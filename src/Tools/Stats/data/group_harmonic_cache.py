@@ -17,6 +17,11 @@ from Main_App.projects.preprocessing_settings import (
     normalize_preprocessing_settings,
 )
 from Main_App.projects.project import PROJECT_SCHEMA_VERSION
+from Main_App.projects.frequency_protocol import (
+    FrequencyProtocol,
+    FrequencyProtocolError,
+    normalize_frequency_protocol,
+)
 from Tools.Stats.analysis.dv_policy_settings import (
     DVPolicySettings,
     HARMONIC_PROFILE_FIXED_ID,
@@ -40,6 +45,7 @@ REPEATED_SESSION_RECORDING_IDENTITY_VERSION = (
 )
 PREPROCESSING_ORDER_VERSION_LABEL = "filter_then_optional_fft_multinotch_then_downsample_v2"
 PROCESSING_FINGERPRINT_VERSION_LABEL = "processing_fingerprint_v8_fft_multinotch"
+SPECTRAL_DOMAIN_CACHE_METHOD_VERSION = "project_protocol_spectral_eligibility_qc14_v1"
 _PROFILE_KEYS_OUTSIDE_LEGACY_PROCESSING_SIGNATURE = {
     "harmonic_selection_profile",
     "harmonic_selection_profile_version",
@@ -124,6 +130,7 @@ def build_group_harmonic_cache_request(
     rois: Mapping[str, Sequence[object]] | None = None,
     recording_assignments: Mapping[str, Mapping[str, object]] | None = None,
     declared_session_ids: Sequence[object] | None = None,
+    oddball_frequency_hz: float | None = None,
 ) -> GroupHarmonicCacheRequest | None:
     """Build the exact manifest-cache request for the current Stats selection."""
 
@@ -151,6 +158,39 @@ def build_group_harmonic_cache_request(
         subject_key,
     )
     repeated_session = bool(normalized_recordings)
+    protocol, protocol_identity = _project_frequency_protocol(manifest)
+    if protocol is not None:
+        protocol_base_hz = float(protocol.presentation_rate_hz)
+        if not math.isclose(
+            float(base_frequency_hz),
+            protocol_base_hz,
+            rel_tol=0.0,
+            abs_tol=1e-9,
+        ):
+            raise ValueError(
+                "Stats base frequency does not match the active project frequency "
+                "protocol. Reload the project before harmonic selection."
+            )
+        protocol_oddball_hz = float(protocol.oddball_rate_hz)
+        if oddball_frequency_hz is not None and not math.isclose(
+            float(oddball_frequency_hz),
+            protocol_oddball_hz,
+            rel_tol=0.0,
+            abs_tol=1e-9,
+        ):
+            raise ValueError(
+                "Stats oddball frequency does not match the active project frequency "
+                "protocol. Reload the project before harmonic selection."
+            )
+        resolved_oddball_hz = protocol_oddball_hz
+        spectral_domain_method = SPECTRAL_DOMAIN_CACHE_METHOD_VERSION
+    else:
+        resolved_oddball_hz = float(
+            LOCKED_ODDBALL_FREQUENCY_HZ
+            if oddball_frequency_hz is None
+            else oddball_frequency_hz
+        )
+        spectral_domain_method = None
     processing_signature = build_project_processing_signature(manifest)
     processing_signature_hash = _hash_payload(processing_signature)
     workbooks = [
@@ -167,6 +207,7 @@ def build_group_harmonic_cache_request(
     method_version = _method_version_for_settings(
         settings,
         repeated_session=repeated_session,
+        spectral_domain_method=spectral_domain_method,
     )
     selection_inputs: dict[str, object] = {
         "subjects": list(subject_key),
@@ -187,7 +228,7 @@ def build_group_harmonic_cache_request(
         )
     stats_settings: dict[str, object] = {
         "base_frequency_hz": float(base_frequency_hz),
-        "oddball_frequency_hz": float(LOCKED_ODDBALL_FREQUENCY_HZ),
+        "oddball_frequency_hz": resolved_oddball_hz,
         "max_freq_hz": float(max_freq_hz) if max_freq_hz is not None else None,
         "z_threshold": float(settings.group_significant_z_threshold),
         "electrode_scope": str(settings.group_significant_electrode_scope),
@@ -226,6 +267,8 @@ def build_group_harmonic_cache_request(
         "project_processing_signature": processing_signature,
         "project_processing_signature_hash": processing_signature_hash,
     }
+    if protocol_identity is not None:
+        fingerprint["frequency_protocol"] = protocol_identity
     cache_key = _hash_payload(fingerprint)
     return GroupHarmonicCacheRequest(
         project_root=root,
@@ -265,6 +308,7 @@ def build_project_processing_signature(manifest: Mapping[str, object] | None) ->
         "processing_fingerprint_version": PROCESSING_FINGERPRINT_VERSION_LABEL,
         "preprocessing": canonical_preprocessing,
         "event_map": dict(sorted(event_map.items())),
+        "frequency_protocol": _json_safe(source.get("frequency_protocol")),
         "frequency_domain_qc": _frequency_domain_qc_signature(source),
     }
 
@@ -539,27 +583,61 @@ def _method_version_for_settings(
     settings: DVPolicySettings,
     *,
     repeated_session: bool = False,
+    spectral_domain_method: str | None = None,
 ) -> str:
     if settings.harmonic_selection_profile == HARMONIC_PROFILE_LEGACY_ID:
         method_version = GROUP_HARMONIC_METHOD_VERSION
-        return (
+        method_version = (
             f"{method_version}_{REPEATED_SESSION_RECORDING_IDENTITY_VERSION}"
             if repeated_session
             else method_version
         )
-    method_version = (
-        "group_significant_harmonic_profiles_"
-        f"{settings.harmonic_selection_profile}_v"
-        f"{settings.harmonic_selection_profile_version}"
-    )
-    if repeated_session:
-        repeated_version = (
-            REPEATED_SESSION_RECORDING_IDENTITY_VERSION
-            if settings.harmonic_selection_profile == HARMONIC_PROFILE_FIXED_ID
-            else REPEATED_SESSION_POOLING_METHOD_VERSION
+    else:
+        method_version = (
+            "group_significant_harmonic_profiles_"
+            f"{settings.harmonic_selection_profile}_v"
+            f"{settings.harmonic_selection_profile_version}"
         )
-        return f"{method_version}_{repeated_version}"
+        if repeated_session:
+            repeated_version = (
+                REPEATED_SESSION_RECORDING_IDENTITY_VERSION
+                if settings.harmonic_selection_profile == HARMONIC_PROFILE_FIXED_ID
+                else REPEATED_SESSION_POOLING_METHOD_VERSION
+            )
+            method_version = f"{method_version}_{repeated_version}"
+    if spectral_domain_method:
+        method_version = f"{method_version}_{spectral_domain_method}"
     return method_version
+
+
+def _project_frequency_protocol(
+    manifest: Mapping[str, object],
+) -> tuple[FrequencyProtocol | None, object | None]:
+    raw = manifest.get("frequency_protocol")
+    if raw is None:
+        return None, None
+    if not isinstance(raw, Mapping):
+        raise ValueError(
+            "The project frequency protocol is invalid; reload or repair the project "
+            "before harmonic selection."
+        )
+    try:
+        protocol = normalize_frequency_protocol(raw)
+    except (FrequencyProtocolError, TypeError, ValueError) as exc:
+        raise ValueError(
+            "The project frequency protocol is invalid; reload or repair the project "
+            "before harmonic selection."
+        ) from exc
+    if (
+        not protocol.is_ready
+        or protocol.presentation_rate_hz is None
+        or protocol.oddball_rate_hz is None
+    ):
+        raise ValueError(
+            "Confirm the project frequency protocol and expected analyzed oddball "
+            "cycles before harmonic selection."
+        )
+    return protocol, protocol.to_manifest()
 
 
 def _normalize_recording_assignments(

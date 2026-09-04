@@ -12,6 +12,10 @@ from typing import Callable, Dict, Iterable, List, Mapping, Optional, Sequence
 import numpy as np
 import pandas as pd
 
+from Main_App.processing.spectral_eligibility import (
+    QC14_NOISE_CANDIDATE_OFFSETS,
+    SPECTRAL_ELIGIBILITY_METHOD_VERSION,
+)
 from Tools.Stats.analysis.dv_policy_settings import (
     DVPolicySettings,
     GROUP_SIGNIFICANT_ELECTRODE_SCOPE_FROZEN,
@@ -170,6 +174,9 @@ class GroupSignificantHarmonicSelection:
     declared_session_ids: tuple[str, ...] = ()
     analysis_condition_ids: tuple[str, ...] = ()
     recording_assignments: tuple[dict[str, object], ...] = ()
+    eligible_harmonic_orders: tuple[int, ...] = ()
+    spectral_eligibility_method_version: str | None = None
+    spectral_eligibility_fingerprint: str | None = None
 
     def to_metadata(self) -> dict[str, object]:
         harmonic_domain = _canonical_harmonic_frequency_list(self.harmonic_domain_hz)
@@ -282,6 +289,13 @@ class GroupSignificantHarmonicSelection:
             "base_overlap_tolerance_hz": float(self.base_overlap_tolerance_hz),
             "matching_tolerance_hz": float(self.matching_tolerance_hz),
             "frequency_resolution_hz": self.frequency_resolution_hz,
+            "eligible_harmonic_orders": list(self.eligible_harmonic_orders),
+            "spectral_eligibility_method_version": (
+                self.spectral_eligibility_method_version
+            ),
+            "spectral_eligibility_fingerprint": (
+                self.spectral_eligibility_fingerprint
+            ),
             "harmonic_domain_hz": harmonic_domain,
             "evaluated_harmonics_hz": harmonic_domain,
             "detected_significant_harmonics_hz": detected_harmonics,
@@ -385,6 +399,8 @@ class RequiredFullFftColumns:
     candidate_indices: list[int]
     excluded_base_indices: list[int]
     required_indices: list[int]
+    oddball_frequency_hz: float = LOCKED_ODDBALL_FREQUENCY_HZ
+    canonical_eligibility_domain: bool = False
 
 
 @dataclass(frozen=True)
@@ -417,6 +433,8 @@ class GroupSignificantSelectionCacheKey:
     project_processing_signature_hash: str | None = None
     recording_assignments: tuple[tuple[object, ...], ...] = ()
     declared_session_ids: tuple[str, ...] = ()
+    eligible_harmonic_orders: tuple[int, ...] = ()
+    spectral_eligibility_fingerprint: str | None = None
 
 
 def clear_group_significant_selection_cache() -> None:
@@ -461,6 +479,8 @@ def preflight_group_significant_full_fft_columns(
     base_frequency_hz: float,
     log_func: Callable[[str], None],
     max_freq: float | None = None,
+    oddball_frequency_hz: float | None = None,
+    eligible_harmonic_orders: Sequence[int] | None = None,
 ) -> int:
     """Validate exact FullFFT harmonic columns before expensive Stats reads."""
     required = _plan_required_full_fft_columns(
@@ -470,6 +490,8 @@ def preflight_group_significant_full_fft_columns(
         base_frequency_hz=base_frequency_hz,
         max_freq=max_freq,
         log_func=log_func,
+        oddball_frequency_hz=oddball_frequency_hz,
+        eligible_harmonic_orders=eligible_harmonic_orders,
     )
     return _preflight_required_full_fft_columns(
         subjects=subjects,
@@ -553,6 +575,9 @@ def _group_significant_selection_cache_key(
     project_processing_signature_hash: str | None = None,
     recording_assignments: Mapping[str, Mapping[str, object]] | None = None,
     declared_session_ids: Sequence[str] | None = None,
+    oddball_frequency_hz: float | None = None,
+    eligible_harmonic_orders: Sequence[int] | None = None,
+    spectral_eligibility_fingerprint: str | None = None,
 ) -> GroupSignificantSelectionCacheKey:
     subject_key = tuple(str(subject) for subject in subjects)
     condition_key = tuple(str(condition) for condition in conditions)
@@ -588,7 +613,11 @@ def _group_significant_selection_cache_key(
         workbooks=workbook_signatures,
         rois=rois_key,
         base_frequency_hz=float(base_frequency_hz),
-        oddball_frequency_hz=LOCKED_ODDBALL_FREQUENCY_HZ,
+        oddball_frequency_hz=float(
+            LOCKED_ODDBALL_FREQUENCY_HZ
+            if oddball_frequency_hz is None
+            else oddball_frequency_hz
+        ),
         max_freq_hz=float(max_freq) if max_freq is not None else None,
         z_threshold=float(settings.group_significant_z_threshold),
         electrode_scope=str(settings.group_significant_electrode_scope),
@@ -626,6 +655,15 @@ def _group_significant_selection_cache_key(
         ),
         declared_session_ids=tuple(
             str(session_id) for session_id in (declared_session_ids or ())
+        ),
+        eligible_harmonic_orders=_normalize_eligible_harmonic_orders(
+            eligible_harmonic_orders,
+            allow_unspecified=True,
+        ),
+        spectral_eligibility_fingerprint=(
+            str(spectral_eligibility_fingerprint).strip()
+            if spectral_eligibility_fingerprint
+            else None
         ),
     )
 
@@ -884,6 +922,19 @@ def group_significant_selection_from_metadata(
             for item in _metadata_sequence(metadata.get("recording_assignments"))
             if isinstance(item, dict)
         ),
+        eligible_harmonic_orders=tuple(
+            _metadata_int_list(metadata.get("eligible_harmonic_orders"))
+        ),
+        spectral_eligibility_method_version=(
+            str(metadata.get("spectral_eligibility_method_version"))
+            if metadata.get("spectral_eligibility_method_version") not in (None, "")
+            else None
+        ),
+        spectral_eligibility_fingerprint=(
+            str(metadata.get("spectral_eligibility_fingerprint"))
+            if metadata.get("spectral_eligibility_fingerprint") not in (None, "")
+            else None
+        ),
     )
 
 
@@ -1135,6 +1186,9 @@ def build_group_significant_harmonic_selection(
     recording_assignments: Mapping[str, Mapping[str, object]] | None = None,
     declared_session_ids: Sequence[str] | None = None,
     electrode_exclusions_by_subject: Mapping[str, frozenset[str]] | None = None,
+    oddball_frequency_hz: float | None = None,
+    eligible_harmonic_orders: Sequence[int] | None = None,
+    spectral_eligibility_fingerprint: str | None = None,
 ) -> GroupSignificantHarmonicSelection:
     started = perf_counter()
     repeated_session = bool(recording_assignments)
@@ -1218,6 +1272,7 @@ def build_group_significant_harmonic_selection(
         settings=settings,
         recording_assignments=recording_assignments,
         declared_session_ids=declared_session_ids,
+        oddball_frequency_hz=oddball_frequency_hz,
     )
     _log_project_cache_warnings(cache_request, log_func)
     cache_key = _group_significant_selection_cache_key(
@@ -1232,6 +1287,9 @@ def build_group_significant_harmonic_selection(
         declared_group_ids=resolved_declared_groups,
         recording_assignments=recording_assignments,
         declared_session_ids=declared_session_ids,
+        oddball_frequency_hz=oddball_frequency_hz,
+        eligible_harmonic_orders=eligible_harmonic_orders,
+        spectral_eligibility_fingerprint=spectral_eligibility_fingerprint,
         project_processing_signature_hash=(
             cache_request.project_processing_signature_hash
             if cache_request is not None
@@ -1303,6 +1361,7 @@ def build_group_significant_harmonic_selection(
     base = float(base_frequency_hz)
     oddball = _resolve_group_oddball_frequency(
         base_frequency_hz=base,
+        oddball_frequency_hz=oddball_frequency_hz,
     )
     required = _plan_required_full_fft_columns(
         subjects=subjects,
@@ -1311,6 +1370,8 @@ def build_group_significant_harmonic_selection(
         base_frequency_hz=base,
         max_freq=max_freq,
         log_func=log_func,
+        oddball_frequency_hz=oddball,
+        eligible_harmonic_orders=eligible_harmonic_orders,
     )
     planned_workbook_count = _preflight_required_full_fft_columns(
         subjects=subjects,
@@ -1432,6 +1493,7 @@ def build_group_significant_harmonic_selection(
     }
     excluded_base: list[float] = []
     seen_indices: set[int] = set()
+    require_complete_qc14_window = required.canonical_eligibility_domain
 
     for matched_idx in required.candidate_indices:
         matched_freq = freq_by_bin.get(int(matched_idx))
@@ -1495,6 +1557,7 @@ def build_group_significant_harmonic_selection(
             matched_idx,
             window_size=GROUP_SIGNIFICANT_NOISE_WINDOW_BINS,
             min_bins=4,
+            require_complete_window=require_complete_qc14_window,
         )
         target_amp = amplitude_by_bin.get(int(matched_idx), np.nan)
         noise_mean = noise_stats.mean_uv
@@ -1512,6 +1575,7 @@ def build_group_significant_harmonic_selection(
                     matched_idx,
                     window_size=GROUP_SIGNIFICANT_NOISE_WINDOW_BINS,
                     min_bins=4,
+                    require_complete_window=require_complete_qc14_window,
                 )
                 condition_target = condition_amplitudes.get(int(matched_idx), np.nan)
                 condition_z = (
@@ -1571,7 +1635,7 @@ def build_group_significant_harmonic_selection(
         )
         if selected:
             detected_freqs.append(selected_frequency)
-            detected_columns.append(f"{selected_frequency:.4f}_Hz")
+            detected_columns.append(matched_column)
             detected_indices.append(matched_idx)
         rows.append(
             GroupSignificantHarmonicRow(
@@ -1664,7 +1728,9 @@ def build_group_significant_harmonic_selection(
             _canonical_harmonic_frequency(row.target_frequency_hz)
             for row in detected_rows
         ]
-        detected_columns = [f"{freq:.4f}_Hz" for freq in detected_freqs]
+        detected_columns = [
+            str(row.matched_column) for row in detected_rows if row.matched_column
+        ]
         detected_indices = [
             int(row.matched_bin_index)
             for row in detected_rows
@@ -1679,15 +1745,15 @@ def build_group_significant_harmonic_selection(
             candidate_summary = _format_candidate_z_summary(rows)
             log_func(
                 "Two-consecutive-failures harmonic selection could not establish "
-                "a cutoff because the configured search domain ended before two "
+                "a cutoff because technical spectral support ended before two "
                 f"consecutive eligible failures. Tested candidates: {candidate_summary}."
             )
             _log_candidate_diagnostics(rows, log_func)
             raise RuntimeError(
                 "The Dzhelyova/Poncet two-consecutive-failures profile reached the "
-                "configured harmonic search ceiling before its stopping criterion "
-                "was met. Increase the BCA harmonic upper limit and recalculate, or "
-                "choose a fixed/preregistered harmonic profile. "
+                "end of the canonical filter/Nyquist/neighbor-bin eligibility domain "
+                "before its stopping criterion was met. Review the applied filter and "
+                "analyzed duration, or choose a fixed/preregistered harmonic profile. "
                 f"Tested candidates: {candidate_summary}."
             )
 
@@ -1899,6 +1965,20 @@ def build_group_significant_harmonic_selection(
             else ()
         ),
         recording_assignments=active_recording_assignments,
+        eligible_harmonic_orders=_normalize_eligible_harmonic_orders(
+            eligible_harmonic_orders,
+            allow_unspecified=True,
+        ),
+        spectral_eligibility_method_version=(
+            SPECTRAL_ELIGIBILITY_METHOD_VERSION
+            if eligible_harmonic_orders is not None
+            else None
+        ),
+        spectral_eligibility_fingerprint=(
+            str(spectral_eligibility_fingerprint).strip()
+            if spectral_eligibility_fingerprint
+            else None
+        ),
     )
     selection = replace(
         selection,
@@ -2000,10 +2080,7 @@ def _resolve_summation_harmonics(
     included_freqs = [
         _canonical_harmonic_frequency(row.target_frequency_hz) for row in included_rows
     ]
-    included_columns = [
-        f"{_canonical_harmonic_frequency(row.target_frequency_hz):.4f}_Hz"
-        for row in included_rows
-    ]
+    included_columns = [str(row.matched_column) for row in included_rows]
     included_indices = [int(row.matched_bin_index) for row in included_rows]
     return included_freqs, included_columns, included_indices, updated_rows
 
@@ -2608,11 +2685,14 @@ def _plan_required_full_fft_columns(
     base_frequency_hz: float,
     max_freq: float | None,
     log_func: Callable[[str], None],
+    oddball_frequency_hz: float | None = None,
+    eligible_harmonic_orders: Sequence[int] | None = None,
 ) -> RequiredFullFftColumns:
     started = perf_counter()
     base = float(base_frequency_hz)
     oddball = _resolve_group_oddball_frequency(
         base_frequency_hz=base,
+        oddball_frequency_hz=oddball_frequency_hz,
     )
     header_columns = _find_first_full_fft_columns(subjects, conditions, subject_data)
     frequency_columns = _parse_frequency_columns(header_columns)
@@ -2623,20 +2703,44 @@ def _plan_required_full_fft_columns(
         )
 
     freq_axis = np.asarray([freq for freq, _column, _idx in frequency_columns], dtype=float)
-    max_limit = float(max_freq) if max_freq is not None else float(np.nanmax(freq_axis))
-    highest_k = int(np.floor(max_limit / oddball))
+    canonical_orders = _normalize_eligible_harmonic_orders(
+        eligible_harmonic_orders,
+        allow_unspecified=True,
+    )
+    canonical_domain = eligible_harmonic_orders is not None
+    if canonical_domain:
+        if not canonical_orders:
+            raise RuntimeError(
+                "Canonical spectral eligibility contains no harmonics available for "
+                "standard local-Z selection. Regenerate the workbooks and inspect "
+                "their Spectral Eligibility sheets."
+            )
+        harmonic_orders: Sequence[int] = canonical_orders
+    else:
+        max_limit = (
+            float(max_freq) if max_freq is not None else float(np.nanmax(freq_axis))
+        )
+        highest_k = int(np.floor(max_limit / oddball))
+        harmonic_orders = range(1, highest_k + 1)
     candidate_indices: list[int] = []
     excluded_base_indices: list[int] = []
     required_indices: set[int] = set()
     all_indices = {int(idx) for _freq, _column, idx in frequency_columns}
 
-    for harmonic_index in range(1, highest_k + 1):
+    for harmonic_index in harmonic_orders:
         target_freq = _canonical_harmonic_frequency_for_index(
             harmonic_index,
             oddball,
         )
         exact_match = _find_exact_frequency_column(frequency_columns, target_freq)
         if exact_match is None:
+            if canonical_domain:
+                raise RuntimeError(
+                    "A harmonic declared eligible by the canonical spectral resolver "
+                    f"has no exact FullFFT column ({target_freq:g} Hz, oddball "
+                    f"harmonic {harmonic_index}). Regenerate the frequency-domain "
+                    "workbook; nearest-bin substitution is disabled."
+                )
             continue
         matched_freq, _column, matched_idx = exact_match
         candidate_indices.append(int(matched_idx))
@@ -2644,11 +2748,18 @@ def _plan_required_full_fft_columns(
         if _is_base_overlap(matched_freq, base, GROUP_SIGNIFICANT_BASE_TOLERANCE_HZ):
             excluded_base_indices.append(int(matched_idx))
             continue
-        for noise_idx in _noise_indices_for_bin(
+        noise_indices = _noise_indices_for_bin(
             int(matched_idx),
             available_indices=all_indices,
             window_size=GROUP_SIGNIFICANT_NOISE_WINDOW_BINS,
-        ):
+        )
+        if canonical_domain and len(noise_indices) != len(QC14_NOISE_CANDIDATE_OFFSETS):
+            raise RuntimeError(
+                "A harmonic declared eligible by the canonical spectral resolver "
+                f"does not have its complete +/-10-bin FullFFT neighborhood "
+                f"({target_freq:g} Hz). Regenerate the frequency-domain workbook."
+            )
+        for noise_idx in noise_indices:
             required_indices.add(int(noise_idx))
 
     if not candidate_indices:
@@ -2678,12 +2789,15 @@ def _plan_required_full_fft_columns(
         candidate_indices=candidate_indices,
         excluded_base_indices=excluded_base_indices,
         required_indices=sorted(required_indices),
+        oddball_frequency_hz=oddball,
+        canonical_eligibility_domain=canonical_domain,
     )
 
 
 def _resolve_group_oddball_frequency(
     *,
     base_frequency_hz: float,
+    oddball_frequency_hz: float | None = None,
 ) -> float:
     base = float(base_frequency_hz)
     if not np.isfinite(base) or base <= 0:
@@ -2691,26 +2805,56 @@ def _resolve_group_oddball_frequency(
             "Group-level significant harmonic selection requires a positive finite "
             f"base frequency. Received base_frequency_hz={base_frequency_hz!r}."
         )
-    oddball = float(LOCKED_ODDBALL_FREQUENCY_HZ)
+    oddball = float(
+        LOCKED_ODDBALL_FREQUENCY_HZ
+        if oddball_frequency_hz is None
+        else oddball_frequency_hz
+    )
+    if not np.isfinite(oddball) or oddball <= 0:
+        raise RuntimeError(
+            "Group-level significant harmonic selection requires a positive finite "
+            f"oddball frequency. Received oddball_frequency_hz={oddball_frequency_hz!r}."
+        )
     if oddball >= base:
         raise RuntimeError(
             "Group-level significant harmonic selection requires the oddball "
-            "frequency to be lower than the base frequency. The Stats oddball "
-            "frequency is locked at 1.2 Hz; the BCA upper limit only controls "
-            "where the 1.2 Hz harmonic list stops. "
+            "frequency to be lower than the presentation/base frequency. "
             f"Received base_frequency_hz={base:g} and oddball_frequency_hz={oddball:g}. "
             "Check Settings > FPVS base frequency."
         )
     if _is_base_overlap(oddball, base, GROUP_SIGNIFICANT_BASE_TOLERANCE_HZ):
         raise RuntimeError(
             "Group-level significant harmonic selection requires an oddball "
-            "frequency that is not itself a base-rate overlap. The Stats oddball "
-            "frequency is locked at 1.2 Hz; the BCA upper limit only controls "
-            "where the 1.2 Hz harmonic list stops. "
+            "frequency that is not itself a base-rate overlap. "
             f"Received base_frequency_hz={base:g} and oddball_frequency_hz={oddball:g}. "
             "Check Settings > FPVS base frequency."
         )
     return float(oddball)
+
+
+def _normalize_eligible_harmonic_orders(
+    values: Sequence[int] | None,
+    *,
+    allow_unspecified: bool,
+) -> tuple[int, ...]:
+    if values is None:
+        if allow_unspecified:
+            return ()
+        raise RuntimeError("Canonical spectral eligibility was not supplied.")
+    orders: set[int] = set()
+    for value in values:
+        if isinstance(value, bool):
+            raise RuntimeError("Eligible harmonic orders must be positive integers.")
+        try:
+            order = int(value)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise RuntimeError(
+                "Eligible harmonic orders must be positive integers."
+            ) from exc
+        if order <= 0 or float(order) != float(value):
+            raise RuntimeError("Eligible harmonic orders must be positive integers.")
+        orders.add(order)
+    return tuple(sorted(orders))
 
 
 def _preflight_required_full_fft_columns(
@@ -2721,14 +2865,17 @@ def _preflight_required_full_fft_columns(
     required: RequiredFullFftColumns,
     log_func: Callable[[str], None],
 ) -> int:
-    reference_grid = _locked_full_fft_grid_identity(required.frequency_columns)
+    reference_grid = _locked_full_fft_grid_identity(
+        required.frequency_columns,
+        oddball_frequency_hz=required.oddball_frequency_hz,
+    )
     if reference_grid is None:
         raise RuntimeError(
             "Group-level significant harmonic selection requires matching FullFFT "
             "candidate and neighboring-noise columns on one common locked FFT "
             "grid/bin spacing in every included workbook before reading amplitude "
             "or BCA data. The reference FullFFT header is not a valid uniform "
-            "zero-based grid with one exact 1.2000 Hz bin."
+            "zero-based grid with one exact project oddball-frequency bin."
         )
     candidate_columns = _columns_for_required_indices(
         required.frequency_columns,
@@ -2782,7 +2929,8 @@ def _preflight_required_full_fft_columns(
 
             workbook_frequency_columns = _parse_frequency_columns(header_columns)
             workbook_grid = _locked_full_fft_grid_identity(
-                workbook_frequency_columns
+                workbook_frequency_columns,
+                oddball_frequency_hz=required.oddball_frequency_hz,
             )
             if workbook_grid != reference_grid:
                 reference_bin, reference_spacing = reference_grid
@@ -2790,7 +2938,7 @@ def _preflight_required_full_fft_columns(
                     "invalid or non-uniform"
                     if workbook_grid is None
                     else (
-                        f"1.2000 Hz bin={workbook_grid[0]}, "
+                        f"{required.oddball_frequency_hz:g} Hz bin={workbook_grid[0]}, "
                         f"df={workbook_grid[1]:.9g} Hz"
                     )
                 )
@@ -2799,7 +2947,8 @@ def _preflight_required_full_fft_columns(
                     "FullFFT candidate and neighboring-noise columns on one common "
                     "locked FFT grid/bin spacing in every included workbook before "
                     "reading amplitude or BCA data. "
-                    f"Reference grid: 1.2000 Hz bin={reference_bin}, "
+                    f"Reference grid: {required.oddball_frequency_hz:g} Hz "
+                    f"bin={reference_bin}, "
                     f"df={reference_spacing:.9g} Hz; grid in {file_path}: "
                     f"{observed_grid}. Reprocess or exclude participant-condition "
                     "workbooks with a different usable FFT crop length."
@@ -3293,12 +3442,21 @@ def _compute_noise_stats_for_planned_bin(
     *,
     window_size: int,
     min_bins: int,
+    require_complete_window: bool = False,
 ) -> GroupSignificantNoiseStats:
     indices = _noise_indices_for_bin(
         int(target_idx),
         available_indices=set(amplitude_by_bin.keys()),
         window_size=window_size,
     )
+    required_count = len(QC14_NOISE_CANDIDATE_OFFSETS)
+    if require_complete_window and len(indices) != required_count:
+        return GroupSignificantNoiseStats(
+            mean_uv=np.nan,
+            std_uv=np.nan,
+            candidate_bin_indices=tuple(indices),
+            used_bin_indices=(),
+        )
     if len(indices) < min_bins:
         return GroupSignificantNoiseStats(
             mean_uv=0.0,
@@ -3311,6 +3469,13 @@ def _compute_noise_stats_for_planned_bin(
         for idx in indices
         if np.isfinite(amplitude_by_bin.get(idx, np.nan))
     ]
+    if require_complete_window and len(finite_pairs) != required_count:
+        return GroupSignificantNoiseStats(
+            mean_uv=np.nan,
+            std_uv=np.nan,
+            candidate_bin_indices=tuple(idx for idx, _value in finite_pairs),
+            used_bin_indices=(),
+        )
     if len(finite_pairs) < min_bins:
         return GroupSignificantNoiseStats(
             mean_uv=0.0,
@@ -3405,6 +3570,8 @@ def _parse_frequency_columns(columns: Sequence[object]) -> list[tuple[float, str
 
 def _locked_full_fft_grid_identity(
     frequency_columns: Sequence[tuple[float, str, int]],
+    *,
+    oddball_frequency_hz: float = LOCKED_ODDBALL_FREQUENCY_HZ,
 ) -> tuple[int, float] | None:
     """Return the exact oddball-bin index and spacing for one valid FullFFT grid."""
 
@@ -3412,7 +3579,7 @@ def _locked_full_fft_grid_identity(
     if len(frequencies) < 2 or abs(frequencies[0]) > 5e-5:
         return None
 
-    oddball_hz = float(LOCKED_ODDBALL_FREQUENCY_HZ)
+    oddball_hz = float(oddball_frequency_hz)
     target_positions = [
         index
         for index, frequency in enumerate(frequencies)

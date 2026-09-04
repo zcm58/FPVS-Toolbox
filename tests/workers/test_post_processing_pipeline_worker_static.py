@@ -221,6 +221,32 @@ def test_post_processing_run_reuses_and_releases_one_dataset_index() -> None:
     )
 
 
+def test_frequency_review_requires_current_recording_condition_outcomes() -> None:
+    tree = _worker_tree()
+    qc_method = _class_method(tree, "_run_frequency_domain_qc_review")
+    qc_source = ast.unparse(qc_method)
+
+    assert "load_ledger(project_root)" in qc_source
+    assert "load_recording_condition_outcomes" in qc_source
+    assert "require_pre_review_readiness(outcome_ledger)" in qc_source
+    assert qc_source.index("require_pre_review_readiness(outcome_ledger)") < qc_source.index(
+        "self._dataset_index = load_project_dataset_index(project_root)"
+    )
+
+
+def test_full_fft_provenance_uses_only_ready_project_protocol_rates() -> None:
+    tree = _worker_tree()
+    method = _class_method(tree, "_run_full_fft_provenance")
+    source = ast.unparse(method)
+
+    assert "normalize_frequency_protocol" in source
+    assert "protocol.presentation_rate_hz" in source
+    assert "protocol.oddball_rate_hz" in source
+    assert "frequency_protocol_fingerprint=protocol.fingerprint" in source
+    assert "SettingsManager" not in source
+    assert "DEFAULT_ODDBALL_FREQ" not in source
+
+
 def _is_named_method_call(
     statement: ast.stmt,
     object_name: str,

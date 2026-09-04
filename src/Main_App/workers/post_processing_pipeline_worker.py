@@ -370,9 +370,25 @@ class PostProcessingPipelineWorker(QObject):
     def _run_frequency_domain_qc_review(self) -> dict[str, object]:
         self._emit_progress("FPVS Toolbox is reviewing frequency-domain QC before final harmonic selection.")
         from Main_App.projects import load_project_dataset_index
+        from Main_App.processing.processing_ledger import load_ledger
+        from Main_App.processing.recording_condition_outcomes import (
+            RecordingConditionOutcomeError,
+            load_recording_condition_outcomes,
+            require_pre_review_readiness,
+        )
         from Main_App.processing.frequency_domain_qc import run_frequency_domain_qc_review
 
         project_root = Path(self._project.project_root).expanduser().resolve()
+        outcome_ledger = load_recording_condition_outcomes(
+            load_ledger(project_root)
+        )
+        if outcome_ledger is None:
+            raise RecordingConditionOutcomeError(
+                "Frequency review is blocked because the current processing run "
+                "has no recording-condition output ledger. Reprocess the project "
+                "to create validated workbook receipts."
+            )
+        require_pre_review_readiness(outcome_ledger)
         self._dataset_index = load_project_dataset_index(project_root)
         return run_frequency_domain_qc_review(
             self._project,
@@ -567,8 +583,6 @@ class PostProcessingPipelineWorker(QObject):
             )
 
         try:
-            import config
-            from Main_App import SettingsManager
             from Main_App.processing.frequency_domain_qc import (
                 mark_frequency_domain_outputs_current,
                 mark_frequency_domain_outputs_stale,
@@ -576,16 +590,29 @@ class PostProcessingPipelineWorker(QObject):
             from Main_App.processing.full_fft_provenance import (
                 write_project_full_fft_provenance,
             )
+            from Main_App.projects import normalize_frequency_protocol
 
-            base_frequency_hz = float(
-                SettingsManager().get("analysis", "base_freq", "6.0")
+            protocol = normalize_frequency_protocol(
+                getattr(self._project, "frequency_protocol", None)
             )
-            oddball_frequency_hz = float(config.DEFAULT_ODDBALL_FREQ)
+            if (
+                not protocol.is_ready
+                or protocol.presentation_rate_hz is None
+                or protocol.oddball_rate_hz is None
+            ):
+                raise ValueError(
+                    "The project frequency protocol is incomplete. Confirm the "
+                    "presentation rate, oddball recurrence, and analyzed cycle "
+                    "count before post-processing."
+                )
+            base_frequency_hz = float(protocol.presentation_rate_hz)
+            oddball_frequency_hz = float(protocol.oddball_rate_hz)
             mark_frequency_domain_outputs_current(project_root)
             record = write_project_full_fft_provenance(
                 project_root,
                 base_frequency_hz=base_frequency_hz,
                 oddball_frequency_hz=oddball_frequency_hz,
+                frequency_protocol_fingerprint=protocol.fingerprint,
                 dataset_index=self._dataset_index,
             )
         except PIPELINE_STEP_EXCEPTIONS as exc:
@@ -611,7 +638,8 @@ class PostProcessingPipelineWorker(QObject):
             True,
             (
                 "Neutral FullFFT provenance published for "
-                f"{record.source_workbook_count} active workbook(s)."
+                f"{record.source_workbook_count} active workbook(s) with the "
+                "current project frequency protocol."
             ),
             str(project_root / "project.json"),
         )

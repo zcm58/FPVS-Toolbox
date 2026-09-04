@@ -66,11 +66,12 @@ peak and stops summation at the next-highest peak. Base-rate overlaps do not
 count; exactly 10 remains allowed. Fixed/predefined harmonic summation remains
 an alternate DV policy.
 
-Preserve the exact-column, common-harmonic-list, 1.2-Hz oddball spacing,
-neighboring-noise, population-SD, gap-guard, cache-fingerprint, persistence,
-frequency-domain QC, and participant-condition exclusion rules documented in
-`docs/agent/architecture/statistics-tools.md`. Stats consumes the durable
-processing-time selection; it must not calculate a replacement.
+Preserve the exact-column, common-harmonic-list, project-protocol oddball
+spacing, neighboring-noise, population-SD, gap-guard, protocol/eligibility and
+cache fingerprints, persistence, frequency-domain QC, and participant-condition
+exclusion rules documented in `docs/agent/architecture/statistics-tools.md`.
+Stats consumes the durable processing-time selection; it must not calculate a
+replacement.
 
 ## Project And Package Boundaries
 

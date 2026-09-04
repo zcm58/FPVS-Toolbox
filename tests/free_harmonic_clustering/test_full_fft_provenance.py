@@ -18,6 +18,7 @@ from Main_App.processing.full_fft_provenance import (
 )
 from Main_App.io.eeg_geometry import biosemi64_geometry_identity
 from Main_App.processing.processing_ledger import PROCESSING_FINGERPRINT_VERSION
+from Main_App.projects import FrequencyProtocol
 from Tools.Free_Harmonic_Clustering.preparation import (
     build_available_frequency_window_plan,
 )
@@ -47,11 +48,18 @@ def _write_project(
 ) -> tuple[Path, tuple[Path, ...]]:
     root = tmp_path / "Project"
     root.mkdir()
+    protocol = FrequencyProtocol.from_recurrence(
+        6,
+        5,
+        expected_analyzed_oddball_cycles=144,
+        expected_analyzed_oddball_cycles_source="manual",
+    )
     manifest = {
         "results_folder": ".",
         "subfolders": {"excel": "1 - Excel Data Files"},
         "participants": {"P1": {}, "P2": {}},
         "preprocessing": {},
+        "frequency_protocol": protocol.to_manifest(),
     }
     (root / "project.json").write_text(
         json.dumps(manifest, indent=2),
@@ -105,6 +113,10 @@ def test_neutral_provenance_round_trip_is_stats_independent_and_project_relative
     metadata_paths = tuple(row["path"] for row in metadata["source_workbooks"])
 
     assert metadata["method_version"] == FULL_FFT_PROVENANCE_METHOD_VERSION
+    assert (
+        metadata["frequency_protocol_fingerprint"]
+        == written.frequency_protocol_fingerprint
+    )
     assert "stats" not in manifest["tools"]
     assert metadata["cohort_state"]["ledger_filter_applied"] is True
     assert metadata["frequency_qc_state"]["excluded_participants"] == []

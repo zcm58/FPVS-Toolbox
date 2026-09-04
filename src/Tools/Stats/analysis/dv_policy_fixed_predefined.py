@@ -178,9 +178,22 @@ def build_fixed_harmonic_selection(
     input_mode: str = FIXED_HARMONIC_INPUT_FREQUENCY_LIST,
     upper_harmonic_index: int | None = None,
     upper_frequency_hz: float | None = None,
+    oddball_frequency_hz: float | None = None,
+    eligible_harmonic_orders: Sequence[int] | None = None,
 ) -> FixedHarmonicSelection:
     base = float(base_frequency_hz)
-    oddball = float(LOCKED_ODDBALL_FREQUENCY_HZ)
+    oddball = float(
+        LOCKED_ODDBALL_FREQUENCY_HZ
+        if oddball_frequency_hz is None
+        else oddball_frequency_hz
+    )
+    if not np.isfinite(oddball) or oddball <= 0:
+        raise ValueError("The project oddball frequency must be positive and finite.")
+    eligible_orders = (
+        None
+        if eligible_harmonic_orders is None
+        else {int(value) for value in eligible_harmonic_orders}
+    )
     requested_raw = _fixed_requested_frequencies(
         requested_values=requested_values,
         input_mode=input_mode,
@@ -250,6 +263,35 @@ def build_fixed_harmonic_selection(
                 )
             )
             continue
+
+        if eligible_orders is not None:
+            raw_order = float(freq) / oddball
+            harmonic_order = int(round(raw_order))
+            if (
+                harmonic_order <= 0
+                or not np.isclose(raw_order, harmonic_order, rtol=0.0, atol=1e-9)
+                or harmonic_order not in eligible_orders
+            ):
+                validation_errors.append(
+                    f"{freq:g} Hz is unavailable under the canonical project "
+                    "filter/Nyquist/notch/+/-10-bin eligibility decision. The "
+                    "declared fixed list was preserved and was not reduced."
+                )
+                rows.append(
+                    FixedHarmonicRow(
+                        requested_frequency_hz=float(freq),
+                        matched_frequency_hz=None,
+                        matched_column=None,
+                        matched_bin_index=None,
+                        included=False,
+                        exclusion_reason="spectral_eligibility_unavailable",
+                        warning=(
+                            "The declared harmonic result is unavailable; the fixed "
+                            "list was preserved and was not reduced automatically."
+                        ),
+                    )
+                )
+                continue
 
         exact_match = _exact_bca_frequency(bca_freqs, freq)
         if exact_match is None:
@@ -413,6 +455,8 @@ def _prepare_fixed_predefined_bca_data(
     project_root: str | Path | None = None,
     use_accepted_processing_selection: bool = False,
     electrode_exclusions_by_subject: Mapping[str, frozenset[str]] | None = None,
+    oddball_frequency_hz: float | None = None,
+    eligible_harmonic_orders: Sequence[int] | None = None,
 ) -> Optional[Dict[str, Dict[str, Dict[str, float]]]]:
     if not subjects or not subject_data:
         log_func("No subject data. Scan folder first.")
@@ -485,6 +529,8 @@ def _prepare_fixed_predefined_bca_data(
             input_mode=settings.fixed_harmonic_input_mode,
             upper_harmonic_index=settings.fixed_harmonic_upper_harmonic_index,
             upper_frequency_hz=settings.fixed_harmonic_upper_frequency_hz,
+            oddball_frequency_hz=oddball_frequency_hz,
+            eligible_harmonic_orders=eligible_harmonic_orders,
         )
         selection = replace(
             selection,

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import math
 import threading
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
@@ -190,9 +191,41 @@ def prepare_summed_bca_data(
             project_root=project_root,
             log_func=log_func,
         )
+        canonical_base_frequency_hz = _required_canonical_rate(
+            canonical.metadata,
+            "base_frequency_hz",
+        )
+        canonical_oddball_frequency_hz = _required_canonical_rate(
+            canonical.metadata,
+            "oddball_frequency_hz",
+        )
+        if not math.isclose(
+            float(base_freq),
+            canonical_base_frequency_hz,
+            rel_tol=0.0,
+            abs_tol=1e-9,
+        ):
+            raise RuntimeError(
+                "The Stats base frequency does not match the accepted project "
+                "harmonic selection. Reload the project before analysis."
+            )
+        base_freq = canonical_base_frequency_hz
         settings = normalize_dv_policy(
             dv_policy_payload_from_selection_metadata(canonical.metadata)
         )
+        if not math.isclose(
+            settings.group_significant_oddball_frequency_hz,
+            canonical_oddball_frequency_hz,
+            rel_tol=0.0,
+            abs_tol=1e-9,
+        ):
+            raise RuntimeError(
+                "The accepted harmonic selection has inconsistent oddball-rate "
+                "metadata. Use Settings > Recalculate Harmonics."
+            )
+        # The processing-owned selection already contains the exact canonical
+        # list. A caller-supplied or historical upper bound is provenance only.
+        resolved_max_freq = None
         canonical_selection_fingerprint = str(
             canonical.metadata.get("selection_fingerprint") or ""
         )
@@ -268,3 +301,22 @@ def prepare_summed_bca_data(
                 _DV_DATA_CACHE.pop(next(iter(_DV_DATA_CACHE)))
             _DV_DATA_CACHE[cache_key] = (data, copy.deepcopy(meta_target))
     return data
+
+
+def _required_canonical_rate(
+    metadata: dict[str, object],
+    field_name: str,
+) -> float:
+    try:
+        value = float(metadata[field_name])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise RuntimeError(
+            "The accepted processing-time harmonic selection lacks current "
+            f"{field_name} metadata. Use Settings > Recalculate Harmonics."
+        ) from exc
+    if not math.isfinite(value) or value <= 0:
+        raise RuntimeError(
+            "The accepted processing-time harmonic selection has invalid "
+            f"{field_name} metadata. Use Settings > Recalculate Harmonics."
+        )
+    return value

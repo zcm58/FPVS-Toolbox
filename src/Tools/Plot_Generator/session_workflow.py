@@ -183,6 +183,7 @@ class SessionPlotWorkflowMixin:
             raise SessionPlotConfigurationError(
                 "No usable repeated-session FullSNR curves were available."
             )
+        self._clamp_x_max_to_observed_frequency_grid(frequencies)
         aggregation = aggregate_repeated_session_snr(
             workbook_records=selection.records,
             curves_by_recording=curves_by_recording,

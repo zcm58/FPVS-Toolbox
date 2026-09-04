@@ -403,6 +403,22 @@ class _Worker(
         hi = max(freqs)
         return [freq for freq in self.oddballs if lo <= freq <= hi]
 
+    def _clamp_x_max_to_observed_frequency_grid(
+        self,
+        *frequency_grids: Sequence[float],
+    ) -> None:
+        observed = [
+            float(value)
+            for grid in frequency_grids
+            for value in grid
+            if math.isfinite(float(value))
+        ]
+        if not observed:
+            return
+        observed_upper = max(observed)
+        if self.x_min < observed_upper < self.x_max:
+            self.x_max = observed_upper
+
     def _run(self) -> None:
         if self._cancellation_checkpoint():
             return
@@ -455,6 +471,7 @@ class _Worker(
                         total,
                     )
                     return
+                self._clamp_x_max_to_observed_frequency_grid(freqs_a, freqs_b)
                 avg_a = self._aggregate_roi_data(data_a)
                 if self._cancellation_checkpoint():
                     return
@@ -483,6 +500,7 @@ class _Worker(
             self._build_group_curves({})
             return
         if freqs and subject_data:
+            self._clamp_x_max_to_observed_frequency_grid(freqs)
             averaged = self._aggregate_roi_data(subject_data)
             if self._cancellation_checkpoint():
                 return

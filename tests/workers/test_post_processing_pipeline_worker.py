@@ -620,13 +620,19 @@ def test_base_post_processing_steps_reuse_one_dataset_index(
 ) -> None:
     from Main_App import projects as projects_module
     from Main_App import exports as exports_module
-    from Main_App.processing import frequency_domain_qc, harmonic_selection_qc
+    from Main_App.processing import (
+        frequency_domain_qc,
+        harmonic_selection_qc,
+        processing_ledger,
+        recording_condition_outcomes,
+    )
     from Tools.LORETA_Visualizer import stats_ready_workbook
 
     root = tmp_path.resolve()
     sentinel_index = SimpleNamespace(project_root=root)
     loader_calls: list[Path] = []
     captured: list[tuple[str, object]] = []
+    sentinel_outcomes = object()
 
     def load_index(project_root):
         loader_calls.append(Path(project_root))
@@ -669,6 +675,17 @@ def test_base_post_processing_steps_reuse_one_dataset_index(
         )
 
     monkeypatch.setattr(projects_module, "load_project_dataset_index", load_index)
+    monkeypatch.setattr(processing_ledger, "load_ledger", lambda project_root: {"root": str(project_root)})
+    monkeypatch.setattr(
+        recording_condition_outcomes,
+        "load_recording_condition_outcomes",
+        lambda ledger: sentinel_outcomes,
+    )
+    monkeypatch.setattr(
+        recording_condition_outcomes,
+        "require_pre_review_readiness",
+        lambda outcomes: captured.append(("readiness", outcomes)),
+    )
     monkeypatch.setattr(
         frequency_domain_qc,
         "run_frequency_domain_qc_review",
@@ -698,6 +715,7 @@ def test_base_post_processing_steps_reuse_one_dataset_index(
     assert audit_result.ok is True
     assert loader_calls == [root]
     assert captured == [
+        ("readiness", sentinel_outcomes),
         ("qc", sentinel_index),
         ("harmonics", sentinel_index),
         ("stats", sentinel_index),

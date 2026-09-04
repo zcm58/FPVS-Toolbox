@@ -14,6 +14,8 @@ from Main_App.processing.full_fft_provenance import (
     FullFftProvenanceError,
     FullFftProvenanceStaleError,
 )
+from Main_App.processing.spectral_eligibility import resolve_spectral_eligibility
+from Main_App.projects import FrequencyProtocol
 from Tools.Plot_Generator import analysis_context
 
 
@@ -24,6 +26,7 @@ def _record(project_root: Path) -> FullFftProvenance:
         method_version=FULL_FFT_PROVENANCE_METHOD_VERSION,
         base_frequency_hz=6.0,
         oddball_frequency_hz=1.2,
+        frequency_protocol_fingerprint="protocol-fingerprint",
         grid_fingerprint="grid-fingerprint",
         frequency_resolution_hz=0.025,
         upper_frequency_hz=40.0,
@@ -34,6 +37,16 @@ def _record(project_root: Path) -> FullFftProvenance:
         source_fingerprint="source-identity-fingerprint",
         frequency_qc_fingerprint="qc-fingerprint",
         processing_export_fingerprint="ledger-fingerprint",
+    )
+
+
+def _domain() -> analysis_context.PlotSpectralEligibilityDomain:
+    return analysis_context.PlotSpectralEligibilityDomain(
+        eligible_harmonic_orders=(1, 2, 3),
+        eligible_harmonic_frequencies_hz=(1.2, 2.4, 3.6),
+        eligible_oddball_frequencies_hz=(1.2, 2.4, 3.6),
+        upper_frequency_hz=3.6,
+        fingerprint="spectral-eligibility-fingerprint",
     )
 
 
@@ -67,6 +80,11 @@ def test_managed_context_uses_saved_rates_allowlist_and_exact_identity(
         "require_current_project_full_fft_provenance",
         require_current,
     )
+    monkeypatch.setattr(
+        analysis_context,
+        "_resolve_managed_spectral_eligibility_domain",
+        lambda *_args: _domain(),
+    )
 
     context = analysis_context.resolve_snr_analysis_context(
         index,
@@ -78,12 +96,24 @@ def test_managed_context_uses_saved_rates_allowlist_and_exact_identity(
     assert context.base_frequency_hz == 6.0
     assert context.oddball_frequency_hz == 1.2
     assert context.allowed_workbook_paths == frozenset({workbook.resolve()})
+    assert context.eligible_oddball_frequencies_hz == (1.2, 2.4, 3.6)
+    assert context.eligible_frequency_upper_hz == 3.6
     provenance = context.provenance
     assert provenance["source_kind"] == "managed_full_fft_provenance"
     assert provenance["method_version"] == FULL_FFT_PROVENANCE_METHOD_VERSION
+    assert provenance["frequency_protocol_fingerprint"] == "protocol-fingerprint"
+    assert provenance["spectral_eligibility"] == {
+        "method_version": "project_filter_qc14_v1",
+        "fingerprint": "spectral-eligibility-fingerprint",
+        "eligible_harmonic_orders": [1, 2, 3],
+        "eligible_harmonic_frequencies_hz": [1.2, 2.4, 3.6],
+        "eligible_oddball_frequencies_hz": [1.2, 2.4, 3.6],
+        "upper_frequency_hz": 3.6,
+    }
     full_fft = provenance["full_fft_provenance"]
     assert full_fft["status"] == "current"
     assert full_fft["source_sheet"] == "FullFFT Amplitude (uV)"
+    assert full_fft["frequency_protocol_fingerprint"] == "protocol-fingerprint"
     assert full_fft["fingerprints"] == {
         "cohort": "cohort-fingerprint",
         "sources": "source-identity-fingerprint",
@@ -186,6 +216,11 @@ def test_managed_context_revalidation_blocks_figure_output_after_change(
         "require_current_project_full_fft_provenance",
         require_current,
     )
+    monkeypatch.setattr(
+        analysis_context,
+        "_resolve_managed_spectral_eligibility_domain",
+        lambda *_args: _domain(),
+    )
     context = analysis_context.resolve_snr_analysis_context(
         index,
         legacy_base_frequency_hz=6.0,
@@ -201,6 +236,97 @@ def test_managed_context_revalidation_blocks_figure_output_after_change(
         (project_root.resolve(), {"dataset_index": index}),
         (project_root.resolve(), {}),
     ]
+
+
+def test_managed_plot_domain_intersects_qc14_eligible_nonbase_harmonics(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root = tmp_path / "Project"
+    workbook = project_root / "P01.xlsx"
+    workbook.parent.mkdir(parents=True)
+    workbook.write_bytes(b"source")
+    protocol = FrequencyProtocol.from_recurrence(
+        10,
+        5,
+        expected_analyzed_oddball_cycles=120,
+        expected_analyzed_oddball_cycles_source="manual",
+    )
+    eligibility = resolve_spectral_eligibility(
+        protocol=protocol,
+        sampling_rate_hz=240,
+        analyzed_samples=14_400,
+        requested_high_pass_hz=0.1,
+        requested_low_pass_hz=10,
+        applied_high_pass_hz=0.1,
+        applied_low_pass_hz=10,
+    )
+    index = SimpleNamespace(manifest={"frequency_protocol": protocol.to_manifest()})
+    record = replace(
+        _record(project_root),
+        base_frequency_hz=10.0,
+        oddball_frequency_hz=2.0,
+        frequency_protocol_fingerprint=protocol.fingerprint,
+        frequency_resolution_hz=1.0 / 60.0,
+        source_paths=(workbook.name,),
+    )
+    monkeypatch.setattr(
+        analysis_context.pd,
+        "read_excel",
+        lambda *_args, **_kwargs: analysis_context.pd.DataFrame(
+            eligibility.to_rows()
+        ),
+    )
+
+    domain = analysis_context._resolve_managed_spectral_eligibility_domain(
+        index,
+        record,
+    )
+
+    assert domain.eligible_harmonic_frequencies_hz == (2.0, 4.0, 6.0, 8.0)
+    assert domain.eligible_oddball_frequencies_hz == (2.0, 4.0, 6.0, 8.0)
+    assert domain.upper_frequency_hz == 8.0
+
+
+def test_plot_default_uses_technical_eligibility_not_selected_stats_list() -> None:
+    protocol = FrequencyProtocol.from_recurrence(
+        10,
+        5,
+        expected_analyzed_oddball_cycles=120,
+        expected_analyzed_oddball_cycles_source="manual",
+    )
+    project = SimpleNamespace(
+        frequency_protocol=protocol,
+        preprocessing={"low_pass": 50.0, "downsample": 256},
+        manifest={
+            "tools": {
+                "processing": {
+                    "harmonic_selection": {
+                        "active": {
+                            "selection_metadata": {
+                                "frequency_protocol_fingerprint": protocol.fingerprint,
+                                "spectral_eligibility_fingerprint": "eligibility",
+                                "eligible_harmonic_orders": [1, 2, 3, 4],
+                                "selected_harmonics_hz": [2.0],
+                            }
+                        }
+                    }
+                }
+            }
+        },
+    )
+
+    assert analysis_context.project_plot_default_upper_hz(project) == 8.0
+
+
+def test_plot_default_falls_back_to_project_filter_and_nyquist() -> None:
+    project = SimpleNamespace(
+        frequency_protocol=None,
+        preprocessing={"low_pass": 70.0, "downsample": 100},
+        manifest={},
+    )
+
+    assert analysis_context.project_plot_default_upper_hz(project) == 50.0
 
 
 def test_unmanaged_context_revalidation_does_not_read_project_provenance(

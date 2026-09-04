@@ -216,7 +216,7 @@ def test_two_failure_profile_blocks_when_search_ceiling_precedes_stopping_rule(
     path = tmp_path / "alternating_peaks.xlsx"
     _write_profile_workbook(path, peak_harmonics=(1, 3))
     messages: list[str] = []
-    with pytest.raises(RuntimeError, match="Increase the BCA harmonic upper limit"):
+    with pytest.raises(RuntimeError, match="filter/Nyquist/neighbor-bin"):
         build_group_significant_harmonic_selection(
             subjects=["S1"],
             conditions=["C1"],
@@ -233,7 +233,46 @@ def test_two_failure_profile_blocks_when_search_ceiling_precedes_stopping_rule(
             ),
             max_freq=3.6,
         )
-    assert any("search domain ended" in message for message in messages)
+    assert any("technical spectral support ended" in message for message in messages)
+
+
+def test_two_failure_profile_skips_canonical_eligibility_hole(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "eligibility_hole.xlsx"
+    frequencies = np.arange(0.0, 10.5 + 1e-9, 0.1)
+    amplitudes = 1.0 + 0.05 * np.sin(np.arange(len(frequencies), dtype=float))
+    amplitudes[12] = 10.0
+    frame = pd.DataFrame(
+        [["O1", *amplitudes]],
+        columns=["Electrode", *[f"{frequency:.4f}_Hz" for frequency in frequencies]],
+    )
+    with pd.ExcelWriter(path, engine="openpyxl") as writer:
+        frame.to_excel(writer, sheet_name="FullFFT Amplitude (uV)", index=False)
+
+    selection = build_group_significant_harmonic_selection(
+        subjects=["S1"],
+        conditions=["C1"],
+        subject_data={"S1": {"C1": str(path)}},
+        base_frequency_hz=6.0,
+        oddball_frequency_hz=1.2,
+        eligible_harmonic_orders=[1, 3, 4],
+        spectral_eligibility_fingerprint="eligibility-fixture",
+        rois={"Posterior": ["O1"]},
+        log_func=lambda _message: None,
+        settings=normalize_dv_policy(
+            {
+                "harmonic_selection_profile": (
+                    HARMONIC_PROFILE_TWO_CONSECUTIVE_FAILURES_ID
+                )
+            }
+        ),
+    )
+
+    assert [row.harmonic_index for row in selection.rows if row.evaluated] == [1, 3, 4]
+    assert selection.stopping_harmonics_hz == pytest.approx((3.6, 4.8))
+    assert selection.eligible_harmonic_orders == (1, 3, 4)
+    assert selection.spectral_eligibility_fingerprint == "eligibility-fixture"
 
 
 def test_two_failure_profile_rejects_undefined_z_instead_of_counting_failure(
@@ -345,6 +384,17 @@ def test_fixed_profile_supports_upper_harmonic_and_frequency_domains() -> None:
     assert by_index.to_metadata()["included_harmonics_hz"] == pytest.approx(
         [1.2, 2.4, 3.6, 4.8]
     )
+
+
+def test_fixed_profile_preserves_declared_unavailable_harmonic_as_error() -> None:
+    with pytest.raises(RuntimeError, match=r"4 Hz is unavailable.*was not reduced"):
+        build_fixed_harmonic_selection(
+            requested_values="2, 4, 6",
+            bca_columns=["2_Hz", "4_Hz", "6_Hz"],
+            base_frequency_hz=10.0,
+            oddball_frequency_hz=2.0,
+            eligible_harmonic_orders=[1, 3],
+        )
 
 
 def test_nonlegacy_cache_identity_records_profile_mask_and_canonical_groups(

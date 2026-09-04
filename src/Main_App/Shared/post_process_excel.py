@@ -1,4 +1,5 @@
 from contextlib import contextmanager
+import hashlib
 import os
 from pathlib import Path
 import shutil
@@ -7,12 +8,15 @@ from time import perf_counter
 from typing import Any, Dict, List, Optional
 
 import numpy as np
+from openpyxl import load_workbook
 import pandas as pd
 
 
 NEIGHBOR_OFFSETS = [*range(-11, 0), *range(1, 12)]
 _COLUMN_WIDTH_CHUNK_SIZE = 1024
 FFT_METADATA_SHEET_NAME = "FFT Metadata"
+SPECTRAL_ELIGIBILITY_SHEET_NAME = "Spectral Eligibility"
+SPECTRAL_METRIC_QC_SHEET_NAME = "Spectral Metric QC"
 FFT_METADATA_COLUMN_MAP = {
     "file_name": "Source File",
     "condition_label": "Condition",
@@ -23,6 +27,7 @@ FFT_METADATA_COLUMN_MAP = {
     "df_hz": "FFT Bin Width (Hz)",
     "crop_mode": "Crop Mode",
 }
+WORKBOOK_WRITE_RECEIPT_VERSION = "workbook_write_receipt_v1"
 
 
 def _elapsed_ms(started_at: float) -> int:
@@ -147,12 +152,83 @@ def _should_stage_workbook_locally(destination: Path) -> bool:
     )
 
 
+def _artifact_identity(path: Path) -> dict[str, object] | None:
+    if not path.is_file():
+        return None
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    stat = path.stat()
+    return {
+        "path": str(path.resolve()),
+        "size": int(stat.st_size),
+        "mtime_ns": int(stat.st_mtime_ns),
+        "sha256": digest.hexdigest(),
+    }
+
+
+def workbook_artifact_identity(
+    path: str | os.PathLike[str],
+) -> dict[str, object] | None:
+    """Return the immutable identity used by current-run workbook receipts."""
+
+    return _artifact_identity(Path(path))
+
+
+def _validate_workbook_schema(
+    path: Path,
+    expected_headers: Dict[str, List[str]],
+) -> dict[str, object]:
+    workbook = load_workbook(path, read_only=True, data_only=False)
+    try:
+        actual_sheets = list(workbook.sheetnames)
+        expected_sheets = list(expected_headers)
+        if actual_sheets != expected_sheets:
+            raise ValueError(
+                "Written workbook sheet order does not match the requested schema: "
+                f"expected={expected_sheets!r}, actual={actual_sheets!r}."
+            )
+        validated_headers: dict[str, list[str]] = {}
+        for sheet_name, headers in expected_headers.items():
+            worksheet = workbook[sheet_name]
+            actual_headers = [
+                str(cell.value) if cell.value is not None else ""
+                for cell in next(worksheet.iter_rows(min_row=1, max_row=1))
+            ]
+            if actual_headers != headers:
+                raise ValueError(
+                    "Written workbook headers do not match the requested schema "
+                    f"for {sheet_name!r}: expected={headers!r}, "
+                    f"actual={actual_headers!r}."
+                )
+            validated_headers[sheet_name] = actual_headers
+        return {
+            "status": "passed",
+            "sheet_names": actual_sheets,
+            "headers": validated_headers,
+        }
+    finally:
+        workbook.close()
+
+
 @contextmanager
 def _workbook_write_target(destination: Path):
-    """Yield a local assembly path and atomically publish cross-volume results."""
+    """Yield a staging path and atomically replace the destination on success."""
 
     if not _should_stage_workbook_locally(destination):
-        yield os.fspath(destination)
+        publish_descriptor, publish_name = tempfile.mkstemp(
+            dir=destination.parent,
+            prefix=f".{destination.stem}.",
+            suffix=".tmp.xlsx",
+        )
+        os.close(publish_descriptor)
+        publish_path = Path(publish_name)
+        try:
+            yield os.fspath(publish_path)
+            os.replace(publish_path, destination)
+        finally:
+            publish_path.unlink(missing_ok=True)
         return
 
     stage_descriptor, stage_name = tempfile.mkstemp(
@@ -204,7 +280,10 @@ def build_fft_neighbors_rows(
     if len(freqs) == 0:
         return rows
 
-    if crop_mode != "55_onbin":
+    if crop_mode not in {
+        "55_onbin",
+        "project_marker_plan_target_grid_v2",
+    }:
         raise ValueError(
             "Locked FFT crop required for FFT-neighbor export: "
             f"crop_mode={crop_mode}, fallback_reason={fallback_reason or 'unknown'}."
@@ -239,7 +318,7 @@ def build_fft_neighbors_rows(
             "condition_id": condition_id,
             "repetition_index": repetition_index,
             "channel_or_roi": channel_name,
-            "target": "1.2Hz",
+            "target": f"{float(target_freq):g}Hz",
             "fs": float(fs),
             "N": int(n_samples),
             "T_sec": float(n_samples / fs) if fs else np.nan,
@@ -292,11 +371,37 @@ def write_results_workbook(
     full_excel_path: str,
     dataframes_to_save: Dict[str, pd.DataFrame],
     fft_neighbors_df: Optional[pd.DataFrame] = None,
+    spectral_eligibility_df: Optional[pd.DataFrame] = None,
+    spectral_metric_qc_df: Optional[pd.DataFrame] = None,
     timing_sink: list[dict[str, object]] | None = None,
-) -> None:
+) -> dict[str, object]:
     """Write results workbook with consistent formatting and optional debug sheet."""
     workbook_started = perf_counter()
     destination = Path(full_excel_path)
+    prior_artifact = _artifact_identity(destination)
+    expected_headers: Dict[str, List[str]] = {
+        str(sheet_name): [str(column) for column in frame.columns]
+        for sheet_name, frame in dataframes_to_save.items()
+    }
+    fft_metadata_df: pd.DataFrame | None = None
+    if fft_neighbors_df is not None and not fft_neighbors_df.empty:
+        expected_headers["FFT and neighbors"] = [
+            str(column) for column in fft_neighbors_df.columns
+        ]
+        fft_metadata_df = build_fft_metadata_frame(fft_neighbors_df)
+        if not fft_metadata_df.empty:
+            expected_headers[FFT_METADATA_SHEET_NAME] = [
+                str(column) for column in fft_metadata_df.columns
+            ]
+    for sheet_name, audit_frame in (
+        (SPECTRAL_ELIGIBILITY_SHEET_NAME, spectral_eligibility_df),
+        (SPECTRAL_METRIC_QC_SHEET_NAME, spectral_metric_qc_df),
+    ):
+        if audit_frame is not None and not audit_frame.empty:
+            expected_headers[sheet_name] = [
+                str(column) for column in audit_frame.columns
+            ]
+    schema_validation: dict[str, object]
     try:
         with _workbook_write_target(destination) as workbook_path:
             with pd.ExcelWriter(workbook_path, engine="xlsxwriter") as writer:
@@ -393,8 +498,7 @@ def write_results_workbook(
                         timing_sink=timing_sink,
                     )
 
-                    fft_metadata_df = build_fft_metadata_frame(fft_neighbors_df)
-                    if not fft_metadata_df.empty:
+                    if fft_metadata_df is not None and not fft_metadata_df.empty:
                         sheet_name = FFT_METADATA_SHEET_NAME
                         sheet_started = perf_counter()
                         write_started = perf_counter()
@@ -438,6 +542,59 @@ def write_results_workbook(
                             cols=len(fft_metadata_df.columns),
                             timing_sink=timing_sink,
                         )
+
+                for sheet_name, audit_frame in (
+                    (SPECTRAL_ELIGIBILITY_SHEET_NAME, spectral_eligibility_df),
+                    (SPECTRAL_METRIC_QC_SHEET_NAME, spectral_metric_qc_df),
+                ):
+                    if audit_frame is None or audit_frame.empty:
+                        continue
+                    sheet_started = perf_counter()
+                    write_started = perf_counter()
+                    audit_frame.to_excel(
+                        writer,
+                        sheet_name=sheet_name,
+                        index=False,
+                    )
+                    _log_excel_timing(
+                        "sheet_to_excel",
+                        write_started,
+                        path=full_excel_path,
+                        sheet_name=sheet_name,
+                        rows=len(audit_frame),
+                        cols=len(audit_frame.columns),
+                        timing_sink=timing_sink,
+                    )
+                    worksheet = writer.sheets[sheet_name]
+                    worksheet.freeze_panes(1, 0)
+                    widths_started = perf_counter()
+                    _apply_column_widths(
+                        worksheet,
+                        audit_frame,
+                        center_fmt,
+                    )
+                    _log_excel_timing(
+                        "sheet_column_widths",
+                        widths_started,
+                        path=full_excel_path,
+                        sheet_name=sheet_name,
+                        rows=len(audit_frame),
+                        cols=len(audit_frame.columns),
+                        timing_sink=timing_sink,
+                    )
+                    _log_excel_timing(
+                        "sheet_total",
+                        sheet_started,
+                        path=full_excel_path,
+                        sheet_name=sheet_name,
+                        rows=len(audit_frame),
+                        cols=len(audit_frame.columns),
+                        timing_sink=timing_sink,
+                    )
+            schema_validation = _validate_workbook_schema(
+                Path(workbook_path),
+                expected_headers,
+            )
     finally:
         _log_excel_timing(
             "workbook_write_total",
@@ -445,3 +602,16 @@ def write_results_workbook(
             path=full_excel_path,
             timing_sink=timing_sink,
         )
+    artifact = _artifact_identity(destination)
+    if artifact is None:
+        raise RuntimeError(
+            f"Workbook publication completed without a readable artifact: {destination}"
+        )
+    return {
+        "version": WORKBOOK_WRITE_RECEIPT_VERSION,
+        "status": "written",
+        "path": str(destination.resolve()),
+        "prior_artifact": prior_artifact,
+        "artifact": artifact,
+        "schema_validation": schema_validation,
+    }

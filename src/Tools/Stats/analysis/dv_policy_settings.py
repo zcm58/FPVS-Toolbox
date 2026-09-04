@@ -6,8 +6,6 @@ from typing import Iterable, Mapping
 
 import numpy as np
 
-from Main_App import SettingsManager
-
 FIXED_PREDEFINED_POLICY_NAME = "Fixed / predefined harmonic list"
 FIXED_PREDEFINED_POLICY_ID = "fixed_predefined_harmonic_list"
 FIXED_PREDEFINED_POLICY_LABEL = (
@@ -33,6 +31,8 @@ GROUP_SIGNIFICANT_SUMMATION_SIGNIFICANT_ONLY = "significant_only"
 GROUP_SIGNIFICANT_SUMMATION_THROUGH_HIGHEST = "through_highest_significant"
 GROUP_SIGNIFICANT_SUMMATION_TWO_CONSECUTIVE_FAILURES = "two_consecutive_failures"
 GROUP_SIGNIFICANT_SUMMATION_METHOD = GROUP_SIGNIFICANT_SUMMATION_THROUGH_HIGHEST
+# Compatibility value for unmanaged legacy inputs. Managed projects replace it
+# with their processing-owned canonical protocol before any current analysis.
 LOCKED_ODDBALL_FREQUENCY_HZ = 1.2
 
 HARMONIC_PROFILE_LEGACY_ID = "legacy_fpvs_toolbox"
@@ -144,7 +144,9 @@ class DVPolicySettings:
             "group_significant_summation_method": str(
                 self.group_significant_summation_method
             ),
-            "group_significant_oddball_frequency_hz": LOCKED_ODDBALL_FREQUENCY_HZ,
+            "group_significant_oddball_frequency_hz": float(
+                self.group_significant_oddball_frequency_hz
+            ),
             "base_frequency_hz": float(base_freq),
             "selected_conditions": list(selected_conditions),
         }
@@ -297,6 +299,13 @@ def normalize_dv_policy(settings: dict[str, object] | None) -> DVPolicySettings:
         raw_summation = GROUP_SIGNIFICANT_SUMMATION_SIGNIFICANT_ONLY
     elif profile_id == HARMONIC_PROFILE_TWO_CONSECUTIVE_FAILURES_ID:
         raw_summation = GROUP_SIGNIFICANT_SUMMATION_TWO_CONSECUTIVE_FAILURES
+    raw_oddball = settings.get(
+        "group_significant_oddball_frequency_hz",
+        LOCKED_ODDBALL_FREQUENCY_HZ,
+    )
+    group_oddball = _optional_positive_float(raw_oddball)
+    if group_oddball is None:
+        raise ValueError("The harmonic-selection oddball frequency must be positive.")
     return DVPolicySettings(
         name=name,
         harmonic_selection_profile=profile_id,
@@ -316,7 +325,7 @@ def normalize_dv_policy(settings: dict[str, object] | None) -> DVPolicySettings:
         group_significant_electrode_scope=group_scope,
         group_significant_selection_electrodes=selection_electrodes,
         group_significant_summation_method=raw_summation,
-        group_significant_oddball_frequency_hz=LOCKED_ODDBALL_FREQUENCY_HZ,
+        group_significant_oddball_frequency_hz=group_oddball,
     )
 
 
@@ -359,6 +368,10 @@ def dv_policy_payload_from_selection_metadata(
         "harmonic_selection_profile": profile_id,
         "harmonic_selection_profile_version": version,
     }
+    if metadata.get("oddball_frequency_hz") not in (None, ""):
+        payload["group_significant_oddball_frequency_hz"] = metadata[
+            "oddball_frequency_hz"
+        ]
     if profile_id == HARMONIC_PROFILE_FIXED_ID:
         requested = metadata.get("fixed_harmonic_requested_frequencies_hz")
         if isinstance(requested, (list, tuple)):
@@ -445,18 +458,12 @@ def _normalize_electrode_mask(value: object) -> tuple[str, ...]:
 
 
 def _resolve_max_freq(max_freq: object | None) -> float | None:
-    """Resolve harmonic max frequency from explicit input or persisted settings."""
-    candidate = max_freq
-    if candidate is None:
-        try:
-            candidate = SettingsManager().get("analysis", "bca_upper_limit", "16.8")
-        except Exception:
-            candidate = None
-    if candidate is None:
+    """Validate an explicit legacy bound without inventing a current ceiling."""
+    if max_freq is None:
         return None
     try:
-        value = float(candidate)
-    except Exception:
+        value = float(max_freq)
+    except (TypeError, ValueError):
         return None
     if not np.isfinite(value) or value <= 0:
         return None

@@ -92,7 +92,10 @@ def test_legacy_results_folder_detected(tmp_path, monkeypatch):
     app.quit()
 
 
-def test_xmax_defaults_to_analysis_upper_limit(tmp_path, monkeypatch):
+def test_xmax_defaults_to_project_filter_without_legacy_bca_ceiling(
+    tmp_path,
+    monkeypatch,
+):
     proj = tmp_path / "proj"
     proj.mkdir()
     (proj / "project.json").write_text(json.dumps({"name": "XMax"}))
@@ -103,14 +106,16 @@ def test_xmax_defaults_to_analysis_upper_limit(tmp_path, monkeypatch):
     from PySide6.QtWidgets import QApplication
 
     class _FakeSettings:
+        calls = []
+
         def get(self, section, option, fallback=None):
-            if section == "analysis" and option == "bca_upper_limit":
-                return "24.0"
+            self.calls.append((section, option))
             return fallback
 
     monkeypatch.setattr(gui_module, "SettingsManager", lambda: _FakeSettings())
 
     app = QApplication.instance() or QApplication([])
     win = module.PlotGeneratorWindow()
-    assert win.xmax_spin.value() == pytest.approx(24.0)
+    assert win.xmax_spin.value() == pytest.approx(50.0)
+    assert ("analysis", "bca_upper_limit") not in _FakeSettings.calls
     app.quit()

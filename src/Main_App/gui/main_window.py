@@ -559,15 +559,22 @@ class MainWindow(QMainWindow):
         """Return the active read-only analysis-frequency snapshot, if valid."""
 
         from Tools.Free_Harmonic_Clustering.gui import ProjectFrequencySnapshot
+        from Main_App.projects import normalize_frequency_protocol
 
         try:
-            oddball_hz = float(self.settings.get("analysis", "oddball_freq", ""))
-            base_hz = float(self.settings.get("analysis", "base_freq", ""))
+            project = self.currentProject
+            protocol = normalize_frequency_protocol(project.frequency_protocol)
+            if (
+                not protocol.is_ready
+                or protocol.presentation_rate_hz is None
+                or protocol.oddball_rate_hz is None
+            ):
+                raise ValueError("project frequency protocol is incomplete")
             return ProjectFrequencySnapshot(
-                oddball_frequency_hz=oddball_hz,
-                base_frequency_hz=base_hz,
+                oddball_frequency_hz=float(protocol.oddball_rate_hz),
+                base_frequency_hz=float(protocol.presentation_rate_hz),
             )
-        except (TypeError, ValueError):
+        except (AttributeError, TypeError, ValueError):
             logger.warning(
                 "free_harmonic_clustering_frequency_metadata_invalid",
                 exc_info=True,

@@ -780,20 +780,16 @@ def test_selection_derivative_signature_tracks_analysis_and_roi_inputs(
     dlg.base_freq_edit.setText(original_base)
     assert dlg._project_protocol_changed_after_processing() is False
 
-    original_limit = dlg.bca_limit_edit.text()
-    dlg.bca_limit_edit.setText("18.0")
-    assert dlg._harmonic_settings_changed_after_processing(validated) is True
-    dlg.bca_limit_edit.setText(original_limit)
+    assert not hasattr(dlg, "bca_limit_edit")
 
     roi_pairs = dlg.roi_editor.get_pairs()
     dlg.roi_editor.set_pairs([*roi_pairs, ("Audit ROI", ["OZ"])])
     assert dlg._harmonic_settings_changed_after_processing(validated) is True
 
 
-def test_explicit_harmonic_recalculation_persists_all_selection_inputs(
+def test_explicit_harmonic_recalculation_persists_project_selection_inputs(
     tmp_path,
     qtbot,
-    monkeypatch,
 ):
     os.environ["XDG_CONFIG_HOME"] = str(tmp_path)
     project = _prep_project(tmp_path)
@@ -804,22 +800,9 @@ def test_explicit_harmonic_recalculation_persists_all_selection_inputs(
     win.loadProject(project)
     dlg = SettingsDialog(win.settings, win, project)
     qtbot.addWidget(dlg)
-    monkeypatch.setattr(dlg, "_project_has_processed_outputs", lambda: True)
-    resumed: list[bool] = []
-    monkeypatch.setattr(
-        dlg,
-        "_resume_frequency_domain_post_processing",
-        lambda: resumed.append(True),
-    )
-
-    dlg.bca_limit_edit.setText("17.64")
     dlg.roi_editor.set_pairs([("Selection Audit", ["O1", "O2"])])
-    dlg._on_recalculate_harmonics_clicked()
+    assert dlg._save_analysis_inputs_for_harmonic_recalculation()
 
-    assert resumed == [True]
-    assert float(win.settings.get("analysis", "bca_upper_limit", "0")) == pytest.approx(
-        17.64
-    )
     assert project.frequency_protocol.presentation_rate_hz == 6
     assert win.settings.get_roi_pairs() == [("Selection Audit", ["O1", "O2"])]
 

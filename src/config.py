@@ -3,7 +3,7 @@ FPVS Toolbox configuration for the PySide6 app.
 
 Exposes:
 - FPVS_TOOLBOX_VERSION
-- frequency helpers: update_target_frequencies(), TARGET_FREQUENCIES
+- legacy frequency-migration helpers: update_target_frequencies(), TARGET_FREQUENCIES
 - UI sizing tokens
 - Legacy symbols: init_fonts(), FONT_MAIN/FONT_BOLD/FONT_HEADING (no-op/None)
 - 2/8/26 Checkpoint before removing ratio tool in a merge
@@ -23,7 +23,10 @@ FPVS_TOOLBOX_REPO_PAGE: str = "https://github.com/zcm58/FPVS-Toolbox-Repo/releas
 
 # — Defaults for analysis —
 DEFAULT_ODDBALL_FREQ: float = 1.2
-DEFAULT_BCA_UPPER_LIMIT: float = 40
+LEGACY_BCA_UPPER_LIMIT: float = 40
+# Compatibility alias for reading historical settings and artifacts. Current
+# analysis must use Main_App.processing.spectral_eligibility instead.
+DEFAULT_BCA_UPPER_LIMIT: float = LEGACY_BCA_UPPER_LIMIT
 _ODDBALL_FREQ_TOLERANCE: float = 1e-9
 
 
@@ -47,7 +50,7 @@ def validate_locked_oddball_frequency(value: float | str | None = None) -> float
     return DEFAULT_ODDBALL_FREQ
 
 def _load_frequency_settings() -> tuple[float, float]:
-    """Return oddball frequency and upper limit from saved settings."""
+    """Return historical oddball/ceiling settings for legacy migration only."""
     from Main_App import SettingsManager  # lazy to avoid cycles
     mgr = SettingsManager()
     odd = validate_locked_oddball_frequency(
@@ -67,14 +70,15 @@ def _compute_freqs(odd: float, upper: float) -> np.ndarray:
     return np.array([odd * i for i in range(1, steps + 1)], dtype=float)
 
 def update_target_frequencies(odd: float | None = None, upper: float | None = None) -> np.ndarray:
-    """Update and return the global TARGET_FREQUENCIES array."""
+    """Update the legacy compatibility array; active analysis never consumes it."""
     global TARGET_FREQUENCIES
     if odd is None or upper is None:
         odd, upper = _load_frequency_settings()
     TARGET_FREQUENCIES = _compute_freqs(float(odd), float(upper))
     return TARGET_FREQUENCIES
 
-# Precompute defaults without touching SettingsManager at import time.
+# Historical compatibility/provenance only. The active project path uses the
+# exact protocol/filter/Nyquist resolver in Main_App.processing.
 TARGET_FREQUENCIES: np.ndarray = _compute_freqs(DEFAULT_ODDBALL_FREQ, DEFAULT_BCA_UPPER_LIMIT)
 
 # — Channels and electrodes —

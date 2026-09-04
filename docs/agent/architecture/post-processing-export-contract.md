@@ -68,8 +68,9 @@ as current.
 Original FullFFT sheets are upstream source artifacts, not Summed-BCA
 derivatives. `Main_App.processing.full_fft_provenance` records their separate
 neutral identity under `tools.processing.full_fft_provenance`: project-relative
-source workbooks, base/oddball rates, exact grid and resolution, active cohort
-and frequency-QC state, processing-ledger/export identity, the complete
+source workbooks, base/oddball rates, the exact project frequency-protocol
+fingerprint, exact grid and resolution, active cohort and frequency-QC state,
+processing-ledger/export identity, the complete
 canonical BioSemi64 geometry identity, and independent fingerprints. The
 geometry payload includes montage and geometry versions, coordinate and scalp-
 set fingerprints, mapping profile, retained scalp channels, and a composite
@@ -82,6 +83,12 @@ does not rewrite it because neither the FullFFT sources nor their cohort
 changed. Stale standard Summed-BCA derivatives therefore do not block Free
 Harmonic Clustering; stale FullFFT, cohort/QC, rate, grid, or processing-export
 provenance does.
+
+The current neutral FullFFT provenance schema is v3. Loading or writing it
+requires the rates and fingerprint to match the managed project's canonical
+frequency protocol. A protocol change makes the record explicitly stale and
+requires post-processing; no application-wide 6/1.2 fallback may be stamped as
+managed provenance.
 
 Every active FullFFT workbook must match one completed processing-ledger entry
 with the project geometry identity and the expected retained channel count.
@@ -187,17 +194,41 @@ participant-condition and is recorded in the harmonic-scale and QC sheets. The
 writer publishes through a same-directory temporary workbook and atomic
 replacement so a failed rebuild cannot leave a partially written XLSX file.
 
-## Analysis Settings
+## Project Protocol And Spectral Eligibility
 
-Target frequencies come from `settings["analysis"]`, `settings.get("analysis", key, fallback)`, flat dict keys, or attributes:
+Current post-processing requires the immutable, ready project
+`frequency_protocol` in the run-settings snapshot. It does not read an
+application oddball-rate default or BCA ceiling. The protocol supplies the
+exact presentation rate, oddball recurrence/rate, expected analyzed oddball
+cycles, and marker identity. Missing, incomplete, or inconsistent protocol
+evidence is a processing failure.
 
-- `oddball_freq`, locked at `config.DEFAULT_ODDBALL_FREQ` (`1.2` Hz).
-- `bca_upper_limit`, default `config.DEFAULT_BCA_UPPER_LIMIT`.
+`Main_App.processing.spectral_eligibility.resolve_spectral_eligibility` is the
+sole current technical-domain owner. For each realized FFT input it combines
+the exact protocol and grid with successfully applied nominal high-pass and
+low-pass edges, Nyquist, and the effective notch mask. The resolver enumerates
+project harmonics through filter/Nyquist support and marks standard metrics
+eligible only when the target and all required QC-14 +/-10-bin candidates are
+inside the applied passband, above DC, strictly below Nyquist, and outside
+effective notch support. The complete one-sided `FullFFT Amplitude (uV)` stays
+available for audit; FullFFT column existence never grants standard-analysis
+eligibility.
 
-The resolved frequencies come from `config.update_target_frequencies(oddball_freq, bca_upper_limit)`.
-Non-1.2 Hz `oddball_freq` values are hard failures. The BCA upper limit only
-sets the highest 1.2 Hz harmonic exported; it must not be used as oddball
-spacing or as a fallback when exact harmonic columns are missing.
+A notch remains applied when it intersects a project harmonic. A directly
+notched target is audit-only, while a notch in a required noise bin leaves the
+target amplitude as audit evidence but makes BCA, SNR, and local z unavailable.
+These frequency holes do not exclude the recording-condition. The workbook
+records every decision in `Spectral Eligibility` and every per-channel metric
+status in `Spectral Metric QC`, including the exact protocol/filter/grid
+identity and method fingerprints.
+
+Managed SNR Plot Generator contexts rehydrate and intersect this technical
+eligibility across the provenance-allowed workbooks. They annotate only
+eligible non-presentation harmonics, keep that domain separate from the Stats
+profile's selected list, and clamp the requested display range to the observed
+FullSNR grid. Free Harmonic Clustering remains selection-independent: it reads
+original FullFFT values under neutral provenance while using the project rates
+only for frequency identity.
 
 ## PID And Output Naming
 
@@ -239,8 +270,10 @@ Workbook sheets and column behavior must remain:
 - `SNR`
 - `Z Score`
 - `BCA (uV)`
-- `FullSNR`, interpolated from 0.5 Hz to the configured upper limit in 0.01 Hz steps when full-spectrum SNR is available.
+- `FullSNR`, interpolated from 0.5 Hz to the applied low-pass/Nyquist support in 0.01 Hz steps when full-spectrum SNR is available.
 - `FFT and neighbors`, only when neighbor rows are non-empty.
+- `Spectral Eligibility`, one deterministic availability row per filter-reachable project harmonic.
+- `Spectral Metric QC`, per-channel BCA/SNR/local-z availability and reason codes.
 
 All metric sheets insert `Electrode` as the first column. Target-frequency columns are formatted as `{frequency:.4f}_Hz`.
 
@@ -257,7 +290,10 @@ The `FFT and neighbors` sheet uses these columns in this exact order:
 
 `file_name`, `condition_label`, `condition_id`, `repetition_index`, `channel_or_roi`, `target`, `fs`, `N`, `T_sec`, `df_hz`, `k0`, `f_bin_hz`, `crop_mode`, `n55`, `first55_samp`, `last55_samp`, `N_step`, `N_mod_step`, `fallback_reason`, `amp_m11` through `amp_m1`, `amp_p1` through `amp_p11`, `warning`.
 
-The target label is `1.2Hz`. Neighbor amplitudes are exported for +/-11 FFT bins around the target bin, excluding the center bin. Out-of-range neighbor bins are `NaN` and set a warning string.
+The target label uses the project oddball rate, for example `1.2Hz` or
+`0.3Hz`. Neighbor amplitudes are exported for +/-11 FFT bins around the target
+bin, excluding the center bin. Out-of-range neighbor bins are `NaN` and set a
+warning string.
 
 `build_fft_neighbors_rows(...)` returns one row per electrode/channel. It resolves `k0` by the exact target-bin formula, records `fs`, `N`, `T_sec`, `df_hz`, and crop metadata, and raises if the target frequency is not exactly on an FFT bin. It must not fall back to the nearest frequency bin. `crop_mode` must be `55_onbin` and `N_step` must be present; fixed-epoch FFT fallback is not valid for normal post-export.
 

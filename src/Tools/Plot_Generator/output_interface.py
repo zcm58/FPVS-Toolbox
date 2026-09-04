@@ -53,7 +53,21 @@ class PlotOutputInterfaceMixin(PlotSourceDataMixin):
         self._provenance_allowed_paths = context.allowed_workbook_paths
         self._analysis_base_freq = context.base_frequency_hz
         self._analysis_oddball_freq = context.oddball_frequency_hz
-        if not self._explicit_oddballs:
+        eligible_oddballs = context.eligible_oddball_frequencies_hz
+        if eligible_oddballs is not None:
+            if self._explicit_oddballs:
+                requested = tuple(float(value) for value in self.oddballs)
+                self.oddballs = [
+                    frequency
+                    for frequency in eligible_oddballs
+                    if any(
+                        abs(frequency - candidate) <= 1e-9
+                        for candidate in requested
+                    )
+                ]
+            else:
+                self.oddballs = list(eligible_oddballs)
+        elif not self._explicit_oddballs:
             self.oddballs = self._derive_oddball_harmonics(self.x_max)
         for warning in context.warnings:
             self._record_warning(

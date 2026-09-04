@@ -10,22 +10,28 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass
+from fractions import Fraction
 from pathlib import Path
 import re
 from typing import Mapping, Sequence
 from xml.etree import ElementTree
 import zipfile
 
-from Main_App.Shared.fft_crop_utils import ODDBALL_FREQ
 from Main_App.processing.frequency_domain_qc import (
     active_frequency_domain_exclusions,
 )
 from Main_App.processing.processing_ledger import load_ledger
 from Main_App.projects import WorkbookRecord, load_project_dataset_index
+from Main_App.projects.frequency_protocol import (
+    FrequencyProtocol,
+    normalize_frequency_protocol,
+)
 
-FULL_FFT_GRID_QC_METHOD_VERSION = "full_fft_oddball_bin_index_v1"
+FULL_FFT_GRID_QC_METHOD_VERSION = "project_protocol_full_fft_bin_index_v2"
 FULL_FFT_SHEET_NAME = "FullFFT Amplitude (uV)"
 _FREQUENCY_COLUMN = re.compile(r"^\s*(-?\d+(?:\.\d+)?)_Hz\s*$")
+_DISPLAY_FREQUENCY_TOLERANCE_HZ = Fraction(1, 20_000)
+_GRID_FREQUENCY_TOLERANCE_HZ = Fraction(3, 50_000)
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,13 +78,15 @@ class FullFftGridAudit:
     reference_oddball_cycles: int | None
     reference_support: int
     reference_total: int
+    oddball_frequency_hz: float = 1.2
+    frequency_protocol_fingerprint: str = ""
     method_version: str = FULL_FFT_GRID_QC_METHOD_VERSION
 
     @property
     def reference_duration_s(self) -> float | None:
         if self.reference_oddball_cycles is None:
             return None
-        return self.reference_oddball_cycles / float(ODDBALL_FREQ)
+        return self.reference_oddball_cycles / self.oddball_frequency_hz
 
     @property
     def review_candidates(self) -> tuple[FullFftGridObservation, ...]:
@@ -166,6 +174,7 @@ def audit_project_full_fft_grids(
 
     root = Path(project_root).resolve(strict=False)
     dataset_index = load_project_dataset_index(root)
+    protocol = _require_project_frequency_protocol(dataset_index.manifest)
     active_paths = _harmonic_active_workbook_paths(
         root,
         dataset_index.workbooks,
@@ -192,18 +201,55 @@ def audit_project_full_fft_grids(
         _inspect_workbook_grid(
             record,
             already_excluded=record.path.resolve(strict=False) not in active_paths,
+            oddball_frequency_hz=protocol.oddball_rate_hz,
         )
         for record in records
     )
-    reference, support, total = strict_majority_oddball_cycles(
-        observations
+    reference = int(protocol.expected_analyzed_oddball_cycles)
+    active_valid_cycles = tuple(
+        observation.oddball_cycles
+        for observation in observations
+        if not observation.already_excluded
+        and observation.issue is None
+        and observation.oddball_cycles is not None
     )
+    support = sum(cycles == reference for cycles in active_valid_cycles)
+    total = len(active_valid_cycles)
     return FullFftGridAudit(
         observations=observations,
         reference_oddball_cycles=reference,
         reference_support=support,
         reference_total=total,
+        oddball_frequency_hz=float(protocol.oddball_rate_hz),
+        frequency_protocol_fingerprint=protocol.fingerprint,
     )
+
+
+def _require_project_frequency_protocol(
+    manifest: Mapping[str, object] | None,
+) -> FrequencyProtocol:
+    raw_protocol = manifest.get("frequency_protocol") if manifest is not None else None
+    if raw_protocol is None:
+        raise RuntimeError(
+            "FullFFT grid QC requires the project's confirmed frequency protocol; "
+            "confirm the project rates and expected analyzed oddball cycles first."
+        )
+    try:
+        protocol = normalize_frequency_protocol(raw_protocol)
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError(
+            "FullFFT grid QC cannot use the project's invalid frequency protocol."
+        ) from exc
+    if (
+        not protocol.is_ready
+        or protocol.oddball_rate_hz is None
+        or protocol.expected_analyzed_oddball_cycles is None
+    ):
+        raise RuntimeError(
+            "FullFFT grid QC requires confirmed project rates and an expected "
+            "analyzed oddball-cycle count."
+        )
+    return protocol
 
 
 def _harmonic_active_workbook_paths(
@@ -268,6 +314,7 @@ def _inspect_workbook_grid(
     record: WorkbookRecord,
     *,
     already_excluded: bool,
+    oddball_frequency_hz: Fraction,
 ) -> FullFftGridObservation:
     try:
         from Main_App.io import read_xlsx_sheet_header
@@ -282,7 +329,10 @@ def _inspect_workbook_grid(
             bin_spacing_hz,
             frequency_column_count,
             issue,
-        ) = _grid_from_header(header)
+        ) = _grid_from_header(
+            header,
+            oddball_frequency_hz=oddball_frequency_hz,
+        )
     except (
         OSError,
         ValueError,
@@ -316,24 +366,34 @@ def _inspect_workbook_grid(
 
 def _grid_from_header(
     header: Sequence[object],
+    *,
+    oddball_frequency_hz: Fraction,
 ) -> tuple[int | None, float | None, float | None, int, str | None]:
-    frequencies: list[float] = []
+    frequencies: list[Fraction] = []
     for value in header:
         match = _FREQUENCY_COLUMN.fullmatch(str(value or ""))
         if match is None:
             continue
-        frequencies.append(float(match.group(1)))
+        frequencies.append(Fraction(match.group(1)))
     count = len(frequencies)
     if count < 2:
         return None, None, None, count, "No usable FullFFT frequency grid was found."
-    if abs(frequencies[0]) > 5e-5:
+    if abs(frequencies[0]) > _DISPLAY_FREQUENCY_TOLERANCE_HZ:
         return None, None, None, count, "The FullFFT grid does not begin at 0 Hz."
+    if len(set(frequencies)) != count:
+        return (
+            None,
+            None,
+            None,
+            count,
+            "Rounded FullFFT frequency labels collide and cannot identify one grid.",
+        )
 
-    oddball_hz = float(ODDBALL_FREQ)
     target_positions = [
         index
         for index, frequency in enumerate(frequencies)
-        if abs(frequency - oddball_hz) <= 5e-5
+        if abs(frequency - oddball_frequency_hz)
+        <= _DISPLAY_FREQUENCY_TOLERANCE_HZ
     ]
     if len(target_positions) != 1 or target_positions[0] <= 0:
         return (
@@ -341,13 +401,15 @@ def _grid_from_header(
             None,
             None,
             count,
-            "The FullFFT grid does not contain one exact 1.2000 Hz target column.",
+            "The FullFFT grid does not contain one displayed project oddball "
+            f"target near {float(oddball_frequency_hz):.4f} Hz.",
         )
 
     cycles = int(target_positions[0])
-    spacing = oddball_hz / cycles
+    spacing = oddball_frequency_hz / cycles
     if any(
-        abs(frequencies[index] - index * spacing) > 6e-5
+        abs(frequencies[index] - index * spacing)
+        > _GRID_FREQUENCY_TOLERANCE_HZ
         for index in range(count)
     ):
         return (
@@ -357,8 +419,8 @@ def _grid_from_header(
             count,
             "The FullFFT frequency columns are not a uniform zero-based grid.",
         )
-    duration_s = cycles / oddball_hz
-    return cycles, duration_s, 1.0 / duration_s, count, None
+    duration_s = Fraction(cycles, 1) / oddball_frequency_hz
+    return cycles, float(duration_s), float(spacing), count, None
 
 
 __all__ = [

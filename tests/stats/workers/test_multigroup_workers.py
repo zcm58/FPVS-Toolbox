@@ -1566,6 +1566,70 @@ def test_complete_core_excludes_incomplete_condition_not_participants(
     assert set(payload.primary_data["subject"]) == {"P1", "P2"}
 
 
+def test_managed_multigroup_cache_miss_does_not_rebuild_harmonic_domain(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    class _CacheMiss:
+        hit = None
+
+    cache_requests: list[dict[str, object]] = []
+    summed_calls: list[dict[str, object]] = []
+    messages: list[str] = []
+
+    def _cache_request(**kwargs):
+        cache_requests.append(kwargs)
+        return object()
+
+    monkeypatch.setattr(workers, "build_group_harmonic_cache_request", _cache_request)
+    monkeypatch.setattr(
+        workers,
+        "lookup_cached_group_harmonic_selection",
+        lambda _request: _CacheMiss(),
+    )
+    monkeypatch.setattr(
+        workers,
+        "preflight_group_significant_full_fft_columns",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("managed project rebuilt an independent harmonic domain")
+        ),
+    )
+
+    def _summed(**kwargs):
+        summed_calls.append(kwargs)
+        return {
+            "P1": {"A": {"R1": 1.0}},
+            "P2": {"A": {"R1": 2.0}},
+        }
+
+    monkeypatch.setattr(workers, "prepare_summed_bca_data", _summed)
+
+    frame, frozen, _metadata = workers._prepare_project_long_data(
+        subjects=["P1", "P2"],
+        conditions=["A"],
+        conditions_all=["A"],
+        subject_data={"P1": {}, "P2": {}},
+        base_freq=10.0,
+        rois={"R1": ["Oz"]},
+        rois_all=None,
+        dv_policy={"name": GROUP_SIGNIFICANT_POLICY_NAME},
+        outlier_abs_limit=50.0,
+        qc_config=None,
+        qc_state={"report": _cached_qc_report()},
+        manual_excluded_pids=None,
+        max_freq=16.8,
+        project_root=str(tmp_path),
+        message_emit=messages.append,
+        progress_callback=None,
+    )
+
+    assert frozen == ["P1", "P2"]
+    assert not frame.empty
+    assert cache_requests[0]["max_freq_hz"] is None
+    assert summed_calls[0]["max_freq"] is None
+    assert any("no independent FullFFT target list" in message for message in messages)
+
+
 def test_prepare_cancellation_after_adaptive_preflight_skips_summed_bca(
     monkeypatch,
 ) -> None:

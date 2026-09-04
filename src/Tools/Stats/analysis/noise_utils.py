@@ -20,11 +20,15 @@ This file is used to calculate SNR using the +/- 10 bins method used in several 
 """
 from __future__ import annotations
 
-from typing import Tuple
+from dataclasses import dataclass
+from typing import Sequence, Tuple
 
 import numpy as np
 
 __all__ = [
+    "QC14_METRIC_METHOD_VERSION",
+    "QC14NoiseMetricResult",
+    "compute_qc14_standard_metrics",
     "compute_noise_stats_for_bin",
     "compute_noise_stats_for_bin_channels",
 ]
@@ -32,6 +36,209 @@ __all__ = [
 
 _BATCH_SAFE_ABS_MIN = 1e-100
 _BATCH_SAFE_ABS_MAX = 1e100
+QC14_METRIC_METHOD_VERSION = "qc14_fixed_bin_metrics_v1"
+QC14_EFFECTIVELY_ZERO_TOLERANCE = 1e-12
+_QC14_OFFSETS = tuple([*range(-10, -1), *range(2, 11)])
+
+
+@dataclass(frozen=True, slots=True)
+class QC14NoiseMetricResult:
+    """Per-channel standard metrics with explicit QC-14 availability."""
+
+    method_version: str
+    target_bin_index: int
+    candidate_bin_indices: tuple[int, ...]
+    retained_bin_indices: tuple[int, ...]
+    target_amplitude: float | None
+    noise_mean: float | None
+    noise_population_sd: float | None
+    bca: float | None
+    snr: float | None
+    local_z: float | None
+    target_amplitude_status: str
+    bca_status: str
+    snr_status: str
+    local_z_status: str
+    reason_codes: tuple[str, ...]
+
+    def to_payload(self) -> dict[str, object]:
+        return {
+            "method_version": self.method_version,
+            "target_bin_index": self.target_bin_index,
+            "candidate_bin_indices": list(self.candidate_bin_indices),
+            "retained_bin_indices": list(self.retained_bin_indices),
+            "target_amplitude": self.target_amplitude,
+            "noise_mean": self.noise_mean,
+            "noise_population_sd": self.noise_population_sd,
+            "bca": self.bca,
+            "snr": self.snr,
+            "local_z": self.local_z,
+            "target_amplitude_status": self.target_amplitude_status,
+            "bca_status": self.bca_status,
+            "snr_status": self.snr_status,
+            "local_z_status": self.local_z_status,
+            "reason_codes": list(self.reason_codes),
+        }
+
+
+def compute_qc14_standard_metrics(
+    amplitudes: np.ndarray,
+    *,
+    target_idx: int,
+    candidate_bin_indices: Sequence[int],
+    static_metrics_available: bool = True,
+    static_reason_codes: Sequence[str] = (),
+    target_amplitude_status: str = "available",
+    zero_tolerance: float = QC14_EFFECTIVELY_ZERO_TOLERANCE,
+) -> QC14NoiseMetricResult:
+    """Calculate BCA/SNR/local z only from complete valid QC-14 support.
+
+    The candidate list must be the exact symmetric ``-10..-2,+2..+10`` set.
+    One finite minimum and one finite maximum are removed, including when tied,
+    leaving exactly 16 values in their original frequency order.
+    """
+
+    values = np.asarray(amplitudes)
+    if values.ndim != 1:
+        raise ValueError("QC-14 metrics require one one-dimensional amplitude spectrum.")
+    target = int(target_idx)
+    candidates = tuple(int(index) for index in candidate_bin_indices)
+    expected = tuple(target + offset for offset in _QC14_OFFSETS)
+    reasons = list(dict.fromkeys(str(value) for value in static_reason_codes if str(value)))
+
+    target_value: float | None = None
+    if 0 <= target < values.size and np.isfinite(values[target]):
+        target_value = float(values[target])
+    else:
+        reasons.append("nonfinite_or_missing_target_bin")
+        target_amplitude_status = "unavailable"
+
+    if candidates != expected or any(index < 0 or index >= values.size for index in candidates):
+        reasons.append("incomplete_or_asymmetric_noise_support")
+        return _unavailable_qc14_result(
+            target_idx=target,
+            candidates=candidates,
+            target_value=target_value,
+            target_amplitude_status=target_amplitude_status,
+            reasons=reasons,
+        )
+    if not static_metrics_available:
+        return _unavailable_qc14_result(
+            target_idx=target,
+            candidates=candidates,
+            target_value=target_value,
+            target_amplitude_status=target_amplitude_status,
+            reasons=reasons or ["static_spectral_eligibility_unavailable"],
+        )
+    if target_value is None:
+        return _unavailable_qc14_result(
+            target_idx=target,
+            candidates=candidates,
+            target_value=None,
+            target_amplitude_status="unavailable",
+            reasons=reasons,
+        )
+
+    noise_values = values[np.asarray(candidates, dtype=np.intp)].astype(float)
+    if not np.all(np.isfinite(noise_values)):
+        reasons.append("nonfinite_noise_support")
+        return _unavailable_qc14_result(
+            target_idx=target,
+            candidates=candidates,
+            target_value=target_value,
+            target_amplitude_status=target_amplitude_status,
+            reasons=reasons,
+        )
+
+    # Stable sorting identifies distinct occurrences when the extrema tie.
+    sorted_positions = np.argsort(noise_values, kind="stable")
+    removed_positions = {int(sorted_positions[0]), int(sorted_positions[-1])}
+    retained_positions = tuple(
+        position
+        for position in range(len(candidates))
+        if position not in removed_positions
+    )
+    retained_indices = tuple(candidates[position] for position in retained_positions)
+    retained_values = noise_values[np.asarray(retained_positions, dtype=np.intp)]
+    if retained_values.size != 16:
+        raise RuntimeError("QC-14 trimming must retain exactly 16 noise bins.")
+
+    noise_mean = float(retained_values.mean())
+    noise_sd = float(retained_values.std(ddof=0))
+    bca = float(target_value - noise_mean)
+    snr: float | None = None
+    local_z: float | None = None
+    snr_status = "available"
+    local_z_status = "available"
+    if not np.isfinite(noise_mean):
+        reasons.append("nonfinite_noise_mean")
+        return _unavailable_qc14_result(
+            target_idx=target,
+            candidates=candidates,
+            target_value=target_value,
+            target_amplitude_status=target_amplitude_status,
+            reasons=reasons,
+            retained_indices=retained_indices,
+        )
+    if abs(noise_mean) <= float(zero_tolerance):
+        reasons.append("effectively_zero_noise_mean")
+        snr_status = "unavailable"
+    else:
+        snr = float(target_value / noise_mean)
+    if not np.isfinite(noise_sd):
+        reasons.append("nonfinite_noise_population_sd")
+        local_z_status = "unavailable"
+    elif abs(noise_sd) <= float(zero_tolerance):
+        reasons.append("effectively_zero_noise_population_sd")
+        local_z_status = "unavailable"
+    else:
+        local_z = float((target_value - noise_mean) / noise_sd)
+
+    return QC14NoiseMetricResult(
+        method_version=QC14_METRIC_METHOD_VERSION,
+        target_bin_index=target,
+        candidate_bin_indices=candidates,
+        retained_bin_indices=retained_indices,
+        target_amplitude=target_value,
+        noise_mean=noise_mean,
+        noise_population_sd=noise_sd,
+        bca=bca,
+        snr=snr,
+        local_z=local_z,
+        target_amplitude_status=target_amplitude_status,
+        bca_status="available",
+        snr_status=snr_status,
+        local_z_status=local_z_status,
+        reason_codes=tuple(dict.fromkeys(reasons)),
+    )
+
+
+def _unavailable_qc14_result(
+    *,
+    target_idx: int,
+    candidates: tuple[int, ...],
+    target_value: float | None,
+    target_amplitude_status: str,
+    reasons: Sequence[str],
+    retained_indices: tuple[int, ...] = (),
+) -> QC14NoiseMetricResult:
+    return QC14NoiseMetricResult(
+        method_version=QC14_METRIC_METHOD_VERSION,
+        target_bin_index=target_idx,
+        candidate_bin_indices=candidates,
+        retained_bin_indices=retained_indices,
+        target_amplitude=target_value,
+        noise_mean=None,
+        noise_population_sd=None,
+        bca=None,
+        snr=None,
+        local_z=None,
+        target_amplitude_status=target_amplitude_status,
+        bca_status="unavailable",
+        snr_status="unavailable",
+        local_z_status="unavailable",
+        reason_codes=tuple(dict.fromkeys(reasons)),
+    )
 
 
 def compute_noise_stats_for_bin(

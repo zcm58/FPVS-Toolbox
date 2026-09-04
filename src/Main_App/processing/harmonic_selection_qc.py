@@ -13,12 +13,24 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
-from Main_App.projects import ProjectDatasetIndex, load_project_dataset_index
+import pandas as pd
+
+from Main_App.projects import (
+    ProjectDatasetIndex,
+    load_project_dataset_index,
+    normalize_frequency_protocol,
+)
 from Main_App.processing.processing_ledger import load_ledger
 from Main_App.processing.frequency_domain_qc import (
     active_frequency_domain_exclusions,
     filter_frequency_domain_recordings,
     filter_frequency_domain_subjects,
+)
+from Main_App.processing.spectral_eligibility import (
+    SPECTRAL_ELIGIBILITY_METHOD_VERSION,
+    SpectralEligibilityError,
+    intersect_eligible_harmonics,
+    spectral_eligibility_from_rows,
 )
 from Tools.Stats.analysis.dv_policy_group_significant import (
     GroupSignificantHarmonicSelection,
@@ -51,7 +63,7 @@ from Tools.Stats.io.harmonic_selection_export import (
 )
 
 QUALITY_CHECK_FOLDER = "Quality Check"
-PROCESSING_HARMONIC_SELECTION_SCHEMA_VERSION = 1
+PROCESSING_HARMONIC_SELECTION_SCHEMA_VERSION = 2
 PROCESSING_HARMONIC_SELECTION_MANIFEST_PATH = (
     "tools",
     "processing",
@@ -79,6 +91,11 @@ class ProcessingHarmonicSelectionInputs:
     settings: DVPolicySettings
     base_frequency_hz: float
     max_frequency_hz: float | None
+    oddball_frequency_hz: float = 1.2
+    frequency_protocol_fingerprint: str = ""
+    eligible_harmonic_orders: tuple[int, ...] = ()
+    spectral_eligibility_fingerprint: str = ""
+    spectral_eligibility_workbooks: tuple[tuple[str, str, str], ...] = ()
     recording_assignments: dict[str, dict[str, object]] = field(default_factory=dict)
     declared_session_ids: tuple[str, ...] = ()
     participant_group_ids: dict[str, str] = field(default_factory=dict)
@@ -199,6 +216,15 @@ def run_processing_harmonic_selection_qc(
     settings = inputs.settings
     base_frequency_hz = inputs.base_frequency_hz
     max_frequency_hz = inputs.max_frequency_hz
+    oddball_frequency_hz = float(getattr(inputs, "oddball_frequency_hz", 1.2))
+    spectral_eligibility_fingerprint = str(
+        getattr(inputs, "spectral_eligibility_fingerprint", "") or ""
+    )
+    eligible_harmonic_orders = (
+        tuple(getattr(inputs, "eligible_harmonic_orders", ()) or ())
+        if spectral_eligibility_fingerprint
+        else None
+    )
     if settings.name == GROUP_SIGNIFICANT_POLICY_NAME:
         selection = build_group_significant_harmonic_selection(
             subjects=subjects,
@@ -232,6 +258,11 @@ def run_processing_harmonic_selection_qc(
                 if _inputs_are_repeated(inputs)
                 else None
             ),
+            oddball_frequency_hz=oddball_frequency_hz,
+            eligible_harmonic_orders=eligible_harmonic_orders,
+            spectral_eligibility_fingerprint=(
+                spectral_eligibility_fingerprint or None
+            ),
         )
         if (
             force_recalculate
@@ -258,6 +289,8 @@ def run_processing_harmonic_selection_qc(
             dv_metadata=dv_metadata,
             project_root=project_root,
             use_accepted_processing_selection=False,
+            oddball_frequency_hz=oddball_frequency_hz,
+            eligible_harmonic_orders=eligible_harmonic_orders,
             electrode_exclusions_by_subject=(
                 active_frequency_domain_exclusions(
                     project_root
@@ -305,6 +338,7 @@ def _require_persisted_group_harmonic_selection(
         declared_session_ids=(
             inputs.declared_session_ids if _inputs_are_repeated(inputs) else None
         ),
+        oddball_frequency_hz=float(getattr(inputs, "oddball_frequency_hz", 1.2)),
     )
     lookup = lookup_cached_group_harmonic_selection(cache_request)
     if lookup.hit is not None:
@@ -330,6 +364,37 @@ def _canonical_selection_metadata(
     canonical["harmonic_selection_profile_version"] = (
         inputs.settings.harmonic_selection_profile_version
     )
+    spectral_fingerprint = str(
+        getattr(inputs, "spectral_eligibility_fingerprint", "") or ""
+    )
+    if spectral_fingerprint:
+        canonical.update(
+            {
+            "frequency_protocol_fingerprint": str(
+                getattr(inputs, "frequency_protocol_fingerprint", "") or ""
+            ),
+            "oddball_frequency_hz": float(
+                getattr(inputs, "oddball_frequency_hz", 1.2)
+            ),
+            "eligible_harmonic_orders": list(
+                getattr(inputs, "eligible_harmonic_orders", ()) or ()
+            ),
+            "spectral_eligibility_method_version": (
+                SPECTRAL_ELIGIBILITY_METHOD_VERSION
+            ),
+            "spectral_eligibility_fingerprint": spectral_fingerprint,
+            "spectral_eligibility_workbooks": [
+                {
+                    "subject": subject,
+                    "condition": condition,
+                    "eligibility_fingerprint": fingerprint,
+                }
+                for subject, condition, fingerprint in (
+                    getattr(inputs, "spectral_eligibility_workbooks", ()) or ()
+                )
+            ],
+            }
+        )
     request = _processing_cache_request(inputs)
     sources = request.fingerprint.get("source_workbooks")
     if isinstance(sources, list):
@@ -384,6 +449,7 @@ def _processing_cache_request(
         declared_session_ids=(
             inputs.declared_session_ids if _inputs_are_repeated(inputs) else None
         ),
+        oddball_frequency_hz=float(getattr(inputs, "oddball_frequency_hz", 1.2)),
     )
     if request is None:
         raise RuntimeError(
@@ -409,6 +475,15 @@ def _processing_selection_input_fingerprint(
             ),
             "upstream_input_identity": upstream_identity,
             "dv_policy": _dv_policy_payload(inputs.settings),
+            "frequency_protocol_fingerprint": str(
+                getattr(inputs, "frequency_protocol_fingerprint", "") or ""
+            ),
+            "spectral_eligibility_fingerprint": (
+                str(getattr(inputs, "spectral_eligibility_fingerprint", "") or "")
+            ),
+            "eligible_harmonic_orders": list(
+                getattr(inputs, "eligible_harmonic_orders", ()) or ()
+            ),
         }
     )
 
@@ -633,6 +708,7 @@ def load_processing_harmonic_selection(
         declared_session_ids=(
             inputs.declared_session_ids if _inputs_are_repeated(inputs) else None
         ),
+        oddball_frequency_hz=float(getattr(inputs, "oddball_frequency_hz", 1.2)),
     )
     try:
         selection = group_significant_selection_from_metadata(
@@ -745,6 +821,28 @@ def _processing_harmonic_selection_inputs(
 
     rois = load_rois_from_settings() or {}
     settings = _harmonic_selection_settings(project)
+    frequency_protocol = _current_project_frequency_protocol(project, project_root)
+    if (
+        not frequency_protocol.is_ready
+        or frequency_protocol.presentation_rate_hz is None
+        or frequency_protocol.oddball_rate_hz is None
+    ):
+        raise RuntimeError(
+            "Harmonic selection requires a complete project frequency protocol. "
+            "Confirm the presentation rate, oddball recurrence/rate, expected "
+            "analyzed cycles, and marker code before processing."
+        )
+    (
+        eligible_harmonic_orders,
+        spectral_eligibility_fingerprint,
+        spectral_eligibility_workbooks,
+    ) = _project_spectral_eligibility_domain(
+        protocol=frequency_protocol,
+        subjects=subjects,
+        conditions=ordered_conditions,
+        subject_data=subject_data,
+        log_func=log_func,
+    )
     return ProcessingHarmonicSelectionInputs(
         project_root=project_root,
         subjects=tuple(subjects),
@@ -752,8 +850,13 @@ def _processing_harmonic_selection_inputs(
         subject_data=subject_data,
         rois={str(name): [str(channel) for channel in channels] for name, channels in rois.items()},
         settings=settings,
-        base_frequency_hz=_analysis_base_frequency_hz(),
-        max_frequency_hz=_analysis_bca_upper_limit_hz(),
+        base_frequency_hz=float(frequency_protocol.presentation_rate_hz),
+        max_frequency_hz=None,
+        oddball_frequency_hz=float(frequency_protocol.oddball_rate_hz),
+        frequency_protocol_fingerprint=frequency_protocol.fingerprint,
+        eligible_harmonic_orders=eligible_harmonic_orders,
+        spectral_eligibility_fingerprint=spectral_eligibility_fingerprint,
+        spectral_eligibility_workbooks=spectral_eligibility_workbooks,
         recording_assignments={
             recording_id: dict(recording_assignments[recording_id])
             for recording_id in subjects
@@ -987,23 +1090,104 @@ def _filter_subject_data(
     }
 
 
-def _analysis_base_frequency_hz() -> float:
-    from Main_App import SettingsManager
-
+def _current_project_frequency_protocol(project: Any, project_root: Path):
+    raw_protocol = getattr(project, "frequency_protocol", None)
+    if raw_protocol is None:
+        manifest = _read_manifest_required(project_root / "project.json")
+        raw_protocol = manifest.get("frequency_protocol")
+    if raw_protocol is None:
+        raise RuntimeError(
+            "Harmonic selection cannot infer project rates from application defaults. "
+            "Confirm the project frequency protocol and regenerate its workbooks."
+        )
     try:
-        return float(SettingsManager().get("analysis", "base_freq", "6.0"))
-    except (TypeError, ValueError):
-        return 6.0
+        return normalize_frequency_protocol(raw_protocol)
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError(
+            "The project frequency protocol is invalid; correct it before harmonic "
+            "selection."
+        ) from exc
 
 
-def _analysis_bca_upper_limit_hz() -> float | None:
-    from Main_App import SettingsManager
+def _project_spectral_eligibility_domain(
+    *,
+    protocol: Any,
+    subjects: Sequence[str],
+    conditions: Sequence[str],
+    subject_data: Mapping[str, Mapping[str, str]],
+    log_func: Callable[[str], None] | None,
+) -> tuple[tuple[int, ...], str, tuple[tuple[str, str, str], ...]]:
+    results = []
+    workbook_identities: list[tuple[str, str, str]] = []
+    for subject in subjects:
+        for condition in conditions:
+            file_path = (subject_data.get(str(subject), {}) or {}).get(str(condition))
+            if not file_path:
+                continue
+            path = Path(file_path)
+            try:
+                frame = pd.read_excel(path, sheet_name="Spectral Eligibility")
+            except (OSError, ValueError) as exc:
+                raise SpectralEligibilityError(
+                    "A current Spectral Eligibility sheet is required in every "
+                    f"included frequency-domain workbook ({path}). Regenerate the "
+                    "workbook before harmonic selection."
+                ) from exc
+            try:
+                result = spectral_eligibility_from_rows(
+                    frame.to_dict(orient="records"),
+                    protocol=protocol,
+                )
+            except SpectralEligibilityError as exc:
+                raise SpectralEligibilityError(f"{path}: {exc}") from exc
+            results.append(result)
+            workbook_identities.append(
+                (str(subject), str(condition), result.fingerprint)
+            )
 
-    try:
-        value = float(SettingsManager().get("analysis", "bca_upper_limit", "16.8"))
-    except (TypeError, ValueError):
-        return None
-    return value if value > 0 else None
+    if not results:
+        raise SpectralEligibilityError(
+            "Harmonic selection found no current Spectral Eligibility sheets. "
+            "Regenerate the frequency-domain workbooks."
+        )
+    common_targets = intersect_eligible_harmonics(results)
+    eligible_orders = tuple(
+        int(target.oddball_harmonic_order) for target in common_targets
+    )
+    if not eligible_orders:
+        raise SpectralEligibilityError(
+            "No standard harmonic is technically eligible across the included "
+            "workbooks. Review their filter, notch, Nyquist, and analyzed-cycle "
+            "provenance."
+        )
+
+    ordered_identities = tuple(
+        sorted(workbook_identities, key=lambda row: (row[0].casefold(), row[1].casefold()))
+    )
+    intersection_fingerprint = compute_selection_fingerprint(
+        {
+            "spectral_eligibility_method_version": (
+                SPECTRAL_ELIGIBILITY_METHOD_VERSION
+            ),
+            "frequency_protocol_fingerprint": protocol.fingerprint,
+            "eligible_harmonic_orders": list(eligible_orders),
+            "workbooks": [
+                {
+                    "subject": subject,
+                    "condition": condition,
+                    "eligibility_fingerprint": fingerprint,
+                }
+                for subject, condition, fingerprint in ordered_identities
+            ],
+        }
+    )
+    if log_func is not None:
+        log_func(
+            "Canonical spectral eligibility intersection: "
+            f"{len(eligible_orders)} harmonics across {len(results)} included "
+            "recording-condition workbooks."
+        )
+    return eligible_orders, intersection_fingerprint, ordered_identities
 
 
 def _load_processing_harmonic_selection_record(

@@ -5,16 +5,32 @@ from types import SimpleNamespace
 
 import mne
 import numpy as np
+import pandas as pd
 import pytest
+from openpyxl import load_workbook
 
 from Main_App.Shared.post_process import (
     _can_batch_target_noise,
     _create_output_subfolder,
     _eeg_pick_indices,
     _mean_epochs_float64,
-    _resolve_target_frequencies,
+    _resolve_frequency_protocol,
     post_process,
 )
+from Main_App.processing.spectral_eligibility import SpectralEligibilityError
+from Main_App.projects.frequency_protocol import (
+    EXPECTED_CYCLES_SOURCE_MANUAL,
+    FrequencyProtocol,
+)
+
+
+def _ready_protocol() -> FrequencyProtocol:
+    return FrequencyProtocol.from_recurrence(
+        3,
+        10,
+        expected_analyzed_oddball_cycles=36,
+        expected_analyzed_oddball_cycles_source=EXPECTED_CYCLES_SOURCE_MANUAL,
+    )
 
 
 @pytest.mark.parametrize(
@@ -142,44 +158,29 @@ def test_target_noise_batch_guard_is_conservative() -> None:
     assert not _can_batch_target_noise(tied, np.array([40], dtype=np.intp))
 
 
-def test_resolve_target_frequencies_from_nested_analysis_dict() -> None:
-    app = SimpleNamespace(
-        settings={"analysis": {"oddball_freq": 1.2, "bca_upper_limit": 24.0}}
+@pytest.mark.parametrize("nested", [False, True])
+def test_resolve_frequency_protocol_from_run_snapshot(nested: bool) -> None:
+    protocol = _ready_protocol()
+    settings = (
+        {"analysis": {"frequency_protocol": protocol.to_manifest()}}
+        if nested
+        else {"frequency_protocol": protocol}
     )
 
-    freqs, upper = _resolve_target_frequencies(app)
+    resolved = _resolve_frequency_protocol(SimpleNamespace(settings=settings))
 
-    assert upper == pytest.approx(24.0)
-    assert float(freqs[0]) == pytest.approx(1.2)
-    assert float(freqs[-1]) == pytest.approx(24.0)
-    assert len(freqs) == 20
-
-
-def test_resolve_target_frequencies_from_settings_getter() -> None:
-    class _FakeSettings:
-        def get(self, section, option, fallback=None):
-            if section == "analysis" and option == "oddball_freq":
-                return "1.2"
-            if section == "analysis" and option == "bca_upper_limit":
-                return "19.2"
-            return fallback
-
-    app = SimpleNamespace(settings=_FakeSettings())
-
-    freqs, upper = _resolve_target_frequencies(app)
-
-    assert upper == pytest.approx(19.2)
-    assert float(freqs[-1]) == pytest.approx(19.2)
-    assert len(freqs) == 16
+    assert resolved == protocol
+    assert float(resolved.presentation_rate_hz) == pytest.approx(3.0)
+    assert float(resolved.oddball_rate_hz) == pytest.approx(0.3)
 
 
-def test_resolve_target_frequencies_rejects_non_locked_oddball() -> None:
+def test_resolve_frequency_protocol_rejects_legacy_rate_and_ceiling_settings() -> None:
     app = SimpleNamespace(
-        settings={"analysis": {"oddball_freq": 6.0, "bca_upper_limit": 30.0}}
+        settings={"analysis": {"oddball_freq": 1.2, "bca_upper_limit": 16.8}}
     )
 
-    with pytest.raises(ValueError, match="locked at 1.2 Hz"):
-        _resolve_target_frequencies(app)
+    with pytest.raises(SpectralEligibilityError, match="fallbacks are retired"):
+        _resolve_frequency_protocol(app)
 
 
 def test_create_output_subfolder_routes_condition_then_group(tmp_path) -> None:
@@ -223,7 +224,7 @@ def test_post_process_logs_export_timing_when_no_data(tmp_path, caplog) -> None:
     logs: list[str] = []
     app = SimpleNamespace(
         save_folder_path=_PathBox(),
-        settings={},
+        settings={"frequency_protocol": _ready_protocol()},
         preprocessed_data={},
         data_paths=[],
         log=logs.append,
@@ -240,3 +241,74 @@ def test_post_process_logs_export_timing_when_no_data(tmp_path, caplog) -> None:
         "condition_skip_no_data",
         "post_process_total",
     }
+
+
+def test_post_process_exports_filter_domain_and_structured_notch_hole(tmp_path) -> None:
+    sampling_rate = 128.0
+    sample_count = 7_680  # 120 cycles at a 2-Hz oddball rate.
+    info = mne.create_info(["Oz"], sampling_rate, ["eeg"])
+    with info._unlock():
+        info["highpass"] = 0.1
+        info["lowpass"] = 60.0
+    metadata = pd.DataFrame(
+        {
+            "crop_mode": ["55_onbin"],
+            "n55": [120],
+            "first55_samp": [0],
+            "last55_samp": [sample_count - 64],
+            "N_step": [64],
+            "fallback_reason": [""],
+        }
+    )
+    epochs = mne.EpochsArray(
+        np.random.default_rng(12).normal(size=(1, 1, sample_count)) * 1e-6,
+        info,
+        tmin=0.0,
+        metadata=metadata,
+        verbose=False,
+    )
+    protocol = FrequencyProtocol.from_recurrence(
+        10,
+        5,
+        expected_analyzed_oddball_cycles=120,
+        expected_analyzed_oddball_cycles_source=EXPECTED_CYCLES_SOURCE_MANUAL,
+    )
+    app = SimpleNamespace(
+        save_folder_path=SimpleNamespace(get=lambda: str(tmp_path)),
+        settings={
+            "frequency_protocol": protocol,
+            "high_pass": 0.1,
+            "low_pass": 60.0,
+            "line_noise_filter_enabled": True,
+            "_fpvs_fft_multinotch_applied_centers_hz": [50.0],
+        },
+        preprocessed_data={"Condition A": [epochs]},
+        data_paths=[],
+        log=lambda _message: None,
+    )
+
+    post_process(app, ["Condition A"])
+
+    workbook_path = next(tmp_path.rglob("*.xlsx"))
+    workbook = load_workbook(workbook_path, read_only=True, data_only=True)
+    try:
+        assert "48.0000_Hz" in [
+            cell.value for cell in workbook["BCA (uV)"][1]
+        ]
+        bca_headers = [cell.value for cell in workbook["BCA (uV)"][1]]
+        bca_values = [cell.value for cell in workbook["BCA (uV)"][2]]
+        assert bca_values[bca_headers.index("48.0000_Hz")] is not None
+        assert bca_values[bca_headers.index("50.0000_Hz")] is None
+
+        eligibility_rows = workbook["Spectral Eligibility"].iter_rows(values_only=True)
+        eligibility_headers = list(next(eligibility_rows))
+        frequency_index = eligibility_headers.index("Target Frequency (Hz)")
+        available_index = eligibility_headers.index("BCA Available")
+        reason_index = eligibility_headers.index("Unavailable Reasons")
+        fifty_hz = next(
+            row for row in eligibility_rows if row[frequency_index] == 50.0
+        )
+        assert fifty_hz[available_index] is False
+        assert "target_inside_applied_notch" in fifty_hz[reason_index]
+    finally:
+        workbook.close()

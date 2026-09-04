@@ -1,6 +1,8 @@
 # post_process.py
 import logging
 import os
+import hashlib
+import json
 import pandas as pd
 import numpy as np
 import traceback
@@ -11,7 +13,6 @@ from contextvars import ContextVar
 from fractions import Fraction
 from pathlib import Path
 from time import perf_counter
-import config
 from config import DEFAULT_ELECTRODE_NAMES_64  # Ensure these are correct
 from typing import List, Any, Dict
 from Tools.Stats.analysis.full_snr import (
@@ -19,25 +20,182 @@ from Tools.Stats.analysis.full_snr import (
     compute_full_snr_prefix_from_amplitudes,
 )
 from Tools.Stats.analysis.noise_utils import (
-    compute_noise_stats_for_bin,
-    compute_noise_stats_for_bin_channels,
+    compute_qc14_standard_metrics,
 )
 from Main_App.Shared.fft_crop_utils import compute_onbin_N, compute_onbin_step
+from Main_App.processing.fft_multinotch import (
+    FFT_MULTINOTCH_HALF_WIDTH_HZ,
+    FFT_MULTINOTCH_METHOD_VERSION,
+)
+from Main_App.processing.spectral_eligibility import (
+    SpectralEligibilityError,
+    SpectralEligibilityResult,
+    resolve_spectral_eligibility,
+)
+from Main_App.processing.output_integrity import (
+    OutputIntegrityError,
+    require_finite_computable_bca,
+    require_finite_retained_signal,
+)
+from Main_App.projects.frequency_protocol import (
+    FrequencyProtocol,
+    normalize_frequency_protocol,
+)
 from Main_App.projects.grouping import (
     resolve_group_output_directory,
     resolve_output_directory,
 )
 
 
-from Main_App.Shared.post_process_excel import build_fft_neighbors_rows, write_results_workbook
+from Main_App.Shared.post_process_excel import (
+    build_fft_neighbors_rows,
+    workbook_artifact_identity,
+    write_results_workbook,
+)
 
 
-ODDBALL_FREQ = Fraction(6, 5)
 logger = logging.getLogger(__name__)
 _EXPORT_TIMING_SINK: ContextVar[list[dict[str, object]] | None] = ContextVar(
     "_EXPORT_TIMING_SINK",
     default=None,
 )
+RECORDING_CONDITION_EXPORT_RECEIPT_VERSION = (
+    "recording_condition_export_receipt_v1"
+)
+
+
+def _export_receipt_sink(app: Any) -> list[dict[str, object]]:
+    sink = getattr(app, "export_receipts", None)
+    if isinstance(sink, list):
+        return sink
+    sink = []
+    setattr(app, "export_receipts", sink)
+    return sink
+
+
+def _run_identity_payload(app: Any, *, fallback_recording_id: str) -> dict[str, object]:
+    settings = getattr(app, "settings", None)
+    settings = settings if isinstance(settings, dict) else {}
+    geometry = settings.get("_fpvs_geometry")
+    source_spans = settings.get("_fpvs_source_analysis_span_plan")
+    target_spans = settings.get("_fpvs_realized_analysis_span_plan")
+    return {
+        "run_id": str(settings.get("_fpvs_expected_plan_run_id") or ""),
+        "processing_fingerprint": str(
+            settings.get("_fpvs_processing_fingerprint") or ""
+        ),
+        "processing_fingerprint_version": str(
+            settings.get("_fpvs_processing_fingerprint_version") or ""
+        ),
+        "recording_id": str(
+            settings.get("_fpvs_recording_id") or fallback_recording_id
+        ),
+        "participant_id": str(
+            settings.get("_fpvs_participant_id") or fallback_recording_id
+        ),
+        "session_id": str(settings.get("_fpvs_session_id") or ""),
+        "geometry": dict(geometry) if isinstance(geometry, dict) else None,
+        "source_analysis_span_plan_fingerprint": str(
+            source_spans.get("fingerprint")
+            if isinstance(source_spans, dict)
+            else ""
+        ),
+        "target_analysis_span_plan_fingerprint": str(
+            target_spans.get("fingerprint")
+            if isinstance(target_spans, dict)
+            else ""
+        ),
+    }
+
+
+def _fingerprinted_export_receipt(
+    payload: dict[str, object],
+) -> dict[str, object]:
+    canonical = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    return {
+        **payload,
+        "fingerprint": hashlib.sha256(canonical).hexdigest(),
+    }
+
+
+def _retained_occurrence_receipts(data_object: Any, object_index: int) -> list[dict[str, object]]:
+    """Extract exact retained spans already carried by active Epochs metadata."""
+
+    metadata = getattr(data_object, "metadata", None)
+    if not isinstance(metadata, pd.DataFrame) or metadata.empty:
+        return [
+            {
+                "status": "retained",
+                "object_index": int(object_index),
+                "occurrence_index": 1,
+                "span_status": "legacy_unknown",
+            }
+        ]
+
+    receipts: list[dict[str, object]] = []
+    for row_position, (_, row) in enumerate(metadata.iterrows(), start=1):
+        def _integer(name: str) -> int | None:
+            value = row.get(name)
+            if value is None or pd.isna(value):
+                return None
+            return int(value)
+
+        receipts.append(
+            {
+                "status": "retained",
+                "object_index": int(object_index),
+                "occurrence_index": row_position,
+                "span_status": (
+                    "exact"
+                    if row.get("approved_span_fingerprint")
+                    else "legacy_unknown"
+                ),
+                "approved_span_fingerprint": str(
+                    row.get("approved_span_fingerprint") or ""
+                ),
+                "marker_plan_fingerprint": str(
+                    row.get("marker_plan_fingerprint") or ""
+                ),
+                "source_start_sample": _integer("source_start_sample"),
+                "source_stop_sample": _integer("source_stop_sample"),
+                "target_start_sample": _integer("target_start_sample"),
+                "target_stop_sample": _integer("target_stop_sample"),
+                "marker_disposition": str(row.get("marker_disposition") or ""),
+            }
+        )
+    return receipts
+
+
+def _blocked_export_receipt(
+    app: Any,
+    *,
+    pid: str,
+    condition_label: str,
+    path: str | None,
+    stage: str,
+    reason: str,
+    integrity_failure: dict[str, object] | None = None,
+) -> dict[str, object]:
+    """Record a current-run failure without treating an older file as output."""
+
+    return _fingerprinted_export_receipt({
+        "version": RECORDING_CONDITION_EXPORT_RECEIPT_VERSION,
+        "status": "blocked",
+        **_run_identity_payload(app, fallback_recording_id=pid),
+        "condition_label": str(condition_label),
+        "path": str(Path(path).resolve()) if path else None,
+        "failure_stage": stage,
+        "reason": str(reason),
+        "integrity_failure": integrity_failure,
+        "prior_artifact": workbook_artifact_identity(path) if path else None,
+        "current_run_artifact": None,
+    })
 
 
 def _elapsed_ms(started_at: float) -> int:
@@ -209,11 +367,63 @@ def _read_analysis_float(app: Any, option: str, default: float) -> float:
         return float(default)
 
 
-def _resolve_target_frequencies(app: Any) -> tuple[np.ndarray, float]:
-    oddball_freq = _read_analysis_float(app, "oddball_freq", config.DEFAULT_ODDBALL_FREQ)
-    upper_limit = _read_analysis_float(app, "bca_upper_limit", config.DEFAULT_BCA_UPPER_LIMIT)
-    config.validate_locked_oddball_frequency(oddball_freq)
-    return config.update_target_frequencies(oddball_freq, upper_limit), upper_limit
+def _resolve_frequency_protocol(app: Any) -> FrequencyProtocol:
+    """Return the required immutable project protocol from the run snapshot."""
+
+    settings = getattr(app, "settings", None)
+    raw_protocol = settings.get("frequency_protocol") if isinstance(settings, dict) else None
+    if raw_protocol is None and isinstance(settings, dict):
+        analysis = settings.get("analysis")
+        if isinstance(analysis, dict):
+            raw_protocol = analysis.get("frequency_protocol")
+    if raw_protocol is None:
+        raise SpectralEligibilityError(
+            "Post-processing requires the immutable project frequency protocol; "
+            "global 1.2-Hz and BCA-ceiling fallbacks are retired."
+        )
+    protocol = normalize_frequency_protocol(raw_protocol)
+    if not protocol.is_ready:
+        raise SpectralEligibilityError(
+            "Post-processing requires a ready project frequency protocol with an "
+            "expected analyzed oddball-cycle count."
+        )
+    return protocol
+
+
+def _applied_notch_centers(settings: Any) -> tuple[float, ...]:
+    if not isinstance(settings, dict):
+        raise SpectralEligibilityError(
+            "Post-processing requires the immutable preprocessing settings snapshot."
+        )
+    if not bool(settings.get("line_noise_filter_enabled", True)):
+        return ()
+    if "_fpvs_fft_multinotch_applied_centers_hz" not in settings:
+        raise SpectralEligibilityError(
+            "Applied line-noise notch metadata is missing; affected spectral "
+            "frequencies cannot be inferred from the requested setting."
+        )
+    raw_centers = settings.get("_fpvs_fft_multinotch_applied_centers_hz")
+    if raw_centers in (None, ""):
+        return ()
+    if not isinstance(raw_centers, (list, tuple)):
+        raise SpectralEligibilityError(
+            "Applied line-noise notch centers must be a sequence."
+        )
+    return tuple(float(value) for value in raw_centers)
+
+
+def _frequency_column_names(frequencies: np.ndarray) -> list[str]:
+    """Use four-decimal labels when unique and expand only to avoid collisions."""
+
+    numeric = [float(value) for value in frequencies]
+    for places in range(4, 13):
+        labels = [f"{value:.{places}f}_Hz" for value in numeric]
+        if len(labels) == len(set(labels)):
+            return labels
+    raise ValueError(
+        "The realized FFT grid cannot be represented by unique workbook frequency "
+        "headers through 12 decimal places."
+    )
 
 
 def _resolve_condition_id(event_id_map: Dict[str, Any], condition_label: str) -> int | None:
@@ -267,6 +477,8 @@ def _attempt_legacy_55_onbin_crop(
     global_events: np.ndarray,
     stream_end_sample: int,
     epoch_tmin_sec: float,
+    oddball_rate_hz: Fraction,
+    oddball_marker_code: int,
 ):
     num_channels, num_times = avg_data.shape
     samples_55 = []
@@ -289,17 +501,27 @@ def _attempt_legacy_55_onbin_crop(
     samples_55 = [
         int(row[0])
         for row in global_events
-        if block_start < int(row[0]) < block_end and int(row[2]) == 55
+        if (
+            block_start < int(row[0]) < block_end
+            and int(row[2]) == oddball_marker_code
+        )
     ]
     n55 = int(len(samples_55))
     first55_samp = int(samples_55[0]) if samples_55 else None
     last55_samp = int(samples_55[-1]) if samples_55 else None
 
-    _, n_step, step_err = compute_onbin_step(fs=float(sfreq), f_oddball=ODDBALL_FREQ)
+    _, n_step, step_err = compute_onbin_step(
+        fs=float(sfreq),
+        f_oddball=oddball_rate_hz,
+    )
     if step_err or n_step is None:
         raise ValueError(f"locked FFT crop unavailable: {step_err or 'step_error'}")
     if len(samples_55) < 2:
-        reason = "no_55_in_block" if len(samples_55) == 0 else "insufficient_55"
+        reason = (
+            f"no_{oddball_marker_code}_in_block"
+            if len(samples_55) == 0
+            else f"insufficient_{oddball_marker_code}"
+        )
         raise ValueError(f"locked FFT crop unavailable: {reason}")
 
     available_samples = int(block_end - first55_samp)
@@ -326,6 +548,7 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
     """
     post_started = perf_counter()
     export_timing_sink = getattr(app, "export_timing_records", None)
+    export_receipts = _export_receipt_sink(app)
     _EXPORT_TIMING_SINK.set(
         export_timing_sink if isinstance(export_timing_sink, list) else None
     )
@@ -345,12 +568,20 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
         )
         return
 
-    target_frequencies, configured_upper_limit = _resolve_target_frequencies(app)
+    frequency_protocol = _resolve_frequency_protocol(app)
+    if (
+        frequency_protocol.oddball_rate_hz is None
+        or frequency_protocol.presentation_rate_hz is None
+        or frequency_protocol.oddball_marker_code is None
+    ):
+        raise SpectralEligibilityError(
+            "The project frequency protocol is missing canonical rate or marker identity."
+        )
     app.log(
-        "Using target frequencies from settings: "
-        f"oddball={target_frequencies[0] if len(target_frequencies) else 'n/a'} Hz, "
-        f"upper_limit={configured_upper_limit} Hz, "
-        f"count={len(target_frequencies)}"
+        "Using the project FPVS protocol: "
+        f"presentation={float(frequency_protocol.presentation_rate_hz):g} Hz, "
+        f"oddball={float(frequency_protocol.oddball_rate_hz):g} Hz, "
+        f"expected_cycles={frequency_protocol.expected_analyzed_oddball_cycles}."
     )
 
     # --- PID Determination ---
@@ -392,6 +623,20 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
         data_list = current_epochs_data_source.get(cond_label_from_keys, [])
         if not data_list:
             app.log(f"\nSkipping post-processing for '{cond_label_from_keys}': No data found.")
+            export_receipts.append(
+                _blocked_export_receipt(
+                    app,
+                    pid=pid,
+                    condition_label=cond_label_from_keys,
+                    path=None,
+                    stage="condition_input",
+                    reason=(
+                        "No retained data object reached post-processing. The "
+                        "processing ledger must reconcile this with an explicit "
+                        "excluded or unavailable occurrence outcome."
+                    ),
+                )
+            )
             _log_export_timing(
                 "condition_skip_no_data",
                 condition_started,
@@ -502,9 +747,15 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
         full_snr_frequencies = None
         full_fft_accum = None
         fft_neighbors_rows: List[Dict[str, Any]] = []
+        spectral_metric_qc_rows: List[Dict[str, Any]] = []
+        condition_eligibility: SpectralEligibilityResult | None = None
+        target_frequencies = np.asarray([], dtype=float)
+        full_snr_max_frequency = 0.0
         valid_data_count = 0
         final_num_channels = 0
         final_electrode_names_ordered = []
+        source_integrity_receipts: list[dict[str, object]] = []
+        retained_occurrences: list[dict[str, object]] = []
 
         for data_idx, data_object in enumerate(data_list):  # Should be one Evoked for advanced
             is_evoked = isinstance(data_object, mne.Evoked)
@@ -673,6 +924,10 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                                 global_events=global_events,
                                 stream_end_sample=int(stream_end_sample),
                                 epoch_tmin_sec=float(epoch_tmin_sec),
+                                oddball_rate_hz=frequency_protocol.oddball_rate_hz,
+                                oddball_marker_code=int(
+                                    frequency_protocol.oddball_marker_code
+                                ),
                             )
                             num_channels, num_times = avg_data.shape
                         except Exception as crop_err:
@@ -691,8 +946,16 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                     metadata_started = perf_counter()
                     md = data_object.metadata
                     crop_modes = [m for m in md.get("crop_mode", pd.Series(dtype=object)).dropna().astype(str).tolist() if m]
-                    if crop_modes and all(m == "55_onbin" for m in crop_modes):
-                        crop_mode = "55_onbin"
+                    supported_crop_modes = {
+                        "55_onbin",
+                        "project_marker_plan_target_grid_v2",
+                    }
+                    unique_crop_modes = set(crop_modes)
+                    if (
+                        len(unique_crop_modes) == 1
+                        and unique_crop_modes.issubset(supported_crop_modes)
+                    ):
+                        crop_mode = next(iter(unique_crop_modes))
                         fallback_reason = ""
                     elif crop_modes:
                         crop_mode = "non_55_onbin_metadata"
@@ -730,7 +993,10 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                         extra=f"crop_mode={crop_mode}",
                     )
 
-                if crop_mode == "55_onbin":
+                if crop_mode in {
+                    "55_onbin",
+                    "project_marker_plan_target_grid_v2",
+                }:
                     if not n_step:
                         raise ValueError(f"Missing N_step for 55_onbin path in condition {cond_label_from_keys}")
                     if num_times % n_step != 0:
@@ -744,6 +1010,18 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                         f"fallback_reason={fallback_reason or 'unknown'}. "
                         "Fixed-epoch FFT fallback is disabled."
                     )
+
+                source_integrity_receipts.append(
+                    require_finite_retained_signal(
+                        avg_data,
+                        electrode_names=ordered_electrode_names_for_df,
+                        recording_id=_run_identity_payload(
+                            app,
+                            fallback_recording_id=pid,
+                        )["recording_id"],
+                        condition_label=cond_label_from_keys,
+                    ).to_payload()
+                )
 
                 avg_data_uv = avg_data * 1e6
                 if data_idx == 0:
@@ -767,6 +1045,54 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                     extra=f"channels={num_channels} samples={num_times}",
                 )
 
+                run_settings = getattr(app, "settings", None)
+                if not isinstance(run_settings, dict):
+                    raise SpectralEligibilityError(
+                        "Post-processing requires a dictionary run-settings snapshot."
+                    )
+                source_info = data_object.info if data_eeg is None else data_eeg.info
+                object_eligibility = resolve_spectral_eligibility(
+                    protocol=frequency_protocol,
+                    sampling_rate_hz=sfreq,
+                    analyzed_samples=num_times,
+                    requested_high_pass_hz=run_settings.get("high_pass"),
+                    requested_low_pass_hz=run_settings.get("low_pass"),
+                    applied_high_pass_hz=source_info.get("highpass"),
+                    applied_low_pass_hz=source_info.get("lowpass"),
+                    applied_notch_centers_hz=_applied_notch_centers(run_settings),
+                    notch_half_width_hz=FFT_MULTINOTCH_HALF_WIDTH_HZ,
+                    notch_method_version=FFT_MULTINOTCH_METHOD_VERSION,
+                )
+                if not object_eligibility.targets:
+                    raise SpectralEligibilityError(
+                        "The applied filter/Nyquist range contains no project oddball "
+                        "harmonic targets."
+                    )
+                if condition_eligibility is None:
+                    condition_eligibility = object_eligibility
+                    target_frequencies = np.asarray(
+                        [
+                            float(item.target.frequency_hz)
+                            for item in object_eligibility.targets
+                        ],
+                        dtype=float,
+                    )
+                    full_snr_max_frequency = float(
+                        object_eligibility.applied_filter.applied_low_pass_hz
+                    )
+                    app.log(
+                        "    Canonical spectral eligibility: "
+                        f"{len(object_eligibility.eligible_targets)} eligible of "
+                        f"{len(object_eligibility.targets)} filter-reachable project "
+                        f"harmonics; df={float(object_eligibility.bin_width_hz):.9g} Hz."
+                    )
+                elif object_eligibility.fingerprint != condition_eligibility.fingerprint:
+                    raise SpectralEligibilityError(
+                        "Multiple FFT inputs for one condition have different filter, "
+                        "notch, grid, or harmonic eligibility. A partial average is not "
+                        "permitted."
+                    )
+
                 source_file_name = os.path.basename(app.data_paths[0]) if app.data_paths else pid
                 neighbors_started = perf_counter()
                 fft_neighbors_rows.extend(
@@ -780,7 +1106,7 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                         freqs=fft_frequencies,
                         fs=sfreq,
                         n_samples=num_times,
-                        target_freq=1.2,
+                        target_freq=float(frequency_protocol.oddball_rate_hz),
                         crop_mode=crop_mode,
                         n55=n55,
                         first55_samp=first55_samp,
@@ -802,7 +1128,7 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                 full_snr_started = perf_counter()
                 if len(data_list) == 1:
                     full_snr_max_freq = min(
-                        configured_upper_limit,
+                        full_snr_max_frequency,
                         float(fft_frequencies[-1]),
                     )
                     full_snr_grid = np.arange(
@@ -849,128 +1175,98 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                 )
 
                 num_target_freqs = len(target_frequencies)
-                metrics_fft = np.zeros((final_num_channels, num_target_freqs))
-                metrics_snr = np.zeros((final_num_channels, num_target_freqs))
-                metrics_z = np.zeros((final_num_channels, num_target_freqs))
-                metrics_bca = np.zeros((final_num_channels, num_target_freqs))
+                metrics_fft = np.full(
+                    (final_num_channels, num_target_freqs),
+                    np.nan,
+                    dtype=float,
+                )
+                metrics_snr = np.full_like(metrics_fft, np.nan)
+                metrics_z = np.full_like(metrics_fft, np.nan)
+                metrics_bca = np.full_like(metrics_fft, np.nan)
 
                 target_metrics_started = perf_counter()
-                target_bin_indices = np.full(num_target_freqs, -1, dtype=np.intp)
-                target_noise_means = np.zeros(
-                    (final_num_channels, num_target_freqs)
-                )
-                target_noise_stds = np.zeros(
-                    (final_num_channels, num_target_freqs)
-                )
-                for freq_idx, target_freq in enumerate(target_frequencies):
-                    if not (
-                        fft_frequencies[0]
-                        <= target_freq
-                        <= fft_frequencies[-1]
-                    ):
-                        if data_idx == 0:
-                            app.log(
-                                f"    Skipping target freq {target_freq} Hz."
-                            )
-                        continue
-
-                    exact_position = target_freq * num_times / sfreq
-                    exact_k = int(round(exact_position))
-                    if abs(exact_position - exact_k) >= 1e-9:
-                        raise ValueError(
-                            "Target frequency is not locked to an FFT bin: "
-                            f"condition={cond_label_from_keys}, target={target_freq}, "
-                            f"N={num_times}, fs={sfreq}, k={exact_position:.12g}. "
-                            "Nearest-bin fallback is disabled."
-                        )
-                    if not (0 <= exact_k < len(fft_frequencies)):
-                        raise ValueError(
-                            "Target frequency bin is outside the FFT frequency grid: "
-                            f"condition={cond_label_from_keys}, target={target_freq}, "
-                            f"N={num_times}, fs={sfreq}, k={exact_k}."
-                        )
-
-                    target_bin_indices[freq_idx] = exact_k
-                batch_target_noise = _can_batch_target_noise(
-                    fft_amplitudes,
-                    target_bin_indices,
-                )
-                if batch_target_noise:
-                    for freq_idx, target_freq in enumerate(target_frequencies):
-                        target_bin_index = int(target_bin_indices[freq_idx])
-                        if target_bin_index < 0:
-                            continue
-                        (
-                            target_noise_means[:, freq_idx],
-                            target_noise_stds[:, freq_idx],
-                        ) = compute_noise_stats_for_bin_channels(
-                            fft_amplitudes,
-                            target_bin_index,
-                            window_size=10,
-                            min_bins=4,
-                        )
-                        if (
-                            target_noise_means[0, freq_idx] == 0.0
-                            and target_noise_stds[0, freq_idx] == 0.0
-                            and data_idx == 0
-                        ):
-                            app.log(
-                                f"    Warn: Not enough noise bins near {target_freq:.1f} Hz."
-                            )
-
+                if condition_eligibility is None:
+                    raise SpectralEligibilityError(
+                        "Spectral eligibility was not resolved for this FFT input."
+                    )
                 for chan_idx in range(final_num_channels):
                     channel_amplitudes = fft_amplitudes[chan_idx, :]
-                    for freq_idx, target_freq in enumerate(target_frequencies):
-                        target_bin_index = int(target_bin_indices[freq_idx])
-                        if target_bin_index < 0:
-                            continue
-
-                        # Shared noise-floor logic: ±10 bins, exclude neighbors, remove 2 extremes
-                        if batch_target_noise:
-                            noise_mean_val = float(
-                                target_noise_means[chan_idx, freq_idx]
-                            )
-                            noise_std_val = float(
-                                target_noise_stds[chan_idx, freq_idx]
-                            )
-                        else:
-                            noise_mean_val, noise_std_val = (
-                                compute_noise_stats_for_bin(
-                                    channel_amplitudes,
-                                    target_bin_index,
-                                    window_size=10,
-                                    min_bins=4,
-                                )
-                            )
-                            if (
-                                noise_mean_val == 0.0
-                                and noise_std_val == 0.0
-                                and data_idx == 0
-                                and chan_idx == 0
-                            ):
-                                app.log(
-                                    f"    Warn: Not enough noise bins near {target_freq:.1f} Hz."
-                                )
-
-                        signal_amplitude = channel_amplitudes[target_bin_index]
-                        peak_signal_amplitude = signal_amplitude
-
-                        snr_val = (
-                            signal_amplitude / noise_mean_val
-                            if noise_mean_val > 1e-12
-                            else 0.0
+                    for freq_idx, availability in enumerate(
+                        condition_eligibility.targets
+                    ):
+                        metric_result = compute_qc14_standard_metrics(
+                            channel_amplitudes,
+                            target_idx=availability.target_bin_index,
+                            candidate_bin_indices=(
+                                availability.noise_candidate_bin_indices
+                            ),
+                            static_metrics_available=(
+                                availability.standard_metrics_available
+                            ),
+                            static_reason_codes=availability.reason_codes,
+                            target_amplitude_status=(
+                                availability.target_amplitude_status
+                            ),
                         )
-                        z_score_val = (
-                            (peak_signal_amplitude - noise_mean_val) / noise_std_val
-                            if noise_std_val > 1e-12
-                            else 0.0
+                        if (
+                            metric_result.target_amplitude is not None
+                            and metric_result.target_amplitude_status != "unavailable"
+                        ):
+                            metrics_fft[chan_idx, freq_idx] = (
+                                metric_result.target_amplitude
+                            )
+                        if metric_result.snr is not None:
+                            metrics_snr[chan_idx, freq_idx] = metric_result.snr
+                        if metric_result.local_z is not None:
+                            metrics_z[chan_idx, freq_idx] = metric_result.local_z
+                        if metric_result.bca is not None:
+                            metrics_bca[chan_idx, freq_idx] = metric_result.bca
+                        spectral_metric_qc_rows.append(
+                            {
+                                "Source File": source_file_name,
+                                "Condition": cond_label_from_keys,
+                                "FFT Input Index": data_idx + 1,
+                                "Electrode": ordered_electrode_names_for_df[chan_idx],
+                                "Eligibility Fingerprint": (
+                                    condition_eligibility.fingerprint
+                                ),
+                                "Oddball Harmonic Order": (
+                                    availability.target.oddball_harmonic_order
+                                ),
+                                "Presentation Harmonic Order": (
+                                    availability.target.presentation_harmonic_order
+                                    if availability.target.presentation_harmonic_order
+                                    is not None
+                                    else ""
+                                ),
+                                "Target Frequency Exact (Hz)": (
+                                    f"{availability.target.frequency_hz.numerator}/"
+                                    f"{availability.target.frequency_hz.denominator}"
+                                ),
+                                "Target FFT Bin": availability.target_bin_index,
+                                "Noise Candidate FFT Bins": ",".join(
+                                    str(value)
+                                    for value in metric_result.candidate_bin_indices
+                                ),
+                                "Noise Retained FFT Bins": ",".join(
+                                    str(value)
+                                    for value in metric_result.retained_bin_indices
+                                ),
+                                "Target Amplitude Status": (
+                                    metric_result.target_amplitude_status
+                                ),
+                                "BCA Status": metric_result.bca_status,
+                                "SNR Status": metric_result.snr_status,
+                                "Local Z Status": metric_result.local_z_status,
+                                "Noise Mean (uV)": metric_result.noise_mean,
+                                "Noise Population SD (uV)": (
+                                    metric_result.noise_population_sd
+                                ),
+                                "Reason Codes": ";".join(
+                                    metric_result.reason_codes
+                                ),
+                            }
                         )
-                        bca_val = signal_amplitude - noise_mean_val
-
-                        metrics_fft[chan_idx, freq_idx] = signal_amplitude
-                        metrics_snr[chan_idx, freq_idx] = snr_val
-                        metrics_z[chan_idx, freq_idx] = z_score_val
-                        metrics_bca[chan_idx, freq_idx] = bca_val
                 _log_export_timing(
                     "target_metrics_loop",
                     target_metrics_started,
@@ -997,10 +1293,34 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                     full_snr_accum += full_snr_matrix
                     full_fft_accum += fft_amplitudes
                 valid_data_count += 1
+                retained_occurrences.extend(
+                    _retained_occurrence_receipts(data_object, data_idx + 1)
+                )
             except Exception as e:
                 app.log(
                     f"!!! Error post-processing data object {data_idx + 1}: {e}\n{traceback.format_exc()}"
                 )
+                if isinstance(e, (SpectralEligibilityError, OutputIntegrityError)):
+                    export_receipts.append(
+                        _blocked_export_receipt(
+                            app,
+                            pid=pid,
+                            condition_label=cond_label_from_keys,
+                            path=full_excel_path,
+                            stage=(
+                                e.stage
+                                if isinstance(e, OutputIntegrityError)
+                                else "spectral_eligibility"
+                            ),
+                            reason=str(e),
+                            integrity_failure=(
+                                e.to_payload()
+                                if isinstance(e, OutputIntegrityError)
+                                else None
+                            ),
+                        )
+                    )
+                    raise
             finally:
                 _log_export_timing(
                     "data_object_total",
@@ -1013,9 +1333,41 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                 gc.collect()
 
         if valid_data_count > 0 and final_electrode_names_ordered:
+            if condition_eligibility is None:
+                raise SpectralEligibilityError(
+                    "No canonical spectral eligibility result was retained for export."
+                )
             dataframe_started = perf_counter()
             avg_metrics = {k: v / valid_data_count for k, v in accum.items()}
-            freq_column_names = [f"{f:.4f}_Hz" for f in target_frequencies]
+            try:
+                bca_integrity_receipt = require_finite_computable_bca(
+                    avg_metrics["bca"],
+                    electrode_names=final_electrode_names_ordered,
+                    target_availability=condition_eligibility.targets,
+                    recording_id=_run_identity_payload(
+                        app,
+                        fallback_recording_id=pid,
+                    )["recording_id"],
+                    condition_label=cond_label_from_keys,
+                ).to_payload()
+            except OutputIntegrityError as integrity_error:
+                export_receipts.append(
+                    _blocked_export_receipt(
+                        app,
+                        pid=pid,
+                        condition_label=cond_label_from_keys,
+                        path=full_excel_path,
+                        stage=integrity_error.stage,
+                        reason=str(integrity_error),
+                        integrity_failure=integrity_error.to_payload(),
+                    )
+                )
+                app.log(
+                    "!!! Technical output integrity failure: "
+                    f"{integrity_error}"
+                )
+                raise
+            freq_column_names = _frequency_column_names(target_frequencies)
             full_snr_avg = (
                 full_snr_accum / valid_data_count if full_snr_accum is not None else None
             )
@@ -1046,7 +1398,7 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
             }
             if full_snr_avg is not None and full_snr_frequencies is not None:
                 full_snr_dataframe_started = perf_counter()
-                max_freq = min(configured_upper_limit, float(fft_frequencies[-1]))
+                max_freq = min(full_snr_max_frequency, float(fft_frequencies[-1]))
                 freq_grid = np.arange(0.5, max_freq + 0.01, 0.01)
 
                 interp_snr = np.zeros((full_snr_avg.shape[0], len(freq_grid)))
@@ -1073,17 +1425,16 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                     extra=f"channels={full_snr_avg.shape[0]} freqs={len(freq_grid)}",
                 )
             if full_fft_avg is not None:
-                max_target = max(
-                    [float(freq) for freq in target_frequencies if float(freq) <= float(configured_upper_limit)],
-                    default=float(configured_upper_limit),
-                )
-                df_hz = float(fft_frequencies[1] - fft_frequencies[0]) if len(fft_frequencies) > 1 else 0.0
-                export_max_freq = min(float(fft_frequencies[-1]), max_target + (10.0 * df_hz))
-                full_fft_cols = np.where(fft_frequencies <= export_max_freq + 1e-12)[0]
+                if len(fft_frequencies) + 1 > 16_384:
+                    raise ValueError(
+                        "The complete one-sided FullFFT exceeds Excel's 16,384-column "
+                        "limit. Processing stopped rather than silently truncating the "
+                        "auditable spectrum."
+                    )
                 full_fft_df = pd.DataFrame(
-                    full_fft_avg[:, full_fft_cols],
+                    full_fft_avg,
                     index=final_electrode_names_ordered,
-                    columns=[f"{float(fft_frequencies[idx]):.4f}_Hz" for idx in full_fft_cols],
+                    columns=_frequency_column_names(fft_frequencies),
                 )
                 dataframes_to_save["FullFFT Amplitude (uV)"] = full_fft_df
             for df_name_iter in dataframes_to_save:
@@ -1120,22 +1471,58 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                 fft_neighbors_df = pd.DataFrame(columns=neighbor_columns)
             else:
                 fft_neighbors_df = fft_neighbors_df.reindex(columns=neighbor_columns)
+            spectral_eligibility_df = pd.DataFrame(
+                condition_eligibility.to_rows()
+            )
+            spectral_metric_qc_df = pd.DataFrame(spectral_metric_qc_rows)
             _log_export_timing(
                 "dataframes_to_save",
                 dataframe_started,
                 pid=pid,
                 condition=cond_label_from_keys,
                 path=full_excel_path,
-                extra=f"sheets={len(dataframes_to_save)} neighbor_rows={len(fft_neighbors_df)}",
+                extra=(
+                    f"sheets={len(dataframes_to_save)} "
+                    f"neighbor_rows={len(fft_neighbors_df)} "
+                    f"eligibility_rows={len(spectral_eligibility_df)} "
+                    f"metric_qc_rows={len(spectral_metric_qc_df)}"
+                ),
             )
 
             try:
                 workbook_started = perf_counter()
-                write_results_workbook(
+                workbook_write_receipt = write_results_workbook(
                     full_excel_path=full_excel_path,
                     dataframes_to_save=dataframes_to_save,
                     fft_neighbors_df=fft_neighbors_df,
+                    spectral_eligibility_df=spectral_eligibility_df,
+                    spectral_metric_qc_df=spectral_metric_qc_df,
                     timing_sink=export_timing_sink if isinstance(export_timing_sink, list) else None,
+                )
+                export_receipts.append(
+                    _fingerprinted_export_receipt({
+                        "version": RECORDING_CONDITION_EXPORT_RECEIPT_VERSION,
+                        "status": "written",
+                        **_run_identity_payload(
+                            app,
+                            fallback_recording_id=pid,
+                        ),
+                        "condition_label": cond_label_from_keys,
+                        "path": str(Path(full_excel_path).resolve()),
+                        "protocol_fingerprint": frequency_protocol.fingerprint,
+                        "spectral_eligibility_fingerprint": (
+                            condition_eligibility.fingerprint
+                        ),
+                        "expected_data_object_count": len(data_list),
+                        "contributing_data_object_count": valid_data_count,
+                        "retained_occurrence_count": len(retained_occurrences),
+                        "retained_occurrences": retained_occurrences,
+                        "finite_integrity": [
+                            *source_integrity_receipts,
+                            bca_integrity_receipt,
+                        ],
+                        "workbook_write": workbook_write_receipt,
+                    })
                 )
                 _log_export_timing(
                     "workbook_write",
@@ -1147,12 +1534,48 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                 app.log(f"Successfully saved Excel: {excel_filename}")
                 any_results_saved = True
             except Exception as write_err:
+                if not (
+                    export_receipts
+                    and export_receipts[-1].get("condition_label")
+                    == cond_label_from_keys
+                    and export_receipts[-1].get("status") == "written"
+                ):
+                    export_receipts.append(
+                        _blocked_export_receipt(
+                            app,
+                            pid=pid,
+                            condition_label=cond_label_from_keys,
+                            path=full_excel_path,
+                            stage=(
+                                write_err.stage
+                                if isinstance(write_err, OutputIntegrityError)
+                                else "workbook_write"
+                            ),
+                            reason=str(write_err),
+                            integrity_failure=(
+                                write_err.to_payload()
+                                if isinstance(write_err, OutputIntegrityError)
+                                else None
+                            ),
+                        )
+                    )
                 app.log(
                     f"!!! Error writing Excel file {full_excel_path}: {write_err}\n{traceback.format_exc()}"
                 )
+                raise
         else:
             app.log(
                 f"No valid data to save for '{cond_label_from_keys}' (PID: {pid}). No Excel file generated."
+            )
+            export_receipts.append(
+                _blocked_export_receipt(
+                    app,
+                    pid=pid,
+                    condition_label=cond_label_from_keys,
+                    path=full_excel_path,
+                    stage="condition_input",
+                    reason="No valid retained data object reached workbook export.",
+                )
             )
         _log_export_timing(
             "condition_total",

@@ -23,14 +23,6 @@ class _EventRow:
         return list(self._edits)
 
 
-class _Settings:
-    @staticmethod
-    def get(_section: str, option: str, fallback: str) -> str:
-        if option == "bca_upper_limit":
-            return "16.8"
-        return fallback
-
-
 def _ready_project(root: Path, *, marker_code: int = 55) -> Project:
     project = Project.load(root)
     project.update_frequency_protocol(
@@ -50,7 +42,7 @@ def test_processing_params_use_one_frozen_project_protocol_snapshot(tmp_path) ->
     host = SimpleNamespace(
         currentProject=project,
         file_mode=SimpleNamespace(get=lambda: "Batch"),
-        settings=_Settings(),
+        settings=object(),
         event_rows=[_EventRow("Condition A", 11)],
     )
 
@@ -63,6 +55,8 @@ def test_processing_params_use_one_frozen_project_protocol_snapshot(tmp_path) ->
     assert params["frequency_protocol_fingerprint"] == project.frequency_protocol.fingerprint
     assert params["base_freq"] == 3.0
     assert params["oddball_freq"] == 0.3
+    assert "bca_upper_limit" not in params
+    assert "bca_upper_limit" not in params["analysis"]
     assert params["analysis"]["frequency_protocol"] == (
         project.frequency_protocol.to_manifest()
     )
@@ -81,7 +75,7 @@ def test_processing_params_block_incomplete_protocol_before_event_parsing(
     )
     host = SimpleNamespace(
         currentProject=project,
-        settings=_Settings(),
+        settings=object(),
         event_rows=[],
     )
 
@@ -109,7 +103,7 @@ def test_processing_params_reject_marker_condition_code_collision(
     host = SimpleNamespace(
         currentProject=project,
         file_mode=SimpleNamespace(get=lambda: "Batch"),
-        settings=_Settings(),
+        settings=object(),
         event_rows=[_EventRow("Condition A", 55)],
     )
 

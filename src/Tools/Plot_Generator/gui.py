@@ -29,6 +29,7 @@ from Tools.Plot_Generator.gui_settings import (
     _project_plot_input_folder,
 )
 from Tools.Plot_Generator.generation_workflow import PlotGeneratorWorkflowMixin
+from Tools.Plot_Generator.analysis_context import project_plot_default_upper_hz
 from Tools.Plot_Generator.ui_sections import PlotGeneratorUiSectionsMixin
 from Tools.Plot_Generator.selection_state import (
     ALL_CONDITIONS_OPTION,  # noqa: F401 - re-exported by plot_generator.py
@@ -163,12 +164,7 @@ class PlotGeneratorWindow(
             if not default_out:
                 default_out = main_default
 
-        try:
-            plot_x_max_default = str(
-                float(mgr.get("analysis", "bca_upper_limit", "10.0"))
-            )
-        except Exception:
-            plot_x_max_default = "10.0"
+        plot_x_max_default = str(project_plot_default_upper_hz(self._project))
 
         self._defaults = {
             "title_snr": "SNR Plot",

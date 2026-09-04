@@ -11,12 +11,19 @@ from Main_App.processing.full_fft_provenance import (
 )
 from Main_App.io.eeg_geometry import biosemi64_geometry_identity
 from Main_App.processing.processing_ledger import PROCESSING_FINGERPRINT_VERSION
+from Main_App.projects import FrequencyProtocol
 
 
 def test_repeated_full_fft_provenance_keeps_recording_and_session_identity(
     tmp_path: Path,
 ) -> None:
     project_root = tmp_path / "Project"
+    protocol = FrequencyProtocol.from_recurrence(
+        6,
+        5,
+        expected_analyzed_oddball_cycles=144,
+        expected_analyzed_oddball_cycles_source="manual",
+    )
     manifest = {
         "schema_version": "2.2.0",
         "subfolders": {"excel": "1 - Excel Data Files"},
@@ -63,6 +70,7 @@ def test_repeated_full_fft_provenance_keeps_recording_and_session_identity(
             },
         },
         "preprocessing": {},
+        "frequency_protocol": protocol.to_manifest(),
     }
     project_root.mkdir()
     manifest_path = project_root / "project.json"
@@ -119,6 +127,7 @@ def test_repeated_full_fft_provenance_keeps_recording_and_session_identity(
 
     assert provenance.method_version == REPEATED_FULL_FFT_PROVENANCE_METHOD_VERSION
     assert provenance.source_workbook_count == 2
+    assert provenance.frequency_protocol_fingerprint == protocol.fingerprint
     assert {row["recording_id"] for row in source_rows} == {
         "P1__visit_1",
         "P1__visit_2",

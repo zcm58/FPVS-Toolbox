@@ -5,6 +5,8 @@ import pytest
 from Main_App.Shared import post_process_excel
 from Main_App.Shared.post_process_excel import (
     FFT_METADATA_SHEET_NAME,
+    SPECTRAL_ELIGIBILITY_SHEET_NAME,
+    SPECTRAL_METRIC_QC_SHEET_NAME,
     _can_write_finite_metric_frame_direct,
     _column_widths,
     build_fft_neighbors_rows,
@@ -232,6 +234,87 @@ def test_cross_volume_staging_preserves_existing_workbook_on_write_failure(
     assert workbook_path.read_bytes() == original_bytes
 
 
+def test_same_volume_staging_preserves_existing_workbook_on_write_failure(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    workbook_path = tmp_path / "existing-local-result.xlsx"
+    original_bytes = b"existing local workbook sentinel"
+    workbook_path.write_bytes(original_bytes)
+
+    monkeypatch.setattr(
+        post_process_excel,
+        "_should_stage_workbook_locally",
+        lambda _destination: False,
+    )
+
+    def fail_to_excel(*_args, **_kwargs):
+        raise RuntimeError("synthetic local write failure")
+
+    monkeypatch.setattr(pd.DataFrame, "to_excel", fail_to_excel)
+
+    with pytest.raises(RuntimeError, match="synthetic local write failure"):
+        write_results_workbook(
+            str(workbook_path),
+            {"FFT Amplitude (uV)": pd.DataFrame({"Electrode": ["Oz"]})},
+        )
+
+    assert workbook_path.read_bytes() == original_bytes
+    assert list(tmp_path.glob(".existing-local-result.*.tmp.xlsx")) == []
+
+
+def test_workbook_receipt_records_prior_and_validated_current_artifact(
+    tmp_path,
+) -> None:
+    workbook_path = tmp_path / "receipt-result.xlsx"
+    first = write_results_workbook(
+        str(workbook_path),
+        {
+            "BCA (uV)": pd.DataFrame(
+                {"Electrode": ["Oz"], "1.2000_Hz": [1.25]}
+            )
+        },
+    )
+    second = write_results_workbook(
+        str(workbook_path),
+        {
+            "BCA (uV)": pd.DataFrame(
+                {"Electrode": ["Oz"], "1.2000_Hz": [2.5]}
+            )
+        },
+    )
+
+    assert first["version"] == "workbook_write_receipt_v1"
+    assert first["prior_artifact"] is None
+    assert first["schema_validation"]["status"] == "passed"
+    assert first["schema_validation"]["sheet_names"] == ["BCA (uV)"]
+    assert second["prior_artifact"]["sha256"] == first["artifact"]["sha256"]
+    assert second["artifact"]["sha256"] != first["artifact"]["sha256"]
+    assert len(second["artifact"]["sha256"]) == 64
+
+
+def test_schema_validation_failure_preserves_prior_workbook(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    workbook_path = tmp_path / "schema-failure.xlsx"
+    original_bytes = b"previous complete workbook"
+    workbook_path.write_bytes(original_bytes)
+
+    def fail_schema(*_args, **_kwargs):
+        raise ValueError("synthetic schema mismatch")
+
+    monkeypatch.setattr(post_process_excel, "_validate_workbook_schema", fail_schema)
+
+    with pytest.raises(ValueError, match="synthetic schema mismatch"):
+        write_results_workbook(
+            str(workbook_path),
+            {"BCA (uV)": pd.DataFrame({"Electrode": ["Oz"]})},
+        )
+
+    assert workbook_path.read_bytes() == original_bytes
+
+
 def test_fft_neighbors_sheet_written_with_expected_columns(tmp_path, caplog):
     fs = 12.0
     n_samples = 120
@@ -360,3 +443,55 @@ def test_fft_neighbors_rejects_nearest_bin_fallback() -> None:
             crop_mode="55_onbin",
             n_step=640,
         )
+
+
+def test_nondefault_neighbor_label_and_spectral_audit_sheets(tmp_path) -> None:
+    fs = 12.0
+    n_samples = 120
+    freqs = np.fft.rfftfreq(n_samples, d=1.0 / fs)
+    rows = build_fft_neighbors_rows(
+        file_name="demo.bdf",
+        condition_label="Condition A",
+        condition_id="Condition A",
+        repetition_index="1",
+        electrode_names=["Oz"],
+        fft_amplitudes=np.zeros((1, len(freqs))),
+        freqs=freqs,
+        fs=fs,
+        n_samples=n_samples,
+        target_freq=0.3,
+        crop_mode="55_onbin",
+        n_step=40,
+    )
+    assert rows[0]["target"] == "0.3Hz"
+
+    eligibility = pd.DataFrame(
+        {
+            "Oddball Harmonic Order": [165],
+            "Target Frequency Exact (Hz)": ["99/2"],
+            "BCA Available": [False],
+            "Unavailable Reasons": ["required_noise_bin_inside_applied_notch"],
+        }
+    )
+    metric_qc = pd.DataFrame(
+        {
+            "Electrode": ["Oz"],
+            "Oddball Harmonic Order": [165],
+            "BCA Status": ["unavailable"],
+        }
+    )
+    workbook_path = tmp_path / "spectral-audit.xlsx"
+    write_results_workbook(
+        str(workbook_path),
+        {"BCA (uV)": pd.DataFrame({"Electrode": ["Oz"], "49.5000_Hz": [np.nan]})},
+        spectral_eligibility_df=eligibility,
+        spectral_metric_qc_df=metric_qc,
+    )
+
+    workbook = load_workbook(workbook_path, data_only=True)
+    assert workbook.sheetnames[-2:] == [
+        SPECTRAL_ELIGIBILITY_SHEET_NAME,
+        SPECTRAL_METRIC_QC_SHEET_NAME,
+    ]
+    assert workbook[SPECTRAL_ELIGIBILITY_SHEET_NAME]["C2"].value is False
+    assert workbook[SPECTRAL_METRIC_QC_SHEET_NAME]["C2"].value == "unavailable"

@@ -14,6 +14,7 @@ def test_postprocess_worker_reports_generated_excel_paths(tmp_path, monkeypatch)
 
     def _fake_export(ctx, labels):
         (output_root / "P01_results.xlsx").write_text("ok", encoding="utf-8")
+        ctx.export_receipts.append({"status": "written", "condition": labels[0]})
 
     monkeypatch.setattr(worker_module, "run_post_export", _fake_export)
 
@@ -34,6 +35,7 @@ def test_postprocess_worker_reports_generated_excel_paths(tmp_path, monkeypatch)
     payload = payloads[0]
     assert payload["generated_excel_paths"] == [str((output_root / "P01_results.xlsx").resolve())]
     assert payload["existing_excel_paths"] == [str((output_root / "P01_results.xlsx").resolve())]
+    assert payload["export_receipts"] == [{"status": "written", "condition": "A"}]
 
 
 def test_postprocess_worker_accepts_overwrite_only_runs(tmp_path, monkeypatch):

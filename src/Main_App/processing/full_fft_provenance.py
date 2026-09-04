@@ -27,19 +27,21 @@ from Main_App.processing.frequency_domain_qc import (
 )
 from Main_App.processing.processing_ledger import load_ledger
 from Main_App.projects import (
+    FrequencyProtocolError,
     ProjectDatasetIndex,
     load_project_dataset_index,
     normalize_manual_excluded_recordings,
     normalize_preprocessing_settings,
+    normalize_frequency_protocol,
 )
 
 
-FULL_FFT_PROVENANCE_SCHEMA_VERSION = 2
+FULL_FFT_PROVENANCE_SCHEMA_VERSION = 3
 FULL_FFT_PROVENANCE_METHOD_VERSION = (
-    "project_full_fft_provenance_v2_biosemi64_geometry"
+    "project_full_fft_provenance_v3_biosemi64_frequency_protocol"
 )
 REPEATED_FULL_FFT_PROVENANCE_METHOD_VERSION = (
-    "project_full_fft_provenance_recording_session_v2_biosemi64_geometry"
+    "project_full_fft_provenance_recording_session_v3_biosemi64_frequency_protocol"
 )
 FULL_FFT_PROVENANCE_MANIFEST_PATH = (
     "tools",
@@ -78,6 +80,7 @@ class FullFftProvenance:
     method_version: str
     base_frequency_hz: float
     oddball_frequency_hz: float
+    frequency_protocol_fingerprint: str
     grid_fingerprint: str
     frequency_resolution_hz: float
     upper_frequency_hz: float
@@ -136,6 +139,34 @@ def _same_rate(left: float, right: float) -> bool:
         rel_tol=0.0,
         abs_tol=_RATE_TOLERANCE_HZ,
     )
+
+
+def _current_project_frequency_protocol(project_root: Path):
+    manifest = _read_manifest(project_root)
+    raw_protocol = manifest.get("frequency_protocol")
+    if raw_protocol is None:
+        raise FullFftProvenanceError(
+            "The managed project has no frequency protocol. Confirm the project "
+            "presentation rate, oddball recurrence, and analyzed cycle count "
+            "before post-processing."
+        )
+    try:
+        protocol = normalize_frequency_protocol(raw_protocol)
+    except FrequencyProtocolError as exc:
+        raise FullFftProvenanceError(
+            f"The managed project frequency protocol is invalid: {exc}"
+        ) from exc
+    if (
+        not protocol.is_ready
+        or protocol.presentation_rate_hz is None
+        or protocol.oddball_rate_hz is None
+    ):
+        raise FullFftProvenanceError(
+            "The managed project frequency protocol is incomplete. Confirm the "
+            "project presentation rate, oddball recurrence, and analyzed cycle "
+            "count before post-processing."
+        )
+    return protocol
 
 
 def _hash_payload(value: object) -> str:
@@ -815,8 +846,9 @@ def _record_from_metadata(
         ) from exc
     if schema_version != FULL_FFT_PROVENANCE_SCHEMA_VERSION:
         raise FullFftProvenanceStaleError(
-            "The saved neutral FullFFT provenance predates the BioSemi64 "
-            "geometry contract. Reprocess the EEG before analysis."
+            "The saved neutral FullFFT provenance predates the current "
+            "BioSemi64 and project-frequency-protocol contract. Reprocess the "
+            "EEG before analysis."
         )
     if method_version not in {
         FULL_FFT_PROVENANCE_METHOD_VERSION,
@@ -838,6 +870,9 @@ def _record_from_metadata(
         saved_at = str(metadata.get("saved_at") or "")
         base_hz = float(metadata.get("base_frequency_hz"))
         oddball_hz = float(metadata.get("oddball_frequency_hz"))
+        frequency_protocol_fingerprint = str(
+            metadata.get("frequency_protocol_fingerprint") or ""
+        )
         grid = metadata["grid"]
         sources = metadata["source_workbooks"]
         fingerprints = metadata["fingerprints"]
@@ -859,6 +894,7 @@ def _record_from_metadata(
             method_version=method_version,
             base_frequency_hz=base_hz,
             oddball_frequency_hz=oddball_hz,
+            frequency_protocol_fingerprint=frequency_protocol_fingerprint,
             grid_fingerprint=str(grid["fingerprint"]),
             frequency_resolution_hz=float(grid["frequency_resolution_hz"]),
             upper_frequency_hz=float(grid["upper_frequency_hz"]),
@@ -902,6 +938,7 @@ def _record_from_metadata(
         or record.base_frequency_hz <= 0.0
         or not math.isfinite(record.oddball_frequency_hz)
         or record.oddball_frequency_hz <= 0.0
+        or not record.frequency_protocol_fingerprint
     ):
         raise FullFftProvenanceStaleError(
             "The saved neutral FullFFT provenance is incomplete. Rerun "
@@ -915,6 +952,7 @@ def write_project_full_fft_provenance(
     *,
     base_frequency_hz: float,
     oddball_frequency_hz: float,
+    frequency_protocol_fingerprint: str | None = None,
     dataset_index: ProjectDatasetIndex | None = None,
 ) -> FullFftProvenance:
     """Build and atomically save current neutral FullFFT provenance.
@@ -933,6 +971,26 @@ def write_project_full_fft_provenance(
         oddball_frequency_hz,
         label="oddball_frequency_hz",
     )
+    protocol = _current_project_frequency_protocol(root)
+    protocol_base_hz = float(protocol.presentation_rate_hz)
+    protocol_oddball_hz = float(protocol.oddball_rate_hz)
+    if not (
+        _same_rate(base_hz, protocol_base_hz)
+        and _same_rate(oddball_hz, protocol_oddball_hz)
+    ):
+        raise FullFftProvenanceError(
+            "FullFFT provenance rates must match the current project frequency "
+            f"protocol exactly (project base={protocol_base_hz:g} Hz, project "
+            f"oddball={protocol_oddball_hz:g} Hz)."
+        )
+    supplied_protocol_fingerprint = str(
+        frequency_protocol_fingerprint or protocol.fingerprint
+    ).strip()
+    if supplied_protocol_fingerprint != protocol.fingerprint:
+        raise FullFftProvenanceError(
+            "The supplied frequency-protocol fingerprint is stale relative to "
+            "the managed project. Reload the project before post-processing."
+        )
     index = _load_dataset_index(root, dataset_index)
     snapshot = _source_snapshot(root, index)
     grid = _project_grid_identity(
@@ -959,6 +1017,7 @@ def write_project_full_fft_provenance(
         "source_sheet": FULL_FFT_SHEET_NAME,
         "base_frequency_hz": base_hz,
         "oddball_frequency_hz": oddball_hz,
+        "frequency_protocol_fingerprint": protocol.fingerprint,
         "grid": {
             "fingerprint": grid.fingerprint,
             "frequency_resolution_hz": grid.frequency_resolution_hz,
@@ -1004,6 +1063,13 @@ def _require_current_full_fft_record(
     *,
     dataset_index: ProjectDatasetIndex | None,
 ) -> FullFftProvenance:
+    try:
+        protocol = _current_project_frequency_protocol(root)
+    except FullFftProvenanceError as exc:
+        raise FullFftProvenanceStaleError(
+            "Neutral FullFFT provenance cannot be validated because the current "
+            f"project frequency protocol is unavailable: {exc}"
+        ) from exc
     index = _load_dataset_index(root, dataset_index)
     try:
         current = _source_snapshot(root, index)
@@ -1015,6 +1081,16 @@ def _require_current_full_fft_record(
             "post-processing; EEG preprocessing is not required."
         ) from exc
     differences: list[str] = []
+    if protocol.fingerprint != record.frequency_protocol_fingerprint:
+        differences.append("project frequency protocol changed")
+    if not (
+        _same_rate(record.base_frequency_hz, float(protocol.presentation_rate_hz))
+        and _same_rate(
+            record.oddball_frequency_hz,
+            float(protocol.oddball_rate_hz),
+        )
+    ):
+        differences.append("saved rates do not match the project frequency protocol")
     if current.cohort_fingerprint != record.cohort_fingerprint:
         differences.append("cohort or canonical workbook identity changed")
     if current.source_fingerprint != record.source_fingerprint:

@@ -891,6 +891,8 @@ def _prepare_project_long_data(
             qc_state["report"] = qc_report
     _raise_if_preparation_cancelled(cancel_check, stage="after_qc")
     settings = normalize_dv_policy(dict(dv_policy or {}))
+    managed_project = project_root not in (None, "")
+    harmonic_max_freq = None if managed_project else max_freq
     if settings.name == GROUP_SIGNIFICANT_POLICY_NAME:
         _raise_if_preparation_cancelled(
             cancel_check,
@@ -903,22 +905,27 @@ def _prepare_project_long_data(
             subject_data=selected_subject_data,
             rois=dict(rois),
             base_frequency_hz=float(base_freq),
-            max_freq_hz=max_freq,
+            max_freq_hz=harmonic_max_freq,
             settings=settings,
         )
-        if lookup_cached_group_harmonic_selection(request).hit is None:
+        if lookup_cached_group_harmonic_selection(request).hit is not None:
+            message_emit(
+                "Project metadata contains matching significant harmonics; "
+                "skipping FullFFT preflight."
+            )
+        elif managed_project:
+            message_emit(
+                "Processing-time harmonic metadata will validate the canonical "
+                "project spectral domain; no independent FullFFT target list was built."
+            )
+        else:
             preflight_group_significant_full_fft_columns(
                 subjects=selected_subjects,
                 conditions=[str(value) for value in conditions],
                 subject_data=selected_subject_data,
                 base_frequency_hz=float(base_freq),
                 log_func=message_emit,
-                max_freq=max_freq,
-            )
-        else:
-            message_emit(
-                "Project metadata contains matching significant harmonics; "
-                "skipping FullFFT preflight."
+                max_freq=harmonic_max_freq,
             )
         _raise_if_preparation_cancelled(
             cancel_check,
@@ -939,7 +946,7 @@ def _prepare_project_long_data(
         rois=dict(rois),
         dv_policy=dict(dv_policy or {}),
         dv_metadata=dv_metadata,
-        max_freq=max_freq,
+        max_freq=harmonic_max_freq,
         selection_conditions=[str(value) for value in conditions],
         project_root=project_root,
     )

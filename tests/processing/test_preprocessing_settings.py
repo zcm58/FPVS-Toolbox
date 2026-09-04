@@ -69,6 +69,10 @@ def test_defaults_use_expected_bandpass():
     assert normalized[KURTOSIS_REVIEW_DECISIONS_BY_RECORDING_KEY] == {}
     assert normalized["harmonic_selection_profile"] == LEGACY_HARMONIC_SELECTION_PROFILE
     assert normalized["harmonic_selection_profile_version"] == HARMONIC_SELECTION_PROFILE_VERSION
+    assert normalized["fixed_harmonic_input_mode"] == "frequency_list"
+    assert normalized["fixed_harmonic_frequencies_hz"] == (
+        "1.2, 2.4, 3.6, 4.8, 7.2"
+    )
     assert _RETIRED_EPOCH_KEYS.isdisjoint(normalized)
     assert _RETIRED_EPOCH_KEYS.isdisjoint(PREPROCESSING_CANONICAL_KEYS)
 
@@ -130,7 +134,8 @@ def test_new_projects_explicitly_use_publication_aligned_harmonic_profile():
     assert settings["harmonic_selection_profile_version"] == HARMONIC_SELECTION_PROFILE_VERSION
     assert settings["group_significant_electrode_scope"] == "all_scalp_electrodes"
     assert settings["group_significant_summation_method"] == "two_consecutive_failures"
-    assert settings["fixed_harmonic_input_mode"] == "frequency_list"
+    assert settings["fixed_harmonic_input_mode"] == "upper_harmonic_index"
+    assert settings["fixed_harmonic_upper_harmonic_index"] == 6
 
 
 def test_harmonic_profile_inputs_normalize_to_manifest_safe_values():

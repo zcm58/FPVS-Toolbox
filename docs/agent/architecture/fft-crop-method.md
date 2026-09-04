@@ -4,7 +4,12 @@ This page documents the current FFT crop method now owned by `Main_App.Shared.ff
 
 ## Purpose
 
-The FFT crop helper chooses per-condition repetition windows that put the oddball frequency exactly on an FFT bin when possible. It is used by the processing runner, compatibility processing bridge, and post-processing bridge to keep epoch lengths compatible with oddball-frequency analysis.
+The FFT crop helper chooses per-condition repetition windows that put the
+project's exact oddball frequency on an FFT bin when possible. The active
+processing runner passes the immutable project protocol; post-processing
+verifies the resulting grid before producing frequency-domain values. The old
+`ProcessingMixin` export is compatibility-only and is not in the active Main
+App window's method-resolution order.
 
 ## Locked Invariant
 
@@ -14,7 +19,7 @@ preference: the crop length `N` must make the oddball bin index
 `k = f_oddball * N / fs` an integer before downstream FFT, SNR, BCA, FullFFT,
 Plot Generator, or Stats code consumes the workbook.
 
-For the toolbox default oddball frequency, `f_oddball = 6/5 Hz = 1.2 Hz`.
+For the default project protocol, `f_oddball = 6/5 Hz = 1.2 Hz`.
 With the supported integer sampling rates that are multiples of 256 Hz, this
 means the crop length advances in 3-oddball-cycle units:
 
@@ -47,13 +52,20 @@ readers unless the user explicitly scopes that separate workflow.
   `51, 52, 53, 54, 55`.
 - `stream_end_sample`: optional sample index used as the end boundary for the final repetition block.
 
-The oddball frequency constant is `6/5` Hz, equivalent to `1.2` Hz. The
-BCA harmonic upper limit does not change this constant; it only controls the
-highest 1.2 Hz harmonic calculated for FFT/BCA exports and later Stats use.
+- `f_oddball`: the exact rational oddball rate from the ready project
+  frequency protocol. `6/5` Hz remains the compatibility default of the pure
+  helper, but active processing must pass the project value explicitly.
+- `expected_analyzed_oddball_cycles`: the project-wide intended FFT-cycle
+  count. Managed-project processing checks each repetition against this target;
+  longer usable spans are capped and shorter spans are reported as protocol
+  mismatches.
 
 ## On-Bin Length Rule
 
-`compute_onbin_step(fs, f_oddball=6/5)` rounds `fs` to an integer and rejects non-integer sampling rates when `abs(fs - round(fs)) >= 1e-6`.
+`compute_onbin_step(fs, f_oddball)` rounds `fs` to an integer and rejects
+non-integer sampling rates when `abs(fs - round(fs)) >= 1e-6`. Active callers
+pass the exact project rate; the function's `6/5` default exists only for
+legacy/direct compatibility.
 
 For integer sampling rates, the required FFT-compatible sample step is:
 
@@ -86,7 +98,8 @@ used for the condition; otherwise the standard global marker `55` is used.
 
 ## Oddball-Marker Deduplication And Gap Warnings
 
-The expected oddball-marker interval is `round(fs / 1.2)` samples.
+The expected oddball-marker interval is `fs / f_oddball`, evaluated from the
+exact project rate and represented on the source sample grid.
 
 - An oddball marker is dropped as a duplicate when it occurs less than half the expected interval after the previous retained marker.
 - A missing-gap warning is counted when a retained marker occurs more than 1.5 times the expected interval after the previous retained marker.
@@ -122,11 +135,11 @@ The helper still records fallback diagnostics for invalid repetition blocks:
 - computed `n_samples <= 0`: fallback, reason `nonpositive_N`.
 
 These fallback flags are diagnostic only. `Main_App.Performance.process_runner`
-and the public compatibility `Main_App.Shared.processing_mixin` worker must
-hard-fail when any selected condition repetition falls back, when `n_step` is
-unavailable, or when no common on-bin `N` can be computed. Do not convert these
-diagnostics into `fixed_epoch_fallback` epochs, skip repetitions, use fixed
-epoch windows, or let post-processing choose nearest FFT bins.
+must hard-fail when any selected condition repetition falls back, when
+`n_step` is unavailable, or when no common on-bin `N` can be computed. Do not
+convert these diagnostics into `fixed_epoch_fallback` epochs, skip
+repetitions, use fixed epoch windows, or let post-processing choose nearest
+FFT bins.
 
 ## Shared Condition Span Plan
 
@@ -143,21 +156,29 @@ fails preflight explicitly; preflight must not invent an onset-based or fixed-
 duration interval, use the whole arbitrary condition block, or duplicate the
 common-length calculation. This reuse keeps preflight aligned with the FPVS crop
 contract without changing the later 256 Hz preprocessing/downsample path.
+The preflight scan and crop-grid audit carry the resolved project oddball rate
+and frequency-protocol fingerprint; reference duration and cycle calculations
+must not import the 1.2-Hz compatibility constant.
 
-Normal condition workbooks report the realized grid in the `FFT Metadata`
-sheet. `FFT Bin Width (Hz)` is the exact `fs / N` for each exported FFT input;
-the existing `df_hz` field in `FFT and neighbors` remains available for
-machine-readable compatibility. Projects may use any valid common locked crop
-length, while downstream group analysis requires one bin width/grid across all
-included participant-condition workbooks.
-The group-harmonic cache method identity includes this common-grid guard, so
-selections saved before the guard are cache misses and are validated again.
+Normal condition workbooks report the realized grid in `FFT Metadata` and the
+exact protocol/grid/filter identity in `Spectral Eligibility`. `FFT Bin Width
+(Hz)` is `fs / N`; the existing `df_hz` field in `FFT and neighbors` remains
+available for machine-readable compatibility. For managed projects, FullFFT
+grid QC uses the declared expected oddball-cycle count as the reference and
+validates displayed headers against the exact rational oddball spacing. A
+cohort majority may describe legacy/corruption evidence but cannot redefine
+the project duration. Rounded header collisions are invalid rather than a
+license to select a nearby bin. The project protocol and spectral-eligibility
+fingerprints invalidate old harmonic caches.
 
 Run-level warnings are exactly `empty_events`, `no_onsets`, or `non_integer_fs:{fs}` where applicable.
 
 ## Refactor Constraints
 
-- Do not change `ODDBALL_FREQ`, `CropResult`, function signatures, fallback reasons, warning strings, result keys, or sample arithmetic.
+- Preserve `CropResult`, fallback reasons, warning strings, result keys, and
+  exact sample arithmetic. `ODDBALL_FREQ` is a compatibility default only;
+  never use it as an active fallback when a managed project protocol is
+  missing or invalid.
 - Do not change the preprocessing order except through the locked
   `preprocessing-contract.md` behavior-change process. Do not change epoch
   metadata fields, FFT crop diagnostics, output filenames, Excel sheets, or

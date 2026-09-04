@@ -23,6 +23,7 @@ from Main_App.io.eeg_geometry import (
     biosemi64_geometry_identity,
 )
 from Main_App.processing.processing_ledger import PROCESSING_FINGERPRINT_VERSION
+from Main_App.projects import FrequencyProtocol
 
 
 def _write_geometry_ledger(
@@ -48,9 +49,20 @@ def _write_geometry_ledger(
     )
 
 
-def _managed_full_fft_project(tmp_path: Path) -> Path:
+def _managed_full_fft_project(
+    tmp_path: Path,
+    *,
+    presentation_rate_hz: float = 6.0,
+    oddball_every_n: int = 5,
+) -> Path:
     root = tmp_path / "Project"
     root.mkdir()
+    protocol = FrequencyProtocol.from_recurrence(
+        presentation_rate_hz,
+        oddball_every_n,
+        expected_analyzed_oddball_cycles=144,
+        expected_analyzed_oddball_cycles_source="manual",
+    )
     (root / "project.json").write_text(
         json.dumps(
             {
@@ -58,6 +70,7 @@ def _managed_full_fft_project(tmp_path: Path) -> Path:
                 "subfolders": {"excel": "1 - Excel Data Files"},
                 "participants": {"P1": {}, "P2": {}},
                 "preprocessing": {},
+                "frequency_protocol": protocol.to_manifest(),
                 "tools": {"unrelated": {"preserved": True}},
             },
             indent=2,
@@ -145,7 +158,11 @@ def test_failed_manifest_replace_preserves_project_and_cleans_staging(
 def test_require_current_full_fft_provenance_uses_saved_rates_and_checks_inputs(
     tmp_path: Path,
 ) -> None:
-    root = _managed_full_fft_project(tmp_path)
+    root = _managed_full_fft_project(
+        tmp_path,
+        presentation_rate_hz=7.5,
+        oddball_every_n=6,
+    )
     written = write_project_full_fft_provenance(
         root,
         base_frequency_hz=7.5,
@@ -157,6 +174,7 @@ def test_require_current_full_fft_provenance_uses_saved_rates_and_checks_inputs(
     assert current == written
     assert current.base_frequency_hz == 7.5
     assert current.oddball_frequency_hz == 1.25
+    assert current.frequency_protocol_fingerprint
 
     workbook_path = root / Path(current.source_paths[0])
     workbook_path.touch()
@@ -184,6 +202,35 @@ def test_rate_mismatch_wins_when_saved_full_fft_inputs_are_also_stale(
             base_frequency_hz=7.5,
             oddball_frequency_hz=1.2,
         )
+
+
+def test_current_full_fft_provenance_rejects_changed_project_protocol(
+    tmp_path: Path,
+) -> None:
+    root = _managed_full_fft_project(tmp_path)
+    record = write_project_full_fft_provenance(
+        root,
+        base_frequency_hz=6.0,
+        oddball_frequency_hz=1.2,
+    )
+    manifest_path = root / "project.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    changed_protocol = FrequencyProtocol.from_recurrence(
+        6,
+        5,
+        expected_analyzed_oddball_cycles=120,
+        expected_analyzed_oddball_cycles_source="manual",
+    )
+    manifest["frequency_protocol"] = changed_protocol.to_manifest()
+    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+
+    with pytest.raises(
+        FullFftProvenanceStaleError,
+        match="project frequency protocol changed",
+    ):
+        require_current_project_full_fft_provenance(root)
+
+    assert record.frequency_protocol_fingerprint != changed_protocol.fingerprint
 
 
 def test_full_fft_provenance_rejects_unknown_legacy_geometry(tmp_path: Path) -> None:
@@ -291,6 +338,6 @@ def test_saved_legacy_full_fft_schema_requires_eeg_reprocessing(
 
     with pytest.raises(
         FullFftProvenanceStaleError,
-        match="predates the BioSemi64 geometry contract",
+        match="predates the current BioSemi64 and project-frequency-protocol contract",
     ):
         require_current_project_full_fft_provenance(root)

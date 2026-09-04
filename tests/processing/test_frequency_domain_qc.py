@@ -14,6 +14,10 @@ from Main_App.processing.frequency_domain_qc import (
     sync_frequency_domain_qc_automatic_state,
 )
 from Main_App.projects.project import Project
+from Main_App.projects.frequency_protocol import (
+    EXPECTED_CYCLES_SOURCE_MANUAL,
+    FrequencyProtocol,
+)
 from Main_App.projects.preprocessing_settings import (
     FIXED_HARMONIC_SELECTION_PROFILE,
     HARMONIC_SELECTION_PROFILE_VERSION,
@@ -128,8 +132,18 @@ def test_summed_bca_drops_frequency_domain_excluded_electrode(
     )
     monkeypatch.setattr(
         harmonic_selection_qc,
-        "_analysis_base_frequency_hz",
-        lambda: 6.0,
+        "_current_project_frequency_protocol",
+        lambda _project, _root: FrequencyProtocol.from_recurrence(
+            6,
+            5,
+            expected_analyzed_oddball_cycles=12,
+            expected_analyzed_oddball_cycles_source=EXPECTED_CYCLES_SOURCE_MANUAL,
+        ),
+    )
+    monkeypatch.setattr(
+        harmonic_selection_qc,
+        "_project_spectral_eligibility_domain",
+        lambda **_kwargs: ((), "", ()),
     )
     harmonic_selection_qc.run_processing_harmonic_selection_qc(project)
 
@@ -186,6 +200,14 @@ def _make_project(tmp_path):
         }
     )
     project.update_preprocessing(payload)
+    project.update_frequency_protocol(
+        FrequencyProtocol.from_recurrence(
+            6,
+            5,
+            expected_analyzed_oddball_cycles=12,
+            expected_analyzed_oddball_cycles_source=EXPECTED_CYCLES_SOURCE_MANUAL,
+        )
+    )
     project.save()
 
     _write_bca_workbook(

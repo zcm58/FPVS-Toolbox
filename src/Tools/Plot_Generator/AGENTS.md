@@ -114,13 +114,18 @@ v2.1 project contract:
   condition B values against condition A's physical frequencies.
 - Resolve the selected input folder through the shared dataset index before
   reading source workbooks. Managed projects must use the current neutral
-  FullFFT provenance's frozen base/oddball rates and exact workbook family;
-  missing or stale provenance is a hard stop. Unmanaged folders may retain the
+  FullFFT provenance's frozen project-protocol rates and exact workbook family;
+  missing or stale provenance is a hard stop. For managed projects, derive the
+  displayed harmonic annotations from the common processing-owned `Spectral
+  Eligibility` domain, excluding presentation-rate harmonics, and never from
+  the Stats profile's selected list. The initial x-domain comes from that
+  technical domain or the project passband/Nyquist fallback and is clamped to
+  the observed FullSNR grid before rendering. Unmanaged folders may retain the
   documented legacy settings fallback but must not borrow exclusions or QC
   output routing from an unrelated active GUI project. Rebuild the managed
-  dataset index and revalidate the originally captured rates, cohort, source,
-  frequency-QC, and processing/export identities when publishing provenance-
-  bearing artifacts.
+  dataset index and revalidate the originally captured rates, technical
+  eligibility, cohort, source, frequency-QC, and processing/export identities
+  when publishing provenance-bearing artifacts.
 - An **All Conditions** run may pass the immutable dataset index built by its
   first worker to later sequential workers. Index construction must remain on
   the worker thread, every worker must still configure its own analysis

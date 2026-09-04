@@ -413,7 +413,10 @@ def _prepare_single_group_data(
 ]:
     all_subjects = list(subjects) if subjects else []
     settings = normalize_dv_policy(dv_policy)
-    resolved_preflight_max = _resolve_max_freq(max_freq)
+    managed_project = project_root not in (None, "")
+    resolved_preflight_max = (
+        None if managed_project else _resolve_max_freq(max_freq)
+    )
     if settings.name == GROUP_SIGNIFICANT_POLICY_NAME:
         if _has_valid_project_group_harmonic_cache(
             project_root=project_root,
@@ -428,6 +431,11 @@ def _prepare_single_group_data(
             message_cb(
                 "Project metadata contains matching significant harmonics; "
                 "skipping FullFFT preflight."
+            )
+        elif managed_project:
+            message_cb(
+                "Processing-time harmonic metadata will validate the canonical "
+                "project spectral domain; no independent FullFFT target list was built."
             )
         else:
             preflight_group_significant_full_fft_columns(

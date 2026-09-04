@@ -10,8 +10,10 @@ import pytest
 from Main_App.processing.full_fft_provenance import (
     write_project_full_fft_provenance,
 )
+from Main_App.processing.spectral_eligibility import resolve_spectral_eligibility
 from Main_App.io.eeg_geometry import biosemi64_geometry_identity
 from Main_App.processing.processing_ledger import PROCESSING_FINGERPRINT_VERSION
+from Main_App.projects import FrequencyProtocol
 from Tools.Plot_Generator import analysis_context
 from Tools.Plot_Generator.generation_outcome import (
     format_completion_summary,
@@ -23,6 +25,15 @@ from Tools.Plot_Generator.worker import _Worker
 from Main_App.processing.roi_settings import ALL_ROIS_OPTION
 
 
+def _frequency_protocol_payload() -> dict[str, object]:
+    return FrequencyProtocol.from_recurrence(
+        6,
+        5,
+        expected_analyzed_oddball_cycles=12,
+        expected_analyzed_oddball_cycles_source="manual",
+    ).to_manifest()
+
+
 def _write_full_snr(path: Path, values: list[float]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     df = pd.DataFrame(
@@ -32,18 +43,35 @@ def _write_full_snr(path: Path, values: list[float]) -> None:
             "2.0_Hz": [values[1]],
         }
     )
+    protocol_payload = _frequency_protocol_payload()
+    eligibility = resolve_spectral_eligibility(
+        protocol=protocol_payload,
+        sampling_rate_hz=24,
+        analyzed_samples=240,
+        requested_high_pass_hz=0.1,
+        requested_low_pass_hz=2.4,
+        applied_high_pass_hz=0.1,
+        applied_low_pass_hz=2.4,
+    )
+    full_fft_frequencies = [index / 10 for index in range(25)]
     with pd.ExcelWriter(path) as writer:
         df.to_excel(writer, sheet_name="FullSNR", index=False)
         pd.DataFrame(
             {
                 "Electrode": ["Cz"],
-                "0.0_Hz": [1.0],
-                "1.2_Hz": [1.0],
-                "2.4_Hz": [1.0],
+                **{
+                    f"{frequency:.1f}_Hz": [1.0]
+                    for frequency in full_fft_frequencies
+                },
             }
         ).to_excel(
             writer,
             sheet_name="FullFFT Amplitude (uV)",
+            index=False,
+        )
+        pd.DataFrame(eligibility.to_rows()).to_excel(
+            writer,
+            sheet_name="Spectral Eligibility",
             index=False,
         )
 
@@ -186,6 +214,7 @@ def test_group_overlay_matches_project_participant_ids_from_excel_names(
                     "e2p2final": {"group_id": "after"},
                     "E2P1INITIAL": {"group_id": "before"},
                 },
+                "frequency_protocol": _frequency_protocol_payload(),
             }
         ),
         encoding="utf-8",
@@ -276,6 +305,7 @@ def test_worker_uses_shared_index_preference_for_grouped_workbook(
                     }
                 },
                 "participants": {"P01": {"group_id": "control"}},
+                "frequency_protocol": _frequency_protocol_payload(),
             }
         ),
         encoding="utf-8",

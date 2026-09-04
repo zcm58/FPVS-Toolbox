@@ -246,8 +246,6 @@ class StatsWindowExportsMixin:
                     "Existing stats-ready workbook will be replaced only if "
                     f"the new export succeeds: {output_path}",
                 )
-            _, max_freq_raw = self._safe_settings_get("analysis", "bca_upper_limit", None)
-            max_freq = float(max_freq_raw) if max_freq_raw not in (None, "") else None
         except Exception as exc:  # noqa: BLE001
             self._end_run()
             logger.exception("stats_ready_export_prepare_failed", exc_info=True)
@@ -267,7 +265,6 @@ class StatsWindowExportsMixin:
             group_label_map=getattr(self, "_subject_group_map", {}),
             output_path=str(output_path),
             manual_excluded_pids=sorted(self.manual_excluded_pids),
-            max_freq=max_freq,
             project_root=str(self._project_path),
             _op="stats_ready_export",
         )

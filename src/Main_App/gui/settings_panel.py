@@ -1102,9 +1102,6 @@ class SettingsDialog(QDialog):
         )
         analysis_form = make_form_layout()
 
-        self.bca_limit_edit = QLineEdit(self.manager.get("analysis", "bca_upper_limit", "16.8"))
-        analysis_form.addRow(QLabel("BCA harmonic upper limit:"), self.bca_limit_edit)
-
         self.alpha_edit = QLineEdit(self.manager.get("analysis", "alpha", "0.05"))
         analysis_form.addRow(QLabel("ANOVA alpha value:"), self.alpha_edit)
         analysis_group.content_layout.addLayout(analysis_form)
@@ -1999,11 +1996,6 @@ class SettingsDialog(QDialog):
         settings = normalize_dv_policy(
             self._harmonic_policy_payload_from_preprocessing(preprocessing)
         )
-        bca_upper_limit = (
-            self.bca_limit_edit.text()
-            if hasattr(self, "bca_limit_edit")
-            else self.manager.get("analysis", "bca_upper_limit", "16.8")
-        )
         roi_pairs = (
             self.roi_editor.get_pairs()
             if hasattr(self, "roi_editor")
@@ -2018,7 +2010,6 @@ class SettingsDialog(QDialog):
         )
         return (
             *self._harmonic_settings_signature_from_settings(settings),
-            self._normalized_signature_number(bca_upper_limit),
             normalized_rois,
         )
 
@@ -2063,11 +2054,8 @@ class SettingsDialog(QDialog):
         current = self._harmonic_settings_signature_from_preprocessing(validated_preproc)
         return initial is not None and current != initial
 
-    def _frequency_analysis_settings_signature(self) -> tuple[object, object]:
-        return (
-            self._project_protocol_signature(),
-            self._normalized_signature_number(self.bca_limit_edit.text()),
-        )
+    def _frequency_analysis_settings_signature(self) -> tuple[object]:
+        return (self._project_protocol_signature(),)
 
     def _frequency_analysis_settings_changed_after_processing(self) -> bool:
         if self.project is None or not self._project_has_processed_outputs():
@@ -2226,23 +2214,6 @@ class SettingsDialog(QDialog):
                     self.tabs.setCurrentIndex(self._protocol_tab_index)
                     return False
         try:
-            bca_upper_limit = float(self.bca_limit_edit.text())
-        except (TypeError, ValueError):
-            QMessageBox.warning(
-                self,
-                "Invalid Analysis Settings",
-                "BCA harmonic upper limit must be a number.",
-            )
-            return False
-        if bca_upper_limit <= 0.0:
-            QMessageBox.warning(
-                self,
-                "Invalid Analysis Settings",
-                "BCA harmonic upper limit must be positive.",
-            )
-            return False
-        try:
-            self.manager.set("analysis", "bca_upper_limit", f"{bca_upper_limit:g}")
             self.manager.set_roi_montage(self._current_roi_montage())
             self.manager.set_roi_pairs(self.roi_editor.get_pairs())
             for montage_key, custom_presets in self._custom_roi_presets_by_montage.items():
@@ -2315,15 +2286,6 @@ class SettingsDialog(QDialog):
                 apply_rois_to_modules(load_rois_from_settings(self.manager))
             except Exception:  # Rollback cache-refresh boundary: saved settings remain authoritative.
                 pass
-            try:
-                from config import update_target_frequencies
-
-                update_target_frequencies(
-                    config.DEFAULT_ODDBALL_FREQ,
-                    float(self.manager.get("analysis", "bca_upper_limit", "16.8")),
-                )
-            except Exception:  # Rollback cache-refresh boundary: saved settings remain authoritative.
-                pass
         finally:
             self._clear_harmonic_settings_rollback()
         if restore_errors:
@@ -2364,8 +2326,8 @@ class SettingsDialog(QDialog):
         mark_frequency_domain_outputs_stale(
             self.project.project_root,
             reason=(
-                "The project FPVS protocol or legacy BCA harmonic upper limit changed; rerun "
-                "frequency-domain post-processing and QC."
+                "The project FPVS protocol changed; rerun frequency-domain "
+                "post-processing and QC."
             ),
         )
 
@@ -3776,7 +3738,6 @@ class SettingsDialog(QDialog):
 
         if not using_project:
             self.manager.set("stim", "channel", config.DEFAULT_STIM_CHANNEL)
-        self.manager.set("analysis", "bca_upper_limit", self.bca_limit_edit.text())
         self.manager.set("analysis", "alpha", self.alpha_edit.text())
         self.manager.set_roi_montage(self._current_roi_montage())
         self.manager.set_roi_pairs(self.roi_editor.get_pairs())
@@ -3922,16 +3883,6 @@ class SettingsDialog(QDialog):
                 refresh_rois = getattr(stats_page, "refresh_rois", None)
                 if callable(refresh_rois):
                     refresh_rois()
-        except Exception:
-            pass
-
-        try:
-            from config import update_target_frequencies
-
-            update_target_frequencies(
-                config.DEFAULT_ODDBALL_FREQ,
-                float(self.bca_limit_edit.text()),
-            )
         except Exception:
             pass
 

@@ -6,14 +6,59 @@ Load this module with the parent index, shared contracts, and QC-11 for the
 rate foundation. Also load QC-14 when finalizing the replacement harmonic
 domains.
 
-**Status:** accepted on 2026-09-03. Support project-wide rates beyond 6/1.2 Hz
+**Status:** implementation in progress as of 2026-09-04. Support project-wide rates beyond 6/1.2 Hz
 and allow either recurrence-count or direct-frequency entry. Both modes must
 resolve to a whole-number stimulus recurrence. On 2026-09-04, the user
 clarified that there is no universal 16.8-Hz analysis ceiling and then directed
 that the live 16.8-Hz default be removed in favor of the project's filtering
 settings. On 2026-09-04, the user accepted the complete +/-10-bin filter-range
-rule and one shared Toolbox source of spectral eligibility. Implementation
-waits for the completed plan.
+rule and one shared Toolbox source of spectral eligibility.
+
+### Implementation Progress
+
+- `Main_App.processing.spectral_eligibility` now owns the exact technical
+  domain. It combines the ready project protocol, realized exact-bin grid,
+  applied nominal filter edges, Nyquist, and effective notch mask, and returns
+  a reason for every unavailable target.
+- Post-processing exports the complete one-sided FullFFT plus versioned
+  `Spectral Eligibility` and per-channel `Spectral Metric QC` evidence. Live
+  target generation no longer consumes the legacy 16.8-Hz or 40-Hz paths.
+- Processing-time harmonic selection validates every included workbook's
+  exported resolver evidence, takes the documented common eligible-order
+  intersection, and fingerprints the protocol and per-workbook decisions.
+  Adaptive profiles skip unavailable holes; fixed profiles preserve a declared
+  unavailable harmonic and fail rather than silently reducing the sum.
+- Managed single- and multi-group Stats paths consume the accepted
+  processing-time selection. Cache misses no longer trigger an independent
+  FullFFT target-list rebuild, and caller-supplied legacy ceilings are ignored
+  for managed projects. Unmanaged legacy/direct APIs retain explicit historical
+  values only for compatibility.
+- Genuinely new projects seed the fixed/preregistered alternative by project-
+  relative oddball harmonic order (upper harmonic 6). Existing projects with a
+  missing mode still resolve to the historical exact 1.2-Hz list, and every
+  explicitly saved fixed list remains unchanged.
+- FullFFT grid QC now uses the project's exact oddball rate and declared
+  expected cycle count, records the protocol fingerprint, validates rounded
+  headers against exact rational spacing, and rejects rounded-label collisions.
+- Neutral FullFFT provenance schema v3 now stamps and validates the canonical
+  project frequency-protocol fingerprint. The post-processing worker fails on
+  missing managed protocol evidence instead of stamping a global 6/1.2
+  fallback, and a protocol change makes existing provenance stale.
+- Condition-aware preflight crop-grid audits carry the project oddball rate and
+  protocol fingerprint. Free Harmonic Clustering uses those project rates for
+  frequency identity while remaining independent of the standard Stats
+  selection.
+- Plot Generator removes the managed-project BCA-ceiling path. It annotates
+  only common technically eligible non-presentation harmonics, keeps that list
+  separate from the Stats profile's selected harmonics, and clamps its display
+  range to the observed FullSNR grid.
+- Focused non-GUI coverage includes 3-Hz/every-10 and 10/2-Hz protocols,
+  repeating-decimal rates, above-16.8-Hz eligibility, passband/Nyquist edges,
+  notch holes, adaptive skipping, fixed-profile unavailability, cache
+  invalidation, managed Stats consumers, neutral provenance staleness,
+  protocol-aware preflight grids, and Plot Generator technical-domain behavior.
+  Remaining GUI execution is reserved for CI or the documented visible smoke
+  path.
 
 ## Accepted User Model
 

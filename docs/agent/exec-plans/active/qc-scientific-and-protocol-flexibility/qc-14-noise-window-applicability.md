@@ -6,9 +6,37 @@ Load this module with the parent index, shared contracts, QC-12's completed
 rate foundation, and QC-13 when executing this action. QC-12's replacement
 harmonic domains finalize after this applicability boundary is available.
 
-**Status:** accepted on 2026-09-03 as an edge-case safeguard. Ordinary
+**Status:** core implementation complete on 2026-09-04 with focused numerical
+coverage. Ordinary
 conditions are expected to be at least about 60 seconds, but validity is
 decided from cycles and available frequency bins rather than a fixed duration.
+
+### Implementation Progress
+
+- The canonical spectral resolver requires more than ten realized oddball
+  cycles and the exact symmetric candidate offsets `-10..-2,+2..+10`. It
+  checks DC, applied high-pass/low-pass edges, Nyquist, tagged project
+  harmonics, and effective notch support before exposing a standard metric.
+- `compute_qc14_standard_metrics` requires all 18 finite candidate amplitudes,
+  removes one actual minimum and maximum occurrence, and retains exactly 16
+  values. It reports BCA, SNR, and local-z availability separately, including
+  effectively zero mean and population-SD denominator states.
+- Post-processing writes unavailable values as missing with structured reason
+  codes. A notched target is audit-only; a notch confined to a noise bin keeps
+  target amplitude as audit evidence but withholds all standard scores. No
+  notch hole excludes a recording-condition.
+- Adaptive selection consumes only the shared eligible order sequence, so a
+  hole is neither a success nor a failure and the two-failure rule continues
+  with the next eligible harmonic. A fixed/preregistered declaration that
+  intersects a hole is reported unavailable without changing its list.
+- Managed SNR plots intersect the exported eligibility evidence across their
+  provenance-allowed workbooks and highlight only technically eligible
+  non-presentation harmonics. This is intentionally distinct from the Stats
+  profile's selected list.
+- Focused tests cover exact 10/11-cycle boundaries, edge and Nyquist clearance,
+  notch target/noise collisions, finite completeness, tied-extrema trimming,
+  zero/near-zero denominators, common-domain intersection, and unchanged valid
+  metric arithmetic.
 
 ## Accepted Behavior
 

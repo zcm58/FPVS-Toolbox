@@ -9,6 +9,7 @@ from collections import defaultdict
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from fractions import Fraction
 from pathlib import Path
 from typing import Any
 
@@ -30,10 +31,19 @@ logger = logging.getLogger(__name__)
 QUALITY_CHECK_FOLDER = "Quality Check"
 FREQUENCY_DOMAIN_QC_REPORT_NAME = "Frequency_Domain_QC_Review.txt"
 FREQUENCY_DOMAIN_QC_METADATA_PATH = ("tools", "frequency_domain_qc")
-FREQUENCY_DOMAIN_QC_SCHEMA_VERSION = 1
-FREQUENCY_DOMAIN_QC_METHOD_VERSION = "summed_bca_plausibility_v1"
+FREQUENCY_DOMAIN_QC_SCHEMA_VERSION = 2
+FREQUENCY_DOMAIN_QC_METHOD_VERSION = "summed_bca_plausibility_integrity_v2"
 REPEATED_FREQUENCY_DOMAIN_QC_METHOD_VERSION = (
-    "summed_bca_plausibility_recording_v1"
+    "summed_bca_plausibility_recording_integrity_v2"
+)
+FREQUENCY_DOMAIN_QC_INTEGRITY_METHOD_VERSION = "selected_bca_finite_v1"
+SPECTRAL_METRIC_QC_SHEET_NAME = "Spectral Metric QC"
+
+_BCA_AUDIT_REQUIRED_COLUMNS = (
+    "Electrode",
+    "Target Frequency Exact (Hz)",
+    "BCA Status",
+    "Reason Codes",
 )
 
 WARNING_REASON_UNUSUAL_VALUES = "Unusual frequency-domain values"
@@ -84,6 +94,17 @@ class FrequencyDomainExclusions:
     auto_excluded_electrodes_by_recording: dict[str, frozenset[str]] = field(
         default_factory=dict
     )
+
+
+class FrequencyDomainQcIntegrityError(RuntimeError):
+    """Raised when technical workbook defects make frequency QC incomplete."""
+
+
+@dataclass(frozen=True)
+class _SummedBcaInspection:
+    flags: tuple[dict[str, object], ...]
+    technical_integrity_failures: tuple[dict[str, object], ...]
+    unavailable_by_method: tuple[dict[str, object], ...]
 
 
 def run_frequency_domain_qc_review(
@@ -175,7 +196,7 @@ def run_frequency_domain_qc_review(
         "Frequency-domain QC is reviewing provisional summed BCA values "
         f"across {len(selected_harmonics)} harmonic(s)."
     )
-    flags = _collect_summed_bca_flags(
+    inspection = _collect_summed_bca_flags(
         subjects=subjects,
         conditions=ordered_conditions,
         subject_data=subject_data,
@@ -184,6 +205,12 @@ def run_frequency_domain_qc_review(
         log_func=_log,
         recording_assignments=(recording_assignments if repeated_session else None),
     )
+    flags = list(inspection.flags)
+    technical_integrity_failures = list(
+        inspection.technical_integrity_failures
+    )
+    unavailable_by_method = list(inspection.unavailable_by_method)
+    technical_integrity_failed = bool(technical_integrity_failures)
     if repeated_session:
         summaries, auto_electrodes, auto_participants = _summarize_recording_flags(
             flags,
@@ -194,6 +221,38 @@ def run_frequency_domain_qc_review(
             flags,
             thresholds,
         )
+    if technical_integrity_failed:
+        # Threshold flags from complete rows remain useful diagnostic evidence,
+        # but an incomplete project-wide input cannot create exclusions.
+        summaries = []
+        auto_electrodes = []
+        auto_participants = []
+    finite_input_status = {
+        "method_version": FREQUENCY_DOMAIN_QC_INTEGRITY_METHOD_VERSION,
+        "status": (
+            "technical_output_integrity_failed"
+            if technical_integrity_failed
+            else "complete"
+        ),
+        "technical_integrity_failure_count": len(
+            technical_integrity_failures
+        ),
+        "unavailable_by_method_count": len(unavailable_by_method),
+    }
+    finite_input_fingerprint = _hash_payload(
+        {
+            **finite_input_status,
+            "technical_integrity_failures": [
+                _finite_input_fingerprint_diagnostic(project_root, item)
+                for item in technical_integrity_failures
+            ],
+            "unavailable_by_method": [
+                _finite_input_fingerprint_diagnostic(project_root, item)
+                for item in unavailable_by_method
+            ],
+        }
+    )
+    finite_input_status["fingerprint"] = finite_input_fingerprint
     analysis_fingerprint = _analysis_fingerprint(
         project_root=project_root,
         subjects=subjects,
@@ -202,6 +261,7 @@ def run_frequency_domain_qc_review(
         selected_harmonics=selected_harmonics,
         thresholds=thresholds,
         flags=flags,
+        finite_input_fingerprint=finite_input_fingerprint,
         recording_assignments=(recording_assignments if repeated_session else None),
     )
     state = load_frequency_domain_qc_state(project_root)
@@ -235,11 +295,14 @@ def run_frequency_domain_qc_review(
         if bool(summary.get("pause_review"))
     ]
     review_reused = bool(
-        pause_subjects
+        not technical_integrity_failed
+        and pause_subjects
         and reviewed_decision_fingerprint
         and reviewed_decision_fingerprint == current_decision_fingerprint
     )
-    review_required = bool(pause_subjects and not review_reused)
+    review_required = bool(
+        not technical_integrity_failed and pause_subjects and not review_reused
+    )
     report: dict[str, object] = {
         "schema_version": FREQUENCY_DOMAIN_QC_SCHEMA_VERSION,
         "method_version": (
@@ -255,6 +318,13 @@ def run_frequency_domain_qc_review(
         "harmonic_policy": settings.name,
         "provisional_harmonic_metadata": provisional_metadata,
         "flags": flags,
+        "qc_complete": not technical_integrity_failed,
+        "result_status": finite_input_status["status"],
+        "technical_integrity_failed": technical_integrity_failed,
+        "technical_integrity_failures": technical_integrity_failures,
+        "unavailable_by_method": unavailable_by_method,
+        "finite_input_status": finite_input_status,
+        "threshold_flags_diagnostic_only": technical_integrity_failed,
         "participant_summaries": summaries,
         "auto_participant_electrode_exclusions": auto_electrodes,
         "auto_participant_exclusions": auto_participants,
@@ -295,6 +365,39 @@ def run_frequency_domain_qc_review(
     return report
 
 
+def require_frequency_domain_qc_complete(
+    report: Mapping[str, object],
+) -> None:
+    """Reject finalization when selected computable BCA inputs are invalid."""
+
+    failures = [
+        dict(item)
+        for item in _iter_mapping_entries(
+            report.get("technical_integrity_failures")
+        )
+    ]
+    if not bool(report.get("technical_integrity_failed")) and not failures:
+        return
+    first = failures[0] if failures else {}
+    location = "/".join(
+        value
+        for value in (
+            str(first.get("recording_id") or first.get("participant_id") or ""),
+            str(first.get("condition") or ""),
+            str(first.get("electrode") or ""),
+            str(first.get("harmonic_column") or ""),
+        )
+        if value
+    )
+    suffix = f" First affected cell: {location}." if location else ""
+    raise FrequencyDomainQcIntegrityError(
+        "Frequency-domain QC is incomplete because one or more selected, "
+        "method-computable BCA cells failed technical output-integrity "
+        f"validation.{suffix} Reprocess the affected condition workbook(s) "
+        "before continuing."
+    )
+
+
 def apply_frequency_domain_qc_decision(
     project_root: str | Path,
     report: Mapping[str, object],
@@ -304,6 +407,7 @@ def apply_frequency_domain_qc_decision(
 ) -> dict[str, object]:
     """Persist a reviewed QC decision and write the human-readable report."""
 
+    require_frequency_domain_qc_complete(report)
     resolved_recording_decisions = resolve_frequency_qc_recording_decisions(
         report,
         manual_recording_reasons,
@@ -432,6 +536,7 @@ def sync_frequency_domain_qc_automatic_state(
 ) -> dict[str, object]:
     """Refresh automatic QC exclusions from the current processed files."""
 
+    require_frequency_domain_qc_complete(report)
     root = Path(project_root).resolve()
     manifest_path = root / "project.json"
     manifest = _read_manifest(manifest_path)
@@ -854,7 +959,7 @@ def _collect_summed_bca_flags(
     thresholds: FrequencyDomainQcThresholds,
     log_func: Callable[[str], None],
     recording_assignments: Mapping[str, Mapping[str, object]] | None = None,
-) -> list[dict[str, object]]:
+) -> _SummedBcaInspection:
     from Main_App.io import (
         MissingXlsxColumnsError,
         read_xlsx_sheet_selected_columns,
@@ -862,6 +967,8 @@ def _collect_summed_bca_flags(
 
     columns = [f"{float(freq):.4f}_Hz" for freq in selected_harmonics]
     flags: list[dict[str, object]] = []
+    integrity_failures: list[dict[str, object]] = []
+    unavailable_by_method: list[dict[str, object]] = []
     for subject in subjects:
         for condition in conditions:
             file_path = subject_data.get(subject, {}).get(condition)
@@ -886,18 +993,103 @@ def _collect_summed_bca_flags(
             if "Electrode" not in frame.columns:
                 log_func(f"Frequency-domain QC skipped {file_path}: missing Electrode column.")
                 continue
-            frame = frame.set_index("Electrode")
-            frame.index = frame.index.astype(str).str.upper().str.strip()
-            values = (
-                frame[columns]
-                .apply(pd.to_numeric, errors="coerce")
-                .replace([np.inf, -np.inf], np.nan)
+            audit_rows = _read_bca_method_audit_rows(
+                file_path=file_path,
+                reader=read_xlsx_sheet_selected_columns,
+                log_func=log_func,
             )
-            summed = values.sum(axis=1, min_count=1)
-            for electrode, value in summed.items():
-                if not np.isfinite(value):
+            identity = _frequency_qc_cell_identity(
+                subject=subject,
+                condition=condition,
+                file_path=file_path,
+                recording_assignments=recording_assignments,
+            )
+            for row_offset, row in frame.iterrows():
+                electrode = _normalize_electrode(row.get("Electrode"))
+                if not electrode:
                     continue
-                abs_value = abs(float(value))
+                finite_values: list[float] = []
+                score_unavailable = False
+                for harmonic_hz, column in zip(selected_harmonics, columns):
+                    method_evidence = audit_rows.get((electrode, column), ())
+                    method_state, reason_codes = _bca_method_state(
+                        method_evidence
+                    )
+                    diagnostic = {
+                        **identity,
+                        "electrode": electrode,
+                        "worksheet_row": int(row_offset) + 2,
+                        "harmonic_hz": round(float(harmonic_hz), 4),
+                        "harmonic_column": column,
+                    }
+                    if method_state == "technical_integrity_failed":
+                        _append_unique_diagnostic(
+                            integrity_failures,
+                            {
+                                **diagnostic,
+                                "failure_type": "spectral_metric_input_nonfinite",
+                                "value_category": _source_bca_value_category(
+                                    file_path=file_path,
+                                    worksheet_row=int(row_offset) + 2,
+                                    harmonic_column=column,
+                                    fallback_value=row.get(column),
+                                ),
+                                "reason_codes": list(reason_codes),
+                            },
+                        )
+                        score_unavailable = True
+                        continue
+                    if method_state == "unavailable_by_method":
+                        _append_unique_diagnostic(
+                            unavailable_by_method,
+                            {
+                                **diagnostic,
+                                "status": "unavailable_by_method",
+                                "reason_codes": list(reason_codes),
+                            },
+                        )
+                        score_unavailable = True
+                        continue
+
+                    value, _ = _finite_bca_value(row.get(column))
+                    if value is None:
+                        _append_unique_diagnostic(
+                            integrity_failures,
+                            {
+                                **diagnostic,
+                                "failure_type": "invalid_selected_bca_cell",
+                                "value_category": _source_bca_value_category(
+                                    file_path=file_path,
+                                    worksheet_row=int(row_offset) + 2,
+                                    harmonic_column=column,
+                                    fallback_value=row.get(column),
+                                ),
+                                "reason_codes": [],
+                            },
+                        )
+                        score_unavailable = True
+                        continue
+                    finite_values.append(value)
+
+                if score_unavailable:
+                    continue
+                value = float(pd.Series(finite_values, dtype=float).sum())
+                if not np.isfinite(value):
+                    _append_unique_diagnostic(
+                        integrity_failures,
+                        {
+                            **identity,
+                            "electrode": electrode,
+                            "worksheet_row": int(row_offset) + 2,
+                            "harmonic_hz": None,
+                            "harmonic_column": "<selected harmonic sum>",
+                            "failure_type": "nonfinite_selected_bca_sum",
+                            "value_category": _bca_value_category(value),
+                            "reason_codes": [],
+                        },
+                    )
+                    continue
+                abs_value = abs(value)
                 if abs_value <= thresholds.warning_summed_bca_uv:
                     continue
                 severity = "warning"
@@ -906,14 +1098,12 @@ def _collect_summed_bca_flags(
                 elif abs_value > thresholds.strong_warning_summed_bca_uv:
                     severity = "strong"
                 flag: dict[str, object] = {
-                        "participant_id": _normalize_participant_id(subject),
-                        "condition": str(condition),
-                        "electrode": _normalize_electrode(electrode),
-                        "summed_bca_uv": float(value),
-                        "abs_summed_bca_uv": float(abs_value),
-                        "severity": severity,
-                        "workbook_path": str(file_path),
-                    }
+                    **identity,
+                    "electrode": electrode,
+                    "summed_bca_uv": value,
+                    "abs_summed_bca_uv": float(abs_value),
+                    "severity": severity,
+                }
                 if recording_assignments is not None:
                     assignment = recording_assignments.get(subject, {})
                     flag.update(
@@ -929,15 +1119,256 @@ def _collect_summed_bca_flags(
                         }
                     )
                 flags.append(flag)
-    return sorted(
-        flags,
-        key=lambda item: (
-            str(item.get("recording_id") or item.get("participant_id") or ""),
-            -float(item.get("abs_summed_bca_uv") or 0.0),
-            str(item.get("condition") or ""),
-            str(item.get("electrode") or ""),
+    return _SummedBcaInspection(
+        flags=tuple(
+            sorted(
+                flags,
+                key=lambda item: (
+                    str(
+                        item.get("recording_id")
+                        or item.get("participant_id")
+                        or ""
+                    ),
+                    -float(item.get("abs_summed_bca_uv") or 0.0),
+                    str(item.get("condition") or ""),
+                    str(item.get("electrode") or ""),
+                ),
+            )
+        ),
+        technical_integrity_failures=tuple(
+            sorted(integrity_failures, key=_bca_diagnostic_sort_key)
+        ),
+        unavailable_by_method=tuple(
+            sorted(unavailable_by_method, key=_bca_diagnostic_sort_key)
         ),
     )
+
+
+def _read_bca_method_audit_rows(
+    *,
+    file_path: str,
+    reader: Callable[..., pd.DataFrame],
+    log_func: Callable[[str], None],
+) -> dict[tuple[str, str], tuple[dict[str, object], ...]]:
+    """Read optional QC-12/QC-14 per-cell availability from a workbook."""
+
+    from Main_App.io import MissingXlsxColumnsError
+
+    try:
+        frame = reader(
+            file_path,
+            sheet_name=SPECTRAL_METRIC_QC_SHEET_NAME,
+            required_columns=list(_BCA_AUDIT_REQUIRED_COLUMNS),
+        )
+    except MissingXlsxColumnsError as exc:
+        log_func(
+            "Frequency-domain QC ignored malformed optional spectral audit "
+            f"metadata in {file_path}: {exc}"
+        )
+        return {}
+    except (OSError, ValueError):
+        # Historical and externally supplied workbooks can predate the audit
+        # sheet. Their literal selected BCA cells still receive the finite gate.
+        return {}
+
+    rows_by_cell: dict[tuple[str, str], list[dict[str, object]]] = defaultdict(list)
+    for _, row in frame.iterrows():
+        electrode = _normalize_electrode(
+            _optional_cell_text(row.get("Electrode"))
+        )
+        column = _exact_frequency_column(row.get("Target Frequency Exact (Hz)"))
+        if not electrode or not column:
+            continue
+        reason_codes = tuple(
+            reason.strip()
+            for reason in _optional_cell_text(row.get("Reason Codes")).split(";")
+            if reason.strip()
+        )
+        rows_by_cell[(electrode, column)].append(
+            {
+                "bca_status": _optional_cell_text(
+                    row.get("BCA Status")
+                ).casefold(),
+                "reason_codes": reason_codes,
+            }
+        )
+    return {
+        key: tuple(value)
+        for key, value in rows_by_cell.items()
+    }
+
+
+def _exact_frequency_column(value: object) -> str:
+    text = _optional_cell_text(value)
+    if not text:
+        return ""
+    try:
+        frequency = Fraction(text)
+    except (ValueError, ZeroDivisionError):
+        return ""
+    return f"{float(frequency):.4f}_Hz"
+
+
+def _optional_cell_text(value: object) -> str:
+    if value is None:
+        return ""
+    try:
+        if bool(pd.isna(value)):
+            return ""
+    except (TypeError, ValueError):
+        pass
+    return str(value).strip()
+
+
+def _bca_method_state(
+    evidence: Sequence[Mapping[str, object]],
+) -> tuple[str, tuple[str, ...]]:
+    if not evidence:
+        return "method_computable", ()
+    statuses = {
+        str(item.get("bca_status") or "").strip().casefold()
+        for item in evidence
+    }
+    reasons = tuple(
+        dict.fromkeys(
+            str(reason)
+            for item in evidence
+            for reason in item.get("reason_codes", ()) or ()
+            if str(reason)
+        )
+    )
+    if statuses - {"available", "unavailable"}:
+        return "technical_integrity_failed", (
+            *reasons,
+            "invalid_bca_availability_status",
+        )
+    if "unavailable" in statuses:
+        if any(reason.startswith("nonfinite_") for reason in reasons):
+            return "technical_integrity_failed", reasons
+        if not reasons:
+            return "technical_integrity_failed", (
+                "missing_bca_unavailability_reason",
+            )
+        return "unavailable_by_method", reasons
+    return "method_computable", reasons
+
+
+def _finite_bca_value(value: object) -> tuple[float | None, str]:
+    if value is None:
+        return None, "blank"
+    if isinstance(value, str) and not value.strip():
+        return None, "blank"
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None, "text"
+    if np.isnan(numeric):
+        return None, "nan"
+    if np.isposinf(numeric):
+        return None, "positive_infinity"
+    if np.isneginf(numeric):
+        return None, "negative_infinity"
+    return numeric, "finite"
+
+
+def _bca_value_category(value: object) -> str:
+    _, category = _finite_bca_value(value)
+    return category
+
+
+def _source_bca_value_category(
+    *,
+    file_path: str,
+    worksheet_row: int,
+    harmonic_column: str,
+    fallback_value: object,
+) -> str:
+    """Recover blank versus literal NaN text only on an invalid-cell path."""
+
+    try:
+        from openpyxl import load_workbook
+
+        workbook = load_workbook(file_path, read_only=True, data_only=True)
+        try:
+            sheet = workbook["BCA (uV)"]
+            headers = {
+                str(cell.value): index
+                for index, cell in enumerate(sheet[1], start=1)
+                if cell.value not in (None, "")
+            }
+            column_index = headers.get(harmonic_column)
+            if column_index is None:
+                return _bca_value_category(fallback_value)
+            source_value = sheet.cell(
+                row=int(worksheet_row),
+                column=column_index,
+            ).value
+            return _bca_value_category(source_value)
+        finally:
+            workbook.close()
+    except (KeyError, OSError, ValueError):
+        return _bca_value_category(fallback_value)
+
+
+def _frequency_qc_cell_identity(
+    *,
+    subject: str,
+    condition: str,
+    file_path: str,
+    recording_assignments: Mapping[str, Mapping[str, object]] | None,
+) -> dict[str, object]:
+    identity: dict[str, object] = {
+        "participant_id": _normalize_participant_id(subject),
+        "condition": str(condition),
+        "workbook_path": str(file_path),
+    }
+    if recording_assignments is not None:
+        assignment = recording_assignments.get(subject, {})
+        identity.update(
+            {
+                "recording_id": _normalize_recording_id(subject),
+                "participant_id": _normalize_participant_id(
+                    assignment.get("participant_id")
+                ),
+                "session_id": str(assignment.get("session_id") or ""),
+                "visit_index": assignment.get("visit_index"),
+            }
+        )
+    return identity
+
+
+def _append_unique_diagnostic(
+    collection: list[dict[str, object]],
+    diagnostic: Mapping[str, object],
+) -> None:
+    normalized = dict(diagnostic)
+    if normalized not in collection:
+        collection.append(normalized)
+
+
+def _bca_diagnostic_sort_key(item: Mapping[str, object]) -> tuple[object, ...]:
+    return (
+        str(item.get("recording_id") or item.get("participant_id") or "").casefold(),
+        str(item.get("condition") or "").casefold(),
+        str(item.get("workbook_path") or "").casefold(),
+        str(item.get("electrode") or "").casefold(),
+        str(item.get("harmonic_column") or "").casefold(),
+        int(item.get("worksheet_row") or 0),
+    )
+
+
+def _finite_input_fingerprint_diagnostic(
+    project_root: Path,
+    diagnostic: Mapping[str, object],
+) -> dict[str, object]:
+    payload = dict(diagnostic)
+    workbook_path = payload.get("workbook_path")
+    if workbook_path not in (None, ""):
+        payload["workbook_path"] = _manifest_safe_path(
+            project_root,
+            Path(str(workbook_path)),
+        )
+    return payload
 
 
 def _summarize_flags(
@@ -1147,6 +1578,7 @@ def _analysis_fingerprint(
     selected_harmonics: Sequence[float],
     thresholds: FrequencyDomainQcThresholds,
     flags: Sequence[Mapping[str, object]],
+    finite_input_fingerprint: str,
     recording_assignments: Mapping[str, Mapping[str, object]] | None = None,
 ) -> str:
     workbooks = []
@@ -1198,6 +1630,8 @@ def _analysis_fingerprint(
         "subjects": list(map(str, subjects)),
         "conditions": list(map(str, conditions)),
         "selected_harmonics_hz": [round(float(freq), 4) for freq in selected_harmonics],
+        "finite_input_method_version": FREQUENCY_DOMAIN_QC_INTEGRITY_METHOD_VERSION,
+        "finite_input_fingerprint": str(finite_input_fingerprint),
         "workbooks": workbooks,
         "flags": [
             {
@@ -2030,9 +2464,11 @@ def _manifest_safe_path(project_root: Path, path: Path) -> str:
 
 __all__ = [
     "DEFAULT_FREQUENCY_DOMAIN_QC_THRESHOLDS",
+    "FREQUENCY_DOMAIN_QC_INTEGRITY_METHOD_VERSION",
     "FREQUENCY_DOMAIN_QC_REPORT_NAME",
     "MANUAL_EXCLUSION_REASONS",
     "FrequencyDomainExclusions",
+    "FrequencyDomainQcIntegrityError",
     "FrequencyDomainQcThresholds",
     "REPEATED_FREQUENCY_DOMAIN_QC_METHOD_VERSION",
     "active_frequency_domain_exclusions",
@@ -2047,6 +2483,7 @@ __all__ = [
     "load_frequency_domain_qc_state",
     "mark_frequency_domain_outputs_current",
     "mark_frequency_domain_outputs_stale",
+    "require_frequency_domain_qc_complete",
     "run_frequency_domain_qc_review",
     "sync_frequency_domain_qc_automatic_state",
     "thresholds_summary_lines",

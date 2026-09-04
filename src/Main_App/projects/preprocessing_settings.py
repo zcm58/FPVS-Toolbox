@@ -83,6 +83,8 @@ _GROUP_SIGNIFICANT_SUMMATION_THROUGH_HIGHEST = "through_highest_significant"
 _GROUP_SIGNIFICANT_SUMMATION_TWO_CONSECUTIVE_FAILURES = "two_consecutive_failures"
 _FIXED_PREDEFINED_DEFAULT_FREQUENCIES = "1.2, 2.4, 3.6, 4.8, 7.2"
 _FIXED_HARMONIC_INPUT_FREQUENCY_LIST = "frequency_list"
+_FIXED_HARMONIC_INPUT_UPPER_HARMONIC = "upper_harmonic_index"
+_NEW_PROJECT_FIXED_UPPER_HARMONIC_INDEX = 6
 
 LEGACY_HARMONIC_SELECTION_PROFILE = "legacy_fpvs_toolbox"
 FIXED_HARMONIC_SELECTION_PROFILE = "fixed_preregistered_domain"
@@ -410,6 +412,12 @@ def new_project_preprocessing_settings() -> Dict[str, Any]:
             "group_significant_electrode_scope": _GROUP_SIGNIFICANT_ELECTRODE_SCOPE_ALL,
             "group_significant_summation_method": (
                 _GROUP_SIGNIFICANT_SUMMATION_TWO_CONSECUTIVE_FAILURES
+            ),
+            "fixed_harmonic_input_mode": (
+                _FIXED_HARMONIC_INPUT_UPPER_HARMONIC
+            ),
+            "fixed_harmonic_upper_harmonic_index": (
+                _NEW_PROJECT_FIXED_UPPER_HARMONIC_INDEX
             ),
         }
     )

@@ -4,6 +4,12 @@ from copy import deepcopy
 import json
 from pathlib import Path
 
+import pytest
+
+from Main_App.projects.frequency_protocol import (
+    EXPECTED_CYCLES_SOURCE_MANUAL,
+    FrequencyProtocol,
+)
 from Main_App.projects.project import Project
 from Tools.Stats.data import group_harmonic_cache as cache_mod
 from Tools.Stats.analysis.dv_policy_settings import (
@@ -161,6 +167,130 @@ def test_group_harmonic_cache_roundtrip_and_settings_invalidation(tmp_path: Path
     stale_lookup = lookup_cached_group_harmonic_selection(_request(project_root, workbook))
     assert stale_lookup.hit is None
     assert "preprocessing/settings changed" in stale_lookup.reason
+
+
+def test_group_harmonic_cache_uses_ready_project_protocol_rates(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "project"
+    _write_manifest(project_root)
+    protocol = FrequencyProtocol.from_recurrence(
+        10,
+        5,
+        expected_analyzed_oddball_cycles=120,
+        expected_analyzed_oddball_cycles_source=EXPECTED_CYCLES_SOURCE_MANUAL,
+    )
+    manifest_path = project_root / "project.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["frequency_protocol"] = protocol.to_manifest()
+    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    workbook = project_root / "1 - Excel Data Files" / "S1_Face.xlsx"
+    workbook.parent.mkdir(parents=True)
+    workbook.write_bytes(b"placeholder")
+
+    request = build_group_harmonic_cache_request(
+        project_root=project_root,
+        subjects=["S1"],
+        conditions=["Face"],
+        subject_data={"S1": {"Face": str(workbook)}},
+        base_frequency_hz=10.0,
+        oddball_frequency_hz=2.0,
+        max_freq_hz=None,
+        settings=normalize_dv_policy({"name": GROUP_SIGNIFICANT_POLICY_NAME}),
+    )
+
+    assert request is not None
+    assert request.fingerprint["stats_settings"]["base_frequency_hz"] == 10.0
+    assert request.fingerprint["stats_settings"]["oddball_frequency_hz"] == 2.0
+    assert request.fingerprint["frequency_protocol"] == protocol.to_manifest()
+    assert str(request.fingerprint["method_version"]).endswith(
+        cache_mod.SPECTRAL_DOMAIN_CACHE_METHOD_VERSION
+    )
+
+
+def test_group_harmonic_cache_rejects_rate_mismatch_with_project_protocol(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "project"
+    _write_manifest(project_root)
+    protocol = FrequencyProtocol.from_recurrence(
+        10,
+        5,
+        expected_analyzed_oddball_cycles=120,
+        expected_analyzed_oddball_cycles_source=EXPECTED_CYCLES_SOURCE_MANUAL,
+    )
+    manifest_path = project_root / "project.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["frequency_protocol"] = protocol.to_manifest()
+    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="base frequency does not match"):
+        build_group_harmonic_cache_request(
+            project_root=project_root,
+            subjects=["S1"],
+            conditions=["Face"],
+            subject_data={"S1": {}},
+            base_frequency_hz=6.0,
+            oddball_frequency_hz=2.0,
+            max_freq_hz=None,
+            settings=normalize_dv_policy({"name": GROUP_SIGNIFICANT_POLICY_NAME}),
+        )
+
+    with pytest.raises(ValueError, match="oddball frequency does not match"):
+        build_group_harmonic_cache_request(
+            project_root=project_root,
+            subjects=["S1"],
+            conditions=["Face"],
+            subject_data={"S1": {}},
+            base_frequency_hz=10.0,
+            oddball_frequency_hz=1.2,
+            max_freq_hz=None,
+            settings=normalize_dv_policy({"name": GROUP_SIGNIFICANT_POLICY_NAME}),
+        )
+
+
+def test_group_harmonic_cache_protocol_edit_invalidates_saved_selection(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "project"
+    _write_manifest(project_root)
+    manifest_path = project_root / "project.json"
+    workbook = project_root / "1 - Excel Data Files" / "S1_Face.xlsx"
+    workbook.parent.mkdir(parents=True)
+    workbook.write_bytes(b"placeholder")
+
+    def _set_protocol(cycles: int) -> None:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["frequency_protocol"] = FrequencyProtocol.from_recurrence(
+            10,
+            5,
+            expected_analyzed_oddball_cycles=cycles,
+            expected_analyzed_oddball_cycles_source=EXPECTED_CYCLES_SOURCE_MANUAL,
+        ).to_manifest()
+        manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+
+    def _protocol_request():
+        return build_group_harmonic_cache_request(
+            project_root=project_root,
+            subjects=["S1"],
+            conditions=["Face"],
+            subject_data={"S1": {"Face": str(workbook)}},
+            base_frequency_hz=10.0,
+            oddball_frequency_hz=2.0,
+            max_freq_hz=None,
+            settings=normalize_dv_policy({"name": GROUP_SIGNIFICANT_POLICY_NAME}),
+        )
+
+    _set_protocol(120)
+    original = _protocol_request()
+    assert original is not None
+    save_cached_group_harmonic_selection(original, _selection_metadata())
+    _set_protocol(121)
+    changed = _protocol_request()
+
+    assert changed is not None
+    assert changed.cache_key != original.cache_key
+    assert lookup_cached_group_harmonic_selection(changed).hit is None
 
 
 def test_group_harmonic_cache_identity_ignores_subject_and_condition_order(

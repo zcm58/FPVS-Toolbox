@@ -18,8 +18,6 @@ from typing import Dict, List, Optional, Tuple, Union
 import numpy as np
 import pandas as pd
 
-from Tools.Stats.analysis.dv_policy_settings import LOCKED_ODDBALL_FREQUENCY_HZ
-
 from Tools.Stats.io.excel_io import safe_read_excel
 from Tools.Stats.data.roi_resolver import ROI, resolve_active_rois
 from .repeated_m_anova import (
@@ -491,6 +489,7 @@ def filter_to_oddball_harmonics(
     tol: float = 1e-3,
     max_k: Optional[int] = None,
     max_freq: Optional[float] = None,
+    oddball_frequency_hz: Optional[float] = None,
 ) -> List[Tuple[float, int]]:
     """Run the filter to oddball harmonics helper used by the Stats workflow."""
     try:
@@ -500,7 +499,23 @@ def filter_to_oddball_harmonics(
     except Exception:
         return []
 
-    fo = float(LOCKED_ODDBALL_FREQUENCY_HZ)
+    if oddball_frequency_hz is None:
+        if isinstance(every_n, bool):
+            return []
+        try:
+            recurrence = int(every_n)
+        except (TypeError, ValueError):
+            return []
+        if recurrence < 2 or float(recurrence) != float(every_n):
+            return []
+        fo = base / recurrence
+    else:
+        try:
+            fo = float(oddball_frequency_hz)
+        except (TypeError, ValueError):
+            return []
+        if not np.isfinite(fo) or fo <= 0:
+            return []
     out: List[Tuple[float, int]] = []
     for f in sorted(set(freq_list)):
         if max_freq is not None and f > float(max_freq):

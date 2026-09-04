@@ -1,21 +1,41 @@
 from __future__ import annotations
 
 import json
+from fractions import Fraction
 from pathlib import Path
 
 from openpyxl import Workbook
+import pytest
 
 from Main_App.processing.full_fft_grid_qc import audit_project_full_fft_grids
 from Main_App.processing.processing_ledger import save_ledger
+from Main_App.projects.frequency_protocol import (
+    EXPECTED_CYCLES_SOURCE_MANUAL,
+    FrequencyProtocol,
+)
 
 
-def _write_project(root: Path, exclusions: dict[str, list[str]] | None = None) -> Path:
+def _write_project(
+    root: Path,
+    exclusions: dict[str, list[str]] | None = None,
+    *,
+    presentation_rate_hz: int | Fraction = 6,
+    oddball_every_n: int = 5,
+    expected_oddball_cycles: int = 144,
+) -> Path:
     excel_root = root / "1 - Excel Data Files"
     excel_root.mkdir(parents=True)
+    protocol = FrequencyProtocol.from_recurrence(
+        presentation_rate_hz,
+        oddball_every_n,
+        expected_analyzed_oddball_cycles=expected_oddball_cycles,
+        expected_analyzed_oddball_cycles_source=EXPECTED_CYCLES_SOURCE_MANUAL,
+    )
     (root / "project.json").write_text(
         json.dumps(
             {
                 "subfolders": {"excel": "1 - Excel Data Files"},
+                "frequency_protocol": protocol.to_manifest(),
                 "preprocessing": {
                     "manual_excluded_participant_conditions": exclusions or {},
                 },
@@ -32,6 +52,7 @@ def _write_full_fft_header(
     condition: str,
     *,
     oddball_cycles: int | None,
+    oddball_frequency_hz: Fraction | float = Fraction(6, 5),
     frequency_overrides: dict[int, float] | None = None,
 ) -> Path:
     condition_root = excel_root / condition
@@ -42,7 +63,7 @@ def _write_full_fft_header(
     if oddball_cycles is None:
         header = ["Electrode", "0.0000_Hz", "0.5000_Hz", "1.0000_Hz"]
     else:
-        spacing = 1.2 / oddball_cycles
+        spacing = float(oddball_frequency_hz) / oddball_cycles
         overrides = frequency_overrides or {}
         header = [
             "Electrode",
@@ -97,7 +118,7 @@ def test_full_fft_grid_audit_flags_longer_grid_even_when_columns_overlap(
     ]
 
 
-def test_full_fft_grid_audit_does_not_guess_when_valid_grids_tie(
+def test_full_fft_grid_audit_uses_project_expected_cycles_when_grids_tie(
     tmp_path: Path,
 ) -> None:
     excel_root = _write_project(tmp_path)
@@ -106,9 +127,9 @@ def test_full_fft_grid_audit_does_not_guess_when_valid_grids_tie(
 
     audit = audit_project_full_fft_grids(tmp_path)
 
-    assert audit.reference_oddball_cycles is None
-    assert audit.has_unresolved_grid_conflict is True
-    assert audit.review_candidates == ()
+    assert audit.reference_oddball_cycles == 144
+    assert audit.has_unresolved_grid_conflict is False
+    assert [row.participant_id for row in audit.review_candidates] == ["P2"]
     assert audit.is_compatible_with_exclusions({}) is False
     assert audit.is_compatible_with_exclusions({"P2": ["Faces"]}) is True
 
@@ -262,3 +283,52 @@ def test_full_fft_grid_audit_validates_every_frequency_column(
     assert audit.reference_oddball_cycles == 144
     assert [row.path for row in audit.review_candidates] == [malformed]
     assert "uniform" in str(audit.review_candidates[0].issue).casefold()
+
+
+def test_full_fft_grid_audit_uses_nondefault_project_oddball_rate(
+    tmp_path: Path,
+) -> None:
+    oddball_rate = Fraction(10, 3)
+    excel_root = _write_project(
+        tmp_path,
+        presentation_rate_hz=10,
+        oddball_every_n=3,
+        expected_oddball_cycles=40,
+    )
+    _write_full_fft_header(
+        excel_root,
+        "P1",
+        "Faces",
+        oddball_cycles=40,
+        oddball_frequency_hz=oddball_rate,
+    )
+    _write_full_fft_header(
+        excel_root,
+        "P2",
+        "Faces",
+        oddball_cycles=40,
+        oddball_frequency_hz=oddball_rate,
+    )
+
+    audit = audit_project_full_fft_grids(tmp_path)
+
+    assert audit.oddball_frequency_hz == pytest.approx(10 / 3)
+    assert audit.reference_oddball_cycles == 40
+    assert audit.reference_duration_s == pytest.approx(12.0)
+    assert audit.reference_support == 2
+    assert audit.review_candidates == ()
+    assert audit.frequency_protocol_fingerprint
+
+
+def test_full_fft_grid_audit_rejects_missing_project_protocol(
+    tmp_path: Path,
+) -> None:
+    excel_root = _write_project(tmp_path)
+    manifest_path = tmp_path / "project.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest.pop("frequency_protocol")
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    _write_full_fft_header(excel_root, "P1", "Faces", oddball_cycles=144)
+
+    with pytest.raises(RuntimeError, match="confirmed frequency protocol"):
+        audit_project_full_fft_grids(tmp_path)

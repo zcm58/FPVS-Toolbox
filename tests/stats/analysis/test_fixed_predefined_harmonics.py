@@ -1,14 +1,21 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pandas as pd
 import pytest
 
 from Main_App.processing import full_fft_provenance, harmonic_selection_qc
 from Main_App.projects.project import Project
+from Main_App.projects.frequency_protocol import (
+    EXPECTED_CYCLES_SOURCE_MANUAL,
+    FrequencyProtocol,
+)
 from Tools.Stats.analysis import dv_policies
+from Tools.Stats.analysis import dv_policy_settings as policy_settings
 from Tools.Stats.analysis import dv_policy_fixed_predefined as fixed_policy
 from Tools.Stats.analysis import dv_policy_group_significant as group_policy
 from Tools.Stats.analysis.dv_policy_fixed_predefined import build_fixed_harmonic_selection
@@ -92,15 +99,132 @@ def test_fixed_harmonic_selection_rejects_nearest_bca_column_fallback() -> None:
         )
 
 
-def test_filter_to_oddball_harmonics_uses_locked_oddball_not_base_every_n() -> None:
+def test_filter_to_oddball_harmonics_uses_supplied_recurrence() -> None:
     result = filter_to_oddball_harmonics(
-        [1.2, 2.4, 3.6, 6.0],
-        base_freq=8.0,
-        every_n=5,
+        [0.3, 0.6, 0.9, 3.0],
+        base_freq=3.0,
+        every_n=10,
         tol=1e-3,
     )
 
-    assert result == [(1.2, 1), (2.4, 2), (3.6, 3), (6.0, 5)]
+    assert result == [(0.3, 1), (0.6, 2), (0.9, 3), (3.0, 10)]
+
+
+def test_filter_to_oddball_harmonics_accepts_explicit_project_rate() -> None:
+    result = filter_to_oddball_harmonics(
+        [2.0, 4.0, 6.0, 10.0],
+        base_freq=10.0,
+        every_n=99,
+        oddball_frequency_hz=2.0,
+    )
+
+    assert result == [(2.0, 1), (4.0, 2), (6.0, 3), (10.0, 5)]
+
+
+def test_legacy_max_frequency_requires_explicit_input() -> None:
+    assert policy_settings._resolve_max_freq(None) is None
+    assert policy_settings._resolve_max_freq(24.0) == 24.0
+
+
+def test_managed_stats_uses_processing_rates_and_ignores_legacy_ceiling(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from Main_App.processing import frequency_domain_qc
+
+    canonical = SimpleNamespace(
+        metadata={
+            "harmonic_policy": "group_level_significant_harmonics",
+            "harmonic_selection_profile": "significant_only_exploratory",
+            "harmonic_selection_profile_version": "1.0",
+            "base_frequency_hz": 10.0,
+            "oddball_frequency_hz": 2.0,
+            "selected_harmonics_hz": [2.0, 4.0, 6.0],
+            "included_harmonics_hz": [2.0, 4.0, 6.0],
+            "selection_fingerprint": "canonical-selection",
+        }
+    )
+    monkeypatch.setattr(
+        dv_policies,
+        "load_project_processing_harmonics",
+        lambda **_kwargs: canonical,
+    )
+    monkeypatch.setattr(
+        frequency_domain_qc,
+        "filter_frequency_domain_subjects",
+        lambda _root, subjects, subject_data: (subjects, subject_data, ()),
+    )
+    monkeypatch.setattr(
+        dv_policies,
+        "project_processing_signature_hash",
+        lambda _root: "processing-signature",
+    )
+    captured: dict[str, object] = {}
+
+    def _prepare(**kwargs):
+        captured.update(kwargs)
+        return {"S1": {"C1": {"Posterior": 1.0}}}
+
+    monkeypatch.setattr(dv_policies, "_prepare_group_significant_bca_data", _prepare)
+
+    result = dv_policies.prepare_summed_bca_data(
+        subjects=["S1"],
+        conditions=["C1"],
+        subject_data={"S1": {"C1": str(tmp_path / "unused.xlsx")}},
+        base_freq=10.0,
+        log_func=lambda _message: None,
+        rois={"Posterior": ["Oz"]},
+        provenance_map={},
+        dv_policy={"name": GROUP_SIGNIFICANT_POLICY_NAME},
+        max_freq=16.8,
+        project_root=str(tmp_path),
+    )
+
+    assert result is not None
+    assert captured["base_freq"] == 10.0
+    assert captured["max_freq"] is None
+    assert captured["settings"].group_significant_oddball_frequency_hz == 2.0
+
+
+def test_managed_stats_rejects_base_rate_that_disagrees_with_processing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from Main_App.processing import frequency_domain_qc
+
+    monkeypatch.setattr(
+        dv_policies,
+        "load_project_processing_harmonics",
+        lambda **_kwargs: SimpleNamespace(
+            metadata={
+                "harmonic_policy": "group_level_significant_harmonics",
+                "harmonic_selection_profile": "significant_only_exploratory",
+                "harmonic_selection_profile_version": "1.0",
+                "base_frequency_hz": 10.0,
+                "oddball_frequency_hz": 2.0,
+                "selected_harmonics_hz": [2.0],
+                "selection_fingerprint": "canonical-selection",
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        frequency_domain_qc,
+        "filter_frequency_domain_subjects",
+        lambda _root, subjects, subject_data: (subjects, subject_data, ()),
+    )
+
+    with pytest.raises(RuntimeError, match="base frequency does not match"):
+        dv_policies.prepare_summed_bca_data(
+            subjects=["S1"],
+            conditions=["C1"],
+            subject_data={"S1": {"C1": str(tmp_path / "unused.xlsx")}},
+            base_freq=6.0,
+            log_func=lambda _message: None,
+            rois={"Posterior": ["Oz"]},
+            provenance_map={},
+            dv_policy={"name": GROUP_SIGNIFICANT_POLICY_NAME},
+            project_root=str(tmp_path),
+        )
 
 
 def test_fixed_predefined_policy_sums_bca_uniformly_and_ignores_z(tmp_path: Path) -> None:
@@ -566,9 +690,11 @@ def test_processing_harmonic_selection_reuses_cached_selection_between_runs(
         "_load_mean_amplitude_series",
         _recording_fullfft_loader,
     )
-    monkeypatch.setattr(harmonic_selection_qc, "load_rois_from_settings", lambda: rois)
-    monkeypatch.setattr(harmonic_selection_qc, "_analysis_base_frequency_hz", lambda: 6.0)
-    monkeypatch.setattr(harmonic_selection_qc, "_analysis_bca_upper_limit_hz", lambda: 3.6)
+    _patch_processing_harmonic_inputs(
+        rois=rois,
+        max_frequency_hz=3.6,
+        monkeypatch=monkeypatch,
+    )
     messages: list[str] = []
 
     try:
@@ -610,9 +736,11 @@ def test_processing_harmonic_selection_force_recalculate_bypasses_cache(
         "_load_mean_amplitude_series",
         _recording_fullfft_loader,
     )
-    monkeypatch.setattr(harmonic_selection_qc, "load_rois_from_settings", lambda: rois)
-    monkeypatch.setattr(harmonic_selection_qc, "_analysis_base_frequency_hz", lambda: 6.0)
-    monkeypatch.setattr(harmonic_selection_qc, "_analysis_bca_upper_limit_hz", lambda: 3.6)
+    _patch_processing_harmonic_inputs(
+        rois=rois,
+        max_frequency_hz=3.6,
+        monkeypatch=monkeypatch,
+    )
     messages: list[str] = []
 
     try:
@@ -646,9 +774,11 @@ def test_processing_harmonic_selection_force_failure_preserves_saved_entry(
         path = _project_workbook_path(project_root, "S1", condition)
         _write_group_policy_workbook(path, scale=idx)
 
-    monkeypatch.setattr(harmonic_selection_qc, "load_rois_from_settings", lambda: rois)
-    monkeypatch.setattr(harmonic_selection_qc, "_analysis_base_frequency_hz", lambda: 6.0)
-    monkeypatch.setattr(harmonic_selection_qc, "_analysis_bca_upper_limit_hz", lambda: 3.6)
+    _patch_processing_harmonic_inputs(
+        rois=rois,
+        max_frequency_hz=3.6,
+        monkeypatch=monkeypatch,
+    )
 
     try:
         harmonic_selection_qc.run_processing_harmonic_selection_qc(
@@ -698,9 +828,11 @@ def test_group_significant_policy_uses_processing_metadata_without_fullfft(
         _write_group_policy_workbook(path, scale=idx)
         subject_data["S1"][condition] = str(path)
 
-    monkeypatch.setattr(harmonic_selection_qc, "load_rois_from_settings", lambda: rois)
-    monkeypatch.setattr(harmonic_selection_qc, "_analysis_base_frequency_hz", lambda: 6.0)
-    monkeypatch.setattr(harmonic_selection_qc, "_analysis_bca_upper_limit_hz", lambda: 3.6)
+    _patch_processing_harmonic_inputs(
+        rois=rois,
+        max_frequency_hz=3.6,
+        monkeypatch=monkeypatch,
+    )
     harmonic_selection_qc.run_processing_harmonic_selection_qc(Project.load(project_root))
     group_policy.clear_group_significant_selection_cache()
     dv_policies._DV_DATA_CACHE.clear()
@@ -946,6 +1078,64 @@ def test_group_significant_stats_worker_preflights_exact_columns_before_qc(
     group_policy.clear_group_significant_selection_cache()
 
 
+def test_managed_stats_worker_cache_miss_does_not_rebuild_harmonic_domain(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    messages: list[str] = []
+    summed_calls: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        stats_workers,
+        "_has_valid_project_group_harmonic_cache",
+        lambda **_kwargs: False,
+    )
+    monkeypatch.setattr(
+        stats_workers,
+        "preflight_group_significant_full_fft_columns",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("managed project rebuilt an independent harmonic domain")
+        ),
+    )
+    monkeypatch.setattr(
+        stats_workers,
+        "_apply_qc_screening",
+        lambda *, subjects, subject_data, **_kwargs: (
+            subjects,
+            subject_data,
+            None,
+        ),
+    )
+
+    def _summed(**kwargs):
+        summed_calls.append(kwargs)
+        return {"S1": {"C1": {"Posterior": 1.0}}}
+
+    monkeypatch.setattr(stats_workers, "prepare_summed_bca_data", _summed)
+
+    result = stats_workers._prepare_single_group_data(
+        subjects=["S1"],
+        conditions=["C1"],
+        conditions_all=["C1"],
+        subject_data={"S1": {}},
+        base_freq=10.0,
+        rois={"Posterior": ["Oz"]},
+        rois_all={"Posterior": ["Oz"]},
+        dv_policy={"name": GROUP_SIGNIFICANT_POLICY_NAME},
+        outlier_exclusion_enabled=False,
+        outlier_abs_limit=50.0,
+        qc_config={},
+        qc_state={},
+        manual_excluded_pids=[],
+        message_cb=messages.append,
+        max_freq=16.8,
+        project_root=str(tmp_path),
+    )
+
+    assert result[0] == ["S1"]
+    assert summed_calls[0]["max_freq"] is None
+    assert any("no independent FullFFT target list" in message for message in messages)
+
+
 def test_group_significant_policy_requires_exact_selected_bca_columns(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -996,14 +1186,46 @@ def _persist_processing_harmonics(
     max_frequency_hz: float,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(harmonic_selection_qc, "load_rois_from_settings", lambda: rois)
-    monkeypatch.setattr(harmonic_selection_qc, "_analysis_base_frequency_hz", lambda: 6.0)
-    monkeypatch.setattr(
-        harmonic_selection_qc,
-        "_analysis_bca_upper_limit_hz",
-        lambda: max_frequency_hz,
+    _patch_processing_harmonic_inputs(
+        rois=rois,
+        max_frequency_hz=max_frequency_hz,
+        monkeypatch=monkeypatch,
     )
     harmonic_selection_qc.run_processing_harmonic_selection_qc(Project.load(project_root))
+
+
+def _patch_processing_harmonic_inputs(
+    *,
+    rois: dict[str, list[str]],
+    max_frequency_hz: float,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(harmonic_selection_qc, "load_rois_from_settings", lambda: rois)
+    protocol = FrequencyProtocol.from_recurrence(
+        6,
+        5,
+        expected_analyzed_oddball_cycles=12,
+        expected_analyzed_oddball_cycles_source=EXPECTED_CYCLES_SOURCE_MANUAL,
+    )
+    monkeypatch.setattr(
+        harmonic_selection_qc,
+        "_current_project_frequency_protocol",
+        lambda _project, _root: protocol,
+    )
+    monkeypatch.setattr(
+        harmonic_selection_qc,
+        "_project_spectral_eligibility_domain",
+        lambda **_kwargs: ((), "", ()),
+    )
+    original_inputs = harmonic_selection_qc._processing_harmonic_selection_inputs
+    monkeypatch.setattr(
+        harmonic_selection_qc,
+        "_processing_harmonic_selection_inputs",
+        lambda *args, **kwargs: replace(
+            original_inputs(*args, **kwargs),
+            max_frequency_hz=max_frequency_hz,
+        ),
+    )
 
 
 def _write_stats_project_manifest(project_root: Path, *, high_pass: float = 0.1) -> None:

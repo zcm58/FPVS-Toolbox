@@ -10,6 +10,8 @@ import pytest
 from openpyxl import load_workbook
 
 from Main_App.processing import full_fft_provenance, harmonic_selection_qc
+from Main_App.processing.spectral_eligibility import resolve_spectral_eligibility
+from Main_App.projects.frequency_protocol import EXPECTED_CYCLES_SOURCE_MANUAL, FrequencyProtocol
 from Main_App.projects import Project
 from Tools.LORETA_Visualizer import stats_ready_workbook as stats_ready_workbook_mod
 from Tools.LORETA_Visualizer.source_producers.project_inputs import (
@@ -30,6 +32,14 @@ from Tools.Stats.data.group_harmonic_cache import (
 from Tools.Stats.io.stats_ready_export import HARMONIC_SELECTION_COLUMNS
 
 
+TEST_FREQUENCY_PROTOCOL = FrequencyProtocol.from_recurrence(
+    6,
+    5,
+    expected_analyzed_oddball_cycles=12,
+    expected_analyzed_oddball_cycles_source=EXPECTED_CYCLES_SOURCE_MANUAL,
+)
+
+
 @pytest.fixture(autouse=True)
 def _current_workbook_geometry(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
@@ -41,6 +51,11 @@ def _current_workbook_geometry(monkeypatch: pytest.MonkeyPatch) -> None:
         full_fft_provenance,
         "require_current_project_full_fft_provenance",
         lambda _root, *, dataset_index=None: object(),
+    )
+    monkeypatch.setattr(
+        harmonic_selection_qc,
+        "_current_project_frequency_protocol",
+        lambda _project, _root: TEST_FREQUENCY_PROTOCOL,
     )
 
 
@@ -73,6 +88,60 @@ def test_processing_harmonic_entry_rejects_legacy_geometry_before_workbook_math(
             SimpleNamespace(project_root=tmp_path)
         )
 
+
+def test_processing_spectral_domain_intersects_verified_workbook_eligibility(
+    tmp_path: Path,
+) -> None:
+    protocol = FrequencyProtocol.from_recurrence(
+        6,
+        5,
+        expected_analyzed_oddball_cycles=144,
+        expected_analyzed_oddball_cycles_source=EXPECTED_CYCLES_SOURCE_MANUAL,
+    )
+    paths = {
+        "S1": {"Faces": str(tmp_path / "S1.xlsx")},
+        "S2": {"Faces": str(tmp_path / "S2.xlsx")},
+    }
+    results = []
+    for subject, notch_centers in (("S1", ()), ("S2", (24,))):
+        result = resolve_spectral_eligibility(
+            protocol=protocol,
+            sampling_rate_hz=256,
+            analyzed_samples=30_720,
+            requested_high_pass_hz=0.1,
+            requested_low_pass_hz=50,
+            applied_high_pass_hz=0.1,
+            applied_low_pass_hz=50,
+            applied_notch_centers_hz=notch_centers,
+        )
+        results.append(result)
+        with pd.ExcelWriter(paths[subject]["Faces"], engine="openpyxl") as writer:
+            pd.DataFrame(result.to_rows()).to_excel(
+                writer,
+                sheet_name="Spectral Eligibility",
+                index=False,
+            )
+
+    orders, fingerprint, identities = (
+        harmonic_selection_qc._project_spectral_eligibility_domain(
+            protocol=protocol,
+            subjects=["S1", "S2"],
+            conditions=["Faces"],
+            subject_data=paths,
+            log_func=None,
+        )
+    )
+
+    assert 20 not in orders  # 24 Hz is deliberately notched in S2.
+    assert orders == tuple(
+        item.target.oddball_harmonic_order
+        for item in results[1].eligible_targets
+    )
+    assert len(fingerprint) == 64
+    assert identities == (
+        ("S1", "Faces", results[0].fingerprint),
+        ("S2", "Faces", results[1].fingerprint),
+    )
 
 def test_processing_harmonic_selection_qc_writes_quality_check_workbook_and_cache(
     tmp_path: Path,
@@ -107,8 +176,6 @@ def test_processing_harmonic_selection_qc_writes_quality_check_workbook_and_cach
         "load_rois_from_settings",
         lambda: {"Posterior": ["O1", "O2"], "Central": ["FZ"]},
     )
-    monkeypatch.setattr(harmonic_selection_qc, "_analysis_base_frequency_hz", lambda: 6.0)
-    monkeypatch.setattr(harmonic_selection_qc, "_analysis_bca_upper_limit_hz", lambda: 8.4)
 
     report = harmonic_selection_qc.run_processing_harmonic_selection_qc(project)
 
@@ -204,16 +271,6 @@ def test_processing_harmonic_selection_survives_project_event_order_reload(
         "load_rois_from_settings",
         lambda: {"Posterior": ["O1", "O2"], "Central": ["FZ"]},
     )
-    monkeypatch.setattr(
-        harmonic_selection_qc,
-        "_analysis_base_frequency_hz",
-        lambda: 6.0,
-    )
-    monkeypatch.setattr(
-        harmonic_selection_qc,
-        "_analysis_bca_upper_limit_hz",
-        lambda: 8.4,
-    )
 
     harmonic_selection_qc.run_processing_harmonic_selection_qc(live_project)
     reloaded_project = Project.load(project_root)
@@ -262,8 +319,6 @@ def test_processing_harmonic_selection_qc_uses_project_summation_settings(
         "load_rois_from_settings",
         lambda: {"Posterior": ["O1", "O2"], "Central": ["FZ"]},
     )
-    monkeypatch.setattr(harmonic_selection_qc, "_analysis_base_frequency_hz", lambda: 6.0)
-    monkeypatch.setattr(harmonic_selection_qc, "_analysis_bca_upper_limit_hz", lambda: 8.4)
 
     report = harmonic_selection_qc.run_processing_harmonic_selection_qc(project)
 
@@ -398,8 +453,6 @@ def test_processing_harmonic_selection_qc_resolves_relative_excel_subfolder(
         "load_rois_from_settings",
         lambda: {"Posterior": ["O1", "O2"], "Central": ["FZ"]},
     )
-    monkeypatch.setattr(harmonic_selection_qc, "_analysis_base_frequency_hz", lambda: 6.0)
-    monkeypatch.setattr(harmonic_selection_qc, "_analysis_bca_upper_limit_hz", lambda: 8.4)
 
     report = harmonic_selection_qc.run_processing_harmonic_selection_qc(project)
 
@@ -456,6 +509,11 @@ def test_processing_harmonic_inputs_omit_excluded_participant_condition(
         harmonic_selection_qc,
         "load_rois_from_settings",
         lambda: {"Posterior": ["O1", "O2"]},
+    )
+    monkeypatch.setattr(
+        harmonic_selection_qc,
+        "_project_spectral_eligibility_domain",
+        lambda **_kwargs: ((1,), "fixture-eligibility", ()),
     )
 
     inputs = harmonic_selection_qc._processing_harmonic_selection_inputs(project)
@@ -519,16 +577,6 @@ def test_processing_harmonic_selection_succeeds_after_grid_outlier_exclusion(
         "load_rois_from_settings",
         lambda: {"Posterior": ["O1", "O2"], "Central": ["FZ"]},
     )
-    monkeypatch.setattr(
-        harmonic_selection_qc,
-        "_analysis_base_frequency_hz",
-        lambda: 6.0,
-    )
-    monkeypatch.setattr(
-        harmonic_selection_qc,
-        "_analysis_bca_upper_limit_hz",
-        lambda: 8.4,
-    )
 
     report = harmonic_selection_qc.run_processing_harmonic_selection_qc(project)
 
@@ -580,17 +628,6 @@ def test_processing_record_persists_and_loads_every_profile(
         "load_rois_from_settings",
         lambda: {"Posterior": ["O1", "O2"], "Central": ["FZ"]},
     )
-    monkeypatch.setattr(
-        harmonic_selection_qc,
-        "_analysis_base_frequency_hz",
-        lambda: 6.0,
-    )
-    monkeypatch.setattr(
-        harmonic_selection_qc,
-        "_analysis_bca_upper_limit_hz",
-        lambda: 10.2,
-    )
-
     report = harmonic_selection_qc.run_processing_harmonic_selection_qc(project)
     loaded = harmonic_selection_qc.load_processing_harmonic_selection(project)
     manifest = json.loads(
@@ -645,8 +682,6 @@ def test_processing_selection_load_migrates_group_cache_only_project(
         "load_rois_from_settings",
         lambda: {"Posterior": ["O1", "O2"]},
     )
-    monkeypatch.setattr(harmonic_selection_qc, "_analysis_base_frequency_hz", lambda: 6.0)
-    monkeypatch.setattr(harmonic_selection_qc, "_analysis_bca_upper_limit_hz", lambda: 8.4)
     report = harmonic_selection_qc.run_processing_harmonic_selection_qc(project)
     manifest_path = project_root / "project.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -691,8 +726,6 @@ def test_processing_selection_record_rebases_with_copied_project(
         "load_rois_from_settings",
         lambda: {"Posterior": ["O1", "O2"]},
     )
-    monkeypatch.setattr(harmonic_selection_qc, "_analysis_base_frequency_hz", lambda: 6.0)
-    monkeypatch.setattr(harmonic_selection_qc, "_analysis_bca_upper_limit_hz", lambda: 8.4)
     harmonic_selection_qc.run_processing_harmonic_selection_qc(
         Project.load(project_root)
     )
@@ -793,8 +826,6 @@ def test_managed_fixed_summed_bca_uses_only_accepted_selection(
     )
     rois = {"Posterior": ["O1", "O2"]}
     monkeypatch.setattr(harmonic_selection_qc, "load_rois_from_settings", lambda: rois)
-    monkeypatch.setattr(harmonic_selection_qc, "_analysis_base_frequency_hz", lambda: 6.0)
-    monkeypatch.setattr(harmonic_selection_qc, "_analysis_bca_upper_limit_hz", lambda: 8.4)
     harmonic_selection_qc.run_processing_harmonic_selection_qc(project)
 
     # A caller cannot widen an accepted fixed domain ad hoc: the managed
@@ -877,8 +908,6 @@ def test_fixed_canonical_profile_drives_stats_ready_schema_and_downstream_reader
     )
     rois = {"Posterior": ["O1", "O2"]}
     monkeypatch.setattr(harmonic_selection_qc, "load_rois_from_settings", lambda: rois)
-    monkeypatch.setattr(harmonic_selection_qc, "_analysis_base_frequency_hz", lambda: 6.0)
-    monkeypatch.setattr(harmonic_selection_qc, "_analysis_bca_upper_limit_hz", lambda: 8.4)
     accepted = harmonic_selection_qc.run_processing_harmonic_selection_qc(project)
 
     class _Settings:
@@ -951,8 +980,6 @@ def test_managed_dv_cache_tracks_reaccepted_selection_and_workbook_identity(
     )
     rois = {"Posterior": ["O1", "O2"]}
     monkeypatch.setattr(harmonic_selection_qc, "load_rois_from_settings", lambda: rois)
-    monkeypatch.setattr(harmonic_selection_qc, "_analysis_base_frequency_hz", lambda: 6.0)
-    monkeypatch.setattr(harmonic_selection_qc, "_analysis_bca_upper_limit_hz", lambda: 8.4)
     dv_policies._DV_DATA_CACHE.clear()
     harmonic_selection_qc.run_processing_harmonic_selection_qc(project)
 
@@ -1014,11 +1041,11 @@ def _write_group_policy_workbook(
     path: Path,
     *,
     scale: int,
-    spacing_hz: float = 0.3,
+    spacing_hz: float = 0.1,
 ) -> None:
     frequency_values = [
         round(spacing_hz * idx, 4)
-        for idx in range(0, int(round(10.2 / spacing_hz)) + 1)
+        for idx in range(0, int(round(12.0 / spacing_hz)) + 1)
     ]
     fft_values = []
     for idx, freq in enumerate(frequency_values):
@@ -1047,3 +1074,18 @@ def _write_group_policy_workbook(
     with pd.ExcelWriter(path, engine="openpyxl") as writer:
         bca.to_excel(writer, sheet_name="BCA (uV)")
         full_fft.to_excel(writer, sheet_name="FullFFT Amplitude (uV)")
+        if spacing_hz == 0.1:
+            eligibility = resolve_spectral_eligibility(
+                protocol=TEST_FREQUENCY_PROTOCOL,
+                sampling_rate_hz=128,
+                analyzed_samples=1_280,
+                requested_high_pass_hz=0.1,
+                requested_low_pass_hz=11.0,
+                applied_high_pass_hz=0.1,
+                applied_low_pass_hz=11.0,
+            )
+            pd.DataFrame(eligibility.to_rows()).to_excel(
+                writer,
+                sheet_name="Spectral Eligibility",
+                index=False,
+            )
