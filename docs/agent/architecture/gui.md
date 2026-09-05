@@ -108,9 +108,16 @@ project-wide presentation/oddball protocol under Protocol, project-specific
 harmonic selection and summation under Harmonics, analysis defaults under
 Stats, ROI definitions under ROIs, project-owned review controls under
 Experimental, and app-level toggles such as Debug Mode and Beta Tools under
-Advanced. The Experimental tab hosts the explicit On/Off choice for the
-lab-calibrated automatic removed-electrode detector, its independently enabled
-manual removed-electrode lists, and the versioned summed-BCA screening limits.
+Advanced. Experimental uses three flat sub-tabs: **Electrodes** contains
+kurtosis interpolation, the explicit On/Off choice for the lab-calibrated
+automatic removed-electrode detector, and its independently enabled manual
+removed-electrode lists; **Raw-Spectral Review** contains the review switch
+and expandable read-only thresholds; **Summed-BCA Screening** contains the
+versioned review limits. Each section has its own vertical space within the
+supported workspace, including when raw-spectral details are expanded.
+Settings tab panes stay unframed around their section cards, and each main tab
+keeps Change Projects Root, Save, and Cancel on one bottom action row. Invalid
+summed-BCA input reveals its sub-tab before focusing the affected field.
 Advanced retains manual participant-level processing exclusions and shows
 read-only frequency-domain QC
 thresholds and active frequency-domain exclusions; changing manual
@@ -459,8 +466,17 @@ project with no cycle count cannot start processing; and verify a marker code
 matching a condition-onset code is rejected. Keep Qt execution in CI unless the
 user has approved a visible local Qt session.
 
-For Experimental-tab changes, open a project at 1280x900 and verify both cards
-and their Save/Cancel controls remain visible. Confirm automatic detection has
-only Off and On choices, manual lists can be edited and enabled independently,
-and all summed-BCA thresholds survive save and reopen. For an older project with
-no saved detector choice, saving another setting must leave the choice pending.
+For Experimental-tab changes, open a project at 1280x900 and visit all three
+Experimental sub-tabs. Confirm every label and threshold field is readable
+without clipping, including all eight read-only Raw-Spectral Advanced rows,
+and the bottom action row remains visible. Repeat with the supported display
+scaling settings on Windows and Linux. Confirm automatic detection has only
+Off and On choices, manual lists can be edited and enabled independently,
+and all eleven summed-BCA thresholds survive switching sub-tabs, Save, and
+reopen. Enter an invalid summed-BCA value, switch to Electrodes, and Save:
+after dismissing the warning, Summed-BCA Screening must be visible with the
+invalid field selected. For an older project with no saved detector choice,
+verify the prompt and warning fit, and saving another setting leaves the
+choice pending. Check Preprocessing, Protocol, Harmonics, Stats, ROIs, and
+Advanced retain their controls above the compact footer. Qt execution remains
+CI-only unless a safe visible local session is explicitly approved.

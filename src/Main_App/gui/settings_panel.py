@@ -270,6 +270,13 @@ class SettingsDialog(QDialog):
         layout = QVBoxLayout(self)
 
         self.tabs = QTabWidget()
+        self.tabs.setObjectName("settings_tabs")
+        self.tabs.setDocumentMode(True)
+        self.tabs.setStyleSheet(
+            "QTabWidget#settings_tabs::pane, "
+            "QTabWidget#settings_experimental_sections::pane {"
+            " border: none; background: transparent; }"
+        )
         layout.addWidget(self.tabs, 1)
 
         preproc_tab = self._init_preproc_tab(self.tabs)
@@ -299,7 +306,7 @@ class SettingsDialog(QDialog):
     def _add_settings_footer(self, tab: QWidget, layout: QVBoxLayout, object_name: str) -> None:
         footer = QWidget(tab)
         footer.setObjectName(object_name)
-        footer_layout = QVBoxLayout(footer)
+        footer_layout = QHBoxLayout(footer)
         footer_layout.setContentsMargins(0, 0, 0, 0)
         footer_layout.setSpacing(8)
 
@@ -307,6 +314,7 @@ class SettingsDialog(QDialog):
         change_root.setObjectName(f"{object_name}_change_root")
         change_root.clicked.connect(lambda: changeProjectsRoot(self))
         footer_layout.addWidget(change_root)
+        footer_layout.addStretch(1)
         if not hasattr(self, "btn_changeRoot"):
             self.btn_changeRoot = change_root
 
@@ -1217,6 +1225,36 @@ class SettingsDialog(QDialog):
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(10)
 
+        # Give each review stage its own page so threshold grids and expanded
+        # details do not compete for the embedded workspace's vertical space.
+        self.experimental_tabs = QTabWidget(tab)
+        self.experimental_tabs.setObjectName("settings_experimental_sections")
+        self.experimental_tabs.setDocumentMode(True)
+        layout.addWidget(self.experimental_tabs, 1)
+
+        electrodes_page = QWidget()
+        electrodes_page.setObjectName("settings_experimental_electrodes_page")
+        electrodes_layout = QVBoxLayout(electrodes_page)
+        electrodes_layout.setContentsMargins(0, 12, 0, 0)
+        electrodes_layout.setSpacing(10)
+        self.experimental_tabs.addTab(electrodes_page, "Electrodes")
+
+        raw_spectral_page = QWidget()
+        raw_spectral_page.setObjectName("settings_experimental_raw_spectral_page")
+        raw_spectral_layout = QVBoxLayout(raw_spectral_page)
+        raw_spectral_layout.setContentsMargins(0, 12, 0, 0)
+        raw_spectral_layout.setSpacing(10)
+        self.experimental_tabs.addTab(raw_spectral_page, "Raw-Spectral Review")
+
+        summed_bca_page = QWidget()
+        summed_bca_page.setObjectName("settings_experimental_summed_bca_page")
+        summed_bca_layout = QVBoxLayout(summed_bca_page)
+        summed_bca_layout.setContentsMargins(0, 12, 0, 0)
+        summed_bca_layout.setSpacing(10)
+        self._experimental_summed_bca_tab_index = self.experimental_tabs.addTab(
+            summed_bca_page, "Summed-BCA Screening"
+        )
+
         if self.project is not None:
             qc_preproc = self._project_preprocessing()
             experimental_settings = self.project.experimental_qc_settings
@@ -1234,7 +1272,7 @@ class SettingsDialog(QDialog):
             experimental_settings = ExperimentalQcSettings()
 
         self.kurtosis_auto_interpolate_all_check = QCheckBox(
-            "Auto interpolate all kurtosis flags (experimental)", tab,
+            "Auto interpolate all kurtosis flags (experimental)", electrodes_page,
         )
         self.kurtosis_auto_interpolate_all_check.setObjectName(
             "settings_kurtosis_auto_interpolate_all"
@@ -1247,7 +1285,7 @@ class SettingsDialog(QDialog):
             "configured absolute normalized-score threshold. Off: use the kurtosis "
             "review dialog. Invalid statistics still need review."
         )
-        layout.addWidget(self.kurtosis_auto_interpolate_all_check)
+        electrodes_layout.addWidget(self.kurtosis_auto_interpolate_all_check)
 
         removed_detection_mode = normalize_removed_electrode_detection_mode(
             qc_preproc.get("removed_electrode_detection_mode"),
@@ -1279,7 +1317,7 @@ class SettingsDialog(QDialog):
         )
         detector_card = SectionCard(
             "Experimental Removed-Electrode Detection",
-            tab,
+            electrodes_page,
             object_name="settings_experimental_removed_electrode_card",
         )
         detector_text = QLabel(
@@ -1447,12 +1485,13 @@ class SettingsDialog(QDialog):
         )
         self._sync_removed_electrode_detection_checkbox()
         self._refresh_removed_electrode_detection_status()
-        layout.addWidget(detector_card)
+        electrodes_layout.addWidget(detector_card)
+        electrodes_layout.addStretch(1)
 
         raw_spectral = experimental_settings.raw_spectral_screening
         raw_spectral_card = SectionCard(
             "Experimental Raw-Spectral Review",
-            tab,
+            raw_spectral_page,
             object_name="settings_experimental_raw_spectral_card",
         )
         self.raw_spectral_explanation_label = QLabel(
@@ -1505,6 +1544,9 @@ class SettingsDialog(QDialog):
         )
         raw_spectral_grid = QGridLayout(self.raw_spectral_advanced_values)
         raw_spectral_grid.setContentsMargins(0, 0, 0, 0)
+        raw_spectral_grid.setHorizontalSpacing(16)
+        raw_spectral_grid.setVerticalSpacing(8)
+        raw_spectral_grid.setColumnStretch(1, 1)
         raw_spectral_specs = (
             ("Lower screen boundary", f"{raw_spectral.minimum_frequency_hz:g} Hz"),
             (
@@ -1536,7 +1578,9 @@ class SettingsDialog(QDialog):
         self.raw_spectral_advanced_value_labels: dict[str, QLabel] = {}
         for row, (name, value) in enumerate(raw_spectral_specs):
             name_label = QLabel(f"{name}:", self.raw_spectral_advanced_values)
+            name_label.setWordWrap(True)
             value_label = QLabel(str(value), self.raw_spectral_advanced_values)
+            value_label.setWordWrap(True)
             key = name.casefold().replace(" ", "_")
             value_label.setObjectName(f"settings_raw_spectral_{key}_value")
             value_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
@@ -1550,12 +1594,13 @@ class SettingsDialog(QDialog):
         raw_spectral_card.content_layout.addWidget(
             self.raw_spectral_advanced_values
         )
-        layout.addWidget(raw_spectral_card)
+        raw_spectral_layout.addWidget(raw_spectral_card)
+        raw_spectral_layout.addStretch(1)
 
         screening = experimental_settings.summed_bca_screening
         summed_bca_card = SectionCard(
             "Experimental Summed-BCA Screening",
-            tab,
+            summed_bca_page,
             object_name="settings_experimental_summed_bca_card",
         )
         self.summed_bca_explanation_label = QLabel(
@@ -1667,7 +1712,8 @@ class SettingsDialog(QDialog):
             summed_bca_card,
         )
         summed_bca_card.content_layout.addLayout(cohort_grid)
-        layout.addWidget(summed_bca_card)
+        summed_bca_layout.addWidget(summed_bca_card)
+        summed_bca_layout.addStretch(1)
 
         project_controls_enabled = self.project is not None
         for control in (
@@ -1688,7 +1734,6 @@ class SettingsDialog(QDialog):
             )
             self.removed_electrode_detection_status.setVisible(True)
 
-        layout.addStretch(1)
         self._add_settings_footer(
             tab,
             layout,
@@ -1703,6 +1748,8 @@ class SettingsDialog(QDialog):
         specs: tuple[tuple[str, str, object], ...],
         parent: QWidget,
     ) -> None:
+        grid.setHorizontalSpacing(16)
+        grid.setVerticalSpacing(8)
         for index, (field_name, label_text, value) in enumerate(specs):
             row = index // 2
             column = (index % 2) * 2
@@ -1710,7 +1757,11 @@ class SettingsDialog(QDialog):
             edit.setObjectName(f"settings_summed_bca_{field_name}")
             edit.setText(str(value))
             edit.setMaximumWidth(120)
-            grid.addWidget(QLabel(label_text, parent), row, column)
+            edit.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+            label = QLabel(label_text, parent)
+            label.setWordWrap(True)
+            label.setBuddy(edit)
+            grid.addWidget(label, row, column)
             grid.addWidget(edit, row, column + 1)
             self.summed_bca_threshold_edits[field_name] = edit
         grid.setColumnStretch(1, 1)
@@ -3695,6 +3746,9 @@ class SettingsDialog(QDialog):
         except ExperimentalQcSettingsError as exc:
             QMessageBox.warning(self, "Invalid Experimental Settings", str(exc))
             self.tabs.setCurrentIndex(self._experimental_tab_index)
+            self.experimental_tabs.setCurrentIndex(
+                self._experimental_summed_bca_tab_index
+            )
             message = str(exc).casefold()
             for field_name, edit in self.summed_bca_threshold_edits.items():
                 if field_name.casefold() in message:

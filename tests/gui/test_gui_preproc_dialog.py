@@ -8,8 +8,20 @@ import pytest
 if importlib.util.find_spec("PySide6") is None or importlib.util.find_spec("pytestqt") is None:
     pytest.skip("PySide6 or pytest-qt not available", allow_module_level=True)
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication, QDialog, QLabel, QLineEdit, QMessageBox, QPushButton, QSizePolicy, QWidget
+from PySide6.QtCore import QPoint, QRect, Qt
+from PySide6.QtWidgets import (
+    QAbstractButton,
+    QApplication,
+    QComboBox,
+    QDialog,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QPushButton,
+    QSizePolicy,
+    QVBoxLayout,
+    QWidget,
+)
 
 from Main_App.Shared.settings_manager import SettingsManager
 from Main_App.projects import (
@@ -28,6 +40,7 @@ from Main_App.gui.recording_qc_identity import QcRecordingIdentity
 from Main_App.gui import processing_inputs
 from Main_App.gui.components import ActionRow, SectionCard, SubsectionHeaderLabel
 from Main_App.gui.style_tokens import EVENT_REMOVE_BUTTON_SIZE
+from Main_App.gui.theme import apply_fpvs_theme
 from Main_App.processing.processing_controller import RawFileInfo
 import Main_App.gui.settings_panel as settings_panel
 from Main_App.gui.settings_panel import SettingsDialog
@@ -710,6 +723,155 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
     assert actions is not None
     assert actions.row_layout.indexOf(panel.ok_btn) >= 0
     assert actions.row_layout.indexOf(panel.cancel_btn) >= 0
+
+
+@pytest.fixture
+def experimental_settings_page(tmp_path, qtbot):
+    project = _prep_project(tmp_path)
+    manifest_path = project.project_root / "project.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    for key in REMOVED_ELECTRODE_DETECTION_CHOICE_CANONICAL_KEYS:
+        manifest["preprocessing"].pop(key, None)
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    project = Project.load(project.project_root)
+
+    app = QApplication.instance() or QApplication([])
+    previous_stylesheet = app.styleSheet()
+    previous_font = app.font()
+    previous_palette = app.palette()
+    previous_style = app.style().objectName()
+    host = QWidget()
+    qtbot.addWidget(host)
+    try:
+        apply_fpvs_theme(app)
+        # This is the settings area inside the supported 1280 x 900 shell.
+        # A fixed host prevents a large minimum size from hiding overflow by
+        # silently enlarging the test window.
+        host.setFixedSize(1000, 780)
+        layout = QVBoxLayout(host)
+        layout.setContentsMargins(0, 0, 0, 0)
+        manager = SettingsManager(str(tmp_path / "settings.ini"))
+        page = settings_panel.EmbeddedSettingsPage(manager, host, project)
+        layout.addWidget(page)
+        page.tabs.setCurrentIndex(page._experimental_tab_index)
+        host.show()
+        qtbot.waitExposed(host)
+        yield page
+    finally:
+        host.close()
+        app.setStyle(previous_style)
+        app.setFont(previous_font)
+        app.setPalette(previous_palette)
+        app.setStyleSheet(previous_stylesheet)
+
+
+def test_experimental_sections_fit_embedded_workspace(experimental_settings_page, qtbot):
+    page = experimental_settings_page
+    host = page.parentWidget()
+    sections = page.experimental_tabs
+    assert [sections.tabText(index) for index in range(sections.count())] == [
+        "Electrodes",
+        "Raw-Spectral Review",
+        "Summed-BCA Screening",
+    ]
+
+    def assert_unclipped(widget):
+        name = widget.objectName() or type(widget).__name__
+        assert widget.isVisibleTo(host), name
+        minimum_height = widget.minimumSizeHint().height()
+        if isinstance(widget, QLabel) and widget.wordWrap():
+            minimum_height = max(minimum_height, widget.heightForWidth(widget.width()))
+        assert widget.height() >= minimum_height, name
+        if isinstance(widget, (QLineEdit, QComboBox, QAbstractButton)):
+            assert widget.width() >= widget.minimumSizeHint().width(), name
+        ancestor = widget.parentWidget()
+        while ancestor is not None:
+            bounds = QRect(widget.mapTo(ancestor, QPoint(0, 0)), widget.size())
+            assert ancestor.rect().contains(bounds), (name, ancestor.objectName())
+            if ancestor is host:
+                break
+            ancestor = ancestor.parentWidget()
+
+    expected_controls = (
+        (
+            page.kurtosis_auto_interpolate_all_check,
+            page.removed_electrode_detection_mode_combo,
+            page.removed_electrode_detection_info_button,
+            page.manual_removed_electrodes_enabled_check,
+            page.manual_removed_electrodes_button,
+            page.removed_electrode_detection_status,
+        ),
+        (
+            page.raw_spectral_screening_enabled_check,
+            page.raw_spectral_advanced_toggle,
+            *page.raw_spectral_advanced_value_labels.values(),
+        ),
+        (
+            page.summed_bca_screening_enabled_check,
+            *page.summed_bca_threshold_edits.values(),
+        ),
+    )
+    assert page.removed_electrode_detection_mode_combo.currentData() is None
+    assert len(page.raw_spectral_advanced_value_labels) == 8
+    assert len(page.summed_bca_threshold_edits) == 11
+
+    for index, controls in enumerate(expected_controls):
+        sections.setCurrentIndex(index)
+        section = sections.currentWidget()
+        qtbot.waitUntil(lambda: section.isVisibleTo(host))
+        if index == 1:
+            assert page.raw_spectral_advanced_values.isHidden()
+            qtbot.mouseClick(page.raw_spectral_advanced_toggle, Qt.LeftButton)
+            qtbot.waitUntil(page.raw_spectral_advanced_values.isVisible)
+        QApplication.processEvents()
+        for control in controls:
+            assert section.isAncestorOf(control)
+            assert_unclipped(control)
+        for widget in section.findChildren(QWidget):
+            if widget.isVisibleTo(host) and isinstance(
+                widget, (QLabel, QLineEdit, QComboBox, QAbstractButton)
+            ):
+                assert_unclipped(widget)
+
+        footer = page.findChild(QWidget, "settings_experimental_footer")
+        assert footer is not None
+        buttons = {button.text(): button for button in footer.findChildren(QPushButton)}
+        assert set(buttons) == {"Change Projects Root...", "Save", "Cancel"}
+        for button in buttons.values():
+            assert_unclipped(button)
+        root_bounds = QRect(
+            buttons["Change Projects Root..."].mapTo(footer, QPoint(0, 0)),
+            buttons["Change Projects Root..."].size(),
+        )
+        save_bounds = QRect(
+            buttons["Save"].mapTo(footer, QPoint(0, 0)), buttons["Save"].size()
+        )
+        assert root_bounds.right() < save_bounds.left()
+        assert root_bounds.top() <= save_bounds.center().y() <= root_bounds.bottom()
+
+
+def test_invalid_experimental_threshold_reveals_its_section(
+    experimental_settings_page, qtbot, monkeypatch
+):
+    page = experimental_settings_page
+    page.experimental_tabs.setCurrentIndex(0)
+    edit = page.summed_bca_threshold_edits["warning_summed_bca_uv"]
+    edit.setText("not-a-number")
+    warnings = []
+    monkeypatch.setattr(
+        QMessageBox,
+        "warning",
+        lambda _parent, title, message: warnings.append((title, message)),
+    )
+
+    assert page._validated_experimental_qc_settings() is None
+
+    assert warnings and warnings[0][0] == "Invalid Experimental Settings"
+    assert "warning_summed_bca_uv" in warnings[0][1]
+    assert page.experimental_tabs.currentWidget().isAncestorOf(edit)
+    assert edit.isVisibleTo(page)
+    qtbot.waitUntil(edit.hasFocus)
+    assert edit.selectedText() == "not-a-number"
 
 
 def test_harmonic_setting_change_after_processing_prompts_recalculation(
