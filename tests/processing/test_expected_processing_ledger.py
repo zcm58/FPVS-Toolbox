@@ -392,8 +392,10 @@ def test_current_recording_exclusion_is_planned_without_marker_or_workbook(
     )
 
 
+@pytest.mark.parametrize("has_condition_input", [True, False])
 def test_current_condition_exclusion_preserves_occurrences_but_plans_no_output(
     tmp_path: Path,
+    has_condition_input: bool,
 ) -> None:
     event_map = {"Condition A": 1, "Condition B": 2}
     processing_plan = _processing_plan(tmp_path, event_map=event_map)
@@ -404,11 +406,8 @@ def test_current_condition_exclusion_preserves_occurrences_but_plans_no_output(
             [10, 0, 55],
             [20, 0, 55],
             [30, 0, 55],
-            [50, 0, 2],
-            [60, 0, 55],
-            [70, 0, 55],
-            [80, 0, 55],
-        ],
+        ] + ([[50, 0, 2], [60, 0, 55], [70, 0, 55], [80, 0, 55]]
+             if has_condition_input else []),
     )
 
     expected = build_expected_recording_condition_plan(
@@ -429,11 +428,17 @@ def test_current_condition_exclusion_preserves_occurrences_but_plans_no_output(
     assert retained.planned_workbook_requirement == EXPECTED_WORKBOOK_REQUIRED
     assert excluded.planned_cell_action == EXPECTED_CELL_ACTION_EXCLUDE_CONDITION
     assert excluded.planned_workbook_requirement == EXPECTED_WORKBOOK_NOT_REQUIRED
-    assert excluded.planned_occurrence_count == 1
+    assert excluded.planned_occurrence_count == int(has_condition_input)
     assert excluded.planned_contributing_occurrence_count == 0
-    assert excluded.planned_excluded_occurrence_count == 1
+    assert excluded.planned_excluded_occurrence_count == int(has_condition_input)
     assert excluded.no_output_decision is not None
     assert excluded.no_output_decision["decision"] == "exclude_condition"
+    from Main_App.processing.recording_condition_outcomes import reconcile_recording_condition_outputs
+
+    outcomes = reconcile_recording_condition_outputs(expected, [])
+    assert outcomes.cells[1].status == "excluded"
+    assert outcomes.cells[1].contributor_count == 0
+    assert outcomes.cells[0].status == "blocked"  # Other cells still require valid outputs.
 
 def test_expected_matrix_rejects_stale_protocol_and_span_evidence(tmp_path: Path) -> None:
     event_map = {"Condition A": 1}

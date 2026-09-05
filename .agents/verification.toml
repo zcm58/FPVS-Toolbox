@@ -56,6 +56,8 @@ tests = [
   "tests/processing/test_filter_downsample_order.py",
   "tests/processing/test_processing_full_fft_provenance.py",
   "tests/processing/test_full_fft_grid_qc.py",
+  "tests/processing/test_missing_condition_outputs.py",
+  "tests/processing/test_expected_processing_ledger.py",
   "tests/processing/test_frequency_domain_qc.py",
   "tests/processing/test_harmonic_selection_qc.py",
   "tests/processing/test_pipeline_speed_safety.py",

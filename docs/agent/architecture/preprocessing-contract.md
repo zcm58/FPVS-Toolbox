@@ -122,6 +122,15 @@ participant-condition exclusions. Valid tied grids are shown without an
 automatic choice, and recalculation remains blocked until the proposed included
 cohort has exactly one valid FFT grid.
 
+The same review also exposes fingerprint-matched, zero-occurrence missing
+condition cells from the last processing outcome, using current canonical
+project identities. These are separate review-only rows, initially unchecked,
+and never enter FFT-grid observations or reference calculations. Whole-recording
+technical exclusions and failed/deleted output artifacts are not condition
+choices. Changed missing-condition exclusions require rerunning Processing;
+Settings must not resume harmonic selection or post-processing against the old
+outcome ledger. This review reuses the existing worker-side ledger read.
+
 Epoch building in the process runner must preserve locked FFT crop behavior.
 When valid `55_onbin` repetition crops exist for a condition, those repetitions
 must keep `N % N_step == 0` and metadata `N_mod_step == 0`. Do not downgrade

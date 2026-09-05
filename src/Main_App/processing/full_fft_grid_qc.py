@@ -22,6 +22,10 @@ from Main_App.processing.frequency_domain_qc import (
     active_frequency_domain_exclusions,
 )
 from Main_App.processing.processing_ledger import load_ledger
+from Main_App.processing.missing_condition_outputs import (
+    MissingConditionOutput,
+    missing_condition_output_rows,
+)
 from Main_App.projects import WorkbookRecord, load_project_dataset_index
 from Main_App.projects.frequency_protocol import (
     FrequencyProtocol,
@@ -82,6 +86,12 @@ class FullFftGridAudit:
     oddball_frequency_hz: float
     frequency_protocol_fingerprint: str = ""
     method_version: str = FULL_FFT_GRID_QC_METHOD_VERSION
+    missing_condition_outputs: tuple[MissingConditionOutput, ...] = ()
+
+    @property
+    def review_rows(self) -> tuple[MissingConditionOutput | FullFftGridObservation, ...]:
+        """Missing outputs are choices to review, never members of the FFT grid."""
+        return (*self.missing_condition_outputs, *self.observations)
 
     def __post_init__(self) -> None:
         oddball_frequency_hz = float(self.oddball_frequency_hz)
@@ -184,9 +194,12 @@ def audit_project_full_fft_grids(
     root = Path(project_root).resolve(strict=False)
     dataset_index = load_project_dataset_index(root)
     protocol = _require_project_frequency_protocol(dataset_index.manifest)
+    ledger = load_ledger(root)
+    exclusions = active_frequency_domain_exclusions(root)
     active_paths = _harmonic_active_workbook_paths(
-        root,
         dataset_index.workbooks,
+        ledger=ledger,
+        excluded_participants=exclusions.excluded_participants,
     )
     active_records = tuple(
         record
@@ -224,6 +237,21 @@ def audit_project_full_fft_grids(
     )
     support = sum(cycles == reference for cycles in active_valid_cycles)
     total = len(active_valid_cycles)
+    from Main_App.projects import (
+        normalize_manual_excluded_participants,
+        normalize_manual_excluded_recordings,
+    )
+
+    preprocessing = (dataset_index.manifest or {}).get("preprocessing") or {}
+    missing_rows = missing_condition_output_rows(
+        dataset_index, ledger,
+        excluded_participants=tuple(exclusions.excluded_participants) + tuple(
+            normalize_manual_excluded_participants(preprocessing.get("manual_excluded_participants"))
+        ),
+        excluded_recordings=tuple(exclusions.excluded_recordings) + tuple(
+            normalize_manual_excluded_recordings(preprocessing.get("manual_excluded_recordings"))
+        ),
+    )
     return FullFftGridAudit(
         observations=observations,
         reference_oddball_cycles=reference,
@@ -231,6 +259,7 @@ def audit_project_full_fft_grids(
         reference_total=total,
         oddball_frequency_hz=float(protocol.oddball_rate_hz),
         frequency_protocol_fingerprint=protocol.fingerprint,
+        missing_condition_outputs=missing_rows,
     )
 
 
@@ -262,13 +291,14 @@ def _require_project_frequency_protocol(
 
 
 def _harmonic_active_workbook_paths(
-    project_root: Path,
     records: Sequence[WorkbookRecord],
+    *,
+    ledger: Mapping,
+    excluded_participants: Sequence[str],
 ) -> set[Path]:
     """Mirror the participant-level cohort filters used by harmonic selection."""
 
     completed_identities: set[str] = set()
-    ledger = load_ledger(project_root)
     entries = ledger.get("entries") if isinstance(ledger, Mapping) else None
     if isinstance(entries, Mapping):
         completed_identities = {
@@ -280,9 +310,7 @@ def _harmonic_active_workbook_paths(
         }
     excluded_participants = {
         str(participant_id).strip().casefold()
-        for participant_id in active_frequency_domain_exclusions(
-            project_root
-        ).excluded_participants
+        for participant_id in excluded_participants
         if str(participant_id).strip()
     }
     return {

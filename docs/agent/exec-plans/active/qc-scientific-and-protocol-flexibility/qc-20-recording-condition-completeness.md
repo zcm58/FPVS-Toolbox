@@ -102,6 +102,28 @@ clean.
 
 ## Owners and Acceptance
 
+### Missing-condition recovery (2026-09-05)
+
+Settings → Harmonics → Review FFT Crop Exclusions also shows **No condition
+output** rows when the last Processing run planned zero occurrences and reported
+`condition_input`. Users may explicitly exclude that condition or restore a
+complete source recording, then rerun Processing before post-processing. Missing
+start markers cannot be reconstructed. New missing rows start unchecked; prior
+condition exclusions remain editable. Whole-recording exclusions, removed project
+identities, write failures, and missing previously written files are not offered
+as absent-source condition choices. Review-only rows have no synthetic workbook
+or FFT grid and never affect grid reference/compatibility arithmetic. Saving
+choices preserves the existing invalidation path; it does not update readiness
+or bypass the processing outcome gate.
+
+Backend/AST coverage: `test_missing_condition_outputs.py` and the zero-occurrence
+case in `test_expected_processing_ledger.py`. Visible manual smoke (Qt is
+CI-only locally): open the review after a missing-input run; confirm the missing
+row is unchecked, check only its condition, save, and verify rerun guidance with
+no automatic post-processing. Rerun Processing and confirm the explicit exclusion
+is accounted for while other conditions retain their normal output requirements.
+Reopen to verify the saved exclusion, and cancel a change to verify it persists.
+
 Primary owners are `processing/processing_ledger.py` for the expected matrix
 and states; `Performance/process_runner.py` for occurrence outcomes;
 `Shared/post_process.py`, `exports/post_export_adapter.py`, and

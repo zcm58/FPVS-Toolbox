@@ -62,6 +62,7 @@ from Main_App.gui.recording_qc_identity import project_recording_coverage_rows
 from Main_App.gui.roi_settings_editor import ROISettingsEditor
 from Main_App.processing.processing_controller import prepare_batch_file_infos
 from Main_App.processing.processing_ledger import load_ledger
+from Main_App.processing.missing_condition_outputs import missing_output_exclusions_changed
 from Main_App.processing.frequency_domain_qc import (
     active_frequency_domain_exclusions,
     clear_manual_frequency_domain_participant_exclusions,
@@ -1062,7 +1063,7 @@ class SettingsDialog(QDialog):
         )
         self.review_condition_exclusions_button.setToolTip(
             "Check processed FullFFT grids and exclude selected participant-condition "
-            "pairs from downstream analyses."
+            "pairs, including conditions with no input in the last Processing run."
         )
         self.review_condition_exclusions_button.setEnabled(self.project is not None)
         self.review_condition_exclusions_button.clicked.connect(
@@ -2909,8 +2910,10 @@ class SettingsDialog(QDialog):
             nonlocal activity_handed_off
             nonlocal resume_frequency_postprocessing_after_release
             candidates = tuple(getattr(audit, "review_candidates", ()) or ())
+            missing_outputs = tuple(getattr(audit, "missing_condition_outputs", ()) or ())
             should_open = (
                 bool(candidates)
+                or bool(missing_outputs)
                 or bool(
                     getattr(audit, "has_unresolved_grid_conflict", False)
                 )
@@ -2919,7 +2922,7 @@ class SettingsDialog(QDialog):
             recording_review = any(
                 str(getattr(observation, "recording_id", "") or "").strip()
                 for observation in (
-                    getattr(audit, "observations", ()) or candidates
+                    (*missing_outputs, *getattr(audit, "observations", ())) or candidates
                 )
             )
             accepted = True
@@ -2965,7 +2968,14 @@ class SettingsDialog(QDialog):
                     "warning",
                 )
                 return
-            if recalculate_after:
+            needs_processing = any(row.requires_processing for row in missing_outputs) or (
+                missing_output_exclusions_changed(
+                    missing_outputs,
+                    current_exclusions, proposed_exclusions,
+                    current_recording_exclusions, proposed_recording_exclusions,
+                )
+            )
+            if recalculate_after and not needs_processing:
                 compatible = (
                     audit.is_compatible_with_exclusions(
                         proposed_exclusions,
@@ -3010,6 +3020,19 @@ class SettingsDialog(QDialog):
                 invalidate_outputs=True,
             ):
                 self._restore_harmonic_settings_after_cancel()
+                return
+            if needs_processing:
+                self._clear_harmonic_settings_rollback()
+                self._set_harmonic_recalculation_status(
+                    (
+                        "Condition exclusions saved. Rerun Processing after restoring "
+                        "missing condition data or confirming its exclusion."
+                        if exclusions_changed else
+                        "Missing condition inputs still need review. Restore complete source "
+                        "data or explicitly exclude those conditions, then rerun Processing."
+                    ),
+                    "warning",
+                )
                 return
             if recalculate_after:
                 if exclusions_changed:

@@ -21,6 +21,7 @@ from Main_App.processing.full_fft_grid_qc import (
     FullFftGridAudit,
     FullFftGridObservation,
 )
+from Main_App.processing.missing_condition_outputs import MissingConditionOutput
 from Main_App.projects.preprocessing_settings import (
     normalize_manual_excluded_participant_conditions,
     normalize_manual_excluded_recording_conditions,
@@ -43,7 +44,7 @@ class ParticipantConditionExclusionsDialog(QDialog):
     ) -> None:
         super().__init__(parent)
         self._audit = audit
-        self._observations = audit.observations
+        self._observations = audit.review_rows
         self.setWindowTitle("Participant-Condition FFT Crop Exclusions")
         self.setObjectName("participant_condition_exclusions_dialog")
         self._recording_aware = any(
@@ -103,6 +104,15 @@ class ParticipantConditionExclusionsDialog(QDialog):
         )
         prompt.setWordWrap(True)
         layout.addWidget(prompt)
+        if audit.missing_condition_outputs:
+            missing_prompt = QLabel(
+                "No condition output: the last Processing run found no condition input. "
+                "Missing start markers cannot be reconstructed. Check a row only to "
+                "exclude that condition, then rerun Processing before post-processing.",
+                self,
+            )
+            missing_prompt.setWordWrap(True)
+            layout.addWidget(missing_prompt)
 
         if self._recording_aware:
             headers = (
@@ -162,7 +172,7 @@ class ParticipantConditionExclusionsDialog(QDialog):
                     observation.condition,
                     _observed_grid_text(observation),
                     _grid_status_text(observation, audit),
-                    observation.path.name,
+                    "No workbook" if isinstance(observation, MissingConditionOutput) else observation.path.name,
                 )
             else:
                 values = (
@@ -171,7 +181,7 @@ class ParticipantConditionExclusionsDialog(QDialog):
                     observation.condition,
                     _observed_grid_text(observation),
                     _grid_status_text(observation, audit),
-                    observation.path.name,
+                    "No workbook" if isinstance(observation, MissingConditionOutput) else observation.path.name,
                 )
             for column, value in enumerate(values):
                 item = QTableWidgetItem(value)
@@ -186,7 +196,10 @@ class ParticipantConditionExclusionsDialog(QDialog):
             should_check = participant_pair in existing_pairs or (
                 recording_pair is not None
                 and recording_pair in existing_recording_pairs
-            ) or observation.pair_key in candidate_pairs
+            ) or (
+                not isinstance(observation, MissingConditionOutput)
+                and observation.pair_key in candidate_pairs
+            )
             exclude_item.setCheckState(Qt.Checked if should_check else Qt.Unchecked)
             self.table.setItem(row, self._exclude_column, exclude_item)
             if self._recording_aware and self._scope_column is not None:
@@ -283,7 +296,9 @@ class ParticipantConditionExclusionsDialog(QDialog):
         return _SCOPE_RECORDING
 
 
-def _observed_grid_text(observation: FullFftGridObservation) -> str:
+def _observed_grid_text(observation: FullFftGridObservation | MissingConditionOutput) -> str:
+    if isinstance(observation, MissingConditionOutput):
+        return "—"
     if observation.duration_s is None or observation.oddball_cycles is None:
         return "Unavailable"
     return (
@@ -293,9 +308,11 @@ def _observed_grid_text(observation: FullFftGridObservation) -> str:
 
 
 def _grid_status_text(
-    observation: FullFftGridObservation,
+    observation: FullFftGridObservation | MissingConditionOutput,
     audit: FullFftGridAudit,
 ) -> str:
+    if isinstance(observation, MissingConditionOutput):
+        return "No condition output"
     if observation.issue:
         return observation.issue
     if audit.reference_oddball_cycles is None:
