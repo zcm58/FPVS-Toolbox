@@ -311,12 +311,17 @@ def _capture_workbook_identity(
                 if not chunk:
                     break
                 digest.update(chunk)
-        # The workbook manifest binds selected compact metrics to its spectral
-        # companion. Validate that artifact even though scalp values stay XLSX.
+        # Validate the compact metric values and their original spectral source.
+        from Main_App.io.condition_data import condition_companion_identity
         from Main_App.io.spectral_data import spectral_companion_identity
 
         companion = (
             spectral_companion_identity(workbook.path)
+            if zipfile.is_zipfile(workbook.path)
+            else None
+        )
+        condition_companion = (
+            condition_companion_identity(workbook.path)
             if zipfile.is_zipfile(workbook.path)
             else None
         )
@@ -340,6 +345,7 @@ def _capture_workbook_identity(
         size_bytes=after_signature[2],
         mtime_ns=after_signature[3],
         spectral_companion=companion,
+        condition_companion=condition_companion,
     )
 
 
@@ -360,6 +366,7 @@ def verify_publication_workbooks_unchanged(
             or current.size_bytes != workbook.size_bytes
             or current.mtime_ns != workbook.mtime_ns
             or current.spectral_companion != workbook.spectral_companion
+            or current.condition_companion != workbook.condition_companion
         ):
             raise PublicationMapInputError(
                 f"Active workbook changed while Scalp Maps data were being read: "

@@ -423,16 +423,22 @@ def _validate_written_receipt(
             recorded_artifact
         ):
             reasons.append("workbook_artifact_not_current")
-        companion = workbook_write.get("spectral_companion")
-        if companion is not None:
-            from Main_App.io.spectral_data import spectral_companion_identity
+        from Main_App.io.condition_data import condition_companion_identity
+        from Main_App.io.spectral_data import spectral_companion_identity
 
+        for key, reader in (
+            ("spectral_companion", spectral_companion_identity),
+            ("condition_companion", condition_companion_identity),
+        ):
+            if key not in workbook_write:
+                continue  # Historical workbook-only receipts remain valid.
+            companion = workbook_write[key]
             try:
-                actual_companion = spectral_companion_identity(expected_path)
+                actual_companion = reader(expected_path)
                 if not isinstance(companion, Mapping) or actual_companion != dict(companion):
-                    reasons.append("spectral_companion_not_current")
+                    reasons.append(f"{key}_not_current")
             except (OSError, ValueError):
-                reasons.append("spectral_companion_not_current")
+                reasons.append(f"{key}_not_current")
 
     integrity = receipt.get("finite_integrity")
     if not isinstance(integrity, Sequence) or isinstance(integrity, (str, bytes)):

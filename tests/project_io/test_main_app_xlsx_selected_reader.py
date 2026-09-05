@@ -351,12 +351,10 @@ def test_run_scoped_cache_does_not_store_a_read_changed_in_flight(
         original_signature,
         mtime_ns=original_signature.mtime_ns + 1,
     )
-    signature_calls = 0
+    changed_during_read = False
 
     def changing_signature(_excel_path):  # noqa: ANN001
-        nonlocal signature_calls
-        signature_calls += 1
-        return original_signature if signature_calls == 1 else changed_signature
+        return changed_signature if changed_during_read else original_signature
 
     monkeypatch.setattr(
         selected_reader,
@@ -367,9 +365,11 @@ def test_run_scoped_cache_does_not_store_a_read_changed_in_flight(
     original_read = selected_reader._read_selected_columns_from_stream
 
     def counted_read(*args, **kwargs):  # noqa: ANN002, ANN003
-        nonlocal read_count
+        nonlocal read_count, changed_during_read
         read_count += 1
-        return original_read(*args, **kwargs)
+        frame = original_read(*args, **kwargs)
+        changed_during_read = True
+        return frame
 
     monkeypatch.setattr(
         selected_reader,

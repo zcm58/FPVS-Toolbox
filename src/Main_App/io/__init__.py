@@ -58,6 +58,20 @@ from Main_App.io.spectral_data import (
     validate_spectral_companion,
     write_spectral_companion,
 )
+from Main_App.io.condition_data import (
+    CONDITION_COMPANION_VERSION,
+    CONDITION_MANIFEST_SHEET,
+    CONDITION_DATA_SHEET_NAMES,
+    ConditionDataError,
+    condition_companion_identity,
+    condition_manifest_frame,
+    declared_condition_companion,
+    read_condition_sheet,
+    read_condition_sheet_header,
+    read_condition_sheet_selected_columns,
+    validate_condition_companion,
+    write_condition_companion,
+)
 
 __all__ = [
     "BDF_RECORDING_NOT_STARTED_REASON",
@@ -110,4 +124,16 @@ __all__ = [
     "spectral_manifest_frame",
     "validate_spectral_companion",
     "write_spectral_companion",
+    "CONDITION_COMPANION_VERSION",
+    "CONDITION_MANIFEST_SHEET",
+    "CONDITION_DATA_SHEET_NAMES",
+    "ConditionDataError",
+    "condition_companion_identity",
+    "condition_manifest_frame",
+    "declared_condition_companion",
+    "read_condition_sheet",
+    "read_condition_sheet_header",
+    "read_condition_sheet_selected_columns",
+    "validate_condition_companion",
+    "write_condition_companion",
 ]

@@ -6,6 +6,9 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from Main_App.io.condition_data import read_condition_sheet
+from Main_App.io.xlsx_selected_reader import xlsx_read_cache_scope
+
 from .constants import ELECTRODE_COL, SHEET_BCA, SHEET_SNR, SHEET_Z
 from .utils import (
     build_hz_to_col_map,
@@ -68,13 +71,15 @@ def read_participant_file(
     xlsx_path: Path,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, list[str]]:
     try:
-        df_snr = pd.read_excel(xlsx_path, sheet_name=SHEET_SNR)
-        df_z = pd.read_excel(xlsx_path, sheet_name=SHEET_Z)
-        df_bca = pd.read_excel(xlsx_path, sheet_name=SHEET_BCA)
+        with xlsx_read_cache_scope():
+            df_snr = read_condition_sheet(xlsx_path, sheet_name=SHEET_SNR)
+            df_z = read_condition_sheet(xlsx_path, sheet_name=SHEET_Z)
+            df_bca = read_condition_sheet(xlsx_path, sheet_name=SHEET_BCA)
     except ValueError as exc:
         raise ValueError(
             f"File '{xlsx_path.name}' is missing one or more required sheets: "
             f"{SHEET_SNR}, {SHEET_Z}, {SHEET_BCA}."
+            f" Details: {exc}"
         ) from exc
 
     for sheet_name, df in [(SHEET_SNR, df_snr), (SHEET_Z, df_z), (SHEET_BCA, df_bca)]:

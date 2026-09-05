@@ -367,10 +367,15 @@ def test_saved_legacy_full_fft_schema_requires_eeg_reprocessing(
 
 
 @pytest.mark.parametrize("damage", ["missing", "altered"])
+@pytest.mark.parametrize("companion_key", ["spectral_companion", "condition_companion"])
 def test_companion_provenance_is_portable_and_rejects_changed_arrays(
-    tmp_path: Path, damage: str,
+    tmp_path: Path, damage: str, companion_key: str,
 ) -> None:
     import pandas as pd
+    from Main_App.io.condition_data import (
+        condition_manifest_frame,
+        write_condition_companion,
+    )
     from Main_App.io.spectral_data import (
         spectral_manifest_frame,
         write_spectral_companion,
@@ -392,18 +397,30 @@ def test_companion_provenance_is_portable_and_rejects_changed_arrays(
             workbook, {"FullFFT Amplitude (uV)": frame},
             metadata={"frequencies_hz": frequencies},
         )
+        condition_descriptor = write_condition_companion(workbook, {
+            "BCA (uV)": pd.DataFrame({"Electrode": ["Fp1"], "1.200000_Hz": [0.5]}),
+        })
         with pd.ExcelWriter(workbook, engine="xlsxwriter") as writer:
             spectral_manifest_frame(descriptor).to_excel(
                 writer, sheet_name="Spectral Data", index=False,
             )
-        descriptors[workbook.name] = descriptor
+            condition_manifest_frame(condition_descriptor).to_excel(
+                writer, sheet_name="Condition Data", index=False,
+            )
+        descriptors[workbook.name] = {
+            "spectral_companion": descriptor,
+            "condition_companion": condition_descriptor,
+        }
 
     written = write_project_full_fft_provenance(
         root, base_frequency_hz=6.0, oddball_frequency_hz=1.2,
     )
     manifest = json.loads((root / "project.json").read_text(encoding="utf-8"))
     sources = manifest["tools"]["processing"]["full_fft_provenance"]["source_workbooks"]
-    assert all(row["spectral_companion"] == descriptors[Path(row["path"]).name] for row in sources)
+    assert all(
+        row[key] == descriptors[Path(row["path"]).name][key]
+        for row in sources for key in ("spectral_companion", "condition_companion")
+    )
     assert written.frequency_column_count == len(frequencies)
     copied = tmp_path / "Copied Project"
     shutil.copytree(root, copied, copy_function=shutil.copy2)
@@ -416,7 +433,7 @@ def test_companion_provenance_is_portable_and_rejects_changed_arrays(
     assert grid.issue is None
     assert grid.frequency_column_count == len(frequencies)
 
-    descriptor = descriptors[record.path.name]
+    descriptor = descriptors[record.path.name][companion_key]
     companion = record.path.with_name(str(descriptor["path"]))
     workbook_bytes = record.path.read_bytes()
     if damage == "missing":
@@ -426,9 +443,11 @@ def test_companion_provenance_is_portable_and_rejects_changed_arrays(
         data[len(data) // 2] ^= 1
         companion.write_bytes(data)
     assert record.path.read_bytes() == workbook_bytes
-    with pytest.raises(FullFftProvenanceError, match="spectral companion"):
+    with pytest.raises(FullFftProvenanceError, match="companion"):
         require_current_project_full_fft_provenance(copied)
     grid = _inspect_workbook_grid(
         record, already_excluded=False, oddball_frequency_hz=Fraction(6, 5),
     )
-    assert grid.issue is not None
+    # A damaged BCA companion invalidates dataset provenance, while the
+    # independent FullFFT grid remains usable by its dedicated validator.
+    assert (grid.issue is not None) == (companion_key == "spectral_companion")

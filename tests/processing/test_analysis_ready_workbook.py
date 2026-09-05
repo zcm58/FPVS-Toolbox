@@ -276,6 +276,121 @@ def _build_fixture_project(root: Path) -> None:
     )
 
 
+def _rewrite_sources_as_compact_only(root: Path) -> None:
+    from Main_App.Shared.post_process_excel import write_results_workbook
+
+    index = load_project_dataset_index(root)
+    for record in [*index.workbooks, *index.excluded_workbooks]:
+        values = pd.read_excel(record.path, sheet_name="BCA (uV)")
+        receipt = write_results_workbook(
+            str(record.path), {"BCA (uV)": values},
+        )
+        companion = record.path.with_name(receipt["condition_companion"]["path"])
+        assert companion.is_file()
+        # The default writer publishes only a notice in the physical worksheet.
+        # All downstream numerical work must therefore read the companion.
+        notice = pd.read_excel(record.path, sheet_name="BCA (uV)")
+        assert "Electrode" not in notice.columns
+        assert "Companion file" in notice.columns
+
+
+def test_compact_only_sources_preserve_analysis_ready_long_and_wide_exports(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "Project"
+    _build_fixture_project(root)
+    coverage = _released_coverage(
+        load_project_dataset_index(root),
+        rois={"LOT": ["O1"], "ROT": ["O2"], "Central": ["CZ"]},
+        excluded_by_cell={("p1", "condition a"): {"O2"}},
+        excluded_cells={("p2", "condition a")},
+    )
+    # Fixture-authorized QC coverage is unchanged by the storage migration.
+    # All source reads, BCA sums, normalization, pivots and Excel writes are real.
+    monkeypatch.setattr(
+        export_module, "_require_analysis_ready_release",
+        lambda _root: (coverage, "test-final-release"),
+    )
+    sheets = [
+        "ROI Long", "Raw BCA Wide", "RMS Normalized Wide",
+        "Signed Mean Normalized Wide", "Electrode Long",
+        "Whole Scalp Values", "RMS Harmonic Scales", "QC Flags", "ROI Coverage",
+    ]
+    legacy = write_analysis_ready_workbook(root)
+    expected = pd.read_excel(legacy.path, sheet_name=sheets)
+
+    _rewrite_sources_as_compact_only(root)
+    compact = write_analysis_ready_workbook(root)
+    actual = pd.read_excel(compact.path, sheet_name=sheets)
+
+    assert compact.path == legacy.path
+    assert compact.row_count == legacy.row_count == 9
+    for sheet in sheets:
+        pd.testing.assert_frame_equal(actual[sheet], expected[sheet], check_exact=True)
+    long = actual["ROI Long"]
+    assert long.loc[long["PID"].eq("P2"), "Raw Summed BCA"].isna().all()
+    retained = long.loc[
+        long["PID"].eq("P1") & long["Condition"].eq("Condition B")
+        & long["ROI"].eq("LOT")
+    ].iloc[0]
+    assert retained["Raw Summed BCA"] == 2.0
+    assert math.isfinite(retained["RMS Normalized BCA"])
+
+
+def test_compact_only_sources_preserve_stats_ready_long_and_wide_exports(
+    tmp_path: Path,
+) -> None:
+    from Tools.Stats.analysis.dv_policy_settings import FIXED_PREDEFINED_POLICY_NAME
+    from Tools.Stats.io.stats_ready_export import (
+        LONG_FORMAT_SHEET,
+        WIDE_FORMAT_SHEET,
+        prepare_stats_ready_export,
+    )
+
+    root = tmp_path / "Project"
+    _build_fixture_project(root)
+    # Include signed BCA and an unused channel to catch value or row-selection
+    # changes; the same fixed selected frequencies are used in both runs.
+    _write_bca_workbook(
+        root, pid="P1", condition="Condition A", group_folder="Anxious",
+        values=[("O1", -0.5, 1.25), ("O2", 0.75, -0.25), ("Cz", 0.0, 0.0)],
+    )
+    index = load_project_dataset_index(root)
+    subject_data = {}
+    for record in index.workbooks:
+        subject_data.setdefault(record.participant_id, {})[record.condition] = str(record.path)
+    target = root / "Stats_Ready_Summed_BCA.xlsx"
+    inputs = {
+        "subjects": ["P1"], "conditions": ["Condition A", "Condition B"],
+        "subject_data": subject_data, "base_freq": 6.0,
+        "rois": {"Occipital": ["O1", "O2"]},
+        "dv_policy": {
+            "name": FIXED_PREDEFINED_POLICY_NAME,
+            "fixed_harmonic_frequencies_hz": "1.2, 2.4",
+        },
+        "group_map": {"P1": "anxious"},
+        "log_func": lambda _message: None,
+        "save_path": target,
+    }
+    legacy = prepare_stats_ready_export(**inputs)
+    sheets = [LONG_FORMAT_SHEET, WIDE_FORMAT_SHEET]
+    expected = pd.read_excel(target, sheet_name=sheets)
+
+    _rewrite_sources_as_compact_only(root)
+    compact = prepare_stats_ready_export(**inputs)
+    actual = pd.read_excel(target, sheet_name=sheets)
+
+    assert compact.workbook_path == legacy.workbook_path == target
+    assert compact.row_count == legacy.row_count == 2
+    for sheet in sheets:
+        pd.testing.assert_frame_equal(actual[sheet], expected[sheet], check_exact=True)
+        pd.testing.assert_frame_equal(
+            compact.frames[sheet], legacy.frames[sheet], check_exact=True,
+        )
+    assert actual[LONG_FORMAT_SHEET]["summed_bca_uv"].tolist() == [0.625, 3.0]
+    assert actual[WIDE_FORMAT_SHEET].iloc[0, 2:].tolist() == [0.625, 3.0]
+
+
 def test_full_audit_workbook_keeps_excluded_values_and_flags(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

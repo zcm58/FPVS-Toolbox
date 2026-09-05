@@ -336,13 +336,37 @@ no declaration exists. Moving a project preserves this association through
 the relative sibling filename; copy or share the workbook and companion
 together. No application-owned workbook-only project clone/export path exists.
 
-The shared full/header/selected-column readers route spectral sheets to NPZ
-and compact sheets to Excel. Stats, FullFFT grid QC, Free Harmonic Clustering,
+The shared full/header/selected-column readers route spectral and compact
+tables to their separate NPZ companions. Stats, FullFFT grid QC, Free Harmonic Clustering,
 legacy LORETA FullFFT inputs and Individual Detectability use this boundary.
 Plot snapshots capture both dense arrays with their workbook and validate
-source identity before publication. Scalp Maps still calculates from its
-existing compact BCA/SNR/Z worksheets. A run-scoped cache retains at most four
+source identity before publication. Scalp Maps calculates from the saved
+compact BCA/SNR/Z values. A run-scoped cache retains at most four
 companions and invalidates on workbook or companion identity changes.
+
+## Compact Condition Companion
+
+`Main_App.io.condition_data` owns `numpy_condition_companion_v1` and a separate
+`<workbook stem>.metrics.<20-character SHA prefix>.npz`. The `Condition Data`
+workbook manifest uses the same relative-name, size, and SHA-256 contract as
+the dense companion. It stores already-calculated FFT amplitude, BCA, SNR, Z,
+Spectral Eligibility, Spectral Metric QC, FFT and neighbors, and FFT Metadata.
+Numerical blocks preserve their original values and types without pickle;
+text/mixed metadata retain explicit types and missing-value distinctions.
+
+Default per-condition Excel tabs are notices, with no automatic numerical
+copies or large audit tables. `write_results_workbook(include_condition_excel=True)`
+is the explicit report-writer option. Stats-ready and full-audit long/wide
+Excel exports retain their existing writers and remain user-facing outputs.
+
+Compact reads validate the compact archive and load requested tables/columns
+without materializing dense spectra or unrelated audit rows. Old workbook-only
+or dense-only companion exports retain Excel compatibility for their compact
+tables. New caches, current-run receipts, final QC release, neutral provenance,
+and publication source identities include `condition_companion`; a missing or
+changed declared file is an error, never a reason to reuse a notice tab. Cleanup
+can remove declared generated compact companions for repair, including corrupt
+ones, but preserves arbitrary NPZ files and undeclared compact archives.
 
 This is a storage change only: all FFT bins through Nyquist are retained,
 including the 30,721 bins from 120 seconds at 512 Hz. Excel's 16,384-column

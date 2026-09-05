@@ -32,6 +32,7 @@ class SourceFileIdentity:
     size_bytes: int
     stat_signature: tuple[int, int, int, int]
     spectral_companion: dict[str, object] | None = field(default=None, hash=False)
+    condition_companion: dict[str, object] | None = field(default=None, hash=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,6 +56,19 @@ def _companion_identity(path: Path) -> dict[str, object] | None:
     except (OSError, ValueError) as exc:
         raise SNRPublicationError(
             f"Spectral companion for {path.name} is missing or invalid: {exc}"
+        ) from exc
+
+
+def _condition_companion_identity(path: Path) -> dict[str, object] | None:
+    if not zipfile.is_zipfile(path):
+        return None
+    from Main_App.io.condition_data import condition_companion_identity
+
+    try:
+        return condition_companion_identity(path)
+    except (OSError, ValueError) as exc:
+        raise SNRPublicationError(
+            f"Condition companion for {path.name} is missing or invalid: {exc}"
         ) from exc
 
 
@@ -114,6 +128,7 @@ def capture_stable_source_identity(
         cancellation_checkpoint=cancellation_checkpoint,
     )
     companion = _companion_identity(source)
+    condition_companion = _condition_companion_identity(source)
     after_hash = source_stat_signature(source)
     if after_hash != before_hash:
         raise SNRPublicationError(
@@ -126,6 +141,7 @@ def capture_stable_source_identity(
         size_bytes=after_hash[2],
         stat_signature=after_hash,
         spectral_companion=companion,
+        condition_companion=condition_companion,
     )
 
 
@@ -139,6 +155,7 @@ def capture_stable_source_snapshot(
     source = Path(path)
     before_read = source_stat_signature(source)
     companion_before = _companion_identity(source)
+    condition_before = _condition_companion_identity(source)
     digest = hashlib.sha256()
     chunks: list[bytes] = []
     with source.open("rb") as handle:
@@ -162,8 +179,13 @@ def capture_stable_source_snapshot(
                     raise SNRPublicationCancelled("SNR input capture was cancelled.")
                 spectral_sheets[sheet_name] = read_spectral_sheet(source, sheet_name=sheet_name)
     companion_after = _companion_identity(source)
+    condition_after = _condition_companion_identity(source)
     after_read = source_stat_signature(source)
-    if after_read != before_read or companion_after != companion_before:
+    if (
+        after_read != before_read
+        or companion_after != companion_before
+        or condition_after != condition_before
+    ):
         raise SNRPublicationError(
             f"Source workbook changed while SNR data were being read: "
             f"{source.name}. Restart generation after workbook writes have finished."
@@ -176,6 +198,7 @@ def capture_stable_source_snapshot(
             size_bytes=after_read[2],
             stat_signature=after_read,
             spectral_companion=companion_after,
+            condition_companion=condition_after,
         ),
         spectral_sheets=spectral_sheets,
     )
@@ -225,6 +248,7 @@ def verify_source_snapshot_after_read(
         or offset != len(content)
         or source_stat_signature(source) != expected_signature
         or _companion_identity(source) != snapshot.identity.spectral_companion
+        or _condition_companion_identity(source) != snapshot.identity.condition_companion
     ):
         raise SNRPublicationError(
             f"Source workbook changed while SNR data were being read: "
@@ -300,6 +324,7 @@ def verify_source_identity_after_read(
         after_read.sha256 != before_read.sha256
         or after_read.stat_signature != before_read.stat_signature
         or after_read.spectral_companion != before_read.spectral_companion
+        or after_read.condition_companion != before_read.condition_companion
     ):
         raise SNRPublicationError(
             f"Source workbook changed while SNR data were being read: "

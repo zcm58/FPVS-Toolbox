@@ -383,264 +383,124 @@ def write_results_workbook(
     spectral_metric_qc_df: Optional[pd.DataFrame] = None,
     timing_sink: list[dict[str, object]] | None = None,
     spectral_metadata: dict[str, Any] | None = None,
+    *,
+    include_condition_excel: bool = False,
 ) -> dict[str, object]:
-    """Publish Excel reports after their lossless spectral companion is ready."""
+    """Publish lossless data companions and a small discovery workbook.
+
+    Compact condition tables are numerical inputs, not automatic Excel reports.
+    Explicit report callers may request their Excel copies; long/wide statistical
+    workbooks have separate writers and are unaffected.
+    """
+    from Main_App.io.condition_data import (
+        CONDITION_DATA_SHEET_NAMES,
+        CONDITION_MANIFEST_SHEET,
+        condition_manifest_frame,
+        validate_condition_companion,
+        write_condition_companion,
+    )
+
     workbook_started = perf_counter()
     destination = Path(full_excel_path)
     prior_artifact = _artifact_identity(destination)
+    frames = dict(dataframes_to_save)
+    if fft_neighbors_df is not None and not fft_neighbors_df.empty:
+        frames["FFT and neighbors"] = fft_neighbors_df
+        metadata_frame = build_fft_metadata_frame(fft_neighbors_df)
+        if not metadata_frame.empty:
+            frames[FFT_METADATA_SHEET_NAME] = metadata_frame
+    for name, frame in (
+        (SPECTRAL_ELIGIBILITY_SHEET_NAME, spectral_eligibility_df),
+        (SPECTRAL_METRIC_QC_SHEET_NAME, spectral_metric_qc_df),
+    ):
+        if frame is not None and not frame.empty:
+            frames[name] = frame
+
     spectral_frames = {
-        name: frame for name, frame in dataframes_to_save.items()
-        if name in SPECTRAL_SHEET_NAMES
+        name: frame for name, frame in frames.items() if name in SPECTRAL_SHEET_NAMES
     }
-    spectral_companion: dict[str, object] | None = None
+    condition_frames = {
+        name: frame for name, frame in frames.items() if name in CONDITION_DATA_SHEET_NAMES
+    }
+    spectral_companion = None
+    condition_companion = None
     if spectral_frames:
-        companion_started = perf_counter()
+        started = perf_counter()
         spectral_companion = write_spectral_companion(
             destination, spectral_frames, metadata=spectral_metadata
         )
         _log_excel_timing(
-            "spectral_companion_write", companion_started,
+            "spectral_companion_write", started,
             path=full_excel_path, timing_sink=timing_sink,
         )
-        # Keep familiar report tabs, but never serialize dense spectra twice.
-        dataframes_to_save = {
-            name: (
-                pd.DataFrame({
-                    "Spectral data": ["Stored losslessly in the NumPy companion file."],
-                    "Companion file": [spectral_companion["path"]],
-                }) if name in spectral_frames else frame
-            )
-            for name, frame in dataframes_to_save.items()
-        }
-        dataframes_to_save[SPECTRAL_MANIFEST_SHEET] = spectral_manifest_frame(
-            spectral_companion
+    if condition_frames:
+        started = perf_counter()
+        condition_companion = write_condition_companion(destination, condition_frames)
+        _log_excel_timing(
+            "condition_companion_write", started,
+            path=full_excel_path, timing_sink=timing_sink,
         )
-    expected_headers: Dict[str, List[str]] = {
-        str(sheet_name): [str(column) for column in frame.columns]
-        for sheet_name, frame in dataframes_to_save.items()
+
+    excel_frames = {}
+    for name, frame in frames.items():
+        companion = (
+            spectral_companion if name in spectral_frames
+            else condition_companion if name in condition_frames and not include_condition_excel
+            else None
+        )
+        excel_frames[name] = (
+            pd.DataFrame({
+                "Spectral data" if name in spectral_frames else "Condition data": [
+                    "Stored losslessly in the NumPy companion file."
+                ],
+                "Companion file": [companion["path"]],
+            }) if companion is not None else frame
+        )
+    if spectral_companion is not None:
+        excel_frames[SPECTRAL_MANIFEST_SHEET] = spectral_manifest_frame(spectral_companion)
+    if condition_companion is not None:
+        excel_frames[CONDITION_MANIFEST_SHEET] = condition_manifest_frame(condition_companion)
+    expected_headers = {
+        name: [str(column) for column in frame.columns]
+        for name, frame in excel_frames.items()
     }
-    fft_metadata_df: pd.DataFrame | None = None
-    if fft_neighbors_df is not None and not fft_neighbors_df.empty:
-        expected_headers["FFT and neighbors"] = [
-            str(column) for column in fft_neighbors_df.columns
-        ]
-        fft_metadata_df = build_fft_metadata_frame(fft_neighbors_df)
-        if not fft_metadata_df.empty:
-            expected_headers[FFT_METADATA_SHEET_NAME] = [
-                str(column) for column in fft_metadata_df.columns
-            ]
-    for sheet_name, audit_frame in (
-        (SPECTRAL_ELIGIBILITY_SHEET_NAME, spectral_eligibility_df),
-        (SPECTRAL_METRIC_QC_SHEET_NAME, spectral_metric_qc_df),
-    ):
-        if audit_frame is not None and not audit_frame.empty:
-            expected_headers[sheet_name] = [
-                str(column) for column in audit_frame.columns
-            ]
-    schema_validation: dict[str, object]
     try:
         with _workbook_write_target(destination) as workbook_path:
             with pd.ExcelWriter(workbook_path, engine="xlsxwriter") as writer:
-                workbook = writer.book
-                center_fmt = workbook.add_format(
-                    {"align": "center", "valign": "vcenter"}
-                )
-
-                for sheet_name, df_to_write in dataframes_to_save.items():
+                center_fmt = writer.book.add_format({"align": "center", "valign": "vcenter"})
+                for name, frame in excel_frames.items():
                     sheet_started = perf_counter()
-                    write_started = perf_counter()
-                    worksheet = _write_dataframe_to_excel(
-                        writer,
-                        sheet_name=sheet_name,
-                        frame=df_to_write,
-                    )
+                    started = perf_counter()
+                    worksheet = _write_dataframe_to_excel(writer, sheet_name=name, frame=frame)
                     _log_excel_timing(
-                        "sheet_to_excel",
-                        write_started,
-                        path=full_excel_path,
-                        sheet_name=sheet_name,
-                        rows=len(df_to_write),
-                        cols=len(df_to_write.columns),
+                        "sheet_to_excel", started, path=full_excel_path,
+                        sheet_name=name, rows=len(frame), cols=len(frame.columns),
                         timing_sink=timing_sink,
                     )
                     worksheet.freeze_panes(1, 0)
-                    widths_started = perf_counter()
-                    _apply_column_widths(
-                        worksheet,
-                        df_to_write,
-                        center_fmt,
-                    )
+                    started = perf_counter()
+                    _apply_column_widths(worksheet, frame, center_fmt)
                     _log_excel_timing(
-                        "sheet_column_widths",
-                        widths_started,
-                        path=full_excel_path,
-                        sheet_name=sheet_name,
-                        rows=len(df_to_write),
-                        cols=len(df_to_write.columns),
+                        "sheet_column_widths", started, path=full_excel_path,
+                        sheet_name=name, rows=len(frame), cols=len(frame.columns),
                         timing_sink=timing_sink,
                     )
                     _log_excel_timing(
-                        "sheet_total",
-                        sheet_started,
-                        path=full_excel_path,
-                        sheet_name=sheet_name,
-                        rows=len(df_to_write),
-                        cols=len(df_to_write.columns),
+                        "sheet_total", sheet_started, path=full_excel_path,
+                        sheet_name=name, rows=len(frame), cols=len(frame.columns),
                         timing_sink=timing_sink,
                     )
-
-                if fft_neighbors_df is not None and not fft_neighbors_df.empty:
-                    sheet_name = "FFT and neighbors"
-                    sheet_started = perf_counter()
-                    write_started = perf_counter()
-                    fft_neighbors_df.to_excel(
-                        writer,
-                        sheet_name=sheet_name,
-                        index=False,
-                    )
-                    _log_excel_timing(
-                        "sheet_to_excel",
-                        write_started,
-                        path=full_excel_path,
-                        sheet_name=sheet_name,
-                        rows=len(fft_neighbors_df),
-                        cols=len(fft_neighbors_df.columns),
-                        timing_sink=timing_sink,
-                    )
-                    worksheet = writer.sheets[sheet_name]
-                    worksheet.freeze_panes(1, 0)
-                    widths_started = perf_counter()
-                    _apply_column_widths(
-                        worksheet,
-                        fft_neighbors_df,
-                        center_fmt,
-                    )
-                    _log_excel_timing(
-                        "sheet_column_widths",
-                        widths_started,
-                        path=full_excel_path,
-                        sheet_name=sheet_name,
-                        rows=len(fft_neighbors_df),
-                        cols=len(fft_neighbors_df.columns),
-                        timing_sink=timing_sink,
-                    )
-                    _log_excel_timing(
-                        "sheet_total",
-                        sheet_started,
-                        path=full_excel_path,
-                        sheet_name=sheet_name,
-                        rows=len(fft_neighbors_df),
-                        cols=len(fft_neighbors_df.columns),
-                        timing_sink=timing_sink,
-                    )
-
-                    if fft_metadata_df is not None and not fft_metadata_df.empty:
-                        sheet_name = FFT_METADATA_SHEET_NAME
-                        sheet_started = perf_counter()
-                        write_started = perf_counter()
-                        fft_metadata_df.to_excel(
-                            writer,
-                            sheet_name=sheet_name,
-                            index=False,
-                        )
-                        _log_excel_timing(
-                            "sheet_to_excel",
-                            write_started,
-                            path=full_excel_path,
-                            sheet_name=sheet_name,
-                            rows=len(fft_metadata_df),
-                            cols=len(fft_metadata_df.columns),
-                            timing_sink=timing_sink,
-                        )
-                        worksheet = writer.sheets[sheet_name]
-                        worksheet.freeze_panes(1, 0)
-                        widths_started = perf_counter()
-                        _apply_column_widths(
-                            worksheet,
-                            fft_metadata_df,
-                            center_fmt,
-                        )
-                        _log_excel_timing(
-                            "sheet_column_widths",
-                            widths_started,
-                            path=full_excel_path,
-                            sheet_name=sheet_name,
-                            rows=len(fft_metadata_df),
-                            cols=len(fft_metadata_df.columns),
-                            timing_sink=timing_sink,
-                        )
-                        _log_excel_timing(
-                            "sheet_total",
-                            sheet_started,
-                            path=full_excel_path,
-                            sheet_name=sheet_name,
-                            rows=len(fft_metadata_df),
-                            cols=len(fft_metadata_df.columns),
-                            timing_sink=timing_sink,
-                        )
-
-                for sheet_name, audit_frame in (
-                    (SPECTRAL_ELIGIBILITY_SHEET_NAME, spectral_eligibility_df),
-                    (SPECTRAL_METRIC_QC_SHEET_NAME, spectral_metric_qc_df),
-                ):
-                    if audit_frame is None or audit_frame.empty:
-                        continue
-                    sheet_started = perf_counter()
-                    write_started = perf_counter()
-                    audit_frame.to_excel(
-                        writer,
-                        sheet_name=sheet_name,
-                        index=False,
-                    )
-                    _log_excel_timing(
-                        "sheet_to_excel",
-                        write_started,
-                        path=full_excel_path,
-                        sheet_name=sheet_name,
-                        rows=len(audit_frame),
-                        cols=len(audit_frame.columns),
-                        timing_sink=timing_sink,
-                    )
-                    worksheet = writer.sheets[sheet_name]
-                    worksheet.freeze_panes(1, 0)
-                    widths_started = perf_counter()
-                    _apply_column_widths(
-                        worksheet,
-                        audit_frame,
-                        center_fmt,
-                    )
-                    _log_excel_timing(
-                        "sheet_column_widths",
-                        widths_started,
-                        path=full_excel_path,
-                        sheet_name=sheet_name,
-                        rows=len(audit_frame),
-                        cols=len(audit_frame.columns),
-                        timing_sink=timing_sink,
-                    )
-                    _log_excel_timing(
-                        "sheet_total",
-                        sheet_started,
-                        path=full_excel_path,
-                        sheet_name=sheet_name,
-                        rows=len(audit_frame),
-                        cols=len(audit_frame.columns),
-                        timing_sink=timing_sink,
-                    )
-            schema_validation = _validate_workbook_schema(
-                Path(workbook_path),
-                expected_headers,
-            )
+            schema_validation = _validate_workbook_schema(Path(workbook_path), expected_headers)
+            # The staging XLSX can be on a different volume. Resolve companions
+            # beside the final destination before atomically publishing it.
             if spectral_companion is not None:
-                # The staging XLSX can be on a different volume. Resolve the
-                # companion beside the final destination before publishing it.
                 validate_spectral_companion(destination, spectral_companion)
+            if condition_companion is not None:
+                validate_condition_companion(destination, condition_companion)
     finally:
         _log_excel_timing(
-            "workbook_write_total",
-            workbook_started,
-            path=full_excel_path,
-            timing_sink=timing_sink,
+            "workbook_write_total", workbook_started,
+            path=full_excel_path, timing_sink=timing_sink,
         )
     artifact = _artifact_identity(destination)
     if artifact is None:
@@ -654,6 +514,6 @@ def write_results_workbook(
         "prior_artifact": prior_artifact,
         "artifact": artifact,
         "schema_validation": schema_validation,
-        **({"spectral_companion": spectral_companion}
-           if spectral_companion is not None else {}),
+        **({"spectral_companion": spectral_companion} if spectral_companion is not None else {}),
+        **({"condition_companion": condition_companion} if condition_companion is not None else {}),
     }

@@ -108,6 +108,10 @@ v2.1 project contract:
   present. Never recreate it from FullFFT. Both spectral sheets in a plot run
   must use the captured input snapshot, and source checks must validate the
   workbook's same-directory companion declaration as well as workbook bytes.
+- Read processing-owned Spectral Eligibility through the shared condition
+  companion reader. Include that companion in captured and verified source
+  identities; a missing or invalid declaration must block publication rather
+  than fall back to a workbook notice. Old Excel-only inputs remain readable.
 - Group-overlay PNG/PDF pairs append `_group_overlay` to the normal
   `<title or condition> - <ROI>` stem so they cannot overwrite the corresponding
   non-group figure. Preserve normal single-condition filenames.

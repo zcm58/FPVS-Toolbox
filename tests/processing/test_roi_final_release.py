@@ -328,10 +328,26 @@ def test_final_release_rejects_a_different_review_fingerprint(tmp_path):
         )
 
 
-def test_current_final_release_rejects_a_changed_source_workbook(tmp_path):
+@pytest.mark.parametrize("artifact", ["workbook", "condition_companion", "spectral_companion"])
+@pytest.mark.parametrize("failure", ["missing", "changed"])
+def test_current_final_release_rejects_a_changed_source_workbook(tmp_path, artifact, failure):
+    from Main_App.Shared.post_process_excel import write_results_workbook
+
     source = tmp_path / "Faces.xlsx"
     _write_source(source)
-    outcomes = _outcomes(_cell(source))
+    write_receipt = None
+    if artifact != "workbook":
+        frames = pd.read_excel(source, sheet_name=None)
+        if artifact == "spectral_companion":
+            frames["FullFFT Amplitude (uV)"] = pd.DataFrame({
+                "Electrode": list(BIOSEMI64_CHANNELS),
+                "0.0000_Hz": [1.0] * len(BIOSEMI64_CHANNELS),
+            })
+        write_receipt = write_results_workbook(str(source), frames)
+    cell = _cell(source)
+    if write_receipt is not None:
+        cell.export_receipt["workbook_write"].update(write_receipt)
+    outcomes = _outcomes(cell)
     save_ledger(
         tmp_path,
         {"recording_condition_outcomes": outcomes.to_payload()},
@@ -360,8 +376,13 @@ def test_current_final_release_rejects_a_changed_source_workbook(tmp_path):
         expected_decision_fingerprint="review-fingerprint",
     )[1] == final
 
-    source.write_bytes(source.read_bytes() + b"changed after release")
-    with pytest.raises(RoiCoverageGateError, match="workbook changed or is missing"):
+    target = source if artifact == "workbook" else source.with_name(write_receipt[artifact]["path"])
+    if failure == "missing":
+        target.unlink()
+    else:
+        target.write_bytes(target.read_bytes() + b"changed after release")
+    message = "workbook changed or is missing" if artifact == "workbook" else "data companion"
+    with pytest.raises(RoiCoverageGateError, match=message):
         require_current_final_release(
             tmp_path,
             expected_decision_fingerprint="review-fingerprint",

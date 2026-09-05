@@ -7,7 +7,7 @@ import mne
 import numpy as np
 import pandas as pd
 import pytest
-from openpyxl import load_workbook
+from Main_App.io.condition_data import read_condition_sheet
 
 from Main_App.Shared.post_process import (
     _can_batch_target_noise,
@@ -290,25 +290,11 @@ def test_post_process_exports_filter_domain_and_structured_notch_hole(tmp_path) 
     post_process(app, ["Condition A"])
 
     workbook_path = next(tmp_path.rglob("*.xlsx"))
-    workbook = load_workbook(workbook_path, read_only=True, data_only=True)
-    try:
-        assert "48.0000_Hz" in [
-            cell.value for cell in workbook["BCA (uV)"][1]
-        ]
-        bca_headers = [cell.value for cell in workbook["BCA (uV)"][1]]
-        bca_values = [cell.value for cell in workbook["BCA (uV)"][2]]
-        assert bca_values[bca_headers.index("48.0000_Hz")] is not None
-        assert bca_values[bca_headers.index("50.0000_Hz")] is None
-
-        eligibility_rows = workbook["Spectral Eligibility"].iter_rows(values_only=True)
-        eligibility_headers = list(next(eligibility_rows))
-        frequency_index = eligibility_headers.index("Target Frequency (Hz)")
-        available_index = eligibility_headers.index("BCA Available")
-        reason_index = eligibility_headers.index("Unavailable Reasons")
-        fifty_hz = next(
-            row for row in eligibility_rows if row[frequency_index] == 50.0
-        )
-        assert fifty_hz[available_index] is False
-        assert "target_inside_applied_notch" in fifty_hz[reason_index]
-    finally:
-        workbook.close()
+    bca = read_condition_sheet(workbook_path, sheet_name="BCA (uV)")
+    assert "48.0000_Hz" in bca.columns
+    assert np.isfinite(bca.loc[0, "48.0000_Hz"])
+    assert np.isnan(bca.loc[0, "50.0000_Hz"])
+    eligibility = read_condition_sheet(workbook_path, sheet_name="Spectral Eligibility")
+    fifty_hz = eligibility.loc[eligibility["Target Frequency (Hz)"] == 50.0].iloc[0]
+    assert not fifty_hz["BCA Available"]
+    assert "target_inside_applied_notch" in fifty_hz["Unavailable Reasons"]

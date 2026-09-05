@@ -85,8 +85,10 @@ def test_direct_metric_writer_preserves_stable_xlsx_members(
             "warning": [""],
         }
     )
-    baseline_path = tmp_path / "pandas-baseline.xlsx"
-    direct_path = tmp_path / "direct-metric.xlsx"
+    baseline_path = tmp_path / "baseline" / "result.xlsx"
+    direct_path = tmp_path / "direct" / "result.xlsx"
+    baseline_path.parent.mkdir()
+    direct_path.parent.mkdir()
 
     monkeypatch.setattr(
         post_process_excel,
@@ -97,6 +99,7 @@ def test_direct_metric_writer_preserves_stable_xlsx_members(
         str(baseline_path),
         {"FFT Amplitude (uV)": frame},
         neighbors,
+        include_condition_excel=True,
     )
 
     monkeypatch.setattr(
@@ -108,6 +111,7 @@ def test_direct_metric_writer_preserves_stable_xlsx_members(
         str(direct_path),
         {"FFT Amplitude (uV)": frame},
         neighbors,
+        include_condition_excel=True,
     )
 
     with zipfile.ZipFile(baseline_path) as baseline, zipfile.ZipFile(
@@ -162,17 +166,20 @@ def test_cross_volume_staging_publishes_one_sequential_copy(
     staged_source, publish_target = map(lambda value: value.resolve(), copy_calls[0])
     assert staged_source.parent != workbook_path.parent
     assert publish_target.parent == workbook_path.parent
-    worksheet = load_workbook(workbook_path, data_only=True)["FFT Amplitude (uV)"]
-    assert worksheet["A2"].value == "Oz"
-    assert worksheet["B2"].value == 1.25
+    from Main_App.io.condition_data import read_condition_sheet
+
+    frame = read_condition_sheet(workbook_path, sheet_name="FFT Amplitude (uV)")
+    assert frame.iloc[0].tolist() == ["Oz", 1.25]
 
 
 def test_cross_volume_staging_preserves_xlsx_members_except_core_timestamps(
     tmp_path,
     monkeypatch,
 ) -> None:
-    direct_path = tmp_path / "direct.xlsx"
-    staged_path = tmp_path / "staged.xlsx"
+    direct_path = tmp_path / "direct" / "result.xlsx"
+    staged_path = tmp_path / "staged" / "result.xlsx"
+    direct_path.parent.mkdir()
+    staged_path.parent.mkdir()
     frame = pd.DataFrame(
         {
             "Electrode": ["Oz", "POz"],
@@ -287,7 +294,7 @@ def test_workbook_receipt_records_prior_and_validated_current_artifact(
     assert first["version"] == "workbook_write_receipt_v1"
     assert first["prior_artifact"] is None
     assert first["schema_validation"]["status"] == "passed"
-    assert first["schema_validation"]["sheet_names"] == ["BCA (uV)"]
+    assert first["schema_validation"]["sheet_names"] == ["BCA (uV)", "Condition Data"]
     assert second["prior_artifact"]["sha256"] == first["artifact"]["sha256"]
     assert second["artifact"]["sha256"] != first["artifact"]["sha256"]
     assert len(second["artifact"]["sha256"]) == 64
@@ -476,10 +483,11 @@ def test_fft_neighbors_sheet_written_with_expected_columns(tmp_path, caplog):
         {"FFT Amplitude (uV)": pd.DataFrame({"Electrode": ["Oz"], "1.2000_Hz": [1.0]})},
         neighbors_df,
         timing_sink=timing_records,
+        include_condition_excel=True,
     )
 
     wb = load_workbook(workbook_path)
-    assert wb.sheetnames[-2:] == ["FFT and neighbors", FFT_METADATA_SHEET_NAME]
+    assert wb.sheetnames[-3:-1] == ["FFT and neighbors", FFT_METADATA_SHEET_NAME]
 
     ws = wb["FFT and neighbors"]
     header = [cell.value for cell in ws[1]]
@@ -591,10 +599,11 @@ def test_nondefault_neighbor_label_and_spectral_audit_sheets(tmp_path) -> None:
         {"BCA (uV)": pd.DataFrame({"Electrode": ["Oz"], "49.5000_Hz": [np.nan]})},
         spectral_eligibility_df=eligibility,
         spectral_metric_qc_df=metric_qc,
+        include_condition_excel=True,
     )
 
     workbook = load_workbook(workbook_path, data_only=True)
-    assert workbook.sheetnames[-2:] == [
+    assert workbook.sheetnames[-3:-1] == [
         SPECTRAL_ELIGIBILITY_SHEET_NAME,
         SPECTRAL_METRIC_QC_SHEET_NAME,
     ]

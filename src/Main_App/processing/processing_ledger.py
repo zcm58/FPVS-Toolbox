@@ -545,30 +545,40 @@ def _source_derivative_reuse_problem(
     return None
 
 
-def _spectral_companion_reuse_problem(
+def _condition_companion_reuse_problem(
     entry: Mapping[str, Any], expected_outputs: Sequence[Path],
 ) -> str | None:
-    """Require recorded spectral artifacts, resolving beside current workbooks."""
+    """Require recorded arrays, resolving beside the current condition workbooks."""
+    from Main_App.io.condition_data import condition_companion_identity
     from Main_App.io.spectral_data import spectral_companion_identity
 
+    companion_readers = (
+        ("spectral_companion", "Spectral", spectral_companion_identity),
+        ("condition_companion", "Condition metrics", condition_companion_identity),
+    )
     outputs = {path.name: path for path in expected_outputs}
     for receipt in _export_receipts_payload(entry):
         write = receipt.get("workbook_write")
-        if not isinstance(write, Mapping) or "spectral_companion" not in write:
+        if not isinstance(write, Mapping) or not any(
+            key in write for key, _label, _reader in companion_readers
+        ):
             continue  # Legacy Excel-only completion receipts remain reusable.
         artifact = write.get("artifact")
         if not isinstance(artifact, Mapping):
-            return "Spectral companion workbook identity was not recorded."
+            return "Condition companion workbook identity was not recorded."
         # Stored absolute paths may precede a project move, including another OS.
         name = str(artifact.get("path") or "").replace("\\", "/").rsplit("/", 1)[-1]
         workbook = outputs.get(name)
         if workbook is None:
-            return "Spectral companion does not match an expected condition workbook."
-        try:
-            if spectral_companion_identity(workbook) != write["spectral_companion"]:
-                return f"Spectral companion is missing or changed: {workbook.name}"
-        except (OSError, ValueError):
-            return f"Spectral companion is missing, corrupt, or changed: {workbook.name}"
+            return "Condition companion does not match an expected condition workbook."
+        for key, label, reader in companion_readers:
+            if key not in write:
+                continue
+            try:
+                if not isinstance(write[key], Mapping) or reader(workbook) != write[key]:
+                    return f"{label} companion is missing or changed: {workbook.name}"
+            except (OSError, ValueError):
+                return f"{label} companion is missing, corrupt, or changed: {workbook.name}"
     return None
 
 
@@ -1147,7 +1157,7 @@ def classify_processing_inputs(
         source_derivative_problem = _source_derivative_reuse_problem(
             Path(project.project_root),
             entry,
-        ) or _spectral_companion_reuse_problem(entry, expected_outputs)
+        ) or _condition_companion_reuse_problem(entry, expected_outputs)
         if source_derivative_problem:
             states.append(
                 ProcessingInputState(
@@ -1242,7 +1252,7 @@ def _state_still_matches_ledger(
 
     if _source_derivative_reuse_problem(Path(project.project_root), entry):
         return False
-    if _spectral_companion_reuse_problem(entry, state.expected_outputs):
+    if _condition_companion_reuse_problem(entry, state.expected_outputs):
         return False
 
     present_outputs = [path for path in state.expected_outputs if path.exists()]
@@ -1447,17 +1457,41 @@ def _is_managed_spectral_companion(path: Path) -> bool:
     return re.fullmatch(r".+\.spectra\.[0-9a-f]{20}\.npz", path.name) is not None
 
 
+def _declared_condition_companions(root: Path, workbook: Path) -> tuple[Path, ...]:
+    """Select declared metric artifacts without requiring their data to be intact."""
+    from Main_App.io.condition_data import declared_condition_companion
+
+    if not workbook.is_file():
+        return ()
+    try:
+        descriptor = declared_condition_companion(workbook)
+    except (OSError, ValueError):
+        # Historical/non-XLSX files and invalid declarations cannot authorize
+        # deleting any sibling. Unreferenced arrays are not guessed or reused.
+        return ()
+    if descriptor is None:
+        return ()
+    name = descriptor["path"]
+    if name != f"{workbook.stem}.metrics.{descriptor['sha256'][:20]}.npz":
+        raise ValueError(f"Refusing to delete an unexpected condition companion: {name}")
+    target = _assert_under_excel_root(root, workbook.with_name(name))
+    if target.parent != workbook.parent.resolve():
+        raise ValueError(f"Condition companion resolves outside its workbook folder: {name}")
+    return (target,) if target.is_file() else ()
+
+
 def _workbook_companions(root: Path, workbook: Path) -> tuple[Path, ...]:
-    """Find only this workbook's generated siblings, including superseded arrays."""
+    """Find managed spectra and this workbook's explicitly declared metrics."""
     if not workbook.parent.is_dir():
         return ()
     prefix = f"{workbook.stem}.spectra."
-    return tuple(
+    spectral = tuple(
         _assert_under_excel_root(root, path)
         for path in workbook.parent.iterdir()
         if path.is_file() and path.name.startswith(prefix)
         and _is_managed_spectral_companion(path)
     )
+    return spectral + _declared_condition_companions(root, workbook)
 
 
 def clean_managed_excel_root(project: Any) -> Path:
@@ -1475,6 +1509,13 @@ def clean_managed_excel_root(project: Any) -> Path:
                     or _is_managed_spectral_companion(path)
                 )
             ]
+            declared_metrics = [
+                companion
+                for path in candidates
+                if path.suffix.lower() in GENERATED_EXCEL_SUFFIXES
+                for companion in _declared_condition_companions(root, path)
+            ]
+            candidates = list(dict.fromkeys([*candidates, *declared_metrics]))
         except OSError as exc:
             raise RuntimeError(
                 "Unable to scan the managed Excel output folder for cleanup. "
@@ -1584,7 +1625,7 @@ def clean_participant_outputs(project: Any, plan: ProcessingPlan) -> list[Path]:
                 target.unlink()
                 deleted.append(target)
             for companion in companions:
-                deleted.append(_delete_generated_file(companion, "spectral companion"))
+                deleted.append(_delete_generated_file(companion, "condition data companion"))
         deleted.extend(
             _delete_recorded_source_derivative_targets(
                 project_root,
@@ -1607,7 +1648,7 @@ def _remove_expected_outputs_for_state(
         target = _assert_under_excel_root(root, expected_output)
         companions = _workbook_companions(root, target)
         if not target.exists():
-            removed.extend(str(_delete_generated_file(path, "spectral companion")) for path in companions)
+            removed.extend(str(_delete_generated_file(path, "condition data companion")) for path in companions)
             continue
         try:
             target.unlink()
@@ -1618,7 +1659,7 @@ def _remove_expected_outputs_for_state(
             )
             continue
         removed.append(str(target))
-        removed.extend(str(_delete_generated_file(path, "spectral companion")) for path in companions)
+        removed.extend(str(_delete_generated_file(path, "condition data companion")) for path in companions)
     removed.extend(
         str(path)
         for path in _delete_recorded_source_derivative_targets(

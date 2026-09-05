@@ -138,6 +138,7 @@ class WorkbookEntry:
     size_bytes: int | None = None
     mtime_ns: int | None = None
     spectral_companion: dict[str, object] | None = field(default=None, hash=False)
+    condition_companion: dict[str, object] | None = field(default=None, hash=False)
 
     @property
     def participant_id(self) -> str:

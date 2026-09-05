@@ -2592,6 +2592,18 @@ def _source_bca_value_category(
 ) -> str:
     """Recover blank versus literal NaN text only on an invalid-cell path."""
 
+    from Main_App.io.condition_data import (
+        declared_condition_companion,
+        read_condition_sheet,
+    )
+
+    if declared_condition_companion(file_path) is not None:
+        frame = read_condition_sheet(file_path, sheet_name="BCA (uV)")
+        row_index = int(worksheet_row) - 2
+        if harmonic_column in frame.columns and 0 <= row_index < len(frame):
+            return _bca_value_category(frame.iloc[row_index][harmonic_column])
+        return _bca_value_category(fallback_value)
+
     try:
         from openpyxl import load_workbook
 

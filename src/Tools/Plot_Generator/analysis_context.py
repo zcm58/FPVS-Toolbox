@@ -9,7 +9,7 @@ import math
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-import pandas as pd
+from Main_App.io.condition_data import read_condition_sheet
 
 from Main_App.processing.full_fft_provenance import (
     FULL_FFT_PROVENANCE_SCHEMA_VERSION,
@@ -220,7 +220,7 @@ def _resolve_managed_spectral_eligibility_domain(
         path = (record.project_root / Path(relative_path)).resolve(strict=False)
         try:
             path.relative_to(record.project_root)
-            frame = pd.read_excel(path, sheet_name="Spectral Eligibility")
+            frame = read_condition_sheet(path, sheet_name="Spectral Eligibility")
             result = spectral_eligibility_from_rows(
                 frame.to_dict(orient="records"),
                 protocol=protocol,

@@ -69,5 +69,39 @@ driver path gates share that blocker, so their registered safe test commands
 were executed directly. Visible GUI smoke remains a handoff check, not a
 claim of local Qt execution.
 
-After completing this migration, explain original-rate epoching in plain
-language. Do not change the processing order in this task.
+## Compact condition data extension (2026-09-05)
+
+User approved a separate uncompressed NumPy companion for already-calculated
+FFT amplitude, BCA, SNR, Z, and processing-owned eligibility/audit tables.
+Default per-condition XLSX files become small manifests/notices; preserve the
+automatic long/wide statistical workbooks. Keep legacy XLSX reads and provide
+an explicit report-writer option for compact Excel copies. Never recompute
+metrics from averaged FullFFT or change timing, noise, harmonic, or ROI math.
+
+- [x] Commit/push prior work before starting (`f356b035`).
+- [x] Separate compact companion, shared readers, and atomic publication.
+- [x] Stats, Scalp Maps, Ratio, SNR setup, QC, source identities, and cleanup.
+- [x] Exact parity, legacy/missing/corrupt/moved data, long/wide export tests,
+      measured storage benchmark, docs, and focused verification.
+- [ ] After storage is complete, investigate missing start markers in two study recordings;
+      do not infer or synthesize trigger timing or silently exclude data.
+
+Production-writer benchmark against `f356b035`: median of three writes,
+486 ms -> 185 ms (62% faster). Median of five reads of three metric sheets
+plus eligibility: 28.3 -> 21.6 ms for 12 selected frequencies (24% faster),
+33.0 -> 22.9 ms for all 40 frequencies (31% faster). Fresh application caches,
+warm filesystem cache, integrity checks retained. Fixture: 64 electrodes,
+four 40-frequency metric tables, 2,560 QC rows, eligibility/neighbors, and
+unchanged FullFFT/FullSNR arrays. Workbook 235 KB -> 13 KB; total size +1.9%.
+Stored tables match exactly. These are storage timings, not whole-app forecasts.
+
+Visible smoke (pending): process a small condition and confirm both NPZ
+companions appear beside its small workbook. Open SNR Plots, Scalp Maps,
+Stats and Ratio Calculator; complete frequency-domain QC and verify long/wide
+Excel outputs. Repeat with legacy Excel inputs. In a test copy, withhold one
+companion and confirm a clear error. No local Qt execution.
+
+Final extension checks: processing focused gate 678 passed, 1 skipped;
+combined registered non-Qt project-I/O, Stats, Plot, Scalp and Ratio targets
+811 passed. Changed-file Ruff and diff checks passed. Broad precommit remains
+blocked by the same eight unrelated, pre-existing `outputs/` path findings.

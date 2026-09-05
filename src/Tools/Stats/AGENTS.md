@@ -78,6 +78,11 @@ NumPy companion owns the complete spectrum; a missing or invalid companion
 must not fall back to an Excel notice or partial data. Source fingerprints and
 in-memory/persisted harmonic caches include its validated identity. Legacy
 Excel-only inputs retain their existing source identity and numerical behavior.
+Compact BCA/SNR/Z/FFT values and technical eligibility use the shared condition
+companion readers, with legacy Excel fallback only when no companion is
+declared. Include the validated condition companion in source and DV cache
+identities; preserve saved values and exact columns rather than recalculating
+metrics from FullFFT. Long/wide statistical workbooks remain Excel exports.
 
 ## Project And Package Boundaries
 

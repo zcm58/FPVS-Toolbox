@@ -292,13 +292,16 @@ def test_changed_workbook_cannot_reuse_prior_write_receipt(tmp_path):
 
 
 @pytest.mark.parametrize("failure", ["missing", "corrupt"])
-def test_companion_failure_blocks_condition_with_unchanged_workbook(tmp_path, failure):
+@pytest.mark.parametrize("companion_key", ["spectral_companion", "condition_companion"])
+def test_companion_failure_blocks_condition_with_unchanged_workbook(
+    tmp_path, failure, companion_key,
+):
     path = tmp_path / "Faces.xlsx"
     plan = _expected(path)
     receipt = _written_receipt(path, plan, with_companion=True)
     assert reconcile_recording_condition_outputs(plan, [receipt]).is_pre_review_ready
     original = path.read_bytes()
-    companion = path.with_name(receipt["workbook_write"]["spectral_companion"]["path"])
+    companion = path.with_name(receipt["workbook_write"][companion_key]["path"])
     if failure == "missing":
         companion.unlink()
     else:
@@ -306,7 +309,7 @@ def test_companion_failure_blocks_condition_with_unchanged_workbook(tmp_path, fa
     outcome = reconcile_recording_condition_outputs(plan, [receipt]).cells[0]
     assert path.read_bytes() == original
     assert outcome.status == CELL_BLOCKED
-    assert "spectral_companion_not_current" in outcome.reason_codes
+    assert f"{companion_key}_not_current" in outcome.reason_codes
 
 
 def test_missing_retained_occurrence_cannot_make_partial_average_ready(tmp_path):

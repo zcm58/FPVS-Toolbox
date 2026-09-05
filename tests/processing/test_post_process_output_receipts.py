@@ -149,6 +149,56 @@ def test_512_hz_export_preserves_full_spectra_and_calculated_snr(tmp_path):
         workbook.close()
 
 
+def test_compact_export_preserves_calculated_tables_without_excel_copies(
+    tmp_path, monkeypatch
+):
+    import importlib
+    from openpyxl import load_workbook
+    from Main_App.io.condition_data import CONDITION_DATA_SHEET_NAMES, read_condition_sheet
+
+    module = importlib.import_module("Main_App.Shared.post_process")
+    original_write = module.write_results_workbook
+    calculated = {}
+
+    def capture_write(*args, **kwargs):
+        calculated.update({
+            name: frame.copy(deep=True)
+            for name, frame in kwargs["dataframes_to_save"].items()
+            if name in CONDITION_DATA_SHEET_NAMES
+        })
+        for argument, name in (
+            ("spectral_eligibility_df", "Spectral Eligibility"),
+            ("spectral_metric_qc_df", "Spectral Metric QC"),
+            ("fft_neighbors_df", "FFT and neighbors"),
+        ):
+            calculated[name] = kwargs[argument].copy(deep=True)
+        return original_write(*args, **kwargs)
+
+    monkeypatch.setattr(module, "write_results_workbook", capture_write)
+    app = _app(tmp_path, _epochs())
+    post_process(app, ["Faces"])
+    receipt = app.export_receipts[0]
+    assert receipt["status"] == "written"
+    assert receipt["workbook_write"]["condition_companion"]["path"].endswith(".npz")
+    path = receipt["path"]
+    workbook = load_workbook(path, read_only=True)
+    try:
+        assert "Condition Data" in workbook.sheetnames
+        for name in calculated:
+            assert workbook[name].max_row == 2
+            assert workbook[name].max_column == 2
+    finally:
+        workbook.close()
+
+    def no_excel_metrics(*args, **kwargs):
+        raise AssertionError("Compact numerical reads must not parse Excel tables")
+
+    monkeypatch.setattr(pd, "read_excel", no_excel_metrics)
+    for name, expected in calculated.items():
+        actual = read_condition_sheet(path, sheet_name=name)
+        pd.testing.assert_frame_equal(actual, expected.reset_index(drop=True), check_exact=True)
+
+
 @pytest.mark.parametrize("invalid", [np.nan, np.inf, -np.inf])
 def test_nonfinite_source_blocks_current_export_and_preserves_prior_workbook(
     tmp_path,

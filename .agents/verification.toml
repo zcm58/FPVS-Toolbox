@@ -37,6 +37,7 @@ tests = [
   "tests/project_io/test_repeated_session_project_setup.py",
   "tests/project_io/test_main_app_xlsx_selected_reader.py",
   "tests/project_io/test_spectral_data.py",
+  "tests/project_io/test_condition_data.py",
   "tests/project_io/test_settings_paths.py",
 ]
 include = ["src/Main_App/projects/**", "src/Main_App/io/**", "src/Main_App/Shared/settings_paths.py", "src/Main_App/gui/project_workflows.py", "src/Main_App/gui/tool_workflows.py", "tests/project_io/**"]
@@ -60,6 +61,8 @@ tests = [
   "tests/processing/test_pipeline_speed_safety.py",
   "tests/processing/test_post_process_target_freqs.py",
   "tests/processing/test_post_process_output_receipts.py",
+  "tests/processing/test_roi_final_release.py",
+  "tests/processing/test_analysis_ready_workbook.py",
   "tests/processing/test_recording_condition_outcomes.py",
   "tests/processing/test_individual_detectability_project_coverage.py",
   "tests/processing/test_project_processing_cache.py",
@@ -119,6 +122,7 @@ tests = [
   "tests/plot_generator/test_plot_generator_project_input_policy.py",
   "tests/plot_generator/test_plot_generator_spectral_qc.py",
   "tests/plot_generator/test_spectral_companion_inputs.py",
+  "tests/plot_generator/test_condition_companion_consumers.py",
   "tests/plot_generator/test_plot_generator_rendering_contract.py",
   "tests/plot_generator/test_plot_generator_session_aggregation.py",
   "tests/plot_generator/test_plot_generator_session_controls.py",

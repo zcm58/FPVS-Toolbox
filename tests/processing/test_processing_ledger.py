@@ -414,7 +414,16 @@ def _write_expected_outputs(plan) -> None:
 
 
 @pytest.mark.parametrize("failure", ["missing", "corrupt"])
-def test_incremental_completion_requires_spectral_companion(tmp_path, failure):
+@pytest.mark.parametrize(
+    "companion_key,sheet_name,label",
+    [
+        ("spectral_companion", "FullFFT Amplitude (uV)", "Spectral"),
+        ("condition_companion", "BCA (uV)", "Condition metrics"),
+    ],
+)
+def test_incremental_completion_requires_declared_companions(
+    tmp_path, failure, companion_key, sheet_name, label,
+):
     import pandas as pd
 
     from Main_App.Shared.post_process_excel import write_results_workbook
@@ -424,7 +433,7 @@ def test_incremental_completion_requires_spectral_companion(tmp_path, failure):
     output = plan.states[0].expected_outputs[0]
     output.parent.mkdir(parents=True, exist_ok=True)
     write = write_results_workbook(str(output), {
-        "FullFFT Amplitude (uV)": pd.DataFrame({"Electrode": ["Oz"], "0.0000_Hz": [1.0]}),
+        sheet_name: pd.DataFrame({"Electrode": ["Oz"], "0.0000_Hz": [1.0]}),
     })
     record_processing_results(
         project, plan,
@@ -434,14 +443,14 @@ def test_incremental_completion_requires_spectral_companion(tmp_path, failure):
     )
     ready = classify_processing_inputs(project, [info], _settings(), project.event_map)
     assert ready.states[0].status == "completed"
-    companion = output.with_name(write["spectral_companion"]["path"])
+    companion = output.with_name(write[companion_key]["path"])
     if failure == "missing":
         companion.unlink()
     else:
         companion.write_bytes(b"corrupt")
     changed = classify_processing_inputs(project, [info], _settings(), project.event_map)
     assert changed.states[0].status == "missing_outputs"
-    assert "Spectral companion" in changed.states[0].reason
+    assert f"{label} companion" in changed.states[0].reason
     assert not processing_ledger_module._state_still_matches_ledger(project, ready.states[0])
 
 
@@ -467,6 +476,48 @@ def test_companion_cleanup_preserves_other_recordings_and_unrelated_npz(tmp_path
     assert unrelated.exists() and other.exists()
     clean_managed_excel_root(project)
     assert unrelated.exists() and not other.exists()
+
+
+@pytest.mark.parametrize("cleanup", ["participant", "all"])
+@pytest.mark.parametrize("corrupt", [False, True])
+def test_metric_cleanup_selects_declared_artifacts_and_allows_repair(
+    tmp_path, cleanup, corrupt,
+):
+    import pandas as pd
+
+    from Main_App.io.condition_data import (
+        condition_manifest_frame,
+        write_condition_companion,
+    )
+
+    project, info = _project_with_raw(tmp_path)
+    plan = classify_processing_inputs(project, [info], _settings(), project.event_map)
+    output = plan.states[0].expected_outputs[0]
+    output.parent.mkdir(parents=True, exist_ok=True)
+    descriptor = write_condition_companion(output, {
+        "BCA (uV)": pd.DataFrame({"Electrode": ["Oz"], "1.2000_Hz": [1.0]}),
+    })
+    with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
+        condition_manifest_frame(descriptor).to_excel(
+            writer, sheet_name="Condition Data", index=False,
+        )
+    companion = output.with_name(descriptor["path"])
+    if corrupt:
+        companion.write_bytes(b"damaged data must not prevent reprocessing")
+    orphan = output.with_name(f"{output.stem}.metrics.{'a' * 20}.npz")
+    unrelated = output.with_name("manual-array.npz")
+    other = output.with_name("P02_Condition A_Results.metrics." + "b" * 20 + ".npz")
+    for path in (orphan, unrelated, other):
+        path.write_bytes(b"not declared by a managed workbook")
+
+    if cleanup == "participant":
+        deleted = clean_participant_outputs(project, plan)
+        assert set(deleted) == {output, companion}
+    else:
+        clean_managed_excel_root(project)
+
+    assert not output.exists() and not companion.exists()
+    assert all(path.exists() for path in (orphan, unrelated, other))
 
 
 def _write_source_derivative_result(

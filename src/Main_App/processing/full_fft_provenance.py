@@ -583,6 +583,10 @@ def _source_snapshot(
     )
 
     source_rows: list[dict[str, object]] = []
+    from Main_App.io.condition_data import (
+        ConditionDataError,
+        condition_companion_identity,
+    )
     from Main_App.io.spectral_data import (
         SpectralDataError,
         spectral_companion_identity,
@@ -614,6 +618,14 @@ def _source_snapshot(
             ) from exc
         if companion is not None:
             row["spectral_companion"] = companion
+        try:
+            condition_companion = condition_companion_identity(resolved)
+        except ConditionDataError as exc:
+            raise FullFftProvenanceError(
+                f"Condition metrics companion is invalid for {relative}: {exc}"
+            ) from exc
+        if condition_companion is not None:
+            row["condition_companion"] = condition_companion
         if repeated_session:
             row.update(
                 {
@@ -1193,7 +1205,7 @@ def _require_current_full_fft_record(
         differences.append("cohort or canonical workbook identity changed")
     if current.source_fingerprint != record.source_fingerprint:
         differences.append(
-            "FullFFT workbook path, size, modification time, or spectral companion changed"
+            "FullFFT workbook path, size, modification time, or condition data companion changed"
         )
     if current.frequency_qc_fingerprint != record.frequency_qc_fingerprint:
         differences.append("frequency-domain cohort/QC exclusions changed")

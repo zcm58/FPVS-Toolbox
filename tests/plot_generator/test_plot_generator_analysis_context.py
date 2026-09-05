@@ -7,6 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import pandas as pd
 
 from Main_App.processing.full_fft_provenance import (
     FULL_FFT_PROVENANCE_METHOD_VERSION,
@@ -238,14 +239,14 @@ def test_managed_context_revalidation_blocks_figure_output_after_change(
     ]
 
 
+@pytest.mark.parametrize("companion", [False, True])
 def test_managed_plot_domain_intersects_qc14_eligible_nonbase_harmonics(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    companion: bool,
 ) -> None:
     project_root = tmp_path / "Project"
     workbook = project_root / "P01.xlsx"
     workbook.parent.mkdir(parents=True)
-    workbook.write_bytes(b"source")
     protocol = FrequencyProtocol.from_recurrence(
         10,
         5,
@@ -270,13 +271,17 @@ def test_managed_plot_domain_intersects_qc14_eligible_nonbase_harmonics(
         frequency_resolution_hz=1.0 / 60.0,
         source_paths=(workbook.name,),
     )
-    monkeypatch.setattr(
-        analysis_context.pd,
-        "read_excel",
-        lambda *_args, **_kwargs: analysis_context.pd.DataFrame(
-            eligibility.to_rows()
-        ),
-    )
+    frame = pd.DataFrame(eligibility.to_rows())
+    if companion:
+        from Main_App.io.condition_data import condition_manifest_frame, write_condition_companion
+
+        descriptor = write_condition_companion(workbook, {"Spectral Eligibility": frame})
+        with pd.ExcelWriter(workbook) as writer:
+            condition_manifest_frame(descriptor).to_excel(
+                writer, sheet_name="Condition Data", index=False,
+            )
+    else:
+        frame.to_excel(workbook, sheet_name="Spectral Eligibility", index=False)
 
     domain = analysis_context._resolve_managed_spectral_eligibility_domain(
         index,

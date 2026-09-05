@@ -57,6 +57,8 @@ class _RunScopedXlsxReadCache:
     )
     spectral_manifests: dict[_WorkbookSignature, dict | None] = field(default_factory=dict)
     spectral_payloads: OrderedDict[tuple, object] = field(default_factory=OrderedDict)
+    condition_manifests: dict[_WorkbookSignature, dict | None] = field(default_factory=dict)
+    condition_payloads: OrderedDict[tuple, object] = field(default_factory=OrderedDict)
 
 
 _ACTIVE_XLSX_READ_CACHE: ContextVar[_RunScopedXlsxReadCache | None] = ContextVar(
@@ -95,6 +97,13 @@ def read_xlsx_sheet_header(excel_path: str | Path, *, sheet_name: str) -> list[o
         from Main_App.io.spectral_data import read_spectral_sheet_header
 
         return read_spectral_sheet_header(excel_path, sheet_name=sheet_name)
+    from Main_App.io.condition_data import (
+        CONDITION_DATA_SHEET_NAMES,
+        read_condition_sheet_header,
+    )
+
+    if sheet_name in CONDITION_DATA_SHEET_NAMES:
+        return read_condition_sheet_header(excel_path, sheet_name=sheet_name)
     return _read_xlsx_sheet_header_raw(excel_path, sheet_name=sheet_name)
 
 
@@ -156,6 +165,21 @@ def read_xlsx_sheet_selected_columns(
         from Main_App.io.spectral_data import read_spectral_sheet_selected_columns
 
         return read_spectral_sheet_selected_columns(
+            excel_path,
+            sheet_name=sheet_name,
+            required_columns=required_columns,
+            require_all=require_all,
+            included_electrodes_upper=included_electrodes_upper,
+            electrode_column=electrode_column,
+            timing_details=timing_details,
+        )
+    from Main_App.io.condition_data import (
+        CONDITION_DATA_SHEET_NAMES,
+        read_condition_sheet_selected_columns,
+    )
+
+    if sheet_name in CONDITION_DATA_SHEET_NAMES:
+        return read_condition_sheet_selected_columns(
             excel_path,
             sheet_name=sheet_name,
             required_columns=required_columns,

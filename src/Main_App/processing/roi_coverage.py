@@ -1905,6 +1905,25 @@ def require_current_final_release(
                 "QC-20 final release is stale because its workbook changed or "
                 f"is missing: {cell.processing_id}/{cell.condition_label}."
             )
+        from Main_App.io.condition_data import condition_companion_identity
+        from Main_App.io.spectral_data import spectral_companion_identity
+
+        for key, reader in (
+            ("condition_companion", condition_companion_identity),
+            ("spectral_companion", spectral_companion_identity),
+        ):
+            try:
+                current_companion = reader(workbook_path)
+            except (OSError, ValueError) as exc:
+                raise RoiCoverageGateError(
+                    "QC-20 final release has a missing or changed data companion: "
+                    f"{cell.processing_id}/{cell.condition_label}."
+                ) from exc
+            if current_companion != workbook_write.get(key):
+                raise RoiCoverageGateError(
+                    "QC-20 final release has a different data companion: "
+                    f"{cell.processing_id}/{cell.condition_label}."
+                )
     coverage = load_roi_coverage(root, stage=ROI_COVERAGE_STAGE_FINAL)
     if coverage is None:
         raise RoiCoverageGateError("QC-21 final ROI coverage has not been recorded.")

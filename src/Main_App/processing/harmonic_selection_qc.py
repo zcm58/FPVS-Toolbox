@@ -13,7 +13,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
-import pandas as pd
 
 from Main_App.projects import (
     ProjectDatasetIndex,
@@ -1250,7 +1249,9 @@ def _project_spectral_eligibility_domain(
                 continue
             path = Path(file_path)
             try:
-                frame = pd.read_excel(path, sheet_name="Spectral Eligibility")
+                from Main_App.io.condition_data import read_condition_sheet
+
+                frame = read_condition_sheet(path, sheet_name="Spectral Eligibility")
             except (OSError, ValueError) as exc:
                 raise SpectralEligibilityError(
                     "A current Spectral Eligibility sheet is required in every "

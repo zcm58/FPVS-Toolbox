@@ -412,6 +412,7 @@ class WorkbookSignature:
     size_bytes: int | None
     mtime_ns: int | None
     spectral_companion_json: str | None = None
+    condition_companion_json: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1177,6 +1178,7 @@ def _workbook_signature(
     condition: str,
     file_path: str | None,
 ) -> WorkbookSignature:
+    from Main_App.io.condition_data import condition_companion_identity
     from Main_App.io.spectral_data import spectral_companion_identity
 
     if not file_path:
@@ -1203,6 +1205,7 @@ def _workbook_signature(
             mtime_ns=None,
         )
     companion = spectral_companion_identity(path)
+    condition_companion = condition_companion_identity(path)
     return WorkbookSignature(
         subject=str(subject),
         condition=str(condition),
@@ -1212,6 +1215,11 @@ def _workbook_signature(
         spectral_companion_json=(
             json.dumps(companion, sort_keys=True, separators=(",", ":"))
             if companion is not None
+            else None
+        ),
+        condition_companion_json=(
+            json.dumps(condition_companion, sort_keys=True, separators=(",", ":"))
+            if condition_companion is not None
             else None
         ),
     )
@@ -2123,6 +2131,11 @@ def _selection_source_workbook_fingerprints(
             **(
                 {"spectral_companion": json.loads(signature.spectral_companion_json)}
                 if signature.spectral_companion_json is not None
+                else {}
+            ),
+            **(
+                {"condition_companion": json.loads(signature.condition_companion_json)}
+                if signature.condition_companion_json is not None
                 else {}
             ),
         }
