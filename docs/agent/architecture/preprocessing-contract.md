@@ -732,6 +732,23 @@ Downsampling:
 
 Kurtosis review and interpolation:
 
+- QC preparation may reuse an exact checkpoint under the active project's
+  `.fpvs_cache/prepared_kurtosis/`. `prepared_kurtosis_cache.py` owns atomic,
+  checksummed uncompressed NumPy archives with float64 samples;
+  `prepared_raw_codec.py` preserves supported MNE metadata, annotations,
+  geometry, and numerical evidence without pickle. Unsupported metadata or a
+  damaged/incomplete entry falls back to the ordinary calculation. One latest
+  complete checkpoint is retained per source recording.
+  Failed reference/filter/resampling preparation never publishes a checkpoint.
+- Reuse is bound to the source file and actual input sample hashes, source
+  metadata/annotations, full analyzed-span plan, channel selection/direct bads,
+  reference/filter/notch/resampling inputs, and numerical-library/method versions.
+  A hit skips only the already-completed reference/filter/downsample/scoring
+  prefix. The shared `_finish_preprocessing_at_kurtosis` rebuilds decisions from
+  current policy and receipts, then performs interpolation and final reference
+  in the original order. No GUI approval is stored as reusable numerical evidence.
+  The scanner and runner still validate/load their current source Raw before
+  this checkpoint boundary; trigger positions and data precision are unchanged.
 - Kurtosis runs only when `reject_thresh` is truthy.
 - EEG picks exclude existing bads and exclude the stim channel when the stim
   channel exists and is not typed as EEG.

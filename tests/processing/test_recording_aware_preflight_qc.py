@@ -111,7 +111,7 @@ def test_recording_condition_exclusion_removes_only_one_visit(
     ) is True
 
 
-def test_v22_cache_identity_adds_recording_without_changing_legacy_shape(
+def test_cache_identity_adds_recording_to_source_stat_identity(
     tmp_path: Path,
 ) -> None:
     raw_file = tmp_path / "P01.bdf"
@@ -123,5 +123,5 @@ def test_v22_cache_identity_adds_recording_without_changing_legacy_shape(
         recording_id="P01__luteal",
     )
 
-    assert set(legacy) == {"resolved_path", "size", "mtime_ns"}
+    assert set(legacy) == {"resolved_path", "size", "mtime_ns", "ctime_ns"}
     assert recording == {**legacy, "recording_id": "P01__luteal"}

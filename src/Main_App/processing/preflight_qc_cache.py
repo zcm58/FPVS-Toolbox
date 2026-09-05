@@ -20,7 +20,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-PREFLIGHT_QC_CACHE_SCHEMA_VERSION = 1
+PREFLIGHT_QC_CACHE_SCHEMA_VERSION = 2
 PREFLIGHT_QC_CACHE_METHOD_DIRECTORY = "v7_analyzed_condition_scope"
 PREFLIGHT_QC_CACHE_RELATIVE_DIRECTORY = (
     Path(".fpvs_processing")
@@ -30,13 +30,16 @@ PREFLIGHT_QC_CACHE_RELATIVE_DIRECTORY = (
 _CACHE_WRITE_LOCK = threading.Lock()
 
 
-def preflight_qc_cache_directory(project_root: Path) -> Path:
+def preflight_qc_cache_directory(project_root: Path, *, namespace: str = "") -> Path:
     """Return the current cache directory beneath an explicit project root."""
 
     root = Path(project_root)
     if not root.is_absolute():
         raise ValueError("project_root must be an explicit absolute path")
-    return root / PREFLIGHT_QC_CACHE_RELATIVE_DIRECTORY
+    if namespace not in {"", "events", "occurrences"}:
+        raise ValueError("Unknown preflight cache namespace")
+    directory = root / PREFLIGHT_QC_CACHE_RELATIVE_DIRECTORY
+    return directory / namespace if namespace else directory
 
 
 def _canonical_json(value: object) -> str:
@@ -99,6 +102,7 @@ def preflight_qc_cache_path(
     settings: Mapping[str, object],
     method: Mapping[str, object],
     event_plan: Sequence[Mapping[str, object]] | Mapping[str, object],
+    namespace: str = "",
 ) -> Path:
     """Return the cache path without creating project directories."""
 
@@ -108,7 +112,7 @@ def preflight_qc_cache_path(
         method=method,
         event_plan=event_plan,
     )
-    return preflight_qc_cache_directory(project_root) / f"{fingerprint}.json"
+    return preflight_qc_cache_directory(project_root, namespace=namespace) / f"{fingerprint}.json"
 
 
 def load_preflight_qc_cache(
@@ -118,6 +122,7 @@ def load_preflight_qc_cache(
     settings: Mapping[str, object],
     method: Mapping[str, object],
     event_plan: Sequence[Mapping[str, object]] | Mapping[str, object],
+    namespace: str = "",
 ) -> dict[str, Any] | None:
     """Return a validated cached result, or ``None`` for every cache miss."""
 
@@ -130,13 +135,12 @@ def load_preflight_qc_cache(
     fingerprint = hashlib.sha256(
         _canonical_json(key_payload).encode("utf-8")
     ).hexdigest()
-    path = preflight_qc_cache_directory(project_root) / f"{fingerprint}.json"
-    if not path.is_file():
-        return None
-
+    path = preflight_qc_cache_directory(project_root, namespace=namespace) / f"{fingerprint}.json"
     try:
+        if not path.is_file():
+            return None
         envelope = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+    except (OSError, UnicodeError, json.JSONDecodeError, RecursionError) as exc:
         logger.warning(
             "preflight_qc_cache_unreadable path=%s error=%s",
             path,
@@ -156,6 +160,12 @@ def load_preflight_qc_cache(
     result = envelope.get("result")
     if not isinstance(result, dict):
         return None
+    try:
+        result_digest = hashlib.sha256(_canonical_json(result).encode("utf-8")).hexdigest()
+    except (TypeError, ValueError, RecursionError):
+        return None
+    if envelope.get("result_sha256") != result_digest:
+        return None
     return result
 
 
@@ -167,6 +177,7 @@ def save_preflight_qc_cache(
     method: Mapping[str, object],
     event_plan: Sequence[Mapping[str, object]] | Mapping[str, object],
     result: Mapping[str, object],
+    namespace: str = "",
 ) -> Path:
     """Atomically save one JSON QC result and return its project-local path."""
 
@@ -180,13 +191,16 @@ def save_preflight_qc_cache(
     fingerprint = hashlib.sha256(
         _canonical_json(key_payload).encode("utf-8")
     ).hexdigest()
-    cache_directory = preflight_qc_cache_directory(project_root)
+    cache_directory = preflight_qc_cache_directory(project_root, namespace=namespace)
     destination = cache_directory / f"{fingerprint}.json"
     envelope = {
         "schema_version": PREFLIGHT_QC_CACHE_SCHEMA_VERSION,
         "fingerprint": fingerprint,
         "key": key_payload,
         "result": result_payload,
+        "result_sha256": hashlib.sha256(
+            _canonical_json(result_payload).encode("utf-8")
+        ).hexdigest(),
     }
     serialized = json.dumps(
         envelope,

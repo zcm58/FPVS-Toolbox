@@ -1552,6 +1552,7 @@ def _run_full_pipeline_for_file(
     export_receipts: List[Dict[str, object]] = []
     cache_status = "not_checked"
     settings = _settings_for_file(file_path, settings)
+    settings["project_root"] = str(project_root)
 
     def _record_timing(section: str, started_at: float) -> None:
         elapsed_ms = int((time.perf_counter() - started_at) * 1000)

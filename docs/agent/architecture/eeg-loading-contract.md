@@ -43,6 +43,19 @@ context. The explicit `stim_channel` argument keeps event discovery and the
 header subset on the same configured channel; when omitted, the normal host
 resolution and `Status` fallback still apply.
 
+Preflight caches live under the active project's
+`.fpvs_processing/preflight_qc/v7_analyzed_condition_scope/`. Recording results
+are keyed by effective recording settings; `events/` retains exact integer
+source-event samples and `occurrences/` retains numerical evidence for exact
+analyzed occurrences. Current marker planning and review provenance are rebuilt
+around reused evidence. Schema-2 payload checksums, source-stat checks, channel
+geometry, method versions, thresholds, and exact sample bounds govern reuse;
+unusable entries trigger ordinary recalculation. Excluding one condition can
+reuse the remaining occurrences through the existing aggregation function.
+Unchanged condition review skips a redundant rescan; changed sources, marker
+decisions, or condition choices still rebuild the project-wide result. Timings separate
+condition reads, channel metrics, spectral calculation, and spectral-worker wait.
+
 The implementation still lives in `Main_App.Shared.load_utils` during this
 layout migration slice. Do not change that implementation as part of
 import-surface moves.

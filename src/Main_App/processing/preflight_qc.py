@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from contextlib import contextmanager
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 import hashlib
 import json
 import logging
@@ -44,6 +44,12 @@ from Main_App.processing.preflight_qc_plan import (
     plan_preflight_qc_events,
     resolve_preflight_spectral_bounds,
 )
+from Main_App.processing.preflight_qc_reuse import (
+    load_occurrence_evidence,
+    load_source_events,
+    save_occurrence_evidence,
+    save_source_events,
+)
 from Main_App.processing.analysis_spans import (
     restrict_source_analysis_span_plan_by_condition,
 )
@@ -73,6 +79,8 @@ from Main_App.processing.raw_channel_qc import (
     SCALP_CHANNELS,
     ConditionRawChannelQCBlock,
     ConditionRawChannelQCCancelled,
+    RawChannelQCConfig,
+    _config_from_settings as _raw_channel_config_from_settings,
     combine_condition_raw_channel_qc_v2,
     evaluate_condition_raw_channel_qc_v2,
 )
@@ -1138,7 +1146,13 @@ def _occurrence_evaluation_scope(
     return rows
 
 
-def _preflight_cache_settings(settings: Mapping[str, Any]) -> dict[str, object]:
+def _preflight_cache_settings(
+    settings: Mapping[str, Any],
+    *,
+    participant_id: str | None = None,
+    recording_id: str | None = None,
+    condition_labels: Sequence[str] = (),
+) -> dict[str, object]:
     analysis = settings.get("analysis")
     analysis_payload = dict(analysis) if isinstance(analysis, Mapping) else {}
     analysis_protocol = analysis_payload.get("frequency_protocol")
@@ -1155,6 +1169,8 @@ def _preflight_cache_settings(settings: Mapping[str, Any]) -> dict[str, object]:
         "max_bad_channels_alert_thresh",
         "removed_electrode_detection_mode",
         "auto_detect_removed_electrodes",
+        "detect_removed_electrodes",
+        "auto_mark_removed_electrodes",
         "manual_removed_electrodes_enabled",
         "removed_electrode_detection_choice_schema_version",
         "removed_electrode_detection_choice_status",
@@ -1194,7 +1210,45 @@ def _preflight_cache_settings(settings: Mapping[str, Any]) -> dict[str, object]:
         settings
     )
     payload["reference_pair"] = list(_configured_ref_pair(settings))
+    payload["resolved_stim_channel"] = _configured_stim_channel(settings)
+    if participant_id is not None:
+        # Global maps are authority/configuration inputs, but only this
+        # recording's resolved values can change its numerical findings.
+        for key in (
+            "manual_removed_electrodes", "manual_removed_electrodes_by_recording",
+            "manual_excluded_participant_conditions", "manual_excluded_recording_conditions",
+        ):
+            payload.pop(key, None)
+        payload["_fpvs_manual_removed_electrodes"] = list(
+            manual_removed_electrodes_for_recording(
+                settings, participant_id=participant_id, recording_id=recording_id,
+            )
+        )
+        payload["excluded_condition_labels"] = list(_excluded_condition_labels_for_scan(
+            settings, participant_id=participant_id, recording_id=recording_id,
+            condition_labels=condition_labels,
+        ))
+        payload["recording_scope"] = {
+            "participant_id": participant_id, "recording_id": recording_id,
+        }
+    payload["raw_channel_config"] = asdict(_raw_channel_config_from_settings({
+        **settings,
+        "_fpvs_manual_removed_electrodes": payload.get("_fpvs_manual_removed_electrodes", ()),
+    }))
     return payload
+
+
+def preflight_file_settings_identity(
+    settings: Mapping[str, Any], *, participant_id: str,
+    recording_id: str | None = None, condition_labels: Sequence[str] = (),
+) -> str:
+    """Fingerprint only settings effective for this recording's preflight QC."""
+
+    payload = _preflight_cache_settings(
+        settings, participant_id=participant_id, recording_id=recording_id,
+        condition_labels=condition_labels,
+    )
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()).hexdigest()
 
 
 def _excluded_condition_labels_for_scan(
@@ -1240,6 +1294,7 @@ def _preflight_cache_method(
         "name": PREFLIGHT_QC_METHOD_NAME,
         "version": PREFLIGHT_QC_METHOD_VERSION,
         "raw_channel_method": CONDITION_RAW_CHANNEL_QC_METHOD_VERSION,
+        "raw_channel_defaults": asdict(RawChannelQCConfig()),
         "raw_spectral_method": CONDITION_SPECTRAL_QC_METHOD_VERSION,
         "raw_spectral_notch_method": FFT_MULTINOTCH_METHOD_VERSION,
         "raw_spectral_notch_half_width_hz": FFT_MULTINOTCH_HALF_WIDTH_HZ,
@@ -1269,6 +1324,7 @@ def _preflight_file_identity(
         "resolved_path": str(file_path.resolve()),
         "size": int(stat.st_size),
         "mtime_ns": int(stat.st_mtime_ns),
+        "ctime_ns": int(stat.st_ctime_ns),
     }
     if recording_id:
         payload["recording_id"] = recording_id
@@ -1297,6 +1353,9 @@ def _cached_preflight_result(
     condition_payload = dict(condition_qc) if isinstance(condition_qc, Mapping) else {}
     condition_payload["cache_status"] = "hit"
     condition_payload["timings_ms"] = dict(timings_ms)
+    condition_payload["samples_read_per_channel"] = 0
+    condition_payload["disk_buffered_condition_count"] = 0
+    condition_payload["occurrence_cache_hits"] = condition_payload.get("condition_count", 0)
     return PreflightQcFileResult(
         path=file_path,
         participant_id=participant_id,
@@ -1575,7 +1634,18 @@ def _scan_one_preflight_file_v2(
         return None
 
     if progress_detail:
-        progress_detail(f"Planning {file_path.name} · reading Status events")
+        progress_detail(f"Planning {file_path.name} · checking source events")
+
+    file_identity = _preflight_file_identity(file_path, recording_id=recording_id)
+    cache_settings = _preflight_cache_settings(
+        file_qc_settings, participant_id=participant_id, recording_id=recording_id,
+        condition_labels=tuple(str(label) for label in event_map),
+    )
+    cache_method = _preflight_cache_method(file_qc_settings)
+
+    def _require_unchanged_source() -> None:
+        if _preflight_file_identity(file_path, recording_id=recording_id) != file_identity:
+            raise RuntimeError("The source recording changed during preflight QC; run QC again.")
 
     raw_context = load_utils.open_preflight_eeg_file(
         _LogShim(),
@@ -1600,11 +1670,34 @@ def _scan_one_preflight_file_v2(
             raise _PreflightQcCancelled()
 
         event_started = time.perf_counter()
-        with io_semaphore:
-            events, event_source = _find_preflight_events(
-                raw,
-                stim_channel=_configured_stim_channel(qc_settings),
+        event_cache_key = {
+            "file_identity": file_identity,
+            "settings": {
+                "stim_channel": _configured_stim_channel(qc_settings),
+                "reference_pair": list(_configured_ref_pair(qc_settings)),
+            },
+            "method": {"event_extractor": "mne_shortest_1_annotation_fallback_v1", **cache_method},
+            "event_plan": {
+                "sfreq": float(raw.info["sfreq"]), "n_times": int(raw.n_times),
+                "first_samp": int(raw.first_samp), "channel_names": list(raw.ch_names),
+            },
+        }
+        cached_events = load_source_events(project_root, **event_cache_key)
+        event_cache_status = "hit" if cached_events is not None else "miss"
+        if cached_events is None:
+            with io_semaphore:
+                events, event_source = _find_preflight_events(
+                    raw,
+                    stim_channel=_configured_stim_channel(qc_settings),
+                )
+            if _cancelled():
+                raise _PreflightQcCancelled()
+            _require_unchanged_source()
+            save_source_events(
+                project_root, events=events, source=event_source, **event_cache_key,
             )
+        else:
+            events, event_source = cached_events
         raw_protocol = qc_settings.get("frequency_protocol")
         if raw_protocol is None:
             raise RuntimeError(
@@ -1672,12 +1765,6 @@ def _scan_one_preflight_file_v2(
                 )
             raise RuntimeError("Preflight QC v4 planned no relevant condition intervals.")
 
-        file_identity = _preflight_file_identity(
-            file_path,
-            recording_id=recording_id,
-        )
-        cache_settings = _preflight_cache_settings(file_qc_settings)
-        cache_method = _preflight_cache_method(file_qc_settings)
         event_plan_payload = event_plan.to_payload()
         excluded_condition_labels = _excluded_condition_labels_for_scan(
             qc_settings,
@@ -1728,6 +1815,10 @@ def _scan_one_preflight_file_v2(
                 visit_index=visit_index,
             )
             if cached_result is not None:
+                if _cancelled():
+                    raise _PreflightQcCancelled()
+                _require_unchanged_source()
+                cached_result.condition_qc["event_cache_status"] = event_cache_status
                 if progress_detail:
                     progress_detail(f"Cached {file_path.name} · condition QC reused")
                 logger.info(
@@ -1759,6 +1850,19 @@ def _scan_one_preflight_file_v2(
         samples_read = 0
         disk_buffered_condition_count = 0
         conditions_total = len(scored_spans)
+        occurrence_cache_hits = 0
+        numerical_settings = {
+            key: value for key, value in cache_settings.items()
+            if key not in {"excluded_condition_labels", "recording_scope"}
+        }
+        stage_totals = dict.fromkeys(
+            ("condition_read", "raw_channel_qc", "spectral_wait", "spectral_calculate", "occurrence_cache"),
+            0.0,
+        )
+
+        def _add_stage(stage: str, started: float) -> None:
+            stage_totals[stage] += (time.perf_counter() - started) * 1_000.0
+
         qc_started = time.perf_counter()
         for condition_index, span in enumerate(scored_spans, start=1):
             if _cancelled():
@@ -1767,9 +1871,40 @@ def _scan_one_preflight_file_v2(
                 f"Scanning {file_path.name} · {span.condition_label} "
                 f"{condition_index}/{conditions_total}"
             )
+            occurrence_key = {
+                "file_identity": file_identity,
+                "settings": numerical_settings,
+                "method": {**cache_method, "evidence_codec": "typed_float64_v1"},
+                "event_plan": {
+                    "span": {
+                        key: value for key, value in span.to_payload().items()
+                        if key not in {
+                            "marker_plan_fingerprint", "approved_span_fingerprint", "marker_disposition",
+                        }
+                    },
+                    "sfreq": sfreq, "first_samp": event_plan.first_samp,
+                    "channel_names": list(channel_names), "picks": list(picks),
+                    "spectral_upper_hz": upper_hz,
+                },
+            }
+            occurrence_started = time.perf_counter()
+            evidence = load_occurrence_evidence(project_root, **occurrence_key)
+            _add_stage("occurrence_cache", occurrence_started)
+            if evidence is not None:
+                cached_channel, cached_spectral = evidence
+                channel_results.append(cached_channel)
+                if cached_spectral is None:
+                    skipped_spectral_spans.append(span)
+                else:
+                    spectral_results.append((span, cached_spectral))
+                occurrence_cache_hits += 1
+                if progress_detail:
+                    progress_detail(f"{detail_prefix} · cached condition QC reused")
+                continue
             if progress_detail:
                 progress_detail(f"{detail_prefix} · reading condition samples")
 
+            read_started = time.perf_counter()
             with _condition_data_buffer(
                 raw,
                 picks=picks,
@@ -1781,12 +1916,15 @@ def _scan_one_preflight_file_v2(
                 progress_detail=progress_detail,
                 detail_prefix=detail_prefix,
             ) as (condition_data, disk_buffered):
+                _add_stage("condition_read", read_started)
                 blocks = None
                 spectral_data = None
+                spectral_result = None
                 try:
                     if disk_buffered:
                         disk_buffered_condition_count += 1
                     samples_read += int(condition_data.shape[1])
+                    raw_qc_started = time.perf_counter()
                     blocks = _condition_blocks(condition_data, span=span, sfreq=sfreq)
                     if progress_detail:
                         progress_detail(
@@ -1810,6 +1948,7 @@ def _scan_one_preflight_file_v2(
                         )
                     except ConditionRawChannelQCCancelled as exc:
                         raise _PreflightQcCancelled() from exc
+                    _add_stage("raw_channel_qc", raw_qc_started)
 
                     if (
                         span.spectral_start_sample is None
@@ -1841,7 +1980,10 @@ def _scan_one_preflight_file_v2(
                                 f"{detail_prefix} · checking exact on-bin spectrum"
                             )
                         try:
+                            spectral_wait_started = time.perf_counter()
                             with spectral_semaphore:
+                                _add_stage("spectral_wait", spectral_wait_started)
+                                spectral_calculate_started = time.perf_counter()
                                 spectral_result = evaluate_condition_spectral_qc_v2(
                                     spectral_data,
                                     sfreq=sfreq,
@@ -1855,6 +1997,7 @@ def _scan_one_preflight_file_v2(
                                     thresholds=spectral_thresholds,
                                     should_cancel=should_cancel,
                                 )
+                                _add_stage("spectral_calculate", spectral_calculate_started)
                         except ConditionSpectralQCCancelled as exc:
                             raise _PreflightQcCancelled() from exc
                         spectral_results.append(
@@ -1867,7 +2010,22 @@ def _scan_one_preflight_file_v2(
                     spectral_data = None
                     blocks = None
                     del condition_data
+            if _cancelled():
+                raise _PreflightQcCancelled()
+            _require_unchanged_source()
+            occurrence_started = time.perf_counter()
+            save_occurrence_evidence(
+                project_root, channel=channel_results[-1], spectral=spectral_result,
+                **occurrence_key,
+            )
+            _add_stage("occurrence_cache", occurrence_started)
         _record_timing("condition_qc", qc_started)
+        for stage, elapsed_ms in stage_totals.items():
+            timings_ms[stage] = elapsed_ms
+            logger.info(
+                "preflight_qc_timing file=%s participant_id=%s stage=%s elapsed_ms=%.3f",
+                file_path.name, participant_id, stage, elapsed_ms,
+            )
         if _cancelled():
             raise _PreflightQcCancelled()
 
@@ -1943,6 +2101,8 @@ def _scan_one_preflight_file_v2(
             "review_only": True,
             "cache_status": "miss",
             "event_source": event_source,
+            "event_cache_status": event_cache_status,
+            "occurrence_cache_hits": occurrence_cache_hits,
             "event_plan": event_plan_payload,
             "scored_source_analysis_span_plan": scored_source_plan,
             "excluded_condition_labels": list(excluded_condition_labels),
@@ -1982,6 +2142,7 @@ def _scan_one_preflight_file_v2(
         if _cancelled():
             raise _PreflightQcCancelled()
         save_started = time.perf_counter()
+        _require_unchanged_source()
         try:
             save_preflight_qc_cache(
                 project_root,
@@ -2350,6 +2511,7 @@ __all__ = [
     "PreflightQcFileResult",
     "PreflightQcScan",
     "build_preflight_condition_crop_grid_audit",
+    "preflight_file_settings_identity",
     "scan_preprocessing_qc",
     "scan_recording_not_started_files",
 ]

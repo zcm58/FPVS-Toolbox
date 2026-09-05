@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -4178,6 +4179,33 @@ def _show_suspicious_remainder(
     return choice == "continue"
 
 
+def _condition_review_scan_identity(
+    raw_file_infos: Sequence[Any],
+    params: Mapping[str, Any],
+) -> tuple[object, ...] | None:
+    """Snapshot inputs that can change while the condition review is open."""
+
+    sources = []
+    try:
+        for info in raw_file_infos:
+            path = Path(info.path).resolve()
+            stat = path.stat()
+            sources.append((str(path), stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns))
+    except (OSError, TypeError, ValueError):
+        # Let the scanner report missing/unreadable files through its normal UI.
+        return None
+    return (
+        tuple(sources),
+        normalize_manual_excluded_participant_conditions(
+            params.get("manual_excluded_participant_conditions")
+        ),
+        normalize_manual_excluded_recording_conditions(
+            params.get("manual_excluded_recording_conditions")
+        ),
+        deepcopy(params.get("_fpvs_marker_review_decisions_by_file")),
+    )
+
+
 def run_preprocessing_qc_workflow(
     host: Any,
     raw_file_infos: Sequence[Any],
@@ -4259,6 +4287,7 @@ def run_preprocessing_qc_workflow(
         if _path_key(Path(info.path)) not in header_only_keys
     ]
 
+    condition_review_identity = _condition_review_scan_identity(active_infos, params)
     scan = _run_scan_embedded(
         host,
         active_infos,
@@ -4287,18 +4316,22 @@ def run_preprocessing_qc_workflow(
     ):
         return False
 
-    # Condition decisions define the signal that enters every later QC step.
-    # Re-run through the fingerprinted cache so unchanged files are reused and
-    # newly excluded conditions cannot contribute detector or review evidence.
-    scan = _run_scan_embedded(
-        host,
-        active_infos,
-        params,
-        skip_paths=(),
-        group_labels=group_labels,
-    )
-    if scan is None or scan.cancelled:
-        return False
+    # The existing scan already covers unchanged included intervals. If source
+    # files, marker decisions, or condition choices changed, rebuild the project-wide result via
+    # the recording/occurrence caches before any later detector uses it.
+    if (
+        condition_review_identity is None
+        or condition_review_identity != _condition_review_scan_identity(active_infos, params)
+    ):
+        scan = _run_scan_embedded(
+            host,
+            active_infos,
+            params,
+            skip_paths=(),
+            group_labels=group_labels,
+        )
+        if scan is None or scan.cancelled:
+            return False
 
     if active_infos and not _review_removed_electrodes(
         host,

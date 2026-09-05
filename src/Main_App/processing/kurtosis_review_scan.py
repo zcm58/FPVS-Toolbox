@@ -1126,6 +1126,7 @@ def scan_kurtosis_review(
                 return KurtosisReviewScan(tuple(results), cancelled=True)
 
             file_settings = dict(settings)
+            file_settings["_fpvs_kurtosis_checkpoint_should_cancel"] = should_cancel
             file_settings.update(
                 {
                     "electrode_montage": BIOSEMI64_MONTAGE_ID,
@@ -1246,6 +1247,8 @@ def scan_kurtosis_review(
                 )
             )
         except Exception as exc:
+            if should_cancel and should_cancel():
+                return KurtosisReviewScan(tuple(results), cancelled=True)
             logger.exception(
                 "kurtosis_review_scan_failed file=%s participant_id=%s recording_id=%s",
                 path,

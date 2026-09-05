@@ -1879,6 +1879,35 @@ def _v2_metric_rows(
     data: np.ndarray,
     channel_names: Sequence[str],
 ) -> tuple[RawChannelMetricSet, ...]:
+    # Batch ordinary diagnostic windows, but keep full-occurrence scratch
+    # bounded. Contiguous samples within each row preserve NumPy's existing
+    # reduction order; column-major/other layouts retain the row formulas.
+    if (
+        data.ndim == 2
+        and data.dtype == np.dtype(np.float64)
+        and data.shape[0] == len(channel_names)
+        and data.shape[0] > 1
+        and data.shape[1] > 0
+        and data.nbytes <= 8 * 1024 * 1024
+        and data.strides[1] == data.itemsize
+        and data.strides[0] >= data.shape[1] * data.itemsize
+        and bool(np.isfinite(data).all())
+    ):
+        percentiles = np.percentile(data, [0.05, 0.5, 99.5, 99.95], axis=1)
+        std_uv = np.nanstd(data, axis=1) * 1e6
+        p2p_99_uv = (percentiles[2] - percentiles[1]) * 1e6
+        p2p_999_uv = (percentiles[3] - percentiles[0]) * 1e6
+        full_p2p_uv = (np.nanmax(data, axis=1) - np.nanmin(data, axis=1)) * 1e6
+        return tuple(
+            RawChannelMetricSet(
+                channel=str(channel),
+                std_uv=float(std_uv[row_index]),
+                p2p_99_uv=float(p2p_99_uv[row_index]),
+                p2p_999_uv=float(p2p_999_uv[row_index]),
+                full_p2p_uv=float(full_p2p_uv[row_index]),
+            )
+            for row_index, channel in enumerate(channel_names)
+        )
     return tuple(
         _v2_channel_metrics(str(channel), data[row_index])
         for row_index, channel in enumerate(channel_names)

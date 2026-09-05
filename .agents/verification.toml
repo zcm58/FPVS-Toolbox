@@ -46,6 +46,10 @@ manual_smoke = []
 [scopes.processing]
 audits = ["protected", "source-localization"]
 tests = [
+  "tests/gui/test_preflight_reuse_static.py",
+  "tests/processing/test_preflight_qc_reuse.py",
+  "tests/processing/test_prepared_kurtosis_cache.py",
+  "tests/processing/test_raw_channel_metric_batching.py",
   "tests/gui/test_kurtosis_review_dialog_static.py",
   "tests/gui/test_marker_occurrence_review.py",
   "tests/gui/test_interpolation_burden_review_static.py",
