@@ -16,7 +16,18 @@ def finalize_processing_host_state(host, success: bool) -> None:
         host.log("--- Processing Run Cancelled by User ---")
         return
 
-    if getattr(host, "_processing_summary_reported", False):
+    failure_reason = str(getattr(host, "_post_processing_failure_reason", "") or "").strip()
+    if failure_reason:
+        host.log(f"--- Post-processing Incomplete: {failure_reason} ---")
+        user_messages.show_error(
+            "Post-processing Incomplete",
+            (
+                "Post-processing did not finish. SNR plots and downstream analyses "
+                f"are not ready.\n\n{failure_reason}"
+            ),
+            host,
+        )
+    elif getattr(host, "_processing_summary_reported", False):
         host.log("--- Processing Run Finished with Exclusions or Failures ---")
     elif success:
         host.log("--- Processing Run Completed Successfully ---")

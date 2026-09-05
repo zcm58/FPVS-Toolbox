@@ -32,6 +32,15 @@ _PHASE_FREQUENCY_DOMAIN_QC = "frequency_domain_qc"
 _PHASE_HARMONIC_SELECTION = "harmonic_selection"
 _PHASE_STATS_READY_EXPORT = "stats_ready_export"
 _PHASE_COMPLETE = "post_processing_complete"
+_PHASE_FAILED = "post_processing_failed"
+_REQUIRED_OUTPUT_STEP_NAMES = frozenset(
+    {
+        "frequency_domain_qc",
+        "full_fft_provenance",
+        "harmonic_selection",
+        "stats_ready_summed_bca",
+    }
+)
 _SOURCE_PHASE_BY_MODE = {
     "l2_mne_source_psd": "l2_mne_source_maps",
     "eloreta_volume_source_psd": "eloreta_source_maps",
@@ -79,6 +88,34 @@ class PostProcessingStepResult:
         }
 
 
+def _required_output_failure_reason(
+    steps: list[PostProcessingStepResult],
+    *,
+    selection_only: bool = False,
+) -> str:
+    """Return actionable core failures without treating sibling exports as blockers."""
+
+    required = (
+        {"stats_ready_summed_bca"}
+        if selection_only
+        else _REQUIRED_OUTPUT_STEP_NAMES
+    )
+    completed = {step.name for step in steps if step.ok}
+    return "\n".join(
+        dict.fromkeys(
+            step.message or f"{step.name} did not complete."
+            for step in steps
+            if not step.ok and (
+                step.name in required
+                or (
+                    step.name == "post_processing_pipeline"
+                    and not required.issubset(completed)
+                )
+            )
+        )
+    )
+
+
 class PostProcessingPipelineWorker(QObject):
     """Run downstream analysis prep after preprocessing without touching widgets."""
 
@@ -111,10 +148,14 @@ class PostProcessingPipelineWorker(QObject):
         self._artifact_archives: dict[str, Path] = {}
         self._recording_condition_outcomes: Any | None = None
         self._pre_review_roi_coverage: Any | None = None
+        self._pipeline_steps: list[PostProcessingStepResult] = []
+        self._completed_phase_units = 0
 
     @Slot()
     def run(self) -> None:
         steps: list[PostProcessingStepResult] = []
+        self._pipeline_steps = steps
+        self._completed_phase_units = 0
         cache_stack = ExitStack()
         try:
             from Main_App.io import xlsx_read_cache_scope
@@ -242,15 +283,21 @@ class PostProcessingPipelineWorker(QObject):
             cache_stack.close()
         ok = all(step.ok for step in steps)
         has_warnings = any(step.warning for step in steps)
+        failure_reason = _required_output_failure_reason(
+            steps, selection_only=self._resume_from_selection
+        )
+        self._record_failed_frequency_outputs(steps, failure_reason)
         completion_message = (
-            "Post-processing is complete."
+            f"Post-processing is incomplete: {failure_reason}"
+            if failure_reason
+            else "Post-processing is complete."
             if ok and not has_warnings
             else "Post-processing is complete with source-cohort warnings."
             if ok
-            else "Post-processing finished with warnings; review the processing log for details."
+            else "Core post-processing is complete with optional export warnings; review the processing log for details."
         )
         self._emit_phase_progress(
-            _PHASE_COMPLETE,
+            _PHASE_FAILED if failure_reason else _PHASE_COMPLETE,
             POST_PROCESSING_PHASE_COUNT,
             completion_message,
         )
@@ -258,6 +305,7 @@ class PostProcessingPipelineWorker(QObject):
             {
                 "ok": ok,
                 "has_warnings": has_warnings,
+                "failure_reason": failure_reason,
                 "steps": [step.as_dict() for step in steps],
             }
         )
@@ -350,13 +398,16 @@ class PostProcessingPipelineWorker(QObject):
 
         ok = all(step.ok for step in steps)
         has_warnings = any(step.warning for step in steps)
+        failure_reason = _required_output_failure_reason(steps, selection_only=True)
         completion_message = (
-            "Selection-dependent post-processing is current."
+            f"Selection-dependent post-processing is incomplete: {failure_reason}"
+            if failure_reason
+            else "Selection-dependent post-processing is current."
             if ok and not has_warnings
-            else "Selection-dependent post-processing finished with failures; old artifacts remain stale."
+            else "Selection-dependent post-processing finished with optional export warnings."
         )
         self._emit_phase_progress(
-            _PHASE_COMPLETE,
+            _PHASE_FAILED if failure_reason else _PHASE_COMPLETE,
             POST_PROCESSING_PHASE_COUNT,
             completion_message,
         )
@@ -364,6 +415,7 @@ class PostProcessingPipelineWorker(QObject):
             {
                 "ok": ok,
                 "has_warnings": has_warnings,
+                "failure_reason": failure_reason,
                 "selection_changed": self._selection_changed,
                 "rebuild_skipped": False,
                 "steps": [step.as_dict() for step in steps],
@@ -450,6 +502,35 @@ class PostProcessingPipelineWorker(QObject):
             final_coverage,
             expected_decision_fingerprint=decisions.decision_fingerprint,
         )
+
+    def _record_failed_frequency_outputs(
+        self,
+        steps: list[PostProcessingStepResult],
+        reason: str,
+    ) -> None:
+        """Keep an upstream failure available to downstream readiness guards."""
+
+        if not reason or self._resume_from_selection:
+            return
+        # FullFFT remains usable when selection or a sibling derivative fails.
+        # Only a run that failed before publishing its upstream identity can
+        # invalidate the frequency-domain sources as a whole.
+        if any(step.name == "full_fft_provenance" and step.ok for step in steps):
+            return
+        try:
+            project_root = Path(self._project.project_root).expanduser().resolve()
+            if not self._project_manifest_exists(project_root):
+                return
+            from Main_App.processing.frequency_domain_qc import (
+                mark_frequency_domain_outputs_stale,
+            )
+
+            mark_frequency_domain_outputs_stale(
+                project_root,
+                reason=f"Post-processing did not complete: {reason}",
+            )
+        except PIPELINE_STEP_EXCEPTIONS:
+            logger.exception("post_processing_failure_status_save_failed")
 
     def _run_harmonic_selection(self) -> PostProcessingStepResult:
         self._emit_progress("FPVS Toolbox is currently identifying significant harmonics.")
@@ -1104,6 +1185,13 @@ class PostProcessingPipelineWorker(QObject):
         """Emit coarse, structured progress across the downstream phases."""
 
         completed = max(0, min(POST_PROCESSING_PHASE_COUNT, int(completed_units)))
+        if _required_output_failure_reason(
+            self._pipeline_steps, selection_only=self._resume_from_selection
+        ):
+            completed = min(
+                completed, self._completed_phase_units, POST_PROCESSING_PHASE_COUNT - 1
+            )
+        self._completed_phase_units = completed
         self.phase_progress.emit(
             str(phase_id),
             completed,

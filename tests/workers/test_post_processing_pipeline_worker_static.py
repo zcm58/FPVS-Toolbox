@@ -1,7 +1,15 @@
 from __future__ import annotations
 
 import ast
+from contextlib import ExitStack
+from dataclasses import dataclass
+import json
+import logging
 from pathlib import Path
+from types import MethodType, SimpleNamespace
+from unittest.mock import Mock
+
+import pytest
 
 
 WORKER_PATH = (
@@ -309,3 +317,141 @@ def test_source_psd_exporters_are_loaded_through_separate_expected_seams() -> No
     source_text = WORKER_PATH.read_text(encoding="utf-8")
     assert "project_l2_mne_hauk_zscore_export" not in source_text
     assert "project_eloreta_volume_export" not in source_text
+
+
+def _pipeline_without_qt(tmp_path, *, failed_step="", review_error=""):
+    """Run the production orchestration with exporter/signal doubles and no Qt."""
+
+    tree = _worker_tree()
+    methods = ("run", "_record_failed_frequency_outputs", "_emit_phase_progress")
+    extracted = [_class_method(tree, name) for name in methods]
+    for method in extracted:
+        method.decorator_list = []
+    definitions = [
+        node for node in tree.body
+        if isinstance(node, ast.Assign)
+        or (isinstance(node, ast.ClassDef) and node.name == "PostProcessingStepResult")
+        or (isinstance(node, ast.FunctionDef) and node.name == "_required_output_failure_reason")
+    ]
+    module = ast.Module(
+        body=[
+            ast.ImportFrom(module="__future__", names=[ast.alias(name="annotations")], level=0),
+            *definitions,
+            *extracted,
+        ],
+        type_ignores=[],
+    )
+    namespace = {
+        "__name__": __name__, "Path": Path, "ExitStack": ExitStack,
+        "dataclass": dataclass, "logging": logging,
+    }
+    exec(compile(ast.fix_missing_locations(module), str(WORKER_PATH), "exec"), namespace)
+    step_result = namespace["PostProcessingStepResult"]
+    (tmp_path / "project.json").write_text(
+        json.dumps({"tools": {"processing": {"full_fft_provenance": {"status": "current"}}}}),
+        encoding="utf-8",
+    )
+
+    def result(name):
+        return step_result(name, name != failed_step, f"{name} failed" if name == failed_step else "OK")
+
+    def review():
+        if review_error:
+            raise ValueError(review_error)
+        return {"review_required": False}
+
+    worker = SimpleNamespace(
+        _project=SimpleNamespace(project_root=tmp_path),
+        _resume_from_selection=False,
+        _capture_previous_selection_fingerprint=Mock(),
+        _run_frequency_domain_qc_review=review,
+        _sync_frequency_domain_qc_automatic_state=Mock(),
+        _finalize_frequency_qc_release=Mock(),
+        _run_full_fft_provenance=lambda *_: result("full_fft_provenance"),
+        _run_harmonic_selection=lambda: result("harmonic_selection"),
+        _run_stats_ready_export=lambda *_: result("stats_ready_summed_bca"),
+        _run_analysis_ready_export=lambda *_: result("analysis_ready_full_audit"),
+        _activate_artifact_freshness=Mock(),
+        _record_artifact_freshness=lambda step: step,
+        _artifact_targets={},
+        _artifact_archives={},
+        _project_manifest_exists=lambda root: (root / "project.json").is_file(),
+        phase_progress=Mock(),
+        finished=Mock(),
+    )
+    for name in methods:
+        setattr(worker, name, MethodType(namespace[name], worker))
+
+    def source_maps(_root):
+        worker._emit_phase_progress("l2_mne_source_maps", 4, "Source maps")
+        worker._emit_phase_progress("eloreta_source_maps", 5, "Source maps")
+        return [result("l2_mne_source_psd"), result("eloreta_volume_source_psd")]
+
+    worker._run_source_maps = source_maps
+    return worker
+
+
+def test_prerequisite_failure_persists_reason_and_never_reports_completion(tmp_path):
+    reason = "P9 / Neutral Angry has no retained data. Resolve the missing condition before post-processing."
+    worker = _pipeline_without_qt(tmp_path, review_error=reason)
+
+    worker.run()
+
+    payload = worker.finished.emit.call_args.args[0]
+    phases = [call.args for call in worker.phase_progress.emit.call_args_list]
+    assert payload["ok"] is False
+    assert payload["failure_reason"] == reason
+    assert [(phase, completed) for phase, completed, _, _ in phases] == [
+        ("frequency_domain_qc", 0), ("post_processing_failed", 0),
+    ]
+    manifest = json.loads((tmp_path / "project.json").read_text(encoding="utf-8"))
+    state = manifest["tools"]["frequency_domain_qc"]
+    assert state["downstream_outputs_stale"] is True
+    assert reason in state["stale_reason"]
+
+
+@pytest.mark.parametrize("failed_step", ["full_fft_provenance", "harmonic_selection", "stats_ready_summed_bca"])
+def test_required_output_failure_preserves_progress_and_upstream_independence(tmp_path, failed_step):
+    worker = _pipeline_without_qt(tmp_path, failed_step=failed_step)
+
+    worker.run()
+
+    payload = worker.finished.emit.call_args.args[0]
+    phases = [call.args for call in worker.phase_progress.emit.call_args_list]
+    assert payload["ok"] is False
+    assert payload["failure_reason"] == f"{failed_step} failed"
+    assert phases[-1][0] == "post_processing_failed"
+    assert all(phase != "post_processing_complete" and completed < total for phase, completed, total, _ in phases)
+    manifest = json.loads((tmp_path / "project.json").read_text(encoding="utf-8"))
+    state = manifest["tools"].get("frequency_domain_qc", {})
+    assert bool(state.get("downstream_outputs_stale")) is (failed_step == "full_fft_provenance")
+    assert manifest["tools"]["processing"]["full_fft_provenance"]["status"] == "current"
+
+
+@pytest.mark.parametrize("failed_step", ["analysis_ready_full_audit", "l2_mne_source_psd", "eloreta_volume_source_psd"])
+def test_optional_export_failure_leaves_frequency_outputs_current(tmp_path, failed_step):
+    worker = _pipeline_without_qt(tmp_path, failed_step=failed_step)
+
+    worker.run()
+
+    payload = worker.finished.emit.call_args.args[0]
+    phase, completed, total, _message = worker.phase_progress.emit.call_args.args
+    assert payload["ok"] is False
+    assert payload["failure_reason"] == ""
+    assert (phase, completed, total) == ("post_processing_complete", 5, 5)
+    manifest = json.loads((tmp_path / "project.json").read_text(encoding="utf-8"))
+    assert not manifest["tools"].get("frequency_domain_qc", {}).get("downstream_outputs_stale")
+
+
+def test_exception_after_core_outputs_does_not_report_a_required_output_failure(tmp_path):
+    worker = _pipeline_without_qt(tmp_path)
+    worker._run_source_maps = Mock(side_effect=RuntimeError("Optional source export failed"))
+
+    worker.run()
+
+    payload = worker.finished.emit.call_args.args[0]
+    phase, completed, total, _message = worker.phase_progress.emit.call_args.args
+    assert payload["ok"] is False
+    assert payload["failure_reason"] == ""
+    assert payload["steps"][-1]["message"] == "Optional source export failed"
+    assert (phase, completed, total) == ("post_processing_complete", 5, 5)

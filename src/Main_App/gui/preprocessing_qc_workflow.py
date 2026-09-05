@@ -3097,7 +3097,7 @@ def _checked_condition_crop_pairs(
 ) -> set[tuple[str, str]]:
     table = getattr(host, "processing_files_table", None)
     if table is None:
-        return {candidate.pair_key for candidate in candidates}
+        return {candidate.pair_key for candidate in candidates if candidate.repetition_count > 0}
     checked: set[tuple[str, str]] = set()
     recording_mode = _recording_aware(candidates)
     check_column = 10 if recording_mode else _CONDITION_EXCLUSION_CHECK_COLUMN
@@ -3116,7 +3116,9 @@ def _checked_condition_crop_scopes(
 
     table = getattr(host, "processing_files_table", None)
     if table is None:
-        return set(), {candidate.pair_key for candidate in candidates}
+        return set(), {
+            candidate.pair_key for candidate in candidates if candidate.repetition_count > 0
+        }
     participant_pairs: set[tuple[str, str]] = set()
     recording_pairs: set[tuple[str, str]] = set()
     for row, candidate in enumerate(candidates):
@@ -3142,7 +3144,7 @@ def _replace_reviewed_condition_exclusions(
     checked_pairs: set[tuple[str, str]],
 ) -> dict[str, list[str]]:
     normalized = normalize_manual_excluded_participant_conditions(existing)
-    reviewed_pairs = {candidate.pair_key for candidate in candidates}
+    reviewed_pairs = {candidate.participant_pair_key for candidate in candidates}
     values: dict[str, list[str]] = {}
     for participant_id, conditions in normalized.items():
         for condition in conditions:
@@ -3150,7 +3152,7 @@ def _replace_reviewed_condition_exclusions(
                 continue
             values.setdefault(participant_id, []).append(condition)
     for candidate in candidates:
-        if candidate.pair_key in checked_pairs:
+        if candidate.participant_pair_key in checked_pairs:
             values.setdefault(candidate.participant_id, []).append(
                 candidate.condition_label
             )
@@ -3199,6 +3201,7 @@ def _confirm_condition_crop_exclusions(
     )
     audit = build_preflight_condition_crop_grid_audit(
         scan,
+        expected_event_map=params.get("event_id_map"),
         excluded_participant_conditions=existing,
         excluded_participants=normalize_manual_excluded_participants(
             params.get("manual_excluded_participants")
@@ -3212,11 +3215,19 @@ def _confirm_condition_crop_exclusions(
     if not candidates:
         return True
     recording_mode = _recording_aware(candidates)
+    missing_conditions = any(candidate.repetition_count == 0 for candidate in candidates)
 
     _show_data_quality_notice(
         host,
-        "Review conditions with a different usable FFT crop.",
-        "These condition workbooks would use a different frequency grid from "
+        "Review missing conditions and usable FFT crops."
+        if missing_conditions
+        else "Review conditions with a different usable FFT crop.",
+        "A declared condition has no start occurrence. If it was intentionally "
+        "absent, select it for exclusion. Otherwise, cancel processing and check "
+        "the condition-start triggers. Unresolved missing conditions prevent "
+        "SNR and other analysis outputs from being prepared."
+        if missing_conditions
+        else "These condition workbooks would use a different frequency grid from "
         "the project majority. You can exclude a recording-condition or the "
         "participant-condition across all visits without deleting data."
         if recording_mode
@@ -3228,10 +3239,14 @@ def _confirm_condition_crop_exclusions(
         host,
         step=_CONFIRM_CONDITION_EXCLUSIONS_STEP,
         title="Confirm Condition Exclusions",
-        message="Review usable-data crop differences before processing continues.",
+        message="Resolve missing conditions before processing continues."
+        if missing_conditions
+        else "Review usable-data crop differences before processing continues.",
         busy=False,
         review_visible=True,
-        review_title="Condition Crop Exclusions",
+        review_title="Missing Conditions and Crop Exclusions"
+        if missing_conditions
+        else "Condition Crop Exclusions",
         progress_visible=False,
         checklist=(
             "Compare the usable FFT crop with the project reference",
@@ -3242,7 +3257,10 @@ def _confirm_condition_crop_exclusions(
     _set_label(
         host,
         "processing_summary_label",
-        "A different crop length creates a different FFT grid and prevents "
+        "Missing conditions require an explicit decision. Only exclude a condition "
+        "if its absence is intended; missing rows are not selected automatically."
+        if missing_conditions
+        else "A different crop length creates a different FFT grid and prevents "
         "project-wide statistically significant harmonic selection.",
     )
     _set_label(
@@ -3342,11 +3360,13 @@ def _confirm_condition_crop_exclusions(
             host,
             (
                 ("Save Selected / Next", "save", "primary"),
-                ("Continue Without Changes", "skip", "secondary"),
+                ("Cancel Processing", "cancel", "secondary")
+                if missing_conditions
+                else ("Continue Without Changes", "skip", "secondary"),
             ),
         )
         if choice != "save":
-            return True
+            return not missing_conditions and choice == "skip"
         if recording_mode:
             checked_participants, checked_recordings = (
                 _checked_condition_crop_scopes(host, candidates)
@@ -3375,8 +3395,12 @@ def _confirm_condition_crop_exclusions(
             break
         QMessageBox.warning(
             host,
-            "Incompatible FFT Grids Still Included",
-            "The selected exclusions still leave no usable grid or more than one "
+            "Conditions Still Need Review" if missing_conditions else "Incompatible FFT Grids Still Included",
+            "A missing condition is still included, or the retained conditions "
+            "do not share one usable FFT grid. Exclude only intentionally absent "
+            "conditions, or cancel processing to check the triggers."
+            if missing_conditions
+            else "The selected exclusions still leave no usable grid or more than one "
             "FFT grid in downstream analysis. Select complete participant-condition "
             "rows for exclusion, or continue without saving this QC decision.",
         )

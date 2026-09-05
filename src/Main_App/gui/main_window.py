@@ -816,21 +816,19 @@ class MainWindow(QMainWindow):
             return True
         try:
             from Main_App.processing.frequency_domain_qc import (
-                is_frequency_domain_output_stale,
+                load_frequency_domain_qc_state,
             )
 
-            stale = is_frequency_domain_output_stale(project.project_root)
+            state = load_frequency_domain_qc_state(project.project_root)
         except Exception:
             logger.debug("frequency_domain_stale_guard_failed", exc_info=True)
             return True
-        if not stale:
+        if not state.get("downstream_outputs_stale", False):
             return True
         self.request_post_processing_rebuild(
             tool_name,
-            (
-                "Frequency-domain exclusions changed after the current "
-                "downstream outputs were created."
-            ),
+            str(state.get("stale_reason") or "").strip()
+            or "The project's analysis outputs need a completed post-processing run.",
             str(project.project_root),
         )
         return False

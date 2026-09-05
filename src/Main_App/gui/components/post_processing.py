@@ -29,8 +29,7 @@ class PostProcessingRequiredDialog(AppDialog):
         self.setObjectName("post_processing_required_dialog")
 
         banner = StatusBanner(
-            f"{tool_name} cannot continue because the project's saved analysis "
-            "files are out of date.",
+            f"{tool_name} needs a complete, current set of project analysis outputs.",
             self,
             variant="warning",
         )
@@ -38,10 +37,10 @@ class PostProcessingRequiredDialog(AppDialog):
         self.root_layout.addWidget(banner)
 
         explanation = QLabel(
-            "This tool is trying to use files from an older or incomplete "
-            "post-processing run. Run post-processing again to refresh the "
-            "downstream analysis files. Existing processed EEG data are reused; "
-            "EEG preprocessing is not rerun.",
+            "Review the reason below before retrying. Post-processing reuses "
+            "existing processed EEG data. If a condition is missing, resolve its "
+            "triggers or record an intentional condition exclusion and rerun "
+            "processing first.",
             self,
         )
         explanation.setObjectName("post_processing_required_explanation")
@@ -50,7 +49,7 @@ class PostProcessingRequiredDialog(AppDialog):
 
         details = QTextBrowser(self)
         details.setObjectName("post_processing_required_details")
-        details.setPlainText(reason.strip() or "The downstream project state is stale.")
+        details.setPlainText(reason.strip() or "Project analysis outputs are incomplete or need refreshing.")
         details.setMaximumHeight(105)
         self.root_layout.addWidget(details)
 

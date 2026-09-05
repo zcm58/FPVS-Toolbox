@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 import threading
 import time
@@ -355,6 +356,85 @@ def _condition_crop_result(
             }
         },
     )
+
+
+def test_preflight_requires_explicit_decision_for_absent_declared_condition(tmp_path):
+    result = _condition_crop_result(tmp_path, "P9", "Faces", oddball_cycles=144)
+    scan = PreflightQcScan(results=(result,), oddball_frequency_hz=1.2)
+    audit = build_preflight_condition_crop_grid_audit(
+        scan, expected_event_map={"Faces": 22, "Neutral Angry": 12},
+    )
+
+    (missing,) = audit.review_candidates
+    assert (missing.participant_id, missing.condition_label) == ("P9", "Neutral Angry")
+    assert missing.repetition_count == 0
+    assert "No condition-start occurrence" in missing.issue
+    assert audit.recommended_exclusions == ()
+    assert not audit.is_compatible_with_exclusions({})
+    assert audit.is_compatible_with_exclusions({"P9": ["Neutral Angry"]})
+    assert result.condition_qc["event_plan"]["spans"][0]["condition_id"] == 22
+
+
+def test_preflight_missing_condition_respects_recording_scope(tmp_path):
+    result = _condition_crop_result(tmp_path, "P9", "Faces", oddball_cycles=144)
+    visits = (
+        replace(result, recording_id="p9-v1", session_id="baseline", visit_index=1),
+        replace(result, recording_id="p9-v2", session_id="followup", visit_index=2),
+    )
+    audit = build_preflight_condition_crop_grid_audit(
+        PreflightQcScan(results=visits, oddball_frequency_hz=1.2),
+        expected_event_map={"Faces": 22, "Neutral Angry": 12},
+        excluded_recording_conditions={"p9-v1": ["Neutral Angry"]},
+    )
+    assert [item.recording_id for item in audit.review_candidates] == ["p9-v2"]
+    assert not audit.is_compatible_with_exclusions(
+        {}, recording_exclusions={"p9-v1": ["Neutral Angry"]},
+    )
+    assert audit.is_compatible_with_exclusions({"P9": ["Neutral Angry"]})
+
+
+@pytest.mark.parametrize("scope", ["participant", "recording", "condition"])
+def test_preflight_does_not_reprompt_for_explicitly_excluded_missing_condition(tmp_path, scope):
+    result = replace(
+        _condition_crop_result(tmp_path, "P9", "Faces", oddball_cycles=144),
+        recording_id="p9-v1",
+    )
+    options = {
+        "participant": {"excluded_participants": ["P9"]},
+        "recording": {"excluded_recordings": ["p9-v1"]},
+        "condition": {"excluded_participant_conditions": {"P9": ["Neutral Angry"]}},
+    }[scope]
+    audit = build_preflight_condition_crop_grid_audit(
+        PreflightQcScan(results=(result,), oddball_frequency_hz=1.2),
+        expected_event_map={"Faces": 22, "Neutral Angry": 12},
+        **options,
+    )
+    assert audit.review_candidates == ()
+
+
+def test_preflight_does_not_infer_absence_from_failed_event_plan(tmp_path):
+    result = replace(
+        _condition_crop_result(tmp_path, "P9", "Faces", oddball_cycles=144),
+        condition_qc={}, load_error="Unable to load recording",
+    )
+    audit = build_preflight_condition_crop_grid_audit(
+        PreflightQcScan(results=(result,), oddball_frequency_hz=1.2),
+        expected_event_map={"Faces": 22, "Neutral Angry": 12},
+    )
+    assert audit.observations == ()
+
+
+def test_preflight_preserves_explicit_marker_occurrence_exclusions(tmp_path):
+    result = _condition_crop_result(tmp_path, "P9", "Faces", oddball_cycles=144)
+    result.condition_qc["event_plan"]["approved_occurrences"] = [
+        {"condition_code": 12, "repetition_index": 0, "disposition": "exclude_occurrence"},
+    ]
+    audit = build_preflight_condition_crop_grid_audit(
+        PreflightQcScan(results=(result,), oddball_frequency_hz=1.2),
+        expected_event_map={"Faces": 22, "Neutral Angry": 12},
+    )
+    assert audit.review_candidates == ()
+    assert audit.is_compatible_with_exclusions({})
 
 
 def test_preflight_crop_grid_audit_flags_condition_against_project_majority(

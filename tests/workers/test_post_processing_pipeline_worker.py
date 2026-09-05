@@ -787,6 +787,7 @@ def test_post_processing_pipeline_runs_source_psd_when_stats_ready_fails(tmp_pat
         f"source_mode:eloreta_volume_source_psd:{tmp_path.name}",
     ]
     assert finished and finished[0]["ok"] is False
+    assert finished[0]["failure_reason"] == "stats failed"
     assert [step["name"] for step in finished[0]["steps"]] == [
         "frequency_domain_qc",
         "full_fft_provenance",
@@ -797,12 +798,12 @@ def test_post_processing_pipeline_runs_source_psd_when_stats_ready_fails(tmp_pat
         "eloreta_volume_source_psd",
     ]
     assert phase_progress[-6:] == [
-        ("stats_ready_export", 3, 5),
-        ("l2_mne_source_maps", 3, 5),
-        ("l2_mne_source_maps", 4, 5),
-        ("eloreta_source_maps", 4, 5),
-        ("eloreta_source_maps", 5, 5),
-        ("post_processing_complete", 5, 5),
+        ("stats_ready_export", 2, 5),
+        ("l2_mne_source_maps", 2, 5),
+        ("l2_mne_source_maps", 2, 5),
+        ("eloreta_source_maps", 2, 5),
+        ("eloreta_source_maps", 2, 5),
+        ("post_processing_failed", 2, 5),
     ]
 
 

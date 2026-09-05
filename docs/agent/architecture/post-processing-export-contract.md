@@ -18,6 +18,23 @@ Active post-export adapter imports should use `Main_App.exports.post_export_adap
 
 The function logs start/end status, skips conditions without data, and logs a warning if no Excel files are saved.
 
+The processing-end GUI must use required post-processing outcomes when deciding
+whether a run succeeded. An early frequency-QC/readiness failure must preserve
+its specific reason in the saved downstream-stale state and report incomplete
+progress, even when every available participant workbook was just written.
+File recency is not evidence of a released analysis cohort. Tool guards display
+that saved reason rather than assuming an exclusion changed. Optional full-audit
+or source-map export failures do not turn successful core outputs into failures;
+valid upstream FullFFT provenance remains independent of selection derivatives.
+
+Preflight condition review compares the declared event map with the actual
+planned spans. A declared condition with no start occurrence requires an
+explicit exclusion decision or cancellation to investigate triggers before
+processing starts. Missing conditions are not preselected for exclusion, and
+recording-level and participant-level decisions retain their existing scopes.
+This does not relax the expected recording-condition ledger release checks or
+create output receipts for absent data.
+
 ## Canonical Harmonic Selection And Freshness
 
 Processing-end harmonic selection produces one immutable scientific result for

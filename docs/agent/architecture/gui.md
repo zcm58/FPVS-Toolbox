@@ -481,6 +481,19 @@ The registered `tests/gui/test_signal_review_panel_qt.py` owns CI-only interacti
 and layout coverage; widget-free identity coverage lives in
 `tests/gui/test_signal_review_model.py`.
 
+For processing readiness changes, use a project with a declared condition that
+has no start marker. In Step 3, verify that the missing condition appears
+unchecked and cannot be skipped; Cancel must stop the run without saving an
+exclusion. Save an intentional condition exclusion and verify a subsequent run
+can complete with the existing ledger checks. Repeat with two recordings of
+one participant and check the selected recording/all-visits scope. Trigger a
+required post-processing failure and verify that progress and completion say
+incomplete, display the concrete reason, and that opening SNR shows the same
+reason. After successful core post-processing, SNR must open normally; an
+optional source-map export failure must not block it. Qt execution is CI-only;
+local regression checks execute the orchestration functions with widget-free
+doubles plus the pure preflight and recording-condition models.
+
 For Protocol-tab changes, the visible smoke path is: open two projects in turn,
 save distinct recurrence/direct-Hz protocols, reopen each project and verify its
 own values; confirm that direct-Hz entry displays the implied integer recurrence

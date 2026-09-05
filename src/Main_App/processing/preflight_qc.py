@@ -437,12 +437,13 @@ class PreflightConditionCropGridAudit:
     def recommended_exclusions(
         self,
     ) -> tuple[PreflightConditionCropObservation, ...]:
-        """Return invalid rows and strict-majority mismatches safe to precheck."""
+        """Precheck crop issues; absent conditions require a deliberate choice."""
 
         return tuple(
             observation
             for observation in self.observations
             if not observation.already_excluded
+            and observation.repetition_count > 0
             and (
                 observation.issue is not None
                 or (
@@ -513,6 +514,7 @@ class PreflightConditionCropGridAudit:
 def build_preflight_condition_crop_grid_audit(
     scan: PreflightQcScan,
     *,
+    expected_event_map: Mapping[str, int] | None = None,
     excluded_participant_conditions: Mapping[str, Sequence[str]] | None = None,
     excluded_participants: Sequence[str] = (),
     excluded_recording_conditions: Mapping[str, Sequence[str]] | None = None,
@@ -553,6 +555,7 @@ def build_preflight_condition_crop_grid_audit(
         observations.extend(
             _condition_crop_observations(
                 result,
+                expected_event_map=expected_event_map,
                 oddball_frequency_hz=scan.oddball_frequency_hz,
                 excluded_pair_keys=excluded_pair_keys,
                 excluded_recording_pair_keys=excluded_recording_pair_keys,
@@ -638,6 +641,7 @@ def _condition_crop_observations(
     oddball_frequency_hz: float | None,
     excluded_pair_keys: set[tuple[str, str]],
     excluded_recording_pair_keys: set[tuple[str, str]],
+    expected_event_map: Mapping[str, int] | None = None,
 ) -> list[PreflightConditionCropObservation]:
     condition_qc = result.condition_qc or {}
     event_plan = condition_qc.get("event_plan")
@@ -666,10 +670,33 @@ def _condition_crop_observations(
             condition_label = str(condition_id)
         grouped[(condition_id, condition_label)].append(raw_span)
 
+    # An absent start marker has no span, but still needs a deliberate review
+    # decision before the expected-output ledger can release this condition.
+    observed_codes = {condition_id for condition_id, _label in grouped}
+    # Explicitly excluded occurrences also have no retained span. They already
+    # have a marker-review decision and must not be presented as absent markers.
+    approved_occurrences = event_plan.get("approved_occurrences") or ()
+    for occurrence in approved_occurrences:
+        if not isinstance(occurrence, Mapping):
+            continue
+        if occurrence.get("disposition") == "exclude_occurrence":
+            try:
+                observed_codes.add(int(occurrence["condition_code"]))
+            except (KeyError, TypeError, ValueError):
+                continue
+    for condition_label, condition_id in (expected_event_map or {}).items():
+        if int(condition_id) not in observed_codes:
+            grouped[(int(condition_id), str(condition_label))] = []
+
     observations: list[PreflightConditionCropObservation] = []
     for (condition_id, condition_label), condition_spans in grouped.items():
         lengths: list[int] = []
-        issue: str | None = None
+        issue: str | None = (
+            "No condition-start occurrence was found. Check its triggers, or "
+            "explicitly exclude this condition if it was intentionally absent."
+            if not condition_spans
+            else None
+        )
         for span in condition_spans:
             fallback_reason = str(
                 span.get("spectral_fallback_reason") or ""

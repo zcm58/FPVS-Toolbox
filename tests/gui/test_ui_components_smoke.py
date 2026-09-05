@@ -516,15 +516,15 @@ def test_post_processing_required_dialog_explains_scope_and_actions(qtbot) -> No
     )
     qtbot.addWidget(dialog)
 
-    assert "SNR Plots cannot continue" in dialog.findChild(
+    assert "SNR Plots needs a complete, current set" in dialog.findChild(
         StatusBanner,
         "post_processing_required_banner",
     ).text()
-    assert "EEG preprocessing is not rerun" in dialog.findChild(
+    assert "If a condition is missing" in dialog.findChild(
         QLabel,
         "post_processing_required_explanation",
     ).text()
-    assert "older or incomplete" in dialog.findChild(
+    assert "reuses existing processed EEG data" in dialog.findChild(
         QLabel,
         "post_processing_required_explanation",
     ).text()

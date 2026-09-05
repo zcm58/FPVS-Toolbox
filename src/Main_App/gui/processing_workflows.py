@@ -107,6 +107,11 @@ _POST_PROCESSING_PHASE_STATES = {
         "Post-Processing Complete",
         "FPVS Toolbox has finished preparing downstream analysis outputs.",
     ),
+    "post_processing_failed": (
+        5,
+        "Post-processing Incomplete",
+        "Downstream analysis outputs are not ready. Review the reported failure.",
+    ),
 }
 
 
@@ -293,6 +298,37 @@ def _post_processing_frequency_domain_outputs_ready(result: object) -> bool:
         outcomes.get(step_name) is True
         for step_name in _POST_PROCESSING_FREQUENCY_DOMAIN_STEP_NAMES
     )
+
+
+def _post_processing_failure_reason(result: object) -> str:
+    """Keep failed prerequisites distinct from usable optional-export failures."""
+
+    if _post_processing_frequency_domain_outputs_ready(result):
+        return ""
+    if isinstance(result, dict):
+        if result.get("ok") and result.get("rebuild_skipped"):
+            return ""
+        if result.get("requires_frequency_domain_qc_review"):
+            return "Frequency-domain QC review must be completed before downstream analysis."
+        reason = str(result.get("failure_reason") or "").strip()
+        if reason:
+            return reason
+        steps = result.get("steps")
+        if isinstance(steps, list):
+            for step in steps:
+                if (
+                    isinstance(step, dict)
+                    and not step.get("ok")
+                    and str(step.get("name") or "")
+                    in (
+                        _POST_PROCESSING_FREQUENCY_DOMAIN_STEP_NAMES
+                        | {"post_processing_pipeline"}
+                    )
+                ):
+                    reason = str(step.get("message") or "").strip()
+                    if reason:
+                        return reason
+    return "Required post-processing steps did not complete. Review the processing log."
 
 
 def _refresh_cached_loreta_source_maps(
@@ -565,8 +601,10 @@ def _start_post_processing_pipeline_after_processing(
 ) -> bool:
     if os.getenv("FPVS_TEST_MODE") or os.getenv("PYTEST_CURRENT_TEST"):
         return False
+    host._post_processing_failure_reason = ""
     project = getattr(host, "currentProject", None)
     if project is None:
+        host._post_processing_failure_reason = "No project is loaded for post-processing."
         return False
 
     try:
@@ -576,6 +614,7 @@ def _start_post_processing_pipeline_after_processing(
         )
     except Exception as exc:  # noqa: BLE001
         logger.exception("Failed to import post-processing pipeline worker.")
+        host._post_processing_failure_reason = f"Post-processing pipeline could not start: {exc}"
         host.log(
             f"Post-processing pipeline could not start: {exc}",
             level=logging.WARNING,
@@ -653,6 +692,7 @@ def _start_post_processing_pipeline_after_processing(
             frequency_domain_outputs_ready = (
                 _post_processing_frequency_domain_outputs_ready(result)
             )
+            host._post_processing_failure_reason = _post_processing_failure_reason(result)
             steps = result.get("steps") if isinstance(result, dict) else []
             if isinstance(steps, list):
                 for step in steps:
@@ -711,8 +751,8 @@ def _start_post_processing_pipeline_after_processing(
                 )
             else:
                 host.log(
-                    "Post-processing pipeline finished with warnings. Review the log before "
-                    "using Stats-ready or LORETA outputs.",
+                    "Post-processing is incomplete. SNR and downstream analysis outputs "
+                    f"are not ready: {host._post_processing_failure_reason}",
                     level=logging.WARNING,
                 )
             if source_maps_attempted:
@@ -805,6 +845,7 @@ def _handle_frequency_domain_qc_review(
         )
     except (RuntimeError, ValueError) as exc:
         logger.exception("frequency_domain_qc_group_membership_failed")
+        host._post_processing_failure_reason = f"Frequency-domain QC could not start: {exc}"
         QMessageBox.critical(host, "Frequency-Domain QC Error", str(exc))
         mark_frequency_domain_outputs_stale(
             project.project_root,
@@ -826,6 +867,7 @@ def _handle_frequency_domain_qc_review(
             _sync_project_tools_metadata_from_disk(project)
         except Exception as exc:
             logger.exception("frequency_domain_qc_decision_apply_failed")
+            host._post_processing_failure_reason = f"Frequency-domain QC decisions could not be saved: {exc}"
             QMessageBox.critical(host, "Frequency-Domain QC Error", str(exc))
             mark_frequency_domain_outputs_stale(
                 project.project_root,
@@ -847,9 +889,12 @@ def _handle_frequency_domain_qc_review(
         on_finished()
         return
 
+    host._post_processing_failure_reason = (
+        "Frequency-domain QC review was canceled before final harmonic selection."
+    )
     mark_frequency_domain_outputs_stale(
         project.project_root,
-        reason="Frequency-domain QC review was canceled before final harmonic selection.",
+        reason=host._post_processing_failure_reason,
     )
     _sync_project_tools_metadata_from_disk(project)
     host.log(
@@ -885,6 +930,7 @@ def resume_post_processing(
     if not getattr(host, "currentProject", None):
         QMessageBox.warning(host, "No Project", "Load a project before resuming post-processing.")
         return
+    host._post_processing_failure_reason = ""
     _set_resume_post_processing_pending(host, False)
     host._set_controls_enabled(False)
     host._run_active = True
@@ -907,7 +953,12 @@ def resume_post_processing(
         except Exception:
             logger.debug("resume_post_processing_controls_unlock_failed", exc_info=True)
         _set_resume_post_processing_pending(host, False)
-        host.log("Post-processing resume finished.", level=logging.INFO)
+        failure_reason = str(getattr(host, "_post_processing_failure_reason", "") or "")
+        if failure_reason:
+            host.log(f"Post-processing is incomplete: {failure_reason}", level=logging.WARNING)
+            QMessageBox.warning(host, "Post-processing Incomplete", failure_reason)
+        else:
+            host.log("Post-processing resume finished.", level=logging.INFO)
         if on_finished is not None:
             try:
                 on_finished()
@@ -1244,6 +1295,7 @@ def start_processing(host: Any, *, log: logging.Logger = logger) -> None:
         return
 
     host._last_job_success = False
+    host._post_processing_failure_reason = ""
     host._cancel_requested = False
     host._run_active = False
     host._processing_plan = None
@@ -1647,6 +1699,7 @@ def _review_interpolation_burden_before_post_processing(host: Any) -> bool:
 
 
 def on_processing_finished(host: Any, payload: dict | None = None) -> None:
+    host._post_processing_failure_reason = ""
     results: list[dict] = []
     error_results: list[dict] = []
     excluded_results: list[dict] = []
@@ -1759,6 +1812,9 @@ def on_processing_finished(host: Any, payload: dict | None = None) -> None:
             )
         except Exception as exc:
             logger.exception("Failed to update processing ledger.")
+            host._post_processing_failure_reason = (
+                f"Post-processing could not start because the processing ledger could not be saved: {exc}"
+            )
             host.log(f"Processing ledger update failed: {exc}", level=logging.WARNING)
         else:
             ledger_update_succeeded = True
@@ -1822,7 +1878,7 @@ def on_processing_finished(host: Any, payload: dict | None = None) -> None:
         _show_condition_warning_popup(host, condition_warning_results)
 
         host._busy_stop()
-        success = not cancelled
+        success = not cancelled and not bool(host._post_processing_failure_reason)
         host._processing_summary_reported = bool(summary_results)
         try:
             host._finalize_processing(success, cancelled=cancelled)
@@ -1845,6 +1901,9 @@ def on_processing_finished(host: Any, payload: dict | None = None) -> None:
     ]
     if not cancelled and successful_results and ledger_update_succeeded:
         if not _review_interpolation_burden_before_post_processing(host):
+            host._post_processing_failure_reason = (
+                "Interpolation-burden review was not completed. Post-processing did not run."
+            )
             _finish_processing_run()
             return
         started_post_processing = _start_post_processing_pipeline_after_processing(
