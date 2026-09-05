@@ -28,7 +28,10 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from Main_App.gui.components import make_action_button
+from Main_App.gui.components import ActionRow, make_action_button
+from Main_App.gui.open_paths import open_path_in_file_manager
+from Main_App.gui.signal_review_model import SignalReviewItem
+from Main_App.gui.signal_review_panel import SignalReviewPanel
 from Main_App.gui.marker_occurrence_review import (
     MARKER_DECISION_EXCLUDE,
     MARKER_DECISION_RETAIN_FULL,
@@ -3748,12 +3751,22 @@ def _remaining_review_rows(
     scan: PreflightQcScan,
     accepted_hard_exclusions: set[str],
     group_labels: Mapping[str, str] | None = None,
+    *,
+    review_items: list[SignalReviewItem] | None = None,
 ) -> list[tuple[str, ...]]:
     labels = group_labels or {}
     recording_mode = _recording_aware(scan.results)
     rows: list[tuple[str, ...]] = []
 
-    def append_row(result: PreflightQcFileResult, review_item: str) -> None:
+    def append_row(
+        result: PreflightQcFileResult,
+        review_item: str,
+        *,
+        kind: str = "Other",
+        title: str = "Signal review",
+        finding: Mapping[str, Any] | None = None,
+        channels: Sequence[str] = (),
+    ) -> None:
         if recording_mode:
             rows.append(
                 (
@@ -3776,6 +3789,27 @@ def _remaining_review_rows(
                 )
             )
 
+        if review_items is not None:
+            payload = finding or {}
+            channel_names = (
+                list(channels)
+                or _payload_list(payload, "channels")
+                or _payload_list(payload, "affected_channels")
+            )
+            if not channel_names and payload.get("channel"):
+                channel_names = [str(payload["channel"])]
+            occurrence = payload.get("occurrence_display")
+            review_items.append(
+                SignalReviewItem(
+                    export_row=rows[-1],
+                    kind=kind,
+                    title=title,
+                    condition=str(payload.get("condition_label") or ""),
+                    occurrence=str(occurrence) if occurrence is not None else "",
+                    channels=", ".join(channel_names),
+                )
+            )
+
     for result in scan.suspicious_results:
         if (
             result.participant_id.casefold() in accepted_hard_exclusions
@@ -3783,7 +3817,10 @@ def _remaining_review_rows(
         ):
             continue
         if result.load_error:
-            append_row(result, f"Could not be scanned ({result.load_error}).")
+            append_row(
+                result, f"Could not be scanned ({result.load_error}).",
+                kind="Assessment status", title="Scan unavailable",
+            )
 
         for finding in result.raw_amplitude_review_findings:
             condition = str(finding.get("condition_label") or "").strip()
@@ -3810,6 +3847,8 @@ def _remaining_review_rows(
                 f"{window_scope} "
                 f"{SEVERE_RAW_AMPLITUDE_HELP_TEXT} BioSemi help: "
                 f"{BIOSEMI_SHARED_NOISE_HELP_URL}",
+                kind="Amplitude", title=f"High raw amplitude ({severity})",
+                finding=finding,
             )
 
         for finding in result.candidate_burden_findings:
@@ -3829,6 +3868,8 @@ def _remaining_review_rows(
                 + str(finding.get("threshold"))
                 + (f"; channels {', '.join(channels)}" if channels else "")
                 + ". Review only; no automatic exclusion or interpolation.",
+                kind="Candidate burden", title="Candidate burden",
+                finding=finding,
             )
 
         for finding in result.occurrence_review_findings:
@@ -3847,6 +3888,10 @@ def _remaining_review_rows(
                     if None not in bounds
                     else ""
                 ),
+                kind="Channel quality",
+                title=", ".join(categories).replace("_", " ").capitalize()
+                or "Channel quality",
+                finding=finding,
             )
 
         for finding in result.transient_review_findings:
@@ -3859,6 +3904,11 @@ def _remaining_review_rows(
                 f"{finding.get('diagnostic_window_count') or 0} overlapping "
                 "diagnostic window(s). Reported coverage is the union of flagged "
                 "windows, not measured artifact duration.",
+                kind="Transient signals",
+                title="Transient " + str(finding.get("category") or "signal").replace(
+                    "_", " "
+                ),
+                finding=finding,
             )
 
         for scope_row in result.occurrence_evaluation_scope:
@@ -3870,6 +3920,8 @@ def _remaining_review_rows(
                 f"{scope_row.get('condition_label') or 'Condition'}, occurrence "
                 f"{scope_row.get('occurrence_display') or '?'}: Not evaluated "
                 f"({reason}). It is excluded from the evaluated comparison count.",
+                kind="Assessment status", title="Occurrence not evaluated",
+                finding=scope_row,
             )
 
         if result.raw_channel_qc is not None and not result.experimental_detector_evaluated:
@@ -3877,6 +3929,7 @@ def _remaining_review_rows(
                 result,
                 "Experimental removed-electrode assessment: Not evaluated "
                 "(disabled in project settings). No detector finding is inferred.",
+                kind="Assessment status", title="Removed-electrode detection disabled",
             )
 
         structured_channel_findings = bool(
@@ -3887,17 +3940,23 @@ def _remaining_review_rows(
                 result,
                 "High-amplitude channel review: "
                 + ", ".join(result.high_amplitude_channels),
+                kind="Amplitude", title="High-amplitude channels",
+                channels=result.high_amplitude_channels,
             )
         if not structured_channel_findings and result.rare_burst_channels:
             append_row(
                 result,
                 "Rare-burst channel review: " + ", ".join(result.rare_burst_channels),
+                kind="Transient signals", title="Rare-burst channels",
+                channels=result.rare_burst_channels,
             )
         if not structured_channel_findings and result.spatial_outlier_channels:
             append_row(
                 result,
                 "Spatially inconsistent channel review: "
                 + ", ".join(result.spatial_outlier_channels),
+                kind="Channel quality", title="Spatially inconsistent channels",
+                channels=result.spatial_outlier_channels,
             )
         if (
             result.review_rules
@@ -3908,6 +3967,7 @@ def _remaining_review_rows(
             append_row(
                 result,
                 "Raw-data review rule(s): " + ", ".join(result.review_rules),
+                title="Raw-data review rules",
             )
         for finding in result.raw_spectral_review_rows:
             condition = str(finding.get("condition_label") or "condition")
@@ -3939,6 +3999,8 @@ def _remaining_review_rows(
                     + f"; oddball harmonic {harmonic}; {frequency_text} is below "
                     "the locked 0.5-Hz screen boundary and was not evaluated. "
                     "The recording-condition is retained.",
+                    kind="Assessment status", title="Target below spectral screen boundary",
+                    finding=finding,
                 )
                 continue
             if finding.get("evidence_kind") == "configured_notch_fpvs_collision":
@@ -4013,6 +4075,8 @@ def _remaining_review_rows(
                     + ". The configured line-noise filter stays in place. The affected "
                     "standard frequency metric is unavailable; other valid frequencies "
                     "remain available.",
+                    kind="Spectral", title="Line-noise / FPVS collision",
+                    finding=finding,
                 )
                 continue
             channels = _payload_list(finding, "channels")
@@ -4057,6 +4121,10 @@ def _remaining_review_rows(
                 if None not in (frequency, legacy_score, local_ratio, local_score)
                 else f"Experimental raw-spectral signal: {scope}. Review only; "
                 "the default decision is retain and this check never changes data.",
+                kind="Spectral",
+                title=classification.capitalize()
+                + (f" ({frequency:g} Hz)" if frequency is not None else ""),
+                finding=finding,
             )
         if (
             not result.raw_spectral_review_rows
@@ -4068,12 +4136,15 @@ def _remaining_review_rows(
                 + ", ".join(result.raw_spectral_flagged_channels)
                 + ". Preserved for review only; it has no current exclusion "
                 "authority and does not change data.",
+                kind="Spectral", title="Historical spectral flags",
+                channels=result.raw_spectral_flagged_channels,
             )
         if result.raw_spectral_evaluation_status == "not_performed_disabled":
             append_row(
                 result,
                 "Experimental raw-spectral review: Not performed (disabled in "
                 "project settings). No prior spectral flag is treated as current.",
+                kind="Assessment status", title="Raw-spectral review disabled",
             )
         elif result.raw_spectral_evaluation_status == "not_evaluated":
             detail = result.raw_spectral_message or (
@@ -4082,6 +4153,7 @@ def _remaining_review_rows(
             append_row(
                 result,
                 "Experimental raw-spectral review: Not evaluated. " + detail,
+                kind="Assessment status", title="Raw-spectral review not evaluated",
             )
     return rows
 
@@ -4092,10 +4164,12 @@ def _show_suspicious_remainder(
     accepted_hard_exclusions: set[str],
     group_labels: Mapping[str, str],
 ) -> bool:
-    rows = _remaining_review_rows(scan, accepted_hard_exclusions, group_labels)
+    review_items: list[SignalReviewItem] = []
+    rows = _remaining_review_rows(
+        scan, accepted_hard_exclusions, group_labels, review_items=review_items
+    )
     if not rows:
         return True
-    recording_mode = len(rows[0]) == 7
 
     report_path: Path | None = None
     report_message = ""
@@ -4122,61 +4196,78 @@ def _show_suspicious_remainder(
         host,
         step=_REVIEW_OTHER_FLAGS_STEP,
         title="Review Signal Flags",
-        message="Review recording, condition, and occurrence signal findings.",
+        message="Select a finding to read its evidence, then continue when ready.",
         busy=False,
         review_visible=True,
         review_title="Review Flags",
         progress_visible=False,
-        checklist=(
-            "Review recording, condition, and occurrence scope",
-            "Use the saved workbook as a later review checklist",
-            "Continue processing when you have noted the flagged items",
-        ),
     )
-    _set_label(
-        host,
-        "processing_summary_label",
-        "FPVS Toolbox found signal-review flags that do not change data automatically.",
+
+    # This step is a review browser, so the shared run-status narrative and
+    # full-width evidence table give their space to the summary/detail view.
+    container = host.processing_files_card
+    panel = SignalReviewPanel(
+        review_items, container, amplitude_help_url=BIOSEMI_SHARED_NOISE_HELP_URL
     )
-    if any(result.raw_amplitude_review_findings for result in scan.results):
-        _set_amplitude_help_label(
+    report_row = ActionRow(panel, alignment=Qt.AlignLeft)
+    report_row.setObjectName("signal_review_report_row")
+    report_status = QLabel(
+        "Workbook saved for later review."
+        if report_path is not None
+        else "Review workbook could not be saved.",
+        report_row,
+    )
+    report_status.setObjectName("signal_review_report_status")
+    report_status.setToolTip(report_message)
+    report_status.setWordWrap(True)
+    report_row.row_layout.addWidget(report_status, 1)
+    open_report = make_action_button("Open Review Workbook", compact=True, parent=report_row)
+    open_report.setObjectName("signal_review_open_report")
+    open_report.setEnabled(report_path is not None)
+    open_report.setToolTip(str(report_path) if report_path is not None else report_message)
+
+    def open_saved_report() -> None:
+        if report_path is None:
+            return
+        try:
+            if not report_path.is_file():
+                raise OSError("The saved review workbook is no longer available.")
+            if not open_path_in_file_manager(report_path):
+                raise OSError("No application could open the review workbook.")
+        except (OSError, RuntimeError) as exc:
+            logger.warning("Could not open review workbook %s: %s", report_path, exc)
+            report_status.setText("Could not open workbook. Hover here for details.")
+            report_status.setToolTip(f"{exc}\n{report_path}")
+
+    open_report.clicked.connect(open_saved_report)
+    report_row.add_button(open_report)
+    panel.layout().addWidget(report_row)
+
+    hidden_widgets = (
+        host.processing_status_card,
+        host.processing_files_title_label,
+        host.processing_files_table,
+    )
+    visibility = [(widget, not widget.isHidden()) for widget in hidden_widgets]
+    try:
+        for widget, _visible in visibility:
+            widget.hide()
+        container.layout().addWidget(panel, 1)
+        panel.show()
+        choice = _await_preflight_choice(
             host,
-            "processing_current_file_label",
-            "Review the amplitude findings below. " + report_message,
+            (
+                ("Continue Processing", "continue", "primary"),
+                ("Cancel Processing", "cancel", "secondary"),
+            ),
         )
-    else:
-        _set_label(
-            host,
-            "processing_current_file_label",
-            "Please make note of these and manually investigate them later. "
-            + report_message,
-        )
-    _set_preflight_table(
-        host,
-        (
-            [
-                "Participant",
-                "Recording",
-                "Session / phase-at-visit",
-                "Visit",
-                "Group",
-                "Source File",
-                "Review item",
-            ]
-            if recording_mode
-            else ["PID", "Group", "Source File", "Review item"]
-        ),
-        rows,
-        stretch_column=6 if recording_mode else 3,
-    )
-    choice = _await_preflight_choice(
-        host,
-        (
-            ("Continue Processing", "continue", "primary"),
-            ("Cancel Processing", "cancel", "secondary"),
-        ),
-    )
-    return choice == "continue"
+        return choice == "continue"
+    finally:
+        panel.hide()
+        container.layout().removeWidget(panel)
+        panel.deleteLater()
+        for widget, visible in visibility:
+            widget.setVisible(visible)
 
 
 def _condition_review_scan_identity(

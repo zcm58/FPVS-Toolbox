@@ -13,7 +13,7 @@ manual_smoke = []
 
 [scopes.gui]
 audits = ["gui"]
-tests = []
+tests = ["tests/gui/test_signal_review_model.py"]
 include = ["src/Main_App/gui/**", "src/Tools/**/gui*.py", "tests/gui/**"]
 manual_smoke = ["Launch the Main App at 1280x900 and verify the home Conditions editor fills the available vertical workspace, Start Processing stays anchored beneath it, no Log card appears, and View Log opens the retained processing messages in a modal with working Clear Log and Close actions. With Beta Tools disabled, verify only Free Harmonic Clustering and SNR Plots appear under Quick Tools. Enable Beta Tools, restart, and verify Scalp Maps, Standard FPVS Screening, Sensitivity Analysis, LORETA Visualizer, Sequence Figure, Ratio Calculator, and Individual Detectability appear under Beta Tools. Verify each beta tool shows the shared warning before its first display in that app session, does not repeat for that same tool, and the two default tools show no beta warning."]
 

@@ -68,6 +68,18 @@ Primary paths:
   relayed through the worker and take effect between condition reads,
   time-domain blocks, FFT channel batches, and cache writes; widgets remain
   signal consumers and never read BDF data directly.
+- `src/Main_App/gui/signal_review_model.py` and `signal_review_panel.py`:
+  presentation-only Step 7 signal-review browser. The workflow attaches short
+  type, condition, occurrence, and channel fields while collecting the existing
+  four- or seven-column review rows; the complete original rows and workbook
+  export remain unchanged. A compact tree groups items by their full recording
+  identity, with text search and finding-type filters. Its resizable evidence
+  pane shows the selected item's complete text. Disabled and unevaluated checks
+  are assessment statuses, not detected signal problems; repeated findings are
+  retained. The browser temporarily replaces the shared status narrative and
+  table, restoring their visibility on Continue, Cancel, or failure. A compact
+  workbook action opens the exact saved active-project report through the
+  cross-platform path helper and reports open/save failures inline.
 - `src/Main_App/gui/post_export_workflows.py`: GUI-side post-processing worker
   launch, worker error routing, and export completion handling used by
   `MainWindow` compatibility wrappers.
@@ -455,6 +467,19 @@ The driver runs the safe import/static checks. Main-window and dialog pytest-qt
 coverage is CI-only by default; document a visible/manual smoke path for the
 changed interaction. Run the GUI audit directly only as an initial diagnostic
 before manually searching broad GUI folders.
+
+For the Step 7 signal-review browser, open a project at 1280x900, reach Review
+Signal Flags, and confirm the recording groups, filters, evidence pane, workbook
+action, and Continue/Cancel buttons fit without page-level scrolling. Select
+findings using both mouse and keyboard; check complete evidence and identity for
+multiple recordings of the same participant. Search for a channel and condition,
+filter by assessment status, and clear a search with no matches. Open the saved
+workbook and compare its rows with the full displayed evidence. Confirm Continue
+returns to the normal processing table, and Cancel followed by another QC run
+does not retain the previous browser or hide the shared status/table widgets.
+The registered `tests/gui/test_signal_review_panel_qt.py` owns CI-only interaction
+and layout coverage; widget-free identity coverage lives in
+`tests/gui/test_signal_review_model.py`.
 
 For Protocol-tab changes, the visible smoke path is: open two projects in turn,
 save distinct recurrence/direct-Hz protocols, reopen each project and verify its
