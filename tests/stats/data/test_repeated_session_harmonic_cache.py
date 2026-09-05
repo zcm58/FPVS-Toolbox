@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from openpyxl import Workbook
+
 from Tools.Stats.analysis.dv_policy_settings import (
     HARMONIC_PROFILE_SIGNIFICANT_ONLY_ID,
     normalize_dv_policy,
@@ -40,8 +42,11 @@ def test_repeated_cache_fingerprints_recording_session_and_source_identity(
     )
     workbook_1 = project_root / "rec_1_Faces_Results.xlsx"
     workbook_2 = project_root / "rec_2_Faces_Results.xlsx"
-    workbook_1.write_text("one", encoding="utf-8")
-    workbook_2.write_text("two", encoding="utf-8")
+    for path, value in ((workbook_1, "one"), (workbook_2, "two")):
+        workbook = Workbook()
+        workbook.active.append([value])
+        workbook.save(path)
+        workbook.close()
     subject_data = {
         "rec_1": {"Faces": str(workbook_1)},
         "rec_2": {"Faces": str(workbook_2)},

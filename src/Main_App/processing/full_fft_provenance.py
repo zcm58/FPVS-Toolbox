@@ -1,7 +1,8 @@
 """Neutral project-local provenance for processed FullFFT workbooks.
 
 This module owns the source identity used by sibling analyses that consume the
-original ``FullFFT Amplitude (uV)`` sheets.  It deliberately records no Stats
+original ``FullFFT Amplitude (uV)`` data, including declared NumPy companions.
+It deliberately records no Stats
 harmonic-selection state and does not depend on a Summed-BCA cache.
 """
 
@@ -582,6 +583,11 @@ def _source_snapshot(
     )
 
     source_rows: list[dict[str, object]] = []
+    from Main_App.io.spectral_data import (
+        SpectralDataError,
+        spectral_companion_identity,
+    )
+
     for record in active_records:
         resolved, relative = _manifest_relative_path(project_root, record.path)
         stat = resolved.stat()
@@ -600,6 +606,14 @@ def _source_snapshot(
                 "size_bytes": int(stat.st_size),
                 "mtime_ns": int(stat.st_mtime_ns),
             }
+        try:
+            companion = spectral_companion_identity(resolved)
+        except SpectralDataError as exc:
+            raise FullFftProvenanceError(
+                f"FullFFT spectral companion is invalid for {relative}: {exc}"
+            ) from exc
+        if companion is not None:
+            row["spectral_companion"] = companion
         if repeated_session:
             row.update(
                 {
@@ -1178,7 +1192,9 @@ def _require_current_full_fft_record(
     if current.cohort_fingerprint != record.cohort_fingerprint:
         differences.append("cohort or canonical workbook identity changed")
     if current.source_fingerprint != record.source_fingerprint:
-        differences.append("FullFFT workbook path, size, or modification time changed")
+        differences.append(
+            "FullFFT workbook path, size, modification time, or spectral companion changed"
+        )
     if current.frequency_qc_fingerprint != record.frequency_qc_fingerprint:
         differences.append("frequency-domain cohort/QC exclusions changed")
     if current.processing_export_fingerprint != record.processing_export_fingerprint:

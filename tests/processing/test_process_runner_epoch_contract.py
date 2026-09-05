@@ -24,6 +24,7 @@ from Main_App.processing.raw_channel_qc import (
 )
 from Main_App.processing.preflight_qc_plan import plan_preflight_qc_events
 from Main_App.processing.analysis_spans import (
+    ANALYSIS_SPAN_PLAN_VERSION,
     read_source_analysis_span_plan,
     realize_target_analysis_span_plan,
 )
@@ -1471,7 +1472,7 @@ def test_run_full_pipeline_publishes_available_source_conditions(
     assert provenance["geometry"] == biosemi64_geometry_identity(
         retained_channels=("Cz", "Pz")
     )
-    assert provenance["analysis_span_plan_version"] == "analysis_span_plan_v1"
+    assert provenance["analysis_span_plan_version"] == ANALYSIS_SPAN_PLAN_VERSION
     assert provenance["source_analysis_span_plan"]["fingerprint"]
     assert provenance["realized_analysis_span_plan"]["fingerprint"]
     assert result["source_derivative_status"] == "complete"
@@ -1912,7 +1913,7 @@ def test_preprocessed_cache_round_trip_preserves_audit_metadata(tmp_path: Path) 
 
     assert stored == "stored"
     assert payload["version"] == (
-        "preprocessed-raw-v12-condition-scope-kurtosis-review"
+        "preprocessed-raw-v13-v3-trigger-alignment"
     )
     assert payload["geometry"] == biosemi64_geometry_identity(
         retained_channels=("Fp1",)

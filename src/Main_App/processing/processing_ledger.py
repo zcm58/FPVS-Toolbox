@@ -87,7 +87,7 @@ PROCESSING_STATE_DIR = ".fpvs_processing"
 LEDGER_FILENAME = "processing_ledger.json"
 RUNS_FILENAME = "processing_runs.jsonl"
 PROCESSING_FINGERPRINT_VERSION = (
-    "processing_fingerprint_v12_analyzed_condition_scope"
+    "processing_fingerprint_v13_v3_trigger_alignment"
 )
 _GEOMETRY_INDEPENDENT_EXCLUSION_REASONS = frozenset(
     {
@@ -542,6 +542,33 @@ def _source_derivative_reuse_problem(
     missing = [path for path in output_paths if not path.is_file()]
     if missing:
         return f"Source-ready time-domain derivative output is missing: {missing[0]}"
+    return None
+
+
+def _spectral_companion_reuse_problem(
+    entry: Mapping[str, Any], expected_outputs: Sequence[Path],
+) -> str | None:
+    """Require recorded spectral artifacts, resolving beside current workbooks."""
+    from Main_App.io.spectral_data import spectral_companion_identity
+
+    outputs = {path.name: path for path in expected_outputs}
+    for receipt in _export_receipts_payload(entry):
+        write = receipt.get("workbook_write")
+        if not isinstance(write, Mapping) or "spectral_companion" not in write:
+            continue  # Legacy Excel-only completion receipts remain reusable.
+        artifact = write.get("artifact")
+        if not isinstance(artifact, Mapping):
+            return "Spectral companion workbook identity was not recorded."
+        # Stored absolute paths may precede a project move, including another OS.
+        name = str(artifact.get("path") or "").replace("\\", "/").rsplit("/", 1)[-1]
+        workbook = outputs.get(name)
+        if workbook is None:
+            return "Spectral companion does not match an expected condition workbook."
+        try:
+            if spectral_companion_identity(workbook) != write["spectral_companion"]:
+                return f"Spectral companion is missing or changed: {workbook.name}"
+        except (OSError, ValueError):
+            return f"Spectral companion is missing, corrupt, or changed: {workbook.name}"
     return None
 
 
@@ -1120,7 +1147,7 @@ def classify_processing_inputs(
         source_derivative_problem = _source_derivative_reuse_problem(
             Path(project.project_root),
             entry,
-        )
+        ) or _spectral_companion_reuse_problem(entry, expected_outputs)
         if source_derivative_problem:
             states.append(
                 ProcessingInputState(
@@ -1214,6 +1241,8 @@ def _state_still_matches_ledger(
         return str(entry.get("status") or "") == "excluded"
 
     if _source_derivative_reuse_problem(Path(project.project_root), entry):
+        return False
+    if _spectral_companion_reuse_problem(entry, state.expected_outputs):
         return False
 
     present_outputs = [path for path in state.expected_outputs if path.exists()]
@@ -1414,6 +1443,23 @@ def _remove_empty_source_derivative_tree(project_root: Path) -> None:
         pass
 
 
+def _is_managed_spectral_companion(path: Path) -> bool:
+    return re.fullmatch(r".+\.spectra\.[0-9a-f]{20}\.npz", path.name) is not None
+
+
+def _workbook_companions(root: Path, workbook: Path) -> tuple[Path, ...]:
+    """Find only this workbook's generated siblings, including superseded arrays."""
+    if not workbook.parent.is_dir():
+        return ()
+    prefix = f"{workbook.stem}.spectra."
+    return tuple(
+        _assert_under_excel_root(root, path)
+        for path in workbook.parent.iterdir()
+        if path.is_file() and path.name.startswith(prefix)
+        and _is_managed_spectral_companion(path)
+    )
+
+
 def clean_managed_excel_root(project: Any) -> Path:
     root = _excel_root(project).resolve()
     project_root = Path(project.project_root).resolve()
@@ -1424,7 +1470,10 @@ def clean_managed_excel_root(project: Any) -> Path:
             candidates = [
                 path
                 for path in root.rglob("*")
-                if path.is_file() and path.suffix.lower() in GENERATED_EXCEL_SUFFIXES
+                if path.is_file() and (
+                    path.suffix.lower() in GENERATED_EXCEL_SUFFIXES
+                    or _is_managed_spectral_companion(path)
+                )
             ]
         except OSError as exc:
             raise RuntimeError(
@@ -1432,6 +1481,7 @@ def clean_managed_excel_root(project: Any) -> Path:
                 f"Check OneDrive sync/permissions for: {root}. Original error: {exc}"
             ) from exc
         for path in candidates:
+            path = _assert_under_excel_root(root, path)
             try:
                 path.unlink()
             except PermissionError as exc:
@@ -1529,9 +1579,12 @@ def clean_participant_outputs(project: Any, plan: ProcessingPlan) -> list[Path]:
             continue
         for expected_output in state.expected_outputs:
             target = _assert_under_excel_root(root, expected_output)
+            companions = _workbook_companions(root, target)
             if target.exists():
                 target.unlink()
                 deleted.append(target)
+            for companion in companions:
+                deleted.append(_delete_generated_file(companion, "spectral companion"))
         deleted.extend(
             _delete_recorded_source_derivative_targets(
                 project_root,
@@ -1552,7 +1605,9 @@ def _remove_expected_outputs_for_state(
     removed: list[str] = []
     for expected_output in state.expected_outputs:
         target = _assert_under_excel_root(root, expected_output)
+        companions = _workbook_companions(root, target)
         if not target.exists():
+            removed.extend(str(_delete_generated_file(path, "spectral companion")) for path in companions)
             continue
         try:
             target.unlink()
@@ -1563,6 +1618,7 @@ def _remove_expected_outputs_for_state(
             )
             continue
         removed.append(str(target))
+        removed.extend(str(_delete_generated_file(path, "spectral companion")) for path in companions)
     removed.extend(
         str(path)
         for path in _delete_recorded_source_derivative_targets(

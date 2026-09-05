@@ -95,7 +95,7 @@ def test_direct_metric_writer_preserves_stable_xlsx_members(
     )
     write_results_workbook(
         str(baseline_path),
-        {"FullFFT Amplitude (uV)": frame},
+        {"FFT Amplitude (uV)": frame},
         neighbors,
     )
 
@@ -106,7 +106,7 @@ def test_direct_metric_writer_preserves_stable_xlsx_members(
     )
     write_results_workbook(
         str(direct_path),
-        {"FullFFT Amplitude (uV)": frame},
+        {"FFT Amplitude (uV)": frame},
         neighbors,
     )
 
@@ -313,6 +313,111 @@ def test_schema_validation_failure_preserves_prior_workbook(
         )
 
     assert workbook_path.read_bytes() == original_bytes
+
+
+@pytest.mark.parametrize("stage_locally", [False, True])
+@pytest.mark.parametrize("interruption", ["schema", "publish"])
+def test_spectral_publication_interruption_preserves_prior_workbook_and_companion(
+    tmp_path, monkeypatch, stage_locally, interruption,
+) -> None:
+    from Main_App.io import read_spectral_sheet, spectral_companion_identity
+
+    workbook_path = tmp_path / "spectral-publication.xlsx"
+    frames = {
+        "FullFFT Amplitude (uV)": pd.DataFrame({"Electrode": ["Oz"], "1.2000_Hz": [1.25]}),
+        "FullSNR": pd.DataFrame({"Electrode": ["Oz"], "1.2000_Hz": [np.nan]}),
+    }
+    first_receipt = write_results_workbook(str(workbook_path), frames)
+    prior_descriptor = first_receipt["spectral_companion"]
+    prior_workbook = workbook_path.read_bytes()
+    prior_companion_path = tmp_path / prior_descriptor["path"]
+    prior_companion = prior_companion_path.read_bytes()
+    monkeypatch.setattr(post_process_excel, "_should_stage_workbook_locally", lambda _destination: stage_locally)
+
+    if interruption == "schema":
+        def fail_schema(*_args, **_kwargs):
+            raise ValueError("interrupted spectral schema validation")
+
+        monkeypatch.setattr(post_process_excel, "_validate_workbook_schema", fail_schema)
+    else:
+        original_replace = post_process_excel.os.replace
+
+        def fail_final_replace(source, destination):
+            if post_process_excel.Path(destination) == workbook_path:
+                raise OSError("interrupted spectral workbook publication")
+            return original_replace(source, destination)
+
+        monkeypatch.setattr(post_process_excel.os, "replace", fail_final_replace)
+
+    frames["FullFFT Amplitude (uV)"].iloc[0, 1] = 99.0
+    with pytest.raises((ValueError, OSError), match="interrupted spectral"):
+        write_results_workbook(str(workbook_path), frames)
+
+    assert workbook_path.read_bytes() == prior_workbook
+    assert prior_companion_path.read_bytes() == prior_companion
+    assert spectral_companion_identity(workbook_path) == prior_descriptor
+    assert read_spectral_sheet(workbook_path).iloc[0, 1] == 1.25
+    assert np.isnan(read_spectral_sheet(workbook_path, sheet_name="FullSNR").iloc[0, 1])
+    assert not list(tmp_path.glob(".spectral-publication.*.tmp.xlsx"))
+    assert not list(tmp_path.glob(".spectral-publication.*.xlsx.tmp"))
+
+
+def test_cross_volume_copy_interruption_preserves_prior_spectral_pair(tmp_path, monkeypatch) -> None:
+    from Main_App.io import spectral_companion_identity
+
+    workbook_path = tmp_path / "copy-interruption.xlsx"
+    frame = pd.DataFrame({"Electrode": ["Oz"], "1.2000_Hz": [1.25]})
+    receipt = write_results_workbook(str(workbook_path), {"FullFFT Amplitude (uV)": frame})
+    prior_workbook = workbook_path.read_bytes()
+    prior_companion_path = tmp_path / receipt["spectral_companion"]["path"]
+    prior_companion = prior_companion_path.read_bytes()
+    monkeypatch.setattr(post_process_excel, "_should_stage_workbook_locally", lambda _destination: True)
+
+    def fail_copy(_source, destination):
+        post_process_excel.Path(destination).write_bytes(b"partial copied workbook")
+        raise OSError("interrupted cross-volume copy")
+
+    monkeypatch.setattr(post_process_excel.shutil, "copyfile", fail_copy)
+    frame.iloc[0, 1] = 99.0
+    with pytest.raises(OSError, match="interrupted cross-volume copy"):
+        write_results_workbook(str(workbook_path), {"FullFFT Amplitude (uV)": frame})
+
+    assert workbook_path.read_bytes() == prior_workbook
+    assert prior_companion_path.read_bytes() == prior_companion
+    assert spectral_companion_identity(workbook_path) == receipt["spectral_companion"]
+    assert not list(tmp_path.glob(".copy-interruption.*.xlsx.tmp"))
+
+
+def test_cross_volume_spectral_export_resolves_companion_beside_final_workbook(tmp_path, monkeypatch) -> None:
+    from Main_App.io import read_spectral_sheet, spectral_companion_identity
+
+    workbook_path = tmp_path / "cross-volume-spectra.xlsx"
+    grid = np.fft.rfftfreq(8, 1.0 / 4.0)
+    frame = pd.DataFrame([np.arange(len(grid), dtype=np.float64)], columns=[f"{freq:.4f}_Hz" for freq in grid])
+    frame.insert(0, "Electrode", ["Oz"])
+    copy_calls = []
+    original_copy = post_process_excel.shutil.copyfile
+    monkeypatch.setattr(post_process_excel, "_should_stage_workbook_locally", lambda _destination: True)
+
+    def record_copy(source, destination):
+        copy_calls.append((post_process_excel.Path(source), post_process_excel.Path(destination)))
+        return original_copy(source, destination)
+
+    monkeypatch.setattr(post_process_excel.shutil, "copyfile", record_copy)
+    receipt = write_results_workbook(
+        str(workbook_path), {"FullFFT Amplitude (uV)": frame},
+        spectral_metadata={"sampling_frequency_hz": 4.0, "fft_sample_count": 8, "frequencies_hz": grid},
+    )
+
+    assert len(copy_calls) == 1
+    assert copy_calls[0][0].parent != workbook_path.parent
+    assert copy_calls[0][1].parent == workbook_path.parent
+    assert (tmp_path / receipt["spectral_companion"]["path"]).is_file()
+    assert spectral_companion_identity(workbook_path) == receipt["spectral_companion"]
+    restored = read_spectral_sheet(workbook_path)
+    pd.testing.assert_frame_equal(restored, frame)
+    assert restored.attrs["spectral_metadata"]["fft_sample_count"] == 8
+    np.testing.assert_array_equal(restored.attrs["spectral_metadata"]["frequencies_hz"], grid)
 
 
 def test_fft_neighbors_sheet_written_with_expected_columns(tmp_path, caplog):

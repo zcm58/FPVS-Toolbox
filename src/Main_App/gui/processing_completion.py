@@ -16,7 +16,9 @@ def finalize_processing_host_state(host, success: bool) -> None:
         host.log("--- Processing Run Cancelled by User ---")
         return
 
-    if success:
+    if getattr(host, "_processing_summary_reported", False):
+        host.log("--- Processing Run Finished with Exclusions or Failures ---")
+    elif success:
         host.log("--- Processing Run Completed Successfully ---")
         if host.validated_params and host.data_paths:
             output_folder = host.save_folder_path.get()

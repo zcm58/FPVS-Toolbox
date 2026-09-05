@@ -19,9 +19,9 @@ import numpy as np
 from Main_App.processing.marker_integrity import validate_approved_event_plan
 from Main_App.projects.frequency_protocol import FrequencyProtocol
 
-ANALYSIS_SPAN_PLAN_VERSION = "analysis_span_plan_v1"
+ANALYSIS_SPAN_PLAN_VERSION = "analysis_span_plan_v2_v3_stim_alignment"
 ANALYSIS_SPAN_COORDINATE_VERSION = "raw_half_open_relative_to_first_samp_v1"
-TARGET_SPAN_ROUNDING_VERSION = "nearest_target_sample_half_up_v1"
+TARGET_SPAN_ROUNDING_VERSION = "v3_mne_stim_window_start_exact_duration_v1"
 ANALYSIS_CONDITION_SELECTION_VERSION = "manual_condition_exclusion_v1"
 
 _EVENT_PLAN_DERIVED_KEYS = {
@@ -265,6 +265,9 @@ def _build_source_analysis_span_plan(
             "condition_code": condition_code,
             "repetition_index": repetition_index,
             "occurrence_key": key,
+            "oddball_marker_code": _integer(
+                raw_span.get("oddball_id"), field_name="oddball_marker_code"
+            ),
             "marker_plan_fingerprint": str(
                 raw_span.get("marker_plan_fingerprint") or ""
             ),
@@ -526,10 +529,36 @@ def restrict_source_analysis_span_plan_by_condition(
     return {**restricted_core, "fingerprint": _fingerprint(restricted_core)}
 
 
-def _round_nonnegative_fraction_half_up(value: Fraction) -> int:
-    if value < 0:
-        raise AnalysisSpanPlanError("Target-grid coordinate cannot be negative.")
-    return (2 * value.numerator + value.denominator) // (2 * value.denominator)
+def _v3_stim_window_index(
+    source_sample: int,
+    *,
+    source_count: int,
+    target_count: int,
+) -> int:
+    """Locate MNE's target stimulus window containing one source sample.
+
+    For a single Raw segment MNE uses the realized length ratio, then window
+    starts ``int(target_index / ratio)``. Binary search reproduces those float
+    operations without allocating a recording-length index array. The actual
+    target stimulus must also be checked: collisions can suppress an onset.
+    """
+
+    if not 0 <= source_sample < source_count:
+        raise AnalysisSpanPlanError("Source marker is outside its Raw sample grid.")
+    if not 0 < target_count <= source_count:
+        raise AnalysisSpanPlanError(
+            "V3 stimulus alignment requires a positive, non-upsampled Raw grid."
+        )
+    ratio = float(target_count) / source_count
+    lower, upper = 0, target_count
+    while lower < upper:
+        midpoint = (lower + upper) // 2
+        window_start = min(int(midpoint / ratio), source_count - 1)
+        if window_start <= source_sample:
+            lower = midpoint + 1
+        else:
+            upper = midpoint
+    return lower - 1
 
 
 def _rate_fraction(value: Any, *, field_name: str) -> Fraction:
@@ -544,11 +573,13 @@ def realize_target_analysis_span_plan(
     target_n_times: int,
     target_first_samp: int,
 ) -> dict[str, Any]:
-    """Map source-relative times onto the actual target Raw sample grid.
+    """Preserve v3 stimulus-window starts and the exact approved duration.
 
-    Each boundary is rounded to the nearest target sample; exact half-sample
-    ties round upward.  Rounding uses rational arithmetic derived from the two
-    recorded sampling rates, so it is platform independent.
+    This mapping covers one continuous Raw segment with stimulus events and
+    no upsampling. The caller must reject resampled annotation-only or
+    multi-segment inputs, then verify the actual target stimulus onset;
+    event collisions cannot be resolved from source coordinates alone. The
+    stop is the mapped start plus the exact project duration in target samples.
     """
 
     if not isinstance(source_plan, Mapping):
@@ -566,6 +597,13 @@ def realize_target_analysis_span_plan(
         field_name="source_sfreq_hz",
     )
     target_rate = _rate_fraction(target_sfreq_hz, field_name="target_sfreq_hz")
+    source_count = _nonnegative_int(
+        source_grid.get("n_times"), field_name="source_n_times"
+    )
+    if source_count <= 0 or target_rate > source_rate:
+        raise AnalysisSpanPlanError(
+            "V3 stimulus alignment requires a positive, non-upsampled Raw grid."
+        )
     target_count = _nonnegative_int(target_n_times, field_name="target_n_times")
     if target_count <= 0:
         raise AnalysisSpanPlanError("target_n_times must be positive.")
@@ -586,12 +624,22 @@ def realize_target_analysis_span_plan(
             source_coordinates.get("stop_relative_sample"),
             field_name="source_stop_relative_sample",
         )
-        target_start_relative = _round_nonnegative_fraction_half_up(
-            Fraction(source_start_relative) * target_rate / source_rate
+        target_start_relative = _v3_stim_window_index(
+            source_start_relative,
+            source_count=source_count,
+            target_count=target_count,
         )
-        target_stop_relative = _round_nonnegative_fraction_half_up(
-            Fraction(source_stop_relative) * target_rate / source_rate
+        target_duration = (
+            Fraction(source_stop_relative - source_start_relative)
+            * target_rate
+            / source_rate
         )
+        if target_duration <= 0 or target_duration.denominator != 1:
+            raise AnalysisSpanPlanError(
+                "The approved analyzed duration must contain an exact whole "
+                "number of target samples."
+            )
+        target_stop_relative = target_start_relative + int(target_duration)
         if (
             target_stop_relative <= target_start_relative
             or target_stop_relative > target_count
@@ -604,6 +652,9 @@ def realize_target_analysis_span_plan(
             "condition_code": int(raw_span.get("condition_code")),
             "repetition_index": int(raw_span.get("repetition_index")),
             "occurrence_key": str(raw_span.get("occurrence_key") or ""),
+            "oddball_marker_code": _integer(
+                raw_span.get("oddball_marker_code"), field_name="oddball_marker_code"
+            ),
             "marker_plan_fingerprint": str(
                 raw_span.get("marker_plan_fingerprint") or ""
             ),
@@ -659,6 +710,53 @@ def realize_target_analysis_span_plan(
     if isinstance(condition_selection, Mapping):
         plan_core["condition_selection"] = dict(condition_selection)
     return {**plan_core, "fingerprint": _fingerprint(plan_core)}
+
+
+def validate_target_analysis_span_markers(
+    target_plan: Mapping[str, Any],
+    events: np.ndarray,
+) -> None:
+    """Require each mapped start to remain an actual project oddball onset.
+
+    No nearest-event snapping is permitted. A lost or merged onset requires
+    review instead of silently analyzing a different time window.
+    """
+
+    if not isinstance(target_plan, Mapping) or (
+        target_plan.get("version") != ANALYSIS_SPAN_PLAN_VERSION
+        or target_plan.get("rounding_version") != TARGET_SPAN_ROUNDING_VERSION
+        or target_plan.get("fingerprint")
+        != _fingerprint(_without_fingerprint(target_plan))
+    ):
+        raise AnalysisSpanPlanError("Realized analysis-span plan is missing or stale.")
+    event_array = np.asarray(events)
+    if event_array.ndim != 2 or event_array.shape[1] != 3:
+        raise AnalysisSpanPlanError("Target marker events must have shape (n, 3).")
+    marker_starts = {
+        (
+            _integer(row[0], field_name="target_marker_sample"),
+            _integer(row[2], field_name="target_marker_code"),
+        )
+        for row in event_array
+    }
+    for span in _sequence_of_mappings(target_plan.get("spans"), field_name="target spans"):
+        marker_code = _integer(
+            span.get("oddball_marker_code"), field_name="oddball_marker_code"
+        )
+        if marker_code <= 0:
+            raise AnalysisSpanPlanError("Oddball marker code must be positive.")
+        coordinates = span.get("target_coordinates")
+        if not isinstance(coordinates, Mapping):
+            raise AnalysisSpanPlanError("Target span coordinates are malformed.")
+        start = _integer(coordinates.get("start_sample"), field_name="target_start_sample")
+        if (start, marker_code) not in marker_starts:
+            raise AnalysisSpanPlanError(
+                "The v3-aligned analyzed start no longer matches an actual "
+                f"oddball marker {marker_code} after resampling "
+                f"(occurrence={span.get('occurrence_key')}, sample={start}). "
+                "The marker may have been lost or merged; the analysis window "
+                "was not shifted."
+            )
 
 
 def validate_realized_target_analysis_span_plan(
@@ -720,6 +818,7 @@ __all__ = [
     "relative_spans_from_plan",
     "restrict_source_analysis_span_plan_by_condition",
     "validate_realized_target_analysis_span_plan",
+    "validate_target_analysis_span_markers",
     "validate_source_analysis_span_context",
     "validate_source_analysis_span_plan",
 ]

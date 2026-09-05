@@ -423,6 +423,16 @@ def _validate_written_receipt(
             recorded_artifact
         ):
             reasons.append("workbook_artifact_not_current")
+        companion = workbook_write.get("spectral_companion")
+        if companion is not None:
+            from Main_App.io.spectral_data import spectral_companion_identity
+
+            try:
+                actual_companion = spectral_companion_identity(expected_path)
+                if not isinstance(companion, Mapping) or actual_companion != dict(companion):
+                    reasons.append("spectral_companion_not_current")
+            except (OSError, ValueError):
+                reasons.append("spectral_companion_not_current")
 
     integrity = receipt.get("finite_integrity")
     if not isinstance(integrity, Sequence) or isinstance(integrity, (str, bytes)):
@@ -673,14 +683,33 @@ def require_pre_review_readiness(
 
     blocked = [cell for cell in outcomes.cells if cell.status == CELL_BLOCKED]
     if blocked:
-        detail = "; ".join(
-            f"{cell.processing_id}/{cell.condition_label}: "
-            f"{', '.join(cell.reason_codes)}"
-            for cell in blocked
+        details = []
+        has_missing_input = False
+        for cell in blocked:
+            reason = ", ".join(cell.reason_codes)
+            if "condition_input" in cell.reason_codes:
+                has_missing_input = True
+                if cell.planned_occurrence_count == 0:
+                    reason = (
+                        "no condition occurrence was planned and no retained "
+                        "data reached export"
+                    )
+                else:
+                    receipt = cell.export_receipt or {}
+                    reason = str(
+                        receipt.get("reason") or "No retained condition data reached export"
+                    )
+            details.append(f"{cell.processing_id}/{cell.condition_label}: {reason}")
+        recovery = (
+            " If a condition was intentionally absent or removed, record a "
+            "participant-condition exclusion and rerun processing. Otherwise, "
+            "check its condition-start triggers and the earlier processing log."
+            if has_missing_input
+            else ""
         )
         raise RecordingConditionOutcomeError(
             "Frequency review is blocked because current recording-condition "
-            f"outputs are incomplete: {detail}"
+            f"outputs are incomplete: {'; '.join(details).rstrip('.')}.{recovery}"
         )
 
 

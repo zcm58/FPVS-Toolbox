@@ -364,3 +364,71 @@ def test_saved_legacy_full_fft_schema_requires_eeg_reprocessing(
         match="predates the current BioSemi64 and project-frequency-protocol contract",
     ):
         require_current_project_full_fft_provenance(root)
+
+
+@pytest.mark.parametrize("damage", ["missing", "altered"])
+def test_companion_provenance_is_portable_and_rejects_changed_arrays(
+    tmp_path: Path, damage: str,
+) -> None:
+    import pandas as pd
+    from Main_App.io.spectral_data import (
+        spectral_manifest_frame,
+        write_spectral_companion,
+    )
+    from Main_App.processing.full_fft_grid_qc import _inspect_workbook_grid
+    from Main_App.projects import load_project_dataset_index
+    from fractions import Fraction
+
+    root = _managed_full_fft_project(tmp_path)
+    frequencies = np.arange(151, dtype=np.float64) * 0.025
+    descriptors = {}
+    for workbook in (root / "1 - Excel Data Files").rglob("*.xlsx"):
+        frame = pd.DataFrame(
+            np.ones((1, len(frequencies))),
+            columns=[f"{frequency:.6f}_Hz" for frequency in frequencies],
+        )
+        frame.insert(0, "Electrode", ["Fp1"])
+        descriptor = write_spectral_companion(
+            workbook, {"FullFFT Amplitude (uV)": frame},
+            metadata={"frequencies_hz": frequencies},
+        )
+        with pd.ExcelWriter(workbook, engine="xlsxwriter") as writer:
+            spectral_manifest_frame(descriptor).to_excel(
+                writer, sheet_name="Spectral Data", index=False,
+            )
+        descriptors[workbook.name] = descriptor
+
+    written = write_project_full_fft_provenance(
+        root, base_frequency_hz=6.0, oddball_frequency_hz=1.2,
+    )
+    manifest = json.loads((root / "project.json").read_text(encoding="utf-8"))
+    sources = manifest["tools"]["processing"]["full_fft_provenance"]["source_workbooks"]
+    assert all(row["spectral_companion"] == descriptors[Path(row["path"]).name] for row in sources)
+    assert written.frequency_column_count == len(frequencies)
+    copied = tmp_path / "Copied Project"
+    shutil.copytree(root, copied, copy_function=shutil.copy2)
+    validated = require_current_project_full_fft_provenance(copied)
+    assert validated.source_fingerprint == written.source_fingerprint
+    record = load_project_dataset_index(copied).workbooks[0]
+    grid = _inspect_workbook_grid(
+        record, already_excluded=False, oddball_frequency_hz=Fraction(6, 5),
+    )
+    assert grid.issue is None
+    assert grid.frequency_column_count == len(frequencies)
+
+    descriptor = descriptors[record.path.name]
+    companion = record.path.with_name(str(descriptor["path"]))
+    workbook_bytes = record.path.read_bytes()
+    if damage == "missing":
+        companion.unlink()
+    else:
+        data = bytearray(companion.read_bytes())
+        data[len(data) // 2] ^= 1
+        companion.write_bytes(data)
+    assert record.path.read_bytes() == workbook_bytes
+    with pytest.raises(FullFftProvenanceError, match="spectral companion"):
+        require_current_project_full_fft_provenance(copied)
+    grid = _inspect_workbook_grid(
+        record, already_excluded=False, oddball_frequency_hz=Fraction(6, 5),
+    )
+    assert grid.issue is not None

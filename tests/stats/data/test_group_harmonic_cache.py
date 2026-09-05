@@ -5,6 +5,8 @@ import json
 from pathlib import Path
 
 import pytest
+from openpyxl import Workbook
+import pandas as pd
 
 from Main_App.projects.frequency_protocol import (
     EXPECTED_CYCLES_SOURCE_MANUAL,
@@ -26,6 +28,30 @@ from Tools.Stats.data.group_harmonic_cache import (
     lookup_cached_group_harmonic_selection,
     save_cached_group_harmonic_selection,
 )
+
+
+def _write_cache_workbook(path: Path, value: str = "placeholder") -> None:
+    workbook = Workbook()
+    workbook.active.append([value])
+    workbook.save(path)
+    workbook.close()
+
+
+def _write_companion_workbook(path: Path) -> dict[str, object]:
+    from Main_App.io.spectral_data import (
+        spectral_manifest_frame,
+        write_spectral_companion,
+    )
+
+    frame = pd.DataFrame({"Electrode": ["Oz"], "0.0000_Hz": [1.0]})
+    descriptor = write_spectral_companion(
+        path, {"FullFFT Amplitude (uV)": frame}
+    )
+    with pd.ExcelWriter(path, engine="xlsxwriter") as writer:
+        spectral_manifest_frame(descriptor).to_excel(
+            writer, sheet_name="Spectral Data", index=False
+        )
+    return descriptor
 
 
 def _write_manifest(project_root: Path, *, high_pass: float = 0.1) -> None:
@@ -145,7 +171,7 @@ def test_group_harmonic_cache_roundtrip_and_settings_invalidation(tmp_path: Path
     _write_manifest(project_root, high_pass=0.1)
     workbook = project_root / "1 - Excel Data Files" / "S1_Face.xlsx"
     workbook.parent.mkdir(parents=True)
-    workbook.write_bytes(b"placeholder")
+    _write_cache_workbook(workbook)
 
     request = _request(project_root, workbook)
     assert request is not None
@@ -186,7 +212,7 @@ def test_group_harmonic_cache_uses_ready_project_protocol_rates(
     manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     workbook = project_root / "1 - Excel Data Files" / "S1_Face.xlsx"
     workbook.parent.mkdir(parents=True)
-    workbook.write_bytes(b"placeholder")
+    _write_cache_workbook(workbook)
 
     request = build_group_harmonic_cache_request(
         project_root=project_root,
@@ -257,7 +283,7 @@ def test_group_harmonic_cache_protocol_edit_invalidates_saved_selection(
     manifest_path = project_root / "project.json"
     workbook = project_root / "1 - Excel Data Files" / "S1_Face.xlsx"
     workbook.parent.mkdir(parents=True)
-    workbook.write_bytes(b"placeholder")
+    _write_cache_workbook(workbook)
 
     def _set_protocol(cycles: int) -> None:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -309,7 +335,7 @@ def test_group_harmonic_cache_identity_ignores_subject_and_condition_order(
                 / f"{subject}_{condition}.xlsx"
             )
             workbook.parent.mkdir(parents=True, exist_ok=True)
-            workbook.write_bytes(b"placeholder")
+            _write_cache_workbook(workbook)
             subject_data[subject][condition] = str(workbook)
 
     forward = _multi_request(
@@ -364,7 +390,7 @@ def test_reordered_cache_inputs_still_detect_changed_workbook(
                 / f"{subject}_{condition}.xlsx"
             )
             workbook.parent.mkdir(parents=True, exist_ok=True)
-            workbook.write_bytes(b"placeholder")
+            _write_cache_workbook(workbook)
             subject_data[subject][condition] = str(workbook)
 
     saved_request = _multi_request(
@@ -377,7 +403,7 @@ def test_reordered_cache_inputs_still_detect_changed_workbook(
     save_cached_group_harmonic_selection(saved_request, _selection_metadata())
 
     changed_workbook = Path(subject_data["S2"]["Object"])
-    changed_workbook.write_bytes(b"changed-placeholder")
+    _write_cache_workbook(changed_workbook, "changed-placeholder")
     changed_request = _multi_request(
         project_root,
         subjects=["S2", "S1"],
@@ -406,7 +432,7 @@ def test_lookup_accepts_legacy_cache_with_different_input_order(
                 / f"{subject}_{condition}.xlsx"
             )
             workbook.parent.mkdir(parents=True, exist_ok=True)
-            workbook.write_bytes(b"placeholder")
+            _write_cache_workbook(workbook)
             subject_data[subject][condition] = str(workbook)
 
     request = _multi_request(
@@ -489,7 +515,7 @@ def test_frequency_domain_workflow_status_does_not_invalidate_harmonics(
     _write_manifest(project_root)
     workbook = project_root / "1 - Excel Data Files" / "S1_Face.xlsx"
     workbook.parent.mkdir(parents=True)
-    workbook.write_bytes(b"placeholder")
+    _write_cache_workbook(workbook)
     _write_frequency_domain_qc_state(
         project_root,
         downstream_outputs_stale=True,
@@ -531,7 +557,7 @@ def test_lookup_accepts_legacy_cache_differing_only_by_workflow_status(
     _write_manifest(project_root)
     workbook = project_root / "1 - Excel Data Files" / "S1_Face.xlsx"
     workbook.parent.mkdir(parents=True)
-    workbook.write_bytes(b"placeholder")
+    _write_cache_workbook(workbook)
     _write_frequency_domain_qc_state(
         project_root,
         downstream_outputs_stale=False,
@@ -574,7 +600,7 @@ def test_cache_miss_reports_method_upgrade_before_older_workbook_drift(
     _write_manifest(project_root)
     workbook = project_root / "1 - Excel Data Files" / "S1_Face.xlsx"
     workbook.parent.mkdir(parents=True)
-    workbook.write_bytes(b"placeholder")
+    _write_cache_workbook(workbook)
     request = _request(project_root, workbook)
     assert request is not None
 
@@ -604,7 +630,7 @@ def test_clear_group_harmonic_cache_preserves_manifest_shape(tmp_path: Path) -> 
     _write_manifest(project_root)
     workbook = project_root / "1 - Excel Data Files" / "S1_Face.xlsx"
     workbook.parent.mkdir(parents=True)
-    workbook.write_bytes(b"placeholder")
+    _write_cache_workbook(workbook)
     request = _request(project_root, workbook)
     assert request is not None
     save_cached_group_harmonic_selection(request, _selection_metadata())
@@ -641,3 +667,53 @@ def test_project_save_preserves_stats_tools_metadata_written_to_disk(tmp_path: P
     cache = saved["tools"]["stats"]["group_significant_harmonics_cache"]
     assert cache["entries"]["abc"]["saved_at"] == "2026-01-01T00:00:00Z"
     assert saved["name"] == "Renamed Project"
+
+
+@pytest.mark.parametrize("damage", ["missing", "altered"])
+def test_every_stats_source_signature_binds_and_validates_companion(
+    tmp_path: Path, damage: str,
+) -> None:
+    from Main_App.io.spectral_data import SpectralDataError
+    from Tools.Stats.analysis.dv_policies import _source_workbook_identities
+    from Tools.Stats.analysis.dv_policy_fixed_predefined import (
+        _fixed_source_workbook_fingerprints,
+    )
+    from Tools.Stats.analysis.dv_policy_group_significant import (
+        _selection_source_workbook_fingerprints,
+        _workbook_signature,
+    )
+
+    root = tmp_path / "Project"
+    _write_manifest(root)
+    workbook = root / "S1_Face.xlsx"
+    descriptor = _write_companion_workbook(workbook)
+    sources = {"S1": {"Face": str(workbook)}}
+    shared = dict(subjects=["S1"], conditions=["Face"], subject_data=sources)
+    signature_kwargs = dict(subject="S1", condition="Face", file_path=str(workbook))
+    factories = [
+        lambda: _request(root, workbook),
+        lambda: _workbook_signature(**signature_kwargs),
+        lambda: _source_workbook_identities(**shared),
+        lambda: _fixed_source_workbook_fingerprints(**shared, project_root=root),
+        lambda: _selection_source_workbook_fingerprints(**shared, cache_request=None),
+    ]
+    request, signature, dv_identity, fixed_identity, group_identity = [
+        factory() for factory in factories
+    ]
+    assert request.fingerprint["source_workbooks"][0]["spectral_companion"] == descriptor
+    assert json.loads(signature.spectral_companion_json) == descriptor
+    assert json.loads(dv_identity[0][-1]) == descriptor
+    assert fixed_identity[0]["spectral_companion"] == descriptor
+    assert group_identity[0]["spectral_companion"] == descriptor
+    workbook_bytes = workbook.read_bytes()
+    companion = workbook.with_name(str(descriptor["path"]))
+    if damage == "missing":
+        companion.unlink()
+    else:
+        content = bytearray(companion.read_bytes())
+        content[len(content) // 2] ^= 1
+        companion.write_bytes(content)
+    assert workbook.read_bytes() == workbook_bytes
+    for factory in factories:
+        with pytest.raises(SpectralDataError):
+            factory()

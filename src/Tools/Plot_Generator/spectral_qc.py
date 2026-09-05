@@ -18,6 +18,7 @@ from Tools.Plot_Generator.full_snr_reader import (
     _ROW_TAG,
     XlsxWorkbookReadSession,
     _add_timing_detail,
+    _read_companion_selection,
     _row_values_by_column,
     _selected_row_values,
 )
@@ -160,6 +161,13 @@ def read_full_fft_sheet_read_only(
     session = workbook_session or XlsxWorkbookReadSession(excel_path)
     context = session if workbook_session is None else nullcontext(session)
     with context:
+        companion = _read_companion_selection(
+            session, FULLFFT_SHEET_NAME, x_min=x_min, x_max=x_max,
+            included_electrodes_upper=included_electrodes_upper,
+        )
+        if companion is not None:
+            _add_timing_detail(timing_details, "fullfft_companion_read", started)
+            return companion
         archive = session.archive
         sheet_member = session.worksheet_member(FULLFFT_SHEET_NAME)
         _add_timing_detail(timing_details, "fullfft_workbook_open", started)

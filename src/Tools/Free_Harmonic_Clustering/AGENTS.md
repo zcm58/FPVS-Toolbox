@@ -18,10 +18,12 @@ current-session result while delegating long work to signal-driven workers.
 - Do not copy, translate, import, or redistribute the authors' restrictively
   licensed MATLAB code or `.mat` layout.
 - Read scientific inputs only from original `FullFFT Amplitude (uV)` condition
-  workbooks discovered through `Main_App.projects.load_project_dataset_index`.
+  data discovered through `Main_App.projects.load_project_dataset_index`.
+  The workbook's declared NumPy spectral companion is authoritative when
+  present; legacy workbooks retain their complete Excel spectrum.
   Do not read Stats-ready Summed BCA workbooks.
-- Read exact FullFFT headers and selected columns through the neutral
-  `Main_App.io` XLSX-reader surface. Do not depend on the beta Stats package's
+- Read exact FullFFT headers and selected columns through the neutral,
+  companion-aware `Main_App.io` reader surface. Do not depend on the beta Stats package's
   compatibility adapter.
 - Both GUI inspection and direct preparation must validate
   `Main_App.processing.full_fft_provenance`. That neutral project-local record

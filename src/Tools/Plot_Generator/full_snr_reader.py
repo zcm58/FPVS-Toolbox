@@ -7,7 +7,7 @@ from io import BytesIO
 import posixpath
 from pathlib import Path
 import time
-from typing import BinaryIO, List, Sequence
+from typing import BinaryIO, List, Mapping, Sequence
 from xml.etree import ElementTree
 import zipfile
 
@@ -77,8 +77,14 @@ def _worksheet_member(archive: zipfile.ZipFile, sheet_name: str) -> str:
 class XlsxWorkbookReadSession:
     """One lazily opened XLSX archive with shared workbook metadata."""
 
-    def __init__(self, source: str | Path | bytes) -> None:
+    def __init__(
+        self,
+        source: str | Path | bytes,
+        *,
+        spectral_sheets: Mapping[str, pd.DataFrame] | None = None,
+    ) -> None:
         self._source = source
+        self._spectral_sheets = spectral_sheets
         self._stream: BinaryIO | None = None
         self._archive: zipfile.ZipFile | None = None
         self._shared_strings: list[str] | None = None
@@ -115,6 +121,28 @@ class XlsxWorkbookReadSession:
             return self._sheet_members[sheet_name]
         except KeyError as exc:
             raise ValueError(f"Worksheet named '{sheet_name}' not found") from exc
+
+    def spectral_sheet(self, sheet_name: str) -> pd.DataFrame | None:
+        """Return captured companion values; never substitute an Excel notice."""
+
+        if self._spectral_sheets is not None:
+            if not self._spectral_sheets:
+                return None
+            if sheet_name not in self._spectral_sheets:
+                raise ValueError(f"Spectral companion is missing '{sheet_name}'.")
+            return self._spectral_sheets[sheet_name]
+        if isinstance(self._source, bytes):
+            if "Spectral Data" in _worksheet_members(self.archive):
+                raise ValueError("Spectral workbook bytes require a captured companion.")
+            return None
+        from Main_App.io.spectral_data import (
+            read_spectral_sheet,
+            spectral_companion_identity,
+        )
+
+        if spectral_companion_identity(self._source) is None:
+            return None
+        return read_spectral_sheet(self._source, sheet_name=sheet_name)
 
     def close(self) -> None:
         if self._archive is not None:
@@ -235,6 +263,13 @@ def _read_full_snr_sheet_read_only(
     session = workbook_session or XlsxWorkbookReadSession(excel_path)
     context = session if workbook_session is None else nullcontext(session)
     with context:
+        companion = _read_companion_selection(
+            session, _FULLSNR_SHEET, x_min=x_min, x_max=x_max,
+            included_electrodes_upper=included_electrodes_upper,
+        )
+        if companion is not None:
+            _add_timing_detail(timing_details, "fullsnr_companion_read", started)
+            return companion
         archive = session.archive
         sheet_member = session.worksheet_member(_FULLSNR_SHEET)
         _add_timing_detail(timing_details, "fullsnr_workbook_open", started)
@@ -357,3 +392,41 @@ def _read_full_snr_sheet_read_only(
             df = pd.DataFrame(rows, columns=columns)
             _add_timing_detail(timing_details, "fullsnr_dataframe_build", started)
             return df, ordered_freqs, ordered_cols
+
+
+def _read_companion_selection(
+    session: XlsxWorkbookReadSession,
+    sheet_name: str,
+    *,
+    x_min: float,
+    x_max: float,
+    included_electrodes_upper: set[str] | None,
+) -> tuple[pd.DataFrame, List[float], List[str]] | None:
+    frame = session.spectral_sheet(sheet_name)
+    if frame is None:
+        return None
+    if "Electrode" not in frame.columns:
+        raise KeyError("Electrode")
+    pairs = []
+    for column in frame.columns:
+        if not isinstance(column, str) or not column.endswith("_Hz"):
+            continue
+        try:
+            frequency = float(column.split("_")[0])
+        except ValueError:
+            continue
+        if x_min - 1e-3 <= frequency <= x_max + 1e-3:
+            pairs.append((frequency, column))
+    pairs.sort(key=lambda item: item[0])
+    frequencies = [frequency for frequency, _column in pairs]
+    columns = [column for _frequency, column in pairs]
+    if not columns:
+        return pd.DataFrame(columns=["Electrode"]), [], []
+    selected = frame.loc[:, ["Electrode", *columns]]
+    if included_electrodes_upper is not None:
+        selected = selected.loc[
+            selected["Electrode"].map(lambda value: str(value).upper()).isin(
+                included_electrodes_upper
+            )
+        ]
+    return selected.reset_index(drop=True).copy(), frequencies, columns

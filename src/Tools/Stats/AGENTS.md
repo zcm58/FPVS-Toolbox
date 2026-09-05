@@ -73,6 +73,12 @@ exclusion rules documented in `docs/agent/architecture/statistics-tools.md`.
 Stats consumes the durable processing-time selection; it must not calculate a
 replacement.
 
+FullFFT inputs use the shared `Main_App.io` companion-aware readers. A declared
+NumPy companion owns the complete spectrum; a missing or invalid companion
+must not fall back to an Excel notice or partial data. Source fingerprints and
+in-memory/persisted harmonic caches include its validated identity. Legacy
+Excel-only inputs retain their existing source identity and numerical behavior.
+
 ## Project And Package Boundaries
 
 - `project.json` is canonical for group assignments. Prefer participant

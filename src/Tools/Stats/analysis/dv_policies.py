@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import json
 import math
 import threading
 from pathlib import Path
@@ -124,6 +125,8 @@ def _source_workbook_identities(
 ) -> tuple:
     """Freeze current source identity so in-process DV cache cannot outlive files."""
 
+    from Main_App.io.spectral_data import spectral_companion_identity
+
     identities: list[tuple[object, ...]] = []
     for subject in subjects:
         for condition in conditions:
@@ -140,6 +143,9 @@ def _source_workbook_identities(
             else:
                 size_bytes = int(stat.st_size)
                 mtime_ns = int(stat.st_mtime_ns)
+            companion = (
+                spectral_companion_identity(path) if size_bytes is not None else None
+            )
             identities.append(
                 (
                     str(subject),
@@ -147,6 +153,11 @@ def _source_workbook_identities(
                     str(path),
                     size_bytes,
                     mtime_ns,
+                    *(
+                        (json.dumps(companion, sort_keys=True, separators=(",", ":")),)
+                        if companion is not None
+                        else ()
+                    ),
                 )
             )
     return tuple(sorted(identities))

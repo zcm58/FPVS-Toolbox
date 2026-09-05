@@ -413,6 +413,62 @@ def _write_expected_outputs(plan) -> None:
             output_path.write_text("ok", encoding="utf-8")
 
 
+@pytest.mark.parametrize("failure", ["missing", "corrupt"])
+def test_incremental_completion_requires_spectral_companion(tmp_path, failure):
+    import pandas as pd
+
+    from Main_App.Shared.post_process_excel import write_results_workbook
+
+    project, info = _project_with_raw(tmp_path)
+    plan = classify_processing_inputs(project, [info], _settings(), project.event_map)
+    output = plan.states[0].expected_outputs[0]
+    output.parent.mkdir(parents=True, exist_ok=True)
+    write = write_results_workbook(str(output), {
+        "FullFFT Amplitude (uV)": pd.DataFrame({"Electrode": ["Oz"], "0.0000_Hz": [1.0]}),
+    })
+    record_processing_results(
+        project, plan,
+        [{"status": "ok", "geometry": biosemi64_geometry_identity(),
+          "file": str(info.path), "export_receipts": [{"workbook_write": write}]}],
+        run_mode="Batch", user_choice="incremental", cancelled=False,
+    )
+    ready = classify_processing_inputs(project, [info], _settings(), project.event_map)
+    assert ready.states[0].status == "completed"
+    companion = output.with_name(write["spectral_companion"]["path"])
+    if failure == "missing":
+        companion.unlink()
+    else:
+        companion.write_bytes(b"corrupt")
+    changed = classify_processing_inputs(project, [info], _settings(), project.event_map)
+    assert changed.states[0].status == "missing_outputs"
+    assert "Spectral companion" in changed.states[0].reason
+    assert not processing_ledger_module._state_still_matches_ledger(project, ready.states[0])
+
+
+def test_companion_cleanup_preserves_other_recordings_and_unrelated_npz(tmp_path):
+    import pandas as pd
+
+    from Main_App.Shared.post_process_excel import write_results_workbook
+
+    project, info = _project_with_raw(tmp_path)
+    plan = classify_processing_inputs(project, [info], _settings(), project.event_map)
+    output = plan.states[0].expected_outputs[0]
+    output.parent.mkdir(parents=True, exist_ok=True)
+    write = write_results_workbook(str(output), {
+        "FullFFT Amplitude (uV)": pd.DataFrame({"Electrode": ["Oz"], "0.0000_Hz": [1.0]}),
+    })
+    companion = output.with_name(write["spectral_companion"]["path"])
+    unrelated = output.with_name("manual-array.npz")
+    unrelated.write_bytes(b"manual")
+    other = output.with_name("P02_Condition A_Results.spectra." + "a" * 20 + ".npz")
+    other.write_bytes(b"other recording")
+    deleted = clean_participant_outputs(project, plan)
+    assert set(deleted) == {output, companion}
+    assert unrelated.exists() and other.exists()
+    clean_managed_excel_root(project)
+    assert unrelated.exists() and not other.exists()
+
+
 def _write_source_derivative_result(
     project: Project,
     participant_id: str,
@@ -546,7 +602,7 @@ def test_record_results_persists_complete_source_derivative_contract(tmp_path) -
     entry = ledger["entries"]["P01"]
     assert (
         PROCESSING_FINGERPRINT_VERSION
-        == "processing_fingerprint_v12_analyzed_condition_scope"
+        == "processing_fingerprint_v13_v3_trigger_alignment"
     )
     assert entry["geometry"] == plan.geometry_identity
     assert entry["source_derivative_status"] == "complete"
@@ -821,7 +877,11 @@ def test_pre_qc_carry_forward_does_not_hide_raw_file_changes(tmp_path) -> None:
     assert carried.incremental_files == (info.path,)
 
 
-def test_classify_old_processing_fingerprint_version_is_stale(tmp_path) -> None:
+@pytest.mark.parametrize(
+    "old_version",
+    ["processing_fingerprint_v1", "processing_fingerprint_v12_analyzed_condition_scope"],
+)
+def test_classify_old_processing_fingerprint_version_is_stale(tmp_path, old_version) -> None:
     project, info = _project_with_raw(tmp_path)
     initial_plan = classify_processing_inputs(project, [info], _settings(), project.event_map)
     _write_expected_outputs(initial_plan)
@@ -835,7 +895,7 @@ def test_classify_old_processing_fingerprint_version_is_stale(tmp_path) -> None:
     )
     ledger_path = project.project_root / ".fpvs_processing" / "processing_ledger.json"
     ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
-    ledger["entries"]["P01"]["processing_fingerprint_version"] = "processing_fingerprint_v1"
+    ledger["entries"]["P01"]["processing_fingerprint_version"] = old_version
     ledger_path.write_text(json.dumps(ledger), encoding="utf-8")
 
     plan = classify_processing_inputs(project, [info], _settings(), project.event_map)

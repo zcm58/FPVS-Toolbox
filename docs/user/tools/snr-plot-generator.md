@@ -1,15 +1,17 @@
 # SNR Plots
 
-SNR Plots creates region-of-interest (ROI) spectra from the `FullSNR` sheets in
-processed FPVS workbooks. It averages electrodes within each selected ROI and
+SNR Plots creates region-of-interest (ROI) spectra from the saved `FullSNR`
+arrays associated with processed FPVS workbooks. It averages electrodes within each selected ROI and
 participants within each plotted condition or project group.
 
 ## Before You Start
 
 Process the relevant BDF files first. The selected Excel root should contain a
 subfolder for each condition, with one processed workbook per participant. Each
-workbook must include the `FullSNR` sheet; this tool does not recompute SNR from
-FFT amplitudes.
+workbook must have saved FullSNR data, in its NumPy companion for new exports
+or its `FullSNR` worksheet for older exports. Keep the workbook and companion
+together; see [Spectral Data Files](../reference/spectral-data-files.md).
+This tool does not recompute SNR from FFT amplitudes.
 
 For a managed project, SNR Plots uses the base and oddball frequencies frozen
 with the current processing-owned FullFFT provenance. It also uses that

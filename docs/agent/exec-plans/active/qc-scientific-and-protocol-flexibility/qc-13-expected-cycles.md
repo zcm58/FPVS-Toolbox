@@ -10,6 +10,22 @@ integer expected analyzed oddball-cycle count and source. FPVS Studio imports
 and manual entry normalize into the same exact protocol, and processing keeps
 analyzed cycles, marker counts, usable spans, and derived seconds distinct.
 
+**Timing correction completed, 2026-09-05:** replaced nearest-target-sample
+crop rounding with v3-compatible MNE stimulus sampling-window alignment,
+verified against actual boundary markers before scoring and after cache reuse.
+Exact declared sample counts, original source coordinates, continuous
+preprocessing order, and correct relative sample origins remain intact.
+Unverifiable alignment fails; cache and ledger versions now invalidate old
+windows. Verification: 64 real-MNE alignment cases cover marker phase, pulse
+width, 256/512-Hz and noninteger downsampling ratios, nonzero origins, and
+120-second windows. The processing gate passed 582 tests (one skipped), and
+28 kurtosis review/runner integration tests passed. The repo precommit gate
+remains blocked only by eight pre-existing local-path findings in `outputs/`.
+No local Qt execution was performed. Visible smoke: process one known BDF at
+256 Hz, verify the declared duration and workbook completion, then repeat via
+the cache and confirm unchanged crop metadata. FullFFT storage redesign remains
+a separate future change; spectra were not truncated by this correction.
+
 ## Accepted Behavior
 
 1. Extend the project frequency protocol with a positive integer

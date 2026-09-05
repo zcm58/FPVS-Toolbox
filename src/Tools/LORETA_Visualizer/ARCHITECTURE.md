@@ -3,6 +3,11 @@
 This page is the tool-local architecture contract for agents working in
 `src/Tools/LORETA_Visualizer/`.
 
+Legacy amplitude-workbook adapters use the shared spectral sheet readers,
+which resolve a workbook's declared, validated NumPy companion or retain
+legacy Excel-only reads. This storage compatibility does not add a fallback
+to the current signed-FIF source-PSD producers or change any source estimator.
+
 ## Purpose
 
 The LORETA Visualizer is an embedded PySide6 tool for interactive 3D display of

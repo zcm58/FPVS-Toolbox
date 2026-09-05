@@ -63,6 +63,7 @@ from Main_App.processing.analysis_spans import (
     relative_spans_from_plan,
     restrict_source_analysis_span_plan_by_condition,
     validate_realized_target_analysis_span_plan,
+    validate_target_analysis_span_markers,
     validate_source_analysis_span_context,
     validate_source_analysis_span_plan,
 )
@@ -97,7 +98,7 @@ import psutil  # soft memory cap
 from .mp_env import set_blas_threads_multiprocess
 
 logger = logging.getLogger(__name__)
-PREPROC_CACHE_VERSION = "preprocessed-raw-v12-condition-scope-kurtosis-review"
+PREPROC_CACHE_VERSION = "preprocessed-raw-v13-v3-trigger-alignment"
 BDF_FIRST_N_CHANNELS = 64
 REMOVED_ELECTRODE_REVIEW_LIST_KEYS = (
     "removed_electrode_original_auto_flagged",
@@ -1716,7 +1717,7 @@ def _run_full_pipeline_for_file(
                 excluded_condition_labels=excluded_condition_labels,
                 exclusion_scope={
                     "participant_id": participant_id,
-                    "recording_id": recording_id,
+                    "recording_id": recording_id or participant_id,
                 },
             )
         )
@@ -1821,7 +1822,7 @@ def _run_full_pipeline_for_file(
                     excluded_condition_labels=excluded_condition_labels,
                     exclusion_scope={
                         "participant_id": participant_id,
-                        "recording_id": recording_id,
+                        "recording_id": recording_id or participant_id,
                     },
                 )
             )
@@ -2070,7 +2071,10 @@ def _run_full_pipeline_for_file(
             )
             _record_timing("preprocessing", section_started)
             if raw_proc is None:
-                raise RuntimeError("perform_preprocessing returned None")
+                raise RuntimeError(
+                    settings.get("_fpvs_preprocessing_error")
+                    or "perform_preprocessing returned None"
+                )
             raw_target_span_plan = settings.get(
                 "_fpvs_realized_analysis_span_plan"
             )
@@ -2162,6 +2166,17 @@ def _run_full_pipeline_for_file(
             mne_module=mne,
             stim_channel=stim,
         )
+        if float(source_analysis_span_plan["source_grid"]["sfreq_hz"]) != float(
+            raw_proc.info["sfreq"]
+        ):
+            if events_source != "stim" or len(raw_proc._first_samps) != 1:
+                raise AnalysisSpanPlanError(
+                    "Exact v3 trigger alignment after downsampling requires a "
+                    "single recording segment with recorded stimulus markers."
+                )
+            # Also check cache hits against the resident stim channel, so cached
+            # coordinates cannot silently disagree with the actual crop trigger.
+            validate_target_analysis_span_markers(target_analysis_span_plan, events)
 
         events_info = {
             "stim_channel": stim,

@@ -1,6 +1,7 @@
 """Group-level significant-harmonic Summed BCA DV policy helpers."""
 from __future__ import annotations
 
+import json
 import logging
 import threading
 from dataclasses import dataclass, field, replace
@@ -410,6 +411,7 @@ class WorkbookSignature:
     path: str
     size_bytes: int | None
     mtime_ns: int | None
+    spectral_companion_json: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1175,6 +1177,8 @@ def _workbook_signature(
     condition: str,
     file_path: str | None,
 ) -> WorkbookSignature:
+    from Main_App.io.spectral_data import spectral_companion_identity
+
     if not file_path:
         return WorkbookSignature(
             subject=str(subject),
@@ -1198,12 +1202,18 @@ def _workbook_signature(
             size_bytes=None,
             mtime_ns=None,
         )
+    companion = spectral_companion_identity(path)
     return WorkbookSignature(
         subject=str(subject),
         condition=str(condition),
         path=resolved,
         size_bytes=int(stat.st_size),
         mtime_ns=int(stat.st_mtime_ns),
+        spectral_companion_json=(
+            json.dumps(companion, sort_keys=True, separators=(",", ":"))
+            if companion is not None
+            else None
+        ),
     )
 
 
@@ -2110,6 +2120,11 @@ def _selection_source_workbook_fingerprints(
             "path": signature.path,
             "size_bytes": signature.size_bytes,
             "mtime_ns": signature.mtime_ns,
+            **(
+                {"spectral_companion": json.loads(signature.spectral_companion_json)}
+                if signature.spectral_companion_json is not None
+                else {}
+            ),
         }
         for subject in subjects
         for condition in conditions

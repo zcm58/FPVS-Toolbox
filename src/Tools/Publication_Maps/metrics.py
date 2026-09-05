@@ -8,6 +8,7 @@ from functools import partial
 import hashlib
 import json
 from pathlib import Path
+import zipfile
 
 import numpy as np
 import pandas as pd
@@ -310,6 +311,15 @@ def _capture_workbook_identity(
                 if not chunk:
                     break
                 digest.update(chunk)
+        # The workbook manifest binds selected compact metrics to its spectral
+        # companion. Validate that artifact even though scalp values stay XLSX.
+        from Main_App.io.spectral_data import spectral_companion_identity
+
+        companion = (
+            spectral_companion_identity(workbook.path)
+            if zipfile.is_zipfile(workbook.path)
+            else None
+        )
         after = workbook.path.stat()
         after_signature = (
             int(after.st_dev),
@@ -317,7 +327,7 @@ def _capture_workbook_identity(
             int(after.st_size),
             int(after.st_mtime_ns),
         )
-    except OSError as exc:
+    except (OSError, ValueError) as exc:
         raise PublicationMapInputError(f"Unable to fingerprint active workbook {workbook.path.name}: {exc}") from exc
     if before_signature != after_signature:
         raise PublicationMapInputError(
@@ -329,6 +339,7 @@ def _capture_workbook_identity(
         sha256=digest.hexdigest(),
         size_bytes=after_signature[2],
         mtime_ns=after_signature[3],
+        spectral_companion=companion,
     )
 
 
@@ -348,6 +359,7 @@ def verify_publication_workbooks_unchanged(
             current.sha256 != workbook.sha256
             or current.size_bytes != workbook.size_bytes
             or current.mtime_ns != workbook.mtime_ns
+            or current.spectral_companion != workbook.spectral_companion
         ):
             raise PublicationMapInputError(
                 f"Active workbook changed while Scalp Maps data were being read: "

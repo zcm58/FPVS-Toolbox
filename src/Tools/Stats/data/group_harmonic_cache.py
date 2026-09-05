@@ -70,6 +70,7 @@ class WorkbookFingerprint:
     group_id: str | None = None
     visit_index: int | None = None
     days_from_baseline: float | None = None
+    spectral_companion: Mapping[str, object] | None = None
 
     def to_manifest(self) -> dict[str, object]:
         payload: dict[str, object] = {
@@ -79,6 +80,8 @@ class WorkbookFingerprint:
             "size_bytes": self.size_bytes,
             "mtime_ns": self.mtime_ns,
         }
+        if self.spectral_companion is not None:
+            payload["spectral_companion"] = dict(self.spectral_companion)
         if self.recording_id is not None:
             payload.update(
                 {
@@ -501,6 +504,8 @@ def _workbook_fingerprint(
     file_path: str | None,
     recording_assignment: Mapping[str, object] | None = None,
 ) -> WorkbookFingerprint:
+    from Main_App.io.spectral_data import spectral_companion_identity
+
     identity = _workbook_recording_identity(subject, recording_assignment)
     if not file_path:
         return WorkbookFingerprint(
@@ -534,6 +539,7 @@ def _workbook_fingerprint(
         path_value,
         int(stat.st_size),
         int(stat.st_mtime_ns),
+        spectral_companion=spectral_companion_identity(resolved),
         **identity,
     )
 

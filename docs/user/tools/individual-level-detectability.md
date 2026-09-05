@@ -8,8 +8,10 @@ participants; it is not a replacement for the group statistical analysis.
 ## Inputs
 
 Choose the processed Excel root, one or more conditions, an output folder, and
-the participants to include. Each workbook must contain `FullFFT Amplitude
-(uV)` and `FullSNR` sheets with compatible electrode and frequency columns.
+the participants to include. Each workbook must have compatible `FullFFT
+Amplitude (uV)` and `FullSNR` data, stored in its NumPy companion for new
+exports or its worksheets for older exports. Keep each workbook and companion
+together; see [Spectral Data Files](../reference/spectral-data-files.md).
 
 By default, the tool loads the project-wide significant-harmonic list saved
 when processing completed. Condition selection and participant display

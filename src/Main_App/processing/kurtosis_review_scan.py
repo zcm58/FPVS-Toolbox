@@ -9,15 +9,22 @@ remains owned by :func:`prepare_kurtosis_review_evidence`.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import dataclass, replace
 import logging
 import math
+import os
 from pathlib import Path
+from queue import Empty, SimpleQueue
+from threading import Event
+from time import perf_counter
 from typing import Any
 
 import mne
 import numpy as np
+import psutil
 
+from Main_App.Performance.mp_env import compute_effective_max_workers
 from Main_App.io import load_utils
 from Main_App.io.eeg_geometry import (
     BIOSEMI64_CHANNELS,
@@ -25,6 +32,7 @@ from Main_App.io.eeg_geometry import (
     validate_raw_biosemi64_geometry,
 )
 from Main_App.processing.analysis_spans import (
+    relative_spans_from_plan,
     restrict_source_analysis_span_plan_by_condition,
     validate_source_analysis_span_context,
     validate_source_analysis_span_plan,
@@ -35,8 +43,11 @@ from Main_App.processing.kurtosis_qc import (
     validate_kurtosis_review_decision_payload,
 )
 from Main_App.processing.preprocess import prepare_kurtosis_review_evidence
+from Main_App.processing.raw_channel_qc import evaluate_raw_channel_qc
 from Main_App.processing.removed_electrode_detection import (
+    REMOVED_ELECTRODE_DETECTION_MODE_AUTO,
     manual_removed_electrodes_for_recording,
+    normalize_removed_electrode_detection_mode,
 )
 from Main_App.projects import (
     is_participant_condition_excluded,
@@ -57,6 +68,7 @@ KURTOSIS_REVIEW_FILE_STATUS_ERROR = "error"
 
 KURTOSIS_REVIEW_SKIP_RECORDING_EXCLUDED = "recording_excluded"
 KURTOSIS_REVIEW_SKIP_ALL_CONDITIONS_EXCLUDED = "all_analyzed_conditions_excluded"
+KURTOSIS_REVIEW_SKIP_RAW_QC_EXCLUDED = "raw_channel_qc_excluded"
 
 KURTOSIS_REVIEW_PENDING_NEW = "new"
 KURTOSIS_REVIEW_PENDING_STALE = "stale"
@@ -253,6 +265,115 @@ class _LoaderLogAdapter:
 def _normalized_optional_text(value: object) -> str | None:
     text = str(value or "").strip()
     return text or None
+
+
+def _log_scan_timing(path: Path, stage: str, started: float) -> None:
+    logger.info(
+        "kurtosis_review_timing file=%s stage=%s elapsed_ms=%.3f",
+        path.name,
+        stage,
+        (perf_counter() - started) * 1_000.0,
+    )
+
+
+def _review_worker_count(raw_file_infos: Sequence[Any], max_workers: int | None) -> int:
+    """Allow at most two full-recording jobs within a conservative RAM budget."""
+
+    if len(raw_file_infos) < 2 or max_workers == 1:
+        return 1
+    try:
+        paths = [Path(info.path) for info in raw_file_infos]
+        # The active loader uses a per-process <stem>_raw.dat memmap. Equal
+        # stems must never be loaded simultaneously, even from different dirs.
+        if len({path.stem.casefold() for path in paths}) != len(paths):
+            return 1
+        memory = psutil.virtual_memory()
+        cap = compute_effective_max_workers(int(memory.total), os.cpu_count() or 1, min(2, max_workers or 2))
+        # Packed BDF samples expand into float64 arrays plus FIR/resampling
+        # scratch arrays. Reserve 24x source bytes and at least 1 GiB per file;
+        # leave half of currently available RAM for the GUI and other work.
+        estimates = sorted(
+            (max(1024**3, path.stat().st_size * 24) for path in paths),
+            reverse=True,
+        )
+        if cap < 2 or sum(estimates[:2]) > int(memory.available) // 2:
+            return 1
+    except (AttributeError, OSError, TypeError, ValueError):
+        return 1
+    return 2
+
+
+def _scan_review_parallel(
+    raw_file_infos: Sequence[Any],
+    settings: Mapping[str, Any],
+    *,
+    event_map: Mapping[str, int],
+    reviewed_event_plans_by_file: Mapping[str, Any] | None,
+    raw_channel_qc_by_recording: Mapping[str, Mapping[str, object]] | None,
+    progress: ProgressCallback | None,
+    should_cancel: CancelCallback | None,
+    max_workers: int,
+) -> KurtosisReviewScan:
+    """Run independent serial scans, relaying progress on the calling thread."""
+
+    total = len(raw_file_infos)
+    pending_index = 0
+    completed = 0
+    stop = Event()
+    messages: SimpleQueue[str] = SimpleQueue()
+    indexed_results: dict[int, tuple[KurtosisReviewFileResult, ...]] = {}
+    futures = {}
+
+    def submit_available(executor: ThreadPoolExecutor) -> None:
+        nonlocal pending_index
+        while not stop.is_set() and pending_index < total and len(futures) < max_workers:
+            index = pending_index
+            pending_index += 1
+            futures[
+                executor.submit(
+                    scan_kurtosis_review,
+                    [raw_file_infos[index]],
+                    settings,
+                    event_map=event_map,
+                    reviewed_event_plans_by_file=reviewed_event_plans_by_file,
+                    raw_channel_qc_by_recording=raw_channel_qc_by_recording,
+                    progress=lambda message, _completed, _total: messages.put(message),
+                    should_cancel=stop.is_set,
+                    max_workers=1,
+                )
+            ] = index
+
+    with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="fpvs_kurtosis_review") as executor:
+        if should_cancel and should_cancel():
+            stop.set()
+        submit_available(executor)
+        while futures:
+            if should_cancel and should_cancel():
+                stop.set()
+            while True:
+                try:
+                    message = messages.get_nowait()
+                except Empty:
+                    break
+                if progress:
+                    progress(message, completed, total)
+            done, _pending = wait(futures, timeout=0.1, return_when=FIRST_COMPLETED)
+            for future in done:
+                index = futures.pop(future)
+                scan = future.result()
+                indexed_results[index] = scan.results
+                if scan.cancelled:
+                    stop.set()
+                completed += len(scan.results)
+                if progress and scan.results:
+                    progress(f"Finished kurtosis review scan for {scan.results[0].path.name}", completed, total)
+            submit_available(executor)
+    if stop.is_set() and progress:
+        progress("Kurtosis review scan cancelled", completed, total)
+    return KurtosisReviewScan(
+        tuple(result for index in sorted(indexed_results) for result in indexed_results[index]),
+        cancelled=stop.is_set(),
+    )
 
 
 def _identity(info: Any) -> tuple[Path, str, str, str | None, str | None, int | None]:
@@ -796,12 +917,15 @@ def scan_kurtosis_review(
     raw_channel_qc_by_recording: Mapping[str, Mapping[str, object]] | None = None,
     progress: ProgressCallback | None = None,
     should_cancel: CancelCallback | None = None,
+    max_workers: int | None = None,
 ) -> KurtosisReviewScan:
     """Prepare current QC-16 evidence for a batch without touching widgets.
 
     The caller should run this synchronous function in its existing worker
     thread.  Cancellation is cooperative between load, validation, and shared
-    preprocessing stages; completed per-file results are retained.
+    preprocessing stages; completed per-file results are retained. At most two
+    files run concurrently when CPU, available RAM, and memmap names allow it.
+    Progress and cancellation callbacks remain on the calling worker thread.
     """
 
     if isinstance(raw_file_infos, (str, bytes, bytearray)):
@@ -827,6 +951,19 @@ def scan_kurtosis_review(
         raise KurtosisReviewScanError(f"Kurtosis review requires a valid project frequency protocol: {exc}") from exc
     if not protocol.is_ready:
         raise KurtosisReviewScanError("Kurtosis review requires a confirmed project frequency protocol.")
+
+    worker_count = _review_worker_count(raw_file_infos, max_workers)
+    if worker_count > 1:
+        return _scan_review_parallel(
+            raw_file_infos,
+            settings,
+            event_map=canonical_event_map,
+            reviewed_event_plans_by_file=reviewed_event_plans_by_file,
+            raw_channel_qc_by_recording=raw_channel_qc_by_recording,
+            progress=progress,
+            should_cancel=should_cancel,
+            max_workers=worker_count,
+        )
 
     raw_plans = (
         reviewed_event_plans_by_file
@@ -921,6 +1058,7 @@ def scan_kurtosis_review(
 
             if progress:
                 progress(f"Loading {path.name} with BioSemi64 geometry", index - 1, total)
+            load_started = perf_counter()
             raw = load_utils.load_eeg_file(
                 _LoaderLogAdapter(path),
                 str(path),
@@ -939,11 +1077,13 @@ def scan_kurtosis_review(
                 stim_channel=stim_channel,
                 require_runtime_identity=True,
             )
+            _log_scan_timing(path, "load_and_geometry", load_started)
             if should_cancel and should_cancel():
                 if progress:
                     progress("Kurtosis review scan cancelled", index - 1, total)
                 return KurtosisReviewScan(tuple(results), cancelled=True)
 
+            events_started = perf_counter()
             events, event_source = _find_raw_events(raw, stim_channel=stim_channel)
             validated_plan = validate_source_analysis_span_plan(
                 event_plan_payload=event_plan,
@@ -958,11 +1098,13 @@ def scan_kurtosis_review(
                 validated_plan,
                 excluded_condition_labels=excluded_conditions,
                 exclusion_scope={
-                    "source_file_path": str(path),
+                    # Match the final processing runner's selection identity.
+                    # Source path is independently bound by each review receipt.
                     "participant_id": participant,
                     "recording_id": recording,
                 },
             )
+            _log_scan_timing(path, "events_and_plan", events_started)
             analyzed_conditions = _condition_labels(restricted_plan)
             if not analyzed_conditions:
                 results.append(
@@ -1002,8 +1144,41 @@ def scan_kurtosis_review(
                 participant_id=participant,
                 recording_id=recording,
             )
+            detector_mode = normalize_removed_electrode_detection_mode(
+                settings.get("removed_electrode_detection_mode"),
+                auto_detect_removed_electrodes=settings.get("auto_detect_removed_electrodes", False),
+            )
+            if detector_mode == REMOVED_ELECTRODE_DETECTION_MODE_AUTO:
+                # Final processing marks these current, directly authorized
+                # raw-QC bads before initial referencing. Recompute them here
+                # on exactly the same included spans instead of promoting
+                # display-only preflight findings into authority.
+                file_settings["_fpvs_manual_removed_electrodes"] = list(direct_bad_channels)
+                raw_qc_started = perf_counter()
+                if progress:
+                    progress(f"Checking removed electrodes in {path.name}", index - 1, total)
+                raw_qc_result = evaluate_raw_channel_qc(
+                    raw,
+                    file_settings,
+                    filename=path.name,
+                    analysis_spans=relative_spans_from_plan(restricted_plan),
+                )
+                _log_scan_timing(path, "automatic_raw_channel_qc", raw_qc_started)
+                if raw_qc_result.excluded:
+                    results.append(
+                        _skipped_result(
+                            identity,
+                            reason=KURTOSIS_REVIEW_SKIP_RAW_QC_EXCLUDED,
+                            analyzed_conditions=analyzed_conditions,
+                        )
+                    )
+                    if progress:
+                        progress(f"Skipped {path.name}: raw channel QC excluded the recording", index, total)
+                    continue
+                direct_bad_channels = tuple(raw_qc_result.channels_to_interpolate)
             if progress:
-                progress(f"Computing kurtosis evidence for {path.name}", index - 1, total)
+                progress(f"Preprocessing {path.name} for kurtosis review", index - 1, total)
+            prepare_started = perf_counter()
             prepared = prepare_kurtosis_review_evidence(
                 raw,
                 file_settings,
@@ -1015,7 +1190,9 @@ def scan_kurtosis_review(
                 ),
                 path.name,
                 direct_bad_channels=direct_bad_channels,
+                copy_raw=False,
             )
+            _log_scan_timing(path, "preprocessing_and_evidence", prepare_started)
             raw_channel_qc: Mapping[object, object] | None = None
             if raw_channel_qc_by_recording is not None:
                 raw_qc_found, raw_qc_payload = _casefold_mapping_entry(
@@ -1099,6 +1276,7 @@ __all__ = [
     "KURTOSIS_REVIEW_PENDING_STALE",
     "KURTOSIS_REVIEW_SKIP_ALL_CONDITIONS_EXCLUDED",
     "KURTOSIS_REVIEW_SKIP_RECORDING_EXCLUDED",
+    "KURTOSIS_REVIEW_SKIP_RAW_QC_EXCLUDED",
     "KurtosisAnalyzedOccurrence",
     "KurtosisCorroboratorState",
     "KurtosisReviewFileResult",

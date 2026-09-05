@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -54,6 +55,8 @@ class _RunScopedXlsxReadCache:
     selected_frames: dict[_SelectedReadKey, pd.DataFrame] = field(
         default_factory=dict
     )
+    spectral_manifests: dict[_WorkbookSignature, dict | None] = field(default_factory=dict)
+    spectral_payloads: OrderedDict[tuple, object] = field(default_factory=OrderedDict)
 
 
 _ACTIVE_XLSX_READ_CACHE: ContextVar[_RunScopedXlsxReadCache | None] = ContextVar(
@@ -87,6 +90,16 @@ def xlsx_read_cache_scope() -> Iterator[None]:
 
 def read_xlsx_sheet_header(excel_path: str | Path, *, sheet_name: str) -> list[object]:
     """Return the first-row values for a worksheet without loading all rows."""
+
+    if sheet_name in {"FullFFT Amplitude (uV)", "FullSNR"}:
+        from Main_App.io.spectral_data import read_spectral_sheet_header
+
+        return read_spectral_sheet_header(excel_path, sheet_name=sheet_name)
+    return _read_xlsx_sheet_header_raw(excel_path, sheet_name=sheet_name)
+
+
+def _read_xlsx_sheet_header_raw(excel_path: str | Path, *, sheet_name: str) -> list[object]:
+    """Read the physical worksheet, without companion dispatch."""
 
     cache = _ACTIVE_XLSX_READ_CACHE.get()
     cache_key: tuple[_WorkbookSignature, str] | None = None
@@ -138,6 +151,41 @@ def read_xlsx_sheet_selected_columns(
     Missing requested columns are omitted unless ``require_all`` is true. When
     electrode filtering is requested, the electrode column must be present.
     """
+
+    if sheet_name in {"FullFFT Amplitude (uV)", "FullSNR"}:
+        from Main_App.io.spectral_data import read_spectral_sheet_selected_columns
+
+        return read_spectral_sheet_selected_columns(
+            excel_path,
+            sheet_name=sheet_name,
+            required_columns=required_columns,
+            require_all=require_all,
+            included_electrodes_upper=included_electrodes_upper,
+            electrode_column=electrode_column,
+            timing_details=timing_details,
+        )
+    return _read_xlsx_sheet_selected_columns_raw(
+        excel_path,
+        sheet_name=sheet_name,
+        required_columns=required_columns,
+        require_all=require_all,
+        included_electrodes_upper=included_electrodes_upper,
+        electrode_column=electrode_column,
+        timing_details=timing_details,
+    )
+
+
+def _read_xlsx_sheet_selected_columns_raw(
+    excel_path: str | Path,
+    *,
+    sheet_name: str,
+    required_columns: Sequence[str],
+    require_all: bool = True,
+    included_electrodes_upper: set[str] | None = None,
+    electrode_column: str = "Electrode",
+    timing_details: dict[str, float] | None = None,
+) -> pd.DataFrame:
+    """Read the physical worksheet, without companion dispatch."""
 
     requested_columns = _unique_requested_columns(required_columns)
     cache_started = perf_counter()

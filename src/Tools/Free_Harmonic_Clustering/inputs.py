@@ -105,7 +105,7 @@ class _RepeatedBatchCohort:
 
 
 def _read_fullfft_header(path: Path) -> list[object]:
-    """Private seam around the shared streaming XML header reader."""
+    """Read the complete declared companion or legacy worksheet header."""
 
     return read_xlsx_sheet_header(path, sheet_name=FULL_FFT_SHEET)
 
@@ -115,7 +115,7 @@ def _read_fullfft_selected_columns(
     required_columns: Sequence[str],
     timing_details: dict[str, float],
 ) -> Any:
-    """Private seam around one exact selected-column XML worksheet read."""
+    """Read exact bins through the shared companion-aware workbook adapter."""
 
     return read_xlsx_sheet_selected_columns(
         path,
@@ -959,7 +959,8 @@ def prepare_project_contrast(
     """Load, validate, and prepare one managed-project two-arm contrast.
 
     Each consumed workbook receives one header-only read and exactly one
-    selected-column XML amplitude read.  Selected frames are converted to
+    selected-column amplitude read through the neutral companion-aware adapter.
+    Selected frames are converted to
     contiguous NumPy matrices immediately and are never cached run-wide.
     """
 

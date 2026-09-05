@@ -1425,12 +1425,6 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                     extra=f"channels={full_snr_avg.shape[0]} freqs={len(freq_grid)}",
                 )
             if full_fft_avg is not None:
-                if len(fft_frequencies) + 1 > 16_384:
-                    raise ValueError(
-                        "The complete one-sided FullFFT exceeds Excel's 16,384-column "
-                        "limit. Processing stopped rather than silently truncating the "
-                        "auditable spectrum."
-                    )
                 full_fft_df = pd.DataFrame(
                     full_fft_avg,
                     index=final_electrode_names_ordered,
@@ -1498,6 +1492,17 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                     spectral_eligibility_df=spectral_eligibility_df,
                     spectral_metric_qc_df=spectral_metric_qc_df,
                     timing_sink=export_timing_sink if isinstance(export_timing_sink, list) else None,
+                    spectral_metadata={
+                        "sampling_frequency_hz": float(sfreq),
+                        "fft_sample_count": int(num_times),
+                        "frequencies_hz": fft_frequencies.tolist(),
+                        "condition_label": cond_label_from_keys,
+                        "frequency_protocol": frequency_protocol.to_manifest(),
+                        "spectral_eligibility_fingerprint": condition_eligibility.fingerprint,
+                        "retained_occurrences": retained_occurrences,
+                        "full_fft_units": "uV",
+                        "full_snr_units": "ratio",
+                    },
                 )
                 export_receipts.append(
                     _fingerprinted_export_receipt({

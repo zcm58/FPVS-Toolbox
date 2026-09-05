@@ -73,6 +73,12 @@ testing, or another specialized estimand.
   expected oddball cycles, and actual analyzed duration. State which
   occurrences were not evaluated and why; do not count them as clean or as an
   unflagged denominator.
+- Report the source and analyzed sampling rates and crop-alignment version.
+  Downsampled BDF crops use the actual stimulus-onset sample consistent with
+  v3, with the project-declared exact analyzed length. Original trigger sample
+  coordinates are retained. Do not describe v3-compatible downsampling as
+  preserving sub-sample timing: its output grid has finite temporal resolution
+  (3.90625 ms at 256 Hz; 1.953125 ms at 512 Hz).
 - Report 5-second transient windows with a nominal 2.5-second hop, actual
   rounded sample counts, and the full tail-aligned or short-unpadded edge
   policy. Treat the union of flagged-window coverage as review provenance, not
@@ -99,9 +105,12 @@ testing, or another specialized estimand.
 - For every kurtosis finding, report raw kurtosis, signed normalized score,
   validity, and final authority separately. Identify confirmed upstream bads,
   eligible corroborated automatic repairs, GUI-approved repairs, GUI-rejected
-  repairs, and unresolved or stale evidence. The initial corroborator registry
-  is empty, so a non-manual kurtosis-only finding requires an explicit GUI
-  Approve or Reject decision with a reason.
+  repairs, experimental automatic repairs, and unresolved or stale evidence.
+  Report use of the optional experimental `|normalized score| > 10.0` rule
+  (`gui_enabled_experimental_abs_z_gt_10_v1`); its cutoff is experimental, not
+  a validated artifact classifier. Exactly 10.0 and other pending findings
+  still require a manual decision and reason. The corroborator registry
+  remains empty. Raw kurtosis is not the automatic cutoff variable.
 - State that kurtosis is scored only from included analyzed intervals, while an
   approved interpolation is applied once to the continuous processed recording
   and therefore affects every retained condition in that recording. Report the

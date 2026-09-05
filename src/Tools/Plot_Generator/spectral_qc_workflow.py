@@ -84,7 +84,9 @@ class PlotSpectralQcWorkflowMixin:
 
         fft_input = None
         qc_unavailable_reason = None
-        with XlsxWorkbookReadSession(snapshot.content) as session:
+        with XlsxWorkbookReadSession(
+            snapshot.content, spectral_sheets=snapshot.spectral_sheets
+        ) as session:
             snr_input = self._read_full_snr_direct(
                 excel_path,
                 included_electrodes_upper=(

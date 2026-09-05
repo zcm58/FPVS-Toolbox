@@ -160,6 +160,18 @@ The preflight scan and crop-grid audit carry the resolved project oddball rate
 and frequency-protocol fingerprint; reference duration and cycle calculations
 must not import the 1.2-Hz compatibility constant.
 
+For managed single-segment BDF processing, `analysis_spans.py` preserves the
+v3 release's post-resampling stimulus-marker alignment. It locates the MNE
+stimulus sampling window containing the approved source onset, verifies the
+actual target oddball onset, and retains the exact project-declared sample
+count from that start. Nearest-target-sample rounding must not shift the crop.
+Missing boundary markers cannot be repaired by snapping to another event.
+The source and observed target origins remain separate, so nonzero
+`first_samp` is not accidentally applied twice. Existing source timestamps are
+preserved; the lower-rate grid still has the timing quantization present in v3.
+Timing-version changes invalidate processed caches and incremental completion
+records before the corrected windows can be reused downstream.
+
 Normal condition workbooks report the realized grid in `FFT Metadata` and the
 exact protocol/grid/filter identity in `Spectral Eligibility`. `FFT Bin Width
 (Hz)` is `fs / N`; the existing `df_hz` field in `FFT and neighbors` remains

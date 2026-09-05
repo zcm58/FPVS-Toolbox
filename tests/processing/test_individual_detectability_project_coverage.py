@@ -372,7 +372,7 @@ def test_managed_participant_read_error_is_fatal_integrity_failure(
     from Tools.Individual_Detectability import core
 
     workbook = tmp_path / "P1_Faces_Results.xlsx"
-    workbook.write_text("placeholder", encoding="utf-8")
+    pd.DataFrame({"Electrode": ["Oz"]}).to_excel(workbook, index=False)
     monkeypatch.setattr(
         core,
         "_excel_minimal_read",
@@ -422,6 +422,38 @@ def test_projectless_participant_read_error_preserves_legacy_skip_policy(
 
     assert result.ok is False
     assert result.fatal_integrity_error is False
+
+
+def test_individual_detectability_reads_companions_and_rejects_stale_cache(tmp_path):
+    import numpy as np
+
+    from Main_App.Shared.post_process_excel import write_results_workbook
+    from Main_App.io.spectral_data import SpectralDataError
+    from Tools.Individual_Detectability import core
+
+    frequencies = np.arange(0, 3.01, 0.05)
+    columns = [f"{value:.4f}_Hz" for value in frequencies]
+    frame = pd.DataFrame(np.arange(2 * len(columns)).reshape(2, -1) / 16, columns=columns)
+    frame.insert(0, "Electrode", ["Oz", "POz"])
+    legacy = tmp_path / "legacy.xlsx"
+    with pd.ExcelWriter(legacy) as writer:
+        frame.to_excel(writer, sheet_name=core.SHEET_FULLFFT, index=False)
+        frame.to_excel(writer, sheet_name=core.SHEET_FULLSNR, index=False)
+    companion_workbook = tmp_path / "companion.xlsx"
+    receipt = write_results_workbook(str(companion_workbook), {
+        core.SHEET_FULLFFT: frame, core.SHEET_FULLSNR: frame,
+    })
+    settings = DetectabilitySettings(oddball_harmonics_hz=[1.2])
+    legacy_fft, legacy_snr, legacy_plan = core._excel_minimal_read(legacy, settings)
+    fft, snr, plan = core._excel_minimal_read(companion_workbook, settings)
+    pd.testing.assert_frame_equal(fft, legacy_fft)
+    pd.testing.assert_frame_equal(snr, legacy_snr)
+    assert plan == legacy_plan
+    before = core._source_fingerprint(companion_workbook)
+    assert before
+    companion_workbook.with_name(receipt["spectral_companion"]["path"]).unlink()
+    with pytest.raises(SpectralDataError):
+        core._source_fingerprint(companion_workbook)
 
 
 def test_worker_gates_managed_inputs_before_harmonic_mode_selection() -> None:

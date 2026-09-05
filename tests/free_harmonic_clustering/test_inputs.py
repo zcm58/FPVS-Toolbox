@@ -950,3 +950,51 @@ def test_nonfinite_selected_amplitude_is_rejected(
             _independent_request(root),
             FreeHarmonicMethodSpec(max_harmonic_hz=3.6),
         )
+
+
+def test_companion_preserves_fhc_bin_windows_sensor_order_and_snr(
+    tmp_path: Path,
+) -> None:
+    from Main_App.io.spectral_data import (
+        SpectralDataError,
+        spectral_manifest_frame,
+        write_spectral_companion,
+    )
+    from Tools.Free_Harmonic_Clustering.preparation import compute_participant_snr
+
+    header = _header()
+    rng = np.random.default_rng(3165)
+    values = rng.integers(1, 129, size=(64, len(header) - 1)) / 16.0
+    frame = pd.DataFrame(values, columns=header[1:])
+    frame.insert(0, "Electrode", DEFAULT_ELECTRODE_NAMES_64)
+    legacy = tmp_path / "legacy.xlsx"
+    frame.to_excel(legacy, sheet_name="FullFFT Amplitude (uV)", index=False)
+    path = tmp_path / "companion.xlsx"
+    descriptor = write_spectral_companion(path, {"FullFFT Amplitude (uV)": frame})
+    with pd.ExcelWriter(path, engine="xlsxwriter") as writer:
+        spectral_manifest_frame(descriptor).to_excel(
+            writer, sheet_name="Spectral Data", index=False,
+        )
+    assert inputs._read_fullfft_header(path) == inputs._read_fullfft_header(legacy)
+    plan = build_available_frequency_window_plan(
+        inputs._read_fullfft_header(path), oddball_frequency_hz=1.2,
+        base_frequency_hz=6.0,
+    )
+    legacy_frame = inputs._read_fullfft_selected_columns(legacy, plan.required_columns, {})
+    companion_frame = inputs._read_fullfft_selected_columns(path, plan.required_columns, {})
+    pd.testing.assert_frame_equal(companion_frame, legacy_frame, check_exact=True)
+    legacy_matrix = inputs._validate_sensor_matrix(legacy_frame, legacy, plan)
+    companion_matrix = inputs._validate_sensor_matrix(companion_frame, path, plan)
+    np.testing.assert_array_equal(companion_matrix, legacy_matrix)
+    np.testing.assert_array_equal(
+        compute_participant_snr(companion_matrix, plan),
+        compute_participant_snr(legacy_matrix, plan),
+    )
+    companion_path = path.with_name(str(descriptor["path"]))
+    data = bytearray(companion_path.read_bytes())
+    data[len(data) // 2] ^= 1
+    companion_path.write_bytes(data)
+    with pytest.raises(SpectralDataError):
+        inputs._read_fullfft_header(path)
+    with pytest.raises(SpectralDataError):
+        inputs._read_fullfft_selected_columns(path, plan.required_columns, {})

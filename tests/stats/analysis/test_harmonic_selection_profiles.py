@@ -500,7 +500,7 @@ def test_nonlegacy_cache_identity_records_profile_mask_and_canonical_groups(
     workbooks: dict[str, dict[str, str]] = {}
     for subject in ("A1", "B1"):
         path = project_root / f"{subject}_C1.xlsx"
-        path.write_bytes(b"fingerprint-only")
+        pd.DataFrame({"Electrode": ["Oz"]}).to_excel(path, index=False)
         workbooks[subject] = {"C1": str(path)}
     settings = normalize_dv_policy(
         {
@@ -549,7 +549,7 @@ def test_explicit_legacy_profile_keeps_unversioned_legacy_cache_identity(
     project_root = tmp_path / "project"
     project_root.mkdir()
     workbook = project_root / "S1_C1.xlsx"
-    workbook.write_bytes(b"fingerprint-only")
+    pd.DataFrame({"Electrode": ["Oz"]}).to_excel(workbook, index=False)
     manifest_path = project_root / "project.json"
     manifest = {
         "schema_version": "2.1.0",
@@ -615,3 +615,46 @@ def _write_profile_workbook(
     path.parent.mkdir(parents=True, exist_ok=True)
     with pd.ExcelWriter(path, engine="openpyxl") as writer:
         frame.to_excel(writer, sheet_name="FullFFT Amplitude (uV)", index=False)
+
+
+@pytest.mark.parametrize("profile", [
+    HARMONIC_PROFILE_LEGACY_ID,
+    HARMONIC_PROFILE_SIGNIFICANT_ONLY_ID,
+    HARMONIC_PROFILE_TWO_CONSECUTIVE_FAILURES_ID,
+])
+def test_harmonic_math_is_identical_for_companion_and_legacy_spectrum(
+    tmp_path: Path, profile: str,
+) -> None:
+    from Main_App.io.spectral_data import (
+        read_spectral_sheet,
+        spectral_manifest_frame,
+        write_spectral_companion,
+    )
+
+    path = tmp_path / "S1_Faces.xlsx"
+    _write_profile_workbook(path)
+    kwargs = dict(
+        subjects=["S1"], conditions=["Faces"],
+        subject_data={"S1": {"Faces": str(path)}},
+        base_frequency_hz=6.0, rois={"Posterior": ["O1"]},
+        log_func=lambda _: None,
+        settings=normalize_dv_policy({"harmonic_selection_profile": profile}),
+        max_freq=4.8,
+    )
+    legacy = build_group_significant_harmonic_selection(**kwargs)
+    original = read_spectral_sheet(path, sheet_name="FullFFT Amplitude (uV)")
+    descriptor = write_spectral_companion(
+        path, {"FullFFT Amplitude (uV)": original},
+    )
+    with pd.ExcelWriter(path, engine="xlsxwriter") as writer:
+        spectral_manifest_frame(descriptor).to_excel(
+            writer, sheet_name="Spectral Data", index=False,
+        )
+    companion = build_group_significant_harmonic_selection(**kwargs)
+    assert companion.selected_harmonics_hz == legacy.selected_harmonics_hz
+    assert companion.selected_columns == legacy.selected_columns
+    assert companion.z_by_harmonic == legacy.z_by_harmonic
+    assert companion.condition_z_by_harmonic == legacy.condition_z_by_harmonic
+    assert companion.stopping_harmonics_hz == legacy.stopping_harmonics_hz
+    assert companion.rows == legacy.rows
+    assert companion.source_workbook_fingerprints[0]["spectral_companion"] == descriptor

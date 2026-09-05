@@ -837,6 +837,8 @@ def _fixed_source_workbook_fingerprints(
     subject_data: Dict[str, Dict[str, str]],
     project_root: str | Path | None,
 ) -> tuple[dict[str, object], ...]:
+    from Main_App.io.spectral_data import spectral_companion_identity
+
     root = Path(project_root).resolve() if project_root not in (None, "") else None
     fingerprints: list[dict[str, object]] = []
     for subject in subjects:
@@ -863,15 +865,18 @@ def _fixed_source_workbook_fingerprints(
                 else:
                     size_bytes = int(stat.st_size)
                     mtime_ns = int(stat.st_mtime_ns)
-            fingerprints.append(
-                {
-                    "subject": str(subject),
-                    "condition": str(condition),
-                    "path": path_text,
-                    "size_bytes": size_bytes,
-                    "mtime_ns": mtime_ns,
-                }
-            )
+            fingerprint: dict[str, object] = {
+                "subject": str(subject),
+                "condition": str(condition),
+                "path": path_text,
+                "size_bytes": size_bytes,
+                "mtime_ns": mtime_ns,
+            }
+            if path is not None and size_bytes is not None:
+                companion = spectral_companion_identity(path)
+                if companion is not None:
+                    fingerprint["spectral_companion"] = companion
+            fingerprints.append(fingerprint)
     return tuple(fingerprints)
 
 

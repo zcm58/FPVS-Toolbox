@@ -11,6 +11,14 @@ import numpy as np
 from openpyxl import load_workbook
 import pandas as pd
 
+from Main_App.io.spectral_data import (
+    SPECTRAL_MANIFEST_SHEET,
+    SPECTRAL_SHEET_NAMES,
+    spectral_manifest_frame,
+    validate_spectral_companion,
+    write_spectral_companion,
+)
+
 
 NEIGHBOR_OFFSETS = [*range(-11, 0), *range(1, 12)]
 _COLUMN_WIDTH_CHUNK_SIZE = 1024
@@ -374,11 +382,39 @@ def write_results_workbook(
     spectral_eligibility_df: Optional[pd.DataFrame] = None,
     spectral_metric_qc_df: Optional[pd.DataFrame] = None,
     timing_sink: list[dict[str, object]] | None = None,
+    spectral_metadata: dict[str, Any] | None = None,
 ) -> dict[str, object]:
-    """Write results workbook with consistent formatting and optional debug sheet."""
+    """Publish Excel reports after their lossless spectral companion is ready."""
     workbook_started = perf_counter()
     destination = Path(full_excel_path)
     prior_artifact = _artifact_identity(destination)
+    spectral_frames = {
+        name: frame for name, frame in dataframes_to_save.items()
+        if name in SPECTRAL_SHEET_NAMES
+    }
+    spectral_companion: dict[str, object] | None = None
+    if spectral_frames:
+        companion_started = perf_counter()
+        spectral_companion = write_spectral_companion(
+            destination, spectral_frames, metadata=spectral_metadata
+        )
+        _log_excel_timing(
+            "spectral_companion_write", companion_started,
+            path=full_excel_path, timing_sink=timing_sink,
+        )
+        # Keep familiar report tabs, but never serialize dense spectra twice.
+        dataframes_to_save = {
+            name: (
+                pd.DataFrame({
+                    "Spectral data": ["Stored losslessly in the NumPy companion file."],
+                    "Companion file": [spectral_companion["path"]],
+                }) if name in spectral_frames else frame
+            )
+            for name, frame in dataframes_to_save.items()
+        }
+        dataframes_to_save[SPECTRAL_MANIFEST_SHEET] = spectral_manifest_frame(
+            spectral_companion
+        )
     expected_headers: Dict[str, List[str]] = {
         str(sheet_name): [str(column) for column in frame.columns]
         for sheet_name, frame in dataframes_to_save.items()
@@ -595,6 +631,10 @@ def write_results_workbook(
                 Path(workbook_path),
                 expected_headers,
             )
+            if spectral_companion is not None:
+                # The staging XLSX can be on a different volume. Resolve the
+                # companion beside the final destination before publishing it.
+                validate_spectral_companion(destination, spectral_companion)
     finally:
         _log_excel_timing(
             "workbook_write_total",
@@ -614,4 +654,6 @@ def write_results_workbook(
         "prior_artifact": prior_artifact,
         "artifact": artifact,
         "schema_validation": schema_validation,
+        **({"spectral_companion": spectral_companion}
+           if spectral_companion is not None else {}),
     }

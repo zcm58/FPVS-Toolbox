@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 import hashlib
 from pathlib import Path
 import re
+import zipfile
+
+import pandas as pd
 
 
 _HASH_CHUNK_BYTES = 1024 * 1024
@@ -28,6 +31,7 @@ class SourceFileIdentity:
     sha256: str
     size_bytes: int
     stat_signature: tuple[int, int, int, int]
+    spectral_companion: dict[str, object] | None = field(default=None, hash=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,6 +40,22 @@ class SourceWorkbookSnapshot:
 
     content: bytes = field(repr=False)
     identity: SourceFileIdentity
+    spectral_sheets: Mapping[str, pd.DataFrame] = field(default_factory=dict, repr=False)
+
+
+def _companion_identity(path: Path) -> dict[str, object] | None:
+    # Identity-only callers also fingerprint unreadable/placeholder workbooks;
+    # their required worksheet reader remains responsible for that failure.
+    if not zipfile.is_zipfile(path):
+        return None
+    from Main_App.io.spectral_data import spectral_companion_identity
+
+    try:
+        return spectral_companion_identity(path)
+    except (OSError, ValueError) as exc:
+        raise SNRPublicationError(
+            f"Spectral companion for {path.name} is missing or invalid: {exc}"
+        ) from exc
 
 
 def source_stat_signature(path: str | Path) -> tuple[int, int, int, int]:
@@ -93,6 +113,7 @@ def capture_stable_source_identity(
         source,
         cancellation_checkpoint=cancellation_checkpoint,
     )
+    companion = _companion_identity(source)
     after_hash = source_stat_signature(source)
     if after_hash != before_hash:
         raise SNRPublicationError(
@@ -104,6 +125,7 @@ def capture_stable_source_identity(
         sha256=digest,
         size_bytes=after_hash[2],
         stat_signature=after_hash,
+        spectral_companion=companion,
     )
 
 
@@ -116,6 +138,7 @@ def capture_stable_source_snapshot(
 
     source = Path(path)
     before_read = source_stat_signature(source)
+    companion_before = _companion_identity(source)
     digest = hashlib.sha256()
     chunks: list[bytes] = []
     with source.open("rb") as handle:
@@ -129,8 +152,18 @@ def capture_stable_source_snapshot(
                 break
             chunks.append(chunk)
             digest.update(chunk)
+    spectral_sheets: dict[str, pd.DataFrame] = {}
+    if companion_before is not None:
+        from Main_App.io.spectral_data import read_spectral_sheet
+
+        for sheet_name in ("FullFFT Amplitude (uV)", "FullSNR"):
+            if sheet_name in companion_before["sheets"]:
+                if cancellation_checkpoint is not None and cancellation_checkpoint():
+                    raise SNRPublicationCancelled("SNR input capture was cancelled.")
+                spectral_sheets[sheet_name] = read_spectral_sheet(source, sheet_name=sheet_name)
+    companion_after = _companion_identity(source)
     after_read = source_stat_signature(source)
-    if after_read != before_read:
+    if after_read != before_read or companion_after != companion_before:
         raise SNRPublicationError(
             f"Source workbook changed while SNR data were being read: "
             f"{source.name}. Restart generation after workbook writes have finished."
@@ -142,7 +175,9 @@ def capture_stable_source_snapshot(
             sha256=digest.hexdigest(),
             size_bytes=after_read[2],
             stat_signature=after_read,
+            spectral_companion=companion_after,
         ),
+        spectral_sheets=spectral_sheets,
     )
 
 
@@ -189,6 +224,7 @@ def verify_source_snapshot_after_read(
         not matches
         or offset != len(content)
         or source_stat_signature(source) != expected_signature
+        or _companion_identity(source) != snapshot.identity.spectral_companion
     ):
         raise SNRPublicationError(
             f"Source workbook changed while SNR data were being read: "
@@ -263,6 +299,7 @@ def verify_source_identity_after_read(
     if (
         after_read.sha256 != before_read.sha256
         or after_read.stat_signature != before_read.stat_signature
+        or after_read.spectral_companion != before_read.spectral_companion
     ):
         raise SNRPublicationError(
             f"Source workbook changed while SNR data were being read: "

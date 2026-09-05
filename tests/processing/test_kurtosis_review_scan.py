@@ -3,7 +3,10 @@ from __future__ import annotations
 from copy import deepcopy
 import hashlib
 import json
+from threading import Barrier, Event, get_ident
 from types import SimpleNamespace
+
+import pytest
 
 from Main_App.io.eeg_geometry import BIOSEMI64_CHANNELS, BIOSEMI64_MONTAGE_ID
 from Main_App.processing import kurtosis_review_scan as scan_module
@@ -210,12 +213,13 @@ def _configure_active_scan(
         _restrict,
     )
 
-    def _prepare(raw, params, log_func, filename, *, direct_bad_channels):  # noqa: ANN001
+    def _prepare(raw, params, log_func, filename, *, direct_bad_channels, copy_raw):  # noqa: ANN001
         captured["prepare"] = {
             "raw": raw,
             "params": params,
             "filename": filename,
             "direct_bad_channels": tuple(direct_bad_channels),
+            "copy_raw": copy_raw,
         }
         log_func("prepared")
         return prepared or _prepared()
@@ -281,7 +285,12 @@ def test_scan_validates_raw_and_limits_evidence_to_current_conditions(
     assert all(not state.eligible for state in item.corroborator_states)
     assert item.signal_preview == (-2.0, 0.5, None, 3.0)
     assert captured["excluded_conditions"] == ("Faces",)
+    assert captured["exclusion_scope"] == {
+        "participant_id": "P01",
+        "recording_id": "P01__visit-1",
+    }
     assert captured["prepare"]["direct_bad_channels"] == ("Fp2",)
+    assert captured["prepare"]["copy_raw"] is False
     assert captured["prepare"]["params"]["_fpvs_source_analysis_span_plan"] == {
         "spans": [{"condition_label": "Objects", "occurrence_key": "2:1"}]
     }
@@ -298,6 +307,217 @@ def test_scan_validates_raw_and_limits_evidence_to_current_conditions(
         1,
         1,
     )
+
+
+@pytest.mark.parametrize("copy_raw", [True, False])
+@pytest.mark.parametrize("fails", [True, False])
+def test_review_preparation_preserves_default_copy_and_owned_input_lifetime(
+    monkeypatch,
+    copy_raw,
+    fails,
+) -> None:
+    from Main_App.processing import preprocess as preprocess_module
+
+    class Raw:
+        def __init__(self):
+            self.ch_names = ["Fp1"]
+            self.info = {"bads": []}
+            self.copies = []
+            self.loaded = False
+            self.closed = False
+
+        def copy(self):
+            child = Raw()
+            self.copies.append(child)
+            return child
+
+        def load_data(self):
+            self.loaded = True
+
+        def close(self):
+            self.closed = True
+
+    def prepare(raw, params, *_args):
+        assert raw.loaded
+        assert raw.info["bads"] == ["Fp1"]
+        if fails:
+            raise RuntimeError("synthetic preparation error")
+        params["_fpvs_kurtosis_qc_evidence"] = {"unchanged": True}
+        params["_fpvs_kurtosis_decision_plan"] = {"ready_for_interpolation": True}
+        return raw, 0
+
+    monkeypatch.setattr(preprocess_module, "perform_preprocessing", prepare)
+    source = Raw()
+    kwargs = {} if copy_raw else {"copy_raw": False}
+    if fails:
+        with pytest.raises(RuntimeError, match="synthetic preparation error"):
+            preprocess_module.prepare_kurtosis_review_evidence(
+                source,
+                {},
+                lambda _message: None,
+                direct_bad_channels=["Fp1"],
+                **kwargs,
+            )
+    else:
+        result = preprocess_module.prepare_kurtosis_review_evidence(
+            source,
+            {},
+            lambda _message: None,
+            direct_bad_channels=["Fp1"],
+            **kwargs,
+        )
+        assert result["evidence"] == {"unchanged": True}
+    assert source.closed is False
+    if copy_raw:
+        assert source.info["bads"] == []
+        assert len(source.copies) == 1
+        assert source.copies[0].closed is True
+    else:
+        assert source.info["bads"] == ["Fp1"]
+        assert source.copies == []
+
+
+def _ample_scan_resources(monkeypatch):
+    monkeypatch.setattr(scan_module.os, "cpu_count", lambda: 8)
+    monkeypatch.setattr(
+        scan_module.psutil,
+        "virtual_memory",
+        lambda: SimpleNamespace(total=128 * 1024**3, available=64 * 1024**3),
+    )
+
+
+def test_parallel_scan_preserves_exact_evidence_order_and_callback_thread(tmp_path, monkeypatch):
+    _ample_scan_resources(monkeypatch)
+    paths = [(tmp_path / f"P0{index}.bdf").resolve() for index in (1, 2)]
+    for path in paths:
+        path.touch()
+    infos = [_info(path, path.stem) for path in paths]
+    loaded = []
+    _configure_active_scan(monkeypatch, loaded_raws=loaded)
+    kwargs = {
+        "event_map": {"Faces": 1, "Objects": 2},
+        "reviewed_event_plans_by_file": {str(path): {"reviewed": True} for path in paths},
+    }
+    sequential = scan_kurtosis_review(infos, _settings(), max_workers=1, **kwargs)
+    original_prepare = scan_module.prepare_kurtosis_review_evidence
+    both_preparing = Barrier(2)
+    worker_threads = set()
+
+    def prepare(*args, **prepare_kwargs):
+        worker_threads.add(get_ident())
+        both_preparing.wait(timeout=5)
+        return original_prepare(*args, **prepare_kwargs)
+
+    monkeypatch.setattr(scan_module, "prepare_kurtosis_review_evidence", prepare)
+    calling_thread = get_ident()
+    updates = []
+
+    def progress(message, completed, total):
+        assert get_ident() == calling_thread
+        updates.append((message, completed, total))
+
+    parallel = scan_kurtosis_review(infos, _settings(), max_workers=2, progress=progress, **kwargs)
+    assert parallel == sequential
+    assert len(worker_threads) == 2
+    assert calling_thread not in worker_threads
+    assert all(raw.closed for raw in loaded)
+    assert [completed for _, completed, _ in updates] == sorted(completed for _, completed, _ in updates)
+    assert updates[-1][1:] == (2, 2)
+
+
+def test_parallel_cancel_closes_inflight_raw_without_starting_more_files(tmp_path, monkeypatch):
+    _ample_scan_resources(monkeypatch)
+    paths = [(tmp_path / f"P0{index}.bdf").resolve() for index in (1, 2, 3)]
+    for path in paths:
+        path.touch()
+    loaded = []
+    _configure_active_scan(monkeypatch, loaded_raws=loaded)
+    original_prepare = scan_module.prepare_kurtosis_review_evidence
+    both_preparing = Barrier(2)
+    can_cancel = Event()
+    release = Event()
+    calling_thread = get_ident()
+
+    def prepare(*args, **kwargs):
+        both_preparing.wait(timeout=5)
+        can_cancel.set()
+        assert release.wait(timeout=5)
+        return original_prepare(*args, **kwargs)
+
+    def cancel():
+        assert get_ident() == calling_thread
+        if can_cancel.is_set():
+            release.set()
+            return True
+        return False
+
+    monkeypatch.setattr(scan_module, "prepare_kurtosis_review_evidence", prepare)
+    scan = scan_kurtosis_review(
+        [_info(path, path.stem) for path in paths],
+        _settings(),
+        event_map={"Faces": 1, "Objects": 2},
+        reviewed_event_plans_by_file={str(path): {"reviewed": True} for path in paths},
+        should_cancel=cancel,
+        max_workers=2,
+    )
+    assert scan.cancelled is True
+    assert len(loaded) == 2
+    assert all(raw.closed for raw in loaded)
+    assert all(result.path != paths[2] for result in scan.results)
+
+
+def test_parallel_scan_respects_memory_cpu_and_memmap_collision_limits(tmp_path, monkeypatch):
+    _ample_scan_resources(monkeypatch)
+    paths = [(tmp_path / name).resolve() for name in ("P01.bdf", "P02.bdf")]
+    for path in paths:
+        path.touch()
+    infos = [_info(path, path.stem) for path in paths]
+    assert scan_module._review_worker_count(infos, None) == 2
+    assert scan_module._review_worker_count(infos, 10) == 2
+    assert scan_module._review_worker_count(infos, 1) == 1
+    collision = [_info(paths[0], "P01"), _info(tmp_path / "other" / "p01.bdf", "P02")]
+    assert scan_module._review_worker_count(collision, 2) == 1
+    monkeypatch.setattr(scan_module.os, "cpu_count", lambda: 1)
+    assert scan_module._review_worker_count(infos, 2) == 1
+    monkeypatch.setattr(scan_module.os, "cpu_count", lambda: 8)
+    monkeypatch.setattr(
+        scan_module.psutil,
+        "virtual_memory",
+        lambda: SimpleNamespace(total=128 * 1024**3, available=3 * 1024**3),
+    )
+    assert scan_module._review_worker_count(infos, 2) == 1
+
+
+@pytest.mark.parametrize("excluded", [False, True])
+def test_auto_detector_uses_current_spans_and_direct_authority(tmp_path, monkeypatch, excluded):
+    path = (tmp_path / "P01.bdf").resolve()
+    path.touch()
+    loaded = []
+    captured = _configure_active_scan(monkeypatch, loaded_raws=loaded)
+    monkeypatch.setattr(scan_module, "relative_spans_from_plan", lambda _plan: ((10, 500),))
+
+    def current_raw_qc(raw, settings, *, filename, analysis_spans):
+        assert raw is loaded[0]
+        assert settings["_fpvs_manual_removed_electrodes"] == ["Fp2"]
+        assert filename == path.name
+        assert analysis_spans == ((10, 500),)
+        return SimpleNamespace(excluded=excluded, channels_to_interpolate=("Fp2", "AF7"))
+
+    monkeypatch.setattr(scan_module, "evaluate_raw_channel_qc", current_raw_qc)
+    scan = scan_kurtosis_review(
+        [_info(path, "P01")],
+        _settings(removed_electrode_detection_mode="auto"),
+        event_map={"Faces": 1, "Objects": 2},
+        reviewed_event_plans_by_file={str(path): {"reviewed": True}},
+        raw_channel_qc_by_recording={"P01": {"low_variance_channels": ["O2"]}},
+    )
+    assert not scan.errors
+    assert loaded[0].closed
+    if excluded:
+        assert scan.results[0].skip_reason == scan_module.KURTOSIS_REVIEW_SKIP_RAW_QC_EXCLUDED
+        assert "prepare" not in captured
+    else:
+        assert captured["prepare"]["direct_bad_channels"] == ("Fp2", "AF7")
 
 
 def test_scan_skips_fully_excluded_recordings_and_condition_sets(

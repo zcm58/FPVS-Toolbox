@@ -134,6 +134,11 @@ Rules:
 - Workers must not touch widgets directly.
 - Communicate progress, errors, and completion through signals.
 - Keep user-facing errors non-blocking where possible.
+- Individual preprocessing file failures emit `file_status`, remain in the
+  bridge's final `errors` payload, and leave the batch active. The GUI passes
+  them to the processing ledger and QC report, then shows one deduplicated
+  completion summary. `MpRunnerBridge.error` is reserved for bridge-level
+  faults; ordinary file failures must not finalize or unlock an active run.
 - Log diagnostics with structured logging.
 - Main App preprocessing cancellation is a hard-stop request: `MpRunnerBridge.cancel()`
   sets the shared cancel event, `run_project_parallel()` terminates active

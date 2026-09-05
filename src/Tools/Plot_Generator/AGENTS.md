@@ -26,9 +26,9 @@ Current ownership map:
 - `worker_config.py`: `_Worker` constructor payload dataclass.
 - `excel_inputs.py`: thin shared participant-identity adapter plus
   frequency-column helpers.
-- `full_snr_reader.py`: direct `.xlsx` XML reader and shared workbook session
-  for the FullSNR/FullFFT fast paths, including selected-frequency parsing,
-  selected-ROI electrode filtering, and load subtimings.
+- `full_snr_reader.py`: companion-aware shared workbook session, with the
+  direct `.xlsx` XML reader retained for legacy FullSNR/FullFFT inputs,
+  selected-frequency parsing, ROI electrode filtering, and load subtimings.
 - `data_collection.py`: shared dataset-index consumption, source-data
   collection, and required-sheet failure handling.
 - `aggregation.py`: selected ROI resolution, ROI averaging, group curves, and
@@ -39,7 +39,9 @@ Current ownership map:
 - `source_data.py` and `output_interface.py`: in-memory contributor/sample-size
   bookkeeping plus managed analysis-context checks for direct figure output.
 - `source_identity.py`: immutable read-time source-workbook snapshots,
-  fingerprints, and verification of the exact contributing bytes.
+  companion array snapshots, fingerprints, and verification of the exact
+  contributing artifacts. A declared companion must remain valid throughout
+  capture and publication; an Excel spectral notice is never a fallback.
 - `spectral_qc.py`: post-processing, report-only electrode-level spectral
   artifact flagging and FullFFT evidence assembly for SNR plots.
 - `spectral_qc_workflow.py`: worker-side spectral-QC orchestration and audit
@@ -102,6 +104,10 @@ v2.1 project contract:
   absent from the active workbook cohort.
 - Treat every non-finite FullSNR value (`NaN`, `+inf`, or `-inf`) as missing for
   electrode, participant, and group means.
+- Read already-calculated FullSNR from the declared NumPy companion when
+  present. Never recreate it from FullFFT. Both spectral sheets in a plot run
+  must use the captured input snapshot, and source checks must validate the
+  workbook's same-directory companion declaration as well as workbook bytes.
 - Group-overlay PNG/PDF pairs append `_group_overlay` to the normal
   `<title or condition> - <ROI>` stem so they cannot overwrite the corresponding
   non-group figure. Preserve normal single-condition filenames.

@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from time import perf_counter
 import traceback
 from typing import Callable, Optional, Tuple, Dict, Any, List, Sequence
 
@@ -51,6 +52,7 @@ from Main_App.processing.analysis_spans import (
     AnalysisSpanPlanError,
     realize_target_analysis_span_plan,
     relative_spans_from_plan,
+    validate_target_analysis_span_markers,
 )
 from Main_App.processing.kurtosis_qc import (
     build_kurtosis_decision_plan,
@@ -139,6 +141,25 @@ def _realize_analysis_spans_for_raw(
         target_n_times=int(raw.n_times),
         target_first_samp=int(raw.first_samp),
     )
+    source_sfreq = float(source_plan["source_grid"]["sfreq_hz"])
+    if source_sfreq != float(raw.info["sfreq"]):
+        # MNE restarts its stim sampling windows for each concatenated segment.
+        # The file-level BDF pipeline supplies one segment; never approximate a
+        # different acquisition layout with the single-recording mapping.
+        if len(raw._first_samps) != 1:
+            raise AnalysisSpanPlanError(
+                "Exact v3 trigger alignment requires a single recording segment."
+            )
+        stim_channel = str(params.get("stim_channel") or config.DEFAULT_STIM_CHANNEL)
+        if stim_channel not in raw.ch_names:
+            raise AnalysisSpanPlanError(
+                "Exact v3 trigger alignment after downsampling requires the "
+                "recorded stimulus channel; annotation-only timing is unsupported."
+            )
+        events = mne.find_events(
+            raw, stim_channel=stim_channel, shortest_event=1, verbose=False
+        )
+        validate_target_analysis_span_markers(realized, events)
     params["_fpvs_realized_analysis_span_plan"] = realized
     params["_fpvs_analysis_scoring_sample_count"] = int(
         realized["unique_sample_count"]
@@ -544,10 +565,16 @@ def prepare_kurtosis_review_evidence(
     filename_for_log: str = "UnknownFile",
     *,
     direct_bad_channels: Sequence[str] = (),
+    copy_raw: bool = True,
 ) -> dict[str, object]:
-    """Run the shared preprocessing stages to the QC-16 review boundary."""
+    """Run the shared preprocessing stages to the QC-16 review boundary.
 
-    working = raw_input.copy()
+    By default the input is preserved. An exclusive owner may pass
+    ``copy_raw=False`` to avoid duplicating the full recording; that caller
+    remains responsible for closing its modified Raw object.
+    """
+
+    working = raw_input.copy() if copy_raw else raw_input
     scan_params = dict(params)
     scan_params["_fpvs_stop_before_kurtosis_interpolation"] = True
     direct = [
@@ -582,10 +609,11 @@ def prepare_kurtosis_review_evidence(
             "signal_preview": dict(preview) if isinstance(preview, dict) else {},
         }
     finally:
-        try:
-            working.close()
-        except (AttributeError, OSError, RuntimeError, ValueError):
-            pass
+        if copy_raw:
+            try:
+                working.close()
+            except (AttributeError, OSError, RuntimeError, ValueError):
+                pass
 
 
 def perform_preprocessing(
@@ -627,6 +655,7 @@ def perform_preprocessing(
     raw = raw_input
 
     # Ensure per-run audit keys do not leak across files when params is reused
+    params.pop("_fpvs_preprocessing_error", None)
     params.pop("_fpvs_initial_ref_ok", None)
     params.pop("_fpvs_initial_ref_pair", None)
     params.pop("_fpvs_fft_multinotch_requested_centers_hz", None)
@@ -1253,12 +1282,14 @@ def perform_preprocessing(
                     "approved analyzed intervals were unavailable."
                 )
             elif len(eeg_picks) >= 1:
+                scoring_started = perf_counter()
                 data = _kurtosis_scoring_data(
                     raw,
                     picks=eeg_picks,
                     params=params,
                 )
                 ch_names_pick = [raw.info["ch_names"][i] for i in eeg_picks]
+                calculation_started = perf_counter()
                 evidence = evaluate_kurtosis_qc(
                     data,
                     ch_names_pick,
@@ -1271,6 +1302,15 @@ def perform_preprocessing(
                         source_sfreq_hz=orig_sfreq,
                     ),
                     geometry_identity=geometry_identity,
+                )
+                logger.info(
+                    "kurtosis_scoring_timing file=%s data_ms=%.3f calculate_ms=%.3f "
+                    "channels=%d samples=%d",
+                    filename_for_log,
+                    (calculation_started - scoring_started) * 1_000.0,
+                    (perf_counter() - calculation_started) * 1_000.0,
+                    data.shape[0],
+                    data.shape[1],
                 )
                 direct_bad_channels = {
                     str(channel): "confirmed_upstream_bad_channel"
@@ -1474,6 +1514,7 @@ def perform_preprocessing(
         return raw, num_kurtosis_bads_identified
 
     except Exception as e:
+        params["_fpvs_preprocessing_error"] = str(e)
         log_func(
             f"!!! CRITICAL Preprocessing error for {filename_for_log}: {e}"
         )

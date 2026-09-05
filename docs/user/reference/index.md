@@ -4,6 +4,9 @@ FPVS Toolbox implements an opinionated processing workflow for frequency-tagged
 EEG. This page identifies the current method contract and provides stable links
 to the publications cited by the application and tool guides.
 
+For the lossless NumPy companions created alongside condition workbooks, see
+[Spectral Data Files](spectral-data-files.md).
+
 ## Processing Contract
 
 For raw EEG preprocessing, the active order is:

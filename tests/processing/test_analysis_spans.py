@@ -17,6 +17,7 @@ from Main_App.processing.analysis_spans import (
     validate_realized_target_analysis_span_plan,
     validate_source_analysis_span_context,
     validate_source_analysis_span_plan,
+    validate_target_analysis_span_markers,
 )
 from Main_App.processing.preflight_qc_plan import plan_preflight_qc_events
 from Main_App.processing.preprocess import _kurtosis_scoring_data
@@ -117,7 +118,7 @@ def test_source_plan_records_absolute_relative_and_nonzero_origin() -> None:
     assert relative_spans_from_plan(source_plan) == ((10, 34),)
 
 
-def test_target_realization_uses_actual_grid_and_half_up_rounding() -> None:
+def test_target_realization_uses_v3_stim_grid_and_exact_duration() -> None:
     source_plan = read_source_analysis_span_plan(_event_plan())
     target_plan = realize_target_analysis_span_plan(
         source_plan,
@@ -316,7 +317,7 @@ def test_kurtosis_input_uses_only_realized_target_samples() -> None:
     )
 
 
-def test_actual_raw_resample_realizes_nonzero_origin_half_sample_boundaries() -> None:
+def test_actual_raw_resample_keeps_v3_window_at_nonzero_origin() -> None:
     protocol = FrequencyProtocol.from_recurrence(
         4,
         2,
@@ -369,15 +370,152 @@ def test_actual_raw_resample_realizes_nonzero_origin_half_sample_boundaries() ->
     assert raw.n_times == 6
     assert target_plan["spans"][0]["target_coordinates"] == {
         "first_samp": 50,
-        "start_sample": 51,
-        "stop_sample": 53,
-        "start_relative_sample": 1,
-        "stop_relative_sample": 3,
+        "start_sample": 50,
+        "stop_sample": 52,
+        "start_relative_sample": 0,
+        "stop_relative_sample": 2,
     }
-    assert relative_spans_from_plan(target_plan) == ((1, 3),)
+    assert relative_spans_from_plan(target_plan) == ((0, 2),)
     target_coordinates = target_plan["spans"][0]["target_coordinates"]
     assert (
         target_coordinates["stop_relative_sample"]
         - target_coordinates["start_relative_sample"]
         == protocol.expected_analyzed_samples(2)
     )
+
+
+@pytest.mark.parametrize(
+    "source_rate,target_rate", [(2048, 256), (2048, 512), (2048, 250), (1000, 256)]
+)
+@pytest.mark.parametrize("phase,width", [(0, 1), (1, 9), (4, 1), (7, 9)])
+@pytest.mark.parametrize("first_samp", [0, 101])
+@pytest.mark.parametrize("cycles", [3, 144])
+def test_target_start_matches_actual_v3_resampled_stim_events(
+    source_rate: int,
+    target_rate: int,
+    phase: int,
+    width: int,
+    first_samp: int,
+    cycles: int,
+) -> None:
+    protocol = FrequencyProtocol.from_recurrence(
+        6,
+        5,
+        expected_analyzed_oddball_cycles=cycles,
+        expected_analyzed_oddball_cycles_source=EXPECTED_CYCLES_SOURCE_MANUAL,
+    )
+    n_samples = protocol.expected_analyzed_samples(source_rate) + source_rate * 3 + 7
+    stim = np.zeros(n_samples)
+    stim[source_rate // 2] = 1
+    source_start = source_rate + phase
+    marker_samples = np.round(
+        source_start + np.arange(cycles + 1) * source_rate / 1.2
+    ).astype(int)
+    for sample in marker_samples:
+        stim[sample : sample + width] = 55
+    raw = mne.io.RawArray(
+        stim[None, :],
+        mne.create_info(["Status"], source_rate, ["stim"]),
+        first_samp=first_samp,
+        verbose=False,
+    )
+    source_events = mne.find_events(
+        raw, stim_channel="Status", shortest_event=1, verbose=False
+    )
+    source_plan = read_source_analysis_span_plan(
+        plan_preflight_qc_events(
+            events=source_events,
+            event_map={"Faces": 1},
+            sfreq=source_rate,
+            n_times=n_samples,
+            first_samp=first_samp,
+            frequency_protocol=protocol,
+        ).to_payload()
+    )
+    raw.resample(target_rate, npad="auto", window="hann", verbose=False)
+    target_events = mne.find_events(
+        raw, stim_channel="Status", shortest_event=1, verbose=False
+    )
+    target_plan = realize_target_analysis_span_plan(
+        source_plan,
+        target_sfreq_hz=raw.info["sfreq"],
+        target_n_times=raw.n_times,
+        target_first_samp=raw.first_samp,
+    )
+    coordinates = target_plan["spans"][0]["target_coordinates"]
+    # This is the exact v3 anchor: the first actual oddball after resampling.
+    legacy_start = int(target_events[target_events[:, 2] == 55][0, 0])
+    assert coordinates["start_sample"] == legacy_start
+    assert coordinates["start_relative_sample"] == legacy_start - raw.first_samp
+    assert (
+        coordinates["stop_relative_sample"] - coordinates["start_relative_sample"]
+        == protocol.expected_analyzed_samples(target_rate)
+    )
+    validate_target_analysis_span_markers(target_plan, target_events)
+
+
+def test_target_marker_validation_rejects_lost_onset_without_snapping() -> None:
+    protocol = FrequencyProtocol.from_recurrence(
+        2,
+        2,
+        expected_analyzed_oddball_cycles=1,
+        expected_analyzed_oddball_cycles_source=EXPECTED_CYCLES_SOURCE_MANUAL,
+    )
+    stim = np.zeros(128)
+    stim[16] = 1
+    stim[33] = 3  # An earlier nonzero pulse wins MNE's [32, 40) window.
+    stim[[39, 71]] = 55
+    raw = mne.io.RawArray(
+        stim[None, :], mne.create_info(["Status"], 32, ["stim"]), verbose=False
+    )
+    source_events = mne.find_events(
+        raw, stim_channel="Status", shortest_event=1, verbose=False
+    )
+    source_plan = read_source_analysis_span_plan(
+        plan_preflight_qc_events(
+            events=source_events,
+            event_map={"Faces": 1},
+            sfreq=32,
+            n_times=128,
+            frequency_protocol=protocol,
+        ).to_payload()
+    )
+    with pytest.warns(RuntimeWarning, match="Resampling of the stim channels"):
+        raw.resample(4, verbose=False)
+    target_plan = realize_target_analysis_span_plan(
+        source_plan,
+        target_sfreq_hz=4,
+        target_n_times=raw.n_times,
+        target_first_samp=raw.first_samp,
+    )
+    target_events = mne.find_events(
+        raw, stim_channel="Status", shortest_event=1, verbose=False
+    )
+    before = copy.deepcopy(target_plan)
+    with pytest.raises(AnalysisSpanPlanError, match="lost or merged"):
+        validate_target_analysis_span_markers(target_plan, target_events)
+    assert target_plan == before
+
+
+def test_target_marker_validation_requires_exact_project_code_and_sample() -> None:
+    source_plan = read_source_analysis_span_plan(_event_plan())
+    target_plan = realize_target_analysis_span_plan(
+        source_plan, target_sfreq_hz=6, target_n_times=30, target_first_samp=50
+    )
+    assert target_plan["spans"][0]["oddball_marker_code"] == 55
+    validate_target_analysis_span_markers(target_plan, np.asarray([[55, 0, 55]]))
+    for events in (np.asarray([[55, 0, 54]]), np.asarray([[56, 0, 55]])):
+        with pytest.raises(AnalysisSpanPlanError, match="was not shifted"):
+            validate_target_analysis_span_markers(target_plan, events)
+
+
+def test_target_realization_rejects_fractional_duration_and_upsampling() -> None:
+    source_plan = read_source_analysis_span_plan(_event_plan())
+    with pytest.raises(AnalysisSpanPlanError, match="exact whole number"):
+        realize_target_analysis_span_plan(
+            source_plan, target_sfreq_hz=1.25, target_n_times=6, target_first_samp=0
+        )
+    with pytest.raises(AnalysisSpanPlanError, match="non-upsampled"):
+        realize_target_analysis_span_plan(
+            source_plan, target_sfreq_hz=24, target_n_times=120, target_first_samp=0
+        )

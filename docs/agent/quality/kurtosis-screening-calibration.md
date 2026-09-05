@@ -3,8 +3,11 @@
 Use this guide when evaluating the QC-16 kurtosis screen or proposing a method
 or authority change. The shipped method is an EEGLAB-inspired, versioned
 10-percent-trimmed normalized excess-kurtosis screen. It is not an exact
-EEGLAB port. Its current corroborator registry is empty, so a non-manual
-kurtosis finding always requires explicit GUI review.
+EEGLAB port. Its current corroborator registry is empty. The GUI additionally
+offers an experimental automatic rule for valid pending findings with absolute
+normalized score strictly greater than 10.0, with a distinct versioned receipt.
+This user-selected cutoff has not established detector accuracy; it changes
+decision authority, not the score calculation. Other findings require review.
 
 ## Required Dataset
 
@@ -53,7 +56,8 @@ different-scope, stale, invalid, and review-only findings cannot authorize an
 automatic repair.
 
 Until representative holdout evidence supports a change, keep the current
-empty registry and GUI review requirement. The tests in
+empty registry and retain manual review outside the optional experimental
+rule; evaluate that rule separately from individually reviewed decisions. The tests in
 `tests/processing/test_kurtosis_qc.py`,
 `tests/processing/test_preprocess_kurtosis_gate.py`, and
 `tests/processing/test_kurtosis_review_scan.py` validate software behavior;

@@ -354,6 +354,8 @@ def _format_timing_summary(result: dict) -> str | None:
 
 
 def _format_exclusion_reason(result: dict) -> str:
+    if result.get("status") == "error":
+        return f"[{result.get('stage') or 'unknown'}] {result.get('error') or 'Unknown error'}"
     reason = str(result.get("reason") or "excluded")
     if reason == BDF_RECORDING_NOT_STARTED_REASON:
         return "Recording was not started in BioSemi; the BDF is header-only/approximately 19 KB."
@@ -1646,11 +1648,13 @@ def _review_interpolation_burden_before_post_processing(host: Any) -> bool:
 
 def on_processing_finished(host: Any, payload: dict | None = None) -> None:
     results: list[dict] = []
+    error_results: list[dict] = []
     excluded_results: list[dict] = []
     cancelled = False
     interrupted_files: list[str] = []
     if isinstance(payload, dict):
         results = payload.get("results") or []
+        error_results = payload.get("errors") or []
         excluded_results = payload.get("excluded") or []
         cancelled = bool(payload.get("cancelled", False))
         interrupted_files = [str(file_path) for file_path in payload.get("interrupted_files") or []]
@@ -1671,6 +1675,13 @@ def on_processing_finished(host: Any, payload: dict | None = None) -> None:
 
     total_rejected = 0
     files_with_reject_info = 0
+
+    for result in error_results:
+        file_name = Path(str(result.get("file") or "unknown")).name
+        host.log(
+            f"Failed {file_name}: {_format_exclusion_reason(result)}",
+            level=logging.ERROR,
+        )
 
     for result in results:
         audit = result.get("audit") or {}
@@ -1741,7 +1752,7 @@ def on_processing_finished(host: Any, payload: dict | None = None) -> None:
             record_processing_results(
                 host.currentProject,
                 plan,
-                [*results, *excluded_results],
+                [*results, *error_results, *excluded_results],
                 run_mode=str(getattr(host, "_processing_run_mode", "Batch")),
                 user_choice=str(getattr(host, "_processing_user_choice", "incremental")),
                 cancelled=cancelled,
@@ -1786,7 +1797,7 @@ def on_processing_finished(host: Any, payload: dict | None = None) -> None:
                 qc_summary_path = export_processing_qc_summary(
                     host.currentProject,
                     plan,
-                    [*results, *excluded_results],
+                    [*results, *error_results, *excluded_results],
                 )
                 host.log(
                     f"Preprocessing QC Report saved: {qc_summary_path}",
@@ -1800,12 +1811,23 @@ def on_processing_finished(host: Any, payload: dict | None = None) -> None:
                 )
 
     def _finish_processing_run() -> None:
-        _show_exclusion_summary_popup(host, [*excluded_results, *failed_run_results])
+        # Prefer the original worker error over the ledger's derived failure for
+        # the same file, while retaining ledger-only incomplete-output findings.
+        summary_by_file = {
+            str(Path(str(result.get("file") or "unknown")).resolve()): result
+            for result in [*failed_run_results, *excluded_results, *error_results]
+        }
+        summary_results = list(summary_by_file.values())
+        _show_exclusion_summary_popup(host, summary_results)
         _show_condition_warning_popup(host, condition_warning_results)
 
         host._busy_stop()
         success = not cancelled
-        host._finalize_processing(success, cancelled=cancelled)
+        host._processing_summary_reported = bool(summary_results)
+        try:
+            host._finalize_processing(success, cancelled=cancelled)
+        finally:
+            host._processing_summary_reported = False
         if cancelled:
             host.log("Processing run cancelled by user.", level=logging.INFO)
             if interrupted_files:

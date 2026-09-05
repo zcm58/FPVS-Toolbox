@@ -58,6 +58,7 @@ class MpRunnerBridge(QObject):
         self._total: int = 0
         self._running: bool = False
         self._results: List[Dict[str, object]] = []
+        self._error_results: List[Dict[str, object]] = []
         self._excluded_results: List[Dict[str, object]] = []
         self._cancel_event: Optional[Event] = None
         self._worker_thread: Optional[Thread] = None
@@ -94,8 +95,9 @@ class MpRunnerBridge(QObject):
             )
             self._total = 0
             self._results = []
+            self._error_results = []
             self._excluded_results = []
-            self.finished.emit({"files": 0, "results": [], "excluded": [], "cancelled": False})
+            self.finished.emit({"files": 0, "results": [], "errors": [], "excluded": [], "cancelled": False})
             return
 
         self._running = True
@@ -103,6 +105,7 @@ class MpRunnerBridge(QObject):
         self._q = get_context("spawn").Queue()
         self._total = len(data_files)
         self._results = []
+        self._error_results = []
         self._excluded_results = []
 
         bridge_fingerprint = _build_preproc_fingerprint(settings)
@@ -219,6 +222,7 @@ class MpRunnerBridge(QObject):
                     if isinstance(result, dict):
                         status = result.get("status")
                         if status == "error":
+                            self._error_results.append(result)
                             self.file_status.emit(result)
                             raw_error = str(result.get("error") or "Unknown error")
                             stage = str(result.get("stage") or "unknown")
@@ -235,8 +239,9 @@ class MpRunnerBridge(QObject):
                                 raw_error,
                             )
 
-                            message = f"{file_name} [{stage}]: {raw_error}"
-                            self.error.emit(message)
+                            # A file failure is a batch result, not a fatal bridge
+                            # error. Keep the run active and report failures once
+                            # at completion instead of opening one dialog per file.
                         elif status == "ok":
                             self._results.append(result)
                             self.file_status.emit(result)
@@ -276,6 +281,7 @@ class MpRunnerBridge(QObject):
                     payload: Dict[str, object] = {
                         "files": self._total,
                         "results": list(self._results),
+                        "errors": list(self._error_results),
                         "excluded": list(self._excluded_results),
                         "cancelled": cancelled,
                     }

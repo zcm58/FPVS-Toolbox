@@ -45,6 +45,19 @@ from Main_App.io.xlsx_selected_reader import (
     read_xlsx_sheet_selected_columns,
     xlsx_read_cache_scope,
 )
+from Main_App.io.spectral_data import (
+    SPECTRAL_COMPANION_VERSION,
+    SPECTRAL_MANIFEST_SHEET,
+    SPECTRAL_SHEET_NAMES,
+    SpectralDataError,
+    read_spectral_sheet,
+    read_spectral_sheet_header,
+    read_spectral_sheet_selected_columns,
+    spectral_companion_identity,
+    spectral_manifest_frame,
+    validate_spectral_companion,
+    write_spectral_companion,
+)
 
 __all__ = [
     "BDF_RECORDING_NOT_STARTED_REASON",
@@ -86,4 +99,15 @@ __all__ = [
     "read_xlsx_sheet_header",
     "read_xlsx_sheet_selected_columns",
     "xlsx_read_cache_scope",
+    "SPECTRAL_COMPANION_VERSION",
+    "SPECTRAL_MANIFEST_SHEET",
+    "SPECTRAL_SHEET_NAMES",
+    "SpectralDataError",
+    "read_spectral_sheet",
+    "read_spectral_sheet_header",
+    "read_spectral_sheet_selected_columns",
+    "spectral_companion_identity",
+    "spectral_manifest_frame",
+    "validate_spectral_companion",
+    "write_spectral_companion",
 ]

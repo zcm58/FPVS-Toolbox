@@ -145,8 +145,8 @@ result includes `timings_ms` and `preproc_cache_status` so users can compare
 first-run and cache-hit runtimes.
 
 The preprocessed Raw cache version is
-`preprocessed-raw-v11-analyzed-intervals`, and the project processing ledger
-uses `processing_fingerprint_v11_biosemi64_frequency_protocol`. The processing
+`preprocessed-raw-v13-v3-trigger-alignment`, and the project processing ledger
+uses `processing_fingerprint_v13_v3_trigger_alignment`. The processing
 fingerprint stores the project frequency protocol's canonical payload and
 fingerprint, so equivalent protocol objects and manifests have one identity
 while a rate, analyzed-cycle count, recurrence, or marker-code change
@@ -266,10 +266,20 @@ approved-span, and source-span fingerprints. Normal processing validates this
 exact plan against the source event stream before any signal-based raw QC.
 
 Processing-time raw-channel metrics use the unique union of approved source
-spans. After the continuous filter/downsample stages, each source boundary is
-mapped to the actual target Raw grid by nearest-sample rounding with half-sample
-ties upward. The versioned target plan supplies the unique samples for the
-existing kurtosis statistic and the exact relative slices for epoch creation.
+spans. After the continuous filter/downsample stages, the approved starting
+marker maps to the same stimulus sampling window used by MNE in the v3 release.
+This uses the realized source/target recording lengths, not nearest-sample
+rounding or a nominal-rate floor. The stop is the aligned start plus the exact
+project duration in target samples; no padding or duration rounding is allowed.
+Before kurtosis, each downsampled start must match an actual event with the
+approved oddball code. The runner repeats this check for cached data. A missing
+or colliding boundary marker stops processing rather than moving the crop.
+This mapping supports the single-segment recorded-stimulus BDF route;
+downsampled annotation-only or concatenated-segment inputs fail explicitly.
+The versioned target plan supplies the unique samples for the existing kurtosis
+statistic and the exact relative slices for epoch creation. Source trigger
+coordinates remain unchanged. Matching v3 does not eliminate the inherent
+output-grid timing quantization from its continuous downsampling method.
 MNE may independently round the absolute `first_samp` when it resamples a Raw;
 the target plan therefore records that observed target origin and maps interval
 times relative to the Raw start. It does not rescale source absolute indices.
@@ -728,14 +738,33 @@ Kurtosis review and interpolation:
   it is never converted to a zero score.
 - `abs(signed_normalized_score) > reject_thresh` creates evidence. Confirmed
   manual/physical bad channels retain direct authority. The initial eligible
-  corroborator registry is empty, so every otherwise non-manual kurtosis-only
-  finding requires an explicit Approve or Reject decision in the GUI.
+  corroborator registry is empty. The GUI offers an enabled-by-default,
+  experimental rule for pending valid findings with strict
+  `abs(signed_normalized_score) > 10.0`. Applying it creates a distinct
+  `gui_enabled_experimental_abs_z_gt_10_v1` receipt and
+  `experimental_automatic` channel decision, not an individual manual approval
+  or independent corroboration. Disabling it restores individual review.
+  Other findings require an explicit Interpolate or Keep channel decision.
 - The GUI displays recording/session, electrode, analyzed condition and
   occurrence scope, raw kurtosis, signed normalized score, threshold,
   corroborator status, review-only raw-channel context, and a compact trace.
-  It has no default choice, requires a reason, and states that approval repairs
+  A compact table and one selected-row evidence panel expose these details.
+  Manual choices have no default and require a reason; the dialog states that approval repairs
   the electrode throughout the processed recording. Cancel, close, missing or
   stale evidence, and non-GUI execution do not authorize interpolation.
+- Review scanning and the processing worker derive the same condition-selection
+  identity (`participant_id`, `recording_id` falling back to the participant).
+  Source file paths remain bound separately in review receipts. The scanner
+  also applies the same current raw-QC direct bad channels when the experimental
+  removed-electrode detector is enabled; cached display findings cannot grant
+  this authority. The two stages must agree on selection metadata and donor
+  exclusions for unchanged inputs; genuinely changed evidence still requires review.
+- The scan may run at most two independent recordings concurrently, guarded by
+  available CPU/RAM and distinct loader memmap names. Each job retains the
+  shared processing order and numerical implementation; owned Raw objects may
+  be reused without an extra copy. Results retain input order, progress callbacks
+  run on the calling worker, and cancellation waits for active stages to close
+  their Raw objects. Stage timings separate loading/preprocessing from scoring.
 - A decision receipt is valid only for its recording, channel, evidence
   fingerprint, processing settings, analyzed spans, and BioSemi64 geometry.
   Changed evidence requires review again. Only authorized channels are appended

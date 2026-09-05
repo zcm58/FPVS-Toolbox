@@ -122,10 +122,14 @@ def _written_receipt(
     plan: _Plan,
     *,
     retained: tuple[str, ...] = ("a" * 64,),
+    with_companion: bool = False,
 ) -> dict[str, object]:
+    frames = {"BCA (uV)": pd.DataFrame({"Electrode": ["Oz"], "0.3000_Hz": [1.0]})}
+    if with_companion:
+        frames["FullFFT Amplitude (uV)"] = pd.DataFrame({"Electrode": ["Oz"], "0.0000_Hz": [1.0]})
     workbook = write_results_workbook(
         str(path),
-        {"BCA (uV)": pd.DataFrame({"Electrode": ["Oz"], "0.3000_Hz": [1.0]})},
+        frames,
     )
     source_integrity = OutputIntegrityReceipt(
         stage="retained_signal",
@@ -244,6 +248,37 @@ def test_missing_receipt_blocks_pre_review(tmp_path):
         require_pre_review_readiness(outcomes)
 
 
+@pytest.mark.parametrize("occurrence_count", [0, 1])
+def test_missing_condition_input_explains_absence_without_releasing_it(
+    tmp_path, occurrence_count
+):
+    plan = _expected(
+        tmp_path / "Faces.xlsx",
+        occurrences=tuple(_Occurrence("a" * 64) for _ in range(occurrence_count)),
+    )
+    receipt = _fingerprinted_export_receipt({
+        "recording_id": "P01__visit_1",
+        "condition_label": "Faces",
+        "status": "blocked",
+        "failure_stage": "condition_input",
+        "reason": "No valid retained data object reached workbook export.",
+    })
+    outcomes = reconcile_recording_condition_outputs(plan, [receipt])
+
+    assert not outcomes.is_pre_review_ready
+    assert outcomes.cells[0].status == CELL_BLOCKED
+    with pytest.raises(RecordingConditionOutcomeError) as caught:
+        require_pre_review_readiness(outcomes)
+    message = str(caught.value)
+    assert "P01__visit_1/Faces" in message
+    assert "participant-condition exclusion" in message
+    assert "condition-start triggers" in message
+    if occurrence_count == 0:
+        assert "no condition occurrence was planned" in message
+    else:
+        assert receipt["reason"].rstrip(".") in message
+
+
 def test_changed_workbook_cannot_reuse_prior_write_receipt(tmp_path):
     path = tmp_path / "Faces.xlsx"
     plan = _expected(path)
@@ -254,6 +289,24 @@ def test_changed_workbook_cannot_reuse_prior_write_receipt(tmp_path):
 
     assert outcome.status == CELL_BLOCKED
     assert "workbook_artifact_not_current" in outcome.reason_codes
+
+
+@pytest.mark.parametrize("failure", ["missing", "corrupt"])
+def test_companion_failure_blocks_condition_with_unchanged_workbook(tmp_path, failure):
+    path = tmp_path / "Faces.xlsx"
+    plan = _expected(path)
+    receipt = _written_receipt(path, plan, with_companion=True)
+    assert reconcile_recording_condition_outputs(plan, [receipt]).is_pre_review_ready
+    original = path.read_bytes()
+    companion = path.with_name(receipt["workbook_write"]["spectral_companion"]["path"])
+    if failure == "missing":
+        companion.unlink()
+    else:
+        companion.write_bytes(b"corrupt")
+    outcome = reconcile_recording_condition_outputs(plan, [receipt]).cells[0]
+    assert path.read_bytes() == original
+    assert outcome.status == CELL_BLOCKED
+    assert "spectral_companion_not_current" in outcome.reason_codes
 
 
 def test_missing_retained_occurrence_cannot_make_partial_average_ready(tmp_path):

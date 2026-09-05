@@ -24,9 +24,8 @@ def _protocol() -> FrequencyProtocol:
     )
 
 
-def _epochs(*, invalid: float | None = None) -> mne.EpochsArray:
-    sampling_rate = 20.0
-    sample_count = 2_400
+def _epochs(*, invalid: float | None = None, sampling_rate: float = 20.0) -> mne.EpochsArray:
+    sample_count = int(120 * sampling_rate)
     info = mne.create_info(["Oz"], sampling_rate, ["eeg"])
     with info._unlock():
         info["highpass"] = 0.1
@@ -42,14 +41,14 @@ def _epochs(*, invalid: float | None = None) -> mne.EpochsArray:
             "n55": [36],
             "first55_samp": [0],
             "last55_samp": [sample_count - 1],
-            "N_step": [200],
+            "N_step": [int(sampling_rate * 10)],
             "fallback_reason": [""],
             "approved_span_fingerprint": ["a" * 64],
             "marker_plan_fingerprint": ["b" * 64],
             "source_start_sample": [100],
-            "source_stop_sample": [2_500],
+            "source_stop_sample": [100 + sample_count],
             "target_start_sample": [100],
-            "target_stop_sample": [2_500],
+            "target_stop_sample": [100 + sample_count],
             "marker_disposition": ["complete"],
         }
     )
@@ -105,6 +104,49 @@ def test_current_run_receipt_links_atomic_workbook_and_exact_span(tmp_path):
         "retained_eeg",
         "bca",
     }
+
+
+def test_512_hz_export_preserves_full_spectra_and_calculated_snr(tmp_path):
+    from openpyxl import load_workbook
+
+    from Main_App.io.spectral_data import read_spectral_sheet, spectral_companion_identity
+    from Tools.Stats.analysis.full_snr import compute_full_snr_from_amplitudes
+
+    epochs = _epochs(sampling_rate=512.0)
+    app = _app(tmp_path, epochs)
+    post_process(app, ["Faces"])
+    receipt = app.export_receipts[0]
+    assert receipt["status"] == "written", receipt
+    path = receipt["path"]
+    descriptor = spectral_companion_identity(path)
+    assert descriptor == receipt["workbook_write"]["spectral_companion"]
+
+    # Established production expression, including its Nyquist scaling.
+    averaged_uv = np.mean(epochs.get_data(copy=True).astype(np.float64), axis=0) * 1e6
+    samples = averaged_uv.shape[1]
+    frequencies = np.fft.rfftfreq(samples, d=1 / 512.0)
+    expected_fft = np.abs(np.fft.fft(averaged_uv, axis=1)[:, :samples // 2 + 1]) / samples * 2
+    full_fft = read_spectral_sheet(path, sheet_name="FullFFT Amplitude (uV)")
+    assert full_fft.shape == (1, 30_722)
+    assert full_fft["Electrode"].tolist() == ["Oz"]
+    assert full_fft.iloc[:, 1:].to_numpy().tobytes() == expected_fft.tobytes()
+    metadata = full_fft.attrs["spectral_metadata"]
+    np.testing.assert_array_equal(metadata["frequencies_hz"], frequencies)
+    assert metadata["fft_sample_count"] == 61_440
+    assert metadata["sampling_frequency_hz"] == 512.0
+
+    full_snr = read_spectral_sheet(path, sheet_name="FullSNR")
+    snr_grid = np.arange(0.5, 9.0 + 0.01, 0.01)
+    calculated_snr = compute_full_snr_from_amplitudes(expected_fft)
+    expected_snr = np.interp(snr_grid, frequencies, calculated_snr[0])
+    np.testing.assert_array_equal(full_snr.iloc[0, 1:].to_numpy(dtype=float), expected_snr)
+    workbook = load_workbook(path, read_only=True)
+    try:
+        assert workbook["FullFFT Amplitude (uV)"].max_column == 2
+        assert workbook["FullSNR"].max_column == 2
+        assert "Spectral Data" in workbook.sheetnames
+    finally:
+        workbook.close()
 
 
 @pytest.mark.parametrize("invalid", [np.nan, np.inf, -np.inf])

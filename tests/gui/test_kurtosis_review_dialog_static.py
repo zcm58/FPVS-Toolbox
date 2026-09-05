@@ -33,7 +33,7 @@ def test_kurtosis_review_dialog_uses_pyside6_and_shared_components() -> None:
 
 def test_dialog_has_no_default_decision_and_requires_a_reason() -> None:
     source = _source(DIALOG_PATH)
-    placeholder = source.index('decision.addItem("Choose Approve or Reject…", "")')
+    placeholder = source.index('decision.addItem("Choose…", "")')
     approve = source.index("KURTOSIS_DECISION_APPROVE", placeholder)
     reject = source.index("KURTOSIS_DECISION_REJECT", approve)
 
@@ -48,26 +48,21 @@ def test_dialog_has_no_default_decision_and_requires_a_reason() -> None:
 def test_dialog_exposes_required_scientific_evidence_and_fixed_scope() -> None:
     source = _source(DIALOG_PATH)
 
-    for label in (
-        "Participant",
-        "Recording / session",
-        "Electrode",
-        "Review status",
-        "Affected analyzed conditions / occurrences",
-        "Raw kurtosis",
-        "Signed normalized score",
-        "Threshold |z| >",
-        "Approved corroborator state",
-        "Other channel-health results",
-        "Compact signal evidence",
-        "Fixed repair scope",
-    ):
+    for label in ("Recording", "Electrode", "|Score|", "Raw kurtosis", "Conditions", "Decision", "Reason"):
         assert f'"{label}"' in source
+    assert "Signed normalized score:" in source
+    assert "review threshold |z| >" in source
+    assert "Analyzed occurrences:" in source
+    assert "Approved corroborator:" in source
     assert "whole processed recording" in source
-    assert "Every analyzed condition named here" in source
     assert '", ".join(item.analyzed_conditions)' in source
     assert '"Whole processed recording → {conditions}"' in source
     assert '"Changed evidence — review again"' in source
+    assert "QPlainTextEdit(self)" in source
+    assert "self.table.currentCellChanged.connect(self._show_selected_evidence)" in source
+    assert "setWordWrap(False)" in source
+    assert "ResizeToContents" not in source
+    assert "seen_scopes" not in source
     assert "display_only_channel_health_summary" in source
     assert "review-only; not an approved corroborator" in _source(SCANNER_PATH)
 
@@ -81,6 +76,8 @@ def test_compact_signal_view_is_bounded_and_presentation_only() -> None:
     assert "QPolygonF" in source
     assert "drawPolyline" in source
     assert "setMaximumHeight(62)" in source
+    assert source.count("= KurtosisSignalPreviewWidget(") == 1
+    assert "self.preview.set_signal(" in source
     assert "prepare_kurtosis_review_evidence" not in source
     assert "load_eeg_file" not in source
 
@@ -143,3 +140,14 @@ def test_preprocessing_workflow_runs_and_persists_the_fail_closed_review() -> No
     )
     remainder_index = source.index("_show_suspicious_remainder(", scan_index)
     assert event_plan_index < scan_index < remainder_index
+
+
+def test_experimental_selection_is_visible_optional_and_auditable() -> None:
+    source = _source(DIALOG_PATH)
+    assert "Experimental: auto-interpolate |normalized score| >" in source
+    assert "self.auto_checkbox.setChecked(True)" in source
+    assert "qualifies_for_experimental_kurtosis_auto(channel)" in source
+    assert "self.auto_checkbox.isChecked() and row in self._automatic_rows" in source
+    assert "experimental_auto=automatic" in source
+    assert "self.table.setRowHidden(row, enabled and not show_auto)" in source
+    assert "self._manual_indices.pop(row)" in source

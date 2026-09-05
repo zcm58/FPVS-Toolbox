@@ -10,6 +10,12 @@ import traceback
 from typing import Callable, Mapping, Sequence, TYPE_CHECKING
 
 from Main_App.Shared.file_filters import is_excel_workbook_file
+from Main_App.io.spectral_data import spectral_companion_identity
+from Main_App.io.xlsx_selected_reader import (
+    read_xlsx_sheet_header,
+    read_xlsx_sheet_selected_columns,
+    xlsx_read_cache_scope,
+)
 from Main_App.exports.figure_style import (
     FIGURE_EXPORT_DPI,
     FIGURE_FONT_FAMILY,
@@ -774,6 +780,9 @@ def _settings_fingerprint(
 def _source_fingerprint(path: Path) -> str:
     st = path.stat()
     token = f"{st.st_mtime_ns}-{st.st_size}".encode("utf-8")
+    companion = spectral_companion_identity(path)
+    if companion is not None:
+        token += companion["sha256"].encode("ascii")
     return hashlib.sha1(token).hexdigest()[:16]
 
 
@@ -884,29 +893,27 @@ def _excel_minimal_read(excel_path: Path, settings: DetectabilitySettings):
       df_z (Electrode + required harmonic cols)
       df_snr (Electrode + freq cols within ±half_window around each harmonic)
     """
-    import pandas as pd
+    with xlsx_read_cache_scope():
+        return _read_spectral_inputs(excel_path, settings)
 
-    xl = pd.ExcelFile(excel_path)
 
-    if SHEET_FULLFFT not in xl.sheet_names:
-        raise ValueError(f"Missing required sheet '{SHEET_FULLFFT}'.")
-    if SHEET_FULLSNR not in xl.sheet_names:
-        raise ValueError(f"Missing required sheet '{SHEET_FULLSNR}'.")
-
-    fft_head = xl.parse(SHEET_FULLFFT, nrows=0)
-    if ELECTRODE_COL not in fft_head.columns:
+def _read_spectral_inputs(excel_path: Path, settings: DetectabilitySettings):
+    fft_columns = read_xlsx_sheet_header(excel_path, sheet_name=SHEET_FULLFFT)
+    if ELECTRODE_COL not in fft_columns:
         raise ValueError(f"Missing column '{ELECTRODE_COL}' in '{SHEET_FULLFFT}'.")
-    plan = build_fullfft_harmonic_plan(fft_head.columns, settings.oddball_harmonics_hz)
-    df_fft = xl.parse(SHEET_FULLFFT, usecols=list(plan.usecols))
+    plan = build_fullfft_harmonic_plan(fft_columns, settings.oddball_harmonics_hz)
+    df_fft = read_xlsx_sheet_selected_columns(
+        excel_path, sheet_name=SHEET_FULLFFT, required_columns=list(plan.usecols),
+    )
 
-    snr_head = xl.parse(SHEET_FULLSNR, nrows=0)
-    if ELECTRODE_COL not in snr_head.columns:
+    snr_columns = read_xlsx_sheet_header(excel_path, sheet_name=SHEET_FULLSNR)
+    if ELECTRODE_COL not in snr_columns:
         raise ValueError(f"Missing column '{ELECTRODE_COL}' in '{SHEET_FULLSNR}'.")
 
     keep = [ELECTRODE_COL]
     half = float(settings.half_window_hz)
     harmonics = [float(h) for h in settings.oddball_harmonics_hz]
-    for col in snr_head.columns:
+    for col in snr_columns:
         if col == ELECTRODE_COL:
             continue
         if not isinstance(col, str):
@@ -928,7 +935,9 @@ def _excel_minimal_read(excel_path: Path, settings: DetectabilitySettings):
         seen.add(c)
         keep2.append(c)
 
-    df_snr = xl.parse(SHEET_FULLSNR, usecols=keep2)
+    df_snr = read_xlsx_sheet_selected_columns(
+        excel_path, sheet_name=SHEET_FULLSNR, required_columns=keep2,
+    )
     return df_fft, df_snr, plan
 
 
@@ -939,20 +948,17 @@ def _require_managed_fullfft_noise_support(
 ) -> None:
     """Validate the managed FullFFT grid and frozen source rows before cache reuse."""
 
-    import pandas as pd
-
-    xl = pd.ExcelFile(excel_path)
-    if SHEET_FULLFFT not in xl.sheet_names:
-        raise ValueError(f"Missing required sheet '{SHEET_FULLFFT}'.")
-    fft_head = xl.parse(SHEET_FULLFFT, nrows=0)
-    if ELECTRODE_COL not in fft_head.columns:
+    fft_columns = read_xlsx_sheet_header(excel_path, sheet_name=SHEET_FULLFFT)
+    if ELECTRODE_COL not in fft_columns:
         raise ValueError(f"Missing column '{ELECTRODE_COL}' in '{SHEET_FULLFFT}'.")
     plan = build_fullfft_harmonic_plan(
-        fft_head.columns,
+        fft_columns,
         settings.oddball_harmonics_hz,
     )
     require_complete_harmonic_noise_support(plan)
-    df_fft = xl.parse(SHEET_FULLFFT, usecols=list(plan.usecols))
+    df_fft = read_xlsx_sheet_selected_columns(
+        excel_path, sheet_name=SHEET_FULLFFT, required_columns=list(plan.usecols),
+    )
     validate_managed_fullfft_rows(
         df_fft,
         coverage=coverage,
@@ -1142,12 +1148,18 @@ def _process_one_participant(
 
     excel_path = Path(excel_path_str)
     cache_dir = Path(cache_dir_str)
-    cache_path = _cache_path_for(
-        excel_path,
-        settings,
-        cache_dir,
-        managed_coverage,
-    )
+    try:
+        cache_path = _cache_path_for(
+            excel_path,
+            settings,
+            cache_dir,
+            managed_coverage,
+        )
+    except (OSError, ValueError) as error:
+        return _ParticipantResult(
+            pid=pid, ok=False, err=str(error), tb=traceback.format_exc(),
+            fatal_integrity_error=managed_coverage is not None,
+        )
 
     if managed_coverage is not None:
         try:

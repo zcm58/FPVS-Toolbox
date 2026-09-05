@@ -47,6 +47,10 @@ Rules:
   cohorts.
 - BCA summation and SNR averaging must use the exact selected `"{freq:.4f}_Hz"`
   columns, matching Stats behavior. Do not add nearest-column fallback.
+- Compact BCA/SNR/Z metric sheets remain Excel inputs. A workbook's declared
+  NumPy spectral companion is part of its source identity and must validate
+  during capture and publication; missing or tampered companions cannot
+  silently pass the source checks.
 - Z-score maps read the `Z Score` sheet, use the exact selected
   `"{freq:.4f}_Hz"` columns, and combine selected harmonics as
   `sum(z) / sqrt(K)` before the condition grand average.

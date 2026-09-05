@@ -1,6 +1,8 @@
 # Post-Processing Export Contract
 
-This page documents the current post-processing and Excel export behavior before direct callers are migrated away from historical package paths. Refactors must preserve these outputs exactly unless a future task explicitly changes the processing pipeline.
+This page documents current post-processing, Excel reports, and NumPy spectral
+companion exports. Refactors must preserve scientific values and processing
+order unless a task explicitly changes the corresponding method contract.
 
 ## Entry Contract
 
@@ -281,12 +283,15 @@ Workbook sheets and column behavior must remain:
 - `SNR`
 - `Z Score`
 - `BCA (uV)`
-- `FullSNR`, interpolated from 0.5 Hz to the applied low-pass/Nyquist support in 0.01 Hz steps when full-spectrum SNR is available.
+- `FullSNR` and `FullFFT Amplitude (uV)`: small companion-file notices for new exports; legacy exports contain their dense arrays directly.
+- `Spectral Data`: the versioned companion declaration for new exports.
 - `FFT and neighbors`, only when neighbor rows are non-empty.
 - `Spectral Eligibility`, one deterministic availability row per filter-reachable project harmonic.
 - `Spectral Metric QC`, per-channel BCA/SNR/local-z availability and reason codes.
 
-All metric sheets insert `Electrode` as the first column. Target-frequency columns are formatted as `{frequency:.4f}_Hz`.
+All metric DataFrames insert `Electrode` as the first column. Target-frequency
+columns are formatted as `{frequency:.4f}_Hz`. FullSNR retains its established
+0.5-Hz to applied low-pass/Nyquist grid in 0.01-Hz steps.
 
 For the normal one-object condition export, FullSNR calculation may retain
 only the bins needed by the exported interpolation grid plus the unchanged
@@ -294,6 +299,55 @@ right-hand noise window. The retained FullSNR values and interpolated output
 must be byte-identical to calculating the complete Nyquist range. Multi-object
 conditions retain complete-spectrum accumulation because their frequency grids
 can differ while their FFT matrix shapes match.
+
+## NumPy Spectral Companion
+
+`Main_App.io.spectral_data` owns `numpy_spectral_companion_v1`. Every new
+condition export writes FullFFT and its independently calculated FullSNR into
+one uncompressed, non-pickled NPZ beside the workbook. Float64 arrays preserve
+the values supplied to the writer exactly, including signed zero and nonfinite
+FullSNR values. Labels, electrode order, exact FullFFT frequencies, fs/N, units,
+protocol, eligibility fingerprint, and retained-occurrence metadata are saved.
+FullSNR is never reconstructed from the averaged FullFFT array.
+
+The companion is named `<workbook stem>.spectra.<20-character SHA prefix>.npz`.
+Its `Spectral Data` workbook sheet has `Field`/`Value` columns with JSON-encoded
+version, local basename, byte size, full SHA-256, and ordered spectral sheet
+names. References cannot escape the workbook directory. Readers verify both
+the manifest and complete companion before supplying values. A declared
+missing, corrupt, unsupported or changed companion is an error; it must never
+fall back to a notice sheet or silently reuse a cache. Workbooks without this
+declaration keep the established Excel-only read behavior.
+
+`write_results_workbook` writes and validates the immutable companion first,
+then validates and atomically replaces the workbook last. Cross-volume XLSX
+staging resolves the companion against the final workbook directory. Failed
+schema validation, copy or replacement preserves the previous workbook and
+companion. A failed or superseded export can leave an unreferenced companion;
+managed reprocessing cleanup removes only generated spectral siblings. It
+preserves unrelated NPZ files and other participants during selective cleanup.
+
+The workbook remains the dataset-index discovery identity. Its write receipt
+also records `spectral_companion`; condition readiness and incremental reuse
+check that descriptor. Neutral FullFFT provenance schema v3 adds the same
+optional source field, and Stats, plots, scalp-map and detectability cache
+identities bind the companion. Legacy source signatures remain unchanged when
+no declaration exists. Moving a project preserves this association through
+the relative sibling filename; copy or share the workbook and companion
+together. No application-owned workbook-only project clone/export path exists.
+
+The shared full/header/selected-column readers route spectral sheets to NPZ
+and compact sheets to Excel. Stats, FullFFT grid QC, Free Harmonic Clustering,
+legacy LORETA FullFFT inputs and Individual Detectability use this boundary.
+Plot snapshots capture both dense arrays with their workbook and validate
+source identity before publication. Scalp Maps still calculates from its
+existing compact BCA/SNR/Z worksheets. A run-scoped cache retains at most four
+companions and invalidates on workbook or companion identity changes.
+
+This is a storage change only: all FFT bins through Nyquist are retained,
+including the 30,721 bins from 120 seconds at 512 Hz. Excel's 16,384-column
+limit no longer constrains FullFFT. Epoching, trigger timing, filtering,
+averaging, noise windows and statistical methods are unchanged.
 
 ## FFT Neighbor Export
 
@@ -308,7 +362,13 @@ warning string.
 
 `build_fft_neighbors_rows(...)` returns one row per electrode/channel. It resolves `k0` by the exact target-bin formula, records `fs`, `N`, `T_sec`, `df_hz`, and crop metadata, and raises if the target frequency is not exactly on an FFT bin. It must not fall back to the nearest frequency bin. `crop_mode` must be `55_onbin` and `N_step` must be present; fixed-epoch FFT fallback is not valid for normal post-export.
 
-`write_results_workbook(...)` writes each provided metric DataFrame to its existing sheet name with no index column, freezes the header row, center-aligns cells vertically and horizontally, and sets each column width from the maximum header/data string length plus four characters. The optional `FFT and neighbors` sheet is written only when the neighbor DataFrame is present and non-empty.
+`write_results_workbook(...)` moves the two dense spectral DataFrames into the
+companion and writes each remaining report DataFrame to its existing sheet
+name with no index column, freezes the header row, center-aligns cells
+vertically and horizontally, and sets each column width from the maximum
+header/data string length plus four characters. The optional `FFT and
+neighbors` sheet is written only when the neighbor DataFrame is present and
+non-empty.
 
 Metric sheets whose first column is the all-string `Electrode` column and
 whose remaining columns are finite native-float64 values may let pandas create
