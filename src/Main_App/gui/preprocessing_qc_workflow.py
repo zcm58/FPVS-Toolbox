@@ -792,6 +792,9 @@ def _clear_preflight_actions(host: Any) -> None:
     slot = getattr(host, "processing_action_slot", None)
     for button in list(getattr(host, "_preflight_qc_action_buttons", []) or []):
         try:
+            # Deferred deletion can wait through the next QC event loop;
+            # hide the old action before its slot is shown again.
+            button.hide()
             if layout is not None and layout.indexOf(button) >= 0:
                 layout.removeWidget(button)
             button.deleteLater()
