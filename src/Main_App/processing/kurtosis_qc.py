@@ -60,6 +60,8 @@ KURTOSIS_DECISION_APPROVE = "approve_interpolation"
 KURTOSIS_DECISION_REJECT = "reject_interpolation"
 KURTOSIS_REVIEWER_STATE_EXPLICIT_GUI = "explicit_gui_review"
 KURTOSIS_REVIEWER_STATE_EXPERIMENTAL_AUTO = "gui_enabled_experimental_abs_z_gt_10_v1"
+KURTOSIS_REVIEWER_STATE_EXPERIMENTAL_AUTO_ALL = "gui_enabled_experimental_all_flags_v1"
+KURTOSIS_NO_REASON_PROVIDED = "No reason provided"
 KURTOSIS_EXPERIMENTAL_AUTO_Z_THRESHOLD = 10.0
 KURTOSIS_REVIEWER_IDENTITY_STATUS_NOT_COLLECTED = "not_collected"
 KURTOSIS_REVIEWER_IDENTITY_STATUS_PROVIDED = "provided"
@@ -953,7 +955,7 @@ class KurtosisReviewDecision:
         return cls(
             schema_version=str(value.get("schema_version") or "").strip(),
             decision=str(value.get("decision") or "").strip(),
-            reason=str(value.get("reason") or "").strip(),
+            reason=str(value.get("reason") or "").strip() or KURTOSIS_NO_REASON_PROVIDED,
             reviewed_at_utc=str(value.get("reviewed_at_utc") or "").strip(),
             reviewer_state=str(value.get("reviewer_state") or "").strip(),
             reviewer_identity=(
@@ -1018,9 +1020,24 @@ def qualifies_for_experimental_kurtosis_auto(channel: Mapping[str, Any]) -> bool
     )
 
 
+def qualifies_for_experimental_kurtosis_auto_all(channel: Mapping[str, Any]) -> bool:
+    """Use the existing normalized rejection result without changing its math."""
+
+    score = channel.get("signed_z")
+    return (
+        channel.get("validity") == CHANNEL_VALIDITY_VALID
+        and channel.get("exceeds_threshold") is True
+        and isinstance(score, (int, float))
+        and not isinstance(score, bool)
+        and math.isfinite(score)
+    )
+
+
 def _validate_review_authority(
     receipt: KurtosisReviewDecision,
     channel: Mapping[str, Any] | None = None,
+    *,
+    kurtosis_auto_interpolate_all: bool | None = None,
 ) -> None:
     if receipt.reviewer_state == KURTOSIS_REVIEWER_STATE_EXPLICIT_GUI:
         return
@@ -1030,8 +1047,15 @@ def _validate_review_authority(
         and (channel is None or qualifies_for_experimental_kurtosis_auto(channel))
     ):
         return
+    if (
+        receipt.reviewer_state == KURTOSIS_REVIEWER_STATE_EXPERIMENTAL_AUTO_ALL
+        and receipt.decision == KURTOSIS_DECISION_APPROVE
+        and kurtosis_auto_interpolate_all is not False
+        and (channel is None or qualifies_for_experimental_kurtosis_auto_all(channel))
+    ):
+        return
     raise KurtosisQCError(
-        "Kurtosis review requires explicit GUI review or a valid experimental |z| > 10.0 approval."
+        "Kurtosis review requires explicit GUI review or a valid enabled experimental approval."
     )
 
 
@@ -1045,6 +1069,7 @@ def build_kurtosis_review_decision(
     reviewer_identity: object | None = None,
     reviewed_at_utc: str | None = None,
     experimental_auto: bool = False,
+    experimental_auto_all: bool = False,
 ) -> KurtosisReviewDecision:
     """Build an auditable GUI receipt from one cached evidence payload."""
 
@@ -1063,9 +1088,7 @@ def build_kurtosis_review_decision(
         KURTOSIS_DECISION_REJECT,
     }:
         raise KurtosisQCError("Kurtosis review decision must approve or reject interpolation.")
-    normalized_reason = str(reason or "").strip()
-    if not normalized_reason:
-        raise KurtosisQCError("Kurtosis review decision requires a reason.")
+    normalized_reason = str(reason or "").strip() or KURTOSIS_NO_REASON_PROVIDED
     if not isinstance(review_scope, Mapping):
         raise KurtosisQCError("Kurtosis review scope must be an object.")
 
@@ -1136,7 +1159,9 @@ def build_kurtosis_review_decision(
         reason=normalized_reason,
         reviewed_at_utc=reviewed_time,
         reviewer_state=(
-            KURTOSIS_REVIEWER_STATE_EXPERIMENTAL_AUTO
+            KURTOSIS_REVIEWER_STATE_EXPERIMENTAL_AUTO_ALL
+            if experimental_auto_all
+            else KURTOSIS_REVIEWER_STATE_EXPERIMENTAL_AUTO
             if experimental_auto
             else KURTOSIS_REVIEWER_STATE_EXPLICIT_GUI
         ),
@@ -1163,6 +1188,20 @@ def build_kurtosis_review_decision(
     )
     _validate_review_authority(receipt, channel_row)
     return receipt
+
+
+def make_kurtosis_auto_all_decision_receipt(
+    evidence: Mapping[str, Any], *, channel: object, review_scope: Mapping[str, Any],
+    reviewer_identity: object | None = None, reviewed_at_utc: str | None = None,
+) -> KurtosisReviewDecision:
+    """Record the selected experimental policy separately from manual review."""
+
+    return build_kurtosis_review_decision(
+        evidence, channel=channel, decision=KURTOSIS_DECISION_APPROVE,
+        reason="Experimental project setting: automatically interpolate all kurtosis flags.",
+        review_scope=review_scope, reviewer_identity=reviewer_identity,
+        reviewed_at_utc=reviewed_at_utc, experimental_auto_all=True,
+    )
 
 
 def _normalized_optional_text(value: object) -> str | None:
@@ -1199,6 +1238,7 @@ def validate_kurtosis_review_decision(
     evidence: KurtosisQCEvidence,
     channel_evidence: KurtosisChannelEvidence,
     review_scope: Mapping[str, Any],
+    kurtosis_auto_interpolate_all: bool = False,
 ) -> KurtosisReviewDecision:
     """Validate one explicit GUI receipt against current recording evidence."""
 
@@ -1214,7 +1254,7 @@ def validate_kurtosis_review_decision(
     if not receipt.reason:
         raise KurtosisQCError("Kurtosis review decision requires a reason.")
     _validate_utc_time(receipt.reviewed_at_utc)
-    _validate_review_authority(receipt, channel_evidence.to_payload())
+    _validate_review_authority(receipt, channel_evidence.to_payload(), kurtosis_auto_interpolate_all=kurtosis_auto_interpolate_all)
     if receipt.reviewer_identity_status == KURTOSIS_REVIEWER_IDENTITY_STATUS_NOT_COLLECTED:
         if _normalized_optional_text(receipt.reviewer_identity) is not None:
             raise KurtosisQCError("Reviewer identity cannot be stored when it was not collected.")
@@ -1261,6 +1301,7 @@ def validate_kurtosis_review_decision_payload(
     evidence: Mapping[str, Any],
     channel: object,
     review_scope: Mapping[str, Any],
+    kurtosis_auto_interpolate_all: bool = False,
 ) -> KurtosisReviewDecision:
     """Validate a saved GUI receipt against serialized scanner evidence."""
 
@@ -1348,7 +1389,7 @@ def validate_kurtosis_review_decision_payload(
     if not receipt.reason:
         raise KurtosisQCError("Kurtosis review decision requires a reason.")
     _validate_utc_time(receipt.reviewed_at_utc)
-    _validate_review_authority(receipt, channel_row)
+    _validate_review_authority(receipt, channel_row, kurtosis_auto_interpolate_all=kurtosis_auto_interpolate_all)
     if receipt.reviewer_identity_status == (
         KURTOSIS_REVIEWER_IDENTITY_STATUS_NOT_COLLECTED
     ):
@@ -1518,6 +1559,7 @@ class KurtosisDecisionPlan:
     ready_for_interpolation: bool
     blocking_reasons: tuple[str, ...]
     channel_decisions: tuple[KurtosisChannelDecision, ...]
+    kurtosis_auto_interpolate_all: bool = False
 
     @property
     def candidate_channels(self) -> tuple[str, ...]:
@@ -1587,6 +1629,7 @@ class KurtosisDecisionPlan:
             "ready_for_interpolation": self.ready_for_interpolation,
             "blocking_reasons": list(self.blocking_reasons),
             "channel_decisions": [item.to_payload() for item in self.channel_decisions],
+            "kurtosis_auto_interpolate_all": self.kurtosis_auto_interpolate_all,
         }
 
     def to_payload(self) -> dict[str, object]:
@@ -1623,11 +1666,14 @@ def build_kurtosis_decision_plan(
     review_scope: Mapping[str, Any] | None = None,
     direct_bad_channels: Mapping[str, str] | None = None,
     registry: KurtosisCorroboratorRegistry = CURRENT_KURTOSIS_CORROBORATOR_REGISTRY,
+    kurtosis_auto_interpolate_all: bool = False,
 ) -> KurtosisDecisionPlan:
     """Apply QC-16 authority without treating candidates as interpolation outcomes."""
 
     if evidence.method_version != KURTOSIS_QC_METHOD_VERSION:
         raise KurtosisQCError("Kurtosis evidence method is missing or stale.")
+    if not isinstance(kurtosis_auto_interpolate_all, bool):
+        raise KurtosisQCError("The experimental auto-interpolate-all setting must be boolean.")
     if evidence.authority_policy_version != KURTOSIS_AUTHORITY_POLICY_VERSION:
         raise KurtosisQCError("Kurtosis authority policy is missing or stale.")
     if (
@@ -1725,16 +1771,29 @@ def build_kurtosis_decision_plan(
                     raise KurtosisQCError(
                         "A corroborated automatic channel cannot also have a review decision."
                     )
+            elif kurtosis_auto_interpolate_all and qualifies_for_experimental_kurtosis_auto_all(channel_evidence.to_payload()):
+                state = CHANNEL_DECISION_EXPERIMENTAL_AUTO
+                authorized = True
+                reasons.append("experimental_all_kurtosis_flags_v1")
+                if channel in decisions:
+                    # Keep any current receipt for audit, but the selected
+                    # project policy is the authority while this option is on.
+                    receipt = validate_kurtosis_review_decision(
+                        decisions[channel], evidence=evidence, channel_evidence=channel_evidence,
+                        review_scope=scope, kurtosis_auto_interpolate_all=True,
+                    )
+                    used_decisions.add(channel)
             elif channel in decisions:
                 receipt = validate_kurtosis_review_decision(
                     decisions[channel],
                     evidence=evidence,
                     channel_evidence=channel_evidence,
                     review_scope=scope,
+                    kurtosis_auto_interpolate_all=kurtosis_auto_interpolate_all,
                 )
                 used_decisions.add(channel)
                 if receipt.decision == KURTOSIS_DECISION_APPROVE:
-                    experimental = receipt.reviewer_state == KURTOSIS_REVIEWER_STATE_EXPERIMENTAL_AUTO
+                    experimental = receipt.reviewer_state in {KURTOSIS_REVIEWER_STATE_EXPERIMENTAL_AUTO, KURTOSIS_REVIEWER_STATE_EXPERIMENTAL_AUTO_ALL}
                     state = CHANNEL_DECISION_EXPERIMENTAL_AUTO if experimental else CHANNEL_DECISION_USER_APPROVED
                     authorized = True
                     reasons.append("experimental_abs_z_gt_10_v1" if experimental else "explicit_gui_approval")
@@ -1783,6 +1842,7 @@ def build_kurtosis_decision_plan(
         ready_for_interpolation=not blocking,
         blocking_reasons=tuple(blocking),
         channel_decisions=tuple(rows),
+        kurtosis_auto_interpolate_all=kurtosis_auto_interpolate_all,
     )
 
 
@@ -1833,8 +1893,12 @@ __all__ = [
     "KURTOSIS_REVIEWER_IDENTITY_STATUS_PROVIDED",
     "KURTOSIS_REVIEWER_STATE_EXPLICIT_GUI",
     "KURTOSIS_REVIEWER_STATE_EXPERIMENTAL_AUTO",
+    "KURTOSIS_REVIEWER_STATE_EXPERIMENTAL_AUTO_ALL",
+    "KURTOSIS_NO_REASON_PROVIDED",
     "KURTOSIS_EXPERIMENTAL_AUTO_Z_THRESHOLD",
     "qualifies_for_experimental_kurtosis_auto",
+    "qualifies_for_experimental_kurtosis_auto_all",
+    "make_kurtosis_auto_all_decision_receipt",
     "KurtosisChannelDecision",
     "KurtosisChannelEvidence",
     "KurtosisCorroborationAssessment",

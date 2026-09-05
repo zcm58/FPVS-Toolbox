@@ -1187,6 +1187,7 @@ def start_processing(self) -> None:
                 line_noise_settings["line_noise_frequency_hz"]
             ),
             "reject_thresh": p.get("rejection_z"),
+            "kurtosis_auto_interpolate_all": bool(p.get("kurtosis_auto_interpolate_all", False)),
             "ref_channel1": ref1,
             "ref_channel2": ref2,
             "max_idx_keep": p.get("max_chan_idx_keep"),

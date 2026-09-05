@@ -41,6 +41,7 @@ from Main_App.processing.kurtosis_qc import (
     KURTOSIS_REVIEWER_IDENTITY_STATUS_NOT_COLLECTED,
     KURTOSIS_REVIEWER_STATE_EXPLICIT_GUI,
     KURTOSIS_REVIEWER_STATE_EXPERIMENTAL_AUTO,
+    KURTOSIS_REVIEWER_STATE_EXPERIMENTAL_AUTO_ALL,
     KurtosisCorroboratorFinding,
     KurtosisCorroboratorMethod,
     KurtosisCorroboratorRegistry,
@@ -51,6 +52,8 @@ from Main_App.processing.kurtosis_qc import (
     legacy_kurtosis_audit_payload,
     normalize_kurtosis_review_decisions_by_recording,
     qualifies_for_experimental_kurtosis_auto,
+    qualifies_for_experimental_kurtosis_auto_all,
+    make_kurtosis_auto_all_decision_receipt,
     validate_kurtosis_review_decision_payload,
 )
 
@@ -731,3 +734,80 @@ def test_experimental_receipt_cannot_bypass_rule_by_changing_reviewer_state(tmp_
         validate_kurtosis_review_decision_payload(receipt, evidence=evidence.to_payload(), channel=channel.channel, review_scope=scope)
     with pytest.raises(KurtosisQCError, match="experimental"):
         build_kurtosis_decision_plan(evidence, review_decisions={channel.channel: receipt}, review_scope=scope)
+
+
+@pytest.mark.parametrize("score", [5.01, -5.01, 8.0, -8.0, 10.0, -10.0, 10.001])
+def test_project_auto_all_uses_existing_flags_and_distinct_experimental_authority(score) -> None:
+    original = _evidence()
+    channel = replace(original.channels[0], signed_z=score, absolute_z=abs(score))
+    evidence = replace(original, channels=(channel, *original.channels[1:]))
+    manual = build_kurtosis_decision_plan(evidence)
+    automatic = build_kurtosis_decision_plan(evidence, kurtosis_auto_interpolate_all=True)
+    assert manual.pending_review_channels == (channel.channel,)
+    assert automatic.ready_for_interpolation
+    assert automatic.authorized_interpolation_channels == (channel.channel,)
+    assert automatic.channel_decisions[0].state == CHANNEL_DECISION_EXPERIMENTAL_AUTO
+    assert "experimental_all_kurtosis_flags_v1" in automatic.channel_decisions[0].reasons
+    assert automatic.channel_decisions[0].review_receipt is None
+    assert automatic.user_approved_channels == ()
+    assert automatic.corroborated_automatic_channels == ()
+    assert automatic.evidence_fingerprint == manual.evidence_fingerprint
+    assert automatic.fingerprint != manual.fingerprint
+    assert automatic.to_payload()["kurtosis_auto_interpolate_all"] is True
+    assert build_kurtosis_decision_plan(evidence).pending_review_channels == (channel.channel,)
+
+
+@pytest.mark.parametrize("score", [8.0, 20.0])
+def test_auto_all_receipt_requires_current_enabled_setting_even_above_ten(score, tmp_path) -> None:
+    original = _evidence()
+    channel = replace(original.channels[0], signed_z=score, absolute_z=abs(score))
+    evidence = replace(original, channels=(channel, *original.channels[1:]))
+    scope = _scope(tmp_path / "P001.bdf")
+    receipt = make_kurtosis_auto_all_decision_receipt(evidence.to_payload(), channel=channel.channel, review_scope=scope)
+    assert receipt.reviewer_state == KURTOSIS_REVIEWER_STATE_EXPERIMENTAL_AUTO_ALL
+    stored = normalize_kurtosis_review_decisions_by_recording({receipt.recording_id: {channel.channel: receipt.to_payload()}})
+    assert stored[receipt.recording_id][channel.channel] == receipt.to_payload()
+    assert validate_kurtosis_review_decision_payload(
+        receipt, evidence=evidence.to_payload(), channel=channel.channel,
+        review_scope=scope, kurtosis_auto_interpolate_all=True,
+    ) == receipt
+    with pytest.raises(KurtosisQCError, match="experimental"):
+        validate_kurtosis_review_decision_payload(receipt, evidence=evidence.to_payload(), channel=channel.channel, review_scope=scope)
+    with pytest.raises(KurtosisQCError, match="experimental"):
+        build_kurtosis_decision_plan(evidence, review_decisions={channel.channel: receipt}, review_scope=scope)
+    assert build_kurtosis_decision_plan(
+        evidence, review_decisions={channel.channel: receipt}, review_scope=scope,
+        kurtosis_auto_interpolate_all=True,
+    ).ready_for_interpolation
+
+
+@pytest.mark.parametrize("overrides", [
+    {"signed_z": None}, {"signed_z": float("nan")}, {"signed_z": float("inf")},
+    {"signed_z": True}, {"validity": CHANNEL_VALIDITY_UNDEFINED_STATISTIC}, {"exceeds_threshold": False},
+])
+def test_auto_all_cannot_authorize_invalid_or_unflagged_values(overrides) -> None:
+    assert not qualifies_for_experimental_kurtosis_auto_all({"signed_z": 8.0, "validity": "valid", "exceeds_threshold": True, **overrides})
+
+
+def test_auto_all_leaves_invalid_statistics_for_manual_review() -> None:
+    evidence = _evidence()
+    invalid = replace(evidence.channels[0], validity=CHANNEL_VALIDITY_UNDEFINED_STATISTIC, signed_z=None, absolute_z=None, exceeds_threshold=False)
+    evidence = replace(evidence, channels=(invalid, *evidence.channels[1:]), status=EVIDENCE_STATUS_PARTIAL)
+    plan = build_kurtosis_decision_plan(evidence, kurtosis_auto_interpolate_all=True)
+    assert not plan.ready_for_interpolation
+    assert plan.pending_review_channels == (invalid.channel,)
+    assert plan.authorized_interpolation_channels == ()
+
+
+@pytest.mark.parametrize("reason", [None, "", " \n "])
+def test_manual_reason_is_optional_and_normalized_before_fingerprinting(reason, tmp_path) -> None:
+    evidence = _evidence()
+    channel = evidence.channels[0].channel
+    scope = _scope(tmp_path / "P001.bdf")
+    receipt = build_kurtosis_review_decision(evidence.to_payload(), channel=channel, decision=KURTOSIS_DECISION_APPROVE, reason=reason, review_scope=scope)
+    assert receipt.reason == "No reason provided"
+    blank_payload = {**receipt.to_payload(), "reason": reason}
+    blank_plan = build_kurtosis_decision_plan(evidence, review_decisions={channel: blank_payload}, review_scope=scope)
+    named_plan = build_kurtosis_decision_plan(evidence, review_decisions={channel: receipt}, review_scope=scope)
+    assert blank_plan.fingerprint == named_plan.fingerprint
+    assert blank_plan.channel_decisions[0].review_receipt.reason == "No reason provided"

@@ -236,6 +236,29 @@ def test_unscoped_compatibility_call_cannot_auto_interpolate_kurtosis() -> None:
     )
 
 
+def test_project_auto_all_scan_stops_before_repair_and_final_run_interpolates(tmp_path, monkeypatch) -> None:
+    from Main_App.processing import preprocess as preprocessing_module
+
+    source = tmp_path / "P001.bdf"
+    source.touch()
+    params = {**_params(source), "kurtosis_auto_interpolate_all": True}
+    original_interpolation = preprocessing_module._interpolate_current_bads
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Review preparation must stop before interpolation")
+
+    monkeypatch.setattr(preprocessing_module, "_interpolate_current_bads", forbidden)
+    prepared = prepare_kurtosis_review_evidence(_raw(), params, lambda _message: None, source.name)
+    assert prepared["decision_plan"]["ready_for_interpolation"] is True
+    assert prepared["decision_plan"]["kurtosis_auto_interpolate_all"] is True
+    assert not any(row["state"] == "review_required" for row in prepared["decision_plan"]["channel_decisions"])
+    monkeypatch.setattr(preprocessing_module, "_interpolate_current_bads", original_interpolation)
+    processed, rejected = perform_preprocessing(_raw(), params, lambda _message: None, source.name)
+    assert processed is not None and rejected == 1
+    assert params["_fpvs_interpolated_channels"] == [BIOSEMI64_CHANNELS[0]]
+    assert params["_fpvs_kurtosis_user_approved_channels"] == []
+
+
 @pytest.mark.parametrize("single_session,auto_detector", [(False, False), (True, False), (True, True)])
 @pytest.mark.parametrize("exclude_objects", [False, True])
 @pytest.mark.parametrize("filtered", [False, True])

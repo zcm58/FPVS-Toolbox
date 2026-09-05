@@ -189,6 +189,21 @@ def test_secondary_family_uses_paired_deltas_with_ci_and_cohens_dz() -> None:
     ).all()
 
 
+@pytest.mark.parametrize("reason", ["", "  ", None])
+def test_optional_exclusion_reason_preserves_explicit_exclusion(reason) -> None:
+    data = _complete_data()
+    excluded = data["participant_id"].eq("C5") & data["visit_index"].eq(2)
+    data.loc[excluded, "excluded"] = True
+    data.loc[excluded, "exclusion_reason"] = reason
+    audit = audit_repeated_session_design(data, contract=_contract(), outcomes=OUTCOMES)
+    normalized = audit.normalized_data
+    assert normalized.loc[normalized["excluded"], "exclusion_reason"].eq("No reason provided").all()
+    assert normalized.loc[~normalized["excluded"], "exclusion_reason"].eq("").all()
+    pairs = audit.outcome_pairs.loc[audit.outcome_pairs["participant_id"].eq("C5")]
+    assert pairs["pair_status"].str.contains("excluded_visit_2").all()
+    assert not pairs["complete_usable_pair"].any()
+
+
 def test_missing_sessions_exclusions_and_nonfinite_values_remain_explicit() -> None:
     data = _complete_data()
     data = data[

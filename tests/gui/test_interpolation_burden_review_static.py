@@ -54,7 +54,7 @@ def _call_lines(node: ast.AST, function_name: str) -> list[int]:
     ]
 
 
-def test_dialog_starts_with_no_decision_and_requires_reason_before_accept() -> None:
+def test_dialog_requires_explicit_decision_and_labels_reason_optional() -> None:
     tree = _tree(DIALOG_PATH)
     build_ui = _method(tree, "InterpolationBurdenReviewDialog", "_build_ui")
     validate = _method(
@@ -68,7 +68,7 @@ def test_dialog_starts_with_no_decision_and_requires_reason_before_accept() -> N
     assert "Choose Retain or Exclude" in source
     assert source.count("decision.addItem") == 3
     assert "decision.setCurrentIndex(0)" in source
-    assert "reason.setPlaceholderText('Required review reason')" in source
+    assert "reason.setPlaceholderText('Optional reason')" in source
     assert source.index("INTERPOLATION_BURDEN_SCOPE_RECORDING") < source.index(
         "INTERPOLATION_BURDEN_SCOPE_PARTICIPANT"
     )

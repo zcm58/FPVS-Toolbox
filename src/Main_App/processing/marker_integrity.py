@@ -314,6 +314,10 @@ class MarkerReviewDecision:
     verified_start_sample: int | None = None
     verified_stop_sample: int | None = None
 
+    def __post_init__(self) -> None:
+        if not str(self.reason or "").strip():
+            object.__setattr__(self, "reason", "No reason provided")
+
     @classmethod
     def from_payload(cls, value: Mapping[str, Any]) -> "MarkerReviewDecision":
         if not isinstance(value, Mapping):
@@ -724,8 +728,6 @@ def _validate_marker_review_receipt(
             "Marker review decision schema is missing or stale; review this "
             "occurrence again."
         )
-    if not str(decision.reason or "").strip():
-        raise MarkerIntegrityError("Marker review decision requires a reason.")
     _validate_utc_review_time(decision.reviewed_at_utc)
     if decision.reviewer_state != MARKER_REVIEWER_STATE_EXPLICIT_GUI:
         raise MarkerIntegrityError(

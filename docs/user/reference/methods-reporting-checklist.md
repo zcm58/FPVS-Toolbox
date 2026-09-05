@@ -108,8 +108,14 @@ testing, or another specialized estimand.
   repairs, experimental automatic repairs, and unresolved or stale evidence.
   Report use of the optional experimental `|normalized score| > 10.0` rule
   (`gui_enabled_experimental_abs_z_gt_10_v1`); its cutoff is experimental, not
-  a validated artifact classifier. Exactly 10.0 and other pending findings
-  still require a manual decision and reason. The corroborator registry
+  a validated artifact classifier. Also report whether the project enabled
+  experimental auto interpolation of all valid flags above its configured
+  absolute normalized-score threshold (`kurtosis_auto_interpolate_all`, default
+  Off; `gui_enabled_experimental_all_flags_v1`). This takes precedence over the
+  >10 option without changing scores. Without either qualifying policy, pending
+  findings require a manual decision. Invalid statistics always need review.
+  Reasons are optional; omitted comments are saved as `No reason provided`.
+  The corroborator registry
   remains empty. Raw kurtosis is not the automatic cutoff variable.
 - State that kurtosis is scored only from included analyzed intervals, while an
   approved interpolation is applied once to the continuous processed recording
@@ -562,7 +568,7 @@ adjacency edges, null extrema or hash, Toolbox commit, and analysis
 plan/preregistration.
 
 For repeated batches, also retain the complete-pair cohort/coverage audit,
-analysis-only recording exclusions and their required reasons, shared-domain
+analysis-only recording exclusions and their optional reasons (No reason provided when omitted), shared-domain
 tables/fingerprint, per-run derived seeds, both Holm layers, and the fixed-order
 confounding statement. Analysis-specific exclusions are source-immutable and
 must not be presented as changes to project QC.

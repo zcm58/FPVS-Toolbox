@@ -18,7 +18,7 @@ Experimental removed-electrode detection is Off by default for new projects. Aut
 
 ## SC-04: Evidence, Suggestions, and Decisions
 
-Store original machine findings, candidate sources, user-accepted/rejected/manual channel selections, and recording inclusion/exclusion decisions separately. A suggestion is not confirmed physical failure, successful interpolation, or a user decision. Review flags alone do not automatically change the analysis cohort unless the applicable action explicitly says so. Persist decision reason, reviewer state, time, evidence fingerprint, and scope.
+Store original machine findings, candidate sources, user-accepted/rejected/manual channel selections, and recording inclusion/exclusion decisions separately. A suggestion is not confirmed physical failure, successful interpolation, or a user decision. Review flags alone do not automatically change the analysis cohort unless the applicable action explicitly says so. Persist decision reason, reviewer state, time, evidence fingerprint, and scope. User-entered reasons are optional; normalize an omitted comment to `No reason provided` before persistence/fingerprinting. Explicit choices, technical failure reasons, and independent evidence required to retain a marker-gap occurrence remain mandatory.
 
 ## SC-05: Truthful Processing Outcomes
 

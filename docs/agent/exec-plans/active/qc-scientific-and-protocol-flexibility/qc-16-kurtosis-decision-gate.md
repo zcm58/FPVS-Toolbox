@@ -6,9 +6,10 @@ Load this module with the parent index, shared contracts, QC-06, and QC-15.
 
 **Status:** implemented on the active QC branch. Kurtosis plus an eligible
 independent channel-health method permits automatic interpolation. The initial
-registry remains empty. The GUI also offers the user-approved experimental
-absolute-normalized-score > 10.0 rule; other kurtosis-only findings require
-manual review. Representative-data calibration remains follow-up evidence.
+registry remains empty. Projects can opt into experimental automatic interpolation
+of all valid kurtosis flags. With that option off, the GUI retains the optional
+absolute-normalized-score > 10.0 rule and individual review. User reasons are
+optional. Representative-data calibration remains follow-up evidence.
 
 ## Accepted Behavior
 
@@ -43,7 +44,12 @@ manual review. Representative-data calibration remains follow-up evidence.
    be disabled, and creates versioned experimental receipts rather than manual
    approvals. Exactly 10.0 stays manual. This does not populate the registry
    or establish scientific validation of the cutoff.
-5. Outside that enabled experimental rule, when kurtosis is the sole eligible
+   A separate project preference, `kurtosis_auto_interpolate_all` (default Off),
+   authorizes all valid flags above the existing configured absolute normalized
+   threshold. It is available in Settings > Experimental and the review dialog,
+   takes precedence over the >10 rule, and records distinct experimental authority.
+   Invalid statistics still require review; scoring and interpolation scope do not change.
+5. Outside the enabled experimental policies, when kurtosis is the sole eligible
    reason, stop before interpolation and
    present it in the GUI review. Processing cannot treat timeout, dialog close,
    CLI/non-GUI execution, missing evidence, or an old decision as approval.
@@ -87,8 +93,9 @@ different-channel and different-occurrence non-corroboration, review-only flags,
 the initially empty registry, manual channels, experimental detector Off,
 legacy kurtosis-only automatic outputs, invalid/nonfinite statistics,
 threshold validation, dialog close, stale evidence, worker cancellation, and
-successful/failed interpolation. Verify no kurtosis-only channel without a current manual or qualifying
-experimental receipt can reach `raw.info["bads"]` or interpolation. GUI behavior receives static checks,
+successful/failed interpolation. Verify no kurtosis-only channel without a current
+manual receipt or qualifying enabled experimental authority can reach
+`raw.info["bads"]` or interpolation. GUI behavior receives static checks,
 CI-only Qt tests, and a documented visible smoke path.
 
 Calibrate signed score, threshold, temporal persistence, and downstream
@@ -121,7 +128,7 @@ Cancel, close, scan error, missing receipt, or changed evidence blocks the run.
 Focused numerical and static GUI tests cover approve/reject receipts,
 staleness, invalid evidence, cancellation, display-only raw-QC context,
 zero-based occurrence storage with one-based display, fixed repair wording,
-and the no-default/reason-required contract for manual decisions. Qt execution remains the
+and explicit manual decisions with optional reasons. Qt execution remains the
 CI gate. The visible smoke path is: open a project containing a recording with
 a known kurtosis-only channel; start preprocessing; verify the review lists its
 recording, analyzed occurrences, metrics, raw-QC context, trace, and full-recording
@@ -217,3 +224,23 @@ Files changed for this repair (relative to the repo root):
 
 Protected-boundary audits passed; retired `Legacy_App` and `PySide6_App` paths
 were not affected. Prior dialog/experimental-cutoff edits remain in place.
+
+
+### Experimental auto-all and optional comments (2026-09-05)
+
+- [x] Add default-Off per-project auto-all to Settings > Experimental and review;
+  persist distinct authority, invalidate cache/receipts when mode changes, and
+  keep invalid statistics in review. Rescan if an auto-on review turns it off.
+- [x] Make user reasons optional across kurtosis, marker, interpolation-burden,
+  frequency-domain, and FHC exclusions; preserve explicit decisions and evidence.
+- [x] Verify unchanged numerical kurtosis AST and processing-order tests. Processing
+  gate: 957 passed, one skipped, one Windows cache-write access failure that passed
+  on isolated retry. FHC/Stats checks: 160 passed. GUI audit, Ruff, compile, and
+  diff checks passed. Broad precommit remains blocked only by eight pre-existing
+  path findings in unrelated untracked `outputs/`.
+- [ ] Visible smoke (Qt execution is CI-only locally): toggle auto-all in project
+  Settings, reopen to verify persistence, then process valid flags automatically.
+  In review, toggle modes, cancel once, and apply once; confirm blank reasons save
+  after explicit choices. Turn automation off and confirm required manual review
+  returns. Check blank-comment marker/burden/frequency/FHC decisions and persisted
+  `No reason provided`; marker-gap retention still requires independent evidence.

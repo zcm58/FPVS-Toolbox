@@ -180,7 +180,7 @@ class FrequencyDomainQcReviewDialog(QDialog):
                 "Analysis window",
                 "Independent QC",
                 "Decision",
-                "Reason for exclusion",
+                "Reason (optional)",
             ]
         )
         self.details_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
@@ -312,7 +312,7 @@ class FrequencyDomainQcReviewDialog(QDialog):
                 combo.addItem(_DECISION_LABELS[decision], decision)
             reason = QLineEdit(self.details_table)
             reason.setObjectName(f"frequency_domain_qc_reason_{row_index}")
-            reason.setPlaceholderText("Required for an exclusion")
+            reason.setPlaceholderText("Optional reason")
             saved = existing.get(fingerprint)
             if saved is not None:
                 prior_decision = str(saved.get("decision") or "")

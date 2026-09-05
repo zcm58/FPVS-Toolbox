@@ -903,6 +903,7 @@ def _preproc_cache_payload(
         "low_pass": settings.get("low_pass"),
         "downsample_rate": settings.get("downsample_rate", settings.get("downsample")),
         "reject_thresh": settings.get("reject_thresh"),
+        "kurtosis_auto_interpolate_all": settings.get("kurtosis_auto_interpolate_all", False),
         "ref_channel1": settings.get("ref_channel1", settings.get("ref_ch1")),
         "ref_channel2": settings.get("ref_channel2", settings.get("ref_ch2")),
         "stim_channel": settings.get("stim_channel"),

@@ -85,10 +85,8 @@ class InterpolationBurdenReviewChoice:
             raise InterpolationBurdenReviewError(
                 "Choose Retain or Exclude for every interpolation-burden finding."
             )
-        if not self.reason.strip():
-            raise InterpolationBurdenReviewError(
-                "Every interpolation-burden decision requires a reason."
-            )
+        if not str(self.reason or "").strip():
+            object.__setattr__(self, "reason", "No reason provided")
         if self.exclusion_scope not in {
             INTERPOLATION_BURDEN_SCOPE_PARTICIPANT,
             INTERPOLATION_BURDEN_SCOPE_RECORDING,

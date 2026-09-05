@@ -145,20 +145,16 @@ class RecordingChoice:
 
 @dataclass(frozen=True, slots=True)
 class AnalysisRecordingExclusion:
-    """Analysis-only recording exclusion with required audit reason."""
+    """Analysis-only recording exclusion with optional audit explanation."""
 
     recording_id: str
-    reason: str
+    reason: str = ""
 
     def __post_init__(self) -> None:
         recording_id = str(self.recording_id).strip()
-        reason = str(self.reason).strip()
+        reason = str(self.reason or "").strip() or "No reason provided"
         if not recording_id:
             raise ValueError("An analysis exclusion requires a recording ID.")
-        if not reason:
-            raise ValueError(
-                f"Analysis exclusion {recording_id!r} requires a reason."
-            )
         object.__setattr__(self, "recording_id", recording_id)
         object.__setattr__(self, "reason", reason)
 

@@ -646,6 +646,7 @@ def build_validated_params(host: Any) -> dict | None:
         KURTOSIS_REVIEW_DECISIONS_BY_RECORDING_KEY: dict(
             normalized.get(KURTOSIS_REVIEW_DECISIONS_BY_RECORDING_KEY) or {}
         ),
+        "kurtosis_auto_interpolate_all": bool(normalized.get("kurtosis_auto_interpolate_all", False)),
         "stim_channel": stim_channel,
         "save_preprocessed_fif": False,
         "event_id_map": event_map,

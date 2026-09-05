@@ -200,7 +200,7 @@ def test_review_decision_round_trips_and_is_tied_to_exact_burden() -> None:
     assert reloaded.reviewer_identity_status == "not_collected"
 
 
-def test_review_decision_rejects_blank_reason_and_stale_evidence() -> None:
+def test_review_decision_allows_omitted_reason_and_rejects_stale_evidence() -> None:
     burden = build_interpolation_burden(
         _outcome(
             status=INTERPOLATION_STATUS_SUCCEEDED,
@@ -210,13 +210,11 @@ def test_review_decision_rejects_blank_reason_and_stale_evidence() -> None:
     )
     finding = interpolation_burden_review_finding("P01", burden)
     assert finding is not None
-    with pytest.raises(InterpolationBurdenError, match="requires a reason"):
-        build_interpolation_burden_review_decision(
-            finding,
-            participant_id="P01",
-            decision=INTERPOLATION_BURDEN_DECISION_EXCLUDE,
-            reason="",
-        )
+    omitted = build_interpolation_burden_review_decision(
+        finding, participant_id="P01", decision=INTERPOLATION_BURDEN_DECISION_EXCLUDE,
+    )
+    assert omitted.reason == "No reason provided"
+    assert normalize_interpolation_burden_review_decision(omitted.to_payload()) == omitted
 
     payload = build_interpolation_burden_review_decision(
         finding,

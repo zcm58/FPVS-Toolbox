@@ -35,7 +35,7 @@ from Main_App.processing.interpolation_burden_review import (
 
 
 class InterpolationBurdenReviewDialog(AppDialog):
-    """Require an unambiguous decision and reason for every pending finding."""
+    """Require an unambiguous decision for every pending finding."""
 
     def __init__(
         self,
@@ -74,7 +74,7 @@ class InterpolationBurdenReviewDialog(AppDialog):
         explanation = QLabel(
             (
                 "Review the successfully interpolated electrode locations, choose "
-                "Retain or Exclude, and record a reason for every row. No choice is "
+                "Retain or Exclude for every row. Reasons are optional. No choice is "
                 "selected automatically. Canceling or closing this dialog skips "
                 "downstream post-processing."
             ),
@@ -101,7 +101,7 @@ class InterpolationBurdenReviewDialog(AppDialog):
         ]
         if self._batch.is_repeated_session:
             headers.append("Exclusion scope")
-        headers.append("Reason")
+        headers.append("Reason (optional)")
 
         self.table = QTableWidget(len(self._batch.items), len(headers), self)
         self.table.setObjectName("interpolation_burden_review_table")
@@ -180,7 +180,7 @@ class InterpolationBurdenReviewDialog(AppDialog):
 
             reason = QLineEdit(self.table)
             reason.setObjectName(f"interpolation_burden_reason_{row}")
-            reason.setPlaceholderText("Required review reason")
+            reason.setPlaceholderText("Optional reason")
             reason.textChanged.connect(self.error_banner.hide)
             self.table.setCellWidget(row, next_column, reason)
             self._reason_controls[item.processing_id] = reason

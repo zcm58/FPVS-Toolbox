@@ -314,6 +314,17 @@ def _kurtosis_report_fields(
     ).strip()
     method = str(evidence.get("method_label") or evidence.get("method_version") or "").strip()
     fingerprint = str(evidence.get("fingerprint") or "").strip()
+    decision_plan: Mapping[str, Any] = {}
+    for source in (audit, entry, cache_entry):
+        candidate = source.get("kurtosis_decision_plan")
+        if isinstance(candidate, Mapping) and candidate:
+            decision_plan = candidate
+            break
+    experimental_channels = [
+        str(row.get("channel"))
+        for row in decision_plan.get("channel_decisions", [])
+        if isinstance(row, Mapping) and row.get("state") == "experimental_automatic"
+    ]
     return {
         "Kurtosis QC Status": status or "not evaluated",
         "Kurtosis Method": method or "Not recorded",
@@ -328,6 +339,12 @@ def _kurtosis_report_fields(
         ),
         "Kurtosis Corroborated Automatic Electrodes": _join_channels(
             _channels("kurtosis_corroborated_channels")
+        ),
+        "Kurtosis Experimental Automatic Electrodes": _join_channels(experimental_channels),
+        "Kurtosis Experimental Auto-All Setting": (
+            "Enabled" if decision_plan.get("kurtosis_auto_interpolate_all") is True
+            else "Disabled" if "kurtosis_auto_interpolate_all" in decision_plan
+            else "Not recorded"
         ),
         "Kurtosis User-Approved Electrodes": _join_channels(
             _channels("kurtosis_user_approved_channels")

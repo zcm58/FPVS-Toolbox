@@ -76,3 +76,15 @@ def test_end_audit_uses_empty_structures_when_kurtosis_was_not_evaluated():
     assert audit["kurtosis_candidate_channels"] == []
     assert audit["kurtosis_qc_evidence"] == {}
     assert audit["kurtosis_decision_plan"] == {}
+
+
+def test_qc_report_separates_experimental_policy_from_manual_approval():
+    from Main_App.processing.qc_summary_export import _kurtosis_report_fields
+
+    fields = _kurtosis_report_fields(None, {"kurtosis_decision_plan": {
+        "kurtosis_auto_interpolate_all": True,
+        "channel_decisions": [{"channel": "Fp1", "state": "experimental_automatic"}],
+    }}, {})
+    assert fields["Kurtosis Experimental Automatic Electrodes"] == "Fp1"
+    assert fields["Kurtosis Experimental Auto-All Setting"] == "Enabled"
+    assert fields["Kurtosis User-Approved Electrodes"] == "None"

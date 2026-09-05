@@ -9,6 +9,7 @@ from Main_App.projects.preprocessing_settings import (
     HARMONIC_SELECTION_PROFILE_VERSION,
     INTERPOLATION_BURDEN_REVIEW_DECISIONS_KEY,
     KURTOSIS_REVIEW_DECISIONS_BY_RECORDING_KEY,
+    KURTOSIS_AUTO_INTERPOLATE_ALL_KEY,
     LEGACY_HARMONIC_SELECTION_PROFILE,
     MANUAL_REMOVED_ELECTRODES_ENABLED_KEY,
     NEW_PROJECT_HARMONIC_SELECTION_PROFILE,
@@ -37,6 +38,14 @@ _RETIRED_EPOCH_KEYS = {
     "epoch_start",
     "epoch_end",
 }
+
+
+def test_experimental_kurtosis_auto_all_defaults_off_and_is_project_scoped() -> None:
+    assert new_project_preprocessing_settings()[KURTOSIS_AUTO_INTERPOLATE_ALL_KEY] is False
+    assert normalize_preprocessing_settings({})[KURTOSIS_AUTO_INTERPOLATE_ALL_KEY] is False
+    assert normalize_preprocessing_settings({KURTOSIS_AUTO_INTERPOLATE_ALL_KEY: True})[KURTOSIS_AUTO_INTERPOLATE_ALL_KEY] is True
+    assert normalize_preprocessing_settings({KURTOSIS_AUTO_INTERPOLATE_ALL_KEY: "false"})[KURTOSIS_AUTO_INTERPOLATE_ALL_KEY] is False
+    assert normalize_preprocessing_settings({})[KURTOSIS_AUTO_INTERPOLATE_ALL_KEY] is False
 
 
 def test_defaults_use_expected_bandpass():

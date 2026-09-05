@@ -71,6 +71,7 @@ _INTERPOLATION_BURDEN_REVIEW_DECISIONS = "interpolation_burden_review_decisions"
 KURTOSIS_REVIEW_DECISIONS_BY_RECORDING_KEY = (
     "kurtosis_review_decisions_by_recording"
 )
+KURTOSIS_AUTO_INTERPOLATE_ALL_KEY = "kurtosis_auto_interpolate_all"
 _KURTOSIS_REVIEW_DECISIONS_BY_RECORDING = (
     "kurtosis_review_decisions_by_recording"
 )
@@ -286,6 +287,7 @@ _FIELDS: tuple[_Field, ...] = (
         {},
         _KURTOSIS_REVIEW_DECISIONS_BY_RECORDING,
     ),
+    _Field(KURTOSIS_AUTO_INTERPOLATE_ALL_KEY, (KURTOSIS_AUTO_INTERPOLATE_ALL_KEY,), False, _BOOL),
     _Field(
         "max_parallel_workers_override",
         ("max_parallel_workers_override", "max_parallel_workers", "max_workers"),
@@ -1301,6 +1303,7 @@ __all__ = [
     "is_recording_condition_excluded",
     "INTERPOLATION_BURDEN_REVIEW_DECISIONS_KEY",
     "KURTOSIS_REVIEW_DECISIONS_BY_RECORDING_KEY",
+    "KURTOSIS_AUTO_INTERPOLATE_ALL_KEY",
     "PREPROCESSING_CANONICAL_KEYS",
     "REPEATED_SESSION_PREPROCESSING_KEYS",
     "PREPROCESSING_DEFAULTS",

@@ -204,6 +204,15 @@ def test_repeated_session_cli_builds_ordered_batch_and_recording_exclusion(
     assert summary["write_performed"] is False
 
 
+@pytest.mark.parametrize("value", ["P01_visit2", "P01_visit2=", "P01_visit2=  "])
+def test_cli_accepts_explicit_exclusion_without_reason(value):
+    result = cli._recording_exclusions([value])
+    assert result[0].recording_id == "P01_visit2"
+    assert result[0].reason == "No reason provided"
+    with pytest.raises(ValueError, match="recording ID"):
+        cli._recording_exclusions(["=reason"])
+
+
 def test_cli_returns_nonzero_and_writes_error_to_stderr(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

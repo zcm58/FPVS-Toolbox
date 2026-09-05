@@ -121,6 +121,23 @@ def test_changed_manual_recording_rows_fail_review_integrity(
         load_current_frequency_qc_review_evidence(project_root)
 
 
+def test_blank_recording_comment_preserves_recording_scope_and_current_evidence(tmp_path):
+    project_root = _write_repeated_project(tmp_path / "Project")
+    report = run_frequency_domain_qc_review(Project.load(project_root))
+    state = apply_frequency_domain_qc_decision(
+        project_root, report,
+        review_decisions={str(item["finding_fingerprint"]): {"decision": DECISION_EXCLUDE_RECORDING}
+                          for item in report["review_findings"]},
+        manual_recording_reasons={"P2__visit_2": " \t"},
+    )
+    assert {row["reason"] for row in state["review_decisions"]} == {"No reason provided"}
+    assert state["manual_recording_exclusions"][0]["reason"] == "No reason provided"
+    exclusions = active_frequency_domain_exclusions(project_root)
+    assert exclusions.excluded_participants == frozenset()
+    assert exclusions.manual_excluded_recordings == frozenset({"P1__VISIT_1", "P2__VISIT_2"})
+    assert load_current_frequency_qc_review_evidence(project_root) == state["review_evidence"]
+
+
 def _write_repeated_project(project_root: Path) -> Path:
     manifest = {
         "schema_version": "2.2.0",

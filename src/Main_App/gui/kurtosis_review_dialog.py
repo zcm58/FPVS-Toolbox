@@ -42,6 +42,7 @@ from Main_App.processing.kurtosis_qc import (
     KurtosisQCError,
     build_kurtosis_review_decision,
     qualifies_for_experimental_kurtosis_auto,
+    qualifies_for_experimental_kurtosis_auto_all,
 )
 from Main_App.processing.kurtosis_review_scan import (
     KURTOSIS_REVIEW_PENDING_STALE,
@@ -180,6 +181,7 @@ class KurtosisReviewDialog(AppDialog):
         parent: QWidget | None = None,
         *,
         reviewer_identity: str | None = None,
+        auto_interpolate_all: bool = False,
     ) -> None:
         if isinstance(review, KurtosisReviewDecisionReconciliation):
             scan = review.scan
@@ -204,6 +206,7 @@ class KurtosisReviewDialog(AppDialog):
         self._items = tuple(scan.review_items)
         self._current_receipts = deepcopy(current_receipts)
         self._reviewer_identity = str(reviewer_identity or "").strip() or None
+        self._auto_interpolate_all = bool(auto_interpolate_all)
         self._decision_controls: dict[tuple[str, str], QComboBox] = {}
         self._reason_controls: dict[tuple[str, str], QLineEdit] = {}
         self._invalid_reason: QLineEdit | None = None
@@ -213,6 +216,14 @@ class KurtosisReviewDialog(AppDialog):
             if any(
                 channel.get("channel") == item.channel
                 and qualifies_for_experimental_kurtosis_auto(channel)
+                for channel in item.evidence.get("channels", ())
+            )
+        )
+        self._all_flag_rows = frozenset(
+            row for row, item in enumerate(self._items)
+            if any(
+                channel.get("channel") == item.channel
+                and qualifies_for_experimental_kurtosis_auto_all(channel)
                 for channel in item.evidence.get("channels", ())
             )
         )
@@ -230,6 +241,17 @@ class KurtosisReviewDialog(AppDialog):
         self.banner.setObjectName("kurtosis_review_banner")
         self.root_layout.addWidget(self.banner)
 
+        self.auto_all_checkbox = QCheckBox(
+            "Auto interpolate all kurtosis flags (experimental)", self,
+        )
+        self.auto_all_checkbox.setObjectName("kurtosis_auto_interpolate_all")
+        self.auto_all_checkbox.setChecked(self._auto_interpolate_all)
+        self.auto_all_checkbox.setToolTip(
+            "Automatically interpolate valid flags above the configured absolute "
+            "normalized-score threshold. Saved for this project when you apply "
+            "decisions. Turn off for manual review; invalid statistics still need review."
+        )
+        self.root_layout.addWidget(self.auto_all_checkbox)
         options = QHBoxLayout()
         self.auto_checkbox = QCheckBox(
             f"Experimental: auto-interpolate |normalized score| > {KURTOSIS_EXPERIMENTAL_AUTO_Z_THRESHOLD:.1f}",
@@ -251,7 +273,7 @@ class KurtosisReviewDialog(AppDialog):
 
         explanation = QLabel(
             "Interpolation repairs the electrode across the whole processed recording. "
-            "Select a row for conditions and evidence. Manual decisions need a reason.",
+            "Select a row for conditions and evidence. Reasons are optional.",
             self,
         )
         explanation.setObjectName("kurtosis_review_fixed_repair_explanation")
@@ -311,7 +333,7 @@ class KurtosisReviewDialog(AppDialog):
 
             reason = QLineEdit(self.table)
             reason.setObjectName(f"kurtosis_review_reason_{row}")
-            reason.setPlaceholderText("Review reason")
+            reason.setPlaceholderText("Reason (optional)")
             reason.textChanged.connect(self._clear_error)
             self.table.setCellWidget(row, 6, reason)
             key = (item.recording_id.casefold(), item.channel.casefold())
@@ -330,6 +352,7 @@ class KurtosisReviewDialog(AppDialog):
         self.root_layout.addWidget(self.preview)
         self.table.currentCellChanged.connect(self._show_selected_evidence)
         self.auto_checkbox.toggled.connect(self._refresh_automatic_rows)
+        self.auto_all_checkbox.toggled.connect(self._refresh_automatic_rows)
         self.show_auto_checkbox.toggled.connect(self._refresh_automatic_rows)
 
         actions = ActionRow(self)
@@ -339,7 +362,7 @@ class KurtosisReviewDialog(AppDialog):
         )
         self.mark_all_button.setObjectName("kurtosis_review_interpolate_all")
         self.mark_all_button.setToolTip(
-            "Select interpolation for all flagged electrodes with |normalized score| > 5 "
+            "Select interpolation for all flagged electrodes above the configured threshold "
             "and fill the reason with 'User auto mark'. Then click Apply decisions."
         )
         self.mark_all_button.clicked.connect(self._mark_all_flagged)
@@ -357,23 +380,31 @@ class KurtosisReviewDialog(AppDialog):
     def _mark_all_flagged(self) -> None:
         # Make this explicit bulk choice (including hidden >10 rows) use the
         # requested reason instead of the experimental policy's generated reason.
+        self.auto_all_checkbox.setChecked(False)
         self.auto_checkbox.setChecked(False)
         for item in self._items:
             score = item.signed_normalized_score
-            if score is None or not math.isfinite(score) or abs(score) <= 5.0:
+            if score is None or not math.isfinite(score) or abs(score) <= item.threshold:
                 continue
             key = (item.recording_id.casefold(), item.channel.casefold())
             decision = self._decision_controls[key]
             decision.setCurrentIndex(decision.findData(KURTOSIS_DECISION_APPROVE))
             self._reason_controls[key].setText("User auto mark")
 
+    def _selected_automatic_rows(self) -> frozenset[int]:
+        if self.auto_all_checkbox.isChecked():
+            return self._all_flag_rows
+        return self._automatic_rows if self.auto_checkbox.isChecked() else frozenset()
+
     def _refresh_automatic_rows(self, *_args: object) -> None:
         self._clear_error()
-        enabled = self.auto_checkbox.isChecked()
+        automatic_rows = self._selected_automatic_rows()
+        self.auto_checkbox.setEnabled(not self.auto_all_checkbox.isChecked())
         show_auto = self.show_auto_checkbox.isChecked()
-        self.show_auto_checkbox.setEnabled(enabled and bool(self._automatic_rows))
+        self.show_auto_checkbox.setEnabled(bool(automatic_rows))
         self.table.setUpdatesEnabled(False)
-        for row in self._automatic_rows:
+        for row in self._all_flag_rows | self._automatic_rows:
+            enabled = row in automatic_rows
             item = self._items[row]
             key = (item.recording_id.casefold(), item.channel.casefold())
             decision = self._decision_controls[key]
@@ -386,7 +417,7 @@ class KurtosisReviewDialog(AppDialog):
             self._reason_controls[key].setEnabled(not enabled)
             self.table.setRowHidden(row, enabled and not show_auto)
         self.table.setUpdatesEnabled(True)
-        automatic = len(self._automatic_rows) if enabled else 0
+        automatic = len(automatic_rows)
         manual = len(self._items) - automatic
         self.banner.set_text(f"{manual} need manual review · {automatic} selected for experimental automatic interpolation")
         current = self.table.currentRow()
@@ -407,7 +438,7 @@ class KurtosisReviewDialog(AppDialog):
             self.preview.hide()
             return
         item = self._items[row]
-        automatic = self.auto_checkbox.isChecked() and row in self._automatic_rows
+        automatic = row in self._selected_automatic_rows()
         status = "Experimental automatic interpolation" if automatic else _review_status_text(item)
         self.details.setPlainText(
             f"{item.participant_id} / {_recording_text(item)} / {item.channel} — {status}\n"
@@ -434,27 +465,20 @@ class KurtosisReviewDialog(AppDialog):
         receipts = deepcopy(self._current_receipts)
         for row, item in enumerate(self._items):
             key = (item.recording_id.casefold(), item.channel.casefold())
-            automatic = self.auto_checkbox.isChecked() and row in self._automatic_rows
+            automatic_all = self.auto_all_checkbox.isChecked() and row in self._all_flag_rows
+            automatic = row in self._selected_automatic_rows()
             decision = KURTOSIS_DECISION_APPROVE if automatic else str(self._decision_controls[key].currentData() or "")
             reason_control = self._reason_controls[key]
             reason = reason_control.text().strip()
-            if automatic:
+            if automatic_all:
+                reason = "Experimental automatic interpolation of all valid kurtosis flags."
+            elif automatic:
                 reason = f"Experimental automatic interpolation: |normalized score| > {KURTOSIS_EXPERIMENTAL_AUTO_Z_THRESHOLD:.1f}."
             if not decision:
                 self.table.setCurrentCell(row, 5)
                 self.table.scrollToItem(self.table.item(row, 0))
                 raise KurtosisReviewDialogError(
                     f"{item.participant_id} / {item.recording_id} / {item.channel}: choose Interpolate or Keep channel."
-                )
-            if not reason:
-                self.table.setCurrentCell(row, 6)
-                self.table.scrollToItem(self.table.item(row, 0))
-                self._invalid_reason = reason_control
-                reason_control.setProperty("invalid", True)
-                reason_control.style().unpolish(reason_control)
-                reason_control.style().polish(reason_control)
-                raise KurtosisReviewDialogError(
-                    f"{item.participant_id} / {item.recording_id} / {item.channel}: enter a review reason."
                 )
             try:
                 receipt = build_kurtosis_review_decision(
@@ -464,7 +488,8 @@ class KurtosisReviewDialog(AppDialog):
                     reason=reason,
                     review_scope=item.review_scope,
                     reviewer_identity=self._reviewer_identity,
-                    experimental_auto=automatic,
+                    experimental_auto=automatic and not automatic_all,
+                    experimental_auto_all=automatic_all,
                 )
             except KurtosisQCError as exc:
                 raise KurtosisReviewDialogError(
@@ -489,6 +514,12 @@ class KurtosisReviewDialog(AppDialog):
         if self.result() != QDialog.DialogCode.Accepted or self._accepted_receipts is None:
             raise KurtosisReviewDialogError("Kurtosis review was not completed; downstream processing remains blocked.")
         return deepcopy(self._accepted_receipts)
+
+    def auto_interpolate_all(self) -> bool:
+        """Read the project preference after the user applies this review."""
+        if self.result() != QDialog.DialogCode.Accepted:
+            raise KurtosisReviewDialogError("Kurtosis review was not completed.")
+        return self.auto_all_checkbox.isChecked()
 
     def reject(self) -> None:
         self._accepted_receipts = None

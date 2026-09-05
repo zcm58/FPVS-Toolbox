@@ -406,14 +406,11 @@ def build_marker_review_decision(
                 "This occurrence is too short for the declared analyzed cycles and "
                 "cannot be retained without padding."
             )
-        normalized_reason = reason.strip() or evidence_note
-        if not normalized_reason:
-            normalized_reason = f"External evidence reference: {evidence_reference}"
         return {
             **_decision_receipt(
                 item,
                 decision=MARKER_DECISION_RETAIN_FULL,
-                reason=normalized_reason,
+                reason=reason,
                 reviewed_at_utc=review_time,
             ),
             "evidence_type": evidence_type,
@@ -439,25 +436,17 @@ def build_marker_review_decision(
             **_decision_receipt(
                 item,
                 decision=MARKER_DECISION_USE_CONTIGUOUS,
-                reason=(
-                    reason.strip()
-                    or f"Selected marker-verified contiguous span [{span[0]}, {span[1]})."
-                ),
+                reason=reason,
                 reviewed_at_utc=review_time,
             ),
             "verified_start_sample": span[0],
             "verified_stop_sample": span[1],
         }
     if normalized == MARKER_DECISION_EXCLUDE:
-        normalized_reason = reason.strip()
-        if not normalized_reason:
-            raise MarkerOccurrenceReviewError(
-                "Excluding an occurrence requires a brief reason."
-            )
         return _decision_receipt(
             item,
             decision=MARKER_DECISION_EXCLUDE,
-            reason=normalized_reason,
+            reason=reason,
             reviewed_at_utc=review_time,
         )
     raise MarkerOccurrenceReviewError(
@@ -494,7 +483,7 @@ def _decision_receipt(
     return {
         "schema_version": MARKER_REVIEW_DECISION_SCHEMA_VERSION,
         "decision": decision,
-        "reason": reason,
+        "reason": str(reason or "").strip() or "No reason provided",
         "reviewed_at_utc": reviewed_at_utc,
         "reviewer_state": MARKER_REVIEWER_STATE_EXPLICIT_GUI,
         "reviewer_identity": None,

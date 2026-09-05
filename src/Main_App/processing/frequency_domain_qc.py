@@ -754,12 +754,10 @@ def validate_frequency_domain_qc_review_decisions(
                 "A recording exclusion requires a recording-scoped QC report."
             )
         reason = (
-            ""
+            "No reason provided"
             if decision == DECISION_RETAIN
-            else str(submitted.get("reason") or "").strip()
+            else str(submitted.get("reason") or "").strip() or "No reason provided"
         )
-        if decision != DECISION_RETAIN and not reason:
-            raise ValueError("Every summed-BCA exclusion requires a reason.")
         participant_id = _normalize_participant_id(finding.get("participant_id"))
         recording_id = _normalize_recording_id(finding.get("recording_id"))
         condition = str(finding.get("condition") or "").strip()
@@ -952,9 +950,7 @@ def apply_frequency_domain_qc_decision(
         pid = _normalize_participant_id(raw_pid)
         if not pid or pid in reviewed_participant_exclusions:
             continue
-        reason = str(raw_reason or "").strip()
-        if not reason:
-            raise ValueError("Every whole-participant exclusion requires a reason.")
+        reason = str(raw_reason or "").strip() or "No reason provided"
         previous = manual_by_pid.get(pid, {})
         manual_by_pid[pid] = {
             "participant_id": pid,
@@ -980,9 +976,7 @@ def apply_frequency_domain_qc_decision(
         recording_id = str(decision.identity.recording_id)
         if _normalize_recording_id(recording_id) in reviewed_recording_exclusions:
             continue
-        reason = str(decision.reason or "").strip()
-        if not reason:
-            raise ValueError("Every whole-recording exclusion requires a reason.")
+        reason = str(decision.reason or "").strip() or "No reason provided"
         recording_key = recording_id.casefold()
         previous = manual_by_recording.get(recording_key, {})
         manual_by_recording[recording_key] = {
@@ -4640,7 +4634,7 @@ def _normalize_manual_entries(value: object) -> list[dict[str, object]]:
         if not pid:
             continue
         reason = str(item.get("reason") or WARNING_REASON_UNUSUAL_VALUES)
-        if reason not in MANUAL_EXCLUSION_REASONS:
+        if reason not in MANUAL_EXCLUSION_REASONS and reason != "No reason provided":
             reason = WARNING_REASON_UNUSUAL_VALUES
         entry = {
             "participant_id": pid,
@@ -4741,7 +4735,7 @@ def _normalize_manual_recording_entries(value: object) -> list[dict[str, object]
         if not recording_id:
             continue
         reason = str(item.get("reason") or WARNING_REASON_UNUSUAL_VALUES)
-        if reason not in MANUAL_EXCLUSION_REASONS:
+        if reason not in MANUAL_EXCLUSION_REASONS and reason != "No reason provided":
             reason = WARNING_REASON_UNUSUAL_VALUES
         entry: dict[str, object] = {
             "recording_id": recording_id,

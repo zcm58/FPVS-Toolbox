@@ -2204,6 +2204,17 @@ def test_preprocessed_cache_key_tracks_fft_multinotch_settings(tmp_path: Path) -
     )
 
 
+def test_preprocessed_cache_key_tracks_experimental_auto_all_kurtosis(tmp_path: Path) -> None:
+    source = tmp_path / "fake.bdf"
+    source.write_bytes(b"raw source")
+    base = {"stim_channel": "Status", "ref_channel1": "EXG1", "ref_channel2": "EXG2"}
+    manual = process_runner._preproc_cache_payload(source, base, mne_version=str(mne.__version__))
+    automatic = process_runner._preproc_cache_payload(
+        source, {**base, "kurtosis_auto_interpolate_all": True}, mne_version=str(mne.__version__),
+    )
+    assert process_runner._preproc_cache_key(manual) != process_runner._preproc_cache_key(automatic)
+
+
 def test_preprocessed_cache_prunes_old_entries_for_same_source(tmp_path: Path) -> None:
     info = mne.create_info(["Fp1", "Status"], sfreq=8.0, ch_types=["eeg", "stim"])
     raw = _with_biosemi64_montage(

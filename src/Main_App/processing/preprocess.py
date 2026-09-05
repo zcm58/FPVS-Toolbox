@@ -1327,6 +1327,7 @@ def perform_preprocessing(
                         filename_for_log=filename_for_log,
                     ),
                     direct_bad_channels=direct_bad_channels,
+                    kurtosis_auto_interpolate_all=params.get("kurtosis_auto_interpolate_all", False),
                 )
                 bad_k_auto = list(evidence.candidate_channels)
                 num_kurtosis_bads_identified = len(bad_k_auto)
@@ -1363,13 +1364,13 @@ def perform_preprocessing(
                         f"n_bad={num_kurtosis_bads_identified} "
                         f"bad_chs={bad_k_auto}"
                     )
+                if params.get("_fpvs_stop_before_kurtosis_interpolation", False):
+                    log_func(
+                        f"Stopped before interpolation for {filename_for_log}; "
+                        "kurtosis review evidence is ready for the GUI."
+                    )
+                    return raw, num_kurtosis_bads_identified
                 if not decision_plan.ready_for_interpolation:
-                    if params.get("_fpvs_stop_before_kurtosis_interpolation", False):
-                        log_func(
-                            f"Stopped before interpolation for {filename_for_log}; "
-                            "kurtosis review evidence is ready for the GUI."
-                        )
-                        return raw, num_kurtosis_bads_identified
                     reasons = ", ".join(decision_plan.blocking_reasons)
                     raise RuntimeError(
                         "Kurtosis interpolation is blocked pending current GUI review "

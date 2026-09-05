@@ -307,13 +307,32 @@ def test_reconfirmed_exclusion_changed_to_retain_clears_old_reason(tmp_path) -> 
     assert {row["decision"] for row in state["review_decisions"]} == {
         DECISION_RETAIN
     }
-    assert {row["reason"] for row in state["review_decisions"]} == {""}
+    assert {row["reason"] for row in state["review_decisions"]} == {"No reason provided"}
     assert (
         active_frequency_domain_exclusions(
             project.project_root
         ).excluded_electrodes_by_participant_condition
         == {}
     )
+
+
+@pytest.mark.parametrize("reason", [None, "", " \t"])
+def test_blank_frequency_comments_survive_review_reload_without_changing_scope(tmp_path, reason):
+    project = _make_project(tmp_path)
+    report = run_frequency_domain_qc_review(project)
+    decisions = _decisions(report, DECISION_EXCLUDE_CONDITION_ELECTRODE, reason=reason)
+    state = apply_frequency_domain_qc_decision(
+        project.project_root, report, review_decisions=decisions,
+        manual_participant_reasons={"P2": reason},
+    )
+    assert {row["reason"] for row in state["review_decisions"]} == {"No reason provided"}
+    assert state["manual_participant_exclusions"][0]["reason"] == "No reason provided"
+    exclusions = active_frequency_domain_exclusions(project.project_root)
+    assert exclusions.manual_excluded_participants == frozenset({"P2"})
+    assert exclusions.excluded_electrodes_by_participant_condition == {("P1", "CondA"): frozenset({"O2"})}
+    assert load_current_frequency_qc_review_evidence(project.project_root) == state["review_evidence"]
+    with pytest.raises(ValueError, match="explicit decision"):
+        frequency_qc.validate_frequency_domain_qc_review_decisions(report, {})
 
 
 def test_independent_qc_is_exact_context_and_changes_finding_identity() -> None:

@@ -719,6 +719,20 @@ def test_reconciliation_marks_missing_receipt_as_new(
     assert reconciled.pending_status_by_recording == {item.recording_id: {item.channel: KURTOSIS_REVIEW_PENDING_NEW}}
 
 
+def test_reconciliation_reprompts_auto_all_receipts_after_option_is_disabled(tmp_path, monkeypatch) -> None:
+    scan, item = _scan_one_pending_item(tmp_path, monkeypatch)
+    receipt = build_kurtosis_review_decision(
+        item.evidence, channel=item.channel, decision=KURTOSIS_DECISION_APPROVE,
+        reason="Experimental setting enabled", review_scope=item.review_scope, experimental_auto_all=True,
+    ).to_payload()
+    decisions = {item.recording_id: {item.channel: receipt}}
+    enabled = reconcile_kurtosis_review_decisions(scan, decisions, kurtosis_auto_interpolate_all=True)
+    assert enabled.pending_items == ()
+    disabled = reconcile_kurtosis_review_decisions(scan, decisions)
+    assert disabled.pending_items[0].review_status == KURTOSIS_REVIEW_PENDING_STALE
+    assert disabled.processing_decisions_by_recording == {}
+
+
 def test_reconciliation_reprompts_changed_evidence_as_stale(
     tmp_path,
     monkeypatch,

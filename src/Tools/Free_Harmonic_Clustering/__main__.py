@@ -131,8 +131,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--exclude-recording",
         action="append",
         default=[],
-        metavar="RECORDING_ID=REASON",
-        help=("Analysis-only recording exclusion with explicit reason; repeat for additional recordings."),
+        metavar="RECORDING_ID[=REASON]",
+        help=("Analysis-only recording exclusion with optional reason; repeat for additional recordings."),
     )
     _add_run_options(repeated)
     return parser
@@ -143,9 +143,9 @@ def _recording_exclusions(
 ) -> tuple[RecordingExclusionRequest, ...]:
     rows: list[RecordingExclusionRequest] = []
     for raw_value in values:
-        recording_id, separator, reason = str(raw_value).partition("=")
-        if not separator or not recording_id.strip() or not reason.strip():
-            raise ValueError("--exclude-recording must use RECORDING_ID=REASON with both values present.")
+        recording_id, _separator, reason = str(raw_value).partition("=")
+        if not recording_id.strip():
+            raise ValueError("--exclude-recording requires a recording ID; =REASON is optional.")
         rows.append(
             RecordingExclusionRequest(
                 recording_id=recording_id.strip(),

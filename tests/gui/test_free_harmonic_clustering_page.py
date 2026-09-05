@@ -409,7 +409,7 @@ def test_repeated_project_uses_prespecified_batch_without_page_scroll(
     assert stage == "repeated_session_batch"
 
 
-def test_recording_exclusion_dialog_requires_reason_and_is_analysis_only(
+def test_recording_exclusion_dialog_accepts_optional_reason_and_is_analysis_only(
     qtbot,
     tmp_path: Path,
 ) -> None:
@@ -419,15 +419,15 @@ def test_recording_exclusion_dialog_requires_reason_and_is_analysis_only(
     dialog.show()
     qtbot.waitExposed(dialog)
 
-    assert "only to this Free Harmonic Clustering batch" in (
+    assert "do not change project QC" in (
         dialog.findChild(
             QtWidgets.QWidget,
             "free_harmonic_exclusion_scope_note",
         ).text()
     )
     dialog.table.item(0, 0).setCheckState(QtCore.Qt.Checked)
-    assert not dialog.apply_button.isEnabled()
-    assert "Add a reason" in dialog.validation_status.text()
+    assert dialog.apply_button.isEnabled()
+    assert dialog.exclusions()[0].reason == "No reason provided"
 
     dialog.table.item(0, 6).setText("User-declared outlier")
     assert dialog.apply_button.isEnabled()

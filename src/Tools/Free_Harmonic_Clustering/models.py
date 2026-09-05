@@ -283,18 +283,16 @@ class ProjectContrastRequest:
 
 @dataclass(frozen=True, slots=True)
 class RecordingExclusionRequest:
-    """One analysis-only recording exclusion with an explicit reason."""
+    """One explicit recording exclusion with an optional user explanation."""
 
     recording_id: str
-    reason: str
+    reason: str = ""
 
     def __post_init__(self) -> None:
-        for field_name in ("recording_id", "reason"):
-            object.__setattr__(
-                self,
-                field_name,
-                _nonempty_text(getattr(self, field_name), field_name=field_name),
-            )
+        object.__setattr__(
+            self, "recording_id", _nonempty_text(self.recording_id, field_name="recording_id")
+        )
+        object.__setattr__(self, "reason", str(self.reason or "").strip() or "No reason provided")
 
 
 @dataclass(frozen=True, slots=True)

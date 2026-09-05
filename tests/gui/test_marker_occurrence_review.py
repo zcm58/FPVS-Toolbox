@@ -200,9 +200,7 @@ def test_retain_full_requires_evidence_type_and_note_or_reference(
 
     assert decision["schema_version"] == MARKER_REVIEW_DECISION_SCHEMA_VERSION
     assert decision["decision"] == MARKER_DECISION_RETAIN_FULL
-    assert decision["reason"] == (
-        "External evidence reference: presentation_log.json#trial-4"
-    )
+    assert decision["reason"] == "No reason provided"
     assert decision["reviewed_at_utc"] == REVIEWED_AT_UTC
     assert decision["reviewer_state"] == MARKER_REVIEWER_STATE_EXPLICIT_GUI
     assert decision["reviewer_identity"] is None
@@ -248,8 +246,9 @@ def test_contiguous_decision_accepts_only_a_supplied_candidate(tmp_path: Path) -
     assert decision["verified_stop_sample"] == 36
     assert decision["reviewed_marker_plan_fingerprint"] == MARKER_PLAN_FINGERPRINT
 
-    with pytest.raises(MarkerOccurrenceReviewError, match="brief reason"):
-        build_marker_review_decision(item, MARKER_DECISION_EXCLUDE)
+    assert decision["reason"] == "No reason provided"
+    blank_exclusion = build_marker_review_decision(item, MARKER_DECISION_EXCLUDE)
+    assert blank_exclusion["reason"] == "No reason provided"
     exclusion = build_marker_review_decision(
         item,
         MARKER_DECISION_EXCLUDE,

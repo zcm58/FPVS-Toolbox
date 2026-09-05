@@ -1427,7 +1427,11 @@ def _run_kurtosis_review_scan_embedded(
     _set_label(
         host,
         "processing_summary_label",
-        "Checking whether any kurtosis-only electrode findings need review...",
+        (
+            "Experimental automatic interpolation is enabled for valid kurtosis flags."
+            if params.get("kurtosis_auto_interpolate_all", False) else
+            "Checking whether any kurtosis-only electrode findings need review..."
+        ),
     )
     _set_progress(host, 0, len(raw_file_infos))
 
@@ -1541,6 +1545,8 @@ def _save_kurtosis_review_receipts(
     host: Any,
     params: dict[str, Any],
     receipts: Mapping[str, Mapping[str, Mapping[str, object]]],
+    *,
+    auto_interpolate_all: bool | None = None,
 ) -> bool:
     project = getattr(host, "currentProject", None)
     if project is None:
@@ -1558,6 +1564,9 @@ def _save_kurtosis_review_receipts(
         or {}
     )
     updated_preprocessing = dict(getattr(project, "preprocessing", {}) or {})
+    previous_auto_all = bool(updated_preprocessing.get("kurtosis_auto_interpolate_all", False))
+    if auto_interpolate_all is not None:
+        updated_preprocessing["kurtosis_auto_interpolate_all"] = bool(auto_interpolate_all)
     updated_preprocessing[KURTOSIS_REVIEW_DECISIONS_BY_RECORDING_KEY] = {
         str(recording_id): {
             str(channel): dict(receipt)
@@ -1580,8 +1589,11 @@ def _save_kurtosis_review_receipts(
         normalized.get(KURTOSIS_REVIEW_DECISIONS_BY_RECORDING_KEY) or {}
     )
     params[KURTOSIS_REVIEW_DECISIONS_BY_RECORDING_KEY] = saved
+    params["kurtosis_auto_interpolate_all"] = bool(
+        normalized.get("kurtosis_auto_interpolate_all", False)
+    )
     host.validated_params = params
-    if saved != previous:
+    if saved != previous or params["kurtosis_auto_interpolate_all"] != previous_auto_all:
         try:
             mark_frequency_domain_outputs_stale(
                 project.project_root,
@@ -1606,7 +1618,7 @@ def _review_kurtosis_findings(
     params: dict[str, Any],
     scan: KurtosisReviewScan,
 ) -> bool:
-    """Require current explicit receipts for every kurtosis-only finding."""
+    """Use the selected experimental policy or current explicit review decisions."""
 
     if scan.cancelled:
         return False
@@ -1656,8 +1668,11 @@ def _review_kurtosis_findings(
         if project is not None
         else params.get(KURTOSIS_REVIEW_DECISIONS_BY_RECORDING_KEY, {})
     )
+    auto_all = bool(params.get("kurtosis_auto_interpolate_all", False))
     try:
-        reconciliation = reconcile_kurtosis_review_decisions(scan, existing)
+        reconciliation = reconcile_kurtosis_review_decisions(
+            scan, existing, kurtosis_auto_interpolate_all=auto_all,
+        )
     except (TypeError, ValueError) as exc:
         logger.exception("Kurtosis decision reconciliation failed.")
         QMessageBox.critical(
@@ -1670,7 +1685,9 @@ def _review_kurtosis_findings(
     scanned_receipts = reconciliation.processing_decisions_by_recording
     if reconciliation.pending_items:
         try:
-            dialog = KurtosisReviewDialog(reconciliation, parent=host)
+            dialog = KurtosisReviewDialog(
+                reconciliation, parent=host, auto_interpolate_all=auto_all,
+            )
         except KurtosisReviewDialogError as exc:
             QMessageBox.critical(host, "Kurtosis Review Error", str(exc))
             return False
@@ -1678,6 +1695,7 @@ def _review_kurtosis_findings(
             return False
         try:
             scanned_receipts = dialog.review_decisions_by_recording()
+            auto_all = dialog.auto_interpolate_all()
         except KurtosisReviewDialogError as exc:
             QMessageBox.critical(host, "Kurtosis Review Error", str(exc))
             return False
@@ -1692,7 +1710,9 @@ def _review_kurtosis_findings(
     except ValueError as exc:
         QMessageBox.critical(host, "Kurtosis Review Error", str(exc))
         return False
-    return _save_kurtosis_review_receipts(host, params, merged)
+    return _save_kurtosis_review_receipts(
+        host, params, merged, auto_interpolate_all=auto_all,
+    )
 
 
 def _marker_review_actions() -> tuple[tuple[str, str, str], ...]:
@@ -1893,7 +1913,7 @@ def _collect_marker_exclusion_reason(
 ) -> dict[str, object] | None:
     dialog = QDialog(host)
     dialog.setObjectName("marker_exclusion_reason_dialog")
-    dialog.setWindowTitle("Reason for Excluding Occurrence")
+    dialog.setWindowTitle("Exclude Occurrence")
     dialog.setModal(True)
     dialog.setMinimumWidth(560)
 
@@ -1901,9 +1921,8 @@ def _collect_marker_exclusion_reason(
     layout.setContentsMargins(18, 18, 18, 18)
     layout.setSpacing(12)
     explanation = QLabel(
-        f"Explain why {item.condition_label}, repetition "
-        f"{item.repetition_index + 1}, should contribute no analyzed data. "
-        "This reason is saved with the exact marker evidence and occurrence scope.",
+        f"Exclude {item.condition_label}, repetition "
+        f"{item.repetition_index + 1}, from analysis. You may add a reason below.",
         dialog,
     )
     explanation.setWordWrap(True)
@@ -1912,7 +1931,7 @@ def _collect_marker_exclusion_reason(
     reason_edit = QPlainTextEdit(dialog)
     reason_edit.setObjectName("marker_exclusion_reason_edit")
     reason_edit.setPlaceholderText(
-        "Brief reason, for example: the presentation log confirms stimulation stopped."
+        "Reason (optional)"
     )
     reason_edit.setMaximumHeight(120)
     layout.addWidget(reason_edit)
@@ -4302,19 +4321,25 @@ def run_preprocessing_qc_workflow(
         _show_marker_review_error(host, str(exc))
         return False
 
-    kurtosis_scan = _run_kurtosis_review_scan_embedded(
-        host,
-        active_infos,
-        params,
-        reviewed_event_plans_by_file=current_event_plans,
-        raw_channel_qc_by_recording=display_only_raw_qc,
-    )
-    if kurtosis_scan is None or not _review_kurtosis_findings(
-        host,
-        params,
-        kurtosis_scan,
-    ):
-        return False
+    while True:
+        scanned_auto_all = bool(params.get("kurtosis_auto_interpolate_all", False))
+        kurtosis_scan = _run_kurtosis_review_scan_embedded(
+            host,
+            active_infos,
+            params,
+            reviewed_event_plans_by_file=current_event_plans,
+            raw_channel_qc_by_recording=display_only_raw_qc,
+        )
+        if kurtosis_scan is None or not _review_kurtosis_findings(
+            host,
+            params,
+            kurtosis_scan,
+        ):
+            return False
+        # An auto-on scan omits valid automatic flags. If review disabled the
+        # policy, collect those missing manual choices before processing.
+        if not scanned_auto_all or params.get("kurtosis_auto_interpolate_all", False):
+            break
 
     if not _show_suspicious_remainder(
         host,

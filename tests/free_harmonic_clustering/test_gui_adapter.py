@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
+import pytest
+
 from Tools.Free_Harmonic_Clustering import (
     HarmonicSelectionMode,
     ProjectAnalysisOptions as BackendProjectAnalysisOptions,
@@ -322,3 +324,22 @@ def test_process_operation_registry_cancels_retired_page_work() -> None:
 
     assert not has_active_operations()
     release_active_operation(token)
+
+
+@pytest.mark.parametrize("reason", ["", "  ", None])
+def test_optional_exclusion_reason_persists_truthfully_with_canonical_identity(tmp_path, reason):
+    from Tools.Free_Harmonic_Clustering.gui.exclusion_state import (
+        load_project_recording_exclusions,
+        save_project_recording_exclusions,
+    )
+
+    for model in (AnalysisRecordingExclusion, RecordingExclusionRequest):
+        exclusion = model(" P01_visit2 ", reason)
+        assert exclusion.recording_id == "P01_visit2"
+        assert exclusion.reason == "No reason provided"
+        with pytest.raises(ValueError, match="recording"):
+            model("", reason)
+    save_project_recording_exclusions(tmp_path, [AnalysisRecordingExclusion("p01_VISIT2", reason)])
+    assert load_project_recording_exclusions(tmp_path, ["P01_visit2"]) == (
+        AnalysisRecordingExclusion("P01_visit2", "No reason provided"),
+    )

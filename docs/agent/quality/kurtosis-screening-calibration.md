@@ -7,7 +7,11 @@ EEGLAB port. Its current corroborator registry is empty. The GUI additionally
 offers an experimental automatic rule for valid pending findings with absolute
 normalized score strictly greater than 10.0, with a distinct versioned receipt.
 This user-selected cutoff has not established detector accuracy; it changes
-decision authority, not the score calculation. Other findings require review.
+decision authority, not the score calculation. Projects may also opt into
+experimental automatic interpolation of all valid flags above the configured
+absolute normalized-score threshold. This separate default-Off policy takes
+precedence over the >10 option; it is not a validated artifact classifier.
+Invalid statistics and findings outside enabled policies require review.
 
 ## Required Dataset
 
@@ -57,7 +61,7 @@ automatic repair.
 
 Until representative holdout evidence supports a change, keep the current
 empty registry and retain manual review outside the optional experimental
-rule; evaluate that rule separately from individually reviewed decisions. The tests in
+policies; evaluate each policy separately from individually reviewed decisions. The tests in
 `tests/processing/test_kurtosis_qc.py`,
 `tests/processing/test_preprocess_kurtosis_gate.py`, and
 `tests/processing/test_kurtosis_review_scan.py` validate software behavior;

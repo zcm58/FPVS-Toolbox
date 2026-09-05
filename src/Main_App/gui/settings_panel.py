@@ -1233,6 +1233,22 @@ class SettingsDialog(QDialog):
             )
             experimental_settings = ExperimentalQcSettings()
 
+        self.kurtosis_auto_interpolate_all_check = QCheckBox(
+            "Auto interpolate all kurtosis flags (experimental)", tab,
+        )
+        self.kurtosis_auto_interpolate_all_check.setObjectName(
+            "settings_kurtosis_auto_interpolate_all"
+        )
+        self.kurtosis_auto_interpolate_all_check.setChecked(
+            bool(qc_preproc.get("kurtosis_auto_interpolate_all", False))
+        )
+        self.kurtosis_auto_interpolate_all_check.setToolTip(
+            "On: automatically interpolate every valid kurtosis flag above the "
+            "configured absolute normalized-score threshold. Off: use the kurtosis "
+            "review dialog. Invalid statistics still need review."
+        )
+        layout.addWidget(self.kurtosis_auto_interpolate_all_check)
+
         removed_detection_mode = normalize_removed_electrode_detection_mode(
             qc_preproc.get("removed_electrode_detection_mode"),
             auto_detect_removed_electrodes=qc_preproc.get(
@@ -1655,6 +1671,7 @@ class SettingsDialog(QDialog):
 
         project_controls_enabled = self.project is not None
         for control in (
+            self.kurtosis_auto_interpolate_all_check,
             self.removed_electrode_detection_mode_combo,
             self.removed_electrode_detection_info_button,
             self.manual_removed_electrodes_enabled_check,
@@ -4088,6 +4105,9 @@ class SettingsDialog(QDialog):
             values[canonical] = edit.text()
         values["line_noise_filter_enabled"] = (
             self.line_noise_filter_enabled_check.isChecked()
+        )
+        values["kurtosis_auto_interpolate_all"] = (
+            self.kurtosis_auto_interpolate_all_check.isChecked()
         )
         values["line_noise_frequency_hz"] = int(
             self.line_noise_frequency_combo.currentData()

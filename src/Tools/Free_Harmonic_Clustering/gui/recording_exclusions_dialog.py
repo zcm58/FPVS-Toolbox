@@ -24,7 +24,7 @@ from .models import AnalysisRecordingExclusion, RecordingChoice
 
 
 class RecordingExclusionsDialog(AppDialog):
-    """Collect project-specific recording exclusions with an audit reason."""
+    """Collect explicit project-specific exclusions with optional explanations."""
 
     def __init__(
         self,
@@ -45,8 +45,7 @@ class RecordingExclusionsDialog(AppDialog):
         note = StatusBanner(
             "These exclusions persist for this project's future Free Harmonic "
             "Clustering batches until changed. They do not change project QC, "
-            "processing, or source files. Every selected recording requires a "
-            "reason in the exported audit.",
+            "processing, or source files. Reasons are optional.",
             self,
             variant="info",
         )
@@ -61,7 +60,7 @@ class RecordingExclusionsDialog(AppDialog):
             "Session / phase-at-visit",
             "Visit",
             "Group",
-            "Required reason",
+            "Reason (optional)",
         )
         self.table = QTableWidget(len(self._recordings), len(headers), self)
         self.table.setObjectName("free_harmonic_recording_exclusions_table")
@@ -100,7 +99,7 @@ class RecordingExclusionsDialog(AppDialog):
                 self.table.setItem(row, column, item)
             reason = QTableWidgetItem("" if previous is None else previous.reason)
             reason.setToolTip(
-                "Required when this recording is excluded (for example, "
+                "Optional explanation (for example, "
                 "predeclared outlier or recording-specific artifact)."
             )
             self.table.setItem(row, 6, reason)
@@ -164,19 +163,12 @@ class RecordingExclusionsDialog(AppDialog):
         return tuple(exclusions)
 
     def _validation_error(self) -> str | None:
-        missing: list[str] = []
         selected = 0
-        for row, recording_id in self._row_recording_ids.items():
+        for row in self._row_recording_ids:
             include = self.table.item(row, 0)
             if include is None or include.checkState() != Qt.Checked:
                 continue
             selected += 1
-            reason_item = self.table.item(row, 6)
-            if reason_item is None or not reason_item.text().strip():
-                missing.append(recording_id)
-        if missing:
-            joined = ", ".join(missing)
-            return f"Add a reason for each selected recording: {joined}."
         if selected == len(self._recordings) and selected:
             return "At least one recording must remain available for analysis."
         return None

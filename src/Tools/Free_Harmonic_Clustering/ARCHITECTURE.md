@@ -63,8 +63,8 @@ graph is `spatial_adjacency kron I_H OR I_S kron complete_harmonic_adjacency`.
 - `gui/exclusion_state.py`: versioned, atomic project-local persistence for the
   GUI's canonical recording exclusions beneath the FHC results parent.
 - `gui/recording_exclusions_dialog.py`: source-immutable editor for project-
-  persistent canonical recording exclusions; every selected row requires an
-  audit reason.
+  persistent canonical recording exclusions; reasons are optional and blank
+  explanations persist as `No reason provided` in the audit.
 - `gui/__init__.py`: small embedded-GUI import surface.
 
 ## Contrast Modes
@@ -226,7 +226,7 @@ family, and whole-participant exchangeability.
 - Flat-project Setup resolves one contrast and displays the A-minus-B direction.
   A repeated-session project is recognized from canonical inspection options
   and replaces the legacy selector with a compact stable-group summary and a
-  project-persistent analysis-only recording-exclusion dialog with required
+  project-persistent analysis-only recording-exclusion dialog with optional
   reasons. One run action starts the applicable workflow. A concise Results
   section appears beneath Setup when complete; detailed cohort, exclusion,
   contrast-family, direction, harmonic, source-coverage, and participant x

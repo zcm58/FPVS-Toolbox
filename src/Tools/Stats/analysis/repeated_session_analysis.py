@@ -358,10 +358,7 @@ def prepare_repeated_session_data(
             lambda value: "" if pd.isna(value) else str(value).strip()
         )
     missing_reasons = frame["excluded"] & frame["exclusion_reason"].eq("")
-    if bool(missing_reasons.any()):
-        raise RepeatedSessionDesignError(
-            "Every excluded row must include a non-empty exclusion_reason."
-        )
+    frame.loc[missing_reasons, "exclusion_reason"] = "No reason provided"
 
     return frame.loc[:, REPEATED_SESSION_NORMALIZED_COLUMNS].reset_index(drop=True)
 

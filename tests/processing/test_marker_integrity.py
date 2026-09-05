@@ -337,7 +337,7 @@ def test_manual_decision_requires_current_evidence_and_exact_scope() -> None:
         )
 
 
-def test_manual_decision_requires_reason_time_and_truthful_reviewer_state() -> None:
+def test_manual_decision_allows_blank_reason_but_requires_time_and_reviewer_state() -> None:
     plan = _plan([10, 16])
     occurrence = plan.occurrences[0]
     decision = _review_decision(
@@ -349,8 +349,11 @@ def test_manual_decision_requires_reason_time_and_truthful_reviewer_state() -> N
 
     with pytest.raises(MarkerIntegrityError, match="schema is missing or stale"):
         _apply_review(plan, occurrence, replace(decision, schema_version=None))
-    with pytest.raises(MarkerIntegrityError, match="requires a reason"):
-        _apply_review(plan, occurrence, replace(decision, reason=""))
+    blank = _apply_review(plan, occurrence, replace(decision, reason=""))
+    assert blank.decision_payload["reason"] == "No reason provided"
+    assert blank.start_sample is None and blank.stop_sample is None
+    explicit = _apply_review(plan, occurrence, replace(decision, reason="No reason provided"))
+    assert explicit.fingerprint == blank.fingerprint
     with pytest.raises(MarkerIntegrityError, match="UTC timestamp"):
         _apply_review(
             plan,
@@ -363,6 +366,26 @@ def test_manual_decision_requires_reason_time_and_truthful_reviewer_state() -> N
             occurrence,
             replace(decision, reviewer_identity="Invented User"),
         )
+
+
+@pytest.mark.parametrize("blank_reason", [None, "", "  \t"])
+def test_marker_comment_is_optional_without_relaxing_correction_evidence(blank_reason) -> None:
+    plan = _plan([10, 16, 28, 34, 40])
+    occurrence = plan.occurrences[0]
+    decision = _review_decision(plan, occurrence, MARKER_DECISION_RETAIN_FULL)
+    decision = replace(decision, reason=blank_reason)
+    with pytest.raises(MarkerIntegrityError, match="evidence type"):
+        _apply_review(plan, occurrence, decision)
+    approved = _apply_review(plan, occurrence, replace(
+        decision, evidence_type="presentation_log", evidence_reference="log.json#trial-4",
+    ))
+    assert approved.decision_payload["reason"] == "No reason provided"
+    assert approved.decision_payload["evidence_reference"] == "log.json#trial-4"
+    assert (approved.start_sample, approved.stop_sample) == (
+        occurrence.proposed_start_sample, occurrence.proposed_stop_sample,
+    )
+    with pytest.raises(MarkerIntegrityError, match="explicit start and stop"):
+        _apply_review(plan, occurrence, replace(decision, decision=MARKER_DECISION_USE_CONTIGUOUS))
 
 
 def test_marker_plan_payload_carries_its_predecision_fingerprint() -> None:

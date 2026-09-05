@@ -831,6 +831,8 @@ def _casefold_mapping_entry(
 def reconcile_kurtosis_review_decisions(
     scan: KurtosisReviewScan,
     kurtosis_review_decisions_by_recording: object,
+    *,
+    kurtosis_auto_interpolate_all: bool = False,
 ) -> KurtosisReviewDecisionReconciliation:
     """Reuse only fingerprint-current receipts and reprompt new or stale items.
 
@@ -877,6 +879,7 @@ def reconcile_kurtosis_review_decisions(
                         evidence=item.evidence,
                         channel=item.channel,
                         review_scope=item.review_scope,
+                        kurtosis_auto_interpolate_all=kurtosis_auto_interpolate_all,
                     )
                 except (KurtosisQCError, TypeError, ValueError):
                     status = KURTOSIS_REVIEW_PENDING_STALE

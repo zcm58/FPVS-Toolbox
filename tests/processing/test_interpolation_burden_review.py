@@ -124,6 +124,22 @@ def test_current_receipt_is_reused_and_changed_evidence_requires_review(
     assert stale.items[0].evidence_status == "stale"
 
 
+@pytest.mark.parametrize("decision", [INTERPOLATION_BURDEN_DECISION_RETAIN, INTERPOLATION_BURDEN_DECISION_EXCLUDE])
+@pytest.mark.parametrize("reason", ["", "  \t"])
+def test_blank_comment_preserves_explicit_burden_decision_and_fingerprint(tmp_path, decision, reason):
+    project = _ordinary_project(tmp_path / "Project")
+    batch = collect_interpolation_burden_review(project, ledger=_ordinary_ledger())
+    choice = InterpolationBurdenReviewChoice(decision, reason, INTERPOLATION_BURDEN_SCOPE_PARTICIPANT)
+    applied = apply_interpolation_burden_review(project, batch, {"P01": choice})
+    receipt = applied.decisions[0]
+    assert receipt.reason == "No reason provided" and receipt.decision == decision
+    assert applied.excluded_participants == (("P01",) if decision == INTERPOLATION_BURDEN_DECISION_EXCLUDE else ())
+    reloaded = Project.load(project.project_root)
+    saved = reloaded.preprocessing["interpolation_burden_review_decisions"]["P01"]
+    assert saved["reason"] == "No reason provided" and saved["fingerprint"] == receipt.fingerprint
+    assert not collect_interpolation_burden_review(reloaded, ledger=_ordinary_ledger()).requires_review
+
+
 def test_retain_removes_only_a_qc07_owned_participant_exclusion(
     tmp_path: Path,
 ) -> None:

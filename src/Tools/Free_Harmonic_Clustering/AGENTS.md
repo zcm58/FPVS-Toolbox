@@ -95,7 +95,8 @@ current-session result while delegating long work to signal-driven workers.
   report missing visits as coverage and never treat recordings as independent
   participants, impute visits, or zero-fill them.
 - GUI analysis-specific recording exclusions are additive, project-local FHC
-  preferences and require nonempty reasons. Persist them beneath the FHC results
+  preferences with optional user reasons. Normalize blank submitted reasons to
+  `No reason provided` in persistence and audit exports. Persist them beneath the FHC results
   parent, reuse them for later repeated batches until changed, and export them
   with the cohort audit without mutating project QC or metadata. Headless CLI
   exclusions remain explicit and batch-local.
@@ -163,7 +164,7 @@ the page implementation.
   Harmonic Clustering Analysis**. Repeated projects are recognized
   automatically and replace the flat-project selectors with a compact stable-
   group summary and a project-persistent analysis-only recording-exclusion
-  dialog with required reasons. A concise Results section appears only after
+  dialog with optional reasons. A concise Results section appears only after
   completion; detailed cohort, contrast-family, direction, harmonic, method,
   and run provenance remains in the exported workbook.
 - Keep the embedded task pages free of page-level scroll areas. Bounded result

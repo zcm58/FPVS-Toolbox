@@ -543,7 +543,7 @@ def build_interpolation_burden_review_decision(
     *,
     participant_id: object,
     decision: str,
-    reason: object,
+    reason: object = None,
     reviewed_at_utc: str | None = None,
     reviewer_identity: str | None = None,
     exclusion_scope: str | None = None,
@@ -569,7 +569,7 @@ def build_interpolation_burden_review_decision(
         decision=str(decision or "").strip().casefold(),
         processing_id=finding.recording_id,
         participant_id=normalized_participant_id,
-        reason=str(reason or "").strip(),
+        reason=str(reason or "").strip() or "No reason provided",
         burden_fingerprint=finding.burden_fingerprint,
         reviewed_at_utc=(
             reviewed_at_utc

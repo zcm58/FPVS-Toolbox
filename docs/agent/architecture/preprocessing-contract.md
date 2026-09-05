@@ -753,14 +753,24 @@ Kurtosis review and interpolation:
   `gui_enabled_experimental_abs_z_gt_10_v1` receipt and
   `experimental_automatic` channel decision, not an individual manual approval
   or independent corroboration. Disabling it restores individual review.
+  A separate per-project `kurtosis_auto_interpolate_all` preference (default
+  False) authorizes every valid flag above the existing configured absolute
+  normalized threshold, and takes precedence over the >10 rule. Settings >
+  Experimental and the review dialog expose this policy. Its versioned
+  `gui_enabled_experimental_all_flags_v1` authority is experimental; invalid
+  statistics still need an explicit decision. Turning it off invalidates
+  auto-all receipts even for scores above 10. The policy is included in the
+  interpolation plan, preprocessing cache, processing fingerprint, and QC report.
   Other findings require an explicit Interpolate or Keep channel decision.
 - The GUI displays recording/session, electrode, analyzed condition and
   occurrence scope, raw kurtosis, signed normalized score, threshold,
   corroborator status, review-only raw-channel context, and a compact trace.
   A compact table and one selected-row evidence panel expose these details.
-  Manual choices have no default and require a reason; the dialog states that approval repairs
+  Manual choices have no default; reasons are optional and omitted comments are
+  recorded as `No reason provided`. The dialog states that approval repairs
   the electrode throughout the processed recording. Cancel, close, missing or
-  stale evidence, and non-GUI execution do not authorize interpolation.
+  stale evidence, and non-GUI execution do not create manual approval. An
+  explicitly saved experimental project policy applies consistently in workers.
 - Review scanning and the processing worker derive the same condition-selection
   identity (`participant_id`, `recording_id` falling back to the participant).
   Source file paths remain bound separately in review receipts. The scanner
@@ -770,7 +780,10 @@ Kurtosis review and interpolation:
   exclusions for unchanged inputs; genuinely changed evidence still requires review.
 - The scan may run at most two independent recordings concurrently, guarded by
   available CPU/RAM and distinct loader memmap names. Each job retains the
-  shared processing order and numerical implementation; owned Raw objects may
+  shared processing order and numerical implementation and stops before
+  interpolation/final reference even when automatic decisions are ready. If
+  review turns off an auto-on scan's policy, the workflow rescans to collect
+  previously omitted manual decisions before continuing. Owned Raw objects may
   be reused without an extra copy. Results retain input order, progress callbacks
   run on the calling worker, and cancellation waits for active stages to close
   their Raw objects. Stage timings separate loading/preprocessing from scoring.

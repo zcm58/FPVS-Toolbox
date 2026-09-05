@@ -72,8 +72,8 @@ runs every project condition through four prespecified contrast families:
 <p>
 The primary batch uses complete, phase-balanced participant pairs for every
 contrast. Missing sessions are reported as coverage; they are never imputed or
-zero-filled. Analysis-only recording exclusions can be added before a run, and
-each requires a reason. These exclusions are exported with the batch but do not
+zero-filled. Analysis-only recording exclusions can be added before a run with
+an optional reason. These exclusions are exported with the batch but do not
 change project QC or source files.
 </p>
 <h3>Direction and Fixed Order</h3>

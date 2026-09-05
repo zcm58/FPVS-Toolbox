@@ -17,6 +17,9 @@ or the stable `Tools.Stats.StatsWindow` import surface.
 - Freeze the QC/manual-eligible cohort first, then use every finite selected
   observation without imputation. Do not silently drop a participant to rescue
   a Condition.
+- User exclusion explanations are optional; blank explanations on explicitly
+  excluded imported rows become `No reason provided`. Preserve required
+  machine-generated QC evidence and exclusion decisions.
 - The participant-random-intercept LMM is primary for balanced and incomplete
   data:
   - single: `Summed BCA ~ Condition * ROI + (1 | Participant)`;

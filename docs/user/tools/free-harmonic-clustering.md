@@ -95,9 +95,10 @@ participant-level contrast families:
 
 All four families use complete, phase-balanced pairs for the relevant
 condition. Missing sessions remain visible in the cohort audit and are never
-imputed or zero-filled. The GUI can add recording-specific exclusions for one
-batch only; every selected recording requires a reason, is exported in the
-audit, and does not change project QC or any source file.
+imputed or zero-filled. GUI recording exclusions persist for this project's
+Free Harmonic Clustering batches until changed. Reasons are optional; blank
+reasons appear as `No reason provided` in the audit. These exclusions do not
+change project QC or any source file. CLI exclusions apply only to that batch.
 
 The session direction is later visit minus earlier visit. If every participant
 completed sessions in the same order—as in the Birth Control project—phase is

@@ -152,6 +152,14 @@ def test_detector_choice_provenance_does_not_change_processing_fingerprint(
     )
 
 
+def test_experimental_auto_all_kurtosis_changes_processing_fingerprint(tmp_path) -> None:
+    project, _info = _project_with_raw(tmp_path)
+    settings = {**_settings(), "kurtosis_auto_interpolate_all": False}
+    manual = build_processing_fingerprint(project, settings, project.event_map)
+    automatic = build_processing_fingerprint(project, {**settings, "kurtosis_auto_interpolate_all": True}, project.event_map)
+    assert automatic != manual
+
+
 def test_classification_fingerprint_uses_canonical_limit_when_alias_is_none(
     tmp_path,
 ) -> None:
