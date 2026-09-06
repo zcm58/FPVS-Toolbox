@@ -15,6 +15,7 @@ manual_smoke = []
 audits = ["gui"]
 tests = [
   "tests/gui/test_signal_review_model.py",
+  "tests/gui/test_toolbox_cache_workflow_static.py",
   "tests/gui/test_post_processing_readiness_static.py",
   "tests/gui/test_processing_failure_routing_static.py",
 ]
@@ -50,6 +51,9 @@ manual_smoke = []
 [scopes.processing]
 audits = ["protected", "source-localization"]
 tests = [
+  "tests/processing/test_preflight_qc_pruning.py",
+  "tests/processing/test_qc_cache_maintenance_integration.py",
+  "tests/processing/test_toolbox_cache.py",
   "tests/gui/test_preflight_reuse_static.py",
   "tests/processing/test_preflight_qc_reuse.py",
   "tests/processing/test_prepared_kurtosis_cache.py",

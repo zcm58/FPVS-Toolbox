@@ -18,6 +18,13 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from Main_App.processing.preflight_qc_pruning import (
+    namespace_cache_publication_lock,
+    prepare_pruning_candidates,
+    prune_after_publication,
+    safe_cache_directory,
+)
+
 logger = logging.getLogger(__name__)
 
 PREFLIGHT_QC_CACHE_SCHEMA_VERSION = 2
@@ -211,34 +218,58 @@ def save_preflight_qc_cache(
     ) + "\n"
 
     with _CACHE_WRITE_LOCK:
+        if not safe_cache_directory(Path(project_root), cache_directory):
+            raise OSError("Preflight cache directory is not a safe project-local directory")
         cache_directory.mkdir(parents=True, exist_ok=True)
-        file_descriptor, temporary_name = tempfile.mkstemp(
-            dir=cache_directory,
-            prefix=f".{fingerprint}.",
-            suffix=".tmp",
-        )
-        temporary_path = Path(temporary_name)
-        try:
-            with os.fdopen(
-                file_descriptor,
-                "w",
-                encoding="utf-8",
-                newline="\n",
-            ) as stream:
-                stream.write(serialized)
-                stream.flush()
-                os.fsync(stream.fileno())
-            os.replace(temporary_path, destination)
-        finally:
-            try:
-                temporary_path.unlink(missing_ok=True)
-            except OSError:
-                logger.warning(
-                    "preflight_qc_cache_temp_cleanup_failed path=%s",
-                    temporary_path,
-                )
+        with namespace_cache_publication_lock(cache_directory) as acquired:
+            if not acquired:
+                raise OSError("Preflight cache publication is busy or unavailable")
+            prepared = prepare_pruning_candidates(
+                Path(project_root), cache_directory, key_payload,
+                namespace=namespace, schema_version=PREFLIGHT_QC_CACHE_SCHEMA_VERSION,
+                method_directory=PREFLIGHT_QC_CACHE_METHOD_DIRECTORY,
+            )
+            _publish_cache_file(cache_directory, destination, fingerprint, serialized)
+            prune_after_publication(
+                Path(project_root), destination, prepared,
+                namespace=namespace, schema_version=PREFLIGHT_QC_CACHE_SCHEMA_VERSION,
+                method_directory=PREFLIGHT_QC_CACHE_METHOD_DIRECTORY,
+            )
 
     return destination
+
+
+def _publish_cache_file(
+    cache_directory: Path, destination: Path, fingerprint: str, serialized: str,
+) -> None:
+    """Publish the completed cache while its namespace lock remains held."""
+
+    file_descriptor, temporary_name = tempfile.mkstemp(
+        dir=cache_directory,
+        prefix=f".{fingerprint}.",
+        suffix=".tmp",
+    )
+    temporary_path = Path(temporary_name)
+    try:
+        with os.fdopen(
+            file_descriptor,
+            "w",
+            encoding="utf-8",
+            newline="\n",
+        ) as stream:
+            stream.write(serialized)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary_path, destination)
+    finally:
+        try:
+            temporary_path.unlink(missing_ok=True)
+        except OSError:
+            logger.warning(
+                "preflight_qc_cache_temp_cleanup_failed path=%s",
+                temporary_path,
+            )
+
 
 
 __all__ = [

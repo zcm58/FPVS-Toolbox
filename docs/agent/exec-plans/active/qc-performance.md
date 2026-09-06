@@ -32,6 +32,17 @@ only affected evidence is recomputed and processing still follows current choice
 Record measured synthetic timings separately from numerical parity and do not
 present them as a measured speedup of the user's full dataset.
 
+## Cache Maintenance Follow-up
+
+- [x] Remove older QC entries only after a complete replacement for the same
+  recording/event/occurrence is published; retain unrelated and unreplaced work.
+- [x] Add Advanced settings cache inspection/clearing for known disposable
+  project/app caches, with background workers and current-work guards.
+- [x] Preserve recordings, analysis companions/exports, project settings,
+  review decisions, processing ledgers, and downloaded anatomical dependencies.
+- [x] Verify failed writes/cancellation, concurrent writers, replaced inputs,
+  path redirection, partial deletion failures, and GUI wiring without local Qt.
+
 ## Verification Result (2026-09-05)
 
 Completed all four items. Direct comparisons against `ffebf3ab` preserved exact
@@ -50,3 +61,13 @@ Synthetic paired metric benchmark: median 12.533 ms before versus 11.039 ms afte
 (about 12% faster for that component). Cache hits avoid repeated evidence and
 preparation work; no full-dataset wall-clock speedup is claimed. Full BDF loading
 and current decision validation still run before final processing cache handoff.
+
+Cache maintenance verification: **1,128 processing tests passed, 5 skipped**;
+**52 non-Qt GUI checks passed**. Cache deletion/repopulation, locked predecessor
+retry, failed publication, source changes, redirects, and cache-only manifest
+updates are covered. The concurrency test now coordinates initial work with
+barriers instead of assuming filesystem work finishes inside a 30-ms sleep;
+the same concurrency limits remain asserted. Lint/compile/diff checks passed.
+The broad gate still reports only the eight unrelated `outputs/` path findings.
+Four cache-dialog Qt tests are registered for CI. No user caches were cleared.
+See [cache ownership and visible smoke](../../architecture/cache-maintenance.md).

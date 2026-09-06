@@ -1791,6 +1791,19 @@ class SettingsDialog(QDialog):
         self.beta_tools_check.setChecked(self.manager.beta_tools_enabled())
         advanced_form.addRow(QLabel("Beta Tools", advanced_group), self.beta_tools_check)
 
+        self.clear_toolbox_cache_button = make_action_button(
+            "Clear Toolbox Cache…", compact=True, parent=advanced_group,
+        )
+        self.clear_toolbox_cache_button.setObjectName("settings_clear_toolbox_cache")
+        self.clear_toolbox_cache_button.clicked.connect(self._clear_toolbox_cache)
+        advanced_form.addRow(QLabel("Temporary files", advanced_group), self.clear_toolbox_cache_button)
+        cache_note = QLabel(
+            "Keep recordings and results. The next calculations may take longer.",
+            advanced_group,
+        )
+        cache_note.setWordWrap(True)
+        advanced_form.addRow(cache_note)
+
         advanced_group.content_layout.addLayout(advanced_form)
         layout.addWidget(advanced_group)
 
@@ -1880,6 +1893,11 @@ class SettingsDialog(QDialog):
         self._add_settings_footer(tab, layout, "settings_advanced_footer")
 
         tabs.addTab(tab, "Advanced")
+
+    def _clear_toolbox_cache(self) -> None:
+        from Main_App.gui.toolbox_cache_workflow import show_toolbox_cache_clear
+
+        show_toolbox_cache_clear(self)
 
     def _add_frequency_domain_qc_settings(self, parent: QWidget) -> None:
         header = SubsectionHeaderLabel("Frequency-domain QC", parent)

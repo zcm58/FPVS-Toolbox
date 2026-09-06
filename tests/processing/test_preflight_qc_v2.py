@@ -928,25 +928,39 @@ def test_v2_caps_worker_and_bdf_read_concurrency(monkeypatch, tmp_path: Path) ->
     maximum_reads = 0
     active_spectra = 0
     maximum_spectra = 0
+    read_calls = 0
+    spectral_calls = 0
+    first_reads = threading.Barrier(2)
+    first_spectra = threading.Barrier(2)
     original_spectral_qc = preflight_qc.evaluate_condition_spectral_qc_v2
 
     def _read_hook() -> None:
-        nonlocal active_reads, maximum_reads
+        nonlocal active_reads, maximum_reads, read_calls
         with lock:
             active_reads += 1
+            read_calls += 1
+            first_pair = read_calls <= 2
             maximum_reads = max(maximum_reads, active_reads)
         try:
+            # Cache publication can delay arrivals beyond the synthetic read
+            # duration. Coordinate the first pair instead of relying on luck.
+            if first_pair:
+                first_reads.wait(timeout=5)
             time.sleep(0.03)
         finally:
             with lock:
                 active_reads -= 1
 
     def _spectral_qc(*args, **kwargs):  # noqa: ANN002, ANN003
-        nonlocal active_spectra, maximum_spectra
+        nonlocal active_spectra, maximum_spectra, spectral_calls
         with lock:
             active_spectra += 1
+            spectral_calls += 1
+            first_pair = spectral_calls <= 2
             maximum_spectra = max(maximum_spectra, active_spectra)
         try:
+            if first_pair:
+                first_spectra.wait(timeout=5)
             time.sleep(0.03)
             return original_spectral_qc(*args, **kwargs)
         finally:

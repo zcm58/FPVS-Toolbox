@@ -19,6 +19,10 @@ Primary paths:
 - `src/Main_App/Shared/settings_paths.py`
 - tool modules that import, export, or generate files under `src/Tools/`
 
+Disposable cache ownership, automatic QC replacement, and the Advanced settings
+cache-clearing action are documented in [Cache Maintenance](cache-maintenance.md).
+Cache removal preserves analysis companions, review decisions, and ledgers.
+
 ## Settings Storage
 
 FPVS Toolbox uses a strict hybrid settings model:
