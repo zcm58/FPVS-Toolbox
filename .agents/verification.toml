@@ -14,6 +14,7 @@ manual_smoke = []
 [scopes.gui]
 audits = ["gui"]
 tests = [
+  "tests/gui/test_frequency_domain_qc_dialog_static.py",
   "tests/gui/test_signal_review_model.py",
   "tests/gui/test_toolbox_cache_workflow_static.py",
   "tests/gui/test_post_processing_readiness_static.py",

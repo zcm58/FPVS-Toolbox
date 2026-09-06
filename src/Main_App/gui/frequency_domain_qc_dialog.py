@@ -8,22 +8,29 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
-    QDialog,
     QHeaderView,
-    QHBoxLayout,
     QLabel,
     QLineEdit,
     QMessageBox,
     QPlainTextEdit,
     QSizePolicy,
+    QSplitter,
+    QStackedWidget,
+    QTabWidget,
     QTableWidget,
     QTableWidgetItem,
-    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
-from Main_App.gui.components import ActionRow, StatusBanner, make_action_button
+from Main_App.gui.components import (
+    ActionRow,
+    AppDialog,
+    StatusBanner,
+    SubsectionHeaderLabel,
+    SurfaceSize,
+    make_action_button,
+)
 from Main_App.processing.frequency_domain_qc import (
     DECISION_EXCLUDE_CONDITION,
     DECISION_EXCLUDE_CONDITION_ELECTRODE,
@@ -46,7 +53,7 @@ _DECISION_LABELS = {
 }
 
 
-class FrequencyDomainQcReviewDialog(QDialog):
+class FrequencyDomainQcReviewDialog(AppDialog):
     """Collect explicit choices without treating a BCA flag as an exclusion."""
 
     def __init__(
@@ -56,7 +63,11 @@ class FrequencyDomainQcReviewDialog(QDialog):
         *,
         participant_groups: Mapping[str, str] | None = None,
     ) -> None:
-        super().__init__(parent)
+        super().__init__(
+            "Experimental Summed-BCA Review",
+            parent,
+            size=SurfaceSize(1180, 780, min_width=1000, min_height=650),
+        )
         self._report = report
         self._identity_scope = str(
             report.get("identity_scope") or "participant"
@@ -68,11 +79,11 @@ class FrequencyDomainQcReviewDialog(QDialog):
             if str(participant_id).strip() and str(group_label).strip()
         }
         self._decision_controls: dict[str, tuple[QComboBox, QLineEdit]] = {}
+        self._findings = _review_findings(report)
+        self._evidence_texts: list[str] = []
+        self._row_controls: list[tuple[QComboBox, QLineEdit]] = []
         self._submitted_decisions: tuple[dict[str, object], ...] = ()
-        self.setWindowTitle("Experimental Summed-BCA Review")
         self.setModal(True)
-        self.setMinimumSize(1000, 650)
-        self.resize(1220, 780)
         self._build_ui()
 
     def review_decisions(self) -> tuple[dict[str, object], ...]:
@@ -111,124 +122,122 @@ class FrequencyDomainQcReviewDialog(QDialog):
         super().accept()
 
     def _build_ui(self) -> None:
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(10)
-
+        layout = self.root_layout
         layout.addWidget(
             StatusBanner(
-                "Review each flagged frequency-domain finding before final harmonics are finalized.",
+                "Experimental screening: review unusually large summed-BCA responses.",
                 self,
                 variant="warning",
             )
         )
-        explanation = QLabel(SUMMED_BCA_SCREENING_BRIEF_TEXT, self)
-        explanation.setObjectName("frequency_domain_qc_experimental_explanation")
-        explanation.setWordWrap(True)
-        layout.addWidget(explanation)
         outcome_label = QLabel(_outcome_text(self._report), self)
         outcome_label.setObjectName("frequency_domain_qc_outcome_label")
         outcome_label.setWordWrap(True)
         layout.addWidget(outcome_label)
 
-        self.summary_table = QTableWidget(self)
-        self.summary_table.setObjectName("frequency_domain_qc_summary_table")
-        self.summary_table.setColumnCount(6)
-        identity_heading = (
-            "Recording" if self._identity_scope == "recording" else "Participant"
-        )
-        self.summary_table.setHorizontalHeaderLabels(
-            [
-                identity_heading,
-                "Participant",
-                "Session / visit",
-                "Group",
-                "Findings",
-                "Automatic action",
-            ]
-        )
-        self.summary_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        self.summary_table.setMaximumHeight(185)
-        self.summary_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.summary_table.setSelectionMode(QAbstractItemView.NoSelection)
-        header = self.summary_table.horizontalHeader()
-        for column in (0, 1, 2, 3):
-            header.setSectionResizeMode(column, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(4, QHeaderView.Stretch)
-        header.setSectionResizeMode(5, QHeaderView.ResizeToContents)
-        layout.addWidget(self.summary_table)
-        self._populate_summary_table()
-
-        review_label = QLabel("Decide Every Finding", self)
-        review_label.setObjectName("frequency_domain_qc_review_label")
-        layout.addWidget(review_label)
-        self.details_table = QTableWidget(self)
-        self.details_table.setObjectName("frequency_domain_qc_details_table")
-        self.details_table.setColumnCount(14)
-        self.details_table.setHorizontalHeaderLabels(
-            [
-                "Participant",
-                "Recording",
-                "Session / visit",
-                "Condition",
-                "Electrode / ROI",
-                "Finding",
-                "Signed value",
-                "Absolute value",
-                "Band",
-                "Harmonics",
-                "Analysis window",
-                "Independent QC",
-                "Decision",
-                "Reason (optional)",
-            ]
-        )
-        self.details_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.details_table.setSelectionMode(QAbstractItemView.NoSelection)
-        header = self.details_table.horizontalHeader()
-        for column in range(12):
-            header.setSectionResizeMode(column, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(12, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(13, QHeaderView.Stretch)
-        layout.addWidget(self.details_table, 3)
-        self._populate_details_table()
-
         technical_rows = _technical_context_rows(self._report)
         if technical_rows:
             technical_label = QLabel(
-                f"{len(technical_rows)} cohort-context input(s) are unavailable. "
-                "They were not silently treated as passes; review the recorded technical statuses.",
+                f"{len(technical_rows)} cohort-context inputs unavailable — "
+                "see Review context. These are not passes.",
                 self,
             )
             technical_label.setObjectName("frequency_domain_qc_technical_status")
             technical_label.setWordWrap(True)
             layout.addWidget(technical_label)
-            technical_details = QPlainTextEdit(self)
-            technical_details.setObjectName(
-                "frequency_domain_qc_technical_status_details"
-            )
-            technical_details.setReadOnly(True)
-            technical_details.setMaximumHeight(90)
-            technical_details.setPlainText(
-                "\n".join(_technical_context_text(row) for row in technical_rows)
-            )
-            layout.addWidget(technical_details)
 
-        tools = QWidget(self)
-        tools_layout = QHBoxLayout(tools)
-        tools_layout.setContentsMargins(0, 0, 0, 0)
-        self.rules_button = QToolButton(tools)
-        self.rules_button.setText("Show screening rules")
-        self.rules_button.setCheckable(True)
-        self.rules_button.toggled.connect(self._toggle_rules)
-        tools_layout.addWidget(self.rules_button)
-        tools_layout.addStretch(1)
-        layout.addWidget(tools)
-        self.rules_label = QLabel(_threshold_text(self._report), self)
-        self.rules_label.setObjectName("frequency_domain_qc_rules_label")
-        self.rules_label.setWordWrap(True)
-        self.rules_label.setVisible(False)
-        layout.addWidget(self.rules_label)
+        self.splitter = QSplitter(Qt.Horizontal, self)
+        self.splitter.setChildrenCollapsible(False)
+        layout.addWidget(self.splitter, 1)
+        findings_panel = QWidget(self.splitter)
+        findings_panel.setMinimumWidth(490)
+        findings_layout = QVBoxLayout(findings_panel)
+        findings_layout.setContentsMargins(0, 0, 0, 0)
+        findings_layout.addWidget(SubsectionHeaderLabel("Findings", findings_panel))
+        self.search_edit = QLineEdit(findings_panel)
+        self.search_edit.setObjectName("frequency_domain_qc_search")
+        self.search_edit.setPlaceholderText("Search participant, condition, electrode or evidence…")
+        self.search_edit.setAccessibleName("Search frequency-domain findings")
+        self.search_edit.setClearButtonEnabled(True)
+        findings_layout.addWidget(self.search_edit)
+
+        self.details_table = QTableWidget(findings_panel)
+        self.details_table.setObjectName("frequency_domain_qc_details_table")
+        self.details_table.setColumnCount(5)
+        identity_heading = (
+            "Recording" if self._identity_scope == "recording" else "Participant"
+        )
+        self.details_table.setHorizontalHeaderLabels(
+            [identity_heading, "Condition", "Electrode / ROI", "|Value|", "Decision"]
+        )
+        self.details_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.details_table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.details_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.details_table.setWordWrap(False)
+        self.details_table.setTextElideMode(Qt.ElideRight)
+        self.details_table.setAlternatingRowColors(True)
+        self.details_table.verticalHeader().hide()
+        self.details_table.verticalHeader().setDefaultSectionSize(32)
+        header = self.details_table.horizontalHeader()
+        header.setMinimumSectionSize(40)
+        header.setStretchLastSection(False)
+        header.setSectionResizeMode(1, QHeaderView.Stretch)
+        # Bound the short columns; long labels stay available in the evidence pane.
+        for column, width in ((0, 100), (2, 105), (3, 85), (4, 105)):
+            header.setSectionResizeMode(column, QHeaderView.Fixed)
+            self.details_table.setColumnWidth(column, width)
+        findings_layout.addWidget(self.details_table, 1)
+        self.progress_label = QLabel(findings_panel)
+        self.progress_label.setObjectName("frequency_domain_qc_progress")
+        self.progress_label.setWordWrap(True)
+        findings_layout.addWidget(self.progress_label)
+
+        detail_panel = QWidget(self.splitter)
+        detail_panel.setMinimumWidth(360)
+        detail_layout = QVBoxLayout(detail_panel)
+        detail_layout.setContentsMargins(8, 0, 0, 0)
+        detail_layout.addWidget(SubsectionHeaderLabel("Selected finding", detail_panel))
+        self.detail_tabs = QTabWidget(detail_panel)
+        self.detail_tabs.setObjectName("frequency_domain_qc_detail_tabs")
+        self.evidence_view = QPlainTextEdit(self.detail_tabs)
+        self.evidence_view.setObjectName("frequency_domain_qc_finding_evidence")
+        self.evidence_view.setAccessibleName("Complete selected finding evidence")
+        self.evidence_view.setReadOnly(True)
+        self.evidence_view.setLineWrapMode(QPlainTextEdit.WidgetWidth)
+        self.detail_tabs.addTab(self.evidence_view, "Finding evidence")
+        self.context_view = QPlainTextEdit(self.detail_tabs)
+        self.context_view.setObjectName("frequency_domain_qc_review_context")
+        self.context_view.setAccessibleName("Screening rules, participant summaries and unavailable inputs")
+        self.context_view.setReadOnly(True)
+        self.context_view.setLineWrapMode(QPlainTextEdit.WidgetWidth)
+        self.context_view.setPlainText(self._review_context_text(technical_rows))
+        self.detail_tabs.addTab(self.context_view, "Review context")
+        detail_layout.addWidget(self.detail_tabs, 1)
+
+        self.decision_stack = QStackedWidget(detail_panel)
+        self.decision_stack.setObjectName("frequency_domain_qc_decision_stack")
+        self.decision_stack.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        detail_layout.addWidget(self.decision_stack)
+        self.next_button = make_action_button(
+            "Next undecided", variant="secondary", parent=detail_panel
+        )
+        self.next_button.setObjectName("frequency_domain_qc_next_undecided")
+        self.next_button.setToolTip("Go to the next undecided finding, including hidden search results.")
+        self.next_button.clicked.connect(self._select_next_undecided)
+        detail_layout.addWidget(self.next_button)
+        self.splitter.setStretchFactor(0, 3)
+        self.splitter.setStretchFactor(1, 2)
+        self.splitter.setSizes([650, 470])
+
+        self._populate_details_table()
+        self.details_table.currentCellChanged.connect(self._show_finding)
+        self.search_edit.textChanged.connect(self._filter_findings)
+        self._update_progress()
+        if self._findings:
+            self.details_table.setCurrentCell(0, 0)
+            self._show_finding(0)
+        else:
+            self._show_finding(-1)
 
         actions = ActionRow(self, alignment=Qt.AlignRight)
         actions.setObjectName("frequency_domain_qc_actions")
@@ -242,32 +251,36 @@ class FrequencyDomainQcReviewDialog(QDialog):
         actions.add_button(continue_btn)
         layout.addWidget(actions)
 
-    def _populate_summary_table(self) -> None:
+    def _review_context_text(self, technical_rows: list[Mapping[str, object]]) -> str:
+        # This public adapter also validates canonical recording assignments.
         summaries = [
             row
             for row in frequency_qc_review_rows(self._report)
             if row.get("pause_review")
         ]
-        self.summary_table.setRowCount(len(summaries))
-        for row_index, item in enumerate(summaries):
-            participant_id = str(item.get("participant_id") or "")
-            recording_id = str(item.get("recording_id") or "")
-            values = (
-                recording_id or participant_id,
-                participant_id,
-                _session_text(item),
-                self._group_for_participant(participant_id),
-                _finding_text(item),
-                "None — review flag only",
-            )
-            for column, value in enumerate(values):
-                table_item = QTableWidgetItem(value)
-                table_item.setFlags(table_item.flags() & ~Qt.ItemIsEditable)
-                self.summary_table.setItem(row_index, column, table_item)
-        self.summary_table.resizeRowsToContents()
+        lines = ["EXPERIMENTAL SCREENING", SUMMED_BCA_SCREENING_BRIEF_TEXT]
+        lines.extend(["", "SCREENING RULES", _threshold_text(self._report)])
+        if technical_rows:
+            lines.extend([
+                "", "UNAVAILABLE COHORT INPUTS",
+                "These inputs were not treated as passes.",
+                *(_technical_context_text(row) for row in technical_rows),
+            ])
+        lines.extend(["", "REVIEW SUMMARY", "Automatic action: None — review flag only"])
+        for item in summaries:
+            participant = str(item.get("participant_id") or "")
+            recording = str(item.get("recording_id") or "")
+            identity = participant
+            if recording and recording != participant:
+                identity += f" / {recording}"
+            session = _session_text(item)
+            if session:
+                identity += f" / {session}"
+            group = self._group_for_participant(participant)
+            lines.append(f"{identity} · {group}: {_finding_text(item)}")
+        return "\n".join(lines)
 
     def _populate_details_table(self) -> None:
-        findings = _review_findings(self._report)
         existing = {
             str(row.get("finding_fingerprint") or ""): row
             for row in [
@@ -275,33 +288,41 @@ class FrequencyDomainQcReviewDialog(QDialog):
                 *_mapping_rows(self._report.get("review_prefill_decisions")),
             ]
         }
-        self.details_table.setRowCount(len(findings))
-        for row_index, item in enumerate(findings):
+        self.details_table.setRowCount(len(self._findings))
+        for row_index, item in enumerate(self._findings):
             fingerprint = str(item.get("finding_fingerprint") or "")
             signed_value, absolute_value = _value_texts(item)
+            participant = str(item.get("participant_id") or "")
+            recording = str(item.get("recording_id") or "")
+            group = self._group_for_participant(participant)
             values = (
-                str(item.get("participant_id") or ""),
-                str(item.get("recording_id") or ""),
-                _session_text(item),
+                recording if self._identity_scope == "recording" else participant,
                 str(item.get("condition") or ""),
                 str(item.get("electrode") or item.get("roi") or ""),
-                _finding_kind_text(item),
-                signed_value,
                 absolute_value,
-                str(item.get("band_crossed") or item.get("severity") or ""),
-                _harmonic_text(item),
-                _analysis_window_text(item),
-                _independent_qc_text(item),
+                "Undecided",
             )
             for column, value in enumerate(values):
                 table_item = QTableWidgetItem(value)
                 table_item.setFlags(table_item.flags() & ~Qt.ItemIsEditable)
-                if column in {6, 7}:
+                table_item.setToolTip(value)
+                if column == 0:
+                    table_item.setData(Qt.UserRole, fingerprint)
+                if column == 3:
                     table_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
                 self.details_table.setItem(row_index, column, table_item)
 
-            combo = QComboBox(self.details_table)
+            page = QWidget(self.decision_stack)
+            page_layout = QVBoxLayout(page)
+            page_layout.setContentsMargins(0, 4, 0, 0)
+            decision_label = QLabel("Decision for this finding", page)
+            page_layout.addWidget(decision_label)
+            combo = QComboBox(page)
             combo.setObjectName(f"frequency_domain_qc_decision_{row_index}")
+            combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+            combo.setMinimumContentsLength(12)
+            combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            decision_label.setBuddy(combo)
             allowed = [_CHOOSE_DECISION, DECISION_RETAIN, DECISION_EXCLUDE_CONDITION]
             if item.get("electrode"):
                 allowed.insert(2, DECISION_EXCLUDE_CONDITION_ELECTRODE)
@@ -310,10 +331,16 @@ class FrequencyDomainQcReviewDialog(QDialog):
             allowed.append(DECISION_EXCLUDE_PARTICIPANT)
             for decision in allowed:
                 combo.addItem(_DECISION_LABELS[decision], decision)
-            reason = QLineEdit(self.details_table)
+            page_layout.addWidget(combo)
+            reason_label = QLabel("Reason (optional)", page)
+            reason = QLineEdit(page)
             reason.setObjectName(f"frequency_domain_qc_reason_{row_index}")
             reason.setPlaceholderText("Optional reason")
+            reason_label.setBuddy(reason)
+            page_layout.addWidget(reason_label)
+            page_layout.addWidget(reason)
             saved = existing.get(fingerprint)
+            context = ""
             if saved is not None:
                 prior_decision = str(saved.get("decision") or "")
                 prior_reason = str(saved.get("reason") or "").strip()
@@ -327,19 +354,89 @@ class FrequencyDomainQcReviewDialog(QDialog):
                 combo.setToolTip(context)
                 reason.setToolTip(context)
             combo.currentIndexChanged.connect(
-                lambda _index, current=combo, edit=reason: edit.setEnabled(
-                    str(current.currentData() or "")
-                    not in {_CHOOSE_DECISION, DECISION_RETAIN}
-                )
+                lambda _index, row=row_index: self._decision_changed(row)
             )
-            reason.setEnabled(
-                str(combo.currentData() or "")
-                not in {_CHOOSE_DECISION, DECISION_RETAIN}
-            )
-            self.details_table.setCellWidget(row_index, 12, combo)
-            self.details_table.setCellWidget(row_index, 13, reason)
+            reason.setEnabled(False)
+            self.decision_stack.addWidget(page)
             self._decision_controls[fingerprint] = (combo, reason)
-        self.details_table.resizeRowsToContents()
+            self._row_controls.append((combo, reason))
+            self._evidence_texts.append(
+                _finding_evidence_text(item, group, signed_value, absolute_value, context)
+            )
+
+    def _show_finding(self, row: int, *_unused: int) -> None:
+        if row < 0 or self.details_table.isRowHidden(row):
+            self.evidence_view.setPlainText("No matching findings. Clear the search to show all findings.")
+            self.decision_stack.setEnabled(False)
+            return
+        self.evidence_view.setPlainText(self._evidence_texts[row])
+        self.decision_stack.setCurrentIndex(row)
+        self.decision_stack.setEnabled(True)
+        self.detail_tabs.setCurrentIndex(0)
+
+    def _decision_changed(self, row: int) -> None:
+        combo, reason = self._row_controls[row]
+        decision = str(combo.currentData() or "")
+        reason.setEnabled(decision not in {_CHOOSE_DECISION, DECISION_RETAIN})
+        status = {
+            _CHOOSE_DECISION: "Undecided",
+            DECISION_RETAIN: "Retain",
+            DECISION_EXCLUDE_CONDITION_ELECTRODE: "Excl. electrode",
+            DECISION_EXCLUDE_CONDITION: "Excl. condition",
+            DECISION_EXCLUDE_RECORDING: "Excl. recording",
+            DECISION_EXCLUDE_PARTICIPANT: "Excl. participant",
+        }[decision]
+        cell = self.details_table.item(row, 4)
+        cell.setText(status)
+        cell.setToolTip(_DECISION_LABELS[decision])
+        self._update_progress()
+
+    def _update_progress(self) -> None:
+        decided = sum(bool(combo.currentData()) for combo, _ in self._row_controls)
+        visible = sum(
+            not self.details_table.isRowHidden(row) for row in range(len(self._findings))
+        )
+        text = f"{decided} of {len(self._findings)} decisions made"
+        if visible != len(self._findings):
+            text += f" · {visible} findings shown"
+        self.progress_label.setText(text)
+        self.next_button.setEnabled(decided < len(self._findings))
+
+    def _filter_findings(self, _text: str) -> None:
+        terms = self.search_edit.text().casefold().split()
+        for row, evidence in enumerate(self._evidence_texts):
+            self.details_table.setRowHidden(
+                row, not all(term in evidence.casefold() for term in terms)
+            )
+        current = self.details_table.currentRow()
+        if current < 0 or self.details_table.isRowHidden(current):
+            first = next(
+                (row for row in range(len(self._findings))
+                 if not self.details_table.isRowHidden(row)),
+                -1,
+            )
+            if first >= 0:
+                self.details_table.setCurrentCell(first, 0)
+            else:
+                self.details_table.setCurrentCell(-1, -1)
+            self._show_finding(first)
+        self._update_progress()
+
+    def _select_next_undecided(self) -> None:
+        count = len(self._findings)
+        current = self.details_table.currentRow()
+        for offset in range(1, count + 1):
+            row = (current + offset) % count
+            combo, _ = self._row_controls[row]
+            if combo.currentData():
+                continue
+            if self.details_table.isRowHidden(row):
+                self.search_edit.clear()
+            self.details_table.setCurrentCell(row, 0)
+            self._show_finding(row)
+            self.details_table.scrollToItem(self.details_table.item(row, 0))
+            combo.setFocus()
+            return
 
     def _group_for_participant(self, participant_id: object) -> str:
         normalized = str(participant_id or "").strip()
@@ -353,11 +450,34 @@ class FrequencyDomainQcReviewDialog(QDialog):
             )
         return group
 
-    def _toggle_rules(self, checked: bool) -> None:
-        self.rules_label.setVisible(bool(checked))
-        self.rules_button.setText(
-            "Hide screening rules" if checked else "Show screening rules"
-        )
+
+def _finding_evidence_text(
+    item: Mapping[str, object],
+    group: str,
+    signed_value: str,
+    absolute_value: str,
+    prior_context: str,
+) -> str:
+    """Format existing evidence for a wrapped, copyable view without recomputing it."""
+    fields = [
+        ("Participant", item.get("participant_id")),
+        ("Recording", item.get("recording_id")),
+        ("Session / visit", _session_text(item)),
+        ("Group", group),
+        ("Condition", item.get("condition")),
+        ("Electrode / ROI", item.get("electrode") or item.get("roi")),
+        ("Finding", _finding_kind_text(item)),
+        ("Signed value", signed_value),
+        ("Absolute value", absolute_value),
+        ("Band", item.get("band_crossed") or item.get("severity")),
+        ("Harmonics", _harmonic_text(item)),
+        ("Analysis window", _analysis_window_text(item)),
+        ("Independent QC", _independent_qc_text(item)),
+    ]
+    text = "\n\n".join(f"{label}: {value or 'Unavailable'}" for label, value in fields)
+    if prior_context:
+        text += f"\n\n{prior_context}\nChoose a new decision for this review."
+    return text
 
 
 def _review_findings(report: Mapping[str, object]) -> list[Mapping[str, object]]:

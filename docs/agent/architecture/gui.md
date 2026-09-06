@@ -28,15 +28,24 @@ Primary paths:
   queue polling, worker completion/error, and finalization GUI orchestration
   used by `MainWindow` compatibility wrappers.
 - `src/Main_App/gui/frequency_domain_qc_dialog.py`: modal review dialog shown
-  after workbook processing and before final harmonic selection when
-  project-wide summed-BCA frequency-domain QC finds automatic hard exclusions,
-  strong warnings, or repeated warning patterns. The dialog presents a
-  participant summary first, optional flagged-cell details second, and lets the
-  user add manual participant-level frequency-domain exclusions before
-  processing resumes. Participant and detail rows show the canonical project
-  group label resolved from manifest membership; an unknown participant or
-  missing grouped assignment blocks the review instead of displaying inferred
-  membership.
+  after condition processing and before final harmonic selection for experimental
+  summed-BCA flags. A searchable five-column list keeps identities, conditions,
+  electrodes/ROIs, absolute values, and decision status visible without horizontal
+  scrolling. A resizable selected-finding pane shows complete signed/absolute
+  evidence, canonical group/session identity, and the existing decision choices
+  with optional reasons. Review context holds screening rules, participant or
+  recording summaries, and unavailable cohort-input statuses; unavailable input
+  counts also remain visible above the list. Decisions stay keyed by finding
+  fingerprint across selection/search, start undecided even with prior context,
+  and pass unchanged to the existing validator. Next undecided navigates across
+  all findings, clearing a search if needed. Unknown participants or missing
+  required grouped assignments block review instead of inferring membership.
+  No scientific calculations or exclusion authority belong to this presentation.
+  Visible smoke (Qt execution is CI-only locally): open the review at 1280x900,
+  resize the dialog down to 1000x650, and verify the list and action buttons fit;
+  choose decisions/reasons, switch rows and search, and confirm choices persist.
+  Inspect long evidence and unavailable-input context, use Next undecided, then
+  verify incomplete Apply is rejected and completed choices submit normally.
 - `src/Main_App/gui/processing_inputs.py`: processing input validation,
   single/batch mode UI state, `.bdf` file selection, start-button readiness,
   trigger-detection placeholder behavior, and preprocessing parameter assembly

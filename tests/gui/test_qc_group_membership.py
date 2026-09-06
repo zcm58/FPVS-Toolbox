@@ -181,7 +181,7 @@ def test_repeated_session_preflight_tables_remain_compact_and_reachable(
         assert table.visualItemRect(item).intersects(table.viewport().rect())
 
 
-def test_frequency_domain_qc_dialog_shows_groups_in_both_tables(qtbot) -> None:
+def test_frequency_domain_qc_dialog_shows_group_in_finding_evidence(qtbot) -> None:
     report = {
         "participant_summaries": [
             {
@@ -217,8 +217,6 @@ def test_frequency_domain_qc_dialog_shows_groups_in_both_tables(qtbot) -> None:
     )
     qtbot.addWidget(dialog)
 
-    assert dialog.summary_table.horizontalHeaderItem(1).text() == "Group"
-    assert dialog.summary_table.item(0, 1).text() == "Control"
-    assert dialog.details_table.horizontalHeaderItem(1).text() == "Group"
-    assert dialog.details_table.item(0, 1).text() == "Control"
+    dialog.details_table.selectRow(0)
+    assert "Control" in dialog.evidence_view.toPlainText()
 
