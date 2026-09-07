@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import asdict
 import hashlib
 import json
+from pathlib import Path
 from threading import Barrier, Event, get_ident
 from types import SimpleNamespace
 
@@ -591,18 +593,25 @@ def test_parallel_cancel_closes_inflight_raw_without_starting_more_files(tmp_pat
         return False
 
     monkeypatch.setattr(scan_module, "prepare_kurtosis_review_evidence", prepare)
+    excluded_path = tmp_path / "excluded" / paths[0].name
+    statuses = []
     scan = scan_kurtosis_review(
-        [_info(path, path.stem) for path in paths],
-        _settings(),
+        [*[_info(path, path.stem) for path in paths], _info(excluded_path, "excluded")],
+        _settings(manual_excluded_participants=["excluded"]),
         event_map={"Faces": 1, "Objects": 2},
         reviewed_event_plans_by_file={str(path): {"reviewed": True} for path in paths},
         should_cancel=cancel,
+        status_progress=statuses.append,
         max_workers=2,
     )
     assert scan.cancelled is True
     assert len(loaded) == 2
     assert all(raw.closed for raw in loaded)
     assert all(result.path != paths[2] for result in scan.results)
+    assert scan.results[-1].path == excluded_path
+    assert scan.results[-1].status == KURTOSIS_REVIEW_FILE_STATUS_SKIPPED
+    _assert_progress_partition(statuses, 4)
+    assert statuses[-1].excluded_count == 1
 
 
 def test_parallel_scan_respects_memory_cpu_and_memmap_collision_limits(tmp_path, monkeypatch):
@@ -744,19 +753,272 @@ def test_scan_cancellation_is_cooperative_and_closes_loaded_raw(
     path.touch()
     loaded: list[_FakeRaw] = []
     _configure_active_scan(monkeypatch, loaded_raws=loaded)
-    checks = iter((False, True))
 
     scan = scan_kurtosis_review(
         [_info(path, "P01")],
         _settings(),
         event_map={"Faces": 1, "Objects": 2},
         reviewed_event_plans_by_file={str(path): {"reviewed": True}},
-        should_cancel=lambda: next(checks),
+        should_cancel=lambda: bool(loaded),
     )
 
     assert scan.cancelled is True
     assert scan.results == ()
     assert loaded[0].closed is True
+
+
+def _review_payload_bits(scan):
+    from Main_App.processing.preflight_qc_reuse import encode_evidence
+
+    def path_values(value):
+        if isinstance(value, Path):
+            return str(value)
+        if isinstance(value, dict):
+            return {key: path_values(item) for key, item in value.items()}
+        if isinstance(value, tuple):
+            return tuple(path_values(item) for item in value)
+        if isinstance(value, list):
+            return [path_values(item) for item in value]
+        return value
+
+    return encode_evidence([path_values(asdict(result)) for result in scan.results])
+
+
+def _assert_progress_partition(updates, requested):
+    assert updates
+    for update in updates:
+        assert update.eligible_total + update.excluded_count == requested
+        assert 0 <= update.completed_eligible <= update.eligible_total
+        assert 0 <= update.failed_count <= update.completed_eligible
+
+
+@pytest.mark.parametrize("workers", [1, 2])
+def test_eligible_only_scheduling_preserves_full_order_bits_and_progress(tmp_path, monkeypatch, workers):
+    _ample_scan_resources(monkeypatch)
+    first = tmp_path / "P01.bdf"
+    second = tmp_path / "P02.bdf"
+    first.touch()
+    second.touch()
+    duplicate_excluded = tmp_path / "excluded" / "p01.bdf"
+    conditions_excluded = tmp_path / "P03.bdf"
+    invalid = tmp_path / "missing-plan.bdf"
+    infos = [
+        _info(second, "P02"), _info(duplicate_excluded, "excluded"),
+        _info(invalid, "invalid"), _info(first, "P01"),
+        _info(conditions_excluded, "P03", "recording-03"),
+    ]
+    settings = _settings(
+        manual_excluded_participants=["EXCLUDED"],
+        manual_excluded_recording_conditions={"recording-03": ["Faces", "Objects"]},
+        manual_excluded_participant_conditions={"P01": ["Faces"]},
+    )
+    plans = {str(path): {"reviewed": True} for path in (first, second, conditions_excluded)}
+    loaded = []
+    _configure_active_scan(monkeypatch, loaded_raws=loaded)
+    kwargs = dict(event_map={"Faces": 1, "Objects": 2}, reviewed_event_plans_by_file=plans)
+    baseline = scan_module._scan_kurtosis_review_serial(infos, settings, **kwargs)
+    expected_bits = _review_payload_bits(baseline)
+    original_stat = type(first).stat
+
+    def guarded_stat(path, *args, **kwargs):
+        assert path not in (duplicate_excluded, conditions_excluded, invalid), "Non-runnable source reached file-size estimation"
+        return original_stat(path, *args, **kwargs)
+
+    monkeypatch.setattr(type(first), "stat", guarded_stat)
+    estimates = []
+    original_estimator = scan_module._review_worker_count
+
+    def estimate(eligible, requested):
+        estimates.append(tuple(info.subject_id for info in eligible))
+        return original_estimator(eligible, requested)
+
+    monkeypatch.setattr(scan_module, "_review_worker_count", estimate)
+    if workers == 2:
+        both_preparing = Barrier(2)
+        original_prepare = scan_module.prepare_kurtosis_review_evidence
+
+        def prepare(*args, **kwargs):
+            both_preparing.wait(timeout=5)
+            return original_prepare(*args, **kwargs)
+
+        monkeypatch.setattr(scan_module, "prepare_kurtosis_review_evidence", prepare)
+    calling_thread = get_ident()
+    statuses = []
+    legacy = []
+
+    def status(update):
+        assert get_ident() == calling_thread
+        statuses.append(update)
+
+    actual = scan_kurtosis_review(
+        infos, settings, max_workers=workers, status_progress=status,
+        progress=lambda message, completed, total: legacy.append((message, completed, total)),
+        **kwargs,
+    )
+    assert _review_payload_bits(actual) == expected_bits
+    assert [result.participant_id for result in actual.results] == [info.subject_id for info in infos]
+    assert estimates == [("P02", "P01")]
+    assert all(raw.closed for raw in loaded)
+    _assert_progress_partition(statuses, 5)
+    assert statuses[0] == scan_module.KurtosisReviewProgress(3, 1, 2, 1)
+    assert statuses[-1] == scan_module.KurtosisReviewProgress(3, 3, 2, 1)
+    assert legacy[-1][1:] == (5, 5)
+    assert [completed for _, completed, _ in legacy] == sorted(completed for _, completed, _ in legacy)
+
+
+def test_all_excluded_needs_no_source_io_or_worker_estimate_and_stops_prefetch(tmp_path, monkeypatch):
+    paths = [tmp_path / f"P0{index}.bdf" for index in (1, 2, 3)]
+    began = []
+    statuses = []
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("Excluded recordings must not allocate workers or read source data")
+
+    monkeypatch.setattr(scan_module, "_review_worker_count", forbidden)
+    monkeypatch.setattr(scan_module.load_utils, "load_eeg_file", forbidden)
+    from Main_App.processing import qc_signal_view
+    monkeypatch.setattr(qc_signal_view, "source_content_identity", forbidden)
+    monkeypatch.setattr(scan_module, "validate_source_analysis_span_context", lambda **_kwargs: _source_plan("Faces", "Objects"))
+    source = SimpleNamespace(
+        begin_consumption=lambda: began.append(True) or True,
+        take=forbidden,
+    )
+    scan = scan_kurtosis_review(
+        [_info(paths[0], "P01"), _info(paths[1], "P02", "recording-02"), _info(paths[2], "P03")],
+        _settings(
+            manual_excluded_participants=["p01"],
+            manual_excluded_recordings=["RECORDING-02"],
+            manual_excluded_participant_conditions={"P03": ["Faces", "Objects"]},
+        ),
+        event_map={"Faces": 1, "Objects": 2},
+        reviewed_event_plans_by_file={str(paths[2]): {}},
+        source_prefetch=source, status_progress=statuses.append,
+    )
+    assert began == [True]
+    assert scan.cancelled is False
+    assert [result.skip_reason for result in scan.results] == [
+        KURTOSIS_REVIEW_SKIP_RECORDING_EXCLUDED,
+        KURTOSIS_REVIEW_SKIP_RECORDING_EXCLUDED,
+        KURTOSIS_REVIEW_SKIP_ALL_CONDITIONS_EXCLUDED,
+    ]
+    assert statuses == [scan_module.KurtosisReviewProgress(0, 0, 3)]
+
+
+def test_active_excluded_prefetch_still_reserves_one_large_job_slot(tmp_path, monkeypatch):
+    _ample_scan_resources(monkeypatch)
+    paths = [tmp_path / f"P0{index}.bdf" for index in (1, 2)]
+    for path in paths:
+        path.touch()
+    excluded = tmp_path / "excluded" / paths[0].name
+    _configure_active_scan(monkeypatch, loaded_raws=[])
+    began = []
+    taken = []
+    estimates = []
+    original_estimator = scan_module._review_worker_count
+
+    def estimate(infos, requested):
+        estimates.append((tuple(info.subject_id for info in infos), requested))
+        return original_estimator(infos, requested)
+
+    monkeypatch.setattr(scan_module, "_review_worker_count", estimate)
+    source = SimpleNamespace(
+        begin_consumption=lambda: began.append(excluded) or True,
+        take=lambda path, **_kwargs: taken.append(path) or None,
+    )
+    scan = scan_kurtosis_review(
+        [_info(excluded, "excluded"), *[_info(path, path.stem) for path in paths]],
+        _settings(manual_excluded_participants=["excluded"]),
+        event_map={"Faces": 1, "Objects": 2},
+        reviewed_event_plans_by_file={str(path): {} for path in paths},
+        source_prefetch=source, max_workers=2,
+    )
+    assert not scan.errors
+    assert began == [excluded]
+    assert taken == paths
+    assert estimates == [(("P01", "P02"), 1)]
+
+
+@pytest.mark.parametrize("plan", [None, {}, {"source_analysis_span_plan": {}}, {"source_analysis_span_plan": {"spans": []}}])
+def test_all_condition_exclusion_does_not_hide_invalid_or_missing_metadata(tmp_path, monkeypatch, plan):
+    path = tmp_path / "invalid-plan.bdf"
+    statuses = []
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("Invalid metadata needs neither a source read nor a numerical worker")
+
+    monkeypatch.setattr(scan_module, "_review_worker_count", forbidden)
+    monkeypatch.setattr(scan_module.load_utils, "load_eeg_file", forbidden)
+    scan = scan_kurtosis_review(
+        [_info(path, "P01")],
+        _settings(manual_excluded_participant_conditions={"P01": ["Faces", "Objects"]}),
+        event_map={"Faces": 1, "Objects": 2},
+        reviewed_event_plans_by_file={} if plan is None else {str(path): plan},
+        status_progress=statuses.append,
+    )
+    assert len(scan.errors) == 1
+    assert scan.results[0].skip_reason is None
+    assert statuses == [scan_module.KurtosisReviewProgress(1, 1, 0, 1)]
+
+
+def test_metadata_cancellation_starts_no_source_work(tmp_path, monkeypatch):
+    paths = [tmp_path / f"P0{index}.bdf" for index in (1, 2)]
+    cancelled = False
+    validated = []
+    statuses = []
+
+    def validate(**kwargs):
+        nonlocal cancelled
+        validated.append(kwargs)
+        cancelled = True
+        return _source_plan("Faces", "Objects")
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("Cancelled metadata planning must not start source work")
+
+    monkeypatch.setattr(scan_module, "validate_source_analysis_span_context", validate)
+    monkeypatch.setattr(scan_module, "_review_worker_count", forbidden)
+    monkeypatch.setattr(scan_module.load_utils, "load_eeg_file", forbidden)
+    scan = scan_kurtosis_review(
+        [_info(path, path.stem) for path in paths], _settings(),
+        event_map={"Faces": 1, "Objects": 2},
+        reviewed_event_plans_by_file={str(path): {} for path in paths},
+        should_cancel=lambda: cancelled, status_progress=statuses.append,
+    )
+    assert scan.cancelled is True
+    assert scan.results == ()
+    assert len(validated) == 1
+    assert statuses == [scan_module.KurtosisReviewProgress(2, 0, 0)]
+
+
+def test_runtime_raw_qc_skip_moves_to_excluded_without_counting_as_processed(tmp_path, monkeypatch):
+    paths = [tmp_path / f"P0{index}.bdf" for index in (1, 2)]
+    for path in paths:
+        path.touch()
+    loaded = []
+    _configure_active_scan(monkeypatch, loaded_raws=loaded)
+    monkeypatch.setattr(scan_module, "relative_spans_from_plan", lambda _plan: ((10, 500),))
+    monkeypatch.setattr(
+        scan_module, "evaluate_raw_channel_qc",
+        lambda _raw, _settings, *, filename, analysis_spans: SimpleNamespace(
+            excluded=filename == paths[0].name, channels_to_interpolate=(),
+        ),
+    )
+    statuses = []
+    scan = scan_kurtosis_review(
+        [_info(path, path.stem) for path in paths],
+        _settings(removed_electrode_detection_mode="auto", auto_detect_removed_electrodes=True),
+        event_map={"Faces": 1, "Objects": 2},
+        reviewed_event_plans_by_file={str(path): {} for path in paths},
+        max_workers=1, status_progress=statuses.append,
+    )
+    assert scan.results[0].skip_reason == scan_module.KURTOSIS_REVIEW_SKIP_RAW_QC_EXCLUDED
+    assert scan.results[1].status == KURTOSIS_REVIEW_FILE_STATUS_REVIEW_REQUIRED
+    assert statuses == [
+        scan_module.KurtosisReviewProgress(2, 0, 0),
+        scan_module.KurtosisReviewProgress(1, 0, 1),
+        scan_module.KurtosisReviewProgress(1, 1, 1),
+    ]
+    assert all(raw.closed for raw in loaded)
 
 
 @pytest.mark.parametrize("cancelled", [True, False])

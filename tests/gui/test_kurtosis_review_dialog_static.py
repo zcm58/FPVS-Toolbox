@@ -445,6 +445,7 @@ def test_turning_off_auto_all_collects_omitted_manual_findings_before_continuing
         "host": object(), "active_infos": (), "params": params,
         "current_event_plans": {}, "display_only_raw_qc": {},
         "prefetch": None,
+        "_refresh_qc_source_prefetch_exclusions": lambda *_args: None,
         "_run_kurtosis_review_scan_embedded": scan,
         "_review_kurtosis_findings": review,
     }

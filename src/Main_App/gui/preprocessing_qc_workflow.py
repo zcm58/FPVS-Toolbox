@@ -72,6 +72,7 @@ from Main_App.processing.preflight_qc import (
 )
 from Main_App.processing.qc_source_prefetch import QcSourcePrefetch
 from Main_App.processing.kurtosis_review_scan import (
+    KurtosisReviewProgress,
     KurtosisReviewScan,
     reconcile_kurtosis_review_decisions,
     scan_kurtosis_review,
@@ -225,6 +226,7 @@ class _KurtosisReviewWorker(QObject):
     """Prepare QC-16 evidence outside the GUI thread."""
 
     progress = Signal(str, int, int)
+    status_progress = Signal(object)
     finished = Signal(object)
     failed = Signal(str)
 
@@ -263,6 +265,7 @@ class _KurtosisReviewWorker(QObject):
                 reviewed_event_plans_by_file=self._reviewed_event_plans_by_file,
                 raw_channel_qc_by_recording=self._raw_channel_qc_by_recording,
                 progress=self.progress.emit,
+                status_progress=self.status_progress.emit,
                 should_cancel=lambda: self._cancelled,
                 source_prefetch=self._source_prefetch,
             )
@@ -1115,6 +1118,17 @@ class _PreflightQcEmbeddedBridge(QObject):
         self._loop.quit()
 
 
+def _kurtosis_scan_progress_text(state: KurtosisReviewProgress) -> str:
+    processed = state.completed_eligible - state.failed_count
+    text = (
+        f"Processed {processed} of {state.eligible_total} eligible recordings; "
+        f"{state.excluded_count} excluded."
+    )
+    if state.failed_count:
+        text += f" {state.failed_count} failed."
+    return text
+
+
 class _KurtosisReviewEmbeddedBridge(QObject):
     """Marshal the QC-16 worker's results and progress to the GUI thread."""
 
@@ -1133,13 +1147,19 @@ class _KurtosisReviewEmbeddedBridge(QObject):
 
     @Slot(str, int, int)
     def on_progress(self, message: str, completed: int, total: int) -> None:
-        _set_progress(self._host, completed, total)
+        _set_label(self._host, "processing_current_file_label", message)
+
+    @Slot(object)
+    def on_status_progress(self, state: KurtosisReviewProgress) -> None:
+        if state.eligible_total:
+            _set_progress(self._host, state.completed_eligible, state.eligible_total)
+        else:
+            _set_progress(self._host, 1, 1)
         _set_label(
             self._host,
             "processing_summary_label",
-            f"Checked {completed} of {total} recording(s) for kurtosis evidence.",
+            _kurtosis_scan_progress_text(state),
         )
-        _set_label(self._host, "processing_current_file_label", message)
 
     @Slot(object)
     def on_finished(self, scan: object) -> None:
@@ -1480,6 +1500,20 @@ def _start_qc_source_prefetch(
     return bridge
 
 
+def _refresh_qc_source_prefetch_exclusions(
+    bridge: _QcSourcePrefetchBridge | None, params: Mapping[str, Any],
+) -> None:
+    """Update speculative eligibility without loading or closing data on the GUI."""
+    if bridge is None:
+        return
+    try:
+        bridge.source_prefetch.update_participant_exclusions(
+            params.get("manual_excluded_participants")
+        )
+    except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
+        logger.warning("qc_source_prefetch_exclusion_refresh_unavailable", exc_info=True)
+
+
 def _finish_qc_source_prefetch(host: Any, bridge: _QcSourcePrefetchBridge | None) -> None:
     """Close run-owned maps off the GUI thread before leaving the QC workflow."""
     if bridge is None:
@@ -1575,6 +1609,7 @@ def _run_kurtosis_review_scan_embedded(
         _request_cancel,
     )
     worker.progress.connect(bridge.on_progress)
+    worker.status_progress.connect(bridge.on_status_progress)
     worker.finished.connect(bridge.on_finished)
     worker.failed.connect(bridge.on_failed)
     thread.started.connect(worker.run)
@@ -4693,6 +4728,7 @@ def run_preprocessing_qc_workflow(
         if scan is None or scan.cancelled:
             return False
 
+        _refresh_qc_source_prefetch_exclusions(prefetch, params)
         if not _confirm_condition_crop_exclusions(
             host,
             params,
@@ -4701,6 +4737,7 @@ def run_preprocessing_qc_workflow(
         ):
             return False
 
+        _refresh_qc_source_prefetch_exclusions(prefetch, params)
         # The existing scan already covers unchanged included intervals. If source
         # files, marker decisions, or condition choices changed, rebuild the project-wide result via
         # the recording/occurrence caches before any later detector uses it.
@@ -4727,12 +4764,14 @@ def run_preprocessing_qc_workflow(
         ):
             return False
 
+        _refresh_qc_source_prefetch_exclusions(prefetch, params)
         accepted_hard_exclusions = _confirm_hard_exclusions(
             host,
             params,
             scan,
             group_labels,
         )
+        _refresh_qc_source_prefetch_exclusions(prefetch, params)
         try:
             current_event_plans = canonical_event_plans_by_file(scan)
             existing_event_plans.update(current_event_plans)
@@ -4743,6 +4782,7 @@ def run_preprocessing_qc_workflow(
             return False
 
         while True:
+            _refresh_qc_source_prefetch_exclusions(prefetch, params)
             scanned_auto_all = bool(params.get("kurtosis_auto_interpolate_all", False))
             kurtosis_scan = _run_kurtosis_review_scan_embedded(
                 host,

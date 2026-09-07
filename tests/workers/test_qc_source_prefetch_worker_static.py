@@ -45,10 +45,12 @@ class _ObservedEvent:
     def set(self):
         self._event.set()
 
-    def wait(self):
+    def wait(self, timeout=None):
         self.waiting.set()
-        if not self._event.wait(timeout=5):
+        result = self._event.wait(timeout=5 if timeout is None else timeout)
+        if timeout is None and not result:
             raise TimeoutError("Worker did not receive its finish request")
+        return result
 
 
 @pytest.mark.parametrize("run_error", [None, OSError("Cannot preload recording")])
@@ -98,6 +100,56 @@ def test_finish_requested_before_start_skips_loading_and_still_cleans_up():
     prefetch.cancel.assert_called_once_with()
     prefetch.close.assert_called_once_with()
     worker.finished.emit.assert_called_once_with()
+
+
+def test_retirement_maintenance_runs_off_caller_thread_after_loading_finishes():
+    maintained = Event()
+    thread_ids = []
+    prefetch = Mock()
+
+    def maintain():
+        thread_ids.append(get_ident())
+        maintained.set()
+
+    prefetch.maintain.side_effect = maintain
+    worker = _worker_without_qt(prefetch)
+    producer = Thread(target=worker.run, daemon=True)
+    producer.start()
+    try:
+        assert maintained.wait(5)
+        assert producer.is_alive()
+        prefetch.close.assert_not_called()
+        assert thread_ids and all(value == producer.ident for value in thread_ids)
+        assert producer.ident != get_ident()
+    finally:
+        worker.request_finish()
+        producer.join(5)
+    assert not producer.is_alive()
+    prefetch.close.assert_called_once_with()
+
+
+def test_maintenance_failure_preserves_consumer_lifetime_and_final_cleanup(caplog):
+    failed = Event()
+    prefetch = Mock()
+
+    def maintain():
+        failed.set()
+        raise OSError("Retirement temporarily unavailable")
+
+    prefetch.maintain.side_effect = maintain
+    worker = _worker_without_qt(prefetch)
+    producer = Thread(target=worker.run, daemon=True)
+    producer.start()
+    try:
+        assert failed.wait(5)
+        assert producer.is_alive()
+        prefetch.close.assert_not_called()
+    finally:
+        worker.request_finish()
+        producer.join(5)
+    assert not producer.is_alive()
+    prefetch.close.assert_called_once_with()
+    assert "Retirement temporarily unavailable" in caplog.text
 
 
 def test_finish_request_does_not_wait_for_an_active_source_load():

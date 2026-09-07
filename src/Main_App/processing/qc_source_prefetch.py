@@ -1,7 +1,8 @@
 """Run-owned source prefetch between interactive QC and kurtosis preparation.
 
-Only the loader's unmodified, disk-backed Raw is retained. A recording is lent
-once to an exclusive consumer; review choices and processing remain downstream.
+Only the loader's unmodified, disk-backed Raw is retained. Participant
+exclusions gate speculative work; a recording is lent once to an exclusive
+consumer, with scientific review choices and processing remaining downstream.
 The producer and final cleanup must run outside the GUI thread.
 """
 
@@ -21,6 +22,7 @@ from typing import Any
 from Main_App.io import load_utils
 from Main_App.io.eeg_geometry import BIOSEMI64_MONTAGE_ID
 from Main_App.processing.toolbox_cache_paths import checked_path
+from Main_App.projects.preprocessing_settings import normalize_manual_excluded_participants
 
 logger = logging.getLogger(__name__)
 _DEFAULT_MAX_BYTES = 16 * 1024**3
@@ -81,7 +83,9 @@ def _loader_settings(settings: Mapping[str, Any]) -> dict[str, Any]:
 @dataclass
 class _Entry:
     path: Path
+    participant_id: str = ""
     status: str = "pending"
+    discard_requested: bool = False
     identity: tuple | None = None
     source_sha256: str | None = None
     handoff_validated: bool = False
@@ -105,6 +109,8 @@ class QcSourcePrefetch:
     and every borrowed Raw before removing the private run directory, so it
     also belongs on a background worker. Files outside the staging budget are
     ordinary misses; the producer never waits for a possibly excluded file.
+    Participant eligibility updates perform no I/O; ``maintain`` retires their
+    unused buffers on the background owner while review is open.
     """
 
     def __init__(
@@ -117,9 +123,21 @@ class QcSourcePrefetch:
     ) -> None:
         self._project_root = Path(project_root)
         self._settings = _loader_settings(settings)
-        self._entries = {
-            _path_key(info.path): _Entry(Path(os.path.abspath(info.path))) for info in raw_file_infos
+        self._excluded_participants = {
+            value.casefold() for value in normalize_manual_excluded_participants(
+                settings.get("manual_excluded_participants")
+            )
         }
+        self._entries = {
+            _path_key(info.path): _Entry(
+                Path(os.path.abspath(info.path)),
+                participant_id=str(getattr(info, "subject_id", "") or "").strip().casefold(),
+            ) for info in raw_file_infos
+        }
+        for entry in self._entries.values():
+            if entry.participant_id in self._excluded_participants:
+                entry.status = "miss"
+                entry.discard_requested = True
         self._max_bytes = max(0, int(max_prefetch_bytes))
         self._retained_bytes = 0
         self._condition = Condition()
@@ -130,6 +148,7 @@ class QcSourcePrefetch:
         self._closed = False
         self._consuming = False
         self._borrowed: dict[int, _Entry] = {}
+        self._maintenance_active = 0
         self._run_directory: Path | None = None
         self._resolved_root: Path | None = None
 
@@ -141,8 +160,10 @@ class QcSourcePrefetch:
             self._started = True
             self._running = True
         try:
-            if self._cancelled.is_set() or not self._max_bytes or self._consuming:
-                return
+            with self._condition:
+                if (self._cancelled.is_set() or not self._max_bytes or self._consuming
+                        or not any(entry.status == "pending" for entry in self._entries.values())):
+                    return
             root = self._project_root.resolve(strict=True)
             parent = checked_path(root / ".fpvs_processing", root)
             parent.mkdir(parents=True, exist_ok=True)
@@ -152,9 +173,11 @@ class QcSourcePrefetch:
             self._run_directory = Path(tempfile.mkdtemp(prefix="qc-source-", dir=parent))
             checked_path(self._run_directory, root)
             for index, entry in enumerate(self._entries.values()):
+                self.maintain()
                 if self._cancelled.is_set():
                     break
                 self._prepare(entry, index)
+            self.maintain()
         except Exception:  # noqa: BLE001 - optional prefetch must preserve ordinary scanner fallback.
             # Prefetch must never replace the scanner's normal validation or
             # make a temporary-storage failure fail the scientific workflow.
@@ -170,7 +193,8 @@ class QcSourcePrefetch:
 
     def _prepare(self, entry: _Entry, index: int) -> None:
         with self._condition:
-            if entry.status != "pending" or self._consuming or self._cancelled.is_set():
+            if (entry.status != "pending" or self._consuming or self._cancelled.is_set()
+                    or entry.discard_requested or entry.participant_id in self._excluded_participants):
                 return
             # Claim before any file I/O, atomically with begin_consumption.
             entry.status = "loading"
@@ -184,8 +208,9 @@ class QcSourcePrefetch:
             available_disk = max(0, shutil.disk_usage(self._run_directory).free - _DISK_RESERVE_BYTES)
             if estimate > min(available_budget, available_disk):
                 return
-            source_digest = _source_sha256(entry.path, self._cancelled.is_set)
-            if source_digest is None or _source_identity(entry.path) != identity:
+            source_digest = _source_sha256(entry.path, lambda: self._entry_cancelled(entry))
+            if (source_digest is None or _source_identity(entry.path) != identity
+                    or self._entry_cancelled(entry)):
                 return
             entry.preload_path = self._run_directory / f"{index:06d}_raw.dat"
             raw = load_utils.load_eeg_file(
@@ -200,12 +225,13 @@ class QcSourcePrefetch:
             entry.size_bytes = int(getattr(data, "nbytes", 0))
             # Keep only actual disk-backed results; unsupported loader states
             # fall back instead of silently retaining whole recordings in RAM.
-            if (entry.mmap is None
-                    or _source_sha256(entry.path, self._cancelled.is_set) != source_digest
+            if (entry.mmap is None or self._entry_cancelled(entry)
+                    or _source_sha256(entry.path, lambda: self._entry_cancelled(entry)) != source_digest
                     or _source_identity(entry.path) != identity):
                 return
             with self._condition:
-                if self._cancelled.is_set() or entry.size_bytes > self._max_bytes - self._retained_bytes:
+                if (self._entry_cancelled(entry)
+                        or entry.size_bytes > self._max_bytes - self._retained_bytes):
                     return
                 entry.identity = identity
                 entry.source_sha256 = source_digest
@@ -222,6 +248,52 @@ class QcSourcePrefetch:
                 self._dispose(entry)
                 with self._condition:
                     entry.status = "miss"
+                    self._condition.notify_all()
+
+    def _entry_cancelled(self, entry: _Entry) -> bool:
+        with self._condition:
+            return (self._cancelled.is_set() or self._closed or entry.discard_requested
+                    or entry.participant_id in self._excluded_participants)
+
+    def update_participant_exclusions(self, exclusions: Any) -> None:
+        """Update eligibility without I/O or closing another thread's Raw.
+
+        Discarded speculative work is not restarted when a participant is
+        included again; the scanner's ordinary loader remains its fallback.
+        """
+        excluded = {value.casefold() for value in normalize_manual_excluded_participants(exclusions)}
+        with self._condition:
+            self._excluded_participants = excluded
+            for entry in self._entries.values():
+                if entry.participant_id not in excluded:
+                    continue
+                entry.discard_requested = True
+                if entry.status == "pending":
+                    entry.status = "miss"
+                elif entry.status == "ready":
+                    entry.status = "retire"
+                # Loading stays loading until the actual read returns. Taken
+                # sources remain borrowed and are disposed only by release().
+            self._condition.notify_all()
+
+    def maintain(self) -> None:
+        """Retire excluded ready sources on a background worker, never the GUI."""
+        while True:
+            with self._condition:
+                if self._closed:
+                    return
+                entry = next((item for item in self._entries.values() if item.status == "retire"), None)
+                if entry is None:
+                    return
+                entry.status = "disposing"
+                self._maintenance_active += 1
+            try:
+                self._dispose(entry)
+            finally:
+                with self._condition:
+                    self._retained_bytes -= entry.size_bytes
+                    entry.status = "miss"
+                    self._maintenance_active -= 1
                     self._condition.notify_all()
 
     def begin_consumption(self) -> bool:
@@ -259,10 +331,10 @@ class QcSourcePrefetch:
             if entry is None:
                 return None
             while entry.status == "loading":
-                if self._cancelled.is_set() or self._closed or (should_cancel and should_cancel()):
+                if self._entry_cancelled(entry) or (should_cancel and should_cancel()):
                     return None
                 self._condition.wait(timeout=0.05)
-            if (entry.status != "ready" or self._cancelled.is_set() or self._closed
+            if (entry.status != "ready" or self._entry_cancelled(entry)
                     or (should_cancel and should_cancel())):
                 return None
             raw = entry.raw
@@ -273,15 +345,17 @@ class QcSourcePrefetch:
             if (_source_identity(entry.path) == entry.identity
                     and _source_sha256(
                         entry.path,
-                        lambda: self._cancelled.is_set() or bool(should_cancel and should_cancel()),
+                        lambda: self._entry_cancelled(entry) or bool(should_cancel and should_cancel()),
                     ) == entry.source_sha256
                     and _source_identity(entry.path) == entry.identity
-                    and not self._cancelled.is_set()
+                    and not self._entry_cancelled(entry)
                     and not (should_cancel and should_cancel())):
-                logger.info("qc_source_prefetch_hit file=%s", entry.path.name)
                 with self._condition:
+                    if self._entry_cancelled(entry):
+                        return None
                     entry.handoff_validated = True
-                accepted = True
+                    accepted = True
+                logger.info("qc_source_prefetch_hit file=%s", entry.path.name)
                 return raw
         except (OSError, RuntimeError, ValueError):
             pass
@@ -331,10 +405,12 @@ class QcSourcePrefetch:
         with self._condition:
             self._closed = True
             self._condition.notify_all()
-            while self._running or self._borrowed:
+            while self._running or self._borrowed or self._maintenance_active:
                 self._condition.wait(timeout=0.05)
         for entry in self._entries.values():
             self._dispose(entry)
+        with self._condition:
+            self._retained_bytes = 0
         if self._run_directory is not None:
             try:
                 checked_path(self._run_directory, self._resolved_root)

@@ -47,7 +47,12 @@ class QcSourcePrefetchWorker(QObject):
                 logger.exception("qc_source_prefetch_background_failed")
             # Loading may finish long before review. Keep cached sources until
             # the GUI has finished the consumer scan or cancelled the workflow.
-            self._finish_requested.wait()
+            try:
+                while not self._finish_requested.wait(timeout=0.1):
+                    self._prefetch.maintain()
+            except Exception:  # noqa: BLE001 - final cleanup still waits for the consumer to finish.
+                logger.exception("qc_source_prefetch_maintenance_failed")
+                self._finish_requested.wait()
         finally:
             try:
                 self._prefetch.close()

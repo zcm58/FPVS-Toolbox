@@ -857,7 +857,13 @@ Kurtosis review and interpolation:
   this authority. The two stages must agree on selection metadata and donor
   exclusions for unchanged inputs; genuinely changed evidence still requires review.
 - The scan may run at most two independent recordings concurrently, guarded by
-  available CPU/RAM and distinct loader memmap names. Each job retains the
+  available CPU/RAM and distinct loader memmap names. Verified whole-participant,
+  recording, and all-analyzed-condition exclusions are resolved before resource
+  estimates or scheduling. Excluded file sizes and duplicate stems cannot
+  reduce the worker pool for retained recordings. Missing or invalid source
+  plans remain errors, not inferred exclusions. An active speculative read
+  still counts against loading concurrency even if its participant has just
+  been excluded. Each job retains the
   shared processing order and numerical implementation and stops before
   interpolation/final reference even when automatic decisions are ready. If
   review turns off an auto-on scan's policy, the workflow rescans to collect
@@ -865,6 +871,13 @@ Kurtosis review and interpolation:
   be reused without an extra copy. Results retain input order, progress callbacks
   run on the calling worker, and cancellation waits for active stages to close
   their Raw objects. Stage timings separate loading/preprocessing from scoring.
+- Structured kurtosis progress reports eligible total, completed eligible
+  entries, exclusions and failures independently. The GUI reports successful
+  processing separately from exclusions and failed entries; an all-excluded
+  scan completes at zero eligible recordings. The existing three-argument
+  progress callback retains its full-request accounting for compatibility.
+  Skip/error records remain in original input order, and these scheduling and
+  presentation changes do not alter numerical evidence or cache fingerprints.
 - A decision receipt is valid only for its recording, channel, evidence
   fingerprint, processing settings, analyzed spans, and BioSemi64 geometry.
   Changed evidence requires review again. Only authorized channels are appended

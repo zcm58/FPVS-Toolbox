@@ -83,6 +83,12 @@ def prefetch_review(qtbot, monkeypatch, tmp_path):
             state.cancel_threads.append(get_ident())
             state.cancelled.set()
 
+        def maintain(self):
+            pass
+
+        def update_participant_exclusions(self, _exclusions):
+            pass
+
         def close(self):
             state.backend_threads.append(("close", get_ident()))
             state.cleanup_entered.set()

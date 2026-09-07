@@ -1,5 +1,95 @@
 # QC Performance: Exact Numerical Reuse
 
+## Participant Exclusions Before Kurtosis Loading (2026-09-07)
+
+Baseline: `37739269`. Remove known participant exclusions from speculative
+step-2 source loading and refresh eligibility as review choices change. Select
+step-6 workers from recordings that require work, and report eligible progress
+separately from exclusions and failures. Preserve scientific calculations,
+continuous filtering for retained conditions, ordered evidence/skip results,
+cache identities, and source immutability.
+
+- [x] Filter and refresh the preload queue without GUI-thread I/O; retire
+  excluded ready buffers safely and let active reads release their own data.
+- [x] Resolve verified skips before worker resource estimates and add
+  structured eligible/excluded progress without breaking legacy callbacks.
+- [x] Wire current participant choices and clear progress into the GUI.
+- [x] Verify races, exclusion scope, eligible-only scheduling, exact evidence,
+  cancellation and cleanup; run processing/GUI gates and commit.
+
+Scope is participant-level speculative loading. Recording and condition
+exclusions retain their existing scientific authority; partial exclusions do
+not justify changing the continuous filter input. Temporary sources remain
+inside the active project's `.fpvs_processing/qc-source-*` directory.
+
+The preload constructor matches normalized, case-insensitive participant IDs
+from `RawFileInfo.subject_id`, never filenames. The GUI refreshes exclusions
+after accepted reviews and before each kurtosis scan. Refresh only changes
+thread-safe state: queued work is skipped, active reads finish safely without
+publishing excluded data, and ready buffers are retired by background
+maintenance. Borrowed Raw objects remain owned until release. Retired work is
+not restarted if a participant is re-included; normal source loading remains
+available. Maintenance and final cleanup coordinate ownership and staging
+budget, including cancellation and concurrent close.
+
+The kurtosis coordinator resolves existing participant, recording and complete
+condition exclusions before file-size or duplicate-stem resource estimates.
+Invalid plans remain explicit errors; partial exclusions retain continuous
+filtering. Ordered skip/error/evidence results and legacy progress accounting
+remain available. Structured progress reports eligible completions, exclusions
+and failures; the GUI shows `Processed X of Y eligible recordings; Z excluded`
+and a separate failure count. Zero eligible recordings complete without source
+hashing, loading or worker allocation. An excluded but still active preload
+continues to reserve its concurrency slot until it releases its data.
+
+Production files: `src/Main_App/processing/qc_source_prefetch.py`,
+`src/Main_App/workers/qc_source_prefetch_worker.py`,
+`src/Main_App/processing/kurtosis_review_scan.py`, and
+`src/Main_App/gui/preprocessing_qc_workflow.py`. Coverage is in
+`tests/processing/test_qc_source_prefetch.py`,
+`tests/processing/test_kurtosis_review_scan.py`,
+`tests/workers/test_qc_source_prefetch_worker_static.py`,
+`tests/gui/test_qc_source_prefetch_static.py`, the extracted-loop fixture in
+`tests/gui/test_kurtosis_review_dialog_static.py`, and the existing CI-only fixture
+in `tests/gui/test_qc_source_prefetch_qt.py`. This plan, the preprocessing
+contract and workers/threading contract document the changes. Project roots
+still come from the active project; no hard-coded paths, export formats,
+method fingerprints or retired-package boundaries changed.
+
+The complete serial body from `raw_plans` through its final result is AST-
+identical to `37739269`. Focused tests compare full ordered scientific payload
+bits against that unchanged body, including errors, exclusions and retained
+conditions. Initial focused checks passed 50 source/worker cases, 40 scanner
+cases, and 30 GUI-safe orchestration cases. No local Qt execution or real
+project mutation occurred.
+
+Final combined focused verification passed **142 tests** across the source,
+scanner, worker and GUI-safe orchestration files above plus preflight reuse and
+Continue checks; Ruff, compilation, GUI/protected/source-localization audits
+and whitespace checks passed. `python .agents/scripts/verify.py --scope gui
+--tier focused` passed **382 tests**. The processing driver (`--scope processing
+--tier focused`) completed with **1,690 passed, 5 skipped** and six failures:
+five were old extracted-loop test namespaces missing the new refresh helper,
+now fixed and covered by the passing combined run. The remaining fixed-profile
+harmonic-selection failure is caused by a concurrent, unrelated Stats edit
+whose canonical ROI comparison differs from its old `FZ` fixture. That test
+fails alone with the concurrent edit and passes in an isolated test process
+when only the Stats function is restored from `37739269`; no working-tree
+files were changed for that confirmation. Concurrent Stats/export edits remain
+outside this commit. The repository precommit driver (`--scope repo --tier
+precommit`) still stops on the same eight pre-existing path-audit findings in
+unrelated untracked `outputs/`. The broad gates are therefore not claimed as
+passing. Independent final review found no actionable QC regression.
+
+Visible smoke after restart: use a small project with a participant exclusion,
+leave step 2 open, and confirm that participant never appears in preload logs.
+Add a participant exclusion during review and confirm unstarted loads are
+skipped, the UI stays responsive, and step 6 reports eligible/excluded counts.
+Repeat with every participant excluded, then cancel an active preload/scan and
+confirm run-owned temporary directories disappear after cleanup. Re-including
+a participant must retain the normal loading fallback. Qt execution is CI-only
+locally under the repository policy.
+
 ## Preprocessing Step 1 Follow-up (2026-09-07)
 
 Baseline: `ed089e9d`. Require exact float bits, complete scientific evidence,

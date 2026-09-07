@@ -5,7 +5,7 @@ from copy import deepcopy
 import gc
 import hashlib
 import os
-from threading import Event, Thread
+from threading import Event, Thread, get_ident
 from types import SimpleNamespace
 
 import numpy as np
@@ -31,7 +31,7 @@ def recordings(tmp_path, monkeypatch):
         source = tmp_path / folder / "participant.bdf"
         source.parent.mkdir()
         source.write_bytes(b"x" * 128)
-        infos.append(SimpleNamespace(path=source))
+        infos.append(SimpleNamespace(path=source, subject_id=f"P{len(infos) + 1:02d}"))
     created = []
 
     def load(_app, _source, **kwargs):
@@ -60,6 +60,247 @@ def test_construction_does_no_io_and_close_before_run_is_safe(recordings, monkey
     assert session.finished.is_set()
     assert session.take(infos[0].path, settings={}) is None
     assert not (root / ".fpvs_processing").exists()
+
+
+@pytest.mark.parametrize("exclusions", [["p01"], {"P01": True}, '[" P01 "]'])
+def test_initial_exclusions_use_participant_identity_for_every_recording(recordings, monkeypatch, exclusions):
+    root, infos, created = recordings
+    infos[1].subject_id = "p01"
+    # This filename resembles an excluded participant, but its actual identity
+    # is P03 and must remain eligible.
+    infos[2].path = infos[2].path.with_name("P01.bdf")
+    infos[2].path.write_bytes(b"x" * 128)
+    source_identity = prefetch._source_identity
+
+    def only_eligible(path):
+        assert path == infos[2].path
+        return source_identity(path)
+
+    monkeypatch.setattr(prefetch, "_source_identity", only_eligible)
+    session = prefetch.QcSourcePrefetch(root, infos, {"manual_excluded_participants": exclusions})
+    session.run()
+    assert len(created) == 1
+    assert session.take(infos[0].path, settings={}) is None
+    assert session.take(infos[1].path, settings={}) is None
+    raw = session.take(infos[2].path, settings={})
+    assert raw is created[0][0]
+    session.release(raw)
+    session.close()
+    assert all(info.path.exists() for info in infos)
+
+
+def test_initially_excluded_sources_do_no_io_and_unexclude_uses_normal_fallback(recordings, monkeypatch):
+    root, infos, created = recordings
+    session = prefetch.QcSourcePrefetch(root, infos[:1], {"manual_excluded_participants": ["P01"]})
+    session.update_participant_exclusions([])
+    with monkeypatch.context() as patched:
+        patched.setattr(Path, "resolve", lambda *_args, **_kwargs: pytest.fail("Excluded source caused I/O"))
+        patched.setattr(prefetch, "_source_sha256", lambda *_args: pytest.fail("Excluded source was hashed"))
+        session.run()
+    assert session.take(infos[0].path, settings={}) is None
+    session.close()
+    assert not created
+    assert not (root / ".fpvs_processing").exists()
+
+
+@pytest.mark.parametrize("begin_consumption", [False, True])
+def test_active_and_pending_excluded_sources_cannot_publish_or_be_taken(recordings, monkeypatch, begin_consumption):
+    root, infos, created = recordings
+    infos[0].subject_id = "P02"
+    infos[1].subject_id = infos[2].subject_id = "P01"
+    loading, allow_load = Event(), Event()
+    loader = prefetch.load_utils.load_eeg_file
+
+    def blocked_second(app, source, **kwargs):
+        if source == str(infos[1].path):
+            loading.set()
+            assert allow_load.wait(5)
+        return loader(app, source, **kwargs)
+
+    monkeypatch.setattr(prefetch.load_utils, "load_eeg_file", blocked_second)
+    session = prefetch.QcSourcePrefetch(root, infos, {})
+    producer = Thread(target=session.run)
+    producer.start()
+    retained = None
+    try:
+        assert loading.wait(5)
+        session.update_participant_exclusions(["p01"])
+        assert session.take(infos[1].path, settings={}) is None
+        assert session.take(infos[2].path, settings={}) is None
+        if begin_consumption:
+            assert session.begin_consumption() is True
+        assert producer.is_alive()
+        retained = session.take(infos[0].path, settings={})
+        assert retained is created[0][0]
+        allow_load.set()
+        producer.join(5)
+        assert not producer.is_alive()
+        assert len(created) == 2
+        assert created[1][0].close_count == 1
+        assert not created[1][1].exists()
+        assert session.begin_consumption() is False
+        assert session.take(infos[1].path, settings={}) is None
+    finally:
+        allow_load.set()
+        producer.join(5)
+        if retained is not None:
+            session.release(retained)
+        session.close()
+
+
+def test_ready_exclusion_update_is_io_free_and_background_retirement_preserves_other_sources(recordings, monkeypatch):
+    root, infos, created = recordings
+    infos[1].subject_id = "p01"
+    session = prefetch.QcSourcePrefetch(root, infos, {})
+    session.run()
+    closed_threads = []
+    for raw, _path, _kwargs in created:
+        close = raw.close
+
+        def observed_close(close=close):
+            closed_threads.append(get_ident())
+            close()
+
+        raw.close = observed_close
+    with monkeypatch.context() as patched:
+        patched.setattr(Path, "stat", lambda *_args: pytest.fail("GUI update performed I/O"))
+        patched.setattr(Path, "unlink", lambda *_args, **_kwargs: pytest.fail("GUI update removed data"))
+        session.update_participant_exclusions("P01")
+    assert closed_threads == []
+    assert session.take(infos[0].path, settings={}) is None
+    maintenance = Thread(target=session.maintain)
+    maintenance.start()
+    maintenance.join(5)
+    assert not maintenance.is_alive()
+    assert closed_threads == [maintenance.ident, maintenance.ident]
+    assert session._retained_bytes == created[2][0]._data.nbytes
+    assert not created[0][1].exists() and not created[1][1].exists()
+    raw = session.take(infos[2].path, settings={})
+    assert raw is created[2][0]
+    session.release(raw)
+    session.close()
+
+
+def test_new_exclusion_does_not_close_borrowed_raw_or_mutate_its_samples(recordings):
+    root, infos, created = recordings
+    session = prefetch.QcSourcePrefetch(root, infos[:1], {})
+    session.run()
+    raw = session.take(infos[0].path, settings={})
+    before = raw._data.tobytes()
+    session.update_participant_exclusions(["P01"])
+    session.maintain()
+    assert raw.close_count == 0 and created[0][1].exists()
+    assert raw._data.tobytes() == before
+    assert session.source_content_identity_for(raw) is not None
+    session.release(raw)
+    assert raw.close_count == 1
+    assert session._retained_bytes == 0
+    session.close()
+
+
+def test_exclusion_during_take_validation_vetoes_handoff_and_consumer_releases(recordings, monkeypatch):
+    root, infos, created = recordings
+    session = prefetch.QcSourcePrefetch(root, infos[:1], {})
+    session.run()
+    hashing, allow_hash = Event(), Event()
+    source_hash = prefetch._source_sha256
+    results = []
+
+    def blocked_hash(path, should_cancel):
+        hashing.set()
+        assert allow_hash.wait(5)
+        return source_hash(path, should_cancel)
+
+    monkeypatch.setattr(prefetch, "_source_sha256", blocked_hash)
+    consumer = Thread(target=lambda: results.append(session.take(infos[0].path, settings={})))
+    consumer.start()
+    try:
+        assert hashing.wait(5)
+        session.update_participant_exclusions(["P01"])
+        session.maintain()
+        assert created[0][0].close_count == 0
+        assert created[0][1].exists()
+        allow_hash.set()
+        consumer.join(5)
+        assert not consumer.is_alive()
+        assert results == [None]
+        assert created[0][0].close_count == 1
+        assert not created[0][1].exists()
+        assert session._borrowed == {} and session._retained_bytes == 0
+    finally:
+        allow_hash.set()
+        consumer.join(5)
+        session.close()
+
+
+def test_retirement_reclaims_budget_before_the_next_source(recordings, monkeypatch):
+    root, infos, created = recordings
+    session = prefetch.QcSourcePrefetch(root, infos, {}, max_prefetch_bytes=550)
+    prepare = session._prepare
+
+    def exclude_after_first(entry, index):
+        prepare(entry, index)
+        if index == 0:
+            session.update_participant_exclusions(["P01"])
+
+    monkeypatch.setattr(session, "_prepare", exclude_after_first)
+    session.run()
+    assert len(created) == 2
+    assert created[0][0].close_count == 1
+    assert not created[0][1].exists()
+    raw = session.take(infos[1].path, settings={})
+    assert raw is created[1][0]
+    session.release(raw)
+    session.close()
+
+
+def test_close_waits_for_active_retirement_and_disposes_only_once(recordings):
+    root, infos, created = recordings
+    session = prefetch.QcSourcePrefetch(root, infos[:1], {})
+    session.run()
+    closing, allow_close, finished = Event(), Event(), Event()
+    raw = created[0][0]
+    original_close = raw.close
+
+    def blocked_close():
+        closing.set()
+        assert allow_close.wait(5)
+        original_close()
+
+    raw.close = blocked_close
+    session.update_participant_exclusions(["P01"])
+    maintenance = Thread(target=session.maintain)
+    closer = Thread(target=lambda: (session.close(), finished.set()))
+    maintenance.start()
+    try:
+        assert closing.wait(5)
+        closer.start()
+        assert not finished.wait(0.05)
+        allow_close.set()
+        maintenance.join(5)
+        closer.join(5)
+        assert finished.is_set()
+        assert raw.close_count == 1
+        assert session._retained_bytes == 0
+        assert not created[0][1].parent.exists()
+    finally:
+        allow_close.set()
+        maintenance.join(5)
+        if closer.ident is not None:
+            closer.join(5)
+        session.close()
+
+
+def test_close_disposes_queued_retirement_even_without_maintenance_loop(recordings):
+    root, infos, created = recordings
+    session = prefetch.QcSourcePrefetch(root, infos[:1], {})
+    session.run()
+    session.update_participant_exclusions(["P01"])
+    session.update_participant_exclusions([])
+    assert session.take(infos[0].path, settings={}) is None
+    session.close()
+    assert created[0][0].close_count == 1
+    assert not created[0][1].parent.exists()
 
 
 def test_handoff_is_exact_single_use_and_same_stems_have_unique_paths(recordings):

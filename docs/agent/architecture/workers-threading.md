@@ -27,6 +27,15 @@ Common long-running work:
   worker/thread-finished signals and uses a responsive event loop for final
   cleanup, never a GUI-thread `wait()` or file deletion. The main window rejects
   Close until the review and worker cleanup release the prefetch bridge.
+  Known participant exclusions never enter source hashing/loading. After each
+  accepted review stage, the GUI sends current participant exclusions through
+  the I/O-free `update_participant_exclusions` call. Pending work is vetoed;
+  active reads finish under their existing owner, and background maintenance
+  closes newly excluded ready sources and returns their staging budget.
+  Borrowed sources remain exclusively owned until scanner release. A later
+  re-inclusion can use the normal scanner fallback rather than restart
+  speculative work. The worker performs maintenance while awaiting final
+  cleanup, never by closing memmaps on the GUI thread.
   Step 6 reuses completed
   sources and stops queued speculative work. No-action steps 2, 3, and 5 show
   a brief counted summary with Continue; step 4 retains the editable electrode
