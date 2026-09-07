@@ -193,3 +193,34 @@ first-invalid-value checks. Ruff, compile, protected-boundary and whitespace
 checks passed. Repository precommit still stops at the same eight unrelated
 hardcoded paths in untracked `outputs/`. No Qt execution was needed or run for
 these backend-only changes.
+
+## Harmonic Calculation Metadata Copies (2026-09-07)
+
+- [x] Drop unused DataFrame attrs only on the harmonic loader's owned working
+  frame, before pandas column operations. Preserve shared reader metadata,
+  validated source identities, exact values/reductions, and all selection rules.
+- [x] Verify bitwise parity, electrode/column ordering, retained provenance,
+  cached rereads, and unchanged nonfinite/source-membership rejection. A copy
+  sentinel guards against reintroducing calculation-time metadata copying.
+
+The observed MCCTR provisional-harmonic stage took 479.751 s. Live sampling
+found pandas repeatedly deep-copying the attached 15,361-frequency grid.
+A read-only full-loader comparison on one saved 64-electrode condition with
+627 planned columns measured 3.2921 s before and 0.06289 s after (about 52x).
+Every output float64 bit, frequency index, reference column, electrode count,
+and selected-electrode set matched; original/fresh metadata and the companion
+identity were unchanged. This is a single-loader measurement, not a measured
+whole-project speedup. No user data were rewritten or reprocessed.
+
+No architecture update is needed for this local working-frame optimization;
+ownership, I/O formats, processing order, fingerprints and GUI workflows stay
+the same. Manual smoke: restart the Toolbox, resume post-processing and compare
+the logged provisional-harmonic duration; review decisions still apply normally.
+
+Verification: **1,284 processing tests passed, 5 skipped**; **421 Stats tests**
+passed before the added regression cases, then the complete modified profile
+test file passed **31 tests**. GUI static checks passed **81 tests**, companion
+reader checks **61**, and harmonic-cache checks **17**. Ruff, compilation and
+whitespace checks passed. Repository precommit still reports only the eight
+existing hardcoded paths in unrelated untracked `outputs/`; those files are
+excluded from the commits. No local Qt workflow was run.

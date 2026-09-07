@@ -3484,6 +3484,11 @@ def _load_mean_amplitude_series(
             "['Electrode']"
         )
 
+    # The reader returns an owned frame; source provenance is validated separately.
+    # This reducer uses only its values. Drop unused metadata here so pandas does
+    # not deepcopy the complete spectral grid during each column operation.
+    df_fft.attrs = {}
+
     electrodes = (
         df_fft["Electrode"]
         .where(df_fft["Electrode"].notna(), "")

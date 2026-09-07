@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 import json
 from pathlib import Path
 
@@ -19,6 +20,7 @@ from Tools.Stats.analysis.dv_policy_settings import (
     FIXED_HARMONIC_INPUT_UPPER_FREQUENCY,
     FIXED_HARMONIC_INPUT_UPPER_HARMONIC,
     GROUP_SIGNIFICANT_ELECTRODE_SCOPE_FROZEN,
+    GROUP_SIGNIFICANT_ELECTRODE_SCOPE_ROI_UNION,
     HARMONIC_PROFILE_FIXED_ID,
     HARMONIC_PROFILE_LEGACY_ID,
     HARMONIC_PROFILE_SIGNIFICANT_ONLY_ID,
@@ -374,6 +376,119 @@ def test_fullfft_source_membership_is_validated_before_scoped_exclusions(
     assert used_electrodes == {"O1"}
 
 
+@pytest.mark.parametrize("scope", [
+    GROUP_SIGNIFICANT_ELECTRODE_SCOPE_ALL,
+    GROUP_SIGNIFICANT_ELECTRODE_SCOPE_FROZEN,
+    GROUP_SIGNIFICANT_ELECTRODE_SCOPE_ROI_UNION,
+])
+def test_fullfft_calculation_avoids_metadata_copies_and_preserves_exact_values(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scope: str,
+) -> None:
+    from Main_App.io import (
+        spectral_companion_identity,
+        spectral_manifest_frame,
+        write_spectral_companion,
+        xlsx_read_cache_scope,
+    )
+
+    path = tmp_path / "metadata_spectrum.xlsx"
+    frequencies = np.arange(32, dtype=float) / 120.0
+    columns = [f"{frequency:.4f}_Hz" for frequency in frequencies]
+    electrodes = [" o1 ", "O2", "Oz", "P1", "P2", "Pz", "Cz", "Fp1"]
+    values = np.random.default_rng(414).normal(size=(len(electrodes), len(columns)))
+    values *= np.logspace(-9, 9, len(columns))
+    values[0, :3] = [np.nextafter(1.0, 2.0), -0.0, np.nextafter(0.0, 1.0)]
+    frame = pd.DataFrame(values, columns=columns)
+    frame.insert(0, "Electrode", electrodes)
+    descriptor = write_spectral_companion(
+        path, {"FullFFT Amplitude (uV)": frame},
+        metadata={"frequencies_hz": frequencies, "source_fingerprint": "fixture"},
+    )
+    spectral_manifest_frame(descriptor).to_excel(
+        path, sheet_name="Spectral Data", index=False,
+    )
+    reader = group_policy.read_xlsx_sheet_selected_columns
+    requested = {"sheet_name": "FullFFT Amplitude (uV)",
+                 "required_columns": ["Electrode", *columns]}
+
+    class NoMetadataCopy:
+        def __deepcopy__(self, memo):
+            raise AssertionError("The calculation copied unused spectral metadata.")
+
+    def guarded_reader(*args, **kwargs):
+        owned = reader(*args, **kwargs)
+        owned.attrs["spectral_metadata"]["copy_guard"] = NoMetadataCopy()
+        return owned
+
+    with xlsx_read_cache_scope():
+        source = reader(path, **requested)
+        source_attrs = deepcopy(source.attrs)
+        labels = source["Electrode"].astype(str).str.upper().str.strip()
+        wanted = {"O1", "O2", "OZ"}
+        mask = labels.ne("O2")
+        if scope != GROUP_SIGNIFICANT_ELECTRODE_SCOPE_ALL:
+            mask &= labels.isin(wanted)
+        # The pre-change numeric path retains attrs through these pandas steps.
+        reference = source.loc[mask].copy()
+        block = reference.loc[:, columns].apply(pd.to_numeric, errors="coerce")
+        reference.loc[:, columns] = block
+        expected_means = np.asarray([
+            pd.to_numeric(reference[column], errors="coerce")
+            .to_numpy(dtype=float).mean()
+            for column in columns
+        ])
+        used: set[str] = set()
+        monkeypatch.setattr(
+            group_policy, "read_xlsx_sheet_selected_columns", guarded_reader,
+        )
+        actual, actual_columns, count = group_policy._load_mean_amplitude_series(
+            str(path), rois={"Posterior": sorted(wanted)}, electrode_scope=scope,
+            selection_electrodes=sorted(wanted),
+            reference_frequency_columns=[
+                (float(frequency), column, index)
+                for index, (frequency, column) in enumerate(zip(frequencies, columns))
+            ],
+            required_indices=list(range(len(columns))),
+            expected_scalp_channels=labels.tolist(), excluded_electrodes_upper={"O2"},
+            used_electrodes_out=used,
+        )
+        after = reader(path, **requested)
+        assert spectral_companion_identity(path) == descriptor
+
+    assert actual_columns == columns
+    assert count == int(mask.sum())
+    assert used == set(labels.loc[mask])
+    np.testing.assert_array_equal(actual.index.to_numpy(), frequencies)
+    np.testing.assert_array_equal(
+        actual.to_numpy().view(np.uint64), expected_means.view(np.uint64),
+    )
+    assert source.attrs == after.attrs == source_attrs
+    pd.testing.assert_frame_equal(source, after, check_exact=True)
+
+
+@pytest.mark.parametrize("bad_value", [np.nan, np.inf, -np.inf, "invalid"])
+def test_fullfft_metadata_optimization_preserves_nonfinite_rejection(
+    monkeypatch: pytest.MonkeyPatch, bad_value: object,
+) -> None:
+    frame = pd.DataFrame({"Electrode": ["O1"], "0.0000_Hz": [bad_value]})
+    frame.attrs["spectral_metadata"] = {"frequencies_hz": [0.0]}
+    monkeypatch.setattr(
+        group_policy, "read_xlsx_sheet_header", lambda *args, **kwargs: list(frame),
+    )
+    monkeypatch.setattr(
+        group_policy, "read_xlsx_sheet_selected_columns",
+        lambda *args, **kwargs: frame.copy(),
+    )
+    with pytest.raises(RuntimeError, match="requires finite FullFFT values"):
+        group_policy._load_mean_amplitude_series(
+            "synthetic.xlsx", rois={},
+            electrode_scope=GROUP_SIGNIFICANT_ELECTRODE_SCOPE_ALL,
+            reference_frequency_columns=[(0.0, "0.0000_Hz", 0)],
+            required_indices=[0], expected_scalp_channels=["O1"],
+        )
+    assert frame.attrs == {"spectral_metadata": {"frequencies_hz": [0.0]}}
+
+
 @pytest.mark.parametrize(
     ("electrodes", "expected", "excluded", "message"),
     [
@@ -384,6 +499,8 @@ def test_fullfft_source_membership_is_validated_before_scoped_exclusions(
             set(),
             "extra or unknown row\\(s\\): UNKNOWN",
         ),
+        (["O1", "O1"], ["O1"], set(), "duplicate electrode rows"),
+        (["O1", ""], ["O1"], set(), "blank electrode row\\(s\\): 1"),
     ],
 )
 def test_fullfft_source_membership_rejects_missing_or_extra_rows_before_exclusions(
