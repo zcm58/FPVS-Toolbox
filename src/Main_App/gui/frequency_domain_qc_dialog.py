@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+import re
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPoint, QSignalBlocker, Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
+    QHBoxLayout,
     QHeaderView,
     QLabel,
     QLineEdit,
@@ -16,6 +18,8 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QSplitter,
     QStackedWidget,
+    QStyle,
+    QTabBar,
     QTabWidget,
     QTableWidget,
     QTableWidgetItem,
@@ -26,6 +30,7 @@ from PySide6.QtWidgets import (
 from Main_App.gui.components import (
     ActionRow,
     AppDialog,
+    ColumnFilterMenu,
     StatusBanner,
     SubsectionHeaderLabel,
     SurfaceSize,
@@ -41,6 +46,11 @@ from Main_App.processing.frequency_domain_qc import (
     validate_frequency_domain_qc_review_decisions,
 )
 from Main_App.processing.frequency_qc_identity import frequency_qc_review_rows
+from Main_App.gui.frequency_domain_qc_review_model import (
+    electrode_group_key,
+    electrode_groups,
+    finding_section,
+)
 
 _CHOOSE_DECISION = ""
 _DECISION_LABELS = {
@@ -51,6 +61,17 @@ _DECISION_LABELS = {
     DECISION_EXCLUDE_RECORDING: "Exclude this recording",
     DECISION_EXCLUDE_PARTICIPANT: "Exclude whole participant",
 }
+
+
+class _ReviewTableItem(QTableWidgetItem):
+    def __init__(self, text: str, sort_key: tuple) -> None:
+        super().__init__(text)
+        self.sort_key = sort_key
+
+    def __lt__(self, other: QTableWidgetItem) -> bool:
+        if isinstance(other, _ReviewTableItem):
+            return self.sort_key < other.sort_key
+        return super().__lt__(other)
 
 
 class FrequencyDomainQcReviewDialog(AppDialog):
@@ -80,8 +101,14 @@ class FrequencyDomainQcReviewDialog(AppDialog):
         }
         self._decision_controls: dict[str, tuple[QComboBox, QLineEdit]] = {}
         self._findings = _review_findings(report)
+        self._electrode_groups = electrode_groups(self._findings, self._identity_scope)
+        self._bulk_snapshot: dict[int, tuple[str, str]] = {}
         self._evidence_texts: list[str] = []
         self._row_controls: list[tuple[QComboBox, QLineEdit]] = []
+        self._column_filters: dict[int, set[str]] = {}
+        self._sort_column: int | None = None
+        self._sort_order = Qt.AscendingOrder
+        self._column_menu: ColumnFilterMenu | None = None
         self._submitted_decisions: tuple[dict[str, object], ...] = ()
         self.setModal(True)
         self._build_ui()
@@ -154,12 +181,57 @@ class FrequencyDomainQcReviewDialog(AppDialog):
         findings_layout = QVBoxLayout(findings_panel)
         findings_layout.setContentsMargins(0, 0, 0, 0)
         findings_layout.addWidget(SubsectionHeaderLabel("Findings", findings_panel))
+        self.finding_sections = QTabBar(findings_panel)
+        self.finding_sections.setObjectName("frequency_domain_qc_sections")
+        self.finding_sections.setAccessibleName("Finding sections")
+        self.finding_sections.setDrawBase(False)
+        self.finding_sections.setExpanding(False)
+        for section, label in (("electrode", "Individual electrodes"), ("roi", "ROIs"),
+                               ("other", "Other findings")):
+            count = sum(finding_section(item) == section for item in self._findings)
+            if section == "other" and not count:
+                continue
+            tab = self.finding_sections.addTab(f"{label} ({count})")
+            self.finding_sections.setTabData(tab, section)
+        if not any(finding_section(item) == "electrode" for item in self._findings):
+            section = finding_section(self._findings[0]) if self._findings else "electrode"
+            self.finding_sections.setCurrentIndex(self._section_tab(section))
+        findings_layout.addWidget(self.finding_sections)
+        self.electrode_group_row = QWidget(findings_panel)
+        group_layout = QHBoxLayout(self.electrode_group_row)
+        group_layout.setContentsMargins(0, 0, 0, 0)
+        group_label = QLabel("Electrode group", self.electrode_group_row)
+        self.electrode_group_combo = QComboBox(self.electrode_group_row)
+        self.electrode_group_combo.setObjectName("frequency_domain_qc_electrode_group")
+        self.electrode_group_combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.electrode_group_combo.setMinimumContentsLength(12)
+        self.electrode_group_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.electrode_group_combo.addItem("All electrode flags", None)
+        for key, indices in sorted(self._electrode_groups.items(),
+                                   key=lambda entry: _natural_sort_key(self._electrode_group_label(entry[0]))):
+            self.electrode_group_combo.addItem(
+                f"{self._electrode_group_label(key)} — {len(indices)} flags", key
+            )
+        group_label.setBuddy(self.electrode_group_combo)
+        group_layout.addWidget(group_label)
+        group_layout.addWidget(self.electrode_group_combo, 1)
+        findings_layout.addWidget(self.electrode_group_row)
         self.search_edit = QLineEdit(findings_panel)
         self.search_edit.setObjectName("frequency_domain_qc_search")
         self.search_edit.setPlaceholderText("Search participant, condition, electrode or evidence…")
         self.search_edit.setAccessibleName("Search frequency-domain findings")
         self.search_edit.setClearButtonEnabled(True)
-        findings_layout.addWidget(self.search_edit)
+        search_row = QHBoxLayout()
+        search_row.addWidget(self.search_edit, 1)
+        self.clear_filters_button = make_action_button(
+            "Clear filters", variant="secondary", parent=findings_panel
+        )
+        self.clear_filters_button.setObjectName("frequency_domain_qc_clear_filters")
+        self.clear_filters_button.setToolTip("Clear column filters and text search.")
+        self.clear_filters_button.setEnabled(False)
+        self.clear_filters_button.clicked.connect(self._clear_filters)
+        search_row.addWidget(self.clear_filters_button)
+        findings_layout.addLayout(search_row)
 
         self.details_table = QTableWidget(findings_panel)
         self.details_table.setObjectName("frequency_domain_qc_details_table")
@@ -179,6 +251,10 @@ class FrequencyDomainQcReviewDialog(AppDialog):
         self.details_table.verticalHeader().hide()
         self.details_table.verticalHeader().setDefaultSectionSize(32)
         header = self.details_table.horizontalHeader()
+        header.setSectionsClickable(True)
+        header.setHighlightSections(False)
+        header.setToolTip("Click a column heading to sort or filter.")
+        header.sectionClicked.connect(self._show_column_menu)
         header.setMinimumSectionSize(40)
         header.setStretchLastSection(False)
         header.setSectionResizeMode(1, QHeaderView.Stretch)
@@ -196,7 +272,7 @@ class FrequencyDomainQcReviewDialog(AppDialog):
         detail_panel.setMinimumWidth(360)
         detail_layout = QVBoxLayout(detail_panel)
         detail_layout.setContentsMargins(8, 0, 0, 0)
-        detail_layout.addWidget(SubsectionHeaderLabel("Selected finding", detail_panel))
+        detail_layout.addWidget(SubsectionHeaderLabel("Review", detail_panel))
         self.detail_tabs = QTabWidget(detail_panel)
         self.detail_tabs.setObjectName("frequency_domain_qc_detail_tabs")
         self.evidence_view = QPlainTextEdit(self.detail_tabs)
@@ -212,6 +288,7 @@ class FrequencyDomainQcReviewDialog(AppDialog):
         self.context_view.setLineWrapMode(QPlainTextEdit.WidgetWidth)
         self.context_view.setPlainText(self._review_context_text(technical_rows))
         self.detail_tabs.addTab(self.context_view, "Review context")
+        self._build_electrode_group_panel()
         detail_layout.addWidget(self.detail_tabs, 1)
 
         self.decision_stack = QStackedWidget(detail_panel)
@@ -222,7 +299,7 @@ class FrequencyDomainQcReviewDialog(AppDialog):
             "Next undecided", variant="secondary", parent=detail_panel
         )
         self.next_button.setObjectName("frequency_domain_qc_next_undecided")
-        self.next_button.setToolTip("Go to the next undecided finding, including hidden search results.")
+        self.next_button.setToolTip("Go to the next undecided finding; clear filters if it is hidden.")
         self.next_button.clicked.connect(self._select_next_undecided)
         detail_layout.addWidget(self.next_button)
         self.splitter.setStretchFactor(0, 3)
@@ -230,14 +307,12 @@ class FrequencyDomainQcReviewDialog(AppDialog):
         self.splitter.setSizes([650, 470])
 
         self._populate_details_table()
+        self._update_filter_headers()
         self.details_table.currentCellChanged.connect(self._show_finding)
         self.search_edit.textChanged.connect(self._filter_findings)
-        self._update_progress()
-        if self._findings:
-            self.details_table.setCurrentCell(0, 0)
-            self._show_finding(0)
-        else:
-            self._show_finding(-1)
+        self.finding_sections.currentChanged.connect(self._section_changed)
+        self.electrode_group_combo.currentIndexChanged.connect(self._electrode_group_changed)
+        self._section_changed()
 
         actions = ActionRow(self, alignment=Qt.AlignRight)
         actions.setObjectName("frequency_domain_qc_actions")
@@ -250,6 +325,163 @@ class FrequencyDomainQcReviewDialog(AppDialog):
         actions.add_button(cancel_btn)
         actions.add_button(continue_btn)
         layout.addWidget(actions)
+
+    def _build_electrode_group_panel(self) -> None:
+        self.bulk_panel = QWidget(self.detail_tabs)
+        self.bulk_panel.setObjectName("frequency_domain_qc_electrode_group_panel")
+        layout = QVBoxLayout(self.bulk_panel)
+        layout.setContentsMargins(8, 8, 8, 8)
+        self.bulk_scope_label = QLabel(self.bulk_panel)
+        self.bulk_scope_label.setWordWrap(True)
+        layout.addWidget(self.bulk_scope_label)
+        self.bulk_scope_view = QPlainTextEdit(self.bulk_panel)
+        self.bulk_scope_view.setReadOnly(True)
+        self.bulk_scope_view.setAccessibleName("Electrode group and all affected conditions")
+        self.bulk_scope_view.setLineWrapMode(QPlainTextEdit.WidgetWidth)
+        layout.addWidget(self.bulk_scope_view, 1)
+        actions = ActionRow(self.bulk_panel)
+        self.bulk_retain_button = make_action_button("Retain all", variant="secondary", parent=actions)
+        self.bulk_exclude_button = make_action_button("Exclude all", variant="secondary", parent=actions)
+        self.bulk_retain_button.setObjectName("frequency_domain_qc_bulk_retain")
+        self.bulk_exclude_button.setObjectName("frequency_domain_qc_bulk_exclude")
+        self.bulk_retain_button.clicked.connect(
+            lambda: self._apply_electrode_group_decision(DECISION_RETAIN)
+        )
+        self.bulk_exclude_button.clicked.connect(
+            lambda: self._apply_electrode_group_decision(DECISION_EXCLUDE_CONDITION_ELECTRODE)
+        )
+        actions.add_button(self.bulk_retain_button)
+        actions.add_button(self.bulk_exclude_button)
+        self.bulk_undo_button = make_action_button(
+            "Undo", variant="secondary", parent=actions
+        )
+        self.bulk_undo_button.setObjectName("frequency_domain_qc_bulk_undo")
+        self.bulk_undo_button.setAccessibleName("Undo last group decision")
+        self.bulk_undo_button.clicked.connect(self._undo_electrode_group_decision)
+        actions.add_button(self.bulk_undo_button)
+        layout.addWidget(actions)
+        self.detail_tabs.addTab(self.bulk_panel, "Electrode group")
+
+    def _section_tab(self, section: str) -> int:
+        return next(index for index in range(self.finding_sections.count())
+                    if self.finding_sections.tabData(index) == section)
+
+    def _current_section(self) -> str:
+        return str(self.finding_sections.tabData(self.finding_sections.currentIndex()))
+
+    def _section_changed(self, _index: int = 0) -> None:
+        section = self._current_section()
+        self.electrode_group_row.setVisible(section == "electrode")
+        self.details_table.horizontalHeaderItem(2).setText(
+            {"electrode": "Electrode", "roi": "ROI", "other": "Finding"}[section]
+        )
+        if self._column_menu is not None:
+            self._column_menu.close()
+        self._clear_filters()
+
+    @staticmethod
+    def _electrode_group_label(key: tuple[str, str, str]) -> str:
+        participant, recording, electrode = key
+        identity = f"{participant} / {recording}" if recording and recording != participant else participant
+        return f"{identity} · {electrode}"
+
+    def _electrode_group_changed(self, _index: int) -> None:
+        self._filter_findings()
+        if self._selected_electrode_group() is not None:
+            self.detail_tabs.setCurrentWidget(self.bulk_panel)
+
+    def _scope_matches(self, finding_index: int) -> bool:
+        item = self._findings[finding_index]
+        if finding_section(item) != self._current_section():
+            return False
+        key = self.electrode_group_combo.currentData()
+        return (self._current_section() != "electrode" or key is None
+                or electrode_group_key(item, self._identity_scope) == key)
+
+    def _selected_electrode_group(self) -> tuple[str, str, str] | None:
+        if self._current_section() != "electrode":
+            return None
+        key = self.electrode_group_combo.currentData()
+        if key is not None:
+            return key if key in self._electrode_groups else None
+        row = self.details_table.currentRow()
+        if row < 0 or self.details_table.isRowHidden(row):
+            return None
+        return electrode_group_key(self._findings[self._finding_index(row)], self._identity_scope)
+
+    def _update_bulk_group(self) -> None:
+        key = self._selected_electrode_group()
+        indices = self._electrode_groups.get(key, ())
+        available = bool(indices)
+        bulk_tab = self.detail_tabs.indexOf(self.bulk_panel)
+        self.detail_tabs.setTabEnabled(bulk_tab, available)
+        if not available and self.detail_tabs.currentIndex() == bulk_tab:
+            self.detail_tabs.setCurrentIndex(0)
+        self.bulk_scope_label.setText(
+            f"Apply one decision to all {len(indices)} flags for this electrode."
+            if available else "Select an individual electrode to review its flagged conditions together."
+        )
+        if key is not None:
+            participant, recording, electrode = key
+            conditions: dict[str, int] = {}
+            for index in indices:
+                condition = str(self._findings[index]["condition"])
+                conditions[condition] = conditions.get(condition, 0) + 1
+            lines = [f"Participant: {participant}", f"Recording: {recording or 'Single recording'}",
+                     f"Electrode: {electrode}", "", f"{len(indices)} flags across {len(conditions)} conditions:"]
+            lines.extend(f"{condition} — {count} flag(s)" for condition, count in conditions.items())
+            lines.extend([
+                "", "Includes flags hidden by filters. Existing decisions will be replaced; "
+                "individual reasons are kept. You can still edit each finding before applying.",
+            ])
+            self.bulk_scope_view.setPlainText("\n".join(lines))
+        else:
+            self.bulk_scope_view.clear()
+        self.bulk_retain_button.setEnabled(available)
+        self.bulk_exclude_button.setEnabled(available)
+        self.bulk_retain_button.setToolTip(f"Retain all {len(indices)} flags listed above.")
+        self.bulk_exclude_button.setToolTip("Exclude this electrode in each flagged condition listed above.")
+        self.bulk_undo_button.setEnabled(bool(self._bulk_snapshot))
+
+    def _invalidate_bulk_undo(self, _text: str = "") -> None:
+        self._bulk_snapshot.clear()
+        self.bulk_undo_button.setEnabled(False)
+
+    def _apply_electrode_group_decision(self, decision: str) -> None:
+        if decision not in {DECISION_RETAIN, DECISION_EXCLUDE_CONDITION_ELECTRODE}:
+            raise ValueError("Electrode groups support retain or condition-electrode exclusion only.")
+        indices = self._electrode_groups.get(self._selected_electrode_group(), ())
+        if not indices:
+            return
+        self._bulk_snapshot = {
+            index: (str(self._row_controls[index][0].currentData() or ""),
+                    self._row_controls[index][1].text()) for index in indices
+        }
+        for index in indices:
+            combo, _reason = self._row_controls[index]
+            with QSignalBlocker(combo):
+                combo.setCurrentIndex(combo.findData(decision))
+            self._refresh_decision_cell(index)
+        self.bulk_undo_button.setToolTip(
+            "Undo decisions for " + self._electrode_group_label(self._selected_electrode_group())
+        )
+        self._refresh_decision_view()
+
+    def _undo_electrode_group_decision(self) -> None:
+        snapshot, self._bulk_snapshot = self._bulk_snapshot, {}
+        for index, (decision, text) in snapshot.items():
+            combo, reason = self._row_controls[index]
+            with QSignalBlocker(combo), QSignalBlocker(reason):
+                combo.setCurrentIndex(combo.findData(decision))
+                reason.setText(text)
+            self._refresh_decision_cell(index)
+        self._refresh_decision_view()
+
+    def _refresh_decision_view(self) -> None:
+        if self._sort_column == 4:
+            self._sort_findings(4, self._sort_order)
+        else:
+            self._filter_findings()
 
     def _review_context_text(self, technical_rows: list[Mapping[str, object]]) -> str:
         # This public adapter also validates canonical recording assignments.
@@ -302,12 +534,18 @@ class FrequencyDomainQcReviewDialog(AppDialog):
                 absolute_value,
                 "Undecided",
             )
+            absolute = _absolute_value(item)
             for column, value in enumerate(values):
-                table_item = QTableWidgetItem(value)
+                sort_key = (
+                    (absolute is None, absolute or 0.0)
+                    if column == 3 else _natural_sort_key(value)
+                )
+                table_item = _ReviewTableItem(value, sort_key)
                 table_item.setFlags(table_item.flags() & ~Qt.ItemIsEditable)
                 table_item.setToolTip(value)
                 if column == 0:
                     table_item.setData(Qt.UserRole, fingerprint)
+                    table_item.setData(Qt.UserRole + 1, row_index)
                 if column == 3:
                     table_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
                 self.details_table.setItem(row_index, column, table_item)
@@ -356,6 +594,7 @@ class FrequencyDomainQcReviewDialog(AppDialog):
             combo.currentIndexChanged.connect(
                 lambda _index, row=row_index: self._decision_changed(row)
             )
+            reason.textChanged.connect(self._invalidate_bulk_undo)
             reason.setEnabled(False)
             self.decision_stack.addWidget(page)
             self._decision_controls[fingerprint] = (combo, reason)
@@ -365,16 +604,24 @@ class FrequencyDomainQcReviewDialog(AppDialog):
             )
 
     def _show_finding(self, row: int, *_unused: int) -> None:
+        self._update_bulk_group()
         if row < 0 or self.details_table.isRowHidden(row):
-            self.evidence_view.setPlainText("No matching findings. Clear the search to show all findings.")
+            self.evidence_view.setPlainText("No matching findings. Clear filters to show all findings.")
             self.decision_stack.setEnabled(False)
             return
-        self.evidence_view.setPlainText(self._evidence_texts[row])
-        self.decision_stack.setCurrentIndex(row)
+        finding_index = self._finding_index(row)
+        self.evidence_view.setPlainText(self._evidence_texts[finding_index])
+        self.decision_stack.setCurrentIndex(finding_index)
         self.decision_stack.setEnabled(True)
-        self.detail_tabs.setCurrentIndex(0)
+        if self.detail_tabs.currentWidget() is not self.bulk_panel:
+            self.detail_tabs.setCurrentIndex(0)
 
     def _decision_changed(self, row: int) -> None:
+        self._invalidate_bulk_undo()
+        self._refresh_decision_cell(row)
+        self._refresh_decision_view()
+
+    def _refresh_decision_cell(self, row: int) -> None:
         combo, reason = self._row_controls[row]
         decision = str(combo.currentData() or "")
         reason.setEnabled(decision not in {_CHOOSE_DECISION, DECISION_RETAIN})
@@ -386,10 +633,10 @@ class FrequencyDomainQcReviewDialog(AppDialog):
             DECISION_EXCLUDE_RECORDING: "Excl. recording",
             DECISION_EXCLUDE_PARTICIPANT: "Excl. participant",
         }[decision]
-        cell = self.details_table.item(row, 4)
+        cell = self.details_table.item(self._table_row(row), 4)
+        cell.sort_key = _natural_sort_key(status)
         cell.setText(status)
         cell.setToolTip(_DECISION_LABELS[decision])
-        self._update_progress()
 
     def _update_progress(self) -> None:
         decided = sum(bool(combo.currentData()) for combo, _ in self._row_controls)
@@ -402,11 +649,95 @@ class FrequencyDomainQcReviewDialog(AppDialog):
         self.progress_label.setText(text)
         self.next_button.setEnabled(decided < len(self._findings))
 
-    def _filter_findings(self, _text: str) -> None:
+    def _finding_index(self, row: int) -> int:
+        cell = self.details_table.item(row, 0)
+        return int(cell.data(Qt.UserRole + 1)) if cell is not None else -1
+
+    def _table_row(self, finding_index: int) -> int:
+        return next(
+            (row for row in range(self.details_table.rowCount())
+             if self._finding_index(row) == finding_index), -1,
+        )
+
+    def _show_column_menu(self, column: int) -> None:
+        header = self.details_table.horizontalHeader()
+        # A header click toggles its native arrow even when it only opens a menu.
+        # Keep the indicator tied to the sort that was actually applied.
+        with QSignalBlocker(header):
+            if self._sort_column is not None:
+                header.setSortIndicator(self._sort_column, self._sort_order)
+            header.setSortIndicatorShown(self._sort_column is not None)
+        if self._column_menu is not None:
+            self._column_menu.close()
+            self._column_menu.deleteLater()
+        cells = [self.details_table.item(row, column)
+                 for row in range(self.details_table.rowCount())
+                 if self._scope_matches(self._finding_index(row))]
+        values = list(dict.fromkeys(cell.text() for cell in sorted(cells)))
+        menu = ColumnFilterMenu(
+            self.details_table.horizontalHeaderItem(column).text(),
+            values, self._column_filters.get(column), numeric=column == 3, parent=self,
+        )
+        self._column_menu = menu
+        menu.sort_requested.connect(lambda order: self._sort_findings(column, order))
+        menu.filter_applied.connect(lambda selected: self._set_column_filter(column, selected))
+        menu.popup(header.mapToGlobal(QPoint(header.sectionViewportPosition(column), header.height())))
+
+    def _sort_findings(self, column: int, order: Qt.SortOrder) -> None:
+        selected = self._finding_index(self.details_table.currentRow())
+        self._sort_column, self._sort_order = column, order
+        with QSignalBlocker(self.details_table):
+            self.details_table.sortItems(column, order)
+            if selected >= 0:
+                self.details_table.setCurrentCell(self._table_row(selected), 0)
+        self.details_table.horizontalHeader().setSortIndicator(column, order)
+        self.details_table.horizontalHeader().setSortIndicatorShown(True)
+        self._filter_findings()
+        self._show_finding(self.details_table.currentRow())
+
+    def _set_column_filter(self, column: int, selected: set[str] | None) -> None:
+        all_values = {self.details_table.item(row, column).text()
+                      for row in range(self.details_table.rowCount())
+                      if self._scope_matches(self._finding_index(row))}
+        if selected is None or selected == all_values:
+            self._column_filters.pop(column, None)
+        else:
+            self._column_filters[column] = set(selected)
+        self._filter_findings()
+
+    def _clear_filters(self) -> None:
+        self._column_filters.clear()
+        with QSignalBlocker(self.search_edit):
+            self.search_edit.clear()
+        with QSignalBlocker(self.electrode_group_combo):
+            self.electrode_group_combo.setCurrentIndex(0)
+        self._filter_findings()
+
+    def _update_filter_headers(self) -> None:
+        for column in range(self.details_table.columnCount()):
+            active = column in self._column_filters
+            item = self.details_table.horizontalHeaderItem(column)
+            item.setIcon(self.style().standardIcon(
+                QStyle.SP_DialogApplyButton if active else QStyle.SP_ArrowDown
+            ))
+            item.setToolTip(
+                ("Filter active. " if active else "") + "Click to sort or filter this column."
+            )
+        self.clear_filters_button.setEnabled(bool(
+            self._column_filters or self.search_edit.text()
+            or self.electrode_group_combo.currentData() is not None
+        ))
+
+    def _filter_findings(self, _text: str = "") -> None:
         terms = self.search_edit.text().casefold().split()
-        for row, evidence in enumerate(self._evidence_texts):
+        for row in range(self.details_table.rowCount()):
+            finding_index = self._finding_index(row)
+            evidence = self._evidence_texts[finding_index]
+            values = [self.details_table.item(row, column).text()
+                      for column in range(self.details_table.columnCount())]
             self.details_table.setRowHidden(
-                row, not all(term in evidence.casefold() for term in terms)
+                row, not (self._scope_matches(finding_index)
+                          and _matches_filters(evidence, values, terms, self._column_filters))
             )
         current = self.details_table.currentRow()
         if current < 0 or self.details_table.isRowHidden(current):
@@ -420,18 +751,22 @@ class FrequencyDomainQcReviewDialog(AppDialog):
             else:
                 self.details_table.setCurrentCell(-1, -1)
             self._show_finding(first)
+        self._update_filter_headers()
         self._update_progress()
+        self._update_bulk_group()
 
     def _select_next_undecided(self) -> None:
         count = len(self._findings)
         current = self.details_table.currentRow()
         for offset in range(1, count + 1):
             row = (current + offset) % count
-            combo, _ = self._row_controls[row]
+            combo, _ = self._row_controls[self._finding_index(row)]
             if combo.currentData():
                 continue
             if self.details_table.isRowHidden(row):
-                self.search_edit.clear()
+                section = finding_section(self._findings[self._finding_index(row)])
+                self.finding_sections.setCurrentIndex(self._section_tab(section))
+                self._clear_filters()
             self.details_table.setCurrentCell(row, 0)
             self._show_finding(row)
             self.details_table.scrollToItem(self.details_table.item(row, 0))
@@ -449,6 +784,27 @@ class FrequencyDomainQcReviewDialog(AppDialog):
                 f"'{normalized}' without canonical project group membership."
             )
         return group
+
+
+def _natural_sort_key(text: str) -> tuple:
+    return tuple((1, int(part)) if part.isdigit() else (0, part.casefold())
+                 for part in re.split(r"(\d+)", text))
+
+
+def _absolute_value(item: Mapping[str, object]) -> float | None:
+    if item.get("finding_type") == "cohort_relative_summed_bca_context":
+        value = item.get("value_uv")
+        if value is None:
+            value = item.get("abs_summed_bca_uv")
+        return abs(float(value)) if value is not None else None
+    return float(item.get("abs_summed_bca_uv") or abs(float(item.get("summed_bca_uv") or 0.0)))
+
+
+def _matches_filters(evidence: str, values: list[str], terms: list[str],
+                     filters: Mapping[int, set[str]]) -> bool:
+    folded = evidence.casefold()
+    return (all(term in folded for term in terms)
+            and all(values[column] in allowed for column, allowed in filters.items()))
 
 
 def _finding_evidence_text(

@@ -55,6 +55,9 @@ FREQUENCY_DOMAIN_QC_INDEPENDENT_EVIDENCE_VERSION = (
 )
 FREQUENCY_DOMAIN_QC_MAX_REVIEW_ITERATIONS = 64
 SPECTRAL_METRIC_QC_SHEET_NAME = "Spectral Metric QC"
+_HARMONIC_CACHE_ANNOTATIONS = frozenset({
+    "selection_cache_source", "selection_cache_saved_at", "selection_cache_key",
+})
 
 DECISION_RETAIN = "retain"
 DECISION_EXCLUDE_CONDITION_ELECTRODE = "exclude_condition_electrode"
@@ -479,6 +482,11 @@ def run_frequency_domain_qc_review(
             ),
         }
     )
+    state = load_frequency_domain_qc_state(project_root)
+    previous_review_evidence = (
+        _validated_review_evidence_from_state(project_root, state)
+        if state.get("review_complete") else None
+    )
     evidence_context_fingerprint = _analysis_fingerprint(
         project_root=project_root,
         subjects=subjects,
@@ -495,8 +503,8 @@ def run_frequency_domain_qc_review(
         cohort_fingerprint=cohort_inspection.cohort_fingerprint,
         source_workbooks=source_workbooks,
         source_fingerprint=source_fingerprint,
+        previous_review_evidence=previous_review_evidence,
     )
-    state = load_frequency_domain_qc_state(project_root)
     reconfirmation_findings, stable_exclusion_decisions = (
         _review_exclusion_reconfirmation_findings(
             state,
@@ -1197,6 +1205,14 @@ def sync_frequency_domain_qc_automatic_state(
         if isinstance(state.get("last_review"), Mapping)
         else {}
     )
+    if report.get("review_reused"):
+        previous_evidence = _validated_review_evidence_from_state(root, state)
+        if previous_evidence is not None and (
+            previous_evidence.get("analysis_fingerprint") == analysis_fingerprint
+        ):
+            # Preserve what the user actually reviewed. In particular, an older
+            # receipt may bind its identity to the original cache annotations.
+            review_evidence = previous_evidence
     update: dict[str, object] = {
         "schema_version": FREQUENCY_DOMAIN_QC_SCHEMA_VERSION,
         "method_version": str(
@@ -2979,6 +2995,7 @@ def _analysis_fingerprint(
     cohort_fingerprint: str = "",
     source_workbooks: Sequence[Mapping[str, object]] | None = None,
     source_fingerprint: str = "",
+    previous_review_evidence: Mapping[str, object] | None = None,
 ) -> str:
     workbooks = list(source_workbooks or ())
     if not workbooks:
@@ -3007,7 +3024,8 @@ def _analysis_fingerprint(
         "finite_input_method_version": FREQUENCY_DOMAIN_QC_INTEGRITY_METHOD_VERSION,
         "finite_input_fingerprint": str(finite_input_fingerprint),
         "provisional_harmonic_metadata": _json_safe(
-            provisional_metadata or {}
+            {key: value for key, value in (provisional_metadata or {}).items()
+             if key not in _HARMONIC_CACHE_ANNOTATIONS}
         ),
         "roi_definition_fingerprint": str(roi_definition_fingerprint),
         "cohort_fingerprint": str(cohort_fingerprint),
@@ -3088,7 +3106,29 @@ def _analysis_fingerprint(
                 ],
             }
         )
-    return _hash_payload(payload)
+    fingerprint = _hash_payload(payload)
+    if previous_review_evidence is not None:
+        previous_fingerprint = str(previous_review_evidence.get("analysis_fingerprint") or "")
+        previous_metadata = previous_review_evidence.get("provisional_harmonic_metadata")
+        if previous_fingerprint == fingerprint:
+            return fingerprint
+        if isinstance(previous_metadata, Mapping):
+            stable_previous_metadata = _json_safe({
+                key: value for key, value in previous_metadata.items()
+                if key not in _HARMONIC_CACHE_ANNOTATIONS
+            })
+            if stable_previous_metadata == payload["provisional_harmonic_metadata"]:
+                # Compatibility for validated receipts written before cache
+                # bookkeeping was separated from scientific review identity.
+                # Every current source, setting and finding must still match;
+                # only the three saved cache annotations may be substituted.
+                previous_payload = {
+                    **payload,
+                    "provisional_harmonic_metadata": _json_safe(previous_metadata),
+                }
+                if previous_fingerprint and _hash_payload(previous_payload) == previous_fingerprint:
+                    return previous_fingerprint
+    return fingerprint
 
 
 def _source_workbook_rows(

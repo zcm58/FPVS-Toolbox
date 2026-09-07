@@ -224,3 +224,34 @@ reader checks **61**, and harmonic-cache checks **17**. Ruff, compilation and
 whitespace checks passed. Repository precommit still reports only the eight
 existing hardcoded paths in unrelated untracked `outputs/`; those files are
 excluded from the commits. No local Qt workflow was run.
+
+## Repeated Summed-BCA Review Fix (2026-09-07)
+
+- [x] Reproduce accepted decisions changing the adaptive harmonic cache key
+  and timestamp, then incorrectly invalidating otherwise identical QC evidence.
+- [x] Exclude the three harmonic-cache annotations from scientific review
+  identity. Preserve all source, settings, cohort, harmonic and finding checks.
+- [x] Reuse older validated review receipts only when the complete current
+  analysis matches after substituting the original cache annotations. Preserve
+  original review evidence across automatic synchronization and repeated reuse.
+- [x] Add regression coverage for cache rebuild/reload, old receipts, damaged
+  receipts, changed inputs/settings and legitimate exclusion reconfirmation.
+
+The export contract now documents this review-identity boundary. No scientific
+selection rules, exclusion scopes, or persistence formats change.
+
+Manual smoke: restart the Toolbox, resume post-processing, apply the QC review
+choices, and verify unchanged findings do not reopen and processing advances.
+If exclusions change the actual cohort or harmonic evidence, complete the
+legitimate follow-up review and verify it settles. Existing saved choices should
+also be reused when their scientific evidence still matches.
+
+Verification: `python .agents/scripts/verify.py --scope processing --tier focused`
+passed **1,324 tests, 5 skipped**, including eight new reuse regressions. Ruff,
+compilation, protected/source-localization audits, independent review, and
+whitespace checks passed. The protected audit evaluated the retired
+`Legacy_App`, `PySide6_App`, Source Localization and quarantine boundaries;
+none was changed by this fix. `python .agents/scripts/verify.py --scope repo
+--tier precommit` still stops at eight existing hardcoded paths in unrelated
+untracked `outputs/`. No Qt workflow was run locally; the visible smoke path
+above remains to be exercised in the application.

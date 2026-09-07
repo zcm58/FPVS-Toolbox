@@ -8,6 +8,7 @@ windows, filesystem access, project state reads, or worker startup.
 from __future__ import annotations
 
 from .actions import ActionRow, make_action_row
+from .column_filter_menu import ColumnFilterMenu
 from .messages import confirm, show_error, show_info, show_warning
 from .post_processing import (
     PostProcessingRequiredDialog,
@@ -41,6 +42,7 @@ __all__ = (
     "BrainPulseWidget",
     "BusySpinner",
     "CardHeader",
+    "ColumnFilterMenu",
     "PathPickerRow",
     "PostProcessingRequiredDialog",
     "SectionCard",

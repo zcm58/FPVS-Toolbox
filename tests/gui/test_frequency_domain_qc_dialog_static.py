@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import re
 from collections.abc import Mapping
 from copy import deepcopy
 from pathlib import Path
@@ -52,7 +53,7 @@ def _presentation_helpers():
     """Execute the real pure formatting helpers without importing Qt."""
     tree = ast.parse(DIALOG.read_text(encoding="utf-8"))
     helpers = [node for node in tree.body if isinstance(node, ast.FunctionDef)]
-    namespace = {"Mapping": Mapping}
+    namespace = {"Mapping": Mapping, "re": re}
     exec(compile(ast.Module(body=helpers, type_ignores=[]), str(DIALOG), "exec"), namespace)
     return namespace
 
@@ -108,3 +109,55 @@ def test_unavailable_input_context_keeps_each_status_instead_of_a_pass() -> None
     assert helpers["_technical_context_text"](unavailable[0]) == (
         "P9-visit2 / Neutral Angry / LOT: source_workbook_missing"
     )
+
+
+@pytest.mark.parametrize(
+    "values, expected",
+    [
+        (["P10", "P2", "P1"], ["P1", "P2", "P10"]),
+        (["PO10", "PO2", "PO1"], ["PO1", "PO2", "PO10"]),
+        (["visit10", "Visit2", "visit1"], ["visit1", "Visit2", "visit10"]),
+    ],
+)
+def test_column_sort_uses_natural_identifier_order(values, expected) -> None:
+    assert sorted(values, key=_presentation_helpers()["_natural_sort_key"]) == expected
+
+
+@pytest.mark.parametrize(
+    "item, expected",
+    [
+        ({"summed_bca_uv": -12.345678}, 12.345678),
+        ({"summed_bca_uv": -12.345678, "abs_summed_bca_uv": 9.876543}, 9.876543),
+        ({"finding_type": "cohort_relative_summed_bca_context", "value_uv": -2.00049}, 2.00049),
+        ({"finding_type": "cohort_relative_summed_bca_context", "abs_summed_bca_uv": 2.00041}, 2.00041),
+    ],
+)
+def test_amplitude_sort_preserves_exact_unrounded_display_source(item, expected) -> None:
+    original = deepcopy(item)
+    assert _presentation_helpers()["_absolute_value"](item) == expected
+    assert item == original
+
+
+@pytest.mark.parametrize(
+    "terms, filters, expected",
+    [
+        ([], {}, True),
+        (["p2", "faces"], {}, True),
+        (["p2", "objects"], {}, False),
+        ([], {0: {"P2", "P10"}, 1: {"Faces"}}, True),
+        ([], {0: {"P2"}, 1: {"Objects"}}, False),
+        ([], {0: {"P20"}}, False),
+        ([], {0: set()}, False),
+        (["kurtosis"], {1: {"Faces"}, 4: {"Undecided"}}, True),
+        (["missing"], {1: {"Faces"}}, False),
+    ],
+)
+def test_column_filters_combine_exact_choices_with_existing_evidence_search(
+    terms, filters, expected,
+) -> None:
+    helpers = _presentation_helpers()
+    values = ["P2", "Faces", "PO8", "12.346 uV", "Undecided"]
+    evidence = "Participant: P2\nCondition: Faces\nIndependent QC: Kurtosis review current"
+    original = deepcopy(filters)
+    assert helpers["_matches_filters"](evidence, values, terms, filters) is expected
+    assert filters == original

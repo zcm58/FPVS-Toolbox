@@ -29,23 +29,51 @@ Primary paths:
   used by `MainWindow` compatibility wrappers.
 - `src/Main_App/gui/frequency_domain_qc_dialog.py`: modal review dialog shown
   after condition processing and before final harmonic selection for experimental
-  summed-BCA flags. A searchable five-column list keeps identities, conditions,
-  electrodes/ROIs, absolute values, and decision status visible without horizontal
+  summed-BCA flags. Separate Individual electrodes and ROIs tabs share a searchable
+  five-column list; ambiguous targets remain visible under Other findings.
+  The list keeps identities, conditions, targets, absolute values, and decision status visible without horizontal
   scrolling. A resizable selected-finding pane shows complete signed/absolute
   evidence, canonical group/session identity, and the existing decision choices
   with optional reasons. Review context holds screening rules, participant or
   recording summaries, and unavailable cohort-input statuses; unavailable input
   counts also remain visible above the list. Decisions stay keyed by finding
-  fingerprint across selection/search, start undecided even with prior context,
-  and pass unchanged to the existing validator. Next undecided navigates across
-  all findings, clearing a search if needed. Unknown participants or missing
+  fingerprint across selection, sorting and filtering, start undecided even with
+  prior context, and pass unchanged to the existing validator. Each column header
+  opens the shared `components.ColumnFilterMenu`: natural text or exact numeric
+  sorting, searchable value checkboxes, Apply/Cancel, and clear-column filtering.
+  Column filters combine with text search; checked header icons identify active
+  filters and Clear filters resets search, column and electrode-group filters.
+  Switching sections resets these filters; column menus show values for the
+  current section and electrode group. Hidden findings still require decisions.
+  Next undecided follows the displayed sort order across all findings, switching
+  sections and clearing filters if needed. Unknown participants or missing
   required grouped assignments block review instead of inferring membership.
   No scientific calculations or exclusion authority belong to this presentation.
+  `frequency_domain_qc_review_model.py` groups existing electrode findings by
+  exact participant, recording and electrode identity across flagged conditions.
+  The electrode-group selector opens an Electrode group detail tab with the full
+  affected condition list and explicit Retain all / Exclude all actions. These
+  fill existing fingerprint-keyed decisions, including flags hidden by filters;
+  exclusions remain electrode-in-condition choices. No other participant,
+  recording, electrode, ROI or unflagged condition is added. Per-finding choices
+  remain editable and optional reason text is preserved in the review controls.
+  Undo restores the last group's prior choices and reasons; a later individual
+  decision or reason edit invalidates it. The existing validator and persistence
+  remain authoritative (including their existing retained-reason normalization).
   Visible smoke (Qt execution is CI-only locally): open the review at 1280x900,
   resize the dialog down to 1000x650, and verify the list and action buttons fit;
-  choose decisions/reasons, switch rows and search, and confirm choices persist.
+  choose decisions/reasons, sort by participant, condition and value, combine
+  column filters with search, and confirm choices and evidence persist on the
+  same finding. Check column-menu Apply, Cancel, Select all and Clear selection,
+  zero matches, clear-column/reset, numeric ordering, and next-hidden-undecided.
   Inspect long evidence and unavailable-input context, use Next undecided, then
   verify incomplete Apply is rejected and completed choices submit normally.
+  Switch electrode/ROI tabs, select one participant-recording electrode group,
+  filter to one condition, and verify the group panel still lists every affected
+  flag. Retain/exclude the group, undo, then override one finding and verify the
+  other participants, recordings and ROI decisions are unchanged. Exercise this
+  path in the registered `test_frequency_domain_qc_dialog_qt.py` CI coverage;
+  pure grouping and actual bulk-action tests run in the local GUI scope.
 - `src/Main_App/gui/frequency_domain_qc_handoff.py`: asynchronous accepted-review
   handoff to `FrequencyDomainQcDecisionWorker`. It keeps the main processing
   page visible, receives saved metadata on the GUI thread, and resumes the

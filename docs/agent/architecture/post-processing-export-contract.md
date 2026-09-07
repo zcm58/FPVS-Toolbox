@@ -84,6 +84,16 @@ partial replacement, restores the preceding artifact, and leaves its registry
 record failed/stale for the new fingerprint instead of presenting the old file
 as current.
 
+Frequency-domain review identity excludes the harmonic cache's
+`selection_cache_source`, `selection_cache_saved_at`, and `selection_cache_key`
+annotations. Saving review decisions can change those annotations without
+changing any scientific evidence; unchanged findings must reuse the accepted
+review. Older saved reviews are compatible only when their validated analysis
+hash matches the complete current payload with the original cache annotations
+substituted. Automatic synchronization preserves that original validated review
+evidence when reusing its analysis identity. Source, cohort, harmonic-selection,
+ROI, settings, and finding changes continue to invalidate review reuse.
+
 Original FullFFT sheets are upstream source artifacts, not Summed-BCA
 derivatives. `Main_App.processing.full_fft_provenance` records their separate
 neutral identity under `tools.processing.full_fft_provenance`: project-relative
