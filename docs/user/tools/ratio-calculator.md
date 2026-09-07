@@ -33,9 +33,13 @@ Each workbook must contain:
 - `SNR`; and
 - `Z Score`.
 
-The tool loads the current ROI definitions from Settings. Advanced controls set
-the oddball frequency, upper summation frequency, excluded frequencies, color
-palette, output DPI, and optional y-axis limits.
+The tool loads the current app-level ROI definitions from **Settings > ROIs**
+and refreshes them when the saved definitions change. Select a named ROI in the
+right-hand list and edit its electrodes directly on the embedded BioSemi64 map;
+LOT, ROT, and Central are protected built-in rows, and custom ROIs are added
+with **+ New ROI**. These edits do not change EEG preprocessing. Advanced
+controls set the oddball frequency, upper summation frequency, excluded
+frequencies, color palette, output DPI, and optional y-axis limits.
 
 ## Calculation
 

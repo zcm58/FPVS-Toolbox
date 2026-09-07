@@ -172,6 +172,22 @@ Primary paths:
 - `src/Main_App/gui/processing_log_dialog.py`: focused modal viewer for the
   persistent Main App processing log. The home page keeps only a **View Log**
   action so the Conditions editor can use the full remaining height.
+- `src/Main_App/gui/roi_electrode_selector.py`: focused, settings-agnostic
+  BioSemi64 map presentation. It owns the scalable nose-up map, accessible
+  electrode controls, active-ROI styling, and color-ring visualization for
+  electrodes shared by multiple ROIs.
+- `src/Main_App/gui/roi_electrode_selector_state.py`: GUI-neutral ordered
+  per-ROI membership state that preserves legacy duplicates and unmapped-label
+  occurrences.
+- `src/Main_App/gui/roi_visual_editor_state.py`: GUI-neutral ordered collection
+  state for stable draft-row identity, pair projection, partial-draft
+  validation, protected built-in ROI identity, and deterministic contrast-safe
+  presentation colors.
+- `src/Main_App/gui/roi_settings_widgets.py`: presentation-only right-side ROI
+  controls, color palette, and keyboard-order helpers.
+- `src/Main_App/gui/roi_settings_editor.py`: embedded map/list coordinator that
+  retains the ordered `(name, electrodes)` compatibility API consumed by
+  Settings. None of the ROI editor modules reads or writes settings directly.
 - `src/Main_App/updates/`: non-GUI updater backend. It owns GitHub Release
   selection, typed update contracts, installer downloads, and installer launch.
   This package must not import Qt widgets or create windows.
@@ -204,23 +220,71 @@ Each section has its own vertical space within the
 supported workspace, including when raw-spectral details are expanded.
 Settings tab panes stay unframed around their section cards; both levels disable
 native tab-bar base drawing to avoid a gray line behind the styled tabs. Each main tab
-keeps Change Projects Root, Save, and Cancel on one bottom action row. Invalid
+keeps Save and Cancel in its footer. Invalid
 summed-BCA input reveals its sub-tab before focusing the affected field.
-The ROIs Quick Add montage selector is disabled and shows only BioSemi ActiveTwo
-64, matching the existing preprocessing montage. The former `10-10` ROI-preset
+The ROI map uses BioSemi64 anatomical labels, matching the default preprocessing
+geometry. The former `10-10` ROI-preset
 setting is a read-compatibility alias only; named ROI electrodes and saved custom
 presets are preserved, and future saves use the `biosemi64` preset key. This does
 not relabel historical processing geometry or bypass its provenance validation.
 Visible smoke (Qt is CI-only locally): open Settings from an existing project,
-check Preprocessing and ROIs show only BioSemi64, confirm custom ROI presets
-remain available, and switch main/Experimental tabs to check the native gray
+check Preprocessing and ROIs show only BioSemi64, confirm saved ROI memberships
+remain intact, and switch main/Experimental tabs to check the native gray
 line is absent. Save/reopen and confirm ROI lists are unchanged.
-Advanced retains manual participant-level processing exclusions and shows
-read-only frequency-domain QC
-thresholds and active frequency-domain exclusions; changing manual
-frequency-domain exclusions marks downstream frequency-domain outputs stale and
-requires regeneration. Do not put app-level visibility or diagnostics toggles
-in the Preprocessing tab.
+Advanced exposes the unified Dataset Exclusions manager, distinguishing
+skipping processing from excluding already-processed data from analysis, and
+retains read-only frequency-domain QC thresholds. Changing analysis exclusions
+marks downstream frequency-domain outputs stale and requires regeneration.
+The **Change Projects Root...** action is available only
+from the Advanced footer. Do not put app-level visibility or diagnostics
+toggles in the Preprocessing tab.
+
+The ROIs tab is a flat, visual-first embedded editor without an enclosing
+`SectionCard`. A scalable BioSemi64 scalp map fills the left side and an ordered
+list of named, color-coded ROIs fills the right. Selecting a row makes that ROI
+active; pointer or Space-key activation of a map node changes only the active
+ROI. An electrode may belong to any number of ROIs. Ordered color-ring segments
+show those overlapping memberships, while active-row controls, checked/focus
+styling, tooltips, and accessible descriptions keep the state understandable
+without relying on color alone. Electrode counts remain accessible metadata;
+they are not visible layout rows.
+
+ROI names are the only normal text-entry surface. Configured labels that are
+not present on the BioSemi64 map remain visible as occurrence-preserving legacy
+entries with explicit removal controls; repeated labels must not be collapsed.
+The only supported map is labeled **BioSemi 64** in the GUI and uses the
+canonical `biosemi64` settings key. LOT, ROT, and Central are built-in ROIs:
+the editor appends any missing built-in to the in-memory draft, protects the
+last case-insensitive saved occurrence from rename or deletion, and keeps its
+electrode membership editable. Existing row order and earlier duplicate-name
+rows remain unchanged. Presentation colors, protection identity, and internal
+row IDs are draft-only metadata and never enter the ROI settings schema.
+
+The preset controls are not part of the ROI screen. Existing `[roi_presets]`
+data and `SettingsManager` compatibility APIs remain intact but Settings does
+not load or rewrite them. Full clears that would remove retained unmapped
+occurrences require a second explicit activation. Wholly blank custom
+placeholders are ignored, while partially defined rows—including an emptied
+built-in ROI—block Save and focus the missing input.
+
+All embedded ROI edits remain in memory until the outer Settings **Save** uses
+`SettingsManager` and the existing harmonic recalculation/rollback workflow.
+Outer **Cancel** discards the draft, and the embedded Settings page is retired
+after Save or Cancel so an abandoned draft cannot survive into a later
+Settings session. A worker-driven acceptance waits for both Settings worker
+owners to release. The UI bridge defers cleanup during a result/error handler's
+nested modal event loop, so the page and its controls survive until the handler
+returns, including when shared progress-page presentation is unavailable.
+Both initial harmonic and frequency-QC signatures use the persisted ROI pairs,
+before missing built-ins are injected into the draft. Saving those additions
+therefore uses the current frequency-QC rebuild path; it never silently treats
+the added ROIs as already reviewed. The saved schema remains the ordered ROI name/electrode
+pairs plus the existing montage and custom-preset keys. After a committed ROI
+change or rollback, Settings refreshes the cached Stats and SNR pages
+independently. SNR reloads through `Main_App.processing.roi_settings`, preserves
+a still-valid selected ROI, and otherwise returns to `(All ROIs)`; active
+worker requests remain snapshotted. Ratio Calculator retains its existing
+signature-based live refresh.
 
 The Protocol tab edits only the active project's versioned FPVS protocol. It
 accepts a presentation rate plus either an every-N-stimuli recurrence or a

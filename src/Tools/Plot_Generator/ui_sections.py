@@ -151,7 +151,12 @@ class PlotGeneratorUiSectionsMixin:
         self.roi_combo = QComboBox()
         self.roi_combo.setAccessibleName("Region of interest to plot")
         self.roi_combo.addItems([ALL_ROIS_OPTION] + list(self.roi_map.keys()))
-        self.roi_combo.setToolTip("Select the region of interest")
+        self.roi_combo.setEnabled(bool(self.roi_map))
+        self.roi_combo.setToolTip(
+            "Select the region of interest"
+            if self.roi_map
+            else "No valid ROIs are configured. Update Settings > ROIs."
+        )
 
         self.condition_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.condition_b_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
@@ -521,5 +526,6 @@ class PlotGeneratorUiSectionsMixin:
         self.out_edit.textChanged.connect(self._check_required)
         self.condition_combo.currentTextChanged.connect(self._on_condition_a_changed)
         self.condition_b_combo.currentTextChanged.connect(self._on_condition_b_changed)
+        self.roi_combo.currentTextChanged.connect(self._check_required)
         self.overlay_check.toggled.connect(self._check_required)
         self._check_required()

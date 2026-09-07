@@ -40,10 +40,6 @@ def test_roi_preset_montage_validation_is_explicit(tmp_path, montage) -> None:
         manager.set_custom_roi_presets(montage, [("Custom", ["P7"])])
 
 
-def test_biosemi64_is_the_only_supported_roi_montage() -> None:
-    assert supported_roi_montages() == (("biosemi64", "BioSemi ActiveTwo 64"),)
-
-
 def test_biosemi64_default_roi_presets_preserve_electrodes() -> None:
     presets = default_roi_presets(ROI_MONTAGE_BIOSEMI64)
 
@@ -51,6 +47,38 @@ def test_biosemi64_default_roi_presets_preserve_electrodes() -> None:
         ("LOT", ["P7", "P9", "PO7", "PO3", "O1"]),
         ("ROT", ["P8", "P10", "PO8", "PO4", "O2"]),
         ("Central", ["FCZ", "CZ", "CPZ", "CP1", "C1", "FC1"]),
+    ]
+
+
+def test_biosemi64_is_the_only_supported_roi_montage() -> None:
+    assert supported_roi_montages() == ((ROI_MONTAGE_BIOSEMI64, "BioSemi 64"),)
+
+
+def test_fresh_settings_rois_match_the_canonical_default_catalog(tmp_path) -> None:
+    manager = SettingsManager(str(tmp_path / "settings.ini"))
+
+    assert manager.get_roi_pairs() == [
+        (preset.name, list(preset.electrodes))
+        for preset in default_roi_presets(ROI_MONTAGE_BIOSEMI64)
+    ]
+
+
+def test_roi_pair_schema_preserves_row_and_duplicate_electrode_order(tmp_path) -> None:
+    path = tmp_path / "settings.ini"
+    manager = SettingsManager(str(path))
+    manager.set_roi_pairs(
+        [
+            ("First", ["o2", "O1", "o2", "CustomAux"]),
+            ("First", ["cz"]),
+        ]
+    )
+    manager.save()
+
+    restored = SettingsManager(str(path))
+
+    assert restored.get_roi_pairs() == [
+        ("First", ["O2", "O1", "O2", "CUSTOMAUX"]),
+        ("First", ["CZ"]),
     ]
 
 

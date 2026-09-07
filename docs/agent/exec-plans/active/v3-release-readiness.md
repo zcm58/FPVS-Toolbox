@@ -109,6 +109,17 @@ now opens from a focused **View Log** modal instead of consuming the bottom of
 the home workspace. The Conditions editor expands into the recovered height,
 and the Start Processing action remains anchored below it.
 
+ROI selector port implementation completed locally on 2026-09-03: the
+SSSEP-style visual BioSemi64 electrode picker is explicit v3 scope on
+`codex/sssep-roi-selector`. It replaces the free-text-only experience on
+**Settings > ROIs** while retaining the text rows as a compatibility fallback,
+the existing FPVS settings schema and preset catalog, and all downstream ROI
+mathematics and output contracts. Focused local code/state/consumer gates and
+strict docs pass; the registered CI Qt suite and visible installed-app
+acceptance remain. That pass must cover draft Cancel/Use behavior,
+noncanonical-label preservation, outer Settings Save/Cancel/reopen, and
+same-session refresh of cached ROI consumers.
+
 Baseline: `v2.1.2`. At the 2026-08-16 audit, `main` was 217 commits and 633
 changed files beyond that tag, while `src/config.py` still reported `2.1.2`.
 That scope warrants a major release rather than a patch release.
@@ -335,6 +346,9 @@ threshold/p-value rules, or relevant numerical dependencies change.
 - [ ] Add accessible names/descriptions through shared button/path/status
       factories, visible keyboard focus for shared controls, and a documented
       1280 x 900 keyboard/layout smoke.
+- [ ] Add the visual BioSemi64 selector to **Settings > ROIs**, retaining the
+      existing app-level ROI schema, FPVS preset definitions, text fallback,
+      and same-session refresh for cached consumers.
 - [ ] Add a restrained version-3 identity cue to the landing/header area, such
       as a config-derived `FPVS Toolbox 3` badge plus one subtle harmonic or
       waveform motif. Preserve the quiet scientific-desktop palette.

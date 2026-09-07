@@ -28,7 +28,6 @@ from PySide6.QtWidgets import (
 
 from Main_App.Shared.settings_manager import SettingsManager
 from Main_App.Shared.roi_presets import (
-    default_roi_name_keys,
     default_roi_presets,
     supported_roi_montages,
     validate_roi_montage,
@@ -148,15 +147,29 @@ class _SettingsWorkerUiBridge(QObject):
         self._progress_callback = progress_callback
         self._phase_progress_callback = phase_progress_callback
         self._thread_finished_callback = thread_finished_callback
+        self._handling_result = False
+        self._thread_finished_pending = False
 
     @Slot(object)
     def handle_result(self, result: object) -> None:
-        self._result_callback(result)
+        self._handling_result = True
+        try:
+            self._result_callback(result)
+        finally:
+            self._handling_result = False
+            if self._thread_finished_pending:
+                self.handle_thread_finished()
 
     @Slot(str)
     def handle_failed(self, message: str) -> None:
-        if self._failed_callback is not None:
-            self._failed_callback(message)
+        self._handling_result = True
+        try:
+            if self._failed_callback is not None:
+                self._failed_callback(message)
+        finally:
+            self._handling_result = False
+            if self._thread_finished_pending:
+                self.handle_thread_finished()
 
     @Slot(str)
     def handle_progress(self, message: str) -> None:
@@ -181,8 +194,19 @@ class _SettingsWorkerUiBridge(QObject):
 
     @Slot()
     def handle_thread_finished(self) -> None:
-        if self._thread_finished_callback is not None:
-            self._thread_finished_callback()
+        # Result handlers can open a modal review. Its nested event loop may
+        # deliver thread.finished before that handler returns to its controls.
+        if self._handling_result:
+            self._thread_finished_pending = True
+            return
+        self._thread_finished_pending = False
+        callback = self._thread_finished_callback
+        self._thread_finished_callback = None
+        try:
+            if callback is not None:
+                callback()
+        finally:
+            self.deleteLater()
 
 
 class SettingsPanel(QWidget):
@@ -244,7 +268,6 @@ class SettingsDialog(QDialog):
         self.manager = manager
         self.project = project
         self._project_cache: Dict[str, Any] | None = None
-        self._custom_roi_presets_by_montage: dict[str, list[tuple[str, list[str]]]] = {}
         self._settings_footer_buttons: list[QWidget] = []
         # Stub attributes for pruned settings to avoid AttributeError if referenced
         self.data_edit = None
@@ -289,43 +312,58 @@ class SettingsDialog(QDialog):
         self._initial_protocol_editor_values = self._protocol_editor_values()
         self._initial_harmonic_settings_signature = (
             self._harmonic_settings_signature_from_preprocessing(
-                self._project_preprocessing()
+                self._project_preprocessing(),
+                roi_pairs_override=self.manager.get_roi_pairs(),
             )
         )
         self._initial_frequency_analysis_signature = (
-            self._frequency_analysis_settings_signature()
+            self._frequency_analysis_settings_signature(
+                roi_pairs_override=self.manager.get_roi_pairs(),
+            )
         )
         self._last_tab_index = self.tabs.currentIndex()
         self._tab_change_guard = False
         self.tabs.currentChanged.connect(self._on_tab_changed)
 
-    def _add_settings_footer(self, tab: QWidget, layout: QVBoxLayout, object_name: str) -> None:
+    def _add_settings_footer(
+        self,
+        tab: QWidget,
+        layout: QVBoxLayout,
+        object_name: str,
+        *,
+        compact: bool = False,
+        show_change_root: bool = False,
+    ) -> None:
         footer = QWidget(tab)
         footer.setObjectName(object_name)
-        footer_layout = QHBoxLayout(footer)
+        footer_layout = QHBoxLayout(footer) if compact else QVBoxLayout(footer)
         footer_layout.setContentsMargins(0, 0, 0, 0)
         footer_layout.setSpacing(8)
 
-        change_root = make_action_button("Change Projects Root...", parent=footer)
-        change_root.setObjectName(f"{object_name}_change_root")
-        change_root.clicked.connect(lambda: changeProjectsRoot(self))
-        footer_layout.addWidget(change_root)
-        footer_layout.addStretch(1)
-        if not hasattr(self, "btn_changeRoot"):
+        footer_buttons: list[QWidget] = []
+        if show_change_root:
+            change_root = make_action_button("Change Projects Root...", parent=footer)
+            change_root.setObjectName(f"{object_name}_change_root")
+            change_root.clicked.connect(lambda: changeProjectsRoot(self))
+            footer_layout.addWidget(change_root)
             self.btn_changeRoot = change_root
+            footer_buttons.append(change_root)
+        if compact:
+            footer_layout.addStretch(1)
 
         actions = ActionRow(footer, alignment=Qt.AlignRight)
         actions.setObjectName(f"{object_name}_actions")
         save_btn = make_action_button("Save", variant="primary", parent=actions)
         cancel_btn = make_action_button("Cancel", variant="secondary", parent=actions)
+        save_btn.setObjectName(f"{object_name}_save")
+        cancel_btn.setObjectName(f"{object_name}_cancel")
         save_btn.clicked.connect(self._save)
         cancel_btn.clicked.connect(self.reject)
         actions.add_button(save_btn)
         actions.add_button(cancel_btn)
         footer_layout.addWidget(actions)
-        self._settings_footer_buttons.extend(
-            (change_root, save_btn, cancel_btn)
-        )
+        footer_buttons.extend((save_btn, cancel_btn))
+        self._settings_footer_buttons.extend(footer_buttons)
 
         layout.addWidget(footer)
 
@@ -1132,92 +1170,26 @@ class SettingsDialog(QDialog):
         layout.setSpacing(10)
 
         current_montage = self.manager.get_roi_montage()
-        self._custom_roi_presets_by_montage[current_montage] = self.manager.get_custom_roi_presets(
-            current_montage
+        montage_labels = dict(supported_roi_montages())
+        default_rois = tuple(
+            (preset.name, preset.electrodes)
+            for preset in default_roi_presets(current_montage)
         )
-        quick_add_group = SectionCard(
-            "Quick Add",
+
+        self.roi_editor = ROISettingsEditor(
             tab,
-            object_name="settings_rois_quick_add_card",
+            self.manager.get_roi_pairs(),
+            canonical_electrodes=config.DEFAULT_ELECTRODE_NAMES_64,
+            default_rois=default_rois,
+            current_montage=current_montage,
+            montage_label=montage_labels[current_montage],
         )
-        quick_add_form = make_form_layout()
-
-        self.roi_montage_combo = QComboBox(quick_add_group)
-        self.roi_montage_combo.setObjectName("settings_rois_montage_combo")
-        for montage_key, label in supported_roi_montages():
-            self.roi_montage_combo.addItem(label, montage_key)
-        montage_index = self.roi_montage_combo.findData(current_montage)
-        if montage_index >= 0:
-            self.roi_montage_combo.setCurrentIndex(montage_index)
-        self.roi_montage_combo.setEnabled(False)
-        self.roi_montage_combo.setToolTip("BioSemi64 is the only supported electrode montage.")
-        quick_add_form.addRow(QLabel("Electrode montage:", quick_add_group), self.roi_montage_combo)
-
-        self.roi_preset_combo = QComboBox(quick_add_group)
-        self.roi_preset_combo.setObjectName("settings_rois_preset_combo")
-        quick_add_form.addRow(QLabel("Quick-add ROI:", quick_add_group), self.roi_preset_combo)
-
-        self.roi_preset_electrodes_edit = QLineEdit(quick_add_group)
-        self.roi_preset_electrodes_edit.setObjectName("settings_rois_preset_electrodes")
-        self.roi_preset_electrodes_edit.setReadOnly(True)
-        quick_add_form.addRow(QLabel("Electrodes:", quick_add_group), self.roi_preset_electrodes_edit)
-        quick_add_group.content_layout.addLayout(quick_add_form)
-
-        quick_add_actions = ActionRow(quick_add_group, alignment=Qt.AlignLeft)
-        quick_add_actions.setObjectName("settings_rois_quick_add_actions")
-        add_preset_btn = make_action_button("Add ROI", compact=True, parent=quick_add_group)
-        add_preset_btn.setObjectName("settings_rois_add_preset")
-        add_preset_btn.clicked.connect(self._add_selected_roi_preset)
-        save_presets_btn = make_action_button("Save Custom Presets", compact=True, parent=quick_add_group)
-        save_presets_btn.setObjectName("settings_rois_save_custom_presets")
-        save_presets_btn.clicked.connect(self._save_roi_editor_as_custom_presets)
-        quick_add_actions.add_button(add_preset_btn)
-        quick_add_actions.add_button(save_presets_btn)
-        quick_add_group.content_layout.addWidget(quick_add_actions)
-
-        self.roi_preset_status = StatusBanner("", quick_add_group, variant="info")
-        self.roi_preset_status.setObjectName("settings_rois_preset_status")
-        self.roi_preset_status.setVisible(False)
-        quick_add_group.content_layout.addWidget(self.roi_preset_status)
-
-        self.roi_montage_combo.currentIndexChanged.connect(self._on_roi_montage_changed)
-        self.roi_preset_combo.currentIndexChanged.connect(self._update_roi_preset_preview)
-
-        roi_group = SectionCard(
-            "Regions of Interest",
-            tab,
-            object_name="settings_rois_card",
-        )
-        roi_group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        roi_header = QWidget(roi_group)
-        roi_header_layout = QHBoxLayout(roi_header)
-        roi_header_layout.setContentsMargins(0, 0, 0, 0)
-        roi_header_layout.setSpacing(8)
-        roi_header_layout.addWidget(SubsectionHeaderLabel("ROI name", roi_header), 1)
-        roi_header_layout.addWidget(SubsectionHeaderLabel("Electrodes", roi_header), 1)
-        roi_header_layout.addSpacing(32)
-        roi_group.content_layout.addWidget(roi_header)
-
-        self.roi_editor = ROISettingsEditor(self, self.manager.get_roi_pairs())
         self.roi_editor.setObjectName("settings_rois_editor")
         self.roi_editor.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.roi_editor.scroll.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        roi_group.content_layout.addWidget(self.roi_editor, 1)
+        layout.addWidget(self.roi_editor, 1)
+        self._add_settings_footer(tab, layout, "settings_rois_footer", compact=True)
 
-        add_btn = make_action_button("+ Add ROI", compact=True, parent=roi_group)
-        add_btn.setObjectName("settings_rois_add_roi")
-        add_btn.clicked.connect(lambda: self.roi_editor.add_entry())
-        roi_actions = ActionRow(roi_group, alignment=Qt.AlignLeft)
-        roi_actions.setObjectName("settings_rois_actions")
-        roi_actions.add_button(add_btn)
-        roi_group.content_layout.addWidget(roi_actions)
-
-        layout.addWidget(roi_group, 1)
-        layout.addWidget(quick_add_group)
-        self._add_settings_footer(tab, layout, "settings_rois_footer")
-        self._refresh_roi_preset_combo()
-
-        tabs.addTab(tab, "ROIs")
+        self._roi_tab_index = tabs.addTab(tab, "ROIs")
 
     # ------------------------------------------------------------------
     def _init_experimental_tab(self, tabs: QTabWidget) -> QWidget:
@@ -1905,7 +1877,12 @@ class SettingsDialog(QDialog):
         layout.addWidget(qc_group)
 
         layout.addStretch(1)
-        self._add_settings_footer(tab, layout, "settings_advanced_footer")
+        self._add_settings_footer(
+            tab,
+            layout,
+            "settings_advanced_footer",
+            show_change_root=True,
+        )
 
         tabs.addTab(tab, "Advanced")
 
@@ -2101,21 +2078,27 @@ class SettingsDialog(QDialog):
     def _harmonic_settings_signature_from_preprocessing(
         self,
         preprocessing: Dict[str, Any],
+        *,
+        roi_pairs_override: list[tuple[str, list[str]]] | None = None,
     ) -> tuple[object, ...]:
         settings = normalize_dv_policy(
             self._harmonic_policy_payload_from_preprocessing(preprocessing)
         )
         return (
             *self._harmonic_settings_signature_from_settings(settings),
-            self._roi_settings_signature(),
+            self._roi_settings_signature(roi_pairs_override),
         )
 
-    def _roi_settings_signature(self) -> tuple[object, ...]:
-        roi_pairs = (
-            self.roi_editor.get_pairs()
-            if hasattr(self, "roi_editor")
-            else self.manager.get_roi_pairs()
-        )
+    def _roi_settings_signature(
+        self, roi_pairs_override: list[tuple[str, list[str]]] | None = None,
+    ) -> tuple[object, ...]:
+        roi_pairs = roi_pairs_override
+        if roi_pairs is None:
+            roi_pairs = (
+                self.roi_editor.get_pairs()
+                if hasattr(self, "roi_editor")
+                else self.manager.get_roi_pairs()
+            )
         return tuple(
             (
                 str(name).strip(),
@@ -2165,10 +2148,15 @@ class SettingsDialog(QDialog):
         current = self._harmonic_settings_signature_from_preprocessing(validated_preproc)
         return initial is not None and current != initial
 
-    def _frequency_analysis_settings_signature(self) -> tuple[object, ...]:
+    def _frequency_analysis_settings_signature(
+        self, *, roi_pairs_override: list[tuple[str, list[str]]] | None = None,
+    ) -> tuple[object, ...]:
         # Cohort-relative QC uses ROI membership even when the selection
         # profile uses all electrodes. Rebuild QC before selecting harmonics.
-        return (self._project_protocol_signature(), self._roi_settings_signature())
+        return (
+            self._project_protocol_signature(),
+            self._roi_settings_signature(roi_pairs_override),
+        )
 
     def _frequency_analysis_settings_changed_after_processing(self) -> bool:
         if self.project is None or not self._project_has_processed_outputs():
@@ -2310,6 +2298,8 @@ class SettingsDialog(QDialog):
     def _save_analysis_inputs_for_harmonic_recalculation(self) -> bool:
         """Persist every non-project input consumed by harmonic selection."""
 
+        if not self._validate_roi_draft():
+            return False
         protocol = None
         if self.project is not None:
             if self._protocol_save_requested():
@@ -2330,8 +2320,6 @@ class SettingsDialog(QDialog):
         try:
             self.manager.set_roi_montage(self._current_roi_montage())
             self.manager.set_roi_pairs(self.roi_editor.get_pairs())
-            for montage_key, custom_presets in self._custom_roi_presets_by_montage.items():
-                self.manager.set_custom_roi_presets(montage_key, custom_presets)
             self.manager.save()
             if self.project is not None and protocol is not None:
                 self.project.update_frequency_protocol(protocol)
@@ -2339,7 +2327,43 @@ class SettingsDialog(QDialog):
         except Exception as exc:  # pragma: no cover - settings I/O failure
             QMessageBox.critical(self, "Save Error", str(exc))
             return False
+        self._refresh_roi_consumers()
         return True
+
+    def _refresh_roi_consumers(self) -> None:
+        """Refresh committed ROI state in compatibility modules and cached pages."""
+
+        try:
+            from Tools.Stats.data.shared_rois import (
+                apply_rois_to_modules,
+                load_rois_from_settings,
+            )
+
+            apply_rois_to_modules(load_rois_from_settings(self.manager))
+        except Exception:  # Consumer boundary: committed settings remain authoritative.
+            logger.exception("roi_compatibility_module_refresh_failed")
+
+        host = getattr(self, "host", None) or self.parent()
+        if host is None:
+            return
+        for page_attribute, pass_manager in (
+            ("_stats_page", False),
+            ("_plot_generator_page", True),
+        ):
+            page = getattr(host, page_attribute, None)
+            refresh_rois = getattr(page, "refresh_rois", None)
+            if not callable(refresh_rois):
+                continue
+            try:
+                if pass_manager:
+                    refresh_rois(self.manager)
+                else:
+                    refresh_rois()
+            except Exception:  # Cached-page boundary: refresh failures stay isolated.
+                logger.exception(
+                    "roi_cached_consumer_refresh_failed",
+                    extra={"consumer": page_attribute},
+                )
 
     def _capture_harmonic_settings_rollback(self) -> None:
         """Snapshot settings that must survive a cancelled FFT-grid review."""
@@ -2392,15 +2416,7 @@ class SettingsDialog(QDialog):
                 self.roi_editor.set_pairs(self.manager.get_roi_pairs())
             except Exception as exc:  # pragma: no cover - settings I/O failure
                 restore_errors.append(f"application analysis settings ({exc})")
-            try:
-                from Tools.Stats.data.shared_rois import (
-                    apply_rois_to_modules,
-                    load_rois_from_settings,
-                )
-
-                apply_rois_to_modules(load_rois_from_settings(self.manager))
-            except Exception:  # Rollback cache-refresh boundary: saved settings remain authoritative.
-                pass
+            self._refresh_roi_consumers()
         finally:
             self._clear_harmonic_settings_rollback()
         if restore_errors:
@@ -2767,9 +2783,7 @@ class SettingsDialog(QDialog):
     ) -> None:
         """Finish the shared activity only after both Settings workers release."""
 
-        owner = getattr(self, "host", None)
-        if owner is None or owner is self:
-            return
+        owner = getattr(self, "host", None) or self
         if return_home is not None:
             owner._settings_post_processing_pending_return_home = bool(return_home)
         if getattr(owner, "_settings_full_fft_grid_qc_thread", None) is not None:
@@ -2784,9 +2798,12 @@ class SettingsDialog(QDialog):
         if hasattr(owner, "_settings_post_processing_pending_return_home"):
             del owner._settings_post_processing_pending_return_home
         if pending is not None:
-            self._finish_settings_post_processing_activity(
-                return_home=bool(pending),
-            )
+            if self._settings_post_processing_activity_is_active():
+                self._finish_settings_post_processing_activity(
+                    return_home=bool(pending),
+                )
+            elif pending:
+                self.accept()
 
     def _handoff_settings_activity_to_frequency_post_processing(self) -> None:
         owner = getattr(self, "host", None)
@@ -3091,7 +3108,6 @@ class SettingsDialog(QDialog):
             worker.failed.connect(worker.deleteLater)
             worker.failed.connect(bridge.handle_failed)
             thread.finished.connect(bridge.handle_thread_finished)
-            thread.finished.connect(bridge.deleteLater)
             thread.finished.connect(thread.deleteLater)
             thread.start()
         except Exception as exc:  # noqa: BLE001
@@ -3261,11 +3277,6 @@ class SettingsDialog(QDialog):
                         f"preprocessing was not rerun.\n\nSelection audit:\n{workbook_path}"
                     ),
                 )
-                if (
-                    accept_on_success
-                    and not self._settings_post_processing_activity_is_active()
-                ):
-                    self.accept()
             else:
                 if payload.get("selection_recalculated"):
                     # A new canonical selection was already accepted. Keep its
@@ -3311,7 +3322,6 @@ class SettingsDialog(QDialog):
             worker.progress.connect(bridge.handle_progress)
             worker.phase_progress.connect(bridge.handle_phase_progress)
             thread.finished.connect(bridge.handle_thread_finished)
-            thread.finished.connect(bridge.deleteLater)
             thread.finished.connect(thread.deleteLater)
             thread.start()
         except Exception as exc:  # noqa: BLE001
@@ -3486,96 +3496,14 @@ class SettingsDialog(QDialog):
         )
 
     def _current_roi_montage(self) -> str:
-        return validate_roi_montage(str(self.roi_montage_combo.currentData()))
+        return validate_roi_montage(self.roi_editor.current_montage())
 
-    def _custom_roi_presets(self, montage: str) -> list[tuple[str, list[str]]]:
-        montage_key = validate_roi_montage(montage)
-        if montage_key not in self._custom_roi_presets_by_montage:
-            self._custom_roi_presets_by_montage[montage_key] = self.manager.get_custom_roi_presets(montage_key)
-        return self._custom_roi_presets_by_montage[montage_key]
-
-    def _roi_preset_items(self, montage: str) -> list[tuple[str, list[str], bool]]:
-        montage_key = validate_roi_montage(montage)
-        items: list[tuple[str, list[str], bool]] = []
-        seen: set[str] = set()
-        for preset in default_roi_presets(montage_key):
-            items.append((preset.name, list(preset.electrodes), True))
-            seen.add(preset.name.casefold())
-        for name, electrodes in self._custom_roi_presets(montage_key):
-            if name.casefold() not in seen:
-                items.append((name, list(electrodes), False))
-                seen.add(name.casefold())
-        return items
-
-    def _refresh_roi_preset_combo(self) -> None:
-        montage = self._current_roi_montage()
-        self.roi_preset_combo.blockSignals(True)
-        self.roi_preset_combo.clear()
-        for name, electrodes, is_default in self._roi_preset_items(montage):
-            source = "Default" if is_default else "Custom"
-            self.roi_preset_combo.addItem(f"{name} ({source})", (name, electrodes, is_default))
-        self.roi_preset_combo.blockSignals(False)
-        self._update_roi_preset_preview()
-
-    def _selected_roi_preset(self) -> tuple[str, list[str], bool] | None:
-        preset = self.roi_preset_combo.currentData()
-        if not isinstance(preset, tuple) or len(preset) != 3:
-            return None
-        name, electrodes, is_default = preset
-        if not isinstance(name, str) or not isinstance(electrodes, list) or not isinstance(is_default, bool):
-            return None
-        return name, electrodes, is_default
-
-    def _set_roi_preset_status(self, text: str, variant: str = "info") -> None:
-        self.roi_preset_status.set_variant(variant)
-        self.roi_preset_status.set_text(text)
-        self.roi_preset_status.setVisible(bool(text))
-
-    def _update_roi_preset_preview(self) -> None:
-        preset = self._selected_roi_preset()
-        if preset is None:
-            self.roi_preset_electrodes_edit.clear()
-            return
-        _name, electrodes, _is_default = preset
-        self.roi_preset_electrodes_edit.setText(",".join(electrodes))
-
-    def _on_roi_montage_changed(self) -> None:
-        self._refresh_roi_preset_combo()
-        self._set_roi_preset_status("")
-
-    def _add_selected_roi_preset(self) -> None:
-        preset = self._selected_roi_preset()
-        if preset is None:
-            self._set_roi_preset_status("No ROI preset is selected.", "warning")
-            return
-        name, electrodes, _is_default = preset
-        result = self.roi_editor.add_or_update_entry(name, electrodes)
-        action = "Updated" if result == "updated" else "Added"
-        self._set_roi_preset_status(f"{action} {name}.", "success")
-
-    def _save_roi_editor_as_custom_presets(self) -> None:
-        montage = self._current_roi_montage()
-        default_names = default_roi_name_keys(montage)
-        custom_by_name = {
-            name.casefold(): (name, list(electrodes))
-            for name, electrodes in self._custom_roi_presets(montage)
-        }
-        changed = 0
-        for name, electrodes in self.roi_editor.get_pairs():
-            name_key = name.casefold()
-            if name_key in default_names:
-                continue
-            candidate = (name, list(electrodes))
-            if custom_by_name.get(name_key) != candidate:
-                changed += 1
-            custom_by_name[name_key] = candidate
-
-        self._custom_roi_presets_by_montage[montage] = list(custom_by_name.values())
-        self._refresh_roi_preset_combo()
-        if changed:
-            self._set_roi_preset_status("Custom ROI presets will be saved when you click Save.", "success")
-        else:
-            self._set_roi_preset_status("No new custom ROI presets found.", "info")
+    def _validate_roi_draft(self) -> bool:
+        if self.roi_editor.validate_draft():
+            return True
+        self.tabs.setCurrentIndex(self._roi_tab_index)
+        self.roi_editor.validate_draft()
+        return False
 
     def _on_tab_changed(self, index: int) -> None:
         if getattr(self, "_tab_change_guard", False):
@@ -3855,6 +3783,8 @@ class SettingsDialog(QDialog):
         validated_preproc = self._validated_preproc_payload()
         if validated_preproc is None:
             return
+        if not self._validate_roi_draft():
+            return
         if not self._confirm_parallel_worker_override(validated_preproc):
             return
         harmonic_settings_changed = self._harmonic_settings_changed_after_processing(
@@ -3879,8 +3809,6 @@ class SettingsDialog(QDialog):
         self.manager.set("analysis", "alpha", self.alpha_edit.text())
         self.manager.set_roi_montage(self._current_roi_montage())
         self.manager.set_roi_pairs(self.roi_editor.get_pairs())
-        for montage_key, custom_presets in self._custom_roi_presets_by_montage.items():
-            self.manager.set_custom_roi_presets(montage_key, custom_presets)
         pre_keys = [
             ("preprocessing", "low_pass", "low_pass"),
             ("preprocessing", "high_pass", "high_pass"),
@@ -3972,6 +3900,7 @@ class SettingsDialog(QDialog):
         self.manager.set("debug", "enabled", str(self.debug_check.isChecked()))
         self.manager.set_beta_tools_enabled(self.beta_tools_check.isChecked())
         self.manager.save()
+        self._refresh_roi_consumers()
 
         if using_project and frequency_analysis_changed:
             try:
@@ -4006,24 +3935,6 @@ class SettingsDialog(QDialog):
                 "Tool Visibility Updated",
                 "Please close and reopen FPVS Toolbox for your changes to take effect.",
             )
-
-        try:
-            from Tools.Stats.data.shared_rois import (
-                load_rois_from_settings,
-                apply_rois_to_modules,
-            )
-
-            rois = load_rois_from_settings(self.manager)
-            apply_rois_to_modules(rois)
-
-            host = getattr(self, "host", None) or self.parent()
-            stats_page = getattr(host, "_stats_page", None)
-            if stats_page is not None:
-                refresh_rois = getattr(stats_page, "refresh_rois", None)
-                if callable(refresh_rois):
-                    refresh_rois()
-        except Exception:
-            pass
 
         if recalculate_harmonics_after_save:
             if frequency_analysis_changed:
@@ -4232,3 +4143,9 @@ class EmbeddedSettingsPage(SettingsDialog):
         show_home_page = getattr(host, "show_home_page", None)
         if callable(show_home_page):
             show_home_page()
+        if getattr(host, "_settings_page", None) is self:
+            workspace_stack = getattr(host, "workspace_stack", None)
+            if workspace_stack is not None:
+                workspace_stack.removeWidget(self)
+            host._settings_page = None
+            self.deleteLater()

@@ -8,7 +8,7 @@ import pytest
 if importlib.util.find_spec("PySide6") is None or importlib.util.find_spec("pytestqt") is None:
     pytest.skip("PySide6 or pytest-qt not available", allow_module_level=True)
 
-from PySide6.QtCore import QPoint, QRect, Qt
+from PySide6.QtCore import QCoreApplication, QEvent, QPoint, QRect, Qt
 from PySide6.QtWidgets import (
     QAbstractButton,
     QApplication,
@@ -18,11 +18,16 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QSizePolicy,
+    QSplitter,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
+from config import DEFAULT_ELECTRODE_NAMES_64
+from Main_App.Shared.roi_presets import ROI_MONTAGE_BIOSEMI64, default_roi_presets
 from Main_App.Shared.settings_manager import SettingsManager
 from Main_App.projects import (
     MANUAL_REMOVED_ELECTRODES_ENABLED_KEY,
@@ -38,8 +43,7 @@ from Main_App.gui.manual_participant_exclusions_dialog import (
 from Main_App.gui.manual_removed_electrodes_dialog import ManualRemovedElectrodesDialog
 from Main_App.gui.recording_qc_identity import QcRecordingIdentity
 from Main_App.gui import processing_inputs
-from Main_App.gui.components import ActionRow, SectionCard, SubsectionHeaderLabel
-from Main_App.gui.style_tokens import EVENT_REMOVE_BUTTON_SIZE
+from Main_App.gui.components import ActionRow, SectionCard
 from Main_App.gui.theme import apply_fpvs_theme
 from Main_App.processing.processing_controller import RawFileInfo
 import Main_App.gui.settings_panel as settings_panel
@@ -52,6 +56,11 @@ _RETIRED_EPOCH_KEYS = {
     "epoch_start",
     "epoch_end",
 }
+
+_DEFAULT_ROI_PAIRS = [
+    (preset.name, list(preset.electrodes))
+    for preset in default_roi_presets(ROI_MONTAGE_BIOSEMI64)
+]
 
 
 class _FakeSignal:
@@ -196,7 +205,8 @@ def test_dialog_loads_saves_project(tmp_path, qtbot):
     )
     assert dlg.electrode_mapping_profile_combo.isEnabled() is True
     assert "ABC" in dlg.electrode_mapping_profile_combo.toolTip()
-    assert dlg.roi_montage_combo is not dlg.electrode_montage_combo
+    assert dlg.roi_editor.current_montage() == ROI_MONTAGE_BIOSEMI64
+    assert not hasattr(dlg, "roi_montage_combo")
 
     dlg.preproc_edits[2].setText("256")
     dlg.preproc_edits[3].setText("3.5")
@@ -492,9 +502,8 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
     dlg = SettingsDialog(win.settings, win, project)
     qtbot.addWidget(dlg)
 
-    cards = {
-        card.header.title_label.text(): card for card in dlg.findChildren(SectionCard)
-    }
+    section_cards = dlg.findChildren(SectionCard)
+    cards = {card.header.title_label.text(): card for card in section_cards}
     assert "Preprocessing Parameters" in cards
     assert "Project FPVS Protocol" in cards
     assert "Harmonic Selection and Summation" in cards
@@ -505,8 +514,8 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
     assert "Diagnostics" not in cards
     assert "Tool Visibility" not in cards
     assert "Analysis Defaults" in cards
-    assert "Quick Add" in cards
-    assert "Regions of Interest" in cards
+    assert "Quick Add" not in cards
+    assert "Regions of Interest" not in cards
     assert [dlg.tabs.tabText(i) for i in range(dlg.tabs.count())] == [
         "Preprocessing",
         "Protocol",
@@ -627,17 +636,22 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
     assert dlg.oddball_freq_edit.isReadOnly()
     assert dlg.protocol_derived_duration_edit.text() == "120 seconds"
     assert dlg.protocol_oddball_marker_code_edit.text() == "55"
-    assert cards["Regions of Interest"].sizePolicy().verticalPolicy() == QSizePolicy.Expanding
-    assert cards["Regions of Interest"].isAncestorOf(dlg.roi_editor)
     assert dlg.roi_editor.sizePolicy().verticalPolicy() == QSizePolicy.Expanding
-    remove_buttons = dlg.roi_editor.findChildren(QPushButton, "settings_rois_remove_roi")
-    assert remove_buttons
-    assert all(button.text() == "x" for button in remove_buttons)
-    assert all(button.property("variant") == "secondary" for button in remove_buttons)
-    assert all(button.property("compact") is True for button in remove_buttons)
-    assert all(button.property("iconButton") is True for button in remove_buttons)
-    assert all(button.width() == EVENT_REMOVE_BUTTON_SIZE for button in remove_buttons)
-    assert all(button.height() == EVENT_REMOVE_BUTTON_SIZE for button in remove_buttons)
+    roi_splitter = dlg.roi_editor.findChild(QSplitter, "settings_rois_splitter")
+    assert roi_splitter is dlg.roi_editor.splitter
+    assert roi_splitter.orientation() == Qt.Orientation.Horizontal
+    assert roi_splitter.childrenCollapsible() is False
+    assert roi_splitter.indexOf(dlg.roi_editor.map_pane) == 0
+    assert roi_splitter.indexOf(dlg.roi_editor.roi_pane) == 1
+    assert dlg.roi_editor.map_pane.isAncestorOf(dlg.roi_editor.map_widget)
+    assert dlg.roi_editor.roi_pane.isAncestorOf(dlg.roi_editor.roi_list)
+    assert dlg.roi_editor.roi_list.objectName() == "settings_rois_list"
+    map_buttons = dlg.roi_editor.map_widget.findChildren(QToolButton)
+    assert len(map_buttons) == 64
+    assert len(dlg.roi_editor.map_widget.electrode_buttons) == 64
+    roi_line_edits = dlg.roi_editor.findChildren(QLineEdit)
+    assert roi_line_edits == [dlg.roi_editor.name_edit]
+    assert dlg.roi_editor.name_edit.objectName() == "settings_rois_name"
     assert dlg.btn_changeRoot.property("secondary") is True
     preproc_tab = dlg.tabs.widget(dlg._preproc_tab_index)
     harmonics_tab_index = next(
@@ -675,11 +689,8 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
     assert experimental_tab.isAncestorOf(detector_card)
     assert experimental_tab.isAncestorOf(summed_bca_card)
     assert experimental_tab.objectName() == "settings_experimental_tab"
-    assert rois_tab.isAncestorOf(cards["Regions of Interest"])
-    assert rois_tab.isAncestorOf(cards["Quick Add"])
-    assert not stats_tab.isAncestorOf(cards["Regions of Interest"])
-    rois_layout = rois_tab.layout()
-    assert rois_layout.indexOf(cards["Regions of Interest"]) < rois_layout.indexOf(cards["Quick Add"])
+    assert rois_tab.isAncestorOf(dlg.roi_editor)
+    assert rois_tab.findChild(SectionCard, "settings_rois_card") is None
     assert preproc_tab.findChild(ActionRow, "settings_preproc_footer_actions") is not None
     assert protocol_tab.findChild(ActionRow, "settings_protocol_footer_actions") is not None
     assert harmonics_tab.findChild(ActionRow, "settings_harmonic_footer_actions") is not None
@@ -696,33 +707,36 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
     assert stats_tab.findChild(QWidget, "settings_stats_footer") is not None
     assert rois_tab.findChild(QWidget, "settings_rois_footer") is not None
     assert advanced_tab.findChild(QWidget, "settings_advanced_footer") is not None
-    assert rois_tab.findChild(ActionRow, "settings_rois_actions") is not None
-    assert rois_tab.findChild(ActionRow, "settings_rois_quick_add_actions") is not None
-    assert dlg.roi_montage_combo.count() == 1
-    assert dlg.roi_montage_combo.currentData() == "biosemi64"
-    assert dlg.roi_montage_combo.currentText() == "BioSemi ActiveTwo 64"
-    assert not dlg.roi_montage_combo.isEnabled()
     assert not dlg.tabs.tabBar().drawBase()
     assert not dlg.experimental_tabs.tabBar().drawBase()
-    assert dlg.roi_preset_combo.findText("LOT (Default)") >= 0
-    assert dlg.roi_preset_combo.findText("ROT (Default)") >= 0
-    assert dlg.roi_preset_electrodes_edit.isReadOnly()
-    dlg.roi_preset_combo.setCurrentIndex(dlg.roi_preset_combo.findText("ROT (Default)"))
-    dlg._add_selected_roi_preset()
-    assert ("ROT", ["P8", "P10", "PO8", "PO4", "O2"]) in dlg.roi_editor.get_pairs()
-    dlg.roi_editor.set_pairs([
-        ("Custom Occipito Temporal", ["PO7", "PO8"]),
-        ("LOT", ["BAD"]),
-    ])
-    dlg._save_roi_editor_as_custom_presets()
-    assert dlg._custom_roi_presets_by_montage["biosemi64"] == [
-        ("Custom Occipito Temporal", ["PO7", "PO8"]),
+    assert preproc_tab.findChild(QWidget, "settings_preproc_footer_change_root") is None
+    assert harmonics_tab.findChild(QWidget, "settings_harmonic_footer_change_root") is None
+    assert stats_tab.findChild(QWidget, "settings_stats_footer_change_root") is None
+    assert rois_tab.findChild(QWidget, "settings_rois_footer_change_root") is None
+    assert (
+        advanced_tab.findChild(QWidget, "settings_advanced_footer_change_root")
+        is dlg.btn_changeRoot
+    )
+    assert rois_tab.findChild(QWidget, "settings_rois_toolbar") is None
+    assert dlg.roi_editor.current_montage() == ROI_MONTAGE_BIOSEMI64
+    assert dlg.roi_editor.montage_label.text() == "Montage: BioSemi 64"
+    assert [entry.name for entry in dlg.roi_editor.entries[:3]] == [
+        "LOT",
+        "ROT",
+        "Central",
     ]
-    roi_headers = {
+    assert all(entry.is_default for entry in dlg.roi_editor.entries[:3])
+    assert dlg.roi_editor.findChild(QWidget, "settings_rois_add_preset") is None
+    assert dlg.roi_editor.findChild(QWidget, "settings_rois_save_custom_presets") is None
+    roi_labels = {
         label.text()
-        for label in cards["Regions of Interest"].findChildren(SubsectionHeaderLabel)
+        for label in dlg.roi_editor.findChildren(QLabel)
+        if label.text()
     }
-    assert {"ROI name", "Electrodes"} <= roi_headers
+    assert "Regions of interest" in roi_labels
+    assert "Interactive scalp map" not in roi_labels
+    assert "Edit active ROI" not in roi_labels
+    assert not any("visible map position" in text for text in roi_labels)
 
     panel = settings_panel.SettingsPanel(controller=SimpleNamespace(save_settings=lambda _values: None))
     qtbot.addWidget(panel)
@@ -968,7 +982,7 @@ def test_saving_roi_removal_invalidates_qc_and_preserves_deletion(
     win = MainWindow()
     qtbot.addWidget(win)
     win.loadProject(project)
-    retained = [("ROT", ["O2", "PO8"])]
+    retained = [*_DEFAULT_ROI_PAIRS]
     win.settings.set_roi_pairs([*retained, ("Test ROI", ["F8", "T8"])])
     win.settings.save()
     dlg = SettingsDialog(win.settings, win, project)
@@ -998,6 +1012,232 @@ def test_saving_roi_removal_invalidates_qc_and_preserves_deletion(
     assert resumed == ([True] if rebuild_now else [])
 
 
+def test_injected_default_rois_are_compared_with_the_raw_saved_signature(
+    tmp_path,
+    qtbot,
+    monkeypatch,
+):
+    os.environ["XDG_CONFIG_HOME"] = str(tmp_path)
+    project = _prep_project(tmp_path)
+
+    QApplication.instance() or QApplication([])
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win.loadProject(project)
+    win.settings.set_roi_pairs([("Custom only", ["O1"])])
+    win.settings.save()
+
+    dlg = SettingsDialog(win.settings, win, project)
+    qtbot.addWidget(dlg)
+    monkeypatch.setattr(dlg, "_project_has_processed_outputs", lambda: True)
+    validated = dlg._validated_preproc_payload()
+    assert validated is not None
+
+    assert win.settings.get_roi_pairs() == [("Custom only", ["O1"])]
+    assert dlg.roi_editor.get_pairs() == [
+        ("Custom only", ["O1"]),
+        *_DEFAULT_ROI_PAIRS,
+    ]
+    assert dlg._harmonic_settings_changed_after_processing(validated) is True
+
+
+def test_settings_save_refreshes_cached_stats_and_plot_roi_consumers(
+    tmp_path,
+    qtbot,
+    monkeypatch,
+):
+    monkeypatch.setenv("FPVS_CONFIG_HOME", str(tmp_path / "config"))
+    QApplication.instance() or QApplication([])
+    win = MainWindow()
+    qtbot.addWidget(win)
+    settings_path = tmp_path / "settings.ini"
+    manager = SettingsManager(str(settings_path))
+    manager.set_roi_pairs([("Visual ROI", ["O1"])])
+    manager.save()
+    observed: list[tuple[str, list[tuple[str, list[str]]]]] = []
+
+    win._stats_page = SimpleNamespace(
+        refresh_rois=lambda: observed.append(("stats", manager.get_roi_pairs()))
+    )
+    win._plot_generator_page = SimpleNamespace(
+        refresh_rois=lambda committed_manager: observed.append(
+            ("plot", committed_manager.get_roi_pairs())
+        )
+    )
+    dlg = SettingsDialog(manager, win)
+    qtbot.addWidget(dlg)
+    dlg.roi_editor.select_roi(0)
+    dlg.roi_editor.name_edit.setText("Visual ROI Edited")
+    dlg.roi_editor.map_widget.electrode_buttons["O2"].click()
+
+    assert manager.get_roi_pairs() == [("Visual ROI", ["O1"])]
+
+    save_button = dlg.findChild(QPushButton, "settings_rois_footer_save")
+    assert save_button is not None
+    save_button.click()
+
+    committed = [
+        ("Visual ROI Edited", ["O1", "O2"]),
+        *_DEFAULT_ROI_PAIRS,
+    ]
+    assert manager.get_roi_pairs() == committed
+    assert ("stats", committed) in observed
+    assert ("plot", committed) in observed
+
+    reloaded_manager = SettingsManager(str(settings_path))
+    reloaded = SettingsDialog(reloaded_manager, win)
+    qtbot.addWidget(reloaded)
+    assert reloaded.roi_editor.get_pairs() == committed
+
+
+def test_settings_save_does_not_rewrite_dormant_custom_roi_presets(
+    tmp_path,
+    qtbot,
+    monkeypatch,
+):
+    monkeypatch.setenv("FPVS_CONFIG_HOME", str(tmp_path / "config"))
+    QApplication.instance() or QApplication([])
+    manager = SettingsManager(str(tmp_path / "settings.ini"))
+    raw_presets = (
+        '[ { "name" : "Archived custom preset", '
+        '"electrodes" : ["po8", "PO7"], "legacy" : true } ]'
+    )
+    manager.set("roi_presets", "custom_10_10", raw_presets)
+    manager.save()
+    dlg = SettingsDialog(manager)
+    qtbot.addWidget(dlg)
+
+    dlg.roi_editor.map_widget.electrode_buttons["O1"].click()
+    dlg._save()
+
+    assert manager.get("roi_presets", "custom_10_10", "") == raw_presets
+    assert manager.get_custom_roi_presets(ROI_MONTAGE_BIOSEMI64) == [
+        ("Archived custom preset", ["PO8", "PO7"]),
+    ]
+
+
+def test_embedded_settings_cancel_discards_roi_draft_before_reopen(
+    tmp_path,
+    qtbot,
+    monkeypatch,
+):
+    monkeypatch.setenv("FPVS_CONFIG_HOME", str(tmp_path / "config"))
+    QApplication.instance() or QApplication([])
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win.settings.set_roi_pairs([("Committed", ["O1", "O2"])])
+    win.settings.save()
+
+    win.open_settings_window()
+    canceled_page = win._settings_page
+    assert canceled_page is not None
+    canceled_page.roi_editor.select_roi(0)
+    canceled_page.roi_editor.name_edit.setText("Canceled Draft")
+    canceled_page.roi_editor.map_widget.electrode_buttons["Oz"].click()
+    assert canceled_page.roi_editor.get_pairs() == [
+        ("Canceled Draft", ["O1", "O2", "OZ"]),
+        *_DEFAULT_ROI_PAIRS,
+    ]
+    cancel_button = canceled_page.findChild(
+        QPushButton,
+        "settings_rois_footer_cancel",
+    )
+    assert cancel_button is not None
+    cancel_button.click()
+
+    assert win._settings_page is None
+    assert win.settings.get_roi_pairs() == [("Committed", ["O1", "O2"])]
+
+    win.open_settings_window()
+    reloaded_page = win._settings_page
+    assert reloaded_page is not None
+    assert reloaded_page is not canceled_page
+    assert reloaded_page.roi_editor.get_pairs() == [
+        ("Committed", ["O1", "O2"]),
+        *_DEFAULT_ROI_PAIRS,
+    ]
+
+
+def test_settings_save_blocks_a_partially_defined_visual_roi(
+    tmp_path,
+    qtbot,
+    monkeypatch,
+):
+    monkeypatch.setenv("FPVS_CONFIG_HOME", str(tmp_path / "config"))
+    QApplication.instance() or QApplication([])
+    manager = SettingsManager(str(tmp_path / "settings.ini"))
+    manager.set_roi_pairs([("Committed", ["O1"])])
+    manager.save()
+    dlg = SettingsDialog(manager)
+    qtbot.addWidget(dlg)
+
+    dlg.roi_editor.add_button.click()
+    dlg.roi_editor.map_widget.electrode_buttons["Oz"].click()
+    assert dlg.roi_editor.validate_draft() is False
+
+    stats_index = next(
+        index
+        for index in range(dlg.tabs.count())
+        if dlg.tabs.tabText(index) == "Stats"
+    )
+    dlg.tabs.setCurrentIndex(stats_index)
+    dlg._save()
+
+    assert manager.get_roi_pairs() == [("Committed", ["O1"])]
+    assert dlg.tabs.currentIndex() == dlg._roi_tab_index
+    assert dlg.roi_editor.status.property("statusVariant") == "warning"
+    incomplete_row = dlg.roi_editor.active_roi_index() + 1
+    assert f"ROI {incomplete_row} is incomplete" in dlg.roi_editor.status.text()
+
+    dlg.roi_editor.name_edit.setText("Completed Visually")
+    dlg._save()
+
+    assert manager.get_roi_pairs() == [
+        ("Committed", ["O1"]),
+        *_DEFAULT_ROI_PAIRS,
+        ("Completed Visually", ["OZ"]),
+    ]
+
+
+def test_embedded_visual_roi_editor_fits_the_supported_workspace(tmp_path, qtbot, monkeypatch):
+    monkeypatch.setenv("FPVS_CONFIG_HOME", str(tmp_path / "config"))
+    QApplication.instance() or QApplication([])
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win.resize(1280, 900)
+    win.show()
+    qtbot.waitExposed(win)
+    win.open_settings_window()
+    page = win._settings_page
+    assert page is not None
+    page.roi_editor.set_pairs(
+        [("All Scalp", [*DEFAULT_ELECTRODE_NAMES_64, "LegacyAux"])]
+    )
+    page.roi_editor.show_status("Visible layout verification status.", "info")
+    page.tabs.setCurrentIndex(page._roi_tab_index)
+    qtbot.wait(1)
+
+    roi_tab = page.tabs.widget(page._roi_tab_index)
+    footer = roi_tab.findChild(QWidget, "settings_rois_footer")
+    assert win.size().width() == 1280
+    assert win.size().height() == 900
+    assert roi_tab.findChildren(QScrollArea) == []
+    assert roi_tab.findChild(SectionCard, "settings_rois_card") is None
+    assert roi_tab.findChild(QWidget, "settings_rois_footer_change_root") is None
+    assert page.roi_editor.map_widget.minimumWidth() >= 600
+    assert page.roi_editor.map_widget.minimumHeight() >= 550
+    assert all(
+        button.width() >= 36 and button.height() >= 36
+        for button in page.roi_editor.map_widget.electrode_buttons.values()
+    )
+    assert page.roi_editor.unmapped_pane.isVisibleTo(roi_tab)
+    assert page.roi_editor.status.isVisibleTo(roi_tab)
+    for widget in (page.roi_editor.map_widget, page.roi_editor.roi_pane, footer):
+        assert widget is not None
+        assert roi_tab.rect().contains(widget.mapTo(roi_tab, widget.rect().topLeft()))
+        assert roi_tab.rect().contains(widget.mapTo(roi_tab, widget.rect().bottomRight()))
+
+
 def test_explicit_harmonic_recalculation_persists_project_selection_inputs(
     tmp_path,
     qtbot,
@@ -1015,7 +1255,10 @@ def test_explicit_harmonic_recalculation_persists_project_selection_inputs(
     assert dlg._save_analysis_inputs_for_harmonic_recalculation()
 
     assert project.frequency_protocol.presentation_rate_hz == 6
-    assert win.settings.get_roi_pairs() == [("Selection Audit", ["O1", "O2"])]
+    assert win.settings.get_roi_pairs() == [
+        ("Selection Audit", ["O1", "O2"]),
+        *_DEFAULT_ROI_PAIRS,
+    ]
 
 
 def test_cancelled_grid_review_can_restore_staged_harmonic_settings(
@@ -1033,6 +1276,17 @@ def test_cancelled_grid_review_can_restore_staged_harmonic_settings(
     qtbot.addWidget(dlg)
     original_protocol = project.frequency_protocol
     original_rois = win.settings.get_roi_pairs()
+    observed_rois: list[tuple[str, list[tuple[str, list[str]]]]] = []
+    win._stats_page = SimpleNamespace(
+        refresh_rois=lambda: observed_rois.append(
+            ("stats", win.settings.get_roi_pairs())
+        )
+    )
+    win._plot_generator_page = SimpleNamespace(
+        refresh_rois=lambda manager: observed_rois.append(
+            ("plot", manager.get_roi_pairs())
+        )
+    )
     original_condition_exclusions = {
         "P01": ["Condition A"],
     }
@@ -1062,6 +1316,11 @@ def test_cancelled_grid_review_can_restore_staged_harmonic_settings(
     assert reloaded.frequency_protocol == original_protocol
     assert win.settings.get_roi_pairs() == original_rois
     assert dlg.roi_editor.get_pairs() == original_rois
+    assert (
+        "plot",
+        [("Temporary", ["OZ"]), *_DEFAULT_ROI_PAIRS],
+    ) in observed_rois
+    assert observed_rois[-1] == ("plot", original_rois)
     assert (
         dlg._manual_excluded_participant_conditions
         == original_condition_exclusions
@@ -1232,6 +1491,84 @@ def test_embedded_settings_harmonic_save_uses_post_processing_activity_page(
     assert win.btn_start.text() == "Start Processing"
     assert win.busy is False
     assert win.lbl_debug.isHidden()
+
+
+@pytest.mark.parametrize("finish_inside_message", [False, True])
+def test_embedded_settings_waits_for_harmonic_cleanup_without_progress_page(
+    tmp_path, qtbot, monkeypatch, finish_inside_message,
+):
+    monkeypatch.setenv("FPVS_CONFIG_HOME", str(tmp_path / "config"))
+    project = _prep_project(tmp_path)
+    QApplication.instance() or QApplication([])
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win.loadProject(project)
+    win.open_settings_window()
+    page = win._settings_page
+    assert page is not None
+
+    fake_thread = _FakeSettingsThread()
+    fake_worker = _FakeSettingsWorker()
+    monkeypatch.setattr(settings_panel, "QThread", lambda _owner: fake_thread)
+    import Main_App.workers.harmonic_selection_worker as harmonic_worker_module
+
+    monkeypatch.setattr(
+        harmonic_worker_module,
+        "ProcessingHarmonicSelectionWorker",
+        lambda _project: fake_worker,
+    )
+    monkeypatch.setattr(page, "_begin_settings_post_processing_activity", lambda: False)
+    enabled_states = []
+    original_set_enabled = page._set_full_fft_grid_review_controls_enabled
+
+    def _set_enabled_while_page_is_owned(enabled):
+        assert win._settings_page is page
+        original_set_enabled(enabled)
+        enabled_states.append(page.recalculate_harmonics_button.isEnabled())
+
+    monkeypatch.setattr(
+        page, "_set_full_fft_grid_review_controls_enabled", _set_enabled_while_page_is_owned,
+    )
+    success_messages = []
+
+    def _success_message(_parent, title, _message, *_args, **_kwargs):
+        success_messages.append(title)
+        assert win._settings_page is page
+        if finish_inside_message:
+            # A modal success message can deliver thread.finished in its
+            # nested event loop before the result callback returns.
+            fake_thread.finished.emit()
+            QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+            assert win._settings_page is page
+            assert win._settings_harmonic_recalc_thread is fake_thread
+            assert not page.recalculate_harmonics_button.isEnabled()
+
+    monkeypatch.setattr(QMessageBox, "information", _success_message)
+    destroyed = []
+    page.destroyed.connect(lambda *_args: destroyed.append(True))
+
+    assert page._start_harmonic_recalculation(accept_on_success=True)
+    assert not page._settings_post_processing_activity_is_active()
+    assert enabled_states == [False]
+
+    fake_worker.finished.emit({"ok": True, "workbook_path": "Harmonic_Selection_Summary.xlsx"})
+
+    if not finish_inside_message:
+        assert win._settings_page is page
+        assert win._settings_harmonic_recalc_thread is fake_thread
+        assert enabled_states == [False]
+        fake_thread.finished.emit()
+
+    assert success_messages == ["Harmonics and Outputs Rebuilt"]
+    assert enabled_states == [False, True]
+    assert win._settings_harmonic_recalc_thread is None
+    assert win._settings_harmonic_recalc_worker is None
+    assert win._settings_harmonic_recalc_bridge is None
+    assert win._settings_worker_navigation_locked is False
+    assert win._settings_page is None
+    assert win.workspace_stack.currentWidget() is win.homeWidget
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    assert destroyed == [True]
 
 
 def test_harmonic_thread_start_failure_releases_settings_worker_state(

@@ -81,6 +81,12 @@ v2.1 project contract:
 - `project.json` is canonical for group assignments. Prefer participant
   `group_id` and resolve labels/folder names through `project.groups`; legacy
   participant `group` values are compatibility input only.
+- `PlotGeneratorWindow.refresh_rois(manager=None)` is the public
+  committed-settings refresh seam for the cached embedded page. It must reload through
+  `Main_App.processing.roi_settings`, preserve the selected ROI when it remains
+  valid, otherwise select `(All ROIs)`, and block generation with actionable
+  feedback when no valid ROI exists. Replacing the page map must not mutate a
+  worker request already snapshotted for a run.
 - In multi-group project mode, the SNR Plots input folder should come
   from the project manifest's resolved Excel subfolder. Do not let saved
   SNR Plots `input_folder` settings override that canonical project root.

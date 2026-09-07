@@ -6,7 +6,7 @@ ROI_MONTAGE_BIOSEMI64 = "biosemi64"
 DEFAULT_ROI_MONTAGE = ROI_MONTAGE_BIOSEMI64
 
 SUPPORTED_ROI_MONTAGES: tuple[tuple[str, str], ...] = (
-    (ROI_MONTAGE_BIOSEMI64, "BioSemi ActiveTwo 64"),
+    (ROI_MONTAGE_BIOSEMI64, "BioSemi 64"),
 )
 
 

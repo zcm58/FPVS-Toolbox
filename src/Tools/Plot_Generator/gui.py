@@ -5,7 +5,7 @@ import logging
 import os
 from pathlib import Path
 
-from PySide6.QtCore import QPropertyAnimation, QThread, Signal
+from PySide6.QtCore import QPropertyAnimation, QSignalBlocker, QThread, Signal
 from PySide6.QtWidgets import (
     QFileDialog,
     QMessageBox,
@@ -16,7 +16,7 @@ from PySide6.QtWidgets import QColorDialog
 
 
 from Main_App import SettingsManager
-from Main_App.processing.roi_settings import load_rois_from_settings
+from Main_App.processing.roi_settings import ALL_ROIS_OPTION, load_rois_from_settings
 from Main_App.projects import (
     EXCEL_SUBFOLDER_NAME,
     Project,
@@ -74,7 +74,11 @@ class PlotGeneratorWindow(
         self._ui_initializing = True
         self._populating_conditions = False
         mgr = SettingsManager()
-        self.roi_map = load_rois_from_settings(mgr)
+        self.roi_map = {
+            name: list(electrodes)
+            for name, electrodes in load_rois_from_settings(mgr).items()
+            if electrodes
+        }
         self.plot_mgr = plot_mgr or PlotSettingsManager()
         default_in = self.plot_mgr.get("paths", "input_folder", "")
         default_out = self.plot_mgr.get("paths", "output_folder", "")
@@ -229,6 +233,32 @@ class PlotGeneratorWindow(
         ) = None
         self._ui_initializing = False
 
+    def refresh_rois(self, manager: object | None = None) -> None:
+        """Reload committed ROI settings without mutating an active worker request."""
+
+        previous = self.roi_combo.currentText().strip()
+        settings_manager = manager if manager is not None else SettingsManager()
+        refreshed = load_rois_from_settings(settings_manager)
+        self.roi_map = {
+            name: list(electrodes)
+            for name, electrodes in refreshed.items()
+            if electrodes
+        }
+
+        with QSignalBlocker(self.roi_combo):
+            self.roi_combo.clear()
+            self.roi_combo.addItem(ALL_ROIS_OPTION)
+            self.roi_combo.addItems(list(self.roi_map))
+            selected = previous if previous == ALL_ROIS_OPTION or previous in self.roi_map else ALL_ROIS_OPTION
+            self.roi_combo.setCurrentText(selected)
+            self.roi_combo.setEnabled(bool(self.roi_map))
+        self.roi_combo.setToolTip(
+            "Select the region of interest"
+            if self.roi_map
+            else "No valid ROIs are configured. Update Settings > ROIs."
+        )
+        self._check_required()
+
     def _update_legend_group_visibility(self) -> None:
         self.legend_group.setVisible(
             not getattr(self, "_session_comparison_active", lambda: False)()
@@ -313,7 +343,11 @@ class PlotGeneratorWindow(
         required = bool(input_folder and output_folder and condition_a)
         status = ""
         variant = "info"
-        if not input_folder:
+        if not self.roi_map:
+            required = False
+            status = "No valid ROIs are configured. Update Settings > ROIs before generating SNR plots."
+            variant = "warning"
+        elif not input_folder:
             status = "Choose the processed Excel folder."
         elif not output_folder:
             status = "Choose the plot output folder."

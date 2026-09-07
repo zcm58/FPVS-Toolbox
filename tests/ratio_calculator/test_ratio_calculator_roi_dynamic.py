@@ -55,5 +55,5 @@ def test_ratio_calculator_uses_runtime_roi_settings_and_refreshes(qtbot):
 
     roi_state.clear()
     roi_state["Central"] = ["C3", "C4"]
-    window._sync_rois_if_changed()
+    window._roi_watch_timer.timeout.emit()
     assert _table_rows(window) == [("Central", "C3, C4")]
