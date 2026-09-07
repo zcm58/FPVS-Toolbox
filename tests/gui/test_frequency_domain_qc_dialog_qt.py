@@ -44,10 +44,9 @@ def _report(scope="recording"):
             **identity,
             "finding_fingerprint": f"{index + 1:064x}",
             "condition": condition + "_long_condition_identifier_" * 5,
-            "electrode": "PO8" if index < 2 else "",
-            "roi": "Occipital_ROI_with_a_long_descriptive_name" if index == 2 else "",
-            "finding_type": "absolute_summed_bca" if index < 2 else "cohort_relative_summed_bca_context",
-            "metric": "sum_absolute_roi_mean_harmonics",
+            "electrode": "PO8" if index < 2 else "O2",
+            "finding_type": "absolute_summed_bca",
+            "metric": "absolute_electrode_summed_bca",
             "summed_bca_uv": -55.125,
             "abs_summed_bca_uv": 55.125,
             "value_uv": 55.125,
@@ -77,7 +76,7 @@ def _report(scope="recording"):
         "review_decisions": [prior],
         "review_prefill_decisions": [prior],
         "cohort_relative_rows": [{
-            **assignments[1], "condition": findings[1]["condition"], "roi": "Occipital",
+            **assignments[1], "condition": findings[1]["condition"], "electrode": "PO8",
             "status": "unavailable_by_method", "reason_codes": ["not_enough_eligible_harmonics"],
         }],
         "thresholds": {},
@@ -138,7 +137,6 @@ def test_decisions_and_optional_reasons_survive_navigation_and_filtering(qtbot):
     assert second_combo.isVisibleTo(dialog.decision_stack)
     second_combo.setCurrentIndex(second_combo.findData(DECISION_RETAIN))
     assert not second_reason.isEnabled()
-    _select_section(dialog, "roi")
     dialog.search_edit.setText("Neutral")
     assert dialog.details_table.isRowHidden(0)
     assert dialog.details_table.isRowHidden(1)
@@ -425,7 +423,7 @@ def _grouped_dialog(qtbot):
         ("P1", "P1_visit2", "O2", "Faces"),
         ("P2", "P2_visit1", "O2", "Faces"),
         ("P1", "P1_visit1", "CP4", "Faces"),
-        ("P1", "P1_visit1", "", "Faces"),
+        ("P1", "P1_visit1", "Pz", "Faces"),
     ]
     findings = []
     for index, (participant, recording, electrode, condition) in enumerate(identities):
@@ -436,7 +434,6 @@ def _grouped_dialog(qtbot):
             "recording_id": recording,
             "electrode": electrode,
             "condition": condition,
-            "roi": "Occipital" if not electrode else "",
             "finding_type": ("cohort_relative_summed_bca_context"
                              if index in (3, 7) else "absolute_summed_bca"),
         })
@@ -475,49 +472,50 @@ def _decision_state(dialog, findings):
     }
 
 
-def test_roi_section_is_separate_and_next_undecided_crosses_sections(qtbot):
-    dialog, findings = _grouped_dialog(qtbot)
+def test_legacy_roi_findings_have_no_tab_controls_or_unavailable_counter(qtbot):
+    report, groups = _report()
+    findings = list(report["review_findings"])
+    legacy = {
+        **findings[-1], "electrode": "", "roi": "Occipital",
+        "finding_fingerprint": "legacy-roi", "finding_type": "cohort_relative_summed_bca_context",
+    }
+    report.update(review_findings=[*findings, legacy], flags=[*findings, legacy],
+                  cohort_relative_rows=[{**legacy, "status": "unavailable"}])
+    dialog = module.FrequencyDomainQcReviewDialog(report, participant_groups=groups)
+    qtbot.addWidget(dialog)
+    dialog.show()
+    qtbot.waitExposed(dialog)
     tabs = dialog.finding_sections
-    assert [tabs.tabData(index) for index in range(tabs.count())] == ["electrode", "roi"]
+    assert [tabs.tabData(index) for index in range(tabs.count())] == ["electrode"]
     assert tabs.tabData(tabs.currentIndex()) == "electrode"
-    assert _visible_fingerprints(dialog) == [item["finding_fingerprint"] for item in findings[:-1]]
+    assert _visible_fingerprints(dialog) == [item["finding_fingerprint"] for item in findings]
     assert dialog.details_table.horizontalHeaderItem(2).text() == "Electrode"
-    _select_section(dialog, "roi")
-    assert _visible_fingerprints(dialog) == [findings[-1]["finding_fingerprint"]]
-    assert dialog.details_table.horizontalHeaderItem(2).text() == "ROI"
-    assert not dialog.bulk_retain_button.isEnabled()
-    assert not dialog.bulk_interpolate_button.isEnabled()
-    roi_combo, _ = dialog._decision_controls[findings[-1]["finding_fingerprint"]]
-    assert roi_combo.findData(DECISION_INTERPOLATE_CONDITION_ELECTRODE) == -1
-
-    _select_section(dialog, "electrode")
-    for finding in findings[:-1]:
+    assert legacy["finding_fingerprint"] not in dialog._decision_controls
+    assert "UNAVAILABLE COHORT INPUTS" not in _context(dialog)
+    assert "Occipital" not in _context(dialog)
+    for finding in findings:
         combo, _ = dialog._decision_controls[finding["finding_fingerprint"]]
         combo.setCurrentIndex(combo.findData(DECISION_RETAIN))
-    _select_electrode_group(dialog)
-    dialog._set_column_filter(1, {"Objects"})
-    dialog.search_edit.setText("Objects")
-    qtbot.mouseClick(dialog.next_button, Qt.MouseButton.LeftButton)
-    assert tabs.tabData(tabs.currentIndex()) == "roi"
-    assert dialog.search_edit.text() == ""
-    assert dialog._column_filters == {}
-    assert dialog.electrode_group_combo.currentData() is None
-    assert _visible_fingerprints(dialog) == [findings[-1]["finding_fingerprint"]]
-    assert roi_combo.isVisibleTo(dialog.decision_stack)
-    assert not roi_combo.currentData()
+    dialog.accept()
+    assert dialog.result() == QDialog.DialogCode.Accepted
+    assert {row["finding_fingerprint"] for row in dialog.review_decisions()} == {
+        row["finding_fingerprint"] for row in findings
+    }
 
 
-def test_roi_only_review_opens_its_nonempty_section(qtbot):
+def test_legacy_roi_only_report_offers_no_review_targets(qtbot):
     report, groups = _report()
-    roi = report["review_findings"][-1]
+    roi = {**report["review_findings"][-1], "electrode": "", "roi": "Occipital"}
     report.update(review_findings=[roi], flags=[roi], review_decisions=[], review_prefill_decisions=[])
     dialog = module.FrequencyDomainQcReviewDialog(report, participant_groups=groups)
     qtbot.addWidget(dialog)
     dialog.show()
     qtbot.waitExposed(dialog)
-    assert dialog.finding_sections.tabData(dialog.finding_sections.currentIndex()) == "roi"
-    assert _visible_fingerprints(dialog) == [roi["finding_fingerprint"]]
-    assert dialog.details_table.horizontalHeaderItem(2).text() == "ROI"
+    assert dialog.finding_sections.count() == 1
+    assert dialog.finding_sections.tabData(dialog.finding_sections.currentIndex()) == "electrode"
+    assert _visible_fingerprints(dialog) == []
+    assert dialog._decision_controls == {}
+    assert dialog.details_table.horizontalHeaderItem(2).text() == "Electrode"
     assert not dialog.bulk_retain_button.isEnabled()
     assert not dialog.bulk_interpolate_button.isEnabled()
 

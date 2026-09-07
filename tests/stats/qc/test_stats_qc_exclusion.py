@@ -10,9 +10,7 @@ from Tools.Stats.analysis.dv_policies import (
     FIXED_PREDEFINED_POLICY_NAME,
     prepare_summed_bca_data,
 )
-from Tools.Stats.io import excel_io
 from Tools.Stats.qc.stats_qc_exclusion import (
-    QC_REASON_MAXABS,
     QC_REASON_SUMABS,
     QcViolation,
     format_qc_violation,
@@ -34,139 +32,53 @@ def _make_bca_df(max_value: float) -> pd.DataFrame:
     return df
 
 
-def test_qc_exclusion_independent_of_selected_conditions(monkeypatch, tmp_path) -> None:
-    paths = {
-        name: tmp_path / name
-        for name in (
-            "P1_A.xlsx",
-            "P1_B.xlsx",
-            "P2_A.xlsx",
-            "P2_B.xlsx",
-            "P3_A.xlsx",
-            "P3_B.xlsx",
-        )
-    }
-    for name, path in paths.items():
-        _write_bca_workbook(path, _make_bca_df(1000.0 if name == "P3_B.xlsx" else 0.1))
+@pytest.mark.parametrize("suffix", [".xlsx", ".xls", ".fpvs"])
+def test_projectless_roi_qc_is_retired_without_source_reads(monkeypatch, tmp_path, suffix):
+    from pathlib import Path
 
-    subject_data = {
-        "P1": {"A": str(paths["P1_A.xlsx"]), "B": str(paths["P1_B.xlsx"])},
-        "P2": {"A": str(paths["P2_A.xlsx"]), "B": str(paths["P2_B.xlsx"])},
-        "P3": {"A": str(paths["P3_A.xlsx"]), "B": str(paths["P3_B.xlsx"])},
-    }
-    conditions_all = ["A", "B"]
-    rois = {"Occipital": ["O1", "O2"]}
+    def fail_read(*_args, **_kwargs):
+        raise AssertionError("Retired ROI screening must not read source workbooks")
 
-    def _fail_full_workbook_read(*_args, **_kwargs):
-        raise AssertionError("QC should use the selective .xlsx reader")
-
-    selected_electrode_filters: list[set[str] | None] = []
-    original_selected_read = qc_exclusion.read_xlsx_sheet_selected_columns
-
-    def _record_selected_read(*args, **kwargs):
-        selected_electrode_filters.append(kwargs.get("included_electrodes_upper"))
-        return original_selected_read(*args, **kwargs)
-
-    monkeypatch.setattr(excel_io, "safe_read_excel", _fail_full_workbook_read)
-    monkeypatch.setattr(
-        qc_exclusion,
-        "read_xlsx_sheet_selected_columns",
-        _record_selected_read,
-    )
-
+    monkeypatch.setattr(Path, "open", fail_read)
+    messages = []
     report = run_qc_exclusion(
-        subjects=list(subject_data.keys()),
-        subject_data=subject_data,
-        conditions_all=conditions_all,
-        rois_all=rois,
-        base_freq=6.0,
-        warn_threshold=1.0,
-        log_func=None,
-    )
-
-    assert report.summary.n_subjects_flagged == 1
-    assert any(
-        QC_REASON_MAXABS in participant.reasons
-        for participant in report.participants
-        if participant.participant_id == "P3"
-    )
-    assert selected_electrode_filters
-    assert all(
-        electrode_filter == {"O1", "O2"}
-        for electrode_filter in selected_electrode_filters
-    )
-
-    dv_data = prepare_summed_bca_data(
-        subjects=list(subject_data.keys()),
-        conditions=["A"],
-        subject_data=subject_data,
-        base_freq=6.0,
-        log_func=lambda _m: None,
-        rois=rois,
-        dv_policy={"name": FIXED_PREDEFINED_POLICY_NAME},
-    )
-
-    assert dv_data is not None
-    assert set(dv_data.keys()) == set(subject_data.keys())
-    assert set(dv_data["P1"].keys()) == {"A"}
-
-
-def test_qc_keeps_full_reader_fallback_for_non_xlsx(
-    monkeypatch,
-    tmp_path,
-) -> None:
-    workbook = tmp_path / "legacy_results.xls"
-    workbook.write_bytes(b"test placeholder")
-    read_calls: list[tuple[str, str, str | None]] = []
-
-    def _fake_read_excel(path, sheet_name, *, index_col=None, use_cache=True):
-        _ = use_cache
-        read_calls.append((str(path), str(sheet_name), index_col))
-        return _make_bca_df(0.1)
-
-    monkeypatch.setattr(excel_io, "safe_read_excel", _fake_read_excel)
-
-    report = run_qc_exclusion(
-        subjects=["P1"],
-        subject_data={"P1": {"A": str(workbook)}},
-        conditions_all=["A"],
+        subjects=["P1", "P2"],
+        subject_data={"P1": {"A": str(tmp_path / ("extreme" + suffix))}, "P2": {}},
+        conditions_all=["A", "B"],
         rois_all={"Occipital": ["O1", "O2"]},
         base_freq=6.0,
-        log_func=None,
-    )
-
-    assert read_calls == [(str(workbook), "BCA (uV)", "Electrode")]
-    assert report.summary.n_subjects_before == 1
-    assert report.summary.n_subjects_flagged == 0
-
-
-def test_qc_reports_missing_mapping_without_attempting_a_read(
-    monkeypatch,
-) -> None:
-    messages: list[str] = []
-
-    def _fail_read(*_args, **_kwargs):
-        raise AssertionError("No workbook read should be attempted")
-
-    monkeypatch.setattr(excel_io, "safe_read_excel", _fail_read)
-    monkeypatch.setattr(
-        qc_exclusion,
-        "read_xlsx_sheet_header",
-        _fail_read,
-    )
-
-    report = run_qc_exclusion(
-        subjects=["P1"],
-        subject_data={"P1": {}},
-        conditions_all=["A"],
-        rois_all={"Occipital": ["O1", "O2"]},
-        base_freq=6.0,
+        warn_threshold=0.0001,
         log_func=messages.append,
     )
-
-    assert any("QC: Missing file for P1 A" in message for message in messages)
-    assert report.summary.n_subjects_before == 1
+    assert report.source == "retired_roi_screen"
+    assert report.screening_status == "not_performed"
+    assert report.authority == "none"
+    assert report.review_complete is False
+    assert report.participants == []
+    assert report.screened_rois == []
+    assert report.screened_conditions == []
+    assert report.excluded_pids == set()
+    assert report.summary.n_subjects_before == report.summary.n_subjects_after == 2
     assert report.summary.n_subjects_flagged == 0
+    assert any("retired" in message for message in messages)
+
+
+def test_retiring_roi_screen_preserves_normal_roi_summed_bca(tmp_path):
+    path = tmp_path / "P1_A.xlsx"
+    _write_bca_workbook(path, _make_bca_df(1000.0))
+    data = {"P1": {"A": str(path)}}
+    report = run_qc_exclusion(
+        subjects=["P1"], subject_data=data, conditions_all=["A"],
+        rois_all={"Occipital": ["O1", "O2"]}, base_freq=6.0,
+    )
+    assert report.participants == []
+    dv_data = prepare_summed_bca_data(
+        subjects=["P1"], conditions=["A"], subject_data=data,
+        base_freq=6.0, log_func=lambda _m: None,
+        rois={"Occipital": ["O1", "O2"]},
+        dv_policy={"name": FIXED_PREDEFINED_POLICY_NAME},
+    )
+    assert dv_data["P1"]["A"]["Occipital"] == 1000.4
 
 
 def _write_bca_workbook(path, frame: pd.DataFrame) -> None:
@@ -200,6 +112,35 @@ def test_format_qc_violation_is_human_readable() -> None:
     assert "threshold 6.00" in text
 
 
+@pytest.mark.parametrize("threshold", [float("nan"), 250.0])
+def test_shared_electrode_format_omits_retired_roi_robust_context(threshold):
+    from Tools.Stats.qc.stats_outlier_exclusion import (
+        format_flag_type_display, format_outlier_reason, format_worst_value_display,
+    )
+
+    metric = qc_exclusion.QC_REASON_ABSOLUTE_ELECTRODE
+    violation = QcViolation(
+        condition="Faces", roi="O2", metric=metric, severity="EXTREME",
+        value=300.0, robust_center=float("nan"), robust_spread=float("nan"),
+        robust_score=float("nan"), threshold_used=threshold, abs_floor_used=float("nan"),
+        recording_id="P1__V2", decision="retain", source="shared_project_qc17_review",
+    )
+    text = format_qc_violation(violation)
+    assert "Condition: Faces, Electrode: O2" in text
+    assert "Summed-BCA magnitude: 300.0000 µV" in text
+    assert "Recording: P1__V2" in text
+    assert "Saved QC-17 decision: retain" in text
+    assert "ROI" not in text
+    assert "robust" not in text.casefold()
+    assert "nan" not in text.casefold()
+    assert ("Review threshold:" in text) == (threshold == 250.0)
+    assert format_flag_type_display(metric) == "Large electrode summed BCA"
+    assert format_outlier_reason(metric) == "Unusually large electrode summed BCA."
+    assert format_worst_value_display(metric, 300.0) == (
+        "Electrode summed-BCA magnitude: 300.0000 µV", None,
+    )
+
+
 def test_managed_stats_reuses_recording_aware_qc17_evidence(monkeypatch, tmp_path) -> None:
     import Main_App.processing.frequency_domain_qc as project_qc
 
@@ -208,7 +149,8 @@ def test_managed_stats_reuses_recording_aware_qc17_evidence(monkeypatch, tmp_pat
             "recording_id": recording_id,
             "participant_id": "P1",
             "condition": "Faces",
-            "roi": "Right OT",
+            "roi": "",
+            "electrode": "O2",
             "decision": "retain",
             "reason": "",
             "finding_fingerprint": f"finding-{recording_id}",
@@ -217,12 +159,12 @@ def test_managed_stats_reuses_recording_aware_qc17_evidence(monkeypatch, tmp_pat
     )
     findings = [
         {
-            "finding_type": "cohort_relative_summed_bca_context",
+            "finding_type": "absolute_electrode_summed_bca",
             "recording_id": row["recording_id"],
             "participant_id": "P1",
             "condition": "Faces",
-            "roi": "Right OT",
-            "metric": "sum_abs_roi_mean",
+            "roi": "",
+            "electrode": "O2",
             "value_uv": 12.0,
             "robust_center_uv": 2.0,
             "robust_spread_uv": 1.0,
@@ -248,8 +190,8 @@ def test_managed_stats_reuses_recording_aware_qc17_evidence(monkeypatch, tmp_pat
         project_qc,
         "load_current_frequency_qc_review_evidence",
         lambda _root: {
-            "cohort_findings": findings,
-            "ordinary_findings": [],
+            "cohort_findings": [],
+            "ordinary_findings": findings,
             "screening_settings": {
                 "cohort_warning_robust_score": 6.0,
                 "cohort_extreme_robust_score": 10.0,
@@ -269,6 +211,9 @@ def test_managed_stats_reuses_recording_aware_qc17_evidence(monkeypatch, tmp_pat
     )
 
     assert report.source == "shared_project_qc17_review"
+    assert report.screened_rois == []
+    assert all(v.metric == qc_exclusion.QC_REASON_ABSOLUTE_ELECTRODE
+               for item in report.participants for v in item.violations)
     assert report.source_fingerprint == "source-fingerprint"
     assert report.decision_fingerprint == "decision-fingerprint"
     assert report.evidence_fingerprint == "evidence-fingerprint"
@@ -289,6 +234,16 @@ def test_managed_stats_reuses_recording_aware_qc17_evidence(monkeypatch, tmp_pat
         for participant in report.participants
         for violation in participant.violations
     )
+    from Tools.Stats.qc.stats_outlier_exclusion import build_flagged_participants_tables
+
+    summary, details = build_flagged_participants_tables(report, None)
+    # Keep the existing workbook keys while making their displayed text exact.
+    assert details["roi"].tolist() == ["O2", "O2"]
+    assert summary["worst_roi"].tolist() == ["O2", "O2"]
+    for text in [*details["reason_text"], *summary["reason_text"]]:
+        assert "Electrode: O2" in text
+        assert "ROI:" not in text
+        assert "Robust score:" not in text
 
 
 def test_managed_stats_preserves_stabilized_reconfirmation_only_exclusion(
@@ -427,3 +382,107 @@ def test_managed_stats_rejects_stale_qc17_evidence(monkeypatch, tmp_path) -> Non
             conditions_all=["Faces"],
             rois_all={},
         )
+
+
+@pytest.mark.parametrize("legacy", [
+    {"roi": "Right OT"},
+    {"metric": "sum_abs_roi_mean"},
+    {"metric": "peak_abs_roi_mean"},
+    {"finding_type": "cohort_relative_summed_bca_context"},
+])
+def test_managed_stats_never_revives_legacy_roi_findings(monkeypatch, tmp_path, legacy):
+    import Main_App.processing.frequency_domain_qc as project_qc
+
+    decision = {"participant_id": "P1", "condition": "A",
+                "decision": "exclude_participant", "finding_fingerprint": "old-decision",
+                "evidence": {**legacy, "value_uv": 300.0}}
+    monkeypatch.setattr(project_qc, "resolve_frequency_qc_coverage_decisions", lambda _root:
+                        SimpleNamespace(review_complete=True, decision_fingerprint="current",
+                                        reviewed_decisions=(decision,)))
+    monkeypatch.setattr(project_qc, "load_current_frequency_qc_review_evidence", lambda _root: {
+        "ordinary_findings": [{**legacy, "finding_fingerprint": "unreviewed-old"}],
+        "cohort_findings": [{**legacy, "finding_fingerprint": "old-cohort"}],
+        "reconfirmation_findings": [{**legacy, "finding_fingerprint": "old-reconfirmation"}],
+        "technical_statuses": [{**legacy, "status": "unavailable"}],
+        "screening_status": "performed",
+    })
+    report = load_shared_frequency_qc_review(
+        project_root=tmp_path, subjects=["P1"], conditions_all=["A"],
+        rois_all={"Right OT": ["O2"]},
+    )
+    assert report.participants == []
+    assert report.excluded_pids == set()
+    assert report.screened_rois == []
+    assert report.technical_statuses == ()
+
+
+def test_managed_stats_still_requires_exact_electrode_decision(monkeypatch, tmp_path):
+    import Main_App.processing.frequency_domain_qc as project_qc
+
+    monkeypatch.setattr(project_qc, "resolve_frequency_qc_coverage_decisions", lambda _root:
+                        SimpleNamespace(review_complete=True, decision_fingerprint="current",
+                                        reviewed_decisions=()))
+    monkeypatch.setattr(project_qc, "load_current_frequency_qc_review_evidence", lambda _root: {
+        "ordinary_findings": [{"finding_type": "absolute_electrode_summed_bca",
+                               "electrode": "O2", "finding_fingerprint": "unreviewed"}],
+    })
+    with pytest.raises(RuntimeError, match="exact reviewed decision"):
+        load_shared_frequency_qc_review(project_root=tmp_path, subjects=["P1"],
+                                       conditions_all=["A"], rois_all={})
+
+
+@pytest.mark.parametrize("filename", ["stats_workers.py", "multigroup_workers.py"])
+def test_projectless_worker_cannot_reuse_cached_roi_qc_report(filename):
+    import ast
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parents[3] / "src/Tools/Stats/workers" / filename
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    # Worker adapters must not load old ROI reports out of qc_state. Their only
+    # report writes are the fresh shared-electrode or not-performed receipt.
+    report_reads = [node for node in ast.walk(tree) if
+                    isinstance(node, ast.Subscript) and isinstance(node.ctx, ast.Load)
+                    and isinstance(node.value, ast.Name) and node.value.id == "qc_state"
+                    and isinstance(node.slice, ast.Constant) and node.slice.value == "report"]
+    get_report_calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)
+                        and isinstance(node.func, ast.Attribute) and node.func.attr == "get"
+                        and isinstance(node.func.value, ast.Name) and node.func.value.id == "qc_state"
+                        and node.args and isinstance(node.args[0], ast.Constant)
+                        and node.args[0].value == "report"]
+    assert not report_reads
+    assert not get_report_calls
+
+
+def test_retired_roi_receipt_preserves_nonfinite_dv_integrity():
+    from Tools.Stats.qc.stats_outlier_exclusion import (
+        apply_hard_dv_exclusion, build_outlier_summary_text, merge_exclusion_reports,
+    )
+
+    qc_report = run_qc_exclusion(subjects=["P1", "P2"], subject_data={},
+        conditions_all=["A"], rois_all={"R": ["O1"]}, base_freq=6.0)
+    frame = pd.DataFrame({"subject": ["P1", "P2"], "condition": ["A", "A"],
+                          "roi": ["R", "R"], "value": [float("nan"), 300.0]})
+    _filtered, dv_report = apply_hard_dv_exclusion(frame, 50.0)
+    combined = merge_exclusion_reports(dv_report, qc_report)
+    assert combined.summary.n_subjects_required_excluded == 1
+    assert "no ROI screen was performed" in build_outlier_summary_text(combined)
+
+
+
+def test_stats_startup_ignores_malformed_retired_roi_thresholds():
+    import ast
+    from pathlib import Path
+
+    ui = Path(__file__).resolve().parents[3] / "src/Tools/Stats/ui"
+    tree = ast.parse((ui / "stats_window_exclusions.py").read_text(encoding="utf-8"))
+    method = next(node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)
+                  and node.name == "_get_qc_exclusion_payload")
+    namespace = {}
+    exec(compile(ast.Module(body=[method], type_ignores=[]), "isolated_qc_payload", "exec"), namespace)
+    historical = SimpleNamespace(qc_warn_threshold="broken", qc_critical_threshold=None,
+        qc_warn_abs_floor_sumabs={}, qc_critical_abs_floor_sumabs=[],
+        qc_warn_abs_floor_maxabs="invalid", qc_critical_abs_floor_maxabs=-1)
+    assert namespace["_get_qc_exclusion_payload"](historical) == {}
+    pipeline = ast.parse((ui / "stats_window_pipeline.py").read_text(encoding="utf-8"))
+    assert not any(isinstance(node, ast.Attribute) and node.attr == "_get_qc_settings"
+                   for node in ast.walk(pipeline))

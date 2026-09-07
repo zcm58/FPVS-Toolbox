@@ -103,12 +103,6 @@ class SummedBcaScreeningSettings:
     extreme_review_summed_bca_uv: float = 250.0
     concentrated_review_flagged_cells: int = 5
     broad_extreme_review_unique_electrodes: int = 11
-    cohort_warning_robust_score: float = 6.0
-    cohort_extreme_robust_score: float = 10.0
-    cohort_warning_sum_floor_uv: float = 5.0
-    cohort_extreme_sum_floor_uv: float = 10.0
-    cohort_warning_peak_floor_uv: float = 1.0
-    cohort_extreme_peak_floor_uv: float = 2.0
 
     def __post_init__(self) -> None:
         enabled = _coerce_bool(self.enabled, field_name="enabled")
@@ -147,41 +141,6 @@ class SummedBcaScreeningSettings:
             field_name="broad_extreme_review_unique_electrodes",
         )
 
-        robust_warning = _finite_positive_float(
-            self.cohort_warning_robust_score,
-            field_name="cohort_warning_robust_score",
-        )
-        robust_extreme = _finite_positive_float(
-            self.cohort_extreme_robust_score,
-            field_name="cohort_extreme_robust_score",
-        )
-        sum_warning = _finite_positive_float(
-            self.cohort_warning_sum_floor_uv,
-            field_name="cohort_warning_sum_floor_uv",
-        )
-        sum_extreme = _finite_positive_float(
-            self.cohort_extreme_sum_floor_uv,
-            field_name="cohort_extreme_sum_floor_uv",
-        )
-        peak_warning = _finite_positive_float(
-            self.cohort_warning_peak_floor_uv,
-            field_name="cohort_warning_peak_floor_uv",
-        )
-        peak_extreme = _finite_positive_float(
-            self.cohort_extreme_peak_floor_uv,
-            field_name="cohort_extreme_peak_floor_uv",
-        )
-        ordered_pairs = (
-            (robust_warning, robust_extreme, "cohort robust-score"),
-            (sum_warning, sum_extreme, "cohort summed-BCA floor"),
-            (peak_warning, peak_extreme, "cohort peak floor"),
-        )
-        for lower, upper, label in ordered_pairs:
-            if lower >= upper:
-                raise ExperimentalQcSettingsError(
-                    f"The {label} warning value must be below its extreme value."
-                )
-
         object.__setattr__(self, "enabled", enabled)
         object.__setattr__(self, "policy_version", policy_version)
         object.__setattr__(self, "warning_summed_bca_uv", warning)
@@ -197,12 +156,6 @@ class SummedBcaScreeningSettings:
             "broad_extreme_review_unique_electrodes",
             broad,
         )
-        object.__setattr__(self, "cohort_warning_robust_score", robust_warning)
-        object.__setattr__(self, "cohort_extreme_robust_score", robust_extreme)
-        object.__setattr__(self, "cohort_warning_sum_floor_uv", sum_warning)
-        object.__setattr__(self, "cohort_extreme_sum_floor_uv", sum_extreme)
-        object.__setattr__(self, "cohort_warning_peak_floor_uv", peak_warning)
-        object.__setattr__(self, "cohort_extreme_peak_floor_uv", peak_extreme)
 
     @classmethod
     def from_manifest(
@@ -215,6 +168,7 @@ class SummedBcaScreeningSettings:
             raise ExperimentalQcSettingsError(
                 "summed_bca_screening must be a JSON object."
             )
+        # Retired ROI cohort thresholds in older manifests are ignored.
         defaults = cls()
         return cls(
             enabled=raw.get("enabled", defaults.enabled),
@@ -239,30 +193,7 @@ class SummedBcaScreeningSettings:
                 "broad_extreme_review_unique_electrodes",
                 defaults.broad_extreme_review_unique_electrodes,
             ),
-            cohort_warning_robust_score=raw.get(
-                "cohort_warning_robust_score",
-                defaults.cohort_warning_robust_score,
-            ),
-            cohort_extreme_robust_score=raw.get(
-                "cohort_extreme_robust_score",
-                defaults.cohort_extreme_robust_score,
-            ),
-            cohort_warning_sum_floor_uv=raw.get(
-                "cohort_warning_sum_floor_uv",
-                defaults.cohort_warning_sum_floor_uv,
-            ),
-            cohort_extreme_sum_floor_uv=raw.get(
-                "cohort_extreme_sum_floor_uv",
-                defaults.cohort_extreme_sum_floor_uv,
-            ),
-            cohort_warning_peak_floor_uv=raw.get(
-                "cohort_warning_peak_floor_uv",
-                defaults.cohort_warning_peak_floor_uv,
-            ),
-            cohort_extreme_peak_floor_uv=raw.get(
-                "cohort_extreme_peak_floor_uv",
-                defaults.cohort_extreme_peak_floor_uv,
-            ),
+
         )
 
     def to_manifest(self) -> dict[str, object]:
@@ -278,12 +209,6 @@ class SummedBcaScreeningSettings:
             "broad_extreme_review_unique_electrodes": (
                 self.broad_extreme_review_unique_electrodes
             ),
-            "cohort_warning_robust_score": self.cohort_warning_robust_score,
-            "cohort_extreme_robust_score": self.cohort_extreme_robust_score,
-            "cohort_warning_sum_floor_uv": self.cohort_warning_sum_floor_uv,
-            "cohort_extreme_sum_floor_uv": self.cohort_extreme_sum_floor_uv,
-            "cohort_warning_peak_floor_uv": self.cohort_warning_peak_floor_uv,
-            "cohort_extreme_peak_floor_uv": self.cohort_extreme_peak_floor_uv,
         }
 
 

@@ -129,8 +129,6 @@ class StatsWindow(
         self._pipeline_qc_config: dict[PipelineId, dict[str, object]] = {}
         self._pipeline_qc_state: dict[PipelineId, dict[str, object]] = {}
         self._pipeline_run_reports: dict[PipelineId, StatsRunReport | None] = {}
-        self._qc_threshold_sumabs: float = QC_DEFAULT_WARN_THRESHOLD
-        self._qc_threshold_maxabs: float = QC_DEFAULT_CRITICAL_THRESHOLD
         self._last_export_path: str | None = None
         self._pipeline_start_perf: dict[PipelineId, float] = {}
 

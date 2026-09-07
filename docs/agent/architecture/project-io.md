@@ -97,8 +97,10 @@ FPVS Toolbox uses a strict hybrid settings model:
 - Project-owned QC-17 configuration lives separately from raw preprocessing in
   the top-level, versioned `experimental_qc` record. Its
   `summed_bca_screening` subsection defaults to enabled review-only screening
-  with the accepted absolute, count, cohort-relative, summed-response, and peak
-  thresholds. Existing projects with no record receive those defaults and
+  with the accepted absolute electrode-amplitude and flagged-cell/electrode
+  count thresholds. Retired cohort-relative ROI thresholds are ignored when
+  loading older settings and are omitted from newly saved settings. Existing
+  projects with no record receive the electrode-screening defaults and
   persist them on their next save. This settings record is distinct from
   `tools.frequency_domain_qc` findings and decisions; the Wave 1 foundation
   does not reinterpret or change prior automatic exclusion state.

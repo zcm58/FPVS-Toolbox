@@ -1366,15 +1366,18 @@ def test_project_prepare_accepts_canonical_and_display_group_aliases(
     [float("nan"), float("inf")],
     ids=["nan", "inf"],
 )
-def test_project_adapter_reuses_qc_and_defers_nonfinite_cells_to_scope_audit(
+def test_projectless_adapter_retires_cached_roi_qc_and_defers_nonfinite_cells_to_scope_audit(
     monkeypatch,
     invalid_value,
 ) -> None:
     qc_report = _cached_qc_report()
+    current_report = _cached_qc_report()
     seen_subjects: list[str] = []
+    qc_calls: list[dict] = []
 
-    def fail_qc(*_args, **_kwargs):
-        raise AssertionError("cached QC report was not reused")
+    def current_qc(**kwargs):
+        qc_calls.append(kwargs)
+        return current_report
 
     def fake_summed_bca(**kwargs):
         seen_subjects.extend(kwargs["subjects"])
@@ -1383,7 +1386,7 @@ def test_project_adapter_reuses_qc_and_defers_nonfinite_cells_to_scope_audit(
             "P2": {"A": {"R1": invalid_value}},
         }
 
-    monkeypatch.setattr(workers, "run_qc_exclusion", fail_qc)
+    monkeypatch.setattr(workers, "run_qc_exclusion", current_qc)
     monkeypatch.setattr(workers, "prepare_summed_bca_data", fake_summed_bca)
     frame, frozen, metadata = workers._prepare_project_long_data(
         subjects=["P1", "P2", "P3"],
@@ -1410,7 +1413,8 @@ def test_project_adapter_reuses_qc_and_defers_nonfinite_cells_to_scope_audit(
     assert not np.isfinite(
         frame.loc[frame["subject"].eq("P2"), "value"].iloc[0]
     )
-    assert metadata["qc_report"] is qc_report
+    assert len(qc_calls) == 1
+    assert metadata["qc_report"] is current_report
     assert metadata["nonfinite_dv_cells"] == 1
     assert metadata["nonfinite_dv_handling"] == "analysis_scope"
     outlier_report = metadata["outlier_report"]

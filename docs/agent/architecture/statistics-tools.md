@@ -337,10 +337,15 @@ Rules:
 - Reviewed frequency-domain QC exclusions are applied before final harmonic selection,
   Summed BCA DV aggregation, Stats-ready export, SNR Plot ROI collection, Scalp
   Maps metric collection, and source-map input preparation. Full participant or
-  recording exclusions retain their accepted scope. Electrode exclusions stay
-  scoped to the reviewed participant/recording and condition; QC-21 final
-  coverage supplies that exact map to harmonic selection and ROI aggregation
-  without widening it across other conditions.
+  recording exclusions retain their accepted scope. The experimental summed-BCA
+  review screens electrodes only and permits explicit broader exclusions or
+  enabled, artifact-confirmed condition-specific electrode repair. ROI amplitude
+  findings and decisions are retired; managed Stats must not reconstruct them
+  from historical review evidence. Projectless Stats does not run the former
+  ROI cohort amplitude screen or reuse its cached reports; its compatibility
+  receipt records screening as not performed. Nonfinite-DV integrity checks
+  and QC-21 fixed-electrode coverage remain separate requirements for ROI
+  aggregation and final release.
 - Adaptive harmonic-selection profiles must fail fast from workbook headers
   when exact nominal oddball-harmonic columns are missing. Header
   preflight happens in the Stats worker before QC screening, grand-average

@@ -45,12 +45,6 @@ from Tools.Stats.qc.stats_outlier_exclusion import (
     merge_exclusion_reports,
 )
 from Tools.Stats.qc.stats_qc_exclusion import (
-    QC_DEFAULT_CRITICAL_ABS_FLOOR_MAXABS,
-    QC_DEFAULT_CRITICAL_ABS_FLOOR_SUMABS,
-    QC_DEFAULT_CRITICAL_THRESHOLD,
-    QC_DEFAULT_WARN_ABS_FLOOR_MAXABS,
-    QC_DEFAULT_WARN_ABS_FLOOR_SUMABS,
-    QC_DEFAULT_WARN_THRESHOLD,
     QcExclusionReport,
     load_shared_frequency_qc_review,
     run_qc_exclusion,
@@ -275,22 +269,13 @@ def _apply_qc_screening(
         )
         if qc_state is not None:
             qc_state["report"] = qc_report
-    elif qc_state is not None and isinstance(qc_state.get("report"), QcExclusionReport):
-        qc_report = qc_state.get("report")
     else:
-        config = qc_config or {}
         qc_report = run_qc_exclusion(
             subjects=list(subjects),
             subject_data=subject_data,
             conditions_all=list(conditions_all or []),
             rois_all=rois_all or {},
             base_freq=base_freq,
-            warn_threshold=float(config.get("warn_threshold", QC_DEFAULT_WARN_THRESHOLD)),
-            critical_threshold=float(config.get("critical_threshold", QC_DEFAULT_CRITICAL_THRESHOLD)),
-            warn_abs_floor_sumabs=float(config.get("warn_abs_floor_sumabs", QC_DEFAULT_WARN_ABS_FLOOR_SUMABS)),
-            critical_abs_floor_sumabs=float(config.get("critical_abs_floor_sumabs", QC_DEFAULT_CRITICAL_ABS_FLOOR_SUMABS)),
-            warn_abs_floor_maxabs=float(config.get("warn_abs_floor_maxabs", QC_DEFAULT_WARN_ABS_FLOOR_MAXABS)),
-            critical_abs_floor_maxabs=float(config.get("critical_abs_floor_maxabs", QC_DEFAULT_CRITICAL_ABS_FLOOR_MAXABS)),
             log_func=message_cb,
         )
         if qc_state is not None:

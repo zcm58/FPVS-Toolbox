@@ -63,18 +63,7 @@ def test_summed_bca_screening_defaults_are_versioned_and_review_only() -> None:
     ) == (10.0, 50.0, 250.0)
     assert screening.concentrated_review_flagged_cells == 5
     assert screening.broad_extreme_review_unique_electrodes == 11
-    assert (
-        screening.cohort_warning_robust_score,
-        screening.cohort_extreme_robust_score,
-    ) == (6.0, 10.0)
-    assert (
-        screening.cohort_warning_sum_floor_uv,
-        screening.cohort_extreme_sum_floor_uv,
-    ) == (5.0, 10.0)
-    assert (
-        screening.cohort_warning_peak_floor_uv,
-        screening.cohort_extreme_peak_floor_uv,
-    ) == (1.0, 2.0)
+    assert not any(key.startswith("cohort_") for key in screening.to_manifest())
     assert SUMMED_BCA_SCREENING_BRIEF_TEXT == (
         "Experimental summed-BCA screening flags unusually large frequency "
         "responses for review. These suggested limits come from FPVS Toolbox "
@@ -210,9 +199,6 @@ def test_raw_spectral_policy_rejects_unversioned_threshold_edits() -> None:
         ("warning_summed_bca_uv", 0),
         ("strong_warning_summed_bca_uv", float("inf")),
         ("extreme_review_summed_bca_uv", float("nan")),
-        ("cohort_warning_robust_score", -1),
-        ("cohort_extreme_sum_floor_uv", 0),
-        ("cohort_warning_peak_floor_uv", True),
         ("concentrated_review_flagged_cells", 0),
         ("concentrated_review_flagged_cells", 5.5),
         ("broad_extreme_review_unique_electrodes", 65),
@@ -235,18 +221,6 @@ def test_summed_bca_screening_rejects_nonfinite_nonpositive_or_invalid_counts(
         {
             "warning_summed_bca_uv": 50,
             "strong_warning_summed_bca_uv": 50,
-        },
-        {
-            "cohort_warning_robust_score": 10,
-            "cohort_extreme_robust_score": 10,
-        },
-        {
-            "cohort_warning_sum_floor_uv": 10,
-            "cohort_extreme_sum_floor_uv": 5,
-        },
-        {
-            "cohort_warning_peak_floor_uv": 3,
-            "cohort_extreme_peak_floor_uv": 2,
         },
     ],
 )
@@ -565,12 +539,6 @@ def test_existing_project_defaults_qc17_on_and_custom_settings_round_trip(
         extreme_review_summed_bca_uv=300,
         concentrated_review_flagged_cells=6,
         broad_extreme_review_unique_electrodes=12,
-        cohort_warning_robust_score=7,
-        cohort_extreme_robust_score=11,
-        cohort_warning_sum_floor_uv=6,
-        cohort_extreme_sum_floor_uv=12,
-        cohort_warning_peak_floor_uv=1.5,
-        cohort_extreme_peak_floor_uv=3,
     )
     expected = project.experimental_qc_settings.with_summed_bca_screening(
         custom_screening
@@ -581,3 +549,35 @@ def test_existing_project_defaults_qc17_on_and_custom_settings_round_trip(
     saved = json.loads((tmp_path / "project.json").read_text(encoding="utf-8"))
     assert saved["experimental_qc"] == expected.to_manifest()
     assert Project.load(tmp_path).experimental_qc_settings == expected
+
+
+@pytest.mark.parametrize("legacy_value", [None, -1, "invalid", {"old": "value"}])
+def test_retired_roi_cohort_settings_are_ignored_and_not_saved(legacy_value):
+    legacy = {
+        "warning_summed_bca_uv": 12.5,
+        **{name: legacy_value for name in (
+            "cohort_warning_robust_score", "cohort_extreme_robust_score",
+            "cohort_warning_sum_floor_uv", "cohort_extreme_sum_floor_uv",
+            "cohort_warning_peak_floor_uv", "cohort_extreme_peak_floor_uv",
+        )},
+    }
+    screening = SummedBcaScreeningSettings.from_manifest(legacy)
+    assert screening.warning_summed_bca_uv == 12.5
+    assert screening.strong_warning_summed_bca_uv == 50.0
+    assert not any(key.startswith("cohort_") for key in screening.to_manifest())
+    assert SummedBcaScreeningSettings.from_manifest(screening.to_manifest()) == screening
+
+
+def test_settings_editor_exposes_only_retained_electrode_thresholds():
+    import ast
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parents[2] / "src/Main_App/gui/settings_panel.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    strings = {node.value for node in ast.walk(tree) if isinstance(node, ast.Constant)
+               and isinstance(node.value, str)}
+    assert "Optional cohort-relative context" not in strings
+    assert not any(value.startswith("cohort_") for value in strings)
+    assert {"warning_summed_bca_uv", "strong_warning_summed_bca_uv",
+            "extreme_review_summed_bca_uv", "concentrated_review_flagged_cells",
+            "broad_extreme_review_unique_electrodes"} <= strings

@@ -205,7 +205,7 @@ class FrequencyDomainQcReviewDialog(AppDialog):
         self.finding_sections.setAccessibleName("Finding sections")
         self.finding_sections.setDrawBase(False)
         self.finding_sections.setExpanding(False)
-        for section, label in (("electrode", "Individual electrodes"), ("roi", "ROIs"),
+        for section, label in (("electrode", "Individual electrodes"),
                                ("other", "Other findings")):
             count = sum(finding_section(item) == section for item in self._findings)
             if section == "other" and not count:
@@ -259,7 +259,7 @@ class FrequencyDomainQcReviewDialog(AppDialog):
             "Recording" if self._identity_scope == "recording" else "Participant"
         )
         self.details_table.setHorizontalHeaderLabels(
-            [identity_heading, "Condition", "Electrode / ROI", "|Value|", "Decision"]
+            [identity_heading, "Condition", "Electrode", "|Value|", "Decision"]
         )
         self.details_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.details_table.setSelectionMode(QAbstractItemView.SingleSelection)
@@ -400,7 +400,7 @@ class FrequencyDomainQcReviewDialog(AppDialog):
         section = self._current_section()
         self.electrode_group_row.setVisible(section == "electrode")
         self.details_table.horizontalHeaderItem(2).setText(
-            {"electrode": "Electrode", "roi": "ROI", "other": "Finding"}[section]
+            {"electrode": "Electrode", "other": "Finding"}[section]
         )
         if self._column_menu is not None:
             self._column_menu.close()
@@ -586,7 +586,7 @@ class FrequencyDomainQcReviewDialog(AppDialog):
             values = (
                 recording if self._identity_scope == "recording" else participant,
                 str(item.get("condition") or ""),
-                str(item.get("electrode") or item.get("roi") or ""),
+                str(item.get("electrode") or ""),
                 absolute_value,
                 "Undecided",
             )
@@ -900,7 +900,7 @@ def _finding_evidence_text(
         ("Session / visit", _session_text(item)),
         ("Group", group),
         ("Condition", item.get("condition")),
-        ("Electrode / ROI", item.get("electrode") or item.get("roi")),
+        ("Electrode", item.get("electrode")),
         ("Finding", _finding_kind_text(item)),
         ("Signed value", signed_value),
         ("Absolute value", absolute_value),
@@ -917,7 +917,10 @@ def _finding_evidence_text(
 
 def _review_findings(report: Mapping[str, object]) -> list[Mapping[str, object]]:
     value = report.get("review_findings")
-    return _mapping_rows(value if value is not None else report.get("flags"))
+    return [
+        row for row in _mapping_rows(value if value is not None else report.get("flags"))
+        if finding_section(row) is not None
+    ]
 
 
 def _technical_context_rows(report: Mapping[str, object]) -> list[Mapping[str, object]]:
@@ -925,6 +928,7 @@ def _technical_context_rows(report: Mapping[str, object]) -> list[Mapping[str, o
         row
         for row in _mapping_rows(report.get("cohort_relative_rows"))
         if str(row.get("status") or "") != "complete"
+        and finding_section(row) is not None
     ]
 
 
@@ -1017,9 +1021,9 @@ def _independent_qc_text(item: Mapping[str, object]) -> str:
 def _technical_context_text(item: Mapping[str, object]) -> str:
     identity = str(item.get("recording_id") or item.get("participant_id") or "")
     condition = str(item.get("condition") or "")
-    roi = str(item.get("roi") or "")
+    electrode = str(item.get("electrode") or "")
     reasons = ", ".join(str(value) for value in item.get("reason_codes") or [])
-    return f"{identity} / {condition} / {roi}: {reasons or item.get('status') or 'unavailable'}"
+    return f"{identity} / {condition} / {electrode}: {reasons or item.get('status') or 'unavailable'}"
 
 
 def _session_text(item: Mapping[str, object]) -> str:
@@ -1037,17 +1041,12 @@ def _count_phrase(count: int, singular: str, plural: str | None = None) -> str:
 
 def _threshold_text(report: Mapping[str, object]) -> str:
     thresholds = report.get("thresholds") if isinstance(report.get("thresholds"), Mapping) else {}
-    settings = report.get("screening_settings") if isinstance(report.get("screening_settings"), Mapping) else {}
     return (
         "Experimental absolute-value review bands: warning above "
         f"{thresholds.get('warning_summed_bca_uv', 10)} uV; strong warning above "
         f"{thresholds.get('strong_warning_summed_bca_uv', 50)} uV; extreme review above "
         f"{thresholds.get('extreme_review_summed_bca_uv', 250)} uV. "
-        "Cohort-relative context uses median/MAD, scaled-IQR, and zero-spread "
-        "fallbacks with warning/extreme robust scores "
-        f"{settings.get('cohort_warning_robust_score', 6)}/"
-        f"{settings.get('cohort_extreme_robust_score', 10)}. These are review "
-        "limits and never automatic exclusions."
+        "These are review limits and never automatic exclusions."
     )
 
 

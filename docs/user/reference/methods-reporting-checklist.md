@@ -153,6 +153,10 @@ testing, or another specialized estimand.
 
 ### Summed BCA and selection provenance
 
+- Describe experimental summed-BCA artifact screening at the electrode level.
+  ROI amplitudes are not separately screened for inclusion or exclusion.
+  Preserve electrode review and repair decisions; ROI values still require
+  complete fixed electrode membership and valid normalization inputs.
 - Report the named harmonic-selection profile, stable method ID/version,
   canonical selection fingerprint, configured search ceiling, and whether the
   project inherited Legacy behavior or explicitly saved a new-project profile.

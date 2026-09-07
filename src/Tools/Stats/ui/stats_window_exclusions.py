@@ -152,15 +152,8 @@ class StatsWindowExclusionsMixin:
         }
 
     def _get_qc_exclusion_payload(self) -> dict[str, object]:
-        """Handle the get qc exclusion payload step for the Stats workflow."""
-        return {
-            "warn_threshold": float(self._qc_threshold_sumabs),
-            "critical_threshold": float(self._qc_threshold_maxabs),
-            "warn_abs_floor_sumabs": QC_DEFAULT_WARN_ABS_FLOOR_SUMABS,
-            "critical_abs_floor_sumabs": QC_DEFAULT_CRITICAL_ABS_FLOOR_SUMABS,
-            "warn_abs_floor_maxabs": QC_DEFAULT_WARN_ABS_FLOOR_MAXABS,
-            "critical_abs_floor_maxabs": QC_DEFAULT_CRITICAL_ABS_FLOOR_MAXABS,
-        }
+        """Keep the worker call shape without retired ROI-screen settings."""
+        return {}
 
     def _on_outlier_exclusion_toggled(self, state: int) -> None:
         """Handle the on outlier exclusion toggled step for the Stats workflow."""
@@ -455,7 +448,7 @@ class StatsWindowExclusionsMixin:
                     "Flag count",
                     "Worst value",
                     "Condition",
-                    "ROI",
+                    "Electrode / ROI",
                     "Explanation",
                 ]
             )
@@ -552,7 +545,7 @@ class StatsWindowExclusionsMixin:
                         "Flag count": int(item["n_flags"]),
                         "Worst value": worst_text,
                         "Condition": str(item["worst_condition"]),
-                        "ROI": str(item["worst_roi"]),
+                        "Electrode / ROI": str(item["worst_roi"]),
                         "Explanation": summary_text,
                     }
                 )
@@ -613,7 +606,7 @@ class StatsWindowExclusionsMixin:
                     "Flag count",
                     "Worst value",
                     "Condition",
-                    "ROI",
+                    "Electrode / ROI",
                     "Explanation",
                 ],
             )

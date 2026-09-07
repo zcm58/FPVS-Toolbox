@@ -84,11 +84,10 @@ def test_frequency_domain_qc_is_review_only_and_reuses_explicit_retain(tmp_path,
     assert (project.project_root / "Quality Check" / "Frequency_Domain_QC_Review.txt").is_file()
 
 
-def test_removed_roi_is_not_reintroduced_by_previous_retain_review(tmp_path, monkeypatch):
+def test_roi_definitions_do_not_generate_findings_or_reopen_unchanged_electrode_review(tmp_path, monkeypatch):
     from Main_App.processing import harmonic_selection_qc
 
     project = _make_project(tmp_path)
-    # Five participants make P1's existing large O2 response a cohort outlier.
     for participant in ("P3", "P4", "P5"):
         for condition in ("CondA", "CondB"):
             _write_bca_workbook(
@@ -102,55 +101,65 @@ def test_removed_roi_is_not_reintroduced_by_previous_retain_review(tmp_path, mon
         lambda: {name: list(channels) for name, channels in current_rois.items()},
     )
     original = run_frequency_domain_qc_review(project)
-    old_roi_findings = {
-        row["finding_fingerprint"] for row in original["review_findings"]
-        if row.get("roi") == "Test ROI"
-    }
-    assert old_roi_findings
-    assert any(row.get("roi") == "Test ROI" for row in original["cohort_relative_flags"])
+    assert original["flags"]
+    assert original["cohort_relative_rows"] == []
+    assert original["cohort_relative_flags"] == []
+    assert all(row.get("electrode") for row in original["review_findings"])
     reviewed_state = apply_frequency_domain_qc_decision(
         project.project_root, original,
         review_decisions=_decisions(original, DECISION_RETAIN),
     )
     previous_history = reviewed_state["review_history"]
-    assert old_roi_findings <= {
-        row["finding_fingerprint"] for row in reviewed_state["review_decisions"]
-        if row["decision"] == DECISION_RETAIN
-    }
-    assert run_frequency_domain_qc_review(project)["review_reused"] is True
-
-    # Removing the ROI from the authoritative definitions must win over the
-    # saved retain decisions when the same processed values are inspected again.
     del current_rois["Test ROI"]
+    current_rois["Missing electrodes"] = ["CZ"]
     current = run_frequency_domain_qc_review(project)
-    assert current["roi_definition_fingerprint"] != original["roi_definition_fingerprint"]
-    assert current["analysis_fingerprint"] != original["analysis_fingerprint"]
-    assert current["review_reused"] is False
-    assert current["review_required"] is True  # The unrelated O2 finding remains.
-    assert {row["roi"] for row in current["cohort_relative_rows"]} == {"Central"}
-    for key in (
-        "cohort_relative_flags", "review_findings", "reconfirmation_findings",
-        "review_decisions", "active_review_decisions", "review_prefill_decisions",
-    ):
-        assert all(row.get("roi") != "Test ROI" for row in current[key])
-        assert old_roi_findings.isdisjoint(
-            row.get("finding_fingerprint") for row in current[key]
-        )
+    assert current["analysis_fingerprint"] == original["analysis_fingerprint"]
+    assert current["source_fingerprint"] == original["source_fingerprint"]
+    assert current["flags"] == original["flags"]
+    assert current["review_reused"] is True
+    assert current["review_required"] is False
+    assert current["cohort_relative_rows"] == []
+    assert current["cohort_relative_flags"] == []
+    assert not any(frequency_qc.is_roi_frequency_qc_entry(row)
+                   for row in frequency_qc._technical_status_rows(current))
     assert frequency_qc.load_frequency_domain_qc_state(project.project_root)[
         "review_history"
     ] == previous_history
 
-    updated = apply_frequency_domain_qc_decision(
-        project.project_root, current,
-        review_decisions=_decisions(current, DECISION_RETAIN),
+
+def test_roi_only_outlier_below_electrode_warning_does_not_prompt(tmp_path, monkeypatch):
+    from Main_App.processing import harmonic_selection_qc
+
+    project = _make_project(tmp_path)
+    monkeypatch.setattr(
+        harmonic_selection_qc, "load_rois_from_settings",
+        lambda: {"Occipital": ["O2"]},
     )
-    assert updated["review_history"][:-1] == previous_history
-    assert updated["review_history"][-1]["analysis_fingerprint"] == current["analysis_fingerprint"]
-    assert old_roi_findings.isdisjoint(
-        row["finding_fingerprint"] for row in updated["review_decisions"]
-    )
-    assert all(row.get("roi") != "Test ROI" for row in updated["review_decisions"])
-    assert run_frequency_domain_qc_review(project)["review_reused"] is True
+    # P1 would cross the retired ROI peak floor (3 uV) and summed floor
+    # (6 uV), with zero cohort spread among the four other participants.
+    # Every electrode remains below the unchanged 10 uV summed warning.
+    for participant in ("P1", "P2", "P3", "P4", "P5"):
+        amplitude = 3.0 if participant == "P1" else 0.1
+        for condition in ("CondA", "CondB"):
+            _write_bca_workbook(
+                project.project_root / "1 - Excel Data Files" / condition
+                / f"{participant}_{condition}_Results.xlsx",
+                {"O2": (amplitude, amplitude), "PZ": (0.1, 0.1)},
+            )
+
+    report = run_frequency_domain_qc_review(project)
+
+    assert report["screening_enabled"] is True
+    assert len(report["subjects"]) == 5
+    assert report["thresholds"]["warning_summed_bca_uv"] == 10.0
+    assert report["flags"] == []
+    assert report["cohort_relative_flags"] == []
+    assert report["cohort_relative_rows"] == []
+    assert report["review_findings"] == []
+    assert report["review_required"] is False
+    assert report["technical_integrity_failures"] == []
+    assert report["unavailable_by_method"] == []
+    assert report["qc_complete"] is True
 
 
 def test_frequency_domain_qc_stage_progress_preserves_report(tmp_path, monkeypatch, caplog):
@@ -166,14 +175,13 @@ def test_frequency_domain_qc_stage_progress_preserves_report(tmp_path, monkeypat
         "Frequency-domain QC: Checking preprocessing evidence…",
         "Frequency-domain QC: Preparing candidate harmonics…",
         "Frequency-domain QC: Checking electrode amplitudes…",
-        "Frequency-domain QC: Comparing condition and ROI amplitudes…",
         "Frequency-domain QC: Preparing review findings…",
     ]
     stages = [record for record in caplog.records
               if record.message.startswith("frequency_domain_qc_stage_complete ")]
     assert [record.stage for record in stages] == [
         "canonical_inputs", "independent_evidence", "provisional_harmonics",
-        "absolute_screening", "cohort_context", "report_integrity",
+        "absolute_screening", "report_integrity",
     ]
     assert all(record.elapsed_s >= 0 for record in stages)
     assert all(f"stage={record.stage} elapsed_s=" in record.message for record in stages)
@@ -316,8 +324,8 @@ def test_review_evidence_is_versioned_complete_and_current(tmp_path) -> None:
     assert evidence["technical_statuses"]
     assert evidence["frequency_protocol_fingerprint"]
     assert evidence["harmonic_selection_fingerprint"]
-    assert evidence["roi_definition_fingerprint"]
-    assert evidence["cohort_fingerprint"]
+    assert "roi_definition_fingerprint" not in evidence
+    assert "cohort_fingerprint" not in evidence
     assert evidence["source_fingerprint"]
     assert evidence["evidence_fingerprint"] == state["last_review"][
         "evidence_fingerprint"
@@ -672,12 +680,7 @@ def test_condition_exclusion_survives_review_resume_and_is_reported_as_excluded(
         ("p2", "conda"): ("O2", "Pz"),
         ("p2", "condb"): ("O2", "Pz"),
     }
-    excluded_rows = [row for row in resumed["cohort_relative_rows"]
-                     if row["participant_id"] == "P1" and row["condition"] == "CondA"]
-    assert excluded_rows
-    assert all(row["status"] == "excluded_by_review" for row in excluded_rows)
-    assert all(row["reason_codes"] == ["reviewed_condition_exclusion"] for row in excluded_rows)
-    assert all("sum_abs_roi_mean_uv" not in row for row in excluded_rows)
+    assert resumed["cohort_relative_rows"] == []
     assert source.read_bytes() == original_bytes
     assert resumed["technical_integrity_failed"] is False
     # A changed cohort can require the existing bounded reconfirmation, but
@@ -720,6 +723,118 @@ def test_expected_sources_omit_only_explicit_condition_and_preserve_other_visit(
     # required even when their file is missing from a supplied dataset.
     assert current[("p2", "faces")] == ("Oz",)
     assert frequency_qc._expected_scalp_channels_by_subject_condition(context) == original
+
+
+@pytest.mark.parametrize("marker", [
+    {"roi": "Occipital"},
+    {"roi": "Occipital", "electrode": "O2"},
+    {"decision_scope": "recording_condition_roi"},
+    {"finding_type": "cohort_relative_summed_bca_context"},
+    {"metric": "sum_abs_roi_mean"},
+    {"evidence": {"metric": "peak_abs_roi_mean"}},
+])
+def test_retired_roi_targets_are_detected_even_without_complete_identity(marker):
+    assert frequency_qc.is_roi_frequency_qc_entry(marker)
+    assert not frequency_qc.is_roi_frequency_qc_entry({
+        "electrode": "O2", "evidence": {
+            "finding_type": "cohort_relative_summed_bca_context",
+        },
+    })
+
+
+def test_mixed_legacy_report_accepts_only_electrode_decisions(tmp_path):
+    report = run_frequency_domain_qc_review(_make_project(tmp_path))
+    electrode_choices = _decisions(report, DECISION_RETAIN)
+    roi_finding = {
+        "finding_fingerprint": "old-roi-finding", "participant_id": "P1",
+        "condition": "CondA", "roi": "Occipital",
+    }
+    mixed = {**report, "review_findings": [*report["review_findings"], roi_finding]}
+    assert frequency_qc.validate_frequency_domain_qc_review_decisions(
+        mixed, electrode_choices,
+    ) == frequency_qc.validate_frequency_domain_qc_review_decisions(report, electrode_choices)
+    with pytest.raises(ValueError, match="ROI-level summed-BCA review"):
+        frequency_qc.validate_frequency_domain_qc_review_decisions(
+            mixed, {**electrode_choices, "old-roi-finding": DECISION_RETAIN},
+        )
+
+
+@pytest.mark.parametrize("action", [
+    DECISION_RETAIN, DECISION_EXCLUDE_CONDITION,
+    frequency_qc.DECISION_EXCLUDE_RECORDING,
+    frequency_qc.DECISION_EXCLUDE_PARTICIPANT,
+    DECISION_EXCLUDE_CONDITION_ELECTRODE,
+    DECISION_INTERPOLATE_CONDITION_ELECTRODE,
+])
+def test_legacy_roi_decisions_are_inactive_and_archived_without_reconfirmation(tmp_path, action):
+    project = _make_project(tmp_path)
+    report = run_frequency_domain_qc_review(project)
+    state = apply_frequency_domain_qc_decision(
+        project.project_root, report,
+        review_decisions=_decisions(report, DECISION_RETAIN),
+    )
+    roi_decision = dict(state["review_decisions"][0])
+    roi_decision.pop("decision_fingerprint")
+    reviewed_at = roi_decision.pop("reviewed_at", None)
+    roi_decision.update({
+        "finding_fingerprint": "legacy-roi-finding", "electrode": "",
+        "roi": "Occipital", "decision_scope": "participant_condition_roi",
+        "decision": action, "recording_id": "P1__VISIT_1",
+        "analysis_fingerprint": "legacy-roi-analysis",
+    })
+    roi_decision["decision_fingerprint"] = frequency_qc._hash_payload(roi_decision)
+    if reviewed_at is not None:
+        roi_decision["reviewed_at"] = reviewed_at
+    state["review_decisions"].append(roi_decision)
+    state["downstream_outputs_stale"] = False
+    path = project.project_root / "project.json"
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    manifest["tools"]["frequency_domain_qc"] = state
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    exclusions = active_frequency_domain_exclusions(project.project_root)
+    assert not exclusions.excluded_participants
+    assert not exclusions.excluded_recordings
+    assert not exclusions.excluded_participant_conditions
+    assert not exclusions.excluded_recording_conditions
+    current = run_frequency_domain_qc_review(project)
+    assert current["analysis_fingerprint"] == report["analysis_fingerprint"]
+    assert current["current_decision_fingerprint"] == state["last_review"]["decision_fingerprint"]
+    assert current["review_required"] is False
+    assert current["reconfirmation_findings"] == []
+    updated = sync_frequency_domain_qc_automatic_state(project.project_root, current)
+    assert roi_decision in updated["retired_review_decisions"]
+    assert roi_decision in frequency_qc._superseded_narrow_decisions(
+        {**state, "review_complete": False}, current=[],
+    )
+    assert roi_decision not in updated["review_decisions"]
+    assert updated["review_history"] == state["review_history"]
+    if action in frequency_qc._BROAD_EXCLUSION_DECISIONS:
+        assert updated["downstream_outputs_stale"] is True
+    assert resolve_frequency_qc_coverage_decisions(project.project_root).review_complete
+
+
+@pytest.mark.parametrize("legacy_evidence", [
+    {"roi_definition_fingerprint": "old-roi-definitions"},
+    {"cohort_fingerprint": "old-roi-cohort"},
+    {"cohort_rows": [{"roi": "Occipital", "status": "complete"}]},
+    {"technical_statuses": [{"roi": "Occipital", "status": "unavailable"}]},
+])
+def test_saved_roi_evidence_is_not_current_without_roi_decisions(tmp_path, legacy_evidence):
+    project = _make_project(tmp_path)
+    report = run_frequency_domain_qc_review(project)
+    state = apply_frequency_domain_qc_decision(
+        project.project_root, report,
+        review_decisions=_decisions(report, DECISION_RETAIN),
+    )
+    evidence = dict(state["review_evidence"])
+    evidence.pop("evidence_fingerprint")
+    evidence.update(legacy_evidence)
+    evidence["evidence_fingerprint"] = frequency_qc._hash_payload(evidence)
+    state["review_evidence"] = evidence
+    state["last_review"]["evidence_fingerprint"] = evidence["evidence_fingerprint"]
+    state["method_version"] = "experimental_summed_bca_review_v4"
+    assert frequency_qc._validated_review_evidence_from_state(project.project_root, state) is None
 
 
 def _make_project(tmp_path):

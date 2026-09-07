@@ -160,33 +160,6 @@ class StatsWindowPipelineMixin:
             return None
         return base_freq, alpha
 
-    def _get_qc_settings(self) -> Optional[tuple[float, float]]:
-        """Handle the get qc settings step for the Stats workflow."""
-        ok_warn, warn = self._safe_settings_get(
-            "analysis", "qc_warn_threshold", self._qc_threshold_sumabs
-        )
-        if not ok_warn:
-            ok_warn, warn = self._safe_settings_get(
-                "analysis", "qc_threshold_sumabs", self._qc_threshold_sumabs
-            )
-        ok_critical, critical = self._safe_settings_get(
-            "analysis", "qc_critical_threshold", self._qc_threshold_maxabs
-        )
-        if not ok_critical:
-            ok_critical, critical = self._safe_settings_get(
-                "analysis", "qc_threshold_maxabs", self._qc_threshold_maxabs
-            )
-        try:
-            warn_val = float(warn)
-            critical_val = float(critical)
-        except Exception as exc:
-            QMessageBox.critical(self, "Settings Error", f"Invalid QC thresholds: {exc}")
-            return None
-        if not (ok_warn and ok_critical):
-            QMessageBox.critical(self, "Settings Error", "Could not load QC thresholds.")
-            return None
-        return warn_val, critical_val
-
     def _native_control_value(
         self,
         *,
@@ -573,10 +546,6 @@ class StatsWindowPipelineMixin:
         if not got:
             return False
         self._current_base_freq, self._current_alpha = got
-        qc_cfg = self._get_qc_settings()
-        if not qc_cfg:
-            return False
-        self._qc_threshold_sumabs, self._qc_threshold_maxabs = qc_cfg
         if start_guard and not self._begin_run():
             return False
         return True

@@ -5,8 +5,10 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Literal
 
+from Main_App.processing.frequency_domain_qc import is_roi_frequency_qc_entry
 
-FindingSection = Literal["electrode", "roi", "other"]
+
+FindingSection = Literal["electrode", "other"] | None
 ElectrodeGroupKey = tuple[str, str, str]
 
 
@@ -21,16 +23,14 @@ def can_interpolate_finding(
 def finding_section(item: Mapping[str, object]) -> FindingSection:
     """Separate target identities, including prior-decision reconfirmations.
 
-    Finding types describe evidence rather than target identity. Ambiguous or
-    incomplete targets remain visible as other findings without bulk actions.
+    Retired ROI findings are omitted, including historical decisions. Other
+    incomplete targets remain visible without electrode bulk actions.
     """
 
-    electrode = _text(item.get("electrode"))
-    roi = _text(item.get("roi"))
-    if electrode and not roi:
+    if is_roi_frequency_qc_entry(item):
+        return None
+    if _text(item.get("electrode")):
         return "electrode"
-    if roi and not electrode:
-        return "roi"
     return "other"
 
 

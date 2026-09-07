@@ -361,12 +361,22 @@ Resume Post-processing with the saved ROI list; they must not take the
 harmonic-only shortcut with old QC evidence. Once that handoff is committed,
 canceling QC keeps the saved ROI edits and leaves outputs stale. Rollback of
 an earlier, uncommitted settings transaction restores the visible ROI editor
-as well as the saved settings. Historical QC evidence remains audit history;
-only findings computed with the current ROI definitions enter the new review.
+as well as the saved settings. Historical QC evidence remains audit history.
+The Experimental Summed-BCA Review screens individual electrodes only: it has
+no ROI findings tab, ROI amplitude decisions, or cohort-relative ROI controls.
+Saved ROI findings and decisions are audit-only and cannot enter the active
+review, its counts, or its exclusion actions. Electrode grouping, explicit
+Retain decisions, and enabled condition-specific interpolation remain available.
+ROI definitions still govern normal aggregation, harmonic-profile provenance,
+and the fixed-electrode coverage checks before final release.
 
-Visible smoke: remove a temporary ROI, save with rebuild now, and confirm that
-frequency QC omits it. Cancel review, reopen Settings, and confirm the ROI is
-still absent; Resume Post-processing should use the same remaining ROIs.
+Visible smoke: open a project with historical electrode and ROI findings and
+resume post-processing. Confirm that only electrode findings are counted and
+reviewable, with no ROIs tab or ROI cohort controls in Experimental settings.
+Retain one electrode finding and verify the electrode-group actions and
+enabled artifact-confirmed interpolation still work. Remove a temporary ROI,
+save with rebuild now, then cancel review and reopen Settings; the ROI should
+still be absent, and Resume Post-processing should use the remaining ROIs.
 Repeat Save with rebuild later and confirm QC is marked stale. Qt behavior is
 covered in CI; local checks exercise the routing without loading Qt.
 

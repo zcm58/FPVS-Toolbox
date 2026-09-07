@@ -27,10 +27,15 @@ def _electrode_finding(**values: object) -> dict[str, object]:
     "item, expected",
     [
         (_electrode_finding(), "electrode"),
-        ({"roi": "ROT", "finding_type": "cohort_relative_summed_bca_context"}, "roi"),
+        ({"roi": "ROT", "finding_type": "cohort_relative_summed_bca_context"}, None),
         (_electrode_finding(finding_type="prior_outcome_informed_exclusion_reconfirmation"), "electrode"),
-        ({"roi": "O2", "electrode": "", "finding_type": "prior_outcome_informed_exclusion_reconfirmation"}, "roi"),
-        ({"electrode": "O2", "roi": "O2"}, "other"),
+        (_electrode_finding(evidence={"finding_type": "cohort_relative_summed_bca_context"}), "electrode"),
+        ({"roi": "O2", "electrode": "", "finding_type": "prior_outcome_informed_exclusion_reconfirmation"}, None),
+        ({"electrode": "O2", "roi": "O2"}, None),
+        ({"finding_type": "cohort_relative_summed_bca_context"}, None),
+        ({"decision_scope": "recording_condition_roi"}, None),
+        ({"metric": "sum_abs_roi_mean"}, None),
+        ({"evidence": {"roi": "Occipital"}}, None),
         ({"electrode": " ", "roi": None}, "other"),
     ],
 )

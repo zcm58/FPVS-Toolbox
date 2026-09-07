@@ -11,6 +11,7 @@ import pandas as pd
 
 from Tools.Stats.reporting.stats_export import _auto_format_and_write_excel
 from Tools.Stats.qc.stats_qc_exclusion import (
+    QC_REASON_ABSOLUTE_ELECTRODE,
     QC_REASON_MAXABS,
     QC_REASON_SUMABS,
     QcExclusionReport,
@@ -24,6 +25,7 @@ OUTLIER_REASON_MAD = "MAD_OUTLIER"
 OUTLIER_REASON_MANUAL = "MANUAL"
 
 OUTLIER_REASON_LABELS = {
+    QC_REASON_ABSOLUTE_ELECTRODE: "Unusually large electrode summed BCA",
     OUTLIER_REASON_LIMIT: "DV exceeds hard limit",
     OUTLIER_REASON_MAD: "Unusually extreme DV",
     OUTLIER_REASON_NONFINITE: "Non-finite DV (required)",
@@ -33,6 +35,7 @@ OUTLIER_REASON_LABELS = {
 }
 
 DISPLAY_FLAG_TYPE_LABELS = {
+    QC_REASON_ABSOLUTE_ELECTRODE: "Large electrode summed BCA",
     QC_REASON_MAXABS: "Large single-harmonic peak",
     QC_REASON_SUMABS: "Large total response",
     OUTLIER_REASON_LIMIT: "Exceeded DV hard cutoff",
@@ -41,6 +44,7 @@ DISPLAY_FLAG_TYPE_LABELS = {
 }
 
 OUTLIER_REASON_SENTENCE = {
+    QC_REASON_ABSOLUTE_ELECTRODE: "shared review flagged unusually large electrode summed BCA",
     OUTLIER_REASON_LIMIT: "a DV value exceeded the hard cutoff (±{abs_limit:g})",
     OUTLIER_REASON_MAD: "DV values were unusually extreme compared to the group (robust rule)",
     OUTLIER_REASON_NONFINITE: "a DV value was non-finite (NaN/Inf)",
@@ -304,6 +308,8 @@ def format_worst_value_display(
 ) -> tuple[str, str | None]:
     """Handle the format worst value display step for the Stats workflow."""
     value_text = f"{value:.4f}" if np.isfinite(value) else "non-finite"
+    if flag_type == QC_REASON_ABSOLUTE_ELECTRODE:
+        return f"Electrode summed-BCA magnitude: {value_text} µV", None
     if flag_type in (QC_REASON_MAXABS, QC_REASON_SUMABS):
         metric_label = (
             "Max |ROI mean BCA|" if flag_type == QC_REASON_MAXABS else "Sum |ROI mean BCA|"
@@ -369,8 +375,15 @@ def build_outlier_summary_text(report: OutlierExclusionReport) -> str:
     """Handle the build outlier summary text step for the Stats workflow."""
     summary = report.summary
     abs_limit = float(summary.abs_limit)
+    qc_source = str((report.qc_metadata or {}).get("source") or "")
+    if qc_source == "shared_project_qc17_review":
+        screening_text = "Shared electrode-level summed-BCA review was reused."
+    elif qc_source == "retired_roi_screen":
+        screening_text = "ROI-level summed-BCA QC is retired; no ROI screen was performed."
+    else:
+        screening_text = "Dependent-variable integrity and saved review context are reported below."
     lines = [
-        "QC screened all conditions/ROIs in the project, independent of selections.",
+        screening_text,
         "Flagged for review does not automatically exclude participants.",
         "Only non-finite DV values (NaN/Inf) are automatically excluded.",
         "Outlier Flag Summary",
