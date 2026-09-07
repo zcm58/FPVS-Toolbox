@@ -485,6 +485,92 @@ def test_compact_only_sources_preserve_stats_ready_long_and_wide_exports(
     assert actual[WIDE_FORMAT_SHEET].iloc[0, 2:].tolist() == [0.625, 3.0]
 
 
+@pytest.mark.parametrize("source_format", ["xlsx", "compact", "native"])
+@pytest.mark.parametrize("exclude_cz", [False, True])
+def test_canonical_mixed_case_channels_preserve_roi_values_and_reviewed_flags(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    source_format: str,
+    exclude_cz: bool,
+) -> None:
+    from Main_App.processing.roi_settings import build_roi_definition_snapshot
+
+    root = tmp_path / "Project"
+    _write_project(root)
+    source = _write_bca_workbook(
+        root, pid="P1", condition="Condition A", group_folder="Anxious",
+        values=[("FCz", 2.0, 4.0), ("Cz", 4.0, 6.0),
+                ("CPz", 6.0, 8.0), ("O1", 8.0, 10.0)],
+    )
+    snapshot = build_roi_definition_snapshot(
+        {"Central": ["FCz", "Cz", "CPz"], "Occipital": ["O1"]},
+    )
+    coverage = _released_coverage(
+        load_project_dataset_index(root), rois=snapshot.as_mapping(),
+    )
+    coverage.roi_snapshot = snapshot
+    # Real QC-21 evidence retains canonical BioSemi case, unlike the export's
+    # uppercase electrode table. Exercise both retained and reviewed members.
+    cell = coverage.cells[0]
+    normalization = cell.whole_scalp_normalization
+    normalization.expected_channels = ("FCz", "Cz", "CPz", "O1")
+    normalization.observed_channels = normalization.expected_channels
+    normalization.used_channels = normalization.expected_channels
+    if exclude_cz:
+        normalization.excluded_channels = ("Cz",)
+        normalization.used_channels = ()
+        normalization.status = "unavailable"
+        normalization.reason_codes = ("reviewed_whole_scalp_member_exclusion",)
+        central = next(item for item in cell.roi_memberships if item.roi_name == "Central")
+        central.excluded_channels = ("Cz",)
+        central.used_channels = ()
+        central.status = "unavailable"
+        central.reason_codes = ("reviewed_required_roi_member_exclusion",)
+    monkeypatch.setattr(
+        export_module, "_require_analysis_ready_release",
+        lambda _root: (coverage, "test-final-release"),
+    )
+    if source_format == "compact":
+        _rewrite_sources_as_compact_only(root)
+    elif source_format == "native":
+        from Main_App.Shared.post_process_excel import write_results_workbook
+
+        native_path = source.with_suffix(".fpvs")
+        write_results_workbook(
+            str(native_path), {"BCA (uV)": pd.read_excel(source, sheet_name="BCA (uV)")},
+        )
+        cell.workbook_path = str(native_path.resolve())
+
+    result = write_analysis_ready_workbook(root)
+
+    roi_long = pd.read_excel(result.path, sheet_name="ROI Long").set_index("ROI")
+    central = roi_long.loc["Central"]
+    assert roi_long.loc["Occipital", "Raw Summed BCA"] == pytest.approx(18.0)
+    assert central["Current Toolbox Exclusion"] == ("Yes" if exclude_cz else "No")
+    if exclude_cz:
+        assert pd.isna(central["Raw Summed BCA"])
+        assert roi_long["RMS Normalized BCA"].isna().all()
+        assert roi_long["Signed Mean Normalized BCA"].isna().all()
+    else:
+        assert central["Raw Summed BCA"] == pytest.approx(10.0)
+        assert central["RMS Normalized BCA"] == pytest.approx(
+            4.0 / math.sqrt(120.0) + 6.0 / math.sqrt(216.0),
+        )
+        assert central["Signed Mean Normalized BCA"] == pytest.approx(10.0 / 12.0)
+    electrodes = pd.read_excel(result.path, sheet_name="Electrode Long").set_index("Electrode")
+    assert electrodes.loc["CZ", "Raw Summed BCA"] == pytest.approx(10.0)
+    assert electrodes.loc["CZ", "Current Toolbox Exclusion"] == ("Yes" if exclude_cz else "No")
+    if exclude_cz:
+        assert "Reviewed frequency-domain exclusion" in electrodes.loc["CZ", "QC Notes"]
+    audited = pd.read_excel(result.path, sheet_name="ROI Coverage")
+    audited_central = audited.loc[audited["ROI"].eq("Central")].iloc[0]
+    assert audited_central["Expected Electrodes"] == "FCz, Cz, CPz"
+    if exclude_cz:
+        assert audited_central["Excluded Electrodes"] == "Cz"
+    else:
+        assert audited_central["Used Electrodes"] == "FCz, Cz, CPz"
+
+
 def test_full_audit_workbook_keeps_excluded_values_and_flags(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

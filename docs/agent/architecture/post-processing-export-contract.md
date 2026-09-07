@@ -266,6 +266,13 @@ source paths or file hashes to the statistical table. ROI Coverage records the
 expected, observed, excluded, successfully interpolated, and used electrode
 sets and counts for each released cell.
 
+Stats-ready ROI validation uses the same canonical BioSemi channel-name
+normalization as the frozen QC-21 definition snapshot. Case-only spelling
+differences such as `FCZ`/`FCz` must not invalidate an unchanged ROI, while real
+membership or ordering changes still require a new release. Full-audit numeric
+and exclusion lookups normalize frozen channel labels to the electrode table's
+uppercase keys; published coverage retains the canonical snapshot labels.
+
 RMS-normalized BCA follows the topographic normalization order described by
 Dzhelyova et al. (2017) and McCarthy and Wood (1985). For every participant x
 condition x selected harmonic, each electrode BCA is divided by the scalp

@@ -720,9 +720,12 @@ def _append_record_rows(
         frozenset(),
     )
     reviewed_excluded_electrodes = frozenset(
-        coverage_cell.whole_scalp_normalization.excluded_channels
-        if coverage_cell.whole_scalp_normalization is not None
-        else ()
+        channel.strip().upper()
+        for channel in (
+            coverage_cell.whole_scalp_normalization.excluded_channels
+            if coverage_cell.whole_scalp_normalization is not None
+            else ()
+        )
     )
     auto_electrodes = (
         participant_auto_electrodes
@@ -962,7 +965,11 @@ def _append_record_rows(
             )
             raw = rms_normalized = signed_normalized = math.nan
         else:
-            roi_frame = indexed.loc[list(membership.used_channels)]
+            # QC-21 keeps canonical BioSemi spelling (for example, FCz), while
+            # the exported electrode table uses uppercase lookup keys.
+            roi_frame = indexed.loc[
+                [channel.strip().upper() for channel in membership.used_channels]
+            ]
             if isinstance(roi_frame, pd.Series):
                 roi_frame = roi_frame.to_frame().T
             raw = float(roi_frame["Raw Summed BCA"].mean(skipna=False))

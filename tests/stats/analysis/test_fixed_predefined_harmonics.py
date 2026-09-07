@@ -10,6 +10,7 @@ import pandas as pd
 import pytest
 
 from Main_App.processing import full_fft_provenance, harmonic_selection_qc
+from Main_App.processing.roi_settings import build_roi_definition_snapshot
 from Main_App.projects.project import Project
 from Main_App.projects.frequency_protocol import (
     EXPECTED_CYCLES_SOURCE_MANUAL,
@@ -1302,6 +1303,108 @@ def test_managed_stats_rejects_workbook_path_different_from_final_coverage(
             helper(cell, supplied, context=context)
 
 
+@pytest.mark.parametrize("policy", ["fixed", "group"])
+@pytest.mark.parametrize(
+    ("submitted_channels", "error"),
+    [
+        (["Fp1", "FCz", "Cz", "CPz"], None),
+        ([" fp1 ", "FCZ", "cz", " CPZ "], None),
+        (["Fp1", "FCz", "Cz", "Pz"], "ROI definitions differ"),
+        (["Fp1", "FCz", "Cz"], "ROI definitions differ"),
+        (["FCz", "Fp1", "Cz", "CPz"], "ROI definitions differ"),
+        (["Fp1", "FCz", "Cz", "Cz"], "repeats electrode"),
+    ],
+)
+def test_managed_stats_canonical_roi_snapshot_keeps_available_condition_values(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    policy: str,
+    submitted_channels: list[str],
+    error: str | None,
+) -> None:
+    from Main_App.processing import frequency_domain_qc, roi_coverage
+    _write_stats_project_manifest(tmp_path)
+    path = tmp_path / "S1_C1.xlsx"
+    pd.DataFrame(
+        {
+            "Electrode": [" fp1 ", "FCZ", "cz", "CPz"],
+            "1.2000_Hz": [1.0, 2.0, 3.0, 4.0],
+        }
+    ).to_excel(path, sheet_name="BCA (uV)", index=False)
+    frozen_rois = {"Midline": ["Fp1", "FCz", "Cz", "CPz"]}
+    coverage = _managed_coverage_fixture(
+        path=path, rois=frozen_rois, excluded_channels=(),
+    )
+    # Use the production snapshot, whose BioSemi labels retain lower-case z/p.
+    coverage.roi_snapshot = build_roi_definition_snapshot(frozen_rois)
+    monkeypatch.setattr(
+        frequency_domain_qc,
+        "filter_frequency_domain_subjects",
+        lambda _root, subjects, subject_data: (subjects, subject_data, ()),
+    )
+    monkeypatch.setattr(
+        frequency_domain_qc,
+        "active_frequency_domain_exclusions",
+        lambda _root: SimpleNamespace(auto_excluded_electrodes_by_participant={}),
+    )
+    monkeypatch.setattr(
+        roi_coverage,
+        "require_project_final_release",
+        lambda _root: (None, coverage, None),
+    )
+    monkeypatch.setattr(
+        harmonic_selection_qc,
+        "load_processing_harmonic_selection",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            detected_significant_harmonics_hz=[1.2],
+            selected_harmonics_hz=[1.2],
+            selected_columns=["1.2000_Hz"],
+            oddball_frequency_hz=1.2,
+            to_metadata=lambda: {"included_harmonics_hz": [1.2]},
+        ),
+    )
+    provenance = {}
+    kwargs = {
+        "subjects": ["S1"],
+        "conditions": ["C1", "C2"],
+        "subject_data": {"S1": {"C1": str(path)}},
+        "base_freq": 6.0,
+        "log_func": lambda _message: None,
+        "rois": {"Midline": submitted_channels},
+        "provenance_map": provenance,
+    }
+    if policy == "fixed":
+        prepare = fixed_policy._prepare_fixed_predefined_bca_data
+        kwargs.update(
+            settings=normalize_dv_policy(
+                {
+                    "name": FIXED_PREDEFINED_POLICY_NAME,
+                    "fixed_harmonic_frequencies_hz": "1.2",
+                }
+            ),
+            oddball_frequency_hz=1.2,
+            final_roi_coverage=coverage,
+        )
+    else:
+        prepare = group_policy._prepare_group_significant_bca_data
+        kwargs.update(
+            settings=normalize_dv_policy({"name": GROUP_SIGNIFICANT_POLICY_NAME}),
+            project_root=tmp_path,
+        )
+
+    if error is not None:
+        with pytest.raises((RuntimeError, ValueError), match=error):
+            prepare(**kwargs)
+        return
+
+    result = prepare(**kwargs)
+
+    assert result["S1"]["C1"]["Midline"] == pytest.approx(2.5)
+    assert np.isnan(result["S1"]["C2"]["Midline"])
+    assert provenance[("S1", "C2", "Midline")]["roi_coverage_status"] == "unavailable"
+    assert coverage.roi_snapshot.as_mapping() == frozen_rois
+
+
 def test_managed_stats_propagates_unreadable_released_workbook(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1434,13 +1537,7 @@ def _patch_processing_harmonic_inputs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(harmonic_selection_qc, "load_rois_from_settings", lambda: rois)
-    snapshot = SimpleNamespace(
-        fingerprint="test-roi-definition",
-        rois=tuple(
-            SimpleNamespace(name=name, electrodes=tuple(electrodes))
-            for name, electrodes in rois.items()
-        ),
-    )
+    snapshot = build_roi_definition_snapshot(rois)
     normalization = SimpleNamespace(excluded_channels=())
     coverage = SimpleNamespace(
         fingerprint="test-roi-coverage",
