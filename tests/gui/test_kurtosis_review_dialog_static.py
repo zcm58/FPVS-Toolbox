@@ -33,7 +33,16 @@ def test_kurtosis_review_dialog_uses_pyside6_and_shared_components() -> None:
     assert "CustomTkinter" not in source
     application_constructor = "Q" + "Application("
     assert application_constructor not in source
-    assert ".exec(" not in source
+    dialog = next(node for node in tree.body if isinstance(node, ast.ClassDef)
+                  and node.name == "KurtosisReviewDialog")
+    modal_owners = {
+        method.name for method in dialog.body if isinstance(method, ast.FunctionDef)
+        and any(isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "exec" for node in ast.walk(method))
+    }
+    assert modal_owners <= {"_inspect_signal", "_inspect_repair_support"}
+    for method_name in modal_owners:
+        assert f".clicked.connect(self.{method_name})" in source
 
 
 def test_dialog_has_no_default_manual_decision_and_optional_reason() -> None:
@@ -230,6 +239,7 @@ def _dialog_state():
         _automatic_rows=frozenset({1}), _manual_indices={}, _current_receipts={},
         _reviewer_identity=None, _clear_error=lambda: None,
         _show_selected_evidence=lambda *_args: None,
+        _refresh_action_scope=lambda *_args: None,
         _items=tuple(SimpleNamespace(
             recording_id="P01", participant_id="P01", channel=channel,
             evidence={"channel": channel}, review_scope={},
@@ -324,7 +334,10 @@ def test_workflow_only_reads_and_saves_new_preference_after_acceptance(accepted)
     host = SimpleNamespace(currentProject=project)
 
     class Dialog:
-        def __init__(self, reconciliation, *, parent, auto_interpolate_all):
+        def __init__(self, reconciliation, *, parent, auto_interpolate_all, project_root, signal_params):
+            assert parent is host
+            assert project_root == ROOT
+            assert signal_params is params
             calls.append(("dialog", auto_interpolate_all))
 
         def exec(self):

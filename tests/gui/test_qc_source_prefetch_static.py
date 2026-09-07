@@ -48,7 +48,9 @@ def test_prefetch_starts_with_step_two_and_finishes_on_every_review_exit(tmp_pat
         trace.append("finish")
 
     def accept(stage):
-        def review(*_args):
+        def review(*_args, **kwargs):
+            if stage == "other":
+                assert kwargs["signal_params"] is params
             trace.append(stage)
             return stop != stage
         return review

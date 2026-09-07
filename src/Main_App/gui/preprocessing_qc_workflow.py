@@ -30,7 +30,9 @@ from PySide6.QtWidgets import (
 
 from Main_App.gui.components import ActionRow, make_action_button
 from Main_App.gui.open_paths import open_path_in_file_manager
-from Main_App.gui.signal_review_model import SignalReviewItem
+from Main_App.gui.signal_review_model import (
+    SignalReviewItem, episode_view_context, review_time_scope,
+)
 from Main_App.gui.signal_review_panel import SignalReviewPanel
 from Main_App.gui.marker_occurrence_review import (
     MARKER_DECISION_EXCLUDE,
@@ -1793,6 +1795,7 @@ def _review_kurtosis_findings(
         try:
             dialog = KurtosisReviewDialog(
                 reconciliation, parent=host, auto_interpolate_all=auto_all,
+                project_root=getattr(project, "project_root", None), signal_params=params,
             )
         except KurtosisReviewDialogError as exc:
             QMessageBox.critical(host, "Kurtosis Review Error", str(exc))
@@ -3921,6 +3924,7 @@ def _remaining_review_rows(
     group_labels: Mapping[str, str] | None = None,
     *,
     review_items: list[SignalReviewItem] | None = None,
+    review_diagnostics_by_file: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> list[tuple[str, ...]]:
     labels = group_labels or {}
     recording_mode = _recording_aware(scan.results)
@@ -3967,6 +3971,26 @@ def _remaining_review_rows(
             if not channel_names and payload.get("channel"):
                 channel_names = [str(payload["channel"])]
             occurrence = payload.get("occurrence_display")
+            event_plan = (result.condition_qc or {}).get("event_plan")
+            time_spans, time_scope = review_time_scope(payload, event_plan)
+            # Spectral summaries can identify an occurrence without repeating its
+            # sample bounds. Only the exact matching event-plan span supplies them.
+            if (not time_spans and kind == "Spectral" and isinstance(event_plan, Mapping)
+                    and not {"start_sample", "stop_sample", "flagged_window_union_spans"}.intersection(payload)):
+                matching_spans = [
+                    span for span in event_plan.get("spans", ())
+                    if isinstance(span, Mapping)
+                    and payload.get("condition_label")
+                    and span.get("condition_label") == payload.get("condition_label")
+                    and payload.get("occurrence") is not None
+                    and span.get("repetition_index") == payload.get("occurrence")
+                ]
+                if len(matching_spans) == 1:
+                    span = matching_spans[0]
+                    time_spans, time_scope = review_time_scope({
+                        "start_sample": span.get("time_start_sample"),
+                        "stop_sample": span.get("time_stop_sample"),
+                    }, event_plan)
             review_items.append(
                 SignalReviewItem(
                     export_row=rows[-1],
@@ -3975,6 +3999,10 @@ def _remaining_review_rows(
                     condition=str(payload.get("condition_label") or ""),
                     occurrence=str(occurrence) if occurrence is not None else "",
                     channels=", ".join(channel_names),
+                    source_path=str(result.path),
+                    time_spans_s=time_spans,
+                    time_scope=time_scope,
+                    evidence=dict(payload),
                 )
             )
 
@@ -4323,6 +4351,54 @@ def _remaining_review_rows(
                 "Experimental raw-spectral review: Not evaluated. " + detail,
                 kind="Assessment status", title="Raw-spectral review not evaluated",
             )
+    # These extra cues never enter the detector's exclusion/interpolation state.
+    # Include them even when the original scan/kurtosis gate has no findings.
+    diagnostics_by_file = review_diagnostics_by_file or {}
+    pattern_names = {
+        "exact_flatline": "Exact flatline",
+        "candidate_clipping_plateau": "Candidate clipping plateau",
+        "abrupt_jump": "Abrupt transition",
+    }
+    for result in scan.results:
+        if (result.participant_id.casefold() in accepted_hard_exclusions
+                or result.identity_id.casefold() in accepted_hard_exclusions):
+            continue
+        report = diagnostics_by_file.get(str(result.path), {})
+        if report.get("status") == "unavailable":
+            reason = str(report.get("reason") or "The additional signal diagnostics could not be computed.")
+            append_row(
+                result,
+                f"Additional signal diagnostics unavailable: {reason} "
+                "No clean-recording verdict or repair/exclusion decision follows from this unavailable assessment.",
+                kind="Assessment status", title="Signal diagnostics unavailable", finding=report,
+            )
+        omitted = report.get("events_omitted_by_display_limit", 0)
+        if isinstance(omitted, int) and not isinstance(omitted, bool) and omitted > 0:
+            append_row(
+                result,
+                f"Display limit: {omitted} additional provisional signal cue(s) are not listed. "
+                "The displayed cues are incomplete; inspect the source signal for context. "
+                "This does not establish a clean recording or authorize interpolation or exclusion.",
+                kind="Assessment status", title="Additional signal cues omitted", finding={
+                    "events_omitted_by_display_limit": omitted, "authority": "review_only",
+                    "source_identity": report.get("source_identity", {}),
+                },
+            )
+        for event in report.get("localized_events", ()):
+            start, stop = event.get("start_s"), event.get("stop_s")
+            name = pattern_names.get(str(event.get("kind")), "Signal pattern")
+            finding = {
+                **event,
+                "occurrence_display": int(event.get("occurrence", 0)) + 1,
+                "flagged_window_union_spans": [[event.get("start_sample"), event.get("stop_sample")]],
+            }
+            append_row(
+                result,
+                f"{name}: {event.get('channel', 'Unknown channel')}, {start}–{stop} s from recording start. "
+                f"{event.get('interpretation', '')} Provisional MNE-based review cue; "
+                "this does not authorize interpolation or exclusion.",
+                kind="Signal patterns", title=name, finding=finding,
+            )
     return rows
 
 
@@ -4331,10 +4407,17 @@ def _show_suspicious_remainder(
     scan: PreflightQcScan,
     accepted_hard_exclusions: set[str],
     group_labels: Mapping[str, str],
+    *,
+    signal_params: Mapping[str, Any] | None = None,
+    kurtosis_scan: KurtosisReviewScan | None = None,
 ) -> bool:
     review_items: list[SignalReviewItem] = []
     rows = _remaining_review_rows(
-        scan, accepted_hard_exclusions, group_labels, review_items=review_items
+        scan, accepted_hard_exclusions, group_labels, review_items=review_items,
+        review_diagnostics_by_file={
+            str(result.path): result.review_diagnostics
+            for result in getattr(kurtosis_scan, "results", ())
+        },
     )
     if not rows:
         return True
@@ -4352,19 +4435,11 @@ def _show_suspicious_remainder(
         logger.exception("Failed to save data quality review flags workbook.")
         report_message = f"Could not save review flags workbook: {exc}"
 
-    _show_data_quality_notice(
-        host,
-        "Signal findings remain for review.",
-        "FPVS Toolbox found recording-, condition-, or occurrence-level signal "
-        "findings. They will not stop processing automatically, but should be "
-        "reviewed before relying on the affected results.",
-        details=report_message,
-    )
     _begin_preflight_page(
         host,
         step=_REVIEW_OTHER_FLAGS_STEP,
         title="Review Signal Flags",
-        message="Select a finding to read its evidence, then continue when ready.",
+        message="Inspect related signal findings together. These review flags do not automatically change data.",
         busy=False,
         review_visible=True,
         review_title="Review Flags",
@@ -4377,6 +4452,55 @@ def _show_suspicious_remainder(
     panel = SignalReviewPanel(
         review_items, container, amplitude_help_url=BIOSEMI_SHARED_NOISE_HELP_URL
     )
+
+    def inspect_episode(episode: object) -> None:
+        from Main_App.gui.qc_signal_viewer import QcSignalViewer
+        from Main_App.processing.qc_signal_view import request_from_source
+
+        project_root = getattr(getattr(host, "currentProject", None), "project_root", None)
+        source_path = getattr(episode, "source_path", "")
+        if not project_root or not source_path:
+            return
+        indices = getattr(episode, "item_indices", ())
+        channels = [review_items[index].channels for index in indices if review_items[index].channels]
+        channel = channels[0].split(",")[0].strip() if channels else ""
+        source_result = next((result for result in scan.results if str(result.path) == source_path), None)
+        event_plan = ((source_result.condition_qc or {}).get("event_plan", {})
+                      if source_result is not None else {})
+        spans, labels, start_seconds, occurrence_index = episode_view_context(episode, event_plan)
+        request = request_from_source(
+            source_path, project_root, signal_params or {}, channel=channel,
+            spans=spans, span_labels=labels,
+        )
+        scanned = next((result for result in getattr(kurtosis_scan, "results", ())
+                        if str(result.path) == source_path), None)
+        unavailable = set()
+        if scanned is not None:
+            from Main_App.processing.kurtosis_qc import (
+                CHANNEL_DECISION_DIRECT, KURTOSIS_DECISION_APPROVE,
+            )
+
+            # Current user receipts supersede the scan's pending repair scenario.
+            receipts = next((values for recording, values in (signal_params or {}).get(
+                KURTOSIS_REVIEW_DECISIONS_BY_RECORDING_KEY, {}).items()
+                if str(recording).casefold() == scanned.recording_id.casefold()), {})
+            for decision in (scanned.decision_plan or {}).get("channel_decisions", ()):
+                name = str(decision.get("channel") or "")
+                receipt = receipts.get(name)
+                if receipt is not None and decision.get("state") != CHANNEL_DECISION_DIRECT:
+                    blocked = receipt.get("decision") == KURTOSIS_DECISION_APPROVE
+                else:
+                    blocked = bool(decision.get("interpolation_authorized"))
+                if name and blocked:
+                    unavailable.add(name)
+            request = replace(request, diagnostics=scanned.review_diagnostics,
+                              source_identity=scanned.source_identity,
+                              unusable_channels=tuple(sorted(unavailable)))
+        request = replace(request, start_seconds=start_seconds,
+                          occurrence_index=occurrence_index or 0)
+        QcSignalViewer(request, panel).exec()
+
+    panel.inspect_requested.connect(inspect_episode)
     report_row = ActionRow(panel, alignment=Qt.AlignLeft)
     report_row.setObjectName("signal_review_report_row")
     report_status = QLabel(
@@ -4644,6 +4768,8 @@ def run_preprocessing_qc_workflow(
             scan,
             accepted_hard_exclusions,
             group_labels,
+            signal_params=params,
+            kurtosis_scan=kurtosis_scan,
         ):
             return False
         return True

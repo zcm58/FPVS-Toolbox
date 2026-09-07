@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 import logging
 import math
 import os
@@ -130,6 +130,8 @@ class KurtosisReviewItem:
     signal_preview: tuple[float | None, ...]
     evidence: Mapping[str, object]
     review_status: str = KURTOSIS_REVIEW_PENDING_NEW
+    signal_view: Mapping[str, object] = field(default_factory=dict)
+    review_diagnostics: Mapping[str, object] = field(default_factory=dict)
 
     @property
     def review_scope(self) -> dict[str, object]:
@@ -177,9 +179,13 @@ class KurtosisReviewItem:
     def display_only_channel_health_summary(self) -> str:
         """Format other raw-channel findings without granting them authority."""
 
+        diagnostic_rows = [event for event in self.review_diagnostics.get("localized_events", ())
+                           if event.get("channel") == self.channel]
+        extra = (f"{len(diagnostic_rows)} raw signal-pattern cue(s); open Inspect signal for exact timing. "
+                 "Provisional review only, not an approved corroborator.") if diagnostic_rows else ""
         if not self.display_only_channel_health:
-            return "None reported"
-        return "; ".join(self.display_only_channel_health) + " — review-only; not an approved corroborator"
+            return extra or "None reported"
+        return "; ".join((*self.display_only_channel_health, extra) if extra else self.display_only_channel_health) + " — review-only; not an approved corroborator"
 
 
 @dataclass(frozen=True, slots=True)
@@ -199,6 +205,8 @@ class KurtosisReviewFileResult:
     decision_plan: Mapping[str, object] | None = None
     error: str | None = None
     skip_reason: str | None = None
+    review_diagnostics: Mapping[str, object] = field(default_factory=dict)
+    source_identity: Mapping[str, object] = field(default_factory=dict)
 
     @property
     def review_required_channels(self) -> tuple[str, ...]:
@@ -778,6 +786,8 @@ def _review_items_from_prepared(
                 signal_source_sample_count=signal_count,
                 signal_preview=signal_values,
                 evidence=dict(evidence),
+                signal_view=dict(preview.get("signal_view") or {}),
+                review_diagnostics=dict(prepared.get("review_diagnostics") or {}),
             )
         )
     return tuple(items)
@@ -1071,15 +1081,24 @@ def scan_kurtosis_review(
                     progress(f"Skipped excluded conditions in {path.name}", index, total)
                 continue
 
+            from Main_App.processing.qc_signal_view import source_content_identity
+
+            review_source_identity = None
+            prefetched_identity = getattr(source_prefetch, "source_content_identity_for", None)
+            if source_prefetch is not None and not callable(prefetched_identity):
+                review_source_identity = source_content_identity(path, should_cancel=should_cancel)
             load_started = perf_counter()
             if source_prefetch is not None:
                 if progress:
                     progress(f"Preparing {path.name} for kurtosis review", index - 1, total)
                 raw = source_prefetch.take(path, settings=settings, should_cancel=should_cancel)
                 prefetched = raw is not None
+                if prefetched and callable(prefetched_identity):
+                    review_source_identity = prefetched_identity(raw)
                 if should_cancel and should_cancel():
                     return KurtosisReviewScan(tuple(results), cancelled=True)
             if raw is None:
+                review_source_identity = source_content_identity(path, should_cancel=should_cancel)
                 if progress:
                     progress(f"Loading {path.name} with BioSemi64 geometry", index - 1, total)
                 raw = load_utils.load_eeg_file(
@@ -1095,6 +1114,8 @@ def scan_kurtosis_review(
                 progress(f"Using preloaded recording {path.name}", index - 1, total)
             if raw is None:
                 raise KurtosisReviewScanError("The EEG loader returned no Raw data.")
+            if review_source_identity is None:
+                raise KurtosisReviewScanError("Source content identity is unavailable for diagnostic review.")
             validate_raw_biosemi64_geometry(
                 raw,
                 expected_retained_channels=BIOSEMI64_CHANNELS[:channel_limit],
@@ -1204,6 +1225,35 @@ def scan_kurtosis_review(
                 direct_bad_channels = tuple(raw_qc_result.channels_to_interpolate)
             if progress:
                 progress(f"Preprocessing {path.name} for kurtosis review", index - 1, total)
+            review_diagnostics = {}
+            diagnostics_started = perf_counter()
+            try:
+                from Main_App.processing.qc_review_diagnostics import build_raw_qc_review_diagnostics
+
+                review_diagnostics = build_raw_qc_review_diagnostics(
+                    raw,
+                    occurrences=[{
+                        "start_sample": span["source_coordinates"]["start_relative_sample"],
+                        "stop_sample": span["source_coordinates"]["stop_relative_sample"],
+                        "condition_label": span["condition_label"],
+                        "occurrence": span["repetition_index"],
+                        "occurrence_key": span["occurrence_key"],
+                    } for span in restricted_plan["spans"]],
+                    ref_channels=ref_pair, unusable_channels=direct_bad_channels,
+                    should_cancel=should_cancel,
+                )
+            except InterruptedError:
+                return KurtosisReviewScan(tuple(results), cancelled=True)
+            except Exception:  # Diagnostic-only: preparation/scientific evidence still proceeds.
+                if should_cancel and should_cancel():
+                    return KurtosisReviewScan(tuple(results), cancelled=True)
+                logger.debug("qc_review_diagnostics_unavailable file=%s", path, exc_info=True)
+                review_diagnostics = {
+                    "authority": "review_only", "status": "unavailable",
+                    "reason": "Additional raw signal diagnostics could not be computed for this recording. Inspect the signal directly.",
+                    "evaluation_scope": "all_analyzed_occurrences", "localized_events": [],
+                }
+            _log_scan_timing(path, "raw_review_diagnostics", diagnostics_started)
             prepare_started = perf_counter()
             prepared = prepare_kurtosis_review_evidence(
                 raw,
@@ -1219,6 +1269,16 @@ def scan_kurtosis_review(
                 copy_raw=False,
             )
             _log_scan_timing(path, "preprocessing_and_evidence", prepare_started)
+            preview = dict(prepared.get("signal_preview") or {})
+            post_load_identity = (preview.get("signal_view") or {}).get("checkpoint_source_identity")
+            if not post_load_identity:
+                post_load_identity = source_content_identity(path, should_cancel=should_cancel)
+            if post_load_identity != review_source_identity:
+                raise KurtosisReviewScanError("Recording changed while QC evidence was prepared. Run QC again.")
+            review_diagnostics = {**review_diagnostics, "source_identity": review_source_identity} if review_diagnostics else {}
+            prepared = {**prepared, "review_diagnostics": review_diagnostics}
+            preview["signal_view"] = {**dict(preview.get("signal_view") or {}), "source_identity": review_source_identity}
+            prepared["signal_preview"] = preview
             raw_channel_qc: Mapping[object, object] | None = None
             if raw_channel_qc_by_recording is not None:
                 raw_qc_found, raw_qc_payload = _casefold_mapping_entry(
@@ -1266,6 +1326,8 @@ def scan_kurtosis_review(
                     review_items=review_items,
                     evidence=dict(evidence),
                     decision_plan=dict(decision_plan),
+                    review_diagnostics=review_diagnostics,
+                    source_identity=review_source_identity,
                 )
             )
         except Exception as exc:

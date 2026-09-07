@@ -381,3 +381,50 @@ def _repeated_ledger() -> dict[str, object]:
             "interpolation_burden": _burden_payload(4),
         }
     return {"schema_version": 1, "entries": entries}
+
+
+@pytest.mark.parametrize("repeated", [False, True])
+def test_confirmed_repair_support_preserves_each_recordings_retained_scalp_set(tmp_path, repeated):
+    project = (_repeated_project if repeated else _ordinary_project)(tmp_path / "Project")
+    ledger = _repeated_ledger() if repeated else _ordinary_ledger()
+    expected = {}
+    for index, (recording_id, entry) in enumerate(ledger["entries"].items()):
+        # Donors must come from this recording's actual acquisition reduction.
+        retained = ("Fp1", "AF7", "AF3", "F1", "F3", "Cz", "Pz", "Oz")
+        if index:
+            retained = ("Fp1", "AF7", "AF3", "F1", "F3", "T7", "T8", "O1", "O2")
+        successful = ("Fp1", "AF7")
+        outcome = build_preprocessing_outcome(
+            processing_status=PROCESSING_STATUS_COMPLETED,
+            interpolation_status=INTERPOLATION_STATUS_SUCCEEDED,
+            interpolation_requested_channels=successful,
+            interpolation_successful_channels=successful,
+        )
+        burden = build_interpolation_burden(
+            outcome, biosemi64_geometry_identity(retained_channels=retained),
+        )
+        entry["interpolation_burden"] = burden.to_payload()
+        expected[recording_id] = burden
+
+    batch = collect_interpolation_burden_review(project, ledger=ledger)
+
+    assert len(batch.items) == len(expected)
+    for item in batch.items:
+        burden = expected[item.processing_id]
+        assert item.eligible_scalp_channels == burden.eligible_scalp_channels
+        assert item.finding.denominator == len(item.eligible_scalp_channels)
+        assert item.finding.successfully_interpolated_channels == ("Fp1", "AF7")
+        assert item.finding.burden_fingerprint == burden.fingerprint
+        assert set(item.finding.successfully_interpolated_channels) <= set(item.eligible_scalp_channels)
+        ledger["entries"][item.processing_id]["interpolation_burden"]["eligible_scalp_channels"].append("EXG1")
+        assert item.eligible_scalp_channels == burden.eligible_scalp_channels
+
+
+def test_retained_scalp_provenance_tampering_cannot_be_presented_as_confirmed_support(tmp_path):
+    project = _ordinary_project(tmp_path / "Project")
+    ledger = _ordinary_ledger()
+    burden = ledger["entries"]["P01"]["interpolation_burden"]
+    # Keep count and percentage identical: only channel provenance changes.
+    burden["eligible_scalp_channels"][-1] = "EXG1"
+    with pytest.raises(InterpolationBurdenReviewError, match="fingerprint is stale"):
+        collect_interpolation_burden_review(project, ledger=ledger)

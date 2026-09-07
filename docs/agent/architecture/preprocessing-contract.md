@@ -921,6 +921,51 @@ results.
 
 ## Focused Verification
 
+### Diagnostic inspection and review presentation
+
+`processing/qc_signal_view.py` owns bounded, read-only signal requests and
+peak-preserving extrema previews. `workers/qc_signal_view_worker.py` performs
+source/checkpoint reads; `gui/qc_signal_viewer.py` owns presentation and
+cancellation. The viewer can inspect acquisition samples, the configured
+initial-reference preview, reference-channel comparisons, and the existing
+float64 pre-interpolation checkpoint. Exact source and target sample grids are
+carried separately; occurrence gaps are never displayed as continuous EEG.
+Prepared views validate the active project-root checkpoint, source identity,
+array dimensions and evidence identity. Each read verifies content hashes before
+reusing a bounded overview, including same-size edits with restored timestamps.
+Panning reuses the overview after verification and reads only bounded detail
+samples. Closing cancels and waits through signals, never a
+blocking GUI-thread wait.
+
+`processing/qc_review_episodes.py` groups coincident diagnostic-window coverage
+within one recording, condition and occurrence. Every underlying finding is
+retained. Whole-occurrence or unlocalized evidence cannot bridge independent
+time windows. This grouping is presentation only, with no new cause,
+independence, duration or decision-authority claim.
+
+`processing/qc_review_diagnostics.py` adapts MNE's public
+`preprocessing.annotate_amplitude` to bounded channel/occurrence slices and
+describes exact flatlines, repeated extreme plateau candidates and abrupt
+consecutive-sample transitions. Results retain method/MNE version, settings,
+sample fingerprints, exact assessed intervals, output limits and unavailable
+states. The scanner assesses already-loaded acquisition data before the
+existing preprocessing function mutates it. Neither returned annotations nor
+MNE bad-channel suggestions are applied. New shadow evidence never enters the
+kurtosis corroborator registry and cannot authorize interpolation/exclusion.
+See [calibration requirements](../quality/kurtosis-screening-calibration.md).
+
+Kurtosis review supports selected undecided manual decisions, next-undecided
+navigation and undo. Bulk actions preserve existing choices, reasons and
+automatic policies and exclude hidden/automatic rows. The proposed repair map
+includes current choices and upstream repairs, excludes undecided candidates
+as donors, and states whole-recording consequences. The confirmed burden
+review receives the actual normalized retained scalp set and successful repair
+channels; it does not reconstruct that denominator from the nominal cap size.
+`gui/qc_repair_support.py` presents this donor geometry without a new risk
+threshold. Optional spatial holdout uses MNE interpolation on bounded copied
+samples of usable electrodes; its descriptive error is not damaged-electrode
+ground truth or a release criterion.
+
 Use the processing scope for preprocessing ownership, routing, or behavior
 changes. The driver selects `.venv1` or `.venv` and excludes Qt execution
 locally:

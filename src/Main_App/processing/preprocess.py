@@ -271,33 +271,64 @@ def _kurtosis_signal_preview(
     data: np.ndarray,
     channel_names: List[str],
     review_channels: tuple[str, ...],
+    *,
+    raw=None,
+    params=None,
+    checkpoint=None,
+    evidence_fingerprint="",
 ) -> dict[str, object]:
     """Return a bounded signal preview for the GUI without altering evidence."""
 
-    if not review_channels or data.shape[1] < 1:
+    if data.shape[1] < 1:
         return {"unit": "uV", "sample_count": 0, "channels": {}}
-    preview_count = min(256, int(data.shape[1]))
-    sample_indices = np.linspace(
-        0,
-        int(data.shape[1]) - 1,
-        num=preview_count,
-        dtype=int,
+    from Main_App.processing.qc_signal_view import (
+        build_kurtosis_view_metadata, peak_preserving_values,
     )
     channel_index = {name: index for index, name in enumerate(channel_names)}
+    boundaries = {0, int(data.shape[1])}
+    plan = (params or {}).get("_fpvs_realized_analysis_span_plan") or {}
+    pooled_offset = 0
+    for start, stop in plan.get("unique_relative_spans", ()):
+        boundaries.add(pooled_offset)
+        for occurrence in plan.get("spans", ()):
+            coordinates = occurrence.get("target_coordinates") or {}
+            for key in ("start_relative_sample", "stop_relative_sample"):
+                point = coordinates.get(key)
+                if point is not None and start < point < stop:
+                    boundaries.add(pooled_offset + int(point) - int(start))
+        pooled_offset += int(stop) - int(start)
+        boundaries.add(pooled_offset)
+    boundaries = sorted(point for point in boundaries if 0 <= point <= data.shape[1])
+    segments = tuple(zip(boundaries[:-1], boundaries[1:], strict=True))
     rows: dict[str, list[float | None]] = {}
     for channel in review_channels:
         row_index = channel_index.get(channel)
         if row_index is None:
             continue
-        values = np.asarray(data[row_index, sample_indices], dtype=np.float64) * 1e6
+        values = []
+        # Complex projects use the inspectable viewer instead of silently
+        # dropping occurrences to force the miniature into a fixed width.
+        if len(segments) <= 128:
+            for start, stop in segments:
+                if values:
+                    values.append(None)
+                values.extend(peak_preserving_values(data[row_index, start:stop], bins=max(1, 128 // len(segments))))
         rows[channel] = [
-            float(value) if np.isfinite(value) else None for value in values
+            float(value * 1e6) if value is not None else None for value in values
         ]
+    view = {}
+    if raw is not None and params is not None:
+        try:
+            view = build_kurtosis_view_metadata(raw, params, checkpoint, evidence_fingerprint)
+        except (OSError, ValueError, TypeError, KeyError):
+            logger.debug("qc_signal_view_metadata_unavailable", exc_info=True)
     return {
         "unit": "uV",
-        "sample_count": preview_count,
+        "sample_count": max((len(values) for values in rows.values()), default=0),
         "source_sample_count": int(data.shape[1]),
         "channels": rows,
+        "signal_view": view,
+        "preview_method": "temporal_bin_extrema_v1",
     }
 
 
@@ -751,6 +782,10 @@ def _finish_preprocessing_at_kurtosis(
                 data,
                 ch_names_pick,
                 decision_plan.pending_review_channels,
+                raw=raw,
+                params=params,
+                checkpoint=checkpoint,
+                evidence_fingerprint=evidence.fingerprint,
             )
             log_func(
                 f"Kurtosis evidence for {filename_for_log}: "

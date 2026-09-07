@@ -3,6 +3,7 @@
 from pathlib import Path
 from copy import deepcopy
 import gc
+import hashlib
 import os
 from threading import Event, Thread
 from types import SimpleNamespace
@@ -81,6 +82,37 @@ def test_handoff_is_exact_single_use_and_same_stems_have_unique_paths(recordings
     session.close()
     assert not paths[0].parent.exists()
     assert all(source.path.exists() for source in infos)
+
+
+def test_source_content_identity_is_only_available_after_validated_exclusive_take(recordings, monkeypatch):
+    root, infos, created = recordings
+    session = prefetch.QcSourcePrefetch(root, infos[:1], {})
+    session.run()
+    expected_raw = created[0][0]
+    raw_attributes = set(vars(expected_raw))
+    assert session.source_content_identity_for(expected_raw) is None
+    source_hash = prefetch._source_sha256
+
+    def verify(path, should_cancel):
+        assert session.source_content_identity_for(expected_raw) is None
+        return source_hash(path, should_cancel)
+
+    monkeypatch.setattr(prefetch, "_source_sha256", verify)
+    raw = session.take(infos[0].path, settings={})
+    assert raw is expected_raw
+    assert set(vars(raw)) == raw_attributes
+    expected = {"path": str(infos[0].path.resolve()), "size_bytes": 128,
+                "sha256": hashlib.sha256(b"x" * 128).hexdigest()}
+    with monkeypatch.context() as patched:
+        patched.setattr(Path, "stat", lambda *_args: pytest.fail("identity accessor performed I/O"))
+        actual = session.source_content_identity_for(raw)
+        assert actual == expected
+        actual["sha256"] = "changed by caller"
+        assert session.source_content_identity_for(raw) == expected
+        assert session.source_content_identity_for(object()) is None
+    session.release(raw)
+    assert session.source_content_identity_for(raw) is None
+    session.close()
 
 
 @pytest.mark.parametrize("changed", [

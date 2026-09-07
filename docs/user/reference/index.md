@@ -7,6 +7,9 @@ to the publications cited by the application and tool guides.
 For the lossless NumPy companions created alongside condition workbooks, see
 [Spectral Data Files](spectral-data-files.md).
 
+For signal inspection, related findings, diagnostic cues and repair support,
+see [Inspecting preprocessing QC evidence](preprocessing-qc-review.md).
+
 ## Processing Contract
 
 For raw EEG preprocessing, the active order is:

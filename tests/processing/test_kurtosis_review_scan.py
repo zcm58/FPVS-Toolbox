@@ -401,6 +401,53 @@ def test_scan_releases_preloaded_source_on_every_interrupted_path(tmp_path, monk
     assert loaded == []
 
 
+@pytest.mark.parametrize("source_changed", [True, False])
+def test_scan_reuses_owned_source_and_checkpoint_digests_and_rejects_content_mismatch(
+    tmp_path, monkeypatch, source_changed,
+):
+    from Main_App.processing import qc_signal_view
+
+    path = tmp_path / "P01.bdf"
+    path.write_bytes(b"original source")
+    identity = qc_signal_view.source_content_identity(path)
+    prepared = _prepared()
+    prepared["signal_preview"]["signal_view"] = {
+        "checkpoint_source_identity": {**identity, "sha256": "changed"} if source_changed else identity,
+    }
+    loaded = []
+    _configure_active_scan(monkeypatch, loaded_raws=loaded, prepared=prepared)
+    raw = _FakeRaw()
+    observed = []
+
+    def owned_identity(owned):
+        observed.append(owned)
+        assert not owned.closed
+        return dict(identity)
+
+    def duplicate_hash(*_args, **_kwargs):
+        raise AssertionError("Established source digests should be reused without extra file reads")
+
+    monkeypatch.setattr(qc_signal_view, "source_content_identity", duplicate_hash)
+    prefetch = SimpleNamespace(
+        begin_consumption=lambda: False, take=lambda *_args, **_kwargs: raw,
+        source_content_identity_for=owned_identity, release=lambda owned: owned.close(),
+    )
+    scan = scan_kurtosis_review(
+        [_info(path, "P01")], _settings(), event_map={"Faces": 1, "Objects": 2},
+        reviewed_event_plans_by_file={str(path): {}}, source_prefetch=prefetch,
+    )
+    assert observed == [raw]
+    assert raw.closed
+    assert loaded == []
+    if source_changed:
+        assert scan.results[0].status == KURTOSIS_REVIEW_FILE_STATUS_ERROR
+        assert "Recording changed" in scan.results[0].error
+    else:
+        assert not scan.errors
+        assert scan.results[0].source_identity == identity
+        assert scan.review_items[0].signal_view["source_identity"] == identity
+
+
 @pytest.mark.parametrize("copy_raw", [True, False])
 @pytest.mark.parametrize("fails", [True, False])
 def test_review_preparation_preserves_default_copy_and_owned_input_lifetime(
@@ -710,6 +757,69 @@ def test_scan_cancellation_is_cooperative_and_closes_loaded_raw(
     assert scan.cancelled is True
     assert scan.results == ()
     assert loaded[0].closed is True
+
+
+@pytest.mark.parametrize("cancelled", [True, False])
+def test_raw_review_diagnostic_cancellation_stops_before_prepare_but_optional_failure_does_not(
+    tmp_path, monkeypatch, cancelled,
+):
+    from Main_App.processing import qc_review_diagnostics
+
+    path = tmp_path / "P01.bdf"
+    path.touch()
+    loaded = []
+    captured = _configure_active_scan(monkeypatch, loaded_raws=loaded)
+    plan = _source_plan("Objects")
+    plan["spans"][0].update(
+        repetition_index=0,
+        source_coordinates={"start_relative_sample": 100, "stop_relative_sample": 900},
+    )
+    monkeypatch.setattr(scan_module, "validate_source_analysis_span_plan", lambda **_kwargs: plan)
+
+    def diagnose(*_args, **_kwargs):
+        if cancelled:
+            raise qc_review_diagnostics.QCReviewDiagnosticsCancelled("Cancelled during raw diagnostics")
+        raise OSError("Optional diagnostics unavailable")
+
+    monkeypatch.setattr(qc_review_diagnostics, "build_raw_qc_review_diagnostics", diagnose)
+    scan = scan_kurtosis_review(
+        [_info(path, "P01")], _settings(), event_map={"Faces": 1, "Objects": 2},
+        reviewed_event_plans_by_file={str(path): {"reviewed": True}},
+    )
+    assert scan.cancelled is cancelled
+    assert ("prepare" not in captured) is cancelled
+    assert loaded and all(raw.closed for raw in loaded)
+    if not cancelled:
+        assert scan.results[0].source_identity["path"] == str(path.resolve())
+        assert scan.results[0].review_diagnostics["status"] == "unavailable"
+        assert scan.results[0].review_diagnostics["authority"] == "review_only"
+        assert scan.results[0].review_diagnostics["source_identity"] == scan.results[0].source_identity
+
+
+def test_clear_kurtosis_result_retains_review_only_diagnostics_without_scientific_flags(tmp_path, monkeypatch):
+    from Main_App.processing import qc_review_diagnostics
+
+    path = tmp_path / "P01.bdf"
+    path.touch()
+    _configure_active_scan(monkeypatch, loaded_raws=[], prepared=_prepared(ready=True))
+    plan = _source_plan("Objects")
+    plan["spans"][0].update(
+        repetition_index=0,
+        source_coordinates={"start_relative_sample": 100, "stop_relative_sample": 900},
+    )
+    monkeypatch.setattr(scan_module, "validate_source_analysis_span_plan", lambda **_kwargs: plan)
+    report = {"authority": "review_only", "localized_events": [{"channel": "Fp1", "kind": "abrupt_jump"}]}
+    monkeypatch.setattr(qc_review_diagnostics, "build_raw_qc_review_diagnostics", lambda *_args, **_kwargs: report)
+    scan = scan_kurtosis_review(
+        [_info(path, "P01")], _settings(), event_map={"Faces": 1, "Objects": 2},
+        reviewed_event_plans_by_file={str(path): {"reviewed": True}},
+    )
+    result = scan.results[0]
+    assert result.status == scan_module.KURTOSIS_REVIEW_FILE_STATUS_CLEAR
+    assert result.review_items == ()
+    assert result.review_diagnostics["localized_events"] is report["localized_events"]
+    assert result.review_diagnostics["source_identity"]["path"] == str(path.resolve())
+    assert result.decision_plan["ready_for_interpolation"] is True
 
 
 def test_unavailable_unreviewable_evidence_is_a_file_error(

@@ -66,3 +66,37 @@ policies; evaluate each policy separately from individually reviewed decisions. 
 `tests/processing/test_preprocess_kurtosis_gate.py`, and
 `tests/processing/test_kurtosis_review_scan.py` validate software behavior;
 they do not establish detector accuracy.
+
+## MNE review adapters and shadow evidence
+
+The preprocessing review viewer adds `mne_amplitude_review_shadow_v1` in
+`Main_App.processing.qc_review_diagnostics`. It reuses MNE's public
+`annotate_amplitude` implementation for consecutive-sample flat/peak support.
+The toolbox adapter supplies exact occurrence boundaries, channel identity,
+bounded chunks, provisional duration/robust-scale settings, and a descriptive
+candidate-clipping label for extreme repeated plateaus. It records the MNE
+version and input-sample fingerprints. MNE annotations and returned bad names
+are not applied to the production Raw object.
+
+Optional held-out spatial checks reuse `Raw.interpolate_bads` on copied,
+bounded samples with known unusable donors excluded. They report observed vs
+predicted agreement at withheld usable sensors, not known truth at damaged
+sensors. Nearest-donor diagrams describe location support, not spline weights.
+
+This is method reuse with separately unvalidated threshold/authority choices.
+The existing registry remains empty. Same-pattern recurrence somewhere in
+every analyzed occurrence does not establish continuous electrode failure;
+flatness, amplitude, plateau, kurtosis and spatial agreement are not treated
+as independent votes. Missing, truncated, nonfinite or insufficient evidence
+must remain explicit. Lack of a displayed pattern is not a clean classification.
+
+Before automatic promotion, compare the complete frozen adapter against
+independent expert labels with all visits from each participant kept in one
+partition and a held-out project/protocol evaluation. Include unflagged
+recordings in adjudication, record reviewer disagreement, and assess errors at
+both event and whole-recording-channel repair scope. Report confidence
+intervals, false repairs/exclusions, missed artifacts, downstream BCA/SNR
+distortion and review time. Threshold selection and evaluation must use
+separate data; any clinical/population/protocol performance claim requires its
+own representative evidence. Unit/synthetic MNE parity tests are not that
+calibration receipt.

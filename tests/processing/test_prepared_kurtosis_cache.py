@@ -3,6 +3,7 @@
 from copy import deepcopy
 from datetime import datetime, timezone
 import json
+import hashlib
 import struct
 import zipfile
 
@@ -41,6 +42,26 @@ def _run(raw, params):
 
 def _identity(raw, params):
     return cache.checkpoint_identity(raw, params, preprocess._build_preproc_fingerprint(params))
+
+
+def test_checkpoint_exposes_existing_source_digest_without_extra_hash_or_raw_state(recording, monkeypatch):
+    raw, params, source = recording
+    before = set(vars(raw))
+    file_digest = hashlib.file_digest
+    calls = []
+
+    def digest(stream, algorithm):
+        calls.append(stream.name)
+        return file_digest(stream, algorithm)
+
+    monkeypatch.setattr(hashlib, "file_digest", digest)
+    identity = _identity(raw, params)
+    assert identity.source_sha256 == hashlib.sha256(source.read_bytes()).hexdigest()
+    assert calls == [str(source)]
+    assert set(vars(raw)) == before
+    compatible = cache.CheckpointIdentity(identity.project_root, identity.folder, identity.source,
+                                           identity.source_stat, identity.key)
+    assert compatible.key == identity.key and compatible.source_sha256 == ""
 
 
 def _assert_exact_state(left, right):

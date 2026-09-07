@@ -84,6 +84,7 @@ class _Entry:
     status: str = "pending"
     identity: tuple | None = None
     source_sha256: str | None = None
+    handoff_validated: bool = False
     raw: Any = None
     mmap: Any = None
     preload_path: Path | None = None
@@ -278,6 +279,8 @@ class QcSourcePrefetch:
                     and not self._cancelled.is_set()
                     and not (should_cancel and should_cancel())):
                 logger.info("qc_source_prefetch_hit file=%s", entry.path.name)
+                with self._condition:
+                    entry.handoff_validated = True
                 accepted = True
                 return raw
         except (OSError, RuntimeError, ValueError):
@@ -286,6 +289,19 @@ class QcSourcePrefetch:
             if not accepted:
                 self.release(raw)
         return None
+
+    def source_content_identity_for(self, raw: Any) -> dict[str, Any] | None:
+        """Return the source-byte identity validated by this exclusive handoff.
+
+        This read-only snapshot performs no I/O, never certifies later source
+        edits, and disappears when the borrower releases its Raw.
+        """
+        with self._condition:
+            entry = self._borrowed.get(id(raw))
+            if (entry is None or entry.raw is not raw or entry.status != "taken"
+                    or not entry.handoff_validated or entry.identity is None or not entry.source_sha256):
+                return None
+            return {"path": entry.identity[0], "size_bytes": entry.identity[1], "sha256": entry.source_sha256}
 
     def release(self, raw: Any) -> None:
         """Close a borrowed Raw and remove its preload after exclusive use."""
