@@ -831,8 +831,8 @@ def _handle_frequency_domain_qc_review(
     on_finished: Callable[[], None],
 ) -> None:
     from Main_App.gui.frequency_domain_qc_dialog import FrequencyDomainQcReviewDialog
+    from Main_App.gui.frequency_domain_qc_handoff import save_frequency_domain_qc_review
     from Main_App.processing.frequency_domain_qc import (
-        apply_frequency_domain_qc_decision,
         mark_frequency_domain_outputs_stale,
     )
 
@@ -856,37 +856,15 @@ def _handle_frequency_domain_qc_review(
         return
     accepted = dialog.exec() == QDialog.DialogCode.Accepted
     if accepted:
-        try:
-            apply_frequency_domain_qc_decision(
-                project.project_root,
-                report,
-                review_decisions=dialog.review_decisions(),
-                manual_participant_reasons=dialog.manual_participant_reasons(),
-                manual_recording_reasons=dialog.manual_recording_reasons(),
-            )
-            _sync_project_tools_metadata_from_disk(project)
-        except Exception as exc:
-            logger.exception("frequency_domain_qc_decision_apply_failed")
-            host._post_processing_failure_reason = f"Frequency-domain QC decisions could not be saved: {exc}"
-            QMessageBox.critical(host, "Frequency-Domain QC Error", str(exc))
-            mark_frequency_domain_outputs_stale(
-                project.project_root,
-                reason="Frequency-domain QC review failed before post-processing resumed.",
-            )
-            on_finished()
-            _set_resume_post_processing_pending(host, True)
-            return
-        host.log(
-            "Frequency-domain QC review accepted; resuming final harmonic selection.",
-            level=logging.INFO,
-        )
-        if _start_post_processing_pipeline_after_processing(
+        save_frequency_domain_qc_review(
             host,
+            project,
+            report,
+            review_decisions=dialog.review_decisions(),
+            manual_participant_reasons=dialog.manual_participant_reasons(),
+            manual_recording_reasons=dialog.manual_recording_reasons(),
             on_finished=on_finished,
-            completed_phase_floor=1,
-        ):
-            return
-        on_finished()
+        )
         return
 
     host._post_processing_failure_reason = (
@@ -1878,7 +1856,14 @@ def on_processing_finished(host: Any, payload: dict | None = None) -> None:
         _show_condition_warning_popup(host, condition_warning_results)
 
         host._busy_stop()
-        success = not cancelled and not bool(host._post_processing_failure_reason)
+        all_attempted_processing_failed = (
+            not successful_results and bool(error_results or failed_run_results)
+        )
+        success = (
+            not cancelled
+            and not bool(host._post_processing_failure_reason)
+            and not all_attempted_processing_failed
+        )
         host._processing_summary_reported = bool(summary_results)
         try:
             host._finalize_processing(success, cancelled=cancelled)

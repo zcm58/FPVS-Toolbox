@@ -77,6 +77,10 @@ from Main_App.processing.raw_channel_qc import (
     RAW_CHANNEL_QC_METHOD_VERSION,
     evaluate_raw_channel_qc,
 )
+from Main_App.processing.preprocessed_cache_info import (
+    restore_preprocessed_filter_info,
+    snapshot_preprocessed_filter_info,
+)
 from Main_App.projects.frequency_protocol import (
     FrequencyProtocol,
     FrequencyProtocolError,
@@ -1073,12 +1077,22 @@ def _load_preprocessed_cache(
         metadata = json.loads(meta_path.read_text(encoding="utf-8"))
         if metadata.get("cache_key") != cache_key or metadata.get("payload") != payload:
             return None, None, 0, "miss_metadata_mismatch"
+        exact_filter_info = metadata.get("exact_filter_info")
+        if not isinstance(exact_filter_info, Mapping):
+            return None, None, 0, "miss_missing_filter_metadata"
         memmap_path = str(_memmap_path_for_file(raw_path))
         raw = mne_module.io.read_raw_fif(
             str(raw_path),
             preload=memmap_path,
             verbose=False,
         )
+        try:
+            restore_preprocessed_filter_info(
+                raw, exact_filter_info, settings, cache_key=cache_key,
+            )
+        except (KeyError, TypeError, ValueError, OverflowError):
+            raw.close()
+            return None, None, 0, "miss_filter_metadata_mismatch"
         observed_geometry = _attach_processed_geometry(raw, settings)
         cached_geometry = metadata.get("geometry")
         if (
@@ -1267,6 +1281,9 @@ def _store_preprocessed_cache(
     tmp_meta_path = meta_path.with_suffix(".json.tmp")
 
     try:
+        exact_filter_info = snapshot_preprocessed_filter_info(
+            raw.info, settings, cache_key=cache_key,
+        )
         if settings.get("_fpvs_require_analysis_spans", False):
             source_span_plan = settings.get("_fpvs_source_analysis_span_plan")
             target_span_plan = settings.get("_fpvs_realized_analysis_span_plan")
@@ -1296,6 +1313,7 @@ def _store_preprocessed_cache(
         metadata = {
             "cache_key": cache_key,
             "payload": payload,
+            "exact_filter_info": exact_filter_info,
             "geometry": geometry_identity,
             "retained_scalp_channels": list(
                 geometry_identity["retained_scalp_channels"]

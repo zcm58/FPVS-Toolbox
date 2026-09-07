@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from contextlib import ExitStack, nullcontext
+from contextlib import ExitStack, contextmanager, nullcontext
 import logging
 from dataclasses import dataclass
 from pathlib import Path
+from time import perf_counter
 from typing import Any
 
 from PySide6.QtCore import QObject, Signal, Slot
@@ -435,28 +436,58 @@ class PostProcessingPipelineWorker(QObject):
         from Main_App.processing.roi_coverage import build_pre_review_roi_coverage
 
         project_root = Path(self._project.project_root).expanduser().resolve()
-        processing_ledger = load_ledger(project_root)
-        outcome_ledger = load_recording_condition_outcomes(processing_ledger)
-        if outcome_ledger is None:
-            raise RecordingConditionOutcomeError(
-                "Frequency review is blocked because the current processing run "
-                "has no recording-condition output ledger. Reprocess the project "
-                "to create validated workbook receipts."
+        with self._frequency_qc_stage("output_readiness", "Checking completed condition outputs..."):
+            processing_ledger = load_ledger(project_root)
+            outcome_ledger = load_recording_condition_outcomes(processing_ledger)
+            if outcome_ledger is None:
+                raise RecordingConditionOutcomeError(
+                    "Frequency review is blocked because the current processing run "
+                    "has no recording-condition output ledger. Reprocess the project "
+                    "to create validated workbook receipts."
+                )
+            require_pre_review_readiness(outcome_ledger)
+            self._recording_condition_outcomes = outcome_ledger
+        with self._frequency_qc_stage("roi_coverage", "Checking electrode and ROI coverage..."):
+            self._pre_review_roi_coverage = build_pre_review_roi_coverage(
+                self._project,
+                outcome_ledger=outcome_ledger,
+                processing_ledger=processing_ledger,
+                persist=True,
             )
-        require_pre_review_readiness(outcome_ledger)
-        self._recording_condition_outcomes = outcome_ledger
-        self._pre_review_roi_coverage = build_pre_review_roi_coverage(
-            self._project,
-            outcome_ledger=outcome_ledger,
-            processing_ledger=processing_ledger,
-            persist=True,
-        )
-        self._dataset_index = load_project_dataset_index(project_root)
-        return run_frequency_domain_qc_review(
-            self._project,
-            log_func=self._emit_progress,
-            dataset_index=self._dataset_index,
-        )
+        with self._frequency_qc_stage("dataset_index", "Locating condition data for QC..."):
+            self._dataset_index = load_project_dataset_index(project_root)
+        with self._frequency_qc_stage("frequency_review", "Preparing frequency-domain QC findings..."):
+            return run_frequency_domain_qc_review(
+                self._project,
+                log_func=self._emit_frequency_qc_progress,
+                dataset_index=self._dataset_index,
+            )
+
+    @contextmanager
+    def _frequency_qc_stage(self, stage: str, message: str):
+        """Time computation separately from the later GUI review wait."""
+        self._emit_phase_progress(_PHASE_FREQUENCY_DOMAIN_QC, 0, message)
+        logger.info("post_processing_qc_stage_started stage=%s", stage)
+        started = perf_counter()
+        completed = False
+        try:
+            yield
+            completed = True
+        finally:
+            logger.info(
+                "post_processing_qc_timing stage=%s elapsed_ms=%.3f completed=%s",
+                stage, (perf_counter() - started) * 1000.0, completed,
+            )
+
+    def _emit_frequency_qc_progress(self, message: str) -> None:
+        text = str(message).strip()
+        if not text:
+            return
+        self.log_message.emit(text, logging.DEBUG)
+        if text.startswith("Frequency-domain QC: "):
+            self._emit_phase_progress(
+                _PHASE_FREQUENCY_DOMAIN_QC, 0, text.removeprefix("Frequency-domain QC: "),
+            )
 
     def _sync_frequency_domain_qc_automatic_state(
         self,

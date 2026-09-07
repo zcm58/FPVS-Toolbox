@@ -2234,6 +2234,8 @@ def test_preprocessed_cache_prunes_old_entries_for_same_source(tmp_path: Path) -
     old_settings = dict(base_settings, high_pass=0.1)
     new_settings = dict(base_settings, high_pass=1.0)
 
+    with raw.info._unlock():
+        raw.info["highpass"] = old_settings["high_pass"]
     assert process_runner._store_preprocessed_cache(
         raw=raw,
         file_path=fake_bdf,
@@ -2257,6 +2259,8 @@ def test_preprocessed_cache_prunes_old_entries_for_same_source(tmp_path: Path) -
     assert old_raw_path.exists()
     assert old_meta_path.exists()
 
+    with raw.info._unlock():
+        raw.info["highpass"] = new_settings["high_pass"]
     assert process_runner._store_preprocessed_cache(
         raw=raw,
         file_path=fake_bdf,

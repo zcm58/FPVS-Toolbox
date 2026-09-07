@@ -263,42 +263,84 @@ def test_point_five_hz_screen_boundary_is_inclusive() -> None:
     assert [row["fft_bin"] for row in below] == [49]
 
 
+@pytest.mark.parametrize("n_samples", [257, 4096])
+@pytest.mark.parametrize("kind", [
+    "contiguous", "sliced", "stepped", "reversed", "fortran", "signed_zero",
+    "mixed_zero", "constant", "subnormal", "overflow", "nan", "inf", "readonly",
+])
 def test_batched_amplitudes_are_bit_identical_to_unbatched_formula(
     monkeypatch: pytest.MonkeyPatch,
+    kind: str,
+    n_samples: int,
 ) -> None:
     rng = np.random.default_rng(641920)
-    data = rng.normal(scale=20e-6, size=(11, 4096)).astype(np.float64)
+    backing = rng.normal(scale=20e-6, size=(11, n_samples * 2 + 5))
+    data = backing[:, 3:n_samples + 3].copy()
+    if kind == "sliced":
+        data = backing[:, 3:n_samples + 3]
+    elif kind == "stepped":
+        data = backing[:, 3:n_samples * 2 + 3:2]
+    elif kind == "reversed":
+        data = data[:, ::-1]
+    elif kind == "fortran":
+        data = np.asfortranarray(data)
+    elif kind == "signed_zero":
+        data = rng.choice([0.0, -0.0], size=data.shape)
+    elif kind == "mixed_zero":
+        data = rng.choice([-1e-5, -0.0, 0.0, 1e-5], size=data.shape)
+    elif kind == "constant":
+        data[:] = 1e-5
+    elif kind == "subnormal":
+        data *= 1e-305
+    elif kind == "overflow":
+        data = rng.choice([-np.finfo(float).max, np.finfo(float).max], size=data.shape)
+    elif kind == "nan":
+        data[0, 10] = np.nan
+    elif kind == "inf":
+        data[0, 10] = np.inf
+    elif kind == "readonly":
+        data.flags.writeable = False
     window = np.hanning(data.shape[1]).astype(np.float64, copy=False)
-    amplitude_last_bin = 900
-    expected = (
-        np.abs(
-            np.fft.rfft(
-                (data - np.median(data, axis=1, keepdims=True)) * window,
-                axis=1,
-            )[:, : amplitude_last_bin + 1]
+    amplitude_last_bin = min(900, n_samples // 2)
+    with np.errstate(over="ignore", invalid="ignore", under="ignore"):
+        expected_complex = np.fft.rfft(
+            (data - np.median(data, axis=1, keepdims=True)) * window, axis=1,
         )
-        * (2.0e6 / data.shape[1])
-    )
+        expected = np.abs(expected_complex[:, :amplitude_last_bin + 1]) * (2.0e6 / data.shape[1])
     before = data.tobytes()
+    window_before = window.tobytes()
+    complex_batches = []
+    original_rfft = np.fft.rfft
+
+    def capture_fft(values, **kwargs):
+        assert not np.shares_memory(values, data)
+        result = original_rfft(values, **kwargs)
+        complex_batches.append(result.copy())
+        return result
+
+    monkeypatch.setattr(np.fft, "rfft", capture_fft)
     monkeypatch.setattr(
         raw_spectral_qc,
         "CONDITION_SPECTRAL_QC_MAX_CHANNELS_PER_FFT_BATCH",
         3,
     )
 
-    batches = list(
-        raw_spectral_qc._iter_condition_spectral_amplitude_batches(
-            data,
-            window=window,
-            amplitude_last_bin=amplitude_last_bin,
-            should_cancel=None,
+    with np.errstate(over="ignore", invalid="ignore", under="ignore"):
+        batches = list(
+            raw_spectral_qc._iter_condition_spectral_amplitude_batches(
+                data,
+                window=window,
+                amplitude_last_bin=amplitude_last_bin,
+                should_cancel=None,
+            )
         )
-    )
     actual = np.concatenate([batch for _, batch in batches], axis=0)
 
     assert [start for start, _ in batches] == [0, 3, 6, 9]
     assert actual.tobytes() == expected.tobytes()
+    assert np.concatenate(complex_batches, axis=0).tobytes() == expected_complex.tobytes()
     assert data.tobytes() == before
+    assert window.tobytes() == window_before
 
 
 def test_batching_preserves_exact_v2_result_payload(
@@ -330,6 +372,34 @@ def test_batching_preserves_exact_v2_result_payload(
     )
 
     assert one_at_a_time.to_payload() == all_at_once.to_payload()
+
+
+def test_private_scratch_reuse_preserves_former_spectral_evidence(monkeypatch):
+    data = _condition_data(36.0, 40.0, 50.0, n_channels=9)
+    before = data.tobytes()
+    kwargs = {
+        "sfreq": 256.0, "settings": _settings(mains_hz=50, low_pass_hz=100.0),
+        "effective_upper_frequency_hz": 100.0, "condition_label": "Control",
+    }
+    observed = evaluate_condition_spectral_qc_v2(data, **kwargs)
+
+    def former_batches(array, *, window, amplitude_last_bin, should_cancel):
+        n_channels, n_samples = array.shape
+        size = raw_spectral_qc._condition_fft_batch_size(
+            n_samples=n_samples, n_amplitude_bins=amplitude_last_bin + 1,
+        )
+        scale = 2.0e6 / n_samples
+        for start in range(0, n_channels, size):
+            centered = array[start:start + size] - np.median(
+                array[start:start + size], axis=1, keepdims=True,
+            )
+            spectra = np.fft.rfft(centered * window, axis=1)
+            yield start, np.abs(spectra[:, :amplitude_last_bin + 1]) * scale
+
+    monkeypatch.setattr(raw_spectral_qc, "_iter_condition_spectral_amplitude_batches", former_batches)
+    expected = evaluate_condition_spectral_qc_v2(data, **kwargs)
+    assert observed.to_payload() == expected.to_payload()
+    assert data.tobytes() == before
 
 
 def test_fft_batch_size_bounds_long_source_rate_working_set() -> None:

@@ -124,6 +124,35 @@ no automatic post-processing. Rerun Processing and confirm the explicit exclusio
 is accounted for while other conditions retain their normal output requirements.
 Reopen to verify the saved exclusion, and cancel a change to verify it persists.
 
+### Reviewed condition exclusion recovery (2026-09-07)
+
+- [x] Diagnose the reported participant-condition failure read-only: its workbook exists
+  and has a ready receipt; a saved `exclude_condition` decision removes it from
+  analysis. Pre-review coverage incorrectly continued requiring it in the
+  provisional harmonic pool.
+- [x] Remove only explicitly reviewed excluded conditions from that pool's
+  expected-source map; report them as excluded by review, not missing files.
+- [x] Correct final ROI coverage's pair-set/serialized-row decision adapter so
+  whole-condition exclusions survive release and other conditions remain usable.
+- [x] Reject older hash-valid final coverage whose whole-condition exclusion
+  flags contradict its canonical saved decisions; rebuilding post-processing
+  repairs this without invalidating unaffected coverage.
+- [x] Verify release consistency, normal review/reconfirmation completion,
+  missing-source protection, no imputation, exact pooling values/weights and
+  participant/recording/condition scopes. Processing gate: **1,284 passed,
+  5 skipped**; the extended resume/reconfirmation regression also passed.
+  Ruff/compile/protected/Stats-structure checks passed. Repository precommit
+  remains blocked by eight pre-existing paths in unrelated untracked `outputs/`.
+
+The bounded real-project probe now yields 142 eligible sources from 143 validated
+sources, omitting the reviewed participant-condition pair and retaining its other five conditions.
+No user project metadata, workbooks, companions, or EEG samples were rewritten.
+After restarting the application, resume reviewed post-processing to rebuild
+coverage/selection; no EEG preprocessing is required for this exclusion fix.
+Visible/manual smoke: exclude one condition, apply/continue, complete any normal
+re-review, and confirm post-processing proceeds with that condition recorded as
+unavailable and the participant's other conditions present. Qt remains CI-only.
+
 Primary owners are `processing/processing_ledger.py` for the expected matrix
 and states; `Performance/process_runner.py` for occurrence outcomes;
 `Shared/post_process.py`, `exports/post_export_adapter.py`, and

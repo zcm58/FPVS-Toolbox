@@ -429,7 +429,8 @@ class KurtosisCorroboratorRegistry:
         }
 
     def to_payload(self) -> dict[str, object]:
-        return {**self._identity_payload(), "fingerprint": self.fingerprint}
+        core = self._identity_payload()
+        return {**core, "fingerprint": _fingerprint(core)}
 
 
 CURRENT_KURTOSIS_CORROBORATOR_REGISTRY = KurtosisCorroboratorRegistry(
@@ -479,7 +480,8 @@ class KurtosisReferenceDistribution:
         }
 
     def to_payload(self) -> dict[str, object]:
-        return {**self._identity_payload(), "fingerprint": self.fingerprint}
+        core = self._identity_payload()
+        return {**core, "fingerprint": _fingerprint(core)}
 
 
 @dataclass(frozen=True, slots=True)
@@ -505,7 +507,8 @@ class KurtosisChannelEvidence:
         return asdict(self)
 
     def to_payload(self) -> dict[str, object]:
-        return {**self._identity_payload(), "fingerprint": self.fingerprint}
+        core = self._identity_payload()
+        return {**core, "fingerprint": _fingerprint(core)}
 
 
 @dataclass(frozen=True, slots=True)
@@ -563,7 +566,8 @@ class KurtosisQCEvidence:
         }
 
     def to_payload(self) -> dict[str, object]:
-        return {**self._identity_payload(), "fingerprint": self.fingerprint}
+        core = self._identity_payload()
+        return {**core, "fingerprint": _fingerprint(core)}
 
 
 def _validated_geometry_identity(
@@ -1633,7 +1637,8 @@ class KurtosisDecisionPlan:
         }
 
     def to_payload(self) -> dict[str, object]:
-        return {**self._identity_payload(), "fingerprint": self.fingerprint}
+        core = self._identity_payload()
+        return {**core, "fingerprint": _fingerprint(core)}
 
 
 def _normalized_decisions(

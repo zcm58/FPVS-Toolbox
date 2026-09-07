@@ -177,6 +177,14 @@ raw-QC, manual removed-electrode, kurtosis, and interpolated bad-channel names
 plus the interpolation request/status/error, requested/applied/skipped FFT
 multi-notch centers, and complete geometry identity so cache-hit runs can still
 produce complete participant QC and preprocessing provenance.
+Cache metadata also stores the exact observed pre-FIF sampling rate and filter
+edges in a checksummed snapshot bound to the cache key. On reuse,
+`processing/preprocessed_cache_info.py` validates those values against current
+settings and their exact float32 FIF-header representation before restoring the
+original Info values. This prevents header serialization from changing strict
+spectral eligibility (for example, 0.1 Hz becoming 0.10000000149011612 Hz).
+Missing or inconsistent snapshots require recomputation. Sample storage and the
+strict filter-validation tolerance remain unchanged.
 The cache key also binds the current canonical frequency-protocol payload and
 fingerprint, the exact condition event map, and the reviewed source-span-plan
 fingerprint. Processing validates that reviewed plan against the current

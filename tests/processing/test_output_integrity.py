@@ -8,6 +8,7 @@ import pytest
 
 from Main_App.processing.output_integrity import (
     OutputIntegrityError,
+    OutputIntegrityReceipt,
     require_finite_computable_bca,
     require_finite_retained_signal,
 )
@@ -116,3 +117,71 @@ def test_bca_identity_shape_mismatch_fails_before_export():
             recording_id="P01",
             condition_label="Faces",
         )
+
+
+@pytest.mark.parametrize("layout", ["c", "fortran", "reversed", "strided", "empty"])
+@pytest.mark.parametrize("dtype", [np.float32, np.float64, np.complex128, np.int64, np.bool_])
+def test_finite_gate_preserves_reference_first_failure_and_input(layout, dtype):
+    values = np.arange(48).reshape(4, 12).astype(dtype)
+    if np.issubdtype(dtype, np.inexact):
+        values[0, 9] = np.inf
+        values[2, 1] = np.nan
+        values[3, 8] = -np.inf
+        values[0, 0] = -0.0
+    if layout == "fortran":
+        values = np.asfortranarray(values)
+    elif layout == "reversed":
+        values = values[::-1, ::-1]
+    elif layout == "strided":
+        values = values[:, ::2]
+    elif layout == "empty":
+        values = values[:, :0]
+    before = values.tobytes()
+    names = tuple(f"E{index}" for index in range(values.shape[0]))
+    # Frozen pre-change selection: first invalid coordinate in C order.
+    invalid = np.argwhere(~np.isfinite(values))
+    kwargs = dict(electrode_names=names, recording_id="P01", condition_label="Faces")
+    if invalid.size:
+        with pytest.raises(OutputIntegrityError) as error:
+            require_finite_retained_signal(values, **kwargs)
+        expected = tuple(int(value) for value in invalid[0])
+        assert error.value.value_index == expected
+        assert error.value.electrode == names[expected[0]]
+    else:
+        actual = require_finite_retained_signal(values, **kwargs)
+        expected = OutputIntegrityReceipt(
+            stage="retained_signal", recording_id="P01", condition_label="Faces",
+            value_category="retained_eeg", inspected_value_count=values.size,
+        )
+        assert actual.to_payload() == expected.to_payload()
+    assert values.tobytes() == before
+
+
+@pytest.mark.parametrize("available", [(False, False, False), (True, True, True), (False, True, True)])
+def test_bca_gate_preserves_target_major_failure_order_and_skipped_counts(available):
+    # First bad cell in C order differs from first bad available target.
+    values = np.asarray([[1.0, np.nan, np.inf], [np.nan, 2.0, -np.inf]])
+    targets = tuple(_Availability(_Target(Fraction(index + 1)), flag)
+                    for index, flag in enumerate(available))
+    kwargs = dict(electrode_names=("E0", "E1"), recording_id="P01",
+                  condition_label="Faces", target_availability=targets)
+    bad = None
+    for column, flag in enumerate(available):
+        if flag:
+            invalid = np.flatnonzero(~np.isfinite(values[:, column]))
+            if invalid.size:
+                bad = (int(invalid[0]), column)
+                break
+    if bad is not None:
+        with pytest.raises(OutputIntegrityError) as error:
+            require_finite_computable_bca(values, **kwargs)
+        assert error.value.value_index == bad
+        assert error.value.frequency_hz == f"{bad[1] + 1}/1"
+    else:
+        actual = require_finite_computable_bca(values, **kwargs)
+        expected = OutputIntegrityReceipt(
+            stage="computable_bca", recording_id="P01", condition_label="Faces",
+            value_category="bca", inspected_value_count=2 * sum(available),
+            skipped_method_unavailable_target_count=available.count(False),
+        )
+        assert actual.to_payload() == expected.to_payload()

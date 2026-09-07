@@ -13,6 +13,9 @@ import pytest
 from Main_App.processing import full_fft_provenance
 from Main_App.processing.frequency_domain_qc import (
     FrequencyDomainCoverageDecisions,
+    load_frequency_domain_qc_state,
+    mark_frequency_domain_outputs_current,
+    mark_frequency_domain_outputs_stale,
 )
 from Main_App.processing.full_fft_provenance import (
     FullFftProvenanceError,
@@ -27,7 +30,7 @@ from Main_App.io.eeg_geometry import (
     biosemi64_geometry_identity,
 )
 from Main_App.processing.processing_ledger import PROCESSING_FINGERPRINT_VERSION
-from Main_App.projects import FrequencyProtocol
+from Main_App.projects import FrequencyProtocol, Project
 
 
 @pytest.fixture(autouse=True)
@@ -203,6 +206,56 @@ def test_require_current_full_fft_provenance_uses_saved_rates_and_checks_inputs(
     workbook_path.touch()
     with pytest.raises(FullFftProvenanceStaleError, match="workbook path, size"):
         require_current_project_full_fft_provenance(root)
+
+
+def test_completion_timestamp_refresh_does_not_invalidate_full_fft(
+    tmp_path: Path,
+) -> None:
+    root = _managed_full_fft_project(tmp_path)
+    mark_frequency_domain_outputs_stale(root, reason="Processing in progress")
+    mark_frequency_domain_outputs_current(root)
+    written = write_project_full_fft_provenance(
+        root, base_frequency_hz=6.0, oddball_frequency_hz=1.2,
+    )
+    # The GUI refreshes completion state after the worker has already published
+    # neutral provenance. Neither that write nor repeated reads changes inputs.
+    mark_frequency_domain_outputs_current(root)
+    manifest_path = root / "project.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["tools"]["frequency_domain_qc"]["last_outputs_refreshed_at"] = (
+        "2099-01-01T00:00:00+00:00"
+    )
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    before = manifest_path.read_bytes()
+
+    for _ in range(3):
+        assert require_current_project_full_fft_provenance(root) == written
+    assert manifest_path.read_bytes() == before
+
+
+def test_snr_settings_save_preserves_newly_completed_full_fft(
+    tmp_path: Path,
+) -> None:
+    root = _managed_full_fft_project(tmp_path)
+    Project.load(root).save()
+    mark_frequency_domain_outputs_stale(root, reason="Previous run failed")
+    # Model a GUI Project that predates the background worker's completion.
+    gui_project = Project.load(root)
+    assert gui_project.manifest["tools"]["frequency_domain_qc"][
+        "downstream_outputs_stale"
+    ]
+    mark_frequency_domain_outputs_current(root)
+    written = write_project_full_fft_provenance(
+        root, base_frequency_hz=6.0, oddball_frequency_hz=1.2,
+    )
+
+    gui_project.manifest["tools"]["snr_plot"] = {"plot_type": "SNR"}
+    gui_project.save(updated_tool_namespaces={"snr_plot"})
+
+    state = load_frequency_domain_qc_state(root)
+    assert state["downstream_outputs_stale"] is False
+    assert "stale_reason" not in state
+    assert require_current_project_full_fft_provenance(root) == written
 
 
 def test_rate_mismatch_wins_when_saved_full_fft_inputs_are_also_stale(

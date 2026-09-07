@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -629,6 +630,7 @@ def test_post_processing_pipeline_runs_steps_in_order(tmp_path) -> None:
 def test_base_post_processing_steps_reuse_one_dataset_index(
     tmp_path,
     monkeypatch,
+    caplog,
 ) -> None:
     from Main_App import projects as projects_module
     from Main_App import exports as exports_module
@@ -659,6 +661,8 @@ def test_base_post_processing_steps_reuse_one_dataset_index(
 
     def run_qc(_project, *, log_func, dataset_index):
         assert callable(log_func)
+        log_func("Frequency-domain QC: Checking electrode findings...")
+        log_func("[PERF] technical detail stays in the log")
         captured.append(("qc", dataset_index))
         return {"review_required": False, "review_reused": False}
 
@@ -742,7 +746,12 @@ def test_base_post_processing_steps_reuse_one_dataset_index(
     monkeypatch.setattr(exports_module, "write_analysis_ready_workbook", write_audit)
 
     worker = PostProcessingPipelineWorker(_Project(root))
-    qc_report = worker._run_frequency_domain_qc_review()
+    phase_updates = []
+    worker.phase_progress.connect(
+        lambda *args: phase_updates.append(args)
+    )
+    with caplog.at_level(logging.INFO, logger=worker_module.__name__):
+        qc_report = worker._run_frequency_domain_qc_review()
     harmonic_result = worker._run_harmonic_selection()
     stats_result = worker._run_stats_ready_export(root)
     audit_result = worker._run_analysis_ready_export(root)
@@ -762,6 +771,28 @@ def test_base_post_processing_steps_reuse_one_dataset_index(
         ("stats", sentinel_index),
         ("audit", sentinel_index),
     ]
+    assert [update[3] for update in phase_updates] == [
+        "Checking completed condition outputs...",
+        "Checking electrode and ROI coverage...",
+        "Locating condition data for QC...",
+        "Preparing frequency-domain QC findings...",
+        "Checking electrode findings...",
+    ]
+    assert all(update[:3] == ("frequency_domain_qc", 0, 5) for update in phase_updates)
+    timings = [record.message for record in caplog.records if "post_processing_qc_timing" in record.message]
+    assert len(timings) == 4
+    assert all("completed=True" in message and "elapsed_ms=" in message for message in timings)
+
+
+def test_qc_stage_logs_elapsed_time_and_preserves_failure(tmp_path, caplog):
+    worker = PostProcessingPipelineWorker(_Project(tmp_path))
+    with caplog.at_level(logging.INFO, logger=worker_module.__name__):
+        with pytest.raises(ValueError, match="invalid source"):
+            with worker._frequency_qc_stage("roi_coverage", "Checking coverage..."):
+                raise ValueError("invalid source")
+    assert "stage=roi_coverage" in caplog.text
+    assert "elapsed_ms=" in caplog.text
+    assert "completed=False" in caplog.text
 
 
 def test_post_processing_pipeline_runs_source_psd_when_stats_ready_fails(tmp_path) -> None:

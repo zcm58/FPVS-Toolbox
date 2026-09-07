@@ -123,6 +123,19 @@ def test_typical_64_channel_window_uses_batch_without_row_calls(monkeypatch):
     np.testing.assert_array_equal(_metric_bits(actual), _metric_bits(expected))
 
 
+def test_finite_batch_avoids_redundant_nanstd_copy(monkeypatch):
+    data = _samples("sliced_window", 10_240)
+    channels = BIOSEMI64_CHANNELS[:len(data)]
+    expected = _baseline_rows(data, channels)
+
+    def unexpected_nanstd(*args, **kwargs):
+        raise AssertionError("An already-finite batch does not need NaN-aware scratch.")
+
+    monkeypatch.setattr(qc.np, "nanstd", unexpected_nanstd)
+    observed = qc._v2_metric_rows(data, channels)
+    np.testing.assert_array_equal(_metric_bits(observed), _metric_bits(expected))
+
+
 @pytest.mark.parametrize(
     "kind", ["fortran", "stepped", "reversed", "nonfinite", "float32", "integer"]
 )

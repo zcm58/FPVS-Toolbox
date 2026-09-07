@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import asdict, replace
+from fractions import Fraction
 from pathlib import Path
 
 import numpy as np
 import pytest
 
+from Main_App.processing import marker_integrity as marker_module
 from Main_App.processing.marker_integrity import (
     MARKER_DECISION_EXCLUDE,
     MARKER_DECISION_RETAIN_FULL,
@@ -517,3 +519,78 @@ def test_runner_validation_rejects_changed_event_stream() -> None:
             event_map={"Faces": 1},
             protocol=protocol,
         )
+
+
+def _original_interval_payloads(samples, *, sampling_rate_hz, oddball_rate_hz):
+    """Scalar pre-optimization arithmetic, including its exact boundary rules."""
+    payloads = []
+    for start, stop in zip(samples, samples[1:], strict=False):
+        delta = int(stop) - int(start)
+        cycles = Fraction(delta) * oddball_rate_hz / sampling_rate_hz
+        nearest = marker_module._round_positive_fraction(cycles)
+        missing = cycles > marker_module.MISSING_MARKER_BOUNDARY_CYCLES
+        payloads.append(marker_module.MarkerIntervalFinding(
+            start_sample=int(start), stop_sample=int(stop), interval_samples=delta,
+            interval_seconds=Fraction(delta) / sampling_rate_hz,
+            interval_cycles=cycles, phase_residual_cycles=cycles - nearest,
+            early_or_extra_marker=cycles < marker_module.EARLY_MARKER_BOUNDARY_CYCLES,
+            missing_marker_gap=missing,
+            estimated_missing_markers=max(1, nearest - 1) if missing else 0,
+        ).to_payload())
+    return payloads
+
+
+@pytest.mark.parametrize("rates", [(Fraction(12), Fraction(2)), (Fraction(2048), Fraction(6, 5)), (Fraction(2048), Fraction(3, 10))])
+def test_repeated_integer_intervals_match_original_exact_fraction_evidence(rates, monkeypatch):
+    # Include repeated spacings, exact half/one-and-a-half cycle boundaries,
+    # irregular intervals and origins that cannot be represented as float64.
+    deltas = [1, 3, 6, 9, 10, 18, 1706, 1707] * 19
+    samples = [2**53 + 31]
+    for delta in deltas:
+        samples.append(samples[-1] + delta)
+    kwargs = {"sampling_rate_hz": rates[0], "oddball_rate_hz": rates[1]}
+    expected = _original_interval_payloads(samples, **kwargs)
+    calls = []
+    original_round = marker_module._round_positive_fraction
+
+    def counted_round(value):
+        calls.append(value)
+        return original_round(value)
+
+    monkeypatch.setattr(marker_module, "_round_positive_fraction", counted_round)
+    actual = marker_module._interval_findings(samples, **kwargs)
+
+    assert [item.to_payload() for item in actual] == expected
+    assert len(calls) == len(set(deltas))
+    # Per-call reuse must never mix evidence from different project rates.
+    changed = {**kwargs, "oddball_rate_hz": rates[1] * 2}
+    assert [item.to_payload() for item in marker_module._interval_findings(samples, **changed)] == _original_interval_payloads(samples, **changed)
+
+
+@pytest.mark.parametrize("origin", [0, -300, 2**53 + 31])
+def test_marker_index_matches_original_occurrence_scan_with_duplicates_and_boundaries(origin):
+    rows = [[origin + sample, 0, code] for sample, code in [
+        (-1, 55), (0, 1), (0, 55), (10, 55), (10, 55), (16, 55),
+        (22, 55), (28, 55), (34, 55), (35, 2), (35, 55),
+        (40, 55), (46, 55), (52, 55), (52, 99), (58, 55),
+        (64, 55), (70, 1), (70, 2), (70, 55), (75, 55),
+        (81, 55), (87, 55), (93, 55), (99, 55), (100, 55),
+    ]]
+    # Reverse input order to exercise stable normalization, including tied
+    # onsets: the first same-sample occurrence has an empty open interval.
+    events = np.asarray(rows[::-1], dtype=np.int64)
+    events_before = events.copy()
+    plan = build_marker_integrity_plan(
+        events=events, event_map={"Faces": 1, "Faces alias": 1, "Objects": 2},
+        sampling_rate_hz=12, n_times=100, first_samp=origin, protocol=_protocol(),
+    )
+    normalized = marker_module._normalized_events(events)
+    for occurrence in plan.occurrences:
+        expected = tuple(int(row[0]) for row in normalized if
+            occurrence.onset_sample < int(row[0]) < occurrence.block_stop_sample
+            and int(row[2]) == 55)
+        assert occurrence.raw_marker_samples == expected
+        assert [item.to_payload() for item in occurrence.intervals] == _original_interval_payloads(
+            tuple(dict.fromkeys(expected)), sampling_rate_hz=Fraction(12), oddball_rate_hz=Fraction(2),
+        )
+    np.testing.assert_array_equal(events, events_before)

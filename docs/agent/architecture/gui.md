@@ -46,6 +46,11 @@ Primary paths:
   choose decisions/reasons, switch rows and search, and confirm choices persist.
   Inspect long evidence and unavailable-input context, use Next undecided, then
   verify incomplete Apply is rejected and completed choices submit normally.
+- `src/Main_App/gui/frequency_domain_qc_handoff.py`: asynchronous accepted-review
+  handoff to `FrequencyDomainQcDecisionWorker`. It keeps the main processing
+  page visible, receives saved metadata on the GUI thread, and resumes the
+  existing post-processing pipeline only after the save worker exits. See
+  [Workers And Threading](workers-threading.md) for lifecycle and smoke checks.
 - `src/Main_App/gui/processing_inputs.py`: processing input validation,
   single/batch mode UI state, `.bdf` file selection, start-button readiness,
   trigger-detection placeholder behavior, and preprocessing parameter assembly

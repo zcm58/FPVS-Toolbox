@@ -15,6 +15,7 @@ import math
 from dataclasses import dataclass
 from decimal import Decimal
 from fractions import Fraction
+from functools import lru_cache
 from typing import Any, Iterable, Mapping, Sequence, TypeAlias
 
 from Main_App.projects.frequency_protocol import (
@@ -25,6 +26,7 @@ from Main_App.projects.frequency_protocol import (
 )
 
 SPECTRAL_ELIGIBILITY_METHOD_VERSION = "project_filter_qc14_v1"
+_MAX_CACHED_ELIGIBILITY_HARMONICS = 256
 FILTER_EDGE_REPRESENTATION_TOLERANCE_HZ = Fraction(1, 1_000_000_000)
 QC14_NOISE_WINDOW_BINS = 10
 QC14_NOISE_CANDIDATE_OFFSETS = tuple(
@@ -707,6 +709,27 @@ def resolve_spectral_eligibility(
             "The filter-derived harmonic domain exceeds the versioned finite "
             f"implementation guard ({MAX_CANONICAL_HARMONIC_COUNT} harmonics)."
         )
+    # Reuse only pure, immutable method inputs after every current request has
+    # passed the unchanged strict grid/filter/notch checks. Workbook rows are
+    # still independently compared against the resolved result on each read.
+    calculate = (
+        _cached_eligibility_result
+        if highest_order <= _MAX_CACHED_ELIGIBILITY_HARMONICS
+        else _calculate_eligibility_result
+    )
+    return calculate(
+        canonical_protocol, sample_rate, analyzed_samples, realized_cycles,
+        bin_width, nyquist, filter_snapshot, notch_snapshot, highest_order,
+    )
+
+
+def _calculate_eligibility_result(
+    canonical_protocol: FrequencyProtocol, sample_rate: Fraction,
+    analyzed_samples: int, realized_cycles: int, bin_width: Fraction,
+    nyquist: Fraction, filter_snapshot: AppliedFilterSnapshot,
+    notch_snapshot: AppliedNotchSnapshot, highest_order: int,
+) -> SpectralEligibilityResult:
+    oddball_rate = canonical_protocol.oddball_rate_hz
     if highest_order <= 0:
         targets: tuple[SpectralTargetAvailability, ...] = ()
     else:
@@ -738,6 +761,9 @@ def resolve_spectral_eligibility(
         applied_notch=notch_snapshot,
         targets=targets,
     )
+
+
+_cached_eligibility_result = lru_cache(maxsize=16)(_calculate_eligibility_result)
 
 
 def _resolve_target(

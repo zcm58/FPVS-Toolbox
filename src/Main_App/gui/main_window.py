@@ -1019,6 +1019,14 @@ class MainWindow(QMainWindow):
         processing_inputs.set_controls_enabled(self, enabled)
 
     def closeEvent(self, event: QCloseEvent) -> None:
+        if getattr(self, "_frequency_domain_qc_save_thread", None) is not None:
+            QMessageBox.information(
+                self,
+                "Saving QC Decisions",
+                "Wait for the QC decisions to finish saving before closing FPVS Toolbox.",
+            )
+            event.ignore()
+            return
         grid_thread = getattr(self, "_settings_full_fft_grid_qc_thread", None)
         try:
             grid_check_running = (

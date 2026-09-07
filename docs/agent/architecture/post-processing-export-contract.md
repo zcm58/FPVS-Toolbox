@@ -192,6 +192,20 @@ accounted no-output cells remain visible in coverage/audit fields. The export
 must never recompute harmonics: accepted processing-time metadata bound to the
 same final-release receipt is the only selection source.
 
+Whole-condition QC exclusions must be applied consistently to the provisional
+harmonic pool and final ROI coverage. Pre-review source coverage still validates
+the original workbook, but a subsequently reviewed excluded condition is not a
+required contributor to harmonic selection. Never derive this exemption from
+file absence: only the existing scoped review decisions authorize it. Cohort QC
+reports these cells as `excluded_by_review` / `reviewed_condition_exclusion`.
+Final coverage accepts the same canonical decisions as live pair sets or saved
+JSON rows, retains the source evidence, and makes the affected result unavailable.
+Saved coverage must also agree with its canonical whole-cell exclusion decisions;
+contradictory older coverage requires rebuilding reviewed post-processing.
+Other conditions/visits stay eligible; actual contributing Ns and the existing
+group/condition weights are preserved. Entirely empty declared adaptive-pooling
+cells and genuinely missing required sources retain their existing failure rules.
+
 The primary `ROI Long` sheet provides one observed participant x condition x
 configured-ROI row with raw Summed BCA, RMS-normalized BCA, signed-mean-
 normalized BCA, canonical group label, and concise QC fields. Supporting wide,
@@ -358,8 +372,23 @@ tables to their separate NPZ companions. Stats, FullFFT grid QC, Free Harmonic C
 legacy LORETA FullFFT inputs and Individual Detectability use this boundary.
 Plot snapshots capture both dense arrays with their workbook and validate
 source identity before publication. Scalp Maps calculates from the saved
-compact BCA/SNR/Z values. A run-scoped cache retains at most four
-companions and invalidates on workbook or companion identity changes.
+compact BCA/SNR/Z values. A run-scoped cache retains at most four numerical
+companion payloads per family. A separate cache keeps up to 256 already-verified
+spectral headers and compact schemas so later identity/header passes do not
+reload evicted numerical arrays. Spectral headers share identical immutable
+tuples and are also bounded to 262,144 unique header labels. Reuse requires the
+same declaration and workbook/companion signatures, including size, modification
+and change times, device, and file ID. First reads still validate checksums and
+schema/grid; new scopes revalidate, and changed signatures invalidate reuse.
+
+Pure frequency calculations additionally use bounded in-memory reuse, independent
+of workbook identity: `full_fft_grid_qc` retains at most eight exact text-header /
+oddball-rate results (32,768 labels per header), and `spectral_eligibility` retains
+at most sixteen immutable domains of up to 256 harmonics. Larger inputs use the
+same uncached calculation. Keys include the full ordered header or the validated
+protocol, sample grid, filter and notch snapshots respectively. Every request
+still validates its current inputs and exported eligibility rows; these caches
+never replace source-file validation or retain mutable reports/receipts.
 
 ## Compact Condition Companion
 

@@ -1894,7 +1894,9 @@ def _v2_metric_rows(
         and bool(np.isfinite(data).all())
     ):
         percentiles = np.percentile(data, [0.05, 0.5, 99.5, 99.95], axis=1)
-        std_uv = np.nanstd(data, axis=1) * 1e6
+        # These rows are already finite. The same contiguous float64 reduction
+        # avoids nanstd's redundant sample copy and NaN-mask allocation.
+        std_uv = np.std(data, axis=1) * 1e6
         p2p_99_uv = (percentiles[2] - percentiles[1]) * 1e6
         p2p_999_uv = (percentiles[3] - percentiles[0]) * 1e6
         full_p2p_uv = (np.nanmax(data, axis=1) - np.nanmin(data, axis=1)) * 1e6

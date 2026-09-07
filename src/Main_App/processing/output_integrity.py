@@ -132,9 +132,13 @@ def require_finite_retained_signal(
             condition_label=condition,
             value_category="retained_eeg",
         )
-    invalid = np.argwhere(~np.isfinite(data))
-    if invalid.size:
-        channel_index, sample_index = (int(value) for value in invalid[0])
+    finite = np.isfinite(data)
+    if not finite.all():
+        # Preserve the first C-order failure without allocating coordinates for
+        # every invalid sample (potentially the entire recording).
+        channel_index, sample_index = (
+            int(value) for value in np.unravel_index(np.argmin(finite), data.shape)
+        )
         electrode = names[channel_index]
         raise OutputIntegrityError(
             "A retained EEG value is NaN or infinite; the condition workbook "
@@ -188,9 +192,9 @@ def require_finite_computable_bca(
             skipped += 1
             continue
         column = matrix[:, target_index]
-        invalid_channels = np.flatnonzero(~np.isfinite(column))
-        if invalid_channels.size:
-            channel_index = int(invalid_channels[0])
+        finite = np.isfinite(column)
+        if not finite.all():
+            channel_index = int(np.argmin(finite))
             target = getattr(availability, "target", None)
             frequency = _frequency_text(getattr(target, "frequency_hz", "unknown"))
             electrode = names[channel_index]

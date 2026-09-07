@@ -204,3 +204,84 @@ def test_workbook_manifest_replacement_invalidates_cached_identity(tmp_path: Pat
         second = _write(path, frames)
         assert spectral_companion_identity(path) == second
         assert read_spectral_sheet(path).iloc[0, 1] == 9.0
+
+
+def test_verified_headers_survive_dense_eviction_without_reloading_arrays(tmp_path, monkeypatch):
+    from Main_App.io import spectral_data, xlsx_selected_reader as xlsx
+
+    paths = [tmp_path / f"recording{index}.xlsx" for index in range(6)]
+    descriptors = [_write(path) for path in paths]
+    original_load = np.load
+    with xlsx_read_cache_scope():
+        for path, descriptor in zip(paths, descriptors, strict=True):
+            assert spectral_companion_identity(path) == descriptor
+        cache = xlsx._ACTIVE_XLSX_READ_CACHE.get()
+        assert len(cache.spectral_payloads) == 4
+        headers = list(cache.spectral_verified_headers.values())
+        assert headers[0][FFT] is headers[-1][FFT]
+
+        def unexpected_load(*args, **kwargs):
+            pytest.fail("Verified identity/header reloaded dense arrays after eviction")
+
+        monkeypatch.setattr(spectral_data.np, "load", unexpected_load)
+        for path, descriptor in zip(paths, descriptors, strict=True):
+            assert spectral_companion_identity(path) == descriptor
+            header = read_xlsx_sheet_header(path, sheet_name=FFT)
+            assert header == _frames()[FFT].columns.tolist()
+            header[0] = "caller mutation"
+        monkeypatch.setattr(spectral_data.np, "load", original_load)
+        actual = read_spectral_sheet(paths[0])
+        np.testing.assert_array_equal(
+            actual.iloc[:, 1:].to_numpy().view(np.uint64),
+            _frames()[FFT].iloc[:, 1:].to_numpy().view(np.uint64),
+        )
+
+
+def test_evicted_spectral_verification_rejects_changed_companion_and_is_bounded(tmp_path, monkeypatch):
+    from Main_App.io import spectral_data, xlsx_selected_reader as xlsx
+
+    monkeypatch.setattr(spectral_data, "_MAX_CACHED_VERIFICATIONS", 5)
+    paths = [tmp_path / f"recording{index}.xlsx" for index in range(6)]
+    descriptors = [_write(path) for path in paths]
+    with xlsx_read_cache_scope():
+        for path in paths:
+            spectral_companion_identity(path)
+        cache = xlsx._ACTIVE_XLSX_READ_CACHE.get()
+        assert len(cache.spectral_verified_headers) == 5
+        # The second workbook retains metadata but has no dense payload.
+        companion = tmp_path / descriptors[1]["path"]
+        previous = companion.stat()
+        replacement = tmp_path / "changed.npz"
+        data = bytearray(companion.read_bytes())
+        data[-1] ^= 1
+        replacement.write_bytes(data)
+        os.utime(replacement, ns=(previous.st_atime_ns, previous.st_mtime_ns))
+        os.replace(replacement, companion)
+        with pytest.raises(SpectralDataError, match="checksum"):
+            read_xlsx_sheet_header(paths[1], sheet_name=FFT)
+
+
+def test_verified_header_budget_counts_shared_grids_once_and_limits_distinct_grids(tmp_path, monkeypatch):
+    from Main_App.io import spectral_data, xlsx_selected_reader as xlsx
+
+    monkeypatch.setattr(spectral_data, "_MAX_CACHED_HEADER_LABELS", 8)
+    shared_paths = [tmp_path / f"shared{index}.xlsx" for index in range(3)]
+    for path in shared_paths:
+        _write(path)
+    with xlsx_read_cache_scope():
+        for path in shared_paths:
+            spectral_companion_identity(path)
+        cache = xlsx._ACTIVE_XLSX_READ_CACHE.get()
+        assert len(cache.spectral_verified_headers) == 3  # 4 FFT + 3 SNR labels
+        changed = _frames()
+        changed[FFT] = changed[FFT].rename(columns={"1.0000_Hz": "1.1000_Hz"})
+        different = tmp_path / "different.xlsx"
+        descriptor = _write(different, changed)
+        assert spectral_companion_identity(different) == descriptor
+        assert len(cache.spectral_verified_headers) == 1
+        monkeypatch.setattr(spectral_data, "_MAX_CACHED_HEADER_LABELS", 1)
+        oversized = tmp_path / "oversized.xlsx"
+        descriptor = _write(oversized)
+        assert spectral_companion_identity(oversized) == descriptor
+        assert not cache.spectral_verified_headers
+        assert read_xlsx_sheet_header(oversized, sheet_name=FFT) == _frames()[FFT].columns.tolist()

@@ -77,6 +77,39 @@ def _write_full_fft_header(
     return path
 
 
+def test_grid_content_reuse_preserves_results_and_rechecks_changed_rate_or_label():
+    from Main_App.processing import full_fft_grid_qc as grid
+
+    header = ["Electrode", *[f"{index / 120:.4f}_Hz" for index in range(512)]]
+    grid._cached_grid_from_header.cache_clear()
+    expected = grid._calculate_grid_from_header(header, oddball_frequency_hz=Fraction(6, 5))
+    assert grid._grid_from_header(header, oddball_frequency_hz=Fraction(6, 5)) == expected
+    assert grid._grid_from_header(list(header), oddball_frequency_hz=Fraction(6, 5)) == expected
+    assert grid._cached_grid_from_header.cache_info().hits == 1
+    changed_rate = grid._grid_from_header(header, oddball_frequency_hz=Fraction(3, 10))
+    assert changed_rate == grid._calculate_grid_from_header(header, oddball_frequency_hz=Fraction(3, 10))
+    assert changed_rate[0] == 36 and expected[0] == 144
+    header[401] = "3.5000_Hz"
+    changed_grid = grid._grid_from_header(header, oddball_frequency_hz=Fraction(6, 5))
+    assert changed_grid == grid._calculate_grid_from_header(header, oddball_frequency_hz=Fraction(6, 5))
+    assert changed_grid[-1] is not None
+
+
+def test_grid_content_cache_is_bounded_and_oversized_or_nontext_headers_bypass_it(monkeypatch):
+    from Main_App.processing import full_fft_grid_qc as grid
+
+    grid._cached_grid_from_header.cache_clear()
+    for index in range(12):
+        header = ["Electrode", "0.0000_Hz", f"{index + 1}.0000_Hz"]
+        assert grid._grid_from_header(header, oddball_frequency_hz=Fraction(6, 5)) == grid._calculate_grid_from_header(header, oddball_frequency_hz=Fraction(6, 5))
+    assert grid._cached_grid_from_header.cache_info().currsize == 8
+    monkeypatch.setattr(grid, "_MAX_CACHED_GRID_LABELS", 2)
+    before = grid._cached_grid_from_header.cache_info()
+    for header in (["Electrode", "0.0000_Hz", "1.2000_Hz"], [None, "0.0000_Hz"]):
+        assert grid._grid_from_header(header, oddball_frequency_hz=Fraction(6, 5)) == grid._calculate_grid_from_header(header, oddball_frequency_hz=Fraction(6, 5))
+    assert grid._cached_grid_from_header.cache_info() == before
+
+
 def test_full_fft_grid_audit_flags_only_strict_majority_mismatches(
     tmp_path: Path,
 ) -> None:

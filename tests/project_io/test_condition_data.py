@@ -204,6 +204,53 @@ def test_cache_is_bounded_and_workbook_replacement_invalidates_identity(tmp_path
         assert len(xlsx._ACTIVE_XLSX_READ_CACHE.get().condition_payloads) == 4
 
 
+def test_verified_condition_schema_survives_payload_eviction_and_preserves_values(tmp_path, monkeypatch):
+    from Main_App.io import condition_data, xlsx_selected_reader as xlsx
+
+    paths = [tmp_path / f"recording{index}.xlsx" for index in range(6)]
+    descriptors = [_write(path) for path in paths]
+    with xlsx_read_cache_scope():
+        for path, descriptor in zip(paths, descriptors, strict=True):
+            assert condition_companion_identity(path) == descriptor
+        assert len(xlsx._ACTIVE_XLSX_READ_CACHE.get().condition_payloads) == 4
+
+        def unexpected_schema(*args, **kwargs):
+            pytest.fail("Unchanged verified condition schema was revalidated after eviction")
+
+        monkeypatch.setattr(condition_data, "_archive_schema", unexpected_schema)
+        for path, descriptor in zip(paths, descriptors, strict=True):
+            assert condition_companion_identity(path) == descriptor
+            assert read_condition_sheet_header(path, sheet_name=BCA) == _frames()[BCA].columns.tolist()
+            actual = read_condition_sheet(path, sheet_name=BCA)
+            np.testing.assert_array_equal(
+                actual.iloc[:, 1:].to_numpy().view(np.uint64),
+                _frames()[BCA].iloc[:, 1:].to_numpy().view(np.uint64),
+            )
+            pd.testing.assert_frame_equal(read_condition_sheet(path, sheet_name=ELIGIBILITY), _frames()[ELIGIBILITY])
+
+
+def test_evicted_condition_verification_rejects_changed_companion_and_is_bounded(tmp_path, monkeypatch):
+    from Main_App.io import condition_data, xlsx_selected_reader as xlsx
+
+    monkeypatch.setattr(condition_data, "_MAX_CACHED_VERIFICATIONS", 5)
+    paths = [tmp_path / f"recording{index}.xlsx" for index in range(6)]
+    descriptors = [_write(path) for path in paths]
+    with xlsx_read_cache_scope():
+        for path in paths:
+            condition_companion_identity(path)
+        assert len(xlsx._ACTIVE_XLSX_READ_CACHE.get().condition_verified_schemas) == 5
+        companion = tmp_path / descriptors[1]["path"]
+        previous = companion.stat()
+        replacement = tmp_path / "changed.npz"
+        data = bytearray(companion.read_bytes())
+        data[-1] ^= 1
+        replacement.write_bytes(data)
+        os.utime(replacement, ns=(previous.st_atime_ns, previous.st_mtime_ns))
+        os.replace(replacement, companion)
+        with pytest.raises(ConditionDataError, match="checksum"):
+            condition_companion_identity(paths[1])
+
+
 def test_immutable_companions_reused_and_failed_write_cleans_temporary_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     path = tmp_path / "recording.xlsx"
     first = write_condition_companion(path, _frames())

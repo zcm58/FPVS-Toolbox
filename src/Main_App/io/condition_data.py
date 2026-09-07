@@ -32,6 +32,7 @@ CONDITION_DATA_SHEET_NAMES = (
     "Spectral Eligibility", "Spectral Metric QC", "FFT and neighbors", "FFT Metadata",
 )
 _MAX_CACHED_COMPANIONS = 4
+_MAX_CACHED_VERIFICATIONS = 256
 
 
 class ConditionDataError(ValueError):
@@ -269,6 +270,15 @@ def _companion_payload(workbook: Path, descriptor: Mapping) -> _ConditionPayload
     if cache is not None and key in cache.condition_payloads:
         cache.condition_payloads.move_to_end(key)
         return cache.condition_payloads[key]
+    if cache is not None and key in cache.condition_verified_schemas:
+        # Reuse only a previously checksummed schema with unchanged workbook
+        # and companion signatures. Requested columns still validate on read.
+        cache.condition_verified_schemas.move_to_end(key)
+        payload = _ConditionPayload(identity, cache.condition_verified_schemas[key], {}, workbook_signature, signature)
+        cache.condition_payloads[key] = payload
+        while len(cache.condition_payloads) > _MAX_CACHED_COMPANIONS:
+            cache.condition_payloads.popitem(last=False)
+        return payload
     try:
         with path.open("rb") as stream:
             if hashlib.file_digest(stream, "sha256").hexdigest() != identity["sha256"]:
@@ -284,6 +294,10 @@ def _companion_payload(workbook: Path, descriptor: Mapping) -> _ConditionPayload
         raise ConditionDataError("Condition data changed while it was being read; retry the operation.")
     payload = _ConditionPayload(identity, specifications, {}, workbook_signature, signature)
     if cache is not None:
+        cache.condition_verified_schemas[key] = specifications
+        cache.condition_verified_schemas.move_to_end(key)
+        while len(cache.condition_verified_schemas) > _MAX_CACHED_VERIFICATIONS:
+            cache.condition_verified_schemas.popitem(last=False)
         cache.condition_payloads[key] = payload
         while len(cache.condition_payloads) > _MAX_CACHED_COMPANIONS:
             cache.condition_payloads.popitem(last=False)

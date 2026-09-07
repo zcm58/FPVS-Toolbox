@@ -57,8 +57,10 @@ class _RunScopedXlsxReadCache:
     )
     spectral_manifests: dict[_WorkbookSignature, dict | None] = field(default_factory=dict)
     spectral_payloads: OrderedDict[tuple, object] = field(default_factory=OrderedDict)
+    spectral_verified_headers: OrderedDict[tuple, dict] = field(default_factory=OrderedDict)
     condition_manifests: dict[_WorkbookSignature, dict | None] = field(default_factory=dict)
     condition_payloads: OrderedDict[tuple, object] = field(default_factory=OrderedDict)
+    condition_verified_schemas: OrderedDict[tuple, dict] = field(default_factory=OrderedDict)
 
 
 _ACTIVE_XLSX_READ_CACHE: ContextVar[_RunScopedXlsxReadCache | None] = ContextVar(

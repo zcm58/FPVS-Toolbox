@@ -11,6 +11,7 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import dataclass
 from fractions import Fraction
+from functools import lru_cache
 import math
 from pathlib import Path
 import re
@@ -37,6 +38,7 @@ FULL_FFT_SHEET_NAME = "FullFFT Amplitude (uV)"
 _FREQUENCY_COLUMN = re.compile(r"^\s*(-?\d+(?:\.\d+)?)_Hz\s*$")
 _DISPLAY_FREQUENCY_TOLERANCE_HZ = Fraction(1, 20_000)
 _GRID_FREQUENCY_TOLERANCE_HZ = Fraction(3, 50_000)
+_MAX_CACHED_GRID_LABELS = 32_768
 
 
 @dataclass(frozen=True, slots=True)
@@ -405,6 +407,28 @@ def _grid_from_header(
     header: Sequence[object],
     *,
     oddball_frequency_hz: Fraction,
+) -> tuple[int | None, float | None, float | None, int, str | None]:
+    # Only immutable text and the exact rate define this pure calculation.
+    # File reads and companion validation still occur for every workbook.
+    if (
+        isinstance(header, (list, tuple))
+        and len(header) <= _MAX_CACHED_GRID_LABELS
+        and all(type(value) is str for value in header)
+        and isinstance(oddball_frequency_hz, Fraction)
+    ):
+        return _cached_grid_from_header(tuple(header), oddball_frequency_hz)
+    return _calculate_grid_from_header(header, oddball_frequency_hz=oddball_frequency_hz)
+
+
+@lru_cache(maxsize=8)
+def _cached_grid_from_header(
+    header: tuple[str, ...], oddball_frequency_hz: Fraction,
+) -> tuple[int | None, float | None, float | None, int, str | None]:
+    return _calculate_grid_from_header(header, oddball_frequency_hz=oddball_frequency_hz)
+
+
+def _calculate_grid_from_header(
+    header: Sequence[object], *, oddball_frequency_hz: Fraction,
 ) -> tuple[int | None, float | None, float | None, int, str | None]:
     frequencies: list[Fraction] = []
     for value in header:

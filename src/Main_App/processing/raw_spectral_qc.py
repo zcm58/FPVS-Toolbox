@@ -999,10 +999,12 @@ def _iter_condition_spectral_amplitude_batches(
                 keepdims=True,
             )
         )
-        spectra = np.fft.rfft(centered * window, axis=1)
-        amplitudes_uv = (
-            np.abs(spectra[:, : amplitude_last_bin + 1]) * amplitude_scale
-        )
+        # Only newly allocated scratch is changed. Keep the same elementwise
+        # operations and FFT while avoiding second window/amplitude arrays.
+        centered *= window
+        spectra = np.fft.rfft(centered, axis=1)
+        amplitudes_uv = np.abs(spectra[:, : amplitude_last_bin + 1])
+        amplitudes_uv *= amplitude_scale
         del spectra, centered
         _check_condition_spectral_cancelled(should_cancel)
         yield batch_start, amplitudes_uv

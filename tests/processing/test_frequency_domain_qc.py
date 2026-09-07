@@ -74,6 +74,35 @@ def test_frequency_domain_qc_is_review_only_and_reuses_explicit_retain(tmp_path)
     assert (project.project_root / "Quality Check" / "Frequency_Domain_QC_Review.txt").is_file()
 
 
+def test_frequency_domain_qc_stage_progress_preserves_report(tmp_path, monkeypatch, caplog):
+    project = _make_project(tmp_path)
+    monkeypatch.setattr(frequency_qc, "_now_utc_iso", lambda: "2026-09-06T00:00:00Z")
+    expected = run_frequency_domain_qc_review(project)
+    messages = []
+    with caplog.at_level("INFO", logger=frequency_qc.__name__):
+        observed = run_frequency_domain_qc_review(project, log_func=messages.append)
+    assert observed == expected
+    assert [message for message in messages if message.startswith("Frequency-domain QC: ")] == [
+        "Frequency-domain QC: Checking project inputs…",
+        "Frequency-domain QC: Checking preprocessing evidence…",
+        "Frequency-domain QC: Preparing candidate harmonics…",
+        "Frequency-domain QC: Checking electrode amplitudes…",
+        "Frequency-domain QC: Comparing condition and ROI amplitudes…",
+        "Frequency-domain QC: Preparing review findings…",
+    ]
+    stages = [record for record in caplog.records
+              if record.message.startswith("frequency_domain_qc_stage_complete ")]
+    assert [record.stage for record in stages] == [
+        "canonical_inputs", "independent_evidence", "provisional_harmonics",
+        "absolute_screening", "cohort_context", "report_integrity",
+    ]
+    assert all(record.elapsed_s >= 0 for record in stages)
+    assert all(f"stage={record.stage} elapsed_s=" in record.message for record in stages)
+    starts = [record for record in caplog.records
+              if record.message.startswith("frequency_domain_qc_stage_started ")]
+    assert [record.stage for record in starts] == [record.stage for record in stages]
+
+
 def test_frequency_domain_qc_clear_manual_marks_outputs_stale(tmp_path):
     project = _make_project(tmp_path)
     report = run_frequency_domain_qc_review(project)
@@ -463,6 +492,96 @@ def test_missing_exact_independent_qc_cell_is_not_reported_as_current() -> None:
             "source_fingerprint": "source-fingerprint",
         }
     ]
+
+
+def test_condition_exclusion_survives_review_resume_and_is_reported_as_excluded(tmp_path, monkeypatch):
+    project = _make_project(tmp_path)
+    context = frequency_qc._IndependentQcContext(
+        source_identity={"status": "current", "fingerprint": "source-fingerprint"},
+        cells={
+            (pid.casefold(), condition.casefold()): {
+                "participant_id": pid, "recording_id": pid,
+                "condition_label": condition,
+                "source_evidence": {"expected_scalp_channels": ["O2", "Pz"]},
+            }
+            for pid in ("P1", "P2") for condition in ("CondA", "CondB")
+        },
+        processing_entries={},
+    )
+    monkeypatch.setattr(frequency_qc, "_load_independent_qc_context", lambda _root: context)
+    report = run_frequency_domain_qc_review(project)
+    apply_frequency_domain_qc_decision(
+        project.project_root, report,
+        review_decisions=_decisions(report, frequency_qc.DECISION_EXCLUDE_CONDITION),
+    )
+    source = project.project_root / "1 - Excel Data Files" / "CondA" / "P1_CondA_Results.xlsx"
+    original_bytes = source.read_bytes()
+    original_provisional = frequency_qc._provisional_harmonics
+    passed_inputs = []
+
+    def capture_inputs(**kwargs):
+        passed_inputs.append(kwargs)
+        return original_provisional(**kwargs)
+
+    monkeypatch.setattr(frequency_qc, "_provisional_harmonics", capture_inputs)
+    resumed = run_frequency_domain_qc_review(project)
+
+    assert len(passed_inputs) == 1
+    inputs = passed_inputs[0]
+    assert set(inputs["subject_data"]["P1"]) == {"CondB"}
+    assert inputs["expected_scalp_channels_by_subject_condition"] == {
+        ("p1", "condb"): ("O2", "Pz"),
+        ("p2", "conda"): ("O2", "Pz"),
+        ("p2", "condb"): ("O2", "Pz"),
+    }
+    excluded_rows = [row for row in resumed["cohort_relative_rows"]
+                     if row["participant_id"] == "P1" and row["condition"] == "CondA"]
+    assert excluded_rows
+    assert all(row["status"] == "excluded_by_review" for row in excluded_rows)
+    assert all(row["reason_codes"] == ["reviewed_condition_exclusion"] for row in excluded_rows)
+    assert all("sum_abs_roi_mean_uv" not in row for row in excluded_rows)
+    assert source.read_bytes() == original_bytes
+    assert resumed["technical_integrity_failed"] is False
+    # A changed cohort can require the existing bounded reconfirmation, but
+    # accepting that same scoped exclusion must settle instead of looping.
+    assert resumed["review_required"] is True
+    apply_frequency_domain_qc_decision(
+        project.project_root, resumed,
+        review_decisions=_decisions(resumed, frequency_qc.DECISION_EXCLUDE_CONDITION),
+    )
+    settled = run_frequency_domain_qc_review(project)
+    assert settled["review_required"] is False
+    assert settled["qc_complete"] is True
+    assert active_frequency_domain_exclusions(project.project_root).excluded_participant_conditions == frozenset({("P1", "CondA")})
+    sync_frequency_domain_qc_automatic_state(project.project_root, settled)
+    final_decisions = resolve_frequency_qc_coverage_decisions(project.project_root)
+    assert final_decisions.review_complete is True
+    assert final_decisions.excluded_participant_conditions == frozenset({("P1", "CondA")})
+
+
+@pytest.mark.parametrize("identity", ["P1", "P1__VISIT_1"])
+def test_expected_sources_omit_only_explicit_condition_and_preserve_other_visit(identity):
+    context = frequency_qc._IndependentQcContext(
+        source_identity={"status": "current"},
+        cells={
+            (identity.casefold(), "faces"): {"source_evidence": {"expected_scalp_channels": ["Oz"]}},
+            (identity.casefold(), "objects"): {"source_evidence": {"expected_scalp_channels": ["Oz"]}},
+            ("p1__visit_2", "faces"): {"source_evidence": {"expected_scalp_channels": ["Oz"]}},
+            ("p2", "faces"): {"source_evidence": {"expected_scalp_channels": ["Oz"]}},
+        },
+        processing_entries={},
+    )
+    original = frequency_qc._expected_scalp_channels_by_subject_condition(context)
+    current = frequency_qc._expected_scalp_channels_by_subject_condition(
+        context, excluded_conditions={(identity, "Faces")},
+    )
+    assert original is not None and current is not None
+    assert current == {key: channels for key, channels in original.items()
+                       if key != (identity.casefold(), "faces")}
+    # No file discovery/intersection is involved: unexcluded cells remain
+    # required even when their file is missing from a supplied dataset.
+    assert current[("p2", "faces")] == ("Oz",)
+    assert frequency_qc._expected_scalp_channels_by_subject_condition(context) == original
 
 
 def _make_project(tmp_path):

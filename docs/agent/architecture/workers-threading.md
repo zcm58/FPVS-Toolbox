@@ -48,6 +48,23 @@ Common long-running work:
   header-only record is independent of the standard Summed-BCA selection and
   is the common provenance gate for Free Harmonic Clustering GUI inspection
   and direct preparation.
+- Accepting the summed-BCA review starts `FrequencyDomainQcDecisionWorker`
+  through `gui/frequency_domain_qc_handoff.py`. Report/provenance generation,
+  decision persistence, and the tools-metadata reread run on that worker, never
+  in the dialog-close callback. The main shell stays on a locked "Saving QC
+  Decisions" activity page and regains focus once when the review closes. The
+  GUI bridge applies returned tools metadata and resumes the existing pipeline
+  only after the save thread exits successfully. Save errors keep downstream
+  outputs stale, show the failure, and release the run controls. Closing the
+  app is blocked until the save finishes. The shared Start/Stop action is
+  disabled only during this non-cancellable save and restored before the
+  existing continuation/finalization runs; worker progress never steals focus.
+  This changes scheduling only, not decision validation or pipeline ordering.
+  Visible smoke: accept a summed-BCA review, verify the main window and spinner
+  remain visible/responsive while saving, then verify processing resumes. A
+  save failure must show an error and leave Resume Post-processing available.
+  The delayed-save heartbeat smoke test is registered for CI; local Qt execution
+  remains prohibited.
 - Once harmonic selection succeeds, the worker activates the canonical
   selection fingerprint. A changed fingerprint marks the Stats-ready,
   full-audit, L2-MNE Hauk source-PSD map, and eLORETA Hauk source-PSD map
@@ -65,6 +82,13 @@ Common long-running work:
   replace completed per-file rows with downstream progress across frequency-
   domain QC, harmonic selection, Stats-ready export, and Hauk source-PSD map
   generation; numeric progress must not be inferred from free-form log messages.
+- Within frequency-domain QC, output readiness, ROI coverage, dataset indexing,
+  and report generation emit step-1 status messages and INFO timing records.
+  The report's friendly substage messages use structured phase progress; technical
+  details stay in the log. These timings finish before the GUI review wait and
+  never enter scientific report payloads or fingerprints. Visible smoke: verify
+  the step-1 description advances through its checks without advancing to step 2
+  or displaying technical diagnostics, then complete the unchanged review.
 - `ProjectProcessingCacheResetWorker` performs recursive cache inspection and
   deletion in a background `QThread`. The GUI confirms the exact scope first,
   then locks project navigation, the active workspace, the Start button, and

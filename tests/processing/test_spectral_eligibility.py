@@ -62,6 +62,69 @@ def _resolve(
     )
 
 
+def test_validated_domain_reuse_preserves_payload_rows_and_fingerprint(monkeypatch):
+    from Main_App.processing import spectral_eligibility as eligibility
+
+    eligibility._cached_eligibility_result.cache_clear()
+    first = _resolve()
+    expected_payload, expected_rows, expected_fingerprint = first.canonical_payload(), first.to_rows(), first.fingerprint
+    repeated = _resolve(protocol=_protocol())
+    assert repeated is first
+    assert eligibility._cached_eligibility_result.cache_info().hits == 1
+    monkeypatch.setattr(eligibility, "_MAX_CACHED_ELIGIBILITY_HARMONICS", 0)
+    uncached = _resolve()
+    assert uncached is not first
+    assert uncached.canonical_payload() == expected_payload
+    assert uncached.to_rows() == expected_rows
+    assert uncached.fingerprint == expected_fingerprint
+    expected_rows[0]["BCA Available"] = False
+    assert first.to_rows()[0]["BCA Available"] is True
+
+
+@pytest.mark.parametrize("change", ["filter", "rate", "cycles", "notch", "protocol_provenance"])
+def test_validated_domain_cache_keys_every_scientific_and_protocol_input(change):
+    from dataclasses import replace
+    from Main_App.processing import spectral_eligibility as eligibility
+
+    eligibility._cached_eligibility_result.cache_clear()
+    first = _resolve()
+    kwargs = {
+        "filter": {"low_pass": 40, "applied_low_pass": 40},
+        "rate": {"protocol": _protocol(3, 10, cycles=36)},
+        "cycles": {"protocol": _protocol(cycles=72), "n_samples": 15_360},
+        "notch": {"notch_centers": (12,)},
+        "protocol_provenance": {"protocol": replace(_protocol(), oddball_marker_code=54)},
+    }[change]
+    changed = _resolve(**kwargs)
+    assert changed is not first and changed.fingerprint != first.fingerprint
+    assert eligibility._cached_eligibility_result.cache_info().misses == 2
+
+
+def test_primed_domain_cache_still_rejects_invalid_settings_and_corrupt_export_rows():
+    import copy
+    from Main_App.processing import spectral_eligibility as eligibility
+
+    eligibility._cached_eligibility_result.cache_clear()
+    first = _resolve()
+    with pytest.raises(SpectralEligibilityError, match="Applied high-pass metadata"):
+        _resolve(applied_high_pass=0.2)
+    for field, value in (("BCA Available", False), ("Target FFT Bin", 999), ("Eligibility Fingerprint", "changed")):
+        rows = copy.deepcopy(first.to_rows())
+        rows[0][field] = value
+        with pytest.raises(SpectralEligibilityError):
+            spectral_eligibility_from_rows(rows, protocol=_protocol())
+    assert spectral_eligibility_from_rows(first.to_rows(), protocol=_protocol()).fingerprint == first.fingerprint
+
+
+def test_validated_domain_cache_has_fixed_capacity():
+    from Main_App.processing import spectral_eligibility as eligibility
+
+    eligibility._cached_eligibility_result.cache_clear()
+    for value in range(30, 50):
+        _resolve(low_pass=value, applied_low_pass=value)
+    assert eligibility._cached_eligibility_result.cache_info().currsize == 16
+
+
 def test_default_protocol_uses_filter_domain_and_exceeds_legacy_ceiling() -> None:
     result = _resolve()
 

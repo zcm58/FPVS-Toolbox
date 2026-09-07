@@ -125,6 +125,63 @@ def test_reported_failures_do_not_open_second_completion_dialog():
     assert not host.busy
 
 
+@pytest.mark.parametrize(
+    "case, expected_success",
+    [
+        ("all_worker_errors", False),
+        ("ledger_only_failure", False),
+        ("partial_success", True),
+        ("intentional_exclusions", True),
+    ],
+)
+def test_completion_does_not_report_an_entirely_failed_batch_as_success(
+    tmp_path, case, expected_success,
+):
+    failed = {"file": str(tmp_path / "P01.bdf"), "status": "error", "error": "Load failed"}
+    errors = [failed] if case in {"all_worker_errors", "partial_success"} else []
+    ledger_failures = [failed] if case == "ledger_only_failure" else []
+    results = [{"file": str(tmp_path / "P02.bdf"), "status": "ok"}] if case == "partial_success" else []
+    excluded = (
+        [{"file": failed["file"], "status": "excluded", "reason": "Manual exclusion"}]
+        if case == "intentional_exclusions" else []
+    )
+
+    def start_pipeline(host, *, on_finished):
+        on_finished()
+        return True
+
+    starter = Mock(side_effect=start_pipeline)
+    namespace = {
+        "Path": Path, "logging": logging, "logger": logging.getLogger(__name__),
+        "record_processing_results": Mock(),
+        "export_processing_qc_summary": Mock(return_value=tmp_path / "qc.xlsx"),
+        "_run_failed_results_from_ledger": lambda *_: ledger_failures,
+        "_run_condition_warning_results_from_ledger": lambda *_: [],
+        "_format_exclusion_reason": lambda result: result.get("error", result.get("reason", "")),
+        "_show_exclusion_summary_popup": Mock(), "_show_condition_warning_popup": Mock(),
+        "format_audit_summary": lambda *_: ("Preprocessed", False),
+        "_format_timing_summary": lambda *_: None,
+        "_review_interpolation_burden_before_post_processing": lambda *_: True,
+        "_start_post_processing_pipeline_after_processing": starter,
+        "BDF_RECORDING_NOT_STARTED_REASON": "bdf_recording_not_started",
+    }
+    finished = _load_function(
+        "src/Main_App/gui/processing_workflows.py", "on_processing_finished", namespace,
+    )
+    host = SimpleNamespace(
+        settings=SimpleNamespace(debug_enabled=lambda: False), validated_params={},
+        log=Mock(), _processing_plan=object(), currentProject=object(),
+        _busy_stop=Mock(), _finalize_processing=Mock(),
+    )
+    finished(host, {"results": results, "errors": errors, "excluded": excluded})
+
+    host._finalize_processing.assert_called_once_with(expected_success, cancelled=False)
+    assert starter.call_count == int(case == "partial_success")
+    host._busy_stop.assert_called_once()
+    namespace["_show_exclusion_summary_popup"].assert_called_once()
+    assert host._post_processing_failure_reason == ""
+
+
 def _post_processing_namespace():
     path = "src/Main_App/gui/processing_workflows.py"
     tree = ast.parse((REPO_ROOT / path).read_text(encoding="utf-8"))

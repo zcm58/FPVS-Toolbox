@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from fractions import Fraction
 from pathlib import Path
+from time import perf_counter
 from typing import Any
 
 import numpy as np
@@ -271,6 +272,26 @@ def run_frequency_domain_qc_review(
         if log_func is not None:
             log_func(str(message))
 
+    stage_name = ""
+    stage_started = perf_counter()
+
+    def _finish_stage() -> None:
+        if stage_name:
+            elapsed = perf_counter() - stage_started
+            logger.info(
+                "frequency_domain_qc_stage_complete stage=%s elapsed_s=%.3f",
+                stage_name, elapsed,
+                extra={"stage": stage_name, "elapsed_s": elapsed},
+            )
+
+    def _start_stage(name: str, description: str) -> None:
+        nonlocal stage_name, stage_started
+        _finish_stage()
+        stage_name, stage_started = name, perf_counter()
+        logger.info("frequency_domain_qc_stage_started stage=%s", name, extra={"stage": name})
+        _log(f"Frequency-domain QC: {description}")
+
+    _start_stage("canonical_inputs", "Checking project inputs…")
     project_root = Path(project.project_root).resolve()
     screening_settings = _experimental_summed_bca_settings(project, project_root)
     thresholds = FrequencyDomainQcThresholds.from_settings(screening_settings)
@@ -297,12 +318,19 @@ def run_frequency_domain_qc_review(
     rois = canonical_inputs.rois
     settings = canonical_inputs.settings
     active_exclusions = active_frequency_domain_exclusions(project_root)
+    condition_exclusions = (
+        active_exclusions.excluded_recording_conditions
+        if repeated_session
+        else active_exclusions.excluded_participant_conditions
+    )
     condition_electrode_exclusions = (
         active_exclusions.excluded_electrodes_by_recording_condition
         if repeated_session
         else active_exclusions.excluded_electrodes_by_participant_condition
     )
+    _start_stage("independent_evidence", "Checking preprocessing evidence…")
     independent_qc_context = _load_independent_qc_context(project_root)
+    _start_stage("provisional_harmonics", "Preparing candidate harmonics…")
     selected_harmonics, provisional_metadata = _provisional_harmonics(
         project_root=project_root,
         subjects=subjects,
@@ -337,13 +365,17 @@ def run_frequency_domain_qc_review(
             condition_electrode_exclusions
         ),
         expected_scalp_channels_by_subject_condition=(
-            _expected_scalp_channels_by_subject_condition(independent_qc_context)
+            _expected_scalp_channels_by_subject_condition(
+                independent_qc_context,
+                excluded_conditions=condition_exclusions,
+            )
         ),
     )
     _log(
         "Frequency-domain QC is reviewing provisional summed BCA values "
         f"across {len(selected_harmonics)} harmonic(s)."
     )
+    _start_stage("absolute_screening", "Checking electrode amplitudes…")
     inspection = _collect_summed_bca_flags(
         subjects=subjects,
         conditions=ordered_conditions,
@@ -368,6 +400,7 @@ def run_frequency_domain_qc_review(
         flag["harmonic_selection_fingerprint"] = harmonic_selection_fingerprint
         _attach_independent_qc_evidence(flag, independent_qc_context)
         flag["finding_fingerprint"] = _frequency_qc_finding_fingerprint(flag)
+    _start_stage("cohort_context", "Comparing condition and ROI amplitudes…")
     cohort_inspection = _collect_cohort_summed_bca_context(
         subjects=subjects,
         conditions=ordered_conditions,
@@ -381,6 +414,7 @@ def run_frequency_domain_qc_review(
         excluded_electrodes_by_subject_condition=(
             condition_electrode_exclusions
         ),
+        excluded_conditions=condition_exclusions,
     )
     cohort_flags = list(cohort_inspection.flags)
     cohort_rows = [dict(row) for row in cohort_inspection.rows]
@@ -390,6 +424,7 @@ def run_frequency_domain_qc_review(
         flag["harmonic_selection_fingerprint"] = harmonic_selection_fingerprint
         _attach_independent_qc_evidence(flag, independent_qc_context)
         flag["finding_fingerprint"] = _frequency_qc_finding_fingerprint(flag)
+    _start_stage("report_integrity", "Preparing review findings…")
     machine_findings = [*flags, *cohort_flags]
     technical_integrity_failures = list(
         inspection.technical_integrity_failures
@@ -640,6 +675,7 @@ def run_frequency_domain_qc_review(
                 "review_recording_count": len(pause_subjects),
             }
         )
+    _finish_stage()
     return report
 
 
@@ -2062,6 +2098,7 @@ def _collect_cohort_summed_bca_context(
     excluded_electrodes_by_subject_condition: Mapping[
         tuple[str, str], frozenset[str]
     ] | None = None,
+    excluded_conditions: Iterable[tuple[str, str]] = (),
 ) -> _CohortSummedBcaInspection:
     """Build optional cohort-relative context from the exact candidate list."""
 
@@ -2108,6 +2145,12 @@ def _collect_cohort_summed_bca_context(
             )
         ],
     }
+    excluded_keys = {
+        (str(identity).casefold(), str(condition).casefold())
+        for identity, condition in excluded_conditions
+    }
+    if excluded_keys:
+        cohort_payload["excluded_conditions"] = sorted(excluded_keys)
     cohort_fingerprint = _hash_payload(cohort_payload)
     if not screening_enabled:
         return _CohortSummedBcaInspection(
@@ -2133,7 +2176,10 @@ def _collect_cohort_summed_bca_context(
                 file_path=file_path,
                 recording_assignments=recording_assignments,
             )
-            if not file_path or not Path(file_path).is_file():
+            reviewed_exclusion = (
+                str(subject).casefold(), str(condition).casefold()
+            ) in excluded_keys
+            if reviewed_exclusion or not file_path or not Path(file_path).is_file():
                 for roi_name, roi_channels in roi_definitions.items():
                     rows.append(
                         {
@@ -2141,8 +2187,14 @@ def _collect_cohort_summed_bca_context(
                             **protocol_metadata,
                             "roi": roi_name,
                             "roi_electrodes": list(roi_channels),
-                            "status": "technical_input_unavailable",
-                            "reason_codes": ["source_workbook_missing"],
+                            "status": (
+                                "excluded_by_review" if reviewed_exclusion
+                                else "technical_input_unavailable"
+                            ),
+                            "reason_codes": [
+                                "reviewed_condition_exclusion" if reviewed_exclusion
+                                else "source_workbook_missing"
+                            ],
                             "roi_definition_fingerprint": roi_fingerprint,
                             "cohort_fingerprint": cohort_fingerprint,
                         }
@@ -2473,22 +2525,36 @@ def _read_bca_method_audit_rows(
         return {}
 
     rows_by_cell: dict[tuple[str, str], list[dict[str, object]]] = defaultdict(list)
-    for _, row in frame.iterrows():
-        electrode = _normalize_electrode(
-            _optional_cell_text(row.get("Electrode"))
+    if frame.columns.is_unique:
+        positions = frame.columns.get_indexer(_BCA_AUDIT_REQUIRED_COLUMNS)
+        # iterrows uses this same common-dtype array, then allocates one Series
+        # per row. Preserve its scalar values without those temporary objects.
+        row_values = (
+            tuple(values[position] if position >= 0 else None for position in positions)
+            for values in frame.to_numpy(copy=False)
         )
-        column = _exact_frequency_column(row.get("Target Frequency Exact (Hz)"))
+    else:
+        # Retain historical behavior for malformed duplicate-column inputs.
+        row_values = (
+            tuple(row.get(column) for column in _BCA_AUDIT_REQUIRED_COLUMNS)
+            for _, row in frame.iterrows()
+        )
+    for raw_electrode, raw_frequency, raw_status, raw_reasons in row_values:
+        electrode = _normalize_electrode(
+            _optional_cell_text(raw_electrode)
+        )
+        column = _exact_frequency_column(raw_frequency)
         if not electrode or not column:
             continue
         reason_codes = tuple(
             reason.strip()
-            for reason in _optional_cell_text(row.get("Reason Codes")).split(";")
+            for reason in _optional_cell_text(raw_reasons).split(";")
             if reason.strip()
         )
         rows_by_cell[(electrode, column)].append(
             {
                 "bca_status": _optional_cell_text(
-                    row.get("BCA Status")
+                    raw_status
                 ).casefold(),
                 "reason_codes": reason_codes,
             }
@@ -3757,9 +3823,20 @@ def _load_independent_qc_context(project_root: Path) -> _IndependentQcContext:
 
 def _expected_scalp_channels_by_subject_condition(
     context: _IndependentQcContext,
+    *,
+    excluded_conditions: Iterable[tuple[str, str]] = (),
 ) -> dict[tuple[str, str], tuple[str, ...]] | None:
+    # Source coverage precedes review. Only explicit whole-condition decisions
+    # remove that source from the subsequent harmonic pool; an unexplained
+    # absent file must still fail its existing required-source check.
+    excluded_keys = {
+        (str(identity).casefold(), str(condition).casefold())
+        for identity, condition in excluded_conditions
+    }
     expected: dict[tuple[str, str], tuple[str, ...]] = {}
     for key, cell in context.cells.items():
+        if key in excluded_keys:
+            continue
         source = cell.get("source_evidence")
         if not isinstance(source, Mapping):
             continue

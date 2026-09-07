@@ -28,6 +28,8 @@ SPECTRAL_COMPANION_VERSION = "numpy_spectral_companion_v1"
 SPECTRAL_MANIFEST_SHEET = "Spectral Data"
 SPECTRAL_SHEET_NAMES = ("FullFFT Amplitude (uV)", "FullSNR")
 _MAX_CACHED_COMPANIONS = 4
+_MAX_CACHED_VERIFICATIONS = 256
+_MAX_CACHED_HEADER_LABELS = 262_144
 
 
 class SpectralDataError(ValueError):
@@ -197,7 +199,7 @@ def _read_manifest(workbook: Path) -> dict | None:
     return descriptor
 
 
-def _companion_payload(workbook: Path, descriptor: Mapping) -> _SpectralPayload:
+def _companion_location(workbook: Path, descriptor: Mapping) -> tuple:
     identity = _descriptor(descriptor)
     parent = workbook.parent.resolve()
     path = parent / identity["path"]
@@ -208,6 +210,11 @@ def _companion_payload(workbook: Path, descriptor: Mapping) -> _SpectralPayload:
     if signature is None or signature.size_bytes != identity["size_bytes"]:
         raise SpectralDataError(f"Spectral companion is missing or has changed: {path.name}")
     key = (workbook_signature, signature, _json_text(identity))
+    return identity, path, workbook_signature, signature, key
+
+
+def _companion_payload(workbook: Path, descriptor: Mapping) -> _SpectralPayload:
+    identity, path, workbook_signature, signature, key = _companion_location(workbook, descriptor)
     cache = _xlsx._ACTIVE_XLSX_READ_CACHE.get()
     if cache is not None and key in cache.spectral_payloads:
         cache.spectral_payloads.move_to_end(key)
@@ -253,10 +260,39 @@ def _companion_payload(workbook: Path, descriptor: Mapping) -> _SpectralPayload:
         raise SpectralDataError("Spectral data changed while it was being read; retry the operation.")
     payload = _SpectralPayload(identity, columns, electrodes, values, metadata)
     if cache is not None:
+        # Repeated grids share immutable header tuples; keep no dense arrays in
+        # the longer-lived verification cache after the four-payload LRU evicts.
+        for name, header in columns.items():
+            for verified in cache.spectral_verified_headers.values():
+                if verified.get(name) == header:
+                    columns[name] = verified[name]
+                    break
+        cache.spectral_verified_headers[key] = dict(columns)
+        cache.spectral_verified_headers.move_to_end(key)
+        while (
+            len(cache.spectral_verified_headers) > _MAX_CACHED_VERIFICATIONS
+            or sum({
+                id(header): len(header)
+                for verified in cache.spectral_verified_headers.values()
+                for header in verified.values()
+            }.values()) > _MAX_CACHED_HEADER_LABELS
+        ):
+            cache.spectral_verified_headers.popitem(last=False)
         cache.spectral_payloads[key] = payload
         while len(cache.spectral_payloads) > _MAX_CACHED_COMPANIONS:
             cache.spectral_payloads.popitem(last=False)
     return payload
+
+
+def _verified_headers(workbook: Path, descriptor: Mapping) -> dict[str, tuple[str, ...]]:
+    # The key rechecks both current file signatures and the exact declaration.
+    # Only a completed full checksum/schema/grid validation populates this map.
+    _identity, _path, _workbook_signature, _signature, key = _companion_location(workbook, descriptor)
+    cache = _xlsx._ACTIVE_XLSX_READ_CACHE.get()
+    if cache is not None and key in cache.spectral_verified_headers:
+        cache.spectral_verified_headers.move_to_end(key)
+        return cache.spectral_verified_headers[key]
+    return _companion_payload(workbook, descriptor).columns
 
 
 def validate_spectral_companion(workbook_path: str | Path, descriptor: Mapping) -> dict:
@@ -270,7 +306,10 @@ def spectral_companion_identity(workbook_path: str | Path) -> dict | None:
 
     workbook = Path(workbook_path)
     descriptor = _read_manifest(workbook)
-    return None if descriptor is None else validate_spectral_companion(workbook, descriptor)
+    if descriptor is None:
+        return None
+    _verified_headers(workbook, descriptor)
+    return deepcopy(descriptor)
 
 
 def read_spectral_sheet_header(workbook_path: str | Path, *, sheet_name: str = SPECTRAL_SHEET_NAMES[0]) -> list[object]:
@@ -278,10 +317,10 @@ def read_spectral_sheet_header(workbook_path: str | Path, *, sheet_name: str = S
     descriptor = _read_manifest(workbook)
     if descriptor is None:
         return _xlsx._read_xlsx_sheet_header_raw(workbook, sheet_name=sheet_name)
-    payload = _companion_payload(workbook, descriptor)
-    if sheet_name not in payload.columns:
+    columns = _verified_headers(workbook, descriptor)
+    if sheet_name not in columns:
         raise SpectralDataError(f"Spectral companion has no sheet named {sheet_name!r}.")
-    return list(payload.columns[sheet_name])
+    return list(columns[sheet_name])
 
 
 def read_spectral_sheet_selected_columns(

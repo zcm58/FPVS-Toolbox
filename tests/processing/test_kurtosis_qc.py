@@ -9,6 +9,7 @@ import numpy as np
 import pytest
 
 from Main_App.io.eeg_geometry import BIOSEMI64_CHANNELS, biosemi64_geometry_identity
+from Main_App.processing import kurtosis_qc as qc_module
 from Main_App.processing.analysis_spans import (
     ANALYSIS_SPAN_COORDINATE_VERSION,
     ANALYSIS_SPAN_PLAN_VERSION,
@@ -811,3 +812,44 @@ def test_manual_reason_is_optional_and_normalized_before_fingerprinting(reason, 
     named_plan = build_kurtosis_decision_plan(evidence, review_decisions={channel: receipt}, review_scope=scope)
     assert blank_plan.fingerprint == named_plan.fingerprint
     assert blank_plan.channel_decisions[0].review_receipt.reason == "No reason provided"
+
+
+def test_qc_serialization_matches_original_payload_and_builds_each_channel_once(monkeypatch):
+    evidence = _evidence(data=_data(channel_count=64))
+    objects = (
+        CURRENT_KURTOSIS_CORROBORATOR_REGISTRY, evidence.reference_distribution,
+        evidence.channels[0], evidence,
+        build_kurtosis_decision_plan(evidence, kurtosis_auto_interpolate_all=False),
+        build_kurtosis_decision_plan(evidence, kurtosis_auto_interpolate_all=True),
+    )
+    # Original to_payload assembled the core and independently recalculated
+    # the property fingerprint from a second full identity-payload traversal.
+    expected = [{**item._identity_payload(), "fingerprint": item.fingerprint} for item in objects]
+    assert [item.to_payload() for item in objects] == expected
+
+    calls = []
+    original_identity = qc_module.KurtosisChannelEvidence._identity_payload
+
+    def counted_identity(item):
+        calls.append(item.channel)
+        return original_identity(item)
+
+    monkeypatch.setattr(qc_module.KurtosisChannelEvidence, "_identity_payload", counted_identity)
+    assert evidence.to_payload() == expected[3]
+    assert calls == [item.channel for item in evidence.channels]
+
+
+def test_qc_serialization_revalidates_mutable_evidence_each_call():
+    evidence = _evidence()
+    original = evidence.to_payload()
+    # Frozen evidence still owns nested mappings; no fingerprint may persist
+    # across calls after their content changes.
+    evidence.filter_identity["high_pass_hz"] = 0.2
+    changed = evidence.to_payload()
+
+    assert original["filter_identity"]["high_pass_hz"] == 0.1
+    assert changed["filter_identity"]["high_pass_hz"] == 0.2
+    assert changed["fingerprint"] != original["fingerprint"]
+    assert changed["fingerprint"] == _fingerprint({key: value for key, value in changed.items() if key != "fingerprint"})
+    changed["channels"][0]["raw_kurtosis"] = -100.0
+    assert evidence.to_payload()["channels"][0]["raw_kurtosis"] == evidence.channels[0].raw_kurtosis

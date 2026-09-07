@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass
+import json
+from dataclasses import dataclass, replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -23,6 +24,7 @@ from Main_App.processing.roi_coverage import (
     ROI_VALUE_AVAILABLE,
     ROI_VALUE_UNAVAILABLE,
     RoiCoverageGateError,
+    RoiCoverageLedger,
     build_final_roi_coverage,
     build_pre_review_roi_coverage,
     load_final_release_receipt,
@@ -168,6 +170,120 @@ def _snapshot():
     return build_roi_definition_snapshot(
         [("Posterior", ["Oz", "O1"]), ("Frontal", ["Fp1"])]
     )
+
+
+def _real_decisions(**exclusions):
+    values = dict(
+        decision_fingerprint="review-fingerprint", review_complete=True,
+        excluded_participants=frozenset(), excluded_recordings=frozenset(),
+        excluded_participant_conditions=frozenset(), excluded_recording_conditions=frozenset(),
+        excluded_electrodes_by_participant_condition={},
+        excluded_electrodes_by_recording_condition={}, reviewed_decisions=(),
+    )
+    values.update(exclusions)
+    return frequency_domain_qc.FrequencyDomainCoverageDecisions(**values)
+
+
+@pytest.mark.parametrize("scope", [
+    "participant", "recording", "participant_condition", "recording_condition",
+    "participant_electrode", "recording_electrode",
+])
+def test_real_qc_decisions_and_durable_payload_preserve_exact_exclusion_scope(tmp_path, scope):
+    identities = (
+        ("P01__visit_1", "P01", "Faces"), ("P01__visit_1", "P01", "Objects"),
+        ("P01__visit_2", "P01", "Faces"), ("P02__visit_1", "P02", "Faces"),
+    )
+    cells = []
+    originals = {}
+    for recording, participant, condition in identities:
+        source = tmp_path / f"{recording}_{condition}.xlsx"
+        _write_source(source)
+        originals[source] = source.read_bytes()
+        cells.append(_cell(source, recording=recording, participant=participant, condition=condition))
+    outcomes = _outcomes(*cells)
+    pre = build_pre_review_roi_coverage(
+        tmp_path, outcome_ledger=outcomes,
+        processing_ledger=_processing_ledger("P01__visit_1", "P01__visit_2", "P02__visit_1"),
+        roi_snapshot=_snapshot(), persist=False,
+    )
+    changes = {
+        "participant": {"excluded_participants": frozenset({"p01"})},
+        "recording": {"excluded_recordings": frozenset({"p01__visit_1"})},
+        "participant_condition": {"excluded_participant_conditions": frozenset({("p01", "fAcEs")})},
+        "recording_condition": {"excluded_recording_conditions": frozenset({("p01__visit_1", "fAcEs")})},
+        "participant_electrode": {"excluded_electrodes_by_participant_condition": {("p01", "fAcEs"): frozenset({"Oz"})}},
+        "recording_electrode": {"excluded_electrodes_by_recording_condition": {("p01__visit_1", "fAcEs"): frozenset({"Oz"})}},
+    }[scope]
+    decisions = _real_decisions(**changes)
+    affected = {
+        "participant": {0, 1, 2}, "recording": {0, 1},
+        "participant_condition": {0, 2}, "recording_condition": {0},
+        "participant_electrode": {0, 2}, "recording_electrode": {0},
+    }[scope]
+    whole_cell = not scope.endswith("electrode")
+    observed_payloads = []
+    for representation in (decisions, json.loads(json.dumps(decisions.to_payload()))):
+        final = build_final_roi_coverage(
+            tmp_path, outcome_ledger=outcomes, frequency_decisions=representation,
+            pre_review_coverage=pre, persist=False,
+        )
+        observed_payloads.append(final.to_payload())
+        for index, cell in enumerate(final.cells):
+            is_affected = index in affected
+            assert cell.outcome_status == CELL_READY
+            assert cell.source_evidence == pre.cells[index].source_evidence
+            assert cell.downstream_cell_excluded is (is_affected and whole_cell)
+            assert cell.decision_reason_codes == (
+                (f"reviewed_{scope}_exclusion",) if is_affected and whole_cell else ()
+            )
+            by_roi = {roi.roi_name: roi for roi in cell.roi_memberships}
+            assert by_roi["Posterior"].status == (ROI_VALUE_UNAVAILABLE if is_affected else ROI_VALUE_AVAILABLE)
+            assert by_roi["Frontal"].status == (
+                ROI_VALUE_UNAVAILABLE if is_affected and whole_cell else ROI_VALUE_AVAILABLE
+            )
+            assert by_roi["Posterior"].excluded_channels == (("Oz",) if is_affected and not whole_cell else ())
+            assert cell.whole_scalp_normalization.status == (ROI_VALUE_UNAVAILABLE if is_affected else ROI_VALUE_AVAILABLE)
+        require_final_release_readiness(outcomes, final, expected_decision_fingerprint=decisions.decision_fingerprint)
+    assert observed_payloads[0] == observed_payloads[1]
+    assert all(path.read_bytes() == original for path, original in originals.items())
+
+
+@pytest.mark.parametrize("scope", ["participant_condition", "recording_condition", "none"])
+def test_hash_valid_old_coverage_must_agree_with_canonical_condition_decisions(tmp_path, scope):
+    source = tmp_path / "Faces.xlsx"
+    _write_source(source)
+    outcomes = _outcomes(_cell(source))
+    pre = build_pre_review_roi_coverage(
+        tmp_path, outcome_ledger=outcomes, processing_ledger=_processing_ledger("P01__visit_1"),
+        roi_snapshot=_snapshot(), persist=False,
+    )
+    changes = {
+        "participant_condition": {"excluded_participant_conditions": frozenset({("P01", "Faces")})},
+        "recording_condition": {"excluded_recording_conditions": frozenset({("P01__visit_1", "Faces")})},
+        "none": {},
+    }[scope]
+    decisions = _real_decisions(**changes)
+    correct = build_final_roi_coverage(
+        tmp_path, outcome_ledger=outcomes, frequency_decisions=decisions,
+        pre_review_coverage=pre, persist=False,
+    )
+    # Earlier coverage could be consistently hashed while silently ignoring
+    # canonical condition pair sets. Also reject an unjustified exclusion.
+    contradicted_cell = (
+        pre.cells[0] if scope != "none"
+        else replace(correct.cells[0], downstream_cell_excluded=True)
+    )
+    old = replace(correct, cells=(contradicted_cell,))
+    restored = RoiCoverageLedger.from_payload(json.loads(json.dumps(old.to_payload())))
+    assert restored.fingerprint == old.fingerprint
+    with pytest.raises(RoiCoverageGateError, match="Rerun reviewed post-processing"):
+        require_final_release_readiness(
+            outcomes, restored, expected_decision_fingerprint=decisions.decision_fingerprint,
+        )
+    receipt = require_final_release_readiness(
+        outcomes, correct, expected_decision_fingerprint=decisions.decision_fingerprint,
+    )
+    assert receipt.roi_coverage_fingerprint == correct.fingerprint
 
 
 def test_pre_review_persists_exact_source_and_interpolation_provenance(tmp_path):
@@ -330,7 +446,8 @@ def test_final_release_rejects_a_different_review_fingerprint(tmp_path):
 
 @pytest.mark.parametrize("artifact", ["workbook", "condition_companion", "spectral_companion"])
 @pytest.mark.parametrize("failure", ["missing", "changed"])
-def test_current_final_release_rejects_a_changed_source_workbook(tmp_path, artifact, failure):
+@pytest.mark.parametrize("condition_excluded", [False, True])
+def test_current_final_release_rejects_a_changed_source_workbook(tmp_path, artifact, failure, condition_excluded):
     from Main_App.Shared.post_process_excel import write_results_workbook
 
     source = tmp_path / "Faces.xlsx"
@@ -361,9 +478,12 @@ def test_current_final_release_rejects_a_changed_source_workbook(tmp_path, artif
     final = build_final_roi_coverage(
         tmp_path,
         outcome_ledger=outcomes,
-        frequency_decisions=_Decisions(),
+        frequency_decisions=_real_decisions(excluded_recording_conditions=(
+            frozenset({("P01__visit_1", "Faces")}) if condition_excluded else frozenset()
+        )),
         pre_review_coverage=pre,
     )
+    assert final.cells[0].downstream_cell_excluded is condition_excluded
     record_final_release_readiness(
         tmp_path,
         outcomes,

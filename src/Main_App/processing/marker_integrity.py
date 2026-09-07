@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from bisect import bisect_left, bisect_right
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
@@ -458,25 +459,36 @@ def _interval_findings(
     oddball_rate_hz: Fraction,
 ) -> tuple[MarkerIntervalFinding, ...]:
     findings: list[MarkerIntervalFinding] = []
+    by_delta: dict[int, tuple[Fraction, Fraction, Fraction, bool, bool, int]] = {}
     for start, stop in zip(samples, samples[1:], strict=False):
         delta = int(stop) - int(start)
-        interval_cycles = Fraction(delta) * oddball_rate_hz / sampling_rate_hz
-        nearest_cycles = _round_positive_fraction(interval_cycles)
-        missing = interval_cycles > MISSING_MARKER_BOUNDARY_CYCLES
-        early = interval_cycles < EARLY_MARKER_BOUNDARY_CYCLES
+        # Equal integer spacings have identical immutable Fraction evidence.
+        # Reuse it only within this call, whose two exact rates are fixed.
+        interval = by_delta.get(delta)
+        if interval is None:
+            interval_cycles = Fraction(delta) * oddball_rate_hz / sampling_rate_hz
+            nearest_cycles = _round_positive_fraction(interval_cycles)
+            missing = interval_cycles > MISSING_MARKER_BOUNDARY_CYCLES
+            interval = (
+                Fraction(delta) / sampling_rate_hz,
+                interval_cycles,
+                interval_cycles - nearest_cycles,
+                interval_cycles < EARLY_MARKER_BOUNDARY_CYCLES,
+                missing,
+                max(1, nearest_cycles - 1) if missing else 0,
+            )
+            by_delta[delta] = interval
         findings.append(
             MarkerIntervalFinding(
                 start_sample=int(start),
                 stop_sample=int(stop),
                 interval_samples=delta,
-                interval_seconds=Fraction(delta) / sampling_rate_hz,
-                interval_cycles=interval_cycles,
-                phase_residual_cycles=interval_cycles - nearest_cycles,
-                early_or_extra_marker=early,
-                missing_marker_gap=missing,
-                estimated_missing_markers=(
-                    max(1, nearest_cycles - 1) if missing else 0
-                ),
+                interval_seconds=interval[0],
+                interval_cycles=interval[1],
+                phase_residual_cycles=interval[2],
+                early_or_extra_marker=interval[3],
+                missing_marker_gap=interval[4],
+                estimated_missing_markers=interval[5],
             )
         )
     return tuple(findings)
@@ -578,6 +590,9 @@ def build_marker_integrity_plan(
         )
 
     marker_code = int(protocol.oddball_marker_code)
+    marker_samples = tuple(
+        int(row[0]) for row in normalized if int(row[2]) == marker_code
+    )
     expected_interval_samples = sample_rate / protocol.oddball_rate_hz
     repetition_counts: dict[int, int] = defaultdict(int)
     occurrences: list[MarkerOccurrencePlan] = []
@@ -595,12 +610,12 @@ def build_marker_integrity_plan(
             if index + 1 < len(onset_rows)
             else recording_stop
         )
-        raw_samples = tuple(
-            int(row[0])
-            for row in normalized
-            if onset_sample < int(row[0]) < block_stop
-            and int(row[2]) == marker_code
-        )
+        # Normalization already sorted these integer samples stably. Preserve
+        # the original open interval and every duplicate without rescanning
+        # all recording events for each condition occurrence.
+        raw_samples = marker_samples[
+            bisect_right(marker_samples, onset_sample):bisect_left(marker_samples, block_stop)
+        ]
         retained_samples, duplicate_groups = _deduplicate_exact_samples(raw_samples)
         intervals = _interval_findings(
             retained_samples,

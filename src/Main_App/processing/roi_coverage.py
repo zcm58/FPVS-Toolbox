@@ -1432,23 +1432,41 @@ def _decision_attribute(value: object, name: str, default: object) -> object:
     return getattr(value, name, default)
 
 
-def _decision_pairs(value: object) -> dict[tuple[str, str], object]:
-    if not isinstance(value, Mapping):
+def _decision_pairs(
+    value: object, *, identity_field: str,
+) -> dict[tuple[str, str], object]:
+    """Read tuple-key adapters, authoritative pair sets, or durable QC rows."""
+    if isinstance(value, Mapping):
+        entries = value.items()
+    elif isinstance(value, Iterable) and not isinstance(value, (str, bytes, bytearray)):
+        entries = (
+            (
+                (item.get(identity_field), item.get("condition")),
+                item.get("electrodes", True),
+            )
+            if isinstance(item, Mapping)
+            else (item, True)
+            for item in value
+        )
+    else:
         return {}
     result: dict[tuple[str, str], object] = {}
-    for raw_key, payload in value.items():
+    for raw_key, payload in entries:
         if (
             not isinstance(raw_key, Sequence)
             or isinstance(raw_key, (str, bytes))
             or len(raw_key) != 2
+            or any(part is None or not str(part).strip() for part in raw_key)
         ):
             continue
         result[(str(raw_key[0]).casefold(), str(raw_key[1]).casefold())] = payload
     return result
 
 
-def _decision_channel_pairs(value: object) -> dict[tuple[str, str], frozenset[str]]:
-    pairs = _decision_pairs(value)
+def _decision_channel_pairs(
+    value: object, *, identity_field: str,
+) -> dict[tuple[str, str], frozenset[str]]:
+    pairs = _decision_pairs(value, identity_field=identity_field)
     return {
         key: frozenset(
             _normalize_scalp_channels(
@@ -1510,24 +1528,28 @@ def _cell_decisions(
         _decision_attribute(decisions, "excluded_participants", ())
     )
     recording_conditions = _decision_pairs(
-        _decision_attribute(decisions, "excluded_recording_conditions", {})
+        _decision_attribute(decisions, "excluded_recording_conditions", {}),
+        identity_field="recording_id",
     )
     participant_conditions = _decision_pairs(
-        _decision_attribute(decisions, "excluded_participant_conditions", {})
+        _decision_attribute(decisions, "excluded_participant_conditions", {}),
+        identity_field="participant_id",
     )
     recording_electrodes = _decision_channel_pairs(
         _decision_attribute(
             decisions,
             "excluded_electrodes_by_recording_condition",
             {},
-        )
+        ),
+        identity_field="recording_id",
     )
     participant_electrodes = _decision_channel_pairs(
         _decision_attribute(
             decisions,
             "excluded_electrodes_by_participant_condition",
             {},
-        )
+        ),
+        identity_field="participant_id",
     )
     reasons: list[str] = []
     if recording_key in excluded_recordings:
@@ -1798,6 +1820,10 @@ def require_final_release_readiness(
         raise RoiCoverageGateError(
             "QC-20 final release has stale QC-03/QC-17 reviewed decisions."
         )
+    canonical_decisions = all(
+        key in final_coverage.decision_payload
+        for key in ("excluded_participant_conditions", "excluded_recording_conditions")
+    )
     for cell in final_coverage.cells:
         if cell.outcome_status == CELL_BLOCKED:
             raise RoiCoverageGateError(
@@ -1813,6 +1839,19 @@ def require_final_release_readiness(
             raise RoiCoverageGateError(
                 f"QC-21 ROI coverage is incomplete for {cell.cell_id}."
             )
+        if canonical_decisions:
+            excluded, _, _ = _cell_decisions(
+                final_coverage.decision_payload,
+                recording_id=cell.recording_id,
+                participant_id=cell.participant_id,
+                condition_label=cell.condition_label,
+            )
+            if cell.downstream_cell_excluded != excluded:
+                raise RoiCoverageGateError(
+                    "Saved ROI coverage does not match the reviewed condition exclusions "
+                    f"for {cell.recording_id}/{cell.condition_label}. "
+                    "Rerun reviewed post-processing."
+                )
     return FinalReleaseReceipt(
         outcome_ledger_fingerprint=outcomes.fingerprint,
         roi_coverage_fingerprint=final_coverage.fingerprint,
