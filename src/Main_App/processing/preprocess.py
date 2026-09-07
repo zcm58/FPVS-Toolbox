@@ -61,6 +61,10 @@ from Main_App.processing.kurtosis_qc import (
 from Main_App.processing.prepared_kurtosis_cache import (
     checkpoint_identity, load_checkpoint, save_checkpoint,
 )
+from Main_App.processing.condition_electrode_interpolation import (
+    apply_condition_repairs,
+    prepare_condition_repairs,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -641,6 +645,8 @@ def _finish_preprocessing_at_kurtosis(
     params.pop("_fpvs_kurtosis_decision_plan", None)
     params.pop("_fpvs_kurtosis_signal_preview", None)
     params["_fpvs_interpolated_channels"] = []
+    params.pop("_fpvs_condition_interpolation_provenance", None)
+    condition_repairs = None
     bad_k_auto: List[str] = []
     if reject_thresh:
         log_func(
@@ -797,6 +803,7 @@ def _finish_preprocessing_at_kurtosis(
                     extra={"file": filename_for_log, "n_eeg_picks": len(eeg_picks)},
                 )
 
+        condition_repairs = prepare_condition_repairs(raw, params)
         _interpolate_current_bads(
             raw,
             params,
@@ -810,6 +817,7 @@ def _finish_preprocessing_at_kurtosis(
         )
         if debug_enabled:
             logger.debug("kurtosis_skipped_no_threshold", extra={"file": filename_for_log})
+        condition_repairs = prepare_condition_repairs(raw, params)
         _interpolate_current_bads(
             raw,
             params,
@@ -832,6 +840,7 @@ def _finish_preprocessing_at_kurtosis(
         )
 
     # 8) Average reference (final)
+    average_reference_applied = False
     try:
         log_func(f"Applying average reference to {filename_for_log}...")
         eeg_picks_for_ref = mne.pick_types(
@@ -844,6 +853,7 @@ def _finish_preprocessing_at_kurtosis(
                 verbose=False,
             )
             raw.apply_proj(verbose=False)
+            average_reference_applied = True
             log_func(
                 f"Average reference applied to {filename_for_log}."
             )
@@ -856,6 +866,14 @@ def _finish_preprocessing_at_kurtosis(
         log_func(
             f"Warn: Average reference failed for {filename_for_log}: {e}"
         )
+
+    if condition_repairs is not None:
+        if not average_reference_applied:
+            raise RuntimeError("Condition-local interpolation requires successful final average reference.")
+        params["_fpvs_condition_interpolation_provenance"] = apply_condition_repairs(
+            raw, condition_repairs,
+        )
+        log_func(f"Applied condition-local electrode repairs in the exact analyzed intervals for {filename_for_log}.")
 
     # Final reference state debug (after whole pipeline)
     try:

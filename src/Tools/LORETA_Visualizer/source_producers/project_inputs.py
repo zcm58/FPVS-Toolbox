@@ -394,22 +394,35 @@ def _read_metric_sheet(
     selected_harmonics: tuple[float, ...],
     expected_electrodes: tuple[str, ...],
 ) -> dict[float, np.ndarray]:
-    columns = ["Electrode", *(f"{harmonic:.4f}_Hz" for harmonic in selected_harmonics)]
-    workbook = openpyxl.load_workbook(workbook_path, read_only=True, data_only=True)
-    try:
-        worksheet = workbook[sheet_name]
-        rows = worksheet.iter_rows(values_only=True)
-        header = [str(value) if value is not None else "" for value in next(rows)]
-        indexes = _column_indexes(header, columns, workbook_path=workbook_path, sheet_name=sheet_name)
-        data: list[list[object]] = []
-        for row in rows:
-            if row is None or row[indexes[0]] is None:
-                continue
-            data.append([row[index] for index in indexes])
-    finally:
-        workbook.close()
+    from Main_App.io import read_xlsx_sheet_selected_columns
+    from Main_App.io.condition_data import declared_condition_companion
+    from Main_App.io.result_manifest import is_result_manifest
 
-    frame = pd.DataFrame(data, columns=columns)
+    columns = ["Electrode", *(f"{harmonic:.4f}_Hz" for harmonic in selected_harmonics)]
+    if is_result_manifest(workbook_path) or declared_condition_companion(workbook_path) is not None:
+        frame = read_xlsx_sheet_selected_columns(
+            workbook_path, sheet_name=sheet_name,
+            required_columns=columns, require_all=False,
+        )
+        _column_indexes(
+            list(frame.columns), columns, workbook_path=workbook_path, sheet_name=sheet_name,
+        )
+        frame = frame.loc[frame["Electrode"].notna(), columns]
+    else:
+        workbook = openpyxl.load_workbook(workbook_path, read_only=True, data_only=True)
+        try:
+            worksheet = workbook[sheet_name]
+            rows = worksheet.iter_rows(values_only=True)
+            header = [str(value) if value is not None else "" for value in next(rows)]
+            indexes = _column_indexes(header, columns, workbook_path=workbook_path, sheet_name=sheet_name)
+            data: list[list[object]] = []
+            for row in rows:
+                if row is None or row[indexes[0]] is None:
+                    continue
+                data.append([row[index] for index in indexes])
+        finally:
+            workbook.close()
+        frame = pd.DataFrame(data, columns=columns)
     if len(frame) != len(expected_electrodes):
         raise ValueError(f"{workbook_path.name} {sheet_name} expected {len(expected_electrodes)} electrode rows.")
     electrodes = tuple(str(value).upper() for value in frame["Electrode"].tolist())

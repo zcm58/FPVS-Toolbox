@@ -1,7 +1,7 @@
 """Lossless, uncompressed compact metrics and audit tables beside workbooks.
 
-Only a workbook's explicit ``Condition Data`` manifest selects a companion.
-Historical workbooks and undeclared report sheets retain their XLSX readers.
+Only an explicit native result declaration or workbook ``Condition Data``
+manifest selects a companion. Historical report sheets retain XLSX readers.
 """
 
 from __future__ import annotations
@@ -147,6 +147,10 @@ def condition_manifest_frame(descriptor: Mapping) -> pd.DataFrame:
 
 
 def _read_manifest(workbook: Path) -> dict | None:
+    from Main_App.io.result_manifest import is_result_manifest, read_result_manifest
+
+    if is_result_manifest(workbook):
+        return read_result_manifest(workbook)["condition_companion"]
     signature = _xlsx._workbook_signature_or_none(workbook)
     cache = _xlsx._ACTIVE_XLSX_READ_CACHE.get()
     if cache is not None and signature is not None and signature in cache.condition_manifests:
@@ -413,6 +417,7 @@ def read_condition_sheet(workbook_path: str | Path, *, sheet_name: str) -> pd.Da
     workbook = Path(workbook_path)
     descriptor = _read_manifest(workbook)
     if descriptor is None or sheet_name not in descriptor["sheets"]:
+        _xlsx._reject_native_excel_fallback(workbook, sheet_name)
         return pd.read_excel(workbook, sheet_name=sheet_name)
     payload = _companion_payload(workbook, descriptor)
     return _payload_columns(workbook, payload, sheet_name, payload.specifications[sheet_name]["columns"])

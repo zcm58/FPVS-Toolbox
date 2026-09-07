@@ -184,6 +184,26 @@ def _real_decisions(**exclusions):
     return frequency_domain_qc.FrequencyDomainCoverageDecisions(**values)
 
 
+def test_condition_repair_coverage_is_attributed_only_to_its_condition(tmp_path):
+    paths = [tmp_path / "Faces.xlsx", tmp_path / "Objects.xlsx"]
+    for path in paths:
+        _write_source(path)
+    faces = _cell(paths[0], condition="Faces")
+    faces = replace(faces, export_receipt={**faces.export_receipt,
+        "condition_electrode_interpolation": {
+            "version": "condition_electrode_interpolation_v1", "status": "completed",
+            "fingerprint": "completed-proof", "interpolated_channels": ["Fp1", "Oz"],
+            "requested_channels": ["Oz"], "spans": [{"condition_label": "Faces"}],
+        }})
+    objects = _cell(paths[1], condition="Objects")
+    coverage = build_pre_review_roi_coverage(tmp_path, outcome_ledger=_outcomes(faces, objects),
+        processing_ledger=_processing_ledger("P01__visit_1", interpolated=("Fp1",)),
+        roi_snapshot=_snapshot(), persist=False)
+    by_condition = {cell.condition_label: cell for cell in coverage.cells}
+    assert set(by_condition["Faces"].source_evidence.successfully_interpolated_channels) == {"Fp1", "Oz"}
+    assert by_condition["Objects"].source_evidence.successfully_interpolated_channels == ("Fp1",)
+
+
 @pytest.mark.parametrize("scope", [
     "participant", "recording", "participant_condition", "recording_condition",
     "participant_electrode", "recording_electrode",

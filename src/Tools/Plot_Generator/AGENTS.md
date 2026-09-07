@@ -108,6 +108,11 @@ v2.1 project contract:
   present. Never recreate it from FullFFT. Both spectral sheets in a plot run
   must use the captured input snapshot, and source checks must validate the
   workbook's same-directory companion declaration as well as workbook bytes.
+- Snapshot capture shares one freshly validated companion payload between its
+  two spectral-sheet reads. Keep independent fresh before/after validation,
+  including post-read verification inside a caller's existing cache scope.
+  Native `.fpvs` declarations use the same captured spectra without an Excel
+  archive; malformed native declarations must fail rather than fall back.
 - Read processing-owned Spectral Eligibility through the shared condition
   companion reader. Include that companion in captured and verified source
   identities; a missing or invalid declaration must block publication rather

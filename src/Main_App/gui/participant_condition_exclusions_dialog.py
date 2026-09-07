@@ -4,23 +4,32 @@ from __future__ import annotations
 
 from typing import Mapping, Sequence
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSignalBlocker, Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
-    QDialog,
-    QDialogButtonBox,
+    QHBoxLayout,
     QHeaderView,
     QLabel,
+    QLineEdit,
+    QPlainTextEdit,
+    QSizePolicy,
+    QSplitter,
+    QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
+    QWidget,
 )
 
-from Main_App.processing.full_fft_grid_qc import (
-    FullFftGridAudit,
-    FullFftGridObservation,
+from Main_App.gui.components import (
+    ActionRow, AppDialog, StatusBanner, SubsectionHeaderLabel, SurfaceSize,
+    make_action_button,
 )
+from Main_App.gui.condition_exclusion_review_model import (
+    evidence_text, needs_attention, reference_text, status_label,
+)
+from Main_App.processing.full_fft_grid_qc import FullFftGridAudit
 from Main_App.processing.missing_condition_outputs import MissingConditionOutput
 from Main_App.projects.preprocessing_settings import (
     normalize_manual_excluded_participant_conditions,
@@ -31,7 +40,7 @@ _SCOPE_RECORDING = "recording"
 _SCOPE_PARTICIPANT = "participant"
 
 
-class ParticipantConditionExclusionsDialog(QDialog):
+class ParticipantConditionExclusionsDialog(AppDialog):
     """Review FullFFT grids and choose downstream participant-condition omissions."""
 
     def __init__(
@@ -42,150 +51,150 @@ class ParticipantConditionExclusionsDialog(QDialog):
         *,
         excluded_recording_conditions: Mapping[str, Sequence[str]] | None = None,
     ) -> None:
-        super().__init__(parent)
+        super().__init__(
+            "Participant-Condition FFT Crop Exclusions", parent,
+            size=SurfaceSize(1180, 760, min_width=1000, min_height=650),
+        )
+        self.setObjectName("participant_condition_exclusions_dialog")
         self._audit = audit
         self._observations = audit.review_rows
-        self.setWindowTitle("Participant-Condition FFT Crop Exclusions")
-        self.setObjectName("participant_condition_exclusions_dialog")
-        self._recording_aware = any(
-            observation.recording_id for observation in self._observations
-        )
-        self.resize(1180 if self._recording_aware else 1040, 620 if self._recording_aware else 560)
-
-        existing = normalize_manual_excluded_participant_conditions(
+        self._recording_aware = any(row.recording_id for row in self._observations)
+        self._existing = normalize_manual_excluded_participant_conditions(
             excluded_participant_conditions
         )
-        self._existing = existing
-        existing_recordings = normalize_manual_excluded_recording_conditions(
+        self._existing_recordings = normalize_manual_excluded_recording_conditions(
             excluded_recording_conditions
         )
-        self._existing_recordings = existing_recordings
+        self._scope_controls: dict[int, QComboBox] = {}
+        self._exclude_column = 4
+        self._attention = [needs_attention(row, audit) for row in self._observations]
+        self._evidence = [evidence_text(row, audit) for row in self._observations]
+        self._build_ui()
+        self._populate_rows()
+        self.table.currentCellChanged.connect(self._show_observation)
+        self.table.itemChanged.connect(self._selection_changed)
+        self.search_edit.textChanged.connect(self._filter_rows)
+        self.view_combo.currentIndexChanged.connect(self._filter_rows)
+        self._filter_rows()
+
+    def _build_ui(self) -> None:
+        layout = self.root_layout
+        layout.addWidget(StatusBanner(
+            "Review missing outputs or different FFT lengths. Check Exclude to omit "
+            "that condition from downstream analysis; original files are kept.",
+            self, variant="warning" if any(self._attention) else "info",
+        ))
+        reference = QLabel(reference_text(self._audit), self)
+        reference.setObjectName("condition_exclusion_reference")
+        reference.setWordWrap(True)
+        layout.addWidget(reference)
+
+        self.splitter = QSplitter(Qt.Horizontal, self)
+        self.splitter.setChildrenCollapsible(False)
+        layout.addWidget(self.splitter, 1)
+        list_panel = QWidget(self.splitter)
+        list_panel.setMinimumWidth(520)
+        list_layout = QVBoxLayout(list_panel)
+        list_layout.setContentsMargins(0, 0, 0, 0)
+        list_layout.addWidget(SubsectionHeaderLabel("Conditions", list_panel))
+        filters = QHBoxLayout()
+        self.view_combo = QComboBox(list_panel)
+        self.view_combo.setObjectName("condition_exclusion_view")
+        self.view_combo.setAccessibleName("Conditions to show")
+        self.view_combo.addItem("Needs attention", "attention")
+        self.view_combo.addItem("All conditions", "all")
+        self.view_combo.addItem("Selected exclusions", "excluded")
+        self.view_combo.setCurrentIndex(0 if any(self._attention) else 1)
+        filters.addWidget(self.view_combo)
+        self.search_edit = QLineEdit(list_panel)
+        self.search_edit.setObjectName("condition_exclusion_search")
+        self.search_edit.setPlaceholderText("Search participant, condition or details...")
+        self.search_edit.setAccessibleName("Search conditions")
+        self.search_edit.setClearButtonEnabled(True)
+        filters.addWidget(self.search_edit, 1)
+        list_layout.addLayout(filters)
+
+        self.table = QTableWidget(len(self._observations), 5, list_panel)
+        self.table.setObjectName("participant_condition_exclusions_table")
+        self.table.setHorizontalHeaderLabels([
+            "Recording" if self._recording_aware else "Participant",
+            "Condition", "FFT length", "Status", "Exclude",
+        ])
+        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.table.setAlternatingRowColors(True)
+        self.table.setWordWrap(False)
+        self.table.setTextElideMode(Qt.ElideRight)
+        self.table.verticalHeader().hide()
+        self.table.verticalHeader().setDefaultSectionSize(32)
+        header = self.table.horizontalHeader()
+        header.setMinimumSectionSize(35)
+        header.setStretchLastSection(False)
+        header.setSectionResizeMode(1, QHeaderView.Stretch)
+        for column, width in ((0, 105), (2, 100), (3, 110), (4, 70)):
+            header.setSectionResizeMode(column, QHeaderView.Fixed)
+            self.table.setColumnWidth(column, width)
+        list_layout.addWidget(self.table, 1)
+        self.summary_label = QLabel(list_panel)
+        self.summary_label.setObjectName("condition_exclusion_summary")
+        self.summary_label.setWordWrap(True)
+        list_layout.addWidget(self.summary_label)
+
+        detail_panel = QWidget(self.splitter)
+        detail_panel.setMinimumWidth(330)
+        detail_layout = QVBoxLayout(detail_panel)
+        detail_layout.setContentsMargins(8, 0, 0, 0)
+        detail_layout.addWidget(SubsectionHeaderLabel("Selected condition", detail_panel))
+        self.evidence_view = QPlainTextEdit(detail_panel)
+        self.evidence_view.setObjectName("condition_exclusion_evidence")
+        self.evidence_view.setAccessibleName("Condition status, guidance and full details")
+        self.evidence_view.setReadOnly(True)
+        self.evidence_view.setLineWrapMode(QPlainTextEdit.WidgetWidth)
+        detail_layout.addWidget(self.evidence_view, 1)
+        self.decision_stack = QStackedWidget(detail_panel)
+        self.decision_stack.setObjectName("condition_exclusion_scope_stack")
+        self.decision_stack.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.decision_stack.setVisible(self._recording_aware)
+        detail_layout.addWidget(self.decision_stack)
+        self.splitter.setStretchFactor(0, 3)
+        self.splitter.setStretchFactor(1, 2)
+        self.splitter.setSizes([650, 470])
+
+        actions = ActionRow(self, alignment=Qt.AlignRight)
+        actions.setObjectName("participant_condition_exclusions_actions")
+        cancel = make_action_button("Cancel", variant="secondary", parent=actions)
+        save = make_action_button("Save exclusions", variant="primary", parent=actions)
+        cancel.clicked.connect(self.reject)
+        save.clicked.connect(self.accept)
+        actions.add_button(cancel)
+        actions.add_button(save)
+        layout.addWidget(actions)
+
+    def _populate_rows(self) -> None:
         existing_pairs = {
             (participant.casefold(), condition.casefold())
-            for participant, conditions in existing.items()
-            for condition in conditions
+            for participant, conditions in self._existing.items() for condition in conditions
         }
         existing_recording_pairs = {
             (recording.casefold(), condition.casefold())
-            for recording, conditions in existing_recordings.items()
-            for condition in conditions
+            for recording, conditions in self._existing_recordings.items() for condition in conditions
         }
-        candidate_pairs = {
-            observation.pair_key for observation in audit.review_candidates
-        }
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(10)
-
-        reference_text = (
-            f"The project reference is {audit.reference_duration_s:g} s "
-            f"({audit.reference_oddball_cycles} oddball cycles), supported by "
-            f"{audit.reference_support} of {audit.reference_total} active workbooks."
-            if audit.reference_duration_s is not None
-            and audit.reference_oddball_cycles is not None
-            else (
-                "No strict-majority FFT grid could be established. All grids are "
-                "shown, and FPVS Toolbox will not guess which valid grid is expected."
-            )
-        )
-        prompt = QLabel(
-            (
-                "Checked rows can omit only this recording-condition or the same "
-                "participant-condition across all visits. Session/phase-at-visit "
-                "and visit order remain distinct. Raw BDF files and generated "
-                f"workbooks remain unchanged for audit. {reference_text}"
-                if self._recording_aware
-                else "Checked participant-condition pairs are omitted from shared downstream "
-                "workbook analyses. Raw BDF files and generated workbooks remain unchanged "
-                f"for audit. {reference_text}"
-            ),
-            self,
-        )
-        prompt.setWordWrap(True)
-        layout.addWidget(prompt)
-        if audit.missing_condition_outputs:
-            missing_prompt = QLabel(
-                "No condition output: the last Processing run found no condition input. "
-                "Missing start markers cannot be reconstructed. Check a row only to "
-                "exclude that condition, then rerun Processing before post-processing.",
-                self,
-            )
-            missing_prompt.setWordWrap(True)
-            layout.addWidget(missing_prompt)
-
-        if self._recording_aware:
-            headers = (
-                "Participant",
-                "Recording",
-                "Session / phase-at-visit",
-                "Visit",
-                "Group",
-                "Condition",
-                "Usable FFT crop",
-                "Grid status",
-                "Source workbook",
-                "Scope",
-                "Exclude downstream",
-            )
-            self._scope_column = 9
-            self._exclude_column = 10
-        else:
-            headers = (
-                "PID",
-                "Group",
-                "Condition",
-                "Usable FFT crop",
-                "Grid status",
-                "Source workbook",
-                "Exclude downstream",
-            )
-            self._scope_column = None
-            self._exclude_column = 6
-        self.table = QTableWidget(len(self._observations), len(headers), self)
-        self.table.setObjectName("participant_condition_exclusions_table")
-        self.table.setHorizontalHeaderLabels(list(headers))
-        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.table.setSelectionMode(QAbstractItemView.SingleSelection)
-        self.table.verticalHeader().setVisible(False)
-        header = self.table.horizontalHeader()
-        for column in range(len(headers)):
-            header.setSectionResizeMode(
-                column,
-                QHeaderView.Stretch
-                if (
-                    column in {2, 4, 5}
-                    if not self._recording_aware
-                    else column in {2, 7, 8}
-                )
-                else QHeaderView.ResizeToContents,
-            )
-
+        candidate_pairs = {observation.pair_key for observation in self._audit.review_candidates}
         for row, observation in enumerate(self._observations):
-            if self._recording_aware:
-                values = (
-                    observation.participant_id,
-                    observation.recording_id or "Not registered",
-                    observation.session_label or observation.session_id or "—",
-                    str(observation.visit_index or "—"),
-                    observation.group_label or observation.group_id or "Ungrouped",
-                    observation.condition,
-                    _observed_grid_text(observation),
-                    _grid_status_text(observation, audit),
-                    "No workbook" if isinstance(observation, MissingConditionOutput) else observation.path.name,
-                )
-            else:
-                values = (
-                    observation.participant_id,
-                    observation.group_label or observation.group_id or "Ungrouped",
-                    observation.condition,
-                    _observed_grid_text(observation),
-                    _grid_status_text(observation, audit),
-                    "No workbook" if isinstance(observation, MissingConditionOutput) else observation.path.name,
-                )
+            values = (
+                observation.recording_id or "Not registered"
+                if self._recording_aware else observation.participant_id,
+                observation.condition,
+                "--" if isinstance(observation, MissingConditionOutput)
+                else (f"{observation.oddball_cycles} cycles"
+                      if observation.oddball_cycles is not None else "Unavailable"),
+                status_label(observation, self._audit),
+            )
             for column, value in enumerate(values):
                 item = QTableWidgetItem(value)
                 item.setFlags(item.flags() & ~Qt.ItemIsEditable)
+                item.setToolTip(self._evidence[row] if column == 3 else value)
                 self.table.setItem(row, column, item)
             exclude_item = QTableWidgetItem()
             exclude_item.setFlags(
@@ -194,42 +203,71 @@ class ParticipantConditionExclusionsDialog(QDialog):
             participant_pair = observation.participant_pair_key
             recording_pair = observation.recording_pair_key
             should_check = participant_pair in existing_pairs or (
-                recording_pair is not None
-                and recording_pair in existing_recording_pairs
+                recording_pair is not None and recording_pair in existing_recording_pairs
             ) or (
                 not isinstance(observation, MissingConditionOutput)
                 and observation.pair_key in candidate_pairs
             )
             exclude_item.setCheckState(Qt.Checked if should_check else Qt.Unchecked)
+            exclude_item.setToolTip("Checked: omit this condition from downstream analysis.")
             self.table.setItem(row, self._exclude_column, exclude_item)
-            if self._recording_aware and self._scope_column is not None:
-                scope = QComboBox(self.table)
+            if self._recording_aware:
+                page = QWidget(self.decision_stack)
+                page_layout = QVBoxLayout(page)
+                page_layout.setContentsMargins(0, 4, 0, 0)
+                label = QLabel("Exclusion scope", page)
+                page_layout.addWidget(label)
+                scope = QComboBox(page)
                 scope.setObjectName(f"condition_exclusion_scope_{row}")
                 scope.addItem("This recording", _SCOPE_RECORDING)
                 scope.addItem("Participant (all visits)", _SCOPE_PARTICIPANT)
-                selected_scope = (
-                    _SCOPE_PARTICIPANT
-                    if participant_pair in existing_pairs
-                    else _SCOPE_RECORDING
-                )
+                selected_scope = _SCOPE_PARTICIPANT if participant_pair in existing_pairs else _SCOPE_RECORDING
                 scope.setCurrentIndex(max(0, scope.findData(selected_scope)))
-                scope.setToolTip(
-                    "Choose whether this condition exclusion applies only to the "
-                    "listed recording or to the participant across all visits."
-                )
-                self.table.setCellWidget(row, self._scope_column, scope)
+                scope.setToolTip("Apply to this recording, or this participant's condition across all visits.")
+                label.setBuddy(scope)
+                page_layout.addWidget(scope)
+                self.decision_stack.addWidget(page)
+                self._scope_controls[row] = scope
 
-        self.table.resizeRowsToContents()
-        layout.addWidget(self.table, 1)
+    def _show_observation(self, row: int, *_unused) -> None:
+        if row < 0 or self.table.isRowHidden(row):
+            self.evidence_view.setPlainText("No matching conditions. Change the view or clear the search.")
+            self.decision_stack.setEnabled(False)
+            return
+        self.evidence_view.setPlainText(self._evidence[row])
+        self.decision_stack.setCurrentIndex(row)
+        self.decision_stack.setEnabled(True)
 
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.Save | QDialogButtonBox.Cancel,
-            parent=self,
+    def _selection_changed(self, item: QTableWidgetItem) -> None:
+        if item.column() == self._exclude_column:
+            self._filter_rows()
+
+    def _filter_rows(self, *_unused) -> None:
+        terms = self.search_edit.text().casefold().split()
+        view = self.view_combo.currentData()
+        selected = shown = 0
+        for row, evidence in enumerate(self._evidence):
+            excluded = self.table.item(row, self._exclude_column).checkState() == Qt.Checked
+            selected += int(excluded)
+            matches_view = view == "all" or (view == "attention" and self._attention[row]) or (view == "excluded" and excluded)
+            folded = evidence.casefold()
+            visible = matches_view and all(term in folded for term in terms)
+            self.table.setRowHidden(row, not visible)
+            shown += int(visible)
+        current = self.table.currentRow()
+        if current < 0 or self.table.isRowHidden(current):
+            current = next((row for row in range(len(self._observations)) if not self.table.isRowHidden(row)), -1)
+            self.table.setCurrentCell(current, 0 if current >= 0 else -1)
+        self._show_observation(current)
+        total = len(self._observations)
+        attention = sum(self._attention)
+        self.summary_label.setText(
+            f"{shown} of {total} shown | {attention} need review | {selected} selected for exclusion"
         )
-        buttons.setObjectName("participant_condition_exclusions_actions")
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
+        with QSignalBlocker(self.view_combo):
+            self.view_combo.setItemText(0, f"Needs attention ({attention})")
+            self.view_combo.setItemText(1, f"All conditions ({total})")
+            self.view_combo.setItemText(2, f"Selected exclusions ({selected})")
 
     def excluded_participant_conditions(self) -> dict[str, list[str]]:
         observed_pairs = {
@@ -288,38 +326,12 @@ class ParticipantConditionExclusionsDialog(QDialog):
         return normalize_manual_excluded_recording_conditions(values)
 
     def _scope_for_row(self, row: int) -> str:
-        if not self._recording_aware or self._scope_column is None:
+        if not self._recording_aware:
             return _SCOPE_PARTICIPANT
-        widget = self.table.cellWidget(row, self._scope_column)
+        widget = self._scope_controls.get(row)
         if isinstance(widget, QComboBox):
             return str(widget.currentData() or _SCOPE_RECORDING)
         return _SCOPE_RECORDING
-
-
-def _observed_grid_text(observation: FullFftGridObservation | MissingConditionOutput) -> str:
-    if isinstance(observation, MissingConditionOutput):
-        return "—"
-    if observation.duration_s is None or observation.oddball_cycles is None:
-        return "Unavailable"
-    return (
-        f"{observation.duration_s:g} s "
-        f"({observation.oddball_cycles} oddball cycles)"
-    )
-
-
-def _grid_status_text(
-    observation: FullFftGridObservation | MissingConditionOutput,
-    audit: FullFftGridAudit,
-) -> str:
-    if isinstance(observation, MissingConditionOutput):
-        return "No condition output"
-    if observation.issue:
-        return observation.issue
-    if audit.reference_oddball_cycles is None:
-        return "Valid grid; no strict-majority reference"
-    if observation.oddball_cycles == audit.reference_oddball_cycles:
-        return "Matches project reference"
-    return "Different from project reference"
 
 
 __all__ = ["ParticipantConditionExclusionsDialog"]

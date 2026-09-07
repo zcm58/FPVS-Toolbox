@@ -36,6 +36,18 @@ testing, or another specialized estimand.
 
 ### Sensor geometry and interpolation
 
+- If experimental condition-specific interpolation was used, report the affected
+  recording, condition, electrode, and reviewed artifact evidence. These decisions
+  follow inspection of response amplitudes and are outcome-informed; a large
+  response alone does not establish an artifact. Report the repaired conditions
+  and any sensitivity analysis with those repairs omitted.
+- Explain that each requested repair used the exact analyzed intervals, the union
+  of recording-wide and condition-specific bad channels, and the usual final
+  average reference. All electrodes within that condition can change through
+  re-referencing. Other condition outputs are preserved; QC and harmonic selection
+  are recomputed after repairs. The experimental toggle does not reverse previous
+  approved repairs.
+
 - Report the project-owned electrode montage as MNE `biosemi64`, the Toolbox
   geometry version/fingerprint, and the retained canonical scalp set. State
   whether all 64 sensors were retained or an explicit channel limit produced a

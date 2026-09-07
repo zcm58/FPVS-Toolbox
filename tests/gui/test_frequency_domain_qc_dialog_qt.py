@@ -15,7 +15,7 @@ from PySide6.QtWidgets import QAbstractItemView, QDialog, QPlainTextEdit  # noqa
 
 from Main_App.gui import frequency_domain_qc_dialog as module  # noqa: E402
 from Main_App.processing.frequency_domain_qc import (  # noqa: E402
-    DECISION_EXCLUDE_CONDITION_ELECTRODE,
+    DECISION_INTERPOLATE_CONDITION_ELECTRODE,
     DECISION_EXCLUDE_RECORDING,
     DECISION_RETAIN,
 )
@@ -67,6 +67,7 @@ def _report(scope="recording"):
         "identity_scope": scope,
         "analysis_fingerprint": "f" * 64,
         "screening_enabled": True,
+        "condition_specific_interpolation_enabled": True,
         "subjects": list(groups),
         "recording_assignments": assignments if scope == "recording" else [],
         "recording_summaries": summaries if scope == "recording" else [],
@@ -126,7 +127,8 @@ def test_decisions_and_optional_reasons_survive_navigation_and_filtering(qtbot):
     first, second, third = report["review_findings"]
     first_controls = dialog._decision_controls[first["finding_fingerprint"]]
     combo, reason = first_controls
-    combo.setCurrentIndex(combo.findData(DECISION_EXCLUDE_CONDITION_ELECTRODE))
+    combo.setCurrentIndex(combo.findData(DECISION_INTERPOLATE_CONDITION_ELECTRODE))
+    dialog._artifact_controls[first["finding_fingerprint"]].setChecked(True)
     reason.setText("Keep this specific review note")
     assert re.findall(r"\d+", dialog.progress_label.text())[:2] == ["1", "3"]
 
@@ -150,7 +152,7 @@ def test_decisions_and_optional_reasons_survive_navigation_and_filtering(qtbot):
     dialog.details_table.selectRow(0)
     assert dialog._decision_controls[first["finding_fingerprint"]] == first_controls
     assert combo.isVisibleTo(dialog.decision_stack)
-    assert combo.currentData() == DECISION_EXCLUDE_CONDITION_ELECTRODE
+    assert combo.currentData() == DECISION_INTERPOLATE_CONDITION_ELECTRODE
     assert reason.text() == "Keep this specific review note"
     assert re.findall(r"\d+", dialog.progress_label.text())[:2] == ["3", "3"]
     dialog.accept()
@@ -261,7 +263,7 @@ def test_sorted_findings_keep_evidence_decisions_and_reasons_on_exact_fingerprin
     dialog, report = _dialog(qtbot)
     first, second, third = report["review_findings"]
     first_combo, first_reason = dialog._decision_controls[first["finding_fingerprint"]]
-    first_combo.setCurrentIndex(first_combo.findData(DECISION_EXCLUDE_CONDITION_ELECTRODE))
+    first_combo.setCurrentIndex(first_combo.findData(DECISION_INTERPOLATE_CONDITION_ELECTRODE))
     first_reason.setText("Only this recording, condition and electrode")
 
     dialog._sort_findings(1, Qt.SortOrder.DescendingOrder)
@@ -288,7 +290,7 @@ def test_sorted_findings_keep_evidence_decisions_and_reasons_on_exact_fingerprin
     dialog.accept()
     assert dialog.result() == QDialog.DialogCode.Accepted
     receipts = {row["finding_fingerprint"]: row for row in dialog.review_decisions()}
-    assert receipts[first["finding_fingerprint"]]["decision"] == DECISION_EXCLUDE_CONDITION_ELECTRODE
+    assert receipts[first["finding_fingerprint"]]["decision"] == DECISION_INTERPOLATE_CONDITION_ELECTRODE
     assert receipts[first["finding_fingerprint"]]["reason"] == "Only this recording, condition and electrode"
     assert receipts[second["finding_fingerprint"]]["decision"] == DECISION_EXCLUDE_RECORDING
     assert receipts[second["finding_fingerprint"]]["reason"] == "Second recording only"
@@ -484,9 +486,9 @@ def test_roi_section_is_separate_and_next_undecided_crosses_sections(qtbot):
     assert _visible_fingerprints(dialog) == [findings[-1]["finding_fingerprint"]]
     assert dialog.details_table.horizontalHeaderItem(2).text() == "ROI"
     assert not dialog.bulk_retain_button.isEnabled()
-    assert not dialog.bulk_exclude_button.isEnabled()
+    assert not dialog.bulk_interpolate_button.isEnabled()
     roi_combo, _ = dialog._decision_controls[findings[-1]["finding_fingerprint"]]
-    assert roi_combo.findData(DECISION_EXCLUDE_CONDITION_ELECTRODE) == -1
+    assert roi_combo.findData(DECISION_INTERPOLATE_CONDITION_ELECTRODE) == -1
 
     _select_section(dialog, "electrode")
     for finding in findings[:-1]:
@@ -517,14 +519,14 @@ def test_roi_only_review_opens_its_nonempty_section(qtbot):
     assert _visible_fingerprints(dialog) == [roi["finding_fingerprint"]]
     assert dialog.details_table.horizontalHeaderItem(2).text() == "ROI"
     assert not dialog.bulk_retain_button.isEnabled()
-    assert not dialog.bulk_exclude_button.isEnabled()
+    assert not dialog.bulk_interpolate_button.isEnabled()
 
 
 def test_electrode_group_applies_to_filtered_flags_and_exact_receipts_only(qtbot):
     dialog, findings = _grouped_dialog(qtbot)
     targets = findings[:4]
     first_combo, first_reason = dialog._decision_controls[targets[0]["finding_fingerprint"]]
-    first_combo.setCurrentIndex(first_combo.findData(DECISION_EXCLUDE_CONDITION_ELECTRODE))
+    first_combo.setCurrentIndex(first_combo.findData(DECISION_INTERPOLATE_CONDITION_ELECTRODE))
     first_reason.setText("Face-specific note")
     _select_electrode_group(dialog)
     assert _visible_fingerprints(dialog) == [item["finding_fingerprint"] for item in targets]
@@ -538,10 +540,12 @@ def test_electrode_group_applies_to_filtered_flags_and_exact_receipts_only(qtbot
     dialog.search_edit.setText("Objects")
     assert _visible_fingerprints(dialog) == [targets[1]["finding_fingerprint"]]
     dialog.detail_tabs.setCurrentWidget(dialog.bulk_panel)
-    qtbot.mouseClick(dialog.bulk_exclude_button, Qt.MouseButton.LeftButton)
+    assert not dialog.bulk_interpolate_button.isEnabled()
+    dialog.bulk_artifact_check.setChecked(True)
+    qtbot.mouseClick(dialog.bulk_interpolate_button, Qt.MouseButton.LeftButton)
     for finding in targets:
         combo, _ = dialog._decision_controls[finding["finding_fingerprint"]]
-        assert combo.currentData() == DECISION_EXCLUDE_CONDITION_ELECTRODE
+        assert combo.currentData() == DECISION_INTERPOLATE_CONDITION_ELECTRODE
     assert first_reason.text() == "Face-specific note"
     for finding in findings[4:]:
         combo, reason = dialog._decision_controls[finding["finding_fingerprint"]]
@@ -553,7 +557,7 @@ def test_electrode_group_applies_to_filtered_flags_and_exact_receipts_only(qtbot
     receipts = {receipt["finding_fingerprint"]: receipt for receipt in dialog.review_decisions()}
     assert set(receipts) == {finding["finding_fingerprint"] for finding in findings}
     excluded = [receipt for receipt in receipts.values()
-                if receipt["decision"] == DECISION_EXCLUDE_CONDITION_ELECTRODE]
+                if receipt["decision"] == DECISION_INTERPOLATE_CONDITION_ELECTRODE]
     assert {receipt["finding_fingerprint"] for receipt in excluded} == {
         finding["finding_fingerprint"] for finding in targets
     }
@@ -569,7 +573,9 @@ def test_selected_electrode_group_remains_actionable_when_search_hides_every_fla
     dialog.search_edit.setText("no matching finding")
     assert not _visible_fingerprints(dialog)
     assert dialog.bulk_retain_button.isEnabled()
-    assert dialog.bulk_exclude_button.isEnabled()
+    assert not dialog.bulk_interpolate_button.isEnabled()
+    dialog.bulk_artifact_check.setChecked(True)
+    assert dialog.bulk_interpolate_button.isEnabled()
     dialog.detail_tabs.setCurrentWidget(dialog.bulk_panel)
     qtbot.mouseClick(dialog.bulk_retain_button, Qt.MouseButton.LeftButton)
     assert all(decision == DECISION_RETAIN for decision, _ in _decision_state(dialog, findings[:4]).values())
@@ -580,20 +586,21 @@ def test_selected_electrode_group_remains_actionable_when_search_hides_every_fla
 def test_electrode_group_undo_restores_choices_and_manual_edits_invalidate_undo(qtbot, manual_edit):
     dialog, findings = _grouped_dialog(qtbot)
     first_combo, first_reason = dialog._decision_controls[findings[0]["finding_fingerprint"]]
-    first_combo.setCurrentIndex(first_combo.findData(DECISION_EXCLUDE_CONDITION_ELECTRODE))
+    first_combo.setCurrentIndex(first_combo.findData(DECISION_INTERPOLATE_CONDITION_ELECTRODE))
     first_reason.setText("Existing reason")
     second_combo, second_reason = dialog._decision_controls[findings[1]["finding_fingerprint"]]
     second_combo.setCurrentIndex(second_combo.findData(DECISION_RETAIN))
     before = _decision_state(dialog, findings)
     _select_electrode_group(dialog)
     assert not dialog.bulk_undo_button.isEnabled()
-    qtbot.mouseClick(dialog.bulk_exclude_button, Qt.MouseButton.LeftButton)
+    dialog.bulk_artifact_check.setChecked(True)
+    qtbot.mouseClick(dialog.bulk_interpolate_button, Qt.MouseButton.LeftButton)
     assert dialog.bulk_undo_button.isEnabled()
     qtbot.mouseClick(dialog.bulk_undo_button, Qt.MouseButton.LeftButton)
     assert _decision_state(dialog, findings) == before
     assert not dialog.bulk_undo_button.isEnabled()
 
-    qtbot.mouseClick(dialog.bulk_exclude_button, Qt.MouseButton.LeftButton)
+    qtbot.mouseClick(dialog.bulk_interpolate_button, Qt.MouseButton.LeftButton)
     assert dialog.bulk_undo_button.isEnabled()
     if manual_edit == "decision":
         second_combo.setCurrentIndex(second_combo.findData(DECISION_RETAIN))
@@ -604,3 +611,60 @@ def test_electrode_group_undo_restores_choices_and_manual_edits_invalidate_undo(
     qtbot.mouseClick(dialog.bulk_undo_button, Qt.MouseButton.LeftButton)
     assert _decision_state(dialog, findings) == after_manual_edit
     assert first_reason.text() == "Existing reason"
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_experimental_setting_controls_only_condition_electrode_repair(qtbot, enabled):
+    report, groups = _report()
+    report["condition_specific_interpolation_enabled"] = enabled
+    dialog = module.FrequencyDomainQcReviewDialog(report, participant_groups=groups)
+    qtbot.addWidget(dialog)
+    for finding in report["review_findings"]:
+        combo, _ = dialog._decision_controls[finding["finding_fingerprint"]]
+        offered = combo.findData(DECISION_INTERPOLATE_CONDITION_ELECTRODE) >= 0
+        assert offered is (enabled and bool(finding["electrode"]))
+        assert combo.findData("exclude_condition_electrode") == -1
+        assert combo.findData("exclude_condition_roi") == -1
+        assert combo.findData("exclude_condition") >= 0
+        assert combo.findData("exclude_recording") >= 0
+        assert combo.findData("exclude_participant") >= 0
+    assert dialog.bulk_interpolate_button.isHidden() is (not enabled)
+
+
+def test_manual_repair_requires_new_artifact_confirmation_and_reason_is_optional(qtbot, monkeypatch):
+    dialog, report = _dialog(qtbot)
+    warnings = []
+    monkeypatch.setattr(module.QMessageBox, "warning", lambda *_args: warnings.append(_args))
+    for combo, _reason in dialog._decision_controls.values():
+        combo.setCurrentIndex(combo.findData(DECISION_RETAIN))
+    first = report["review_findings"][0]
+    combo, reason = dialog._decision_controls[first["finding_fingerprint"]]
+    combo.setCurrentIndex(combo.findData(DECISION_INTERPOLATE_CONDITION_ELECTRODE))
+    confirmation = dialog._artifact_controls[first["finding_fingerprint"]]
+    assert not confirmation.isChecked()
+    dialog.accept()
+    assert warnings
+    assert not dialog.review_decisions()
+    assert dialog.result() != QDialog.DialogCode.Accepted
+    confirmation.setChecked(True)
+    combo.setCurrentIndex(combo.findData(DECISION_RETAIN))
+    combo.setCurrentIndex(combo.findData(DECISION_INTERPOLATE_CONDITION_ELECTRODE))
+    assert not confirmation.isChecked()
+    confirmation.setChecked(True)
+    assert reason.text() == ""
+    dialog.accept()
+    receipt = next(row for row in dialog.review_decisions()
+                   if row["finding_fingerprint"] == first["finding_fingerprint"])
+    assert dialog.result() == QDialog.DialogCode.Accepted
+    assert receipt["artifact_confirmed"] is True
+    assert receipt["reason"] == "No reason provided"
+
+
+def test_bulk_artifact_confirmation_cannot_carry_over_to_another_recording(qtbot):
+    dialog, _findings = _grouped_dialog(qtbot)
+    _select_electrode_group(dialog)
+    dialog.bulk_artifact_check.setChecked(True)
+    assert dialog.bulk_interpolate_button.isEnabled()
+    _select_electrode_group(dialog, ("P1", "P1_visit2", "O2"))
+    assert not dialog.bulk_artifact_check.isChecked()
+    assert not dialog.bulk_interpolate_button.isEnabled()

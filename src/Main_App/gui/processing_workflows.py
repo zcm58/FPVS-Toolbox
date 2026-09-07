@@ -783,7 +783,12 @@ def _start_post_processing_pipeline_after_processing(
                     on_finished=on_finished,
                 )
             else:
-                QTimer.singleShot(_POST_PROCESSING_PROGRESS_SETTLE_MS, on_finished)
+                def _finish_post_processing() -> None:
+                    on_finished()
+                    if result.get("requires_processing"):
+                        _set_resume_post_processing_pending(host, False)
+
+                QTimer.singleShot(_POST_PROCESSING_PROGRESS_SETTLE_MS, _finish_post_processing)
 
     bridge = _PostProcessingPipelineBridge(
         progress_callback=_handle_progress,
@@ -1565,6 +1570,15 @@ def start_processing(host: Any, *, log: logging.Logger = logger) -> None:
         host._mp.error.connect(host._on_processing_error)
         host._mp.finished.connect(host._on_processing_finished)
 
+        from Main_App.processing.condition_interpolation_executor import (
+            build_condition_interpolation_run_snapshot,
+        )
+
+        settings["_fpvs_condition_interpolation_run_snapshot"] = (
+            build_condition_interpolation_run_snapshot(
+                settings, event_map, chosen_plan, save_folder,
+            )
+        )
         host._mp.start(
             project_root=project_root,
             data_files=files,

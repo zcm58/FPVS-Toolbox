@@ -209,6 +209,8 @@ def test_dialog_loads_saves_project(tmp_path, qtbot):
     dlg.auto_detect_removed_electrodes_check.setChecked(False)
     assert dlg.removed_electrode_detection_mode_combo.currentData() == "off"
     dlg.summed_bca_screening_enabled_check.setChecked(False)
+    assert not dlg.condition_specific_interpolation_enabled_check.isChecked()
+    dlg.condition_specific_interpolation_enabled_check.setChecked(True)
     dlg.summed_bca_threshold_edits["warning_summed_bca_uv"].setText("12.5")
     dlg.line_noise_frequency_combo.setCurrentIndex(
         dlg.line_noise_frequency_combo.findData(50)
@@ -238,6 +240,7 @@ def test_dialog_loads_saves_project(tmp_path, qtbot):
     assert reloaded.preprocessing["auto_detect_removed_electrodes"] is False
     assert reloaded.preprocessing["removed_electrode_detection_mode"] == "off"
     assert reloaded.experimental_qc_settings.summed_bca_screening.enabled is False
+    assert reloaded.experimental_qc_settings.condition_specific_interpolation_enabled is True
     assert (
         reloaded.experimental_qc_settings.summed_bca_screening.warning_summed_bca_uv
         == 12.5
@@ -696,7 +699,11 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
     assert rois_tab.findChild(ActionRow, "settings_rois_actions") is not None
     assert rois_tab.findChild(ActionRow, "settings_rois_quick_add_actions") is not None
     assert dlg.roi_montage_combo.count() == 1
-    assert dlg.roi_montage_combo.currentData() == "10-10"
+    assert dlg.roi_montage_combo.currentData() == "biosemi64"
+    assert dlg.roi_montage_combo.currentText() == "BioSemi ActiveTwo 64"
+    assert not dlg.roi_montage_combo.isEnabled()
+    assert not dlg.tabs.tabBar().drawBase()
+    assert not dlg.experimental_tabs.tabBar().drawBase()
     assert dlg.roi_preset_combo.findText("LOT (Default)") >= 0
     assert dlg.roi_preset_combo.findText("ROT (Default)") >= 0
     assert dlg.roi_preset_electrodes_edit.isReadOnly()
@@ -708,7 +715,7 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
         ("LOT", ["BAD"]),
     ])
     dlg._save_roi_editor_as_custom_presets()
-    assert dlg._custom_roi_presets_by_montage["10-10"] == [
+    assert dlg._custom_roi_presets_by_montage["biosemi64"] == [
         ("Custom Occipito Temporal", ["PO7", "PO8"]),
     ]
     roi_headers = {
@@ -795,6 +802,7 @@ def test_experimental_sections_fit_embedded_workspace(experimental_settings_page
     expected_controls = (
         (
             page.kurtosis_auto_interpolate_all_check,
+            page.condition_specific_interpolation_enabled_check,
             page.removed_electrode_detection_mode_combo,
             page.removed_electrode_detection_info_button,
             page.manual_removed_electrodes_enabled_check,
@@ -947,6 +955,47 @@ def test_selection_derivative_signature_tracks_analysis_and_roi_inputs(
     roi_pairs = dlg.roi_editor.get_pairs()
     dlg.roi_editor.set_pairs([*roi_pairs, ("Audit ROI", ["OZ"])])
     assert dlg._harmonic_settings_changed_after_processing(validated) is True
+    assert dlg._frequency_analysis_settings_changed_after_processing() is True
+    assert dlg._project_protocol_changed_after_processing() is False
+
+
+@pytest.mark.parametrize("rebuild_now", [True, False])
+def test_saving_roi_removal_invalidates_qc_and_preserves_deletion(
+    tmp_path, qtbot, monkeypatch, rebuild_now,
+):
+    os.environ["XDG_CONFIG_HOME"] = str(tmp_path)
+    project = _prep_project(tmp_path)
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win.loadProject(project)
+    retained = [("ROT", ["O2", "PO8"])]
+    win.settings.set_roi_pairs([*retained, ("Test ROI", ["F8", "T8"])])
+    win.settings.save()
+    dlg = SettingsDialog(win.settings, win, project)
+    qtbot.addWidget(dlg)
+    dlg.roi_editor.set_pairs(retained)
+    monkeypatch.setattr(dlg, "_project_has_processed_outputs", lambda: True)
+    monkeypatch.setattr(QMessageBox, "question", lambda *_a, **_kw: (
+        QMessageBox.Yes if rebuild_now else QMessageBox.No
+    ))
+    monkeypatch.setattr(QMessageBox, "warning", lambda *_a, **_kw: None)
+    resumed = []
+    monkeypatch.setattr(
+        dlg, "_resume_frequency_domain_post_processing", lambda: resumed.append(True),
+    )
+    monkeypatch.setattr(dlg, "_start_full_fft_grid_review", lambda **_kw: pytest.fail(
+        "ROI edits must rebuild frequency QC before harmonic selection"
+    ))
+
+    dlg._save()
+    # A later canceled review must not restore an already committed ROI edit.
+    dlg._restore_harmonic_settings_after_cancel()
+
+    assert win.settings.get_roi_pairs() == retained
+    assert SettingsManager(win.settings.ini_path).get_roi_pairs() == retained
+    state = json.loads((project.project_root / "project.json").read_text(encoding="utf-8"))
+    assert state["tools"]["frequency_domain_qc"]["downstream_outputs_stale"] is True
+    assert resumed == ([True] if rebuild_now else [])
 
 
 def test_explicit_harmonic_recalculation_persists_project_selection_inputs(
@@ -1012,6 +1061,7 @@ def test_cancelled_grid_review_can_restore_staged_harmonic_settings(
     assert reloaded.preprocessing["harmonic_selection_profile"] == "legacy_fpvs_toolbox"
     assert reloaded.frequency_protocol == original_protocol
     assert win.settings.get_roi_pairs() == original_rois
+    assert dlg.roi_editor.get_pairs() == original_rois
     assert (
         dlg._manual_excluded_participant_conditions
         == original_condition_exclusions

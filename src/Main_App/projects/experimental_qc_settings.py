@@ -11,7 +11,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any, Mapping
 
 
-EXPERIMENTAL_QC_SETTINGS_SCHEMA_VERSION = "1.1.0"
+EXPERIMENTAL_QC_SETTINGS_SCHEMA_VERSION = "1.2.0"
 LEGACY_EXPERIMENTAL_QC_SETTINGS_SCHEMA_VERSION = "1.0.0"
 SUMMED_BCA_SCREENING_POLICY_VERSION = "1.0.0"
 RAW_SPECTRAL_SCREENING_POLICY_VERSION = "1.0.0"
@@ -460,6 +460,7 @@ class ExperimentalQcSettings:
     raw_spectral_screening: RawSpectralScreeningSettings = field(
         default_factory=RawSpectralScreeningSettings
     )
+    condition_specific_interpolation_enabled: bool = False
 
     def __post_init__(self) -> None:
         schema_version = str(self.schema_version or "").strip()
@@ -478,6 +479,13 @@ class ExperimentalQcSettings:
         object.__setattr__(self, "schema_version", schema_version)
         object.__setattr__(self, "summed_bca_screening", screening)
         object.__setattr__(self, "raw_spectral_screening", raw_spectral)
+        object.__setattr__(
+            self, "condition_specific_interpolation_enabled",
+            _coerce_bool(
+                self.condition_specific_interpolation_enabled,
+                field_name="condition_specific_interpolation_enabled",
+            ),
+        )
 
     @classmethod
     def from_manifest(cls, raw: Mapping[str, Any]) -> "ExperimentalQcSettings":
@@ -491,6 +499,7 @@ class ExperimentalQcSettings:
         ).strip()
         if schema_version not in {
             LEGACY_EXPERIMENTAL_QC_SETTINGS_SCHEMA_VERSION,
+            "1.1.0",
             EXPERIMENTAL_QC_SETTINGS_SCHEMA_VERSION,
         }:
             raise ExperimentalQcSettingsError(
@@ -505,6 +514,9 @@ class ExperimentalQcSettings:
             ),
             raw_spectral_screening=RawSpectralScreeningSettings.from_manifest(
                 raw.get("raw_spectral_screening")
+            ),
+            condition_specific_interpolation_enabled=raw.get(
+                "condition_specific_interpolation_enabled", False
             ),
         )
 
@@ -531,7 +543,15 @@ class ExperimentalQcSettings:
             "schema_version": self.schema_version,
             "summed_bca_screening": self.summed_bca_screening.to_manifest(),
             "raw_spectral_screening": self.raw_spectral_screening.to_manifest(),
+            "condition_specific_interpolation_enabled": (
+                self.condition_specific_interpolation_enabled
+            ),
         }
+
+    def with_condition_specific_interpolation_enabled(
+        self, enabled: bool,
+    ) -> "ExperimentalQcSettings":
+        return replace(self, condition_specific_interpolation_enabled=enabled)
 
 
 def normalize_summed_bca_screening_settings(

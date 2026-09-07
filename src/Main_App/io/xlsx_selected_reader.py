@@ -81,6 +81,16 @@ class MissingXlsxColumnsError(ValueError):
         )
 
 
+def _reject_native_excel_fallback(path: str | Path, sheet_name: str) -> None:
+    """A native result has no physical Excel sheet to fall back to."""
+
+    from Main_App.io.result_manifest import is_result_manifest, read_result_manifest
+
+    if is_result_manifest(path):
+        read_result_manifest(path)  # Reject a corrupt declaration first.
+        raise ValueError(f"Worksheet named '{sheet_name}' not found")
+
+
 @contextmanager
 def xlsx_read_cache_scope() -> Iterator[None]:
     """Reuse exact workbook reads within one explicitly bounded caller run."""
@@ -111,6 +121,8 @@ def read_xlsx_sheet_header(excel_path: str | Path, *, sheet_name: str) -> list[o
 
 def _read_xlsx_sheet_header_raw(excel_path: str | Path, *, sheet_name: str) -> list[object]:
     """Read the physical worksheet, without companion dispatch."""
+
+    _reject_native_excel_fallback(excel_path, sheet_name)
 
     cache = _ACTIVE_XLSX_READ_CACHE.get()
     cache_key: tuple[_WorkbookSignature, str] | None = None
@@ -213,6 +225,7 @@ def _read_xlsx_sheet_selected_columns_raw(
 ) -> pd.DataFrame:
     """Read the physical worksheet, without companion dispatch."""
 
+    _reject_native_excel_fallback(excel_path, sheet_name)
     requested_columns = _unique_requested_columns(required_columns)
     cache_started = perf_counter()
     cache = _ACTIVE_XLSX_READ_CACHE.get()

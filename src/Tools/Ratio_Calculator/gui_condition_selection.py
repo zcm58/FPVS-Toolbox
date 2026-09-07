@@ -8,8 +8,7 @@ from typing import Optional
 from PySide6.QtCore import QSignalBlocker
 from PySide6.QtWidgets import QFileDialog, QComboBox, QLineEdit
 
-from Main_App.Shared.file_filters import is_excel_workbook_file
-from Main_App.projects import EXCEL_SUBFOLDER_NAME, resolve_active_project_root
+from Main_App.projects import EXCEL_SUBFOLDER_NAME, list_result_files, resolve_active_project_root
 
 CUSTOM_CONDITION_OPTION = "Custom path"
 
@@ -49,10 +48,7 @@ class RatioConditionSelectionMixin:
         for child in sorted(excel_root.iterdir(), key=lambda p: p.name.lower()):
             if not child.is_dir():
                 continue
-            if any(
-                is_excel_workbook_file(fp)
-                for fp in child.glob("*.xlsx")
-            ):
+            if list_result_files(child):
                 folders.append(child)
         return folders
 

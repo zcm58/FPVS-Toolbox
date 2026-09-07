@@ -272,6 +272,7 @@ class SettingsDialog(QDialog):
         self.tabs = QTabWidget()
         self.tabs.setObjectName("settings_tabs")
         self.tabs.setDocumentMode(True)
+        self.tabs.tabBar().setDrawBase(False)
         self.tabs.setStyleSheet(
             "QTabWidget#settings_tabs::pane, "
             "QTabWidget#settings_experimental_sections::pane {"
@@ -1149,6 +1150,8 @@ class SettingsDialog(QDialog):
         montage_index = self.roi_montage_combo.findData(current_montage)
         if montage_index >= 0:
             self.roi_montage_combo.setCurrentIndex(montage_index)
+        self.roi_montage_combo.setEnabled(False)
+        self.roi_montage_combo.setToolTip("BioSemi64 is the only supported electrode montage.")
         quick_add_form.addRow(QLabel("Electrode montage:", quick_add_group), self.roi_montage_combo)
 
         self.roi_preset_combo = QComboBox(quick_add_group)
@@ -1230,6 +1233,7 @@ class SettingsDialog(QDialog):
         self.experimental_tabs = QTabWidget(tab)
         self.experimental_tabs.setObjectName("settings_experimental_sections")
         self.experimental_tabs.setDocumentMode(True)
+        self.experimental_tabs.tabBar().setDrawBase(False)
         layout.addWidget(self.experimental_tabs, 1)
 
         electrodes_page = QWidget()
@@ -1286,6 +1290,24 @@ class SettingsDialog(QDialog):
             "review dialog. Invalid statistics still need review."
         )
         electrodes_layout.addWidget(self.kurtosis_auto_interpolate_all_check)
+
+        self.condition_specific_interpolation_enabled_check = QCheckBox(
+            "Allow condition-specific interpolation in frequency QC (experimental)",
+            electrodes_page,
+        )
+        self.condition_specific_interpolation_enabled_check.setObjectName(
+            "settings_condition_specific_interpolation_enabled"
+        )
+        self.condition_specific_interpolation_enabled_check.setChecked(
+            experimental_settings.condition_specific_interpolation_enabled
+        )
+        self.condition_specific_interpolation_enabled_check.setToolTip(
+            "After you confirm an artifact, repair the electrode only in the "
+            "flagged condition and recalculate its analysis. A large response "
+            "alone is not evidence of an artifact. Off by default; switching "
+            "off prevents new repairs and keeps previously accepted repairs."
+        )
+        electrodes_layout.addWidget(self.condition_specific_interpolation_enabled_check)
 
         removed_detection_mode = normalize_removed_electrode_detection_mode(
             qc_preproc.get("removed_electrode_detection_mode"),
@@ -1718,6 +1740,7 @@ class SettingsDialog(QDialog):
         project_controls_enabled = self.project is not None
         for control in (
             self.kurtosis_auto_interpolate_all_check,
+            self.condition_specific_interpolation_enabled_check,
             self.removed_electrode_detection_mode_combo,
             self.removed_electrode_detection_info_button,
             self.manual_removed_electrodes_enabled_check,
@@ -2190,21 +2213,23 @@ class SettingsDialog(QDialog):
         settings = normalize_dv_policy(
             self._harmonic_policy_payload_from_preprocessing(preprocessing)
         )
+        return (
+            *self._harmonic_settings_signature_from_settings(settings),
+            self._roi_settings_signature(),
+        )
+
+    def _roi_settings_signature(self) -> tuple[object, ...]:
         roi_pairs = (
             self.roi_editor.get_pairs()
             if hasattr(self, "roi_editor")
             else self.manager.get_roi_pairs()
         )
-        normalized_rois = tuple(
+        return tuple(
             (
                 str(name).strip(),
                 tuple(str(electrode).strip().upper() for electrode in electrodes),
             )
             for name, electrodes in roi_pairs
-        )
-        return (
-            *self._harmonic_settings_signature_from_settings(settings),
-            normalized_rois,
         )
 
     @staticmethod
@@ -2231,7 +2256,7 @@ class SettingsDialog(QDialog):
         except (DatasetIndexError, OSError):
             return False
         return any(
-            record.path.name.casefold().endswith("_results.xlsx")
+            record.path.stem.casefold().endswith("_results")
             for record in (
                 *dataset_index.workbooks,
                 *dataset_index.excluded_workbooks,
@@ -2248,8 +2273,10 @@ class SettingsDialog(QDialog):
         current = self._harmonic_settings_signature_from_preprocessing(validated_preproc)
         return initial is not None and current != initial
 
-    def _frequency_analysis_settings_signature(self) -> tuple[object]:
-        return (self._project_protocol_signature(),)
+    def _frequency_analysis_settings_signature(self) -> tuple[object, ...]:
+        # Cohort-relative QC uses ROI membership even when the selection
+        # profile uses all electrodes. Rebuild QC before selecting harmonics.
+        return (self._project_protocol_signature(), self._roi_settings_signature())
 
     def _frequency_analysis_settings_changed_after_processing(self) -> bool:
         if self.project is None or not self._project_has_processed_outputs():
@@ -2469,6 +2496,7 @@ class SettingsDialog(QDialog):
             try:
                 self.manager.config = copy.deepcopy(snapshot["manager_config"])
                 self.manager.save()
+                self.roi_editor.set_pairs(self.manager.get_roi_pairs())
             except Exception as exc:  # pragma: no cover - settings I/O failure
                 restore_errors.append(f"application analysis settings ({exc})")
             try:
@@ -2520,7 +2548,7 @@ class SettingsDialog(QDialog):
         mark_frequency_domain_outputs_stale(
             self.project.project_root,
             reason=(
-                "The project FPVS protocol changed; rerun frequency-domain "
+                "The project FPVS protocol or ROI definitions changed; rerun frequency-domain "
                 "post-processing and QC."
             ),
         )
@@ -3754,6 +3782,9 @@ class SettingsDialog(QDialog):
             self.project.experimental_qc_settings.with_summed_bca_screening(
                 screening
             ).with_raw_spectral_screening(raw_spectral)
+            .with_condition_specific_interpolation_enabled(
+                self.condition_specific_interpolation_enabled_check.isChecked()
+            )
         )
 
     def _validated_experimental_qc_settings(
@@ -4126,9 +4157,8 @@ class SettingsDialog(QDialog):
             return
         if harmonic_settings_changed and not protocol_changed_after_processing:
             remedy = (
-                "Use Resume Post-processing before running downstream analyses. "
-                "Free Harmonic Clustering will remain blocked until neutral "
-                "FullFFT provenance is refreshed."
+                "Use Resume Post-processing to rebuild frequency-domain QC and "
+                "dependent outputs before running downstream analyses."
                 if frequency_analysis_changed
                 else (
                     "Use Recalculate Harmonics before running downstream analyses. "

@@ -2,13 +2,17 @@ from __future__ import annotations
 
 import json
 import math
+from copy import copy
 from dataclasses import replace
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 
 import pandas as pd
 import pytest
 from openpyxl import load_workbook
+from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.utils import get_column_letter
 
 import Main_App.exports.analysis_ready_workbook as export_module
 from Main_App.exports.analysis_ready_workbook import (
@@ -16,6 +20,96 @@ from Main_App.exports.analysis_ready_workbook import (
     write_analysis_ready_workbook,
 )
 from Main_App.projects import load_project_dataset_index
+
+
+def _pre_optimization_format_workbook(workbook) -> None:
+    """Frozen formatting reference for exact Excel readback parity."""
+    header_fill = PatternFill(fill_type="solid", fgColor="595959")
+    stripe_fill = PatternFill(fill_type="solid", fgColor="F2F2F2")
+    header_font = Font(color="FFFFFF", bold=True)
+    alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    for worksheet in workbook.worksheets:
+        worksheet.freeze_panes = "A2"
+        if worksheet.max_row >= 1 and worksheet.max_column >= 1:
+            worksheet.auto_filter.ref = worksheet.dimensions
+        worksheet.sheet_view.showGridLines = False
+        for cell in worksheet[1]:
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = alignment
+        for row_number, row in enumerate(worksheet.iter_rows(min_row=2), start=2):
+            for cell in row:
+                cell.alignment = alignment
+                if row_number % 2 == 0:
+                    cell.fill = stripe_fill
+                header = str(worksheet.cell(1, cell.column).value or "")
+                if any(token in header for token in (
+                    "BCA", "RMS", "Signed Mean", "Amplitude",
+                    "Noise Mean", "Noise SD", "Z Score",
+                )):
+                    cell.number_format = "0.000000"
+                elif "Hz" in header:
+                    cell.number_format = "0.0000"
+        worksheet.row_dimensions[1].height = 30
+        for column_number, cells in enumerate(worksheet.columns, start=1):
+            values = [str(cell.value or "") for cell in cells]
+            width = min(max(max(map(len, values), default=0) + 2, 12), 60)
+            worksheet.column_dimensions[get_column_letter(column_number)].width = width
+
+
+def test_workbook_formatting_preserves_all_serialized_values_and_styles(tmp_path):
+    import numpy as np
+
+    values = [0.0, -0.0, np.nextafter(1.0, 2.0), 1.2345678901234567,
+              np.nan, np.inf, -np.inf, np.nextafter(0.0, 1.0)]
+    frames = {
+        "ROI Long": pd.DataFrame({
+            "Raw Summed BCA": values,
+            "Harmonic (Hz)": values[::-1],
+            "QC Notes": ["", None, "A" * 100, "line\nbreak", "=1+2", "é", "0", "ok"],
+            "Reviewed": [False, True] * 4,
+            "Date": [datetime(2026, 9, 7)] * 8,
+        }),
+        "Empty": pd.DataFrame(columns=["RMS", "Hz", "Note"]),
+        "No columns": pd.DataFrame(),
+    }
+    paths = [tmp_path / "before.xlsx", tmp_path / "after.xlsx"]
+    for path, formatter in zip(paths, (
+        _pre_optimization_format_workbook, export_module._format_workbook,
+    )):
+        with pd.ExcelWriter(path, engine="openpyxl") as writer:
+            for sheet_name, frame in frames.items():
+                frame.to_excel(writer, sheet_name=sheet_name, index=False)
+            formatter(writer.book)
+
+    before, after = [load_workbook(path) for path in paths]
+    try:
+        assert before.sheetnames == after.sheetnames
+        for left, right in zip(before, after):
+            assert left.dimensions == right.dimensions
+            assert left.freeze_panes == right.freeze_panes
+            assert left.auto_filter == right.auto_filter
+            assert left.sheet_view == right.sheet_view
+            for attribute in ("row_dimensions", "column_dimensions"):
+                assert {
+                    key: dict(value) for key, value in getattr(left, attribute).items()
+                } == {
+                    key: dict(value) for key, value in getattr(right, attribute).items()
+                }
+            for left_row, right_row in zip(left, right):
+                for a, b in zip(left_row, right_row):
+                    assert a.data_type == b.data_type
+                    assert type(a.value) is type(b.value)
+                    if isinstance(a.value, float):
+                        assert a.value.hex() == b.value.hex()
+                    else:
+                        assert a.value == b.value
+                    for attribute in ("font", "fill", "border", "alignment",
+                                      "number_format", "protection"):
+                        assert copy(getattr(a, attribute)) == copy(getattr(b, attribute))
+    finally:
+        before.close()
+        after.close()
 
 
 def _write_project(root: Path) -> None:

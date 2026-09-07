@@ -179,8 +179,9 @@ def _written_receipt(
     )
 
 
-def test_complete_current_receipt_makes_cell_ready(tmp_path):
-    path = tmp_path / "Faces.xlsx"
+@pytest.mark.parametrize("extension", ["xlsx", "fpvs"])
+def test_complete_current_receipt_makes_cell_ready(tmp_path, extension):
+    path = tmp_path / f"Faces.{extension}"
     plan = _expected(path)
     receipt = _written_receipt(path, plan)
 
@@ -279,8 +280,9 @@ def test_missing_condition_input_explains_absence_without_releasing_it(
         assert receipt["reason"].rstrip(".") in message
 
 
-def test_changed_workbook_cannot_reuse_prior_write_receipt(tmp_path):
-    path = tmp_path / "Faces.xlsx"
+@pytest.mark.parametrize("extension", ["xlsx", "fpvs"])
+def test_changed_workbook_cannot_reuse_prior_write_receipt(tmp_path, extension):
+    path = tmp_path / f"Faces.{extension}"
     plan = _expected(path)
     receipt = _written_receipt(path, plan)
     path.write_bytes(path.read_bytes() + b"externally edited")
@@ -293,10 +295,11 @@ def test_changed_workbook_cannot_reuse_prior_write_receipt(tmp_path):
 
 @pytest.mark.parametrize("failure", ["missing", "corrupt"])
 @pytest.mark.parametrize("companion_key", ["spectral_companion", "condition_companion"])
+@pytest.mark.parametrize("extension", ["xlsx", "fpvs"])
 def test_companion_failure_blocks_condition_with_unchanged_workbook(
-    tmp_path, failure, companion_key,
+    tmp_path, failure, companion_key, extension,
 ):
-    path = tmp_path / "Faces.xlsx"
+    path = tmp_path / f"Faces.{extension}"
     plan = _expected(path)
     receipt = _written_receipt(path, plan, with_companion=True)
     assert reconcile_recording_condition_outputs(plan, [receipt]).is_pre_review_ready

@@ -4,6 +4,34 @@ This page documents current post-processing, Excel reports, and NumPy spectral
 companion exports. Refactors must preserve scientific values and processing
 order unless a task explicitly changes the corresponding method contract.
 
+## Native Condition Results
+
+New standard participant/recording-condition outputs use
+`<recording>_<condition>_Results.fpvs`: a small UTF-8 JSON declaration owned by
+`Main_App.io.result_manifest`. It replaces the former XLSX pointer workbook,
+not the scientific arrays. It records a version, ordered sheet names, and the
+existing immutable `.spectra.*.npz` / `.metrics.*.npz` descriptors (basename,
+size, SHA-256, schema version and sheets). Numerical values remain in those
+uncompressed companions, with the same dtypes, bits, grid and metadata.
+
+Companions validate before the manifest is atomically published beside them.
+Failed publication preserves the previous manifest; readers reject missing,
+corrupt or inconsistent native results without falling back to an older XLSX.
+Shared condition/spectral/selected-column readers retain their APIs and accept
+both native anchors and historical XLSX declarations. Explicit XLSX report
+destinations and advanced recipe exports retain their existing writer.
+Long/wide statistical workbooks remain Excel and retain exact numeric readback
+and formatting. Full-audit formatting reuses column rules/styles; individual
+Stats exports retain both original Excel serializers in memory before writing
+the final workbook, preserving the established numeric rounding boundary.
+
+Dataset discovery accepts both anchor formats and prefers the exact native
+sibling. Existing legacy-only recordings stay reusable; recordings selected
+for reprocessing freeze native output paths before expected-cell receipts are
+created. Receipt keys remain compatible (`workbook_write_receipt_v1`) and
+continue to bind exact anchor paths, hashes, validated schemas and companions.
+This changes no preprocessing or FFT operation, harmonic rule or QC decision.
+
 ## Entry Contract
 
 Active post-export adapter imports should use `Main_App.exports.post_export_adapter`.
@@ -16,7 +44,7 @@ Active post-export adapter imports should use `Main_App.exports.post_export_adap
 - `settings`: `SettingsManager`-like object or dict for analysis settings.
 - `log(message)`: logging callback.
 
-The function logs start/end status, skips conditions without data, and logs a warning if no Excel files are saved.
+The function logs start/end status, skips conditions without data, and logs a warning if no result files are saved.
 
 The processing-end GUI must use required post-processing outcomes when deciding
 whether a run succeeded. An early frequency-QC/readiness failure must preserve

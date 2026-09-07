@@ -26,6 +26,7 @@ from Main_App.processing.preprocessing_outcome import (
     INTERPOLATION_STATUS_SUCCEEDED,
     normalize_preprocessing_outcome,
 )
+from Main_App.processing.condition_electrode_interpolation import CONDITION_INTERPOLATION_VERSION
 from Main_App.processing.recording_condition_outcomes import (
     CELL_BLOCKED,
     CELL_PARTIALLY_RETAINED,
@@ -1317,6 +1318,25 @@ def _source_evidence_for_cell(
         processing_ledger,
         cell.processing_id,
     )
+    local_repair = receipt.get("condition_electrode_interpolation")
+    if local_repair is not None:
+        if (not isinstance(local_repair, Mapping)
+                or local_repair.get("version") != CONDITION_INTERPOLATION_VERSION
+                or local_repair.get("status") != "completed"
+                or not local_repair.get("fingerprint")
+                or not isinstance(local_repair.get("spans"), list)
+                or not local_repair["spans"]
+                or any(not isinstance(span, Mapping) or span.get("condition_label") != cell.condition_label
+                       for span in local_repair["spans"])):
+            raise RoiCoverageGateError("Condition-local interpolation provenance is incomplete or invalid.")
+        local_channels = _normalize_scalp_channels(
+            local_repair.get("interpolated_channels") or (),
+            field_name="Condition-local successfully interpolated channels",
+            allow_empty=False,
+        )
+        interpolated = tuple(channel for channel in BIOSEMI64_CHANNELS
+                             if channel in set(interpolated) | set(local_channels))
+        interpolation_outcome = {**interpolation_outcome, "condition_electrode_interpolation": dict(local_repair)}
     bca_columns = _bca_columns_for_workbook(workbook_path)
     unavailable_columns = _unavailable_bca_columns(
         workbook_path,

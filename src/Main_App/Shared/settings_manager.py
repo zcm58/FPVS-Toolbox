@@ -11,6 +11,9 @@ import configparser
 import logging
 import os
 import ast
+import tempfile
+import threading
+import time
 from pathlib import Path
 from typing import List, Tuple
 
@@ -22,6 +25,7 @@ from Main_App.Shared.roi_presets import (
 from Main_App.Shared.settings_paths import app_settings_dir, app_settings_file, legacy_settings_file
 
 logger = logging.getLogger(__name__)
+_SETTINGS_SAVE_LOCK = threading.RLock()
 
 DEFAULTS = {
     'appearance': {
@@ -70,9 +74,9 @@ DEFAULTS = {
         'names': 'LOT;ROT;Central',
         'electrodes': 'P7,P9,PO7,PO3,O1;P8,P10,PO8,PO4,O2;FCZ,CZ,CPZ,CP1,C1,FC1'
     },
-    'roi_presets': {
-        'custom_10_10': '[]'
-    },
+    # An absent canonical key allows existing saved preset lists to be read
+    # from their legacy name. An explicitly saved [] must remain empty.
+    'roi_presets': {},
     'visualization': {
         'threshold': '0.0',
         'surface_opacity': '0.5',
@@ -103,6 +107,64 @@ CONFIGS_DIR = 'configs'
 def _custom_roi_presets_option(montage: str) -> str:
     montage_key = validate_roi_montage(montage)
     return f"custom_{montage_key.replace('-', '_')}"
+
+
+def _config_values(config: configparser.ConfigParser) -> dict[str, dict[str, str]]:
+    """Snapshot explicit raw values, without expanding defaults/interpolation."""
+
+    # Public items()/options() include inherited DEFAULT values, which would
+    # turn an unrelated default edit into explicit changes in every section.
+    return {
+        config.default_section: dict(config.defaults()),
+        **{section: dict(config._sections[section]) for section in config.sections()},
+    }
+
+
+def _default_config() -> configparser.ConfigParser:
+    config = configparser.ConfigParser()
+    config.read_dict(DEFAULTS)
+    return config
+
+
+def _merge_config_changes(
+    latest: configparser.ConfigParser,
+    current: configparser.ConfigParser,
+    baseline: dict[str, dict[str, str]],
+) -> configparser.ConfigParser:
+    values = _config_values(current)
+    for section in baseline.keys() - values.keys():
+        latest.remove_section(section)
+    for section, options in values.items():
+        previous = baseline.get(section, {})
+        changed = {key: value for key, value in options.items() if key not in previous or value != previous[key]}
+        removed = previous.keys() - options.keys()
+        if section == current.default_section:
+            for key in removed:
+                latest.defaults().pop(key, None)
+            latest.defaults().update(changed)
+            continue
+        if (section not in baseline or changed) and not latest.has_section(section):
+            latest.add_section(section)
+        if latest.has_section(section):
+            for key in removed:
+                latest.remove_option(section, key)
+            for key, value in changed.items():
+                latest.set(section, key, value)
+    return latest
+
+
+def _replace_settings_file(source: Path, target: Path) -> None:
+    """Allow brief Windows scanner locks without truncating the previous INI."""
+
+    delays = (0.01, 0.02, 0.05, 0.1, 0.1)
+    for attempt in range(len(delays) + 1):
+        try:
+            os.replace(source, target)
+            return
+        except PermissionError:
+            if attempt == len(delays):
+                raise
+            time.sleep(delays[attempt])
 
 def _default_ini_path() -> str:
     """Return the default path for the central app settings file."""
@@ -176,15 +238,16 @@ class SettingsManager:
             if self._uses_default_path
             else os.path.join(os.path.dirname(self.ini_path), CONFIGS_DIR)
         )
-        self.config = configparser.ConfigParser()
         self.load()
 
     def load(self) -> None:
         """Load settings from disk, applying defaults where needed."""
-        self.config.read_dict(DEFAULTS)
+        self.config = _default_config()
+        self._saved_values = _config_values(self.config)
         migrated = False
         if os.path.exists(self.ini_path):
             self.config.read(self.ini_path)
+            self._saved_values = _config_values(self.config)
         elif self._uses_default_path:
             old_path = legacy_settings_file()
             if _path_exists_for_migration(old_path):
@@ -221,11 +284,41 @@ class SettingsManager:
         self.set('rois', 'electrodes', DEFAULTS['rois']['electrodes'])
         return True
 
-    def save(self) -> None:
-        """Write the current settings to disk."""
-        os.makedirs(os.path.dirname(self.ini_path), exist_ok=True)
-        with open(self.ini_path, 'w') as f:
-            self.config.write(f)
+    def save(self, *, replace_existing: bool = False) -> None:
+        """Publish local edits without overwriting newer, unrelated settings.
+
+        Reset/import explicitly replace the configuration. Normal saves merge
+        changes since this instance last loaded or successfully saved settings.
+        """
+
+        target = Path(self.ini_path)
+        with _SETTINGS_SAVE_LOCK:
+            if replace_existing:
+                merged = self.config
+            else:
+                latest = _default_config()
+                if target.exists():
+                    with target.open() as stream:
+                        latest.read_file(stream)
+                merged = _merge_config_changes(latest, self.config, self._saved_values)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            temporary: Path | None = None
+            try:
+                with tempfile.NamedTemporaryFile(
+                    mode="w", dir=target.parent, prefix=f".{target.name}.",
+                    suffix=".tmp", delete=False,
+                ) as stream:
+                    temporary = Path(stream.name)
+                    merged.write(stream)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                _replace_settings_file(temporary, target)
+                temporary = None
+            finally:
+                if temporary is not None:
+                    temporary.unlink(missing_ok=True)
+            self.config = merged
+            self._saved_values = _config_values(merged)
 
     def export(self, path: str) -> None:
         """Write the current settings to ``path`` as INI or JSON."""
@@ -253,20 +346,21 @@ class SettingsManager:
 
     def reset(self) -> None:
         """Reset settings to defaults and save."""
-        self.config.read_dict(DEFAULTS)
-        self.save()
+        self.config = _default_config()
+        self.save(replace_existing=True)
 
     def load_from(self, path: str) -> None:
         """Load settings from ``path`` then save to the default ini file."""
-        self.config.read_dict(DEFAULTS)
+        imported = _default_config()
         ext = os.path.splitext(path)[1].lower()
         if ext == '.json':
             with open(path, 'r') as f:
                 data = json.load(f)
-            self.config.read_dict(data)
+            imported.read_dict(data)
         else:
-            self.config.read(path)
-        self.save()
+            imported.read(path)
+        self.config = imported
+        self.save(replace_existing=True)
 
 
     def list_configs(self) -> List[str]:
@@ -365,6 +459,9 @@ class SettingsManager:
 
     def get_roi_montage(self) -> str:
         montage = self.get('rois', 'montage', DEFAULT_ROI_MONTAGE)
+        if montage.strip() == '10-10':
+            # The old ROI selector named preset lists, not EEG geometry.
+            return DEFAULT_ROI_MONTAGE
         try:
             return validate_roi_montage(montage)
         except ValueError:
@@ -376,7 +473,11 @@ class SettingsManager:
 
     def get_custom_roi_presets(self, montage: str | None = None) -> List[Tuple[str, List[str]]]:
         montage_key = validate_roi_montage(montage or self.get_roi_montage())
-        raw = self.get('roi_presets', _custom_roi_presets_option(montage_key), '[]')
+        raw = self.get(
+            'roi_presets',
+            _custom_roi_presets_option(montage_key),
+            self.get('roi_presets', 'custom_10_10', '[]'),
+        )
         try:
             payload = json.loads(raw)
         except json.JSONDecodeError:

@@ -5,13 +5,53 @@ import re
 from collections.abc import Mapping
 from copy import deepcopy
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+
+from Main_App.projects.experimental_qc_settings import ExperimentalQcSettings, SummedBcaScreeningSettings
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DIALOG = REPO_ROOT / "src" / "Main_App" / "gui" / "frequency_domain_qc_dialog.py"
 WORKFLOW = REPO_ROOT / "src" / "Main_App" / "gui" / "processing_workflows.py"
+
+
+def test_frequency_review_offers_no_narrow_exclusions_and_requires_confirmation_for_repair():
+    source = DIALOG.read_text(encoding="utf-8")
+    assert "DECISION_EXCLUDE_CONDITION_ELECTRODE" not in source
+    assert "DECISION_EXCLUDE_CONDITION_ROI" not in source
+    assert 'report.get("condition_specific_interpolation_enabled") is True' in source
+    assert "repair_allowed = can_interpolate_finding(" in source
+    assert '"I confirmed an artifact in this condition."' in source
+    assert '"I confirmed an artifact in every listed condition."' in source
+    assert 'payload["artifact_confirmed"]' in source
+    assert "self.bulk_interpolate_button.setVisible(self._interpolation_enabled)" in source
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_experimental_editor_roundtrips_interpolation_capability_without_changing_other_settings(enabled):
+    path = REPO_ROOT / "src/Main_App/gui/settings_panel.py"
+    source = path.read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    method = next(node for node in ast.walk(tree)
+                  if isinstance(node, ast.FunctionDef) and node.name == "_experimental_qc_settings_from_editor")
+    namespace = {"ExperimentalQcSettings": ExperimentalQcSettings,
+                 "SummedBcaScreeningSettings": SummedBcaScreeningSettings}
+    exec(compile(ast.Module(body=[method], type_ignores=[]), str(path), "exec"), namespace)
+    original = ExperimentalQcSettings().with_raw_spectral_screening({"enabled": False})
+    values = original.summed_bca_screening.to_manifest()
+    controls = SimpleNamespace(
+        project=SimpleNamespace(experimental_qc_settings=original),
+        summed_bca_threshold_edits={key: SimpleNamespace(text=lambda value=value: str(value))
+                                    for key, value in values.items() if key not in {"enabled", "policy_version"}},
+        summed_bca_screening_enabled_check=SimpleNamespace(isChecked=lambda: True),
+        raw_spectral_screening_enabled_check=SimpleNamespace(isChecked=lambda: False),
+        condition_specific_interpolation_enabled_check=SimpleNamespace(isChecked=lambda: enabled),
+    )
+    result = namespace[method.name](controls)
+    assert result == original.with_condition_specific_interpolation_enabled(enabled)
+    assert "experimental_settings.condition_specific_interpolation_enabled" in source
 
 
 def test_frequency_review_exposes_recording_scoped_evidence_without_a_default() -> None:

@@ -11,6 +11,7 @@ from Main_App.projects import (
     group_labels_from_manifest,
     infer_workbook_participant_id,
     is_multi_group_manifest,
+    list_result_files,
     load_project_dataset_index,
     participant_group_label_map_from_manifest,
 )
@@ -57,6 +58,43 @@ def _workbook(excel_root: Path, condition: str, folder: str | None, name: str) -
     path = parent / name
     path.write_text("fixture", encoding="utf-8")
     return path
+
+
+def test_native_results_replace_only_their_exact_legacy_siblings(tmp_path: Path) -> None:
+    project_root = tmp_path / "Project"
+    excel_root = _write_project(
+        project_root,
+        groups={"control": ("Control", "Control")},
+        participants={"P01": "control", "P02": "control"},
+    )
+    native = _workbook(excel_root, "Faces", "Control", "P01_Faces_Results.fpvs")
+    legacy = _workbook(excel_root, "Faces", "Control", "P01_Faces_Results.xlsx")
+    historical = _workbook(excel_root, "Faces", "Control", "P02_Faces_Results.xlsx")
+    _workbook(excel_root, "Faces", "Control", "._P01_Faces_Results.fpvs")
+    _workbook(excel_root, "Faces", "Control", "~$P01_Faces_Results.fpvs")
+
+    index = load_project_dataset_index(project_root)
+
+    assert [record.path for record in index.workbooks] == [native, historical]
+    assert not any("duplicate" in item.code for item in index.diagnostics)
+    # Discovery never opens a declaration or falls back on its legacy sibling
+    # when a native declaration exists but is unreadable/invalid.
+    assert load_project_dataset_index(legacy).workbooks[0].path == native
+    assert load_project_dataset_index(native).workbooks[0].path == native
+
+
+def test_flat_result_listing_preserves_arbitrary_names_and_folder_boundaries(tmp_path: Path) -> None:
+    legacy = tmp_path / "arbitrary.xlsx"
+    legacy.write_text("historical input")
+    native = tmp_path / "subject.fpvs"
+    native.write_text("invalid native input must remain visible")
+    native.with_suffix(".xlsx").write_text("superseded input")
+    (tmp_path / "._subject.fpvs").write_text("sidecar")
+    (tmp_path / "~$arbitrary.xlsx").write_text("lock")
+    nested = _workbook(tmp_path, "Nested", None, "deeper.fpvs")
+
+    assert list_result_files(tmp_path) == (legacy, native)
+    assert set(list_result_files(tmp_path, recursive=True)) == {legacy, native, nested}
 
 
 def test_project_dataset_index_assigns_groups_only_from_project_manifest(

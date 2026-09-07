@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-ROI_MONTAGE_10_10 = "10-10"
-DEFAULT_ROI_MONTAGE = ROI_MONTAGE_10_10
+ROI_MONTAGE_BIOSEMI64 = "biosemi64"
+DEFAULT_ROI_MONTAGE = ROI_MONTAGE_BIOSEMI64
 
 SUPPORTED_ROI_MONTAGES: tuple[tuple[str, str], ...] = (
-    (ROI_MONTAGE_10_10, "10-10 International"),
+    (ROI_MONTAGE_BIOSEMI64, "BioSemi ActiveTwo 64"),
 )
 
 
@@ -17,7 +17,7 @@ class ROIPreset:
 
 
 DEFAULT_ROI_PRESETS_BY_MONTAGE: dict[str, tuple[ROIPreset, ...]] = {
-    ROI_MONTAGE_10_10: (
+    ROI_MONTAGE_BIOSEMI64: (
         ROIPreset("LOT", ("P7", "P9", "PO7", "PO3", "O1")),
         ROIPreset("ROT", ("P8", "P10", "PO8", "PO4", "O2")),
         ROIPreset("Central", ("FCZ", "CZ", "CPZ", "CP1", "C1", "FC1")),

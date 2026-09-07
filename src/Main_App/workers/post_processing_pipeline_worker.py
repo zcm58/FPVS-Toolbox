@@ -158,11 +158,29 @@ class PostProcessingPipelineWorker(QObject):
         self._pipeline_steps = steps
         self._completed_phase_units = 0
         cache_stack = ExitStack()
+        requires_processing = False
         try:
             from Main_App.io import xlsx_read_cache_scope
+            from Main_App.processing.condition_interpolation_executor import (
+                execute_pending_condition_interpolations,
+            )
+            from Main_App.processing.condition_interpolation_state import (
+                require_no_pending_condition_interpolation,
+            )
 
-            cache_stack.enter_context(xlsx_read_cache_scope())
             project_root = Path(self._project.project_root).expanduser().resolve()
+            # Accepted repairs must publish EEG-derived outputs before any
+            # downstream index, selection or source identity is captured.
+            repaired = execute_pending_condition_interpolations(
+                project_root, log_func=self.progress.emit,
+            )
+            if repaired:
+                # A repair changes the signal underlying candidate harmonics;
+                # an export-only continuation can no longer reuse selection.
+                self._resume_from_selection = False
+                self._harmonic_selection_metadata = None
+            require_no_pending_condition_interpolation(project_root)
+            cache_stack.enter_context(xlsx_read_cache_scope())
             self._capture_previous_selection_fingerprint(project_root)
             if self._resume_from_selection:
                 self._run_from_accepted_selection(
@@ -267,6 +285,11 @@ class PostProcessingPipelineWorker(QObject):
             # suppress the other scientific workflow.
             steps.extend(self._run_source_maps(project_root))
         except PIPELINE_STEP_EXCEPTIONS as exc:
+            from Main_App.processing.condition_interpolation_executor import (
+                ConditionInterpolationProcessingRequired,
+            )
+
+            requires_processing = isinstance(exc, ConditionInterpolationProcessingRequired)
             logger.exception("post_processing_pipeline_failed")
             steps.append(
                 PostProcessingStepResult(
@@ -307,6 +330,7 @@ class PostProcessingPipelineWorker(QObject):
                 "ok": ok,
                 "has_warnings": has_warnings,
                 "failure_reason": failure_reason,
+                "requires_processing": requires_processing,
                 "steps": [step.as_dict() for step in steps],
             }
         )

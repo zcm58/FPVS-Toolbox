@@ -107,7 +107,7 @@ def test_current_run_receipt_links_atomic_workbook_and_exact_span(tmp_path):
 
 
 def test_512_hz_export_preserves_full_spectra_and_calculated_snr(tmp_path):
-    from openpyxl import load_workbook
+    from Main_App.io.result_manifest import read_result_manifest
 
     from Main_App.io.spectral_data import read_spectral_sheet, spectral_companion_identity
     from Tools.Stats.analysis.full_snr import compute_full_snr_from_amplitudes
@@ -140,20 +140,18 @@ def test_512_hz_export_preserves_full_spectra_and_calculated_snr(tmp_path):
     calculated_snr = compute_full_snr_from_amplitudes(expected_fft)
     expected_snr = np.interp(snr_grid, frequencies, calculated_snr[0])
     np.testing.assert_array_equal(full_snr.iloc[0, 1:].to_numpy(dtype=float), expected_snr)
-    workbook = load_workbook(path, read_only=True)
-    try:
-        assert workbook["FullFFT Amplitude (uV)"].max_column == 2
-        assert workbook["FullSNR"].max_column == 2
-        assert "Spectral Data" in workbook.sheetnames
-    finally:
-        workbook.close()
+    manifest = read_result_manifest(path)
+    assert "FullFFT Amplitude (uV)" in manifest["sheet_names"]
+    assert "FullSNR" in manifest["sheet_names"]
+    assert manifest["spectral_companion"] == descriptor
+    assert not list(tmp_path.rglob("*.xlsx"))
 
 
 def test_compact_export_preserves_calculated_tables_without_excel_copies(
     tmp_path, monkeypatch
 ):
     import importlib
-    from openpyxl import load_workbook
+    from Main_App.io.result_manifest import read_result_manifest
     from Main_App.io.condition_data import CONDITION_DATA_SHEET_NAMES, read_condition_sheet
 
     module = importlib.import_module("Main_App.Shared.post_process")
@@ -181,14 +179,9 @@ def test_compact_export_preserves_calculated_tables_without_excel_copies(
     assert receipt["status"] == "written"
     assert receipt["workbook_write"]["condition_companion"]["path"].endswith(".npz")
     path = receipt["path"]
-    workbook = load_workbook(path, read_only=True)
-    try:
-        assert "Condition Data" in workbook.sheetnames
-        for name in calculated:
-            assert workbook[name].max_row == 2
-            assert workbook[name].max_column == 2
-    finally:
-        workbook.close()
+    manifest = read_result_manifest(path)
+    assert set(calculated).issubset(manifest["condition_companion"]["sheets"])
+    assert not list(tmp_path.rglob("*.xlsx"))
 
     def no_excel_metrics(*args, **kwargs):
         raise AssertionError("Compact numerical reads must not parse Excel tables")
@@ -204,7 +197,7 @@ def test_nonfinite_source_blocks_current_export_and_preserves_prior_workbook(
     tmp_path,
     invalid,
 ):
-    destination = tmp_path / "Faces" / "P01__visit_1_Faces_Results.xlsx"
+    destination = tmp_path / "Faces" / "P01__visit_1_Faces_Results.fpvs"
     destination.parent.mkdir(parents=True)
     prior_bytes = b"prior complete workbook placeholder"
     destination.write_bytes(prior_bytes)

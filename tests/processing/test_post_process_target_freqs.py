@@ -289,7 +289,7 @@ def test_post_process_exports_filter_domain_and_structured_notch_hole(tmp_path) 
 
     post_process(app, ["Condition A"])
 
-    workbook_path = next(tmp_path.rglob("*.xlsx"))
+    workbook_path = next(tmp_path.rglob("*.fpvs"))
     bca = read_condition_sheet(workbook_path, sheet_name="BCA (uV)")
     assert "48.0000_Hz" in bca.columns
     assert np.isfinite(bca.loc[0, "48.0000_Hz"])

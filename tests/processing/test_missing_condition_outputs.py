@@ -196,9 +196,9 @@ def test_missing_dialog_rows_start_unchecked_and_keep_existing_decisions():
     assert eval(code, namespace) is False
     namespace["existing_pairs"] = {row.participant_pair_key}
     assert eval(code, namespace) is True
-    text = _function(GUI / "participant_condition_exclusions_dialog.py", "_grid_status_text",
-                     {"MissingConditionOutput": MissingConditionOutput})
-    assert text(row, None) == "No condition output"
+    from Main_App.gui.condition_exclusion_review_model import status_label
+
+    assert status_label(row, None) == "Missing output"
 
 
 @pytest.mark.parametrize("selected", [False, True])

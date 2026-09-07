@@ -3,9 +3,62 @@ from __future__ import annotations
 from pathlib import Path
 
 import pandas as pd
+import numpy as np
 import pytest
 
 from Tools.Publication_Maps.xlsx_metric_reader import read_metric_sheet_selected_columns
+
+
+@pytest.mark.parametrize("damage", ["spectral", "condition"])
+def test_native_metric_values_and_source_companions_are_preserved_and_verified(
+    tmp_path: Path, damage: str,
+) -> None:
+    from Main_App.Shared.post_process_excel import write_results_workbook
+    from Tools.Publication_Maps.metrics import (
+        _capture_workbook_identity, verify_publication_workbooks_unchanged,
+    )
+    from Tools.Publication_Maps.models import PublicationMapInputError, WorkbookEntry
+
+    native = tmp_path / "P01.fpvs"
+    values = np.array([-0.0, np.nextafter(1.0, 2.0)], dtype=np.float64)
+    frames = {
+        name: pd.DataFrame({"Electrode": ["Cz", "Pz"], "1.2000_Hz": values})
+        for name in ("BCA (uV)", "SNR", "Z Score", "FullFFT Amplitude (uV)")
+    }
+    write_results_workbook(str(native), frames)
+    entry = _capture_workbook_identity(
+        WorkbookEntry(condition="Faces", subject_id="P01", path=native),
+        cancel_check=None,
+    )
+    assert entry.spectral_companion is not None
+    assert entry.condition_companion is not None
+    for sheet in ("BCA (uV)", "SNR", "Z Score"):
+        actual = read_metric_sheet_selected_columns(
+            native, sheet_name=sheet, required_columns=["Electrode", "1.2000_Hz"],
+        )
+        assert actual["Electrode"].tolist() == ["Cz", "Pz"]
+        np.testing.assert_array_equal(actual["1.2000_Hz"].to_numpy().view(np.uint64), values.view(np.uint64))
+    verify_publication_workbooks_unchanged((entry,))
+    descriptor = entry.spectral_companion if damage == "spectral" else entry.condition_companion
+    companion = native.with_name(descriptor["path"])
+    content = bytearray(companion.read_bytes())
+    content[-1] ^= 1
+    companion.write_bytes(content)
+    with pytest.raises(PublicationMapInputError, match="[Cc]ompanion"):
+        verify_publication_workbooks_unchanged((entry,))
+
+
+def test_scalp_identity_rejects_malformed_native_source(tmp_path: Path) -> None:
+    from Tools.Publication_Maps.metrics import _capture_workbook_identity
+    from Tools.Publication_Maps.models import PublicationMapInputError, WorkbookEntry
+
+    native = tmp_path / "bad.fpvs"
+    native.write_text("{}", encoding="utf-8")
+    with pytest.raises(PublicationMapInputError, match="FPVS result"):
+        _capture_workbook_identity(
+            WorkbookEntry(condition="Faces", subject_id="P01", path=native),
+            cancel_check=None,
+        )
 
 
 def test_selected_metric_reader_matches_pandas_for_scalp_metric_sheets(

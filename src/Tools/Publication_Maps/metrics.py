@@ -313,16 +313,18 @@ def _capture_workbook_identity(
                 digest.update(chunk)
         # Validate the compact metric values and their original spectral source.
         from Main_App.io.condition_data import condition_companion_identity
+        from Main_App.io.result_manifest import is_result_manifest
         from Main_App.io.spectral_data import spectral_companion_identity
 
+        declared_source = is_result_manifest(workbook.path) or zipfile.is_zipfile(workbook.path)
         companion = (
             spectral_companion_identity(workbook.path)
-            if zipfile.is_zipfile(workbook.path)
+            if declared_source
             else None
         )
         condition_companion = (
             condition_companion_identity(workbook.path)
-            if zipfile.is_zipfile(workbook.path)
+            if declared_source
             else None
         )
         after = workbook.path.stat()

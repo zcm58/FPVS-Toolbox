@@ -6,7 +6,7 @@ from typing import Callable, Iterable
 
 import pandas as pd
 
-from Main_App.Shared.file_filters import is_excel_workbook_file
+from Main_App.projects import list_result_files
 from Main_App.processing.roi_settings import build_roi_definition_snapshot
 from Tools.Stats.analysis.canonical_harmonics import (
     CANONICAL_HARMONIC_SOURCE,
@@ -125,9 +125,8 @@ def run_ratio_calculator(
     _log("=" * 110)
 
     def index_folder(path: str, label: str) -> tuple[list[Path], dict[str, Path]]:
-        all_files = sorted(Path(path).expanduser().glob("*.xlsx"))
-        xlsx_files = [p for p in all_files if is_excel_workbook_file(p)]
-        _log(f"[{label}] Found {len(xlsx_files)} .xlsx files.")
+        xlsx_files = list(list_result_files(path))
+        _log(f"[{label}] Found {len(xlsx_files)} processed result files.")
         pid_to_path: dict[str, Path] = {}
         for file_path in xlsx_files:
             pid, _ = parse_participant_id(file_path.name)

@@ -88,6 +88,48 @@ def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def test_focused_condition_repair_preserves_other_condition_derivative_bytes(tmp_path):
+    kwargs = dict(
+        project_root=tmp_path.resolve(), participant_id="P01",
+        processing_provenance=_processing_provenance(),
+        source_signature={"raw_file": "Input/P01.bdf", "raw_size": 1234},
+    )
+    original = write_source_ready_time_domain_derivatives(
+        **kwargs, condition_epochs={"Condition A": [_epochs(scale=1e-6)], "Condition B": [_epochs(scale=2e-6)]},
+    )
+    unaffected = next(item for item in original.artifacts if item.condition_label == "Condition B")
+    paths = (unaffected.fif_path, unaffected.sidecar_path)
+    before = {path: (path.read_bytes(), path.stat().st_mtime_ns) for path in paths}
+    changed = next(item for item in original.artifacts if item.condition_label == "Condition A")
+    previous_changed = changed.fif_path.read_bytes()
+    repaired = write_source_ready_time_domain_derivatives(
+        **kwargs, condition_epochs={"Condition A": [_epochs(scale=3e-6)]}, merge_existing=True,
+    )
+    assert {item.condition_label for item in repaired.artifacts} == {"Condition A", "Condition B"}
+    assert changed.fif_path.read_bytes() != previous_changed
+    assert {path: (path.read_bytes(), path.stat().st_mtime_ns) for path in paths} == before
+    manifest = json.loads(repaired.manifest_path.read_text())
+    assert manifest["complete"] and manifest["artifact_count"] == 2
+    for item in manifest["artifacts"]:
+        assert _sha256(tmp_path / item["fif_path"]) == item["fif_sha256"]
+        assert _sha256(tmp_path / item["sidecar_path"]) == item["sidecar_sha256"]
+
+
+def test_focused_source_merge_rejects_changed_recording_before_writing(tmp_path):
+    kwargs = dict(project_root=tmp_path.resolve(), participant_id="P01", processing_provenance=_processing_provenance())
+    original = write_source_ready_time_domain_derivatives(
+        **kwargs, condition_epochs={"Condition A": [_epochs()], "Condition B": [_epochs()]},
+        source_signature={"raw_size": 1},
+    )
+    before = original.manifest_path.read_bytes()
+    with pytest.raises(ValueError, match="changed recording"):
+        write_source_ready_time_domain_derivatives(
+            **kwargs, condition_epochs={"Condition A": [_epochs()]},
+            source_signature={"raw_size": 2}, merge_existing=True,
+        )
+    assert original.manifest_path.read_bytes() == before
+
+
 def test_export_writes_signed_eeg_mean_sidecar_and_commit_manifest(tmp_path: Path) -> None:
     project_root = (tmp_path / "Project").resolve()
     project_root.mkdir()

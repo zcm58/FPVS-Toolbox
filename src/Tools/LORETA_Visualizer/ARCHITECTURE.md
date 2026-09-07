@@ -7,6 +7,10 @@ Legacy amplitude-workbook adapters use the shared spectral sheet readers,
 which resolve a workbook's declared, validated NumPy companion or retain
 legacy Excel-only reads. This storage compatibility does not add a fallback
 to the current signed-FIF source-PSD producers or change any source estimator.
+The retained compact BCA/FFT-amplitude topography adapter also reads declared
+condition companions, including `.fpvs` anchors, through shared selected-column
+I/O. Its exact harmonic columns, electrode order, and finite-value checks remain
+unchanged; Stats-ready and participant-list reports remain Excel inputs.
 
 ## Purpose
 

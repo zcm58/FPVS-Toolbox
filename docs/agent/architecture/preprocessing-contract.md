@@ -19,6 +19,40 @@ lowest-risk maintenance path is:
 2. Add focused tests before any behavior-sensitive edit.
 3. Split code only when the extraction boundary is obvious and fully covered.
 
+## Experimental condition-specific electrode repairs
+
+Frequency-domain QC may request one electrode repair in one recording-condition
+when the experimental option is enabled and the reviewer confirms an artifact.
+It cannot remove an electrode or a whole ROI from downstream calculations.
+Approvals are durable in `tools.condition_electrode_interpolation`; disabling the
+option prevents new requests and does not undo previous repairs.
+
+`condition_electrode_interpolation.py` branches from the same pre-interpolation
+Raw stage. Within each exact reviewed analyzed interval it interpolates the union
+of approved recording-wide bad channels and condition-specific channels, applies
+the usual final average reference, then replaces only that interval's EEG samples.
+Filtering, resampling, original trigger coordinates, and epoch construction retain
+their existing order. Repairs change the analyzed signal intentionally; the final
+reference can change other electrodes within that repaired condition as well.
+
+`condition_interpolation_executor.py` runs in the post-processing worker before
+QC/selection. It reuses the normal process runner with a durable snapshot of the
+reviewed timing and settings. Only requested condition artifacts are rewritten;
+other condition NumPy/native outputs and source FIF/JSON derivatives remain intact.
+The merged recording-condition ledger and completed repair provenance must validate
+before release. Failed repairs stay pending for retry. A missing/stale run snapshot
+routes the user back to normal Processing; trigger timing is never guessed.
+Normal runs save their snapshot in the background and can supply completed repair
+receipts directly, avoiding a second processing run.
+
+Approvals bind to the reviewed raw path/size/timestamp. Replaced or missing raw
+sources retire the old requests into audit history with a warning. Explicit
+condition/recording exclusions suspend repairs without erasing their history;
+missing condition inputs do not silently suspend them. Each repaired condition
+retains the requested channels, interpolation union, exact interval coordinates,
+and repair fingerprint in its export provenance. Final QC and harmonics recompute
+after a newly completed repair, including one adopted from a normal run.
+
 ## Active Owner
 
 `src/Main_App/processing/preprocess.py` is the canonical active implementation

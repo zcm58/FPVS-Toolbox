@@ -52,6 +52,8 @@ Rules:
   and spectral NumPy companions are part of source identity and must validate
   during capture and publication; missing or tampered companions cannot
   silently pass the source checks.
+  Native `.fpvs` source declarations use these same readers and companion
+  checks; they must not bypass validation because they are not ZIP archives.
 - Z-score maps read the `Z Score` sheet, use the exact selected
   `"{freq:.4f}_Hz"` columns, and combine selected harmonics as
   `sum(z) / sqrt(K)` before the condition grand average.

@@ -8,7 +8,7 @@ import logging
 import os
 import re
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Mapping, Sequence
@@ -16,6 +16,11 @@ from typing import TYPE_CHECKING, Any, Mapping, Sequence
 from Main_App.io.eeg_geometry import (
     BIOSEMI64_CHANNELS,
     biosemi64_geometry_identity,
+)
+from Main_App.io.result_manifest import (
+    RESULT_MANIFEST_SUFFIX,
+    resolve_result_path,
+    result_manifest_path,
 )
 from Main_App.processing.interpolation_burden import build_interpolation_burden
 from Main_App.processing.preprocessing_outcome import (
@@ -117,7 +122,7 @@ _FINGERPRINT_V9_EPOCH_DEFAULTS = {
     "epoch_start_s": -1.0,
     "epoch_end_s": 125.0,
 }
-GENERATED_EXCEL_SUFFIXES = {".xls", ".xlsx", ".xlsm", ".xlsb"}
+GENERATED_EXCEL_SUFFIXES = {".xls", ".xlsx", ".xlsm", ".xlsb", RESULT_MANIFEST_SUFFIX}
 MISSING_EXPECTED_OUTPUTS_WARNING = "missing_expected_outputs"
 NO_EXPECTED_OUTPUTS_FAILURE = "no_expected_outputs"
 SOURCE_READY_TIME_DOMAIN_RELATIVE_ROOT = (
@@ -317,6 +322,8 @@ def _interpolation_payload(source: Mapping[str, Any] | None) -> dict[str, object
             source.get("interpolation_requested_channels")
         ),
         "interpolation_error": str(source.get("interpolation_error") or ""),
+        **({"condition_electrode_interpolation": dict(source["condition_electrode_interpolation"])}
+           if isinstance(source.get("condition_electrode_interpolation"), Mapping) else {}),
     }
 
 
@@ -652,7 +659,7 @@ def _expected_excel_paths(
         output_folder = resolve_output_directory(root, condition_folder)
         if group_folder:
             output_folder = resolve_group_output_directory(output_folder, group_folder)
-        paths.append((output_folder / file_name).resolve())
+        paths.append(resolve_result_path(output_folder / file_name).resolve())
     return tuple(paths)
 
 
@@ -831,6 +838,9 @@ def build_processing_fingerprint(
         for key, value in settings.items()
         if key not in _DOWNSTREAM_ONLY_PREPROCESSING_KEYS
         and key != "frequency_protocol"
+        # Repairs are governed by per-recording cache and condition receipts;
+        # their addition must not obsolete unrelated recordings.
+        and key not in {"condition_electrode_interpolation_requests", "_fpvs_condition_interpolation_requests", "_fpvs_condition_interpolation_provenance", "_fpvs_export_only_conditions", "_fpvs_condition_interpolation_run_snapshot"}
         and (
             repeated_session_project
             or key not in _REPEATED_SESSION_PREPROCESSING_KEYS
@@ -1218,8 +1228,20 @@ def classify_processing_inputs(
 
 
 def with_processing_choice(plan: ProcessingPlan, choice: str) -> ProcessingPlan:
+    # Reused historical recordings retain their XLSX identities. Once selected
+    # for processing, freeze the native output route before the expected-cell
+    # plan records it, including reprocessing an existing legacy recording.
+    states = tuple(
+        replace(
+            state,
+            expected_outputs=tuple(result_manifest_path(path) for path in state.expected_outputs),
+        )
+        if choice in {"reprocess_all", "reprocess_this_file"} or state.should_run_incremental
+        else state
+        for state in plan.states
+    )
     return ProcessingPlan(
-        states=plan.states,
+        states=states,
         fingerprint=plan.fingerprint,
         condition_labels=plan.condition_labels,
         choice=choice,
@@ -1597,6 +1619,21 @@ def clean_downstream_outputs_for_reprocess_all(project: Any) -> list[Path]:
     return deleted
 
 
+def _condition_cleanup_bundle(root: Path, expected_output: Path) -> tuple[tuple[Path, ...], tuple[Path, ...]]:
+    """Collect both exact anchors and their declared arrays before deleting either."""
+
+    anchors = tuple(dict.fromkeys(
+        _assert_under_excel_root(root, path)
+        for path in (expected_output.with_suffix(".xlsx"), result_manifest_path(expected_output))
+    ))
+    companions = tuple(dict.fromkeys(
+        companion
+        for anchor in anchors
+        for companion in _workbook_companions(root, anchor)
+    ))
+    return anchors, companions
+
+
 def clean_participant_outputs(project: Any, plan: ProcessingPlan) -> list[Path]:
     root = _excel_root(project).resolve()
     project_root = Path(project.project_root).resolve()
@@ -1619,11 +1656,11 @@ def clean_participant_outputs(project: Any, plan: ProcessingPlan) -> list[Path]:
         if state.info.path.resolve() not in run_files:
             continue
         for expected_output in state.expected_outputs:
-            target = _assert_under_excel_root(root, expected_output)
-            companions = _workbook_companions(root, target)
-            if target.exists():
-                target.unlink()
-                deleted.append(target)
+            anchors, companions = _condition_cleanup_bundle(root, expected_output)
+            for target in anchors:
+                if target.exists():
+                    target.unlink()
+                    deleted.append(target)
             for companion in companions:
                 deleted.append(_delete_generated_file(companion, "condition data companion"))
         deleted.extend(
@@ -1645,21 +1682,21 @@ def _remove_expected_outputs_for_state(
     derivative_targets = _recorded_source_derivative_paths(project_root, entry)
     removed: list[str] = []
     for expected_output in state.expected_outputs:
-        target = _assert_under_excel_root(root, expected_output)
-        companions = _workbook_companions(root, target)
-        if not target.exists():
+        anchors, companions = _condition_cleanup_bundle(root, expected_output)
+        for target in anchors:
+            if not target.exists():
+                continue
+            try:
+                target.unlink()
+            except OSError as exc:
+                logger.warning(
+                    "excluded_output_cleanup_failed",
+                    extra={"path": str(target), "participant_id": state.participant_id, "error": str(exc)},
+                )
+                break
+            removed.append(str(target))
+        else:
             removed.extend(str(_delete_generated_file(path, "condition data companion")) for path in companions)
-            continue
-        try:
-            target.unlink()
-        except OSError as exc:
-            logger.warning(
-                "excluded_output_cleanup_failed",
-                extra={"path": str(target), "participant_id": state.participant_id, "error": str(exc)},
-            )
-            continue
-        removed.append(str(target))
-        removed.extend(str(_delete_generated_file(path, "condition data companion")) for path in companions)
     removed.extend(
         str(path)
         for path in _delete_recorded_source_derivative_targets(

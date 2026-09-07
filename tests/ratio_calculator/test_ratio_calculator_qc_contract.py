@@ -50,14 +50,28 @@ def _write_managed_input(path: Path, scale: float) -> None:
         }
     )
     path.parent.mkdir(parents=True, exist_ok=True)
+    if path.suffix == ".fpvs":
+        from Main_App.io.condition_data import write_condition_companion
+        from Main_App.io.result_manifest import write_result_manifest
+
+        descriptor = write_condition_companion(
+            path, {sheet: frame for sheet in ("Z Score", "SNR", "BCA (uV)")},
+        )
+        write_result_manifest(
+            path, sheet_names=descriptor["sheets"],
+            spectral_companion=None, condition_companion=descriptor,
+        )
+        return
     with pd.ExcelWriter(path) as writer:
         for sheet_name in ("Z Score", "SNR", "BCA (uV)"):
             frame.to_excel(writer, sheet_name=sheet_name, index=False)
 
 
+@pytest.mark.parametrize("suffix", [".xlsx", ".fpvs"])
 def test_managed_ratio_uses_accepted_project_harmonics(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    suffix: str,
 ) -> None:
     from Tools.Ratio_Calculator import pipeline
 
@@ -66,8 +80,11 @@ def test_managed_ratio_uses_accepted_project_harmonics(
     project_root = tmp_path / "Project"
     output = tmp_path / "Output"
     project_root.mkdir()
-    _write_managed_input(input_a / "P1_A.xlsx", 1.0)
-    _write_managed_input(input_b / "P1_B.xlsx", 2.0)
+    _write_managed_input(input_a / f"P1_A{suffix}", 1.0)
+    _write_managed_input(input_b / f"P1_B{suffix}", 2.0)
+    if suffix == ".fpvs":
+        _write_managed_input(input_a / "P1_A.xlsx", 99.0)
+        _write_managed_input(input_b / "P1_B.xlsx", 99.0)
 
     monkeypatch.setattr(
         pipeline,
@@ -107,6 +124,7 @@ def test_managed_ratio_uses_accepted_project_harmonics(
     assert parameter_map["INCLUDED_ODDBALL_HARMONICS_HZ"] == "0.3, 0.6"
     assert int(parameter_map["N_INCLUDED_HARMONICS"]) == 2
     assert participant_sums["n_harmonics_summed"].tolist() == [2, 2]
+    assert participant_sums["sum_BCA_uV"].tolist() == [5.0, 10.0]
 
 
 def test_unmanaged_ratio_has_no_legacy_frequency_default(tmp_path: Path) -> None:

@@ -253,7 +253,7 @@ def test_changed_exclusion_context_settles_after_one_reconfirmation(adaptive_pro
         project.project_root,
         first,
         review_decisions=_decisions(
-            first, frequency_qc.DECISION_EXCLUDE_CONDITION_ELECTRODE,
+            first, frequency_qc.DECISION_EXCLUDE_CONDITION,
         ),
     )
     changed = frequency_qc.run_frequency_domain_qc_review(project)
@@ -264,7 +264,7 @@ def test_changed_exclusion_context_settles_after_one_reconfirmation(adaptive_pro
         project.project_root,
         changed,
         review_decisions=_decisions(
-            changed, frequency_qc.DECISION_EXCLUDE_CONDITION_ELECTRODE,
+            changed, frequency_qc.DECISION_EXCLUDE_CONDITION,
         ),
     )
 
@@ -273,6 +273,4 @@ def test_changed_exclusion_context_settles_after_one_reconfirmation(adaptive_pro
     assert settled["review_required"] is False
     assert frequency_qc.active_frequency_domain_exclusions(
         project.project_root
-    ).excluded_electrodes_by_participant_condition == {
-        ("P1", "CondA"): frozenset({"O2"})
-    }
+    ).excluded_participant_conditions == {("P1", "CondA")}

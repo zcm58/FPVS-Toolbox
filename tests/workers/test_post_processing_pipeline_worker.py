@@ -144,6 +144,25 @@ class _ReviewRequiredWorker(_RecordingWorker):
         return {"review_required": True, "review_reused": False}
 
 
+def test_condition_repair_restarts_qc_instead_of_reusing_accepted_selection(tmp_path, monkeypatch):
+    from Main_App.processing import condition_interpolation_executor
+
+    monkeypatch.setattr(
+        condition_interpolation_executor, "execute_pending_condition_interpolations",
+        lambda *_args, **_kwargs: True,
+    )
+    worker = _ReviewRequiredWorker(_Project(tmp_path))
+    worker._resume_from_selection = True
+    worker._harmonic_selection_metadata = {"selection_fingerprint": "before-repair"}
+    results = []
+    worker.finished.connect(results.append)
+    worker.run()
+    assert worker.calls == ["qc"]
+    assert worker._resume_from_selection is False
+    assert worker._harmonic_selection_metadata is None
+    assert results[-1]["requires_frequency_domain_qc_review"] is True
+
+
 class _CohortWarningWorker(_RecordingWorker):
     def _run_source_map_mode(
         self,

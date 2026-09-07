@@ -14,6 +14,7 @@ from types import MappingProxyType
 from typing import Any, Iterable, Mapping
 
 from Main_App.Shared.file_filters import is_excel_workbook_file
+from Main_App.io.result_manifest import RESULT_MANIFEST_SUFFIX, resolve_result_path
 
 from .dataset_identity import (
     add_legacy_participant_aliases,
@@ -550,15 +551,37 @@ class ProjectDatasetIndex:
         )
 
 
+def list_result_files(folder: str | Path, *, recursive: bool = False) -> tuple[Path, ...]:
+    """List native/legacy inputs without changing a caller's cohort or identities.
+
+    Flat-folder tools keep their established filename and exclusion handling.
+    Only an exact legacy sibling is suppressed when its native anchor exists;
+    malformed native anchors are retained for the shared reader to reject.
+    """
+
+    root = Path(folder).expanduser()
+    candidates = root.rglob("*") if recursive else root.glob("*")
+    return tuple(sorted(
+        path for path in candidates
+        if is_excel_workbook_file(path, suffixes=(".xlsx", RESULT_MANIFEST_SUFFIX))
+        and path.is_file()
+        and path == resolve_result_path(path)
+    ))
+
+
 def load_project_dataset_index(dataset_path: str | Path) -> ProjectDatasetIndex:
     """Build the shared read-only workbook index for a project or Excel path."""
 
     requested = Path(dataset_path).expanduser().resolve(strict=False)
     requested_is_file = requested.is_file()
-    if requested_is_file and not is_excel_workbook_file(requested):
+    if requested_is_file and not is_excel_workbook_file(
+        requested, suffixes=(".xlsx", RESULT_MANIFEST_SUFFIX)
+    ):
         raise DatasetIndexError(
-            f"Dataset file inputs must be .xlsx workbooks: {requested}"
+            f"Dataset file inputs must be .fpvs results or .xlsx workbooks: {requested}"
         )
+    if requested_is_file:
+        requested = resolve_result_path(requested)
     project_root, manifest = find_project_manifest_for_dataset_path(requested)
     diagnostics: list[DatasetDiagnostic] = []
     single_workbook: Path | None = requested if requested_is_file else None
@@ -657,10 +680,8 @@ def load_project_dataset_index(dataset_path: str | Path) -> ProjectDatasetIndex:
             workbook_paths = tuple(
                 sorted(
                     path
-                    for path in scan_root.rglob("*.xlsx")
-                    if path.is_file()
-                    and is_excel_workbook_file(path)
-                    and not is_ignored_workbook_path(path, scan_root)
+                    for path in list_result_files(scan_root, recursive=True)
+                    if not is_ignored_workbook_path(path, scan_root)
                 )
             )
         except OSError as exc:

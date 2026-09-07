@@ -10,12 +10,13 @@ from types import SimpleNamespace
 import pytest
 
 from Main_App.gui.frequency_domain_qc_review_model import (
+    can_interpolate_finding,
     electrode_group_key,
     electrode_groups,
 )
 from Main_App.processing.frequency_domain_qc import (
     DECISION_EXCLUDE_CONDITION,
-    DECISION_EXCLUDE_CONDITION_ELECTRODE,
+    DECISION_INTERPOLATE_CONDITION_ELECTRODE,
     DECISION_EXCLUDE_PARTICIPANT,
     DECISION_EXCLUDE_RECORDING,
     DECISION_RETAIN,
@@ -24,7 +25,7 @@ from Main_App.processing.frequency_domain_qc import (
 
 
 DIALOG_PATH = Path(__file__).resolve().parents[2] / "src/Main_App/gui/frequency_domain_qc_dialog.py"
-DECISIONS = ("", DECISION_RETAIN, DECISION_EXCLUDE_CONDITION_ELECTRODE,
+DECISIONS = ("", DECISION_RETAIN, DECISION_INTERPOLATE_CONDITION_ELECTRODE,
              DECISION_EXCLUDE_CONDITION, DECISION_EXCLUDE_RECORDING, DECISION_EXCLUDE_PARTICIPANT)
 
 
@@ -63,6 +64,15 @@ class _Control:
 
     def setToolTip(self, value):
         self.tooltip = value
+
+    def isChecked(self):
+        return self.value is True
+
+    def setChecked(self, value):
+        self.setText(value)
+
+    def setVisible(self, value):
+        self.visible = value
 
 
 class _SignalBlocker:
@@ -128,6 +138,7 @@ def _dialog_methods():
         "Qt": SimpleNamespace(UserRole=256),
         "_natural_sort_key": lambda value: (value,),
         "electrode_group_key": electrode_group_key,
+        "can_interpolate_finding": can_interpolate_finding,
         "validate_frequency_domain_qc_review_decisions": validate_frequency_domain_qc_review_decisions,
         "QMessageBox": SimpleNamespace(warning=lambda *_args: pytest.fail("Unexpected review validation failure")),
     }
@@ -164,12 +175,19 @@ def _harness():
                             for index in range(len(dialog._findings))]
     dialog._decision_controls = {item["finding_fingerprint"]: controls
                                  for item, controls in zip(dialog._findings, dialog._row_controls)}
+    dialog._interpolation_enabled = True
+    dialog._artifact_controls = {
+        item["finding_fingerprint"]: _Control(value=False)
+        for item in dialog._findings if item.get("electrode") and not item.get("roi")
+    }
+    dialog.bulk_artifact_check = _Control(value=True)
     dialog.bulk_undo_button = _Control()
     dialog._bulk_snapshot = {}
     dialog._sort_column = None
     dialog._submitted_decisions = ()
     dialog._report = {"identity_scope": "recording", "analysis_fingerprint": "analysis",
-                      "review_findings": dialog._findings}
+                      "review_findings": dialog._findings,
+                      "condition_specific_interpolation_enabled": True}
     dialog.accepted = False
     dialog.refresh_count = 0
 
@@ -181,6 +199,8 @@ def _harness():
     for index, (combo, reason) in enumerate(dialog._row_controls):
         combo.changed = lambda _value, index=index: dialog._decision_changed(index)
         reason.changed = dialog._invalidate_bulk_undo
+    for confirmation in dialog._artifact_controls.values():
+        confirmation.changed = dialog._invalidate_bulk_undo
     return dialog
 
 
@@ -188,11 +208,11 @@ def _state(dialog):
     return [(combo.currentData(), reason.text()) for combo, reason in dialog._row_controls]
 
 
-@pytest.mark.parametrize("decision", [DECISION_RETAIN, DECISION_EXCLUDE_CONDITION_ELECTRODE])
+@pytest.mark.parametrize("decision", [DECISION_RETAIN, DECISION_INTERPOLATE_CONDITION_ELECTRODE])
 def test_bulk_choices_update_exact_original_members_and_submit_canonical_receipts(decision):
     dialog = _harness()
     for index in (0, 1, 2):
-        dialog._row_controls[index][0].value = DECISION_EXCLUDE_CONDITION_ELECTRODE
+        dialog._row_controls[index][0].value = DECISION_INTERPOLATE_CONDITION_ELECTRODE
     before = _state(dialog)
     original_findings = deepcopy(dialog._findings)
 
@@ -203,7 +223,9 @@ def test_bulk_choices_update_exact_original_members_and_submit_canonical_receipt
     assert _state(dialog) == [(decision if index < 3 else old, reason)
                              for index, (old, reason) in enumerate(before)]
     assert dialog._findings == original_findings
-    assert dialog._bulk_snapshot == dict(enumerate(before[:3]))
+    assert dialog._bulk_snapshot == {
+        index: (*values, False) for index, values in enumerate(before[:3])
+    }
     assert dialog.refresh_count == 1
     receipts = {row["finding_fingerprint"]: row for row in dialog.review_decisions()}
     assert set(receipts) == {item["finding_fingerprint"] for item in original_findings}
@@ -215,6 +237,8 @@ def test_bulk_choices_update_exact_original_members_and_submit_canonical_receipt
         assert row["recording_id"] == finding["recording_id"]
         assert row["condition"] == finding["condition"]
         assert row["decision_fingerprint"]
+        if expected == DECISION_INTERPOLATE_CONDITION_ELECTRODE:
+            assert row["artifact_confirmed"] is True
     assert {receipts[name]["decision_scope"] for name in ("happy", "sad", "angry")} == {
         "recording_condition_electrode",
     }
@@ -226,7 +250,7 @@ def test_undo_restores_mixed_decisions_and_reasons_with_sorted_hidden_rows():
         dialog._row_controls[index][0].value = decision
     before = _state(dialog)
 
-    dialog._apply_electrode_group_decision(DECISION_EXCLUDE_CONDITION_ELECTRODE)
+    dialog._apply_electrode_group_decision(DECISION_INTERPOLATE_CONDITION_ELECTRODE)
     dialog._undo_electrode_group_decision()
 
     assert _state(dialog) == before
@@ -238,15 +262,17 @@ def test_undo_restores_mixed_decisions_and_reasons_with_sorted_hidden_rows():
     ]
 
 
-@pytest.mark.parametrize("action", ["decision", "reason"])
+@pytest.mark.parametrize("action", ["decision", "reason", "confirmation"])
 def test_manual_edit_invalidates_bulk_undo_and_later_undo_cannot_overwrite_it(action):
     dialog = _harness()
-    dialog._apply_electrode_group_decision(DECISION_EXCLUDE_CONDITION_ELECTRODE)
+    dialog._apply_electrode_group_decision(DECISION_INTERPOLATE_CONDITION_ELECTRODE)
     combo, reason = dialog._row_controls[1]
     if action == "decision":
         combo.setCurrentIndex(combo.findData(DECISION_RETAIN))
-    else:
+    elif action == "reason":
         reason.setText("Rechecked individual evidence")
+    else:
+        dialog._artifact_controls["sad"].setChecked(False)
     edited = _state(dialog)
 
     dialog._undo_electrode_group_decision()
@@ -280,8 +306,66 @@ def test_unavailable_group_cannot_apply_a_bulk_decision(selection):
         dialog.finding_sections.tabData = lambda _index: "roi"
     before = _state(dialog)
 
-    dialog._apply_electrode_group_decision(DECISION_EXCLUDE_CONDITION_ELECTRODE)
+    dialog._apply_electrode_group_decision(DECISION_INTERPOLATE_CONDITION_ELECTRODE)
 
     assert _state(dialog) == before
     assert not dialog._bulk_snapshot
     assert dialog.refresh_count == 0
+
+
+@pytest.mark.parametrize("enabled, confirmed", [(False, True), (True, False), (False, False)])
+def test_bulk_repair_requires_enabled_setting_and_explicit_artifact_confirmation(enabled, confirmed):
+    dialog = _harness()
+    dialog._interpolation_enabled = enabled
+    dialog.bulk_artifact_check.value = confirmed
+    before = _state(dialog)
+
+    with pytest.raises(ValueError, match="confirm artifacts"):
+        dialog._apply_electrode_group_decision(DECISION_INTERPOLATE_CONDITION_ELECTRODE)
+
+    assert _state(dialog) == before
+    assert not dialog._bulk_snapshot
+
+
+def test_bulk_undo_restores_artifact_confirmation_and_new_manual_choice_clears_it():
+    dialog = _harness()
+    dialog._row_controls[0][0].value = DECISION_INTERPOLATE_CONDITION_ELECTRODE
+    dialog._artifact_controls["happy"].value = True
+    dialog._apply_electrode_group_decision(DECISION_RETAIN)
+    assert not dialog._artifact_controls["happy"].isChecked()
+    dialog._undo_electrode_group_decision()
+    assert dialog._artifact_controls["happy"].isChecked()
+    assert not dialog._artifact_controls["sad"].isChecked()
+    combo, _ = dialog._row_controls[0]
+    combo.setCurrentIndex(combo.findData(DECISION_RETAIN))
+    combo.setCurrentIndex(combo.findData(DECISION_INTERPOLATE_CONDITION_ELECTRODE))
+    assert not dialog._artifact_controls["happy"].isChecked()
+
+
+def test_manual_repair_submits_confirmed_artifact_with_optional_reason():
+    dialog = _harness()
+    combo, reason = dialog._row_controls[0]
+    combo.setCurrentIndex(combo.findData(DECISION_INTERPOLATE_CONDITION_ELECTRODE))
+    dialog._artifact_controls["happy"].setChecked(True)
+    reason.setText("")
+    dialog.accept()
+    receipt = next(row for row in dialog.review_decisions() if row["finding_fingerprint"] == "happy")
+    assert dialog.accepted
+    assert receipt["artifact_confirmed"] is True
+    assert receipt["reason"] == "No reason provided"
+
+
+@pytest.mark.parametrize("enabled, confirmed", [(True, False), (False, True)])
+def test_manual_repair_cannot_be_accepted_without_capability_and_confirmation(enabled, confirmed):
+    dialog = _harness()
+    dialog._report["condition_specific_interpolation_enabled"] = enabled
+    dialog._row_controls[0][0].value = DECISION_INTERPOLATE_CONDITION_ELECTRODE
+    dialog._artifact_controls["happy"].value = confirmed
+    warnings = []
+    dialog.accept.__func__.__globals__["QMessageBox"] = SimpleNamespace(
+        warning=lambda *_args: warnings.append(_args),
+    )
+    dialog.accept()
+    assert warnings
+    assert not dialog.accepted
+    assert not dialog.review_decisions()

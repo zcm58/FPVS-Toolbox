@@ -52,13 +52,22 @@ Primary paths:
   `frequency_domain_qc_review_model.py` groups existing electrode findings by
   exact participant, recording and electrode identity across flagged conditions.
   The electrode-group selector opens an Electrode group detail tab with the full
-  affected condition list and explicit Retain all / Exclude all actions. These
+  affected condition list and explicit Retain all / Interpolate all actions. These
   fill existing fingerprint-keyed decisions, including flags hidden by filters;
-  exclusions remain electrode-in-condition choices. No other participant,
+  interpolation is offered only when the project's experimental
+  `condition_specific_interpolation_enabled` setting is on (default off).
+  Individual electrode and whole-ROI exclusions are never offered; ROI findings
+  support retain or whole condition, recording or participant exclusion.
+  Each repair requires an explicit artifact-confirmation checkbox; the group
+  checkbox confirms every listed condition and resets when the group changes.
+  A large summed-BCA response alone is not sufficient artifact evidence.
+  The backend applies repair before final reference and regenerates analysis;
+  the dialog never repairs spectral metrics. No other participant,
   recording, electrode, ROI or unflagged condition is added. Per-finding choices
   remain editable and optional reason text is preserved in the review controls.
-  Undo restores the last group's prior choices and reasons; a later individual
-  decision or reason edit invalidates it. The existing validator and persistence
+  Undo restores the last group's prior choices, reasons and artifact confirmations;
+  a later individual decision, reason or confirmation edit invalidates it.
+  The existing validator and persistence
   remain authoritative (including their existing retained-reason normalization).
   Visible smoke (Qt execution is CI-only locally): open the review at 1280x900,
   resize the dialog down to 1000x650, and verify the list and action buttons fit;
@@ -70,7 +79,11 @@ Primary paths:
   verify incomplete Apply is rejected and completed choices submit normally.
   Switch electrode/ROI tabs, select one participant-recording electrode group,
   filter to one condition, and verify the group panel still lists every affected
-  flag. Retain/exclude the group, undo, then override one finding and verify the
+  flag. With the experimental setting off, confirm no electrode/ROI exclusion
+  or interpolation action is offered. Enable it in Settings, reopen review,
+  confirm that repair is blocked until the artifact checkbox is checked, and
+  verify changing groups or manual decisions requires fresh confirmation.
+  Retain/interpolate the group, undo, then override one finding and verify the
   other participants, recordings and ROI decisions are unchanged. Exercise this
   path in the registered `test_frequency_domain_qc_dialog_qt.py` CI coverage;
   pure grouping and actual bulk-action tests run in the local GUI scope.
@@ -79,6 +92,23 @@ Primary paths:
   page visible, receives saved metadata on the GUI thread, and resumes the
   existing post-processing pipeline only after the save worker exits. See
   [Workers And Threading](workers-threading.md) for lifecycle and smoke checks.
+- `src/Main_App/gui/participant_condition_exclusions_dialog.py`: compact FFT-crop
+  exclusion review. Needs attention is the initial view when any condition has
+  missing output, an invalid/different grid, or no reference. All conditions and
+  selected-exclusion views plus text search keep matching rows accessible. Five
+  fixed-height columns show identity, condition, cycle count, status and the
+  existing exclusion checkbox; the selected-condition pane keeps full source,
+  group/session/visit details and explicit recording/all-visits scope. The pure
+  `condition_exclusion_review_model.py` formats brief guidance before technical
+  evidence without changing FFT checks or exclusion authority. Hidden checks,
+  unobserved saved exclusions, candidate defaults and new-missing unchecked
+  defaults remain intact. Saving still uses the existing settings handoff and
+  missing-output Processing-rerun requirement.
+  Visible smoke (Qt is CI-only locally): open at 1000x650 and 1280x900, review a
+  missing condition and a different crop, search/switch views, change a checkbox
+  and recording/all-visits scope, and confirm the same choices survive hiding
+  and revealing rows. Verify full paths and recovery guidance in the detail pane,
+  no horizontal table scroll, and Cancel leaves saved exclusions unchanged.
 - `src/Main_App/gui/processing_inputs.py`: processing input validation,
   single/batch mode UI state, `.bdf` file selection, start-button readiness,
   trigger-detection placeholder behavior, and preprocessing parameter assembly
@@ -163,15 +193,28 @@ harmonic selection and summation under Harmonics, analysis defaults under
 Stats, ROI definitions under ROIs, project-owned review controls under
 Experimental, and app-level toggles such as Debug Mode and Beta Tools under
 Advanced. Experimental uses three flat sub-tabs: **Electrodes** contains
-kurtosis interpolation, the explicit On/Off choice for the lab-calibrated
+kurtosis interpolation, the default-off condition-specific interpolation option
+for frequency QC, the explicit On/Off choice for the lab-calibrated
 automatic removed-electrode detector, and its independently enabled manual
 removed-electrode lists; **Raw-Spectral Review** contains the review switch
 and expandable read-only thresholds; **Summed-BCA Screening** contains the
-versioned review limits. Each section has its own vertical space within the
+versioned review limits. The condition-specific interpolation setting controls
+new repair requests; turning it off keeps previously accepted signal repairs.
+Each section has its own vertical space within the
 supported workspace, including when raw-spectral details are expanded.
-Settings tab panes stay unframed around their section cards, and each main tab
+Settings tab panes stay unframed around their section cards; both levels disable
+native tab-bar base drawing to avoid a gray line behind the styled tabs. Each main tab
 keeps Change Projects Root, Save, and Cancel on one bottom action row. Invalid
 summed-BCA input reveals its sub-tab before focusing the affected field.
+The ROIs Quick Add montage selector is disabled and shows only BioSemi ActiveTwo
+64, matching the existing preprocessing montage. The former `10-10` ROI-preset
+setting is a read-compatibility alias only; named ROI electrodes and saved custom
+presets are preserved, and future saves use the `biosemi64` preset key. This does
+not relabel historical processing geometry or bypass its provenance validation.
+Visible smoke (Qt is CI-only locally): open Settings from an existing project,
+check Preprocessing and ROIs show only BioSemi64, confirm custom ROI presets
+remain available, and switch main/Experimental tabs to check the native gray
+line is absent. Save/reopen and confirm ROI lists are unchanged.
 Advanced retains manual participant-level processing exclusions and shows
 read-only frequency-domain QC
 thresholds and active frequency-domain exclusions; changing manual
@@ -246,6 +289,22 @@ publication finishes; a publication failure returns to Settings with the new
 method committed and its dependent outputs marked stale or failed. Project
 switching must not retain another project's method, activity-page state, or
 worker state.
+
+ROI edits (including removals, renames, and electrode membership changes) also
+invalidate frequency-domain QC, regardless of the harmonic-selection electrode
+scope. Save-and-rebuild and Recalculate Harmonics route these edits through
+Resume Post-processing with the saved ROI list; they must not take the
+harmonic-only shortcut with old QC evidence. Once that handoff is committed,
+canceling QC keeps the saved ROI edits and leaves outputs stale. Rollback of
+an earlier, uncommitted settings transaction restores the visible ROI editor
+as well as the saved settings. Historical QC evidence remains audit history;
+only findings computed with the current ROI definitions enter the new review.
+
+Visible smoke: remove a temporary ROI, save with rebuild now, and confirm that
+frequency QC omits it. Cancel review, reopen Settings, and confirm the ROI is
+still absent; Resume Post-processing should use the same remaining ROIs.
+Repeat Save with rebuild later and confirm QC is marked stale. Qt behavior is
+covered in CI; local checks exercise the routing without loading Qt.
 
 The sidebar's default tool list is Free Harmonic Clustering Analysis and SNR
 Plots, in that order. Scalp Maps, Standard FPVS Screening, Sensitivity
@@ -553,7 +612,10 @@ and the bottom action row remains visible. Repeat with the supported display
 scaling settings on Windows and Linux. Confirm automatic detection has only
 Off and On choices, manual lists can be edited and enabled independently,
 and all eleven summed-BCA thresholds survive switching sub-tabs, Save, and
-reopen. Enter an invalid summed-BCA value, switch to Electrodes, and Save:
+reopen. Confirm condition-specific interpolation is off for new and older
+projects, survives Save/reopen when enabled, and only allows individual
+electrode repair after artifact confirmation in frequency QC.
+Enter an invalid summed-BCA value, switch to Electrodes, and Save:
 after dismissing the warning, Summed-BCA Screening must be visible with the
 invalid field selected. For an older project with no saved detector choice,
 verify the prompt and warning fit, and saving another setting leaves the

@@ -952,8 +952,9 @@ def test_nonfinite_selected_amplitude_is_rejected(
         )
 
 
+@pytest.mark.parametrize("suffix", [".xlsx", ".fpvs"])
 def test_companion_preserves_fhc_bin_windows_sensor_order_and_snr(
-    tmp_path: Path,
+    tmp_path: Path, suffix: str,
 ) -> None:
     from Main_App.io.spectral_data import (
         SpectralDataError,
@@ -969,12 +970,20 @@ def test_companion_preserves_fhc_bin_windows_sensor_order_and_snr(
     frame.insert(0, "Electrode", DEFAULT_ELECTRODE_NAMES_64)
     legacy = tmp_path / "legacy.xlsx"
     frame.to_excel(legacy, sheet_name="FullFFT Amplitude (uV)", index=False)
-    path = tmp_path / "companion.xlsx"
+    path = tmp_path / f"companion{suffix}"
     descriptor = write_spectral_companion(path, {"FullFFT Amplitude (uV)": frame})
-    with pd.ExcelWriter(path, engine="xlsxwriter") as writer:
-        spectral_manifest_frame(descriptor).to_excel(
-            writer, sheet_name="Spectral Data", index=False,
+    if suffix == ".fpvs":
+        from Main_App.io.result_manifest import write_result_manifest
+
+        write_result_manifest(
+            path, sheet_names=["FullFFT Amplitude (uV)"],
+            spectral_companion=descriptor, condition_companion=None,
         )
+    else:
+        with pd.ExcelWriter(path, engine="xlsxwriter") as writer:
+            spectral_manifest_frame(descriptor).to_excel(
+                writer, sheet_name="Spectral Data", index=False,
+            )
     assert inputs._read_fullfft_header(path) == inputs._read_fullfft_header(legacy)
     plan = build_available_frequency_window_plan(
         inputs._read_fullfft_header(path), oddball_frequency_hz=1.2,

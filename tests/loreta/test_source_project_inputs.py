@@ -19,11 +19,67 @@ from Main_App.processing.artifact_freshness import (
 from Tools.LORETA_Visualizer.source_producers.project_inputs import (
     SOURCE_TOPOGRAPHY_METRIC_BCA,
     SOURCE_TOPOGRAPHY_METRIC_FFT_AMPLITUDE,
+    _read_metric_sheet,
     _read_selected_harmonics,
     _subject_in_ids,
     build_l2_mne_conditions_from_project,
     project_source_participant_selection,
 )
+
+
+@pytest.mark.parametrize("suffix", [".xlsx", ".fpvs"])
+@pytest.mark.parametrize("sheet", ["BCA (uV)", "FFT Amplitude (uV)"])
+def test_metric_companion_preserves_selected_topography_bits(tmp_path, suffix, sheet):
+    from Main_App.Shared.post_process_excel import write_results_workbook
+
+    path = tmp_path / f"P01{suffix}"
+    values = np.asarray([-0.0, np.nextafter(1.0, 2.0)], dtype=np.float64)
+    frame = pd.DataFrame({
+        "Electrode": ["Cz", "Pz"], "2.4000_Hz": values,
+        "4.8000_Hz": np.asarray([0.125, np.nextafter(0.0, 1.0)]),
+    })
+    write_results_workbook(str(path), {sheet: frame})
+    actual = _read_metric_sheet(
+        path, sheet_name=sheet, selected_harmonics=(2.4, 4.8),
+        expected_electrodes=("CZ", "PZ"),
+    )
+    for harmonic in (2.4, 4.8):
+        expected = frame[f"{harmonic:.4f}_Hz"].to_numpy()
+        np.testing.assert_array_equal(actual[harmonic].view(np.uint64), expected.view(np.uint64))
+
+
+@pytest.mark.parametrize("damage,expected_error", [
+    ("order", "expected BioSemi64 electrode order"),
+    ("row_count", "expected 2 electrode rows"),
+    ("nonfinite", "non-finite source topography"),
+    ("column", "missing columns: 4.8000_Hz"),
+    ("companion", "[Cc]ompanion"),
+])
+def test_native_metric_reader_preserves_source_validation(tmp_path, damage, expected_error):
+    from Main_App.Shared.post_process_excel import write_results_workbook
+    from Main_App.io.condition_data import condition_companion_identity
+
+    path = tmp_path / "P01.fpvs"
+    frame = pd.DataFrame({
+        "Electrode": ["Cz", "Pz"], "2.4000_Hz": [1.0, 2.0], "4.8000_Hz": [3.0, 4.0],
+    })
+    if damage == "order":
+        frame = frame.iloc[::-1]
+    elif damage == "row_count":
+        frame = frame.iloc[:1]
+    elif damage == "nonfinite":
+        frame.loc[0, "2.4000_Hz"] = np.inf
+    elif damage == "column":
+        frame = frame.drop(columns=["4.8000_Hz"])
+    write_results_workbook(str(path), {"BCA (uV)": frame})
+    if damage == "companion":
+        descriptor = condition_companion_identity(path)
+        path.with_name(descriptor["path"]).unlink()
+    with pytest.raises(ValueError, match=expected_error):
+        _read_metric_sheet(
+            path, sheet_name="BCA (uV)", selected_harmonics=(2.4, 4.8),
+            expected_electrodes=("CZ", "PZ"),
+        )
 
 
 def test_project_input_assembler_builds_bca_condition_topographies(tmp_path) -> None:

@@ -60,18 +60,23 @@ _HARMONIC_CACHE_ANNOTATIONS = frozenset({
 })
 
 DECISION_RETAIN = "retain"
+# Read old receipts for audit/reconfirmation, but never apply this retired action.
 DECISION_EXCLUDE_CONDITION_ELECTRODE = "exclude_condition_electrode"
+DECISION_INTERPOLATE_CONDITION_ELECTRODE = "interpolate_condition_electrode"
 DECISION_EXCLUDE_CONDITION = "exclude_condition"
 DECISION_EXCLUDE_RECORDING = "exclude_recording"
 DECISION_EXCLUDE_PARTICIPANT = "exclude_participant"
 
 REVIEW_DECISIONS = (
     DECISION_RETAIN,
-    DECISION_EXCLUDE_CONDITION_ELECTRODE,
+    DECISION_INTERPOLATE_CONDITION_ELECTRODE,
     DECISION_EXCLUDE_CONDITION,
     DECISION_EXCLUDE_RECORDING,
     DECISION_EXCLUDE_PARTICIPANT,
 )
+_BROAD_EXCLUSION_DECISIONS = frozenset({
+    DECISION_EXCLUDE_CONDITION, DECISION_EXCLUDE_RECORDING, DECISION_EXCLUDE_PARTICIPANT,
+})
 
 _BCA_AUDIT_REQUIRED_COLUMNS = (
     "Electrode",
@@ -296,7 +301,15 @@ def run_frequency_domain_qc_review(
 
     _start_stage("canonical_inputs", "Checking project inputs…")
     project_root = Path(project.project_root).resolve()
+    from Main_App.processing.condition_interpolation_state import (
+        require_no_pending_condition_interpolation,
+    )
+
+    require_no_pending_condition_interpolation(project_root)
     screening_settings = _experimental_summed_bca_settings(project, project_root)
+    interpolation_enabled = normalize_experimental_qc_settings(
+        _read_manifest(project_root / "project.json").get("experimental_qc")
+    ).condition_specific_interpolation_enabled
     thresholds = FrequencyDomainQcThresholds.from_settings(screening_settings)
     from Main_App.processing.harmonic_selection_qc import (
         resolve_processing_harmonic_selection_inputs,
@@ -602,6 +615,7 @@ def run_frequency_domain_qc_review(
             "performed" if screening_settings.enabled else "not_performed"
         ),
         "screening_enabled": screening_settings.enabled,
+        "condition_specific_interpolation_enabled": interpolation_enabled,
         "screening_policy_version": screening_settings.policy_version,
         "screening_explanation": SUMMED_BCA_SCREENING_BRIEF_TEXT,
         "screening_settings": screening_settings.to_manifest(),
@@ -791,7 +805,9 @@ def validate_frequency_domain_qc_review_decisions(
         decision = str(submitted.get("decision") or "").strip().casefold()
         if decision not in REVIEW_DECISIONS:
             raise ValueError(
-                "Each summed-BCA finding requires one explicit retain or exclusion decision."
+                "Choose Retain, an enabled electrode repair, or a whole condition, "
+                "recording or participant exclusion. Electrode and ROI exclusions "
+                "are no longer supported."
             )
         if decision == DECISION_EXCLUDE_RECORDING and scope != "recording":
             raise ValueError(
@@ -811,10 +827,15 @@ def validate_frequency_domain_qc_review_decisions(
             raise ValueError(
                 "Summed-BCA finding identity is incomplete; regenerate the review."
             )
-        if decision == DECISION_EXCLUDE_CONDITION_ELECTRODE and not electrode:
-            raise ValueError(
-                "An electrode-in-condition exclusion requires an electrode-level finding."
-            )
+        if decision == DECISION_INTERPOLATE_CONDITION_ELECTRODE:
+            if report.get("condition_specific_interpolation_enabled") is not True:
+                raise ValueError("Enable experimental condition-specific interpolation in Settings first.")
+            if not electrode or roi:
+                raise ValueError("Condition-specific interpolation requires an electrode-level finding, not an ROI.")
+            if scope == "recording" and not recording_id:
+                raise ValueError("A recording-scoped electrode repair requires the exact recording ID.")
+            if submitted.get("artifact_confirmed") is not True:
+                raise ValueError("Confirm an electrode artifact before requesting interpolation; a large BCA alone is insufficient.")
         row: dict[str, object] = {
             "version": FREQUENCY_DOMAIN_QC_DECISION_VERSION,
             "finding_fingerprint": finding_fingerprint,
@@ -876,6 +897,8 @@ def validate_frequency_domain_qc_review_decisions(
                 )
             },
         }
+        if decision == DECISION_INTERPOLATE_CONDITION_ELECTRODE:
+            row["artifact_confirmed"] = True
         row["decision_fingerprint"] = _hash_payload(row)
         normalized.append(row)
 
@@ -894,6 +917,7 @@ def _require_consistent_broad_decisions(
     by_recording: dict[str, set[str]] = defaultdict(set)
     by_participant: dict[str, set[str]] = defaultdict(set)
     by_condition: dict[tuple[str, str], set[str]] = defaultdict(set)
+    by_electrode: dict[tuple[str, str, str], set[str]] = defaultdict(set)
     for item in decisions:
         decision = str(item.get("decision") or "")
         participant_id = _normalize_participant_id(item.get("participant_id"))
@@ -906,6 +930,15 @@ def _require_consistent_broad_decisions(
         condition = str(item.get("condition") or "")
         if identity and condition:
             by_condition[(identity, condition)].add(decision)
+            electrode = _normalize_electrode(item.get("electrode"))
+            if electrode:
+                by_electrode[(identity, condition, electrode)].add(decision)
+    for (identity, condition, electrode), values in by_electrode.items():
+        if DECISION_INTERPOLATE_CONDITION_ELECTRODE in values and len(values) != 1:
+            raise ValueError(
+                f"Conflicting repair decisions for {identity}/{condition}/{electrode}. "
+                "Apply the same choice to each finding for this electrode in this condition."
+            )
     for label, grouped, broad_decision in (
         ("recording", by_recording, DECISION_EXCLUDE_RECORDING),
         ("participant", by_participant, DECISION_EXCLUDE_PARTICIPANT),
@@ -954,6 +987,24 @@ def apply_frequency_domain_qc_decision(
     root = Path(project_root).resolve()
     manifest_path = root / "project.json"
     manifest = _read_manifest(manifest_path)
+    repair_decisions = [
+        item for item in normalized_review_decisions
+        if item.get("decision") == DECISION_INTERPOLATE_CONDITION_ELECTRODE
+    ]
+    if repair_decisions:
+        if Path(str(report.get("project_root") or "")).resolve() != root:
+            raise ValueError("The electrode-repair review belongs to a different project. Reopen QC.")
+        if not _source_workbooks_are_current(root, report.get("source_workbooks")):
+            raise ValueError("The reviewed condition outputs changed. Regenerate QC before requesting a repair.")
+        if not normalize_experimental_qc_settings(
+            manifest.get("experimental_qc")
+        ).condition_specific_interpolation_enabled:
+            raise ValueError("Condition-specific interpolation was disabled. Reopen the QC review.")
+        from Main_App.processing.condition_interpolation_state import (
+            queue_condition_interpolation_decisions,
+        )
+
+        queue_condition_interpolation_decisions(manifest, repair_decisions, report)
     state = _metadata_from_manifest(manifest)
     now = _now_utc_iso()
     repeated_session = str(report.get("identity_scope") or "") == "recording"
@@ -969,7 +1020,7 @@ def apply_frequency_domain_qc_decision(
     preserved_review_decisions = [
         item
         for item in _review_decisions_from_state(state)
-        if str(item.get("decision") or "") != DECISION_RETAIN
+        if str(item.get("decision") or "") in _BROAD_EXCLUSION_DECISIONS
         and str(item.get("decision_fingerprint") or "")
         not in replaced_decision_fingerprints
         and str(item.get("finding_fingerprint") or "")
@@ -1134,6 +1185,9 @@ def apply_frequency_domain_qc_decision(
         decision_fingerprint=decision_fingerprint,
         reviewed_at=now,
     )
+    update["retired_review_decisions"] = _superseded_narrow_decisions(
+        state, combined_review_decisions,
+    )
     state.update(update)
     _set_metadata_in_manifest(manifest, state)
     _write_manifest_if_changed(manifest_path, manifest)
@@ -1271,6 +1325,7 @@ def sync_frequency_domain_qc_automatic_state(
             "authority": "review_only",
         }
     }
+    update["retired_review_decisions"] = _superseded_narrow_decisions(state, current_decisions)
     state.update(update)
     if legacy_authority_removed:
         state["downstream_outputs_stale"] = True
@@ -1300,6 +1355,11 @@ def mark_frequency_domain_outputs_stale(
 
 
 def mark_frequency_domain_outputs_current(project_root: str | Path) -> None:
+    from Main_App.processing.condition_interpolation_state import (
+        require_no_pending_condition_interpolation,
+    )
+
+    require_no_pending_condition_interpolation(project_root)
     root = Path(project_root).resolve()
     manifest_path = root / "project.json"
     manifest = _read_manifest(manifest_path)
@@ -1324,7 +1384,17 @@ def load_frequency_domain_qc_state(project_root: str | Path | None) -> dict[str,
     if project_root in (None, ""):
         return {}
     manifest = _read_manifest(Path(project_root).resolve() / "project.json")
-    return _metadata_from_manifest(manifest)
+    state = _metadata_from_manifest(manifest)
+    if any(row.get("decision") not in REVIEW_DECISIONS
+           for row in _review_decisions_from_state(state)):
+        # Surface the retired policy through the common tool-readiness gate,
+        # without rewriting project history merely when a project is opened.
+        state["downstream_outputs_stale"] = True
+        state["stale_reason"] = (
+            "Saved electrode or ROI exclusions need a new QC decision. "
+            "These exclusions are no longer applied; resume post-processing review."
+        )
+    return state
 
 
 def active_frequency_domain_exclusions(
@@ -1365,7 +1435,6 @@ def _frequency_domain_exclusions_from_rows(
         participant_id = _normalize_participant_id(decision.get("participant_id"))
         recording_id = _normalize_recording_id(decision.get("recording_id"))
         condition = str(decision.get("condition") or "").strip()
-        electrode = _normalize_electrode(decision.get("electrode"))
         if action == DECISION_EXCLUDE_PARTICIPANT and participant_id:
             manual_participants.add(participant_id)
         elif action == DECISION_EXCLUDE_RECORDING and recording_id:
@@ -1375,15 +1444,6 @@ def _frequency_domain_exclusions_from_rows(
                 recording_conditions.add((recording_id, condition))
             elif participant_id and condition:
                 participant_conditions.add((participant_id, condition))
-        elif action == DECISION_EXCLUDE_CONDITION_ELECTRODE:
-            if recording_id and condition and electrode:
-                recording_condition_electrodes[(recording_id, condition)].add(
-                    electrode
-                )
-            elif participant_id and condition and electrode:
-                participant_condition_electrodes[(participant_id, condition)].add(
-                    electrode
-                )
     return FrequencyDomainExclusions(
         excluded_participants=frozenset(manual_participants),
         auto_excluded_participants=frozenset(),
@@ -1451,6 +1511,7 @@ def _review_decision_state_rows_are_hash_valid(
         and len(finding_fingerprints) == len(set(finding_fingerprints))
         and all(decision_fingerprints)
         and all(finding_fingerprints)
+        and all(item.get("decision") in REVIEW_DECISIONS for item in normalized)
     )
     if not raw:
         valid = True
@@ -4118,6 +4179,9 @@ def _build_review_evidence_payload(
         "analysis_fingerprint": str(report.get("analysis_fingerprint") or ""),
         "identity_scope": identity_scope,
         "screening_enabled": bool(report.get("screening_enabled")),
+        "condition_specific_interpolation_enabled": bool(
+            report.get("condition_specific_interpolation_enabled")
+        ),
         "screening_status": str(report.get("screening_status") or ""),
         "screening_policy_version": str(
             report.get("screening_policy_version") or ""
@@ -4365,6 +4429,7 @@ def _current_review_decisions(
         item
         for item in _review_decisions_from_state(state)
         if str(item.get("finding_fingerprint") or "") in current_fingerprints
+        and item.get("decision") in REVIEW_DECISIONS
     ]
     if analysis_fingerprints and any(
         str(item.get("analysis_fingerprint") or "") not in analysis_fingerprints
@@ -4387,6 +4452,21 @@ def _merge_review_decision_rows(
     return [by_fingerprint[key] for key in sorted(by_fingerprint)]
 
 
+def _superseded_narrow_decisions(
+    state: Mapping[str, object], current: Sequence[Mapping[str, object]],
+) -> list[dict[str, object]]:
+    """Keep retired exclusions and completed repair approvals as audit only."""
+    current_ids = {str(row.get("decision_fingerprint") or "") for row in current}
+    return _merge_review_decision_rows(
+        _iter_mapping_entries(state.get("retired_review_decisions")),
+        [
+            row for row in _review_decisions_from_state(state)
+            if row.get("decision") not in {*_BROAD_EXCLUSION_DECISIONS, DECISION_RETAIN}
+            and str(row.get("decision_fingerprint") or "") not in current_ids
+        ],
+    )
+
+
 def _review_exclusion_reconfirmation_findings(
     state: Mapping[str, object],
     *,
@@ -4403,9 +4483,11 @@ def _review_exclusion_reconfirmation_findings(
     reconfirmation_findings: list[dict[str, object]] = []
     stable_exclusions: list[dict[str, object]] = []
     for decision in _review_decisions_from_state(state):
-        if str(decision.get("decision") or "") == DECISION_RETAIN:
+        action = str(decision.get("decision") or "")
+        if action in {DECISION_RETAIN, DECISION_INTERPOLATE_CONDITION_ELECTRODE}:
             continue
-        if str(decision.get("analysis_fingerprint") or "") == str(
+        retired_action = action not in _BROAD_EXCLUSION_DECISIONS
+        if not retired_action and str(decision.get("analysis_fingerprint") or "") == str(
             evidence_context_fingerprint
         ):
             stable_exclusions.append(decision)
@@ -4455,6 +4537,9 @@ def _review_exclusion_reconfirmation_findings(
                 decision.get("decision_fingerprint") or ""
             ),
             "reconfirmation_reason": (
+                "Electrode and ROI exclusions are no longer supported. Choose Retain, "
+                "an enabled electrode repair, or a broader exclusion."
+                if retired_action else
                 "The candidate harmonic/cohort evidence changed after this "
                 "outcome-informed exclusion. Confirm or revise its scope."
             ),
@@ -4934,6 +5019,7 @@ def _manifest_safe_path(project_root: Path, path: Path) -> str:
 __all__ = [
     "DECISION_EXCLUDE_CONDITION",
     "DECISION_EXCLUDE_CONDITION_ELECTRODE",
+    "DECISION_INTERPOLATE_CONDITION_ELECTRODE",
     "DECISION_EXCLUDE_PARTICIPANT",
     "DECISION_EXCLUDE_RECORDING",
     "DECISION_RETAIN",

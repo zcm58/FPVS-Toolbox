@@ -16,6 +16,14 @@ remain verification work.
 
 ## Accepted Behavior
 
+**2026-09-07 amendment:** individual electrode and ROI exclusions are retired.
+The default-off experimental setting instead permits artifact-confirmed,
+condition-specific EEG interpolation followed by regenerated QC and analysis.
+Historical narrow exclusions require a new decision and are retained only for
+audit. Reasons remain optional. This supersedes the electrode-exclusion and
+mandatory-reason wording below; see the
+[condition-specific interpolation implementation](../condition-specific-interpolation.md).
+
 1. Add a dedicated **Experimental settings** section to the project Settings
    menu. Put the QC-04 removed-electrode detector and a project-owned
    **Experimental summed-BCA screening** control there. The summed-BCA screen

@@ -10,6 +10,14 @@ FindingSection = Literal["electrode", "roi", "other"]
 ElectrodeGroupKey = tuple[str, str, str]
 
 
+def can_interpolate_finding(
+    item: Mapping[str, object], identity_scope: str, enabled: object,
+) -> bool:
+    """Offer repair only for an explicitly enabled, complete electrode target."""
+
+    return enabled is True and electrode_group_key(item, identity_scope) is not None
+
+
 def finding_section(item: Mapping[str, object]) -> FindingSection:
     """Separate target identities, including prior-decision reconfirmations.
 

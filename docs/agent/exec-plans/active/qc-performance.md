@@ -1,5 +1,47 @@
 # QC Performance: Exact Numerical Reuse
 
+## Native Result I/O Follow-up (2026-09-07)
+
+Scope: reduce SNR source capture reloads, retain exact Excel export cells with
+less formatting/disk work, and replace new standard condition XLSX anchors
+with small `.fpvs` manifests pointing to the unchanged uncompressed NumPy
+companions. Keep old XLSX inputs readable and long/wide Excel reports intact.
+
+- [x] Reuse SNR payloads inside fresh capture scopes; retain independent
+  before/after integrity checks and snapshot immutability.
+- [x] Streamline report formatting and intermediate writes, retaining writer
+  serialization, numeric readback bits, formatting, and scientific operations.
+- [x] Publish native manifests atomically and integrate discovery, expected
+  paths, receipts, cleanup, and every downstream numerical reader.
+- [x] Verify legacy/native exact parity, changed/corrupt/missing inputs,
+  failed replacement, mixed projects, and focused processing/tool scopes.
+
+No raw data or user project outputs are migrated in place. Visible smoke after
+restart: process a small project, complete post-processing QC, open SNR/scalp
+maps/ratio/Stats with the same choices, and inspect long/wide Excel exports.
+Repeat with an old XLSX project and a project containing both generations.
+
+Verification: processing scope **1,308 passed, 5 skipped**, Stats scope **430
+passed**, GUI static scope **116 passed**, and project-I/O registry **173
+passed**. Additional native receipt/frequency-review/missing-sheet checks
+passed **53 tests**; downstream SNR/scalp/FHC/LORETA adapters passed **78**.
+Exact array bits, portable manifests, original Excel numeric readback/styles,
+fresh integrity boundaries, sibling cleanup, and legacy reuse are covered.
+Ruff and compilation pass for changed Python files. No local Qt, full user
+dataset run, or project-output migration was performed. The project-I/O and
+repository precommit drivers still stop at the eight existing path findings
+in unrelated untracked `outputs/`; applicable tests were run directly.
+Commands: `python .agents/scripts/verify.py --scope processing --tier focused`,
+`--scope stats --tier focused`, and `--scope gui --tier focused` passed;
+`--scope project-io --tier focused` and `--scope repo --tier precommit` report
+that existing path-audit failure. Residual verification is the visible smoke
+above; backend parity does not replace a full interactive project run.
+
+Synthetic paired component medians, not whole-run speed estimates: SNR capture
+182.461 -> 139.843 ms; 12,000 x 10 full-audit Excel export 1.9208 -> 1.3438 s;
+64-channel condition publication with FullFFT/FullSNR 142.756 -> 83.158 ms.
+Native and XLSX anchors produced identical NumPy companion bytes/descriptors.
+
 Baseline: `ffebf3ab`. Scope: pre-processing QC steps 1–7 and reuse of their
 prepared signal during final processing. Existing settings-dialog edits are
 outside this task.

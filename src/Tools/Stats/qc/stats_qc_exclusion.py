@@ -561,7 +561,7 @@ def _read_qc_bca_data(
     """Read only the BCA cells required by QC when the source is `.xlsx`."""
 
     path = Path(file_path)
-    if path.suffix.casefold() == ".xlsx":
+    if path.suffix.casefold() in {".xlsx", ".fpvs"}:
         header = read_xlsx_sheet_header(path, sheet_name="BCA (uV)")
         harmonic_freqs = _build_qc_harmonic_domain(
             header,

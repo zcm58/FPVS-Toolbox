@@ -64,6 +64,21 @@ def test_discover_conditions_single_root(tmp_path: Path) -> None:
     assert conditions[0].path == tmp_path
 
 
+def test_discover_conditions_includes_native_and_suppresses_only_legacy_sibling(tmp_path: Path) -> None:
+    condition = tmp_path / "Faces"
+    condition.mkdir()
+    native = condition / "P1_Faces_Results.fpvs"
+    native.write_text("native input")
+    native.with_suffix(".xlsx").write_text("historical sibling")
+    arbitrary = condition / "arbitrary.xlsx"
+    arbitrary.write_text("existing unmanaged input")
+    (condition / "._P1_Faces_Results.fpvs").write_text("sidecar")
+
+    assert discover_conditions(tmp_path) == [
+        ConditionInfo(name="Faces", path=condition, files=sorted([native, arbitrary])),
+    ]
+
+
 def test_missingness_across_conditions_keeps_union_of_participants(tmp_path: Path) -> None:
     excel_root = tmp_path / "1 - Excel Data Files"
     cond_a = excel_root / "AngryNeutral"

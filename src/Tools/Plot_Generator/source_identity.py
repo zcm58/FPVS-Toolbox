@@ -11,6 +11,8 @@ import zipfile
 
 import pandas as pd
 
+from Main_App.io import xlsx_read_cache_scope
+
 
 _HASH_CHUNK_BYTES = 1024 * 1024
 _SHA256_RE = re.compile(r"[0-9a-f]{64}\Z")
@@ -47,7 +49,9 @@ class SourceWorkbookSnapshot:
 def _companion_identity(path: Path) -> dict[str, object] | None:
     # Identity-only callers also fingerprint unreadable/placeholder workbooks;
     # their required worksheet reader remains responsible for that failure.
-    if not zipfile.is_zipfile(path):
+    from Main_App.io.result_manifest import is_result_manifest
+
+    if not is_result_manifest(path) and not zipfile.is_zipfile(path):
         return None
     from Main_App.io.spectral_data import spectral_companion_identity
 
@@ -60,7 +64,9 @@ def _companion_identity(path: Path) -> dict[str, object] | None:
 
 
 def _condition_companion_identity(path: Path) -> dict[str, object] | None:
-    if not zipfile.is_zipfile(path):
+    from Main_App.io.result_manifest import is_result_manifest
+
+    if not is_result_manifest(path) and not zipfile.is_zipfile(path):
         return None
     from Main_App.io.condition_data import condition_companion_identity
 
@@ -154,32 +160,37 @@ def capture_stable_source_snapshot(
 
     source = Path(path)
     before_read = source_stat_signature(source)
-    companion_before = _companion_identity(source)
-    condition_before = _condition_companion_identity(source)
     digest = hashlib.sha256()
     chunks: list[bytes] = []
-    with source.open("rb") as handle:
-        while True:
-            if cancellation_checkpoint is not None and cancellation_checkpoint():
-                raise SNRPublicationCancelled(
-                    "SNR output publication was cancelled while reading inputs."
-                )
-            chunk = handle.read(_HASH_CHUNK_BYTES)
-            if not chunk:
-                break
-            chunks.append(chunk)
-            digest.update(chunk)
     spectral_sheets: dict[str, pd.DataFrame] = {}
-    if companion_before is not None:
-        from Main_App.io.spectral_data import read_spectral_sheet
-
-        for sheet_name in ("FullFFT Amplitude (uV)", "FullSNR"):
-            if sheet_name in companion_before["sheets"]:
+    # Start fresh even inside a caller's read scope. Both sheets then reuse the
+    # payload validated at this capture boundary, without retaining it per run.
+    with xlsx_read_cache_scope():
+        companion_before = _companion_identity(source)
+        condition_before = _condition_companion_identity(source)
+        with source.open("rb") as handle:
+            while True:
                 if cancellation_checkpoint is not None and cancellation_checkpoint():
-                    raise SNRPublicationCancelled("SNR input capture was cancelled.")
-                spectral_sheets[sheet_name] = read_spectral_sheet(source, sheet_name=sheet_name)
-    companion_after = _companion_identity(source)
-    condition_after = _condition_companion_identity(source)
+                    raise SNRPublicationCancelled(
+                        "SNR output publication was cancelled while reading inputs."
+                    )
+                chunk = handle.read(_HASH_CHUNK_BYTES)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                digest.update(chunk)
+        if companion_before is not None:
+            from Main_App.io.spectral_data import read_spectral_sheet
+
+            for sheet_name in ("FullFFT Amplitude (uV)", "FullSNR"):
+                if sheet_name in companion_before["sheets"]:
+                    if cancellation_checkpoint is not None and cancellation_checkpoint():
+                        raise SNRPublicationCancelled("SNR input capture was cancelled.")
+                    spectral_sheets[sheet_name] = read_spectral_sheet(source, sheet_name=sheet_name)
+    # Never let reuse substitute for the independent post-capture checksum.
+    with xlsx_read_cache_scope():
+        companion_after = _companion_identity(source)
+        condition_after = _condition_companion_identity(source)
     after_read = source_stat_signature(source)
     if (
         after_read != before_read
@@ -243,17 +254,20 @@ def verify_source_snapshot_after_read(
                 break
             offset = end
 
-    if (
-        not matches
-        or offset != len(content)
-        or source_stat_signature(source) != expected_signature
-        or _companion_identity(source) != snapshot.identity.spectral_companion
-        or _condition_companion_identity(source) != snapshot.identity.condition_companion
-    ):
-        raise SNRPublicationError(
-            f"Source workbook changed while SNR data were being read: "
-            f"{source.name}. Restart generation after workbook writes have finished."
-        )
+    # Publication verification remains fresh even when a caller has cached the
+    # same workbook and companion signatures in an outer read scope.
+    with xlsx_read_cache_scope():
+        if (
+            not matches
+            or offset != len(content)
+            or source_stat_signature(source) != expected_signature
+            or _companion_identity(source) != snapshot.identity.spectral_companion
+            or _condition_companion_identity(source) != snapshot.identity.condition_companion
+        ):
+            raise SNRPublicationError(
+                f"Source workbook changed while SNR data were being read: "
+                f"{source.name}. Restart generation after workbook writes have finished."
+            )
     return snapshot.identity
 
 

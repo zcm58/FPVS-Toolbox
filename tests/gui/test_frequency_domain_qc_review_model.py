@@ -5,6 +5,7 @@ from copy import deepcopy
 import pytest
 
 from Main_App.gui.frequency_domain_qc_review_model import (
+    can_interpolate_finding,
     electrode_group_key,
     electrode_groups,
     finding_section,
@@ -107,3 +108,23 @@ def test_grouping_preserves_exact_report_identity_spelling():
     assert list(electrode_groups(findings, "participant")) == [
         ("P26", "", "O2"), ("p26", "", "O2"), ("P26", "", "o2"),
     ]
+
+
+@pytest.mark.parametrize("enabled", [False, None, "true", "false", 1])
+def test_condition_interpolation_is_not_offered_without_explicit_boolean_enable(enabled):
+    assert not can_interpolate_finding(_electrode_finding(), "participant", enabled)
+
+
+@pytest.mark.parametrize("item, scope, expected", [
+    (_electrode_finding(), "participant", True),
+    (_electrode_finding(recording_id="P26-visit1"), "recording", True),
+    (_electrode_finding(), "recording", False),
+    (_electrode_finding(electrode="", roi="O2"), "participant", False),
+    (_electrode_finding(roi="Occipital"), "participant", False),
+    (_electrode_finding(condition=""), "participant", False),
+    (_electrode_finding(participant_id=""), "participant", False),
+])
+def test_only_complete_electrode_targets_can_receive_experimental_repair(item, scope, expected):
+    original = deepcopy(item)
+    assert can_interpolate_finding(item, scope, True) is expected
+    assert item == original

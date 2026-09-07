@@ -102,6 +102,7 @@ _DATASET_INDEX_NAMES = {
     "group_labels_from_manifest",
     "infer_workbook_participant_id",
     "is_multi_group_manifest",
+    "list_result_files",
     "load_project_dataset_index",
     "participant_group_label_map_from_manifest",
 }

@@ -37,6 +37,7 @@ from Main_App.processing.output_integrity import (
     require_finite_computable_bca,
     require_finite_retained_signal,
 )
+from Main_App.processing.condition_electrode_interpolation import condition_interpolation_export_provenance
 from Main_App.projects.frequency_protocol import (
     FrequencyProtocol,
     normalize_frequency_protocol,
@@ -552,7 +553,7 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
     _EXPORT_TIMING_SINK.set(
         export_timing_sink if isinstance(export_timing_sink, list) else None
     )
-    app.log("--- Post-processing: Calculating Metrics & Saving Excel ---")
+    app.log("--- Post-processing: Calculating Metrics & Saving Results ---")
     parent_folder = app.save_folder_path.get()
     logger.debug(
         "[EXPORT STAGE] post_process_start conditions=%d parent_folder=%r",
@@ -717,7 +718,7 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
             # Legacy projects keep the exact PID-based filename. Repeated-
             # session projects supply a canonical participant__session stem.
             excel_filename = (
-                f"{output_stem}_{filename_condition_part}_Results.xlsx"
+                f"{output_stem}_{filename_condition_part}_Results.fpvs"
             )
 
         output_group_folder = None
@@ -739,7 +740,7 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
         )
 
         full_excel_path = os.path.join(output_subfolder_path, excel_filename)
-        app.log(f"Target Excel path for '{cond_label_from_keys}': {full_excel_path}")
+        app.log(f"Target results path for '{cond_label_from_keys}': {full_excel_path}")
 
         # --- Metrics Calculation (largely unchanged) ---
         accum = {"fft": None, "snr": None, "z": None, "bca": None}
@@ -1485,6 +1486,9 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
 
             try:
                 workbook_started = perf_counter()
+                condition_repair = condition_interpolation_export_provenance(
+                    getattr(app, "settings", {}) or {}, cond_label_from_keys,
+                )
                 workbook_write_receipt = write_results_workbook(
                     full_excel_path=full_excel_path,
                     dataframes_to_save=dataframes_to_save,
@@ -1502,6 +1506,7 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                         "retained_occurrences": retained_occurrences,
                         "full_fft_units": "uV",
                         "full_snr_units": "ratio",
+                        **({"condition_electrode_interpolation": condition_repair} if condition_repair else {}),
                     },
                 )
                 export_receipts.append(
@@ -1527,6 +1532,7 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                             bca_integrity_receipt,
                         ],
                         "workbook_write": workbook_write_receipt,
+                        **({"condition_electrode_interpolation": condition_repair} if condition_repair else {}),
                     })
                 )
                 _log_export_timing(
@@ -1536,7 +1542,7 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                     condition=cond_label_from_keys,
                     path=full_excel_path,
                 )
-                app.log(f"Successfully saved Excel: {excel_filename}")
+                app.log(f"Successfully saved results: {excel_filename}")
                 any_results_saved = True
             except Exception as write_err:
                 if not (
@@ -1565,12 +1571,12 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                         )
                     )
                 app.log(
-                    f"!!! Error writing Excel file {full_excel_path}: {write_err}\n{traceback.format_exc()}"
+                    f"!!! Error writing results file {full_excel_path}: {write_err}\n{traceback.format_exc()}"
                 )
                 raise
         else:
             app.log(
-                f"No valid data to save for '{cond_label_from_keys}' (PID: {pid}). No Excel file generated."
+                f"No valid data to save for '{cond_label_from_keys}' (PID: {pid}). No results file generated."
             )
             export_receipts.append(
                 _blocked_export_receipt(

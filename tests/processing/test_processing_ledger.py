@@ -488,8 +488,9 @@ def test_companion_cleanup_preserves_other_recordings_and_unrelated_npz(tmp_path
 
 @pytest.mark.parametrize("cleanup", ["participant", "all"])
 @pytest.mark.parametrize("corrupt", [False, True])
+@pytest.mark.parametrize("suffix", [".fpvs", ".xlsx"])
 def test_metric_cleanup_selects_declared_artifacts_and_allows_repair(
-    tmp_path, cleanup, corrupt,
+    tmp_path, cleanup, corrupt, suffix,
 ):
     import pandas as pd
 
@@ -497,18 +498,25 @@ def test_metric_cleanup_selects_declared_artifacts_and_allows_repair(
         condition_manifest_frame,
         write_condition_companion,
     )
+    from Main_App.io.result_manifest import write_result_manifest
 
     project, info = _project_with_raw(tmp_path)
     plan = classify_processing_inputs(project, [info], _settings(), project.event_map)
-    output = plan.states[0].expected_outputs[0]
+    output = plan.states[0].expected_outputs[0].with_suffix(suffix)
     output.parent.mkdir(parents=True, exist_ok=True)
     descriptor = write_condition_companion(output, {
         "BCA (uV)": pd.DataFrame({"Electrode": ["Oz"], "1.2000_Hz": [1.0]}),
     })
-    with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
-        condition_manifest_frame(descriptor).to_excel(
-            writer, sheet_name="Condition Data", index=False,
+    if suffix == ".fpvs":
+        write_result_manifest(
+            output, sheet_names=descriptor["sheets"],
+            spectral_companion=None, condition_companion=descriptor,
         )
+    else:
+        with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
+            condition_manifest_frame(descriptor).to_excel(
+                writer, sheet_name="Condition Data", index=False,
+            )
     companion = output.with_name(descriptor["path"])
     if corrupt:
         companion.write_bytes(b"damaged data must not prevent reprocessing")
@@ -1137,7 +1145,7 @@ def test_multigroup_expected_outputs_are_condition_first_group_second(tmp_path) 
             project.subfolders["excel"]
             / "Condition A"
             / "Control Group"
-            / "P01_Condition A_Results.xlsx"
+            / "P01_Condition A_Results.fpvs"
         ).resolve(),
     )
     assert output_group_folder_by_file(project, [grouped_info]) == {
@@ -1192,8 +1200,8 @@ def test_repeated_sessions_use_distinct_recording_ledger_and_output_identity(
         "rec_p01_follicular",
     ]
     assert [state.expected_outputs[0].name for state in plan.states] == [
-        "rec_p01_luteal_Condition A_Results.xlsx",
-        "rec_p01_follicular_Condition A_Results.xlsx",
+        "rec_p01_luteal_Condition A_Results.fpvs",
+        "rec_p01_follicular_Condition A_Results.fpvs",
     ]
     for state in plan.states:
         state.expected_outputs[0].parent.mkdir(parents=True, exist_ok=True)
@@ -1942,3 +1950,80 @@ def test_reprocess_all_choice_runs_completed_files(tmp_path) -> None:
 
     assert completed.incremental_files == ()
     assert with_processing_choice(completed, "reprocess_all").run_files == (info.path,)
+
+
+def test_legacy_reuse_and_native_reprocessing_routes(tmp_path) -> None:
+    project, info = _project_with_raw(tmp_path)
+    plan = classify_processing_inputs(project, [info], _settings(), project.event_map)
+    native = plan.states[0].expected_outputs[0]
+    assert native.suffix == ".fpvs"
+    legacy = native.with_suffix(".xlsx")
+    legacy.parent.mkdir(parents=True, exist_ok=True)
+    legacy.write_bytes(b"historical output")
+    legacy_plan = classify_processing_inputs(project, [info], _settings(), project.event_map)
+    assert legacy_plan.states[0].expected_outputs == (legacy,)
+    record_processing_results(
+        project, legacy_plan,
+        [{"status": "ok", "geometry": biosemi64_geometry_identity(), "file": str(info.path)}],
+        run_mode="Batch", user_choice="incremental", cancelled=False,
+    )
+    completed = classify_processing_inputs(project, [info], _settings(), project.event_map)
+    assert completed.states[0].status == "completed"
+    assert with_processing_choice(completed, "incremental").states[0].expected_outputs == (legacy,)
+
+    rerun = with_processing_choice(completed, "reprocess_all")
+    assert rerun.states[0].expected_outputs == (native,)
+    assert clean_participant_outputs(project, rerun) == [legacy]
+    assert not legacy.exists()
+    native.write_bytes(b"native output")
+    record_processing_results(
+        project, rerun,
+        [{"status": "ok", "geometry": biosemi64_geometry_identity(), "file": str(info.path)}],
+        run_mode="Batch", user_choice="reprocess_all", cancelled=False,
+    )
+    refreshed = classify_processing_inputs(project, [info], _settings(), project.event_map)
+    assert refreshed.states[0].status == "completed"
+    assert refreshed.states[0].expected_outputs == (native,)
+
+
+@pytest.mark.parametrize("cleanup", ["participant", "excluded"])
+def test_cleanup_removes_coexisting_anchors_without_reviving_legacy(tmp_path, cleanup) -> None:
+    import pandas as pd
+
+    from Main_App.io.condition_data import condition_manifest_frame, write_condition_companion
+    from Main_App.io.result_manifest import write_result_manifest
+
+    project, info = _project_with_raw(tmp_path)
+    plan = classify_processing_inputs(project, [info], _settings(), project.event_map)
+    native = plan.states[0].expected_outputs[0]
+    legacy = native.with_suffix(".xlsx")
+    native.parent.mkdir(parents=True, exist_ok=True)
+    companions = []
+    for anchor, value in ((legacy, 1.0), (native, 2.0)):
+        descriptor = write_condition_companion(anchor, {
+            "BCA (uV)": pd.DataFrame({"Electrode": ["Oz"], "1.2000_Hz": [value]}),
+        })
+        companions.append(anchor.with_name(descriptor["path"]))
+        if anchor == native:
+            write_result_manifest(
+                anchor, sheet_names=descriptor["sheets"],
+                spectral_companion=None, condition_companion=descriptor,
+            )
+        else:
+            with pd.ExcelWriter(anchor, engine="xlsxwriter") as writer:
+                condition_manifest_frame(descriptor).to_excel(
+                    writer, sheet_name="Condition Data", index=False,
+                )
+    unrelated = native.with_name("P02_Condition A_Results.fpvs")
+    unrelated.write_text("unrelated recording")
+
+    if cleanup == "participant":
+        removed = clean_participant_outputs(project, plan)
+    else:
+        removed = [Path(path) for path in processing_ledger_module._remove_expected_outputs_for_state(
+            project, plan.states[0],
+        )]
+
+    assert set(removed) == {native, legacy, *companions}
+    assert all(not path.exists() for path in removed)
+    assert unrelated.exists()

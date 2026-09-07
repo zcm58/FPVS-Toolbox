@@ -8,6 +8,7 @@ import re
 from PySide6.QtCore import QPoint, QSignalBlocker, Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QCheckBox,
     QComboBox,
     QHBoxLayout,
     QHeaderView,
@@ -38,7 +39,7 @@ from Main_App.gui.components import (
 )
 from Main_App.processing.frequency_domain_qc import (
     DECISION_EXCLUDE_CONDITION,
-    DECISION_EXCLUDE_CONDITION_ELECTRODE,
+    DECISION_INTERPOLATE_CONDITION_ELECTRODE,
     DECISION_EXCLUDE_PARTICIPANT,
     DECISION_EXCLUDE_RECORDING,
     DECISION_RETAIN,
@@ -47,6 +48,7 @@ from Main_App.processing.frequency_domain_qc import (
 )
 from Main_App.processing.frequency_qc_identity import frequency_qc_review_rows
 from Main_App.gui.frequency_domain_qc_review_model import (
+    can_interpolate_finding,
     electrode_group_key,
     electrode_groups,
     finding_section,
@@ -56,7 +58,7 @@ _CHOOSE_DECISION = ""
 _DECISION_LABELS = {
     _CHOOSE_DECISION: "Choose a decision…",
     DECISION_RETAIN: "Retain this finding",
-    DECISION_EXCLUDE_CONDITION_ELECTRODE: "Exclude electrode in this condition",
+    DECISION_INTERPOLATE_CONDITION_ELECTRODE: "Interpolate electrode in this condition",
     DECISION_EXCLUDE_CONDITION: "Exclude this condition",
     DECISION_EXCLUDE_RECORDING: "Exclude this recording",
     DECISION_EXCLUDE_PARTICIPANT: "Exclude whole participant",
@@ -90,6 +92,9 @@ class FrequencyDomainQcReviewDialog(AppDialog):
             size=SurfaceSize(1180, 780, min_width=1000, min_height=650),
         )
         self._report = report
+        self._interpolation_enabled = (
+            report.get("condition_specific_interpolation_enabled") is True
+        )
         self._identity_scope = str(
             report.get("identity_scope") or "participant"
         ).strip().casefold()
@@ -100,9 +105,11 @@ class FrequencyDomainQcReviewDialog(AppDialog):
             if str(participant_id).strip() and str(group_label).strip()
         }
         self._decision_controls: dict[str, tuple[QComboBox, QLineEdit]] = {}
+        self._artifact_controls: dict[str, QCheckBox] = {}
         self._findings = _review_findings(report)
         self._electrode_groups = electrode_groups(self._findings, self._identity_scope)
-        self._bulk_snapshot: dict[int, tuple[str, str]] = {}
+        self._bulk_snapshot: dict[int, tuple[str, str, bool]] = {}
+        self._bulk_confirmation_key: tuple[str, str, str] | None = None
         self._evidence_texts: list[str] = []
         self._row_controls: list[tuple[QComboBox, QLineEdit]] = []
         self._column_filters: dict[int, set[str]] = {}
@@ -139,6 +146,12 @@ class FrequencyDomainQcReviewDialog(AppDialog):
             }
             for fingerprint, (combo, reason) in self._decision_controls.items()
         }
+        for fingerprint, payload in raw.items():
+            if payload["decision"] == DECISION_INTERPOLATE_CONDITION_ELECTRODE:
+                confirmation = self._artifact_controls.get(fingerprint)
+                payload["artifact_confirmed"] = bool(
+                    confirmation is not None and confirmation.isChecked()
+                )
         try:
             self._submitted_decisions = (
                 validate_frequency_domain_qc_review_decisions(self._report, raw)
@@ -152,7 +165,7 @@ class FrequencyDomainQcReviewDialog(AppDialog):
         layout = self.root_layout
         layout.addWidget(
             StatusBanner(
-                "Experimental screening: review unusually large summed-BCA responses.",
+                "Experimental screening: a large response alone does not establish an artifact.",
                 self,
                 variant="warning",
             )
@@ -160,6 +173,12 @@ class FrequencyDomainQcReviewDialog(AppDialog):
         outcome_label = QLabel(_outcome_text(self._report), self)
         outcome_label.setObjectName("frequency_domain_qc_outcome_label")
         outcome_label.setWordWrap(True)
+        outcome_label.setToolTip(
+            "Condition-specific interpolation is "
+            + ("enabled" if self._interpolation_enabled else "off")
+            + ". Change this in Settings > Experimental > Electrodes. "
+            "Confirmed repairs are applied to the signal before recalculating analysis."
+        )
         layout.addWidget(outcome_label)
 
         technical_rows = _technical_context_rows(self._report)
@@ -339,19 +358,27 @@ class FrequencyDomainQcReviewDialog(AppDialog):
         self.bulk_scope_view.setAccessibleName("Electrode group and all affected conditions")
         self.bulk_scope_view.setLineWrapMode(QPlainTextEdit.WidgetWidth)
         layout.addWidget(self.bulk_scope_view, 1)
+        self.bulk_artifact_check = QCheckBox(
+            "I confirmed an artifact in every listed condition.", self.bulk_panel,
+        )
+        self.bulk_artifact_check.setObjectName("frequency_domain_qc_bulk_artifact_confirmed")
+        self.bulk_artifact_check.setVisible(self._interpolation_enabled)
+        self.bulk_artifact_check.toggled.connect(self._update_bulk_group)
+        layout.addWidget(self.bulk_artifact_check)
         actions = ActionRow(self.bulk_panel)
         self.bulk_retain_button = make_action_button("Retain all", variant="secondary", parent=actions)
-        self.bulk_exclude_button = make_action_button("Exclude all", variant="secondary", parent=actions)
+        self.bulk_interpolate_button = make_action_button("Interpolate all", variant="secondary", parent=actions)
         self.bulk_retain_button.setObjectName("frequency_domain_qc_bulk_retain")
-        self.bulk_exclude_button.setObjectName("frequency_domain_qc_bulk_exclude")
+        self.bulk_interpolate_button.setObjectName("frequency_domain_qc_bulk_interpolate")
+        self.bulk_interpolate_button.setVisible(self._interpolation_enabled)
         self.bulk_retain_button.clicked.connect(
             lambda: self._apply_electrode_group_decision(DECISION_RETAIN)
         )
-        self.bulk_exclude_button.clicked.connect(
-            lambda: self._apply_electrode_group_decision(DECISION_EXCLUDE_CONDITION_ELECTRODE)
+        self.bulk_interpolate_button.clicked.connect(
+            lambda: self._apply_electrode_group_decision(DECISION_INTERPOLATE_CONDITION_ELECTRODE)
         )
         actions.add_button(self.bulk_retain_button)
-        actions.add_button(self.bulk_exclude_button)
+        actions.add_button(self.bulk_interpolate_button)
         self.bulk_undo_button = make_action_button(
             "Undo", variant="secondary", parent=actions
         )
@@ -411,6 +438,10 @@ class FrequencyDomainQcReviewDialog(AppDialog):
 
     def _update_bulk_group(self) -> None:
         key = self._selected_electrode_group()
+        if key != self._bulk_confirmation_key:
+            self._bulk_confirmation_key = key
+            with QSignalBlocker(self.bulk_artifact_check):
+                self.bulk_artifact_check.setChecked(False)
         indices = self._electrode_groups.get(key, ())
         available = bool(indices)
         bulk_tab = self.detail_tabs.indexOf(self.bulk_panel)
@@ -438,9 +469,15 @@ class FrequencyDomainQcReviewDialog(AppDialog):
         else:
             self.bulk_scope_view.clear()
         self.bulk_retain_button.setEnabled(available)
-        self.bulk_exclude_button.setEnabled(available)
+        self.bulk_artifact_check.setEnabled(available)
+        self.bulk_interpolate_button.setEnabled(
+            available and self._interpolation_enabled and self.bulk_artifact_check.isChecked()
+        )
         self.bulk_retain_button.setToolTip(f"Retain all {len(indices)} flags listed above.")
-        self.bulk_exclude_button.setToolTip("Exclude this electrode in each flagged condition listed above.")
+        self.bulk_interpolate_button.setToolTip(
+            "Repair this electrode in each listed condition after artifact confirmation; "
+            "recalculate the signal and derived results."
+        )
         self.bulk_undo_button.setEnabled(bool(self._bulk_snapshot))
 
     def _invalidate_bulk_undo(self, _text: str = "") -> None:
@@ -448,19 +485,34 @@ class FrequencyDomainQcReviewDialog(AppDialog):
         self.bulk_undo_button.setEnabled(False)
 
     def _apply_electrode_group_decision(self, decision: str) -> None:
-        if decision not in {DECISION_RETAIN, DECISION_EXCLUDE_CONDITION_ELECTRODE}:
-            raise ValueError("Electrode groups support retain or condition-electrode exclusion only.")
+        if decision not in {DECISION_RETAIN, DECISION_INTERPOLATE_CONDITION_ELECTRODE}:
+            raise ValueError("Electrode groups support retain or condition-electrode interpolation only.")
         indices = self._electrode_groups.get(self._selected_electrode_group(), ())
         if not indices:
             return
+        interpolate = decision == DECISION_INTERPOLATE_CONDITION_ELECTRODE
+        if interpolate and not (
+            self._interpolation_enabled and self.bulk_artifact_check.isChecked()
+            and all(can_interpolate_finding(
+                self._findings[index], self._identity_scope, self._interpolation_enabled,
+            ) for index in indices)
+        ):
+            raise ValueError("Enable experimental interpolation and confirm artifacts before repair.")
         self._bulk_snapshot = {
             index: (str(self._row_controls[index][0].currentData() or ""),
-                    self._row_controls[index][1].text()) for index in indices
+                    self._row_controls[index][1].text(),
+                    bool(self._artifact_controls.get(str(self._findings[index]["finding_fingerprint"]))
+                         and self._artifact_controls[str(self._findings[index]["finding_fingerprint"])].isChecked()))
+            for index in indices
         }
         for index in indices:
             combo, _reason = self._row_controls[index]
             with QSignalBlocker(combo):
                 combo.setCurrentIndex(combo.findData(decision))
+            confirmation = self._artifact_controls.get(str(self._findings[index]["finding_fingerprint"]))
+            if confirmation is not None:
+                with QSignalBlocker(confirmation):
+                    confirmation.setChecked(interpolate)
             self._refresh_decision_cell(index)
         self.bulk_undo_button.setToolTip(
             "Undo decisions for " + self._electrode_group_label(self._selected_electrode_group())
@@ -469,11 +521,15 @@ class FrequencyDomainQcReviewDialog(AppDialog):
 
     def _undo_electrode_group_decision(self) -> None:
         snapshot, self._bulk_snapshot = self._bulk_snapshot, {}
-        for index, (decision, text) in snapshot.items():
+        for index, (decision, text, confirmed) in snapshot.items():
             combo, reason = self._row_controls[index]
             with QSignalBlocker(combo), QSignalBlocker(reason):
                 combo.setCurrentIndex(combo.findData(decision))
                 reason.setText(text)
+            confirmation = self._artifact_controls.get(str(self._findings[index]["finding_fingerprint"]))
+            if confirmation is not None:
+                with QSignalBlocker(confirmation):
+                    confirmation.setChecked(confirmed)
             self._refresh_decision_cell(index)
         self._refresh_decision_view()
 
@@ -562,14 +618,30 @@ class FrequencyDomainQcReviewDialog(AppDialog):
             combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             decision_label.setBuddy(combo)
             allowed = [_CHOOSE_DECISION, DECISION_RETAIN, DECISION_EXCLUDE_CONDITION]
-            if item.get("electrode"):
-                allowed.insert(2, DECISION_EXCLUDE_CONDITION_ELECTRODE)
+            repair_allowed = can_interpolate_finding(
+                item, self._identity_scope, self._interpolation_enabled,
+            )
+            if repair_allowed:
+                allowed.insert(2, DECISION_INTERPOLATE_CONDITION_ELECTRODE)
             if self._identity_scope == "recording":
                 allowed.append(DECISION_EXCLUDE_RECORDING)
             allowed.append(DECISION_EXCLUDE_PARTICIPANT)
             for decision in allowed:
                 combo.addItem(_DECISION_LABELS[decision], decision)
             page_layout.addWidget(combo)
+            if repair_allowed:
+                confirmation = QCheckBox(
+                    "I confirmed an artifact in this condition.", page,
+                )
+                confirmation.setObjectName(f"frequency_domain_qc_artifact_confirmed_{row_index}")
+                confirmation.setToolTip(
+                    "Confirm from the signal or independent artifact evidence. "
+                    "A large summed-BCA response alone is insufficient."
+                )
+                confirmation.setVisible(False)
+                confirmation.toggled.connect(self._invalidate_bulk_undo)
+                page_layout.addWidget(confirmation)
+                self._artifact_controls[fingerprint] = confirmation
             reason_label = QLabel("Reason (optional)", page)
             reason = QLineEdit(page)
             reason.setObjectName(f"frequency_domain_qc_reason_{row_index}")
@@ -618,6 +690,10 @@ class FrequencyDomainQcReviewDialog(AppDialog):
 
     def _decision_changed(self, row: int) -> None:
         self._invalidate_bulk_undo()
+        confirmation = self._artifact_controls.get(str(self._findings[row]["finding_fingerprint"]))
+        if confirmation is not None:
+            with QSignalBlocker(confirmation):
+                confirmation.setChecked(False)
         self._refresh_decision_cell(row)
         self._refresh_decision_view()
 
@@ -625,10 +701,13 @@ class FrequencyDomainQcReviewDialog(AppDialog):
         combo, reason = self._row_controls[row]
         decision = str(combo.currentData() or "")
         reason.setEnabled(decision not in {_CHOOSE_DECISION, DECISION_RETAIN})
+        confirmation = self._artifact_controls.get(str(self._findings[row]["finding_fingerprint"]))
+        if confirmation is not None:
+            confirmation.setVisible(decision == DECISION_INTERPOLATE_CONDITION_ELECTRODE)
         status = {
             _CHOOSE_DECISION: "Undecided",
             DECISION_RETAIN: "Retain",
-            DECISION_EXCLUDE_CONDITION_ELECTRODE: "Excl. electrode",
+            DECISION_INTERPOLATE_CONDITION_ELECTRODE: "Interpolate",
             DECISION_EXCLUDE_CONDITION: "Excl. condition",
             DECISION_EXCLUDE_RECORDING: "Excl. recording",
             DECISION_EXCLUDE_PARTICIPANT: "Excl. participant",

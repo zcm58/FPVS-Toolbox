@@ -2,6 +2,17 @@
 
 Project-aware workflows should resolve paths from the active project root, not from the process current directory or a developer-machine path.
 
+Processed condition discovery supports native `.fpvs` manifest anchors and
+historical `.xlsx` workbooks through `Main_App.projects.dataset_index`.
+`Main_App.projects.list_result_files` owns flat/recursive file eligibility and
+native-over-exact-legacy-sibling preference for older folder-based consumers;
+it does not change their existing cohort or filename interpretation. Native
+manifests contain only portable sibling companion descriptors, and numerical
+readers validate those companions through the shared Main App I/O layer.
+Existing long/wide Excel reports remain unchanged. Reprocessing/exclusion
+cleanup retires both exact sibling anchors and their declared companions so
+an obsolete XLSX cannot reappear after its native replacement is removed.
+
 The canonical project root is runtime context: it is the directory containing
 the opened `project.json`, exposed as `Project.project_root`. It is not stored
 as an absolute manifest field, because copied, renamed, or cross-platform
@@ -36,6 +47,11 @@ FPVS Toolbox uses a strict hybrid settings model:
   Windows override expansion, relative-path handling, `%LOCALAPPDATA%` lookup,
   and missing-variable errors remain unchanged.
 - `Main_App.Shared.settings_manager.SettingsManager` is the single active writer for app-level settings.
+  Ordinary saves merge keys changed since that instance last loaded or saved
+  into the latest INI, then publish atomically under an in-process lock. An
+  unrelated save from an older settings instance cannot resurrect a deleted
+  ROI. Explicit reset/import operations replace the configuration. Reloading
+  starts with a fresh parser so removed options do not linger in memory.
 - Project-specific settings stay in the active project's `project.json`.
 - The experimental removed-electrode detector choice remains in the
   `preprocessing` namespace for compatibility with existing processing inputs.

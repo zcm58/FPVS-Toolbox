@@ -96,6 +96,7 @@ def write_source_ready_time_domain_derivatives(
     processing_provenance: Mapping[str, Any] | None = None,
     source_signature: Mapping[str, Any] | None = None,
     resolved_protocol_by_condition: Mapping[str, Mapping[str, Any] | None] | None = None,
+    merge_existing: bool = False,
 ) -> SourceReadyTimeDomainExportResult:
     """Write all source-ready conditions for one participant and commit last.
 
@@ -147,6 +148,32 @@ def write_source_ready_time_domain_derivatives(
     signature = _json_value(dict(source_signature or {})) if source_signature is not None else None
     written_paths: list[Path] = []
     artifacts: list[SourceReadyTimeDomainArtifact] = []
+    if merge_existing and manifest_path.is_file():
+        previous = json.loads(manifest_path.read_text(encoding="utf-8"))
+        for key, expected in (
+            ("participant_id", participant), ("group_id", normalized_group_id),
+            ("recording_id", normalized_recording_id), ("session_id", normalized_session_id),
+            ("geometry", geometry), ("complete", True),
+        ):
+            if previous.get(key) != expected:
+                raise ValueError(f"Cannot merge source derivatives with changed {key}.")
+        replacing = {plan.condition_label for plan in plans}
+        for item in previous.get("artifacts", []):
+            if item["condition_label"] in replacing:
+                continue
+            fif_path = _project_path(root, item["fif_path"])
+            sidecar_path = _project_path(root, item["sidecar_path"])
+            if (_sha256_file(fif_path) != item["fif_sha256"]
+                    or _sha256_file(sidecar_path) != item["sidecar_sha256"]):
+                raise ValueError("An unchanged source derivative is missing or stale.")
+            sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+            if sidecar.get("source_signature") != signature:
+                raise ValueError("Cannot preserve source derivatives from a changed recording.")
+            artifacts.append(SourceReadyTimeDomainArtifact(
+                condition_id=item["condition_id"], condition_label=item["condition_label"],
+                fif_path=fif_path, sidecar_path=sidecar_path,
+                fif_sha256=item["fif_sha256"], sidecar_sha256=item["sidecar_sha256"],
+            ))
     committed = False
 
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
@@ -198,6 +225,7 @@ def write_source_ready_time_domain_derivatives(
                 )
             )
 
+        artifacts.sort(key=lambda item: (item.condition_id.casefold(), item.condition_label.casefold()))
         manifest = {
             "format": SOURCE_READY_TIME_DOMAIN_PARTICIPANT_MANIFEST_FORMAT,
             "schema_version": 2 if normalized_recording_id else 1,

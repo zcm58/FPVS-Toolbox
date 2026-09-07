@@ -11,6 +11,8 @@ import numpy as np
 from openpyxl import load_workbook
 import pandas as pd
 
+from Main_App.io.result_manifest import is_result_manifest, write_result_manifest
+
 from Main_App.io.spectral_data import (
     SPECTRAL_MANIFEST_SHEET,
     SPECTRAL_SHEET_NAMES,
@@ -386,7 +388,7 @@ def write_results_workbook(
     *,
     include_condition_excel: bool = False,
 ) -> dict[str, object]:
-    """Publish lossless data companions and a small discovery workbook.
+    """Publish lossless companions with a native manifest or Excel anchor.
 
     Compact condition tables are numerical inputs, not automatic Excel reports.
     Explicit report callers may request their Excel copies; long/wide statistical
@@ -440,6 +442,29 @@ def write_results_workbook(
             "condition_companion_write", started,
             path=full_excel_path, timing_sink=timing_sink,
         )
+
+    if is_result_manifest(destination):
+        if include_condition_excel:
+            raise ValueError("Excel copies require an explicit .xlsx report destination.")
+        schema_validation = write_result_manifest(
+            destination, sheet_names=list(frames),
+            spectral_companion=spectral_companion, condition_companion=condition_companion,
+        )
+        artifact = _artifact_identity(destination)
+        if artifact is None:
+            raise RuntimeError(f"Result publication produced no readable artifact: {destination}")
+        _log_excel_timing(
+            "native_result_write_total", workbook_started,
+            path=full_excel_path, timing_sink=timing_sink,
+        )
+        return {
+            "version": WORKBOOK_WRITE_RECEIPT_VERSION, "status": "written",
+            "path": str(destination.resolve()),
+            "artifact": artifact, "prior_artifact": prior_artifact,
+            "schema_validation": schema_validation,
+            **({"spectral_companion": spectral_companion} if spectral_companion is not None else {}),
+            **({"condition_companion": condition_companion} if condition_companion is not None else {}),
+        }
 
     excel_frames = {}
     for name, frame in frames.items():

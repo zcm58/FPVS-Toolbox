@@ -16,6 +16,7 @@ import os
 import re
 import tempfile
 from collections.abc import Callable, Mapping, Sequence
+from copy import copy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -1922,38 +1923,54 @@ def _format_workbook(workbook: Any) -> None:
         if worksheet.max_row >= 1 and worksheet.max_column >= 1:
             worksheet.auto_filter.ref = worksheet.dimensions
         worksheet.sheet_view.showGridLines = False
-        for cell in worksheet[1]:
+        headers = worksheet[1]
+        widths = [len(str(cell.value or "")) for cell in headers]
+        number_formats = []
+        for cell in headers:
             cell.fill = header_fill
             cell.font = header_font
             cell.alignment = alignment
+            header = str(cell.value or "")
+            if any(
+                token in header
+                for token in (
+                    "BCA", "RMS", "Signed Mean", "Amplitude",
+                    "Noise Mean", "Noise SD", "Z Score",
+                )
+            ):
+                number_formats.append("0.000000")
+            elif "Hz" in header:
+                number_formats.append("0.0000")
+            else:
+                number_formats.append(None)
+        styles = {}
         for row_number, row in enumerate(
             worksheet.iter_rows(min_row=2),
             start=2,
         ):
-            for cell in row:
-                cell.alignment = alignment
-                if row_number % 2 == 0:
-                    cell.fill = stripe_fill
-                header = str(worksheet.cell(1, cell.column).value or "")
-                if any(
-                    token in header
-                    for token in (
-                        "BCA",
-                        "RMS",
-                        "Signed Mean",
-                        "Amplitude",
-                        "Noise Mean",
-                        "Noise SD",
-                        "Z Score",
-                    )
-                ):
-                    cell.number_format = "0.000000"
-                elif "Hz" in header:
-                    cell.number_format = "0.0000"
+            striped = row_number % 2 == 0
+            for column_index, cell in enumerate(row):
+                number_format = number_formats[column_index]
+                # Reuse the complete derived style, retaining any existing
+                # pandas date, font, border, or protection settings.
+                key = (cell._style, striped, number_format)
+                style = styles.get(key)
+                if style is None:
+                    cell._style = copy(cell._style)
+                    cell.alignment = alignment
+                    if striped:
+                        cell.fill = stripe_fill
+                    if number_format is not None:
+                        cell.number_format = number_format
+                    style = styles[key] = cell._style
+                else:
+                    cell._style = style
+                widths[column_index] = max(
+                    widths[column_index], len(str(cell.value or ""))
+                )
         worksheet.row_dimensions[1].height = 30
-        for column_number, cells in enumerate(worksheet.columns, start=1):
-            values = [str(cell.value or "") for cell in cells]
-            width = min(max(max(map(len, values), default=0) + 2, 12), 60)
+        for column_number, max_length in enumerate(widths, start=1):
+            width = min(max(max_length + 2, 12), 60)
             worksheet.column_dimensions[get_column_letter(column_number)].width = width
 
 

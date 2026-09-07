@@ -165,6 +165,31 @@ def test_legacy_experimental_qc_manifest_migrates_raw_spectral_screen_on() -> No
     )
 
 
+@pytest.mark.parametrize("version", ["1.0.0", "1.1.0", EXPERIMENTAL_QC_SETTINGS_SCHEMA_VERSION])
+def test_condition_specific_interpolation_is_off_for_missing_and_legacy_settings(version):
+    settings = normalize_experimental_qc_settings({"schema_version": version})
+    assert settings.condition_specific_interpolation_enabled is False
+    assert settings.to_manifest()["condition_specific_interpolation_enabled"] is False
+    assert ExperimentalQcSettings().condition_specific_interpolation_enabled is False
+
+
+@pytest.mark.parametrize("invalid", [None, "maybe", 2, [], {}])
+def test_invalid_condition_specific_interpolation_setting_is_rejected(invalid):
+    with pytest.raises(ExperimentalQcSettingsError, match="condition_specific_interpolation_enabled"):
+        ExperimentalQcSettings(condition_specific_interpolation_enabled=invalid)
+
+
+def test_condition_specific_interpolation_roundtrip_keeps_other_experimental_settings():
+    original = ExperimentalQcSettings().with_raw_spectral_screening({"enabled": False})
+    enabled = original.with_condition_specific_interpolation_enabled(True)
+    assert enabled.condition_specific_interpolation_enabled is True
+    assert original.condition_specific_interpolation_enabled is False
+    assert enabled.summed_bca_screening == original.summed_bca_screening
+    assert enabled.raw_spectral_screening == original.raw_spectral_screening
+    assert normalize_experimental_qc_settings(enabled.to_manifest()) == enabled
+    assert enabled.with_condition_specific_interpolation_enabled(False) == original
+
+
 def test_raw_spectral_policy_rejects_unversioned_threshold_edits() -> None:
     payload = RawSpectralScreeningSettings().to_manifest()
     payload["minimum_local_mean_ratio"] = 24.0
@@ -549,7 +574,7 @@ def test_existing_project_defaults_qc17_on_and_custom_settings_round_trip(
     )
     expected = project.experimental_qc_settings.with_summed_bca_screening(
         custom_screening
-    )
+    ).with_condition_specific_interpolation_enabled(True)
     project.update_experimental_qc_settings(expected)
     project.save()
 

@@ -23,7 +23,7 @@ import os
 import time
 import traceback
 from concurrent.futures import ProcessPoolExecutor, FIRST_COMPLETED, wait
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from multiprocessing import Queue, get_context, Event
 from pathlib import Path
 from types import SimpleNamespace
@@ -55,6 +55,15 @@ from Main_App.processing.kurtosis_qc import (
     KURTOSIS_AUTHORITY_POLICY_VERSION,
     KURTOSIS_CORROBORATOR_REGISTRY_VERSION,
     KURTOSIS_QC_METHOD_VERSION,
+)
+from Main_App.processing.condition_electrode_interpolation import (
+    CONDITION_INTERPOLATION_VERSION,
+    normalize_condition_interpolation_requests,
+    validate_condition_interpolation_provenance,
+)
+from Main_App.processing.condition_interpolation_state import (
+    active_condition_interpolation_requests,
+    reconcile_condition_interpolation_sources,
 )
 from Main_App.processing.analysis_spans import (
     ANALYSIS_SPAN_PLAN_VERSION,
@@ -232,7 +241,7 @@ def _interpolation_provenance_from_settings(
 ) -> dict[str, object]:
     """Return the truthful interpolation outcome accumulated by preprocessing."""
 
-    return {
+    result = {
         "interpolation_status": str(
             settings.get("_fpvs_interpolation_status") or ""
         ),
@@ -246,6 +255,10 @@ def _interpolation_provenance_from_settings(
             settings.get("_fpvs_interpolation_error") or ""
         ),
     }
+    proof = settings.get("_fpvs_condition_interpolation_provenance")
+    if isinstance(proof, Mapping) and proof.get("status") == "completed":
+        result["condition_electrode_interpolation"] = dict(proof)
+    return result
 
 
 def _float_or_zero(value: Any) -> float:
@@ -955,6 +968,15 @@ def _preproc_cache_payload(
             {},
         ),
     }
+    condition_requests = normalize_condition_interpolation_requests(
+        settings.get("_fpvs_condition_interpolation_requests"),
+        excluded_condition_labels=settings.get("_fpvs_excluded_condition_labels", ()),
+    )
+    if condition_requests:
+        relevant_settings["condition_electrode_interpolation"] = {
+            "version": CONDITION_INTERPOLATION_VERSION,
+            "requests": condition_requests,
+        }
     return {
         "version": PREPROC_CACHE_VERSION,
         "mne_version": mne_version,
@@ -1108,6 +1130,7 @@ def _load_preprocessed_cache(
         cached_target_span_plan = metadata.get("realized_analysis_span_plan")
         require_analysis_spans = bool(
             settings.get("_fpvs_require_analysis_spans", False)
+            or settings.get("_fpvs_condition_interpolation_requests")
         )
         if require_analysis_spans:
             if (
@@ -1238,6 +1261,15 @@ def _load_preprocessed_cache(
         settings["_fpvs_interpolation_error"] = str(
             metadata.get("interpolation_error") or ""
         )
+        condition_proof = validate_condition_interpolation_provenance(
+            metadata.get("condition_electrode_interpolation"),
+            requests=settings.get("_fpvs_condition_interpolation_requests"),
+            analysis_span_plan=settings.get("_fpvs_realized_analysis_span_plan"),
+            geometry=observed_geometry,
+        )
+        settings.pop("_fpvs_condition_interpolation_provenance", None)
+        if condition_proof is not None:
+            settings["_fpvs_condition_interpolation_provenance"] = condition_proof
         for key in REMOVED_ELECTRODE_REVIEW_LIST_KEYS:
             settings[f"_fpvs_{key}"] = _string_list(metadata.get(key))
         for key in REMOVED_ELECTRODE_REVIEW_SCALAR_KEYS:
@@ -1250,6 +1282,8 @@ def _load_preprocessed_cache(
             raw_path,
             exc,
         )
+        if "raw" in locals() and raw is not None:
+            raw.close()
         return None, None, 0, "read_error"
 
 
@@ -1284,7 +1318,7 @@ def _store_preprocessed_cache(
         exact_filter_info = snapshot_preprocessed_filter_info(
             raw.info, settings, cache_key=cache_key,
         )
-        if settings.get("_fpvs_require_analysis_spans", False):
+        if settings.get("_fpvs_require_analysis_spans", False) or settings.get("_fpvs_condition_interpolation_requests"):
             source_span_plan = settings.get("_fpvs_source_analysis_span_plan")
             target_span_plan = settings.get("_fpvs_realized_analysis_span_plan")
             if not isinstance(source_span_plan, Mapping) or not isinstance(
@@ -1309,7 +1343,14 @@ def _store_preprocessed_cache(
         settings["_fpvs_retained_scalp_set_fingerprint"] = str(
             geometry_identity["retained_scalp_set_fingerprint"]
         )
-        raw.save(str(raw_path), overwrite=True, verbose=False)
+        condition_proof = validate_condition_interpolation_provenance(
+            settings.get("_fpvs_condition_interpolation_provenance"),
+            requests=settings.get("_fpvs_condition_interpolation_requests"),
+            analysis_span_plan=settings.get("_fpvs_realized_analysis_span_plan"),
+            geometry=geometry_identity,
+        )
+        raw.save(str(raw_path), overwrite=True, verbose=False,
+                 **({"fmt": "double"} if condition_proof is not None else {}))
         metadata = {
             "cache_key": cache_key,
             "payload": payload,
@@ -1344,6 +1385,7 @@ def _store_preprocessed_cache(
             "interpolation_error": str(
                 settings.get("_fpvs_interpolation_error") or ""
             ),
+            "condition_electrode_interpolation": condition_proof,
             "fft_multinotch_requested_centers_hz": _float_list(
                 settings.get("_fpvs_fft_multinotch_requested_centers_hz")
             ),
@@ -1511,6 +1553,12 @@ def _settings_for_file(
     if recording_id:
         file_settings["_fpvs_recording_id"] = recording_id
     processing_id = recording_id or participant_id
+    if "condition_electrode_interpolation_requests" in file_settings:
+        file_settings["_fpvs_condition_interpolation_requests"] = normalize_condition_interpolation_requests(
+            _recording_mapping_payload(
+                file_settings.get("condition_electrode_interpolation_requests"), processing_id,
+            )
+        )
     if "kurtosis_review_decisions_by_recording" in file_settings:
         file_settings["_fpvs_kurtosis_review_decisions"] = (
             _recording_mapping_payload(
@@ -1765,6 +1813,11 @@ def _run_full_pipeline_for_file(
         settings["_fpvs_excluded_condition_labels"] = list(
             excluded_condition_labels
         )
+        if settings.get("_fpvs_condition_interpolation_requests"):
+            settings["_fpvs_condition_interpolation_requests"] = normalize_condition_interpolation_requests(
+                settings["_fpvs_condition_interpolation_requests"],
+                excluded_condition_labels=excluded_condition_labels,
+            )
         settings["_fpvs_require_analysis_spans"] = True
         stim = str(settings.get("stim_channel") or settings.get("stim") or "Status")
 
@@ -2489,7 +2542,14 @@ def _run_full_pipeline_for_file(
             export_timing_records=export_timing_records,
             export_receipts=export_receipts,
         )
-        fif_written = run_post_export(ctx, list(event_map.keys()))
+        export_conditions = list(event_map.keys())
+        requested_exports = settings.get("_fpvs_export_only_conditions")
+        if requested_exports is not None:
+            if (not isinstance(requested_exports, (list, tuple)) or not requested_exports
+                    or not set(requested_exports).issubset(event_map)):
+                raise ValueError("Focused repair requires existing named export conditions.")
+            export_conditions = [label for label in export_conditions if label in requested_exports]
+        fif_written = run_post_export(ctx, export_conditions)
         logger.debug(
             "[PIPELINE] %s: export complete",
             file_path.name,
@@ -2518,6 +2578,8 @@ def _run_full_pipeline_for_file(
                     "source-ready time-domain derivatives were not published."
                 )
             source_epochs = _available_source_epoch_set(epochs_dict, event_map)
+            if requested_exports is not None:
+                source_epochs = {label: epochs for label, epochs in source_epochs.items() if label in export_conditions}
             source_stat = file_path.stat()
             source_result = write_source_ready_time_domain_derivatives(
                 project_root=project_root,
@@ -2544,6 +2606,8 @@ def _run_full_pipeline_for_file(
                     "analysis_span_plan_version": ANALYSIS_SPAN_PLAN_VERSION,
                     "source_analysis_span_plan": source_analysis_span_plan,
                     "realized_analysis_span_plan": target_analysis_span_plan,
+                    **({"condition_electrode_interpolation": settings["_fpvs_condition_interpolation_provenance"]}
+                       if settings.get("_fpvs_condition_interpolation_provenance") else {}),
                 },
                 source_signature={
                     "raw_file": str(file_path.resolve()),
@@ -2573,6 +2637,7 @@ def _run_full_pipeline_for_file(
                     }
                     for label in source_epochs
                 },
+                **({"merge_existing": True} if requested_exports is not None else {}),
             )
             source_derivative_status = "complete"
             source_derivative_manifest = source_ready_project_relative_path(
@@ -2624,6 +2689,9 @@ def _run_full_pipeline_for_file(
         audit_after["interpolation_error"] = str(
             settings.get("_fpvs_interpolation_error") or ""
         )
+        condition_proof = settings.get("_fpvs_condition_interpolation_provenance")
+        if isinstance(condition_proof, Mapping):
+            audit_after["condition_electrode_interpolation"] = dict(condition_proof)
         audit_after["analysis_span_plan_version"] = ANALYSIS_SPAN_PLAN_VERSION
         audit_after["source_analysis_span_plan"] = source_analysis_span_plan
         audit_after["realized_analysis_span_plan"] = target_analysis_span_plan
@@ -2799,7 +2867,35 @@ def _process_one_file(
     This is the worker entry point used by multiprocessing. It delegates to
     _run_full_pipeline_for_file so the same pipeline can be reused by other callers.
     """
+    settings = _with_current_condition_repairs(
+        settings, project_root,
+        current_sources=_condition_repair_sources_for_files([file_path], settings),
+    )
     return _run_full_pipeline_for_file(file_path, settings, event_map, save_folder, project_root)
+
+
+def _condition_repair_sources_for_files(
+    files: List[Path], settings: Mapping[str, object],
+) -> dict[str, str]:
+    return {
+        (_recording_id_for_file(path, settings) or _participant_id_for_file(path, dict(settings))): str(path.resolve())
+        for path in files
+    }
+
+
+def _with_current_condition_repairs(
+    settings: Mapping[str, object], project_root: Path, *,
+    current_sources: Mapping[str, str] | None = None,
+) -> Dict[str, object]:
+    """Accepted project requests remain authoritative even when the toggle is off."""
+    current = dict(settings)
+    requests = active_condition_interpolation_requests(project_root, current_sources=current_sources)
+    current.pop("condition_electrode_interpolation_requests", None)
+    current.pop("_fpvs_condition_interpolation_requests", None)
+    current.pop("_fpvs_condition_interpolation_provenance", None)
+    if requests:
+        current["condition_electrode_interpolation_requests"] = requests
+    return current
 
 
 def _log_export_timing_records(result: Dict[str, object]) -> None:
@@ -2885,6 +2981,21 @@ def run_project_parallel(
         if progress_queue:
             progress_queue.put({"type": "done", "count": 0, "cancelled": False})
         return
+
+    current_sources = _condition_repair_sources_for_files(files, params.settings)
+    _requests, retired_repair_warnings = reconcile_condition_interpolation_sources(
+        params.project_root, current_sources=current_sources,
+    )
+    for warning in retired_repair_warnings:
+        logger.warning("condition_interpolation_approval_retired: %s", warning)
+    current_settings = _with_current_condition_repairs(
+        params.settings, params.project_root, current_sources=current_sources,
+    )
+    run_snapshot = current_settings.pop("_fpvs_condition_interpolation_run_snapshot", None)
+    if run_snapshot is not None:
+        from Main_App.processing.condition_interpolation_executor import persist_condition_interpolation_run_snapshot
+        persist_condition_interpolation_run_snapshot(params.project_root, run_snapshot)
+    params = replace(params, settings=current_settings)
 
     total = len(files)
     completed = 0
