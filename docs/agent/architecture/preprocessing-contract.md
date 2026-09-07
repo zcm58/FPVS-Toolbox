@@ -789,8 +789,11 @@ Kurtosis review and interpolation:
   prefix. The shared `_finish_preprocessing_at_kurtosis` rebuilds decisions from
   current policy and receipts, then performs interpolation and final reference
   in the original order. No GUI approval is stored as reusable numerical evidence.
-  The scanner and runner still validate/load their current source Raw before
-  this checkpoint boundary; trigger positions and data precision are unchanged.
+  The scanner and runner still validate their current source Raw before this
+  checkpoint boundary. The scanner can take exclusive ownership of an unchanged
+  source preloaded during interactive QC, avoiding BDF decoding at step 6;
+  current file/sample hashing and numerical checkpoint checks still run. The
+  runner's source loading, trigger positions, and data precision are unchanged.
 - Kurtosis runs only when `reject_thresh` is truthy.
 - EEG picks exclude existing bads and exclude the stim channel when the stim
   channel exists and is not typed as EEG.

@@ -82,6 +82,10 @@ from Main_App.projects.grouping import (
     resolve_group_output_directory,
     resolve_output_directory,
 )
+from Main_App.projects.preprocessing_settings import (
+    normalize_manual_excluded_participants,
+    normalize_manual_excluded_recordings,
+)
 
 if TYPE_CHECKING:
     from Main_App.processing.processing_controller import RawFileInfo
@@ -981,6 +985,18 @@ def classify_processing_inputs(
     condition_labels = tuple(str(label) for label in event_map.keys())
     fingerprint = build_processing_fingerprint(project, settings, event_map)
     geometry_identity = _configured_geometry_identity(settings)
+    excluded_participants = {
+        participant_id.casefold()
+        for participant_id in normalize_manual_excluded_participants(
+            settings.get("manual_excluded_participants")
+        )
+    }
+    excluded_recordings = {
+        recording_id.casefold()
+        for recording_id in normalize_manual_excluded_recordings(
+            settings.get("manual_excluded_recordings")
+        )
+    }
     ledger = load_ledger(Path(project.project_root))
     entries = ledger.get("entries", {})
     if not isinstance(entries, Mapping):
@@ -1024,6 +1040,29 @@ def classify_processing_inputs(
                 continue
 
             exclusion_reason = str(entry.get("exclusion_reason") or "").strip().casefold()
+            if exclusion_reason in {
+                "manual_participant_exclusion",
+                "manual_recording_exclusion",
+            } and not (
+                participant_id.casefold() in excluded_participants
+                or (
+                    info.recording_id
+                    and info.recording_id.casefold() in excluded_recordings
+                )
+            ):
+                states.append(
+                    ProcessingInputState(
+                        info=info,
+                        participant_id=participant_id,
+                        status="changed_settings",
+                        reason=(
+                            "The prior manual exclusion no longer applies; "
+                            "the recording is eligible for processing."
+                        ),
+                        expected_outputs=expected_outputs,
+                    )
+                )
+                continue
             geometry_independent = (
                 exclusion_reason in _GEOMETRY_INDEPENDENT_EXCLUSION_REASONS
             )

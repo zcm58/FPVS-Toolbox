@@ -41,6 +41,11 @@ companions/exports, processing ledgers, and review decisions are preserved.
 Clearing saved caches does not destroy data already displayed by open tools;
 reopening tools or restarting releases remaining tool memory.
 
+Restore excluded participants through **Manage Dataset Exclusions** in Settings,
+not cache clearing. Removing the final manual processing exclusion now releases
+the cached manual skip on the next processing plan. Clearing cache entries
+continues to preserve saved processing and analysis exclusion decisions.
+
 ## Visible Smoke (Local Qt Execution Is Not Required)
 
 Open Settings → Advanced while idle and choose Clear Toolbox Cache. Confirm

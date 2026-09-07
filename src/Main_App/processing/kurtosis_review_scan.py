@@ -18,11 +18,14 @@ from pathlib import Path
 from queue import Empty, SimpleQueue
 from threading import Event
 from time import perf_counter
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import mne
 import numpy as np
 import psutil
+
+if TYPE_CHECKING:
+    from Main_App.processing.qc_source_prefetch import QcSourcePrefetch
 
 from Main_App.Performance.mp_env import compute_effective_max_workers
 from Main_App.io import load_utils
@@ -313,6 +316,7 @@ def _scan_review_parallel(
     progress: ProgressCallback | None,
     should_cancel: CancelCallback | None,
     max_workers: int,
+    source_prefetch: QcSourcePrefetch | None = None,
 ) -> KurtosisReviewScan:
     """Run independent serial scans, relaying progress on the calling thread."""
 
@@ -340,6 +344,7 @@ def _scan_review_parallel(
                     progress=lambda message, _completed, _total: messages.put(message),
                     should_cancel=stop.is_set,
                     max_workers=1,
+                    source_prefetch=source_prefetch,
                 )
             ] = index
 
@@ -921,6 +926,7 @@ def scan_kurtosis_review(
     progress: ProgressCallback | None = None,
     should_cancel: CancelCallback | None = None,
     max_workers: int | None = None,
+    source_prefetch: QcSourcePrefetch | None = None,
 ) -> KurtosisReviewScan:
     """Prepare current QC-16 evidence for a batch without touching widgets.
 
@@ -955,7 +961,11 @@ def scan_kurtosis_review(
     if not protocol.is_ready:
         raise KurtosisReviewScanError("Kurtosis review requires a confirmed project frequency protocol.")
 
-    worker_count = _review_worker_count(raw_file_infos, max_workers)
+    # Once step 6 needs the sources, abandon untouched speculative loads.
+    # Retain completed sources and let an active read finish, without adding
+    # that reader to two simultaneous full-recording preprocessing jobs.
+    prefetch_loading = source_prefetch.begin_consumption() if source_prefetch is not None else False
+    worker_count = _review_worker_count(raw_file_infos, 1 if prefetch_loading else max_workers)
     if worker_count > 1:
         return _scan_review_parallel(
             raw_file_infos,
@@ -966,6 +976,7 @@ def scan_kurtosis_review(
             progress=progress,
             should_cancel=should_cancel,
             max_workers=worker_count,
+            source_prefetch=source_prefetch,
         )
 
     raw_plans = (
@@ -1015,6 +1026,7 @@ def scan_kurtosis_review(
             continue
 
         raw: Any | None = None
+        prefetched = False
         try:
             event_plan = _event_plan_for_path(plans, path)
             source_plan = validate_source_analysis_span_context(
@@ -1059,18 +1071,28 @@ def scan_kurtosis_review(
                     progress(f"Skipped excluded conditions in {path.name}", index, total)
                 continue
 
-            if progress:
-                progress(f"Loading {path.name} with BioSemi64 geometry", index - 1, total)
             load_started = perf_counter()
-            raw = load_utils.load_eeg_file(
-                _LoaderLogAdapter(path),
-                str(path),
-                ref_pair=ref_pair,
-                first_n_channels=channel_limit,
-                stim_channel=stim_channel,
-                electrode_mapping_profile=settings.get("electrode_mapping_profile"),
-                electrode_montage=BIOSEMI64_MONTAGE_ID,
-            )
+            if source_prefetch is not None:
+                if progress:
+                    progress(f"Preparing {path.name} for kurtosis review", index - 1, total)
+                raw = source_prefetch.take(path, settings=settings, should_cancel=should_cancel)
+                prefetched = raw is not None
+                if should_cancel and should_cancel():
+                    return KurtosisReviewScan(tuple(results), cancelled=True)
+            if raw is None:
+                if progress:
+                    progress(f"Loading {path.name} with BioSemi64 geometry", index - 1, total)
+                raw = load_utils.load_eeg_file(
+                    _LoaderLogAdapter(path),
+                    str(path),
+                    ref_pair=ref_pair,
+                    first_n_channels=channel_limit,
+                    stim_channel=stim_channel,
+                    electrode_mapping_profile=settings.get("electrode_mapping_profile"),
+                    electrode_montage=BIOSEMI64_MONTAGE_ID,
+                )
+            elif progress:
+                progress(f"Using preloaded recording {path.name}", index - 1, total)
             if raw is None:
                 raise KurtosisReviewScanError("The EEG loader returned no Raw data.")
             validate_raw_biosemi64_geometry(
@@ -1259,7 +1281,10 @@ def scan_kurtosis_review(
         finally:
             if raw is not None:
                 try:
-                    raw.close()
+                    if prefetched:
+                        source_prefetch.release(raw)
+                    else:
+                        raw.close()
                 except (AttributeError, OSError, RuntimeError, ValueError):
                     logger.warning(
                         "kurtosis_review_raw_close_failed file=%s",

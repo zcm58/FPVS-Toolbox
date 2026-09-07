@@ -32,6 +32,8 @@ from .preprocessing_settings import (
     REPEATED_SESSION_PREPROCESSING_KEYS,
     confirm_removed_electrode_detection_choice,
     new_project_preprocessing_settings,
+    normalize_electrode_mapping_profile,
+    normalize_electrode_montage,
     normalize_preprocessing_settings,
     removed_electrode_detection_choice_was_saved,
 )
@@ -237,17 +239,11 @@ def _write_manifest_if_changed(manifest_path: Path, data: Dict[str, Any]) -> boo
 
 
 def _preserve_disk_tools_metadata(
-    manifest_path: Path,
+    current: Mapping[str, Any] | None,
     data: Dict[str, Any],
     *,
     updated_tool_namespaces: Collection[str] = (),
 ) -> Dict[str, Any]:
-    if not manifest_path.exists():
-        return data
-    try:
-        current = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except Exception:
-        return data
     if not isinstance(current, Mapping):
         return data
     current_tools = current.get("tools")
@@ -262,6 +258,17 @@ def _preserve_disk_tools_metadata(
             merged_tools.pop(tool_name, None)
     data["tools"] = merged_tools
     return data
+
+
+def _electrode_geometry_settings(preprocessing: Mapping[str, Any]) -> dict[str, str]:
+    return {
+        "electrode_montage": normalize_electrode_montage(
+            preprocessing.get("electrode_montage")
+        ),
+        "electrode_mapping_profile": normalize_electrode_mapping_profile(
+            preprocessing.get("electrode_mapping_profile")
+        ),
+    }
 
 
 def _processing_fingerprint_v9_compatibility(
@@ -450,6 +457,9 @@ class Project:
                 )
                 _LEGACY_BANDPASS_WARNED.add(self.project_root)
         self._legacy_inversion = legacy_inversion if legacy_inversion else None
+        self._electrode_geometry_baseline = _electrode_geometry_settings(
+            self.preprocessing
+        )
         manifest["preprocessing"] = _preprocessing_manifest_payload(
             self.preprocessing,
             repeated_session=bool(
@@ -650,6 +660,46 @@ class Project:
             _write_manifest_if_changed(resolved_manifest_path, raw_manifest)
         return proj
 
+    def _reconciled_electrode_geometry_settings(
+        self, preprocessing: Mapping[str, Any]
+    ) -> tuple[dict[str, str], dict[str, str], Mapping[str, Any] | None]:
+        """Compare local geometry with the last observed and current disk values."""
+
+        local = _electrode_geometry_settings(preprocessing)
+        manifest_path = self.project_root / "project.json"
+        try:
+            current = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return local, dict(self._electrode_geometry_baseline), None
+        if not isinstance(current, Mapping):
+            raise ValueError(f"Project manifest must contain an object: {manifest_path}")
+        disk_preprocessing = current.get("preprocessing", {})
+        if not isinstance(disk_preprocessing, Mapping):
+            raise ValueError(
+                f"Project preprocessing settings must contain an object: {manifest_path}"
+            )
+        disk = _electrode_geometry_settings(disk_preprocessing)
+        merged = {
+            key: disk[key] if value == self._electrode_geometry_baseline[key] else value
+            for key, value in local.items()
+        }
+        return merged, disk, current
+
+    def refresh_electrode_geometry_settings(self) -> None:
+        """Read newer saved geometry without discarding explicit local edits.
+
+        Only montage and label mapping are refreshed. Successful reads advance
+        the observed disk baseline; this method does not save the project.
+        """
+
+        preprocessing = dict(self.preprocessing)
+        merged, disk, _current = self._reconciled_electrode_geometry_settings(
+            preprocessing
+        )
+        preprocessing.update(merged)
+        self.preprocessing = preprocessing
+        self._electrode_geometry_baseline = disk
+
     def save(self, *, updated_tool_namespaces: Collection[str] = ()) -> None:
         """
         Persist manifest. Store relative paths when inside project_root.
@@ -657,6 +707,8 @@ class Project:
 
         Disk-authored tool namespaces remain authoritative unless their names
         are explicitly listed in ``updated_tool_namespaces``.
+        Newer saved electrode geometry is retained when its local values have
+        not changed since load, refresh, or the previous successful save.
         """
         manifest_path = self.project_root / "project.json"
 
@@ -705,7 +757,6 @@ class Project:
         normalized_pp = normalize_preprocessing_settings(
             self.preprocessing if isinstance(self.preprocessing, Mapping) else {}
         )
-        self.preprocessing = normalized_pp
         detector_choice_unresolved = (
             normalized_pp["removed_electrode_detection_choice_status"]
             == REMOVED_ELECTRODE_DETECTION_CHOICE_STATUS_CONFIRMATION_REQUIRED
@@ -962,32 +1013,31 @@ class Project:
             data.pop("recordings_lock_fingerprint", None)
             self._recordings_lock_fingerprint = None
 
+        # Use one validated, late disk snapshot for geometry, worker metadata,
+        # and change detection. Unreadable or invalid manifests must not be
+        # overwritten using stale geometry or guessed defaults.
+        geometry, _disk_geometry, current = self._reconciled_electrode_geometry_settings(
+            normalized_pp
+        )
+        normalized_pp.update(geometry)
+        data["preprocessing"].update(geometry)
         data = _preserve_disk_tools_metadata(
-            manifest_path,
+            current,
             data,
             updated_tool_namespaces=updated_tool_namespaces,
         )
 
-        # Keep in-memory manifest consistent for subsequent operations.
+        if current is None or _stable_dump(current) != _stable_dump(data):
+            # Pretty write for human readability.
+            manifest_path.write_text(
+                json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8"
+            )
+
+        # Rebase only after a successful write or verified no-op. A failed save
+        # must leave local geometry edits available for a later retry.
         self.manifest = data
-
-        # -------- Change-detection write --------
-        # Compute a deterministic compact string for compare only
-        new_compact = _stable_dump(data)
-        if manifest_path.exists():
-            try:
-                current_dict = json.loads(manifest_path.read_text(encoding="utf-8"))
-                if not isinstance(current_dict, dict):
-                    current_dict = {}
-            except Exception:
-                current_dict = {}
-            current_compact = _stable_dump(current_dict)
-            if current_compact == new_compact:
-                # No changes; skip disk write
-                return
-
-        # Pretty write for human readability
-        manifest_path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+        self.preprocessing = normalized_pp
+        self._electrode_geometry_baseline = geometry
 
     # ------------------------------------------------------------------
     def update_preprocessing(self, values: Mapping[str, Any]) -> Dict[str, Any]:

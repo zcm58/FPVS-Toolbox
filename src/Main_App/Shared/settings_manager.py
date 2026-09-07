@@ -55,6 +55,8 @@ DEFAULTS = {
         'alpha': '0.05'
     },
     'preprocessing': {
+        'electrode_montage': 'biosemi64',
+        'electrode_mapping_profile': 'anatomical_labels',
         'line_noise_filter_enabled': 'True',
         'line_noise_frequency_hz': '60',
         'harmonic_selection_policy': 'Group-level significant harmonics (Volfart/Retter/Rossion style)',

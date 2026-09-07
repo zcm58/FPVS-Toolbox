@@ -455,6 +455,15 @@ def _active_geometry_identity(
             "No active processing geometry could be matched to FullFFT workbooks."
         )
     for processing_id, geometry in validated:
+        if geometry["electrode_mapping_profile"] != project_geometry["electrode_mapping_profile"]:
+            raise FullFftProvenanceError(
+                f"The processed workbooks for {processing_id} used channel mapping "
+                f"{geometry['electrode_mapping_profile']!r}, but Settings > Preprocessing > "
+                "Channel mapping profile currently requests "
+                f"{project_geometry['electrode_mapping_profile']!r}. Restore the original "
+                "mapping setting to reuse these outputs, or reprocess the EEG if the "
+                "mapping change was intentional."
+            )
         if geometry != project_geometry:
             raise FullFftProvenanceError(
                 "Active FullFFT workbook geometry or exact retained scalp set does "
@@ -487,6 +496,12 @@ def _source_snapshot(
     frequency_qc_state = load_frequency_domain_qc_state(project_root)
     frequency_qc = resolve_frequency_qc_coverage_decisions(project_root)
     if bool(frequency_qc_state.get("downstream_outputs_stale", False)):
+        stale_reason = str(frequency_qc_state.get("stale_reason") or "").strip()
+        if stale_reason:
+            raise FullFftProvenanceStaleError(
+                "Frequency-domain outputs are not current: "
+                f"{stale_reason} Resolve this issue and resume post-processing."
+            )
         raise FullFftProvenanceStaleError(
             "Frequency-domain cohort/QC state is stale. Complete the required "
             "post-processing review before using FullFFT analyses."
@@ -881,6 +896,67 @@ def require_current_project_workbook_geometry(
         )
     index = _load_dataset_index(root, dataset_index)
     return dict(_source_snapshot(root, index).geometry_identity)
+
+
+def require_current_project_pre_review_geometry(
+    project_root: str | Path,
+    *,
+    dataset_index: ProjectDatasetIndex | None = None,
+) -> dict[str, object]:
+    """Check processed candidate geometry before asking for frequency-QC decisions.
+
+    This prerequisite uses the completed processing cohort, preprocessing
+    manual exclusions, and any still-valid reviewed frequency exclusions. It
+    deliberately does not require frequency review to have finished.
+    """
+    root = Path(project_root).expanduser().resolve(strict=False)
+    if not root.is_dir() or not (root / "project.json").is_file():
+        raise FullFftProvenanceError(
+            "project_root must be an existing managed project containing project.json."
+        )
+    index = _load_dataset_index(root, dataset_index)
+    repeated_session = index.is_repeated_session
+    completed, processing_rows, ledger_filter_applied = _completed_ledger_state(
+        root, repeated_session=repeated_session,
+    )
+    manual_participants = _manual_excluded_participants(index)
+    manual_recordings = _manual_excluded_recordings(index)
+    reviewed = resolve_frequency_qc_coverage_decisions(root)
+    excluded_participants = manual_participants | (
+        {str(value).strip().casefold() for value in reviewed.excluded_participants}
+        if reviewed.review_complete else set()
+    )
+    excluded_recordings = manual_recordings | (
+        {str(value).strip().casefold() for value in reviewed.excluded_recordings}
+        if reviewed.review_complete else set()
+    )
+    excluded_participant_conditions = {
+        (str(identity).strip().casefold(), str(condition).strip().casefold())
+        for identity, condition in reviewed.excluded_participant_conditions
+    } if reviewed.review_complete else set()
+    excluded_recording_conditions = {
+        (str(identity).strip().casefold(), str(condition).strip().casefold())
+        for identity, condition in reviewed.excluded_recording_conditions
+    } if reviewed.review_complete else set()
+    active_records = tuple(
+        record for record in index.workbooks
+        if (
+            not ledger_filter_applied
+            or str(record.recording_id if repeated_session else record.participant_id).casefold()
+            in completed
+        )
+        and record.participant_id.casefold() not in excluded_participants
+        and (not repeated_session or str(record.recording_id or "").casefold() not in excluded_recordings)
+        and (record.participant_id.casefold(), record.condition.casefold())
+        not in excluded_participant_conditions
+        and (not repeated_session or (
+            str(record.recording_id or "").casefold(), record.condition.casefold(),
+        ) not in excluded_recording_conditions)
+    )
+    return _active_geometry_identity(
+        index, active_records, processing_rows,
+        ledger_filter_applied=ledger_filter_applied,
+    )
 
 
 def _read_manifest(project_root: Path) -> dict[str, object]:
@@ -1324,6 +1400,7 @@ __all__ = [
     "FullFftProvenanceStaleError",
     "mark_project_full_fft_provenance_stale",
     "require_current_project_workbook_geometry",
+    "require_current_project_pre_review_geometry",
     "require_current_project_full_fft_provenance",
     "validate_project_full_fft_provenance",
     "write_project_full_fft_provenance",

@@ -240,50 +240,53 @@ class PostProcessingPipelineWorker(QObject):
             # sources, not to any downstream harmonic-selection policy. Publish
             # it before selection/Stats so FHC remains usable if those sibling
             # derivatives fail.
-            steps.append(self._run_full_fft_provenance(project_root, steps))
-            harmonic_message = "FPVS Toolbox is currently identifying significant harmonics."
-            self._emit_phase_progress(
-                _PHASE_HARMONIC_SELECTION,
-                1,
-                harmonic_message,
-            )
-            harmonic_step = self._run_harmonic_selection()
-            steps.append(harmonic_step)
-            self._emit_phase_progress(
-                _PHASE_HARMONIC_SELECTION,
-                2,
-                harmonic_message,
-            )
-            if harmonic_step.ok:
-                self._activate_artifact_freshness(
-                    project_root,
-                    selection_summary_path=harmonic_step.path or None,
+            provenance_step = self._run_full_fft_provenance(project_root, steps)
+            steps.append(provenance_step)
+            # Failed prerequisites must not launch consumers that can only
+            # report secondary stale-state errors or read a preceding selection.
+            if provenance_step.ok:
+                harmonic_message = "FPVS Toolbox is currently identifying significant harmonics."
+                self._emit_phase_progress(
+                    _PHASE_HARMONIC_SELECTION,
+                    1,
+                    harmonic_message,
                 )
-            stats_message = "FPVS Toolbox is preparing analysis files for downstream tools."
-            self._emit_phase_progress(
-                _PHASE_STATS_READY_EXPORT,
-                2,
-                stats_message,
-            )
-            stats_step = self._record_artifact_freshness(
-                self._run_stats_ready_export(project_root)
-            )
-            steps.append(stats_step)
-            steps.append(
-                self._record_artifact_freshness(
-                    self._run_analysis_ready_export(project_root)
+                harmonic_step = self._run_harmonic_selection()
+                steps.append(harmonic_step)
+                self._emit_phase_progress(
+                    _PHASE_HARMONIC_SELECTION,
+                    2,
+                    harmonic_message,
                 )
-            )
-            self._emit_phase_progress(
-                _PHASE_STATS_READY_EXPORT,
-                3,
-                stats_message,
-            )
-            cache_stack.close()
-            # Stats-ready export and source localization are sibling consumers
-            # of the accepted harmonic selection. A failure in one must not
-            # suppress the other scientific workflow.
-            steps.extend(self._run_source_maps(project_root))
+                if harmonic_step.ok:
+                    self._activate_artifact_freshness(
+                        project_root,
+                        selection_summary_path=harmonic_step.path or None,
+                    )
+                    stats_message = "FPVS Toolbox is preparing analysis files for downstream tools."
+                    self._emit_phase_progress(
+                        _PHASE_STATS_READY_EXPORT,
+                        2,
+                        stats_message,
+                    )
+                    stats_step = self._record_artifact_freshness(
+                        self._run_stats_ready_export(project_root)
+                    )
+                    steps.append(stats_step)
+                    steps.append(
+                        self._record_artifact_freshness(
+                            self._run_analysis_ready_export(project_root)
+                        )
+                    )
+                    self._emit_phase_progress(
+                        _PHASE_STATS_READY_EXPORT,
+                        3,
+                        stats_message,
+                    )
+                    cache_stack.close()
+                    # These exports share an accepted selection; a failure in
+                    # one sibling must not suppress the other consumers.
+                    steps.extend(self._run_source_maps(project_root))
         except PIPELINE_STEP_EXCEPTIONS as exc:
             from Main_App.processing.condition_interpolation_executor import (
                 ConditionInterpolationProcessingRequired,
@@ -457,6 +460,9 @@ class PostProcessingPipelineWorker(QObject):
             require_pre_review_readiness,
         )
         from Main_App.processing.frequency_domain_qc import run_frequency_domain_qc_review
+        from Main_App.processing.full_fft_provenance import (
+            require_current_project_pre_review_geometry,
+        )
         from Main_App.processing.roi_coverage import build_pre_review_roi_coverage
 
         project_root = Path(self._project.project_root).expanduser().resolve()
@@ -471,6 +477,12 @@ class PostProcessingPipelineWorker(QObject):
                 )
             require_pre_review_readiness(outcome_ledger)
             self._recording_condition_outcomes = outcome_ledger
+        with self._frequency_qc_stage("dataset_index", "Locating condition data for QC..."):
+            self._dataset_index = load_project_dataset_index(project_root)
+        with self._frequency_qc_stage("geometry", "Checking processed electrode geometry..."):
+            require_current_project_pre_review_geometry(
+                project_root, dataset_index=self._dataset_index,
+            )
         with self._frequency_qc_stage("roi_coverage", "Checking electrode and ROI coverage..."):
             self._pre_review_roi_coverage = build_pre_review_roi_coverage(
                 self._project,
@@ -478,8 +490,6 @@ class PostProcessingPipelineWorker(QObject):
                 processing_ledger=processing_ledger,
                 persist=True,
             )
-        with self._frequency_qc_stage("dataset_index", "Locating condition data for QC..."):
-            self._dataset_index = load_project_dataset_index(project_root)
         with self._frequency_qc_stage("frequency_review", "Preparing frequency-domain QC findings..."):
             return run_frequency_domain_qc_review(
                 self._project,

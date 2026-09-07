@@ -655,6 +655,7 @@ def test_base_post_processing_steps_reuse_one_dataset_index(
     from Main_App import exports as exports_module
     from Main_App.processing import (
         frequency_domain_qc,
+        full_fft_provenance,
         harmonic_selection_qc,
         processing_ledger,
         recording_condition_outcomes,
@@ -731,6 +732,11 @@ def test_base_post_processing_steps_reuse_one_dataset_index(
         )
 
     monkeypatch.setattr(projects_module, "load_project_dataset_index", load_index)
+    monkeypatch.setattr(
+        full_fft_provenance,
+        "require_current_project_pre_review_geometry",
+        lambda project_root, *, dataset_index: captured.append(("geometry", dataset_index)),
+    )
     monkeypatch.setattr(processing_ledger, "load_ledger", lambda project_root: {"root": str(project_root)})
     monkeypatch.setattr(
         recording_condition_outcomes,
@@ -784,6 +790,7 @@ def test_base_post_processing_steps_reuse_one_dataset_index(
     assert loader_calls == [root]
     assert captured == [
         ("readiness", sentinel_outcomes),
+        ("geometry", sentinel_index),
         ("coverage", sentinel_outcomes),
         ("qc", sentinel_index),
         ("harmonics", sentinel_index),
@@ -792,14 +799,15 @@ def test_base_post_processing_steps_reuse_one_dataset_index(
     ]
     assert [update[3] for update in phase_updates] == [
         "Checking completed condition outputs...",
-        "Checking electrode and ROI coverage...",
         "Locating condition data for QC...",
+        "Checking processed electrode geometry...",
+        "Checking electrode and ROI coverage...",
         "Preparing frequency-domain QC findings...",
         "Checking electrode findings...",
     ]
     assert all(update[:3] == ("frequency_domain_qc", 0, 5) for update in phase_updates)
     timings = [record.message for record in caplog.records if "post_processing_qc_timing" in record.message]
-    assert len(timings) == 4
+    assert len(timings) == 5
     assert all("completed=True" in message and "elapsed_ms=" in message for message in timings)
 
 

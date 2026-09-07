@@ -1019,6 +1019,14 @@ class MainWindow(QMainWindow):
         processing_inputs.set_controls_enabled(self, enabled)
 
     def closeEvent(self, event: QCloseEvent) -> None:
+        if getattr(self, "_qc_source_prefetch_bridge", None) is not None:
+            QMessageBox.information(
+                self,
+                "Data Quality Check In Progress",
+                "Finish or cancel the data quality check before closing FPVS Toolbox.",
+            )
+            event.ignore()
+            return
         if getattr(self, "_frequency_domain_qc_save_thread", None) is not None:
             QMessageBox.information(
                 self,

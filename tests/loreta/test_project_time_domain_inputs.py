@@ -62,7 +62,10 @@ def test_load_project_time_domain_inputs_validates_and_lazily_loads_one_raw(tmp_
     assert yielded == 1
 
 
-def test_load_project_time_domain_inputs_accepts_processing_writer_output(tmp_path: Path) -> None:
+@pytest.mark.parametrize("crop_mode", ["55_onbin", "project_marker_plan_target_grid_v2"])
+def test_load_project_time_domain_inputs_accepts_processing_writer_output(
+    tmp_path: Path, crop_mode: str,
+) -> None:
     info = mne.create_info(list(DEFAULT_ELECTRODE_NAMES_64), sfreq=SFREQ, ch_types="eeg")
     info.set_montage("biosemi64", on_missing="raise")
     data = np.stack(
@@ -82,7 +85,7 @@ def test_load_project_time_domain_inputs_accepts_processing_writer_output(tmp_pa
         condition_ids={"Condition A": "condition_a"},
         crop_provenance_by_condition={
             "Condition A": {
-                "crop_mode": "55_onbin",
+                "crop_mode": crop_mode,
                 "N": N_TIMES,
                 "N_step": N_STEP,
                 "N_mod_step": 0,
@@ -99,6 +102,7 @@ def test_load_project_time_domain_inputs_accepts_processing_writer_output(tmp_pa
 
     assert len(result.records) == 1
     assert result.records[0].condition_label == "Condition A"
+    assert result.records[0].sidecar["crop"]["crop_mode"] == crop_mode
     for loaded in result.iter_loaded_raws():
         assert loaded.raw.get_data().shape == (64, N_TIMES)
 
@@ -209,6 +213,7 @@ def test_load_project_time_domain_inputs_rejects_stale_processing_fingerprint(tm
         )
 
 
+@pytest.mark.parametrize("crop_mode", ["55_onbin", "project_marker_plan_target_grid_v2"])
 @pytest.mark.parametrize(
     ("sidecar_change", "match"),
     [
@@ -238,13 +243,24 @@ def test_load_project_time_domain_inputs_rejects_stale_processing_fingerprint(tm
 )
 def test_load_project_time_domain_inputs_rejects_incompatible_sidecar_contracts(
     tmp_path: Path,
+    crop_mode: str,
     sidecar_change: Callable[[dict[str, Any]], None],
     match: str,
 ) -> None:
     fixture = _write_derivative_fixture(tmp_path)
+    _change_sidecar(fixture, "condition_a", lambda payload: payload["crop"].__setitem__("crop_mode", crop_mode))
     _change_sidecar(fixture, "condition_a", sidecar_change)
 
     with pytest.raises(ProjectTimeDomainInputError, match=match):
+        _load(fixture.project_root, [_expected()])
+
+
+@pytest.mark.parametrize("crop_mode", ["unsupported_onbin", "", None, {}, []])
+def test_load_project_time_domain_inputs_rejects_unknown_crop_modes(tmp_path, crop_mode):
+    fixture = _write_derivative_fixture(tmp_path)
+    _change_sidecar(fixture, "condition_a", lambda payload: payload["crop"].__setitem__("crop_mode", crop_mode))
+
+    with pytest.raises(ProjectTimeDomainInputError, match="requires crop_mode"):
         _load(fixture.project_root, [_expected()])
 
 

@@ -431,6 +431,7 @@ def test_turning_off_auto_all_collects_omitted_manual_findings_before_continuing
     namespace = {
         "host": object(), "active_infos": (), "params": params,
         "current_event_plans": {}, "display_only_raw_qc": {},
+        "prefetch": None,
         "_run_kurtosis_review_scan_embedded": scan,
         "_review_kurtosis_findings": review,
     }

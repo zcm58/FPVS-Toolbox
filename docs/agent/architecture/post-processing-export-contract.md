@@ -121,6 +121,10 @@ hash matches the complete current payload with the original cache annotations
 substituted. Automatic synchronization preserves that original validated review
 evidence when reusing its analysis identity. Source, cohort, harmonic-selection,
 ROI, settings, and finding changes continue to invalidate review reuse.
+Resolved Retain decisions for prior-exclusion reconfirmations stay in the
+completed review receipt when its validated analysis is unchanged, even after
+those reconfirmation findings disappear. They add no active exclusion authority
+and do not reopen the ordinary findings solely because the visible list shrinks.
 
 Original FullFFT sheets are upstream source artifacts, not Summed-BCA
 derivatives. `Main_App.processing.full_fft_provenance` records their separate
@@ -160,6 +164,10 @@ or reuse of neutral FullFFT provenance. Geometry staleness requires EEG
 reprocessing before post-processing; a selection-only rebuild cannot repair
 it. Existing legacy files remain audit artifacts and must not be silently
 relabeled or pooled with canonical BioSemi64 outputs.
+The same geometry check runs on the candidate cohort before review, without
+requiring accepted QC or current downstream artifacts. A saved mapping mismatch
+can be resolved by restoring the configuration actually used to process the
+source; deliberately changing source wiring still requires reprocessing.
 
 ## Source-Ready Time-Domain Sibling Export
 
@@ -179,6 +187,11 @@ payload, verifies that the averaged Raw contains exactly its retained scalp
 set, and writes that payload into every JSON sidecar and participant commit
 manifest. Missing, stale, or mismatched geometry fails publication; the writer
 does not infer a montage from channel names at export time.
+The input adapter accepts the writer's historical `55_onbin` and current
+`project_marker_plan_target_grid_v2` crop identities. Both retain the exact
+sample-count, on-bin divisibility, fingerprint, reference, channel, unit and
+artifact-integrity checks; accepting the current tag adds no recropping or
+resampling.
 
 Downstream source-map orchestration may mark a completed participant as
 source-ineligible when any canonical condition is missing or the processing

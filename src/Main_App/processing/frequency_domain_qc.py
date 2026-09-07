@@ -562,6 +562,11 @@ def run_frequency_domain_qc_review(
     active_review_decisions = _merge_review_decision_rows(
         stable_exclusion_decisions,
         current_review_decisions,
+        _resolved_reconfirmation_retains(
+            state=state,
+            analysis_fingerprint=analysis_fingerprint,
+            review_evidence=previous_review_evidence,
+        ),
     )
     current_decision_fingerprint = _decision_fingerprint(
         analysis_fingerprint=analysis_fingerprint,
@@ -1401,6 +1406,14 @@ def active_frequency_domain_exclusions(
     project_root: str | Path | None,
 ) -> FrequencyDomainExclusions:
     state = load_frequency_domain_qc_state(project_root)
+    return frequency_domain_exclusions_from_state(state)
+
+
+def frequency_domain_exclusions_from_state(
+    state: Mapping[str, object],
+) -> FrequencyDomainExclusions:
+    """Resolve an already-read QC state using the same active-decision guards."""
+
     return _frequency_domain_exclusions_from_rows(
         state=state,
         decisions=_review_decisions_from_state(state),
@@ -4439,6 +4452,43 @@ def _current_review_decisions(
     return decisions
 
 
+def _resolved_reconfirmation_retains(
+    *,
+    state: Mapping[str, object],
+    analysis_fingerprint: str,
+    review_evidence: Mapping[str, object] | None,
+) -> list[dict[str, object]]:
+    """Keep resolved review receipts while their validated evidence is unchanged.
+
+    A prior exclusion changed to Retain no longer produces a reconfirmation
+    finding. Its receipt still belongs to that completed review; dropping it
+    would change the decision fingerprint and reopen already-decided findings.
+    The caller supplies only independently validated saved review evidence.
+    """
+
+    if (
+        review_evidence is None
+        or str(review_evidence.get("analysis_fingerprint") or "")
+        != analysis_fingerprint
+    ):
+        return []
+    resolved_findings = {
+        str(finding.get("finding_fingerprint") or "")
+        for finding in _iter_mapping_entries(
+            review_evidence.get("reconfirmation_findings")
+        )
+        if finding.get("finding_type")
+        == "prior_outcome_informed_exclusion_reconfirmation"
+    }
+    return [
+        decision for decision in _review_decisions_from_state(state)
+        if decision.get("decision") == DECISION_RETAIN
+        and decision.get("analysis_fingerprint") == analysis_fingerprint
+        and decision.get("replaces_decision_fingerprint")
+        and decision.get("finding_fingerprint") in resolved_findings
+    ]
+
+
 def _merge_review_decision_rows(
     *groups: Sequence[Mapping[str, object]],
 ) -> list[dict[str, object]]:
@@ -5036,6 +5086,7 @@ __all__ = [
     "FrequencyDomainQcThresholds",
     "REPEATED_FREQUENCY_DOMAIN_QC_METHOD_VERSION",
     "active_frequency_domain_exclusions",
+    "frequency_domain_exclusions_from_state",
     "apply_frequency_domain_qc_decision",
     "clear_manual_frequency_domain_participant_exclusions",
     "clear_manual_frequency_domain_recording_exclusions",

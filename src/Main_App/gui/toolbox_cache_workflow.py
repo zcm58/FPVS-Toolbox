@@ -84,8 +84,8 @@ class ToolboxCacheDialog(AppDialog):
         self.root_layout.addWidget(self.status)
         note = QLabel(
             "Includes the current project, projects in your configured folder, "
-            "and app caches. Recordings, results, settings, and anatomical templates "
-            "are kept. The next calculations may take longer.", self,
+            "and app caches. Recordings, results, settings, saved exclusions, and "
+            "anatomical templates are kept. The next calculations may take longer.", self,
         )
         note.setWordWrap(True)
         self.root_layout.addWidget(note)

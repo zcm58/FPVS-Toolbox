@@ -34,6 +34,37 @@ Disposable cache ownership, automatic QC replacement, and the Advanced settings
 cache-clearing action are documented in [Cache Maintenance](cache-maintenance.md).
 Cache removal preserves analysis companions, review decisions, and ledgers.
 
+## Dataset Exclusion Management
+
+`processing/dataset_exclusions.py` is the GUI-neutral adapter for a single
+project's whole-participant and whole-recording exclusions. It combines existing
+preprocessing skip lists with frequency-QC manual entries and reviewed
+whole-owner decisions; it does not migrate these distinct processing and
+analysis scopes into a new scientific policy. Participant/group/recording
+identity and processed-file availability use the canonical project dataset
+index. Existing overlapping scopes remain visible until explicitly edited.
+
+The snapshot revision binds edits to the loaded project state. Saves patch
+only requested scopes/reasons, preserve condition decisions and unrelated
+metadata, retain exclusion history, and atomically replace the active
+`project.json`. Scope changes invalidate affected downstream readiness and
+saved harmonic cache entries. A restored current review exclusion must lose
+its active authority while retaining its original audit record.
+
+`gui/dataset_exclusions_dialog.py` owns the flat modal editor;
+`workers/dataset_exclusions.py` loads/saves snapshots outside the GUI thread.
+`gui/dataset_exclusions_workflow.py` holds the processing/navigation guard and
+synchronizes saved skip lists into the active Project and open Settings cache,
+preserving unrelated pending Settings edits. Apply saves immediately. The
+Settings page exposes one manager instead of separate processing and frequency
+participant-exclusion controls.
+
+`processing/processing_ledger.py` rechecks current manual participant and
+recording scopes before reusing a cached manual exclusion. Restoring its last
+active processing scope makes that recording eligible for incremental QC and
+processing without deleting the ledger or caches. Header-only and automatic
+QC exclusion validation retain their existing behavior.
+
 ## Settings Storage
 
 FPVS Toolbox uses a strict hybrid settings model:
@@ -101,6 +132,27 @@ FPVS Toolbox uses a strict hybrid settings model:
   A1-A32/B1-B32 wiring. It does not support BioSemi ABC/equiradial or custom
   layouts. Both values normalize and round-trip with the project and are
   passed into workers rather than reread from app-global settings.
+  GUI processing parameter construction forwards both fields into the frozen
+  run plan and worker settings. Omitting them would silently process with the
+  anatomical default while final validation reads a different project choice.
+  App defaults and newly created projects explicitly use BioSemi64 with
+  anatomical labels. The A/B profile is an input-label translation for sources
+  actually labeled A1-A32/B1-B32, not a different montage or a round-trip rename
+  of already anatomical channel names.
+  Project saves reconcile these two geometry fields against the last observed
+  disk values: unchanged local fields adopt a newer saved correction, while
+  explicit local changes remain authoritative. Other preprocessing fields keep
+  their existing save behavior. `Project.refresh_electrode_geometry_settings()`
+  performs the same reconciliation without writing; processing parameter
+  construction calls it before freezing the run plan. Unreadable or malformed
+  saved geometry blocks the operation with an error rather than overwriting it
+  or building a run from stale settings. A successful save advances the saved
+  baseline; a failed save does not.
+  Open Settings panels separately track the geometry values displayed in their
+  controls. Unchanged selectors adopt refreshed project geometry; edited
+  selectors remain pending through validation and failed saves. Successful
+  saves synchronize and rebase the controls, so a later unrelated save cannot
+  resubmit a stale mapping from the panel's older general settings cache.
 - Harmonic Selection and Summation is project-specific scientific state in the
   `preprocessing` namespace. New projects persist the
   `dzhelyova_poncet_two_consecutive_failures` v1 profile with all retained

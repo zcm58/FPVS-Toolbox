@@ -16,10 +16,42 @@ their FPVS-managed caches, choose **File > Reset Project Processing Cache...**.
 This clears cached data-quality results, cached preprocessed EEG data, and the
 incremental completion index for the active project. It does not delete raw BDF
 files, project settings, manual QC choices, current outputs, or processing run
-history. The next processing run rechecks every file and recomputes from raw
+history. The next processing run rechecks eligible files and recomputes from raw
 data; once that run starts, its normal output step replaces the participant
 outputs being recomputed. Windows may still retain its own filesystem cache,
 which this action does not control.
+
+### Dataset Exclusions
+
+Open **Settings > Advanced > Processing QC > Manage Dataset Exclusions…** to
+manage participant and recording exclusions in one list. The table shows
+whether processed data is available and distinguishes three choices:
+
+- **Included** removes the selected participant's or recording's whole-scope
+  processing and analysis exclusions.
+- **Skip processing entirely** leaves that participant or recording out of
+  EEG processing. Raw files and existing results remain on disk.
+- **Exclude from analysis after processing** preserves the processed data but
+  excludes it from downstream analysis. This choice requires existing processed
+  data; use the processing scope for an entry that has not been processed.
+
+Select a row to change its scope or reason. Select multiple rows to apply one
+scope to them, or choose **Include all participants and recordings** to stage
+restoration across the entire list, including rows hidden by the search.
+**Apply** saves these changes immediately; **Cancel** discards pending changes.
+An older project with overlapping exclusions shows both until you choose a
+scope explicitly.
+
+Participant-wide exclusions also affect that participant's recordings. A
+recording-specific choice does not override a participant-wide exclusion;
+restore the participant row as well when needed. Condition-specific decisions
+remain visible in the selected row's details and are not cleared by this
+whole-participant/recording manager.
+
+Restored processing exclusions are reconsidered on the next **Start Processing**
+without a cache reset. Changed analysis choices require regenerated downstream
+outputs; resume post-processing to rebuild them. Clearing caches continues to
+preserve saved exclusions.
 
 ### Multi-Group Projects
 

@@ -64,6 +64,41 @@ import-surface moves.
 have been deleted. `src/Main_App/Shared/load_utils.py` is kept as the temporary
 implementation module and must not duplicate logic elsewhere.
 
+## Interactive QC Source Prefetch
+
+After the signal-health scan, opening step 2 starts `QcSourcePrefetch` through
+`Main_App.workers.qc_source_prefetch_worker` in a background QThread. Its
+constructor performs no filesystem I/O. The producer sequentially decodes
+complete selected-channel sources while the user reviews markers, conditions,
+electrodes, and possible recording exclusions. It does not filter, resample,
+score kurtosis, or apply any review decision before step 6.
+
+Each run owns a unique `qc-source-*` directory under the active project's
+`.fpvs_processing/`. The full loader's optional keyword-only `preload_path`
+reserves a new absolute destination exclusively; ordinary callers retain the
+existing per-process system-temp path. The coordinator keeps only disk-backed
+float64 Raw objects, caps staging at 16 GiB, and reserves 2 GiB of free disk
+space. Budget limits and failed preloads fall back to normal step-6 loading.
+
+Step 6 stops queued speculative loading and adopts completed sources once,
+checking the current source content hash, identity, and effective loader
+settings. Source content is bound before/after preloading, so replacing a file
+while retaining its size/timestamp cannot reuse old samples. An active
+source load may finish; unrelated pending sources use the normal loader without
+waiting behind that load. While a preload is active, at most one foreground
+kurtosis job starts. The scanner retains its current geometry, event, analysis
+span, sample-hash, and review-authority checks. It takes exclusive mutation
+ownership and releases each source in its per-file finally block. A repeated
+scan never receives an already modified source.
+
+The producer remains alive until the QC workflow exits. Cancellation and all
+review exits request cleanup off the GUI thread; a responsive Qt event loop
+waits for the active load and cleanup before downstream processing starts.
+Consumed maps are removed after use, and remaining maps/run directories are
+removed on normal completion, cancellation, or error. Cleanup rejects redirected
+paths and never targets the project's persistent prepared-kurtosis checkpoints,
+original recordings, exports, or the repository's MNE/fsaverage cache.
+
 ## File And Path Behavior
 
 - Supported extension is `.bdf`.

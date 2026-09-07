@@ -521,6 +521,13 @@ def build_validated_params(host: Any) -> dict | None:
         QMessageBox.warning(host, "FPVS Protocol Required", str(exc))
         return None
 
+    refresh_geometry = getattr(host.currentProject, "refresh_electrode_geometry_settings", None)
+    if callable(refresh_geometry):
+        try:
+            refresh_geometry()
+        except (OSError, ValueError) as exc:
+            QMessageBox.warning(host, "Project Settings Unavailable", str(exc))
+            return None
     normalized = normalize_preprocessing_settings(host.currentProject.preprocessing)
     raw_spectral_screening = (
         host.currentProject.experimental_qc_settings.raw_spectral_screening
@@ -592,6 +599,8 @@ def build_validated_params(host: Any) -> dict | None:
     oddball_freq = float(frequency_protocol.oddball_rate_hz)
 
     params = {
+        "electrode_montage": normalized["electrode_montage"],
+        "electrode_mapping_profile": normalized["electrode_mapping_profile"],
         "low_pass": float(normalized.get("low_pass")),
         "high_pass": float(normalized.get("high_pass")),
         "downsample": int(normalized.get("downsample")),

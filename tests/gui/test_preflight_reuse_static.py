@@ -22,7 +22,7 @@ def _reuse_namespace():
     helper = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "_condition_review_scan_identity")
     workflow = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "run_preprocessing_qc_workflow")
     reuse_branch = next(
-        node for node in workflow.body if isinstance(node, ast.If)
+        node for node in ast.walk(workflow) if isinstance(node, ast.If)
         and any(isinstance(child, ast.Name) and child.id == "condition_review_identity" for child in ast.walk(node.test))
     )
     wrapper = ast.parse("def review_scan():\n    pass\n").body[0]

@@ -1618,7 +1618,13 @@ def test_geometry_independent_exclusion_does_not_require_observed_geometry(
     reason,
 ) -> None:
     project, info = _project_with_raw(tmp_path)
-    plan = classify_processing_inputs(project, [info], _settings(), project.event_map)
+    info = RawFileInfo(info.path, info.subject_id, recording_id="rec_p01_visit_1")
+    settings = _settings()
+    if reason == "manual_participant_exclusion":
+        settings["manual_excluded_participants"] = ["p01"]
+    elif reason == "manual_recording_exclusion":
+        settings["manual_excluded_recordings"] = ["REC_P01_VISIT_1"]
+    plan = classify_processing_inputs(project, [info], settings, project.event_map)
     record_processing_results(
         project,
         plan,
@@ -1629,7 +1635,7 @@ def test_geometry_independent_exclusion_does_not_require_observed_geometry(
     )
     path = project.project_root / ".fpvs_processing" / "processing_ledger.json"
     ledger = json.loads(path.read_text(encoding="utf-8"))
-    entry = ledger["entries"]["P01"]
+    entry = ledger["entries"][info.processing_id]
     entry.pop("geometry")
     entry["processing_fingerprint_version"] = "legacy"
     path.write_text(json.dumps(ledger), encoding="utf-8")
@@ -1637,12 +1643,149 @@ def test_geometry_independent_exclusion_does_not_require_observed_geometry(
     current = classify_processing_inputs(
         project,
         [info],
-        _settings(),
+        settings,
         project.event_map,
     )
 
     assert current.states[0].status == "excluded"
     assert current.incremental_files == ()
+
+
+@pytest.mark.parametrize(
+    "reason, recording_id",
+    [
+        pytest.param("manual_participant_exclusion", None, id="legacy-participant"),
+        pytest.param(
+            "manual_participant_exclusion", "rec_p01_visit_1", id="paired-participant"
+        ),
+        pytest.param(
+            "manual_recording_exclusion", "rec_p01_visit_1", id="paired-recording"
+        ),
+    ],
+)
+@pytest.mark.parametrize(
+    "current_exclusions",
+    [
+        pytest.param({}, id="missing-lists"),
+        pytest.param(
+            {"manual_excluded_participants": [], "manual_excluded_recordings": []},
+            id="cleared-lists",
+        ),
+        pytest.param(
+            {
+                "manual_excluded_participants": ["P02"],
+                "manual_excluded_recordings": ["rec_p01_visit_2"],
+            },
+            id="replaced-with-other-identities",
+        ),
+    ],
+)
+def test_removed_manual_exclusion_restores_incremental_eligibility(
+    tmp_path,
+    reason,
+    recording_id,
+    current_exclusions,
+) -> None:
+    project, info = _project_with_raw(tmp_path)
+    info = RawFileInfo(info.path, info.subject_id, recording_id=recording_id)
+    previous_settings = {
+        **_settings(),
+        "manual_excluded_participants": ["P01"],
+        "manual_excluded_recordings": [recording_id] if recording_id else [],
+    }
+    plan = classify_processing_inputs(
+        project, [info], previous_settings, project.event_map
+    )
+    record_processing_results(
+        project,
+        plan,
+        [{"status": "excluded", "file": str(info.path), "reason": reason}],
+        run_mode="Batch",
+        user_choice="incremental",
+        cancelled=False,
+    )
+    ledger_path = project.project_root / ".fpvs_processing" / "processing_ledger.json"
+    original_ledger = ledger_path.read_bytes()
+    original_raw_metadata = processing_ledger_module.raw_file_metadata(info.path)
+
+    current = classify_processing_inputs(
+        project, [info], {**_settings(), **current_exclusions}, project.event_map
+    )
+
+    assert current.states[0].status == "changed_settings"
+    assert "manual exclusion no longer applies" in current.states[0].reason
+    assert current.run_files == (info.path,)
+    assert processing_ledger_module.raw_file_metadata(info.path) == original_raw_metadata
+    assert ledger_path.read_bytes() == original_ledger
+
+
+@pytest.mark.parametrize(
+    "reason",
+    ["manual_participant_exclusion", "manual_recording_exclusion"],
+)
+@pytest.mark.parametrize(
+    "current_exclusions, expected_statuses",
+    [
+        pytest.param(
+            {"manual_excluded_participants": ["p01"]},
+            ["excluded", "excluded"],
+            id="participant-still-excluded",
+        ),
+        pytest.param(
+            {"manual_excluded_recordings": ["REC_P01_VISIT_1"]},
+            ["excluded", "changed_settings"],
+            id="one-recording-still-excluded",
+        ),
+        pytest.param(
+            {"manual_excluded_participants": [], "manual_excluded_recordings": []},
+            ["changed_settings", "changed_settings"],
+            id="both-visits-restored",
+        ),
+    ],
+)
+def test_manual_exclusion_restoration_respects_remaining_scope_for_paired_visits(
+    tmp_path,
+    reason,
+    current_exclusions,
+    expected_statuses,
+) -> None:
+    project, original = _project_with_raw(tmp_path)
+    paired_path = original.path.with_name("P01_visit_2.bdf")
+    paired_path.write_bytes(b"paired raw")
+    infos = [
+        RawFileInfo(original.path, "P01", recording_id="rec_p01_visit_1"),
+        RawFileInfo(paired_path, "P01", recording_id="rec_p01_visit_2"),
+    ]
+    previous_settings = {
+        **_settings(),
+        "manual_excluded_participants": ["P01"],
+        "manual_excluded_recordings": [info.recording_id for info in infos],
+    }
+    plan = classify_processing_inputs(
+        project, infos, previous_settings, project.event_map
+    )
+    record_processing_results(
+        project,
+        plan,
+        [
+            {"status": "excluded", "file": str(info.path), "reason": reason}
+            for info in infos
+        ],
+        run_mode="Batch",
+        user_choice="incremental",
+        cancelled=False,
+    )
+
+    current = classify_processing_inputs(
+        project, infos, {**_settings(), **current_exclusions}, project.event_map
+    )
+
+    assert [state.status for state in current.states] == expected_statuses
+    assert current.run_files == tuple(
+        info.path
+        for info, status in zip(infos, expected_statuses, strict=True)
+        if status == "changed_settings"
+    )
 
 
 

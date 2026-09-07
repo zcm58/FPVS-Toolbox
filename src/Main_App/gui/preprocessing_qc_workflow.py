@@ -68,6 +68,7 @@ from Main_App.processing.preflight_qc import (
     scan_recording_not_started_files,
 )
 from Main_App.processing.preflight_qc_plan import PREFLIGHT_QC_MAX_WORKERS
+from Main_App.processing.qc_source_prefetch import QcSourcePrefetch
 from Main_App.processing.kurtosis_review_scan import (
     KurtosisReviewScan,
     reconcile_kurtosis_review_decisions,
@@ -86,6 +87,7 @@ from Main_App.processing.removed_electrode_detection import (
     parse_electrode_list,
 )
 from Main_App.projects.grouping import project_group_context
+from Main_App.workers.qc_source_prefetch_worker import QcSourcePrefetchWorker
 from Main_App.projects.preprocessing_settings import (
     KURTOSIS_REVIEW_DECISIONS_BY_RECORDING_KEY,
     MANUAL_REMOVED_ELECTRODES_ENABLED_KEY,
@@ -232,10 +234,12 @@ class _KurtosisReviewWorker(QObject):
         event_map: Mapping[str, int],
         reviewed_event_plans_by_file: Mapping[str, Any],
         raw_channel_qc_by_recording: Mapping[str, Mapping[str, object]],
+        source_prefetch: QcSourcePrefetch | None = None,
     ) -> None:
         super().__init__()
         self._raw_file_infos = list(raw_file_infos)
         self._settings = dict(settings)
+        self._source_prefetch = source_prefetch
         self._event_map = dict(event_map)
         self._reviewed_event_plans_by_file = dict(reviewed_event_plans_by_file)
         self._raw_channel_qc_by_recording = {
@@ -258,6 +262,7 @@ class _KurtosisReviewWorker(QObject):
                 raw_channel_qc_by_recording=self._raw_channel_qc_by_recording,
                 progress=self.progress.emit,
                 should_cancel=lambda: self._cancelled,
+                source_prefetch=self._source_prefetch,
             )
         except Exception as exc:  # pragma: no cover - defensive signal bridge
             logger.exception("Kurtosis review scan failed.")
@@ -983,6 +988,32 @@ def _await_preflight_choice(
     return result["choice"]
 
 
+def _show_clear_preflight_step(
+    host: Any,
+    *,
+    step: int,
+    title: str,
+    summary: str,
+    rows: Sequence[Sequence[str]],
+) -> None:
+    """Keep a completed check visible until the user is ready to continue."""
+
+    _begin_preflight_page(
+        host,
+        step=step,
+        title=title,
+        message="Review the summary, then continue to the next step.",
+        busy=False,
+        review_visible=True,
+        review_title="Check Summary",
+        progress_visible=False,
+    )
+    _set_label(host, "processing_summary_label", summary)
+    _set_label(host, "processing_current_file_label", "Continue when you're ready.")
+    _set_preflight_table(host, ("Check", "Result"), rows, stretch_column=1)
+    _await_preflight_choice(host, (("Continue", "continue", "primary"),))
+
+
 def _file_name_from_progress(message: str) -> str:
     for prefix in ("Planning ", "Scanning ", "Cached ", "Finished "):
         if message.startswith(prefix):
@@ -1397,6 +1428,72 @@ def _raw_channel_qc_by_recording(
     return result
 
 
+class _QcSourcePrefetchBridge(QObject):
+    """Retain the prefetch worker through the review and join it responsively."""
+
+    def __init__(self, host: Any, thread: QThread, worker: QcSourcePrefetchWorker,
+                 source_prefetch: QcSourcePrefetch) -> None:
+        super().__init__(host)
+        self.thread = thread
+        self.worker = worker
+        self.source_prefetch = source_prefetch
+        self.finished = False
+        self.loop: QEventLoop | None = None
+
+    @Slot()
+    def on_finished(self) -> None:
+        self.thread.quit()
+
+    @Slot()
+    def on_thread_finished(self) -> None:
+        self.finished = True
+        if self.loop is not None:
+            self.loop.quit()
+
+
+def _start_qc_source_prefetch(
+    host: Any, raw_file_infos: Sequence[Any], params: Mapping[str, Any],
+) -> _QcSourcePrefetchBridge | None:
+    """Start source-only work as step 2 opens; choices remain on the GUI thread."""
+    project = getattr(host, "currentProject", None)
+    project_root = getattr(project, "project_root", None)
+    if not project_root or not raw_file_infos or not params.get("reject_thresh"):
+        return None
+    try:
+        source_prefetch = QcSourcePrefetch(project_root, raw_file_infos, params)
+    except (OSError, TypeError, ValueError, RuntimeError):
+        logger.warning("qc_source_prefetch_setup_unavailable", exc_info=True)
+        return None
+    thread = QThread(host)
+    worker = QcSourcePrefetchWorker(source_prefetch)
+    worker.moveToThread(thread)
+    bridge = _QcSourcePrefetchBridge(host, thread, worker, source_prefetch)
+    host._qc_source_prefetch_bridge = bridge
+    worker.finished.connect(bridge.on_finished)
+    worker.finished.connect(worker.deleteLater)
+    thread.started.connect(worker.run)
+    thread.finished.connect(bridge.on_thread_finished)
+    thread.finished.connect(thread.deleteLater)
+    thread.start()
+    return bridge
+
+
+def _finish_qc_source_prefetch(host: Any, bridge: _QcSourcePrefetchBridge | None) -> None:
+    """Close run-owned maps off the GUI thread before leaving the QC workflow."""
+    if bridge is None:
+        return
+    if not bridge.finished:
+        bridge.loop = QEventLoop(host)
+        bridge.worker.request_finish()
+        _clear_preflight_actions(host)
+        _set_label(host, "processing_current_file_label", "Finishing data quality checks...")
+        bridge.loop.exec()
+        bridge.loop.deleteLater()
+        bridge.loop = None
+    host._qc_source_prefetch_bridge = None
+    bridge.deleteLater()
+
+
 def _run_kurtosis_review_scan_embedded(
     host: Any,
     raw_file_infos: Sequence[Any],
@@ -1404,6 +1501,7 @@ def _run_kurtosis_review_scan_embedded(
     *,
     reviewed_event_plans_by_file: Mapping[str, Any],
     raw_channel_qc_by_recording: Mapping[str, Mapping[str, object]],
+    source_prefetch: QcSourcePrefetch | None = None,
 ) -> KurtosisReviewScan | None:
     """Run the shared QC-16 evidence preparation without blocking the GUI."""
 
@@ -1449,6 +1547,7 @@ def _run_kurtosis_review_scan_embedded(
         event_map=event_map,
         reviewed_event_plans_by_file=reviewed_event_plans_by_file,
         raw_channel_qc_by_recording=raw_channel_qc_by_recording,
+        source_prefetch=source_prefetch,
     )
     worker.moveToThread(thread)
     result_holder: dict[str, Any] = {}
@@ -2042,6 +2141,16 @@ def _review_marker_occurrences(
         _show_marker_review_error(host, str(exc))
         return None
     if not review_items:
+        _show_clear_preflight_step(
+            host,
+            step=_REVIEW_MARKER_OCCURRENCES_STEP,
+            title="Review Marker Occurrences",
+            summary="No marker occurrences are flagged for a review decision.",
+            rows=(
+                ("Recordings in scan", str(len(scan.results))),
+                ("Marker decisions needed", "0"),
+            ),
+        )
         return scan
 
     affected_path_keys: set[str] = set()
@@ -2165,15 +2274,20 @@ def _review_removed_electrodes(
         "treated as removed or unusable before preprocessing. Review FPVS "
         "Toolbox's flags, remove any flags that are wrong, and add missed "
         "removed electrodes in the Manual additions column."
+        if auto_flagged
+        else "No removed-electrode candidates were flagged. Review any saved "
+        "entries and add physically removed electrodes in Manual additions, "
+        "then save the confirmed list to continue."
     )
-    _show_data_quality_notice(
-        host,
-        "Review electrodes that may have been removed before recording.",
-        "FPVS Toolbox will show low-signal removed-electrode candidates. "
-        "High-amplitude, rare-burst, and spatial findings remain separate "
-        "review evidence and are not preselected for interpolation. Confirm the "
-        "list and add any physically removed electrodes that are missing.",
-    )
+    if auto_flagged:
+        _show_data_quality_notice(
+            host,
+            "Review electrodes that may have been removed before recording.",
+            "FPVS Toolbox will show low-signal removed-electrode candidates. "
+            "High-amplitude, rare-burst, and spatial findings remain separate "
+            "review evidence and are not preselected for interpolation. Confirm the "
+            "list and add any physically removed electrodes that are missing.",
+        )
     _begin_preflight_page(
         host,
         step=_CONFIRM_REMOVED_ELECTRODES_STEP,
@@ -2339,13 +2453,14 @@ def _review_removed_electrodes_by_recording(
         or identity.recording_id.casefold() in active_recording_keys
     )
 
-    _show_data_quality_notice(
-        host,
-        "Review removed electrodes for each recording.",
-        "Each visit keeps its own recording identity. Participant-wide entries "
-        "remain available as legacy fallbacks, while recording-specific decisions "
-        "can differ between visits.",
-    )
+    if auto_flagged:
+        _show_data_quality_notice(
+            host,
+            "Review removed electrodes for each recording.",
+            "Each visit keeps its own recording identity. Participant-wide entries "
+            "remain available as legacy fallbacks, while recording-specific decisions "
+            "can differ between visits.",
+        )
     _begin_preflight_page(
         host,
         step=_CONFIRM_REMOVED_ELECTRODES_STEP,
@@ -2366,7 +2481,12 @@ def _review_removed_electrodes_by_recording(
         "processing_summary_label",
         "Session/phase-at-visit labels and visit order are shown separately. "
         "When every participant follows the same order, phase and order effects "
-        "remain confounded.",
+        "remain confounded."
+        if auto_flagged
+        else "No removed-electrode candidates were flagged. Review the saved "
+        "entries for each recording and add physically removed electrodes if "
+        "needed, then save the confirmed list to continue. Session/phase-at-visit "
+        "and visit order are distinct; fixed order can confound them.",
     )
     _set_label(
         host,
@@ -3213,6 +3333,20 @@ def _confirm_condition_crop_exclusions(
     )
     candidates = audit.review_candidates
     if not candidates:
+        _show_clear_preflight_step(
+            host,
+            step=_CONFIRM_CONDITION_EXCLUSIONS_STEP,
+            title="Confirm Condition Exclusions",
+            summary="No additional condition exclusions need review in this crop check.",
+            rows=(
+                ("Condition entries in crop audit", str(len(audit.observations))),
+                (
+                    "Condition entries already excluded",
+                    str(sum(item.already_excluded for item in audit.observations)),
+                ),
+                ("Condition decisions needed", "0"),
+            ),
+        )
         return True
     recording_mode = _recording_aware(candidates)
     missing_conditions = any(candidate.repetition_count == 0 for candidate in candidates)
@@ -3499,6 +3633,16 @@ def _confirm_hard_exclusions(
 ) -> set[str]:
     candidates = scan.hard_exclusion_candidates
     if not candidates:
+        _show_clear_preflight_step(
+            host,
+            step=_CONFIRM_PARTICIPANT_EXCLUSIONS_STEP,
+            title="Review Possible Exclusions",
+            summary="No recording or participant exclusions were flagged by this check.",
+            rows=(
+                ("Recordings in scan", str(len(scan.results))),
+                ("Possible exclusions flagged", "0"),
+            ),
+        )
         return set()
     recording_mode = _recording_aware(candidates)
     _show_data_quality_notice(
@@ -4413,93 +4557,98 @@ def run_preprocessing_qc_workflow(
     if scan is None or scan.cancelled:
         return False
 
-    scan = _review_marker_occurrences(
-        host,
-        active_infos,
-        params,
-        scan,
-        group_labels,
-    )
-    if scan is None or scan.cancelled:
-        return False
-
-    if not _confirm_condition_crop_exclusions(
-        host,
-        params,
-        scan,
-        group_labels,
-    ):
-        return False
-
-    # The existing scan already covers unchanged included intervals. If source
-    # files, marker decisions, or condition choices changed, rebuild the project-wide result via
-    # the recording/occurrence caches before any later detector uses it.
-    if (
-        condition_review_identity is None
-        or condition_review_identity != _condition_review_scan_identity(active_infos, params)
-    ):
-        scan = _run_scan_embedded(
+    prefetch = _start_qc_source_prefetch(host, active_infos, params)
+    try:
+        scan = _review_marker_occurrences(
             host,
             active_infos,
             params,
-            skip_paths=(),
-            group_labels=group_labels,
+            scan,
+            group_labels,
         )
         if scan is None or scan.cancelled:
             return False
 
-    if active_infos and not _review_removed_electrodes(
-        host,
-        active_infos,
-        params,
-        scan,
-        group_labels,
-    ):
-        return False
+        if not _confirm_condition_crop_exclusions(
+            host,
+            params,
+            scan,
+            group_labels,
+        ):
+            return False
 
-    accepted_hard_exclusions = _confirm_hard_exclusions(
-        host,
-        params,
-        scan,
-        group_labels,
-    )
-    try:
-        current_event_plans = canonical_event_plans_by_file(scan)
-        existing_event_plans.update(current_event_plans)
-        params["_fpvs_preflight_event_plans_by_file"] = existing_event_plans
-        display_only_raw_qc = _raw_channel_qc_by_recording(scan)
-    except (MarkerOccurrenceReviewError, ValueError) as exc:
-        _show_marker_review_error(host, str(exc))
-        return False
+        # The existing scan already covers unchanged included intervals. If source
+        # files, marker decisions, or condition choices changed, rebuild the project-wide result via
+        # the recording/occurrence caches before any later detector uses it.
+        if (
+            condition_review_identity is None
+            or condition_review_identity != _condition_review_scan_identity(active_infos, params)
+        ):
+            scan = _run_scan_embedded(
+                host,
+                active_infos,
+                params,
+                skip_paths=(),
+                group_labels=group_labels,
+            )
+            if scan is None or scan.cancelled:
+                return False
 
-    while True:
-        scanned_auto_all = bool(params.get("kurtosis_auto_interpolate_all", False))
-        kurtosis_scan = _run_kurtosis_review_scan_embedded(
+        if active_infos and not _review_removed_electrodes(
             host,
             active_infos,
             params,
-            reviewed_event_plans_by_file=current_event_plans,
-            raw_channel_qc_by_recording=display_only_raw_qc,
-        )
-        if kurtosis_scan is None or not _review_kurtosis_findings(
-            host,
-            params,
-            kurtosis_scan,
+            scan,
+            group_labels,
         ):
             return False
-        # An auto-on scan omits valid automatic flags. If review disabled the
-        # policy, collect those missing manual choices before processing.
-        if not scanned_auto_all or params.get("kurtosis_auto_interpolate_all", False):
-            break
 
-    if not _show_suspicious_remainder(
-        host,
-        scan,
-        accepted_hard_exclusions,
-        group_labels,
-    ):
-        return False
-    return True
+        accepted_hard_exclusions = _confirm_hard_exclusions(
+            host,
+            params,
+            scan,
+            group_labels,
+        )
+        try:
+            current_event_plans = canonical_event_plans_by_file(scan)
+            existing_event_plans.update(current_event_plans)
+            params["_fpvs_preflight_event_plans_by_file"] = existing_event_plans
+            display_only_raw_qc = _raw_channel_qc_by_recording(scan)
+        except (MarkerOccurrenceReviewError, ValueError) as exc:
+            _show_marker_review_error(host, str(exc))
+            return False
+
+        while True:
+            scanned_auto_all = bool(params.get("kurtosis_auto_interpolate_all", False))
+            kurtosis_scan = _run_kurtosis_review_scan_embedded(
+                host,
+                active_infos,
+                params,
+                reviewed_event_plans_by_file=current_event_plans,
+                raw_channel_qc_by_recording=display_only_raw_qc,
+                source_prefetch=prefetch.source_prefetch if prefetch is not None else None,
+            )
+            if kurtosis_scan is None or not _review_kurtosis_findings(
+                host,
+                params,
+                kurtosis_scan,
+            ):
+                return False
+            # An auto-on scan omits valid automatic flags. If review disabled the
+            # policy, collect those missing manual choices before processing.
+            if not scanned_auto_all or params.get("kurtosis_auto_interpolate_all", False):
+                break
+
+        if not _show_suspicious_remainder(
+            host,
+            scan,
+            accepted_hard_exclusions,
+            group_labels,
+        ):
+            return False
+        return True
+    finally:
+        _finish_qc_source_prefetch(host, prefetch)
 
 
 __all__ = ["run_preprocessing_qc_workflow"]

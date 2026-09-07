@@ -80,14 +80,11 @@ def test_stats_audit_and_source_steps_keep_their_pipeline_order() -> None:
 
     def statement_call_index(method_name: str) -> int:
         return next(
-            index
-            for index, statement in enumerate(try_node.body)
-            if any(
-                isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Attribute)
-                and node.func.attr == method_name
-                for node in ast.walk(statement)
-            )
+            node.lineno
+            for node in ast.walk(try_node)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == method_name
         )
 
     stats_index = statement_call_index("_run_stats_ready_export")
@@ -165,14 +162,14 @@ def test_post_processing_run_bounds_xlsx_cache_with_exit_stack() -> None:
         and statement.value.func.attr == "_run_frequency_domain_qc_review"
     )
     assert enter_index < qc_index
-    normal_close_index = next(
-        index
-        for index, statement in enumerate(try_node.body)
+    normal_close_index = min(
+        statement.lineno
+        for statement in ast.walk(try_node)
         if _is_named_method_call(statement, "cache_stack", "close")
     )
     source_maps_index = next(
-        index
-        for index, statement in enumerate(try_node.body)
+        statement.lineno
+        for statement in ast.walk(try_node)
         if isinstance(statement, ast.Expr)
         and isinstance(statement.value, ast.Call)
         and isinstance(statement.value.func, ast.Attribute)
@@ -240,6 +237,45 @@ def test_frequency_review_requires_current_recording_condition_outcomes() -> Non
     assert qc_source.index("require_pre_review_readiness(outcome_ledger)") < qc_source.index(
         "self._dataset_index = load_project_dataset_index(project_root)"
     )
+
+
+def test_geometry_mismatch_stops_before_coverage_or_frequency_review(tmp_path, monkeypatch):
+    from contextlib import nullcontext
+    from Main_App import projects
+    from Main_App.processing import (
+        frequency_domain_qc, full_fft_provenance, processing_ledger,
+        recording_condition_outcomes, roi_coverage,
+    )
+
+    method = _class_method(_worker_tree(), "_run_frequency_domain_qc_review")
+    method.decorator_list = []
+    module = ast.Module(body=[method], type_ignores=[])
+    namespace = {"Path": Path}
+    exec(compile(ast.fix_missing_locations(module), str(WORKER_PATH), "exec"), namespace)
+    dataset_index = object()
+    outcomes = object()
+    monkeypatch.setattr(projects, "load_project_dataset_index", Mock(return_value=dataset_index))
+    monkeypatch.setattr(processing_ledger, "load_ledger", Mock(return_value={}))
+    monkeypatch.setattr(recording_condition_outcomes, "load_recording_condition_outcomes", Mock(return_value=outcomes))
+    monkeypatch.setattr(recording_condition_outcomes, "require_pre_review_readiness", Mock())
+    geometry = Mock(side_effect=ValueError("Processed geometry mismatch"))
+    monkeypatch.setattr(full_fft_provenance, "require_current_project_pre_review_geometry", geometry)
+    coverage = Mock()
+    review = Mock()
+    monkeypatch.setattr(roi_coverage, "build_pre_review_roi_coverage", coverage)
+    monkeypatch.setattr(frequency_domain_qc, "run_frequency_domain_qc_review", review)
+    worker = SimpleNamespace(
+        _project=SimpleNamespace(project_root=tmp_path),
+        _emit_progress=Mock(),
+        _frequency_qc_stage=lambda *_: nullcontext(),
+    )
+
+    with pytest.raises(ValueError, match="Processed geometry mismatch"):
+        namespace[method.name](worker)
+
+    geometry.assert_called_once_with(tmp_path.resolve(), dataset_index=dataset_index)
+    coverage.assert_not_called()
+    review.assert_not_called()
 
 
 def test_full_fft_provenance_uses_only_ready_project_protocol_rates() -> None:
@@ -377,6 +413,7 @@ def _pipeline_without_qt(tmp_path, *, failed_step="", review_error=""):
         _artifact_archives={},
         _project_manifest_exists=lambda root: (root / "project.json").is_file(),
         phase_progress=Mock(),
+        progress=Mock(),
         finished=Mock(),
     )
     for name in methods:
@@ -426,6 +463,52 @@ def test_required_output_failure_preserves_progress_and_upstream_independence(tm
     state = manifest["tools"].get("frequency_domain_qc", {})
     assert bool(state.get("downstream_outputs_stale")) is (failed_step == "full_fft_provenance")
     assert manifest["tools"]["processing"]["full_fft_provenance"]["status"] == "current"
+
+
+@pytest.mark.parametrize("failed_step", ["full_fft_provenance", "harmonic_selection"])
+def test_failed_prerequisite_stops_consumers_and_emits_one_root_failure(tmp_path, failed_step):
+    worker = _pipeline_without_qt(tmp_path, failed_step=failed_step)
+    for name in (
+        "_run_harmonic_selection", "_run_stats_ready_export",
+        "_run_analysis_ready_export", "_run_source_maps",
+    ):
+        setattr(worker, name, Mock(wraps=getattr(worker, name)))
+
+    worker.run()
+
+    worker.finished.emit.assert_called_once()
+    payload = worker.finished.emit.call_args.args[0]
+    assert payload["failure_reason"] == f"{failed_step} failed"
+    assert payload["ok"] is False
+    expected_steps = ["frequency_domain_qc", "full_fft_provenance"]
+    if failed_step == "harmonic_selection":
+        expected_steps.append("harmonic_selection")
+        worker._run_harmonic_selection.assert_called_once()
+    else:
+        worker._run_harmonic_selection.assert_not_called()
+    assert [step["name"] for step in payload["steps"]] == expected_steps
+    worker._run_stats_ready_export.assert_not_called()
+    worker._run_analysis_ready_export.assert_not_called()
+    worker._run_source_maps.assert_not_called()
+    worker._activate_artifact_freshness.assert_not_called()
+    assert worker._dataset_index is None
+    assert worker._harmonic_selection_metadata is None
+
+
+@pytest.mark.parametrize("failed_step", ["stats_ready_summed_bca", "analysis_ready_full_audit"])
+def test_failed_sibling_export_still_runs_source_maps(tmp_path, failed_step):
+    worker = _pipeline_without_qt(tmp_path, failed_step=failed_step)
+    worker._run_source_maps = Mock(wraps=worker._run_source_maps)
+
+    worker.run()
+
+    worker._run_source_maps.assert_called_once_with(tmp_path.resolve())
+    worker.finished.emit.assert_called_once()
+    payload = worker.finished.emit.call_args.args[0]
+    assert payload["ok"] is False
+    assert {step["name"] for step in payload["steps"] if step["ok"]}.issuperset(
+        {"full_fft_provenance", "harmonic_selection", "l2_mne_source_psd", "eloreta_volume_source_psd"}
+    )
 
 
 @pytest.mark.parametrize("failed_step", ["analysis_ready_full_audit", "l2_mne_source_psd", "eloreta_volume_source_psd"])

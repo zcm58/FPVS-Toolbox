@@ -31,6 +31,9 @@ SOURCE_TIME_DOMAIN_PARTICIPANT_MANIFEST_FORMAT = (
     "fpvs-source-ready-time-domain-participant-manifest-v1"
 )
 SOURCE_TIME_DOMAIN_CROP_MODE = "55_onbin"
+SOURCE_TIME_DOMAIN_CROP_MODES = frozenset(
+    {SOURCE_TIME_DOMAIN_CROP_MODE, "project_marker_plan_target_grid_v2"}
+)
 SOURCE_TIME_DOMAIN_AGGREGATION_DOMAIN = "time"
 SOURCE_TIME_DOMAIN_AGGREGATION_METHOD = "arithmetic_mean"
 SOURCE_TIME_DOMAIN_DATA_UNIT = "V"
@@ -431,8 +434,12 @@ def _validate_artifact(
     repetition_count = _positive_int(aggregation.get("repetition_count"), "aggregation repetition_count")
 
     crop = _mapping(sidecar.get("crop"), "sidecar crop")
-    if crop.get("crop_mode") != SOURCE_TIME_DOMAIN_CROP_MODE:
-        raise ProjectTimeDomainInputError(f"Source-ready derivative requires crop_mode=55_onbin: {sidecar_path}.")
+    crop_mode = crop.get("crop_mode")
+    if not isinstance(crop_mode, str) or crop_mode not in SOURCE_TIME_DOMAIN_CROP_MODES:
+        raise ProjectTimeDomainInputError(
+            "Source-ready derivative requires crop_mode=55_onbin or "
+            f"project_marker_plan_target_grid_v2: {sidecar_path}."
+        )
     crop_n = _positive_int(crop.get("N"), "crop N")
     n_step = _positive_int(crop.get("N_step"), "crop N_step")
     n_mod_step = _nonnegative_int(crop.get("N_mod_step"), "crop N_mod_step")

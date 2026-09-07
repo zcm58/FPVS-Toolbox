@@ -27,6 +27,12 @@ tests = [
   "tests/gui/test_toolbox_cache_workflow_static.py",
   "tests/gui/test_post_processing_readiness_static.py",
   "tests/gui/test_processing_failure_routing_static.py",
+  "tests/gui/test_settings_geometry_static.py",
+  "tests/gui/test_dataset_exclusions_static.py",
+  "tests/gui/test_dataset_exclusions_workflow_static.py",
+  "tests/gui/test_preprocessing_qc_continue_static.py",
+  "tests/gui/test_qc_source_prefetch_static.py",
+  "tests/workers/test_qc_source_prefetch_worker_static.py",
 ]
 include = ["src/Main_App/gui/**", "src/Tools/**/gui*.py", "tests/gui/**"]
 manual_smoke = ["Launch the Main App at 1280x900 and verify the home Conditions editor fills the available vertical workspace, Start Processing stays anchored beneath it, no Log card appears, and View Log opens the retained processing messages in a modal with working Clear Log and Close actions. With Beta Tools disabled, verify only Free Harmonic Clustering and SNR Plots appear under Quick Tools. Enable Beta Tools, restart, and verify Scalp Maps, Standard FPVS Screening, Sensitivity Analysis, LORETA Visualizer, Sequence Figure, Ratio Calculator, and Individual Detectability appear under Beta Tools. Verify each beta tool shows the shared warning before its first display in that app session, does not repeat for that same tool, and the two default tools show no beta warning."]
@@ -44,6 +50,7 @@ tests = [
   "tests/project_io/test_project_dataset_index.py",
   "tests/project_io/test_project_enumeration_io.py",
   "tests/project_io/test_project_group_context.py",
+  "tests/project_io/test_project_geometry_persistence.py",
   "tests/project_io/test_project_results_layout.py",
   "tests/project_io/test_project_scan_job.py",
   "tests/project_io/test_project_v2_group_schema.py",
@@ -67,6 +74,7 @@ tests = [
   "tests/gui/test_preflight_reuse_static.py",
   "tests/processing/test_preflight_qc_reuse.py",
   "tests/processing/test_prepared_kurtosis_cache.py",
+  "tests/processing/test_qc_source_prefetch.py",
   "tests/processing/test_raw_channel_metric_batching.py",
   "tests/gui/test_kurtosis_review_dialog_static.py",
   "tests/gui/test_marker_occurrence_review.py",
@@ -91,6 +99,7 @@ tests = [
   "tests/processing/test_fft_neighbors_sheet.py",
   "tests/processing/test_filter_downsample_order.py",
   "tests/processing/test_processing_full_fft_provenance.py",
+  "tests/processing/test_pre_review_geometry.py",
   "tests/processing/test_output_integrity.py",
   "tests/processing/test_spectral_eligibility.py",
   "tests/processing/test_full_fft_grid_qc.py",
@@ -122,12 +131,14 @@ tests = [
   "tests/processing/test_preprocessed_cache_filter_info.py",
   "tests/processing/test_processing_discovery_v2.py",
   "tests/processing/test_processing_ledger.py",
+  "tests/processing/test_dataset_exclusions.py",
   "tests/processing/test_qc_summary_export.py",
   "tests/processing/test_raw_channel_qc.py",
   "tests/processing/test_raw_channel_qc_v2.py",
   "tests/processing/test_removed_electrode_detection.py",
   "tests/processing/test_shared_load_utils.py",
   "tests/workers/test_post_processing_pipeline_worker.py",
+  "tests/workers/test_post_processing_pipeline_worker_static.py",
 ]
 include = [
   "src/Main_App/processing/**",
@@ -148,7 +159,7 @@ include = [
   "tests/processing/**",
   "tests/workers/test_post_processing_pipeline_worker.py",
 ]
-manual_smoke = []
+manual_smoke = ["Start preprocessing at 1280x900. Leave step 2 open and confirm logs show background source preloads while Continue remains responsive. Continue through no-action marker/condition/exclusion summaries and the editable electrode review, then verify step 6 reports use of preloaded recordings and completes current decisions. Repeat by advancing immediately, changing review choices, and cancelling step 6. Verify temporary qc-source-* directories disappear when QC exits, and window Close is blocked while the prefetch bridge is active. Qt lifecycle tests are CI-only locally."]
 
 [scopes.plot-generator]
 audits = ["gui", "paths"]

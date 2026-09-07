@@ -1573,38 +1573,23 @@ def test_manual_removed_electrodes_dialog_saves_project_map(tmp_path, qtbot, mon
     }
 
 
-def test_manual_participant_exclusions_dialog_saves_project_list(
-    tmp_path,
-    qtbot,
-    monkeypatch,
-):
+def test_dataset_exclusions_manager_opens_from_settings(tmp_path, qtbot, monkeypatch):
+    from Main_App.gui import dataset_exclusions_workflow
+
     os.environ["XDG_CONFIG_HOME"] = str(tmp_path)
     project = _prep_project(tmp_path)
-    project.participants = {
-        "P01": {"raw_file": project.input_folder / "P01.bdf"},
-        "P12": {"raw_file": project.input_folder / "P12.bdf"},
-    }
-    project.save()
-
     QApplication.instance() or QApplication([])
     win = MainWindow()
     qtbot.addWidget(win)
     win.loadProject(project)
-
-    def _fake_exec(self):
-        for row in range(self.table.rowCount()):
-            if self.table.item(row, 0).text() == "P12":
-                self.table.item(row, 1).setCheckState(Qt.Checked)
-        return QDialog.Accepted
-
-    monkeypatch.setattr(ManualParticipantExclusionsDialog, "exec", _fake_exec)
+    opened = []
+    monkeypatch.setattr(dataset_exclusions_workflow, "show_dataset_exclusions", opened.append)
     dlg = SettingsDialog(win.settings, win, project)
     qtbot.addWidget(dlg)
-    dlg._edit_manual_participant_exclusions()
-    dlg._save()
-
-    reloaded = Project.load(project.project_root)
-    assert reloaded.preprocessing["manual_excluded_participants"] == ["P12"]
+    assert dlg.dataset_exclusions_button.isEnabled()
+    assert dlg.dataset_exclusions_button.text() == "Manage Dataset Exclusions…"
+    dlg.dataset_exclusions_button.click()
+    assert opened == [dlg]
 
 
 def test_recording_aware_manual_qc_dialogs_keep_missing_visit_as_coverage(qtbot):

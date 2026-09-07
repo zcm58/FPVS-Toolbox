@@ -309,6 +309,98 @@ def test_scan_validates_raw_and_limits_evidence_to_current_conditions(
     )
 
 
+@pytest.mark.parametrize("prefetch_hit", [True, False])
+def test_scan_adopts_preload_without_reloading_and_keeps_current_choices(tmp_path, monkeypatch, prefetch_hit):
+    path = tmp_path / "P01.bdf"
+    path.touch()
+    loaded = []
+    captured = _configure_active_scan(monkeypatch, loaded_raws=loaded)
+    raw = _FakeRaw()
+    releases = []
+    settings = _settings(manual_excluded_participant_conditions={"P01": ["Faces"]})
+
+    def take(current_path, *, settings: dict, should_cancel):
+        assert current_path == path
+        assert settings["manual_excluded_participant_conditions"] == {"P01": ["Faces"]}
+        return raw if prefetch_hit else None
+
+    def release(owned):
+        releases.append(owned)
+        owned.close()
+
+    result = scan_kurtosis_review(
+        [_info(path, "P01")], settings, event_map={"Faces": 1, "Objects": 2},
+        reviewed_event_plans_by_file={str(path): {}},
+        source_prefetch=SimpleNamespace(take=take, release=release, begin_consumption=lambda: False),
+    )
+    assert not result.errors
+    assert result.results[0].analyzed_conditions == ("Objects",)
+    assert captured["prepare"]["direct_bad_channels"] == ("Fp2",)
+    assert len(loaded) == (0 if prefetch_hit else 1)
+    assert releases == ([raw] if prefetch_hit else [])
+    assert captured["prepare"]["raw"].closed
+
+
+@pytest.mark.parametrize("loading", [True, False])
+def test_active_prefetch_shares_foreground_concurrency_budget(tmp_path, monkeypatch, loading):
+    path = tmp_path / "P01.bdf"
+    path.touch()
+    _configure_active_scan(monkeypatch, loaded_raws=[])
+    limits = []
+
+    def workers(_infos, requested):
+        limits.append(requested)
+        return 1
+
+    monkeypatch.setattr(scan_module, "_review_worker_count", workers)
+    source = SimpleNamespace(
+        begin_consumption=lambda: loading,
+        take=lambda *_args, **_kwargs: None,
+    )
+    result = scan_kurtosis_review(
+        [_info(path, "P01")], _settings(), event_map={"Faces": 1, "Objects": 2},
+        reviewed_event_plans_by_file={str(path): {}}, source_prefetch=source, max_workers=2,
+    )
+    assert not result.errors
+    assert limits == [1 if loading else 2]
+
+
+@pytest.mark.parametrize("failure", ["cancel", "geometry", "preprocessing"])
+def test_scan_releases_preloaded_source_on_every_interrupted_path(tmp_path, monkeypatch, failure):
+    path = tmp_path / "P01.bdf"
+    path.touch()
+    loaded = []
+    _configure_active_scan(monkeypatch, loaded_raws=loaded)
+    raw = _FakeRaw()
+    taken, released = [], []
+
+    def take(*_args, **_kwargs):
+        taken.append(raw)
+        return raw
+
+    def fail(*_args, **_kwargs):
+        raise ValueError("current input rejected")
+
+    def release(owned):
+        released.append(owned)
+        owned.close()
+
+    if failure == "geometry":
+        monkeypatch.setattr(scan_module, "validate_raw_biosemi64_geometry", fail)
+    if failure == "preprocessing":
+        monkeypatch.setattr(scan_module, "prepare_kurtosis_review_evidence", fail)
+    scan = scan_kurtosis_review(
+        [_info(path, "P01")], _settings(), event_map={"Faces": 1, "Objects": 2},
+        reviewed_event_plans_by_file={str(path): {}},
+        source_prefetch=SimpleNamespace(take=take, release=release, begin_consumption=lambda: False),
+        should_cancel=lambda: failure == "cancel" and bool(taken),
+    )
+    assert scan.cancelled if failure == "cancel" else scan.errors
+    assert released == [raw]
+    assert raw.closed
+    assert loaded == []
+
+
 @pytest.mark.parametrize("copy_raw", [True, False])
 @pytest.mark.parametrize("fails", [True, False])
 def test_review_preparation_preserves_default_copy_and_owned_input_lifetime(

@@ -274,3 +274,97 @@ def test_changed_exclusion_context_settles_after_one_reconfirmation(adaptive_pro
     assert frequency_qc.active_frequency_domain_exclusions(
         project.project_root
     ).excluded_participant_conditions == {("P1", "CondA")}
+
+
+def _retain_retired_electrode_reconfirmation(project, monkeypatch):
+    first = frequency_qc.run_frequency_domain_qc_review(project)
+    # Build the valid receipt produced when electrode exclusion was supported.
+    # Current production choices must continue rejecting this retired action.
+    with monkeypatch.context() as legacy:
+        legacy.setattr(
+            frequency_qc, "REVIEW_DECISIONS",
+            (*frequency_qc.REVIEW_DECISIONS,
+             frequency_qc.DECISION_EXCLUDE_CONDITION_ELECTRODE),
+        )
+        frequency_qc.apply_frequency_domain_qc_decision(
+            project.project_root, first,
+            review_decisions=_decisions(
+                first, frequency_qc.DECISION_EXCLUDE_CONDITION_ELECTRODE,
+            ),
+        )
+    review = frequency_qc.run_frequency_domain_qc_review(project)
+    assert review["review_required"] is True
+    assert review["reconfirmation_findings"]
+    assert review["flags"]  # Ordinary findings coexist with the reconfirmations.
+    frequency_qc.apply_frequency_domain_qc_decision(
+        project.project_root, review,
+        review_decisions=_decisions(review, frequency_qc.DECISION_RETAIN),
+    )
+    accepted = frequency_qc.load_frequency_domain_qc_state(project.project_root)
+    return review, accepted
+
+
+@pytest.mark.parametrize("change", ["source_values", "selection_profile"])
+def test_resolved_retain_reconfirmation_does_not_reopen_unchanged_findings(
+    adaptive_project, monkeypatch, change,
+):
+    project = adaptive_project
+    reviewed, accepted = _retain_retired_electrode_reconfirmation(project, monkeypatch)
+    resolved_fingerprints = {
+        finding["finding_fingerprint"]
+        for finding in reviewed["reconfirmation_findings"]
+    }
+    for _ in range(3):
+        clear_group_significant_selection_cache()
+        resumed = frequency_qc.run_frequency_domain_qc_review(project)
+        assert resumed["analysis_fingerprint"] == reviewed["analysis_fingerprint"]
+        assert resumed["reconfirmation_findings"] == []
+        assert resumed["flags"] == reviewed["flags"]
+        assert len(resumed["review_decisions"]) == len(resumed["review_findings"])
+        assert resolved_fingerprints.isdisjoint(
+            finding["finding_fingerprint"] for finding in resumed["review_findings"]
+        )
+        assert resumed["review_required"] is False
+        assert resumed["review_reused"] is True
+        assert resumed["current_decision_fingerprint"] == accepted["last_review"][
+            "decision_fingerprint"
+        ]
+        synced = frequency_qc.sync_frequency_domain_qc_automatic_state(
+            project.project_root, resumed,
+        )
+        assert synced["review_decisions"] == accepted["review_decisions"]
+        assert synced["review_evidence"] == accepted["review_evidence"]
+        assert frequency_qc.resolve_frequency_qc_coverage_decisions(
+            project.project_root,
+        ).review_complete is True
+    _change_review_inputs(project, change)
+    changed = frequency_qc.run_frequency_domain_qc_review(project)
+    assert changed["analysis_fingerprint"] != reviewed["analysis_fingerprint"]
+    assert changed["review_required"] is True
+    assert changed["review_reused"] is False
+    assert resolved_fingerprints.isdisjoint(
+        row["finding_fingerprint"] for row in changed["active_review_decisions"]
+    )
+
+
+@pytest.mark.parametrize("mutation", ["evidence", "decision"])
+def test_resolved_reconfirmation_reuse_rejects_tampered_receipts(
+    adaptive_project, monkeypatch, mutation,
+):
+    project = adaptive_project
+    _retain_retired_electrode_reconfirmation(project, monkeypatch)
+    manifest_path = project.project_root / "project.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    state = manifest["tools"]["frequency_domain_qc"]
+    if mutation == "evidence":
+        state["review_evidence"]["screening_status"] = "tampered"
+    else:
+        resolved = next(
+            row for row in state["review_decisions"]
+            if row.get("replaces_decision_fingerprint")
+        )
+        resolved["reason"] = "altered_without_rehashing"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    resumed = frequency_qc.run_frequency_domain_qc_review(project)
+    assert resumed["review_required"] is True
+    assert resumed["review_reused"] is False

@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 from datetime import datetime
 import gc
+import json
 import logging
 from pathlib import Path
 from queue import Empty, Queue
@@ -41,6 +42,130 @@ def _load_function(relative_path, name, namespace, *, class_name=None, outer_fun
     )
     exec(compile(ast.fix_missing_locations(module), str(path), "exec"), namespace)
     return namespace[name]
+
+
+def _build_params_for_project(project):
+    from Main_App.projects import FrequencyProtocol, FrequencyProtocolError
+    from Main_App.projects.preprocessing_settings import (
+        KURTOSIS_REVIEW_DECISIONS_BY_RECORDING_KEY,
+        MANUAL_REMOVED_ELECTRODES_ENABLED_KEY,
+        RemovedElectrodeDetectionConfirmationRequired,
+        normalize_preprocessing_settings,
+    )
+
+    protocol = FrequencyProtocol.from_recurrence(
+        6.0, 5, expected_analyzed_oddball_cycles=144,
+        expected_analyzed_oddball_cycles_source="manual",
+    )
+    messages = Mock()
+    build = _load_function(
+        "src/Main_App/gui/processing_inputs.py", "build_validated_params",
+        {
+            "processing_protocol_snapshot": lambda _project: protocol,
+            "normalize_preprocessing_settings": normalize_preprocessing_settings,
+            "require_removed_electrode_detection_choice_ready": lambda _settings: None,
+            "RemovedElectrodeDetectionConfirmationRequired": RemovedElectrodeDetectionConfirmationRequired,
+            "validate_protocol_condition_codes": lambda *_args: None,
+            "FrequencyProtocolError": FrequencyProtocolError,
+            "logger": logging.getLogger(__name__),
+            "QLineEdit": object, "QMessageBox": messages,
+            "_illegal_condition_chars": lambda _label: (),
+            "config": SimpleNamespace(DEFAULT_STIM_CHANNEL="Status"),
+            "KURTOSIS_REVIEW_DECISIONS_BY_RECORDING_KEY": KURTOSIS_REVIEW_DECISIONS_BY_RECORDING_KEY,
+            "MANUAL_REMOVED_ELECTRODES_ENABLED_KEY": MANUAL_REMOVED_ELECTRODES_ENABLED_KEY,
+        },
+    )
+    row = SimpleNamespace(findChildren=lambda _kind: [
+        SimpleNamespace(text=lambda: "Faces"), SimpleNamespace(text=lambda: "1"),
+    ])
+    params = build(SimpleNamespace(currentProject=project, event_rows=[row]))
+    return params, messages
+
+
+@pytest.mark.parametrize("mapping", ["anatomical_labels", "biosemi64_1020_ab_v1"])
+def test_processing_params_preserve_project_geometry_in_run_plan(mapping):
+    from Main_App.processing.processing_ledger import _configured_geometry_identity
+
+    settings = {"electrode_montage": "biosemi64", "electrode_mapping_profile": mapping}
+    project = SimpleNamespace(
+        preprocessing=settings,
+        experimental_qc_settings=SimpleNamespace(
+            raw_spectral_screening=SimpleNamespace(to_manifest=lambda: {}),
+        ),
+    )
+    params, messages = _build_params_for_project(project)
+
+    assert params is not None
+    assert _configured_geometry_identity(params) == _configured_geometry_identity(settings)
+    assert params["electrode_montage"] == "biosemi64"
+    assert params["electrode_mapping_profile"] == mapping
+    messages.warning.assert_not_called()
+
+
+@pytest.mark.parametrize("explicit_local_change", [False, True])
+def test_processing_refreshes_external_geometry_without_overwriting_local_choice(
+    tmp_path, explicit_local_change,
+):
+    from Main_App.processing.preflight_qc import preflight_file_settings_identity
+    from Main_App.projects import Project
+
+    initial_mapping = (
+        "anatomical_labels" if explicit_local_change else "biosemi64_1020_ab_v1"
+    )
+    manifest = {"preprocessing": {
+        "electrode_montage": "biosemi64",
+        "electrode_mapping_profile": initial_mapping,
+        "high_pass": 0.1,
+    }}
+    manifest_path = tmp_path / "project.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    project = Project(tmp_path, manifest)
+    if explicit_local_change:
+        project.update_preprocessing({
+            **project.preprocessing,
+            "electrode_mapping_profile": "biosemi64_1020_ab_v1",
+        })
+    previous_params, _ = _build_params_for_project(project)
+    assert previous_params["electrode_mapping_profile"] == "biosemi64_1020_ab_v1"
+
+    # Reproduce an external repair while the same Project remains open. An
+    # unrelated disk edit must not refresh the whole live preprocessing state.
+    repaired = json.loads(manifest_path.read_text(encoding="utf-8"))
+    repaired["preprocessing"]["electrode_mapping_profile"] = "anatomical_labels"
+    repaired["preprocessing"]["high_pass"] = 0.5
+    manifest_path.write_text(json.dumps(repaired), encoding="utf-8")
+    repaired_bytes = manifest_path.read_bytes()
+
+    params, messages = _build_params_for_project(project)
+    expected = "biosemi64_1020_ab_v1" if explicit_local_change else "anatomical_labels"
+    assert params["electrode_mapping_profile"] == expected
+    assert params["electrode_montage"] == "biosemi64"
+    assert params["high_pass"] == 0.1
+    assert manifest_path.read_bytes() == repaired_bytes
+    before = preflight_file_settings_identity(previous_params, participant_id="P1")
+    after = preflight_file_settings_identity(params, participant_id="P1")
+    assert (before == after) is explicit_local_change
+    messages.warning.assert_not_called()
+
+
+def test_processing_blocks_stale_geometry_when_current_manifest_is_invalid(tmp_path):
+    from Main_App.projects import Project
+
+    manifest = {"preprocessing": {
+        "electrode_montage": "biosemi64",
+        "electrode_mapping_profile": "biosemi64_1020_ab_v1",
+    }}
+    manifest_path = tmp_path / "project.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    project = Project(tmp_path, manifest)
+    manifest_path.write_text("{invalid project metadata", encoding="utf-8")
+
+    params, messages = _build_params_for_project(project)
+
+    assert params is None
+    messages.warning.assert_called_once()
+    assert messages.warning.call_args.args[1] == "Project Settings Unavailable"
+    assert manifest_path.read_text(encoding="utf-8") == "{invalid project metadata"
 
 
 def test_many_file_errors_keep_batch_running_until_one_finished_payload():

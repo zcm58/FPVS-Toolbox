@@ -19,6 +19,20 @@ Common long-running work:
 - Plot generation and export.
 - Statistics pipeline runs.
 - File scanning over project folders.
+- Interactive preprocessing QC starts `QcSourcePrefetchWorker` when step 2
+  opens. Its QThread preloads sources sequentially, retains them through review,
+  and closes them after the scanner releases its exclusive consumers. The
+  worker's direct `request_finish()` uses thread-safe cancellation/events;
+  a queued slot cannot interrupt its active loader. The GUI bridge handles
+  worker/thread-finished signals and uses a responsive event loop for final
+  cleanup, never a GUI-thread `wait()` or file deletion. The main window rejects
+  Close until the review and worker cleanup release the prefetch bridge.
+  Step 6 reuses completed
+  sources and stops queued speculative work. No-action steps 2, 3, and 5 show
+  a brief counted summary with Continue; step 4 retains the editable electrode
+  table and Save / Next. These controls have no timed delay or preload-completion
+  requirement. CI coverage is `tests/gui/test_qc_source_prefetch_qt.py`; local
+  verification uses source-cache, scanner, orchestration, and worker doubles.
 - Main App processing runs now receive a precomputed incremental plan from
   `Main_App.processing.processing_ledger` before `MpRunnerBridge.start()`.
   Workers receive only the files selected by that plan. Multi-group runs also
@@ -48,6 +62,14 @@ Common long-running work:
   header-only record is independent of the standard Summed-BCA selection and
   is the common provenance gate for Free Harmonic Clustering GUI inspection
   and direct preparation.
+  Before presenting findings, the worker checks completed candidate workbook
+  geometry against the project's montage and channel-label mapping, respecting
+  validated cohort exclusions without requiring a completed new review. A
+  mismatch reports the saved and requested mapping before ROI/report work.
+  Failed neutral provenance stops harmonic selection and its consumers; failed
+  harmonic selection stops its dependent exports. The original failure remains
+  the recovery reason, while successful prerequisites retain the existing
+  independence between spreadsheet and source-map exports.
 - Accepting the summed-BCA review starts `FrequencyDomainQcDecisionWorker`
   through `gui/frequency_domain_qc_handoff.py`. Report/provenance generation,
   decision persistence, and the tools-metadata reread run on that worker, never

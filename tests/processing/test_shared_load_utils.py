@@ -139,6 +139,40 @@ def test_shared_load_eeg_file_preserves_bdf_channel_and_montage_contract(monkeyp
     assert "BDF loaded successfully." in logs
 
 
+def test_run_owned_preload_preserves_geometry_and_uses_its_unique_path(monkeypatch, tmp_path):
+    header_raw, loaded_raw = _raw(), _raw()
+    calls = []
+
+    def reader(_filepath, **kwargs):
+        calls.append(kwargs)
+        return header_raw if len(calls) == 1 else loaded_raw
+
+    monkeypatch.setattr(shared_load_utils.mne.io, "read_raw_bdf", reader)
+    monkeypatch.setattr(shared_load_utils, "_memmap_dir_for_pid", lambda: pytest.fail("Used shared PID path"))
+    destination = tmp_path / "unique-source.dat"
+    raw = load_utils.load_eeg_file(_app([]), str(tmp_path / "sample.bdf"), preload_path=destination)
+
+    assert raw is loaded_raw
+    assert calls[0]["preload"] is False
+    assert calls[1]["preload"] == str(destination)
+    assert read_raw_biosemi64_geometry(raw)["coordinate_fingerprint"] == BIOSEMI64_COORDINATE_FINGERPRINT
+    assert destination.is_file()
+
+
+@pytest.mark.parametrize("destination_kind", ["existing", "source", "relative"])
+def test_run_owned_preload_never_overwrites_existing_or_source_files(monkeypatch, tmp_path, destination_kind):
+    source = tmp_path / "sample.bdf"
+    source.write_bytes(b"original EEG")
+    destination = tmp_path / "owned.dat"
+    destination.write_bytes(b"another active worker")
+    selected = {"existing": destination, "source": source, "relative": "relative.dat"}[destination_kind]
+    monkeypatch.setattr(shared_load_utils.mne.io, "read_raw_bdf", lambda *_a, **_k: pytest.fail("Unsafe destination opened"))
+
+    assert load_utils.load_eeg_file(_app([]), str(source), preload_path=selected) is None
+    assert source.read_bytes() == b"original EEG"
+    assert destination.read_bytes() == b"another active worker"
+
+
 def test_shared_load_eeg_file_can_limit_bdf_to_first_channels_refs_and_stim(
     monkeypatch,
     tmp_path,

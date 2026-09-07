@@ -243,7 +243,9 @@ def reset_project_processing_cache(host: Any) -> None:
             "- the incremental completion index and its derived QC provenance\n\n"
             "Raw BDF files, project settings, manual QC choices, current generated "
             "outputs, and processing run history are not deleted. The next Start "
-            "Processing run will recheck every file and recompute from raw data. "
+            "Processing run will recheck eligible files and recompute from raw data. "
+            "Saved dataset exclusions still apply; use Manage Dataset Exclusions "
+            "in Settings to restore excluded participants. "
             "Once that run begins, normal processing will replace its participant "
             "output files. If that run is cancelled, the completion index remains "
             "empty until a later run rebuilds it.\n\n"
@@ -317,7 +319,8 @@ def on_project_processing_cache_reset_finished(
     if removed.is_empty:
         message = (
             "No FPVS-managed processing cache was present. The next run will "
-            "already recheck every participant and preprocess from raw BDF data."
+            "already recheck eligible participants and preprocess from raw BDF data. "
+            "Saved dataset exclusions still apply."
         )
         logger.info("project_processing_cache_already_empty root=%s", project_root)
         log = getattr(host, "log", None)
@@ -347,7 +350,7 @@ def on_project_processing_cache_reset_finished(
         (
             f"Removed {removed.file_count} managed cache file(s) "
             f"({_format_cache_size(removed.total_bytes)}).\n\n"
-            "The next processing run will recheck every participant and preprocess "
+            "The next processing run will recheck eligible participants and preprocess "
             "from raw BDF data. Project settings, manual QC choices, current outputs, "
             "and run history were preserved."
         ),

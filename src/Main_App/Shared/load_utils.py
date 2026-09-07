@@ -614,15 +614,33 @@ def load_eeg_file(
     stim_channel: Optional[str] = None,
     electrode_mapping_profile: Optional[str] = None,
     electrode_montage: Optional[str] = None,
+    *,
+    preload_path: str | Path | None = None,
 ) -> Optional[mne.io.BaseRaw]:
-    """Load an EEG file with disk-backed memmap and apply montage without resampling."""
+    """Load an EEG file with disk-backed memmap and apply montage without resampling.
+
+    A run-owned caller may supply a new absolute ``preload_path`` inside its
+    private temporary directory. That caller owns the Raw and file cleanup.
+    Existing destinations are never overwritten through this opt-in path.
+    """
     ext = os.path.splitext(filepath)[1].lower()
     base = os.path.basename(filepath)
     app.log(f"[LOADER START] {base}: ext='{ext}'")
     raw: Optional[mne.io.BaseRaw] = None
     try:
-        memmap_dir = _memmap_dir_for_pid()
-        memmap_path = str(memmap_dir / (Path(filepath).stem + "_raw.dat"))
+        if preload_path is None:
+            memmap_dir = _memmap_dir_for_pid()
+            memmap_path = str(memmap_dir / (Path(filepath).stem + "_raw.dat"))
+        else:
+            destination = Path(preload_path)
+            if not destination.is_absolute():
+                raise ValueError("Run-owned EEG preload paths must be absolute.")
+            # Reserve the unique destination before MNE opens it for writing.
+            # In particular, this cannot overwrite a source recording or a
+            # different worker's live memory map.
+            with destination.open("xb"):
+                pass
+            memmap_path = str(destination)
 
         stim_name = str(stim_channel or "").strip() or _resolve_stim(app)
         if not ref_pair:

@@ -18,6 +18,50 @@ def _seed(path: Path) -> SettingsManager:
     return manager
 
 
+@pytest.mark.parametrize("existing_ini", [False, True])
+def test_global_geometry_defaults_match_new_projects_and_loader_fallbacks(
+    tmp_path: Path, existing_ini: bool,
+) -> None:
+    from Main_App.io.load_utils import (
+        _resolve_electrode_mapping_profile,
+        _resolve_electrode_montage,
+    )
+    from Main_App.projects.preprocessing_settings import (
+        PREPROCESSING_DEFAULTS,
+        new_project_preprocessing_settings,
+        normalize_preprocessing_settings,
+    )
+    from Main_App.projects.project import Project
+
+    expected = {
+        "electrode_montage": "biosemi64",
+        "electrode_mapping_profile": "anatomical_labels",
+    }
+    path = tmp_path / "settings.ini"
+    if existing_ini:
+        path.write_text("[preprocessing]\nlow_pass = 45\n", encoding="utf-8")
+    manager = SettingsManager(str(path))
+    for settings in (
+        DEFAULTS["preprocessing"], PREPROCESSING_DEFAULTS,
+        normalize_preprocessing_settings({}), new_project_preprocessing_settings(),
+    ):
+        assert {key: settings[key] for key in expected} == expected
+    assert {key: manager.get("preprocessing", key) for key in expected} == expected
+    manager.save()
+    reloaded = SettingsManager(str(path))
+    assert {key: reloaded.get("preprocessing", key) for key in expected} == expected
+    if existing_ini:
+        assert reloaded.get("preprocessing", "low_pass") == "45"
+
+    project = Project.load(tmp_path / "Project")
+    assert {key: project.preprocessing[key] for key in expected} == expected
+    project.save()
+    saved_project = Project.load(project.project_root)
+    assert {key: saved_project.preprocessing[key] for key in expected} == expected
+    assert _resolve_electrode_montage(None) == expected["electrode_montage"]
+    assert _resolve_electrode_mapping_profile(None) == expected["electrode_mapping_profile"]
+
+
 def test_unrelated_stale_save_cannot_restore_deleted_roi(tmp_path: Path) -> None:
     path = tmp_path / "settings.ini"
     editor = _seed(path)

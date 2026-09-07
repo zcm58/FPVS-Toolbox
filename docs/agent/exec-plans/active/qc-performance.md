@@ -297,3 +297,291 @@ none was changed by this fix. `python .agents/scripts/verify.py --scope repo
 --tier precommit` still stops at eight existing hardcoded paths in unrelated
 untracked `outputs/`. No Qt workflow was run locally; the visible smoke path
 above remains to be exercised in the application.
+
+## QC Resume And Geometry Recovery (2026-09-07)
+
+- [x] Reproduce the second false review from resolved exclusion reconfirmations:
+  a saved review had 26 Retains, including nine resolved reconfirmations; the
+  next report had 17 unchanged ordinary findings and the same analysis hash.
+  Dropping the nine completed receipts changed the decision hash. Retain these
+  independently validated receipts while the analysis remains current, without
+  adding findings or restoring exclusion authority.
+- [x] Forward the project montage and channel-label mapping into GUI processing
+  parameters. Omitting both made the worker and run plan default to anatomical
+  labels while final provenance validated a different saved A/B setting. Both
+  profile cases fail the new forwarding regression before the fix and pass after.
+- [x] Validate candidate geometry before requesting QC decisions. Honor valid
+  reviewed cohort exclusions, reject invalid/mixed geometry, name mapping
+  mismatches precisely, and preserve an existing downstream failure reason.
+- [x] Stop dependent consumers after failed FullFFT provenance or harmonic
+  selection, preserving one final receipt and normal cleanup. Independent
+  spreadsheet/source exports still proceed when their prerequisites succeeded.
+- [x] Accept the current source-ready crop tag in its consumer, preserving all
+  existing sample-grid, reference, channel, processing and integrity checks.
+- [x] Make app-level BioSemi64/anatomical defaults explicit, test new-project
+  persistence, and apply the user-requested pairing to all six configured
+  projects and the local app settings. Changed manifests have exact original
+  backups under `.fpvs_processing/config_backups/`; app settings have an INI
+  backup. Recorded samples, completed processing geometry, and review history
+  are not rewritten by this settings correction.
+
+Comparison baseline: `codex/v3-release` at `f586652e`. That branch predates the
+per-finding reconfirmation receipts and the strict current geometry contract;
+the new receipt-loss bug is not a reason to restore its automatic-exclusion
+semantics. Its unconditional downstream orchestration remained in the current
+worker, producing secondary stale-QC errors after the geometry failure. Its
+source input reader also still accepted only `55_onbin`, although the current
+producer writes `project_marker_plan_target_grid_v2`.
+
+Read-only validation of the affected project found all 24 BDF headers already
+use anatomical scalp labels and all completed records use canonical BioSemi64.
+After the approved mapping correction, the project passes strict geometry
+validation with the same 64-channel identity recorded during processing.
+
+Visible smoke (Qt remains CI-only locally): restart the Toolbox; verify Settings
+shows BioSemi64 and anatomical labels; resume post-processing. A completed
+Retain reconfirmation must not reopen unchanged ordinary findings. Genuine
+changed findings still require review. A mapping mismatch must stop before the
+review, and failed prerequisites must report the original reason without
+launching dependent exports. Source-ready data using either supported crop tag
+must retain its normal validation and publication behavior.
+
+Verification: `python .agents/scripts/verify.py --scope processing --tier focused`
+reported **1,401 passed, 5 skipped** and one existing cache-pruning failure:
+an unavailable `.slots` index retained an extra cache generation. The complete
+unchanged pruning test file then passed **22 tests, 2 skipped** in isolation.
+`--scope gui --tier focused` passed **188 tests**. The explicit non-Qt worker and
+source-input bundle passed **59 tests**; the new worker-static file is now also
+registered in the processing scope. All new failing-before-fix regressions pass.
+Ruff, compilation, protected/source-localization and GUI audits, independent
+review, and whitespace checks passed. `--scope repo --tier precommit` and the
+LORETA/path gate remain blocked by eight existing hardcoded paths in unrelated
+untracked `outputs/`. No local Qt workflow, numerical reprocessing or source-map
+generation was run. The visible smoke above remains the final application check.
+
+Runtime changes are confined to `Shared/settings_manager.py`,
+`gui/processing_inputs.py`, `processing/frequency_domain_qc.py`,
+`processing/full_fft_provenance.py`, `workers/post_processing_pipeline_worker.py`
+under `src/Main_App`, and
+`src/Tools/LORETA_Visualizer/source_producers/project_time_domain_inputs.py`.
+The protected `Legacy_App`, `PySide6_App`, removed Source Localization and
+quarantine boundaries were audited and remain unchanged. Scientific processing
+order, numerical algorithms, and existing output formats remain unchanged.
+
+## Stale Project Mapping Save Recovery (2026-09-07)
+
+The subsequent preflight log rejected all 24 selected BDF files because MCCTR's
+saved channel profile again requested A/B labels. The manifest was rewritten
+at 10:19:26 local time, after its approved anatomical-label correction. The
+other five project manifests and app defaults retained the requested pairing.
+An executable reproduction identified a persistence bug: an older loaded
+`Project` saved its cached A/B profile during an unrelated edit, replacing a
+newer anatomical profile already saved to disk.
+
+- [x] Track the two geometry fields observed at project load, refresh, or the
+  last successful save. Reconcile unchanged local fields with the newest saved
+  values; preserve explicit local edits and existing unrelated settings behavior.
+- [x] Share one validated disk snapshot with the existing worker tool-metadata
+  merge. Invalid or unreadable saved settings must stop saving; failed writes
+  must not advance the geometry baseline.
+- [x] Refresh project geometry before building processing parameters without
+  saving the manifest. A failed refresh warns and stops parameter construction.
+- [x] Preserve the same correction through an already-open Settings panel.
+  Track geometry controls separately from its mutable general settings cache;
+  refresh unchanged selectors, preserve explicitly edited selectors, and rebase
+  only after a successful save. Failed saves keep pending choices available.
+- [x] Reproduce stale saves and stale parameter construction before the fix;
+  test explicit edits, successive refreshes/saves, failed-save retries,
+  malformed/denied manifests, and preservation of worker tool metadata.
+- [x] Restore MCCTR with an exact original-manifest backup under
+  `.fpvs_processing/config_backups/`. Verify all six configured projects and
+  app settings still use BioSemi64/anatomical labels.
+- [x] Open all 24 previously rejected files through the actual public preflight
+  lazy loader using the repaired project settings. Every file opens with all
+  64 canonical scalp channels, montage coordinates, and `preload=False`.
+  This check does not read whole EEG recordings or run numerical preprocessing.
+  The repaired project also passes the strict pre-review geometry check against
+  its existing completed processing records with the same 64-channel identity.
+
+Runtime ownership added by this follow-up is confined to `projects/project.py`
+and the existing `gui/processing_inputs.py` and `gui/settings_panel.py` boundaries.
+The project I/O contract
+documents the geometry reconciliation. The 21 new persistence regressions are
+registered in the project-io focused verification bundle; eight Settings-panel
+AST regressions are registered in the GUI bundle.
+
+Visible smoke: fully close and restart the Toolbox so old Python classes and
+any previously open Settings panel are discarded. Open MCCTR, confirm BioSemi64
+and anatomical labels, and start processing. All selected BDF files must pass
+the label check; then exercise the frequency-domain review/resume path described
+above. Save an unrelated Settings change twice and confirm the mapping stays
+anatomical. A deliberate selector change must save normally; a failed save must
+leave that pending selection available. No local Qt workflow or complete
+numerical pipeline was executed.
+
+Verification: the processing focused gate passed **1,424 tests, 5 skipped**.
+The GUI focused gate passed **199 non-Qt tests**, including the new panel cases.
+The complete configured non-Qt project I/O bundle passed **194 tests** when
+run directly after its focused gate stopped on the existing path audit findings.
+The repo precommit gate still stops on the same eight hardcoded paths in
+unrelated untracked `outputs/`. New persistence and parameter regressions were
+shown failing before the fixes. Ruff, compilation, GUI/protected/retired-source
+audits, and independent review passed for the corresponding changed code.
+
+## Background Source Loading During Interactive QC (2026-09-07)
+
+User scope: begin loading and temporarily caching sources as step 2 opens,
+allow unfinished loading to continue into step 6, and keep clear review steps
+visible for a brief user acknowledgement. No timed pause or minimum review
+duration is introduced.
+
+- [x] Start a background QThread after the initial signal scan and before
+  marker review. Stage sequential disk-backed decoded sources in a private
+  active-project `.fpvs_processing/qc-source-*` directory, bounded to 16 GiB
+  while reserving 2 GiB of free space. The GUI-side constructor performs no I/O.
+- [x] Let step 6 adopt ready sources once with the existing geometry, events,
+  spans, current decisions, file hashes and sample checks. Stop unstarted
+  speculative loads at handoff; pending sources fall back without waiting
+  behind a recording that was excluded. Share concurrency with an active load.
+- [x] Verify source content before/after preload and again at handoff. This
+  rejects same-size source edits whose original modification time was restored,
+  including Windows where ctime is creation time. Hashing is cancellable.
+- [x] Release consumed sources after use and close remaining resources off the
+  GUI thread on every review exit. Prevent duplicate filename collisions,
+  stale mutated reuse, redirected cleanup, and implicit MNE/tempfile deletion
+  bypasses. Reject closing the main window while its prefetch bridge is active.
+- [x] Show no-action steps 2, 3, and 5 with accurate counts and one Continue
+  button. Step 4 keeps its editable electrode table and Save / Next; its clear
+  state no longer presents a redundant introductory modal. Flagged reviews
+  keep their existing scientific decisions and persistence behavior.
+
+This first implementation preloads sources only. Filtering/downsampling and
+kurtosis calculation still occur at step 6; current prepared-kurtosis
+checkpoints and final-runner behavior remain intact. No numerical method,
+processing order, exported format, or approval authority changes. No complete
+user dataset was reprocessed, and no wall-clock speedup is claimed.
+
+Runtime changes are confined to `Shared/load_utils.py`, `gui/main_window.py`,
+`gui/preprocessing_qc_workflow.py`, `processing/kurtosis_review_scan.py`, new
+`processing/qc_source_prefetch.py`, and new
+`workers/qc_source_prefetch_worker.py` under `src/Main_App/`. Loading,
+preprocessing, and worker architecture pages document ownership and lifecycle.
+The retired Legacy_App, PySide6_App, removed Source Localization, and quarantine
+boundaries remain unchanged; the root MNE/fsaverage cache is never a target.
+
+Verification: `.venv/Scripts/python.exe .agents/scripts/verify.py --scope
+processing --tier focused` passed **1,453 tests, 5 skipped**. After lifecycle
+and source-content hardening, the focused loader/scanner/cache/review/worker
+bundle passed **128 tests**; the completed source-prefetch file passed **28
+tests**, including unexpected hash-failure release. The final GUI focused gate
+passed **222 non-Qt tests**. Real MNE comparisons preserve exact sample bytes,
+kurtosis evidence, decision plans, and previews through both review preparation
+and final preprocessing. Ruff, compilation, GUI/protected/removed-source and
+garbage-collection audits, and whitespace checks pass. The repository
+precommit gate still stops at the eight existing hardcoded paths in unrelated
+untracked `outputs/`.
+
+CI-only coverage: `tests/gui/test_qc_source_prefetch_qt.py` registers two real
+QThread tests for review/Continue responsiveness, heartbeat during final cleanup,
+signal delivery, and retained completed prefetch. No local Qt workflow was run.
+Safe coverage also lives in `tests/processing/test_qc_source_prefetch.py`,
+`test_kurtosis_review_scan.py`, `test_shared_load_utils.py`,
+`tests/gui/test_qc_source_prefetch_static.py`,
+`test_preprocessing_qc_continue_static.py`, the existing marker/kurtosis/reuse
+static tests, and `tests/workers/test_qc_source_prefetch_worker_static.py`.
+
+Visible smoke after restart: start a small project at 1280x900, pause on step 2,
+and confirm preloads progress in the log while Continue remains immediately
+usable. Inspect clear steps 2/3/5 and edit step-4 removals normally. At step 6,
+check the preloaded-recording status and complete the same decisions. Repeat
+by advancing rapidly, changing review choices, and cancelling step 6. Confirm
+Close is blocked while review cleanup owns the worker, temporary run files
+disappear on QC exit, and original recordings/persistent checkpoints remain.
+
+## Consolidated Dataset Exclusions (2026-09-07)
+
+User scope: consolidate participant exclusions into one list that distinguishes
+skipping raw processing from excluding already-processed data from analysis.
+Restoring a participant must also release a remembered manual processing skip.
+
+- [x] Replace the two Advanced Settings management controls with one Dataset
+  Exclusions manager, retaining the frequency-QC threshold summary.
+- [x] Show processed-data availability, explicit processing/analysis scopes,
+  existing overlap, reasons, and condition-specific exclusions without silently
+  migrating or removing saved decisions.
+- [x] Support individual edits, selected-row bulk edits, and restoration across
+  the full participant/recording list independently of the search filter.
+- [x] Load and save through a worker; preserve modal ownership and close guards.
+  Apply saves immediately and refreshes only the live exclusion fields, avoiding
+  stale Settings saves that would restore removed exclusions.
+- [x] Revalidate cached manual ledger exclusions against current participant
+  and recording settings. The final removed scope becomes runnable without
+  deleting caches or processing history; header-only and automatic rules remain.
+- [x] Finish backend persistence/review-authority regressions and independent
+  review. The backend rejects stale edits, validates the prospective snapshot
+  before atomic publication, archives obsolete completed-review authority, and
+  preserves condition decisions and unrelated project state.
+- [x] Complete the focused processing gate and record final verification.
+
+Owners added: `processing/dataset_exclusions.py`,
+`gui/dataset_exclusions_dialog.py`, `gui/dataset_exclusions_workflow.py`, and
+`workers/dataset_exclusions.py`. Existing Settings and processing-ledger owners
+provide integration; raw preprocessing, numerical methods, and output formats
+are unchanged. The project-I/O architecture and user guide document the
+workflow. Cache-reset wording now states that saved exclusions still apply.
+
+Visible smoke after restart (Qt execution remains CI-only locally): open the
+manager on a project containing processed and unprocessed participants; verify
+the two exclusion scopes are clear, analysis exclusion is unavailable for a new
+unprocessed row, existing overlaps and condition decisions are visible, and
+all controls fit the supported 1280x900 workspace. Stage individual/bulk edits,
+cancel once, then apply; reopen Settings and save an unrelated change to verify
+restored choices remain restored. Restore a previously skipped participant and
+verify the next incremental Start includes it without resetting caches. Check
+processing versus analysis exclusion, repeated recordings and inherited
+participant scopes, filtered bulk restore, stale-project errors, and closing
+while a load/save worker is active.
+
+Verification: `.venv/Scripts/python.exe .agents/scripts/verify.py --scope
+processing --tier focused` passed **1,493 tests, 5 skipped**. The equivalent GUI
+focused gate passed **246 non-Qt tests**. The 15 new backend regressions and
+existing QC/reuse bundle passed **51 tests**; the ledger/expected-output/cache
+bundle passed **116 tests, 1 skipped**. The final worker-start exception cleanup
+change passed all **13** dialog/worker static tests. Ruff, compilation,
+GUI/protected/removed-source audits, independent review, and whitespace checks
+passed. The repository precommit gate stops at the same eight unrelated
+hardcoded paths under untracked `outputs/`; no new audit findings remain.
+
+Read-only validation against MCCTR returns all **55 participants**: 24 have
+only a processing exclusion, five have both processing and analysis exclusions,
+and 26 have neither whole-participant exclusion. Processed result files are
+available for 24 participants; one participant's condition-specific exclusion appears in its
+details. The project manifest remained byte-identical. No actual project
+exclusions, raw files, or processed outputs were modified during implementation.
+
+CI-only coverage consists of six tests in
+`tests/gui/test_dataset_exclusions_qt.py`, plus the updated manager entry-point
+test in `tests/gui/test_gui_preproc_dialog.py`. No local Qt workflow ran; the
+visible smoke above is still required for the actual dialog presentation.
+
+Files for this feature:
+
+- Runtime: `src/Main_App/processing/dataset_exclusions.py`,
+  `src/Main_App/processing/frequency_domain_qc.py`,
+  `src/Main_App/processing/processing_ledger.py`,
+  `src/Main_App/gui/dataset_exclusions_dialog.py`,
+  `src/Main_App/gui/dataset_exclusions_workflow.py`,
+  `src/Main_App/gui/settings_panel.py`,
+  `src/Main_App/gui/project_workflows.py`,
+  `src/Main_App/gui/toolbox_cache_workflow.py`, and
+  `src/Main_App/workers/dataset_exclusions.py`.
+- Tests: `tests/processing/test_dataset_exclusions.py`,
+  `tests/processing/test_processing_ledger.py`,
+  `tests/gui/test_dataset_exclusions_static.py`,
+  `tests/gui/test_dataset_exclusions_workflow_static.py`,
+  `tests/gui/test_dataset_exclusions_qt.py`, and
+  `tests/gui/test_gui_preproc_dialog.py`; registration in
+  `.agents/verification.toml` and `tests/qt_test_files.txt`.
+- Documentation: `docs/user/index.md`,
+  `docs/agent/architecture/project-io.md`,
+  `docs/agent/architecture/cache-maintenance.md`, and this active plan.

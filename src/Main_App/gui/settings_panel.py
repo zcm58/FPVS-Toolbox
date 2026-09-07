@@ -43,9 +43,6 @@ from Main_App.gui.components import (
     make_form_layout,
 )
 from Main_App.gui.icons import sidebar_icon
-from Main_App.gui.manual_participant_exclusions_dialog import (
-    ManualParticipantExclusionsDialog,
-)
 from Main_App.gui.manual_removed_electrodes_dialog import ManualRemovedElectrodesDialog
 from Main_App.gui.participant_condition_exclusions_dialog import (
     ParticipantConditionExclusionsDialog,
@@ -64,8 +61,6 @@ from Main_App.processing.processing_controller import prepare_batch_file_infos
 from Main_App.processing.processing_ledger import load_ledger
 from Main_App.processing.missing_condition_outputs import missing_output_exclusions_changed
 from Main_App.processing.frequency_domain_qc import (
-    active_frequency_domain_exclusions,
-    clear_manual_frequency_domain_participant_exclusions,
     mark_frequency_domain_outputs_stale,
     thresholds_summary_lines,
 )
@@ -509,6 +504,10 @@ class SettingsDialog(QDialog):
         )
         self.electrode_mapping_profile_combo.setCurrentIndex(max(0, mapping_index))
         self.electrode_mapping_profile_combo.setEnabled(self.project is not None)
+        self._electrode_geometry_control_baseline = {
+            "electrode_montage": self.electrode_montage_combo.currentData(),
+            "electrode_mapping_profile": self.electrode_mapping_profile_combo.currentData(),
+        }
         grid.addWidget(mapping_label, montage_row, 2)
         grid.addWidget(self.electrode_mapping_profile_combo, montage_row, 3)
 
@@ -1872,40 +1871,33 @@ class SettingsDialog(QDialog):
             self._manual_excluded_participant_conditions = {}
             self._manual_excluded_recording_conditions = {}
 
-        recording_aware_qc = bool(
-            self.project is not None
-            and (getattr(self.project, "sessions", {}) or {})
-        )
         qc_group = SectionCard(
             "Processing QC",
             tab,
             object_name="settings_advanced_processing_qc_card",
         )
         qc_form = make_form_layout()
-        self.manual_participant_exclusions_button = make_action_button(
-            "Edit",
+        self.dataset_exclusions_button = make_action_button(
+            "Manage Dataset Exclusions…",
             compact=True,
             parent=qc_group,
         )
-        self.manual_participant_exclusions_button.setObjectName(
-            "settings_manual_participant_exclusions_edit"
+        self.dataset_exclusions_button.setObjectName(
+            "settings_dataset_exclusions_manage"
         )
-        self.manual_participant_exclusions_button.setToolTip(
-            "Edit participant-wide and single-recording processing exclusions"
-            if recording_aware_qc
-            else "Edit participants that should be skipped during processing"
+        self.dataset_exclusions_button.setToolTip(
+            "Manage exclusions from processing and exclusions from analysis in one list."
         )
-        self.manual_participant_exclusions_button.clicked.connect(
-            self._edit_manual_participant_exclusions
+        self.dataset_exclusions_button.setEnabled(self.project is not None)
+        self.dataset_exclusions_button.clicked.connect(
+            self._manage_dataset_exclusions
         )
         qc_form.addRow(
             QLabel(
-                "Manual participant / recording exclusions"
-                if recording_aware_qc
-                else "Manual participant exclusions",
+                "Dataset exclusions",
                 qc_group,
             ),
-            self.manual_participant_exclusions_button,
+            self.dataset_exclusions_button,
         )
         qc_group.content_layout.addLayout(qc_form)
 
@@ -1923,7 +1915,7 @@ class SettingsDialog(QDialog):
         show_toolbox_cache_clear(self)
 
     def _add_frequency_domain_qc_settings(self, parent: QWidget) -> None:
-        header = SubsectionHeaderLabel("Frequency-domain QC", parent)
+        header = SubsectionHeaderLabel("Frequency-domain QC thresholds", parent)
         parent.content_layout.addWidget(header)
 
         self.frequency_domain_qc_thresholds_label = QLabel(
@@ -1935,106 +1927,6 @@ class SettingsDialog(QDialog):
         )
         self.frequency_domain_qc_thresholds_label.setWordWrap(True)
         parent.content_layout.addWidget(self.frequency_domain_qc_thresholds_label)
-
-        self.frequency_domain_qc_exclusions_label = QLabel(parent)
-        self.frequency_domain_qc_exclusions_label.setObjectName(
-            "settings_frequency_domain_qc_exclusions"
-        )
-        self.frequency_domain_qc_exclusions_label.setWordWrap(True)
-
-        self.clear_frequency_domain_manual_exclusions_button = make_action_button(
-            "Clear Manual Frequency Exclusions",
-            compact=True,
-            parent=parent,
-        )
-        self.clear_frequency_domain_manual_exclusions_button.setObjectName(
-            "settings_clear_frequency_domain_manual_exclusions"
-        )
-        self.clear_frequency_domain_manual_exclusions_button.clicked.connect(
-            self._clear_frequency_domain_manual_exclusions
-        )
-
-        exclusion_row = QWidget(parent)
-        exclusion_layout = QHBoxLayout(exclusion_row)
-        exclusion_layout.setContentsMargins(0, 0, 0, 0)
-        exclusion_layout.setSpacing(8)
-        exclusion_layout.addWidget(self.frequency_domain_qc_exclusions_label, 1)
-        exclusion_layout.addWidget(self.clear_frequency_domain_manual_exclusions_button)
-        parent.content_layout.addWidget(exclusion_row)
-        self._refresh_frequency_domain_qc_settings()
-
-    def _refresh_frequency_domain_qc_settings(self) -> None:
-        label = getattr(self, "frequency_domain_qc_exclusions_label", None)
-        button = getattr(self, "clear_frequency_domain_manual_exclusions_button", None)
-        if label is None or button is None:
-            return
-        if self.project is None:
-            label.setText("Load a project to view active frequency-domain exclusions.")
-            button.setEnabled(False)
-            return
-        exclusions = active_frequency_domain_exclusions(self.project.project_root)
-        auto_participants = sorted(exclusions.auto_excluded_participants)
-        manual_participants = sorted(exclusions.manual_excluded_participants)
-        electrode_total = sum(
-            len(electrodes)
-            for electrodes in exclusions.auto_excluded_electrodes_by_participant.values()
-        )
-        parts = [
-            "Automatic participants: "
-            + (", ".join(auto_participants) if auto_participants else "none"),
-            "Manual participants: "
-            + (", ".join(manual_participants) if manual_participants else "none"),
-            f"Automatic participant-electrode exclusions: {electrode_total}",
-        ]
-        if exclusions.downstream_outputs_stale:
-            parts.append("Regeneration required before downstream frequency-domain tools can be used.")
-        label.setText("\n".join(parts))
-        button.setEnabled(bool(manual_participants))
-
-    def _clear_frequency_domain_manual_exclusions(self) -> None:
-        if self.project is None:
-            return
-        exclusions = active_frequency_domain_exclusions(self.project.project_root)
-        manual_participants = sorted(exclusions.manual_excluded_participants)
-        if not manual_participants:
-            self._refresh_frequency_domain_qc_settings()
-            return
-        response = QMessageBox.question(
-            self,
-            "Clear Manual Frequency Exclusions?",
-            (
-                "Clearing manual frequency-domain exclusions requires regenerating "
-                "final harmonics and downstream outputs before using frequency-domain tools."
-            ),
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No,
-        )
-        if response != QMessageBox.Yes:
-            return
-        cleared = clear_manual_frequency_domain_participant_exclusions(
-            self.project.project_root,
-            manual_participants,
-        )
-        self._refresh_frequency_domain_qc_settings()
-        if cleared:
-            QMessageBox.information(
-                self,
-                "Regeneration Required",
-                (
-                    "Manual frequency-domain exclusions were cleared. Resume "
-                    "post-processing before using downstream frequency-domain tools."
-                ),
-            )
-            host = getattr(self, "host", None) or self.parent()
-            if host is not None:
-                try:
-                    from Main_App.gui.processing_workflows import (
-                        _set_resume_post_processing_pending,
-                    )
-
-                    _set_resume_post_processing_pending(host, True)
-                except Exception:
-                    pass
 
     def _removed_electrode_detection_enabled(self) -> bool:
         return (
@@ -2406,6 +2298,7 @@ class SettingsDialog(QDialog):
             normalized = self.project.update_preprocessing(validated_preproc)
             self._project_cache = normalized
             self.project.save()
+            self._sync_electrode_geometry_controls(saved=True)
         except ValueError as exc:
             QMessageBox.warning(self, "Invalid Settings", str(exc))
             return False
@@ -3580,25 +3473,10 @@ class SettingsDialog(QDialog):
                 dialog.manual_removed_electrodes_by_recording()
             )
 
-    def _edit_manual_participant_exclusions(self) -> None:
-        recording_rows = self._qc_recording_rows()
-        if recording_rows:
-            dialog = ManualParticipantExclusionsDialog(
-                self._manual_removed_electrode_participant_ids(),
-                self._manual_excluded_participants,
-                self,
-                recording_rows=recording_rows,
-                excluded_recordings=self._manual_excluded_recordings,
-            )
-        else:
-            dialog = ManualParticipantExclusionsDialog(
-                self._manual_removed_electrode_participant_ids(),
-                self._manual_excluded_participants,
-                self,
-            )
-        if dialog.exec() == QDialog.Accepted:
-            self._manual_excluded_participants = dialog.excluded_participants()
-            self._manual_excluded_recordings = dialog.excluded_recordings()
+    def _manage_dataset_exclusions(self) -> None:
+        from Main_App.gui.dataset_exclusions_workflow import show_dataset_exclusions
+
+        show_dataset_exclusions(self)
 
     def _show_removed_electrode_detection_info(self) -> None:
         QMessageBox.information(
@@ -3841,6 +3719,9 @@ class SettingsDialog(QDialog):
                 ):
                     raise ValueError("Enter a positive upper harmonic frequency in Hz.")
             return normalized
+        except OSError as exc:
+            QMessageBox.warning(self, "Project Settings Unavailable", str(exc))
+            return None
         except ValueError as exc:
             QMessageBox.warning(self, "Invalid Settings", str(exc))
             self._focus_invalid_preproc_field(str(exc))
@@ -4064,6 +3945,7 @@ class SettingsDialog(QDialog):
                 )
                 self._project_cache = normalized
                 self.project.save()
+                self._sync_electrode_geometry_controls(saved=True)
             except ValueError as exc:
                 self._restore_harmonic_settings_after_cancel()
                 QMessageBox.warning(self, "Invalid Settings", str(exc))
@@ -4214,14 +4096,7 @@ class SettingsDialog(QDialog):
         values["line_noise_frequency_hz"] = int(
             self.line_noise_frequency_combo.currentData()
         )
-        values["electrode_montage"] = (
-            self.electrode_montage_combo.currentData()
-            or ELECTRODE_MONTAGE_BIOSEMI64
-        )
-        values["electrode_mapping_profile"] = (
-            self.electrode_mapping_profile_combo.currentData()
-            or ELECTRODE_MAPPING_PROFILE_ANATOMICAL
-        )
+        values.update(self._sync_electrode_geometry_controls())
         if self.project is not None:
             for key in REMOVED_ELECTRODE_DETECTION_CHOICE_CANONICAL_KEYS:
                 if key in self.project.preprocessing:
@@ -4289,6 +4164,32 @@ class SettingsDialog(QDialog):
         )
         values["fixed_harmonic_auto_exclude_base"] = True
         values["stim_channel"] = config.DEFAULT_STIM_CHANNEL
+        return values
+
+    def _sync_electrode_geometry_controls(self, *, saved: bool = False) -> Dict[str, Any]:
+        """Refresh untouched controls; accept explicit edits only after a successful save."""
+
+        if self.project is not None and not saved:
+            self.project.refresh_electrode_geometry_settings()
+        values: Dict[str, Any] = {}
+        for key, combo, default in (
+            ("electrode_montage", self.electrode_montage_combo, ELECTRODE_MONTAGE_BIOSEMI64),
+            (
+                "electrode_mapping_profile", self.electrode_mapping_profile_combo,
+                ELECTRODE_MAPPING_PROFILE_ANATOMICAL,
+            ),
+        ):
+            selected = combo.currentData() or default
+            if self.project is not None and (
+                saved or selected == self._electrode_geometry_control_baseline[key]
+            ):
+                selected = self.project.preprocessing.get(key, default)
+                index = combo.findData(selected)
+                if index < 0:
+                    raise ValueError(f"Unsupported project {key}: {selected}")
+                combo.setCurrentIndex(index)
+                self._electrode_geometry_control_baseline[key] = selected
+            values[key] = selected
         return values
 
 
