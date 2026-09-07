@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
-from typing import Callable
+from typing import BinaryIO, Callable
 
 import numpy as np
 import pandas as pd
@@ -629,7 +629,7 @@ def _correction_export_labels(method_value: object) -> tuple[str, str, str]:
 
 def export_baseline_vs_zero_results_to_excel(
     payload: dict[str, object],
-    save_path: str | Path,
+    save_path: str | Path | BinaryIO,
     log_func: Callable[[str], None],
 ) -> bool:
     """Write baseline-versus-zero results and explicit metadata."""
@@ -788,7 +788,8 @@ def export_baseline_vs_zero_results_to_excel(
         ignore_index=True,
     )
 
-    save_path = Path(save_path)
+    if isinstance(save_path, (str, Path)):
+        save_path = Path(save_path)
     with pd.ExcelWriter(save_path, engine="xlsxwriter") as writer:
         _auto_format_and_write_excel(
             writer,

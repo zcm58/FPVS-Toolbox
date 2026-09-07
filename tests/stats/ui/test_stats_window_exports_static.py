@@ -61,3 +61,18 @@ def test_qc17_review_flags_do_not_become_stats_exclusion_reasons() -> None:
     assert "qc_report.participants" not in source
     assert "manual exclusion" in source
     assert "required DV exclusion" in source
+
+
+def test_individual_stats_exports_format_before_final_disk_write() -> None:
+    tree = ast.parse(EXPORTS_PATH.read_text(encoding="utf-8"))
+    mixin = next(node for node in tree.body if isinstance(node, ast.ClassDef))
+    method = next(
+        node for node in mixin.body
+        if isinstance(node, ast.FunctionDef) and node.name == "export_results"
+    )
+    source = ast.unparse(method)
+    assert "partial(export_formatted_stats_results, func, kind=kind)" in source
+    assert "safe_export_call(" in source
+    assert "apply_rm_anova_pvalue_number_formats(path)" not in source
+    assert "apply_lmm_number_formats_and_metadata(path" not in source
+    assert "apply_baseline_vs_zero_number_formats(path)" not in source

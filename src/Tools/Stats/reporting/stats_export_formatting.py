@@ -7,7 +7,10 @@ from __future__ import annotations
 
 import logging
 import math
+from collections.abc import Callable
+from io import BytesIO
 from pathlib import Path
+from typing import BinaryIO
 
 import openpyxl
 import pandas as pd
@@ -25,6 +28,36 @@ BASELINE_VS_ZERO_P_COLUMNS: tuple[str, ...] = (
     "p_raw",
     "p_corr",
 )
+
+
+def export_formatted_stats_results(
+    exporter: Callable,
+    data: object,
+    save_path: str | Path,
+    log_func: Callable[[str], None],
+    *,
+    kind: str,
+) -> bool:
+    """Keep the legacy Excel roundtrip in memory and write only its final result.
+
+    The original XlsxWriter serialization and openpyxl parsing are retained:
+    bypassing either can change the last bits of exported numeric cell values.
+    """
+
+    if kind not in {"anova", "lmm", "baseline_vs_zero"}:
+        raise ValueError(f"Unsupported formatted Stats export: {kind}")
+    with BytesIO() as buffer:
+        exporter(data, save_path=buffer, log_func=log_func)
+        buffer.seek(0)
+        if kind == "anova":
+            apply_rm_anova_pvalue_number_formats(buffer, output_path=save_path)
+        elif kind == "lmm":
+            apply_lmm_number_formats_and_metadata(
+                buffer, output_path=save_path, lmm_df=data
+            )
+        else:
+            apply_baseline_vs_zero_number_formats(buffer, output_path=save_path)
+    return True
 
 
 def apply_sheet_autosize_and_filters(workbook: openpyxl.Workbook) -> None:
@@ -69,14 +102,15 @@ def log_rm_anova_p_minima(anova_df: pd.DataFrame) -> None:
 
 
 def apply_rm_anova_pvalue_number_formats(
-    workbook_path: str | Path,
+    workbook_path: str | Path | BinaryIO,
     *,
     sheet_name: str = "RM-ANOVA Table",
+    output_path: str | Path | None = None,
 ) -> None:
     """Apply scientific formatting for tiny RM-ANOVA p-values in Excel output."""
 
-    path = Path(workbook_path)
-    workbook = openpyxl.load_workbook(path)
+    path = Path(output_path if output_path is not None else workbook_path)
+    workbook = openpyxl.load_workbook(workbook_path)
     try:
         if sheet_name not in workbook.sheetnames:
             logger.debug(
@@ -120,15 +154,16 @@ LMM_P_COLUMNS: tuple[str, ...] = ("P>|z|", "P>|t|", "p (chi2)")
 
 
 def apply_lmm_number_formats_and_metadata(
-    workbook_path: str | Path,
+    workbook_path: str | Path | BinaryIO,
     *,
     sheet_name: str = "Mixed Model",
     lmm_df: pd.DataFrame | None = None,
+    output_path: str | Path | None = None,
 ) -> None:
     """Apply p-value display rules and add optional LRT/metadata sheets for LMM exports."""
 
-    path = Path(workbook_path)
-    workbook = openpyxl.load_workbook(path)
+    path = Path(output_path if output_path is not None else workbook_path)
+    workbook = openpyxl.load_workbook(workbook_path)
     try:
         if sheet_name in workbook.sheetnames:
             worksheet = workbook[sheet_name]
@@ -226,14 +261,15 @@ def apply_lmm_number_formats_and_metadata(
 
 
 def apply_baseline_vs_zero_number_formats(
-    workbook_path: str | Path,
+    workbook_path: str | Path | BinaryIO,
     *,
     sheet_name: str = "Baseline_vs_Zero",
+    output_path: str | Path | None = None,
 ) -> None:
     """Apply high-precision/scientific formatting to baseline-vs-zero p-value columns."""
 
-    path = Path(workbook_path)
-    workbook = openpyxl.load_workbook(path)
+    path = Path(output_path if output_path is not None else workbook_path)
+    workbook = openpyxl.load_workbook(workbook_path)
     try:
         if sheet_name not in workbook.sheetnames:
             return

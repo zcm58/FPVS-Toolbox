@@ -2,6 +2,9 @@
 # ruff: noqa: F405 - mixin compatibility surface intentionally re-exports support names
 from __future__ import annotations
 
+from functools import partial
+
+from Tools.Stats.reporting.stats_export_formatting import export_formatted_stats_results
 from Tools.Stats.ui.stats_window_support import *  # noqa: F403
 
 logger = logging.getLogger(__name__)
@@ -24,6 +27,8 @@ class StatsWindowExportsMixin:
         if kind == "anova" and isinstance(data, pd.DataFrame):
             log_rm_anova_p_minima(data)
 
+        if kind in {"anova", "lmm", "baseline_vs_zero"}:
+            func = partial(export_formatted_stats_results, func, kind=kind)
         path = safe_export_call(
             func,
             data,
@@ -31,12 +36,6 @@ class StatsWindowExportsMixin:
             fname,
             log_func=self._set_status,
         )
-        if kind == "anova":
-            apply_rm_anova_pvalue_number_formats(path)
-        if kind == "lmm" and isinstance(data, pd.DataFrame):
-            apply_lmm_number_formats_and_metadata(path, lmm_df=data)
-        if kind == "baseline_vs_zero":
-            apply_baseline_vs_zero_number_formats(path)
         return [path]
 
     def _write_dv_metadata(self, out_dir: str, pipeline_id: PipelineId) -> None:
