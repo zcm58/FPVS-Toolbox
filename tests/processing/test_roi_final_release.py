@@ -5,6 +5,7 @@ import json
 from dataclasses import dataclass, replace
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pandas as pd
 import pytest
@@ -35,6 +36,7 @@ from Main_App.processing.roi_coverage import (
     require_project_final_release,
 )
 from Main_App.processing.processing_ledger import save_ledger
+from Main_App.processing.post_processing_context import post_processing_validation_scope
 from Main_App.processing.roi_settings import build_roi_definition_snapshot
 
 
@@ -467,6 +469,7 @@ def test_final_release_rejects_a_different_review_fingerprint(tmp_path):
 @pytest.mark.parametrize("artifact", ["workbook", "condition_companion", "spectral_companion"])
 @pytest.mark.parametrize("failure", ["missing", "changed"])
 @pytest.mark.parametrize("condition_excluded", [False, True])
+@post_processing_validation_scope()
 def test_current_final_release_rejects_a_changed_source_workbook(tmp_path, artifact, failure, condition_excluded):
     from Main_App.Shared.post_process_excel import write_results_workbook
 
@@ -529,6 +532,40 @@ def test_current_final_release_rejects_a_changed_source_workbook(tmp_path, artif
         )
 
 
+def test_release_scope_reuses_validated_sources_and_detaches_returned_coverage(tmp_path, monkeypatch):
+    from Main_App.processing import processing_ledger, roi_coverage
+
+    source = tmp_path / "Faces.xlsx"
+    _write_source(source)
+    outcomes = _outcomes(_cell(source))
+    save_ledger(tmp_path, {"recording_condition_outcomes": outcomes.to_payload()})
+    pre = build_pre_review_roi_coverage(
+        tmp_path, outcome_ledger=outcomes,
+        processing_ledger=_processing_ledger("P01__visit_1"), roi_snapshot=_snapshot(),
+    )
+    final = build_final_roi_coverage(
+        tmp_path, outcome_ledger=outcomes,
+        frequency_decisions=_real_decisions(), pre_review_coverage=pre,
+    )
+    record_final_release_readiness(
+        tmp_path, outcomes, final, expected_decision_fingerprint="review-fingerprint",
+    )
+    read_ledger = Mock(wraps=processing_ledger.load_ledger)
+    read_artifact = Mock(wraps=roi_coverage._current_workbook_artifact)
+    monkeypatch.setattr(processing_ledger, "load_ledger", read_ledger)
+    monkeypatch.setattr(roi_coverage, "_current_workbook_artifact", read_artifact)
+    with post_processing_validation_scope():
+        first = require_current_final_release(tmp_path, expected_decision_fingerprint="review-fingerprint")
+        assert first[1] == final
+        first[1].decision_payload["caller_mutation"] = True
+        second = require_current_final_release(tmp_path, expected_decision_fingerprint="review-fingerprint")
+        assert second[1] == final
+        assert read_ledger.call_count == read_artifact.call_count == 1
+    require_current_final_release(tmp_path, expected_decision_fingerprint="review-fingerprint")
+    assert read_ledger.call_count == read_artifact.call_count == 2
+
+
+@post_processing_validation_scope()
 def test_project_final_release_rejects_changed_decision_payload_with_same_fingerprint(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

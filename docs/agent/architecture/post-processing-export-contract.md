@@ -126,6 +126,28 @@ completed review receipt when its validated analysis is unchanged, even after
 those reconfirmation findings disappear. They add no active exclusion authority
 and do not reopen the ordinary findings solely because the visible list shrinks.
 
+Post-processing validation reuse is owned by
+`Main_App.processing.post_processing_context`. An explicit context spans one
+worker's QC/selection/workbook phases; standalone export entry points create
+their own scope, and nested exports share it. Scope exit discards all retained
+results. Hits still check current project/cohort/settings/ROI identities,
+release decisions and source dependencies, and return detached values.
+Publishing artifact-freshness bookkeeping alone does not invalidate scientific
+selection. Public final-release gates remain mandatory.
+
+`Main_App.processing.provisional_harmonic_cache` holds at most two provisional
+scientific results for one frequency-QC review flow. The GUI passes the same
+instance from the first worker through decision saving to the resumed worker,
+then clears it on completion, cancellation or failure. Standalone QC calls
+remain uncached unless explicitly given an instance. Ordered scientific inputs
+and source-content hashes must match before reuse. Only provisional harmonic
+evidence is cached: reports, current decisions, exclusions and final-release
+checks are rebuilt on every run.
+
+The worker's two source-map modes share one compatibility-index scope after
+workbook validation is released. Each standalone source producer also opens
+that scope; nested calls reuse it and scope exit retains no participant arrays.
+
 Original FullFFT sheets are upstream source artifacts, not Summed-BCA
 derivatives. `Main_App.processing.full_fft_provenance` records their separate
 neutral identity under `tools.processing.full_fft_provenance`: project-relative

@@ -28,6 +28,7 @@ from openpyxl.utils import get_column_letter
 
 from Main_App.io import read_xlsx_sheet_selected_columns
 from Main_App.processing.frequency_domain_qc import load_frequency_domain_qc_state
+from Main_App.processing.post_processing_context import post_processing_validation_scope
 from Main_App.processing.roi_coverage import (
     ROI_VALUE_AVAILABLE,
     RecordingConditionRoiCoverage,
@@ -222,6 +223,7 @@ def default_analysis_ready_workbook_path(project_root: str | Path) -> Path:
     )
 
 
+@post_processing_validation_scope()
 def write_analysis_ready_workbook(
     project_root: str | Path,
     *,

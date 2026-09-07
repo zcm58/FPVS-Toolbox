@@ -84,6 +84,7 @@ from Tools.LORETA_Visualizer.source_producers.source_psd_cache import (
     SourcePsdCacheKeyInputs,
     SourcePsdParticipantResult,
     load_source_psd_cache_entry,
+    source_psd_cache_scope,
     store_source_psd_cache_entry,
 )
 from Tools.LORETA_Visualizer.source_producers.source_validation_report import (
@@ -184,6 +185,7 @@ def default_project_eloreta_volume_hauk_source_psd_output_dir(
     return root / PROJECT_SOURCE_LOCALIZATION_FOLDER / PROJECT_ELORETA_VOLUME_HAUK_SOURCE_PSD_OUTPUT_FOLDER
 
 
+@source_psd_cache_scope()
 def write_project_eloreta_volume_hauk_source_psd_payloads(
     *,
     project: Any,

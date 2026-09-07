@@ -34,10 +34,11 @@ def _function(name, namespace, owner=None, path=HANDOFF):
     {"success": False, "error": "Disk full", "stale_error": "Status save failed"},
     None,
 ])
-def test_completion_resumes_only_after_successful_receipt_and_refreshes_only_tools(monkeypatch, result):
+@pytest.mark.parametrize("resume_started", [False, True])
+def test_completion_resumes_only_after_successful_receipt_and_refreshes_only_tools(monkeypatch, result, resume_started):
     module = ModuleType("Main_App.gui.processing_workflows")
     module._set_resume_post_processing_pending = Mock()
-    module._start_post_processing_pipeline_after_processing = Mock(return_value=True)
+    module._start_post_processing_pipeline_after_processing = Mock(return_value=resume_started)
     monkeypatch.setitem(sys.modules, module.__name__, module)
     thread = object()
     host = SimpleNamespace(_frequency_domain_qc_save_thread=thread, log=Mock())
@@ -45,6 +46,7 @@ def test_completion_resumes_only_after_successful_receipt_and_refreshes_only_too
     owner = SimpleNamespace(
         host=host, project=SimpleNamespace(manifest=manifest), save_thread=thread,
         on_finished=Mock(), result=result, deleteLater=Mock(),
+        provisional_cache=Mock(),
         button_state=(Mock(), True, "Stop Processing", "Original tooltip"),
     )
     messages = SimpleNamespace(critical=Mock())
@@ -63,8 +65,14 @@ def test_completion_resumes_only_after_successful_receipt_and_refreshes_only_too
         assert manifest["tools"] == result["tools"]
         module._start_post_processing_pipeline_after_processing.assert_called_once_with(
             host, on_finished=owner.on_finished, completed_phase_floor=1,
+            provisional_cache=owner.provisional_cache,
         )
-        owner.on_finished.assert_not_called()
+        if resume_started:
+            owner.provisional_cache.clear.assert_not_called()
+            owner.on_finished.assert_not_called()
+        else:
+            owner.provisional_cache.clear.assert_called_once()
+            owner.on_finished.assert_called_once()
         messages.critical.assert_not_called()
     else:
         module._start_post_processing_pipeline_after_processing.assert_not_called()
@@ -73,9 +81,57 @@ def test_completion_resumes_only_after_successful_receipt_and_refreshes_only_too
         assert manifest["tools"] == {"previous": True}
         assert host._post_processing_failure_reason
         messages.critical.assert_called_once()
+        owner.provisional_cache.clear.assert_called_once()
         if result:
             assert result["error"] in host._post_processing_failure_reason
             assert result["stale_error"] in host._post_processing_failure_reason
+
+
+@pytest.mark.parametrize("outcome", ["accepted", "cancelled", "dialog_error"])
+def test_review_hands_evidence_to_save_only_on_acceptance(monkeypatch, outcome):
+    from Main_App.processing import frequency_domain_qc
+
+    dialog_module = ModuleType("Main_App.gui.frequency_domain_qc_dialog")
+    save_module = ModuleType("Main_App.gui.frequency_domain_qc_handoff")
+    dialog = SimpleNamespace(
+        exec=lambda: outcome == "accepted", review_decisions=lambda: [],
+        manual_participant_reasons=lambda: {}, manual_recording_reasons=lambda: {},
+    )
+    dialog_module.FrequencyDomainQcReviewDialog = Mock(
+        return_value=dialog,
+        side_effect=ValueError("Group mismatch") if outcome == "dialog_error" else None,
+    )
+    save_module.save_frequency_domain_qc_review = Mock()
+    monkeypatch.setitem(sys.modules, dialog_module.__name__, dialog_module)
+    monkeypatch.setitem(sys.modules, save_module.__name__, save_module)
+    mark_stale = Mock()
+    monkeypatch.setattr(frequency_domain_qc, "mark_frequency_domain_outputs_stale", mark_stale)
+    callback, cache = Mock(), Mock()
+    project, host, report = SimpleNamespace(project_root=Path("project")), SimpleNamespace(log=Mock()), {}
+    review = _function("_handle_frequency_domain_qc_review", {
+        "_frequency_domain_qc_participant_groups": lambda _project: None,
+        "QDialog": SimpleNamespace(DialogCode=SimpleNamespace(Accepted=True)),
+        "QMessageBox": SimpleNamespace(critical=Mock()),
+        "logger": logging.getLogger(__name__), "logging": logging,
+        "_sync_project_tools_metadata_from_disk": Mock(),
+        "_set_resume_post_processing_pending": Mock(),
+    }, path=ROOT / "src/Main_App/gui/processing_workflows.py")
+
+    review(host, project, report, on_finished=callback, provisional_cache=cache)
+
+    if outcome == "accepted":
+        save_module.save_frequency_domain_qc_review.assert_called_once_with(
+            host, project, report, review_decisions=[], manual_participant_reasons={},
+            manual_recording_reasons={}, on_finished=callback, provisional_cache=cache,
+        )
+        cache.clear.assert_not_called()
+        callback.assert_not_called()
+        mark_stale.assert_not_called()
+    else:
+        save_module.save_frequency_domain_qc_review.assert_not_called()
+        cache.clear.assert_called_once()
+        callback.assert_called_once()
+        mark_stale.assert_called_once()
 
 
 @pytest.mark.parametrize("start_error", [False, True])

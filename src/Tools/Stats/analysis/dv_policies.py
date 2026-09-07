@@ -24,6 +24,7 @@ from Tools.Stats.analysis.dv_policy_settings import (
     normalize_dv_policy,
 )
 from Tools.Stats.data.group_harmonic_cache import project_processing_signature_hash
+from Main_App.processing.post_processing_context import post_processing_validation_scope
 from Tools.Stats.analysis.canonical_harmonics import (
     CANONICAL_HARMONIC_SOURCE,
     CUSTOM_HARMONIC_SOURCE,
@@ -172,6 +173,7 @@ def _source_workbook_identities(
     return tuple(sorted(identities))
 
 
+@post_processing_validation_scope()
 def prepare_summed_bca_data(
     *,
     subjects: List[str],
@@ -257,14 +259,14 @@ def prepare_summed_bca_data(
     meta_target: dict[str, object] | None = dv_metadata if dv_metadata is not None else {}
     if meta_target is not None and resolved_max_freq is not None:
         meta_target["max_frequency_hz"] = float(resolved_max_freq)
-    processing_hash = project_processing_signature_hash(project_root)
-    workbook_identities = _source_workbook_identities(
-        subjects=subjects,
-        conditions=conditions,
-        subject_data=subject_data,
-    )
     cache_key = None
     if provenance_map is None:
+        processing_hash = project_processing_signature_hash(project_root)
+        workbook_identities = _source_workbook_identities(
+            subjects=subjects,
+            conditions=conditions,
+            subject_data=subject_data,
+        )
         cache_key = _build_cache_key(
             subjects=subjects,
             conditions=conditions,

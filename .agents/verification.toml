@@ -115,6 +115,8 @@ tests = [
   "tests/processing/test_missing_condition_outputs.py",
   "tests/processing/test_expected_processing_ledger.py",
   "tests/processing/test_frequency_domain_qc.py",
+  "tests/processing/test_provisional_harmonic_cache.py",
+  "tests/processing/test_post_processing_validation_context.py",
   "tests/processing/test_frequency_domain_qc_review_reuse.py",
   "tests/processing/test_condition_interpolation_qc_policy.py",
   "tests/processing/test_condition_interpolation_execution.py",

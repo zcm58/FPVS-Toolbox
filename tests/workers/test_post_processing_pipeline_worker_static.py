@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import ast
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 import json
 import logging
@@ -209,6 +209,7 @@ def test_post_processing_run_reuses_and_releases_one_dataset_index() -> None:
     assert "dataset_index=self._dataset_index" in stats_source
     assert "dataset_index=self._dataset_index" in audit_source
     assert "selection_metadata=self._harmonic_selection_metadata" in audit_source
+    assert "provisional_cache=self._provisional_cache" in qc_source
 
     try_node = next(node for node in run_method.body if isinstance(node, ast.Try))
     assert any(
@@ -445,6 +446,89 @@ def test_prerequisite_failure_persists_reason_and_never_reports_completion(tmp_p
     state = manifest["tools"]["frequency_domain_qc"]
     assert state["downstream_outputs_stale"] is True
     assert reason in state["stale_reason"]
+
+
+@pytest.mark.parametrize("outcome", ["complete", "review_pause", "review_error"])
+def test_validation_scope_ends_before_sources_and_on_every_review_exit(tmp_path, outcome):
+    from Main_App.processing.post_processing_context import (
+        CACHE_MISS, cached_validation, remember_validation, validation_scope_active,
+    )
+
+    worker = _pipeline_without_qt(tmp_path)
+    stages = []
+
+    def review():
+        assert validation_scope_active()
+        remember_validation("test", "review", {"current": True}, files=())
+        stages.append("review")
+        if outcome == "review_error":
+            raise ValueError("Review failed")
+        return {"review_required": outcome == "review_pause"}
+
+    original_export = worker._run_stats_ready_export
+    original_sources = worker._run_source_maps
+
+    def export(*args):
+        assert cached_validation("test", "review") == {"current": True}
+        stages.append("export")
+        return original_export(*args)
+
+    def sources(*args):
+        assert not validation_scope_active()
+        assert cached_validation("test", "review") is CACHE_MISS
+        stages.append("sources")
+        return original_sources(*args)
+
+    worker._run_frequency_domain_qc_review = review
+    worker._run_stats_ready_export = export
+    worker._run_source_maps = sources
+    worker.run()
+
+    assert stages == (["review", "export", "sources"] if outcome == "complete" else ["review"])
+    assert not validation_scope_active()
+    assert cached_validation("test", "review") is CACHE_MISS
+
+
+@pytest.mark.parametrize("fail_second_mode", [False, True])
+def test_source_modes_share_one_compatibility_scope_and_release_it(tmp_path, monkeypatch, fail_second_mode):
+    from Tools.LORETA_Visualizer.source_producers import source_psd_cache
+
+    worker = _pipeline_without_qt(tmp_path)
+    namespace = worker.run.__func__.__globals__
+    method = _class_method(_worker_tree(), "_run_source_maps")
+    module = ast.Module(body=[method], type_ignores=[])
+    exec(compile(ast.fix_missing_locations(module), str(WORKER_PATH), "exec"), namespace)
+    worker._is_repeated_session_project = lambda: False
+    worker._pipeline_steps = []
+    worker._emit_progress = Mock()
+    state = {"entries": 0, "active": False}
+    modes = []
+
+    @contextmanager
+    def scope():
+        state.update(entries=state["entries"] + 1, active=True)
+        try:
+            yield
+        finally:
+            state["active"] = False
+
+    def export(_root, mode):
+        assert state["active"]
+        modes.append(mode)
+        if fail_second_mode and len(modes) == 2:
+            raise ValueError("Second source export failed")
+        return mode
+
+    monkeypatch.setattr(source_psd_cache, "source_psd_cache_scope", scope)
+    worker._run_source_map_mode = export
+    run_sources = MethodType(namespace["_run_source_maps"], worker)
+    if fail_second_mode:
+        with pytest.raises(ValueError, match="Second source export failed"):
+            run_sources(tmp_path)
+    else:
+        assert run_sources(tmp_path) == ["l2_mne_source_psd", "eloreta_volume_source_psd"]
+    assert modes == ["l2_mne_source_psd", "eloreta_volume_source_psd"]
+    assert state == {"entries": 1, "active": False}
 
 
 @pytest.mark.parametrize("failed_step", ["full_fft_provenance", "harmonic_selection", "stats_ready_summed_bca"])

@@ -16,6 +16,7 @@ import pandas as pd
 from openpyxl.styles import Alignment, Font
 from openpyxl.utils import get_column_letter
 
+from Main_App.processing.post_processing_context import post_processing_validation_scope
 from Tools.Stats.analysis.dv_policies import prepare_summed_bca_data
 from Tools.Stats.analysis.dv_policy_settings import (
     FIXED_PREDEFINED_POLICY_ID,
@@ -906,6 +907,7 @@ def _format_selection_summary_sheet(worksheet: object) -> None:
     worksheet.freeze_panes = "A2"
 
 
+@post_processing_validation_scope()
 def prepare_stats_ready_export(
     *,
     subjects: list[str],

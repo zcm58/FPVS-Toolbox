@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import math
 import os
@@ -19,6 +20,14 @@ from Main_App.projects import (
     normalize_frequency_protocol,
 )
 from Main_App.processing.processing_ledger import load_ledger
+from Main_App.processing.post_processing_context import (
+    CACHE_MISS,
+    cached_validation,
+    capture_validation_files,
+    remember_validation,
+    validation_files_unchanged,
+    validation_scope_active,
+)
 from Main_App.processing.frequency_domain_qc import (
     filter_frequency_domain_recordings,
     filter_frequency_domain_subjects,
@@ -512,8 +521,10 @@ def _processing_cache_request(
 
 def _processing_selection_input_fingerprint(
     inputs: ProcessingHarmonicSelectionInputs,
+    *,
+    cache_request: GroupHarmonicCacheRequest | None = None,
 ) -> str:
-    request = _processing_cache_request(inputs)
+    request = cache_request or _processing_cache_request(inputs)
     upstream_identity = copy.deepcopy(request.fingerprint)
     sources = upstream_identity.get("source_workbooks")
     if isinstance(sources, list):
@@ -676,6 +687,101 @@ def load_processing_harmonic_selection(
 ) -> GroupSignificantHarmonicSelection | PersistedFixedHarmonicSelection:
     """Load the current canonical processing selection without recalculating."""
 
+    if not validation_scope_active():
+        return _load_processing_harmonic_selection_uncached(project, log_func=log_func)
+
+    from Main_App.projects import load_project_dataset_index
+    from Main_App.processing.processing_ledger import ledger_path
+
+    root = Path(project.project_root).resolve()
+    # Re-scan canonical identity even on a hit: new, omitted, or regrouped
+    # sources must never disappear behind the run-scoped optimization.
+    index = load_project_dataset_index(root)
+    release = _current_final_release_context(root)
+    cache_key = _selection_validation_key(project, index, release)
+    cached = cached_validation("processing_selection", cache_key)
+    if cached is not CACHE_MISS:
+        selection, messages = cached
+        if log_func is not None:
+            for message in messages:
+                log_func(message)
+        return selection
+
+    manifest_files = capture_validation_files([root / "project.json"], hash_contents=True)
+    ledger_files = capture_validation_files([ledger_path(root)], hash_contents=True)
+    source_files = _selection_validation_sources(index)
+    messages: list[str] = []
+
+    def _log(message: str) -> None:
+        messages.append(message)
+        if log_func is not None:
+            log_func(message)
+
+    selection = _load_processing_harmonic_selection_uncached(project, log_func=_log)
+    # Publication/migration may change the manifest during an initial read.
+    # Never store that mixed observation; the next call validates it afresh.
+    if validation_files_unchanged(manifest_files):
+        remember_validation(
+            "processing_selection", cache_key, (selection, tuple(messages)),
+            files=(*ledger_files, *source_files),
+        )
+    return selection
+
+
+def _selection_validation_key(project: Any, index: ProjectDatasetIndex, release: tuple) -> str:
+    from Main_App.processing.artifact_freshness import ARTIFACT_FRESHNESS_MANIFEST_PATH
+    from Main_App.processing.roi_coverage import _dataset_index_identity_payload
+
+    manifest = copy.deepcopy(dict(index.manifest or {}))
+    # Only derived-artifact publication is irrelevant. Preserve every other
+    # manifest value, including the exact accepted metadata and QC decisions.
+    parents = []
+    node = manifest
+    for field_name in ARTIFACT_FRESHNESS_MANIFEST_PATH[:-1]:
+        child = node.get(field_name)
+        if not isinstance(child, dict):
+            break
+        parents.append((node, field_name))
+        node = child
+    else:
+        node.pop(ARTIFACT_FRESHNESS_MANIFEST_PATH[-1], None)
+        for parent, field_name in reversed(parents):
+            if not parent[field_name]:
+                parent.pop(field_name)
+    identity = {
+        "manifest": manifest,
+        "dataset": _dataset_index_identity_payload(index),
+        "rois": list((load_rois_from_settings() or {}).items()),
+        "policy": _dv_policy_payload(_harmonic_selection_settings(project)),
+        "protocol": _current_project_frequency_protocol(project, index.project_root).fingerprint,
+        "conditions": _ordered_conditions(project, list(index.conditions)),
+        "final_release_receipt_fingerprint": release[2].fingerprint,
+    }
+    return hashlib.sha256(
+        json.dumps(identity, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
+def _selection_validation_sources(index: ProjectDatasetIndex) -> tuple:
+    from Main_App.io.condition_data import condition_companion_identity
+    from Main_App.io.spectral_data import spectral_companion_identity
+
+    paths = [record.path for record in index.workbooks]
+    workbook_files = capture_validation_files(paths, hash_contents=True)
+    companion_paths = []
+    for path in paths:
+        for reader in (condition_companion_identity, spectral_companion_identity):
+            descriptor = reader(path)
+            if descriptor is not None:
+                companion_paths.append(path.parent / descriptor["path"])
+    return (*workbook_files, *capture_validation_files(companion_paths))
+
+
+def _load_processing_harmonic_selection_uncached(
+    project: Any,
+    *,
+    log_func: Callable[[str], None] | None = None,
+) -> GroupSignificantHarmonicSelection | PersistedFixedHarmonicSelection:
     inputs = _processing_harmonic_selection_inputs(project, log_func=log_func)
     saved = _load_processing_harmonic_selection_record(inputs.project_root)
     if saved is None and inputs.settings.name == GROUP_SIGNIFICANT_POLICY_NAME:
@@ -704,7 +810,10 @@ def load_processing_harmonic_selection(
             "or method version than the current project settings."
         )
 
-    current_input_fingerprint = _processing_selection_input_fingerprint(inputs)
+    cache_request = _processing_cache_request(inputs)
+    current_input_fingerprint = _processing_selection_input_fingerprint(
+        inputs, cache_request=cache_request,
+    )
     saved_input_fingerprint = str(saved.get("input_fingerprint") or "")
     if not saved_input_fingerprint or saved_input_fingerprint != current_input_fingerprint:
         raise _missing_processing_selection_error(
@@ -746,23 +855,6 @@ def load_processing_harmonic_selection(
             )
         return loaded_fixed
 
-    cache_request = build_group_harmonic_cache_request(
-        project_root=inputs.project_root,
-        subjects=inputs.subjects,
-        conditions=inputs.conditions,
-        subject_data=inputs.subject_data,
-        base_frequency_hz=inputs.base_frequency_hz,
-        max_freq_hz=inputs.max_frequency_hz,
-        settings=inputs.settings,
-        rois=inputs.rois,
-        recording_assignments=(
-            inputs.recording_assignments if _inputs_are_repeated(inputs) else None
-        ),
-        declared_session_ids=(
-            inputs.declared_session_ids if _inputs_are_repeated(inputs) else None
-        ),
-        oddball_frequency_hz=_require_canonical_oddball_frequency(inputs),
-    )
     try:
         selection = group_significant_selection_from_metadata(
             dict(metadata),

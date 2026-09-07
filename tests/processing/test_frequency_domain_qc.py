@@ -190,6 +190,49 @@ def test_frequency_domain_qc_stage_progress_preserves_report(tmp_path, monkeypat
     assert [record.stage for record in starts] == [record.stage for record in stages]
 
 
+@pytest.mark.parametrize("native", [False, True])
+@pytest.mark.parametrize("decision", [DECISION_RETAIN, DECISION_EXCLUDE_CONDITION])
+def test_provisional_cache_rebuilds_exact_current_review_after_decisions(
+    tmp_path, monkeypatch, native, decision,
+):
+    from Main_App.processing.provisional_harmonic_cache import ProvisionalHarmonicCache
+
+    project = _make_project(tmp_path)
+    if native:
+        from Main_App.Shared.post_process_excel import write_results_workbook
+
+        for source in (project.project_root / "1 - Excel Data Files").rglob("*.xlsx"):
+            write_results_workbook(str(source.with_suffix(".fpvs")), pd.read_excel(source, sheet_name=None))
+    monkeypatch.setattr(frequency_qc, "_now_utc_iso", lambda: "2026-09-07T00:00:00Z")
+    original = frequency_qc._provisional_harmonics
+    computations = []
+
+    def compute(**kwargs):
+        computations.append(kwargs)
+        return original(**kwargs)
+
+    monkeypatch.setattr(frequency_qc, "_provisional_harmonics", compute)
+    cache = ProvisionalHarmonicCache()
+    first = run_frequency_domain_qc_review(project, provisional_cache=cache)
+    apply_frequency_domain_qc_decision(
+        project.project_root, first, review_decisions=_decisions(first, decision),
+    )
+    reviewed = run_frequency_domain_qc_review(project, provisional_cache=cache)
+    assert len(computations) == (1 if decision == DECISION_RETAIN else 2)
+    # Only provisional evidence is reused. Current exclusions, integrity,
+    # findings, review receipt, output text and fingerprints match a cold run.
+    report_path = project.project_root / "Quality Check" / "Frequency_Domain_QC_Review.txt"
+    reviewed_text = report_path.read_bytes()
+    uncached = run_frequency_domain_qc_review(project)
+    assert reviewed == uncached
+    assert report_path.read_bytes() == reviewed_text
+    if decision == DECISION_RETAIN:
+        assert reviewed["review_reused"] is True
+        assert reviewed["review_required"] is False
+    else:
+        assert set(computations[1]["subject_data"]["P1"]) == {"CondB"}
+
+
 def test_frequency_domain_qc_clear_manual_marks_outputs_stale(tmp_path):
     project = _make_project(tmp_path)
     report = run_frequency_domain_qc_review(project)

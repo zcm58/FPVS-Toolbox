@@ -446,8 +446,10 @@ def test_worker_finished_delivers_explicit_failure_to_completion_callback():
     host = SimpleNamespace(log=Mock())
     finalized_reasons = []
     namespace = _post_processing_namespace()
+    cache = Mock()
     namespace.update({
         "host": host, "project": object(), "logging": logging,
+        "provisional_cache": cache,
         "_post_processing_source_map_outcome": lambda _: (False, False),
         "on_finished": lambda: finalized_reasons.append(host._post_processing_failure_reason),
         "QTimer": SimpleNamespace(singleShot=lambda _delay, callback: callback()),
@@ -462,6 +464,7 @@ def test_worker_finished_delivers_explicit_failure_to_completion_callback():
     })
 
     assert finalized_reasons == [reason]
+    cache.clear.assert_called_once()
     assert host._post_processing_pipeline_thread is None
     assert any("not ready" in call.args[0] for call in host.log.call_args_list)
 

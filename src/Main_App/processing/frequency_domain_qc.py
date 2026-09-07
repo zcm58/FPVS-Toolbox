@@ -20,6 +20,7 @@ import pandas as pd
 from Main_App.processing.frequency_qc_identity import (
     resolve_frequency_qc_recording_decisions,
 )
+from Main_App.processing.provisional_harmonic_cache import ProvisionalHarmonicCache
 from Main_App.projects import (
     ProjectDatasetIndex,
     load_project_dataset_index,
@@ -265,6 +266,7 @@ def run_frequency_domain_qc_review(
     *,
     log_func: Callable[[str], None] | None = None,
     dataset_index: ProjectDatasetIndex | None = None,
+    provisional_cache: ProvisionalHarmonicCache | None = None,
 ) -> dict[str, object]:
     """Build a provisional summed-BCA QC report for the active project."""
 
@@ -339,7 +341,7 @@ def run_frequency_domain_qc_review(
     _start_stage("independent_evidence", "Checking preprocessing evidence…")
     independent_qc_context = _load_independent_qc_context(project_root)
     _start_stage("provisional_harmonics", "Preparing candidate harmonics…")
-    selected_harmonics, provisional_metadata = _provisional_harmonics(
+    provisional_inputs = dict(
         project_root=project_root,
         subjects=subjects,
         conditions=ordered_conditions,
@@ -378,6 +380,11 @@ def run_frequency_domain_qc_review(
                 excluded_conditions=condition_exclusions,
             )
         ),
+    )
+    selected_harmonics, provisional_metadata = (
+        _provisional_harmonics(**provisional_inputs)
+        if provisional_cache is None
+        else provisional_cache.resolve(_provisional_harmonics, **provisional_inputs)
     )
     _log(
         "Frequency-domain QC is reviewing provisional summed BCA values "

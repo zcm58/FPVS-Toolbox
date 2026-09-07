@@ -665,6 +665,7 @@ def test_base_post_processing_steps_reuse_one_dataset_index(
 
     root = tmp_path.resolve()
     sentinel_index = SimpleNamespace(project_root=root)
+    sentinel_cache = object()
     loader_calls: list[Path] = []
     captured: list[tuple[str, object]] = []
     sentinel_outcomes = SimpleNamespace(
@@ -679,8 +680,9 @@ def test_base_post_processing_steps_reuse_one_dataset_index(
         loader_calls.append(Path(project_root))
         return sentinel_index
 
-    def run_qc(_project, *, log_func, dataset_index):
+    def run_qc(_project, *, log_func, dataset_index, provisional_cache):
         assert callable(log_func)
+        assert provisional_cache is sentinel_cache
         log_func("Frequency-domain QC: Checking electrode findings...")
         log_func("[PERF] technical detail stays in the log")
         captured.append(("qc", dataset_index))
@@ -770,7 +772,7 @@ def test_base_post_processing_steps_reuse_one_dataset_index(
     )
     monkeypatch.setattr(exports_module, "write_analysis_ready_workbook", write_audit)
 
-    worker = PostProcessingPipelineWorker(_Project(root))
+    worker = PostProcessingPipelineWorker(_Project(root), provisional_cache=sentinel_cache)
     phase_updates = []
     worker.phase_progress.connect(
         lambda *args: phase_updates.append(args)

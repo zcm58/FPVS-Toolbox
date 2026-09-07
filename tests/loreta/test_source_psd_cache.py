@@ -7,6 +7,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from Tools.LORETA_Visualizer.source_producers import source_psd_cache as cache_module
 from Tools.LORETA_Visualizer.source_producers.l2_mne_hauk_zscore import (
     L2MNEHaukParticipantZScoreValues,
 )
@@ -29,6 +30,7 @@ from Tools.LORETA_Visualizer.source_producers.source_psd_cache import (
     cleanup_source_psd_cache_temp_files,
     load_source_psd_cache_entry,
     source_psd_cache_root,
+    source_psd_cache_scope,
     scientific_source_psd_method_metadata,
     store_source_psd_cache_entry,
 )
@@ -66,7 +68,7 @@ def test_cache_key_is_canonical_and_tracks_all_scientific_inputs() -> None:
         )
 
 
-def test_cache_key_ignores_only_harmonic_selection_cache_bookkeeping() -> None:
+def test_cache_key_ignores_selection_provenance_but_keeps_numerical_inputs() -> None:
     method_metadata = {
         "method_id": "l2_mne_hauk_source_psd_cortical_normal_v1",
         "lambda2": 1.0 / 9.0,
@@ -77,6 +79,7 @@ def test_cache_key_ignores_only_harmonic_selection_cache_bookkeeping() -> None:
                 "selection_cache_source": "computed_this_run",
                 "selection_cache_saved_at": "2026-07-16T10:00:00Z",
                 "selection_cache_key": "first-selection-cache-key",
+                "selection_fingerprint": "a" * 64,
             }
         },
     }
@@ -89,6 +92,7 @@ def test_cache_key_ignores_only_harmonic_selection_cache_bookkeeping() -> None:
             "selection_cache_source": "saved_processing_metadata",
             "selection_cache_saved_at": "2026-07-16T11:00:00Z",
             "selection_cache_key": "second-selection-cache-key",
+            "selection_fingerprint": "b" * 64,
         }
     )
 
@@ -110,6 +114,7 @@ def test_cache_key_ignores_only_harmonic_selection_cache_bookkeeping() -> None:
             "selection_cache_source",
             "selection_cache_saved_at",
             "selection_cache_key",
+            "selection_fingerprint",
         }
     )
     assert (
@@ -129,6 +134,161 @@ def test_cache_key_ignores_only_harmonic_selection_cache_bookkeeping() -> None:
         **common,
     )
     assert changed.cache_key != first.cache_key
+
+
+def test_legacy_selection_fingerprint_keys_reuse_verified_arrays_without_writing(tmp_path):
+    inputs = _selection_key_inputs()
+    legacy_paths = _store_legacy_entry(tmp_path, inputs, selection_fingerprint="b" * 64)
+    before = {path.name: path.read_bytes() for path in legacy_paths.root.iterdir()}
+
+    lookup = load_source_psd_cache_entry(project_root=tmp_path, key_inputs=inputs)
+
+    assert lookup.hit
+    assert lookup.cache_key == inputs.cache_key
+    assert lookup.paths == legacy_paths
+    np.testing.assert_array_equal(lookup.result.values, _participant_result().values)
+    assert {path.name: path.read_bytes() for path in legacy_paths.root.iterdir()} == before
+
+
+@pytest.mark.parametrize("changed", ["derivative", "model", "method", "bins", "harmonics"])
+def test_legacy_cache_does_not_reuse_changed_numerical_inputs(tmp_path, changed):
+    inputs = _selection_key_inputs()
+    _store_legacy_entry(tmp_path, inputs)
+    payload = inputs.canonical_payload()
+    payload.pop("format")
+    if changed == "derivative":
+        payload["derivative_checksum_sha256"] = "c" * 64
+    elif changed == "model":
+        payload["numerical_model_metadata"]["spacing"] = "ico4"
+    elif changed == "method":
+        payload["method_metadata"]["lambda2"] = 0.25
+    elif changed == "bins":
+        payload["frequency_metadata"]["n_times"] = 25600
+    else:
+        payload["method_metadata"]["custom_metadata"]["harmonic_selection"][
+            "selected_harmonics_hz"
+        ] = [1.2]
+
+    lookup = load_source_psd_cache_entry(
+        project_root=tmp_path, key_inputs=SourcePsdCacheKeyInputs(**payload)
+    )
+
+    assert not lookup.hit
+
+
+@pytest.mark.parametrize("tampered", ["metadata", "arrays"])
+def test_legacy_hits_revalidate_metadata_and_arrays_in_same_scope(tmp_path, tampered):
+    inputs = _selection_key_inputs()
+    paths = _store_legacy_entry(tmp_path, inputs)
+    with source_psd_cache_scope():
+        assert load_source_psd_cache_entry(project_root=tmp_path, key_inputs=inputs).hit
+        if tampered == "metadata":
+            metadata = _read_metadata(paths.metadata_path)
+            metadata["key_payload"]["method_metadata"]["lambda2"] = 0.25
+            _write_metadata(paths.metadata_path, metadata)
+        else:
+            paths.arrays_path.write_bytes(b"corrupt archive")
+        assert not load_source_psd_cache_entry(project_root=tmp_path, key_inputs=inputs).hit
+
+
+def test_legacy_index_is_scoped_and_new_exact_writes_remain_visible(tmp_path, monkeypatch):
+    inputs = _selection_key_inputs()
+    _store_legacy_entry(tmp_path, inputs)
+    real_build = cache_module._build_legacy_source_psd_index
+    indexed_roots = []
+
+    def track_build(root):
+        indexed_roots.append(root)
+        return real_build(root)
+
+    monkeypatch.setattr(cache_module, "_build_legacy_source_psd_index", track_build)
+    with source_psd_cache_scope():
+        first = load_source_psd_cache_entry(project_root=tmp_path, key_inputs=inputs)
+        with source_psd_cache_scope():
+            assert load_source_psd_cache_entry(project_root=tmp_path, key_inputs=inputs).hit
+        assert len(indexed_roots) == 1
+        written = store_source_psd_cache_entry(
+            project_root=tmp_path, key_inputs=inputs, result=_participant_result()
+        )
+        exact = load_source_psd_cache_entry(project_root=tmp_path, key_inputs=inputs)
+        assert exact.paths == written.paths
+        assert exact.paths != first.paths
+        assert len(indexed_roots) == 1
+        written.paths.arrays_path.unlink()
+        written.paths.metadata_path.unlink()
+    with source_psd_cache_scope():
+        assert load_source_psd_cache_entry(project_root=tmp_path, key_inputs=inputs).hit
+    assert len(indexed_roots) == 2
+
+
+def test_corrupt_exact_entry_is_not_hidden_by_legacy_fallback(tmp_path):
+    inputs = _selection_key_inputs()
+    _store_legacy_entry(tmp_path, inputs)
+    written = store_source_psd_cache_entry(
+        project_root=tmp_path, key_inputs=inputs, result=_participant_result()
+    )
+    written.paths.arrays_path.write_bytes(b"corrupt current archive")
+
+    lookup = load_source_psd_cache_entry(project_root=tmp_path, key_inputs=inputs)
+
+    assert lookup.status == CACHE_STATUS_MISS_ARRAY_CHECKSUM
+    assert not lookup.hit
+
+
+def test_legacy_index_never_reuses_another_projects_entries(tmp_path):
+    first_root = tmp_path / "First"
+    second_root = tmp_path / "Second"
+    first_root.mkdir()
+    second_root.mkdir()
+    inputs = _selection_key_inputs()
+    _store_legacy_entry(first_root, inputs)
+
+    with source_psd_cache_scope():
+        assert load_source_psd_cache_entry(project_root=first_root, key_inputs=inputs).hit
+        assert not load_source_psd_cache_entry(project_root=second_root, key_inputs=inputs).hit
+
+
+@pytest.mark.parametrize(
+    "limit", ["_LEGACY_INDEX_MAX_FILES", "_LEGACY_INDEX_MAX_BYTES", "_LEGACY_METADATA_MAX_BYTES"]
+)
+def test_legacy_discovery_limits_fall_back_to_recalculation(tmp_path, monkeypatch, limit):
+    inputs = _selection_key_inputs()
+    _store_legacy_entry(tmp_path, inputs)
+    monkeypatch.setattr(cache_module, limit, 0)
+
+    assert not load_source_psd_cache_entry(project_root=tmp_path, key_inputs=inputs).hit
+
+
+def _selection_key_inputs():
+    payload = _key_inputs().canonical_payload()
+    payload.pop("format")
+    payload["method_metadata"]["custom_metadata"] = {
+        "harmonic_selection": {
+            "selected_harmonics_hz": [1.2, 2.4, 3.6],
+            "selection_fingerprint": "a" * 64,
+        }
+    }
+    return SourcePsdCacheKeyInputs(**payload)
+
+
+def _store_legacy_entry(project_root, inputs, *, selection_fingerprint="a" * 64):
+    written = store_source_psd_cache_entry(
+        project_root=project_root, key_inputs=inputs, result=_participant_result()
+    )
+    metadata = _read_metadata(written.paths.metadata_path)
+    metadata["key_payload"]["method_metadata"]["custom_metadata"]["harmonic_selection"][
+        "selection_fingerprint"
+    ] = selection_fingerprint
+    legacy_key = hashlib.sha256(
+        json.dumps(metadata["key_payload"], sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    paths = cache_module.source_psd_cache_paths(project_root, legacy_key)
+    metadata["cache_key"] = legacy_key
+    metadata["arrays_file"] = paths.arrays_path.name
+    written.paths.arrays_path.replace(paths.arrays_path)
+    written.paths.metadata_path.unlink()
+    _write_metadata(paths.metadata_path, metadata)
+    return paths
 
 
 def test_cache_root_requires_absolute_existing_project_and_stays_confined(tmp_path: Path) -> None:

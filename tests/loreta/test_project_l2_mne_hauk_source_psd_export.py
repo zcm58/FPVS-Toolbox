@@ -337,6 +337,7 @@ def test_project_source_psd_export_loads_harmonics_from_the_active_project(
     project = _project_with_ledger(tmp_path, participants=("P01",))
     _write_time_domain_derivative(project.project_root, participant_id="P01")
     seen_projects: list[Any] = []
+    selection_identity = {"fingerprint": "accepted-project-selection"}
 
     class _Selection:
         selected_harmonics_hz = (20.0,)
@@ -350,6 +351,7 @@ def test_project_source_psd_export_loads_harmonics_from_the_active_project(
                 "selection_cache_source": "saved_processing_metadata",
                 "selection_cache_saved_at": "2026-07-16T10:00:00Z",
                 "selection_cache_key": "harmonic-cache-key",
+                "selection_fingerprint": selection_identity["fingerprint"],
             }
 
     def fake_load_processing_harmonics(active_project: Any, **_kwargs: Any) -> _Selection:
@@ -384,6 +386,7 @@ def test_project_source_psd_export_loads_harmonics_from_the_active_project(
             "selection_cache_source",
             "selection_cache_saved_at",
             "selection_cache_key",
+            "selection_fingerprint",
         }
     )
     manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
@@ -391,6 +394,27 @@ def test_project_source_psd_export_loads_harmonics_from_the_active_project(
     assert manifest_selection["selection_cache_source"] == "saved_processing_metadata"
     assert manifest_selection["selection_cache_saved_at"] == "2026-07-16T10:00:00Z"
     assert manifest_selection["selection_cache_key"] == "harmonic-cache-key"
+    assert manifest_selection["selection_fingerprint"] == "accepted-project-selection"
+
+    selection_identity["fingerprint"] = "new-accepted-project-selection"
+
+    def unexpected_recalculation(**_kwargs):
+        raise AssertionError("A global selection fingerprint does not change participant arrays")
+
+    reused = write_project_l2_mne_hauk_source_psd_payloads(
+        project=project,
+        source_psd_model=_source_psd_model(),
+        compute_source_psd_func=unexpected_recalculation,
+        aggregations=("mean",),
+        cluster_mask_enabled=False,
+    )
+    assert reused.cache_hit_count == 1
+    assert reused.cache_miss_count == 0
+    current_manifest = json.loads(reused.manifest_path.read_text(encoding="utf-8"))
+    current_selection = current_manifest["metadata"]["source_psd_method"]["custom_metadata"][
+        "harmonic_selection"
+    ]
+    assert current_selection["selection_fingerprint"] == "new-accepted-project-selection"
 
 
 def test_project_source_psd_export_refuses_missing_completed_participant_derivative(

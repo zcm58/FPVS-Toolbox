@@ -2,6 +2,99 @@
 
 ## Status
 
+The 2026-09-07 follow-up starts from `593b358c` on
+`codex/preprocessing-qc-v3`. The user approved implementing the first three
+findings from the MCCTR post-processing investigation: numerical source-cache
+reuse across selection-fingerprint-only changes, bounded accepted-selection
+and release validation reuse, and unchanged provisional QC evidence reuse
+across review. Commit and push after exactness, invalidation and performance
+checks. Existing untracked `outputs/` path-audit findings remain outside scope.
+
+Follow-up execution:
+
+- [x] Normalize participant source cache identities without changing source
+  arrays or current output provenance; safely reuse compatible existing caches.
+- [x] Reuse validated selection/release state within bounded export operations,
+  retaining replacement, decision, settings, cohort and caller-mutation guards.
+- [x] Reuse provisional scientific evidence across review only when all its
+  inputs remain identical; always apply the current review decisions.
+- [x] Verify exact output parity and stale/corrupt/missing input handling,
+  measure representative-project latency, document visible smoke and commit.
+
+### Follow-up implementation and measurements
+
+The source-PSD identity now excludes the project-wide selection fingerprint
+alongside the three existing selection-cache annotations. Exact derivative,
+inverse-model, method, harmonics and FFT-bin identities remain mandatory. Both
+public producers use a bounded compatibility index scoped to that export
+(shared across the worker's two source-map modes);
+historical metadata must validate under its original key and the complete
+normalized current key, and every hit revalidates the numerical archive.
+Existing cache files remain usable without migration or deletion. Newly
+published source manifests carry the current selection fingerprint.
+
+Accepted selection and release validation are scoped to the worker's
+QC/selection/workbook phases or one standalone export operation. Nested
+consumers reuse detached validated results. Live semantic manifest, canonical
+dataset/cohort, ordered ROI/profile/protocol/condition inputs and current review
+decisions remain checked. Ledger and anchor SHA-256 checks detect same-stat
+in-place edits; companions retain the existing verified-reader policy with
+additional replacement identities. Only artifact-freshness publication is
+ignored in the selection key. No retained validation survives scope exit.
+
+The provisional evidence cache is an explicit two-entry object passed through
+the GUI review/save/resume flow and cleared when that flow finishes or fails.
+Its key includes ordered numerical inputs and actual anchor/companion bytes.
+Only the unchanged provisional calculation is reused; all current report,
+exclusion, integrity and release steps still execute. The calculation's body
+and statistical methods are unchanged.
+
+Representative MCCTR checks used its current 24 participants, six conditions
+and 143 available source cells. Measurements are affected-stage observations,
+not a full-pipeline timing claim:
+
+- All 286 historical L2-MNE/eLORETA source-cache requests hit compatible
+  entries. Every returned array matched the corresponding original array
+  bytes exactly. The read-only lookup plus independent comparison took 15.8 s;
+  no source inverse computation or project write was performed.
+- A read-only outer selection load plus actual Stats-ready preparation used
+  the same project-manifest SHA-256 at baseline `593b358c` and after these
+  changes. Two fresh-operation runs took 52.483/45.195 s before and
+  29.358/29.352 s after: median 48.839 to 29.355 s, 39.9% less time (1.66x).
+  All four export frames matched exactly in values, ordering and dtypes;
+  every numeric column also matched byte-for-byte. The current project
+  produced 432 long-format rows. Repeated runs matched exactly too. Benchmark
+  audit hooks rejected all project writes; only scratch receipts were saved.
+- Provisional harmonic calculation took 36.413 s on the unchanged path,
+  39.359 s on the cache miss including content validation, and 2.001 s on the
+  resumed hit. Exact scientific metadata, container ordering and float bits
+  matched; only existing transient cache annotations were excluded from that
+  benchmark comparison. Native and historical-source regression tests also
+  compare entire current QC reports and exported report text after Retain or
+  condition-exclusion decisions.
+
+Verification: processing focused gate 1,783 passed and 5 skipped; GUI focused
+gate 395 passed; Stats focused gate 442 passed; complete non-Qt LORETA suite
+333 passed; repo focused gate 18 passed; worker orchestration checks
+27 passed, including scope disposal on completion, review pause and exception,
+and shared source-index disposal after either successful or failed exports.
+Ruff and compilation passed for changed code. The broad command
+`python .agents/scripts/verify.py --scope repo --tier precommit` stops at eight
+pre-existing hard-coded-path audit findings in untracked `outputs/` content,
+before its test phase. That unrelated content is preserved and excluded from
+this commit. Focused/direct non-Qt suites provide the applicable validation;
+this is not a claim that the blocked broad gate passed.
+
+Visible/manual smoke remains intentionally unrun locally: in a visible Main
+App session, run a representative project through frequency-domain QC, retain
+unchanged findings and continue. Verify one provisional-cache hit on resume,
+responsive controls, successful standard Stats/full-audit workbooks and both
+source exports with current provenance. Repeat with a condition exclusion to
+verify a miss/current report, then cancel review and verify a later run starts
+with fresh evidence. Confirm no pending source/validation state crosses the
+end of a workflow. Local checks execute orchestration without Qt; Qt execution
+remains CI-only unless a safe visible session is explicitly approved.
+
 The original pipeline work is present on local `codex/finalize-multi-group`.
 The post-processing extension is complete on
 `codex/finalize-multi-group-postprocess-speedups`, branched from that local

@@ -664,9 +664,26 @@ Toolbox neighboring-bin z-score. Only compact method-specific participant
 results are cached; source amplitudes are reproducible from the durable
 time-domain derivative and are not retained in full by default. Cache keys omit
 harmonic-cache bookkeeping fields (source label, save time, and saved cache ID)
-while the full prepared-output provenance retains them, so recalculating an
-identical harmonic selection does not repeat the participant inverse solely
-because the bookkeeping timestamp changed.
+and the global selection fingerprint while the full prepared-output provenance
+retains them. A fingerprint-only change therefore reuses identical participant
+arrays; exact harmonic/bin, derivative-checksum, numerical-model and method
+inputs remain key-bound. Project selection acceptance and artifact freshness
+still use the current full selection fingerprint.
+
+Participant caches live separately from published maps at project-local
+`.fpvs_processing/source_psd_cache/v1`, so rebuilding a map directory preserves
+them. Both source exporters enter a `source_psd_cache_scope`. On the first
+absent normalized key, a bounded read-only compatibility index discovers older
+keys that included selection fingerprints; it retains candidate filenames only
+and is discarded at the end of the export. Candidate keys must match their
+original canonical metadata hash and the complete normalized requested inputs;
+each hit revalidates metadata, NPZ checksum, array schema and finite values.
+Discovery is limited to 4,096 metadata files, 256 MiB in total, 4 MiB per file,
+and eight aliases per normalized key; exceeding a limit causes ordinary
+recomputation. Current keys are checked on every request so new writes remain
+visible in an existing scope, and corrupt current entries cannot be hidden by
+an older alias. New cache entries retain the existing atomic publication format;
+legacy entries are reused without being rewritten or moved.
 
 The legacy amplitude-derived eLORETA exporter continues to write under
 `6 - Source Localization/eLORETA Volume Beta/`. Its manifest and the legacy

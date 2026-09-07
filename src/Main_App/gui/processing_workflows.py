@@ -598,6 +598,7 @@ def _start_post_processing_pipeline_after_processing(
     *,
     on_finished: Callable[[], None],
     completed_phase_floor: int = 0,
+    provisional_cache: Any | None = None,
 ) -> bool:
     if os.getenv("FPVS_TEST_MODE") or os.getenv("PYTEST_CURRENT_TEST"):
         return False
@@ -608,6 +609,7 @@ def _start_post_processing_pipeline_after_processing(
         return False
 
     try:
+        from Main_App.processing.provisional_harmonic_cache import ProvisionalHarmonicCache
         from Main_App.workers.post_processing_pipeline_worker import (
             POST_PROCESSING_PHASE_COUNT,
             PostProcessingPipelineWorker,
@@ -622,7 +624,9 @@ def _start_post_processing_pipeline_after_processing(
         return False
 
     thread = QThread(host)
-    worker = PostProcessingPipelineWorker(project)
+    if provisional_cache is None:
+        provisional_cache = ProvisionalHarmonicCache()
+    worker = PostProcessingPipelineWorker(project, provisional_cache=provisional_cache)
     worker.moveToThread(thread)
     host._post_processing_pipeline_thread = thread
     host._post_processing_pipeline_worker = worker
@@ -781,8 +785,10 @@ def _start_post_processing_pipeline_after_processing(
                     project,
                     pending_qc_report,
                     on_finished=on_finished,
+                    provisional_cache=provisional_cache,
                 )
             else:
+                provisional_cache.clear()
                 def _finish_post_processing() -> None:
                     on_finished()
                     if result.get("requires_processing"):
@@ -834,6 +840,7 @@ def _handle_frequency_domain_qc_review(
     report: dict,
     *,
     on_finished: Callable[[], None],
+    provisional_cache: Any | None = None,
 ) -> None:
     from Main_App.gui.frequency_domain_qc_dialog import FrequencyDomainQcReviewDialog
     from Main_App.gui.frequency_domain_qc_handoff import save_frequency_domain_qc_review
@@ -849,6 +856,8 @@ def _handle_frequency_domain_qc_review(
             participant_groups=participant_groups,
         )
     except (RuntimeError, ValueError) as exc:
+        if provisional_cache is not None:
+            provisional_cache.clear()
         logger.exception("frequency_domain_qc_group_membership_failed")
         host._post_processing_failure_reason = f"Frequency-domain QC could not start: {exc}"
         QMessageBox.critical(host, "Frequency-Domain QC Error", str(exc))
@@ -869,9 +878,12 @@ def _handle_frequency_domain_qc_review(
             manual_participant_reasons=dialog.manual_participant_reasons(),
             manual_recording_reasons=dialog.manual_recording_reasons(),
             on_finished=on_finished,
+            provisional_cache=provisional_cache,
         )
         return
 
+    if provisional_cache is not None:
+        provisional_cache.clear()
     host._post_processing_failure_reason = (
         "Frequency-domain QC review was canceled before final harmonic selection."
     )

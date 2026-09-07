@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pandas as pd
 import pytest
@@ -11,6 +13,8 @@ from openpyxl import load_workbook
 
 from Main_App.processing import full_fft_provenance, harmonic_selection_qc
 from Main_App.processing.spectral_eligibility import resolve_spectral_eligibility
+from Main_App.processing.roi_settings import build_roi_definition_snapshot
+from Main_App.processing.post_processing_context import post_processing_validation_scope
 from Main_App.projects.frequency_protocol import EXPECTED_CYCLES_SOURCE_MANUAL, FrequencyProtocol
 from Main_App.projects import Project
 from Tools.LORETA_Visualizer import stats_ready_workbook as stats_ready_workbook_mod
@@ -60,13 +64,7 @@ def _current_workbook_geometry(monkeypatch: pytest.MonkeyPatch) -> None:
 
     def _released_context(_root):
         rois = harmonic_selection_qc.load_rois_from_settings()
-        snapshot = SimpleNamespace(
-            fingerprint="test-roi-definition",
-            rois=tuple(
-                SimpleNamespace(name=name, electrodes=tuple(electrodes))
-                for name, electrodes in rois.items()
-            ),
-        )
+        snapshot = build_roi_definition_snapshot(rois)
         normalization = SimpleNamespace(excluded_channels=())
         coverage = SimpleNamespace(
             fingerprint="test-roi-coverage",
@@ -739,6 +737,42 @@ def test_processing_record_persists_and_loads_every_profile(
         for row in active["selection_metadata"]["source_workbook_fingerprints"]
     )
 
+    from Main_App.io import xlsx_read_cache_scope
+
+    uncached = Mock(wraps=harmonic_selection_qc._load_processing_harmonic_selection_uncached)
+    monkeypatch.setattr(harmonic_selection_qc, "_load_processing_harmonic_selection_uncached", uncached)
+    with xlsx_read_cache_scope(), post_processing_validation_scope():
+        first_messages, hit_messages = [], []
+        first = harmonic_selection_qc.load_processing_harmonic_selection(project, log_func=first_messages.append)
+        repeated = harmonic_selection_qc.load_processing_harmonic_selection(project, log_func=hit_messages.append)
+        assert repeated is not first
+        assert repeated.to_metadata() == first.to_metadata() == loaded.to_metadata()
+        assert hit_messages == first_messages
+        assert uncached.call_count == 1
+
+        # Publishing a sibling derivative changes no scientific input.
+        manifest["tools"].setdefault("post_processing", {})["artifact_freshness"] = {
+            "updated_at": "test publication", "artifacts": {},
+        }
+        (project_root / "project.json").write_text(json.dumps(manifest), encoding="utf-8")
+        after_publication = harmonic_selection_qc.load_processing_harmonic_selection(project)
+        assert after_publication.to_metadata() == first.to_metadata()
+        assert uncached.call_count == 1
+
+        # Even identical bytes with a restored mtime must be revalidated when
+        # a source file is replaced, rather than inheriting the cached result.
+        path = condition_root / "S1_Faces_Results.xlsx"
+        previous = path.stat()
+        replacement = path.with_suffix(".replacement")
+        replacement.write_bytes(path.read_bytes())
+        os.utime(replacement, ns=(previous.st_atime_ns, previous.st_mtime_ns))
+        replacement.replace(path)
+        replaced = harmonic_selection_qc.load_processing_harmonic_selection(project)
+        assert replaced.to_metadata() == first.to_metadata()
+        assert uncached.call_count == 2
+    harmonic_selection_qc.load_processing_harmonic_selection(project)
+    assert uncached.call_count == 3
+
 
 def test_processing_selection_load_migrates_group_cache_only_project(
     tmp_path: Path,
@@ -1038,6 +1072,7 @@ def test_fixed_canonical_profile_drives_stats_ready_schema_and_downstream_reader
     ]
 
 
+@post_processing_validation_scope()
 def test_managed_dv_cache_tracks_reaccepted_selection_and_workbook_identity(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
