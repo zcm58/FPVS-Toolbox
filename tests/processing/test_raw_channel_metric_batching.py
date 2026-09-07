@@ -104,8 +104,14 @@ def test_metric_rows_are_bitwise_identical_to_baseline(kind, n_samples):
         warnings.simplefilter("ignore", RuntimeWarning)
         expected = _baseline_rows(data, channels)
         actual = qc._v2_metric_rows(data, channels)
+        scalar = tuple(
+            qc._v2_channel_metrics(str(channel), row)
+            for channel, row in zip(channels, data)
+        )
     assert tuple(row.channel for row in actual) == channels
     np.testing.assert_array_equal(_metric_bits(actual), _metric_bits(expected))
+    assert tuple(row.channel for row in scalar) == channels
+    np.testing.assert_array_equal(_metric_bits(scalar), _metric_bits(expected))
     assert data.tobytes() == before
 
 
@@ -171,6 +177,44 @@ def test_large_aggregate_keeps_row_bounded_scratch(monkeypatch):
     monkeypatch.setattr(qc, "_v2_channel_metrics", tracked)
     actual = qc._v2_metric_rows(data, BIOSEMI64_CHANNELS)
     assert visited == list(BIOSEMI64_CHANNELS)
+    np.testing.assert_array_equal(_metric_bits(actual), _metric_bits(expected))
+
+
+def test_finite_full_occurrence_avoids_redundant_nan_copies_with_exact_bits(monkeypatch):
+    data = np.random.default_rng(804).normal(0, 20e-6, (8, 122_880))
+    channels = BIOSEMI64_CHANNELS[:len(data)]
+    expected = _baseline_rows(data, channels)
+    before = data.tobytes()
+
+    def redundant(*_args, **_kwargs):
+        raise AssertionError("A finite contiguous occurrence does not need NaN-aware scratch.")
+
+    monkeypatch.setattr(qc.np, "nanpercentile", redundant)
+    monkeypatch.setattr(qc.np, "nanstd", redundant)
+    actual = tuple(qc._v2_channel_metrics(str(channel), row) for channel, row in zip(channels, data))
+    np.testing.assert_array_equal(_metric_bits(actual), _metric_bits(expected))
+    assert data.tobytes() == before
+
+
+@pytest.mark.parametrize("kind", ["stepped", "reversed", "fortran", "nonfinite"])
+def test_scalar_metric_fallback_keeps_nan_reductions_for_unsupported_rows(monkeypatch, kind):
+    data = _samples(kind, 257)
+    channels = BIOSEMI64_CHANNELS[:len(data)]
+    visited = []
+    original = np.nanstd
+
+    def tracked(values, **kwargs):
+        visited.append(values)
+        return original(values, **kwargs)
+
+    monkeypatch.setattr(qc.np, "nanstd", tracked)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        actual = tuple(qc._v2_channel_metrics(str(channel), row) for channel, row in zip(channels, data))
+    assert len(visited) == (4 if kind == "nonfinite" else len(data))
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        expected = _baseline_rows(data, channels)
     np.testing.assert_array_equal(_metric_bits(actual), _metric_bits(expected))
 
 

@@ -378,12 +378,28 @@ recording/participant decision review; continuing does not promote their
 channels to interpolation targets. Technical integrity failures and saved
 manual exclusions remain independent. Each review row begins unselected and
 must be explicitly kept or excluded; an exclusion can use recording or
-participant scope. V4 caps participant workers at four,
-simultaneous BDF reads at two, and simultaneous spectral evaluators at two. A
+participant scope. Participant concurrency is capped at eight; requests above
+the previous four-worker ceiling must also satisfy the shared CPU/total-RAM
+tier policy without a RAM-cap bypass. Resource-query failure retains the
+four-worker ceiling. Requests already bounded to four or fewer retain their
+existing behavior. The GUI and backend share `preflight_worker_count` so the
+reported count matches the scheduling policy. Simultaneous BDF reads remain
+capped at two, and simultaneous spectral evaluators at two. A
 condition buffer larger than 256 MiB is filled in 10-second chunks into a
 temporary condition-only float64 memmap; no full-recording preflight memmap is
-created. V4 preserves deterministic result order and checks cancellation
+created. The scheduler preserves deterministic result order and checks cancellation
 between condition reads, diagnostic windows, FFT channel batches, and cache writes.
+
+Raw-channel metrics and spatial normalization use guarded finite-float64
+reductions to avoid redundant NaN masks and scratch copies. Unsupported
+layouts or nonfinite values retain the original NaN-aware formulas. Spatial
+donor finiteness is checked once per row; the median, donor order, finite-index
+copies, norm/dot operations and BLAS thread settings remain unchanged. Frozen
+baseline tests compare IEEE float bits, ordered findings and complete evidence
+payloads, including nonfinite, signed-zero, overflow and strided inputs. This
+optimization does not change thresholds, authority, dependency versions or
+cache identities; existing exact evidence remains reusable.
+
 Successful participant results
 are cached atomically under the active project root at
 `.fpvs_processing/preflight_qc/v7_analyzed_condition_scope`; a missing, corrupt, or

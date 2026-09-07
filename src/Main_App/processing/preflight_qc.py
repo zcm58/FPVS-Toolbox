@@ -9,6 +9,7 @@ from dataclasses import asdict, dataclass, replace
 import hashlib
 import json
 import logging
+import os
 from pathlib import Path
 import tempfile
 import threading
@@ -17,6 +18,7 @@ from typing import Any, Callable, Iterator, Mapping, Sequence
 
 import mne
 import numpy as np
+import psutil
 
 from Main_App.io import load_utils
 from Main_App.io.eeg_geometry import (
@@ -68,6 +70,7 @@ from Main_App.projects.experimental_qc_settings import (
     RawSpectralScreeningSettings,
     normalize_raw_spectral_screening_settings,
 )
+from Main_App.workers.mp_env import compute_effective_max_workers
 from Main_App.projects.preprocessing_settings import (
     is_participant_condition_excluded,
     is_recording_condition_excluded,
@@ -1592,14 +1595,36 @@ def _aggregate_condition_spectral_qc(
     }
 
 
-def _preflight_worker_count(total: int, max_workers: int | None) -> int:
+def preflight_worker_count(total: int, max_workers: int | None) -> int:
+    """Share bounded preflight concurrency between scheduling and its display.
+
+    Preserve requests within the former four-worker ceiling. Additional
+    concurrency follows the existing CPU/total-RAM policy without overrides;
+    unavailable resource information retains the former ceiling.
+    """
     if total <= 1:
         return 1
     try:
         requested = int(max_workers or 1)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         requested = 1
-    return max(1, min(total, requested, PREFLIGHT_QC_MAX_WORKERS))
+    bounded = max(1, min(total, requested, PREFLIGHT_QC_MAX_WORKERS))
+    if bounded <= 4:
+        return bounded
+    try:
+        resource_cap = compute_effective_max_workers(
+            total_ram_bytes=int(psutil.virtual_memory().total),
+            cpu_count=os.cpu_count() or 1,
+            project_max_workers=bounded,
+            allow_ram_cap_bypass=False,
+        )
+    except (OSError, RuntimeError, TypeError, ValueError, OverflowError, AttributeError, psutil.Error):
+        return min(bounded, 4)
+    return max(1, min(bounded, resource_cap))
+
+
+# Compatibility for existing internal callers; new consumers share the public API.
+_preflight_worker_count = preflight_worker_count
 
 
 def _scan_one_preflight_file_v2(
@@ -2499,7 +2524,7 @@ def scan_preprocessing_qc(
     spectral_semaphore = threading.BoundedSemaphore(
         PREFLIGHT_QC_MAX_SPECTRAL_WORKERS
     )
-    worker_count = _preflight_worker_count(total, max_workers)
+    worker_count = preflight_worker_count(total, max_workers)
     if worker_count <= 1:
         scan = _scan_preprocessing_qc_serial(
             pending_infos,
@@ -2539,6 +2564,7 @@ __all__ = [
     "PreflightQcScan",
     "build_preflight_condition_crop_grid_audit",
     "preflight_file_settings_identity",
+    "preflight_worker_count",
     "scan_preprocessing_qc",
     "scan_recording_not_started_files",
 ]

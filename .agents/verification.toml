@@ -84,6 +84,7 @@ tests = [
   "tests/processing/test_qc_review_episodes.py",
   "tests/processing/test_qc_review_diagnostics.py",
   "tests/processing/test_raw_channel_metric_batching.py",
+  "tests/processing/test_raw_channel_spatial_parity.py",
   "tests/gui/test_kurtosis_review_dialog_static.py",
   "tests/gui/test_marker_occurrence_review.py",
   "tests/gui/test_interpolation_burden_review_static.py",

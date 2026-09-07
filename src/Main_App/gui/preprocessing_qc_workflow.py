@@ -66,10 +66,10 @@ from Main_App.processing.preflight_qc import (
     PreflightQcFileResult,
     PreflightQcScan,
     build_preflight_condition_crop_grid_audit,
+    preflight_worker_count,
     scan_preprocessing_qc,
     scan_recording_not_started_files,
 )
-from Main_App.processing.preflight_qc_plan import PREFLIGHT_QC_MAX_WORKERS
 from Main_App.processing.qc_source_prefetch import QcSourcePrefetch
 from Main_App.processing.kurtosis_review_scan import (
     KurtosisReviewScan,
@@ -1305,7 +1305,7 @@ def _run_scan_embedded(
         max_workers = max(1, int(getattr(host, "max_workers", 1) or 1))
     except (TypeError, ValueError):
         max_workers = 1
-    worker_count = min(max_workers, len(remaining), PREFLIGHT_QC_MAX_WORKERS)
+    worker_count = preflight_worker_count(len(remaining), max_workers)
     project = getattr(host, "currentProject", None)
     project_root_value = getattr(project, "project_root", None)
     project_root = (

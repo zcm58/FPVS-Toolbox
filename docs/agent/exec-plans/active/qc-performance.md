@@ -1,5 +1,125 @@
 # QC Performance: Exact Numerical Reuse
 
+## Preprocessing Step 1 Follow-up (2026-09-07)
+
+Baseline: `ed089e9d`. Require exact float bits, complete scientific evidence,
+row ordering, source immutability and unchanged cache/method fingerprints.
+Allow up to eight recording threads when the shared CPU/RAM policy permits;
+keep two readers and two spectral evaluators. Do not change FFTs, BLAS thread
+counts, reference/filter order or diagnostic windows.
+
+The latest 51-file MCCTR log spans 306.971 seconds. Overlapping worker-stage
+totals identify raw-channel QC (745.621 s) as dominant, compared with condition
+reads (186.410 s), events/planning (186.393 s) and spectral work (4.689 s;
+experimental spectral screening was disabled). These totals are concurrent
+worker times, not additive wall time. A read-only 64-channel, 120-second real
+occurrence profile attributes about 0.975 of 1.619 seconds to spatial scoring,
+including repeated NaN-aware donor means on entirely finite data.
+
+- [x] Profile actual logs and a read-only real occurrence before selecting work.
+- [x] Add guarded finite-input reductions while preserving the original
+  nonfinite/unsupported-layout path and every spatial norm/dot operation.
+- [x] Verify frozen before/after float bits on edge cases and real recordings.
+- [x] Benchmark complete cold/warm step-1 scans with isolated scratch caches.
+- [x] Compare four/eight workers on synthetic and complete real scans.
+- [x] Verify the final resource-aware worker policy and document measured limits.
+
+User recordings, project manifests, review choices and existing caches remain
+unchanged by diagnostic probes. The GUI workflow does not change; its reported
+worker count now uses the same resource-aware selector as the backend.
+
+Read-only paired measurements (Windows, NumPy 2.3.1, MNE 1.9.0):
+
+| Scope | Baseline | Optimized | Observed reduction |
+| --- | ---: | ---: | ---: |
+| One recording's five analyzed occurrences, raw-QC median across two alternating comparisons per occurrence | 1.738 s | 1.257 s | 27.7% |
+| Four recordings / 24 occurrences, complete step 1, first pair | 25.879 s | 18.983 s | 26.6% |
+| Same four recordings, reversed-order pair | 34.007 s | 29.440 s | 13.4% |
+| Complete step-1 median of those pairs | 29.943 s | 24.211 s | 19.1% |
+
+Complete scan cases used fresh isolated QC caches beneath verified repository
+scratch paths; the operating-system file cache was not cleared. Four recording
+workers and all existing limits/settings remained unchanged. Both versions
+slowed during the second pair; CPU work and reads varied, and the measurements
+do not identify the cause. These are subset measurements, not a predicted
+51-recording duration or a universal performance guarantee.
+
+All ten occurrence comparisons and every complete cold scan matched the frozen
+baseline's scientific float bits and ordered payloads. Full comparisons covered
+channel metrics/findings, spectra, analyzed plans and fingerprints; only timing
+and cache-status metadata differed. An optimized warm scan took 0.323 seconds
+with four cache hits and identical scientific evidence. Raw buffers, recording
+metadata and project-manifest bytes remained unchanged. Benchmark cache folders
+were removed after each case; no real project cache was cleared or replaced.
+
+Median raw-QC worker time fell from 76.475 to 57.376 seconds across the four
+recordings. Sampled peak process RSS ranged from 1,550–1,591 MiB before to
+1,510–1,522 MiB after. RSS sampling and allocator history limit precision.
+
+The subsequent worker comparison used the optimized code in every case:
+
+| Scope | Four workers | Eight workers | Observed reduction |
+| --- | ---: | ---: | ---: |
+| Eight synthetic 64-channel, 120-second occurrences, calculation-only median | 5.509 s | 4.171 s | 24.3% |
+| Eight real recordings / 48 occurrences, complete step 1, first pair | 48.957 s | 42.799 s | 12.6% |
+| Same eight recordings, reversed-order pair | 49.828 s | 44.954 s | 9.8% |
+| Complete step-1 median of those pairs | 49.393 s | 43.877 s | 11.2% |
+
+The full worker comparison retained two readers and two spectral evaluators,
+with fresh isolated QC caches and an uncleared operating-system file cache.
+Every ordered scientific payload matched bit for bit across all four cases.
+Sampled peak RSS rose from 1,499–1,500 MiB to 1,928–2,005 MiB, and median CPU
+time rose from 121.133 to 140.594 seconds. The smaller complete-scan gain came
+with increased read/wait and per-worker calculation time. These are separate
+subset benchmarks; their percentages
+must not be added or used to predict the entire project duration.
+
+The eight-worker ceiling applies the existing shared CPU/total-RAM policy to
+requests above four, without RAM-cap bypass. Existing requests of four or
+fewer stay unchanged; unavailable resource information keeps the previous
+four-worker ceiling. For these additional-concurrency requests, RAM tiers
+permit at most two workers below 12 GiB, four below 40 GiB, seven below 80 GiB,
+and eight at 80 GiB or more when CPU/request limits allow. This uses the
+established total-RAM policy, not a new live-memory
+guarantee. It neither changes BLAS thread settings nor adds process pools.
+
+Changed files:
+
+- `src/Main_App/processing/raw_channel_qc.py`: three guarded finite reductions.
+- `src/Main_App/processing/preflight_qc.py`: shared resource-aware worker selector.
+- `src/Main_App/processing/preflight_qc_plan.py`: eight-worker ceiling.
+- `src/Main_App/gui/preprocessing_qc_workflow.py`: report the resolved worker count.
+- `tests/processing/test_raw_channel_metric_batching.py`: scalar and batch float-bit parity.
+- `tests/processing/test_raw_channel_spatial_parity.py`: frozen spatial formulas and evidence parity.
+- `tests/processing/test_preflight_qc_v2.py`: bounded worker policy and scheduling checks.
+- `.agents/verification.toml`: register the spatial parity test.
+- `docs/agent/architecture/preprocessing-contract.md`: reductions and worker contract.
+- `docs/agent/exec-plans/active/condition-aware-preflight-qc-speedup.md`: current worker ceiling.
+- `docs/agent/exec-plans/active/qc-performance.md`: scope, measurements and verification.
+
+No project paths, exported formats or processing order changed.
+
+Rejected alternatives: replacing the median and changing native BLAS thread
+counts produced different numeric bits in probes. Spectral scratch reuse had
+little impact on this project's bottleneck. More participant processes were
+not justified: recording threads already run native calculations
+concurrently, and processes add transfer, startup and memory costs.
+
+Final verification: `python .agents/scripts/verify.py --scope processing --tier focused`
+passed **1,674 tests, 5 skipped**, with the existing 56 synthetic FIR/stim
+warnings. `python .agents/scripts/verify.py --scope gui --tier focused` passed
+**375 non-GUI-execution checks**. Ruff, compilation, GUI/protected-path/source-
+localization audits, verification registration and whitespace checks passed.
+The independent final review found no actionable regression. The repository
+precommit driver (`python .agents/scripts/verify.py --scope repo --tier precommit`)
+still stops before its full test run on the same eight
+pre-existing local paths in unrelated untracked `outputs/`; those files were
+not changed. No local Qt execution occurred. Visible follow-up: restart the
+toolbox from this branch, run step 1 on a representative project, confirm the
+reported worker count respects its CPU/RAM/request limits, compare its existing
+timing log and review findings, and confirm cancellation and cached restart remain
+responsive. A complete 51-recording GUI run was not repeated by the probe.
+
 ## Native Result I/O Follow-up (2026-09-07)
 
 Scope: reduce SNR source capture reloads, retain exact Excel export cells with
