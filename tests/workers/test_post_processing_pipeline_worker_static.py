@@ -356,11 +356,14 @@ def test_source_psd_exporters_are_loaded_through_separate_expected_seams() -> No
     assert "project_eloreta_volume_export" not in source_text
 
 
-def _pipeline_without_qt(tmp_path, *, failed_step="", review_error=""):
+def _pipeline_without_qt(tmp_path, *, failed_step="", review_error="", repeated_session=False):
     """Run the production orchestration with exporter/signal doubles and no Qt."""
 
     tree = _worker_tree()
-    methods = ("run", "_record_failed_frequency_outputs", "_emit_phase_progress")
+    methods = (
+        "run", "_record_failed_frequency_outputs", "_emit_phase_progress",
+        "_is_repeated_session_project", "_run_from_accepted_selection",
+    )
     extracted = [_class_method(tree, name) for name in methods]
     for method in extracted:
         method.decorator_list = []
@@ -397,9 +400,18 @@ def _pipeline_without_qt(tmp_path, *, failed_step="", review_error=""):
             raise ValueError(review_error)
         return {"review_required": False}
 
+    sessions = {
+        "visit_1": {"label": "Visit 1", "visit_index": 1},
+        "visit_2": {"label": "Visit 2", "visit_index": 2},
+    } if repeated_session else {}
     worker = SimpleNamespace(
-        _project=SimpleNamespace(project_root=tmp_path),
+        _project=SimpleNamespace(project_root=tmp_path, sessions=sessions),
         _resume_from_selection=False,
+        _requires_recording_aware_export=False,
+        _harmonic_selection_metadata={"selection_fingerprint": "accepted"},
+        _selection_fingerprint=None,
+        _selection_changed=True,
+        _emit_progress=Mock(),
         _capture_previous_selection_fingerprint=Mock(),
         _run_frequency_domain_qc_review=review,
         _sync_frequency_domain_qc_automatic_state=Mock(),
@@ -608,6 +620,45 @@ def test_optional_export_failure_leaves_frequency_outputs_current(tmp_path, fail
     assert (phase, completed, total) == ("post_processing_complete", 5, 5)
     manifest = json.loads((tmp_path / "project.json").read_text(encoding="utf-8"))
     assert not manifest["tools"].get("frequency_domain_qc", {}).get("downstream_outputs_stale")
+
+
+@pytest.mark.parametrize("repeated_session", [False, True])
+@pytest.mark.parametrize("selection_resume", [False, True])
+def test_full_audit_failure_is_required_only_for_repeated_stats(
+    tmp_path, repeated_session, selection_resume,
+):
+    worker = _pipeline_without_qt(
+        tmp_path, failed_step="analysis_ready_full_audit", repeated_session=repeated_session,
+    )
+    worker._resume_from_selection = selection_resume
+    worker._run_frequency_domain_qc_review = Mock(wraps=worker._run_frequency_domain_qc_review)
+    worker._run_harmonic_selection = Mock(wraps=worker._run_harmonic_selection)
+    before = (tmp_path / "project.json").read_bytes()
+
+    worker.run()
+
+    worker.finished.emit.assert_called_once()
+    result = worker.finished.emit.call_args.args[0]
+    assert result["ok"] is False
+    assert bool(result["failure_reason"]) is repeated_session
+    phase, completed, total, message = worker.phase_progress.emit.call_args.args
+    if repeated_session:
+        assert "Repeated-session Stats requires the full-audit" in result["failure_reason"]
+        assert "analysis_ready_full_audit failed" in result["failure_reason"]
+        assert phase == "post_processing_failed"
+        assert completed < total
+        assert "incomplete" in message
+        assert "optional" not in message
+    else:
+        assert (phase, completed, total) == ("post_processing_complete", 5, 5)
+        assert "optional" in message
+    if selection_resume:
+        worker._run_frequency_domain_qc_review.assert_not_called()
+        worker._run_harmonic_selection.assert_not_called()
+    # An export failure cannot invalidate already accepted upstream evidence.
+    assert (tmp_path / "project.json").read_bytes() == before
+    assert worker._dataset_index is None
+    assert worker._harmonic_selection_metadata is None
 
 
 def test_exception_after_core_outputs_does_not_report_a_required_output_failure(tmp_path):

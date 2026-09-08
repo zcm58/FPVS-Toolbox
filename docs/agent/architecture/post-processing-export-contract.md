@@ -58,9 +58,19 @@ whether a run succeeded. An early frequency-QC/readiness failure must preserve
 its specific reason in the saved downstream-stale state and report incomplete
 progress, even when every available participant workbook was just written.
 File recency is not evidence of a released analysis cohort. Tool guards display
-that saved reason rather than assuming an exclusion changed. Optional full-audit
-or source-map export failures do not turn successful core outputs into failures;
-valid upstream FullFFT provenance remains independent of selection derivatives.
+that saved reason rather than assuming an exclusion changed. Full-audit export
+is optional for single-session projects, but is required for repeated-session
+Stats because the legacy participant-keyed export cannot represent visits.
+Normal and selection-resume completion must report a repeated-session full-audit
+failure as incomplete, while independently valid FullFFT/SNR evidence remains
+available. Optional source-map failures do not invalidate successful core outputs.
+
+Visible smoke check (CI or an approved local visible session): finish an adaptive
+harmonic review, then verify that full-audit export succeeds on both a fresh
+selection and a saved-selection resume. In a disposable repeated-session project,
+make that export fail and confirm the completion message names the unavailable
+analysis workbook without claiming Stats readiness or invalidating upstream SNR.
+The equivalent single-session audit failure remains an optional-export warning.
 
 Preflight condition review compares the declared event map with the actual
 planned spans. A declared condition with no start occurrence requires an
@@ -113,6 +123,17 @@ group-, ROI-, or participant-specific list. The compact
 `Quality Check/Harmonic_Selection_Summary.xlsx` workbook and the durable
 selection metadata under `tools.processing.harmonic_selection` in
 `project.json` remain the audit source for detected versus included harmonics.
+
+The canonical selection builder applies the manifest's existing JSON conversion
+before fingerprinting, workbook generation, persistence, and report handoff.
+Harmonic-keyed maps therefore use the same string keys in memory and on disk;
+unavailable diagnostic numbers use the same null representation. This preserves
+the scientific fingerprint and ordered selection rows while allowing full-audit
+export to compare the complete caller payload against the validated persisted
+selection exactly. The export's mismatch and final-release guards remain strict.
+Saved-cache loading also retains harmonic keys with explicitly unavailable Z
+diagnostics, so rehydrating a selection cannot silently remove evidence or change
+its scientific fingerprint.
 
 Managed multi-group selection and Stats-ready export carry the stable
 manifest `group_id` separately from the human-readable `group_label`.

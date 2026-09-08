@@ -1092,8 +1092,13 @@ def _metadata_float_map(value: object) -> dict[float, float]:
     for raw_key, raw_value in value.items():
         key = _metadata_optional_float(raw_key)
         map_value = _metadata_optional_float(raw_value)
-        if key is not None and map_value is not None:
-            out[float(key)] = float(map_value)
+        if key is not None:
+            if raw_value is None:
+                # Canonical JSON uses null for an undefined Z diagnostic;
+                # retain its harmonic key through cache rehydration.
+                out[float(key)] = np.nan
+            elif map_value is not None:
+                out[float(key)] = float(map_value)
     return out
 
 

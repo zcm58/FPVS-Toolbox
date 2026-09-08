@@ -282,7 +282,7 @@ def _post_processing_source_map_outcome(result: object) -> tuple[bool, bool]:
 
 
 def _post_processing_frequency_domain_outputs_ready(result: object) -> bool:
-    """Return whether every SNR/Stats prerequisite completed successfully."""
+    """Return whether upstream frequency-domain outputs completed successfully."""
 
     if not isinstance(result, dict):
         return False
@@ -303,6 +303,10 @@ def _post_processing_frequency_domain_outputs_ready(result: object) -> bool:
 def _post_processing_failure_reason(result: object) -> str:
     """Keep failed prerequisites distinct from usable optional-export failures."""
 
+    if isinstance(result, dict):
+        reason = str(result.get("failure_reason") or "").strip()
+        if reason:
+            return reason
     if _post_processing_frequency_domain_outputs_ready(result):
         return ""
     if isinstance(result, dict):
@@ -310,9 +314,6 @@ def _post_processing_failure_reason(result: object) -> str:
             return ""
         if result.get("requires_frequency_domain_qc_review"):
             return "Frequency-domain QC review must be completed before downstream analysis."
-        reason = str(result.get("failure_reason") or "").strip()
-        if reason:
-            return reason
         steps = result.get("steps")
         if isinstance(steps, list):
             for step in steps:
@@ -748,6 +749,12 @@ def _start_post_processing_pipeline_after_processing(
                         "source-map generation steps completed.",
                         level=logging.INFO,
                     )
+            elif frequency_domain_outputs_ready and host._post_processing_failure_reason:
+                host.log(
+                    f"Post-processing is incomplete: {host._post_processing_failure_reason} "
+                    "Accepted frequency-domain data remain available.",
+                    level=logging.WARNING,
+                )
             elif frequency_domain_outputs_ready:
                 host.log(
                     "Core frequency-domain post-processing completed; SNR and standard "
@@ -757,7 +764,7 @@ def _start_post_processing_pipeline_after_processing(
                 )
             else:
                 host.log(
-                    "Post-processing is incomplete. SNR and downstream analysis outputs "
+                    "Post-processing is incomplete. One or more downstream analysis outputs "
                     f"are not ready: {host._post_processing_failure_reason}",
                     level=logging.WARNING,
                 )

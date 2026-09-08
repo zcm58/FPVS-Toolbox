@@ -350,6 +350,22 @@ def test_post_processing_optional_failure_keeps_core_outputs_usable():
     assert namespace["_post_processing_failure_reason"](result) == ""
 
 
+def test_required_recording_aware_export_preserves_failure_and_upstream_readiness():
+    namespace = _post_processing_namespace()
+    reason = "Repeated-session Stats requires the full-audit analysis-ready workbook. Export failed."
+    result = {
+        "ok": False,
+        "failure_reason": reason,
+        "steps": [
+            {"name": name, "ok": True}
+            for name in namespace["_POST_PROCESSING_FREQUENCY_DOMAIN_STEP_NAMES"]
+        ] + [{"name": "analysis_ready_full_audit", "ok": False, "message": "Export failed."}],
+    }
+
+    assert namespace["_post_processing_frequency_domain_outputs_ready"](result) is True
+    assert namespace["_post_processing_failure_reason"](result) == reason
+
+
 @pytest.mark.parametrize("reported_summary", [False, True])
 def test_post_processing_incomplete_dialog_survives_preprocessing_summary(reported_summary):
     messages = Mock()
@@ -371,6 +387,8 @@ def test_post_processing_incomplete_dialog_survives_preprocessing_summary(report
     assert title == "Post-processing Incomplete"
     assert reason in message
     assert "not ready" in message
+    assert "One or more analysis outputs" in message
+    assert "SNR plots" not in message
     assert parent is host
     assert not host.busy
 
@@ -546,6 +564,59 @@ def test_worker_finished_delivers_explicit_failure_to_completion_callback():
     action_button.setToolTip.assert_called_once_with("Original action")
     assert host._post_processing_pipeline_thread is None
     assert any("not ready" in call.args[0] for call in host.log.call_args_list)
+
+
+@pytest.mark.parametrize("selection_resume", [False, True])
+def test_worker_finished_reports_required_audit_failure_without_invalidating_qc(
+    monkeypatch, tmp_path, selection_resume,
+):
+    reason = "Repeated-session Stats requires the full-audit analysis-ready workbook. Export failed."
+    host = SimpleNamespace(log=Mock())
+    namespace = _post_processing_namespace()
+    finalized_reasons = []
+    mark_current = Mock()
+    qc_module = ModuleType("Main_App.processing.frequency_domain_qc")
+    qc_module.mark_frequency_domain_outputs_current = mark_current
+    monkeypatch.setitem(sys.modules, qc_module.__name__, qc_module)
+    namespace.update({
+        "host": host, "project": SimpleNamespace(project_root=tmp_path), "logging": logging,
+        "provisional_cache": Mock(), "action_button": None,
+        "_post_processing_source_map_outcome": lambda _: (False, False),
+        "_sync_project_tools_metadata_from_disk": Mock(),
+        "on_finished": lambda: finalized_reasons.append(host._post_processing_failure_reason),
+        "QTimer": SimpleNamespace(singleShot=lambda _delay, callback: callback()),
+    })
+    handler = _load_function(
+        "src/Main_App/gui/processing_workflows.py", "_handle_finished", namespace,
+        outer_function="_start_post_processing_pipeline_after_processing",
+    )
+
+    handler({
+        "ok": False, "failure_reason": reason,
+        "steps": [
+            {"name": name, "ok": True}
+            for name in (
+                {"stats_ready_summed_bca"}
+                if selection_resume
+                else namespace["_POST_PROCESSING_FREQUENCY_DOMAIN_STEP_NAMES"]
+            )
+        ] + [{"name": "analysis_ready_full_audit", "ok": False, "message": "Export failed."}],
+    })
+
+    assert finalized_reasons == [reason]
+    messages = [call.args[0] for call in host.log.call_args_list]
+    if selection_resume:
+        mark_current.assert_not_called()
+        namespace["_sync_project_tools_metadata_from_disk"].assert_not_called()
+        assert any(f"outputs are not ready: {reason}" in message for message in messages)
+    else:
+        mark_current.assert_called_once_with(tmp_path)
+        assert any(f"Post-processing is incomplete: {reason}" in message for message in messages)
+        assert any("Accepted frequency-domain data remain available" in message for message in messages)
+    assert not any("Stats outputs are ready" in message or "optional" in message for message in messages)
+    assert not any("SNR and downstream analysis outputs" in message for message in messages)
+    assert host._post_processing_pipeline_thread is None
+    assert host._post_processing_pipeline_worker is None
 
 
 def test_failed_post_processing_phase_does_not_say_complete():

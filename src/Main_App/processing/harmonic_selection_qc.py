@@ -487,6 +487,9 @@ def _canonical_selection_metadata(
                 "applied_uniformly_across_sessions": True,
             }
         )
+    # Share the manifest representation with workbook/export callers: numeric
+    # mapping keys and nonfinite diagnostics must not change during persistence.
+    canonical = {str(key): _json_safe(value) for key, value in canonical.items()}
     canonical.pop("selection_fingerprint", None)
     canonical["selection_fingerprint"] = compute_selection_fingerprint(canonical)
     return canonical
