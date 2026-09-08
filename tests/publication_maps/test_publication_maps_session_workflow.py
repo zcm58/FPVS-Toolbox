@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -37,6 +38,7 @@ from Tools.Publication_Maps.session_workflow import (
     validate_session_grid_requests,
 )
 from Tools.Publication_Maps.tool_info import SCALP_MAPS_TOOL_INFO_HTML
+from Tools.Publication_Maps.session_panels import RepeatedSessionMapDataError
 
 
 def _repeated_index(
@@ -186,6 +188,190 @@ def _renderable_session_panel_set() -> SimpleNamespace:
         panel=lambda group_id, session_id: panels[(group_id, session_id)],
         paired_difference=lambda group_id: differences[group_id],
     )
+
+
+def _session_results_for_records(
+    records: tuple[WorkbookRecord, ...],
+    requests: tuple[PublicationMapRequest, ...],
+    *,
+    qc_excluded_participants: tuple[str, ...] | None = None,
+) -> tuple[PublicationMapResult, ...]:
+    """Frozen group results after reading, with no workbook or live-QC lookup."""
+
+    results = []
+    for request in requests:
+        rows = []
+        for record in records:
+            if record.group_id != request.group_id:
+                continue
+            total = (1.0 if record.group_id == "birth_control" else 10.0)
+            total += (record.visit_index - 1) * 2.0
+            for harmonic in (1.2, 2.4):
+                rows.append({
+                    "condition": record.condition,
+                    "group_id": record.group_id,
+                    "subject_id": record.participant_id,
+                    "workbook_path": str(record.path),
+                    "electrode": "Cz",
+                    "is_montage_electrode": True,
+                    "metric": PublicationMetric.BCA.value,
+                    "harmonic_hz": harmonic,
+                    "value": total / 2.0,
+                })
+        qc_provenance = {"applied_exclusions_sha256": "frozen-qc"}
+        if qc_excluded_participants is not None:
+            qc_provenance["excluded_participants"] = list(qc_excluded_participants)
+        results.append(PublicationMapResult(
+            long_values=pd.DataFrame(rows),
+            grand_average_values=pd.DataFrame(),
+            selected_harmonics_hz=(1.2, 2.4),
+            selection_metadata={"selection_fingerprint": "frozen-selection"},
+            qc_provenance=qc_provenance,
+            group_id=request.group_id,
+            group_label=request.group_label,
+            group_folder=request.group_folder,
+        ))
+    return tuple(results)
+
+
+def _with_extra_p15(index: ProjectDatasetIndex) -> ProjectDatasetIndex:
+    extra_records = tuple(
+        replace(
+            record,
+            participant_id="P15",
+            recording_id=f"P15__{record.session_id}_phase",
+            path=record.path.with_name("P15.xlsx"),
+        )
+        for record in index.workbooks
+        if record.participant_id == "P01"
+    )
+    return replace(index, workbooks=index.workbooks + extra_records)
+
+
+@pytest.mark.parametrize("exclusion_source", ("request", "frozen_qc"))
+def test_session_panels_keep_excluded_participant_out_of_both_visits(
+    tmp_path: Path,
+    monkeypatch,
+    exclusion_source: str,
+) -> None:
+    baseline_index = _repeated_index(tmp_path, conditions=("Faces", "Objects"))
+    index = _with_extra_p15(baseline_index)
+    requests = _session_requests(tmp_path, conditions=("Faces", "Objects"))
+    if exclusion_source == "request":
+        requests = tuple(replace(request, subject_exclusions=frozenset({" p15 "})) for request in requests)
+    results = _session_results_for_records(
+        baseline_index.workbooks,
+        requests,
+        qc_excluded_participants=(" p15 ",) if exclusion_source == "frozen_qc" else None,
+    )
+    frozen_frames = tuple(result.long_values.copy(deep=True) for result in results)
+    frozen_provenance = tuple(deepcopy(result.qc_provenance) for result in results)
+    frozen_records = index.workbooks
+    manifest = tmp_path / "project.json"
+    manifest.write_bytes(b'{"name":"synthetic source-immutable project"}')
+    source_paths = [manifest]
+    for record in index.workbooks:
+        record.path.parent.mkdir(parents=True, exist_ok=True)
+        record.path.write_bytes(b"synthetic workbook source: must not read or modify")
+        source_paths.append(record.path)
+    source_bytes = {path: path.read_bytes() for path in source_paths}
+    monkeypatch.setattr(session_workflow, "load_publication_dataset_index", lambda *_args, **_kwargs: index)
+
+    panel_sets = build_session_panel_sets(results, requests)
+
+    assert [panel_set.condition for panel_set in panel_sets] == ["Faces", "Objects"]
+    for panel_set in panel_sets:
+        for group_id in panel_set.group_ids:
+            for session_id in panel_set.session_ids:
+                panel = panel_set.panel(group_id, session_id)
+                assert panel.participant_n == 1
+                assert all("P15" not in recording_id for recording_id in panel.recording_ids)
+            difference = panel_set.paired_difference(group_id)
+            assert difference.paired_n == 1
+            assert difference.values[0].aggregate_difference == pytest.approx(2.0)
+    assert index.workbooks == frozen_records
+    for result, frame, provenance in zip(results, frozen_frames, frozen_provenance, strict=True):
+        pd.testing.assert_frame_equal(result.long_values, frame)
+        assert result.qc_provenance == provenance
+    assert {path: path.read_bytes() for path in source_paths} == source_bytes
+
+
+@pytest.mark.parametrize("exclusion_source", ("request", "frozen_qc"))
+def test_session_panels_still_reject_missing_nonexcluded_recording(
+    tmp_path: Path,
+    monkeypatch,
+    exclusion_source: str,
+) -> None:
+    baseline_index = _repeated_index(tmp_path)
+    index = _with_extra_p15(baseline_index)
+    requests = _session_requests(tmp_path)
+    if exclusion_source == "request":
+        requests = tuple(replace(request, subject_exclusions=frozenset({"P15"})) for request in requests)
+    results = _session_results_for_records(
+        tuple(record for record in baseline_index.workbooks if record.recording_id != "P01_follicular"),
+        requests,
+        qc_excluded_participants=("P15",) if exclusion_source == "frozen_qc" else None,
+    )
+    monkeypatch.setattr(session_workflow, "load_publication_dataset_index", lambda *_args, **_kwargs: index)
+
+    with pytest.raises(RepeatedSessionMapDataError, match="no exact selected-harmonic map rows") as exc_info:
+        build_session_panel_sets(results, requests)
+
+    assert "P01_follicular" in str(exc_info.value)
+    assert "P15" not in str(exc_info.value)
+
+
+@pytest.mark.parametrize("exclusion_source", ("request", "frozen_qc"))
+def test_session_panels_reject_condition_cells_empty_after_participant_exclusion(
+    tmp_path: Path,
+    monkeypatch,
+    exclusion_source: str,
+) -> None:
+    # P15 keeps the Birth control Faces cells populated; excluding P01 empties
+    # only that group's Objects cells, which must still fail the complete grid.
+    baseline_index = _repeated_index(tmp_path, conditions=("Faces", "Objects"))
+    expanded_index = _with_extra_p15(baseline_index)
+    index = replace(
+        expanded_index,
+        workbooks=tuple(
+            record for record in expanded_index.workbooks
+            if record.participant_id != "P15" or record.condition == "Faces"
+        ),
+    )
+    requests = _session_requests(tmp_path, conditions=("Faces", "Objects"))
+    if exclusion_source == "request":
+        requests = tuple(replace(request, subject_exclusions=frozenset({"P01"})) for request in requests)
+    results = _session_results_for_records(
+        tuple(record for record in index.workbooks if record.participant_id != "P01"),
+        requests,
+        qc_excluded_participants=("P01",) if exclusion_source == "frozen_qc" else None,
+    )
+    monkeypatch.setattr(session_workflow, "load_publication_dataset_index", lambda *_args, **_kwargs: index)
+
+    with pytest.raises(PublicationMapInputError, match="condition.*group.*session") as exc_info:
+        build_session_panel_sets(results, requests)
+
+    assert "Objects" in str(exc_info.value)
+    assert "birth_control" in str(exc_info.value)
+    assert "luteal" in str(exc_info.value)
+    assert "follicular" in str(exc_info.value)
+
+
+def test_session_panels_reject_mismatched_frozen_qc_fingerprints(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    index = _repeated_index(tmp_path)
+    requests = _session_requests(tmp_path)
+    results = _session_results_for_records(index.workbooks, requests)
+    mismatched = (
+        results[0],
+        replace(results[1], qc_provenance={"applied_exclusions_sha256": "different-qc"}),
+    )
+    monkeypatch.setattr(session_workflow, "load_publication_dataset_index", lambda *_args, **_kwargs: index)
+
+    with pytest.raises(PublicationMapInputError, match="different QC exclusion snapshots"):
+        build_session_panel_sets(mismatched, requests)
 
 
 def _pdf_media_box_points(path: Path) -> tuple[float, float]:

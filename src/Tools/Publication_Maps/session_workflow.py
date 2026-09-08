@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import replace
 
 import pandas as pd
@@ -110,8 +110,14 @@ def validate_session_grid_requests(
 
 def validate_session_grid_project(
     requests: Sequence[PublicationMapRequest],
+    *,
+    excluded_participants: Iterable[str] = (),
 ):
-    """Return the canonical index after validating the complete 2×2 selection."""
+    """Validate the canonical 2×2 cohort after request and supplied QC exclusions.
+
+    Completed results supply their frozen QC snapshot; do not infer exclusions
+    from missing map rows or reload live QC during panel assembly.
+    """
 
     normalized = tuple(requests)
     validate_session_grid_requests(normalized)
@@ -154,6 +160,15 @@ def validate_session_grid_project(
         session_ids=requested_sessions,
         require_nonempty_groups=True,
         require_nonempty_sessions=True,
+    )
+    excluded = {
+        str(value).strip().casefold()
+        for value in (*normalized[0].subject_exclusions, *excluded_participants)
+        if str(value).strip()
+    }
+    records = tuple(
+        record for record in records
+        if record.participant_id.casefold() not in excluded
     )
     cells = {
         (
@@ -200,9 +215,6 @@ def build_session_panel_sets(
         raise PublicationMapInputError(
             "Session grids require two completed canonical group results."
         )
-    _index, records = validate_session_grid_project(normalized_requests)
-    if cancel_check is not None:
-        cancel_check()
     harmonic_sets = {
         tuple(result.selected_harmonics_hz) for result in normalized_results
     }
@@ -236,6 +248,14 @@ def build_session_panel_sets(
             raise PublicationMapInputError(
                 "Session-grid result group identity does not match its request."
             )
+    _index, records = validate_session_grid_project(
+        normalized_requests,
+        excluded_participants=normalized_results[0].qc_provenance.get(
+            "excluded_participants", ()
+        ),
+    )
+    if cancel_check is not None:
+        cancel_check()
     long_values = pd.concat(
         [result.long_values for result in normalized_results],
         ignore_index=True,

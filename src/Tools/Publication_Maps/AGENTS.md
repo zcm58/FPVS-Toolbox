@@ -45,6 +45,13 @@ Rules:
   exclusions before aggregation. Preserve dataset-index duplicate preference
   and diagnostics, and reject empty, unassigned, or ambiguous requested
   cohorts.
+- Repeated-session grid validation must apply request participant exclusions
+  and the completed results' matching frozen QC participant exclusions to its
+  canonical workbook records before checking coverage. Do not reintroduce
+  excluded recordings when joining panel values, infer exclusions from absent
+  value rows, or reload live QC during panel assembly. An empty requested
+  condition × group × session cell or missing values for a non-excluded
+  canonical recording remains an error.
 - BCA summation and SNR averaging must use the exact selected `"{freq:.4f}_Hz"`
   columns, matching Stats behavior. Do not add nearest-column fallback.
 - Compact BCA/SNR/Z values use the shared companion-aware selected-column
