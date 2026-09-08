@@ -49,9 +49,11 @@ from Main_App.processing.frequency_domain_qc import (
 from Main_App.processing.frequency_qc_identity import frequency_qc_review_rows
 from Main_App.gui.frequency_domain_qc_review_model import (
     can_interpolate_finding,
+    decision_consequence,
     electrode_group_key,
     electrode_groups,
     finding_section,
+    review_attention,
 )
 
 _CHOOSE_DECISION = ""
@@ -112,6 +114,7 @@ class FrequencyDomainQcReviewDialog(AppDialog):
         self._bulk_confirmation_key: tuple[str, str, str] | None = None
         self._evidence_texts: list[str] = []
         self._row_controls: list[tuple[QComboBox, QLineEdit]] = []
+        self._attention = ()
         self._column_filters: dict[int, set[str]] = {}
         self._sort_column: int | None = None
         self._sort_order = Qt.AscendingOrder
@@ -158,6 +161,11 @@ class FrequencyDomainQcReviewDialog(AppDialog):
             )
         except ValueError as exc:
             QMessageBox.warning(self, "Review Incomplete", str(exc))
+            self._update_progress()
+            first = next((row for row in range(self.details_table.rowCount())
+                          if any(issue.index == self._finding_index(row) for issue in self._attention)), -1)
+            if first >= 0:
+                self._focus_attention(first)
             return
         super().accept()
 
@@ -315,10 +323,10 @@ class FrequencyDomainQcReviewDialog(AppDialog):
         self.decision_stack.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         detail_layout.addWidget(self.decision_stack)
         self.next_button = make_action_button(
-            "Next undecided", variant="secondary", parent=detail_panel
+            "Next needs attention", variant="secondary", parent=detail_panel
         )
         self.next_button.setObjectName("frequency_domain_qc_next_undecided")
-        self.next_button.setToolTip("Go to the next undecided finding; clear filters if it is hidden.")
+        self.next_button.setToolTip("Go to the next missing choice, artifact confirmation or conflicting choice; clear filters if hidden.")
         self.next_button.clicked.connect(self._select_next_undecided)
         detail_layout.addWidget(self.next_button)
         self.splitter.setStretchFactor(0, 3)
@@ -335,7 +343,12 @@ class FrequencyDomainQcReviewDialog(AppDialog):
 
         actions = ActionRow(self, alignment=Qt.AlignRight)
         actions.setObjectName("frequency_domain_qc_actions")
-        cancel_btn = make_action_button("Cancel", variant="secondary", parent=actions)
+        unsaved = QLabel("Choices stay unsaved until Apply and Continue.", actions)
+        unsaved.setObjectName("frequency_domain_qc_unsaved_status")
+        unsaved.setWordWrap(True)
+        actions.row_layout.insertWidget(0, unsaved)
+        cancel_btn = make_action_button("Cancel review", variant="secondary", parent=actions)
+        cancel_btn.setToolTip("Discard these review choices and leave Resume Post-processing available.")
         continue_btn = make_action_button(
             "Apply and Continue", variant="primary", parent=actions
         )
@@ -449,7 +462,9 @@ class FrequencyDomainQcReviewDialog(AppDialog):
         if not available and self.detail_tabs.currentIndex() == bulk_tab:
             self.detail_tabs.setCurrentIndex(0)
         self.bulk_scope_label.setText(
-            f"Apply one decision to all {len(indices)} flags for this electrode."
+            f"Apply one decision to all {len(indices)} flags for this electrode. "
+            f"{sum(self.details_table.isRowHidden(self._table_row(index)) for index in indices)} hidden; "
+            f"{_count_phrase(sum(bool(self._row_controls[index][0].currentData()) for index in indices), 'existing choice')} will be replaced."
             if available else "Select an individual electrode to review its flagged conditions together."
         )
         if key is not None:
@@ -639,7 +654,7 @@ class FrequencyDomainQcReviewDialog(AppDialog):
                     "A large summed-BCA response alone is insufficient."
                 )
                 confirmation.setVisible(False)
-                confirmation.toggled.connect(self._invalidate_bulk_undo)
+                confirmation.toggled.connect(self._artifact_confirmation_changed)
                 page_layout.addWidget(confirmation)
                 self._artifact_controls[fingerprint] = confirmation
             reason_label = QLabel("Reason (optional)", page)
@@ -682,7 +697,7 @@ class FrequencyDomainQcReviewDialog(AppDialog):
             self.decision_stack.setEnabled(False)
             return
         finding_index = self._finding_index(row)
-        self.evidence_view.setPlainText(self._evidence_texts[finding_index])
+        self._show_evidence(finding_index)
         self.decision_stack.setCurrentIndex(finding_index)
         self.decision_stack.setEnabled(True)
         if self.detail_tabs.currentWidget() is not self.bulk_panel:
@@ -696,6 +711,17 @@ class FrequencyDomainQcReviewDialog(AppDialog):
                 confirmation.setChecked(False)
         self._refresh_decision_cell(row)
         self._refresh_decision_view()
+
+    def _artifact_confirmation_changed(self, _checked: bool) -> None:
+        self._invalidate_bulk_undo()
+        self._update_progress()
+
+    def _show_evidence(self, finding_index: int) -> None:
+        decision = str(self._row_controls[finding_index][0].currentData() or "")
+        attention = [issue.message for issue in self._attention if issue.index in {-1, finding_index}]
+        text = ("Needs attention: " + "\n".join(attention) + "\n\n") if attention else ""
+        text += "Decision effect: " + decision_consequence(self._findings[finding_index], decision)
+        self.evidence_view.setPlainText(text + "\n\n" + self._evidence_texts[finding_index])
 
     def _refresh_decision_cell(self, row: int) -> None:
         combo, reason = self._row_controls[row]
@@ -718,15 +744,40 @@ class FrequencyDomainQcReviewDialog(AppDialog):
         cell.setToolTip(_DECISION_LABELS[decision])
 
     def _update_progress(self) -> None:
-        decided = sum(bool(combo.currentData()) for combo, _ in self._row_controls)
+        choices = {
+            fingerprint: {"decision": str(combo.currentData() or ""),
+                          "artifact_confirmed": bool(self._artifact_controls.get(fingerprint)
+                                                     and self._artifact_controls[fingerprint].isChecked())}
+            for fingerprint, (combo, _reason) in self._decision_controls.items()
+        }
+        self._attention = review_attention(
+            self._findings, choices, self._identity_scope, self._interpolation_enabled,
+            report=self._report,
+        )
+        affected = {issue.index for issue in self._attention if issue.index >= 0}
+        ready = len(self._findings) - len(affected)
         visible = sum(
             not self.details_table.isRowHidden(row) for row in range(len(self._findings))
         )
-        text = f"{decided} of {len(self._findings)} decisions made"
+        text = f"{ready} of {len(self._findings)} findings ready to submit"
+        if any(issue.index < 0 for issue in self._attention):
+            text = "Review data need attention before submission"
+        details = []
+        for kind, label in (("choice", "Missing choices"), ("confirmation", "Unconfirmed repairs"),
+                            ("conflict", "Conflicts"), ("invalid", "Data issues")):
+            count = sum(issue.kind == kind for issue in self._attention)
+            if count:
+                details.append(f"{label}: {count}")
+        if details:
+            text += "\n" + " · ".join(details)
         if visible != len(self._findings):
-            text += f" · {visible} findings shown"
+            hidden_attention = sum(self.details_table.isRowHidden(self._table_row(index)) for index in affected)
+            text += f"\n{visible} findings shown · Hidden needing attention: {hidden_attention}"
         self.progress_label.setText(text)
-        self.next_button.setEnabled(decided < len(self._findings))
+        self.next_button.setEnabled(bool(affected))
+        current = self.details_table.currentRow()
+        if current >= 0 and not self.details_table.isRowHidden(current):
+            self._show_evidence(self._finding_index(current))
 
     def _finding_index(self, row: int) -> int:
         cell = self.details_table.item(row, 0)
@@ -837,20 +888,30 @@ class FrequencyDomainQcReviewDialog(AppDialog):
     def _select_next_undecided(self) -> None:
         count = len(self._findings)
         current = self.details_table.currentRow()
+        affected = {issue.index for issue in self._attention if issue.index >= 0}
         for offset in range(1, count + 1):
             row = (current + offset) % count
-            combo, _ = self._row_controls[self._finding_index(row)]
-            if combo.currentData():
+            if self._finding_index(row) not in affected:
                 continue
-            if self.details_table.isRowHidden(row):
-                section = finding_section(self._findings[self._finding_index(row)])
-                self.finding_sections.setCurrentIndex(self._section_tab(section))
-                self._clear_filters()
-            self.details_table.setCurrentCell(row, 0)
-            self._show_finding(row)
-            self.details_table.scrollToItem(self.details_table.item(row, 0))
-            combo.setFocus()
+            self._focus_attention(row)
             return
+
+    def _focus_attention(self, row: int) -> None:
+        index = self._finding_index(row)
+        if self.details_table.isRowHidden(row):
+            section = finding_section(self._findings[index])
+            self.finding_sections.setCurrentIndex(self._section_tab(section))
+            self._clear_filters()
+        row = self._table_row(index)
+        self.details_table.setCurrentCell(row, 0)
+        self._show_finding(row)
+        self.detail_tabs.setCurrentIndex(0)
+        self.details_table.scrollToItem(self.details_table.item(row, 0))
+        issue = next((issue for issue in self._attention if issue.index == index), None)
+        control = self._row_controls[index][0]
+        if issue is not None and issue.kind == "confirmation":
+            control = self._artifact_controls[str(self._findings[index]["finding_fingerprint"])]
+        control.setFocus()
 
     def _group_for_participant(self, participant_id: object) -> str:
         normalized = str(participant_id or "").strip()

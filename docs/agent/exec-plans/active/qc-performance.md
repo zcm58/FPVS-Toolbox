@@ -1,5 +1,86 @@
 # QC Performance: Exact Numerical Reuse
 
+## Postprocessing Review Readiness And Audit Parsing (2026-09-08)
+
+Baseline: `c44665827da158de0643758b4bbb999b26d8b6b2`. The approved first batch
+from the [postprocessing QC investigation](../../reviews/postprocessing-qc-v3-investigation.md)
+adds accurate review readiness and exact-target navigation, decision consequence
+and unsaved-state copy, honest non-cancellable post-processing controls, and a
+bounded per-read memo for repeated exact frequency-label parsing.
+
+- [x] Preserve the original choices, reasons, group actions, undo and backend
+  validation; show missing choices, missing artifact confirmations and conflicts.
+- [x] Explain broad exclusion and interpolation consequences within existing
+  detail panes, retaining the supported dialog size and filter/selection state.
+- [x] Keep the shared action disabled during output preparation and saving;
+  restore existing Start/Resume behavior on completion or failure.
+- [x] Reuse at most 256 built-in string tokens, each at most 128 characters, in
+  one audit-table read; on cache allocation failure use original conversion.
+- [x] Complete frozen-baseline regressions, production timing/parity checks,
+  focused verification and independent review.
+
+No numerical operation, summation order, precision, harmonic selection, raw
+source validation, project identity, decision schema, persistence ownership or
+export format changes. No long-lived cache, preview viewer, new broad bulk
+action or saved draft is introduced. Architecture updates document presentation,
+worker-state and per-read cache ownership; statistical-method docs need no
+change because the scientific contract is unchanged.
+
+Actual production verification uses the harness's `--baseline-ref c4466582`
+option to load the frozen parser, converters and constants by AST from Git.
+Three alternating real-project pairs (12 runs across new/reused provisional
+evidence) retained identical complete ordered result fingerprints and source
+validation read counts. Median backend preparation was **30.570 → 28.479 s**
+with new evidence (**6.8%**, 2.091 s saved), and **21.523 → 19.094 s** with
+reused evidence (**11.3%**, 2.429 s saved). The manifest hash stayed unchanged
+and the write-blocking audit recorded no mutation attempts. These measurements
+exclude GUI/user time, saving, repair and export publication; durable harmonic
+caches remained available and OS caches were not flushed. No memory reduction
+is claimed. The actual parser's five-pair helper median was **11.938 → 6.882 ms**,
+reducing frequency conversions from 2,624 to 41 for the measured table.
+[Production evidence](../../reviews/postprocessing-qc-v3-implementation-evidence.json)
+retains all timings, hashes, environment details and bounds. The earlier
+investigation's prototype timings remain historical, not final-code receipts.
+
+Reproduce the real read-only comparison with the repo environment:
+
+```console
+python scripts/manual_diagnostics/investigate_postprocessing_qc.py PROJECT_ROOT NEW_DIAGNOSTIC_DIRECTORY --baseline-ref c44665827da158de0643758b4bbb999b26d8b6b2 --trials 3
+```
+
+The diagnostic directory must be outside the project and unused. No other
+CPU-heavy test or benchmark should run concurrently. This is a developer-only
+probe in `scripts/manual_diagnostics`, not a runtime workflow.
+
+Final implementation checks: processing focused **1,871 passed, 5 skipped**
+(59 existing synthetic FIR/stim warnings); GUI focused **414 passed**. The first
+GUI run exposed an extracted-callback fixture missing the new tooltip state;
+the fixture now supplies it and asserts restoration, and the full GUI rerun
+passes. The parser's focused 39 cases and the non-Qt worker lifecycle cases are
+included in these scopes. Ruff, compilation, GUI/protected/source-localization
+audits and whitespace checks pass. The repository precommit gate still stops
+before broad tests on the same eight pre-existing hard-coded paths in unrelated
+untracked `outputs/`; it is not a passing gate. Those files remain untouched.
+Independent review found and resolved post-processing thread-start cleanup,
+with no remaining actionable finding. Qt execution, visible fit, installer and
+CachyOS smoke remain unrun; the path below and the existing CI registry cover
+the required next validation. This handoff implements only the approved first
+batch; investigation proposals for viewers, broader caching and other deferred
+work remain recommendations.
+
+Visible smoke (not run locally; Qt execution is CI-only): at 1280x900 and the
+1000x650 dialog minimum, verify all actions fit with long identities. Filter and
+sort to hide a missing choice, unconfirmed repair and conflicting exclusion;
+Next needs attention must reveal the exact target and focus its combo or
+confirmation. Verify reasons/choices survive navigation, counts update when
+confirming repair, group hidden/replaced counts are accurate, and undo restores
+choices and confirmations. Cancel must leave Resume available without saving;
+acceptance must show Saving QC then Preparing Outputs with disabled controls,
+and completion/failure must restore Start/Resume and the usual tooltip. Check
+save/start failures and optional export failure without marking failed artifacts
+current. Repeat on Windows 11 and CachyOS. Local tests cover the non-Qt model
+and orchestration; registered Qt tests describe the remaining visible behavior.
+
 ## Participant Exclusions Before Kurtosis Loading (2026-09-07)
 
 Baseline: `37739269`. Remove known participant exclusions from speculative

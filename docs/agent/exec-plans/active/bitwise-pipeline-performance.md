@@ -254,11 +254,13 @@ with fresh evidence. Confirm no pending source/validation state crosses the
 end of a workflow. Local checks execute orchestration without Qt; Qt execution
 remains CI-only unless a safe visible session is explicitly approved.
 
-The original pipeline work is present on local `codex/finalize-multi-group`.
-The post-processing extension is complete on
-`codex/finalize-multi-group-postprocess-speedups`, branched from that local
-branch at `72dbd412`. It is awaiting a visible representative-project smoke
-run and manual review before merge.
+Historical branch context: the original pipeline work was developed on
+`codex/finalize-multi-group` and the post-processing extension on
+`codex/finalize-multi-group-postprocess-speedups` from `72dbd412`. Both are
+present in the 2026-09-08 investigation baseline `c4466582`. The visible
+representative-project smoke above remains unexecuted; it is a validation
+limitation, not an unimplemented extension. The next bounded QC changes are
+tracked in [QC Performance](qc-performance.md).
 
 ## Goal
 

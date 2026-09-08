@@ -185,6 +185,8 @@ def _harness():
     dialog._bulk_snapshot = {}
     dialog._sort_column = None
     dialog._submitted_decisions = ()
+    dialog._attention = ()
+    dialog._update_progress = lambda: None
     dialog._report = {"identity_scope": "recording", "analysis_fingerprint": "analysis",
                       "review_findings": dialog._findings,
                       "condition_specific_interpolation_enabled": True}

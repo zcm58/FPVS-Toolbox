@@ -5,7 +5,8 @@ from __future__ import annotations
 import ast
 import logging
 from pathlib import Path
-from types import SimpleNamespace
+import sys
+from types import ModuleType, SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
@@ -123,3 +124,165 @@ def test_missing_condition_all_visits_choice_saves_participant_scope():
     )
     assert updated == {"P2": ["Faces"], "P9": ["Neutral Angry"]}
     assert replace_exclusions(updated, candidates, set()) == {"P2": ["Faces"]}
+
+
+class _ActionButton:
+    def __init__(self):
+        self.text = "Stop Processing"
+        self.enabled = True
+        self.tooltip = "Original action help"
+
+    def setText(self, value):
+        self.text = value
+
+    def setEnabled(self, value):
+        self.enabled = value
+
+    def setToolTip(self, value):
+        self.tooltip = value
+
+    def toolTip(self):
+        return self.tooltip
+
+
+@pytest.mark.parametrize("outcome", [
+    "complete", "optional_failure", "required_failure", "review", "start_failure",
+])
+def test_postprocessing_action_cannot_offer_stop_and_restores_help_before_handoff(
+    monkeypatch, outcome,
+):
+    """Execute the orchestration closure while all Qt/runtime owners are doubles."""
+    module = ModuleType("Main_App.workers.post_processing_pipeline_worker")
+
+    def signal():
+        return SimpleNamespace(connect=Mock())
+
+    worker = SimpleNamespace(
+        moveToThread=Mock(), run=Mock(), deleteLater=Mock(),
+        progress=signal(), phase_progress=signal(), log_message=signal(), finished=signal(),
+    )
+    module.PostProcessingPipelineWorker = Mock(return_value=worker)
+    module.POST_PROCESSING_PHASE_COUNT = 5
+    monkeypatch.setitem(sys.modules, module.__name__, module)
+    monkeypatch.setattr(frequency_domain_qc, "mark_frequency_domain_outputs_current", Mock())
+    button = _ActionButton()
+    thread = SimpleNamespace(started=signal(), finished=signal(), quit=Mock(), deleteLater=Mock())
+    observed = []
+
+    def start_thread():
+        observed.append((button.text, button.enabled, button.tooltip))
+        if outcome == "start_failure":
+            raise RuntimeError("Thread could not start")
+
+    thread.start = start_thread
+    bridge = SimpleNamespace(
+        handle_progress=Mock(), handle_phase_progress=Mock(), handle_log_message=Mock(),
+        handle_finished=Mock(), deleteLater=Mock(),
+    )
+    bridge_factory = Mock(return_value=bridge)
+    project = SimpleNamespace(project_root=Path("project"))
+    host = SimpleNamespace(currentProject=project, btn_start=button, log=Mock())
+    cache, finish, review = Mock(), Mock(), Mock()
+    delayed = []
+    namespace = {
+        "os": SimpleNamespace(getenv=lambda _: None), "QThread": lambda _: thread,
+        "shell_status": SimpleNamespace(prepare_post_processing_activity=Mock()),
+        "_PostProcessingPipelineBridge": bridge_factory, "logging": logging,
+        "logger": logging.getLogger(__name__),
+        "_post_processing_source_map_outcome": lambda _: (False, False),
+        "_post_processing_frequency_domain_outputs_ready": lambda _: outcome in {"complete", "optional_failure"},
+        "_post_processing_failure_reason": lambda _: "Incomplete inputs" if outcome == "required_failure" else "",
+        "_sync_project_tools_metadata_from_disk": Mock(),
+        "_handle_frequency_domain_qc_review": review,
+        "QTimer": SimpleNamespace(singleShot=lambda _delay, callback: delayed.append(callback)),
+        "_POST_PROCESSING_PROGRESS_SETTLE_MS": 1,
+    }
+    start = _load_function(
+        "src/Main_App/gui/processing_workflows.py", "_start_post_processing_pipeline_after_processing", namespace,
+    )
+
+    assert start(host, on_finished=finish, provisional_cache=cache) == (outcome != "start_failure")
+    assert observed == [(
+        "Preparing Outputs…", False,
+        "Post-processing must finish before another action can start.",
+    )]
+    worker.run.assert_not_called()
+    if outcome == "start_failure":
+        assert host._post_processing_failure_reason == "Post-processing could not start: Thread could not start"
+        assert button.tooltip == "Original action help"
+        assert host._post_processing_pipeline_thread is None
+        assert host._post_processing_pipeline_worker is None
+        assert host._post_processing_pipeline_bridge is None
+        assert not delayed
+        cache.clear.assert_called_once()
+        worker.deleteLater.assert_called_once()
+        bridge.deleteLater.assert_called_once()
+        thread.deleteLater.assert_called_once()
+        review.assert_not_called()
+        finish.assert_not_called()  # False return hands recovery back to the caller.
+        return
+    result = {"ok": outcome == "complete", "steps": []}
+    if outcome == "review":
+        result.update(requires_frequency_domain_qc_review=True, frequency_domain_qc_report={"flags": []})
+    bridge_factory.call_args.kwargs["finished_callback"](result)
+
+    assert button.tooltip == "Original action help"
+    assert button.enabled is False  # Only the existing handoff/finalizer may unlock it.
+    assert host._post_processing_pipeline_thread is None
+    assert host._post_processing_pipeline_worker is None
+    assert host._post_processing_pipeline_bridge is None
+    bridge.deleteLater.assert_called_once()
+    if outcome == "review":
+        review.assert_called_once_with(
+            host, project, result["frequency_domain_qc_report"],
+            on_finished=finish, provisional_cache=cache,
+        )
+        assert not delayed
+        cache.clear.assert_not_called()
+    else:
+        review.assert_not_called()
+        cache.clear.assert_called_once()
+        finish.assert_not_called()
+        assert len(delayed) == 1
+        delayed[0]()
+        finish.assert_called_once()
+
+
+@pytest.mark.parametrize("started", [False, True])
+def test_resume_action_is_locked_before_start_and_finalizer_restores_start(started):
+    button = _ActionButton()
+    host = SimpleNamespace(
+        currentProject=object(), btn_start=button, log=Mock(),
+        _busy_start=Mock(), _busy_stop=Mock(),
+        _update_start_enabled=lambda: button.setEnabled(True),
+    )
+    host._set_controls_enabled = lambda enabled: button.setEnabled(enabled)
+    namespace = {"logging": logging, "logger": logging.getLogger(__name__)}
+    pending = _load_function(
+        "src/Main_App/gui/processing_workflows.py", "_set_resume_post_processing_pending", namespace,
+    )
+    captured = []
+
+    def start(_host, *, on_finished):
+        assert button.text == "Preparing Outputs…"
+        assert button.enabled is False
+        assert host._run_active and host.busy
+        captured.append(on_finished)
+        return started
+
+    namespace.update(
+        _set_resume_post_processing_pending=pending,
+        _start_post_processing_pipeline_after_processing=start,
+    )
+    resume = _load_function("src/Main_App/gui/processing_workflows.py", "resume_post_processing", namespace)
+    finished = Mock()
+    resume(host, on_finished=finished)
+    if started:
+        finished.assert_not_called()
+        assert button.enabled is False
+        captured[0]()
+    finished.assert_called_once()
+    host._busy_stop.assert_called_once()
+    assert button.text == "Start Processing"
+    assert button.enabled is True
+    assert not host._run_active and not host.busy

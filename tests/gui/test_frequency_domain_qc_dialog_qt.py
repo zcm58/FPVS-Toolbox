@@ -11,7 +11,7 @@ pytest.importorskip("pytestqt")
 
 from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtGui import QAction  # noqa: E402
-from PySide6.QtWidgets import QAbstractItemView, QDialog, QPlainTextEdit  # noqa: E402
+from PySide6.QtWidgets import QAbstractItemView, QDialog, QLabel, QPlainTextEdit  # noqa: E402
 
 from Main_App.gui import frequency_domain_qc_dialog as module  # noqa: E402
 from Main_App.processing.frequency_domain_qc import (  # noqa: E402
@@ -119,6 +119,10 @@ def test_compact_review_fits_without_horizontal_table_scrolling(qtbot, size, sco
     for column in (0, 4):
         assert table.visualItemRect(table.item(0, column)).intersects(table.viewport().rect())
     assert not hasattr(dialog, "summary_table")
+    unsaved = dialog.findChild(QLabel, "frequency_domain_qc_unsaved_status")
+    assert unsaved.isVisibleTo(dialog)
+    assert dialog.rect().contains(unsaved.mapTo(dialog, unsaved.rect().bottomRight()))
+    assert dialog.rect().contains(dialog.next_button.mapTo(dialog, dialog.next_button.rect().bottomRight()))
 
 
 def test_decisions_and_optional_reasons_survive_navigation_and_filtering(qtbot):
@@ -206,6 +210,72 @@ def test_next_undecided_reveals_a_filtered_finding_without_changing_choices(qtbo
     assert dialog.details_table.item(1, 0).data(Qt.ItemDataRole.UserRole) == second["finding_fingerprint"]
     assert combo.currentData() == DECISION_RETAIN
     assert dialog._decision_controls[second["finding_fingerprint"]][0].currentData() == ""
+
+
+def test_unconfirmed_repair_stays_pending_and_failed_apply_focuses_hidden_checkbox(qtbot, monkeypatch):
+    dialog, report = _dialog(qtbot)
+    first = report["review_findings"][0]
+    for combo, _reason in dialog._decision_controls.values():
+        combo.setCurrentIndex(combo.findData(DECISION_RETAIN))
+    combo, reason = dialog._decision_controls[first["finding_fingerprint"]]
+    combo.setCurrentIndex(combo.findData(DECISION_INTERPOLATE_CONDITION_ELECTRODE))
+    reason.setText("Independent artifact evidence")
+    confirmation = dialog._artifact_controls[first["finding_fingerprint"]]
+    assert dialog.progress_label.text().startswith("2 of 3 findings ready to submit")
+    assert "Unconfirmed repairs: 1" in dialog.progress_label.text()
+    assert dialog.next_button.isEnabled()
+    dialog.search_edit.setText("Neutral")
+    assert "Hidden needing attention: 1" in dialog.progress_label.text()
+    warnings = []
+    monkeypatch.setattr(module.QMessageBox, "warning", lambda *_args: warnings.append(_args))
+    dialog.accept()
+    assert warnings and dialog.result() != QDialog.DialogCode.Accepted
+    assert dialog.search_edit.text() == ""
+    assert dialog.details_table.currentRow() == _visual_row(dialog, first["finding_fingerprint"])
+    qtbot.waitUntil(confirmation.hasFocus)
+    assert "Needs attention:" in dialog.evidence_view.toPlainText()
+    assert "average reference" in dialog.evidence_view.toPlainText()
+    assert first["recording_id"] in dialog.evidence_view.toPlainText()
+    assert reason.text() == "Independent artifact evidence"
+    confirmation.setChecked(True)
+    assert dialog.progress_label.text() == "3 of 3 findings ready to submit"
+    assert not dialog.next_button.isEnabled()
+    dialog.accept()
+    assert dialog.result() == QDialog.DialogCode.Accepted
+
+
+def test_next_attention_reveals_conflicting_recording_choice_without_changing_any_choices(qtbot, monkeypatch):
+    dialog, findings = _grouped_dialog(qtbot)
+    for combo, _reason in dialog._decision_controls.values():
+        combo.setCurrentIndex(combo.findData(DECISION_RETAIN))
+    first_combo, first_reason = dialog._decision_controls[findings[0]["finding_fingerprint"]]
+    first_combo.setCurrentIndex(first_combo.findData(DECISION_EXCLUDE_RECORDING))
+    first_reason.setText("Review the recording scope")
+    before = _decision_state(dialog, findings)
+    dialog._sort_findings(1, Qt.SortOrder.DescendingOrder)
+    dialog.search_edit.setText("P2")
+    assert "Conflicts: 6" in dialog.progress_label.text()
+    assert "Hidden needing attention: 6" in dialog.progress_label.text()
+    qtbot.mouseClick(dialog.next_button, Qt.MouseButton.LeftButton)
+    selected = dialog.details_table.currentRow()
+    finding_index = dialog._finding_index(selected)
+    assert findings[finding_index]["recording_id"] == "P1_visit1"
+    assert "Conflicting recording choices" in dialog.evidence_view.toPlainText()
+    qtbot.waitUntil(dialog._row_controls[finding_index][0].hasFocus)
+    assert dialog.search_edit.text() == ""
+    assert _decision_state(dialog, findings) == before
+    warnings = []
+    monkeypatch.setattr(module.QMessageBox, "warning", lambda *_args: warnings.append(_args))
+    dialog.accept()
+    assert warnings and not dialog.review_decisions()
+    assert _decision_state(dialog, findings) == before
+    for finding in findings:
+        if finding["recording_id"] == "P1_visit1":
+            combo, _reason = dialog._decision_controls[finding["finding_fingerprint"]]
+            combo.setCurrentIndex(combo.findData(DECISION_EXCLUDE_RECORDING))
+    assert not dialog.next_button.isEnabled()
+    dialog.accept()
+    assert dialog.result() == QDialog.DialogCode.Accepted
 
 
 def test_evidence_preserves_full_identifiers_values_groups_and_unavailable_context(qtbot):
@@ -537,6 +607,8 @@ def test_electrode_group_applies_to_filtered_flags_and_exact_receipts_only(qtbot
     dialog._set_column_filter(1, {"Objects"})
     dialog.search_edit.setText("Objects")
     assert _visible_fingerprints(dialog) == [targets[1]["finding_fingerprint"]]
+    assert "3 hidden" in dialog.bulk_scope_label.text()
+    assert "1 existing choice will be replaced" in dialog.bulk_scope_label.text()
     dialog.detail_tabs.setCurrentWidget(dialog.bulk_panel)
     assert not dialog.bulk_interpolate_button.isEnabled()
     dialog.bulk_artifact_check.setChecked(True)

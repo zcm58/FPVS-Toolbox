@@ -101,8 +101,11 @@ Common long-running work:
   only after the save thread exits successfully. Save errors keep downstream
   outputs stale, show the failure, and release the run controls. Closing the
   app is blocked until the save finishes. The shared Start/Stop action is
-  disabled only during this non-cancellable save and restored before the
-  existing continuation/finalization runs; worker progress never steals focus.
+  disabled during this non-cancellable save. The continuation also disables the
+  action and labels it "Preparing Outputs…": the post-processing worker has no
+  cancellation API. Existing completion, failure and cancelled-review paths
+  restore Start Processing or Resume Post-processing; worker progress never
+  steals focus.
   This changes scheduling only, not decision validation or pipeline ordering.
   Visible smoke: accept a summed-BCA review, verify the main window and spinner
   remain visible/responsive while saving, then verify processing resumes. A

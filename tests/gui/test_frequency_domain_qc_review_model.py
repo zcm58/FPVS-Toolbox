@@ -1,14 +1,26 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from itertools import product
 
 import pytest
 
 from Main_App.gui.frequency_domain_qc_review_model import (
     can_interpolate_finding,
+    decision_consequence,
     electrode_group_key,
     electrode_groups,
     finding_section,
+    review_attention,
+)
+from Main_App.processing.frequency_domain_qc import (
+    DECISION_EXCLUDE_CONDITION,
+    DECISION_EXCLUDE_PARTICIPANT,
+    DECISION_EXCLUDE_RECORDING,
+    DECISION_INTERPOLATE_CONDITION_ELECTRODE,
+    DECISION_RETAIN,
+    REVIEW_DECISIONS,
+    validate_frequency_domain_qc_review_decisions,
 )
 
 
@@ -133,3 +145,98 @@ def test_only_complete_electrode_targets_can_receive_experimental_repair(item, s
     original = deepcopy(item)
     assert can_interpolate_finding(item, scope, True) is expected
     assert item == original
+
+
+@pytest.mark.parametrize("scope", ["participant", "recording"])
+def test_attention_matches_authoritative_validation_for_every_small_choice_map(scope):
+    findings = [
+        _electrode_finding(recording_id="P26-visit1"),
+        _electrode_finding(recording_id="p26-VISIT1", participant_id="p26", electrode="o2",
+                           finding_fingerprint="second-evidence"),
+        _electrode_finding(recording_id="P26-visit2", condition="Other", finding_fingerprint="other-visit"),
+    ]
+    if scope == "participant":
+        for item in findings:
+            item["recording_id"] = ""
+    report = {"identity_scope": scope, "condition_specific_interpolation_enabled": True,
+              "review_findings": findings}
+    original = deepcopy(report)
+    choices = ("", *REVIEW_DECISIONS)
+    for selected in product(choices, repeat=3):
+        for confirmed in (False, True):
+            submitted = {item["finding_fingerprint"]: {"decision": decision, "artifact_confirmed": confirmed}
+                         for item, decision in zip(findings, selected)}
+            before = deepcopy(submitted)
+            issues = review_attention(findings, submitted, scope, True)
+            try:
+                validate_frequency_domain_qc_review_decisions(report, submitted)
+            except ValueError:
+                assert issues, (selected, confirmed)
+            else:
+                assert not issues, (selected, confirmed, issues)
+            assert submitted == before
+    assert report == original
+
+
+def test_confirmation_and_conflict_remain_separate_attention_for_the_same_target():
+    findings = [_electrode_finding(), _electrode_finding(finding_fingerprint="another-evidence")]
+    choices = {"happy-o2": {"decision": DECISION_INTERPOLATE_CONDITION_ELECTRODE},
+               "another-evidence": {"decision": DECISION_RETAIN}}
+    issues = review_attention(findings, choices, "participant", True)
+    assert [(issue.index, issue.kind) for issue in issues] == [
+        (0, "confirmation"), (0, "conflict"), (1, "conflict"),
+    ]
+    assert "P26 / Neutral Happy / O2" in issues[1].message
+
+
+def test_attention_conflicts_do_not_cross_recordings_or_case_distinct_conditions():
+    findings = [
+        _electrode_finding(recording_id="R1", condition="Faces"),
+        _electrode_finding(recording_id="R1", condition="faces", finding_fingerprint="case-condition"),
+        _electrode_finding(recording_id="R2", condition="Faces", finding_fingerprint="other-recording"),
+    ]
+    choices = {"happy-o2": {"decision": DECISION_EXCLUDE_CONDITION},
+               "case-condition": {"decision": DECISION_RETAIN},
+               "other-recording": {"decision": DECISION_RETAIN}}
+    assert not review_attention(findings, choices, "recording", True)
+
+
+def test_recording_scope_requires_canonical_recording_even_for_retain():
+    findings = [_electrode_finding()]
+    issues = review_attention(findings, {"happy-o2": {"decision": DECISION_RETAIN}}, "recording", False)
+    assert [(issue.index, issue.kind) for issue in issues] == [(0, "invalid")]
+
+
+def test_complete_choices_cannot_hide_report_level_submission_failure():
+    findings = [_electrode_finding()]
+    choices = {"happy-o2": {"decision": DECISION_RETAIN}}
+    report = {"review_findings": findings, "screening_enabled": False}
+    before = deepcopy(report)
+    issues = review_attention(findings, choices, "participant", False, report=report)
+    assert len(issues) == 1 and issues[0].index == -1 and issues[0].kind == "invalid"
+    assert "screening is disabled" in issues[0].message
+    assert report == before
+
+
+def test_complete_choices_use_the_unchanged_authoritative_receipt_contract():
+    findings = [_electrode_finding()]
+    choices = {"happy-o2": {"decision": DECISION_RETAIN, "reason": "Original context"}}
+    report = {"review_findings": findings, "identity_scope": "participant"}
+    before = validate_frequency_domain_qc_review_decisions(report, choices)
+    assert not review_attention(findings, choices, "participant", False, report=report)
+    assert validate_frequency_domain_qc_review_decisions(report, choices) == before
+
+
+@pytest.mark.parametrize("decision, required", [
+    (DECISION_RETAIN, ("Independent exclusions remain active", "does not certify artifact-free")),
+    (DECISION_EXCLUDE_CONDITION, ("all electrodes", "condition Neutral Happy", "recording R2", "unflagged")),
+    (DECISION_EXCLUDE_RECORDING, ("every condition", "recording R2", "unflagged")),
+    (DECISION_EXCLUDE_PARTICIPANT, ("every recording and condition", "participant P26", "unflagged")),
+    (DECISION_INTERPOLATE_CONDITION_ELECTRODE, ("electrode O2", "recording R2", "average reference", "other channels", "review QC again")),
+])
+def test_consequences_name_actual_scope_and_limits_without_mutating_evidence(decision, required):
+    finding = _electrode_finding(recording_id="R2")
+    before = deepcopy(finding)
+    text = decision_consequence(finding, decision)
+    assert all(fragment in text for fragment in required)
+    assert finding == before

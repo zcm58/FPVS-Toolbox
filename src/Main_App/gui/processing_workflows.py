@@ -642,6 +642,8 @@ def _start_post_processing_pipeline_after_processing(
     message_label = getattr(host, "processing_message_label", None)
     if message_label is not None:
         message_label.setText(_POST_PROCESSING_STATUS_MESSAGE)
+    action_button = getattr(host, "btn_start", None)
+    previous_action_tooltip = action_button.toolTip() if action_button is not None else ""
 
     active_phase_id: str | None = None
 
@@ -773,6 +775,8 @@ def _start_post_processing_pipeline_after_processing(
                         "loreta_cached_page_refreshed_after_partial_pipeline_success"
                     )
         finally:
+            if action_button is not None:
+                action_button.setToolTip(previous_action_tooltip)
             host._post_processing_pipeline_thread = None
             host._post_processing_pipeline_worker = None
             bridge = getattr(host, "_post_processing_pipeline_bridge", None)
@@ -816,7 +820,25 @@ def _start_post_processing_pipeline_after_processing(
         "Processing finished; preparing harmonics, analysis-ready workbooks, and LORETA source maps...",
         level=logging.INFO,
     )
-    thread.start()
+    if action_button is not None:
+        action_button.setText("Preparing Outputs…")
+        action_button.setToolTip("Post-processing must finish before another action can start.")
+        action_button.setEnabled(False)
+    try:
+        thread.start()
+    except Exception as exc:  # noqa: BLE001 - let the caller release run controls
+        logger.exception("post_processing_pipeline_thread_start_failed")
+        host._post_processing_failure_reason = f"Post-processing could not start: {exc}"
+        host._post_processing_pipeline_thread = None
+        host._post_processing_pipeline_worker = None
+        host._post_processing_pipeline_bridge = None
+        provisional_cache.clear()
+        if action_button is not None:
+            action_button.setToolTip(previous_action_tooltip)
+        worker.deleteLater()
+        bridge.deleteLater()
+        thread.deleteLater()
+        return False
     return True
 
 
@@ -933,8 +955,8 @@ def resume_post_processing(
     if hasattr(host, "_busy_start"):
         host._busy_start()
     if hasattr(host, "btn_start"):
-        host.btn_start.setText("Stop Processing")
-        host.btn_start.setEnabled(True)
+        host.btn_start.setText("Preparing Outputs…")
+        host.btn_start.setEnabled(False)
 
     def _finish_resume() -> None:
         host._run_active = False

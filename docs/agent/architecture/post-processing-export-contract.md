@@ -32,6 +32,13 @@ created. Receipt keys remain compatible (`workbook_write_receipt_v1`) and
 continue to bind exact anchor paths, hashes, validated schemas and companions.
 This changes no preprocessing or FFT operation, harmonic rule or QC decision.
 
+Reading a BCA Method Audit may reuse exact frequency-column parsing within that
+single call: at most 256 built-in string tokens of at most 128 characters each.
+Numeric values, custom string types and oversized tokens retain direct parsing.
+Cache allocation/admission failure falls back to the original parser. This
+bounded memo contains no scientific arrays, survives no read, and changes no
+row ordering, duplicate handling, exceptions, workbook validation or arithmetic.
+
 ## Entry Contract
 
 Active post-export adapter imports should use `Main_App.exports.post_export_adapter`.
@@ -98,9 +105,11 @@ derivatives are:
 - `6 - Source Localization/L2-MNE Hauk Source PSD Beta/`; and
 - `6 - Source Localization/eLORETA Hauk Source PSD Beta/`.
 
-Accepting the same fingerprint leaves current outputs intact. Accepting a
-different fingerprint first marks all four derivatives stale, then resumes the
-normal post-processing pipeline after harmonic selection. That resume reads
+The accepted-selection/all-current shortcut leaves current outputs intact when
+the fingerprint matches. A normal full run regenerates exports; pending repair
+also overrides that shortcut. Accepting a different fingerprint first marks all
+four derivatives stale, then resumes the normal post-processing pipeline after
+harmonic selection. A continuation without pending repair reads
 the immutable processed workbooks and their existing BCA columns; it never
 loads raw EEG, filters, epochs, recomputes FFTs, or rewrites participant-
 condition workbooks. The source-map rebuild reuses durable source-ready time-

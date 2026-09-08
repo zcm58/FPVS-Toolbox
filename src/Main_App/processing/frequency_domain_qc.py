@@ -86,6 +86,8 @@ _BCA_AUDIT_REQUIRED_COLUMNS = (
     "BCA Status",
     "Reason Codes",
 )
+_MAX_BCA_AUDIT_FREQUENCY_TOKENS = 256
+_MAX_BCA_AUDIT_FREQUENCY_TOKEN_LENGTH = 128
 
 WARNING_REASON_UNUSUAL_VALUES = "Unusual frequency-domain values"
 WARNING_REASON_NOISY_SPECTRUM = "Noisy spectrum"
@@ -2240,11 +2242,35 @@ def _read_bca_method_audit_rows(
             tuple(row.get(column) for column in _BCA_AUDIT_REQUIRED_COLUMNS)
             for _, row in frame.iterrows()
         )
+    # Each target repeats across electrodes. Reuse only immutable built-in text
+    # within this table; other scalar types retain the original conversion.
+    try:
+        frequency_columns: dict[str, str] | None = dict()
+    except MemoryError:
+        frequency_columns = None
     for raw_electrode, raw_frequency, raw_status, raw_reasons in row_values:
         electrode = _normalize_electrode(
             _optional_cell_text(raw_electrode)
         )
-        column = _exact_frequency_column(raw_frequency)
+        cacheable = (
+            type(raw_frequency) is str
+            and len(raw_frequency) <= _MAX_BCA_AUDIT_FREQUENCY_TOKEN_LENGTH
+        )
+        column = None
+        if cacheable and frequency_columns is not None:
+            try:
+                column = frequency_columns.get(raw_frequency)
+            except MemoryError:
+                frequency_columns = None
+        if column is None:
+            # Keep converter errors outside cache-only allocation recovery.
+            column = _exact_frequency_column(raw_frequency)
+            if cacheable and frequency_columns is not None:
+                try:
+                    if len(frequency_columns) < _MAX_BCA_AUDIT_FREQUENCY_TOKENS:
+                        frequency_columns[raw_frequency] = column
+                except MemoryError:
+                    frequency_columns = None
         if not electrode or not column:
             continue
         reason_codes = tuple(
