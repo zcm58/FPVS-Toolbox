@@ -30,10 +30,12 @@ class ParticipantReviewDialog(AppDialog):
         self,
         rows: Sequence[ParticipantReviewRow],
         parent: QWidget | None = None,
+        *,
+        additions_only: bool = False,
     ) -> None:
         repeated = any(row.recording_id for row in rows)
         super().__init__(
-            "Review Recordings" if repeated else "Review Participants",
+            "Add BDF Files" if additions_only else "Review Recordings" if repeated else "Review Participants",
             parent,
             size=SurfaceSize(
                 width=1100 if repeated else 860,
@@ -45,8 +47,20 @@ class ParticipantReviewDialog(AppDialog):
         self.rows = list(rows)
         self.repeated_session = repeated
 
-        summary = QLabel(
-            (
+        if additions_only:
+            source_text = (
+                "Group and session come from each file's configured source folder. "
+                if repeated else "Group comes from the project's configured raw folder. "
+            )
+            summary_text = (
+                "New BDF files were found in this project's configured raw folders. "
+                "Review the proposed assignments below. " + source_text
+                + "Add Files and Continue saves these additions before planning processing. "
+                "Existing analysis outputs will need processing to finish before reuse. "
+                "Cancel leaves the project registry unchanged and stops this processing request."
+            )
+        else:
+            summary_text = (
                 "FPVS Toolbox found participant and session-recording assignments "
                 "that need review before processing. Each recording remains linked "
                 "to the same participant for paired analysis."
@@ -54,8 +68,9 @@ class ParticipantReviewDialog(AppDialog):
                 else "FPVS Toolbox found participant assignments that need review "
                 "before processing."
             )
-        )
+        summary = QLabel(summary_text)
         summary.setWordWrap(True)
+        summary.setObjectName("participant_review_summary")
         self.root_layout.addWidget(summary)
 
         headers = (
@@ -108,12 +123,19 @@ class ParticipantReviewDialog(AppDialog):
             for col_index, value in enumerate(values):
                 item = QTableWidgetItem(value)
                 item.setToolTip(value)
+                if additions_only and headers[col_index] == "Raw File":
+                    item.setText(row.raw_file.name)
+                elif additions_only and headers[col_index] == "Group":
+                    item.setToolTip(f"{row.group_label} (group_id: {row.group_id})")
+                elif additions_only and headers[col_index] == "Session":
+                    item.setToolTip(f"{row.session_label or row.session_id} (session_id: {row.session_id})")
                 item.setFlags(item.flags() & ~Qt.ItemIsEditable)
                 self.table.setItem(row_index, col_index, item)
         self.root_layout.addWidget(self.table)
 
         self.continue_button = make_action_button(
             (
+                "Add Files and Continue" if additions_only else
                 "Register Participants and Recordings"
                 if repeated
                 else "Add Participants and Continue"
@@ -123,6 +145,8 @@ class ParticipantReviewDialog(AppDialog):
         self.continue_button.setObjectName("participant_review_continue_button")
         self.cancel_button = make_action_button("Cancel", variant="secondary")
         self.cancel_button.setObjectName("participant_review_cancel_button")
+        if additions_only:
+            self.cancel_button.setDefault(True)
         self.root_layout.addWidget(
             make_action_row(
                 (self.cancel_button, self.continue_button),
@@ -143,4 +167,15 @@ def review_participants_for_processing(
     if not rows:
         return True
     dialog = ParticipantReviewDialog(rows, parent)
+    return dialog.exec() == QDialog.Accepted
+
+
+def review_recording_additions_for_processing(
+    parent: QWidget | None,
+    rows: Sequence[ParticipantReviewRow],
+) -> bool:
+    """Confirm proposed additions only; the caller owns revalidation and saving."""
+    if not rows:
+        return True
+    dialog = ParticipantReviewDialog(rows, parent, additions_only=True)
     return dialog.exec() == QDialog.Accepted

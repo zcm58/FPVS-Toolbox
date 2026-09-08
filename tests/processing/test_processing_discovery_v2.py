@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -17,6 +18,8 @@ from Main_App.processing.processing_controller import (
     prepare_batch_files,
     raw_file_info_for_path,
     register_participants,
+    prepare_raw_registration_review,
+    commit_raw_registration_review,
     validate_repeated_recording_sources_for_processing,
 )
 from Main_App.projects.project import Project
@@ -302,6 +305,129 @@ def test_repeated_discovery_rejects_unregistered_file_after_processing_lock(
 
     with pytest.raises(ValueError, match="unregistered BDF"):
         discover_raw_files(project)
+
+
+def _locked_append_project(tmp_path):
+    project, folders = _build_repeated_project(tmp_path)
+    for source, filename in (
+        ("bc_luteal", "P01_BC_L.bdf"),
+        ("bc_follicular", "P02_BC_F.bdf"),
+        ("control_luteal", "P03_C_L.bdf"),
+        ("control_follicular", "P03_C_F.bdf"),
+    ):
+        (folders[source] / filename).write_bytes(b"existing raw data")
+    register_participants(project, discover_raw_files(project))
+    project.groups_locked = True
+    project.groups_locked_at = "2026-08-18T22:57:13Z"
+    project.save()
+    return project, folders
+
+
+def test_append_review_is_read_only_and_confirmed_visits_continue_strict_discovery(tmp_path):
+    project, folders = _locked_append_project(tmp_path)
+    manifest = project.project_root / "project.json"
+    before = manifest.read_bytes()
+    old_recordings = deepcopy(project.recordings)
+    new_file = folders["bc_follicular"] / "P01_BC_F.bdf"
+    new_file.write_bytes(b"new raw data")
+
+    proposal = prepare_raw_registration_review(project)
+    assert len(proposal.files) == 5
+    assert [(row.participant_id, row.group_id, row.session_id, row.raw_file)
+            for row in proposal.review_rows] == [("P01", "bc", "follicular", new_file.resolve())]
+    assert manifest.read_bytes() == before
+    assert project.recordings == old_recordings
+    with pytest.raises(ValueError, match="unregistered BDF"):
+        discover_raw_files(project)
+
+    confirmed = commit_raw_registration_review(project, proposal)
+    assert confirmed == discover_raw_files(project)
+    assert len(confirmed) == 5
+    assert all(project.recordings[key] == value for key, value in old_recordings.items())
+    assert project.groups_locked and project.groups_locked_at == "2026-08-18T22:57:13Z"
+    state = json.loads(manifest.read_bytes())["tools"]["frequency_domain_qc"]
+    assert state["downstream_outputs_stale"] is True
+    assert new_file.read_bytes() == b"new raw data"
+
+
+def test_append_review_registers_new_participant_and_missing_visit_without_balancing(tmp_path):
+    project, folders = _locked_append_project(tmp_path)
+    (folders["bc_luteal"] / "P04_BC_L.bdf").write_bytes(b"new")
+    proposal = prepare_raw_registration_review(project)
+    assert [row.status for row in proposal.review_rows] == ["New participant and recording"]
+    commit_raw_registration_review(project, proposal)
+    assert project.participants["P04"] == {"group_id": "bc"}
+    assert "P04__luteal" in project.recordings
+    assert "P04__follicular" not in project.recordings
+
+
+@pytest.mark.parametrize("change", ["extra_file", "renamed_file", "manifest"])
+def test_append_confirmation_rejects_stale_proposal_without_registering(tmp_path, change):
+    project, folders = _locked_append_project(tmp_path)
+    candidate = folders["bc_follicular"] / "P01_BC_F.bdf"
+    candidate.write_bytes(b"new")
+    proposal = prepare_raw_registration_review(project)
+    manifest = project.project_root / "project.json"
+    old_registry = deepcopy(project.recordings)
+    if change == "extra_file":
+        (folders["bc_luteal"] / "P05_BC_L.bdf").write_bytes(b"later")
+    elif change == "renamed_file":
+        candidate.rename(candidate.with_name("P06_BC_F.bdf"))
+    else:
+        payload = json.loads(manifest.read_bytes())
+        payload["external_edit"] = True
+        manifest.write_text(json.dumps(payload), encoding="utf-8")
+    before = manifest.read_bytes()
+    with pytest.raises(ValueError, match="changed"):
+        commit_raw_registration_review(project, proposal)
+    assert manifest.read_bytes() == before
+    assert project.recordings == old_registry
+
+
+@pytest.mark.parametrize("source, filename, error", [
+    ("control_follicular", "P01_C_F.bdf", "group"),
+    ("bc_luteal", "P01_repeat_BC_L.bdf", "more than one BDF"),
+    ("bc_follicular", "P05_C_F.bdf", "filename_group_token_conflict"),
+])
+def test_append_review_rejects_conflicting_sources_before_confirmation(tmp_path, source, filename, error):
+    project, folders = _locked_append_project(tmp_path)
+    (folders[source] / filename).write_bytes(b"new")
+    manifest = project.project_root / "project.json"
+    before = manifest.read_bytes()
+    with pytest.raises(ValueError, match=error):
+        prepare_raw_registration_review(project)
+    assert manifest.read_bytes() == before
+
+
+def test_single_append_confirms_only_selected_recording_then_uses_strict_selection(tmp_path):
+    project, folders = _locked_append_project(tmp_path)
+    selected = folders["bc_follicular"] / "P01_BC_F.bdf"
+    other = folders["bc_luteal"] / "P04_BC_L.bdf"
+    selected.write_bytes(b"selected")
+    other.write_bytes(b"other")
+    review = prepare_raw_registration_review(project, selected_path=selected)
+    assert len(review.files) == len(review.review_rows) == 1
+    assert len(review.source_files) == 6
+    commit_raw_registration_review(project, review)
+    assert raw_file_info_for_path(project, selected).recording_id == "P01__follicular"
+    assert "P04__luteal" not in project.recordings
+
+
+def test_locked_flat_project_confirms_new_participant_from_canonical_group(tmp_path):
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    (raw / "P01.bdf").write_bytes(b"old")
+    project = _build_group_project(tmp_path, {
+        "control": {"label": "Control", "folder_name": "Control", "raw_input_folder": raw},
+    })
+    register_participants(project, discover_raw_files(project))
+    project.groups_locked = True
+    project.save()
+    (raw / "P02.bdf").write_bytes(b"new")
+    review = prepare_raw_registration_review(project)
+    assert [(row.participant_id, row.group_id) for row in review.review_rows] == [("P02", "control")]
+    commit_raw_registration_review(project, review)
+    assert project.participants["P02"]["group_id"] == "control"
 
 
 def test_discover_raw_files_rejects_duplicate_subjects_same_folder(tmp_path) -> None:

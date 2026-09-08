@@ -424,6 +424,25 @@ Batch processing still performs strict source discovery and registration checks;
 opening a project does not register additions, unlock assignments or waive
 analysis provenance, QC release or method-specific eligibility requirements.
 
+Starting processing on a locked project stages new BDFs through
+`prepare_raw_registration_review` and asks for explicit confirmation before
+registration. Configured raw roots supply the canonical group and, for v2.2,
+session/source identity. Missing individual visits remain allowed. Duplicate
+visits, conflicting filenames, changed existing assignments and missing
+registered inputs still block processing. Single-file mode proposes only the
+selected addition, while repeated-session source validation covers all sources.
+
+`Project.append_registered_inputs` is the narrow append-only exception to the
+registry lock. It revalidates the reviewed manifest revision, preserves existing
+registry entries and the lock timestamp, and atomically publishes additions,
+the updated recording fingerprint and downstream invalidation together.
+Cancel, stale confirmation or failed persistence does not add files. Ordinary
+saves reject an older registration fingerprint instead of overwriting a newer
+registry. Raw files and existing outputs are untouched by this operation.
+The processing-owned pending-registration receipt requires current expected-plan
+and outcome accounting for the additions before downstream release can resume;
+see [Post-Processing Export Contract](post-processing-export-contract.md).
+
 The shared read-only group/participant context is now available from
 `Main_App.projects`. `Main_App.projects.dataset_index` is the single
 GUI-neutral owner for processed-workbook discovery, condition and participant

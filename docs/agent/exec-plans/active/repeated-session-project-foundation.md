@@ -4,6 +4,74 @@
 
 Active on `codex/repeated-session-projects`.
 
+## Confirmed Recording Additions (2026-09-08)
+
+Follow-up baseline: `5e49aed8` on `codex/postprocessing-qc-v3`. The user has
+explicitly authorized adding newly discovered BDFs to an already processed
+project after a GUI confirmation of folder-derived group/session assignments.
+Existing assignments remain immutable; the append operation is the narrow
+exception to the recording-registry lock. Missing visits remain allowed.
+
+- [x] Stage direct-source discoveries without registry writes, preserving
+  duplicate, group/session, filename-token and existing-source validation.
+- [x] Show new files and canonical participant/group/session identities in the
+  existing review dialog. Cancel leaves the registry unchanged; confirmation
+  revalidates the proposal before saving and continuing processing.
+- [x] Add an atomic append-only model operation preserving existing entries,
+  lock timestamp and output files; reject stale confirmations and stale saves.
+- [x] Persist downstream invalidation with registration and prevent old
+  post-processing plans from releasing a cohort that omits the additions.
+- [x] Complete focused tests, read-only project preview, audits and final review.
+
+The source folders come from the active project's canonical group/recording
+context; no group membership is inferred from processed output folders.
+Staging and confirmation inspect filenames and metadata, never EEG samples.
+The actual Birth Control preview found the two expected new visit files among
+57 sources in 0.118 seconds; the real manifest remained byte-identical. The
+real registry must be updated only through the user's in-app confirmation.
+No preprocessing arithmetic/order, condition selection, harmonic method,
+output format, old recording, raw BDF or processed workbook is rewritten by
+registration. Scientific processing and freshness validation retain their
+normal ownership.
+
+Registration completion is tracked separately from the permanent append
+revision: tools-only metadata refresh cannot let an older Project object erase
+new membership, and later Single-file plans cannot make completed additions
+appear unfinished. Compact completion receipts are saved at pre-review coverage
+only after current expected-plan/outcome accounting validates those additions;
+remaining additions still block downstream release. Existing scientific release
+checks remain authoritative after enrollment.
+
+Validation: `verify.py --scope processing --tier focused` passed 1,921 tests
+with five skips and 59 existing warnings; the GUI scope passed 429 non-Qt
+tests. The 253 registered project-I/O tests passed when run directly, including
+the newly routed recording-context suite. All changed Python files passed Ruff
+and compilation; verification configuration and diff checks passed. The first
+processing run encountered a transient Windows access-denied error in an
+unchanged interpolation-state temporary-file replacement; the focused retry and
+final full processing gate both passed.
+
+`verify.py --scope project-io --tier focused` and
+`verify.py --scope repo --tier precommit` stopped at the same eight pre-existing
+hard-coded-path findings under unrelated untracked `outputs/` files. Those
+files were preserved; the full repo precommit suite therefore did not run.
+Qt execution remains CI-only locally, and the visible smoke below is unrun.
+Architecture and user docs now describe the append exception and enrollment
+gate; worker ownership and numerical method contracts did not change.
+
+Visible smoke (CI or an approved visible environment; not run locally): open a
+processed project, place a valid additional visit and a new participant BDF in
+configured source folders, and click Processing. Confirm the popup lists only
+new files with filename, participant, group, session/visit, full-path tooltip
+and the effect on analysis freshness. Cancel and verify no registry change or
+processing. Confirm, verify processing continues without the former lock error,
+then cancel later QC and verify old post-processing cannot release the expanded
+cohort. Finish processing and confirm normal analysis release. Repeat Single
+selection, wrong-group/session filenames, duplicate visits, failed save and a
+manifest/file change while the popup is open. Existing registered assignments
+and processed outputs must remain intact. Check the dialog at 1280x900 and its
+minimum size on Windows 11 and CachyOS.
+
 ## Goal
 
 Add first-class repeated-session EEG projects without changing the numerical

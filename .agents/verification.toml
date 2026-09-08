@@ -58,6 +58,7 @@ tests = [
   "tests/project_io/test_project_results_layout.py",
   "tests/project_io/test_project_scan_job.py",
   "tests/project_io/test_project_v2_group_schema.py",
+  "tests/project_io/test_project_recording_context.py",
   "tests/project_io/test_repeated_recording_preflight.py",
   "tests/project_io/test_repeated_session_project_setup.py",
   "tests/project_io/test_main_app_xlsx_selected_reader.py",

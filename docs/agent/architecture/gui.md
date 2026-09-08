@@ -131,6 +131,18 @@ Primary paths:
   single/batch mode UI state, `.bdf` file selection, start-button readiness,
   trigger-detection placeholder behavior, and preprocessing parameter assembly
   used by `MainWindow` compatibility wrappers.
+  On locked projects, new raw inputs are staged for an **Add BDF Files** review
+  through `participant_review.py`. The shared dialog shows canonical
+  participant/group/session identity, filenames and full-path tooltips;
+  **Add Files and Continue** confirms append-only registration before normal QC
+  and processing. Cancel leaves the registry unchanged and starts no processing.
+  The proposal is revalidated after confirmation and a changed active project
+  or failed save stops before planning. Single-file selection remains read-only
+  until the same confirmation at processing start. Metadata staging does not
+  load EEG samples. Visible smoke: confirm and cancel new participants and
+  missing visits, verify existing assignments and outputs survive, and check
+  both processing modes and the dialog at 1280x900 on Windows and CachyOS.
+  Qt dialog execution remains CI-only locally.
 - `src/Main_App/gui/preprocessing_qc_workflow.py`: embedded preprocessing
   data-quality review phases. It scans for BioSemi recordings that were never
   started, reviews auto-detected physically removed electrodes in the manual

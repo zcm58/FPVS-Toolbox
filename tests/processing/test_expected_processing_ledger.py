@@ -684,3 +684,430 @@ def test_current_payload_cannot_be_loaded_with_invented_final_outcome(
         match="cannot claim a final processing outcome",
     ):
         ExpectedRecordingConditionPlan.from_payload(payload)
+
+
+def _registration_fixture(tmp_path: Path, *, repeated: bool = False, exclude: bool = True):
+    """Actual expected-plan/outcome schemas, with no EEG or GUI execution."""
+    from Main_App.processing.raw_registration_state import registration_tool_updates
+    from Main_App.processing.recording_condition_outcomes import reconcile_recording_condition_outputs
+
+    event_map = {"Condition A": 1}
+    infos = []
+    participants = {}
+    recordings = {}
+    sessions = {}
+    sources = {}
+    for visit in (1, 2):
+        participant = "P01" if repeated else f"P{visit:02d}"
+        raw_root = tmp_path / f"visit_{visit}" if repeated else tmp_path
+        raw_root.mkdir(exist_ok=True)
+        raw_file = raw_root / f"P{visit:02d}.bdf"
+        raw_file.write_bytes(f"raw-{visit}".encode())
+        participants[participant] = {"group_id": "control"}
+        if repeated:
+            session_id = f"visit_{visit}"
+            source_id = f"control_v{visit}"
+            recording_id = f"rec_p01_v{visit}"
+            sessions[session_id] = {"label": f"Visit {visit}", "visit_index": visit}
+            sources[source_id] = {"group_id": "control", "session_id": session_id, "raw_input_folder": str(raw_root)}
+            recordings[recording_id] = {
+                "participant_id": participant, "session_id": session_id,
+                "source_id": source_id, "raw_file": str(raw_file), "visit_index": visit,
+            }
+            infos.append(RawFileInfo(raw_file, participant, "control", recording_id, session_id, f"Visit {visit}", visit, source_id))
+        else:
+            participants[participant]["raw_file"] = str(raw_file)
+            infos.append(RawFileInfo(raw_file, participant, "control"))
+    processing = _processing_plan(tmp_path, event_map=event_map, infos=tuple(infos))
+    event_plan = _approved_event_plan(event_map=event_map, events=[[0, 0, 1], [10, 0, 55], [20, 0, 55], [30, 0, 55]])
+    ids = tuple(info.recording_id or info.subject_id for info in infos)
+    expected = build_expected_recording_condition_plan(
+        processing_plan=processing, event_map=event_map, frequency_protocol=_protocol(),
+        approved_event_plans={} if exclude else {identity: event_plan for identity in ids},
+        planning_settings=(
+            {"manual_excluded_recordings" if repeated else "manual_excluded_participants": list(ids)} if exclude else {}
+        ),
+    )
+    manifest = {
+        "groups": {"control": {"label": "Control", "folder_name": "Control", "raw_input_folder": str(tmp_path)}},
+        "participants": participants, "event_map": event_map,
+        "sessions": sessions, "recording_sources": sources, "recordings": recordings,
+        "frequency_protocol": _protocol().to_manifest(),
+        "tools": {
+            "frequency_domain_qc": {"review_complete": True, "review_decisions": [{"decision": "retain"}], "last_review": {"saved": "history"}},
+            "processing": {"full_fft_provenance": {"status": "current", "source_fingerprint": "old"}},
+            "stats": {"group_significant_harmonics_cache": {"entries": {"old": {"preserve": True}}}},
+        },
+    }
+    manifest_path = tmp_path / "project.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    manifest["tools"].update(registration_tool_updates(tmp_path, [ids[-1]]))
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    receipts = [] if exclude else _registration_receipts(expected)
+    outcomes = reconcile_recording_condition_outputs(expected, receipts, validate_artifacts=False)
+    ledger = {"entries": {ids[0]: {"status": "completed", "untouched": True}},
+              EXPECTED_RECORDING_CONDITION_PLAN_LEDGER_KEY: expected.to_payload(),
+              "recording_condition_outcomes": outcomes.to_payload()}
+    save_ledger(tmp_path, ledger)
+    return manifest, expected, outcomes, ledger
+
+
+def _registration_receipts(plan):
+    """Valid accounting evidence; normal release must still reject absent files."""
+    from Main_App.Shared.post_process import _fingerprinted_export_receipt
+    from Main_App.processing.output_integrity import OutputIntegrityReceipt
+
+    receipts = []
+    for recording in plan.recordings:
+        for cell in recording.cells:
+            spans = [occurrence.approved_span_fingerprint for occurrence in cell.occurrences if occurrence.plans_workbook_contribution]
+            receipts.append(_fingerprinted_export_receipt({
+                "version": "recording_condition_export_receipt_v1", "status": "written",
+                "run_id": plan.run_id, "processing_fingerprint": plan.processing_fingerprint,
+                "processing_fingerprint_version": plan.processing_fingerprint_version,
+                "recording_id": recording.processing_id, "condition_label": cell.condition_label,
+                "protocol_fingerprint": plan.protocol_fingerprint, "geometry": dict(plan.geometry_identity),
+                "path": cell.expected_workbook, "spectral_eligibility_fingerprint": "eligibility",
+                "retained_occurrence_count": len(spans),
+                "retained_occurrences": [{"approved_span_fingerprint": span} for span in spans],
+                "workbook_write": {"version": "workbook_write_receipt_v1", "status": "written", "schema_validation": {"status": "passed"}},
+                "finite_integrity": [OutputIntegrityReceipt(
+                    stage=stage, recording_id=recording.processing_id,
+                    condition_label=cell.condition_label, value_category=category,
+                    inspected_value_count=1,
+                ).to_payload() for stage, category in (("retained_signal", "retained_eeg"), ("computable_bca", "bca"))],
+            }))
+    return receipts
+
+
+@pytest.mark.parametrize("repeated", [False, True])
+@pytest.mark.parametrize("exclude", [False, True])
+def test_registration_gate_accepts_current_accounting_without_mutating_history(tmp_path, monkeypatch, repeated, exclude):
+    from Main_App.processing import recording_condition_outcomes
+    from Main_App.processing.processing_ledger import ledger_path
+    from Main_App.processing.raw_registration_state import require_registered_raw_processing_complete
+
+    _manifest, _plan, outcomes, _ledger = _registration_fixture(tmp_path, repeated=repeated, exclude=exclude)
+    assert outcomes.is_pre_review_ready
+    before = [(path, path.read_bytes()) for path in (tmp_path / "project.json", ledger_path(tmp_path))]
+    monkeypatch.setattr(recording_condition_outcomes, "_artifact_identity", lambda *_args: pytest.fail("registration gate must not hash workbooks"))
+    require_registered_raw_processing_complete(tmp_path)
+    require_registered_raw_processing_complete(tmp_path)
+    assert all(path.read_bytes() == contents for path, contents in before)
+
+
+def test_registration_metadata_accounting_does_not_weaken_normal_artifact_release(tmp_path):
+    from Main_App.processing.recording_condition_outcomes import CELL_BLOCKED, reconcile_recording_condition_outputs
+
+    _manifest, plan, outcomes, _ledger = _registration_fixture(tmp_path, exclude=False)
+    assert outcomes.is_pre_review_ready
+    checked = reconcile_recording_condition_outputs(plan, [cell.export_receipt for cell in outcomes.cells])
+    assert all(cell.status == CELL_BLOCKED for cell in checked.cells)
+    assert all("workbook_artifact_not_current" in cell.reason_codes for cell in checked.cells)
+
+
+@pytest.mark.parametrize("repeated", [False, True])
+def test_registration_gate_rejects_old_completed_subset(tmp_path, repeated):
+    from Main_App.processing.raw_registration_state import RawRegistrationPendingError, require_registered_raw_processing_complete
+    from Main_App.processing.recording_condition_outcomes import reconcile_recording_condition_outputs
+
+    _manifest, expected, _outcomes, ledger = _registration_fixture(tmp_path, repeated=repeated)
+    old = replace(expected, recordings=expected.recordings[:1])
+    ledger[EXPECTED_RECORDING_CONDITION_PLAN_LEDGER_KEY] = old.to_payload()
+    ledger["recording_condition_outcomes"] = reconcile_recording_condition_outputs(old, []).to_payload()
+    save_ledger(tmp_path, ledger)
+    with pytest.raises(RawRegistrationPendingError, match="absent from the processing plan"):
+        require_registered_raw_processing_complete(tmp_path)
+
+
+@pytest.mark.parametrize("change", ["run", "fingerprint", "missing_cell", "duplicate_cell", "wrong_source", "wrong_group", "condition", "protocol", "blocked", "invented_exclusion"])
+def test_registration_gate_rejects_stale_or_incomplete_accounting(tmp_path, change):
+    from Main_App.processing.raw_registration_state import RawRegistrationPendingError, require_registered_raw_processing_complete
+    from Main_App.processing.recording_condition_outcomes import CELL_EXCLUDED, reconcile_recording_condition_outputs
+
+    manifest, plan, outcomes, ledger = _registration_fixture(tmp_path, exclude=change != "invented_exclusion")
+    if change == "run":
+        outcomes = replace(outcomes, expected_plan_run_id="old-run")
+    elif change == "fingerprint":
+        outcomes = replace(outcomes, expected_plan_fingerprint="old-plan")
+    elif change == "missing_cell":
+        outcomes = replace(outcomes, cells=outcomes.cells[:1])
+    elif change == "duplicate_cell":
+        outcomes = replace(outcomes, cells=(*outcomes.cells, outcomes.cells[-1]))
+    elif change == "wrong_source":
+        manifest["participants"]["P02"]["raw_file"] = str(tmp_path / "different.bdf")
+    elif change == "wrong_group":
+        manifest["participants"]["P02"]["group_id"] = "unknown"
+    elif change == "condition":
+        manifest["event_map"]["Condition B"] = 2
+    elif change == "protocol":
+        manifest["frequency_protocol"] = _protocol(cycles=3).to_manifest()
+    elif change == "blocked":
+        plan = replace(plan, recordings=tuple(replace(recording, cells=tuple(
+            replace(cell, planning_issues=("missing_input",)) for cell in recording.cells
+        )) for recording in plan.recordings))
+        # A valid excluded plan with stale cell fingerprints cannot masquerade as
+        # the original run after its source planning evidence changed.
+        ledger[EXPECTED_RECORDING_CONDITION_PLAN_LEDGER_KEY] = plan.to_payload()
+    elif change == "invented_exclusion":
+        cells = tuple(replace(cell, status=CELL_EXCLUDED, contributor_count=0, retained_occurrence_count=0,
+                              excluded_occurrence_count=cell.planned_occurrence_count, export_receipt=None) for cell in outcomes.cells)
+        outcomes = replace(outcomes, cells=cells)
+        assert not reconcile_recording_condition_outputs(plan, []).is_pre_review_ready
+    ledger["recording_condition_outcomes"] = outcomes.to_payload()
+    save_ledger(tmp_path, ledger)
+    (tmp_path / "project.json").write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(RawRegistrationPendingError):
+        require_registered_raw_processing_complete(tmp_path)
+
+
+def test_registration_tool_updates_are_read_only_cumulative_and_preserve_decisions(tmp_path):
+    from Main_App.processing.artifact_freshness import HARMONIC_SELECTION_SUMMARY_ARTIFACT, SELECTION_DEPENDENT_ARTIFACTS
+    from Main_App.processing.raw_registration_state import registration_tool_updates
+
+    manifest, _plan, _outcomes, _ledger = _registration_fixture(tmp_path)
+    path = tmp_path / "project.json"
+    before = path.read_bytes()
+    updates = registration_tool_updates(tmp_path, ["P03"])
+    assert path.read_bytes() == before
+    state = updates["processing"]["pending_raw_registration"]
+    assert state["processing_ids"] == ["P02", "P03"]
+    assert state["registration_fingerprint"] != manifest["tools"]["processing"]["pending_raw_registration"]["registration_fingerprint"]
+    assert updates["frequency_domain_qc"]["review_decisions"] == manifest["tools"]["frequency_domain_qc"]["review_decisions"]
+    assert updates["frequency_domain_qc"]["last_review"] == {"saved": "history"}
+    assert updates["frequency_domain_qc"]["downstream_outputs_stale"] is True
+    assert updates["processing"]["full_fft_provenance"]["status"] == "stale"
+    assert updates["stats"]["group_significant_harmonics_cache"]["entries"] == {}
+    artifacts = updates["post_processing"]["artifact_freshness"]["artifacts"]
+    assert all(artifacts[key]["status"] == "stale" for key in (HARMONIC_SELECTION_SUMMARY_ARTIFACT, *SELECTION_DEPENDENT_ARTIFACTS))
+    updates["frequency_domain_qc"]["review_decisions"].clear()
+    assert json.loads(path.read_text())["tools"]["frequency_domain_qc"]["review_decisions"]
+
+
+def test_registration_gate_preserves_legacy_no_marker_path(tmp_path, monkeypatch):
+    from Main_App.processing import processing_ledger
+    from Main_App.processing.raw_registration_state import require_registered_raw_processing_complete
+
+    monkeypatch.setattr(processing_ledger, "load_ledger", lambda *_args: pytest.fail("no marker requires no completion read"))
+    require_registered_raw_processing_complete(tmp_path)
+
+
+@pytest.mark.parametrize("change", ["empty", "fingerprint", "version", "case_duplicate", "session"])
+def test_registration_gate_rejects_invalid_registration_receipt_or_session(tmp_path, change):
+    from Main_App.processing.raw_registration_state import RawRegistrationPendingError, require_registered_raw_processing_complete
+
+    manifest, _plan, _outcomes, _ledger = _registration_fixture(tmp_path, repeated=True)
+    marker = manifest["tools"]["processing"]["pending_raw_registration"]
+    if change == "empty":
+        marker["processing_ids"] = []
+    elif change == "fingerprint":
+        marker["registration_fingerprint"] = "old"
+    elif change == "version":
+        marker["version"] = True
+    elif change == "case_duplicate":
+        marker["processing_ids"].append(marker["processing_ids"][0].upper())
+    else:
+        manifest["sessions"]["visit_2"]["label"] = "Changed session"
+    (tmp_path / "project.json").write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(RawRegistrationPendingError):
+        require_registered_raw_processing_complete(tmp_path)
+
+
+def test_registration_gate_rejects_supplied_old_outcomes(tmp_path):
+    from Main_App.processing.raw_registration_state import RawRegistrationPendingError, require_registered_raw_processing_complete
+
+    _manifest, _plan, outcomes, ledger = _registration_fixture(tmp_path)
+    with pytest.raises(RawRegistrationPendingError, match="supplied outcomes are stale"):
+        require_registered_raw_processing_complete(tmp_path, ledger=ledger, outcome_ledger=replace(outcomes, cells=outcomes.cells[:1]))
+
+
+def test_registration_completion_does_not_require_raw_files_to_remain_mounted(tmp_path):
+    from Main_App.processing.raw_registration_state import require_registered_raw_processing_complete
+
+    _manifest, plan, _outcomes, _ledger = _registration_fixture(tmp_path)
+    for recording in plan.recordings:
+        Path(recording.raw_file_identity["raw_file"]).unlink()
+    require_registered_raw_processing_complete(tmp_path)
+
+
+def _save_single_registration_plan(root, plan, index):
+    from Main_App.processing.recording_condition_outcomes import reconcile_recording_condition_outputs
+
+    single = replace(plan, recordings=(plan.recordings[index],))
+    outcomes = reconcile_recording_condition_outputs(single, [])
+    ledger = {"entries": {"old": {"status": "completed"}},
+              EXPECTED_RECORDING_CONDITION_PLAN_LEDGER_KEY: single.to_payload(),
+              "recording_condition_outcomes": outcomes.to_payload()}
+    save_ledger(root, ledger)
+    return outcomes
+
+
+@pytest.mark.parametrize("repeated", [False, True])
+def test_registration_completion_accumulates_single_runs_then_allows_later_single(tmp_path, repeated):
+    from Main_App.processing.raw_registration_state import (
+        RawRegistrationPendingError, record_registered_raw_processing_completion,
+        registration_tool_updates, require_registered_raw_processing_complete,
+    )
+
+    manifest, plan, _outcomes, _ledger = _registration_fixture(tmp_path, repeated=repeated)
+    ids = tuple(recording.processing_id for recording in plan.recordings)
+    manifest["tools"].update(registration_tool_updates(tmp_path, [ids[0]]))
+    path = tmp_path / "project.json"
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    revision = manifest["tools"]["processing"]["pending_raw_registration"]["registration_fingerprint"]
+    first = _save_single_registration_plan(tmp_path, plan, 0)
+    assert record_registered_raw_processing_completion(tmp_path, outcome_ledger=first) == (ids[0],)
+    with pytest.raises(RawRegistrationPendingError, match="absent from the processing plan"):
+        require_registered_raw_processing_complete(tmp_path)
+    # A is safely accounted for although B still prevents post-processing.
+    marker = json.loads(path.read_text())["tools"]["processing"]["pending_raw_registration"]
+    assert set(marker["completed"]) == {ids[0]}
+    assert marker["registration_fingerprint"] == revision
+    second = _save_single_registration_plan(tmp_path, plan, 1)
+    assert record_registered_raw_processing_completion(tmp_path, outcome_ledger=second) == (ids[1],)
+    require_registered_raw_processing_complete(tmp_path)
+    before = path.read_bytes()
+    later = _save_single_registration_plan(tmp_path, plan, 0)
+    assert record_registered_raw_processing_completion(tmp_path, outcome_ledger=later) == ()
+    require_registered_raw_processing_complete(tmp_path)
+    assert path.read_bytes() == before
+
+
+def test_new_append_preserves_prior_completion_but_old_subset_cannot_complete_addition(tmp_path):
+    from Main_App.processing.raw_registration_state import (
+        RawRegistrationPendingError, record_registered_raw_processing_completion,
+        registration_tool_updates, require_registered_raw_processing_complete,
+    )
+
+    _manifest, plan, _outcomes, _ledger = _registration_fixture(tmp_path)
+    record_registered_raw_processing_completion(tmp_path)
+    path = tmp_path / "project.json"
+    manifest = json.loads(path.read_text())
+    completed = manifest["tools"]["processing"]["pending_raw_registration"]["completed"]
+    # Register the other fixture identity in a later append transaction.
+    manifest["tools"].update(registration_tool_updates(tmp_path, ["P01"]))
+    assert manifest["tools"]["processing"]["pending_raw_registration"]["completed"] == completed
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    _save_single_registration_plan(tmp_path, plan, 1)
+    before = path.read_bytes()
+    assert record_registered_raw_processing_completion(tmp_path) == ()
+    assert path.read_bytes() == before
+    with pytest.raises(RawRegistrationPendingError, match="absent from the processing plan"):
+        require_registered_raw_processing_complete(tmp_path)
+    _save_single_registration_plan(tmp_path, plan, 0)
+    assert record_registered_raw_processing_completion(tmp_path) == ("P01",)
+    require_registered_raw_processing_complete(tmp_path)
+
+
+def test_registration_completion_save_failure_preserves_manifest_and_ledger(tmp_path, monkeypatch):
+    from Main_App.processing import raw_registration_state as registration
+    from Main_App.processing.processing_ledger import ledger_path
+
+    _manifest, _plan, _outcomes, _ledger = _registration_fixture(tmp_path)
+    paths = (tmp_path / "project.json", ledger_path(tmp_path))
+    before = [path.read_bytes() for path in paths]
+    def fail_replace(*_args):
+        raise PermissionError("registration save denied")
+    monkeypatch.setattr(registration.os, "replace", fail_replace)
+    with pytest.raises(PermissionError, match="registration save denied"):
+        registration.record_registered_raw_processing_completion(tmp_path)
+    assert [path.read_bytes() for path in paths] == before
+    assert not list(tmp_path.glob(".raw-registration-*.tmp"))
+
+
+@pytest.mark.parametrize("changed_file", ["manifest", "ledger"])
+def test_registration_completion_rejects_concurrent_state_change(tmp_path, monkeypatch, changed_file):
+    from Main_App.processing import raw_registration_state as registration
+    from Main_App.processing.processing_ledger import ledger_path
+
+    _manifest, _plan, _outcomes, _ledger = _registration_fixture(tmp_path)
+    manifest_path = tmp_path / "project.json"
+    before = manifest_path.read_bytes()
+    target = manifest_path if changed_file == "manifest" else ledger_path(tmp_path)
+    def concurrent_write(_descriptor):
+        value = json.loads(target.read_text())
+        value["concurrent_change"] = True
+        target.write_text(json.dumps(value), encoding="utf-8")
+    monkeypatch.setattr(registration.os, "fsync", concurrent_write)
+    with pytest.raises(registration.RawRegistrationPendingError, match="state changed"):
+        registration.record_registered_raw_processing_completion(tmp_path)
+    assert json.loads(target.read_text())["concurrent_change"] is True
+    if changed_file == "ledger":
+        assert manifest_path.read_bytes() == before
+    assert not json.loads(manifest_path.read_text())["tools"]["processing"]["pending_raw_registration"]["completed"]
+    assert not list(tmp_path.glob(".raw-registration-*.tmp"))
+
+
+def test_registration_completion_is_portable_for_internal_raw_paths(tmp_path):
+    from Main_App.processing.raw_registration_state import record_registered_raw_processing_completion, require_registered_raw_processing_complete
+
+    manifest, _plan, _outcomes, _ledger = _registration_fixture(tmp_path)
+    manifest["groups"]["control"]["raw_input_folder"] = "."
+    for participant in manifest["participants"].values():
+        participant["raw_file"] = Path(participant["raw_file"]).relative_to(tmp_path).as_posix()
+    path = tmp_path / "project.json"
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    record_registered_raw_processing_completion(tmp_path)
+    moved = tmp_path / "copied-project"
+    moved.mkdir()
+    (moved / "project.json").write_bytes(path.read_bytes())
+    # The copied project needs neither the old absolute root nor a full plan to
+    # prove historical enrollment. Scientific release still validates its files.
+    require_registered_raw_processing_complete(moved)
+
+
+def test_corrupt_completion_cannot_satisfy_an_absent_registration(tmp_path):
+    from Main_App.processing.raw_registration_state import RawRegistrationPendingError, record_registered_raw_processing_completion, require_registered_raw_processing_complete
+
+    _manifest, plan, _outcomes, _ledger = _registration_fixture(tmp_path)
+    record_registered_raw_processing_completion(tmp_path)
+    path = tmp_path / "project.json"
+    manifest = json.loads(path.read_text())
+    manifest["tools"]["processing"]["pending_raw_registration"]["completed"]["P02"]["outcomes_fingerprint"] = "corrupt"
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    _save_single_registration_plan(tmp_path, plan, 0)
+    with pytest.raises(RawRegistrationPendingError, match="absent from the processing plan"):
+        require_registered_raw_processing_complete(tmp_path)
+
+
+def test_nonpersisting_pre_review_keeps_registration_receipts_read_only(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from Main_App.processing import raw_registration_state, roi_coverage
+
+    _manifest, _plan, outcomes, ledger = _registration_fixture(tmp_path)
+    path = tmp_path / "project.json"
+    before = path.read_bytes()
+    monkeypatch.setattr(raw_registration_state, "record_registered_raw_processing_completion", lambda *_args, **_kwargs: pytest.fail("persist=False must not write enrollment"))
+    with pytest.raises(roi_coverage.RoiCoverageGateError, match="At least one frozen ROI"):
+        roi_coverage.build_pre_review_roi_coverage(
+            SimpleNamespace(project_root=tmp_path), outcome_ledger=outcomes,
+            processing_ledger=ledger, roi_snapshot=SimpleNamespace(rois=()), persist=False,
+        )
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("consumer", ["canonical", "pre_review", "final", "full_fft", "current"])
+def test_pending_registration_blocks_all_release_seams_before_side_effects(tmp_path, monkeypatch, consumer):
+    from types import SimpleNamespace
+    from Main_App.processing import frequency_domain_qc, full_fft_provenance, roi_coverage
+    from Main_App.processing import post_processing_context
+    from Main_App.processing.raw_registration_state import RawRegistrationPendingError
+
+    _manifest, _plan, outcomes, ledger = _registration_fixture(tmp_path)
+    ledger.pop(EXPECTED_RECORDING_CONDITION_PLAN_LEDGER_KEY)
+    save_ledger(tmp_path, ledger)
+    before = (tmp_path / "project.json").read_bytes()
+    monkeypatch.setattr(post_processing_context, "cached_validation", lambda *_args: pytest.fail("pending enrollment must precede cache lookup"))
+    monkeypatch.setattr(roi_coverage, "persist_roi_coverage", lambda *_args: pytest.fail("pending enrollment must precede coverage writes"))
+    with pytest.raises((RawRegistrationPendingError, full_fft_provenance.FullFftProvenanceStaleError)):
+        if consumer == "canonical":
+            roi_coverage.require_canonical_released_dataset_index(tmp_path)
+        elif consumer == "pre_review":
+            roi_coverage.build_pre_review_roi_coverage(SimpleNamespace(project_root=tmp_path), outcome_ledger=outcomes)
+        elif consumer == "final":
+            roi_coverage.require_current_final_release(tmp_path, expected_decision_fingerprint="old")
+        elif consumer == "full_fft":
+            full_fft_provenance._source_snapshot(tmp_path, SimpleNamespace())
+        else:
+            frequency_domain_qc.mark_frequency_domain_outputs_current(tmp_path)
+    assert (tmp_path / "project.json").read_bytes() == before

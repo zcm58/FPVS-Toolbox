@@ -1376,8 +1376,12 @@ def mark_frequency_domain_outputs_current(project_root: str | Path) -> None:
     from Main_App.processing.condition_interpolation_state import (
         require_no_pending_condition_interpolation,
     )
+    from Main_App.processing.raw_registration_state import (
+        require_registered_raw_processing_complete,
+    )
 
     require_no_pending_condition_interpolation(project_root)
+    require_registered_raw_processing_complete(project_root)
     root = Path(project_root).resolve()
     manifest_path = root / "project.json"
     manifest = _read_manifest(manifest_path)

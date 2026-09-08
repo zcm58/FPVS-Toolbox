@@ -5,7 +5,9 @@ import hashlib
 import json
 import logging
 import os
+import tempfile
 from collections.abc import Collection
+from copy import deepcopy
 from pathlib import Path
 from typing import Any, Dict, Mapping
 
@@ -238,6 +240,35 @@ def _write_manifest_if_changed(manifest_path: Path, data: Dict[str, Any]) -> boo
     return True
 
 
+def _replace_reviewed_manifest(
+    manifest_path: Path,
+    data: Dict[str, Any],
+    expected_manifest_sha256: str,
+) -> None:
+    """Atomically replace the reviewed manifest, rejecting a changed disk copy."""
+
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=manifest_path.parent,
+            prefix=f".{manifest_path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as stream:
+            temporary_path = Path(stream.name)
+            json.dump(data, stream, indent=2, ensure_ascii=False)
+            stream.flush()
+            os.fsync(stream.fileno())
+        if hashlib.sha256(manifest_path.read_bytes()).hexdigest() != expected_manifest_sha256:
+            raise ValueError("Project metadata changed after registration review. Review the new inputs again.")
+        temporary_path.replace(manifest_path)
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
+
+
 def _preserve_disk_tools_metadata(
     current: Mapping[str, Any] | None,
     data: Dict[str, Any],
@@ -258,6 +289,17 @@ def _preserve_disk_tools_metadata(
             merged_tools.pop(tool_name, None)
     data["tools"] = merged_tools
     return data
+
+
+def _raw_registration_fingerprint(manifest: Mapping[str, Any] | None) -> str | None:
+    """Read the durable append revision without importing processing code."""
+
+    value: Any = manifest
+    for key in ("tools", "processing", "pending_raw_registration", "registration_fingerprint"):
+        if not isinstance(value, Mapping):
+            return None
+        value = value.get(key)
+    return str(value).strip() if value else None
 
 
 def _electrode_geometry_settings(preprocessing: Mapping[str, Any]) -> dict[str, str]:
@@ -369,6 +411,9 @@ class Project:
             manifest_path.resolve() if manifest_path is not None else self.project_root / "project.json"
         )
         self.manifest = manifest
+        # Tool-only refreshes may replace manifest["tools"] without refreshing
+        # registry attributes. Keep the loaded registration revision separate.
+        self._raw_registration_baseline = _raw_registration_fingerprint(manifest)
 
         raw_experimental_qc = manifest.get("experimental_qc")
         self.experimental_qc_settings = normalize_experimental_qc_settings(
@@ -700,6 +745,124 @@ class Project:
         self.preprocessing = preprocessing
         self._electrode_geometry_baseline = disk
 
+    def append_registered_inputs(
+        self,
+        *,
+        participants: Mapping[str, Mapping[str, Any]],
+        recordings: Mapping[str, Mapping[str, Any]],
+        expected_manifest_sha256: str,
+        tool_namespace_updates: Mapping[str, Mapping[str, Any]],
+    ) -> None:
+        """Persist explicitly reviewed additions without changing existing ownership.
+
+        The processing controller supplies additions only, the digest of the
+        manifest used for review, and its downstream freshness invalidations.
+        This is the sole append exception to a locked recording fingerprint;
+        ordinary saves continue to reject changed locked assignments. Existing
+        manifest entries are retained verbatim. No in-memory state is changed
+        until the validated candidate has been atomically saved.
+        """
+
+        manifest_path = self.project_root / "project.json"
+        reviewed_bytes = manifest_path.read_bytes()
+        if hashlib.sha256(reviewed_bytes).hexdigest() != expected_manifest_sha256:
+            raise ValueError("Project metadata changed after registration review. Review the new inputs again.")
+        disk_manifest = json.loads(reviewed_bytes)
+        if not isinstance(disk_manifest, dict):
+            raise ValueError("Project manifest must contain a JSON object.")
+        disk_project = Project(self.project_root, deepcopy(disk_manifest))
+        for name in (
+            "groups", "participants", "sessions", "recording_sources", "recordings",
+            "groups_locked", "groups_locked_at",
+        ):
+            if getattr(self, name) != getattr(disk_project, name):
+                raise ValueError(
+                    f"Project {name} changed before registration. Reload the project and review the new inputs again."
+                )
+        if (
+            not disk_project.groups
+            and not disk_project.recording_sources
+            and self.input_folder != disk_project.input_folder
+        ):
+            raise ValueError(
+                "Project input_folder changed before registration. Reload the project and review the new inputs again."
+            )
+        if not participants and not recordings:
+            return
+
+        candidate = deepcopy(disk_manifest)
+        additions = {"participants": participants, "recordings": recordings}
+        for name, entries in additions.items():
+            if not isinstance(entries, Mapping):
+                raise ValueError(f"New {name} must be a mapping.")
+            existing_ids = {key.casefold() for key in getattr(disk_project, name)}
+            for identifier in entries:
+                if not isinstance(identifier, str) or identifier != identifier.strip():
+                    raise ValueError(f"New {name} require exact stable IDs.")
+                if identifier.casefold() in existing_ids:
+                    raise ValueError(f"Registration cannot replace existing {name} ID '{identifier}'.")
+            if entries:
+                candidate.setdefault(name, {}).update(deepcopy(entries))
+
+        groups, aliases = normalize_project_groups(self.project_root, candidate.get("groups", {}))
+        normalized_participants = normalize_project_participants(
+            self.project_root, candidate.get("participants", {}), groups, aliases,
+        )
+        normalized_recordings = normalize_project_recordings(
+            self.project_root, candidate.get("recordings", {}), groups,
+            normalized_participants, disk_project.sessions, disk_project.recording_sources,
+        )
+        repeated_session = bool(disk_project.sessions or disk_project.recording_sources)
+        new_recording_participants = {
+            normalized_recordings[key]["participant_id"] for key in recordings
+        }
+        for participant_id in participants:
+            entry = dict(normalized_participants[participant_id])
+            if repeated_session:
+                if participant_id not in new_recording_participants:
+                    raise ValueError(f"New participant '{participant_id}' requires a new recording.")
+            else:
+                raw_file = entry.get("raw_file")
+                if raw_file is None:
+                    raise ValueError(f"New participant '{participant_id}' requires a raw_file.")
+                if not groups and raw_file.parent != disk_project.input_folder:
+                    raise ValueError(f"New raw file is outside the configured input folder: {raw_file}")
+            if entry.get("raw_file") is not None:
+                raw_file = Path(entry["raw_file"])
+                if not raw_file.is_file():
+                    raise ValueError(f"New raw file is unavailable: {raw_file}")
+                entry["raw_file"] = _relativize(self.project_root, raw_file)
+            candidate["participants"][participant_id] = entry
+        for recording_id in recordings:
+            entry = dict(normalized_recordings[recording_id])
+            raw_file = Path(entry["raw_file"])
+            if not raw_file.is_file():
+                raise ValueError(f"New raw file is unavailable: {raw_file}")
+            entry["raw_file"] = _relativize(self.project_root, raw_file)
+            candidate["recordings"][recording_id] = entry
+
+        fingerprint = disk_project._recordings_lock_fingerprint
+        if repeated_session and disk_project.groups_locked:
+            fingerprint = _recordings_lock_fingerprint(
+                disk_project.sessions, disk_project.recording_sources, normalized_recordings,
+            )
+            candidate["recordings_lock_fingerprint"] = fingerprint
+        if not isinstance(tool_namespace_updates, Mapping):
+            raise ValueError("Registration freshness updates must be a mapping.")
+        tools = candidate.setdefault("tools", {})
+        if not isinstance(tools, dict):
+            raise ValueError("Project tools metadata must be a mapping.")
+        for name, namespace in tool_namespace_updates.items():
+            if not isinstance(name, str) or not isinstance(namespace, Mapping):
+                raise ValueError("Registration freshness updates require named mappings.")
+            tools[name] = deepcopy(dict(namespace))
+        _replace_reviewed_manifest(manifest_path, candidate, expected_manifest_sha256)
+        self.participants = normalized_participants
+        self.recordings = normalized_recordings
+        self._recordings_lock_fingerprint = fingerprint
+        self.manifest = candidate
+        self._raw_registration_baseline = _raw_registration_fingerprint(candidate)
+
     def save(self, *, updated_tool_namespaces: Collection[str] = ()) -> None:
         """
         Persist manifest. Store relative paths when inside project_root.
@@ -1019,6 +1182,12 @@ class Project:
         geometry, _disk_geometry, current = self._reconciled_electrode_geometry_settings(
             normalized_pp
         )
+        disk_registration = _raw_registration_fingerprint(current)
+        if disk_registration and disk_registration != self._raw_registration_baseline:
+            raise ValueError(
+                "New raw inputs were registered after this project was loaded. "
+                "Reload the project before saving so its registered recordings are preserved."
+            )
         normalized_pp.update(geometry)
         data["preprocessing"].update(geometry)
         data = _preserve_disk_tools_metadata(

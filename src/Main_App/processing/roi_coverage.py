@@ -1058,8 +1058,12 @@ def require_canonical_released_dataset_index(
     """Return a fresh canonical index after rejecting stale same-root identity."""
 
     from Main_App.projects import load_project_dataset_index
+    from Main_App.processing.raw_registration_state import (
+        require_registered_raw_processing_complete,
+    )
 
     root = _resolved_project_root(project_root)
+    require_registered_raw_processing_complete(root)
     canonical = load_project_dataset_index(root)
     if dataset_index is not None:
         supplied_root = Path(dataset_index.project_root).expanduser().resolve(
@@ -1628,6 +1632,16 @@ def build_pre_review_roi_coverage(
         from Main_App.processing.processing_ledger import load_ledger
 
         processing_ledger = load_ledger(root)
+    from Main_App.processing.raw_registration_state import (
+        record_registered_raw_processing_completion,
+        require_registered_raw_processing_complete,
+    )
+
+    if persist:
+        record_registered_raw_processing_completion(root, outcome_ledger=outcome_ledger)
+    require_registered_raw_processing_complete(
+        root, ledger=processing_ledger, outcome_ledger=outcome_ledger,
+    )
     snapshot = roi_snapshot or snapshot_rois_from_settings()
     if not snapshot.rois:
         raise RoiCoverageGateError("At least one frozen ROI is required.")
@@ -1956,8 +1970,12 @@ def require_current_final_release(
     from Main_App.processing.recording_condition_outcomes import (
         load_recording_condition_outcomes,
     )
+    from Main_App.processing.raw_registration_state import (
+        require_registered_raw_processing_complete,
+    )
 
     root = _resolved_project_root(project_root)
+    require_registered_raw_processing_complete(root)
     cache_key = (str(root), str(expected_decision_fingerprint))
     cached = cached_validation("final_release", cache_key)
     if cached is not CACHE_MISS:

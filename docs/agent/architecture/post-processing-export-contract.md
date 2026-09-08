@@ -70,6 +70,32 @@ recording-level and participant-level decisions retain their existing scopes.
 This does not relax the expected recording-condition ledger release checks or
 create output receipts for absent data.
 
+Confirmed raw-file registration atomically records
+`tools.processing.pending_raw_registration` with the cumulative added
+processing IDs and their registration fingerprint. It also marks downstream
+QC, neutral FullFFT provenance and selection-derived artifacts stale and clears
+the harmonic cache entries, preserving review decisions and existing files.
+`Main_App.processing.raw_registration_state` prevents pre-review coverage,
+canonical dataset/final release, FullFFT provenance and clearing QC staleness
+from accepting an old plan that omits these IDs. The current expected plan must
+match their canonical manifest identity and condition map, and its outcomes
+must account for every added recording, including explicit valid exclusions.
+Cancelling later QC therefore cannot make Resume Post-processing release the
+previous smaller dataset. Missing visits with no registered raw recording do
+not become expected recordings.
+
+This enrollment check reconciles receipt metadata without rehashing artifacts;
+normal outcome reconciliation still defaults to full artifact validation, and
+all existing physical-artifact and scientific release checks remain required.
+Before building pre-review coverage, the workflow atomically stores compact
+completion receipts for additions with validated current processing accounting.
+These bind canonical recording identity to the expected recording and outcome
+fingerprints. Separate Single-file runs accumulate completion; later Single
+reruns do not make earlier completed additions appear pending. The cumulative
+registration fingerprint stays unchanged by completion, and direct release
+checks remain read-only. Pending additions absent from the current plan still
+block release. Projects without this marker retain their existing behavior.
+
 ## Canonical Harmonic Selection And Freshness
 
 Processing-end harmonic selection produces one immutable scientific result for

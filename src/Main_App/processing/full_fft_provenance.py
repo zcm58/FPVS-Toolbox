@@ -477,6 +477,15 @@ def _source_snapshot(
     project_root: Path,
     index: ProjectDatasetIndex,
 ) -> _SourceSnapshot:
+    from Main_App.processing.raw_registration_state import (
+        RawRegistrationPendingError,
+        require_registered_raw_processing_complete,
+    )
+
+    try:
+        require_registered_raw_processing_complete(project_root)
+    except RawRegistrationPendingError as exc:
+        raise FullFftProvenanceStaleError(str(exc)) from exc
     if index.project_root.resolve(strict=False) != project_root:
         raise FullFftProvenanceError(
             "The supplied dataset index belongs to a different active project root."

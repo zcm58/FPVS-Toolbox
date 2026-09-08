@@ -627,3 +627,148 @@ def test_project_open_discovery_failure_keeps_context_and_reports_actual_cause(t
     assert hasattr(host, "max_bad_channels_alert_entry")
     namespace["sync_input_folder_display"].assert_called_once_with(host)
     assert manifest_path.read_bytes() == before
+
+
+def _registration_validation_harness(tmp_path, *, mode="Batch", additions=True):
+    """Drive the real GUI orchestration without widgets or EEG processing."""
+    project = SimpleNamespace(
+        project_root=tmp_path, groups_locked=True, subfolders={"excel": "excel"},
+        preprocessing={}, recordings={"P1_visit1": {"participant_id": "P1"}},
+    )
+    manifest = tmp_path / "project.json"
+    manifest.write_text(json.dumps({"recordings": project.recordings}), encoding="utf-8")
+    old = SimpleNamespace(path=tmp_path / "P1.bdf", processing_id="P1_visit1")
+    new = SimpleNamespace(path=tmp_path / "P2.bdf", processing_id="P2_visit2")
+    new_row = SimpleNamespace(participant_id="P2", group_id="control", group_label="Control",
+                              session_id="visit2", session_label="Follow-up", raw_file=new.path,
+                              recording_id="P2_visit2", status="New participant and recording")
+    selected = (new,) if mode == "Single" else (old, new)
+    proposal = SimpleNamespace(files=selected, source_files=(old, new),
+                               review_rows=(new_row,) if additions else (), manifest_sha256="frozen")
+    timeline = []
+    messages = Mock()
+    host = SimpleNamespace(
+        currentProject=project, data_paths=[str(new.path if mode == "Single" else old.path)],
+        file_mode=SimpleNamespace(get=lambda: mode), log=Mock(),
+        _build_validated_params=Mock(side_effect=lambda: timeline.append("params") or {"event_id_map": {"Faces": 1}}),
+        review_recording_additions_for_processing=Mock(side_effect=lambda *_: timeline.append("confirm") or True),
+        run_preprocessing_qc_workflow=Mock(),
+    )
+    namespace = {
+        "_ensure_removed_electrode_detection_choice_ready": lambda _: True,
+        "Path": Path, "SimpleNamespace": SimpleNamespace, "logging": logging,
+        "logger": logging.getLogger(__name__), "QMessageBox": messages,
+        "prepare_raw_registration_review": Mock(return_value=proposal),
+        "commit_raw_registration_review": Mock(side_effect=lambda *_: timeline.append("commit") or list(selected)),
+        "prepare_batch_file_infos": Mock(side_effect=AssertionError("Strict discovery must not run before addition review")),
+        "raw_file_info_for_path": Mock(side_effect=AssertionError("Locked selection must use staged discovery")),
+        "project_recording_context": lambda _: SimpleNamespace(is_repeated_session=True),
+        "validate_repeated_recording_sources_for_processing": Mock(side_effect=lambda *_: timeline.append("preflight")),
+        "review_recording_additions_for_processing": Mock(),
+        "participant_review_rows": Mock(), "register_participants": Mock(),
+        "review_participants_for_processing": Mock(),
+        "_planning_settings_from_params": lambda params: (params, params["event_id_map"]),
+        "classify_processing_inputs": Mock(side_effect=lambda *_: timeline.append("plan") or SimpleNamespace(states=[])),
+        "PREPROCESSING_CANONICAL_KEYS": (), "FFT_MULTINOTCH_METHOD_VERSION": "unchanged",
+        "FFT_MULTINOTCH_HALF_WIDTH_HZ": 1, "FFT_MULTINOTCH_COMPONENT_COUNT": 1,
+    }
+    validate = _load_function("src/Main_App/gui/processing_inputs.py", "validate_inputs", namespace)
+    return validate, host, proposal, namespace, timeline, manifest
+
+
+@pytest.mark.parametrize("mode", ["Batch", "Single"])
+def test_processing_confirms_additions_once_before_planning_exact_selected_files(tmp_path, mode):
+    validate, host, proposal, namespace, timeline, _manifest = _registration_validation_harness(tmp_path, mode=mode)
+
+    assert validate(host) is True
+
+    assert timeline == ["preflight", "params", "confirm", "commit", "plan"]
+    host.review_recording_additions_for_processing.assert_called_once_with(host, proposal.review_rows)
+    namespace["commit_raw_registration_review"].assert_called_once_with(host.currentProject, proposal)
+    assert namespace["validate_repeated_recording_sources_for_processing"].call_args.args[1] == proposal.source_files
+    assert namespace["classify_processing_inputs"].call_args.args[1] == list(proposal.files)
+    assert host.data_paths == [str(info.path) for info in proposal.files]
+    assert host._processing_raw_file_infos == list(proposal.files)
+    namespace["participant_review_rows"].assert_not_called()
+    namespace["register_participants"].assert_not_called()
+    host.run_preprocessing_qc_workflow.assert_not_called()
+    namespace["QMessageBox"].critical.assert_not_called()
+
+
+@pytest.mark.parametrize("outcome", ["cancel", "stale_manifest", "save_failure", "project_changed"])
+def test_addition_review_cancel_or_failure_never_plans_or_saves_through_generic_registration(tmp_path, outcome):
+    validate, host, _proposal, namespace, timeline, manifest = _registration_validation_harness(tmp_path)
+    before = manifest.read_bytes()
+    initial_paths = list(host.data_paths)
+    if outcome == "cancel":
+        host.review_recording_additions_for_processing.side_effect = lambda *_: False
+    elif outcome == "project_changed":
+        host.review_recording_additions_for_processing.side_effect = lambda *_: setattr(host, "currentProject", object()) or True
+    else:
+        exception = ValueError("Project changed after the review opened") if outcome == "stale_manifest" else OSError("Project folder is read-only")
+        namespace["commit_raw_registration_review"].side_effect = exception
+
+    assert validate(host) is False
+
+    assert "plan" not in timeline
+    namespace["classify_processing_inputs"].assert_not_called()
+    namespace["register_participants"].assert_not_called()
+    namespace["participant_review_rows"].assert_not_called()
+    host.run_preprocessing_qc_workflow.assert_not_called()
+    assert host.data_paths == initial_paths
+    assert manifest.read_bytes() == before
+    if outcome in {"cancel", "project_changed"}:
+        namespace["commit_raw_registration_review"].assert_not_called()
+    if outcome == "cancel":
+        namespace["QMessageBox"].critical.assert_not_called()
+    else:
+        namespace["QMessageBox"].critical.assert_called_once()
+        message = namespace["QMessageBox"].critical.call_args.args[2]
+        expected = {"stale_manifest": "Project changed", "save_failure": "read-only",
+                    "project_changed": "active project changed"}[outcome]
+        assert expected in message
+
+
+def test_addition_source_conflict_stops_before_confirmation_or_registration(tmp_path):
+    validate, host, _proposal, namespace, _timeline, manifest = _registration_validation_harness(tmp_path)
+    before = manifest.read_bytes()
+    namespace["prepare_raw_registration_review"].side_effect = ValueError("Stable group assignment conflict")
+
+    assert validate(host) is False
+
+    host.review_recording_additions_for_processing.assert_not_called()
+    namespace["commit_raw_registration_review"].assert_not_called()
+    namespace["classify_processing_inputs"].assert_not_called()
+    assert "Stable group assignment conflict" in namespace["QMessageBox"].critical.call_args.args[2]
+    assert manifest.read_bytes() == before
+
+
+def test_no_new_recordings_continues_without_a_redundant_confirmation(tmp_path):
+    validate, host, _proposal, _namespace, timeline, _manifest = _registration_validation_harness(tmp_path, additions=False)
+
+    assert validate(host) is True
+
+    host.review_recording_additions_for_processing.assert_not_called()
+    assert timeline == ["preflight", "params", "commit", "plan"]
+
+
+def test_single_file_picker_stages_extra_file_without_confirming_or_saving(tmp_path):
+    chosen = tmp_path / "P2.bdf"
+    project = SimpleNamespace(groups_locked=True)
+    stage = Mock(return_value=SimpleNamespace(files=(SimpleNamespace(path=chosen),)))
+    namespace = {
+        "Path": Path, "raw_selection_start_folder": lambda _: tmp_path,
+        "QFileDialog": SimpleNamespace(getOpenFileName=lambda *_: (str(chosen), "")),
+        "QMessageBox": Mock(), "prepare_raw_registration_review": stage,
+        "raw_file_info_for_path": Mock(side_effect=AssertionError("Do not require registration just to select")),
+    }
+    select = _load_function("src/Main_App/gui/processing_inputs.py", "select_single_file", namespace)
+    host = SimpleNamespace(currentProject=project, le_input_file=Mock(), log=Mock(), _update_start_enabled=Mock())
+
+    select(host)
+
+    stage.assert_called_once_with(project, selected_path=chosen)
+    assert host.data_paths == [str(chosen)]
+    assert host._selected_bdf == str(chosen)
+    host.le_input_file.setText.assert_called_once_with(str(chosen))
+    assert not namespace["QMessageBox"].mock_calls
