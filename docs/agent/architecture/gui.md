@@ -24,6 +24,15 @@ Primary paths:
 - `src/Main_App/gui/project_workflows.py`: project open/create/load/save GUI
   orchestration and the confirmed active-project processing-cache reset used by
   `MainWindow` compatibility wrappers.
+  Opening a locked repeated-session project uses existing registered raw paths
+  rather than scanning new source files as a processing batch. Raw input issues
+  remain non-blocking log notices while processed-data inspection stays available;
+  analysis tools retain their own provenance and eligibility checks. Visible
+  smoke: open a processed project with unequal visit counts and an extra BDF in
+  a source folder; confirm it opens without a Project Data Error or false empty
+  folder warning, preserves registered membership, and opens existing analyses.
+  Repeat with an unavailable raw folder; starting processing must still report
+  the actual source/registration issue. No local Qt execution is required.
 - `src/Main_App/gui/processing_workflows.py`: processing run start/stop,
   queue polling, worker completion/error, and finalization GUI orchestration
   used by `MainWindow` compatibility wrappers.

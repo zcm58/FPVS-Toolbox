@@ -415,6 +415,15 @@ output. Participant-wide, recording-wide, participant-condition, and
 recording-condition exclusions remain distinct. Per-recording removed-
 electrode choices override the participant-level compatibility fallback.
 
+Opening a locked repeated-session project uses the canonical saved recording
+paths that still exist, without scanning source folders for new membership.
+Unequal visit counts, extra unregistered BDFs and unavailable raw files do not
+prevent inspection of existing processed data. Raw preparation errors are
+logged as non-blocking notices and are not reported as empty source folders.
+Batch processing still performs strict source discovery and registration checks;
+opening a project does not register additions, unlock assignments or waive
+analysis provenance, QC release or method-specific eligibility requirements.
+
 The shared read-only group/participant context is now available from
 `Main_App.projects`. `Main_App.projects.dataset_index` is the single
 GUI-neutral owner for processed-workbook discovery, condition and participant

@@ -497,3 +497,133 @@ def test_canceled_processing_does_not_show_post_processing_error_dialog():
     ), False)
 
     assert not messages.mock_calls
+
+
+def _registered_open_project(tmp_path):
+    """Canonical, deliberately uneven registered visits with one extra raw file."""
+    groups = {}
+    sources = {}
+    for group in ("control", "treatment"):
+        group_root = tmp_path / "raw" / group
+        groups[group] = {"label": group.title(), "folder_name": group.title(),
+                         "raw_input_folder": str(group_root)}
+        for session in ("visit1", "visit2"):
+            source_root = group_root / session
+            source_root.mkdir(parents=True)
+            sources[f"{group}_{session}"] = {
+                "group_id": group, "session_id": session, "raw_input_folder": str(source_root),
+            }
+    recordings = {}
+    participants = {}
+    for participant, group, session in (
+        ("P1", "control", "visit1"), ("P1", "control", "visit2"),
+        ("P2", "control", "visit1"), ("P3", "treatment", "visit1"),
+    ):
+        source_id = f"{group}_{session}"
+        raw_file = Path(sources[source_id]["raw_input_folder"]) / f"{participant}.bdf"
+        raw_file.write_bytes(b"Synthetic raw path only; never loaded as EEG")
+        participants[participant] = {"group_id": group}
+        recordings[f"{participant}_{session}"] = {
+            "participant_id": participant, "source_id": source_id,
+            "session_id": session, "raw_file": str(raw_file),
+        }
+    extra = Path(sources["control_visit1"]["raw_input_folder"]) / "P99.bdf"
+    extra.write_bytes(b"Unregistered source that must not be discovered on open")
+    manifest = {
+        "groups_locked": True, "groups": groups, "participants": participants,
+        "sessions": {"visit1": {"label": "Baseline", "visit_index": 1},
+                     "visit2": {"label": "Follow-up", "visit_index": 2}},
+        "recording_sources": sources, "recordings": recordings,
+        "input_folder": str(tmp_path / "raw"), "preprocessing": {},
+        "subfolders": {"excel": "excel"},
+    }
+    manifest_path = tmp_path / "project.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    return SimpleNamespace(project_root=tmp_path, **manifest), manifest_path, extra
+
+
+@pytest.mark.parametrize("missing_registered", [False, True])
+def test_locked_project_open_uses_only_existing_registered_uneven_visits(tmp_path, monkeypatch, missing_registered):
+    from Main_App.projects import project_recording_context
+
+    project, manifest_path, extra = _registered_open_project(tmp_path)
+    registered = [recording.raw_file for recording in project_recording_context(project).recordings]
+    if missing_registered:
+        registered[-1].unlink()
+    existing = [path for path in registered if path.is_file()]
+    before = manifest_path.read_bytes()
+    discover = Mock(side_effect=AssertionError("Project opening must not run processing discovery"))
+    paths_for_open = _load_function(
+        "src/Main_App/gui/project_workflows.py", "_raw_paths_for_project_open",
+        {"project_recording_context": project_recording_context, "prepare_batch_files": discover},
+    )
+    monkeypatch.setattr(Path, "glob", Mock(side_effect=AssertionError("Do not scan raw folders on open")))
+    monkeypatch.setattr(Path, "rglob", Mock(side_effect=AssertionError("Do not recurse raw folders on open")))
+
+    assert paths_for_open(project) == existing
+    discover.assert_not_called()
+    assert extra not in existing
+    assert manifest_path.read_bytes() == before
+    assert set(project.recordings) == {"P1_visit1", "P1_visit2", "P2_visit1", "P3_visit1"}
+
+
+@pytest.mark.parametrize("repeated, locked", [(False, False), (False, True), (True, False)])
+def test_project_open_keeps_existing_strict_discovery_for_other_projects(tmp_path, repeated, locked):
+    from Main_App.projects import project_recording_context
+
+    project, manifest_path, _extra = _registered_open_project(tmp_path)
+    project.groups_locked = locked
+    if not repeated:
+        project.sessions = {}
+        project.recording_sources = {}
+        project.recordings = {}
+    before = manifest_path.read_bytes()
+    expected = [tmp_path / "existing.bdf"]
+    discover = Mock(return_value=expected)
+    paths_for_open = _load_function(
+        "src/Main_App/gui/project_workflows.py", "_raw_paths_for_project_open",
+        {"project_recording_context": project_recording_context, "prepare_batch_files": discover},
+    )
+
+    assert paths_for_open(project) == expected
+    discover.assert_called_once_with(project)
+    discover.side_effect = ValueError("Strict source discovery failed")
+    with pytest.raises(ValueError, match="Strict source discovery failed"):
+        paths_for_open(project)
+    assert manifest_path.read_bytes() == before
+
+
+def test_project_open_discovery_failure_keeps_context_and_reports_actual_cause(tmp_path):
+    project, manifest_path, _extra = _registered_open_project(tmp_path)
+    project.input_folder = Path(project.input_folder)
+    before = manifest_path.read_bytes()
+    messages = Mock()
+    loaded = Mock(side_effect=lambda host, current: setattr(host, "currentProject", current))
+    error = "Processed project recording assignments are locked; P99.bdf is not registered"
+    namespace = {
+        "_load_project": loaded,
+        "_raw_paths_for_project_open": Mock(side_effect=ValueError(error)),
+        "logger": logging.getLogger(__name__), "logging": logging,
+        "QMessageBox": messages, "SimpleNamespace": SimpleNamespace,
+        "project_group_context": lambda _project: SimpleNamespace(has_group_metadata=False, groups=()),
+        "sync_input_folder_display": Mock(),
+        "normalize_preprocessing_settings": lambda settings: settings,
+        "QLineEdit": lambda value: SimpleNamespace(text=lambda: value),
+    }
+    load = _load_function("src/Main_App/gui/project_workflows.py", "load_project", namespace)
+    host = SimpleNamespace(log=Mock(), data_paths=["stale_previous_project.bdf"])
+
+    load(host, project, lambda edit: edit)
+
+    loaded.assert_called_once_with(host, project)
+    assert host.currentProject is project
+    assert host.data_paths == []
+    messages.critical.assert_not_called()
+    messages.warning.assert_not_called()
+    logged = [str(call.args[0]) for call in host.log.call_args_list]
+    assert any(error in message for message in logged)
+    assert not any("no .bdf files found" in message.lower() for message in logged)
+    assert host.save_folder_path.get() == str(tmp_path / "excel")
+    assert hasattr(host, "max_bad_channels_alert_entry")
+    namespace["sync_input_folder_display"].assert_called_once_with(host)
+    assert manifest_path.read_bytes() == before
