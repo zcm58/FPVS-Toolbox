@@ -44,9 +44,11 @@ from .visualization import (
     build_cluster_map_data,
     build_repeated_cluster_map_data,
 )
+from .reporting import EXPLORATORY_CRITERION
 
 if TYPE_CHECKING:
     from .api import RepeatedSessionBatchResult
+    from .reporting import RepeatedSessionReport
 
 
 TOOL_TITLE = "Free Harmonic Clustering Analysis"
@@ -59,6 +61,12 @@ MANIFEST_FILENAME = "manifest.json"
 HUMAN_WORKBOOK_FILENAME = "Free_Harmonic_Clustering_Results.xlsx"
 REPEATED_SESSION_WORKBOOK_FILENAME = "Free_Harmonic_Clustering_Repeated_Session_Batch.xlsx"
 REPEATED_SESSION_EXPORT_SCHEMA_VERSION = 1
+_EXPLORATORY_DESCRIPTION = (
+    EXPLORATORY_CRITERION + " These did not survive Holm within their prespecified "
+    "family. These are not confirmed findings or "
+    "pointwise sensor/harmonic effects."
+)
+_NO_EXPLORATORY_FINDINGS = "No runs met the exploratory reporting criteria."
 HUMAN_WORKBOOK_SHEETS: tuple[str, ...] = (
     "Run Summary",
     "Significant Clusters",
@@ -2110,6 +2118,74 @@ def _batch_cluster_rows(
     return rows
 
 
+def _exploratory_batch_rows(
+    report: "RepeatedSessionReport",
+    cluster_rows: Sequence[Mapping[str, object]],
+    membership_rows: Sequence[Mapping[str, object]],
+) -> tuple[list[dict[str, object]], list[Mapping[str, object]], list[Mapping[str, object]]]:
+    """Select existing audit rows using the shared reporting classification."""
+
+    findings = []
+    keys = set()
+    for row in report.rows:
+        if not row.is_exploratory:
+            continue
+        keys.update(
+            (row.family_id, row.condition, cluster_id)
+            for cluster_id in row.exploratory_cluster_ids
+        )
+        finding = {
+            "family_id": row.family_id,
+            "family_label": row.family_label,
+            "condition": row.condition,
+            "global_two_sided_cluster_p_value": row.global_p,
+            "holm_within_family_p_value": row.holm_family_p,
+            "holm_all_batch_p_value": row.holm_batch_p,
+            "cluster_ids": "|".join(str(value) for value in row.exploratory_cluster_ids),
+        }
+        # Keep detailed prose in bounded, wrapped worksheet rows. The complete
+        # narrative is also exported separately without Excel's cell limit.
+        for paragraph in row.detail_text.splitlines():
+            if paragraph.strip():
+                for offset in range(0, len(paragraph), 4000):
+                    findings.append({**finding, "notes": paragraph[offset:offset + 4000]})
+
+    def selected(row: Mapping[str, object]) -> bool:
+        return (row["family_id"], row["condition"], row["cluster_id"]) in keys
+
+    return (
+        findings,
+        [row for row in cluster_rows if selected(row)],
+        [row for row in membership_rows if selected(row)],
+    )
+
+
+def _write_exploratory_report(path: Path, report: "RepeatedSessionReport") -> None:
+    """Write the shared detailed narrative inside the atomic run staging area."""
+
+    lines = [
+        "# Exploratory FHC findings", "", _EXPLORATORY_DESCRIPTION, "",
+        f"{report.exploratory_count} of {len(report.rows)} condition-by-family runs met these criteria.",
+        "",
+    ]
+    for row in report.rows:
+        if row.is_exploratory:
+            detail = row.detail_text.replace("\n", "  \n")
+            lines.extend([f"## {row.condition} | {row.family_label}", "", detail, ""])
+    if not report.exploratory_count:
+        lines.extend([_NO_EXPLORATORY_FINDINGS, ""])
+    lines.extend([
+        "Exact candidate cluster rows: exploratory_clusters.csv. Exact sensor-harmonic "
+        "membership: exploratory_cluster_membership.csv. The full batch, all clusters, "
+        "and their original p-values remain in the primary workbook and CSV tables.",
+        "",
+    ])
+    with path.open("w", encoding="utf-8", newline="\n") as stream:
+        stream.write("\n".join(lines))
+        stream.flush()
+        os.fsync(stream.fileno())
+
+
 def _batch_membership_rows(
     result: "RepeatedSessionBatchResult",
 ) -> list[dict[str, object]]:
@@ -2540,6 +2616,7 @@ def _write_repeated_session_workbook(
     selection_rows: Sequence[Mapping[str, object]],
     source_rows: Sequence[Mapping[str, object]],
     methods_rows: Sequence[Mapping[str, object]],
+    exploratory_rows: Sequence[Mapping[str, object]],
 ) -> None:
     sheets = (
         "Batch Summary",
@@ -2551,6 +2628,7 @@ def _write_repeated_session_workbook(
         "Shared Harmonic Selection",
         "Source Workbooks",
         "Methods and Provenance",
+        "Exploratory Findings",
     )
     workbook = Workbook()
     workbook.active.title = sheets[0]
@@ -2763,6 +2841,27 @@ def _write_repeated_session_workbook(
         fields=("category", "item", "value", "notes"),
         rows=methods_rows,
     )
+    exploratory_fields = (
+        "family_id", "family_label", "condition", "global_two_sided_cluster_p_value",
+        "holm_within_family_p_value", "holm_all_batch_p_value", "cluster_ids", "notes",
+    )
+    sheet = workbook["Exploratory Findings"]
+    _write_table_sheet(
+        sheet,
+        title="Exploratory Findings — Not Significant After Family Holm",
+        description=_EXPLORATORY_DESCRIPTION,
+        fields=exploratory_fields,
+        rows=exploratory_rows,
+        empty_message=_NO_EXPLORATORY_FINDINGS,
+    )
+    sheet.row_dimensions[2].height = 48
+    sheet.column_dimensions["H"].width = 110
+    for row_index, row in enumerate(exploratory_rows, start=5):
+        sheet.row_dimensions[row_index].height = min(
+            409, max(30, 15 * (2 + len(str(row["notes"])) // 100)),
+        )
+        for column_index in (4, 5, 6):
+            sheet.cell(row_index, column_index).number_format = "0.########"
     workbook.save(path)
     with path.open("rb+") as stream:
         os.fsync(stream.fileno())
@@ -2898,6 +2997,12 @@ def export_repeated_session_batch(
     selection_rows = _batch_shared_selection_rows(prepared)
     source_rows = _batch_source_rows(prepared, project_root)
     methods_rows = _batch_methods_rows(prepared, result)
+    from .reporting import build_repeated_session_report
+
+    report = build_repeated_session_report(result)
+    exploratory_rows, exploratory_clusters, exploratory_membership = _exploratory_batch_rows(
+        report, cluster_rows, membership_rows,
+    )
     created_at_utc = datetime.now(UTC).isoformat()
 
     parent = final_directory.parent
@@ -2939,8 +3044,27 @@ def export_repeated_session_batch(
         ),
         ("source_workbooks", "source_workbooks.csv", tuple(source_rows[0]) if source_rows else (), source_rows),
         ("methods_and_provenance", "methods_and_provenance.csv", ("category", "item", "value", "notes"), methods_rows),
+        (
+            "exploratory_clusters", "exploratory_clusters.csv",
+            tuple(cluster_rows[0]) if cluster_rows else ("family_id", "condition", "cluster_id"),
+            exploratory_clusters,
+        ),
+        (
+            "exploratory_cluster_membership", "exploratory_cluster_membership.csv",
+            tuple(membership_rows[0]) if membership_rows else ("family_id", "condition", "cluster_id"),
+            exploratory_membership,
+        ),
     )
     try:
+        _check_export_cancelled(cancel_check)
+        exploratory_path = staging / "exploratory_findings.md"
+        _write_exploratory_report(exploratory_path, report)
+        artifacts.append(
+            _batch_artifact_manifest_row(
+                role="exploratory_findings", staging_path=exploratory_path,
+                staging_root=staging, destination=final_directory, project_root=project_root,
+            )
+        )
         for role, filename, fields, rows in csv_specs:
             _check_export_cancelled(cancel_check)
             if not fields:
@@ -3016,6 +3140,7 @@ def export_repeated_session_batch(
             selection_rows=selection_rows,
             source_rows=source_rows,
             methods_rows=methods_rows,
+            exploratory_rows=exploratory_rows,
         )
         artifacts.append(
             _batch_artifact_manifest_row(
@@ -3200,6 +3325,16 @@ def export_repeated_session_batch(
                 for family in RepeatedSessionContrastFamily
             },
             "results": summary_rows,
+            "exploratory_reporting": {
+                "criterion": EXPLORATORY_CRITERION,
+                "qualifying_run_count": report.exploratory_count,
+                "qualifying_cluster_count": len(exploratory_clusters),
+                "report": "exploratory_findings.md",
+                "cluster_rows": "exploratory_clusters.csv",
+                "membership_rows": "exploratory_cluster_membership.csv",
+                "changes_inference": False,
+                "pointwise_significance_claimed": False,
+            },
             "contrast_arrays": array_mapping,
             "cluster_maps": map_mapping,
             "source_workbooks": source_rows,

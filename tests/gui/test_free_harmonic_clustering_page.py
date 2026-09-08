@@ -41,6 +41,16 @@ from Tools.Free_Harmonic_Clustering.gui.models import (  # noqa: E402
 from Tools.Free_Harmonic_Clustering.gui.recording_exclusions_dialog import (  # noqa: E402
     RecordingExclusionsDialog,
 )
+from Tools.Free_Harmonic_Clustering.gui.result_details_dialog import (  # noqa: E402
+    ResultDetailsDialog,
+)
+from Tools.Free_Harmonic_Clustering.models import (  # noqa: E402
+    AnalysisDesign,
+    RepeatedSessionContrastFamily,
+)
+from Tools.Free_Harmonic_Clustering.reporting import (  # noqa: E402
+    build_repeated_session_report,
+)
 from Tools.Free_Harmonic_Clustering.gui.workers import (  # noqa: E402
     AnalysisWorker,
     RepeatedSessionBatchWorker,
@@ -484,6 +494,55 @@ def test_repeated_batch_worker_delegates_every_phase_off_widget_state(
     assert completed == [RepeatedBatchWorkerOutcome(run=sentinel)]
 
 
+def _repeated_report_run(
+    conditions: tuple[str, ...],
+    p_values: tuple[tuple[float, float, float], ...],
+) -> SimpleNamespace:
+    """Only compact scientific labels/membership needed by the real report builder."""
+
+    prepared = SimpleNamespace(
+        request=SimpleNamespace(design=AnalysisDesign.INDEPENDENT_GROUPS),
+        arm_a_label="BC Group (two-session average)",
+        arm_b_label="Control Group (two-session average)",
+        participant_ids_a=("P1", "P2"),
+        participant_ids_b=("P3", "P4", "P5"),
+        sensor_names=("Cz", "CPz"),
+        harmonic_orders=(1, 2),
+        harmonics_hz=(1.2, 2.4),
+    )
+    outcomes = []
+    for index, (global_p, family_p, batch_p) in enumerate(p_values):
+        condition = conditions[index % len(conditions)]
+        family = RepeatedSessionContrastFamily.SESSION_AVERAGED_GROUPS
+        cluster = SimpleNamespace(
+            significant=global_p <= 0.05,
+            adjusted_two_sided_p_value=global_p,
+            cluster_id=1,
+            sign="positive",
+            p_value=global_p / 2,
+            mass=4.2,
+            effect_size=0.8,
+            effect_size_kind="Cohen's d",
+            sensor_indices=(0, 1),
+            harmonic_indices=(0, 1),
+        )
+        outcomes.append(SimpleNamespace(
+            family_id=family.value,
+            condition=condition,
+            prepared_run=SimpleNamespace(
+                family=family,
+                family_label="Session Averaged Groups",
+                condition=condition,
+                prepared=prepared,
+            ),
+            result=SimpleNamespace(clusters=(cluster,)),
+            global_two_sided_p_value=global_p,
+            holm_within_family_p_value=family_p,
+            holm_all_batch_p_value=batch_p,
+        ))
+    return SimpleNamespace(result=SimpleNamespace(outcomes=tuple(outcomes)))
+
+
 def test_repeated_batch_result_table_shows_both_holm_layers(
     qtbot,
     tmp_path: Path,
@@ -491,27 +550,7 @@ def test_repeated_batch_result_table_shows_both_holm_layers(
     page = _page(qtbot, tmp_path)
     page._on_inspection_completed(_repeated_options(tmp_path.resolve()))
     conditions = _repeated_options(tmp_path).conditions
-    families = (
-        "session_averaged_groups",
-        "paired_sessions_within_group:bc_group",
-        "paired_sessions_within_group:control_group",
-        "group_session_change",
-    )
-    outcomes = tuple(
-        SimpleNamespace(
-            family_id=family,
-            condition=condition,
-            result=SimpleNamespace(
-                clusters=(SimpleNamespace(significant=True),),
-            ),
-            global_two_sided_p_value=0.01,
-            holm_within_family_p_value=0.04,
-            holm_all_batch_p_value=0.16,
-        )
-        for condition in conditions
-        for family in families
-    )
-    run = SimpleNamespace(result=SimpleNamespace(outcomes=outcomes))
+    run = _repeated_report_run(conditions, ((0.01, 0.04, 0.16),) * 16)
 
     page._on_repeated_batch_completed(RepeatedBatchWorkerOutcome(run=run))
 
@@ -522,7 +561,172 @@ def test_repeated_batch_result_table_shows_both_holm_layers(
     assert page.batch_table.item(0, 0).text() == "Session Averaged Groups"
     assert page.batch_table.item(0, 4).text() == "0.0400"
     assert page.batch_table.item(0, 5).text() == "0.1600"
-    assert "session/phase-at-visit" in page.result_status.text()
+    assert "16 pass family Holm" in page.result_status.text()
+    assert "0 pass full-batch Holm" in page.result_status.text()
+    assert "0 exploratory findings" in page.result_status.text()
+    assert page.result_view_combo.currentText() == "All comparisons"
+    assert page.batch_table.horizontalHeaderItem(2).text() == "Within-run clusters"
+    assert "run-level Holm" in page.batch_table.horizontalHeaderItem(2).toolTip()
+
+
+def test_exploratory_filter_uses_stored_boundaries_and_original_map_indices(
+    qtbot,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    import Tools.Free_Harmonic_Clustering.gui.cluster_map_view as map_module
+
+    class MapViewSpy(QtWidgets.QWidget):
+        def __init__(self, parent=None):
+            super().__init__(parent)
+            self.selected_run = None
+
+        def set_maps(self, maps):
+            self.maps = maps
+
+        def clear(self):
+            self.maps = ()
+
+        def select_run(self, run_index):
+            self.selected_run = run_index
+
+    monkeypatch.setattr(map_module, "ClusterMapView", MapViewSpy)
+    page = _page(qtbot, tmp_path)
+    page._on_inspection_completed(_repeated_options(tmp_path.resolve()))
+    # Only original rows 1 and 4 qualify. Exactly .05 and family-Holm passes do not.
+    p_values = (
+        (0.10, 0.40, 1.0),
+        (0.0402, 0.1608, 0.6029),
+        (0.05, 0.20, 0.80),
+        (0.01, 0.05, 0.16),
+        (0.049999, 0.199996, 0.799984),
+    )
+    run = _repeated_report_run(_repeated_options(tmp_path).conditions, p_values)
+    page._on_repeated_batch_completed(
+        RepeatedBatchWorkerOutcome(run=run, maps=tuple(object() for _ in p_values)),
+    )
+    assert page.batch_table.rowCount() == 5
+    assert "2 exploratory findings" in page.result_status.text()
+    assert "1 pass family Holm" in page.result_status.text()
+    snapshot = page._batch_report_rows
+    assert all(value is not run for value in page.__dict__.values())
+
+    def unexpected_work(*_args, **_kwargs):
+        raise AssertionError("A reporting view must not start processing or export.")
+
+    monkeypatch.setattr(page, "_start_operation", unexpected_work)
+    page.result_view_combo.setCurrentIndex(1)
+    assert page.batch_table.rowCount() == 2
+    assert page.batch_table.item(0, 3).text() == "0.0402"
+    assert page.batch_table.item(0, 4).text() == "0.1608"
+    assert page.batch_table.item(0, 5).text() == "0.6029"
+    assert [page.batch_table.item(row, 0).data(QtCore.Qt.UserRole) for row in range(2)] == [1, 4]
+    assert "0.049999" in page.batch_table.item(1, 3).toolTip()
+    assert page._batch_report_rows is snapshot
+    page.batch_table.selectRow(1)
+    qtbot.mouseClick(page.view_maps_button, QtCore.Qt.LeftButton)
+    assert page.map_view.selected_run == 4
+    assert page.result_tabs.currentIndex() == 1
+    page.result_tabs.setCurrentIndex(0)
+
+    def open_selected_maps(dialog):
+        assert dialog._run_index == 4
+        dialog.maps_button.click()
+        return QtWidgets.QDialog.Accepted
+
+    monkeypatch.setattr(ResultDetailsDialog, "exec", open_selected_maps)
+    qtbot.mouseClick(page.view_details_button, QtCore.Qt.LeftButton)
+    assert page.result_tabs.currentIndex() == 1
+    assert page.map_view.selected_run == 4
+    page.result_tabs.setCurrentIndex(0)
+    page.result_view_combo.setCurrentIndex(0)
+    assert page.batch_table.rowCount() == 5
+    assert page._selected_report_row().run_index == 4
+
+
+def test_exploratory_empty_view_and_context_reset(qtbot, tmp_path: Path) -> None:
+    page = _page(qtbot, tmp_path)
+    page._on_inspection_completed(_repeated_options(tmp_path.resolve()))
+    run = _repeated_report_run(("Neutral Happy",), ((0.05, 0.2, 0.8),))
+    page._on_repeated_batch_completed(RepeatedBatchWorkerOutcome(run=run))
+    page.result_view_combo.setCurrentIndex(1)
+    assert page.batch_table.rowCount() == 0
+    assert "No comparisons meet the exploratory criteria" in page.result_status.text()
+    assert not page.view_details_button.isEnabled()
+    assert not page.view_maps_button.isEnabled()
+    assert page._selected_report_row() is None
+
+    page._on_setup_changed()
+    assert page._batch_report_rows == ()
+    assert page.result_view_combo.currentIndex() == 0
+    assert page.result_view_combo.isHidden()
+    assert page.view_details_button.isHidden()
+    assert page.results_panel.isHidden()
+    page._on_repeated_batch_completed(RepeatedBatchWorkerOutcome(run=run))
+    page.result_view_combo.setCurrentIndex(1)
+    assert page.refresh_project_context(project_root=tmp_path, frequency_snapshot=None)
+    assert page._batch_report_rows == ()
+    assert page.result_view_combo.currentIndex() == 0
+    assert page.result_view_combo.isHidden()
+
+
+def test_result_details_are_read_only_with_explicit_exploratory_status_and_maps(
+    qtbot,
+) -> None:
+    run = _repeated_report_run(("Neutral Happy",), ((0.0402, 0.1608, 0.6029),))
+    row = build_repeated_session_report(run.result).rows[0]
+    dialog = ResultDetailsDialog(row, maps_available=True)
+    qtbot.addWidget(dialog)
+    dialog.show()
+    qtbot.waitExposed(dialog)
+    requested = []
+    dialog.maps_requested.connect(requested.append)
+    assert dialog.windowTitle() == "Exploratory Finding Details"
+    assert dialog.details.isReadOnly()
+    text = dialog.details.toPlainText()
+    assert "does not pass family Holm" in text
+    for value in ("0.0402", "0.1608", "0.6029", "Cz", "CPz", "H1", "H2"):
+        assert value in text
+    assert "not individual clusters or electrodes" in text
+    assert "estimated from the selected cluster" in text
+    assert "visit order" in text
+    assert dialog.findChildren(QtWidgets.QScrollArea) == []
+    assert dialog.size().width() <= 1000
+    assert dialog.size().height() <= 650
+    assert dialog.rect().contains(dialog.maps_button.mapTo(dialog, QtCore.QPoint(0, 0)))
+    assert dialog.rect().contains(dialog.close_button.mapTo(dialog, dialog.close_button.rect().bottomRight()))
+    qtbot.mouseClick(dialog.close_button, QtCore.Qt.LeftButton)
+    assert requested == []
+    dialog.show()
+    qtbot.mouseClick(dialog.maps_button, QtCore.Qt.LeftButton)
+    assert requested == [0]
+
+
+def test_result_details_without_maps_and_page_fit(qtbot, tmp_path: Path, monkeypatch) -> None:
+    page = _page(qtbot, tmp_path)
+    page._on_inspection_completed(_repeated_options(tmp_path.resolve()))
+    run = _repeated_report_run(_repeated_options(tmp_path).conditions, ((0.0402, 0.1608, 0.6029),) * 16)
+    page._on_repeated_batch_completed(RepeatedBatchWorkerOutcome(run=run))
+    page.resize(1280, 900)
+    QtWidgets.QApplication.processEvents()
+    assert page.findChildren(QtWidgets.QScrollArea) == []
+    assert page.minimumSizeHint().width() <= 1280
+    assert page.minimumSizeHint().height() <= 900
+    for widget in (page.result_view_combo, page.view_details_button, page.view_maps_button, page.workflow_actions):
+        assert page.rect().contains(widget.mapTo(page, widget.rect().bottomRight()))
+    observed = []
+
+    def inspect_dialog(dialog):
+        observed.append(dialog.details.toPlainText())
+        assert not dialog.maps_button.isEnabled()
+        assert "unavailable" in dialog.maps_button.toolTip()
+        return QtWidgets.QDialog.Rejected
+
+    monkeypatch.setattr(ResultDetailsDialog, "exec", inspect_dialog)
+    qtbot.mouseClick(page.view_details_button, QtCore.Qt.LeftButton)
+    assert len(observed) == 1
+    assert "Neutral Angry" in observed[0]
+    assert page.result_tabs.currentIndex() == 0
 
 
 def test_provenance_failure_requests_shared_post_processing_without_error_banner(
@@ -961,6 +1165,8 @@ def test_results_appear_in_compact_single_screen_without_run_metadata(
     assert page.setup_panel.isVisible()
     assert page.results_panel.isVisible()
     assert page._has_result
+    assert page.result_view_combo.isHidden()
+    assert page.view_details_button.isHidden()
     assert not hasattr(page, "_prepared")
     assert not hasattr(page, "_run_outcome")
     assert all(value is not prepared for value in page.__dict__.values())

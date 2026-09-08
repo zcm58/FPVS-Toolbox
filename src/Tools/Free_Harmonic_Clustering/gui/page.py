@@ -75,6 +75,7 @@ from .workers import (
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
+    from ..reporting import RepeatedSessionReportRow
     from ..visualization import ClusterMapData
     from .cluster_map_view import ClusterMapView
 
@@ -131,6 +132,8 @@ class FreeHarmonicClusteringPage(QWidget):
         self._options: ProjectAnalysisOptions | None = None
         self._recording_exclusions: tuple[AnalysisRecordingExclusion, ...] = ()
         self._has_result = False
+        self._batch_report_rows: tuple[RepeatedSessionReportRow, ...] = ()
+        self._batch_summary_text = ""
         self.map_view: ClusterMapView | None = None
         self._thread: QThread | None = None
         self._worker: object | None = None
@@ -531,7 +534,7 @@ class FreeHarmonicClusteringPage(QWidget):
             (
                 "Contrast family",
                 "Condition",
-                "Significant clusters",
+                "Within-run clusters",
                 "Global p",
                 "Holm p (family)",
                 "Holm p (full batch)",
@@ -543,7 +546,32 @@ class FreeHarmonicClusteringPage(QWidget):
             QSizePolicy.Preferred,
         )
         self.batch_table.hide()
+        self.batch_table.horizontalHeaderItem(2).setToolTip(
+            "Clusters passing the existing within-run threshold. This count does "
+            "not mean the comparison passes either run-level Holm correction."
+        )
         results_card.content_layout.addWidget(self.batch_table)
+        self.result_view_label = QLabel("Result view:", results_card.content)
+        self.result_view_combo = QComboBox(results_card.content)
+        self.result_view_combo.setObjectName("free_harmonic_result_view")
+        self.result_view_combo.addItem("All comparisons", "all")
+        self.result_view_combo.addItem("Exploratory findings", "exploratory")
+        self.result_view_combo.setToolTip(
+            "Exploratory findings have nominal global p < .05 and family Holm "
+            "p > .05. Changing this view does not change the analysis or correction."
+        )
+        self.result_view_label.setBuddy(self.result_view_combo)
+        self.view_details_button = make_action_button(
+            "View details", variant="secondary", parent=results_card.content,
+        )
+        self.view_details_button.setObjectName("free_harmonic_view_details_button")
+        self.view_details_button.setToolTip(
+            "Read the selected comparison's interpretation, cluster details, and correction status."
+        )
+        for widget in (
+            self.result_view_label, self.result_view_combo, self.view_details_button,
+        ):
+            widget.hide()
         self.view_maps_button = make_action_button(
             "View cluster maps", variant="secondary", parent=results_card.content,
         )
@@ -551,9 +579,13 @@ class FreeHarmonicClusteringPage(QWidget):
         self.view_maps_button.setToolTip(
             "Show harmonic difference maps for the selected cluster or contrast."
         )
-        results_card.content_layout.addWidget(
-            self.view_maps_button, 0, Qt.AlignRight,
+        result_actions = make_action_row(
+            (self.view_details_button, self.view_maps_button),
+            parent=results_card.content,
         )
+        result_actions.row_layout.insertWidget(0, self.result_view_label)
+        result_actions.row_layout.insertWidget(1, self.result_view_combo)
+        results_card.content_layout.addWidget(result_actions)
         self.results_panel.hide()
 
     @staticmethod
@@ -610,6 +642,9 @@ class FreeHarmonicClusteringPage(QWidget):
         self.view_maps_button.clicked.connect(self._open_cluster_maps)
         self.significant_table.cellDoubleClicked.connect(self._open_cluster_maps)
         self.batch_table.cellDoubleClicked.connect(self._open_cluster_maps)
+        self.result_view_combo.currentIndexChanged.connect(self._refresh_batch_table)
+        self.batch_table.itemSelectionChanged.connect(self._update_result_actions)
+        self.view_details_button.clicked.connect(self._open_result_details)
 
     # ---------------------------------------------------------- project state
     def refresh_project_context(
@@ -1142,16 +1177,17 @@ class FreeHarmonicClusteringPage(QWidget):
         elif self.map_view is not None:
             self.map_view.clear()
         self.result_tabs.setTabEnabled(1, bool(maps))
-        self.view_maps_button.setEnabled(bool(maps))
+        self._update_result_actions()
 
     @Slot()
     def _open_cluster_maps(self, *_args: object) -> None:
         if self.map_view is None or not self.result_tabs.isTabEnabled(1):
             return
         if not self.batch_table.isHidden():
-            row = self.batch_table.currentRow()
-            if row >= 0:
-                self.map_view.select_run(row)
+            row = self._selected_report_row()
+            if row is None:
+                return
+            self.map_view.select_run(row.run_index)
         else:
             item = self.significant_table.item(self.significant_table.currentRow(), 0)
             if item is not None:
@@ -1159,6 +1195,53 @@ class FreeHarmonicClusteringPage(QWidget):
                 if cluster_id is not None:
                     self.map_view.select_cluster(int(cluster_id))
         self.result_tabs.setCurrentIndex(1)
+
+    def _selected_report_row(self) -> RepeatedSessionReportRow | None:
+        item = self.batch_table.item(self.batch_table.currentRow(), 0)
+        if item is None:
+            return None
+        run_index = item.data(Qt.UserRole)
+        return next(
+            (row for row in self._batch_report_rows if row.run_index == run_index),
+            None,
+        )
+
+    @Slot()
+    def _update_result_actions(self) -> None:
+        has_selection = self._selected_report_row() is not None
+        self.view_details_button.setEnabled(has_selection)
+        self.view_maps_button.setEnabled(
+            self.result_tabs.isTabEnabled(1)
+            and (self.batch_table.isHidden() or has_selection)
+        )
+
+    @Slot()
+    def _open_result_details(self) -> None:
+        row = self._selected_report_row()
+        if row is None:
+            return
+        from .result_details_dialog import ResultDetailsDialog
+
+        dialog = ResultDetailsDialog(
+            row,
+            self,
+            maps_available=self.result_tabs.isTabEnabled(1),
+        )
+        dialog.maps_requested.connect(self._open_repeated_result_map)
+        try:
+            dialog.exec()
+        finally:
+            dialog.deleteLater()
+
+    @Slot(int)
+    def _open_repeated_result_map(self, run_index: int) -> None:
+        if (
+            self.map_view is not None
+            and self.result_tabs.isTabEnabled(1)
+            and any(row.run_index == run_index for row in self._batch_report_rows)
+        ):
+            self.map_view.select_run(run_index)
+            self.result_tabs.setCurrentIndex(1)
 
     def _show_completed_results(self, map_warning: str = "") -> None:
         """Reveal display-only results without retaining worker analysis arrays."""
@@ -1379,6 +1462,13 @@ class FreeHarmonicClusteringPage(QWidget):
 
     # ------------------------------------------------------------ summaries
     def _populate_results(self, prepared: object, outcome: RunOutcome) -> None:
+        self._batch_report_rows = ()
+        self._batch_summary_text = ""
+        self.result_view_combo.setCurrentIndex(0)
+        for widget in (
+            self.result_view_label, self.result_view_combo, self.view_details_button,
+        ):
+            widget.hide()
         self.batch_table.hide()
         self.batch_table.setRowCount(0)
         result = outcome.result
@@ -1415,54 +1505,69 @@ class FreeHarmonicClusteringPage(QWidget):
             )
 
     def _populate_repeated_batch_results(self, run: object) -> None:
+        from ..reporting import build_repeated_session_report
+
         self.significant_table.hide()
         self.significant_table.setRowCount(0)
-        batch_result = getattr(run, "result", None)
-        outcomes = tuple(
-            getattr(batch_result, "outcomes", getattr(run, "results", ()))
+        report = build_repeated_session_report(getattr(run, "result", run))
+        self._batch_report_rows = report.rows
+        within_family_significant = sum(row.holm_family_p <= 0.05 for row in report.rows)
+        all_batch_significant = sum(row.holm_batch_p <= 0.05 for row in report.rows)
+        self._batch_summary_text = (
+            f"{len(report.rows)} comparisons: {within_family_significant} pass family "
+            f"Holm; {all_batch_significant} pass full-batch Holm. "
+            f"{report.exploratory_count} exploratory "
+            f"{'finding' if report.exploratory_count == 1 else 'findings'} "
+            "(nominal global p < .05, family Holm p > .05)."
         )
-        self.batch_table.setRowCount(len(outcomes))
-        within_family_significant = 0
-        all_batch_significant = 0
-        for row, outcome in enumerate(outcomes):
-            family = getattr(outcome, "family_id", getattr(outcome, "family", ""))
-            family_value = getattr(family, "value", family)
-            prepared_run = getattr(outcome, "prepared_run", None)
-            family_label = str(
-                getattr(prepared_run, "family_label", "")
-                or str(family_value).replace("_", " ").title()
-            )
-            condition = str(getattr(outcome, "condition", ""))
-            result = getattr(outcome, "result", None)
-            clusters = tuple(getattr(result, "clusters", ()))
-            significant_clusters = sum(
-                bool(getattr(cluster, "significant", False)) for cluster in clusters
-            )
-            global_p = float(getattr(outcome, "global_two_sided_p_value", 1.0))
-            family_p = float(getattr(outcome, "holm_within_family_p_value", 1.0))
-            batch_p = float(getattr(outcome, "holm_all_batch_p_value", 1.0))
-            within_family_significant += family_p <= 0.05
-            all_batch_significant += batch_p <= 0.05
+        self.result_status.set_variant("success" if within_family_significant else "info")
+        self.result_view_combo.setCurrentIndex(0)
+        for widget in (
+            self.result_view_label, self.result_view_combo, self.view_details_button,
+        ):
+            widget.show()
+        self.batch_table.show()
+        self._refresh_batch_table()
+
+    @Slot()
+    def _refresh_batch_table(self) -> None:
+        """Filter completed display rows without retaining or rerunning inference."""
+
+        previous = self._selected_report_row()
+        exploratory = self.result_view_combo.currentData() == "exploratory"
+        rows = tuple(
+            row for row in self._batch_report_rows if not exploratory or row.is_exploratory
+        )
+        self.batch_table.setRowCount(0)
+        self.batch_table.setRowCount(len(rows))
+        selected_row = 0
+        for row_index, row in enumerate(rows):
             values = (
-                family_label,
-                condition,
-                str(significant_clusters),
-                f"{global_p:.4f}",
-                f"{family_p:.4f}",
-                f"{batch_p:.4f}",
+                row.family_label,
+                row.condition,
+                str(row.within_run_cluster_count),
+                f"{row.global_p:.4f}",
+                f"{row.holm_family_p:.4f}",
+                f"{row.holm_batch_p:.4f}",
             )
             for column, value in enumerate(values):
-                self.batch_table.setItem(row, column, QTableWidgetItem(value))
-        self.batch_table.show()
-        self.result_status.set_variant(
-            "success" if within_family_significant else "info"
+                item = QTableWidgetItem(value)
+                item.setData(Qt.UserRole, row.run_index)
+                if column >= 3:
+                    stored_p = (row.global_p, row.holm_family_p, row.holm_batch_p)[column - 3]
+                    item.setToolTip(f"Stored p = {stored_p:.8g}; classification uses the unrounded value.")
+                self.batch_table.setItem(row_index, column, item)
+            if previous is not None and row.run_index == previous.run_index:
+                selected_row = row_index
+        if rows:
+            self.batch_table.selectRow(selected_row)
+        empty_note = (
+            " No comparisons meet the exploratory criteria."
+            if exploratory and not rows
+            else ""
         )
-        self.result_status.set_text(
-            f"Repeated-session batch complete: {len(outcomes)} condition x contrast "
-            f"tests; {within_family_significant} pass Holm correction within their "
-            f"prespecified family and {all_batch_significant} pass the conservative "
-            "Holm correction across the full batch."
-        )
+        self.result_status.set_text(self._batch_summary_text + empty_note)
+        self._update_result_actions()
 
     @staticmethod
     def _sorted_clusters(result: object) -> tuple[object, ...]:
@@ -1524,6 +1629,13 @@ class FreeHarmonicClusteringPage(QWidget):
 
     def _clear_results(self) -> None:
         self._has_result = False
+        self._batch_report_rows = ()
+        self._batch_summary_text = ""
+        self.result_view_combo.setCurrentIndex(0)
+        for widget in (
+            self.result_view_label, self.result_view_combo, self.view_details_button,
+        ):
+            widget.hide()
         self.result_tabs.setCurrentIndex(0)
         self._set_cluster_maps(())
         self.significant_table.setRowCount(0)

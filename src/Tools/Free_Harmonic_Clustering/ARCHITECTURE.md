@@ -54,6 +54,9 @@ cache and no changes to cluster membership, mass sums, permutations or progress.
   validation. It is developer validation code and is not imported by runtime
   GUI/API paths.
 - `api.py`: stable orchestration boundary.
+- `reporting.py`: immutable repeated-batch display/report snapshots; one shared
+  exploratory reporting criterion over existing run and cluster p-values,
+  original outcome indices, and exact membership. No inference or array retention.
 - `exports.py`: contained, atomic, provenance-rich result publication.
 - `visualization.py`: compact immutable map snapshots derived from completed
   analyzed arm tensors and exact cluster membership, with repeated-batch
@@ -75,6 +78,8 @@ cache and no changes to cluster membership, mass sums, permutations or progress.
   status/action footer.
 - `gui/cluster_map_view.py`: read-only single-harmonic canvas, run/cluster and
   harmonic selectors, fixed color scale, and exact member inspection.
+- `gui/result_details_dialog.py`: focused read-only comparison and exploratory
+  details with navigation to the existing cluster maps.
 - `gui/exclusion_state.py`: versioned, atomic project-local persistence for the
   GUI's canonical recording exclusions beneath the FHC results parent.
 - `gui/recording_exclusions_dialog.py`: source-immutable editor for project-
@@ -179,12 +184,22 @@ Separate runs are separate uncorrected families.
 
 Within a repeated-session batch, each condition-level electrode x harmonic run
 first retains the same signed maximum-cluster correction. Its global two-sided
-run p-value is the strongest observed cluster's doubled two-sided p-value (or 1
-when no cluster forms). Holm correction is then applied across every declared
+run p-value is the minimum existing two-sided cluster p-value (already doubled
+from its signed-tail p), or 1 when no cluster forms. Holm correction is then applied across every declared
 condition separately within each of the four scientific family IDs, with a
 second conservative Holm layer across the entire condition x family batch.
 Those Holm values are run-level annotations; cluster-specific raw p-values are
 never presented as cross-condition adjusted values.
+
+Exploratory reporting selects stored global p < .05 with family Holm p > .05.
+Existing Holm inference passes at <= .05; a result that fails only full-batch
+Holm is therefore not an exploratory non-survivor of its prespecified family.
+The report details only clusters with their own within-run two-sided p < .05.
+Filtering never changes the declared correction family, recomputes p-values,
+or changes cluster/map membership. Original outcome indices identify maps after
+filtering. Direction comes from the prepared A/B labels, including the actual
+ordered session subtraction, not inferred chronology. Node membership and
+selected-cluster effects remain descriptive.
 
 Automatic mode selects its observed-arm ceiling before permutation and then
 holds that domain fixed. The conditional maximum-cluster null does not by
@@ -255,7 +270,11 @@ family, and whole-participant exchangeability.
   significant clusters in one bounded table ordered by ascending raw
   sign-specific p-value. Repeated Results shows one compact row per condition x
   family with the global run p-value and both Holm layers. Technical metadata
-  and full cluster tables stay in the workbook. View cluster maps or a table
+  and full cluster tables stay in the workbook. All comparisons remains the
+  default; an Exploratory findings filter and a focused details dialog expose
+  nominal findings without adding a permanent detail pane. The page retains
+  only immutable report primitives alongside its compact map snapshots, and
+  clears both on setup/project changes. View cluster maps or a table
   row double-click opens the matching cluster/run in a dedicated tab. It has
   no run-history browser.
 - About this analysis uses shared tabbed `ToolInfoContent`. A second contextual
@@ -266,6 +285,13 @@ family, and whole-participant exchangeability.
   failure, and project switching cannot publish a partial completed bundle.
 
 ## Output
+
+Every new repeated-batch bundle also contains `exploratory_findings.md`, an
+`Exploratory Findings` workbook sheet, and `exploratory_clusters.csv` plus
+`exploratory_cluster_membership.csv`. These are additive reporting artifacts
+inside the same atomic publication and checksum manifest. They record an
+explicit empty result when no run qualifies; all primary batch/cluster tables
+remain complete. No old run bundles or source data are rewritten.
 
 ### Harmonic difference maps
 

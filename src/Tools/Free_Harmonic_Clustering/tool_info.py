@@ -91,6 +91,22 @@ correction. The batch additionally reports Holm-adjusted global run p-values
 across conditions within each of the four contrast families and a conservative
 Holm adjustment across every condition &times; family test in the full batch.
 </p>
+<h3>Exploratory Reporting</h3>
+<p>
+After a batch completes, the Results view can show <b>Exploratory findings</b>:
+global two-sided p &lt; .05 before cross-condition Holm correction, with family
+Holm p &gt; .05. The global p already includes within-run maximum-cluster
+correction. Full-batch Holm is shown separately. All comparisons remain in the
+default view, and changing views never reruns tests or recalculates correction.
+</p>
+<p>
+Use <b>View details</b> for the actual A-minus-B comparison, sample sizes,
+p-values, and exact cluster membership. These findings are leads for follow-up,
+not findings confirmed after family Holm correction. Cluster locations and
+selected-cluster effects are descriptive; individual electrodes or harmonics
+are not established as pointwise significant. A readable exploratory report
+and worksheet are included in every new repeated-batch export.
+</p>
 """
 
 METHOD_HTML = """

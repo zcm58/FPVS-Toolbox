@@ -249,7 +249,7 @@ well as legacy contrasts. Sensors and harmonics are never shuffled separately.
 For a legacy contrast, the main workspace reports whether significant clusters
 were found and shows only those clusters, ordered by raw sign-specific p-value.
 For a repeated-session batch, it shows one compact row per condition x contrast
-family with the number of significant clusters, global run p-value,
+family with the number of within-run significant clusters, global run p-value,
 within-family Holm p-value, and full-batch Holm p-value. The page does not use a
 page-level scroll area; result tables scroll internally when needed. Use
 **Open Results Folder** for complete cluster tables and technical run details.
@@ -257,6 +257,37 @@ The primary raw cluster p-value is evaluated at `.025` per direction for a
 two-tailed family alpha of `.05`. The doubled p-value is included as a
 secondary two-sided presentation, not as a second test. A Monte Carlo interval
 records uncertainty from the finite number of assignments.
+
+### Exploratory findings before Holm correction
+
+After a repeated-session batch completes, choose **Exploratory findings** in
+the Results view to inspect comparisons with **global p < .05** that **do not
+pass Holm across conditions within their prespecified contrast family**.
+**All comparisons** remains the default view. Changing the view does not rerun
+analysis or recalculate correction.
+
+Select a finding and use **View details** for its comparison direction, sample
+sizes, all three p-values, and clusters with within-run two-sided p < .05.
+Details list the actual electrodes at each harmonic and descriptive cluster
+effects; **View cluster maps** opens the same comparison. These are leads for
+follow-up, not findings confirmed after correction. The displayed global p
+already includes within-run maximum-cluster correction; it is not a pointwise
+electrode p-value.
+
+For example, global p = .0402, family Holm p = .1608, and full-batch Holm
+p = .6029 qualifies for this exploratory view. A comparison that passes family
+Holm but fails only the additional full-batch correction stays in All
+comparisons. The filter uses exact stored values: global p exactly .05 does
+not qualify, and the existing family Holm rule treats p <= .05 as passing.
+Neither the filter nor the report changes these thresholds or selects a
+smaller family for correction.
+
+Each new batch also exports **exploratory_findings.md** and an **Exploratory
+Findings** workbook sheet through **Open Results Folder**, including an
+explicit message if no findings qualify. Keep the full batch results alongside
+the exploratory report so all tested comparisons remain visible.
+
+### Cluster interpretation
 
 A positive cluster means that the L2-normalized response is relatively stronger
 for A than B over the connected electrode x harmonic cells. A negative cluster
@@ -346,6 +377,12 @@ membership rows, the complete-pair cohort and exclusion audit, shared harmonic
 selection, methods/provenance, node statistics, signed null distributions, and
 source-workbook audit. Machine-readable per-run tables and compressed arrays
 remain beside it.
+
+The repeated workbook includes an **Exploratory Findings** sheet. The readable
+`exploratory_findings.md` report and filtered `exploratory_clusters.csv` and
+`exploratory_cluster_membership.csv` files contain the same exploratory subset.
+The full primary tables remain unchanged. All new artifacts are published
+together in the completed run bundle; older bundles are not modified.
 
 The workbook uses frozen headers, filters, readable widths, consistent numeric
 precision, and restrained significance highlighting. Machine-readable CSV,
