@@ -47,6 +47,19 @@ Common long-running work:
   Workers receive only the files selected by that plan. Multi-group runs also
   receive a per-file output group-folder map so post-export writes into the
   condition-first/group-second Excel tree.
+- Each persistent processing pool worker owns one bounded prepared-FIR cache
+  for that batch. The initializer creates it after configuring numerical thread
+  limits. A per-file context is always reset on return or exception; only
+  immutable coefficient/kernel bytes survive between that worker's files.
+  The 4 MiB cap includes coefficient-key and result buffers. Reinitialization
+  closes the prior cache, ordinary process exit closes it, and forced pool
+  termination releases it with the process. Direct preprocessing outside an
+  explicit cache scope retains no kernel. No cache crosses worker processes,
+  batches or project settings serialization.
+  Native thread limits remain under the worker initializer's ownership and
+  stay fixed during its processing work; kernel preparation observes that
+  policy without changing it. Cache identities distinguish native library and
+  thread-count changes between calls.
 - After a successful Main App processing run, `PostProcessingPipelineWorker`
   orchestrates downstream analysis prep in a background `QThread`. The full
   order is frequency-domain QC acceptance, neutral FullFFT provenance,

@@ -2,6 +2,165 @@
 
 ## Status
 
+The 2026-09-08 follow-up starts from `164e6dce` on a new branch,
+`codex/bitwise-performance-followup`, created from `codex/preprocessing-qc-v3`.
+The user authorized implementation of the investigation's fingerprint hoist,
+ledger-only validation reuse, sparse/dense FHC guard, and reviewed FIR kernel
+integration, with exact parity/fallback tests and representative timing.
+After reviewing the exact-parity results, the user authorized committing this
+follow-up, merging it into `codex/preprocessing-qc-v3`, and pushing that branch.
+Pre-existing untracked `outputs/` remains untouched. Scientific methods and
+output contracts are fixed.
+
+- [x] Hoist the frozen condition-eligibility fingerprint after its existing
+  guard; preserve every numerical calculation and exported row.
+- [x] Add exact baseline characterization and a sparse/dense FHC scan guard;
+  retain union, component, summation, assignment and progress order.
+- [x] Finish bounded ledger-only reuse and concurrent-change review.
+- [x] Finish the isolated FIR adapter's final native-thread invalidation guard.
+- [x] Confirm focused checks and project timings after that final guard.
+
+### 2026-09-08 measurements and review
+
+Benchmarks use the repository `.venv` (CPython 3.13.9, MNE 1.9.0,
+NumPy 2.3.1, SciPy 1.16.0) and frozen base `164e6dce` on Windows.
+CPU-heavy timing runs are serialized. Cold means application-cache miss/new output;
+the OS file cache is not flushed. Scratch reproducers and receipts are under
+ignored `.codex-tmp/perf-next/`. Real project access rejects writes with an
+audit hook. The stage timings and complete processing-batch measurements below
+are separate observations, not aggregate full-GUI workflow claims.
+
+| Actual implementation | Baseline | Changed | Evidence |
+| --- | ---: | ---: | --- |
+| Condition export, new output (3 paired trials, median) | 1.586 s | 0.583 s | Native arrays, declarations, logs and input bytes exact |
+| Condition export, unchanged repeat | 1.563 s | 0.567 s | Same oracle |
+| Condition export, changed input | 1.584 s | 0.549 s | Same oracle; refreshed values |
+| MCCTR selection + Stats-ready preparation, fresh scope | 29.022 s | 26.160 s | 24 participants, 6 conditions, 432 rows; all 4 frames exact |
+| Same complete-cohort operation, warm scope | 15.771 s | 12.754 s | Numeric dtype/shape/order/bytes and manifest SHA unchanged |
+| FHC independent contrast, 10,000 assignments | 8.832 s | 1.083 s | 18+16 participants, 64 sensors, 6 harmonics |
+| FHC paired contrast, 10,000 assignments | 12.240 s | 0.812 s | 18 participants, same geometry/domain |
+| Full preprocessing helper, prepared FIR miss | 14.502 s | 15.168 s | 120 s, 67 source channels, 2048 Hz; 67,585-tap kernel |
+| Full preprocessing helper, prepared FIR hit | 14.502 s | 2.527 s | Exact full Raw state, scientific settings, logs, QC count and untouched input |
+
+The MCCTR, FIR and 10,000-assignment rows are single confirming before/after pairs.
+The FIR miss is not a speedup claim; only later identical coefficient kernels
+within the same worker batch benefit. The cache retained 1,622,032 buffer bytes
+and zero after close. The helper timing excludes source loading and export.
+It used the shell's native-thread configuration, not the spawned worker's
+thread limits; its roughly 12-second saving must not be extrapolated to workers.
+The FHC density matrix used five paired trials at 2/6/24 harmonics and
+1/5/10/50/100% density. At 1% density it was 7–17x faster; dense fallback
+differences ranged from -0.5% to +1.6%, consistent with timing noise.
+FHC parity covers all scientific result fields and array bytes, RNG identity,
+union order, all 41 progress callbacks, errors and cancellation; elapsed timing
+fields are intentionally not compared. Explicit XLSX parity compares all
+decompressed ZIP members, normalizing only core container timestamps, so
+values, ordering, sheets, styles and dimensions must match.
+
+Reproducers: `exports/verify_implementation.py`,
+`benchmark_ledger_implementation.py`, `downstream/bench_fhc_final.py` and
+`downstream/bench_fhc_guard.py` under the scratch root. Independent FIR review
+reproduced stale behavior after altered MNE defaults or NumPy's native
+correlation operator; strengthened guards now fall back with exact public-MNE
+bytes in both cases. A ledger ABA regression fails without the immutable
+snapshot and passes with it. No scientific method fingerprints were changed.
+The FIR helper reproducer and receipt are `raw/benchmark_production_fir.py`
+and `raw/production-fir-results.json`.
+
+Final worker-environment review also reproduced different coefficient
+convolution bytes at BLAS thread counts 1 and 2. Native library/thread identity
+is now part of the kernel key, with unknown configurations bypassing
+reuse and visible mid-call changes preventing admission. It does not change
+thread counts; active worker ownership keeps that policy stable. An uncontrolled
+external change and restoration during a native call cannot be made atomic by
+before/after snapshots and is outside this worker contract. Stable thread
+changes, missing NumPy-pool identity and changes observed during convolution or
+hit detachment now have regression coverage. The final guard passed 79 focused
+FIR/filter-order/runner checks and the fresh batch comparisons below.
+Worker-configured direct kernel construction measured about 0.92 seconds,
+which is the relevant reusable cost here, rather than the earlier roughly
+12-second default-thread estimate.
+
+The actual `run_project_parallel` benchmark used four immutable synthetic
+BioSemi BDF recordings, each 120 seconds at 2048 Hz with 64 scalp channels,
+two references and stim, two 50-second analyzed conditions, and two spawned
+workers. Baseline workers loaded the frozen source overlay; changed workers
+loaded this branch. Per-worker source hashes confirm both. The timer includes
+pool startup, BDF/cache loading, preprocessing, epochs, native condition
+exports, source-ready FIF output and worker shutdown; fixture generation,
+post-run comparisons, interactive preflight review and optional downstream
+tools are excluded. Native BLAS used one thread per worker.
+
+| Complete four-recording batch | Baseline | Changed | Reduction |
+| --- | ---: | ---: | ---: |
+| Cold application caches | 17.416 s | 14.599 s | 16.2% |
+| Warm preprocessed-Raw cache | 6.853 s | 4.697 s | 31.5% |
+| Cutoff invalidation, 50 to 45 Hz | 16.653 s | 13.836 s | 16.9% |
+
+Each row is one confirming pair with `PYTHONHASHSEED=0` in both runs. This
+controls pre-existing set-derived receipt ordering between spawned processes;
+receipt list ordering is compared exactly, not normalized away. All pairs
+matched ordered NPZ members and array dtype/shape/strides/bytes, complete FIF
+container SHA-256 and sample bytes, source JSON bytes, native manifests and
+scientific result/audit/receipt ordering. Only generated output-root/file-time
+identity and elapsed fields are normalized in runtime receipts; original
+receipt fingerprints are independently verified against their own artifacts.
+The common BDF hashes stayed unchanged. Each cold/invalidation worker had one
+FIR miss and one hit; warm-Raw runs had neither. All worker caches closed with
+zero retained bytes. Reproducer: `exports/whole_project_benchmark.py`; fixtures,
+frozen overlay, case receipts and worker audits: `exports/whole_project/`.
+The final comparisons use `threadguard_{cold,warm,invalidation}_comparison.json`
+and `baseline_threadguard`/`current_threadguard` output roots, and record the
+final `prepared_fir.py` source hash in each changed worker. These timings
+supersede the preliminary fixed-seed runs before native-thread guarding.
+
+The production changes are limited to:
+
+- `Shared/post_process.py`: local eligibility-fingerprint hoist.
+- `processing/frequency_domain_qc.py` and `post_processing_context.py`:
+  ledger snapshot, bounded scoped admission and detached reuse.
+- `Tools/Free_Harmonic_Clustering/analysis.py`: empty-node scan guard.
+- `processing/prepared_fir.py`, `processing/preprocess.py` and
+  `Performance/process_runner.py`: isolated MNE adapter and batch-worker owner.
+
+The `processing/`, `Shared/` and `Performance/` paths above are under
+`src/Main_App/`. Four focused test modules characterize the changed behavior;
+the processing verification registry includes the new ledger/FIR modules.
+Those modules are `tests/processing/test_post_process_output_receipts.py`,
+`tests/processing/test_independent_qc_context_reuse.py`,
+`tests/processing/test_prepared_fir.py` and
+`tests/free_harmonic_clustering/test_sparse_cluster_parity.py`.
+Architecture updates document cache ownership and unchanged processing/graph
+contracts. No user-method update is required because no method changed.
+
+Visible/manual smoke for this follow-up remains intentionally unrun locally:
+process multiple files with two workers, verify successful condition outputs,
+repeat to exercise the existing preprocessed-Raw cache, change a cutoff to
+invalidate it, and cancel/restart a batch to check responsiveness and fresh
+worker ownership. Continue an accepted frequency-QC review into standard
+exports and run an FHC contrast; check current provenance and normal progress.
+Run this only in a safe visible app session or CI; no local offscreen Qt or
+Standalone_Scripts access is permitted. CachyOS and frozen-installer timing
+remain unverified; uncharacterized FIR runtimes deliberately fall back to MNE.
+
+Verification: `verify.py --scope processing --tier focused` passed
+1,842 tests with 5 skips; `--scope stats --tier focused` passed 442;
+`--scope legacy-boundary --tier focused` passed 4, and the final
+`--scope repo --tier focused` passed 18. The complete registered
+non-Qt FHC bundle passed 239 tests, including 88 new exact cases. The FIR
+module was rerun after strengthening direct sample-buffer assertions: 32
+passed. After the final native-thread guard, FIR plus processing-order and
+runner-contract checks passed 79 tests (36 FIR and 43 order/runner).
+Relevant Ruff, compilation, protected-boundary and source-localization
+audits passed. `verify.py --scope repo --tier precommit` and the FHC focused
+driver still stop at the same eight pre-existing hard-coded-path findings in
+untracked `outputs/`; their blocked gates are not reported as passing.
+Transcripts are `processing-implementation.txt`, `stats-implementation.txt`,
+`legacy-implementation.txt`, `fir-final-tests.txt` and
+`precommit-implementation.txt` under the scratch root.
+
+### 2026-09-07 completed follow-up
+
 The 2026-09-07 follow-up starts from `593b358c` on
 `codex/preprocessing-qc-v3`. The user approved implementing the first three
 findings from the MCCTR post-processing investigation: numerical source-cache

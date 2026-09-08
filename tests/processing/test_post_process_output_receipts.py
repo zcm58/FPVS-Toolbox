@@ -192,6 +192,131 @@ def test_compact_export_preserves_calculated_tables_without_excel_copies(
         pd.testing.assert_frame_equal(actual, expected.reset_index(drop=True), check_exact=True)
 
 
+@pytest.mark.parametrize("object_count", [1, 2])
+@pytest.mark.parametrize("zero_signal", [False, True])
+@pytest.mark.parametrize("excel_anchor", [False, True])
+def test_metric_rows_reuse_canonical_fingerprint_without_changing_metric_bytes(
+    tmp_path, monkeypatch, object_count, zero_signal, excel_anchor
+):
+    from Main_App.io.condition_data import read_condition_sheet
+    from Main_App.processing.spectral_eligibility import SpectralEligibilityResult
+    from Tools.Stats.analysis.noise_utils import compute_qc14_standard_metrics
+
+    epochs = _epochs()
+    if zero_signal:
+        epochs._data[:] = -0.0
+    original_bytes = epochs.get_data(copy=True).tobytes()
+    app = _app(tmp_path, epochs)
+    app.preprocessed_data["Faces"] = [epochs] * object_count
+    if excel_anchor:
+        app.group_name_for_output = "Faces"
+    fingerprint_getter = SpectralEligibilityResult.fingerprint.fget
+    fingerprint_reads = []
+
+    def record_fingerprint(result):
+        fingerprint_reads.append(result)
+        return fingerprint_getter(result)
+
+    monkeypatch.setattr(
+        SpectralEligibilityResult, "fingerprint", property(record_fingerprint)
+    )
+
+    post_process(app, ["Faces"])
+
+    receipt = app.export_receipts[0]
+    assert receipt["status"] == "written", receipt
+    assert len(fingerprint_reads) <= 4 * object_count
+    eligibility = fingerprint_reads[0]
+    expected_fingerprint = fingerprint_getter(eligibility)
+    qc = read_condition_sheet(receipt["path"], sheet_name="Spectral Metric QC")
+    assert len(qc) == object_count * len(eligibility.targets)
+    assert qc["Eligibility Fingerprint"].tolist() == [expected_fingerprint] * len(qc)
+    assert all(
+        fingerprint_getter(result) == expected_fingerprint
+        for result in fingerprint_reads
+    )
+
+    # The established scalar numerical expressions remain the byte oracle;
+    # provenance reuse must not change zero/non-finite output encodings either.
+    averaged_uv = np.mean(epochs.get_data(copy=True).astype(np.float64), axis=0) * 1e6
+    sample_count = averaged_uv.shape[1]
+    amplitudes = (
+        np.abs(np.fft.fft(averaged_uv, axis=1)[:, :sample_count // 2 + 1])
+        / sample_count * 2
+    )
+    expected = {
+        name: np.full((1, len(eligibility.targets)), np.nan, dtype=np.float64)
+        for name in ("FFT Amplitude (uV)", "SNR", "Z Score", "BCA (uV)")
+    }
+    for target_index, availability in enumerate(eligibility.targets):
+        metric = compute_qc14_standard_metrics(
+            amplitudes[0],
+            target_idx=availability.target_bin_index,
+            candidate_bin_indices=availability.noise_candidate_bin_indices,
+            static_metrics_available=availability.standard_metrics_available,
+            static_reason_codes=availability.reason_codes,
+            target_amplitude_status=availability.target_amplitude_status,
+        )
+        for name, value in (
+            ("FFT Amplitude (uV)", metric.target_amplitude),
+            ("SNR", metric.snr),
+            ("Z Score", metric.local_z),
+            ("BCA (uV)", metric.bca),
+        ):
+            if value is not None and (
+                name != "FFT Amplitude (uV)"
+                or metric.target_amplitude_status != "unavailable"
+            ):
+                expected[name][0, target_index] = value
+    for name, values in expected.items():
+        frame = read_condition_sheet(receipt["path"], sheet_name=name)
+        actual = frame.iloc[:, 1:].to_numpy()
+        assert actual.dtype == values.dtype
+        assert actual.shape == values.shape
+        assert actual.flags.c_contiguous == values.flags.c_contiguous
+        assert actual.flags.f_contiguous == values.flags.f_contiguous
+        assert actual.tobytes() == values.tobytes()
+    assert epochs.get_data(copy=True).tobytes() == original_bytes
+
+
+def test_metric_row_fingerprint_refreshes_for_each_condition(tmp_path):
+    from Main_App.io.condition_data import read_condition_sheet
+
+    epochs = _epochs()
+    changed = _epochs(sampling_rate=40.0)
+    app = _app(tmp_path, epochs)
+    app.preprocessed_data["Changed"] = [changed]
+
+    post_process(app, ["Faces", "Changed"])
+
+    fingerprints = []
+    for receipt in app.export_receipts:
+        assert receipt["status"] == "written", receipt
+        eligibility = read_condition_sheet(receipt["path"], sheet_name="Spectral Eligibility")
+        qc = read_condition_sheet(receipt["path"], sheet_name="Spectral Metric QC")
+        expected = eligibility["Eligibility Fingerprint"].unique().tolist()
+        assert len(expected) == 1
+        assert qc["Eligibility Fingerprint"].unique().tolist() == expected
+        fingerprints.extend(expected)
+    assert len(fingerprints) == 2
+    assert fingerprints[0] != fingerprints[1]
+
+
+def test_metric_row_fingerprint_reuse_preserves_mixed_input_rejection(tmp_path):
+    from Main_App.processing.spectral_eligibility import SpectralEligibilityError
+
+    epochs = _epochs()
+    changed = _epochs(sampling_rate=40.0)
+    app = _app(tmp_path, epochs)
+    app.preprocessed_data["Faces"] = [epochs, changed]
+
+    with pytest.raises(SpectralEligibilityError, match="A partial average is not permitted"):
+        post_process(app, ["Faces"])
+
+    assert not list(tmp_path.rglob("*.fpvs"))
+    assert app.export_receipts[0]["status"] == "blocked"
+
+
 @pytest.mark.parametrize("invalid", [np.nan, np.inf, -np.inf])
 def test_nonfinite_source_blocks_current_export_and_preserves_prior_workbook(
     tmp_path,

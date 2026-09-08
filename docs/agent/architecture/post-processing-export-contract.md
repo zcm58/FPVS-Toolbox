@@ -135,6 +135,18 @@ release decisions and source dependencies, and return detached values.
 Publishing artifact-freshness bookkeeping alone does not invalidate scientific
 selection. Public final-release gates remain mandatory.
 
+The independent frequency-QC context reuses only successful `current` evidence
+derived from the processing ledger. The scope retains at most one such context,
+with an 8 MiB Python-container admission cap and a 32 MiB snapshot-read cap.
+Canonical project and live ledger paths plus content SHA-256 identify reuse;
+hits return detached values and recheck the ledger after detachment. Missing,
+corrupt, invalid, oversized or changed inputs use the uncached diagnostics.
+Misses parse the exact bounded byte snapshot used for their identity and use
+that one snapshot for coverage and processing entries, preventing retention of
+mixed evidence if a mutable ledger path changes and then changes back.
+Workbook, source-provenance, selection and review-decision validation remain
+outside this ledger-only cache at their original call sites.
+
 `Main_App.processing.provisional_harmonic_cache` holds at most two provisional
 scientific results for one frequency-QC review flow. The GUI passes the same
 instance from the first worker through decision saving to the resumed worker,

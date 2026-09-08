@@ -32,6 +32,12 @@ Array order is participant x sensor x harmonic at the public numerical
 boundary. Flattening is sensor-major (`sensor * H + harmonic`) so the combined
 graph is `spatial_adjacency kron I_H OR I_S kron complete_harmonic_adjacency`.
 
+Connected-component extraction skips empty sensors and edges only when the
+existing active-node count proves that more than half of the sensors are empty.
+The remaining union calls keep their original order; dense masks use the
+original scan loops. This is a local allocation/scan shortcut with no retained
+cache and no changes to cluster membership, mass sums, permutations or progress.
+
 ## Modules
 
 - `models.py`: immutable requests, method specifications, prepared tensors,

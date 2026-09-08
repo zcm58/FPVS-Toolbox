@@ -733,6 +733,22 @@ Filtering:
   downsample target rate. When filtering now runs before downsampling, the
   sample count is scaled to the current sampling rate to preserve the same
   filter duration and MNE transition-band validity.
+- `Main_App.processing.prepared_fir` may reuse only MNE's exact direct
+  `np.convolve(h, h[::-1])` result in an explicit processing-worker batch.
+  A runtime and implementation guard protects an isolated copy of the existing
+  MNE call chain; it never patches MNE/NumPy globals. Filter design, warnings,
+  annotation segmentation, padding, FFT sizing and application still run for
+  each file. Unsupported runtimes or implementations use public `Raw.filter`;
+  unsupported coefficients use the original convolution without retention.
+  No filtering, resampling, Hann-notch or statistical
+  method/version settings change.
+- Kernel identity includes the live native BLAS configuration: even identical
+  coefficients can produce different last bits at different thread counts.
+  Unavailable/unrecognized configuration bypasses reuse, and a visible change
+  during convolution prevents admission. The processing worker owns a stable
+  native-thread policy; concurrent external reconfiguration during a native
+  call is outside that ownership contract, not an atomicity guarantee supplied
+  by this cache. No thread count is forced or changed by kernel preparation.
 - The code logs filter snapshot, mutation, Nyquist, range, applied-cutoff, and
   mismatch diagnostics. These messages are part of the current regression
   surface because they help diagnose accidental cutoff changes.

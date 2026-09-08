@@ -100,6 +100,7 @@ def remember_validation(
     value: Any,
     *,
     files: FileSnapshot,
+    max_namespace_entries: int | None = None,
 ) -> None:
     """Retain successful validation only if inputs stayed unchanged during it."""
     cache = _ACTIVE_READS.get()
@@ -108,5 +109,9 @@ def remember_validation(
     entry_key = (namespace, key)
     cache[entry_key] = _ValidatedRead(files, deepcopy(value))
     cache.move_to_end(entry_key)
+    if max_namespace_entries is not None:
+        keys = [item for item in cache if item[0] == namespace]
+        for old_key in keys[:max(0, len(keys) - max_namespace_entries)]:
+            del cache[old_key]
     while len(cache) > _MAX_ENTRIES:
         cache.popitem(last=False)

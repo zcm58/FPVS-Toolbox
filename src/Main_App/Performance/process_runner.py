@@ -27,7 +27,7 @@ from dataclasses import dataclass, replace
 from multiprocessing import Queue, get_context, Event
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Dict, List, Mapping, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Tuple
 
 import Main_App.processing.preprocess as backend_preprocess
 from Main_App.diagnostics import log_router
@@ -110,7 +110,11 @@ import numpy as np
 import psutil  # soft memory cap
 from .mp_env import set_blas_threads_multiprocess
 
+if TYPE_CHECKING:
+    from Main_App.processing.prepared_fir import PreparedFirCache
+
 logger = logging.getLogger(__name__)
+_WORKER_FIR_CACHE: PreparedFirCache | None = None
 PREPROC_CACHE_VERSION = "preprocessed-raw-v13-v3-trigger-alignment"
 BDF_FIRST_N_CHANNELS = 64
 REMOVED_ELECTRODE_REVIEW_LIST_KEYS = (
@@ -647,8 +651,17 @@ class RunParams:
 
 def _worker_init() -> None:
     """Configure per-process environment."""
+    global _WORKER_FIR_CACHE
     logger.debug("[MP STAGE] worker_init_start pid=%d", os.getpid())
     set_blas_threads_multiprocess()
+    from Main_App.processing.prepared_fir import PreparedFirCache
+
+    # Each pool belongs to one batch. Retain coefficients between its files,
+    # never EEG data or a cache attached to the caller's serialized settings.
+    if _WORKER_FIR_CACHE is not None:
+        _WORKER_FIR_CACHE.close()
+    _WORKER_FIR_CACHE = PreparedFirCache()
+    atexit.register(_WORKER_FIR_CACHE.close)
 
     # --- Memmap cleanup on worker exit ---
     from pathlib import Path as _Path
@@ -2867,11 +2880,14 @@ def _process_one_file(
     This is the worker entry point used by multiprocessing. It delegates to
     _run_full_pipeline_for_file so the same pipeline can be reused by other callers.
     """
+    from Main_App.processing.prepared_fir import prepared_fir_scope
+
     settings = _with_current_condition_repairs(
         settings, project_root,
         current_sources=_condition_repair_sources_for_files([file_path], settings),
     )
-    return _run_full_pipeline_for_file(file_path, settings, event_map, save_folder, project_root)
+    with prepared_fir_scope(_WORKER_FIR_CACHE):
+        return _run_full_pipeline_for_file(file_path, settings, event_map, save_folder, project_root)
 
 
 def _condition_repair_sources_for_files(

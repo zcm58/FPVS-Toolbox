@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import sys
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -3433,18 +3434,138 @@ def _normalized_processing_qc_entry(
     return payload
 
 
+_INDEPENDENT_QC_CACHE_MAX_BYTES = 8 * 1024 * 1024
+_INDEPENDENT_QC_LEDGER_MAX_BYTES = 32 * 1024 * 1024
+
+
+def _independent_qc_context_fits_cache(value: _IndependentQcContext) -> bool:
+    """Bound retained Python containers as well as the ledger's serialized size."""
+    seen: set[int] = set()
+    size = 0
+
+    def fits(item: object) -> bool:
+        nonlocal size
+        if id(item) in seen:
+            return True
+        seen.add(id(item))
+        size += sys.getsizeof(item)
+        if size > _INDEPENDENT_QC_CACHE_MAX_BYTES:
+            return False
+        if isinstance(item, dict):
+            return all(fits(key) and fits(child) for key, child in item.items())
+        if isinstance(item, (tuple, list)):
+            return all(fits(child) for child in item)
+        return item is None or type(item) in (str, bool, int, float)
+
+    return fits((value.source_identity, value.cells, value.processing_entries))
+
+
 def _load_independent_qc_context(project_root: Path) -> _IndependentQcContext:
+    """Reuse only current ledger-derived evidence inside one validation operation.
+
+    Review decisions and workbook validation remain at their original call sites.
+    Every hit rehashes the ledger; live path resolution also detects a retargeted
+    project/ledger link, which resolved file snapshots alone cannot detect.
+    """
+    from Main_App.processing import post_processing_context as context
+    from Main_App.processing.processing_ledger import ledger_path
+
+    if not context.validation_scope_active():
+        return _read_independent_qc_context(project_root)
+
+    def live_key() -> tuple[str, str]:
+        return (
+            str(project_root.resolve()),
+            str(ledger_path(project_root).resolve()),
+        )
+
+    key = None
+    files = ()
+    try:
+        candidate_key = live_key()
+        if Path(candidate_key[1]).stat().st_size <= _INDEPENDENT_QC_LEDGER_MAX_BYTES:
+            files = context.capture_validation_files([candidate_key[1]], hash_contents=True)
+            if all(identity is not None for _, identity in files):
+                key = candidate_key
+                cached = context.cached_validation("independent_qc_ledger", (key, files))
+                if cached is not context.CACHE_MISS:
+                    # Reject edits during detachment as well as initial validation.
+                    if live_key() == key and context.validation_files_unchanged(files):
+                        return cached
+                    key = None
+    except (OSError, RuntimeError, MemoryError):
+        # Missing/unreadable paths and cache-only allocation failures must retain
+        # the uncached loader's diagnostics and error precedence.
+        key = None
+
+    ledger_snapshot = None
+    if key is not None:
+        try:
+            with Path(key[1]).open("rb") as stream:
+                encoded_ledger = stream.read(_INDEPENDENT_QC_LEDGER_MAX_BYTES + 1)
+            if (
+                len(encoded_ledger) <= _INDEPENDENT_QC_LEDGER_MAX_BYTES
+                and hashlib.sha256(encoded_ledger).hexdigest() == files[0][1][-1]
+            ):
+                parsed_ledger = json.loads(encoded_ledger.decode("utf-8"))
+                if isinstance(parsed_ledger, dict):
+                    if not isinstance(parsed_ledger.get("entries"), dict):
+                        parsed_ledger["entries"] = {}
+                    parsed_ledger.setdefault("schema_version", 1)
+                    ledger_snapshot = parsed_ledger
+        except (OSError, ValueError, RuntimeError, MemoryError):
+            pass
+        if ledger_snapshot is None:
+            key = None
+
+    # The cache must bind the context to the exact bytes it parsed, rather than
+    # rereading a mutable path that could change and return to its original target.
+    # Keep normalizer execution outside cache-only exception handling.
+    value = (
+        _read_independent_qc_context(project_root)
+        if ledger_snapshot is None
+        else _read_independent_qc_context(project_root, ledger_snapshot=ledger_snapshot)
+    )
+    if ledger_snapshot is not None and value.source_identity.get("status") != "current":
+        # The original loader owns warnings and precedence for invalid inputs.
+        return _read_independent_qc_context(project_root)
+    if key is None:
+        return value
+    try:
+        if (
+            value.source_identity.get("status") == "current"
+            and _independent_qc_context_fits_cache(value)
+            and live_key() == key
+        ):
+            context.remember_validation(
+                "independent_qc_ledger", (key, files), value, files=files,
+                max_namespace_entries=1,
+            )
+    except (OSError, RuntimeError, MemoryError):
+        pass
+    return value
+
+
+def _read_independent_qc_context(
+    project_root: Path,
+    *,
+    ledger_snapshot: Mapping[str, object] | None = None,
+) -> _IndependentQcContext:
     from Main_App.processing.processing_ledger import load_ledger
     from Main_App.processing.roi_coverage import (
         ROI_COVERAGE_STAGE_PRE_REVIEW,
         RoiCoverageGateError,
+        _roi_coverage_from_ledger,
         load_roi_coverage,
     )
 
     try:
-        coverage = load_roi_coverage(
-            project_root,
-            stage=ROI_COVERAGE_STAGE_PRE_REVIEW,
+        coverage = (
+            load_roi_coverage(project_root, stage=ROI_COVERAGE_STAGE_PRE_REVIEW)
+            if ledger_snapshot is None
+            else _roi_coverage_from_ledger(
+                ledger_snapshot, stage=ROI_COVERAGE_STAGE_PRE_REVIEW,
+            )
         )
     except (OSError, TypeError, ValueError, RoiCoverageGateError) as exc:
         core = {
@@ -3473,7 +3594,7 @@ def _load_independent_qc_context(project_root: Path) -> _IndependentQcContext:
             processing_entries={},
         )
 
-    ledger = load_ledger(project_root)
+    ledger = load_ledger(project_root) if ledger_snapshot is None else ledger_snapshot
     raw_entries = ledger.get("entries")
     entries = raw_entries if isinstance(raw_entries, Mapping) else {}
     entry_by_identity = {

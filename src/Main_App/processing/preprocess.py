@@ -61,6 +61,7 @@ from Main_App.processing.kurtosis_qc import (
 from Main_App.processing.prepared_kurtosis_cache import (
     checkpoint_identity, load_checkpoint, save_checkpoint,
 )
+from Main_App.processing.prepared_fir import filter_raw_with_prepared_fir
 from Main_App.processing.condition_electrode_interpolation import (
     apply_condition_repairs,
     prepare_condition_repairs,
@@ -1369,7 +1370,8 @@ def perform_preprocessing(
                         f"l_freq={effective_l} h_freq={effective_h} "
                         f"sfreq={sf_current:.3f}"
                     )
-                raw.filter(
+                filter_raw_with_prepared_fir(
+                    raw,
                     l_freq,
                     h_freq,
                     method="fir",
