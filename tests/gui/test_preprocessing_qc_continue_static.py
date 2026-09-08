@@ -57,6 +57,7 @@ def _review_namespace():
         "_CONFIRM_PARTICIPANT_EXCLUSIONS_STEP": 5,
         "MarkerOccurrenceReviewError": ValueError,
         "collect_marker_occurrence_reviews": lambda _scan: (),
+        "_participant_group_display_map": lambda *_args: {},
         "normalize_manual_excluded_participant_conditions": lambda value: value or {},
         "normalize_manual_excluded_recording_conditions": lambda value: value or {},
         "normalize_manual_excluded_participants": lambda value: value or [],
@@ -113,7 +114,7 @@ def test_clear_checks_wait_for_one_continue_without_changing_decisions(step):
 
 def test_marker_findings_keep_their_review_without_an_extra_clear_step():
     namespace, calls = _review_namespace()
-    namespace["collect_marker_occurrence_reviews"] = lambda _scan: (object(),)
+    namespace["collect_marker_occurrence_reviews"] = lambda _scan: (SimpleNamespace(participant_id="P01"),)
     namespace["_show_marker_occurrence_review"] = lambda *_args, **_kwargs: "cancel"
 
     assert namespace["_review_marker_occurrences"](object(), [], {}, object(), {}) is None

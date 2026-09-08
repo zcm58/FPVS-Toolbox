@@ -15,6 +15,7 @@ tests/gui/test_main_window_event_map_enter.py
 tests/gui/test_main_window_excel_popup_logic.py
 tests/gui/test_main_window_layout_smoke.py
 tests/gui/test_main_window_processing.py
+tests/gui/test_marker_occurrence_panel_qt.py
 tests/gui/test_nonblocking_qmessagebox.py
 tests/gui/test_participant_condition_exclusions_dialog.py
 tests/gui/test_qc_group_membership.py

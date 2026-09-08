@@ -11,6 +11,30 @@ continuous. Current GUI decisions are bound to the reviewed marker-plan and
 occurrence fingerprints and record exact scope, reason, UTC review time, and
 truthful reviewer-identity status.
 
+Presentation follow-up, 2026-09-08: the user's marker-review screenshot buried
+the decision beneath complete interval/sample dumps. A dedicated embedded panel
+now leads with canonical recording context, the actual finding, required
+duration and three explained choices. Unavailable choices are disabled with
+visible reasons; exact evidence remains available in a read-only details dialog.
+**Keep planned window** replaces the misleading **Retain Full Occurrence**
+label while retaining its existing decision identifier, proposed bounds and
+independent-evidence requirement. The window picker leads with seconds and
+retains exact sample bounds in its data/tooltips. No marker policy, timing
+threshold, crop, evidence requirement, rescan, output or decision receipt changes.
+The GUI architecture and user QC guide document the new presentation and
+visible smoke; numerical method documents do not need changes.
+
+Validation: `verify.py --scope gui --tier focused` passed 463 locally safe
+tests. The focused marker-integrity, summary/decision and lifecycle bundle
+passed 62 tests. Changed-file Ruff, compilation, verification configuration
+and diff checks passed. Ten new Qt cases are registered in
+`tests/gui/test_marker_occurrence_panel_qt.py` for default content, unavailable
+choices, action signals, details without a decision, and 1280x900 fit. Qt was
+not run locally, per the repo rule. The documented visible smoke remains for CI
+or an approved visible session. `verify.py --scope repo --tier precommit`
+stopped at the same eight pre-existing path findings under unrelated untracked
+`outputs/`; those files were preserved and that full gate is not green.
+
 ## Accepted Behavior
 
 1. Add one project-wide **Oddball marker code** to protocol settings. Default

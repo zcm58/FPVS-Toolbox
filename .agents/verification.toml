@@ -35,6 +35,8 @@ tests = [
   "tests/gui/test_dataset_exclusions_static.py",
   "tests/gui/test_dataset_exclusions_workflow_static.py",
   "tests/gui/test_preprocessing_qc_continue_static.py",
+  "tests/gui/test_marker_occurrence_review.py",
+  "tests/gui/test_marker_occurrence_review_static_contract.py",
   "tests/gui/test_qc_source_prefetch_static.py",
   "tests/workers/test_qc_source_prefetch_worker_static.py",
 ]

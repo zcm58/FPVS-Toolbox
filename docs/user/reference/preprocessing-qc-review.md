@@ -4,6 +4,24 @@ The seven preprocessing QC steps retain their existing order. Background
 source loading begins with step 2. A clean summary still waits for Continue;
 there is no timed delay or requirement to wait for preloading to finish.
 
+## Marker timing review
+
+Step 2 shows one flagged repetition at a time: the affected recording, a short
+explanation of the marker finding, and the required analysis duration.
+
+- **Use verified window…** chooses a window that passed the marker-spacing
+  check. Data outside that window does not enter this repetition's analysis.
+- **Keep planned window…** uses the planned window despite the finding. Supply
+  independent evidence, such as a presentation log or photodiode trace, that
+  stimulation stayed continuous and correctly timed.
+- **Exclude this repetition…** leaves only this condition repetition out of
+  analysis. The raw file is kept.
+
+Unavailable choices explain why they cannot be used. **Technical details…**
+opens the complete marker times and interval evidence without changing a
+decision. A marker gap alone does not show that visual stimulation stopped.
+**Cancel Processing** stops the request so you can investigate.
+
 ## Kurtosis review
 
 Select an electrode and choose **Inspect signal**. The overview preserves each

@@ -34,6 +34,7 @@ from Main_App.gui.signal_review_model import (
     SignalReviewItem, episode_view_context, review_time_scope,
 )
 from Main_App.gui.signal_review_panel import SignalReviewPanel
+from Main_App.gui.marker_occurrence_panel import MarkerOccurrenceReviewPanel
 from Main_App.gui.marker_occurrence_review import (
     MARKER_DECISION_EXCLUDE,
     MARKER_DECISION_RETAIN_FULL,
@@ -43,7 +44,6 @@ from Main_App.gui.marker_occurrence_review import (
     build_marker_review_decision,
     canonical_event_plans_by_file,
     collect_marker_occurrence_reviews,
-    marker_occurrence_review_rows,
     merge_marker_review_decision,
     merge_rescanned_results,
     resolved_path_text,
@@ -1859,15 +1859,6 @@ def _review_kurtosis_findings(
     )
 
 
-def _marker_review_actions() -> tuple[tuple[str, str, str], ...]:
-    return (
-        ("Use Verified Span", MARKER_DECISION_USE_CONTIGUOUS, "primary"),
-        ("Retain Full Occurrence", MARKER_DECISION_RETAIN_FULL, "secondary"),
-        ("Exclude Occurrence", MARKER_DECISION_EXCLUDE, "secondary"),
-        ("Cancel Processing", "cancel", "secondary"),
-    )
-
-
 def _show_marker_review_error(host: Any, message: str) -> None:
     box = QMessageBox(host)
     box.setIcon(QMessageBox.Warning)
@@ -1884,7 +1875,7 @@ def _collect_retain_full_marker_evidence(
 ) -> dict[str, object] | None:
     dialog = QDialog(host)
     dialog.setObjectName("marker_retain_full_evidence_dialog")
-    dialog.setWindowTitle("Evidence for Full Occurrence")
+    dialog.setWindowTitle("Evidence for Keeping the Planned Window")
     dialog.setModal(True)
     dialog.setMinimumWidth(620)
 
@@ -1902,8 +1893,8 @@ def _collect_retain_full_marker_evidence(
     layout.addWidget(title)
 
     explanation = QLabel(
-        "Retain the full proposed crop only when independent evidence shows that "
-        "stimulation continued at the expected phase through the marker finding. "
+        "Keep the planned analysis window only when independent evidence shows that "
+        "stimulation stayed continuous and correctly timed despite the marker finding. "
         "Choose the evidence type and enter a note or a log/file reference.",
         dialog,
     )
@@ -1946,7 +1937,7 @@ def _collect_retain_full_marker_evidence(
     actions.addStretch(1)
     back_button = make_action_button("Back", variant="secondary", parent=dialog)
     save_button = make_action_button(
-        "Save Evidence",
+        "Keep Window with This Evidence",
         variant="primary",
         parent=dialog,
     )
@@ -1991,7 +1982,7 @@ def _collect_verified_marker_span(
 
     dialog = QDialog(host)
     dialog.setObjectName("marker_contiguous_span_dialog")
-    dialog.setWindowTitle("Choose Verified Contiguous Span")
+    dialog.setWindowTitle("Choose a Verified Analysis Window")
     dialog.setModal(True)
     dialog.setMinimumWidth(560)
 
@@ -1999,8 +1990,9 @@ def _collect_verified_marker_span(
     layout.setContentsMargins(18, 18, 18, 18)
     layout.setSpacing(12)
     explanation = QLabel(
-        "Choose one span found by the marker check. Each listed span stays inside "
-        "this occurrence and contains exactly the expected analyzed cycles.",
+        "Choose a window that passed the marker-spacing check. Each option uses "
+        "the required analysis duration within this repetition. Signal quality "
+        "will be checked in the following steps.",
         dialog,
     )
     explanation.setWordWrap(True)
@@ -2008,14 +2000,19 @@ def _collect_verified_marker_span(
 
     span_combo = QComboBox(dialog)
     span_combo.setObjectName("marker_contiguous_span_combo")
-    for start, stop in item.contiguous_candidate_spans:
+    for index, (start, stop) in enumerate(item.contiguous_candidate_spans, start=1):
         start_s = float((start - item.first_samp) / item.sampling_rate_hz)
         stop_s = float((stop - item.first_samp) / item.sampling_rate_hz)
         duration_s = float((stop - start) / item.sampling_rate_hz)
         span_combo.addItem(
-            f"Samples [{start}, {stop}) · {start_s:.6g} to {stop_s:.6g} s "
-            f"from recording start · {duration_s:.6g} s duration",
+            f"Window {index}: {start_s:.2f}–{stop_s:.2f} s from recording start "
+            f"({duration_s:.2f} s duration)",
             (start, stop),
+        )
+        span_combo.setItemData(
+            index - 1,
+            f"Samples [{start}, {stop}); {start_s:.9g}–{stop_s:.9g} s from recording start",
+            Qt.ToolTipRole,
         )
     layout.addWidget(span_combo)
 
@@ -2023,7 +2020,7 @@ def _collect_verified_marker_span(
     actions = QHBoxLayout()
     actions.addStretch(1)
     back_button = make_action_button("Back", variant="secondary", parent=dialog)
-    use_button = make_action_button("Use This Span", variant="primary", parent=dialog)
+    use_button = make_action_button("Use This Window", variant="primary", parent=dialog)
 
     def _use() -> None:
         raw_span = span_combo.currentData()
@@ -2057,7 +2054,7 @@ def _collect_marker_exclusion_reason(
 ) -> dict[str, object] | None:
     dialog = QDialog(host)
     dialog.setObjectName("marker_exclusion_reason_dialog")
-    dialog.setWindowTitle("Exclude Occurrence")
+    dialog.setWindowTitle("Exclude This Repetition")
     dialog.setModal(True)
     dialog.setMinimumWidth(560)
 
@@ -2090,7 +2087,7 @@ def _collect_marker_exclusion_reason(
     actions.addStretch(1)
     back_button = make_action_button("Back", variant="secondary", parent=dialog)
     exclude_button = make_action_button(
-        "Exclude Occurrence",
+        "Exclude This Repetition",
         variant="primary",
         parent=dialog,
     )
@@ -2125,45 +2122,50 @@ def _show_marker_occurrence_review(
     *,
     index: int,
     total: int,
+    group_label: str = "",
 ) -> str:
     _begin_preflight_page(
         host,
         step=_REVIEW_MARKER_OCCURRENCES_STEP,
-        title="Review Marker Occurrence",
-        message=(
-            "A marker gap or extra marker needs a decision before signal-quality "
-            "checks can use this condition occurrence."
-        ),
+        title="Review marker timing",
+        message="Choose how to handle the flagged repetition before signal-quality checks continue.",
         busy=False,
         review_visible=True,
-        review_title=f"Marker occurrence {index} of {total}",
+        review_title="Choose what to analyze",
         progress_visible=False,
-        checklist=(
-            "Review the exact marker and interval evidence",
-            "Choose one occurrence-level analysis decision",
-            "Use independent evidence when retaining across a marker finding",
-        ),
     )
-    _set_label(
-        host,
-        "processing_summary_label",
-        f"Reviewing {item.participant_id} · {item.condition_label} · repetition "
-        f"{item.repetition_index + 1}.",
+    _clear_preflight_actions(host)
+    container = host.processing_files_card
+    panel = MarkerOccurrenceReviewPanel(
+        item, container, index=index, total=total, group_label=group_label,
     )
-    _set_label(
-        host,
-        "processing_current_file_label",
-        "No marker is guessed or silently discarded. Your decision applies only "
-        "to this occurrence.",
+    hidden_widgets = (
+        host.processing_status_card,
+        host.processing_files_title_label,
+        host.processing_files_table,
     )
-    _set_preflight_table(
-        host,
-        ("Evidence", "Observed"),
-        marker_occurrence_review_rows(item),
-        stretch_column=1,
-        preferred_column_widths={0: 240},
-    )
-    return _await_preflight_choice(host, _marker_review_actions())
+    visibility = [(widget, not widget.isHidden()) for widget in hidden_widgets]
+    loop = QEventLoop(host)
+    result = {"choice": "cancel"}
+
+    def choose(choice: str) -> None:
+        result["choice"] = choice
+        loop.quit()
+
+    panel.choice_requested.connect(choose)
+    try:
+        for widget, _visible in visibility:
+            widget.hide()
+        container.layout().addWidget(panel, 1)
+        panel.show()
+        loop.exec()
+        return result["choice"]
+    finally:
+        panel.hide()
+        container.layout().removeWidget(panel)
+        panel.deleteLater()
+        for widget, visible in visibility:
+            widget.setVisible(visible)
 
 
 def _review_marker_occurrences(
@@ -2191,6 +2193,7 @@ def _review_marker_occurrences(
         )
         return scan
 
+    participant_groups = _participant_group_display_map(raw_file_infos, group_labels)
     affected_path_keys: set[str] = set()
     for index, item in enumerate(review_items, start=1):
         while True:
@@ -2199,6 +2202,7 @@ def _review_marker_occurrences(
                 item,
                 index=index,
                 total=len(review_items),
+                group_label=participant_groups.get(item.participant_id, ""),
             )
             if choice == "cancel":
                 try:

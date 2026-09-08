@@ -170,6 +170,26 @@ Primary paths:
   relayed through the worker and take effect between condition reads,
   time-domain blocks, FFT channel batches, and cache writes; widgets remain
   signal consumers and never read BDF data directly.
+- `src/Main_App/gui/marker_occurrence_review.py` and
+  `marker_occurrence_panel.py`: Step 2 presents a compact, recording-aware
+  explanation of the actual marker finding and three choices with consequences.
+  Required duration comes from the declared cycles/rate; availability comes
+  only from the existing proposed crop and verified candidate list. The former
+  "Retain Full Occurrence" label is now **Keep planned window**, reflecting
+  its unchanged fixed crop and independent-evidence requirement. No choice
+  is recommended or applied automatically. Canonical group, participant,
+  session, file, condition and repetition remain visible. Complete original
+  sample/time/interval evidence opens on demand in a read-only **Technical
+  details** dialog. The embedded panel temporarily replaces the generic status,
+  checklist and evidence table and restores their visibility on decision,
+  cancellation or failure. It performs no raw I/O, inference or persistence.
+  Visible smoke (Qt is CI-only locally): at 1280x900, review gap, short-marker
+  coverage and extra-marker cases; check all actions and explanations fit,
+  unavailable windows stay disabled, Details/Close makes no decision, each
+  follow-up Back returns to the same repetition, and Cancel stops processing.
+  After an accepted choice, confirm the next decision and subsequent QC pages
+  restore normally. CI coverage is in `test_marker_occurrence_panel_qt.py`;
+  pure summary, decision and lifecycle checks run in the local GUI scope.
 - `src/Main_App/gui/signal_review_model.py` and `signal_review_panel.py`:
   presentation-only Step 7 signal-review browser. The workflow attaches short
   type, condition, occurrence, and channel fields while collecting the existing
