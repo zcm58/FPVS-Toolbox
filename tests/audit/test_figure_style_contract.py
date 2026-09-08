@@ -26,6 +26,7 @@ from Main_App.exports.table_style import (
 )
 
 FIGURE_RENDERER_FILES = (
+    "src/Tools/Free_Harmonic_Clustering/render_cluster_maps.py",
     "src/Tools/Sequence_Figure/renderer.py",
     "src/Tools/Plot_Generator/rendering.py",
     "src/Tools/Publication_Maps/rendering.py",

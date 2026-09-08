@@ -56,6 +56,20 @@ audit reasons.
 5. Review the concise cluster or batch results that appear beneath Setup.
    Use **Open Results Folder** for the polished Excel workbook, all clusters,
    and complete provenance.
+6. Select **View cluster maps**, or double-click a result row, to inspect the
+   matching cluster or repeated-session contrast. Switch harmonics to see the
+   exact member electrodes on the familiar ROI scalp layout. The map background
+   shows the mean analyzed A-minus-B response with a fixed symmetric scale;
+   black/white dots identify positive/negative significant-cluster members.
+   Turn off the member-only filter to inspect every analyzed harmonic.
+
+Completed bundles also include matching 600-DPI PNG and single-page PDF
+harmonic panels, following Figures 7 and 10 of Hermann et al. (2026), plus
+descriptive map values and captions. All retained harmonics are exported.
+Linear interpolation is only for the descriptive response background;
+significance and membership remain discrete. Cluster p-values apply to the
+whole electrode x harmonic cluster, not its individual electrodes or slices.
+Repeated-batch Holm annotations remain run-level corrections.
 
 The GUI exposes the locked Hermann-compatible profile rather than advanced
 method controls. The default runs 10,000 assignments, uses a two-sided node-entry

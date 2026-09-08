@@ -149,6 +149,52 @@ select **Run Free Harmonic Clustering Analysis**. The tool prepares the data
 and continues through all permutations and export without another confirmation.
 A concise result appears beneath the setup controls when the run completes.
 
+## Explore Cluster Maps
+
+Select **View cluster maps**, or double-click a results row, to open the
+**Cluster maps** tab. A batch row opens its condition and contrast family;
+a cluster row selects that cluster. Choose a harmonic by its frequency and
+oddball-frequency multiple, or use the previous/next buttons. The member-only
+filter shows harmonics with members of the selected cluster (or any significant
+cluster). Turn it off to see every analyzed harmonic, including maps with no
+significant-cluster members. Electrode labels can be shown for orientation.
+
+The presentation follows Figures 7 and 10 of
+[Hermann et al. (2026)](https://doi.org/10.1111/psyp.70361):
+
+- The background shows mean analyzed arm A minus mean analyzed arm B. For
+  ordinary contrasts these are L2-normalized SNR responses; repeated-session
+  contrasts preserve the analysis's session-average or session-change
+  definition. The color bar is dimensionless, not microvolts or t values.
+- Every harmonic within a contrast uses the same symmetric, zero-centered
+  color scale, including when you select an individual cluster.
+- Black dots mark positive significant-cluster members and white dots mark
+  negative significant-cluster members at that exact harmonic. The contrast
+  labels identify which condition or group is higher.
+- The scalp geometry is shared with the Toolbox ROI selector. The smooth
+  background is a linear interpolation of response differences inside the
+  electrode layout; it is descriptive and does not change the analysis.
+
+The p-value belongs to the entire electrode x harmonic cluster. A marked
+electrode, a colored area, or a displayed harmonic does not carry its own
+significance claim. Separate patches within one map can belong to the same
+cluster through connections at other harmonics. Repeated-session Holm values
+are shown separately because they correct global run p-values rather than
+individual clusters. These maps illustrate scalp measurements; they do not
+localize brain sources.
+
+Use **Open Results Folder** to find the exported harmonic panels. Matching
+600-DPI PNG and single-page PDF figures show every retained harmonic with
+shared color limits. Larger domains are split across numbered figures.
+The map metadata records descriptive values, membership, and captions so
+the artwork can be checked against the result. This is an independent
+implementation using the Toolbox layout, rather than an exact reproduction
+of the paper's FieldTrip rendering.
+
+The viewer is read-only. Switching harmonics does not rerun statistics, edit
+ROIs, or change saved project settings. Changing the analysis setup or active
+project clears the current maps along with the results table.
+
 The main workspace intentionally omits dense preparation and technical run
 summaries. The completed workbook records the full cohort, exclusions,
 incomplete pairs, harmonic-selection audit, prepared data shape, source

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import logging
 
@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -72,6 +73,10 @@ from .workers import (
 
 
 logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from ..visualization import ClusterMapData
+    from .cluster_map_view import ClusterMapView
 
 _FREQUENCY_UNSET = object()
 
@@ -126,6 +131,7 @@ class FreeHarmonicClusteringPage(QWidget):
         self._options: ProjectAnalysisOptions | None = None
         self._recording_exclusions: tuple[AnalysisRecordingExclusion, ...] = ()
         self._has_result = False
+        self.map_view: ClusterMapView | None = None
         self._thread: QThread | None = None
         self._worker: object | None = None
         self._completion_callback: Callable[[object], None] | None = None
@@ -207,7 +213,16 @@ class FreeHarmonicClusteringPage(QWidget):
         self.results_panel.setObjectName("free_harmonic_results_panel")
         workspace_layout.addWidget(self.setup_panel, 0)
         workspace_layout.addWidget(self.results_panel, 1)
-        root_layout.addWidget(self.workspace, 1)
+        self.result_tabs = QTabWidget(self)
+        self.result_tabs.setObjectName("free_harmonic_result_tabs")
+        self.result_tabs.addTab(self.workspace, "Analysis")
+        self.map_panel = QWidget(self.result_tabs)
+        self.map_panel.setObjectName("free_harmonic_map_panel")
+        self.map_layout = QVBoxLayout(self.map_panel)
+        self.map_layout.setContentsMargins(24, 8, 24, 8)
+        self.result_tabs.addTab(self.map_panel, "Cluster maps")
+        self.result_tabs.setTabEnabled(1, False)
+        root_layout.addWidget(self.result_tabs, 1)
 
         self._build_setup_panel()
         self._build_results_panel()
@@ -529,6 +544,16 @@ class FreeHarmonicClusteringPage(QWidget):
         )
         self.batch_table.hide()
         results_card.content_layout.addWidget(self.batch_table)
+        self.view_maps_button = make_action_button(
+            "View cluster maps", variant="secondary", parent=results_card.content,
+        )
+        self.view_maps_button.setObjectName("free_harmonic_view_maps_button")
+        self.view_maps_button.setToolTip(
+            "Show harmonic difference maps for the selected cluster or contrast."
+        )
+        results_card.content_layout.addWidget(
+            self.view_maps_button, 0, Qt.AlignRight,
+        )
         self.results_panel.hide()
 
     @staticmethod
@@ -582,6 +607,9 @@ class FreeHarmonicClusteringPage(QWidget):
         )
         self.cancel_button.clicked.connect(self.cancel_active_work)
         self.open_results_button.clicked.connect(self._open_results_folder)
+        self.view_maps_button.clicked.connect(self._open_cluster_maps)
+        self.significant_table.cellDoubleClicked.connect(self._open_cluster_maps)
+        self.batch_table.cellDoubleClicked.connect(self._open_cluster_maps)
 
     # ---------------------------------------------------------- project state
     def refresh_project_context(
@@ -1090,22 +1118,59 @@ class FreeHarmonicClusteringPage(QWidget):
             self._show_error("Analysis returned an invalid result.")
             return
         self._populate_results(value.prepared, value.run_outcome)
-        self._show_completed_results()
+        self._set_cluster_maps(value.maps)
+        self._show_completed_results(value.map_warning)
 
     def _on_repeated_batch_completed(self, value: object) -> None:
         if not isinstance(value, RepeatedBatchWorkerOutcome):
             self._show_error("Repeated-session batch returned an invalid result.")
             return
         self._populate_repeated_batch_results(value.run)
-        self._show_completed_results()
+        self._set_cluster_maps(value.maps)
+        self._show_completed_results(value.map_warning)
 
-    def _show_completed_results(self) -> None:
+    def _set_cluster_maps(self, maps: tuple[ClusterMapData, ...]) -> None:
+        """Keep only compact descriptive maps after the worker releases tensors."""
+
+        if maps:
+            if self.map_view is None:
+                from .cluster_map_view import ClusterMapView
+
+                self.map_view = ClusterMapView(self.map_panel)
+                self.map_layout.addWidget(self.map_view)
+            self.map_view.set_maps(maps)
+        elif self.map_view is not None:
+            self.map_view.clear()
+        self.result_tabs.setTabEnabled(1, bool(maps))
+        self.view_maps_button.setEnabled(bool(maps))
+
+    @Slot()
+    def _open_cluster_maps(self, *_args: object) -> None:
+        if self.map_view is None or not self.result_tabs.isTabEnabled(1):
+            return
+        if not self.batch_table.isHidden():
+            row = self.batch_table.currentRow()
+            if row >= 0:
+                self.map_view.select_run(row)
+        else:
+            item = self.significant_table.item(self.significant_table.currentRow(), 0)
+            if item is not None:
+                cluster_id = item.data(Qt.UserRole)
+                if cluster_id is not None:
+                    self.map_view.select_cluster(int(cluster_id))
+        self.result_tabs.setCurrentIndex(1)
+
+    def _show_completed_results(self, map_warning: str = "") -> None:
         """Reveal display-only results without retaining worker analysis arrays."""
 
         self._has_result = True
         self.results_panel.show()
         self._update_results_folder_button()
         self.workflow_status.hide()
+        if map_warning:
+            self.workflow_status.set_variant("warning")
+            self.workflow_status.set_text(map_warning)
+            self.workflow_status.show()
         self._update_buttons()
 
     @Slot()
@@ -1445,7 +1510,9 @@ class FreeHarmonicClusteringPage(QWidget):
         for row, cluster in enumerate(clusters):
             display = self._cluster_display(prepared, cluster)
             for column, key in enumerate(("direction", "sensors", "harmonics", "mass", "raw_p")):
-                self.significant_table.setItem(row, column, QTableWidgetItem(display[key]))
+                item = QTableWidgetItem(display[key])
+                item.setData(Qt.UserRole, getattr(cluster, "cluster_id", None))
+                self.significant_table.setItem(row, column, item)
 
     # -------------------------------------------------------------- utilities
     def _reset_session_views(self) -> None:
@@ -1457,6 +1524,8 @@ class FreeHarmonicClusteringPage(QWidget):
 
     def _clear_results(self) -> None:
         self._has_result = False
+        self.result_tabs.setCurrentIndex(0)
+        self._set_cluster_maps(())
         self.significant_table.setRowCount(0)
         self.significant_table.hide()
         self.batch_table.setRowCount(0)

@@ -5,9 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Mapping
+from typing import TYPE_CHECKING, Mapping
 
 import math
+
+if TYPE_CHECKING:
+    from ..visualization import ClusterMapData
 
 
 class GuiAnalysisDesign(str, Enum):
@@ -255,6 +258,8 @@ class AnalysisWorkerOutcome:
 
     prepared: object
     run_outcome: RunOutcome
+    maps: tuple[ClusterMapData, ...] = ()
+    map_warning: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -272,6 +277,8 @@ class RepeatedBatchWorkerOutcome:
     """Completed repeated-session batch and its additive export receipt."""
 
     run: object
+    maps: tuple[ClusterMapData, ...] = ()
+    map_warning: str = ""
 
 
 __all__ = [

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 from threading import Event
 from time import perf_counter
@@ -13,6 +14,11 @@ from PySide6.QtCore import QObject, Signal, Slot
 from Main_App.processing.full_fft_provenance import (
     FullFftProvenanceMissingError,
     FullFftProvenanceStaleError,
+)
+from ..visualization import (
+    ClusterMapData,
+    build_cluster_map_data,
+    build_repeated_cluster_map_data,
 )
 
 from .backend_adapter import FreeHarmonicBackend
@@ -27,6 +33,21 @@ from .models import (
 
 
 logger = logging.getLogger(__name__)
+
+
+def _map_snapshots_after_publish(
+    build: Callable[[], tuple[ClusterMapData, ...]],
+) -> tuple[tuple[ClusterMapData, ...], str]:
+    """A preview failure cannot undo a successfully published analysis bundle."""
+
+    try:
+        return build(), ""
+    except Exception:
+        logger.exception("free_harmonic_map_preview_failed_after_publication")
+        return (), (
+            "Analysis results and figures were saved, but the interactive map "
+            "preview could not be loaded. Use Open Results Folder to view the figures."
+        )
 
 
 def _requires_post_processing(error: BaseException) -> bool:
@@ -196,9 +217,14 @@ class AnalysisWorker(_CancellableWorker):
         )
         # Do not re-check cancellation after ``run`` returns. A returned run
         # has committed its additive export and must remain visible as success.
+        maps, map_warning = _map_snapshots_after_publish(
+            lambda: (build_cluster_map_data(prepared, run_outcome.result),),
+        )
         return AnalysisWorkerOutcome(
             prepared=prepared,
             run_outcome=run_outcome,
+            maps=maps,
+            map_warning=map_warning,
         )
 
 
@@ -235,7 +261,13 @@ class RepeatedSessionBatchWorker(_CancellableWorker):
             cancel_check=self._should_cancel,
         )
         # A returned batch has already published its additive result bundle.
-        return RepeatedBatchWorkerOutcome(run=run)
+        maps, map_warning = _map_snapshots_after_publish(
+            lambda: tuple(
+                build_repeated_cluster_map_data(outcome)
+                for outcome in run.result.outcomes
+            ),
+        )
+        return RepeatedBatchWorkerOutcome(run=run, maps=maps, map_warning=map_warning)
 
 
 __all__ = [

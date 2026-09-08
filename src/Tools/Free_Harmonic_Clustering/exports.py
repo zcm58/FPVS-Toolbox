@@ -14,7 +14,7 @@ import platform
 from pathlib import Path, PurePosixPath, PureWindowsPath
 import re
 import shutil
-from typing import TYPE_CHECKING, Iterable, Mapping, Sequence
+from typing import TYPE_CHECKING, Callable, Iterable, Mapping, Sequence
 from uuid import uuid4
 
 import numpy as np
@@ -32,11 +32,17 @@ from .models import (
     CohortWorkbook,
     ExportArtifact,
     ExportReceipt,
+    FreeHarmonicCancelledError,
     FreeHarmonicInputError,
     PreparedContrast,
     PreparedRepeatedSessionBatch,
     RepeatedSessionContrastFamily,
     SENSOR_ADJACENCY_VERSION,
+)
+from .visualization import (
+    ClusterMapData,
+    build_cluster_map_data,
+    build_repeated_cluster_map_data,
 )
 
 if TYPE_CHECKING:
@@ -1652,12 +1658,63 @@ def _artifact_manifest_row(
     }
 
 
+def _check_export_cancelled(cancel_check: Callable[[], bool] | None) -> None:
+    if cancel_check is not None and cancel_check():
+        raise FreeHarmonicCancelledError("Free Harmonic Clustering export was cancelled.")
+
+
+def _export_cluster_maps(
+    data: ClusterMapData,
+    output_directory: Path,
+    *,
+    cancel_check: Callable[[], bool] | None,
+) -> tuple[Path, ...]:
+    """Write descriptive maps inside the caller's unpublished staging tree."""
+
+    from .render_cluster_maps import cluster_map_caption, export_cluster_map_figures
+
+    _check_export_cancelled(cancel_check)
+    output_directory.mkdir(parents=True, exist_ok=False)
+    figure_paths = export_cluster_map_figures(data, output_directory, cancel_check=cancel_check)
+    _check_export_cancelled(cancel_check)
+    metadata_path = output_directory / "cluster_maps.json"
+    _write_manifest(
+        metadata_path,
+        {
+            "schema_version": 1,
+            "purpose": "descriptive harmonic slices of existing FHC clusters",
+            "run_label": data.run_label,
+            "arm_a_label": data.arm_a_label,
+            "arm_b_label": data.arm_b_label,
+            "value_label": data.value_label,
+            "background": (
+                "Analyzed arm-mean A-minus-B difference; paired subtraction "
+                "precedes averaging for paired runs."
+            ),
+            "sensor_names": list(data.sensor_names),
+            "harmonic_orders": list(data.harmonic_orders),
+            "harmonics_hz": list(data.harmonics_hz),
+            "mean_difference": data.mean_difference.tolist(),
+            "cluster_labels": data.cluster_labels.tolist(),
+            "clusters": [asdict(cluster) for cluster in data.clusters],
+            "symmetric_color_limit": data.color_limit,
+            "multiplicity_note": data.multiplicity_note,
+            "caption": cluster_map_caption(data),
+            "figures": [path.relative_to(output_directory).as_posix() for path in figure_paths],
+            "pointwise_significance_claimed": False,
+            "reselected_or_reclustered": False,
+        },
+    )
+    return (*figure_paths, metadata_path)
+
+
 def export_free_harmonic_run(
     prepared: PreparedContrast,
     result: ClusterPermutationResult,
     *,
     run_id: str | None = None,
     destination: str | Path | None = None,
+    cancel_check: Callable[[], bool] | None = None,
 ) -> ExportReceipt:
     """Publish one complete result bundle using a manifest-last directory commit."""
 
@@ -1665,6 +1722,7 @@ def export_free_harmonic_run(
         raise TypeError("prepared must be a PreparedContrast.")
     if not isinstance(result, ClusterPermutationResult):
         raise TypeError("result must be a ClusterPermutationResult.")
+    _check_export_cancelled(cancel_check)
     project_root = _resolve_project_root(prepared)
     resolved_run_id, final_directory = resolve_run_destination(
         prepared,
@@ -1830,6 +1888,7 @@ def export_free_harmonic_run(
     artifact_rows: list[dict[str, object]] = []
     try:
         for role, filename, fieldnames, rows in csv_specs:
+            _check_export_cancelled(cancel_check)
             path = staging / filename
             _write_csv(path, fieldnames, rows)
             artifact_rows.append(
@@ -1875,6 +1934,18 @@ def export_free_harmonic_run(
             )
         )
 
+        map_data = build_cluster_map_data(prepared, result)
+        for map_path in _export_cluster_maps(map_data, staging / "cluster_maps", cancel_check=cancel_check):
+            artifact_rows.append(
+                _batch_artifact_manifest_row(
+                    role="cluster_map_data" if map_path.suffix == ".json" else "cluster_map_figure",
+                    staging_path=map_path,
+                    staging_root=staging,
+                    destination=final_directory,
+                    project_root=project_root,
+                )
+            )
+        _check_export_cancelled(cancel_check)
         manifest_payload = _manifest_payload(
             run_id=resolved_run_id,
             project_root=project_root,
@@ -1888,6 +1959,7 @@ def export_free_harmonic_run(
         manifest_staging_path = staging / MANIFEST_FILENAME
         _write_manifest(manifest_staging_path, manifest_payload)
 
+        _check_export_cancelled(cancel_check)
         if final_directory.exists():
             raise FileExistsError(f"Free-harmonic run appeared during export: {final_directory}")
         os.replace(staging, final_directory)
@@ -2725,11 +2797,13 @@ def export_repeated_session_batch(
     *,
     run_id: str | None = None,
     destination: str | Path | None = None,
+    cancel_check: Callable[[], bool] | None = None,
 ) -> ExportReceipt:
     """Atomically publish one corrected repeated-session FHC batch bundle."""
 
     if not isinstance(prepared, PreparedRepeatedSessionBatch):
         raise TypeError("prepared must be a PreparedRepeatedSessionBatch.")
+    _check_export_cancelled(cancel_check)
     outcomes = tuple(getattr(result, "outcomes", ()))
     if len(outcomes) != len(prepared.contrast_runs):
         raise ValueError("Batch result does not match the prepared contrast count.")
@@ -2753,6 +2827,7 @@ def export_repeated_session_batch(
         expected_multiplicity,
         strict=True,
     ):
+        _check_export_cancelled(cancel_check)
         actual = outcome.prepared_run
         if actual is not expected:
             raise ValueError(
@@ -2867,6 +2942,7 @@ def export_repeated_session_batch(
     )
     try:
         for role, filename, fields, rows in csv_specs:
+            _check_export_cancelled(cancel_check)
             if not fields:
                 raise ValueError(f"Batch export has no columns for {role}.")
             path = staging / filename
@@ -2884,7 +2960,9 @@ def export_repeated_session_batch(
         arrays_directory = staging / "contrast_arrays"
         arrays_directory.mkdir()
         array_mapping: list[dict[str, object]] = []
+        map_mapping: list[dict[str, object]] = []
         for outcome in outcomes:
+            _check_export_cancelled(cancel_check)
             slug = _batch_run_slug(outcome.family_id, outcome.condition)
             path = arrays_directory / f"{slug}.npz"
             _write_batch_arrays(path, outcome=outcome, prepared=prepared)
@@ -2902,6 +2980,28 @@ def export_repeated_session_batch(
                     "family_id": outcome.family_id,
                     "condition": outcome.condition,
                     "path": f"contrast_arrays/{path.name}",
+                }
+            )
+            map_directory = staging / "cluster_maps" / slug
+            for map_path in _export_cluster_maps(
+                build_repeated_cluster_map_data(outcome),
+                map_directory,
+                cancel_check=cancel_check,
+            ):
+                artifacts.append(
+                    _batch_artifact_manifest_row(
+                        role="cluster_map_data" if map_path.suffix == ".json" else "cluster_map_figure",
+                        staging_path=map_path,
+                        staging_root=staging,
+                        destination=final_directory,
+                        project_root=project_root,
+                    )
+                )
+            map_mapping.append(
+                {
+                    "family_id": outcome.family_id,
+                    "condition": outcome.condition,
+                    "data_path": (map_directory / "cluster_maps.json").relative_to(staging).as_posix(),
                 }
             )
 
@@ -3101,11 +3201,14 @@ def export_repeated_session_batch(
             },
             "results": summary_rows,
             "contrast_arrays": array_mapping,
+            "cluster_maps": map_mapping,
             "source_workbooks": source_rows,
             "artifacts": artifacts,
         }
         manifest_path = staging / MANIFEST_FILENAME
+        _check_export_cancelled(cancel_check)
         _write_manifest(manifest_path, manifest)
+        _check_export_cancelled(cancel_check)
         if final_directory.exists():
             raise FileExistsError(f"Free-harmonic batch appeared during export: {final_directory}")
         os.replace(staging, final_directory)

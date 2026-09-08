@@ -12,6 +12,7 @@ import pytest
 from Tools.Free_Harmonic_Clustering import analysis, api, exports
 from Tools.Free_Harmonic_Clustering.models import (
     AnalysisDesign,
+    FreeHarmonicCancelledError,
     PreparedRepeatedSessionBatch,
     PreparedRepeatedSessionContrast,
     ProjectContrastRequest,
@@ -24,7 +25,12 @@ from Tools.Free_Harmonic_Clustering.models import (
     SharedHarmonicSelectionAudit,
 )
 
-from tests.free_harmonic_clustering.test_exports import _prepared_and_result
+from tests.free_harmonic_clustering.test_exports import _prepared_and_result, _stub_map_figures
+
+
+@pytest.fixture(autouse=True)
+def _map_figures(monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_map_figures(monkeypatch)
 
 
 def _batch_fixture(
@@ -265,6 +271,21 @@ def test_batch_export_is_atomic_corrected_and_tensor_semantic(tmp_path: Path) ->
     manifest = json.loads(receipt.manifest_path.read_text(encoding="utf-8"))
     assert manifest["calibration"]["legacy_powered_receipt_validates_repeated_batch"] is False
     assert manifest["multiplicity"]["cluster_specific_cross_condition_adjustment"] is False
+    assert len(manifest["cluster_maps"]) == len(prepared.contrast_runs)
+    for mapping, outcome in zip(manifest["cluster_maps"], result.outcomes, strict=True):
+        assert mapping["family_id"] == outcome.family_id
+        assert mapping["condition"] == outcome.condition
+        map_path = receipt.output_directory / mapping["data_path"]
+        maps = json.loads(map_path.read_text(encoding="utf-8"))
+        assert outcome.prepared_run.family_label in maps["run_label"]
+        assert "Raw cluster p values are within-run" in maps["multiplicity_note"]
+        assert f"Holm within family p = {outcome.holm_within_family_p_value:.4g}" in maps["multiplicity_note"]
+        assert "not individual clusters" in maps["multiplicity_note"]
+        np.testing.assert_allclose(
+            maps["mean_difference"],
+            outcome.prepared_run.prepared.values_a.mean(axis=0)
+            - outcome.prepared_run.prepared.values_b.mean(axis=0),
+        )
     assert manifest["frequency_plan"]["noise_selected_indices"]
     assert manifest["preparation"]["grid_fingerprint"] == prepared.provenance.grid_fingerprint
     assert (
@@ -318,6 +339,39 @@ def test_batch_export_is_atomic_corrected_and_tensor_semantic(tmp_path: Path) ->
     assert "Node Statistics" in workbook.sheetnames
     workbook.close()
     assert not list(receipt.output_directory.parent.glob(".batch-001.staging-*"))
+
+
+def test_batch_map_cancellation_discards_all_condition_family_outputs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from Tools.Free_Harmonic_Clustering import render_cluster_maps
+
+    prepared, result = _batch_fixture(tmp_path)
+    figure_exporter = render_cluster_maps.export_cluster_map_figures
+    calls = 0
+    cancel_requested = False
+
+    def cancel_second_run(data: object, output_dir: Path, *, cancel_check: object = None) -> tuple[Path, ...]:
+        nonlocal calls, cancel_requested
+        calls += 1
+        paths = figure_exporter(data, output_dir, cancel_check=cancel_check)
+        if calls == 2:
+            cancel_requested = True
+        return paths
+
+    monkeypatch.setattr(render_cluster_maps, "export_cluster_map_figures", cancel_second_run)
+    with pytest.raises(FreeHarmonicCancelledError):
+        exports.export_repeated_session_batch(
+            prepared,
+            result,
+            run_id="cancelled-batch-maps",
+            cancel_check=lambda: cancel_requested,
+        )
+    assert calls == 2
+    parent = prepared.project_root / exports.DEFAULT_RESULTS_SUBFOLDER
+    assert not (parent / "cancelled-batch-maps").exists()
+    assert not list(parent.glob(".cancelled-batch-maps.staging-*"))
 
 
 def test_batch_export_recomputes_run_global_and_holm_annotations(

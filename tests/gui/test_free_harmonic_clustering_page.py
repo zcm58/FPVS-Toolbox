@@ -235,7 +235,10 @@ def test_project_setup_is_dynamic_and_results_folder_is_reachable(
     assert "CLUSTER ANALYSIS TOOL" not in header_text
     assert not any(text.startswith("Compare one ordered") for text in header_text)
     assert "BETA ANALYSIS TOOL" not in header_text
-    assert page.findChildren(QtWidgets.QTabWidget) == []
+    assert page.result_tabs.count() == 2
+    assert page.result_tabs.tabText(0) == "Analysis"
+    assert page.result_tabs.tabText(1) == "Cluster maps"
+    assert not page.result_tabs.isTabEnabled(1)
     assert page.findChildren(QtWidgets.QScrollArea) == []
     assert page.setup_panel.isVisible()
     assert page.results_panel.isHidden()
@@ -751,10 +754,25 @@ def test_valid_independent_setup_enables_one_click_analysis(
     assert stage == "analysis"
 
 
+@pytest.mark.parametrize("preview_failure", [False, True])
 def test_analysis_worker_chains_phases_and_preserves_late_export_success(
     tmp_path: Path,
+    monkeypatch,
+    preview_failure: bool,
 ) -> None:
+    import Tools.Free_Harmonic_Clustering.gui.workers as workers_module
+
     prepared = _prepared(tmp_path)
+    map_snapshot = object()
+
+    def build_maps(*_args):
+        if preview_failure:
+            raise ValueError("Injected preview failure after publication")
+        return map_snapshot
+
+    monkeypatch.setattr(
+        workers_module, "build_cluster_map_data", build_maps,
+    )
     run_outcome = RunOutcome(
         result=SimpleNamespace(clusters=()),
         receipt=SimpleNamespace(output_directory=tmp_path / "run-001"),
@@ -802,12 +820,15 @@ def test_analysis_worker_chains_phases_and_preserves_late_export_success(
         (1, 1, "Preparation complete. Starting cluster permutations..."),
         (0, 0, "Running whole-participant cluster permutations..."),
     ]
-    assert completed == [
-        AnalysisWorkerOutcome(
-            prepared=prepared,
-            run_outcome=run_outcome,
-        )
-    ]
+    assert len(completed) == 1
+    outcome = completed[0]
+    assert isinstance(outcome, AnalysisWorkerOutcome)
+    assert outcome.prepared is prepared
+    assert outcome.run_outcome is run_outcome
+    assert outcome.maps == (() if preview_failure else (map_snapshot,))
+    assert bool(outcome.map_warning) is preview_failure
+    if preview_failure:
+        assert "were saved" in outcome.map_warning
     assert cancelled == []
 
 
@@ -856,6 +877,25 @@ def test_results_appear_in_compact_single_screen_without_run_metadata(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
+    import Tools.Free_Harmonic_Clustering.gui.cluster_map_view as map_module
+
+    class MapViewSpy(QtWidgets.QWidget):
+        def __init__(self, parent=None):
+            super().__init__(parent)
+            self.maps = ()
+            self.selected_cluster = None
+
+        def set_maps(self, maps):
+            self.maps = maps
+
+        def clear(self):
+            self.maps = ()
+
+        def select_cluster(self, cluster_id):
+            self.selected_cluster = cluster_id
+
+    monkeypatch.setattr(map_module, "ClusterMapView", MapViewSpy)
+    map_snapshot = object()
     page = _page(qtbot, tmp_path)
     prepared = _prepared(tmp_path)
 
@@ -914,6 +954,7 @@ def test_results_appear_in_compact_single_screen_without_run_metadata(
         AnalysisWorkerOutcome(
             prepared=prepared,
             run_outcome=outcome,
+            maps=(map_snapshot,),
         )
     )
 
@@ -928,6 +969,13 @@ def test_results_appear_in_compact_single_screen_without_run_metadata(
     assert page.workflow_actions.isVisible()
     assert page.significant_table.rowCount() == 1
     assert page.significant_table.item(0, 4).text() == "0.0043"
+    assert page.result_tabs.isTabEnabled(1)
+    assert page.map_view.maps == (map_snapshot,)
+    page.significant_table.selectRow(0)
+    qtbot.mouseClick(page.view_maps_button, QtCore.Qt.LeftButton)
+    assert page.result_tabs.currentIndex() == 1
+    assert page.map_view.selected_cluster == significant.cluster_id
+    page.result_tabs.setCurrentIndex(0)
     assert "1 significant cluster found" in page.result_status.text()
     assert "interpret it cautiously" in page.result_status.text()
     visible_text = " ".join(
@@ -971,6 +1019,9 @@ def test_results_appear_in_compact_single_screen_without_run_metadata(
     )
     assert page.results_panel.isHidden()
     assert page.setup_panel.isVisible()
+    assert page.result_tabs.currentIndex() == 0
+    assert not page.result_tabs.isTabEnabled(1)
+    assert page.map_view.maps == ()
     assert not page.run_analysis_button.isEnabled()
     assert "Project Settings" in page.workflow_status.text()
 

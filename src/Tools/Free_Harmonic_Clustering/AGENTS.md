@@ -88,8 +88,19 @@ current-session result while delegating long work to signal-driven workers.
   `fhc_repeated_session_batch_v1` extension is the only all-condition batch:
   it requires two stable groups and two ordered sessions and runs the four
   prespecified participant-level families documented in `ARCHITECTURE.md`.
-  It is not an omnibus model builder. Result plots, a historical-run browser,
-  and clipboard/manuscript helpers remain out of scope.
+  It is not an omnibus model builder. A historical-run browser and
+  clipboard/manuscript helpers remain out of scope.
+- Harmonic difference maps are descriptive views of completed inference.
+  Reuse the ROI selector's attributed BioSemi64 geometry for presentation;
+  never use screen positions to replace the versioned inference adjacency.
+  Show mean analyzed arm A minus mean analyzed arm B with one symmetric color
+  scale across all retained harmonics in a contrast. Linear interpolation is
+  permitted for this descriptive response surface only. Positive/negative
+  significant-cluster members use black/white markers at exact sensor x
+  harmonic nodes; do not interpolate significance or connect gaps in masks.
+  Retain raw cluster p-values and separate repeated-batch run-level Holm
+  annotations. Export all retained harmonics as 600-DPI PNG/PDF panels with
+  reproducible descriptive values and captions, following the figure standard.
 - Keep repeated-session participant, recording, group, session, visit, and
   condition identity canonical. Use complete pairs for all primary families;
   report missing visits as coverage and never treat recordings as independent
@@ -160,7 +171,7 @@ the page implementation.
   **Post-processing Required** dialog. The page emits the affected project and
   reason; it must not show the raw provenance failure in its footer or launch a
   post-processing worker itself.
-- Use one tab-free workspace. Flat and repeated projects use **Run Free
+- Use an **Analysis** tab and a dedicated **Cluster maps** tab. Flat and repeated projects use **Run Free
   Harmonic Clustering Analysis**. Repeated projects are recognized
   automatically and replace the flat-project selectors with a compact stable-
   group summary and a project-persistent analysis-only recording-exclusion
@@ -184,7 +195,10 @@ the page implementation.
 - Preparation, permutation inference, multiplicity correction where applicable,
   and export run sequentially on one background analysis worker. Workers
   communicate through signals and never touch widgets; the page must not retain
-  prepared/result tensors after their display strings have been populated.
+  participant or permutation tensors after completion. Retain only compact
+  immutable sensor x harmonic descriptive means, labels, membership, and
+  frozen contrast/multiplicity context for the map viewer. Clear these with
+  the table when setup or active project changes.
 
 ## Verification
 

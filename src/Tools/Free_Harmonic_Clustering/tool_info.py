@@ -173,6 +173,24 @@ reproducible.
 
 INTERPRETATION_HTML = """
 <h2>Reading the Results</h2>
+<h3>Harmonic Cluster Maps</h3>
+<p>
+Select <b>View cluster maps</b> or double-click a result row. Choose a cluster
+and harmonic, or disable the member-only filter to inspect every analyzed
+harmonic. The background shows mean analyzed A-minus-B normalized response,
+with one symmetric color scale across the contrast. Black dots mark positive
+significant-cluster members and white dots mark negative members at that exact
+harmonic. Repeated-session maps preserve the analyzed composite definition.
+</p>
+<p>
+This follows the descriptive presentation in Hermann et al. (2026), Figures 7
+and 10, using the Toolbox ROI scalp geometry. Interpolation is only for the
+response background. Individual electrodes, colored regions, and harmonic
+slices do not have separate significance claims; p-values belong to the full
+electrode &times; harmonic cluster. Repeated-batch Holm values are separate
+run-level annotations. Matching 600-DPI PNG/PDF panels of all retained
+harmonics and reproducible map values are included in each completed bundle.
+</p>
 <p>
 The workspace shows significant clusters from the current run. The primary
 p-value is the raw, sign-specific Monte Carlo cluster p-value, evaluated at
