@@ -106,3 +106,20 @@ cover the recording-aware rows and no-default decision contract. The visible
 release smoke path is to review two recordings from one participant, exclude a
 single condition/electrode in one recording, reopen the dialog, and verify that
 the saved reason and scope return while the sibling recording remains retained.
+
+The 2026-09-08 exclusion-reconfirmation correction resolves review assignments
+from the complete canonical registry, including excluded recordings brought back
+for review when cohort evidence changes. Numerical inputs remain filtered;
+review summaries no longer lose their canonical identity after a visit is
+excluded. Unknown registry identities still fail rather than being inferred
+from saved findings. Dialog-construction errors retain their actual cause in
+logs and stale-output metadata instead of being labeled group-membership errors.
+Non-GUI regressions exercise exclusion, recomputation, canonical review-row and
+decision resolution, continued sibling availability, and stale-identity rejection.
+
+Visible smoke path: exclude a flagged visit, apply the review, then verify that
+the resumed frequency-QC dialog opens for any required reconfirmation with the
+correct participant, phase, and group. Confirming the exclusion must keep that
+visit out of analysis while retaining the sibling visit. Cancel must leave
+post-processing pending; Resume Post-Processing must reopen the review. Local
+verification does not execute Qt; this visible path remains a release check.

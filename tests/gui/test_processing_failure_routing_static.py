@@ -9,7 +9,8 @@ import json
 import logging
 from pathlib import Path
 from queue import Empty, Queue
-from types import SimpleNamespace
+import sys
+from types import ModuleType, SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
@@ -439,6 +440,81 @@ def test_paused_frequency_qc_requires_review_without_claiming_success():
     assert "QC review must be completed" in reason({
         "ok": False, "requires_frequency_domain_qc_review": True, "steps": [],
     })
+
+
+@pytest.mark.parametrize("failure_stage", ["group", "identity", "dialog"])
+@pytest.mark.parametrize("has_cache", [False, True])
+def test_frequency_qc_review_start_preserves_actual_failure_stage_and_reason(
+    monkeypatch, tmp_path, failure_stage, has_cache,
+):
+    from Main_App.processing.frequency_qc_identity import FrequencyQcReviewIdentityError
+
+    errors = {
+        "group": ValueError("Participant P09 has no canonical group membership."),
+        "identity": FrequencyQcReviewIdentityError(
+            "Recording-scoped review finding for P09 is missing recording_id."
+        ),
+        "dialog": RuntimeError("Could not initialize the review controls."),
+    }
+    error = errors[failure_stage]
+    dialog_factory = Mock(side_effect=error if failure_stage != "group" else None)
+    save_review = Mock()
+    events = []
+    mark_stale = Mock(side_effect=lambda *_args, **_kwargs: events.append("stale"))
+    for name, attributes in (
+        ("Main_App.gui.frequency_domain_qc_dialog", {"FrequencyDomainQcReviewDialog": dialog_factory}),
+        ("Main_App.gui.frequency_domain_qc_handoff", {"save_frequency_domain_qc_review": save_review}),
+        ("Main_App.processing.frequency_domain_qc", {"mark_frequency_domain_outputs_stale": mark_stale}),
+    ):
+        module = ModuleType(name)
+        module.__dict__.update(attributes)
+        monkeypatch.setitem(sys.modules, name, module)
+    messages = SimpleNamespace(critical=Mock(side_effect=lambda *_args: events.append("critical")))
+    group_resolver = Mock(
+        return_value={"P09": "Control"},
+        side_effect=error if failure_stage == "group" else None,
+    )
+    log = Mock()
+    resume = Mock(side_effect=lambda *_args: events.append("resume"))
+    review = _load_function(
+        "src/Main_App/gui/processing_workflows.py", "_handle_frequency_domain_qc_review",
+        {
+            "_frequency_domain_qc_participant_groups": group_resolver,
+            "logger": log, "QMessageBox": messages,
+            "_set_resume_post_processing_pending": resume,
+        },
+    )
+    project = SimpleNamespace(project_root=tmp_path)
+    host = SimpleNamespace(_post_processing_failure_reason="")
+    cache = Mock() if has_cache else None
+    if cache is not None:
+        cache.clear.side_effect = lambda: events.append("clear")
+    finished_reasons = []
+
+    def on_finished():
+        events.append("finished")
+        finished_reasons.append(host._post_processing_failure_reason)
+
+    report = {"findings": [{"participant_id": "P09"}]}
+    review(host, project, report, on_finished=on_finished, provisional_cache=cache)
+
+    expected_context = "resolve canonical group membership" if failure_stage == "group" else "build the review dialog"
+    expected_reason = f"Frequency-domain QC could not {expected_context}: {error}"
+    expected_event = "frequency_domain_qc_group_membership_failed" if failure_stage == "group" else "frequency_domain_qc_review_build_failed"
+    assert host._post_processing_failure_reason == expected_reason
+    log.exception.assert_called_once_with(expected_event)
+    messages.critical.assert_called_once_with(host, "Frequency-Domain QC Error", str(error))
+    mark_stale.assert_called_once_with(tmp_path, reason=expected_reason)
+    assert finished_reasons == [expected_reason]
+    resume.assert_called_once_with(host, True)
+    assert events == (["clear"] if has_cache else []) + ["critical", "stale", "finished", "resume"]
+    if cache is not None:
+        cache.clear.assert_called_once()
+    if failure_stage == "group":
+        dialog_factory.assert_not_called()
+    else:
+        dialog_factory.assert_called_once_with(report, host, participant_groups={"P09": "Control"})
+    save_review.assert_not_called()
 
 
 def test_worker_finished_delivers_explicit_failure_to_completion_callback():

@@ -870,8 +870,12 @@ def _handle_frequency_domain_qc_review(
         mark_frequency_domain_outputs_stale,
     )
 
+    failure_event = "frequency_domain_qc_group_membership_failed"
+    failure_context = "resolve canonical group membership"
     try:
         participant_groups = _frequency_domain_qc_participant_groups(project)
+        failure_event = "frequency_domain_qc_review_build_failed"
+        failure_context = "build the review dialog"
         dialog = FrequencyDomainQcReviewDialog(
             report,
             host,
@@ -880,12 +884,14 @@ def _handle_frequency_domain_qc_review(
     except (RuntimeError, ValueError) as exc:
         if provisional_cache is not None:
             provisional_cache.clear()
-        logger.exception("frequency_domain_qc_group_membership_failed")
-        host._post_processing_failure_reason = f"Frequency-domain QC could not start: {exc}"
+        logger.exception(failure_event)
+        host._post_processing_failure_reason = (
+            f"Frequency-domain QC could not {failure_context}: {exc}"
+        )
         QMessageBox.critical(host, "Frequency-Domain QC Error", str(exc))
         mark_frequency_domain_outputs_stale(
             project.project_root,
-            reason="Frequency-domain QC could not resolve canonical group membership.",
+            reason=host._post_processing_failure_reason,
         )
         on_finished()
         _set_resume_post_processing_pending(host, True)

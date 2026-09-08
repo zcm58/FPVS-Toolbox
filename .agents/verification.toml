@@ -102,6 +102,7 @@ tests = [
   "tests/processing/test_interpolation_burden_review.py",
   "tests/processing/test_frequency_domain_qc_integrity.py",
   "tests/processing/test_repeated_session_frequency_domain_qc.py",
+  "tests/processing/test_frequency_qc_identity.py",
   "tests/gui/test_processing_post_status_text.py",
   "tests/processing/test_analysis_spans.py",
   "tests/processing/test_artifact_freshness.py",

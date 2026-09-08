@@ -161,6 +161,15 @@ completed review receipt when its validated analysis is unchanged, even after
 those reconfirmation findings disappear. They add no active exclusion authority
 and do not reopen the ordinary findings solely because the visible list shrinks.
 
+Repeated-session review reports resolve `recording_assignments` from the full
+canonical project recording registry for both analyzed recordings and prior
+exclusions requiring reconfirmation. An excluded recording can therefore appear
+in `recording_summaries` with its registered participant, group, and session while
+remaining absent from the numerical `recordings`, source workbooks, and harmonic
+inputs. Unknown registry IDs still fail identity validation; saved decision text
+never supplies a replacement identity. This review metadata does not change
+scientific cohort fingerprints or exclusion scope.
+
 Post-processing validation reuse is owned by
 `Main_App.processing.post_processing_context`. An explicit context spans one
 worker's QC/selection/workbook phases; standalone export entry points create

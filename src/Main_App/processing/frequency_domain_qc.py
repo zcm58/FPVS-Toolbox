@@ -19,6 +19,7 @@ import numpy as np
 import pandas as pd
 
 from Main_App.processing.frequency_qc_identity import (
+    FrequencyQcReviewIdentityError,
     resolve_frequency_qc_recording_decisions,
 )
 from Main_App.processing.provisional_harmonic_cache import ProvisionalHarmonicCache
@@ -647,6 +648,15 @@ def run_frequency_domain_qc_review(
         "generated_at": _now_utc_iso(),
     }
     if repeated_session:
+        # Prior exclusions can need reconfirmation after leaving the numerical
+        # cohort. Resolve their review identity from the full project registry.
+        review_assignments = _recording_assignments_from_index(
+            dataset_index,
+            recording_ids=[
+                *subjects,
+                *(str(row.get("recording_id") or "") for row in summaries),
+            ],
+        )
         report.update(
             {
                 "identity_scope": "recording",
@@ -658,10 +668,7 @@ def run_frequency_domain_qc_review(
                     key=str.casefold,
                 ),
                 "recordings": list(subjects),
-                "recording_assignments": [
-                    dict(recording_assignments[recording_id])
-                    for recording_id in subjects
-                ],
+                "recording_assignments": list(review_assignments.values()),
                 "recording_summaries": summaries,
                 "participant_summaries": [],
                 "machine_recording_electrode_suggestions": machine_electrodes,
@@ -3218,16 +3225,27 @@ def _filter_preprocessing_manual_recording_exclusions(
 
 def _recording_assignments_from_index(
     dataset_index: ProjectDatasetIndex,
+    *,
+    recording_ids: Iterable[str],
 ) -> dict[str, dict[str, object]]:
+    """Resolve review identities, including excluded recordings, canonically."""
+
     assignments: dict[str, dict[str, object]] = {}
     group_by_participant = dataset_index.participant_group_id_map()
-    for recording_id in dataset_index.recording_ids:
-        recording = dataset_index.recordings.get(recording_id)
-        if recording is None:
-            raise RuntimeError(
-                "Repeated-session frequency-domain QC is missing the canonical "
-                f"recording assignment for {recording_id}."
+    canonical_ids = {
+        recording_id.casefold(): recording_id
+        for recording_id in dataset_index.recordings
+    }
+    for submitted_id in recording_ids:
+        recording_id = canonical_ids.get(submitted_id.strip().casefold())
+        if recording_id is None:
+            raise FrequencyQcReviewIdentityError(
+                "Frequency-QC report contains unknown or stale recording "
+                f"identity {submitted_id!r}; it is absent from the project registry."
             )
+        if recording_id in assignments:
+            continue
+        recording = dataset_index.recordings[recording_id]
         session = dataset_index.sessions.get(recording.session_id)
         assignments[recording_id] = {
             "recording_id": recording_id,
