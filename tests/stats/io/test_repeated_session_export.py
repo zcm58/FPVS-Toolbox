@@ -145,16 +145,28 @@ def test_export_bundle_has_explicit_schema_and_fixed_order_metadata() -> None:
     )
 
 
-def test_export_hard_fails_recording_reuse_and_unexplained_exclusion() -> None:
+def test_export_hard_fails_recording_reuse() -> None:
     reused = _data()
     reused.loc[reused["participant_id"].eq("C1"), "recording_id"] = "B1__luteal"
     with pytest.raises(RepeatedSessionDesignError, match="recording_id must belong"):
         build_repeated_session_long_frame(reused, contract=_contract())
 
-    unexplained = _data()
-    unexplained.loc[unexplained["participant_id"].eq("C1"), "exclusion_reason"] = ""
-    with pytest.raises(RepeatedSessionDesignError, match="exclusion_reason"):
-        build_repeated_session_long_frame(unexplained, contract=_contract())
+
+@pytest.mark.parametrize("reason", ["", "   ", None])
+def test_export_retains_exclusion_and_qc_evidence_when_optional_reason_is_blank(reason) -> None:
+    data = _data()
+    data.loc[data["participant_id"].eq("C1"), "exclusion_reason"] = reason
+    original = data.copy(deep=True)
+
+    frame = build_repeated_session_long_frame(data, contract=_contract())
+
+    excluded = frame.loc[frame["participant_id"].eq("C1")].iloc[0]
+    assert bool(excluded["excluded"])
+    assert bool(excluded["qc_flag"])
+    assert excluded["qc_notes"] == "Manual review flag"
+    assert excluded["exclusion_reason"] == "No reason provided"
+    assert np.isnan(float(excluded["summed_bca_uv"]))
+    pd.testing.assert_frame_equal(data, original)
 
 
 def test_export_fills_contract_labels_and_defaults_without_imputing_dv() -> None:

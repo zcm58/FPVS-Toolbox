@@ -248,6 +248,109 @@ def _with_extra_p15(index: ProjectDatasetIndex) -> ProjectDatasetIndex:
     return replace(index, workbooks=index.workbooks + extra_records)
 
 
+@pytest.mark.parametrize("scope", ("recording", "participant_condition", "recording_condition"))
+def test_managed_maps_omit_scoped_qc_cells_before_reads_and_preserve_other_cells(
+    tmp_path: Path,
+    monkeypatch,
+    scope: str,
+) -> None:
+    from Main_App.processing import roi_coverage
+    from Main_App.processing.frequency_domain_qc import FrequencyDomainExclusions
+    from Tools.Publication_Maps import metrics
+
+    index = _with_extra_p15(_repeated_index(tmp_path, conditions=("Faces", "Objects")))
+    requests = _session_requests(tmp_path, conditions=("Faces", "Objects"))
+    excluded_paths = frozenset(
+        record.path.resolve()
+        for record in index.workbooks
+        if record.participant_id == "P15"
+        and (scope == "participant_condition" or record.session_id == "follicular")
+        and (scope == "recording" or record.condition == "Faces")
+    )
+    cells = []
+    for record in index.workbooks:
+        record.path.parent.mkdir(parents=True, exist_ok=True)
+        if record.path.resolve() in excluded_paths:
+            # Any attempt to read this excluded source would fail.
+            record.path.write_bytes(b"excluded source must not be read")
+        else:
+            with pd.ExcelWriter(record.path, engine="openpyxl") as writer:
+                pd.DataFrame({
+                    "Electrode": ["Cz"], "1.2000_Hz": [1.0], "2.4000_Hz": [2.0],
+                }).to_excel(writer, sheet_name="BCA (uV)", index=False)
+        cells.append(SimpleNamespace(
+            workbook_path=str(record.path),
+            downstream_cell_excluded=record.path.resolve() in excluded_paths,
+            # Final coverage retains source evidence even for excluded cells.
+            source_evidence=SimpleNamespace(
+                retained_scalp_identity=SimpleNamespace(channels=("Cz",)),
+                allowed_auxiliary_rows=(), observed_auxiliary_rows=(),
+                fingerprint=f"source:{record.path}",
+            ),
+        ))
+    monkeypatch.setattr(roi_coverage, "require_project_final_release", lambda _root: (
+        object(), SimpleNamespace(cells=cells, fingerprint="coverage"),
+        SimpleNamespace(fingerprint="release"),
+    ))
+    monkeypatch.setattr(metrics, "active_frequency_domain_exclusions", lambda _root: FrequencyDomainExclusions(
+        excluded_participants=frozenset(), auto_excluded_participants=frozenset(),
+        manual_excluded_participants=frozenset(), auto_excluded_electrodes_by_participant={},
+        downstream_outputs_stale=False,
+    ))
+    monkeypatch.setattr(metrics, "load_publication_dataset_index", lambda *_args, **_kwargs: index)
+    monkeypatch.setattr(session_workflow, "load_publication_dataset_index", lambda *_args, **_kwargs: index)
+    monkeypatch.setattr(metrics, "_select_stats_significant_harmonics", lambda **_kwargs: (
+        (1.2, 2.4), {"selection_fingerprint": "selection"},
+    ))
+
+    results = tuple(metrics.build_publication_map_result(request) for request in requests)
+
+    included = {entry.path.resolve() for result in results for entry in result.included_workbooks}
+    assert included == {record.path.resolve() for record in index.workbooks} - excluded_paths
+    assert {entry.path.resolve() for result in results for entry in result.excluded_cohort} == excluded_paths
+    for result in results:
+        assert set(result.qc_provenance["excluded_workbook_paths"]) == {str(path) for path in excluded_paths}
+    monkeypatch.setattr(metrics, "active_frequency_domain_exclusions", lambda _root: pytest.fail(
+        "Panel assembly must use the frozen QC snapshot."
+    ))
+    panel_sets = build_session_panel_sets(results, requests)
+    for panel_set in panel_sets:
+        for group_id in panel_set.group_ids:
+            for session_id in panel_set.session_ids:
+                expected = {
+                    record.participant_id for record in index.workbooks
+                    if record.group_id == group_id and record.session_id == session_id
+                    and record.condition == panel_set.condition and record.path.resolve() in included
+                }
+                assert panel_set.panel(group_id, session_id).participant_n == len(expected)
+        expected_paired = 2 if panel_set.condition == "Objects" and scope != "recording" else 1
+        assert panel_set.paired_difference("birth_control").paired_n == expected_paired
+
+
+def test_session_panels_reject_empty_cell_after_scoped_exclusion(tmp_path: Path, monkeypatch) -> None:
+    index = _repeated_index(tmp_path)
+    requests = _session_requests(tmp_path)
+    excluded_path = index.workbooks[0].path
+    retained = tuple(record for record in index.workbooks if record.path != excluded_path)
+    results = _session_results_for_records(retained, requests)
+    for result in results:
+        result.qc_provenance["excluded_workbook_paths"] = [str(excluded_path)]
+    monkeypatch.setattr(session_workflow, "load_publication_dataset_index", lambda *_args, **_kwargs: index)
+
+    with pytest.raises(PublicationMapInputError, match="condition.*group.*session"):
+        build_session_panel_sets(results, requests)
+
+
+def test_session_panels_reject_different_final_releases(tmp_path: Path) -> None:
+    requests = _session_requests(tmp_path)
+    results = _session_results_for_records(_repeated_index(tmp_path).workbooks, requests)
+    for number, result in enumerate(results):
+        result.qc_provenance["final_release_receipt_fingerprint"] = f"release-{number}"
+
+    with pytest.raises(PublicationMapInputError, match="different final QC releases"):
+        build_session_panel_sets(results, requests)
+
+
 @pytest.mark.parametrize("exclusion_source", ("request", "frozen_qc"))
 def test_session_panels_keep_excluded_participant_out_of_both_visits(
     tmp_path: Path,

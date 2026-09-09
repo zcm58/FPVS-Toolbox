@@ -18,8 +18,8 @@ from .core import (
 )
 from .project_coverage import (
     ManagedWorkbookCoverage,
-    load_managed_workbook_coverage,
-    require_selected_workbooks_released,
+    load_managed_project_coverage,
+    select_managed_conditions,
 )
 from Tools.Stats.analysis.canonical_harmonics import (
     CANONICAL_HARMONIC_SOURCE,
@@ -69,10 +69,10 @@ class IndividualDetectabilityWorker(QObject):
 
     def _run(self) -> None:
         req = self._request
-        managed_coverage = self._require_current_project_inputs(req)
+        req, managed_coverage = self._require_current_project_inputs(req)
         total_conditions = len(req.conditions)
         if total_conditions == 0:
-            self._emit_log("No conditions selected.")
+            self._emit_log("No selected inputs remain after participant and project QC exclusions.")
             self.finished.emit(str(req.output_root))
             return
 
@@ -143,11 +143,11 @@ class IndividualDetectabilityWorker(QObject):
     @staticmethod
     def _require_current_project_inputs(
         req: RunRequest,
-    ) -> dict[Path, ManagedWorkbookCoverage] | None:
+    ) -> tuple[RunRequest, dict[Path, ManagedWorkbookCoverage] | None]:
         """Bind managed runs to the current canonical FullFFT source family."""
 
         if req.project_root is None:
-            return None
+            return req, None
         from Main_App.processing.full_fft_provenance import (
             FullFftProvenanceError,
             require_current_project_full_fft_provenance,
@@ -157,14 +157,17 @@ class IndividualDetectabilityWorker(QObject):
 
         try:
             dataset_index = load_project_dataset_index(req.input_root)
-            require_current_project_full_fft_provenance(
+            provenance = require_current_project_full_fft_provenance(
                 req.project_root,
                 dataset_index=dataset_index,
             )
-            managed_coverage = load_managed_workbook_coverage(req.project_root)
-            require_selected_workbooks_released(
-                [path for condition in req.conditions for path in condition.files],
-                managed_coverage,
+            coverage = load_managed_project_coverage(req.project_root)
+            conditions = select_managed_conditions(
+                req.conditions,
+                dataset_index=dataset_index,
+                provenance=provenance,
+                coverage=coverage,
+                excluded_participants=req.excluded_participants,
             )
         except (
             DatasetIndexError,
@@ -175,7 +178,7 @@ class IndividualDetectabilityWorker(QObject):
                 str(exc),
                 reason="stale_project_qc_release",
             ) from exc
-        return managed_coverage
+        return replace(req, conditions=conditions), dict(coverage.by_workbook)
 
     @staticmethod
     def _log_filename(settings: DetectabilitySettings) -> str:

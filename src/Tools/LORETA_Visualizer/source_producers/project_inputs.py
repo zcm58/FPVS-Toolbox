@@ -23,7 +23,10 @@ from Main_App.processing.artifact_freshness import (
     STATS_READY_SUMMED_BCA_ARTIFACT,
     require_current_artifact,
 )
-from Main_App.processing.frequency_domain_qc import active_frequency_domain_exclusions
+from Main_App.processing.frequency_domain_qc import (
+    FrequencyDomainExclusions,
+    active_frequency_domain_exclusions,
+)
 from Main_App.projects import (
     GroupInfo,
     load_project_manifest_for_dataset_path,
@@ -89,10 +92,26 @@ def project_source_participant_selection(
     root = Path(project_root).expanduser().resolve()
     if not root.is_dir():
         raise FileNotFoundError(f"Project root does not exist: {root}")
+    return _project_source_participant_selection(
+        root,
+        include_flagged_subjects=include_flagged_subjects,
+        project_preprocessing=project_preprocessing,
+        frequency_exclusions=active_frequency_domain_exclusions(root),
+    )
+
+
+def _project_source_participant_selection(
+    root: Path,
+    *,
+    include_flagged_subjects: bool,
+    project_preprocessing: Mapping[str, object] | None,
+    frequency_exclusions: FrequencyDomainExclusions,
+) -> ProjectSourceParticipantSelection:
+    """Reuse one accepted QC snapshot across participant and workbook scopes."""
+
     stats_root = root / "3 - Statistical Analysis Results"
     excluded_subjects = _read_subject_list(stats_root / "Excluded Participants.xlsx")
     flagged_subjects = _read_subject_list(stats_root / "Flagged Participants.xlsx")
-    frequency_exclusions = active_frequency_domain_exclusions(root)
     source_electrode_excluded_subjects = {
         participant
         for participant, electrodes in frequency_exclusions.auto_excluded_electrodes_by_participant.items()
@@ -140,17 +159,46 @@ def build_l2_mne_conditions_from_project(
     if not root.is_dir():
         raise FileNotFoundError(f"Project root does not exist: {root}")
     dataset_index = load_project_dataset_index(root)
+    recording_ids_by_participant: dict[str, set[str]] = {}
+    for record in (*dataset_index.workbooks, *dataset_index.excluded_workbooks):
+        if record.recording_id:
+            recording_ids_by_participant.setdefault(
+                record.participant_id.strip().casefold(), set(),
+            ).add(record.recording_id.strip().casefold())
+    if dataset_index.is_repeated_session or any(
+        len(recording_ids) > 1 for recording_ids in recording_ids_by_participant.values()
+    ):
+        raise ValueError(
+            "Legacy workbook-based source maps do not support repeated-session "
+            "projects or multiple recordings per participant. These source inputs "
+            "are participant-keyed; a recording-aware source producer is required."
+        )
     sheet_name = _sheet_for_metric(metric)
     stats_ready = root / "3 - Statistical Analysis Results" / "Stats_Ready_Summed_BCA.xlsx"
     _require_current_stats_ready_workbook(root, stats_ready)
     selected_harmonics = _read_selected_harmonics(stats_ready)
     requested_conditions = _resolve_conditions(stats_ready, conditions=conditions)
-    participant_selection = project_source_participant_selection(
+    frequency_exclusions = active_frequency_domain_exclusions(root)
+    participant_selection = _project_source_participant_selection(
         root,
         include_flagged_subjects=include_flagged_subjects,
+        project_preprocessing=None,
+        frequency_exclusions=frequency_exclusions,
     )
     excluded_lookup = set(participant_selection.excluded_subjects)
     flagged_subjects = participant_selection.flagged_subjects
+    excluded_recordings = {
+        str(recording_id).strip().casefold()
+        for recording_id in frequency_exclusions.excluded_recordings
+    }
+    excluded_participant_conditions = {
+        (str(participant_id).strip().casefold(), str(condition))
+        for participant_id, condition in frequency_exclusions.excluded_participant_conditions
+    }
+    excluded_recording_conditions = {
+        (str(recording_id).strip().casefold(), str(condition))
+        for recording_id, condition in frequency_exclusions.excluded_recording_conditions
+    }
 
     expected_electrodes = tuple(name.upper() for name in DEFAULT_ELECTRODE_NAMES_64)
     diagnostics = [item.message for item in dataset_index.diagnostics]
@@ -170,9 +218,33 @@ def build_l2_mne_conditions_from_project(
                 harmonic: [] for harmonic in selected_harmonics
             }
             included_subjects: list[str] = []
+            qc_omissions: list[dict[str, str]] = []
             for workbook in workbooks:
                 subject_id = workbook.participant_id
                 if _subject_in_ids(subject_id, excluded_lookup):
+                    continue
+                recording_id = str(workbook.recording_id or "")
+                recording_key = recording_id.strip().casefold()
+                participant_key = str(subject_id).strip().casefold()
+                omission_scope = ""
+                if recording_key and recording_key in excluded_recordings:
+                    omission_scope = "recording"
+                elif (participant_key, workbook.condition) in excluded_participant_conditions:
+                    omission_scope = "participant-condition"
+                elif recording_key and (recording_key, workbook.condition) in excluded_recording_conditions:
+                    omission_scope = "recording-condition"
+                if omission_scope:
+                    qc_omissions.append({
+                        "participant_id": subject_id,
+                        "recording_id": recording_id,
+                        "condition": workbook.condition,
+                        "scope": omission_scope,
+                    })
+                    diagnostics.append(
+                        f"Frequency-domain QC {omission_scope} exclusion omitted "
+                        f"participant {subject_id}, recording {recording_id or '(none)'}, "
+                        f"condition {workbook.condition}."
+                    )
                     continue
                 sheet_values = _read_metric_sheet(
                     workbook.path,
@@ -237,6 +309,8 @@ def build_l2_mne_conditions_from_project(
                         "group_id": None if group is None else group.group_id,
                         "group_label": None if group is None else group.label,
                         "group_split_applied": dataset_index.is_multi_group,
+                        "frequency_domain_qc_omitted_workbook_count": len(qc_omissions),
+                        "frequency_domain_qc_omissions": qc_omissions,
                     },
                 )
             )

@@ -45,9 +45,14 @@ Rules:
   exclusions before aggregation. Preserve dataset-index duplicate preference
   and diagnostics, and reject empty, unassigned, or ambiguous requested
   cohorts.
+- Managed inputs must omit exact workbook paths explicitly marked excluded
+  in the current final QC coverage before source validation or reading. A
+  retained source-evidence record does not override that exclusion. Preserve
+  the participant's other released visits and conditions, audit omitted
+  workbook identities, and still reject any other unreleased input.
 - Repeated-session grid validation must apply request participant exclusions
-  and the completed results' matching frozen QC participant exclusions to its
-  canonical workbook records before checking coverage. Do not reintroduce
+  and the completed results' matching frozen QC participant and workbook
+  exclusions to its canonical workbook records before checking coverage. Do not reintroduce
   excluded recordings when joining panel values, infer exclusions from absent
   value rows, or reload live QC during panel assembly. An empty requested
   condition × group × session cell or missing values for a non-excluded
@@ -182,3 +187,8 @@ python .agents/scripts/verify.py --scope publication-maps --tier focused
 
 Add the `stats` scope only when a change touches the shared processing-time
 harmonic or numerical contract. Qt execution remains CI-only by default.
+
+Visible exclusion smoke: generate ordinary and repeated-session maps after
+accepted participant, recording, and condition exclusions. Check the generation
+log lists omitted workbooks, other valid visits and conditions still contribute,
+and a wholly empty requested group/session/condition produces a clear error.

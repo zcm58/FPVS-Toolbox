@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 from Tools.Individual_Detectability.core import (
     ConditionInfo,
@@ -232,7 +233,28 @@ def test_worker_loads_processing_harmonics_before_generating_figures(
 
     seen_settings: dict[str, object] = {}
     prevalidation_calls: list[tuple[object, object, object]] = []
-    dataset_index = object()
+    from Tools.Individual_Detectability.project_coverage import (
+        ManagedProjectCoverage,
+        ManagedWorkbookCoverage,
+    )
+
+    dataset_index = SimpleNamespace(
+        manifest={},
+        workbooks=tuple(
+            SimpleNamespace(path=path, participant_id=participant_id)
+            for path, participant_id in ((file_p1, "P1"), (file_p2, "P2"))
+        ),
+        excluded_workbooks=(),
+    )
+    coverage = ManagedWorkbookCoverage(
+        workbook_path=file_p1,
+        retained_scalp_channels=("O1",),
+        allowed_auxiliary_rows=(),
+        source_evidence_fingerprint="source",
+        final_release_receipt_fingerprint="release",
+        participant_id="P1",
+    )
+    coverage_by_workbook = {file_p1: coverage}
     provenance_calls: list[tuple[Path, object]] = []
     monkeypatch.setattr(
         "Main_App.projects.load_project_dataset_index",
@@ -240,19 +262,15 @@ def test_worker_loads_processing_harmonics_before_generating_figures(
     )
     monkeypatch.setattr(
         "Main_App.processing.full_fft_provenance.require_current_project_full_fft_provenance",
-        lambda root, *, dataset_index: provenance_calls.append(
-            (Path(root), dataset_index)
-        ),
+        lambda root, *, dataset_index: (
+            provenance_calls.append((Path(root), dataset_index)),
+            SimpleNamespace(project_root=tmp_path, source_paths=(str(file_p1),)),
+        )[1],
     )
     monkeypatch.setattr(
         worker_mod,
-        "load_managed_workbook_coverage",
-        lambda root: {} if Path(root) == tmp_path else None,
-    )
-    monkeypatch.setattr(
-        worker_mod,
-        "require_selected_workbooks_released",
-        lambda paths, coverage: None,
+        "load_managed_project_coverage",
+        lambda root: ManagedProjectCoverage(coverage_by_workbook, frozenset()),
     )
     monkeypatch.setattr(
         worker_mod,
@@ -278,11 +296,13 @@ def test_worker_loads_processing_harmonics_before_generating_figures(
     assert provenance_calls == [(tmp_path, dataset_index)]
     assert seen_settings["source"] == CANONICAL_HARMONIC_SOURCE
     assert seen_settings["harmonics"] == [1.2, 2.4]
-    assert seen_settings["managed_coverage"] == {}
+    assert seen_settings["managed_coverage"] == coverage_by_workbook
     assert len(prevalidation_calls) == 1
-    assert prevalidation_calls[0][0] == request.conditions
+    assert prevalidation_calls[0][0] == [
+        ConditionInfo(name="CondA", path=cond_dir, files=[file_p1])
+    ]
     assert prevalidation_calls[0][1].oddball_harmonics_hz == [1.2, 2.4]
-    assert prevalidation_calls[0][2] == {}
+    assert prevalidation_calls[0][2] == coverage_by_workbook
     metadata = tmp_path / "out" / "individual_detectability_metadata.json"
     assert metadata.exists()
     assert "FPVS Toolbox significant harmonics" in metadata.read_text(encoding="utf-8")

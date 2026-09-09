@@ -138,6 +138,8 @@ tests = [
   "tests/processing/test_analysis_ready_workbook.py",
   "tests/processing/test_recording_condition_outcomes.py",
   "tests/processing/test_individual_detectability_project_coverage.py",
+  "tests/processing/test_individual_detectability_core.py",
+  "tests/processing/test_individual_detectability_managed_inputs.py",
   "tests/processing/test_project_processing_cache.py",
   "tests/processing/test_preflight_qc.py",
   "tests/processing/test_preflight_qc_cache.py",
@@ -175,6 +177,7 @@ include = [
   "src/Main_App/gui/style_tokens.py",
   "tests/gui/test_processing_post_status_text.py",
   "tests/processing/**",
+  "src/Tools/Individual_Detectability/**",
   "tests/workers/test_post_processing_pipeline_worker.py",
 ]
 manual_smoke = ["Start preprocessing at 1280x900. Leave step 2 open and confirm logs show background source preloads while Continue remains responsive. Continue through no-action marker/condition/exclusion summaries and the editable electrode review, then verify step 6 reports use of preloaded recordings and completes current decisions. Repeat by advancing immediately, changing review choices, and cancelling step 6. Verify temporary qc-source-* directories disappear when QC exits, and window Close is blocked while the prefetch bridge is active. Qt lifecycle tests are CI-only locally."]
@@ -285,6 +288,7 @@ tests = [
   "tests/stats/controller/test_native_pipeline_controller.py",
   "tests/stats/data/test_stats_project_context.py",
   "tests/stats/io/test_stats_ready_export.py",
+  "tests/stats/io/test_repeated_session_export.py",
   "tests/stats/io/test_xlsx_selected_reader.py",
   "tests/stats/pipeline/test_stats_file_scanner.py",
   "tests/stats/pipeline/test_stats_native_view_state.py",

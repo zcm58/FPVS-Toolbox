@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, replace
 from functools import partial
 import hashlib
@@ -112,6 +112,7 @@ class _ManagedPublicationRelease:
     sources_by_workbook: Mapping[Path, _ReleasedPublicationSource]
     final_coverage_fingerprint: str
     final_release_receipt_fingerprint: str
+    excluded_workbook_paths: frozenset[Path] = frozenset()
 
 
 def build_publication_map_result(
@@ -126,7 +127,12 @@ def build_publication_map_result(
     diagnostics: list[Diagnostic] = []
     requested_metrics = _request_metrics(request)
     frequency_exclusions = active_frequency_domain_exclusions(request.project_root)
-    qc_provenance = _applied_frequency_exclusion_provenance(frequency_exclusions)
+    qc_provenance = _applied_frequency_exclusion_provenance(
+        frequency_exclusions,
+        excluded_workbook_paths=(
+            managed_release.excluded_workbook_paths if managed_release is not None else ()
+        ),
+    )
     _cancellation_checkpoint(cancel_check)
     request_subject_exclusions = {
         str(subject).strip().upper() for subject in request.subject_exclusions if str(subject).strip()
@@ -168,6 +174,9 @@ def build_publication_map_result(
         )
     except DatasetIndexError as exc:
         raise PublicationMapCohortError(str(exc)) from exc
+    workbooks, released_exclusions = _apply_managed_publication_exclusions(
+        workbooks, managed_release, conditions=request.conditions,
+    )
     released_sources = _require_released_publication_workbooks(
         workbooks,
         managed_release,
@@ -182,7 +191,7 @@ def build_publication_map_result(
         group_folder=group_folder,
         request_subject_exclusions=request_subject_exclusions,
         frequency_subject_exclusions=frequency_subject_exclusions,
-    )
+    ) + released_exclusions
     diagnostics.extend(_excluded_cohort_diagnostics(excluded_cohort))
 
     _cancellation_checkpoint(cancel_check)
@@ -250,7 +259,11 @@ def _cancellation_checkpoint(cancel_check: Callable[[], None] | None) -> None:
         cancel_check()
 
 
-def _applied_frequency_exclusion_provenance(exclusions: object) -> dict[str, object]:
+def _applied_frequency_exclusion_provenance(
+    exclusions: object,
+    *,
+    excluded_workbook_paths: Iterable[Path] = (),
+) -> dict[str, object]:
     """Freeze the exact QC exclusions applied to this numerical result."""
 
     applied: dict[str, object] = {
@@ -258,6 +271,7 @@ def _applied_frequency_exclusion_provenance(exclusions: object) -> dict[str, obj
         "excluded_participants": sorted(str(value) for value in exclusions.excluded_participants),
         "auto_excluded_participants": sorted(str(value) for value in exclusions.auto_excluded_participants),
         "manual_excluded_participants": sorted(str(value) for value in exclusions.manual_excluded_participants),
+        "excluded_workbook_paths": sorted(str(path) for path in excluded_workbook_paths),
         "auto_excluded_electrodes_by_participant": {
             str(participant_id): sorted(str(value) for value in electrodes)
             for participant_id, electrodes in sorted(
@@ -607,22 +621,26 @@ def _require_managed_publication_release(
             project_root
         )
         sources: dict[Path, _ReleasedPublicationSource] = {}
+        excluded_paths: set[Path] = set()
+        seen_paths: set[Path] = set()
         for cell in final_coverage.cells:
             source = cell.source_evidence
-            if (
-                source is None
-                or not cell.workbook_path
-                or bool(getattr(cell, "downstream_cell_excluded", False))
-            ):
+            if not cell.workbook_path:
                 continue
             workbook_path = (
                 Path(cell.workbook_path).expanduser().resolve(strict=False)
             )
-            if workbook_path in sources:
+            if workbook_path in seen_paths:
                 raise RoiCoverageGateError(
                     "Scalp Maps found duplicate final QC-21 coverage for "
                     f"workbook {workbook_path}."
                 )
+            seen_paths.add(workbook_path)
+            if bool(getattr(cell, "downstream_cell_excluded", False)):
+                excluded_paths.add(workbook_path)
+                continue
+            if source is None:
+                continue
             sources[workbook_path] = _ReleasedPublicationSource(
                 workbook_path=workbook_path,
                 retained_scalp_channels=tuple(
@@ -636,12 +654,49 @@ def _require_managed_publication_release(
             sources_by_workbook=sources,
             final_coverage_fingerprint=str(final_coverage.fingerprint),
             final_release_receipt_fingerprint=str(receipt.fingerprint),
+            excluded_workbook_paths=frozenset(excluded_paths),
         )
     except RoiCoverageGateError as exc:
         raise CanonicalHarmonicSelectionError(
             str(exc),
             reason="stale_final_release",
         ) from exc
+
+
+def _apply_managed_publication_exclusions(
+    workbooks: tuple[WorkbookEntry, ...],
+    managed_release: _ManagedPublicationRelease | None,
+    *,
+    conditions: tuple[str, ...],
+) -> tuple[tuple[WorkbookEntry, ...], tuple[ExcludedCohortEntry, ...]]:
+    """Omit explicitly excluded final-coverage cells before any source reads."""
+
+    if managed_release is None:
+        return workbooks, ()
+    retained: list[WorkbookEntry] = []
+    excluded: list[ExcludedCohortEntry] = []
+    for workbook in workbooks:
+        path = workbook.path.expanduser().resolve(strict=False)
+        if path not in managed_release.excluded_workbook_paths:
+            retained.append(workbook)
+            continue
+        excluded.append(ExcludedCohortEntry(
+            participant_id=workbook.participant_id,
+            condition=workbook.condition,
+            reason="reviewed QC exclusion for this recording and condition",
+            path=workbook.path,
+            group_id=workbook.group_id,
+            group_label=workbook.group_label,
+            group_folder=workbook.group_folder,
+        ))
+    present = {workbook.condition.casefold() for workbook in retained}
+    missing = [condition for condition in conditions if condition.casefold() not in present]
+    if missing:
+        raise PublicationMapCohortError(
+            "No active canonical workbooks remain in the selected cohort after QC "
+            f"exclusions for condition(s): {', '.join(missing)}."
+        )
+    return tuple(retained), tuple(excluded)
 
 
 def _require_released_publication_workbooks(

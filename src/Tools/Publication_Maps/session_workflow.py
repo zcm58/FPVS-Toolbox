@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import replace
+from pathlib import Path
 
 import pandas as pd
 
@@ -112,6 +113,7 @@ def validate_session_grid_project(
     requests: Sequence[PublicationMapRequest],
     *,
     excluded_participants: Iterable[str] = (),
+    excluded_workbook_paths: Iterable[str | Path] = (),
 ):
     """Validate the canonical 2×2 cohort after request and supplied QC exclusions.
 
@@ -166,9 +168,14 @@ def validate_session_grid_project(
         for value in (*normalized[0].subject_exclusions, *excluded_participants)
         if str(value).strip()
     }
+    excluded_paths = {
+        Path(value).expanduser().resolve(strict=False)
+        for value in excluded_workbook_paths
+    }
     records = tuple(
         record for record in records
         if record.participant_id.casefold() not in excluded
+        and record.path.expanduser().resolve(strict=False) not in excluded_paths
     )
     cells = {
         (
@@ -239,6 +246,11 @@ def build_session_panel_sets(
         raise PublicationMapInputError(
             "Session-grid groups used different QC exclusion snapshots."
         )
+    for key in ("final_roi_coverage_fingerprint", "final_release_receipt_fingerprint"):
+        if len({str(result.qc_provenance.get(key, "")) for result in normalized_results}) != 1:
+            raise PublicationMapInputError(
+                "Session-grid groups used different final QC releases."
+            )
     for result, request in zip(
         normalized_results, normalized_requests, strict=True
     ):
@@ -252,6 +264,9 @@ def build_session_panel_sets(
         normalized_requests,
         excluded_participants=normalized_results[0].qc_provenance.get(
             "excluded_participants", ()
+        ),
+        excluded_workbook_paths=normalized_results[0].qc_provenance.get(
+            "excluded_workbook_paths", ()
         ),
     )
     if cancel_check is not None:

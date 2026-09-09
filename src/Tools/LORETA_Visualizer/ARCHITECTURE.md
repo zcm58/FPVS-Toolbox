@@ -83,6 +83,11 @@ successful, non-applicable skips. It must not invoke those consumers, delete a
 preceding source artifact, or mark a nonexistent replacement current. The
 recording-aware source-ready derivatives remain durable inputs for a future
 recording-aware producer. Single-session orchestration remains unchanged.
+The direct compact-workbook adapter enforces this same boundary before reading
+Stats-ready or metric workbooks. It checks the canonical dataset-index recording
+mode and distinct recording IDs per participant before exclusions can hide
+extra visits; a direct caller cannot enable repeated-source aggregation by
+excluding one visit.
 
 The default L2 method, `l2_mne_hauk_source_psd_cortical_normal_v1`, selects the
 cortical surface-normal component with MNE source PSD `pick_ori="normal"`. The
@@ -572,6 +577,19 @@ electrode-level sheets (`BCA (uV)` or `FFT Amplitude (uV)`), applies existing
 exclusion files, records flagged participant status, partitions true
 multi-group projects before aggregation, and returns `L2MNEFPVSCondition`
 objects for calculation producers.
+
+Compact-workbook assembly freezes one accepted frequency-domain QC snapshot
+for its participant and workbook selection. In addition to existing whole-
+participant exclusions, it omits accepted participant-condition, recording,
+and recording-condition exclusions before sheet I/O. Canonical participant and
+recording IDs match case-insensitively with surrounding whitespace removed;
+condition names retain their exact canonical identity. Within supported
+single-recording cohorts, recording exclusions match only the canonical
+recording, and condition exclusions do not remove other conditions.
+Diagnostics identify each scoped omission, while retained map
+metadata records its omitted-workbook count and identities. A group-condition
+cell with no retained inputs remains omitted with diagnostics. This changes
+neither the selected harmonic list nor the legacy topography averaging method.
 
 The project L2-MNE exporter writes generated files under
 `6 - Source Localization/L2-MNE Cortical Surface Beta/` by default. The manifest

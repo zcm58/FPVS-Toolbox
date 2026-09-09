@@ -272,6 +272,17 @@ preprocessing, project I/O, diagnostics, or unrelated tool packages.
   use local real-project paths in tests. Workbook, participant, condition, and
   canonical group discovery must come from `Main_App.projects.dataset_index`;
   tool-local adapters retain only sheet reading and numerical assembly.
+  The legacy compact-workbook adapter must apply accepted frequency-domain
+  participant, participant-condition, recording, and recording-condition
+  exclusions before reading any omitted workbook. Preserve each exclusion's
+  scope, use one QC snapshot per assembly, and retain individual omission
+  diagnostics and per-map omission counts. Empty retained group-condition
+  cohorts are omitted with diagnostics; do not restore excluded inputs to
+  make them nonempty or promote a scoped omission to the whole participant.
+  Direct calls must reject canonical repeated-session projects or multiple
+  recording IDs per participant before workbook reads, even when exclusions
+  would remove extra visits. These participant-keyed inputs require a future
+  recording-aware producer; do not pool visits or count them as participants.
 
 ## Cache And Project I/O
 
