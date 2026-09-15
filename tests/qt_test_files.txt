@@ -28,6 +28,7 @@ tests/gui/test_sidebar_vector_icons.py
 tests/gui/test_signal_review_panel_qt.py
 tests/gui/test_toolbox_cache_dialog_qt.py
 tests/gui/test_ui_components_smoke.py
+tests/gui/test_update_dialog.py
 tests/gui/test_update_manager_manual_force.py
 tests/plot_generator/test_plot_generator_cancellation_qt.py
 tests/plot_generator/test_plot_generator_condition_title_all.py

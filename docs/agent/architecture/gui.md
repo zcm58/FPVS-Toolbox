@@ -609,10 +609,17 @@ Updater boundary:
 
 - `Main_App.gui.update_manager` schedules startup checks and opens the update
   dialog for manual checks or installable startup updates.
-- `Main_App.gui.update_dialog` owns the visible dialog, progress bar, final
-  confirmation, and busy-processing install guard.
-- `Main_App.updates.github_releases`, `downloader`, and `installer` own
-  network metadata, installer cache writes, and subprocess installer launch.
+- `Main_App.gui.update_dialog` presents discovery, download progress, and
+  explicit install confirmation. `update_lifecycle` keeps workers alive until
+  completion or cancellation; `update_install_guard` blocks handoff during
+  processing, export, and QC work. The existing main-window close path is
+  preserved, and no update functions are added to `main_window.py`.
+- `Main_App.updates.helper_client` calls the separately packaged updater over
+  a private versioned protocol. Its backend owns network metadata, cache,
+  verification, installation, and restart. `updater_window` is its independent
+  Update & Repair surface and uses the Toolbox theme/component adapters.
+- See [updater.md](updater.md) for the shared Studio contracts, Toolbox
+  adapters, install scopes, packaging, migration, and verification requirements.
 - A failed check, missing asset, ambiguous asset, download failure, or launch
   failure must surface as an error/no-install state. Do not silently open the
   GitHub release page as a fallback update path.

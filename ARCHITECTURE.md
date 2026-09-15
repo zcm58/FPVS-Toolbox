@@ -30,6 +30,12 @@ release platform; source development and execution may also occur on CachyOS
 
 Primary areas:
 
+- `src/Main_App/updates/`: GUI-neutral updater protocol, release metadata,
+  verified downloads, cache, and independent installer handoff. The separately
+  packaged `src/updater.py` entry point provides Update & Repair without the
+  main application or scientific runtime. Keep its contracts aligned with
+  FPVS Studio; Toolbox adapters and packaging are documented in
+  [docs/agent/architecture/updater.md](docs/agent/architecture/updater.md).
 - `src/Main_App/gui/`: canonical Main App GUI package. It owns the main-window shell/coordinator, focused GUI workflow helpers, reusable widgets, theme helpers, menu/sidebar/header helpers, icon/style-token/update-manager helpers, and GUI operation guards. `main_window.py` has been appropriately downsized; do not target it for further refactor unless the user explicitly scopes that work.
 - `src/Main_App/gui/components/`: canonical shared component layer for new and migrated GUI surfaces. Prefer this import surface for shared cards, buttons, forms, status banners, window/dialog shells, action rows, and message helpers.
 - `src/Main_App/exports/`: canonical Main App export adapter import surface. It owns post-export adapter behavior used by workers and the process runner while shared post-processing/workbook generation remains behavior-preserving. It also owns GUI-neutral publication figure and publication-table style contracts used by export tooling. The lightweight style surface must not eagerly import Stats-owned workbook builders; heavy processing exports remain lazy compatibility attributes.

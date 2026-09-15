@@ -45,9 +45,9 @@ manual_smoke = ["Launch the Main App at 1280x900 and verify the home Conditions 
 
 [scopes.updates]
 audits = ["gui", "paths"]
-tests = ["tests/updates/test_update_check.py", "tests/updates/test_update_download.py"]
-include = ["src/Main_App/updates/**", "src/Main_App/gui/update_*.py", "tests/updates/**", "scripts/packaging/**"]
-manual_smoke = ["Use File > Check for Updates in a visible Main App window when GUI or installer handoff behavior changed."]
+tests = ["tests/updates"]
+include = ["src/Main_App/updates/**", "src/Main_App/gui/update*.py", "src/Main_App/updater_main.py", "src/updater.py", "tests/updates/**", "scripts/packaging/**"]
+manual_smoke = ["Use File > Check for Updates in a visible Main App window: cancel a download, retry, and confirm progress remains responsive. Verify active processing/export/QC blocks installation and normal close guards still apply. On a disposable Windows installation, exercise patch download/install/restart and standalone Update & Repair; preserve project/settings sentinels. Follow docs/agent/architecture/updater.md for legacy/full-repair, per-user, and all-users checks; never test by replacing the user's production installation."]
 
 [scopes.project-io]
 audits = ["paths"]

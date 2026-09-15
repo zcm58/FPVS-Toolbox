@@ -45,8 +45,13 @@ def install_messagebox_logger(debug: bool) -> None:
     # If you want QMessageBox on errors, wire it inside the PySide6 StatusBar or main window.
 
 
-# Re-export Project API from the canonical project import surface.
-from .projects import Project  # noqa: E402  (safe, no Legacy)
+# Resolve the public Project API only when used; updater workers need no project
+# or scientific dependencies merely to import Main_App.updates.
+def __getattr__(name: str) -> Any:
+    if name == "Project":
+        from .projects import Project
+        return Project
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 __all__ = [
     # PySide6-first exports
