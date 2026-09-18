@@ -113,10 +113,17 @@ def _run_recording(root, snapshot, record, requests, *, log_func):
             settings.setdefault(f"_fpvs_{key}_by_file", {})[source] = info[field]
     settings.setdefault("_fpvs_output_stem_by_file", {})[source] = info.get("recording_id") or info["subject_id"]
     queue = SimpleQueue()
-    run_project_parallel(RunParams(
+    summary = run_project_parallel(RunParams(
         project_root=root, data_files=[Path(source)], settings=settings,
         event_map=snapshot["event_map"], save_folder=Path(snapshot["save_folder"]), max_workers=1,
     ), progress_queue=queue)
+    controller_error = str(summary.get("controller_error") or "")
+    if controller_error or summary["status"] != "success":
+        detail = controller_error or next(
+            (str(error["error"]) for error in summary.get("errors", []) if error.get("error")),
+            f"processing ended with status {summary['status']}",
+        )
+        raise ConditionInterpolationPendingError(f"Condition repair failed for {identity}: {detail}")
     results = []
     while not queue.empty():
         message = queue.get()
@@ -143,6 +150,8 @@ def execute_pending_condition_interpolations(project_root, *, log_func=None) -> 
         raise ConditionInterpolationProcessingRequired(
             "A source recording changed; its previous condition repairs were retired. Run Processing again."
         )
+    state = load_condition_interpolation_state(root)
+    baseline = deepcopy(state)
     from Main_App.io.result_manifest import result_manifest_path
     from Main_App.processing.processing_ledger import load_ledger, save_ledger
     from Main_App.processing.expected_processing_ledger import (
@@ -192,7 +201,8 @@ def execute_pending_condition_interpolations(project_root, *, log_func=None) -> 
                                              if key.casefold() == identity.casefold()), {}))
                 except (KeyError, OSError, TypeError, ValueError):
                     continue
-                save_condition_interpolation_state(root, state)
+                save_condition_interpolation_state(root, state, expected_state=baseline)
+                baseline = deepcopy(state)
                 needed.remove(identity)
                 adopted = True
     if not needed:
@@ -215,7 +225,8 @@ def execute_pending_condition_interpolations(project_root, *, log_func=None) -> 
     # Persist intent before any output changes. Errors/cancellation leave it pending.
     for identity in needed:
         state["pending"].setdefault(identity, {"request_fingerprint": request_fingerprint(state["requests"][identity])})
-    save_condition_interpolation_state(root, state)
+    save_condition_interpolation_state(root, state, expected_state=baseline)
+    baseline = deepcopy(state)
     for identity in needed:
         active = active_condition_requests(expected, identity, state["requests"][identity])
         conditions = set(active)
@@ -260,10 +271,10 @@ def execute_pending_condition_interpolations(project_root, *, log_func=None) -> 
                 entry[key] = result[key]
         ledger[RECORDING_CONDITION_OUTCOME_LEDGER_KEY] = {**outcomes.to_payload(), "reconciliation_status": "complete"}
         save_ledger(root, ledger)
-        state = load_condition_interpolation_state(root)
         _complete_receipts(root, identity, state, expected, receipts,
                            records[identity.casefold()]["raw_file_identity"])
-        save_condition_interpolation_state(root, state)
+        save_condition_interpolation_state(root, state, expected_state=baseline)
+        baseline = deepcopy(state)
     return True
 
 

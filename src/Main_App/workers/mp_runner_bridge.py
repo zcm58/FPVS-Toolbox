@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import logging
-from multiprocessing import Event, Queue, get_context
+from multiprocessing import Event
 from pathlib import Path
 from threading import Thread
 from typing import Dict, List, Optional
-from queue import Empty  # <-- important: handle queue.Empty separately
+from queue import Empty, Queue
 
 from PySide6.QtCore import QObject, QTimer, Signal, Slot
 
@@ -62,6 +62,8 @@ class MpRunnerBridge(QObject):
         self._excluded_results: List[Dict[str, object]] = []
         self._cancel_event: Optional[Event] = None
         self._worker_thread: Optional[Thread] = None
+        self._data_files: List[Path] = []
+        self._poll_error: str = ""
         self.validated_fingerprint: Optional[str] = None
 
     def start(
@@ -101,62 +103,72 @@ class MpRunnerBridge(QObject):
             return
 
         self._running = True
-        self._cancel_event = Event()
-        self._q = get_context("spawn").Queue()
+        # Only the controller thread produces these messages; child results
+        # arrive through Futures. Avoid a multiprocessing feeder whose buffered
+        # messages can appear after the controller has already exited.
+        self._q = Queue()
+        self._data_files = list(data_files)
+        self._poll_error = ""
         self._total = len(data_files)
         self._results = []
         self._error_results = []
         self._excluded_results = []
 
-        bridge_fingerprint = _build_preproc_fingerprint(settings)
-        logger.debug("PREPROC_FINGERPRINT_BRIDGE %s", bridge_fingerprint)
-        if self.validated_fingerprint and self.validated_fingerprint != bridge_fingerprint:
-            logger.warning(
-                "PREPROC_FINGERPRINT_MISMATCH validated=%s bridge=%s",
-                self.validated_fingerprint,
-                bridge_fingerprint,
+        try:
+            self._cancel_event = Event()
+            bridge_fingerprint = _build_preproc_fingerprint(settings)
+            logger.debug("PREPROC_FINGERPRINT_BRIDGE %s", bridge_fingerprint)
+            if self.validated_fingerprint and self.validated_fingerprint != bridge_fingerprint:
+                logger.warning(
+                    "PREPROC_FINGERPRINT_MISMATCH validated=%s bridge=%s",
+                    self.validated_fingerprint,
+                    bridge_fingerprint,
+                )
+
+            params = RunParams(
+                project_root=project_root,
+                data_files=data_files,
+                settings=settings,
+                event_map=event_map,
+                save_folder=save_folder,
+                max_workers=max_workers,
             )
 
-        params = RunParams(
-            project_root=project_root,
-            data_files=data_files,
-            settings=settings,
-            event_map=event_map,
-            save_folder=save_folder,
-            max_workers=max_workers,
-        )
+            logger.debug(
+                "BRIDGE_SETTINGS_SNAPSHOT n_files=%d high_pass=%r low_pass=%r "
+                "downsample_rate=%r reject_thresh=%r ref=(%r,%r) stim=%r files=%s",
+                len(data_files),
+                settings.get("high_pass"),
+                settings.get("low_pass"),
+                settings.get("downsample_rate", settings.get("downsample")),
+                settings.get("reject_thresh"),
+                settings.get("ref_channel1"),
+                settings.get("ref_channel2"),
+                settings.get("stim_channel"),
+                [file_path.name for file_path in data_files],
+            )
 
-        logger.debug(
-            "BRIDGE_SETTINGS_SNAPSHOT n_files=%d high_pass=%r low_pass=%r "
-            "downsample_rate=%r reject_thresh=%r ref=(%r,%r) stim=%r files=%s",
-            len(data_files),
-            settings.get("high_pass"),
-            settings.get("low_pass"),
-            settings.get("downsample_rate", settings.get("downsample")),
-            settings.get("reject_thresh"),
-            settings.get("ref_channel1"),
-            settings.get("ref_channel2"),
-            settings.get("stim_channel"),
-            [file_path.name for file_path in data_files],
-        )
+            logger.debug(
+                "MpRunnerBridge starting run_project_parallel: project_root=%s "
+                "save_folder=%s n_files=%d max_workers=%s",
+                project_root,
+                save_folder,
+                self._total,
+                max_workers,
+            )
 
-        logger.debug(
-            "MpRunnerBridge starting run_project_parallel: project_root=%s "
-            "save_folder=%s n_files=%d max_workers=%s",
-            project_root,
-            save_folder,
-            self._total,
-            max_workers,
-        )
+            set_blas_threads_single_process()
 
-        set_blas_threads_single_process()
+            self._worker_thread = Thread(
+                target=run_project_parallel,
+                args=(params, self._q, self._cancel_event),
+                daemon=True,
+            )
+            self._worker_thread.start()
 
-        self._worker_thread = Thread(
-            target=run_project_parallel,
-            args=(params, self._q, self._cancel_event),
-            daemon=True,
-        )
-        self._worker_thread.start()
+        except Exception as exc:
+            logger.exception("mp_bridge_start_failed")
+            self._q.put({"type": "done", "controller_error": f"Could not start processing: {exc}"})
 
         self._timer.start()
 
@@ -193,12 +205,18 @@ class MpRunnerBridge(QObject):
             self._timer.stop()
             return
 
+        controller_stopped = (
+            self._worker_thread is not None and not self._worker_thread.is_alive()
+        )
         try:
             while True:
                 try:
                     msg = self._q.get_nowait()
                 except Empty:
-                    # No more messages available on this tick; let QTimer call us again later.
+                    if controller_stopped:
+                        self._finish({
+                            "controller_error": "Processing controller exited without a terminal outcome.",
+                        })
                     break
 
                 if not isinstance(msg, dict):
@@ -270,29 +288,7 @@ class MpRunnerBridge(QObject):
                     self.progress.emit(pct)
 
                 elif mtype == "done":
-                    cancelled = bool(msg.get("cancelled", False))
-                    logger.debug(
-                        "MpRunnerBridge run complete: files=%d successful=%d cancelled=%s",
-                        self._total,
-                        len(self._results),
-                        cancelled,
-                    )
-
-                    payload: Dict[str, object] = {
-                        "files": self._total,
-                        "results": list(self._results),
-                        "errors": list(self._error_results),
-                        "excluded": list(self._excluded_results),
-                        "cancelled": cancelled,
-                    }
-
-                    self._timer.stop()
-                    self._running = False
-                    self._cancel_event = None
-                    self._worker_thread = None
-                    self._q = None
-
-                    self.finished.emit(payload)
+                    self._finish(msg)
                     break
 
                 else:
@@ -308,4 +304,48 @@ class MpRunnerBridge(QObject):
                 "MpRunnerBridge._poll encountered an unexpected error while reading "
                 "from the worker queue."
             )
-            self.error.emit(f"Internal error while polling worker queue: {exc!r}")
+            # Keep controls locked until the controller has stopped, so restart
+            # cannot overlap active workers after a transport/decoding fault.
+            self._poll_error = f"Internal error while polling worker queue: {exc!r}"
+            if self._cancel_event is not None:
+                self._cancel_event.set()
+            if controller_stopped:
+                self._finish({"controller_error": self._poll_error})
+
+
+    def _finish(self, message: Dict[str, object]) -> None:
+        """Deliver the authoritative snapshot once, after releasing bridge state."""
+        if self._q is None:
+            return
+        results = list(message.get("results", self._results))
+        errors = list(message.get("errors", self._error_results))
+        excluded = list(message.get("excluded", self._excluded_results))
+        controller_error = str(message.get("controller_error") or self._poll_error)
+        completed = {str(result.get("file")) for result in [*results, *errors, *excluded]}
+        interrupted = list(message.get("interrupted_files", [
+            str(path) for path in self._data_files if str(path) not in completed
+        ]))
+        if controller_error and "errors" not in message:
+            errors.extend(
+                {"status": "error", "file": path, "stage": "controller", "error": controller_error}
+                for path in interrupted
+            )
+        cancelled = bool(message.get("cancelled", False)) and not controller_error
+        payload: Dict[str, object] = {
+            "files": self._total,
+            "results": results,
+            "errors": errors,
+            "excluded": excluded,
+            "cancelled": cancelled,
+            "status": "error" if controller_error else message.get(
+                "status", "cancelled" if cancelled else ("error" if errors else "success")
+            ),
+            "controller_error": controller_error,
+            "interrupted_files": interrupted,
+        }
+        self._timer.stop()
+        self._running = False
+        self._cancel_event = None
+        self._worker_thread = None
+        self._q = None
+        self.finished.emit(payload)

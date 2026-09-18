@@ -22,9 +22,11 @@ class _FakeInfo:
         self._sfreq = float(sfreq)
 
     def __getitem__(self, key: str) -> float:
-        if key != "sfreq":
-            raise KeyError(key)
-        return self._sfreq
+        return {
+            "sfreq": self._sfreq, "ch_names": self.ch_names,
+            "chs": [], "dig": [], "bads": [], "projs": [],
+            "custom_ref_applied": 0,
+        }[key]
 
     def copy(self) -> _FakeInfo:
         return _FakeInfo(tuple(self.ch_names), self._sfreq)
@@ -141,6 +143,12 @@ def test_legacy_forward_builder_delegates_without_preparing_inverse(monkeypatch)
 
 
 def _install_fake_mne(tmp_path, monkeypatch) -> dict[str, object]:
+    for relative in (
+        "bem/fsaverage-5120-5120-5120-bem-sol.fif", "bem/fsaverage-trans.fif", "mri/T1.mgz",
+    ):
+        path = tmp_path / "fsaverage" / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"synthetic-template")
     channels = tuple(DEFAULT_ELECTRODE_NAMES_64)
     raw_inverse = object()
     prepared_inverse = object()

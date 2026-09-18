@@ -27,7 +27,7 @@ from dataclasses import dataclass, replace
 from multiprocessing import Queue, get_context, Event
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Dict, List, Mapping, Optional, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
 import Main_App.processing.preprocess as backend_preprocess
 from Main_App.diagnostics import log_router
@@ -108,7 +108,7 @@ from Main_App.Shared.fft_crop_utils import compute_onbin_step
 
 import numpy as np
 import psutil  # soft memory cap
-from .mp_env import set_blas_threads_multiprocess
+from .mp_env import set_worker_thread_limits
 
 logger = logging.getLogger(__name__)
 PREPROC_CACHE_VERSION = "preprocessed-raw-v13-v3-trigger-alignment"
@@ -648,7 +648,7 @@ class RunParams:
 def _worker_init() -> None:
     """Configure per-process environment."""
     logger.debug("[MP STAGE] worker_init_start pid=%d", os.getpid())
-    set_blas_threads_multiprocess()
+    set_worker_thread_limits()
 
     # --- Memmap cleanup on worker exit ---
     from pathlib import Path as _Path
@@ -2968,19 +2968,68 @@ def run_project_parallel(
     params: RunParams,
     progress_queue: Optional[Queue] = None,
     cancel_event: Optional[Event] = None,
-) -> None:
-    """
-    Submit one process per file and report progress via an optional Queue.
+) -> Dict[str, object]:
+    """Own one terminal outcome across setup, execution, and cleanup.
 
-    Queue messages:
-      - {"type":"progress","completed":int,"total":int,"result":{...}}
-      - {"type":"done","count":int,"cancelled":bool, ...}
+    Per-file progress precedes one ``done`` message containing the complete
+    result snapshot. Synchronous callers without a queue retain exception
+    propagation; queued callers receive the controller error in that snapshot.
     """
+    results: list[Dict[str, object]] = []
+    metadata: Dict[str, object] = {}
+    controller_error = ""
+
+    def report(message: Dict[str, object]) -> None:
+        result = message["result"]
+        results.append(result)
+        if progress_queue is not None:
+            progress_queue.put(message)
+
+    try:
+        metadata = _run_project_parallel(params, report, cancel_event)
+    except BaseException as exc:
+        controller_error = f"{type(exc).__name__}: {exc}"
+        logger.exception("mp_run_controller_failed")
+        if progress_queue is None:
+            raise
+    finally:
+        completed_files = {str(result.get("file")) for result in results}
+        interrupted = [str(path) for path in params.data_files if str(path) not in completed_files]
+        cancelled = bool(metadata.get("cancelled"))
+        errors = [result for result in results if result.get("status") == "error"]
+        if controller_error:
+            errors.extend(
+                {"status": "error", "file": path, "stage": "controller", "error": controller_error}
+                for path in interrupted
+            )
+        excluded = [result for result in results if result.get("status") == "excluded"]
+        terminal = {
+            **metadata,
+            "type": "done",
+            "count": len(results),
+            "status": "error" if controller_error else ("cancelled" if cancelled else ("error" if errors else "success")),
+            "cancelled": cancelled,
+            "controller_error": controller_error,
+            "results": [result for result in results if result.get("status") == "ok"],
+            "errors": errors,
+            "excluded": excluded,
+            "excluded_count": len(excluded),
+            "interrupted_files": interrupted,
+        }
+        if progress_queue is not None:
+            progress_queue.put(terminal)
+    return terminal
+
+
+def _run_project_parallel(
+    params: RunParams,
+    report: Callable[[Dict[str, object]], None],
+    cancel_event: Optional[Event] = None,
+) -> Dict[str, object]:
+    """Schedule files; the public wrapper owns terminal notification."""
     files = list(params.data_files)
     if not files:
-        if progress_queue:
-            progress_queue.put({"type": "done", "count": 0, "cancelled": False})
-        return
+        return {"cancelled": False}
 
     current_sources = _condition_repair_sources_for_files(files, params.settings)
     _requests, retired_repair_warnings = reconcile_condition_interpolation_sources(
@@ -3017,15 +3066,14 @@ def run_project_parallel(
                 "recording_not_started_excluded_pre_submit file=%s",
                 file_path.name,
             )
-            if progress_queue:
-                progress_queue.put(
-                    {
-                        "type": "progress",
-                        "completed": completed,
-                        "total": total,
-                        "result": result,
-                    }
-                )
+            report(
+                {
+                    "type": "progress",
+                    "completed": completed,
+                    "total": total,
+                    "result": result,
+                }
+            )
             continue
 
         manually_excluded, participant_id = _participant_is_manually_excluded(
@@ -3070,28 +3118,17 @@ def run_project_parallel(
             log_identifier,
             participant_id,
         )
-        if progress_queue:
-            progress_queue.put(
-                {
-                    "type": "progress",
-                    "completed": completed,
-                    "total": total,
-                    "result": result,
-                }
-            )
+        report(
+            {
+                "type": "progress",
+                "completed": completed,
+                "total": total,
+                "result": result,
+            }
+        )
 
     if not active_files:
-        if progress_queue:
-            progress_queue.put(
-                {
-                    "type": "done",
-                    "count": completed,
-                    "cancelled": False,
-                    "excluded": list(excluded_results),
-                    "excluded_count": len(excluded_results),
-                }
-            )
-        return
+        return {"cancelled": False}
 
     maxw = params.max_workers or max(1, (os.cpu_count() or 2) - 1)
     ctx = get_context("spawn")
@@ -3129,6 +3166,46 @@ def run_project_parallel(
     )
     logger.debug("[MP STAGE] pool_created max_workers=%d", maxw)
 
+    def _record_future(fut: Any) -> None:
+        nonlocal completed, total_rejected, files_with_audit
+        f = in_flight.pop(fut, None)
+        try:
+            res = fut.result()
+        except Exception as exc:
+            res = {
+                "status": "error",
+                "file": str(f) if f else "unknown",
+                "error": str(exc),
+            }
+
+        completed += 1
+        report(
+            {
+                "type": "progress",
+                "completed": completed,
+                "total": total,
+                "result": res,
+            }
+        )
+
+        # Accumulate per-file rejected-channel counts when available
+        if isinstance(res, dict) and res.get("status") == "ok":
+            _log_export_timing_records(res)
+            audit = res.get("audit") or {}
+            if isinstance(audit, dict):
+                n_rejected = audit.get("n_rejected")
+                if isinstance(n_rejected, (int, float)):
+                    total_rejected += int(n_rejected)
+                    files_with_audit += 1
+        elif isinstance(res, dict) and res.get("status") == "excluded":
+            excluded_results.append(res)
+            logger.debug(
+                "mp_run_file_excluded file=%s reason=%s message=%s",
+                res.get("file"),
+                res.get("reason"),
+                res.get("message"),
+            )
+
     try:
 
         def _cancel_active_pool() -> None:
@@ -3136,6 +3213,9 @@ def run_project_parallel(
             if not _cancelled():
                 return
 
+            for fut in list(in_flight):
+                if fut.done() and not fut.cancelled():
+                    _record_future(fut)
             interrupted = list(in_flight.values()) + list(remaining)
             interrupted_files = [str(file_path) for file_path in interrupted]
             for fut in list(in_flight.keys()):
@@ -3169,7 +3249,7 @@ def run_project_parallel(
             if not mem_ok:
                 return False
 
-            f = remaining.pop(0)
+            f = remaining[0]
             logger.debug(
                 "[MP STAGE] submit_file_start file=%s in_flight=%d remaining=%d",
                 f.name,
@@ -3184,6 +3264,7 @@ def run_project_parallel(
                 params.save_folder,
                 params.project_root,
             )
+            remaining.pop(0)
             in_flight[fut] = f
             logger.debug(
                 "[MP STAGE] submit_file_done file=%s in_flight=%d remaining=%d",
@@ -3231,55 +3312,28 @@ def run_project_parallel(
                 continue
 
             for fut in done:
-                f = in_flight.pop(fut, None)
-                try:
-                    res = fut.result()
-                except Exception as exc:
-                    res = {
-                        "status": "error",
-                        "file": str(f) if f else "unknown",
-                        "error": str(exc),
-                    }
-
-                # Accumulate per-file rejected-channel counts when available
-                if isinstance(res, dict) and res.get("status") == "ok":
-                    _log_export_timing_records(res)
-                    audit = res.get("audit") or {}
-                    if isinstance(audit, dict):
-                        n_rejected = audit.get("n_rejected")
-                        if isinstance(n_rejected, (int, float)):
-                            total_rejected += int(n_rejected)
-                            files_with_audit += 1
-                elif isinstance(res, dict) and res.get("status") == "excluded":
-                    excluded_results.append(res)
-                    logger.debug(
-                        "mp_run_file_excluded file=%s reason=%s message=%s",
-                        res.get("file"),
-                        res.get("reason"),
-                        res.get("message"),
-                    )
-
-                completed += 1
-                if progress_queue:
-                    progress_queue.put(
-                        {
-                            "type": "progress",
-                            "completed": completed,
-                            "total": total,
-                            "result": res,
-                        }
-                    )
+                _record_future(fut)
 
             if _cancelled():
                 _cancel_active_pool()
                 break
 
             _fill_available_slots()
+    except BaseException:
+        shutdown_wait = False
+        try:
+            for fut in list(in_flight):
+                if fut.done() and not fut.cancelled():
+                    _record_future(fut)
+        finally:
+            _terminate_executor_workers(pool)
+        raise
     finally:
         try:
             pool.shutdown(wait=shutdown_wait, cancel_futures=True)
-        except TypeError:
-            pool.shutdown(wait=shutdown_wait)
+        except Exception:  # Cleanup boundary: stop children before propagating any shutdown failure.
+            _terminate_executor_workers(pool)
+            raise
 
     # Final cleanup: remove any stale memmaps in the %TEMP% folder from previous runs
     _scavenge_stale_memmaps()
@@ -3320,27 +3374,26 @@ def run_project_parallel(
             [Path(str(result.get("file", ""))).name for result in excluded_results],
         )
 
-    if progress_queue:
-        done_msg: Dict[str, object] = {
-            "type": "done",
-            "count": completed,
-        }
-        if cancelled:
-            done_msg["cancelled"] = True
-        else:
-            done_msg["cancelled"] = False
+    done_msg: Dict[str, object] = {
+        "type": "done",
+        "count": completed,
+    }
+    if cancelled:
+        done_msg["cancelled"] = True
+    else:
+        done_msg["cancelled"] = False
 
-        if avg_rejected is not None:
-            done_msg.update(
-                {
-                    "avg_rejected": avg_rejected,
-                    "total_rejected": total_rejected,
-                    "files_with_audit": files_with_audit,
-                }
-            )
-        if interrupted_files:
-            done_msg["interrupted_files"] = interrupted_files
-        if excluded_results:
-            done_msg["excluded"] = list(excluded_results)
-            done_msg["excluded_count"] = len(excluded_results)
-        progress_queue.put(done_msg)
+    if avg_rejected is not None:
+        done_msg.update(
+            {
+                "avg_rejected": avg_rejected,
+                "total_rejected": total_rejected,
+                "files_with_audit": files_with_audit,
+            }
+        )
+    if interrupted_files:
+        done_msg["interrupted_files"] = interrupted_files
+    if excluded_results:
+        done_msg["excluded"] = list(excluded_results)
+        done_msg["excluded_count"] = len(excluded_results)
+    return done_msg

@@ -10,6 +10,8 @@ import mne
 import numpy as np
 import pytest
 
+from Tools.LORETA_Visualizer.source_producers import project_time_domain_inputs as time_inputs
+
 from config import DEFAULT_ELECTRODE_NAMES_64
 from Main_App.exports.source_time_domain_export import write_source_ready_time_domain_derivatives
 from Main_App.io.eeg_geometry import biosemi64_geometry_identity
@@ -44,6 +46,7 @@ from Tools.LORETA_Visualizer.source_producers.project_time_domain_inputs import 
     ProjectTimeDomainInputError,
 )
 import Tools.LORETA_Visualizer.source_producers.project_l2_mne_hauk_source_psd_export as export_module
+import Tools.LORETA_Visualizer.source_producers.project_source_psd_inputs as input_module
 
 
 SFREQ = 200.0
@@ -86,7 +89,16 @@ def test_native_leadfield_fingerprint_distinguishes_equal_orientation_norms() ->
 
 def test_project_source_psd_export_streams_inputs_writes_payloads_and_reuses_cache(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    reads = []
+    original_read = time_inputs._read_and_validate_raw
+
+    def track_read(record, *, preload, require_finite):
+        reads.append((preload, require_finite))
+        return original_read(record, preload=preload, require_finite=require_finite)
+
+    monkeypatch.setattr(time_inputs, "_read_and_validate_raw", track_read)
     project = _project_with_ledger(tmp_path, participants=("P01",))
     _write_time_domain_derivative(project.project_root, participant_id="P01")
     model = _source_psd_model()
@@ -147,6 +159,10 @@ def test_project_source_psd_export_streams_inputs_writes_payloads_and_reuses_cac
     assert validation_report["input_summary"]["retained_noise_bin_count_after_extreme_drop"] == 16
     assert validation_report["input_summary"]["min_noise_bins"] == 18
 
+    cold_values = payload["values"]
+    assert reads == [(False, False), (True, True)]
+    reads.clear()
+
     def fail_if_recomputed(**_kwargs: Any) -> Any:
         raise AssertionError("valid compact source-PSD cache entry should have been reused")
 
@@ -162,6 +178,23 @@ def test_project_source_psd_export_streams_inputs_writes_payloads_and_reuses_cac
     assert second.cache_hit_count == 1
     assert second.cache_miss_count == 0
     assert second.manifest_path == first.manifest_path
+
+    assert reads == [(False, False)]
+    warm_manifest = json.loads(second.manifest_path.read_text(encoding="utf-8"))
+    warm_payload = json.loads((second.output_dir / warm_manifest["conditions"][0]["file"]).read_text(encoding="utf-8"))
+    assert warm_payload["values"] == cold_values
+
+    # A warm result never bypasses the committed derivative checksum check.
+    record = second.project_inputs.records[0]
+    with record.fif_path.open("ab") as handle:
+        handle.write(b"changed derivative")
+    reads.clear()
+    with pytest.raises(time_inputs.ProjectTimeDomainInputError, match="checksum"):
+        write_project_l2_mne_hauk_source_psd_payloads(
+            project=project, source_psd_model=model, selected_harmonics_hz=(20.0,),
+            aggregations=("mean",), cluster_mask_enabled=False,
+        )
+    assert reads == []
 
 
 def test_project_source_psd_export_omits_noncanonical_sample_count_only(
@@ -357,7 +390,7 @@ def test_project_source_psd_export_loads_harmonics_from_the_active_project(
         return _Selection()
 
     monkeypatch.setattr(
-        export_module,
+        input_module,
         "load_processing_harmonic_selection",
         fake_load_processing_harmonics,
     )
@@ -424,7 +457,7 @@ def test_project_source_psd_export_applies_shared_project_exclusions(
     _write_time_domain_derivative(project.project_root, participant_id="P01")
 
     monkeypatch.setattr(
-        export_module,
+        input_module,
         "project_source_participant_selection",
         lambda *_args, **_kwargs: ProjectSourceParticipantSelection(
             excluded_subjects=("P02",),

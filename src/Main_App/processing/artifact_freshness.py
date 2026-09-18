@@ -11,16 +11,15 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-import os
 import re
 import shutil
-import tempfile
-import time
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+
+from Main_App.projects import project_manifest_transaction
 
 ARTIFACT_FRESHNESS_SCHEMA_VERSION = 1
 ARTIFACT_FRESHNESS_MANIFEST_PATH = (
@@ -285,78 +284,79 @@ def activate_selection_freshness(
 
     root, manifest_path = _project_paths(project_root, require_manifest=True)
     fingerprint = selection_fingerprint_from_metadata(selection_metadata)
-    manifest = _read_manifest_required(manifest_path)
-    registry = _registry_from_manifest(manifest)
-    registered_previous = _optional_text(registry.get("selection_fingerprint"))
-    previous = registered_previous or _optional_text(previous_fingerprint)
-    changed = previous != fingerprint
-    now = _now_utc_iso()
-    artifacts = _artifact_payloads(registry)
-    stale_ids: list[str] = []
+    with project_manifest_transaction(manifest_path):
+        manifest = _read_manifest_required(manifest_path)
+        registry = _registry_from_manifest(manifest)
+        registered_previous = _optional_text(registry.get("selection_fingerprint"))
+        previous = registered_previous or _optional_text(previous_fingerprint)
+        changed = previous != fingerprint
+        now = _now_utc_iso()
+        artifacts = _artifact_payloads(registry)
+        stale_ids: list[str] = []
 
-    if changed:
-        for artifact_id in SELECTION_DEPENDENT_ARTIFACTS:
-            existing = artifacts.get(artifact_id)
-            record = dict(existing) if isinstance(existing, Mapping) else {}
-            record.update(
-                {
-                    "status": ARTIFACT_STATUS_STALE,
-                    "path": str(
-                        record.get("path")
-                        or _DEFAULT_ARTIFACT_PATHS[artifact_id].as_posix()
-                    ),
-                    "built_from_selection_fingerprint": _optional_text(
-                        record.get("built_from_selection_fingerprint")
-                    )
-                    or previous,
-                    "required_selection_fingerprint": fingerprint,
-                    "updated_at": now,
-                    "reason": "The accepted harmonic selection changed.",
-                    "last_error": "",
-                    "archives": _archive_list(record.get("archives")),
-                }
-            )
-            artifacts[artifact_id] = record
-            stale_ids.append(artifact_id)
+        if changed:
+            for artifact_id in SELECTION_DEPENDENT_ARTIFACTS:
+                existing = artifacts.get(artifact_id)
+                record = dict(existing) if isinstance(existing, Mapping) else {}
+                record.update(
+                    {
+                        "status": ARTIFACT_STATUS_STALE,
+                        "path": str(
+                            record.get("path")
+                            or _DEFAULT_ARTIFACT_PATHS[artifact_id].as_posix()
+                        ),
+                        "built_from_selection_fingerprint": _optional_text(
+                            record.get("built_from_selection_fingerprint")
+                        )
+                        or previous,
+                        "required_selection_fingerprint": fingerprint,
+                        "updated_at": now,
+                        "reason": "The accepted harmonic selection changed.",
+                        "last_error": "",
+                        "archives": _archive_list(record.get("archives")),
+                    }
+                )
+                artifacts[artifact_id] = record
+                stale_ids.append(artifact_id)
 
-    summary_target = (
-        _assert_project_artifact_path(root, selection_summary_path)
-        if selection_summary_path is not None
-        else root / _DEFAULT_ARTIFACT_PATHS[HARMONIC_SELECTION_SUMMARY_ARTIFACT]
-    )
-    summary_existing = artifacts.get(HARMONIC_SELECTION_SUMMARY_ARTIFACT)
-    summary_record = (
-        dict(summary_existing) if isinstance(summary_existing, Mapping) else {}
-    )
-    summary_record.update(
-        {
-            "status": ARTIFACT_STATUS_CURRENT,
-            "path": _project_relative_path(root, summary_target),
-            "built_from_selection_fingerprint": fingerprint,
-            "required_selection_fingerprint": fingerprint,
-            "updated_at": now,
-            "reason": "",
-            "last_error": "",
-            "archives": _archive_list(summary_record.get("archives")),
-        }
-    )
-    artifacts[HARMONIC_SELECTION_SUMMARY_ARTIFACT] = summary_record
-    registry.update(
-        {
-            "schema_version": ARTIFACT_FRESHNESS_SCHEMA_VERSION,
-            "selection_fingerprint": fingerprint,
-            "updated_at": now,
-            "artifacts": artifacts,
-        }
-    )
-    _set_registry(manifest, registry)
-    _write_manifest_atomic(manifest_path, manifest)
-    return SelectionFreshnessTransition(
-        previous_fingerprint=previous,
-        selection_fingerprint=fingerprint,
-        changed=changed,
-        stale_artifact_ids=tuple(stale_ids),
-    )
+        summary_target = (
+            _assert_project_artifact_path(root, selection_summary_path)
+            if selection_summary_path is not None
+            else root / _DEFAULT_ARTIFACT_PATHS[HARMONIC_SELECTION_SUMMARY_ARTIFACT]
+        )
+        summary_existing = artifacts.get(HARMONIC_SELECTION_SUMMARY_ARTIFACT)
+        summary_record = (
+            dict(summary_existing) if isinstance(summary_existing, Mapping) else {}
+        )
+        summary_record.update(
+            {
+                "status": ARTIFACT_STATUS_CURRENT,
+                "path": _project_relative_path(root, summary_target),
+                "built_from_selection_fingerprint": fingerprint,
+                "required_selection_fingerprint": fingerprint,
+                "updated_at": now,
+                "reason": "",
+                "last_error": "",
+                "archives": _archive_list(summary_record.get("archives")),
+            }
+        )
+        artifacts[HARMONIC_SELECTION_SUMMARY_ARTIFACT] = summary_record
+        registry.update(
+            {
+                "schema_version": ARTIFACT_FRESHNESS_SCHEMA_VERSION,
+                "selection_fingerprint": fingerprint,
+                "updated_at": now,
+                "artifacts": artifacts,
+            }
+        )
+        _set_registry(manifest, registry)
+        _write_manifest_atomic(manifest_path, manifest)
+        return SelectionFreshnessTransition(
+            previous_fingerprint=previous,
+            selection_fingerprint=fingerprint,
+            changed=changed,
+            stale_artifact_ids=tuple(stale_ids),
+        )
 
 
 def mark_selection_derivatives_stale(
@@ -372,48 +372,49 @@ def mark_selection_derivatives_stale(
     """
 
     _root, manifest_path = _project_paths(project_root, require_manifest=True)
-    manifest = _read_manifest_required(manifest_path)
-    registry = _registry_from_manifest(manifest)
-    active = _optional_text(registry.get("selection_fingerprint"))
-    artifacts = _artifact_payloads(registry)
-    now = _now_utc_iso()
-    stale_ids = (
-        HARMONIC_SELECTION_SUMMARY_ARTIFACT,
-        *SELECTION_DEPENDENT_ARTIFACTS,
-    )
-    for artifact_id in stale_ids:
-        existing = artifacts.get(artifact_id)
-        record = dict(existing) if isinstance(existing, Mapping) else {}
-        record.update(
+    with project_manifest_transaction(manifest_path):
+        manifest = _read_manifest_required(manifest_path)
+        registry = _registry_from_manifest(manifest)
+        active = _optional_text(registry.get("selection_fingerprint"))
+        artifacts = _artifact_payloads(registry)
+        now = _now_utc_iso()
+        stale_ids = (
+            HARMONIC_SELECTION_SUMMARY_ARTIFACT,
+            *SELECTION_DEPENDENT_ARTIFACTS,
+        )
+        for artifact_id in stale_ids:
+            existing = artifacts.get(artifact_id)
+            record = dict(existing) if isinstance(existing, Mapping) else {}
+            record.update(
+                {
+                    "status": ARTIFACT_STATUS_STALE,
+                    "path": str(
+                        record.get("path")
+                        or _DEFAULT_ARTIFACT_PATHS[artifact_id].as_posix()
+                    ),
+                    "built_from_selection_fingerprint": _optional_text(
+                        record.get("built_from_selection_fingerprint")
+                    )
+                    or active,
+                    "required_selection_fingerprint": None,
+                    "updated_at": now,
+                    "reason": str(reason).strip()
+                    or "Harmonic-selection settings changed.",
+                    "last_error": "",
+                    "archives": _archive_list(record.get("archives")),
+                }
+            )
+            artifacts[artifact_id] = record
+        registry.update(
             {
-                "status": ARTIFACT_STATUS_STALE,
-                "path": str(
-                    record.get("path")
-                    or _DEFAULT_ARTIFACT_PATHS[artifact_id].as_posix()
-                ),
-                "built_from_selection_fingerprint": _optional_text(
-                    record.get("built_from_selection_fingerprint")
-                )
-                or active,
-                "required_selection_fingerprint": None,
+                "schema_version": ARTIFACT_FRESHNESS_SCHEMA_VERSION,
                 "updated_at": now,
-                "reason": str(reason).strip()
-                or "Harmonic-selection settings changed.",
-                "last_error": "",
-                "archives": _archive_list(record.get("archives")),
+                "artifacts": artifacts,
             }
         )
-        artifacts[artifact_id] = record
-    registry.update(
-        {
-            "schema_version": ARTIFACT_FRESHNESS_SCHEMA_VERSION,
-            "updated_at": now,
-            "artifacts": artifacts,
-        }
-    )
-    _set_registry(manifest, registry)
-    _write_manifest_atomic(manifest_path, manifest)
-    return tuple(stale_ids)
+        _set_registry(manifest, registry)
+        _write_manifest_atomic(manifest_path, manifest)
+        return tuple(stale_ids)
 
 
 def mark_artifact_current(
@@ -432,47 +433,48 @@ def mark_artifact_current(
         raise FileNotFoundError(
             f"Cannot mark missing post-processing artifact current: {target}"
         )
-    manifest = _read_manifest_required(manifest_path)
-    registry = _registry_from_manifest(manifest)
-    active = _optional_text(registry.get("selection_fingerprint"))
-    if active != str(selection_fingerprint):
-        raise RuntimeError(
-            "Artifact completion belongs to a selection that is no longer active."
+    with project_manifest_transaction(manifest_path):
+        manifest = _read_manifest_required(manifest_path)
+        registry = _registry_from_manifest(manifest)
+        active = _optional_text(registry.get("selection_fingerprint"))
+        if active != str(selection_fingerprint):
+            raise RuntimeError(
+                "Artifact completion belongs to a selection that is no longer active."
+            )
+        artifacts = _artifact_payloads(registry)
+        existing = artifacts.get(str(artifact_id))
+        record = dict(existing) if isinstance(existing, Mapping) else {}
+        archives = _archive_list(record.get("archives"))
+        if archived_path is not None:
+            archive = _assert_project_artifact_path(root, archived_path)
+            archive_value = _project_relative_path(root, archive)
+            if archive_value not in archives:
+                archives.append(archive_value)
+        now = _now_utc_iso()
+        record.update(
+            {
+                "status": ARTIFACT_STATUS_CURRENT,
+                "path": _project_relative_path(root, target),
+                "built_from_selection_fingerprint": str(selection_fingerprint),
+                "required_selection_fingerprint": str(selection_fingerprint),
+                "updated_at": now,
+                "reason": "",
+                "last_error": "",
+                "archives": archives,
+            }
         )
-    artifacts = _artifact_payloads(registry)
-    existing = artifacts.get(str(artifact_id))
-    record = dict(existing) if isinstance(existing, Mapping) else {}
-    archives = _archive_list(record.get("archives"))
-    if archived_path is not None:
-        archive = _assert_project_artifact_path(root, archived_path)
-        archive_value = _project_relative_path(root, archive)
-        if archive_value not in archives:
-            archives.append(archive_value)
-    now = _now_utc_iso()
-    record.update(
-        {
-            "status": ARTIFACT_STATUS_CURRENT,
-            "path": _project_relative_path(root, target),
-            "built_from_selection_fingerprint": str(selection_fingerprint),
-            "required_selection_fingerprint": str(selection_fingerprint),
-            "updated_at": now,
-            "reason": "",
-            "last_error": "",
-            "archives": archives,
-        }
-    )
-    artifacts[str(artifact_id)] = record
-    registry.update(
-        {
-            "schema_version": ARTIFACT_FRESHNESS_SCHEMA_VERSION,
-            "selection_fingerprint": str(selection_fingerprint),
-            "updated_at": now,
-            "artifacts": artifacts,
-        }
-    )
-    _set_registry(manifest, registry)
-    _write_manifest_atomic(manifest_path, manifest)
-    return _record_from_payload(str(artifact_id), record)
+        artifacts[str(artifact_id)] = record
+        registry.update(
+            {
+                "schema_version": ARTIFACT_FRESHNESS_SCHEMA_VERSION,
+                "selection_fingerprint": str(selection_fingerprint),
+                "updated_at": now,
+                "artifacts": artifacts,
+            }
+        )
+        _set_registry(manifest, registry)
+        _write_manifest_atomic(manifest_path, manifest)
+        return _record_from_payload(str(artifact_id), record)
 
 
 def mark_artifact_failed(
@@ -486,43 +488,44 @@ def mark_artifact_failed(
 
     root, manifest_path = _project_paths(project_root, require_manifest=True)
     target = _assert_project_artifact_path(root, artifact_path)
-    manifest = _read_manifest_required(manifest_path)
-    registry = _registry_from_manifest(manifest)
-    active = _optional_text(registry.get("selection_fingerprint"))
-    if active != str(selection_fingerprint):
-        raise RuntimeError(
-            "Artifact failure belongs to a selection that is no longer active."
+    with project_manifest_transaction(manifest_path):
+        manifest = _read_manifest_required(manifest_path)
+        registry = _registry_from_manifest(manifest)
+        active = _optional_text(registry.get("selection_fingerprint"))
+        if active != str(selection_fingerprint):
+            raise RuntimeError(
+                "Artifact failure belongs to a selection that is no longer active."
+            )
+        artifacts = _artifact_payloads(registry)
+        existing = artifacts.get(str(artifact_id))
+        record = dict(existing) if isinstance(existing, Mapping) else {}
+        now = _now_utc_iso()
+        record.update(
+            {
+                "status": ARTIFACT_STATUS_FAILED,
+                "path": _project_relative_path(root, target),
+                "built_from_selection_fingerprint": _optional_text(
+                    record.get("built_from_selection_fingerprint")
+                ),
+                "required_selection_fingerprint": str(selection_fingerprint),
+                "updated_at": now,
+                "reason": "The post-processing rebuild failed; the preceding artifact remains stale.",
+                "last_error": str(error).strip(),
+                "archives": _archive_list(record.get("archives")),
+            }
         )
-    artifacts = _artifact_payloads(registry)
-    existing = artifacts.get(str(artifact_id))
-    record = dict(existing) if isinstance(existing, Mapping) else {}
-    now = _now_utc_iso()
-    record.update(
-        {
-            "status": ARTIFACT_STATUS_FAILED,
-            "path": _project_relative_path(root, target),
-            "built_from_selection_fingerprint": _optional_text(
-                record.get("built_from_selection_fingerprint")
-            ),
-            "required_selection_fingerprint": str(selection_fingerprint),
-            "updated_at": now,
-            "reason": "The post-processing rebuild failed; the preceding artifact remains stale.",
-            "last_error": str(error).strip(),
-            "archives": _archive_list(record.get("archives")),
-        }
-    )
-    artifacts[str(artifact_id)] = record
-    registry.update(
-        {
-            "schema_version": ARTIFACT_FRESHNESS_SCHEMA_VERSION,
-            "selection_fingerprint": str(selection_fingerprint),
-            "updated_at": now,
-            "artifacts": artifacts,
-        }
-    )
-    _set_registry(manifest, registry)
-    _write_manifest_atomic(manifest_path, manifest)
-    return _record_from_payload(str(artifact_id), record)
+        artifacts[str(artifact_id)] = record
+        registry.update(
+            {
+                "schema_version": ARTIFACT_FRESHNESS_SCHEMA_VERSION,
+                "selection_fingerprint": str(selection_fingerprint),
+                "updated_at": now,
+                "artifacts": artifacts,
+            }
+        )
+        _set_registry(manifest, registry)
+        _write_manifest_atomic(manifest_path, manifest)
+        return _record_from_payload(str(artifact_id), record)
 
 
 def selection_dependent_artifacts_are_current(
@@ -799,29 +802,8 @@ def _write_manifest_atomic(
     manifest_path: Path,
     manifest: Mapping[str, object],
 ) -> None:
-    payload = json.dumps(
-        _json_safe(dict(manifest)),
-        indent=2,
-        ensure_ascii=False,
-    )
-    descriptor, temporary_name = tempfile.mkstemp(
-        prefix=f".{manifest_path.name}.artifact-freshness-",
-        suffix=".tmp",
-        dir=manifest_path.parent,
-        text=True,
-    )
-    temporary_path = Path(temporary_name)
-    try:
-        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as stream:
-            stream.write(payload)
-            stream.flush()
-            os.fsync(stream.fileno())
-        _replace_manifest_with_retry(temporary_path, manifest_path)
-    finally:
-        try:
-            temporary_path.unlink(missing_ok=True)
-        except OSError:
-            pass
+    with project_manifest_transaction(manifest_path) as transaction:
+        transaction.write(_json_safe(dict(manifest)))
 
 
 def _next_archive_path(
@@ -855,19 +837,6 @@ def _next_archive_path(
     return candidate
 
 
-def _replace_manifest_with_retry(temporary_path: Path, manifest_path: Path) -> None:
-    """Tolerate brief Windows scanner/indexer locks around project.json."""
-
-    delays_s = (0.0, 0.01, 0.02, 0.05, 0.1, 0.1)
-    for attempt, delay_s in enumerate(delays_s, start=1):
-        if delay_s:
-            time.sleep(delay_s)
-        try:
-            os.replace(temporary_path, manifest_path)
-            return
-        except PermissionError:
-            if attempt == len(delays_s):
-                raise
 
 
 def _remove_artifact_path(root: Path, target: Path) -> None:

@@ -4,11 +4,13 @@
 from __future__ import annotations
 
 import os
+import sys
 from typing import Optional
 
 # Hard cap of 20 parallel workers on 128GB + workstations
 
 GLOBAL_MAX_WORKERS = 20
+_worker_threadpool_limit = None
 
 
 def get_ram_tier_recommendation(total_ram_bytes: int) -> tuple[str, Optional[int], float]:
@@ -44,11 +46,25 @@ def set_blas_threads_single_process() -> None:
     os.environ.setdefault("NUMEXPR_NUM_THREADS", str(max(1, cores // 2)))
 
 def set_blas_threads_multiprocess() -> None:
-    """Restrict BLAS to one thread per worker process."""
+    """Set limits for numerical libraries loaded later in a worker process."""
     os.environ["MKL_NUM_THREADS"] = "1"
     os.environ["OPENBLAS_NUM_THREADS"] = "1"
     os.environ["OMP_NUM_THREADS"] = "1"
     os.environ["NUMEXPR_NUM_THREADS"] = "1"
+
+
+def set_worker_thread_limits() -> None:
+    """Limit already-loaded pools for the lifetime of a spawned worker only."""
+    from threadpoolctl import threadpool_limits
+
+    global _worker_threadpool_limit
+    set_blas_threads_multiprocess()
+    # Spawn imports the processing module (and NumPy/SciPy) before initializer.
+    # Environment variables alone cannot reconfigure those existing pools.
+    _worker_threadpool_limit = threadpool_limits(limits=1)
+    numexpr = sys.modules.get("numexpr")
+    if numexpr is not None:
+        numexpr.set_num_threads(1)
 
 
 def compute_effective_max_workers(

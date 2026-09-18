@@ -176,10 +176,15 @@ def test_many_file_errors_keep_batch_running_until_one_finished_payload():
     )
     bridge = SimpleNamespace(
         _q=Queue(), _total=12, _running=True, _results=[], _error_results=[],
-        _excluded_results=[], _timer=Mock(), _cancel_event=object(),
-        _worker_thread=object(), error=Mock(), file_status=Mock(),
+        _excluded_results=[], _timer=Mock(), _cancel_event=object(), _poll_error="",
+        _worker_thread=Mock(is_alive=lambda: True), _data_files=[], error=Mock(), file_status=Mock(),
         progress=Mock(), finished=Mock(),
     )
+    finish = _load_function(
+        "src/Main_App/workers/mp_runner_bridge.py", "_finish", {},
+        class_name="MpRunnerBridge",
+    )
+    bridge._finish = lambda message: finish(bridge, message)
     failures = [
         {"file": f"p{index}.bdf", "status": "error", "stage": "preprocess", "error": "Bad receipt"}
         for index in range(12)
@@ -256,6 +261,7 @@ def test_reported_failures_do_not_open_second_completion_dialog():
         ("all_worker_errors", False),
         ("ledger_only_failure", False),
         ("partial_success", True),
+        ("controller_failure_after_success", False),
         ("intentional_exclusions", True),
     ],
 )
@@ -265,7 +271,10 @@ def test_completion_does_not_report_an_entirely_failed_batch_as_success(
     failed = {"file": str(tmp_path / "P01.bdf"), "status": "error", "error": "Load failed"}
     errors = [failed] if case in {"all_worker_errors", "partial_success"} else []
     ledger_failures = [failed] if case == "ledger_only_failure" else []
-    results = [{"file": str(tmp_path / "P02.bdf"), "status": "ok"}] if case == "partial_success" else []
+    results = (
+        [{"file": str(tmp_path / "P02.bdf"), "status": "ok"}]
+        if case in {"partial_success", "controller_failure_after_success"} else []
+    )
     excluded = (
         [{"file": failed["file"], "status": "excluded", "reason": "Manual exclusion"}]
         if case == "intentional_exclusions" else []
@@ -298,13 +307,18 @@ def test_completion_does_not_report_an_entirely_failed_batch_as_success(
         log=Mock(), _processing_plan=object(), currentProject=object(),
         _busy_stop=Mock(), _finalize_processing=Mock(),
     )
-    finished(host, {"results": results, "errors": errors, "excluded": excluded})
+    controller_error = "Pool shutdown failed" if case == "controller_failure_after_success" else ""
+    finished(host, {
+        "results": results, "errors": errors, "excluded": excluded,
+        "controller_error": controller_error,
+    })
 
     host._finalize_processing.assert_called_once_with(expected_success, cancelled=False)
     assert starter.call_count == int(case == "partial_success")
     host._busy_stop.assert_called_once()
     namespace["_show_exclusion_summary_popup"].assert_called_once()
-    assert host._post_processing_failure_reason == ""
+    assert host._post_processing_failure_reason == controller_error
+    assert namespace["record_processing_results"].call_args.args[2] == [*results, *errors, *excluded]
 
 
 def _post_processing_namespace():
@@ -491,3 +505,82 @@ def test_canceled_processing_does_not_show_post_processing_error_dialog():
     ), False)
 
     assert not messages.mock_calls
+
+
+@pytest.mark.parametrize("with_terminal", [False, True])
+def test_dead_controller_drains_queued_results_before_finalizing(with_terminal):
+    path = "src/Main_App/workers/mp_runner_bridge.py"
+    namespace = {"Empty": Empty, "Path": Path, "logger": logging.getLogger(__name__)}
+    poll = _load_function(path, "_poll", namespace, class_name="MpRunnerBridge")
+    finish = _load_function(path, "_finish", namespace, class_name="MpRunnerBridge")
+    bridge = SimpleNamespace(
+        _q=Queue(), _total=2, _running=True, _results=[], _error_results=[],
+        _excluded_results=[], _timer=Mock(), _cancel_event=Mock(), _poll_error="",
+        _worker_thread=Mock(is_alive=lambda: False), _data_files=[Path("a.bdf"), Path("b.bdf")],
+        error=Mock(), file_status=Mock(), progress=Mock(), finished=Mock(),
+    )
+    bridge._finish = lambda message: finish(bridge, message)
+    result = {"file": "a.bdf", "status": "ok"}
+    bridge._q.put({"type": "progress", "completed": 1, "result": result})
+    if with_terminal:
+        bridge._q.put({"type": "done", "cancelled": True, "interrupted_files": ["b.bdf"]})
+    poll(bridge)
+    poll(bridge)
+    bridge.finished.emit.assert_called_once()
+    outcome = bridge.finished.emit.call_args.args[0]
+    assert outcome["results"] == [result]
+    assert outcome["interrupted_files"] == ["b.bdf"]
+    assert outcome["status"] == ("cancelled" if with_terminal else "error")
+    assert not bridge._running
+    assert bridge._q is bridge._worker_thread is bridge._cancel_event is None
+
+
+@pytest.mark.parametrize("start_failure", [False, True])
+def test_bridge_start_and_restart_after_controller_failure_without_qt(tmp_path, start_failure):
+    from threading import Event, Thread
+    from Main_App.workers.process_runner import RunParams
+
+    path = "src/Main_App/workers/mp_runner_bridge.py"
+    namespace = {
+        "Empty": Empty, "Queue": Queue, "Event": Event, "Thread": Thread,
+        "Path": Path, "RunParams": RunParams, "logger": logging.getLogger(__name__),
+        "set_blas_threads_single_process": lambda: None,
+        "_build_preproc_fingerprint": lambda settings: "test",
+        "run_project_parallel": lambda *args: None,
+    }
+    start = _load_function(path, "start", namespace, class_name="MpRunnerBridge")
+    poll = _load_function(path, "_poll", namespace, class_name="MpRunnerBridge")
+    finish = _load_function(path, "_finish", namespace, class_name="MpRunnerBridge")
+    bridge = SimpleNamespace(
+        _q=None, _running=False, _worker_thread=None, _timer=Mock(),
+        _cancel_event=None, validated_fingerprint=None, file_status=Mock(),
+        error=Mock(), progress=Mock(), finished=Mock(),
+    )
+    bridge._finish = lambda message: finish(bridge, message)
+    if start_failure:
+        def fail_start():
+            raise RuntimeError("Thread creation failed")
+        namespace["Thread"] = lambda **kwargs: Mock(start=fail_start, is_alive=lambda: False)
+    files = [tmp_path / "a.bdf"]
+    start(bridge, tmp_path, files, {}, {}, tmp_path, 1)
+    assert bridge._running
+    bridge.finished.emit.assert_not_called()
+    bridge._worker_thread.join(timeout=5)
+    poll(bridge)
+    first = bridge.finished.emit.call_args.args[0]
+    assert first["status"] == "error"
+    assert first["interrupted_files"] == [str(files[0])]
+    assert not bridge._running
+
+    def succeed(params, queue, event):
+        queue.put({"type": "done", "status": "success", "results": [{"file": str(files[0]), "status": "ok"}]})
+    namespace["run_project_parallel"] = succeed
+    namespace["Thread"] = Thread
+    start(bridge, tmp_path, files, {}, {}, tmp_path, 1)
+    bridge._worker_thread.join(timeout=5)
+    poll(bridge)
+    assert bridge.finished.emit.call_count == 2
+    second = bridge.finished.emit.call_args.args[0]
+    assert second["status"] == "success"
+    assert second["errors"] == []
+    assert not bridge._running

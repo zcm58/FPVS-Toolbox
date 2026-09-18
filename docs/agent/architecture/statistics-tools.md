@@ -105,6 +105,12 @@ Publication-ready table figures:
 Stats grouping:
 
 - Public entry point: `Tools.Stats.StatsWindow`; implementation lives in `ui.stats_window` and `ui.stats_main_window`.
+- The public window export is lazy. Importing analysis settings, canonical
+  harmonic contracts, or processing harmonic orchestration must not import Qt.
+  Versioned profile/settings definitions and the accepted-selection contract
+  are owned by `Main_App.processing.harmonic_settings` and
+  `Main_App.processing.canonical_harmonics`; the old Stats analysis paths are
+  compatibility re-exports, not additional implementations.
 - `ui/`: window mixins, dialogs, widget assembly, and small widgets.
 - `controller/`: run coordination, mode-specific pipeline state, cancellation,
   and worker scheduling.
@@ -133,7 +139,8 @@ Stats grouping:
   `analysis/resampling.py`: legacy compatibility surfaces. Paired post-hocs,
   standalone Welch cell tests, and complete-matrix max-|t| are not primary
   Standard FPVS Screening routes.
-- `analysis/canonical_harmonics.py`: thin shared API for resolving the saved
+- `analysis/canonical_harmonics.py`: compatibility export of the processing-owned
+  shared API for resolving the saved
   processing-time FPVS Toolbox harmonic-selection result and deterministic
   scientific fingerprint. The result keeps evaluated, detected, and included
   harmonics separate. Processing remains the only active project workflow

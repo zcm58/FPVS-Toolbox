@@ -44,6 +44,11 @@ from Tools.LORETA_Visualizer.source_producers.project_inputs import (
     build_l2_mne_conditions_from_project,
 )
 
+from Tools.LORETA_Visualizer.source_producers.source_model_cache import (
+    cached_source_model_resources,
+    source_model_signature,
+)
+
 logger = logging.getLogger(__name__)
 
 PROJECT_SOURCE_LOCALIZATION_FOLDER = "6 - Source Localization"
@@ -84,6 +89,7 @@ class MneFsaverageSourcePsdModel:
 @dataclass(frozen=True)
 class _MneFsaverageInverseResources:
     mne_module: Any
+    preparation_signature: str
     subjects_dir: Path
     info: Any
     inverse_operator: Any
@@ -301,45 +307,65 @@ def _build_mne_fsaverage_inverse_resources(
         raise ProjectL2MNEExportError("Source-PSD model sampling frequency must be positive and finite.")
     info = _biosemi64_info(mne, channel_names, sfreq=resolved_sfreq)
     info = _with_eeg_average_reference_projection(mne, info)
-    try:
-        src = mne.setup_source_space(
-            FSAVERAGE_SUBJECT,
-            spacing=str(spacing),
-            add_dist=False,
-            subjects_dir=subjects_dir,
-            verbose=False,
-        )
-        forward = mne.make_forward_solution(
-            info,
-            trans=trans_path,
-            src=src,
-            bem=bem_path,
-            eeg=True,
-            meg=False,
-            mindist=float(mindist_mm),
-            n_jobs=1,
-            verbose=False,
-        )
-        loose_forward = mne.convert_forward_solution(
-            forward,
-            surf_ori=True,
-            force_fixed=False,
-            use_cps=True,
-            verbose=False,
-        )
-        noise_cov = mne.make_ad_hoc_cov(info, verbose=False)
-        inverse_operator = make_inverse_operator(
-            info,
-            loose_forward,
-            noise_cov,
-            loose=float(loose_orientation),
-            depth=None,
-            fixed=False,
-            use_cps=True,
-            verbose=False,
-        )
-    except (OSError, RuntimeError, ValueError) as exc:
-        raise ProjectL2MNEExportError(f"Unable to build MNE/fsaverage forward model: {exc}") from exc
+    surface_names = ("lh.white", "rh.white")
+    if str(spacing) != "all":
+        surface_names += ("lh.sphere", "rh.sphere")
+    preparation_signature = source_model_signature(
+        method="MNE-surface",
+        parameters={"spacing": str(spacing), "mindist_mm": float(mindist_mm),
+                    "loose": float(loose_orientation), "depth": None, "fixed": False,
+                    "use_cps": True, "noise_covariance": "mne_ad_hoc_diagonal_eeg"},
+        info=info,
+        template_paths=(bem_path, trans_path, *(subject_dir / "surf" / name for name in surface_names)),
+        mne_version=str(mne.__version__),
+    )
+
+    def build_resources() -> tuple[Any, Any, Any]:
+        try:
+            src = mne.setup_source_space(
+                FSAVERAGE_SUBJECT,
+                spacing=str(spacing),
+                add_dist=False,
+                subjects_dir=subjects_dir,
+                verbose=False,
+            )
+            forward = mne.make_forward_solution(
+                info,
+                trans=trans_path,
+                src=src,
+                bem=bem_path,
+                eeg=True,
+                meg=False,
+                mindist=float(mindist_mm),
+                n_jobs=1,
+                verbose=False,
+            )
+            loose_forward = mne.convert_forward_solution(
+                forward,
+                surf_ori=True,
+                force_fixed=False,
+                use_cps=True,
+                verbose=False,
+            )
+            noise_cov = mne.make_ad_hoc_cov(info, verbose=False)
+            inverse_operator = make_inverse_operator(
+                info,
+                loose_forward,
+                noise_cov,
+                loose=float(loose_orientation),
+                depth=None,
+                fixed=False,
+                use_cps=True,
+                verbose=False,
+            )
+        except (OSError, RuntimeError, ValueError) as exc:
+            raise ProjectL2MNEExportError(f"Unable to build MNE/fsaverage forward model: {exc}") from exc
+
+        return inverse_operator, loose_forward, src
+
+    inverse_operator, loose_forward, src = cached_source_model_resources(
+        preparation_signature, build_resources,
+    )
 
     leadfield = np.asarray(loose_forward["sol"]["data"], dtype=float)
     row_names = tuple(str(name) for name in loose_forward["sol"]["row_names"])
@@ -357,6 +383,7 @@ def _build_mne_fsaverage_inverse_resources(
         )
     return _MneFsaverageInverseResources(
         mne_module=mne,
+        preparation_signature=preparation_signature,
         subjects_dir=subjects_dir,
         info=info,
         inverse_operator=inverse_operator,
@@ -403,6 +430,7 @@ def _l2_mne_forward_model_from_resources(
         label=f"MNE fsaverage {spacing} BioSemi64 loose-orientation cortical surface",
         metadata={
             "forward_model_status": "beta MNE/fsaverage template EEG inverse model",
+            "model_preparation_signature": resources.preparation_signature,
             "inverse_backend": "mne_python",
             "mne_inverse_method": "MNE",
             "orientation_constraint": "loose",

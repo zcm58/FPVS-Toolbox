@@ -27,11 +27,6 @@ class _FakeQueue:
         return self._items.pop(0)
 
 
-class _FakeContext:
-    def Queue(self):
-        return _FakeQueue()
-
-
 def test_mp_runner_bridge_error_and_finished(app, qtbot):
     bridge = MpRunnerBridge()
     errors = []
@@ -145,7 +140,7 @@ def test_mp_runner_bridge_logs_single_settings_snapshot(app, caplog, monkeypatch
 
     monkeypatch.setattr(mp_runner_bridge, "set_blas_threads_single_process", lambda: None)
     monkeypatch.setattr(mp_runner_bridge.Thread, "start", lambda self: None)
-    monkeypatch.setattr(mp_runner_bridge, "get_context", lambda name: _FakeContext())
+    monkeypatch.setattr(mp_runner_bridge, "Queue", _FakeQueue)
 
     project_root = Path(r"C:\Projects\FPVS\Semantic Categories")
     data_files = [
@@ -180,3 +175,53 @@ def test_mp_runner_bridge_logs_single_settings_snapshot(app, caplog, monkeypatch
     assert "SC_P13.bdf" in snapshot_records[0].getMessage()
     assert "SC_P15.bdf" in snapshot_records[0].getMessage()
     bridge._timer.stop()
+
+
+def test_dead_controller_drains_results_and_allows_restart(app, qtbot, monkeypatch, tmp_path):
+    bridge = MpRunnerBridge()
+    finished = []
+    statuses = []
+    bridge.finished.connect(finished.append)
+    bridge.file_status.connect(statuses.append)
+    first, second = tmp_path / "first.bdf", tmp_path / "second.bdf"
+
+    def abnormal_exit(params, queue, cancel_event):
+        queue.put({"type": "progress", "completed": 1, "result": {"status": "ok", "file": str(first)}})
+        # Return without a terminal message to model an unexpected controller exit.
+
+    monkeypatch.setattr(mp_runner_bridge, "run_project_parallel", abnormal_exit)
+    bridge.start(tmp_path, [first, second], {}, {}, tmp_path, 1)
+    qtbot.waitUntil(lambda: len(finished) == 1)
+    assert not bridge._running
+    assert finished[0]["status"] == "error"
+    assert finished[0]["results"] == statuses
+    assert finished[0]["interrupted_files"] == [str(second)]
+
+    def succeed(params, queue, cancel_event):
+        queue.put({"type": "done", "status": "success", "results": [{"status": "ok", "file": str(second)}]})
+
+    monkeypatch.setattr(mp_runner_bridge, "run_project_parallel", succeed)
+    bridge.start(tmp_path, [second], {}, {}, tmp_path, 1)
+    qtbot.waitUntil(lambda: len(finished) == 2)
+    assert finished[1]["status"] == "success"
+    assert finished[1]["errors"] == []
+    assert not bridge._timer.isActive()
+
+
+def test_bridge_start_failure_emits_one_deferred_terminal(app, qtbot, monkeypatch, tmp_path):
+    bridge = MpRunnerBridge()
+    finished = []
+    bridge.finished.connect(finished.append)
+
+    def failed_start(self):
+        raise RuntimeError("Thread creation failed")
+
+    monkeypatch.setattr(mp_runner_bridge.Thread, "start", failed_start)
+    bridge.start(tmp_path, [tmp_path / "a.bdf"], {}, {}, tmp_path, 1)
+    assert finished == []
+    qtbot.waitUntil(lambda: len(finished) == 1)
+    assert not bridge._running
+    assert finished[0]["status"] == "error"
+    assert "Thread creation failed" in finished[0]["controller_error"]
+    bridge._poll()
+    assert len(finished) == 1

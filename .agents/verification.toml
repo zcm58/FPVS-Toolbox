@@ -1,12 +1,35 @@
 version = 1
 qt_registry = "tests/qt_test_files.txt"
 
+[scopes.backend-hardening]
+audits = ["paths", "protected", "stats-structure"]
+tests = [
+  "tests/audit/test_backend_import_boundaries.py",
+  "tests/project_io/test_project_manifest_transactions.py",
+  "tests/processing/test_process_runner_lifecycle.py",
+  "tests/processing/test_process_runner_epoch_contract.py",
+  "tests/processing/test_condition_interpolation_execution.py",
+  "tests/processing/test_worker_thread_limits.py",
+  "tests/gui/test_processing_failure_routing_static.py",
+  "tests/project_io/test_spectral_data.py",
+  "tests/plot_generator/test_spectral_companion_inputs.py",
+  "tests/stats/analysis/test_canonical_harmonics.py",
+  "tests/stats/analysis/test_harmonic_selection_profiles.py",
+  "tests/stats/io/test_repeated_session_export.py",
+  "tests/loreta/test_source_model_cache.py",
+  "tests/loreta/test_project_l2_mne_hauk_source_psd_export.py",
+  "tests/loreta/test_project_eloreta_volume_hauk_source_psd_export.py",
+]
+include = ["src/Main_App/**", "src/Tools/Stats/**", "src/Tools/LORETA_Visualizer/source_producers/**", "tests/**"]
+manual_smoke = ["In a visible Main App session, start processing, cancel, and restart. Verify a controller failure clears the running state, preserves completed file results, reports failure, and does not start downstream processing. Local Qt execution remains disabled; run registered Qt coverage in CI."]
+
 [scopes.repo]
 audits = ["agent-harness", "garbage-collection"]
 tests = [
   "tests/audit/test_agent_audit_change_detection.py",
   "tests/audit/test_agent_audit_stats_reporting_legibility.py",
   "tests/audit/test_figure_style_contract.py",
+  "tests/audit/test_backend_import_boundaries.py",
 ]
 include = [".agents/**", ".github/**", "docs/agent/**", "AGENTS.md", "ARCHITECTURE.md", "pyproject.toml", "tests/conftest.py"]
 manual_smoke = []
@@ -50,6 +73,7 @@ audits = ["paths"]
 tests = [
   "tests/project_io/test_active_project_root.py",
   "tests/project_io/test_project_dataset_index.py",
+  "tests/project_io/test_project_manifest_transactions.py",
   "tests/project_io/test_project_enumeration_io.py",
   "tests/project_io/test_project_group_context.py",
   "tests/project_io/test_project_geometry_persistence.py",
@@ -71,6 +95,8 @@ manual_smoke = []
 [scopes.processing]
 audits = ["protected", "source-localization"]
 tests = [
+  "tests/processing/test_process_runner_lifecycle.py",
+  "tests/processing/test_worker_thread_limits.py",
   "tests/processing/test_preflight_qc_pruning.py",
   "tests/processing/test_qc_cache_maintenance_integration.py",
   "tests/processing/test_toolbox_cache.py",
@@ -271,6 +297,7 @@ tests = [
   "tests/stats/controller/test_native_pipeline_controller.py",
   "tests/stats/data/test_stats_project_context.py",
   "tests/stats/io/test_stats_ready_export.py",
+  "tests/stats/io/test_repeated_session_export.py",
   "tests/stats/io/test_xlsx_selected_reader.py",
   "tests/stats/pipeline/test_stats_file_scanner.py",
   "tests/stats/pipeline/test_stats_native_view_state.py",

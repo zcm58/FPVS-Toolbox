@@ -5,9 +5,6 @@ from __future__ import annotations
 import copy
 import json
 import math
-import os
-import tempfile
-import time
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -15,6 +12,7 @@ from typing import Any, Callable, Mapping, Sequence
 
 
 from Main_App.projects import (
+    project_manifest_transaction,
     ProjectDatasetIndex,
     normalize_frequency_protocol,
 )
@@ -37,7 +35,7 @@ from Tools.Stats.analysis.dv_policy_group_significant import (
 from Tools.Stats.analysis.dv_policy_fixed_predefined import (
     _prepare_fixed_predefined_bca_data,
 )
-from Tools.Stats.analysis.dv_policy_settings import (
+from Main_App.processing.harmonic_settings import (
     GROUP_SIGNIFICANT_ELECTRODE_SCOPE_ROI_UNION,
     GROUP_SIGNIFICANT_POLICY_NAME,
     GROUP_SIGNIFICANT_SUMMATION_THROUGH_HIGHEST,
@@ -45,7 +43,7 @@ from Tools.Stats.analysis.dv_policy_settings import (
     HARMONIC_PROFILE_FIXED_ID,
     normalize_dv_policy,
 )
-from Tools.Stats.analysis.canonical_harmonics import (
+from Main_App.processing.canonical_harmonics import (
     compute_selection_fingerprint,
 )
 from Main_App.processing.roi_settings import load_rois_from_settings
@@ -580,40 +578,41 @@ def _persist_processing_harmonic_selection(
         "selection_metadata": copy.deepcopy(dict(metadata)),
     }
     manifest_path = inputs.project_root / "project.json"
-    manifest = _read_manifest_required(manifest_path)
-    existing_state = _manifest_processing_harmonic_selection(manifest)
-    history: list[object] = []
-    if isinstance(existing_state, Mapping):
-        raw_history = existing_state.get("history")
-        if isinstance(raw_history, list):
-            history = copy.deepcopy(raw_history)
-        previous = existing_state.get("active")
-        if (
-            isinstance(previous, Mapping)
-            and str(previous.get("selection_fingerprint") or "") != fingerprint
-        ):
-            history.append(copy.deepcopy(dict(previous)))
-    state = {
-        "schema_version": PROCESSING_HARMONIC_SELECTION_SCHEMA_VERSION,
-        "active": active,
-        "history": history[-_PROCESSING_HARMONIC_SELECTION_HISTORY_LIMIT:],
-    }
-    _set_manifest_processing_harmonic_selection(manifest, state)
-    _write_manifest_atomic(manifest_path, manifest)
+    with project_manifest_transaction(manifest_path):
+        manifest = _read_manifest_required(manifest_path)
+        existing_state = _manifest_processing_harmonic_selection(manifest)
+        history: list[object] = []
+        if isinstance(existing_state, Mapping):
+            raw_history = existing_state.get("history")
+            if isinstance(raw_history, list):
+                history = copy.deepcopy(raw_history)
+            previous = existing_state.get("active")
+            if (
+                isinstance(previous, Mapping)
+                and str(previous.get("selection_fingerprint") or "") != fingerprint
+            ):
+                history.append(copy.deepcopy(dict(previous)))
+        state = {
+            "schema_version": PROCESSING_HARMONIC_SELECTION_SCHEMA_VERSION,
+            "active": active,
+            "history": history[-_PROCESSING_HARMONIC_SELECTION_HISTORY_LIMIT:],
+        }
+        _set_manifest_processing_harmonic_selection(manifest, state)
+        _write_manifest_atomic(manifest_path, manifest)
 
-    persisted = _load_processing_harmonic_selection_record(inputs.project_root)
-    if (
-        persisted is None
-        or str(persisted.get("selection_fingerprint") or "") != fingerprint
-        or str(persisted.get("input_fingerprint") or "") != input_fingerprint
-    ):
-        raise RuntimeError(
-            "Harmonic selection was calculated but could not be saved to project "
-            "metadata, so downstream tools cannot load it. Close other processes "
-            "that may be writing project.json, then use Settings > Recalculate "
-            "Harmonics again."
-        )
-    return saved_at
+        persisted = _load_processing_harmonic_selection_record(inputs.project_root)
+        if (
+            persisted is None
+            or str(persisted.get("selection_fingerprint") or "") != fingerprint
+            or str(persisted.get("input_fingerprint") or "") != input_fingerprint
+        ):
+            raise RuntimeError(
+                "Harmonic selection was calculated but could not be saved to project "
+                "metadata, so downstream tools cannot load it. Close other processes "
+                "that may be writing project.json, then use Settings > Recalculate "
+                "Harmonics again."
+            )
+        return saved_at
 
 
 def _migrate_legacy_group_harmonic_selection(
@@ -1388,47 +1387,10 @@ def _write_manifest_atomic(
     manifest_path: Path,
     manifest: Mapping[str, object],
 ) -> None:
-    payload = json.dumps(
-        _json_safe(dict(manifest)),
-        indent=2,
-        ensure_ascii=False,
-    )
-    descriptor, temporary_name = tempfile.mkstemp(
-        prefix=f".{manifest_path.name}.harmonic-selection-",
-        suffix=".tmp",
-        dir=manifest_path.parent,
-        text=True,
-    )
-    temporary_path = Path(temporary_name)
-    try:
-        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as stream:
-            stream.write(payload)
-            stream.flush()
-            os.fsync(stream.fileno())
-        _replace_manifest_with_retry(temporary_path, manifest_path)
-    finally:
-        try:
-            temporary_path.unlink(missing_ok=True)
-        except OSError:
-            pass
+    with project_manifest_transaction(manifest_path) as transaction:
+        transaction.write(_json_safe(dict(manifest)))
 
 
-def _replace_manifest_with_retry(
-    temporary_path: Path,
-    manifest_path: Path,
-) -> None:
-    for attempt, delay_seconds in enumerate(
-        (0.0, 0.01, 0.02, 0.05, 0.1, 0.1),
-        start=1,
-    ):
-        if delay_seconds:
-            time.sleep(delay_seconds)
-        try:
-            os.replace(temporary_path, manifest_path)
-            return
-        except PermissionError:
-            if attempt == 6:
-                raise
 
 
 def _metadata_frequency_list(

@@ -9,6 +9,8 @@ import mne
 import numpy as np
 import pytest
 
+from Tools.LORETA_Visualizer.source_producers import project_time_domain_inputs as time_inputs
+
 from config import DEFAULT_ELECTRODE_NAMES_64
 from Main_App.exports.source_time_domain_export import (
     write_source_ready_time_domain_derivatives,
@@ -41,7 +43,16 @@ PROCESSING_FINGERPRINT = "f" * 64
 
 def test_project_eloreta_source_psd_uses_signed_fif_exact_method_and_cache(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    reads = []
+    original_read = time_inputs._read_and_validate_raw
+
+    def track_read(record, *, preload, require_finite):
+        reads.append((preload, require_finite))
+        return original_read(record, preload=preload, require_finite=require_finite)
+
+    monkeypatch.setattr(time_inputs, "_read_and_validate_raw", track_read)
     project = _project_with_ledger(tmp_path, participants=("P01",))
     _write_time_domain_derivative(project.project_root, participant_id="P01")
     assert not tuple(project.project_root.rglob("*.xlsx"))
@@ -112,6 +123,10 @@ def test_project_eloreta_source_psd_uses_signed_fif_exact_method_and_cache(
     assert validation["input_summary"]["min_noise_bins"] == 18
     assert "legacy_fullfft_fallback=forbidden" in validation["input_summary"]["diagnostics"]
 
+    cold_values = payload["values"]
+    assert reads == [(False, False), (True, True)]
+    reads.clear()
+
     def fail_if_recomputed(**_kwargs: Any) -> Any:
         raise AssertionError("valid eLORETA source-PSD cache entry should be reused")
 
@@ -126,6 +141,13 @@ def test_project_eloreta_source_psd_uses_signed_fif_exact_method_and_cache(
     assert second.cache_hit_count == 1
     assert second.cache_miss_count == 0
 
+    assert reads == [(False, False)]
+    warm_manifest = json.loads(second.manifest_path.read_text(encoding="utf-8"))
+    warm_payload = json.loads((second.output_dir / warm_manifest["conditions"][0]["file"]).read_text(encoding="utf-8"))
+    assert warm_payload["values"] == cold_values
+
+    reads.clear()
+
     alternate_params = {**DEFAULT_ELORETA_SOURCE_PSD_METHOD_PARAMS, "eps": 2e-6}
     alternate_calls: list[dict[str, Any]] = []
     separated = write_project_eloreta_volume_hauk_source_psd_payloads(
@@ -136,6 +158,7 @@ def test_project_eloreta_source_psd_uses_signed_fif_exact_method_and_cache(
         aggregations=("mean",),
         cluster_mask_enabled=False,
     )
+    assert reads == [(False, False), (True, True)]
     assert separated.cache_hit_count == 0
     assert separated.cache_miss_count == 1
     assert len(alternate_calls) == 1
@@ -156,6 +179,18 @@ def test_project_eloreta_source_psd_uses_signed_fif_exact_method_and_cache(
     assert {payload["result_metadata"]["method_id"] for payload in cache_metadata} == {
         METHOD_ID_ELORETA_VOLUME_HAUK_SOURCE_PSD_VECTOR_NORM_V1
     }
+
+    # A warm result never bypasses the committed derivative checksum check.
+    record = second.project_inputs.records[0]
+    with record.fif_path.open("ab") as handle:
+        handle.write(b"changed derivative")
+    reads.clear()
+    with pytest.raises(time_inputs.ProjectTimeDomainInputError, match="checksum"):
+        write_project_eloreta_volume_hauk_source_psd_payloads(
+            project=project, source_psd_model=model, selected_harmonics_hz=(20.0,),
+            aggregations=("mean",), cluster_mask_enabled=False,
+        )
+    assert reads == []
 
 
 def test_project_eloreta_source_psd_uses_canonical_sample_count_cohort(

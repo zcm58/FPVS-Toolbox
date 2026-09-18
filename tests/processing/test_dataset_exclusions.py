@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import pytest
 
@@ -201,31 +200,34 @@ def test_atomic_replace_failure_preserves_manifest_and_cleans_temporary(tmp_path
     def denied(*_args, **_kwargs):
         raise PermissionError("replace denied")
 
-    monkeypatch.setattr(Path, "replace", denied)
+    from Main_App.projects import manifest_store
+
+    monkeypatch.setattr(manifest_store.os, "replace", denied)
     with pytest.raises(PermissionError, match="replace denied"):
         save_dataset_exclusions(root, snapshot, {_row(snapshot, "P1").identity: "skip_processing"})
     assert (root / "project.json").read_bytes() == before
-    assert not list(root.glob(".project.json.dataset-exclusions-*.tmp"))
+    assert not list(root.glob(".project.json.*.tmp"))
 
 
 def test_final_freshness_check_preserves_intervening_worker_update(tmp_path, monkeypatch):
     root = _flat_project(tmp_path)
     snapshot = load_dataset_exclusions(root)
-    path = root / "project.json"
-    original_read = Path.read_bytes
+    from Main_App.processing import dataset_exclusions
+
+    original_publish = dataset_exclusions._publish_manifest
     worker_manifest = _read(root)
     worker_manifest["tools"]["other_tool"]["worker_completed"] = True
 
-    def update_when_temporary_exists(target):
-        if target == path and list(root.glob(".project.json.dataset-exclusions-*.tmp")):
-            _write(root, worker_manifest)
-        return original_read(target)
+    def external_update_before_publish(project_root, content, payload):
+        # A writer outside the coordinated runtime can still invalidate a review.
+        _write(root, worker_manifest)
+        return original_publish(project_root, content, payload)
 
-    monkeypatch.setattr(Path, "read_bytes", update_when_temporary_exists)
+    monkeypatch.setattr(dataset_exclusions, "_publish_manifest", external_update_before_publish)
     with pytest.raises(DatasetExclusionsConflictError):
         save_dataset_exclusions(root, snapshot, {_row(snapshot, "P1").identity: "skip_processing"})
     assert _read(root) == worker_manifest
-    assert not list(root.glob(".project.json.dataset-exclusions-*.tmp"))
+    assert not list(root.glob(".project.json.*.tmp"))
 
 
 def test_restore_current_review_decision_retires_authority_across_reload_and_rebuild(tmp_path, monkeypatch):

@@ -13,6 +13,14 @@ Run `python .agents/scripts/verify.py --scope repo --tier precommit` for the
 broad local handoff gate. Do not duplicate its pytest lists in documentation;
 update the driver when executable coverage changes.
 
+Application verification excludes `tests/standalone_scripts` from broad local
+precommit and CI runs because those tests import the opt-in
+`src/Standalone_Scripts` utilities. Run standalone-script tests separately only
+when the user explicitly scopes that directory or approves access, following
+its scoped `AGENTS.md`. Routine application tests must not collect that suite.
+Default Ruff discovery also excludes these opt-in utilities and their tests;
+Stats remains part of the active application lint baseline.
+
 ## Qt Execution Boundary
 
 PySide6/pytest-qt tests are CI-only by default. Do not run them on local

@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
-import tempfile
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -13,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from Main_App.projects import (
+    project_manifest_transaction,
     infer_raw_participant_id,
     load_project_dataset_index,
     normalize_preprocessing_settings,
@@ -329,18 +328,12 @@ def _invalidate_outputs(tools: dict, state: dict, now: str) -> None:
 
 def _publish_manifest(root: Path, content: bytes, payload: bytes) -> None:
     path = root / "project.json"
-    descriptor, temporary_name = tempfile.mkstemp(prefix=".project.json.dataset-exclusions-", suffix=".tmp", dir=root)
-    temporary = Path(temporary_name)
-    try:
-        with os.fdopen(descriptor, "wb") as stream:
-            stream.write(payload)
+    with project_manifest_transaction(path) as transaction:
         if path.read_bytes() != content:
             raise DatasetExclusionsConflictError(
                 "The project changed before exclusions could be saved. Reload the manager."
             )
-        temporary.replace(path)
-    finally:
-        temporary.unlink(missing_ok=True)
+        transaction.write_bytes(payload)
 
 
 def save_dataset_exclusions(
@@ -359,76 +352,77 @@ def save_dataset_exclusions(
     root = Path(project_root).expanduser().resolve()
     if root != snapshot.project_root:
         raise ValueError("The exclusion snapshot belongs to another project.")
-    current, content, manifest, index = _load_context(root)
-    if current.revision != snapshot.revision:
-        raise DatasetExclusionsConflictError(
-            "The project or processed files changed. Reload the manager before saving."
-        )
-    rows = {row.identity: row for row in current.rows}
-    reasons = dict(reasons or {})
-    if (set(changes) | set(reasons)) - rows.keys():
-        raise ValueError("An exclusion change refers to an unknown dataset.")
-    for identity, scope in changes.items():
-        row = rows[identity]
-        if scope not in {"include", "skip_processing", "exclude_analysis", "both"}:
-            raise ValueError(f"Unknown dataset exclusion scope: {scope}.")
-        if scope == "both" and row.scope != "both":
-            raise ValueError("Choose one exclusion scope; new overlapping exclusions are not supported.")
-        if scope == "exclude_analysis" and not row.has_processed_data and row.scope not in {"exclude_analysis", "both"}:
-            raise ValueError(
-                f"{row.recording_id or row.participant_id} has no processed data to exclude from analysis."
+    with project_manifest_transaction(root / "project.json"):
+        current, content, manifest, index = _load_context(root)
+        if current.revision != snapshot.revision:
+            raise DatasetExclusionsConflictError(
+                "The project or processed files changed. Reload the manager before saving."
             )
-    tools = manifest.setdefault("tools", {})
-    state = tools.get("frequency_domain_qc", {})
-    manager = tools.setdefault("dataset_exclusions", {})
-    stored_reasons = manager.setdefault("reasons", {})
-    history = _entries(manager, "history")
-    preprocessing = manifest.get("preprocessing", {})
-    now = datetime.now(UTC).replace(microsecond=0).isoformat()
-    changed_scope = False
-    events = []
-    for identity in sorted(set(changes) | set(reasons)):
-        row = rows[identity]
-        scope = changes.get(identity, row.scope)
-        scope_changed = False
-        removed_manual = []
-        if identity in changes and scope != row.scope:
-            processing_changed = _set_processing_scope(preprocessing, row, scope in {"skip_processing", "both"})
-            if processing_changed:
-                manifest["preprocessing"] = preprocessing
-            analysis_changed, removed_manual = _set_analysis_scope(
-                state, row, scope in {"exclude_analysis", "both"}, now, index
+        rows = {row.identity: row for row in current.rows}
+        reasons = dict(reasons or {})
+        if (set(changes) | set(reasons)) - rows.keys():
+            raise ValueError("An exclusion change refers to an unknown dataset.")
+        for identity, scope in changes.items():
+            row = rows[identity]
+            if scope not in {"include", "skip_processing", "exclude_analysis", "both"}:
+                raise ValueError(f"Unknown dataset exclusion scope: {scope}.")
+            if scope == "both" and row.scope != "both":
+                raise ValueError("Choose one exclusion scope; new overlapping exclusions are not supported.")
+            if scope == "exclude_analysis" and not row.has_processed_data and row.scope not in {"exclude_analysis", "both"}:
+                raise ValueError(
+                    f"{row.recording_id or row.participant_id} has no processed data to exclude from analysis."
+                )
+        tools = manifest.setdefault("tools", {})
+        state = tools.get("frequency_domain_qc", {})
+        manager = tools.setdefault("dataset_exclusions", {})
+        stored_reasons = manager.setdefault("reasons", {})
+        history = _entries(manager, "history")
+        preprocessing = manifest.get("preprocessing", {})
+        now = datetime.now(UTC).replace(microsecond=0).isoformat()
+        changed_scope = False
+        events = []
+        for identity in sorted(set(changes) | set(reasons)):
+            row = rows[identity]
+            scope = changes.get(identity, row.scope)
+            scope_changed = False
+            removed_manual = []
+            if identity in changes and scope != row.scope:
+                processing_changed = _set_processing_scope(preprocessing, row, scope in {"skip_processing", "both"})
+                if processing_changed:
+                    manifest["preprocessing"] = preprocessing
+                analysis_changed, removed_manual = _set_analysis_scope(
+                    state, row, scope in {"exclude_analysis", "both"}, now, index
+                )
+                scope_changed = processing_changed or analysis_changed
+            reason = str(reasons.get(identity, row.reason)).strip()
+            reason_changed = identity in reasons and reason != row.reason
+            if not scope_changed and not reason_changed:
+                continue
+            changed_scope |= scope_changed
+            if identity in reasons:
+                stored_reasons[identity] = reason
+            events.append(
+                {
+                    "identity": identity,
+                    "participant_id": row.participant_id,
+                    "recording_id": row.recording_id,
+                    "previous_scope": row.scope,
+                    "scope": scope,
+                    "reason": reason,
+                    "changed_at": now,
+                    "removed_manual_analysis_exclusions": removed_manual,
+                }
             )
-            scope_changed = processing_changed or analysis_changed
-        reason = str(reasons.get(identity, row.reason)).strip()
-        reason_changed = identity in reasons and reason != row.reason
-        if not scope_changed and not reason_changed:
-            continue
-        changed_scope |= scope_changed
-        if identity in reasons:
-            stored_reasons[identity] = reason
-        events.append(
-            {
-                "identity": identity,
-                "participant_id": row.participant_id,
-                "recording_id": row.recording_id,
-                "previous_scope": row.scope,
-                "scope": scope,
-                "reason": reason,
-                "changed_at": now,
-                "removed_manual_analysis_exclusions": removed_manual,
-            }
-        )
-    if not events:
-        return current
-    manager.update(schema_version=1, history=[*history, *events])
-    if changed_scope:
-        tools["frequency_domain_qc"] = state
-        _invalidate_outputs(tools, state, now)
-    payload = (json.dumps(manifest, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
-    saved_snapshot = _snapshot_from_manifest(root, payload, manifest, index)
-    _publish_manifest(root, content, payload)
-    return saved_snapshot
+        if not events:
+            return current
+        manager.update(schema_version=1, history=[*history, *events])
+        if changed_scope:
+            tools["frequency_domain_qc"] = state
+            _invalidate_outputs(tools, state, now)
+        payload = (json.dumps(manifest, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
+        saved_snapshot = _snapshot_from_manifest(root, payload, manifest, index)
+        _publish_manifest(root, content, payload)
+        return saved_snapshot
 
 
 __all__ = [

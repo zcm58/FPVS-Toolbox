@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from Main_App.projects import manifest_store
 from Main_App.projects.project import Project
 
 
@@ -108,15 +109,15 @@ def test_failed_save_does_not_rebase_or_adopt_geometry(tmp_path, monkeypatch, ad
     project.name = "An unsaved edit"
     path = project.project_root / "project.json"
     before = path.read_bytes()
-    original_write = Path.write_text
+    original_replace = manifest_store.os.replace
 
-    def deny_manifest_write(target, *args, **kwargs):
+    def deny_manifest_write(source, target):
         if target == path:
             raise PermissionError("manifest write denied")
-        return original_write(target, *args, **kwargs)
+        return original_replace(source, target)
 
     with monkeypatch.context() as patch:
-        patch.setattr(Path, "write_text", deny_manifest_write)
+        patch.setattr(manifest_store.os, "replace", deny_manifest_write)
         with pytest.raises(PermissionError, match="manifest write denied"):
             project.save()
 

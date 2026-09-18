@@ -455,6 +455,15 @@ def load_project_recording_context(
         raise
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise RecordingConfigurationError(f"Unable to read project recording metadata from {manifest_path}.") from exc
+    return project_recording_context_from_manifest(root, payload)
+
+
+def project_recording_context_from_manifest(
+    project_root: str | Path, payload: Mapping[str, Any],
+) -> ProjectRecordingContext:
+    """Normalize one captured manifest without rereading disk or creating paths."""
+
+    root = Path(project_root).resolve(strict=False)
     if not isinstance(payload, Mapping):
         raise RecordingConfigurationError("Project manifest must contain a JSON object.")
 
@@ -560,4 +569,5 @@ __all__ = [
     "normalize_project_recordings",
     "normalize_project_sessions",
     "project_recording_context",
+    "project_recording_context_from_manifest",
 ]

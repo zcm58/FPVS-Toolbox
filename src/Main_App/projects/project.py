@@ -9,6 +9,8 @@ from collections.abc import Collection
 from pathlib import Path
 from typing import Any, Dict, Mapping
 
+from .manifest_store import project_manifest_transaction
+
 from .experimental_qc_settings import (
     ExperimentalQcSettings,
     normalize_experimental_qc_settings,
@@ -219,23 +221,8 @@ def _recordings_lock_fingerprint(
 
 
 def _write_manifest_if_changed(manifest_path: Path, data: Dict[str, Any]) -> bool:
-    new_compact = _stable_dump(data)
-    if manifest_path.exists():
-        try:
-            current_dict = json.loads(manifest_path.read_text(encoding="utf-8"))
-            if not isinstance(current_dict, dict):
-                current_dict = {}
-        except Exception:
-            current_dict = {}
-        current_compact = _stable_dump(current_dict)
-        if current_compact == new_compact:
-            return False
-
-    payload = json.dumps(data, indent=2, ensure_ascii=False)
-    tmp_path = manifest_path.with_name(f"{manifest_path.name}.tmp")
-    tmp_path.write_text(payload, encoding="utf-8")
-    tmp_path.replace(manifest_path)
-    return True
+    with project_manifest_transaction(manifest_path) as transaction:
+        return transaction.write(data)
 
 
 def _preserve_disk_tools_metadata(
@@ -642,22 +629,33 @@ class Project:
         # Keep the merged view as the in-memory manifest so subsequent saves retain defaults
         proj.manifest = merged
         if proj._legacy_inversion is not None:
-            raw_manifest["preprocessing"] = _preprocessing_manifest_payload(
-                proj.preprocessing,
-                repeated_session=bool(
-                    raw_manifest.get("sessions")
-                    or raw_manifest.get("recording_sources")
-                    or raw_manifest.get("recordings")
-                ),
-                include_removed_electrode_choice=(
-                    proj._removed_electrode_detection_choice_was_persisted
-                ),
-            )
-            _store_processing_fingerprint_v9_compatibility(
-                raw_manifest,
-                proj.processing_fingerprint_v9_compatibility,
-            )
-            _write_manifest_if_changed(resolved_manifest_path, raw_manifest)
+            with project_manifest_transaction(resolved_manifest_path):
+                # Migration patches the latest manifest, including metadata
+                # published after the original load snapshot was captured.
+                if resolved_manifest_path.exists():
+                    raw_manifest = json.loads(resolved_manifest_path.read_text(encoding="utf-8"))
+                    if not isinstance(raw_manifest, dict):
+                        raise ValueError("Project manifest must contain a JSON object.")
+                compatibility = _processing_fingerprint_v9_compatibility(raw_manifest)
+                current_preprocessing = normalize_preprocessing_settings(
+                    raw_manifest.get("preprocessing", {}), allow_legacy_inversion=True,
+                )
+                raw_manifest["preprocessing"] = _preprocessing_manifest_payload(
+                    current_preprocessing,
+                    repeated_session=bool(
+                        raw_manifest.get("sessions")
+                        or raw_manifest.get("recording_sources")
+                        or raw_manifest.get("recordings")
+                    ),
+                    include_removed_electrode_choice=removed_electrode_detection_choice_was_saved(
+                        raw_manifest.get("preprocessing", {})
+                    ),
+                )
+                _store_processing_fingerprint_v9_compatibility(
+                    raw_manifest,
+                    compatibility,
+                )
+                _write_manifest_if_changed(resolved_manifest_path, raw_manifest)
         return proj
 
     def _reconciled_electrode_geometry_settings(
@@ -1016,28 +1014,25 @@ class Project:
         # Use one validated, late disk snapshot for geometry, worker metadata,
         # and change detection. Unreadable or invalid manifests must not be
         # overwritten using stale geometry or guessed defaults.
-        geometry, _disk_geometry, current = self._reconciled_electrode_geometry_settings(
-            normalized_pp
-        )
-        normalized_pp.update(geometry)
-        data["preprocessing"].update(geometry)
-        data = _preserve_disk_tools_metadata(
-            current,
-            data,
-            updated_tool_namespaces=updated_tool_namespaces,
-        )
-
-        if current is None or _stable_dump(current) != _stable_dump(data):
-            # Pretty write for human readability.
-            manifest_path.write_text(
-                json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8"
+        with project_manifest_transaction(manifest_path):
+            geometry, _disk_geometry, current = self._reconciled_electrode_geometry_settings(
+                normalized_pp
+            )
+            normalized_pp.update(geometry)
+            data["preprocessing"].update(geometry)
+            data = _preserve_disk_tools_metadata(
+                current,
+                data,
+                updated_tool_namespaces=updated_tool_namespaces,
             )
 
-        # Rebase only after a successful write or verified no-op. A failed save
-        # must leave local geometry edits available for a later retry.
-        self.manifest = data
-        self.preprocessing = normalized_pp
-        self._electrode_geometry_baseline = geometry
+            _write_manifest_if_changed(manifest_path, data)
+
+            # Rebase only after a successful write or verified no-op. A failed save
+            # must leave local geometry edits available for a later retry.
+            self.manifest = data
+            self.preprocessing = normalized_pp
+            self._electrode_geometry_baseline = geometry
 
     # ------------------------------------------------------------------
     def update_preprocessing(self, values: Mapping[str, Any]) -> Dict[str, Any]:

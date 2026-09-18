@@ -18,6 +18,8 @@ import stat
 import sys
 import threading
 
+from Main_App.projects import project_manifest_transaction
+
 from Main_App.processing import toolbox_cache_paths as paths
 
 logger = logging.getLogger(__name__)
@@ -246,21 +248,22 @@ def _remove_empty_cache_dirs(target: CacheTarget, removed: list[Path]) -> None:
 
 def _clear_saved_harmonics(state: _ManifestState) -> None:
     paths.checked_path(state.path, state.path.parent)
-    data, current = _manifest(state.path.parent)
-    if current != state:
-        raise ToolboxCacheChangedError(f"Project changed before cache clearing: {state.path}")
-    temporary = paths.checked_path(state.path.with_name("project.json.tmp"), state.path.parent)
-    if temporary.exists():
-        raise ToolboxCacheError(f"A project save is already pending: {state.path}")
-    # The existing public helper normalizes nonfinite values across its JSON
-    # payload. Preserve such a manifest byte-for-byte instead of changing any
-    # unrelated scientific metadata as a side effect of cache clearing.
-    json.dumps(data, allow_nan=False)
-    from Tools.Stats.data.group_harmonic_cache import clear_cached_group_harmonic_selections
-    clear_cached_group_harmonic_selections(state.path.parent)
-    _data, after = _manifest(state.path.parent)
-    if after.cache_entries:
-        raise ToolboxCacheError(f"Saved harmonic cache was not cleared: {state.path}")
+    with project_manifest_transaction(state.path):
+        data, current = _manifest(state.path.parent)
+        if current != state:
+            raise ToolboxCacheChangedError(f"Project changed before cache clearing: {state.path}")
+        temporary = paths.checked_path(state.path.with_name("project.json.tmp"), state.path.parent)
+        if temporary.exists():
+            raise ToolboxCacheError(f"A project save is already pending: {state.path}")
+        # The existing public helper normalizes nonfinite values across its JSON
+        # payload. Preserve such a manifest byte-for-byte instead of changing any
+        # unrelated scientific metadata as a side effect of cache clearing.
+        json.dumps(data, allow_nan=False)
+        from Tools.Stats.data.group_harmonic_cache import clear_cached_group_harmonic_selections
+        clear_cached_group_harmonic_selections(state.path.parent)
+        _data, after = _manifest(state.path.parent)
+        if after.cache_entries:
+            raise ToolboxCacheError(f"Saved harmonic cache was not cleared: {state.path}")
 
 
 def clear_toolbox_caches(inventory: ToolboxCacheInventory, *,

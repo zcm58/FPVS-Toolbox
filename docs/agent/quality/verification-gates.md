@@ -76,6 +76,18 @@ normal change loop; the precommit tier is the broad local handoff gate.
 
 ## CI Change Detection
 
+The Python workflow lints active Main App/tool code (including Stats), tests,
+and agent scripts. Its Windows backend job runs the project-I/O and
+`backend-hardening` focused scopes without Qt execution. The Linux job runs
+the processing bridge recovery/restart smoke in a separate pytest process
+before the full CI Qt suite. Run `python .agents/scripts/verify.py --scope
+backend-hardening --tier focused` for targeted persistence/recovery/import and
+spectral-read and source-model cache regressions; it supplements the broader
+domain scopes. Repo-local temporary test directories use short node hashes to
+leave Windows path-length headroom for real export and cache filenames.
+An explicit pytest `--basetemp` is honored when a checkout still leaves too
+little headroom; select a fresh short temporary directory for that run.
+
 CI must give change-sensitive audits a committed comparison point with
 `agent_audit.py --base-ref <revision>` or `FPVS_AGENT_AUDIT_BASE_REF`. A plain
 clean-worktree audit compares against `HEAD` and cannot detect files changed

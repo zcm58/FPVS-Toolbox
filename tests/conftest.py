@@ -26,7 +26,7 @@ from tests.qt_test_registry import (
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = ROOT / "src"
-_TEST_TMP_ROOT = ROOT / "test_tmp" / f"pytest-{os.getpid()}-{uuid.uuid4().hex[:10]}"
+_TEST_TMP_ROOT = ROOT / "test_tmp" / uuid.uuid4().hex[:12]
 
 os.environ.setdefault("FPVS_TEST_MODE", "1")
 
@@ -279,13 +279,12 @@ def _nonblocking_qmessagebox(monkeypatch):
 
 
 def _safe_test_name(nodeid: str) -> str:
-    readable = "".join(ch if ch.isalnum() else "_" for ch in nodeid)[-80:]
-    digest = hashlib.sha256(nodeid.encode("utf-8")).hexdigest()[:12]
-    return f"{readable}-{digest}"
+    # Leave room for real export filenames below a Windows checkout path.
+    return hashlib.sha256(nodeid.encode("utf-8")).hexdigest()[:12]
 
 
 @pytest.fixture
-def tmp_path(request):
+def tmp_path(request, tmp_path_factory):
     """
     Provide a repo-local tmp_path that avoids locked Windows pytest temp roots.
 
@@ -294,8 +293,11 @@ def tmp_path(request):
     directly under an ignored repo-local folder avoids that external failure.
     """
 
-    _TEST_TMP_ROOT.mkdir(parents=True, exist_ok=True)
-    path = _TEST_TMP_ROOT / _safe_test_name(request.node.nodeid)
+    # Honor an explicit short base for deep Windows export/cache fixtures.
+    # Otherwise retain the repo-local default that avoids external ACL issues.
+    base = tmp_path_factory.getbasetemp() if request.config.getoption("basetemp") else _TEST_TMP_ROOT
+    base.mkdir(parents=True, exist_ok=True)
+    path = base / _safe_test_name(request.node.nodeid)
     if path.exists():
         shutil.rmtree(path, ignore_errors=True)
     path.mkdir(parents=True, exist_ok=False)

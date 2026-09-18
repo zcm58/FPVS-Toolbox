@@ -29,6 +29,7 @@ from Main_App.processing.frequency_domain_qc import (
 )
 from Main_App.processing.processing_ledger import load_ledger
 from Main_App.projects import (
+    project_manifest_transaction,
     FrequencyProtocolError,
     ProjectDatasetIndex,
     load_project_dataset_index,
@@ -996,25 +997,8 @@ def _set_metadata_in_manifest(
 
 
 def _write_manifest_atomic(project_root: Path, manifest: Mapping[str, object]) -> None:
-    manifest_path = project_root / "project.json"
-    payload = json.dumps(dict(manifest), indent=2, ensure_ascii=False)
-    try:
-        current = manifest_path.read_text(encoding="utf-8")
-    except OSError:
-        current = ""
-    if current == payload:
-        return
-    temporary = manifest_path.with_name(
-        f".{manifest_path.name}.full-fft-provenance.tmp"
-    )
-    try:
-        temporary.write_text(payload, encoding="utf-8")
-        temporary.replace(manifest_path)
-    finally:
-        try:
-            temporary.unlink(missing_ok=True)
-        except OSError:
-            pass
+    with project_manifest_transaction(project_root / "project.json") as transaction:
+        transaction.write(dict(manifest))
 
 
 def _record_from_metadata(
@@ -1225,10 +1209,11 @@ def write_project_full_fft_provenance(
             "geometry": snapshot.geometry_fingerprint,
         },
     }
-    manifest = _read_manifest(root)
-    _set_metadata_in_manifest(manifest, metadata)
-    _write_manifest_atomic(root, manifest)
-    return _record_from_metadata(root, metadata)
+    with project_manifest_transaction(root / "project.json"):
+        manifest = _read_manifest(root)
+        _set_metadata_in_manifest(manifest, metadata)
+        _write_manifest_atomic(root, manifest)
+        return _record_from_metadata(root, metadata)
 
 
 def _saved_full_fft_provenance(root: Path) -> FullFftProvenance:
@@ -1376,16 +1361,17 @@ def mark_project_full_fft_provenance_stale(
     """Explicitly stale an existing record without creating a missing one."""
 
     root = Path(project_root).expanduser().resolve(strict=False)
-    manifest = _read_manifest(root)
-    metadata = _metadata_from_manifest(manifest)
-    if metadata is None:
-        return
-    updated = dict(metadata)
-    updated["status"] = "stale"
-    updated["stale_reason"] = str(reason).strip() or "FullFFT inputs changed"
-    updated["stale_at"] = datetime.now(UTC).isoformat()
-    _set_metadata_in_manifest(manifest, updated)
-    _write_manifest_atomic(root, manifest)
+    with project_manifest_transaction(root / "project.json"):
+        manifest = _read_manifest(root)
+        metadata = _metadata_from_manifest(manifest)
+        if metadata is None:
+            return
+        updated = dict(metadata)
+        updated["status"] = "stale"
+        updated["stale_reason"] = str(reason).strip() or "FullFFT inputs changed"
+        updated["stale_at"] = datetime.now(UTC).isoformat()
+        _set_metadata_in_manifest(manifest, updated)
+        _write_manifest_atomic(root, manifest)
 
 
 __all__ = [

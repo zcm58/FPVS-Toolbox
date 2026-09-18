@@ -11,6 +11,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -43,6 +44,8 @@ class _SpectralPayload:
     electrodes: dict[str, np.ndarray]
     values: dict[str, np.ndarray]
     metadata: dict
+    workbook_signature: object
+    companion_signature: object
 
 
 def _json_default(value):
@@ -217,6 +220,23 @@ def _companion_location(workbook: Path, descriptor: Mapping) -> tuple:
     return identity, path, workbook_signature, signature, key
 
 
+def _dense_shape(container: zipfile.ZipFile, key: str) -> tuple[int, ...]:
+    """Validate a dense member's header and byte length without allocating it."""
+    member = container.getinfo(f"{key}.npy")
+    with container.open(member) as stream:
+        version = np.lib.format.read_magic(stream)
+        if version == (1, 0):
+            shape, _, dtype = np.lib.format.read_array_header_1_0(stream)
+        elif version == (2, 0):
+            shape, _, dtype = np.lib.format.read_array_header_2_0(stream)
+        else:
+            raise SpectralDataError("Unsupported spectral array format version.")
+        if (dtype != np.dtype(np.float64) or len(shape) != 2
+                or member.file_size != stream.tell() + math.prod(shape) * dtype.itemsize):
+            raise SpectralDataError("Invalid spectral array dimensions, type, or byte length.")
+    return shape
+
+
 def _companion_payload(workbook: Path, descriptor: Mapping) -> _SpectralPayload:
     identity, path, workbook_signature, signature, key = _companion_location(workbook, descriptor)
     cache = _xlsx._ACTIVE_XLSX_READ_CACHE.get()
@@ -228,41 +248,39 @@ def _companion_payload(workbook: Path, descriptor: Mapping) -> _SpectralPayload:
             if hashlib.file_digest(stream, "sha256").hexdigest() != identity["sha256"]:
                 raise SpectralDataError(f"Spectral companion checksum does not match: {path.name}")
             stream.seek(0)
-            with np.load(stream, allow_pickle=False) as archive:
+            with np.load(stream, allow_pickle=False) as archive, zipfile.ZipFile(stream) as container:
                 manifest = json.loads(str(archive["metadata_json"].item()))
                 if manifest.get("version") != SPECTRAL_COMPANION_VERSION or manifest.get("sheets") != identity["sheets"]:
                     raise SpectralDataError("Spectral archive disagrees with its workbook declaration.")
-                columns, electrodes, values = {}, {}, {}
+                columns, electrodes = {}, {}
                 for index, name in enumerate(identity["sheets"]):
                     labels = archive[f"sheet{index}_columns"]
                     rows = archive[f"sheet{index}_electrodes"]
-                    data = archive[f"sheet{index}_values"]
+                    shape = _dense_shape(container, f"sheet{index}_values")
                     if (labels.dtype.kind != "U" or rows.dtype.kind != "U" or labels.ndim != 1 or rows.ndim != 1
-                            or data.dtype != np.dtype(np.float64) or data.ndim != 2
                             or len(labels) < 2 or labels[0] != "Electrode"
-                            or data.shape != (len(rows), len(labels) - 1)
+                            or shape != (len(rows), len(labels) - 1)
                             or len(set(labels)) != len(labels) or len(set(rows)) != len(rows)):
                         raise SpectralDataError(f"Invalid spectral array dimensions or types for {name}.")
-                    columns[name], electrodes[name], values[name] = tuple(labels.tolist()), rows, data
+                    columns[name], electrodes[name] = tuple(labels.tolist()), rows
                     rows.setflags(write=False)
-                    data.setflags(write=False)
                 metadata = manifest.get("metadata")
                 if not isinstance(metadata, dict):
                     raise SpectralDataError("Invalid spectral metadata.")
                 if manifest.get("has_exact_fullfft_frequencies"):
                     grid = archive["fullfft_frequencies_hz"]
-                    if grid.dtype != np.dtype(np.float64) or grid.shape != (values[SPECTRAL_SHEET_NAMES[0]].shape[1],) or not np.isfinite(grid).all():
+                    if grid.dtype != np.dtype(np.float64) or grid.shape != (len(columns[SPECTRAL_SHEET_NAMES[0]]) - 1,) or not np.isfinite(grid).all():
                         raise SpectralDataError("Invalid exact FullFFT frequency grid.")
                     # Keep DataFrame attrs comparable by pandas concatenation;
                     # the authoritative NPZ grid remains exact float64 data.
                     metadata["frequencies_hz"] = grid.tolist()
-    except (OSError, ValueError, KeyError, TypeError, zipfile.BadZipFile) as exc:
+    except (OSError, ValueError, KeyError, TypeError, EOFError, zipfile.BadZipFile) as exc:
         if isinstance(exc, SpectralDataError):
             raise
         raise SpectralDataError(f"Cannot read spectral companion {path.name}: {exc}") from exc
     if _xlsx._workbook_signature_or_none(path) != signature or _xlsx._workbook_signature_or_none(workbook) != workbook_signature:
         raise SpectralDataError("Spectral data changed while it was being read; retry the operation.")
-    payload = _SpectralPayload(identity, columns, electrodes, values, metadata)
+    payload = _SpectralPayload(identity, columns, electrodes, {}, metadata, workbook_signature, signature)
     if cache is not None:
         # Repeated grids share immutable header tuples; keep no dense arrays in
         # the longer-lived verification cache after the four-payload LRU evicts.
@@ -286,6 +304,35 @@ def _companion_payload(workbook: Path, descriptor: Mapping) -> _SpectralPayload:
         while len(cache.spectral_payloads) > _MAX_CACHED_COMPANIONS:
             cache.spectral_payloads.popitem(last=False)
     return payload
+
+
+def _sheet_values(workbook: Path, payload: _SpectralPayload, sheet_name: str) -> np.ndarray:
+    """Load only the requested, already schema-validated dense sheet."""
+    path = workbook.parent.resolve() / payload.descriptor["path"]
+
+    def check_signatures() -> None:
+        if (_xlsx._workbook_signature_or_none(path) != payload.companion_signature
+                or _xlsx._workbook_signature_or_none(workbook) != payload.workbook_signature):
+            raise SpectralDataError("Spectral data changed while it was being read; retry the operation.")
+
+    check_signatures()
+    if sheet_name not in payload.values:
+        index = payload.descriptor["sheets"].index(sheet_name)
+        try:
+            with path.open("rb") as stream, np.load(stream, allow_pickle=False) as archive:
+                data = archive[f"sheet{index}_values"]
+            if data.dtype != np.dtype(np.float64) or data.shape != (
+                len(payload.electrodes[sheet_name]), len(payload.columns[sheet_name]) - 1,
+            ):
+                raise SpectralDataError(f"Invalid spectral array dimensions or types for {sheet_name}.")
+            check_signatures()
+        except (OSError, ValueError, KeyError, TypeError, EOFError, zipfile.BadZipFile) as exc:
+            if isinstance(exc, SpectralDataError):
+                raise
+            raise SpectralDataError(f"Cannot read spectral values in {path.name}: {exc}") from exc
+        data.setflags(write=False)
+        payload.values[sheet_name] = data
+    return payload.values[sheet_name]
 
 
 def _verified_headers(workbook: Path, descriptor: Mapping) -> dict[str, tuple[str, ...]]:
@@ -360,7 +407,9 @@ def read_spectral_sheet_selected_columns(
     mask = slice(None) if included_electrodes_upper is None else np.asarray([
         str(label).upper().strip() in included_electrodes_upper for label in rows
     ])
-    data = {column: (rows[mask].copy() if column == "Electrode" else payload.values[sheet_name][mask, positions[column] - 1].copy())
+    needs_values = any(column != "Electrode" and column in positions for column in requested)
+    values = _sheet_values(workbook, payload, sheet_name) if needs_values else None
+    data = {column: (rows[mask].copy() if column == "Electrode" else values[mask, positions[column] - 1].copy())
             for column in requested if column in positions}
     frame = pd.DataFrame(data)
     frame.attrs["spectral_metadata"] = deepcopy(payload.metadata)

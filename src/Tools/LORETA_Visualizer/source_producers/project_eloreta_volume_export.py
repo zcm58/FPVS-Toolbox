@@ -56,6 +56,11 @@ from Tools.LORETA_Visualizer.source_producers.source_validation_report import (
     write_project_source_validation_report,
 )
 
+from Tools.LORETA_Visualizer.source_producers.source_model_cache import (
+    cached_source_model_resources,
+    source_model_signature,
+)
+
 logger = logging.getLogger(__name__)
 ProgressCallback = Callable[[str], None]
 
@@ -370,51 +375,70 @@ def build_mne_fsaverage_eloreta_volume_source_psd_model(
 
     info = _biosemi64_info(mne, resolved_channels, sfreq=resolved_sfreq)
     info = _with_eeg_average_reference_projection(mne, info)
-    try:
-        src = mne.setup_volume_source_space(
-            FSAVERAGE_SUBJECT,
-            pos=float(volume_pos_mm),
-            bem=bem_path,
-            mindist=float(mindist_mm),
-            subjects_dir=subjects_dir,
-            add_interpolator=False,
-            verbose=False,
-        )
-        forward = mne.make_forward_solution(
-            info,
-            trans=trans_path,
-            src=src,
-            bem=bem_path,
-            eeg=True,
-            meg=False,
-            mindist=float(mindist_mm),
-            n_jobs=1,
-            verbose=False,
-        )
-        noise_cov = mne.make_ad_hoc_cov(info, verbose=False)
-        inverse_operator = make_inverse_operator(
-            info,
-            forward,
-            noise_cov,
-            loose=float(loose_orientation),
-            depth=None,
-            fixed=False,
-            verbose=False,
-        )
-        inverse_prepared = bool(prepare_inverse)
-        if inverse_prepared:
-            inverse_operator = prepare_inverse_operator(
-                inverse_operator,
-                nave=1,
-                lambda2=resolved_lambda2,
-                method="eLORETA",
-                method_params=resolved_method_params or None,
-                copy=True,
+    inverse_prepared = bool(prepare_inverse)
+    preparation_signature = source_model_signature(
+        method="eLORETA-volume",
+        parameters={"volume_pos_mm": float(volume_pos_mm), "mindist_mm": float(mindist_mm),
+                    "loose": float(loose_orientation), "depth": None, "fixed": False,
+                    "prepare_inverse": inverse_prepared, "lambda2": resolved_lambda2,
+                    "method_params": resolved_method_params, "nave": 1,
+                    "noise_covariance": "mne_ad_hoc_diagonal_eeg"},
+        info=info,
+        template_paths=(bem_path, trans_path, subject_dir / "mri" / "T1.mgz"),
+        mne_version=str(mne.__version__),
+    )
+
+    def build_resources() -> tuple[Any, Any, Any, Any]:
+        try:
+            src = mne.setup_volume_source_space(
+                FSAVERAGE_SUBJECT,
+                pos=float(volume_pos_mm),
+                bem=bem_path,
+                mindist=float(mindist_mm),
+                subjects_dir=subjects_dir,
+                add_interpolator=False,
                 verbose=False,
             )
-        adjacency_matrix = mne.spatial_src_adjacency(src, verbose=False)
-    except (OSError, RuntimeError, ValueError) as exc:
-        raise ProjectELORETAVolumeExportError(f"Unable to build MNE/fsaverage eLORETA volume model: {exc}") from exc
+            forward = mne.make_forward_solution(
+                info,
+                trans=trans_path,
+                src=src,
+                bem=bem_path,
+                eeg=True,
+                meg=False,
+                mindist=float(mindist_mm),
+                n_jobs=1,
+                verbose=False,
+            )
+            noise_cov = mne.make_ad_hoc_cov(info, verbose=False)
+            inverse_operator = make_inverse_operator(
+                info,
+                forward,
+                noise_cov,
+                loose=float(loose_orientation),
+                depth=None,
+                fixed=False,
+                verbose=False,
+            )
+            if inverse_prepared:
+                inverse_operator = prepare_inverse_operator(
+                    inverse_operator,
+                    nave=1,
+                    lambda2=resolved_lambda2,
+                    method="eLORETA",
+                    method_params=resolved_method_params or None,
+                    copy=True,
+                    verbose=False,
+                )
+            adjacency_matrix = mne.spatial_src_adjacency(src, verbose=False)
+        except (OSError, RuntimeError, ValueError) as exc:
+            raise ProjectELORETAVolumeExportError(f"Unable to build MNE/fsaverage eLORETA volume model: {exc}") from exc
+
+        return inverse_operator, forward, src, adjacency_matrix
+
+    inverse_operator, forward, src, adjacency_matrix = cached_source_model_resources(
+        preparation_signature, build_resources,
+    )
 
     leadfield = np.asarray(forward["sol"]["data"], dtype=float)
     row_names = tuple(str(name) for name in forward["sol"]["row_names"])
@@ -445,6 +469,7 @@ def build_mne_fsaverage_eloreta_volume_source_psd_model(
         label=f"MNE fsaverage {volume_pos_mm:g} mm BioSemi64 eLORETA volume",
         metadata={
             "forward_model_status": "beta MNE/fsaverage template EEG eLORETA volume inverse model",
+            "model_preparation_signature": preparation_signature,
             "inverse_backend": "mne_python",
             "mne_inverse_method": "eLORETA",
             "orientation_constraint": "volume_free",

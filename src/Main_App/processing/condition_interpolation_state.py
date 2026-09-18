@@ -11,6 +11,8 @@ import os
 from pathlib import Path
 import tempfile
 
+from Main_App.projects import project_manifest_transaction
+
 STATE_KEY = "condition_electrode_interpolation"
 STATE_VERSION = "condition_electrode_interpolation_v1"
 REPAIR_DECISION = "interpolate_condition_electrode"
@@ -18,6 +20,10 @@ REPAIR_DECISION = "interpolate_condition_electrode"
 
 class ConditionInterpolationPendingError(RuntimeError):
     """Accepted EEG repairs have not produced validated current outputs yet."""
+
+
+class ConditionInterpolationStateConflictError(ConditionInterpolationPendingError):
+    """New accepted repair state superseded a caller's captured snapshot."""
 
 
 def request_fingerprint(requests: Mapping) -> str:
@@ -109,12 +115,21 @@ def load_condition_interpolation_state(project_root: str | Path) -> dict:
         return _state_from_manifest(json.load(stream))
 
 
-def save_condition_interpolation_state(project_root: str | Path, state: Mapping) -> None:
-    """Merge only this feature's state into the latest on-disk project."""
+def save_condition_interpolation_state(
+    project_root: str | Path, state: Mapping, *, expected_state: Mapping,
+) -> None:
+    """Save only when the captured repair state still matches the latest state."""
     path = Path(project_root) / "project.json"
-    manifest = json.loads(path.read_text(encoding="utf-8"))
-    manifest.setdefault("tools", {})[STATE_KEY] = deepcopy(dict(state))
-    atomic_json(path, manifest)
+    with project_manifest_transaction(path) as transaction:
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+        if request_fingerprint(_state_from_manifest(manifest)) != request_fingerprint(expected_state):
+            raise ConditionInterpolationStateConflictError(
+                "Condition interpolation requests or completion receipts changed while work was "
+                "in progress. Newer accepted repairs were preserved. Resume processing to retry."
+            )
+        manifest.setdefault("tools", {})[STATE_KEY] = deepcopy(dict(state))
+        payload = json.dumps(manifest, ensure_ascii=False, indent=2, allow_nan=False)
+        transaction.write_bytes(payload.encode("utf-8"))
 
 
 def _source_is_current(source: Mapping) -> bool:
@@ -143,28 +158,33 @@ def active_condition_interpolation_requests(project_root: str | Path, *, current
 
 def reconcile_condition_interpolation_sources(project_root: str | Path, *, current_sources: Mapping | None = None) -> tuple[dict, list[str]]:
     """Retire old-source approvals once in the parent runner before child writes."""
-    state = load_condition_interpolation_state(project_root)
-    warnings = []
-    for identity in list(state["requests"]):
-        source = state["source_identities"].get(identity, {})
-        if _source_matches_active_path(source, identity, current_sources):
-            continue
-        state["retired_requests"].append({
-            "processing_id": identity, "requests": state["requests"].pop(identity),
-            "source_identity": state["source_identities"].pop(identity, {}),
-            "reason": "source_recording_changed_or_unavailable", "retired_at": datetime.now(UTC).isoformat(),
-            "completion": state["completed"].pop(identity, None),
-        })
-        state["pending"].pop(identity, None)
-        warnings.append(f"{identity}: previous condition-electrode repair approvals were retired because the source recording changed. Review any new QC findings.")
-    if warnings:
-        save_condition_interpolation_state(project_root, state)
-        from Main_App.processing.frequency_domain_qc import mark_frequency_domain_outputs_stale
+    path = Path(project_root) / "project.json"
+    if not path.exists():
+        return {}, []
+    with project_manifest_transaction(path):
+        state = load_condition_interpolation_state(project_root)
+        baseline = deepcopy(state)
+        warnings = []
+        for identity in list(state["requests"]):
+            source = state["source_identities"].get(identity, {})
+            if _source_matches_active_path(source, identity, current_sources):
+                continue
+            state["retired_requests"].append({
+                "processing_id": identity, "requests": state["requests"].pop(identity),
+                "source_identity": state["source_identities"].pop(identity, {}),
+                "reason": "source_recording_changed_or_unavailable", "retired_at": datetime.now(UTC).isoformat(),
+                "completion": state["completed"].pop(identity, None),
+            })
+            state["pending"].pop(identity, None)
+            warnings.append(f"{identity}: previous condition-electrode repair approvals were retired because the source recording changed. Review any new QC findings.")
+        if warnings:
+            save_condition_interpolation_state(project_root, state, expected_state=baseline)
+            from Main_App.processing.frequency_domain_qc import mark_frequency_domain_outputs_stale
 
-        mark_frequency_domain_outputs_stale(
-            project_root, reason="Condition-repair approvals were retired after a source recording changed. Run Processing and review the new data.",
-        )
-    return state["requests"], warnings
+            mark_frequency_domain_outputs_stale(
+                project_root, reason="Condition-repair approvals were retired after a source recording changed. Run Processing and review the new data.",
+            )
+        return state["requests"], warnings
 
 
 def atomic_json(path: Path, value: object) -> None:

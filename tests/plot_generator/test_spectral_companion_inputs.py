@@ -88,33 +88,37 @@ def test_snapshot_reuses_payload_but_keeps_two_fresh_integrity_boundaries(
     workbook = tmp_path / "P01.xlsx"
     spectral, _frames = _spectral_workbook(workbook)
     condition = _add_condition_companion(workbook)
-    hashes, loads = Counter(), Counter()
-    original_digest, original_load = hashlib.file_digest, np.load
+    hashes, dense_spectral_reads = Counter(), Counter()
+    original_digest = hashlib.file_digest
+    original_getitem = np.lib.npyio.NpzFile.__getitem__
 
     def digest(stream, *args, **kwargs):
         hashes[Path(stream.name).name] += 1
         return original_digest(stream, *args, **kwargs)
 
-    def load(stream, *args, **kwargs):
-        loads[Path(stream.name).name] += 1
-        return original_load(stream, *args, **kwargs)
+    def read_array(archive, key):
+        if Path(archive.zip.filename).name == spectral["path"] and key.endswith("_values"):
+            dense_spectral_reads[key] += 1
+        return original_getitem(archive, key)
 
     with xlsx_read_cache_scope():
         spectral_companion_identity(workbook)
         condition_companion_identity(workbook)
         ambient = xlsx_selected_reader._ACTIVE_XLSX_READ_CACHE.get()
         monkeypatch.setattr(hashlib, "file_digest", digest)
-        monkeypatch.setattr(np, "load", load)
+        monkeypatch.setattr(np.lib.npyio.NpzFile, "__getitem__", read_array)
         snapshot = capture_stable_source_snapshot(workbook)
         assert xlsx_selected_reader._ACTIVE_XLSX_READ_CACHE.get() is ambient
         expected = Counter({spectral["path"]: 2, condition["path"]: 2})
-        assert hashes == loads == expected
+        assert hashes == expected
+        assert dense_spectral_reads == Counter({"sheet0_values": 1, "sheet1_values": 1})
         assert snapshot.identity.spectral_companion == spectral
         assert snapshot.identity.condition_companion == condition
         hashes.clear()
-        loads.clear()
+        dense_spectral_reads.clear()
         assert verify_source_snapshot_after_read(workbook, snapshot=snapshot) == snapshot.identity
-        assert hashes == loads == Counter({spectral["path"]: 1, condition["path"]: 1})
+        assert hashes == Counter({spectral["path"]: 1, condition["path"]: 1})
+        assert not dense_spectral_reads
         assert xlsx_selected_reader._ACTIVE_XLSX_READ_CACHE.get() is ambient
 
 

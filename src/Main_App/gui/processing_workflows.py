@@ -1703,6 +1703,10 @@ def on_processing_finished(host: Any, payload: dict | None = None) -> None:
         excluded_results = payload.get("excluded") or []
         cancelled = bool(payload.get("cancelled", False))
         interrupted_files = [str(file_path) for file_path in payload.get("interrupted_files") or []]
+        controller_error = str(payload.get("controller_error") or "")
+        if controller_error:
+            host._post_processing_failure_reason = controller_error
+            host.log(f"Processing controller failed: {controller_error}", level=logging.ERROR)
 
     try:
         debug_on = host.settings.debug_enabled()
@@ -1898,7 +1902,12 @@ def on_processing_finished(host: Any, payload: dict | None = None) -> None:
         for result in results
         if str(result.get("status") or "").casefold() in {"ok", "completed", "success"}
     ]
-    if not cancelled and successful_results and ledger_update_succeeded:
+    if (
+        not cancelled
+        and not host._post_processing_failure_reason
+        and successful_results
+        and ledger_update_succeeded
+    ):
         if not _review_interpolation_burden_before_post_processing(host):
             host._post_processing_failure_reason = (
                 "Interpolation-burden review was not completed. Post-processing did not run."
@@ -1911,7 +1920,7 @@ def on_processing_finished(host: Any, payload: dict | None = None) -> None:
         )
         if started_post_processing:
             return
-    elif not cancelled and successful_results:
+    elif not cancelled and successful_results and not ledger_update_succeeded:
         host.log(
             "Post-processing and source-map generation were skipped because the "
             "processing ledger could not be updated safely.",

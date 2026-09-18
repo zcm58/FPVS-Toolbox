@@ -285,3 +285,60 @@ def test_verified_header_budget_counts_shared_grids_once_and_limits_distinct_gri
         assert spectral_companion_identity(oversized) == descriptor
         assert not cache.spectral_verified_headers
         assert read_xlsx_sheet_header(oversized, sheet_name=FFT) == _frames()[FFT].columns.tolist()
+
+
+def test_metadata_and_selected_reads_load_only_requested_dense_sheet(tmp_path, monkeypatch):
+    path = tmp_path / "recording.xlsx"
+    descriptor = _write(path, metadata={"frequencies_hz": [0.0, 0.5, 1.0]})
+    loaded = []
+    archive_type = np.lib.npyio.NpzFile
+    original = archive_type.__getitem__
+
+    def track_values(archive, key):
+        if key.endswith("_values"):
+            loaded.append(key)
+        return original(archive, key)
+
+    monkeypatch.setattr(archive_type, "__getitem__", track_values)
+    with xlsx_read_cache_scope():
+        assert spectral_companion_identity(path) == descriptor
+        assert validate_spectral_companion(path, descriptor) == descriptor
+        assert read_xlsx_sheet_header(path, sheet_name=FFT) == _frames()[FFT].columns.tolist()
+        assert loaded == []
+        selected = read_xlsx_sheet_selected_columns(path, sheet_name=FFT, required_columns=["1.0000_Hz"])
+        np.testing.assert_array_equal(
+            selected.to_numpy().view(np.uint64),
+            _frames()[FFT][["1.0000_Hz"]].to_numpy().view(np.uint64),
+        )
+        assert loaded == ["sheet0_values"]
+        read_spectral_sheet(path, sheet_name=FFT)
+        assert loaded == ["sheet0_values"]
+        read_spectral_sheet(path, sheet_name=SNR)
+        assert loaded == ["sheet0_values", "sheet1_values"]
+
+
+@pytest.mark.parametrize("failure", ["wrong_shape", "wrong_dtype", "truncated"])
+def test_header_read_rejects_invalid_unrequested_dense_sheet(tmp_path, failure):
+    import io
+
+    path = tmp_path / "recording.xlsx"
+    descriptor = _write(path)
+    companion = path.parent / descriptor["path"]
+    with zipfile.ZipFile(companion) as source:
+        members = {name: source.read(name) for name in source.namelist()}
+    key = "sheet1_values.npy"
+    if failure == "truncated":
+        members[key] = members[key][:-8]
+    else:
+        buffer = io.BytesIO()
+        np.save(buffer, np.zeros((1, 2) if failure == "wrong_shape" else (3, 2),
+                                 dtype=np.float32 if failure == "wrong_dtype" else np.float64))
+        members[key] = buffer.getvalue()
+    with zipfile.ZipFile(companion, "w", compression=zipfile.ZIP_STORED) as target:
+        for name, data in members.items():
+            target.writestr(name, data)
+    descriptor["size_bytes"] = companion.stat().st_size
+    descriptor["sha256"] = hashlib.sha256(companion.read_bytes()).hexdigest()
+    spectral_manifest_frame(descriptor).to_excel(path, sheet_name=SPECTRAL_MANIFEST_SHEET, index=False)
+    with pytest.raises(SpectralDataError):
+        read_xlsx_sheet_header(path, sheet_name=FFT)

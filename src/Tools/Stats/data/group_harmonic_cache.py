@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from Main_App.projects import project_manifest_transaction
+
 from Main_App.projects.preprocessing_settings import (
     PREPROCESSING_CANONICAL_KEYS,
     normalize_preprocessing_settings,
@@ -22,7 +24,7 @@ from Main_App.projects.frequency_protocol import (
     FrequencyProtocolError,
     normalize_frequency_protocol,
 )
-from Tools.Stats.analysis.dv_policy_settings import (
+from Main_App.processing.harmonic_settings import (
     DVPolicySettings,
     HARMONIC_PROFILE_FIXED_ID,
     HARMONIC_PROFILE_LEGACY_ID,
@@ -438,46 +440,47 @@ def save_cached_group_harmonic_selection(
 ) -> str | None:
     """Persist a successful group-significant selection in project.json."""
 
-    if request is None:
+    if request is None or not request.manifest_path.is_file():
         return None
-    manifest = _read_manifest(request.manifest_path)
-    if manifest is None:
-        return None
-    cache = _cache_from_manifest(manifest)
-    entries = cache.get("entries")
-    if not isinstance(entries, dict):
-        entries = {}
-    saved_at = _now_utc_iso()
-    entry = {
-        "schema_version": CACHE_SCHEMA_VERSION,
-        "cache_key": request.cache_key,
-        "saved_at": saved_at,
-        "fingerprint": _json_safe(request.fingerprint),
-        "project_processing_signature": _json_safe(request.project_processing_signature),
-        "project_processing_signature_hash": request.project_processing_signature_hash,
-        "selected_harmonics_hz": _json_safe(selection_metadata.get("selected_harmonics_hz", [])),
-        "detected_significant_harmonics_hz": _json_safe(
-            selection_metadata.get("detected_significant_harmonics_hz", [])
-        ),
-        "included_harmonics_hz": _json_safe(selection_metadata.get("included_harmonics_hz", [])),
-        "selection_fingerprint": str(
-            selection_metadata.get("selection_fingerprint") or request.cache_key
-        ),
-        "highest_significant_harmonic_hz": _json_safe(
-            selection_metadata.get("highest_significant_harmonic_hz")
-        ),
-        "highest_significant_harmonic_index": _json_safe(
-            selection_metadata.get("highest_significant_harmonic_index")
-        ),
-        "selection_metadata": _json_safe(dict(selection_metadata)),
-    }
-    entries[request.cache_key] = entry
-    _prune_entries(entries)
-    cache["schema_version"] = CACHE_SCHEMA_VERSION
-    cache["entries"] = entries
-    _set_manifest_cache(manifest, cache)
-    _write_manifest_if_changed(request.manifest_path, manifest)
-    return saved_at
+    with project_manifest_transaction(request.manifest_path):
+        manifest = _read_manifest(request.manifest_path)
+        if manifest is None:
+            return None
+        cache = _cache_from_manifest(manifest)
+        entries = cache.get("entries")
+        if not isinstance(entries, dict):
+            entries = {}
+        saved_at = _now_utc_iso()
+        entry = {
+            "schema_version": CACHE_SCHEMA_VERSION,
+            "cache_key": request.cache_key,
+            "saved_at": saved_at,
+            "fingerprint": _json_safe(request.fingerprint),
+            "project_processing_signature": _json_safe(request.project_processing_signature),
+            "project_processing_signature_hash": request.project_processing_signature_hash,
+            "selected_harmonics_hz": _json_safe(selection_metadata.get("selected_harmonics_hz", [])),
+            "detected_significant_harmonics_hz": _json_safe(
+                selection_metadata.get("detected_significant_harmonics_hz", [])
+            ),
+            "included_harmonics_hz": _json_safe(selection_metadata.get("included_harmonics_hz", [])),
+            "selection_fingerprint": str(
+                selection_metadata.get("selection_fingerprint") or request.cache_key
+            ),
+            "highest_significant_harmonic_hz": _json_safe(
+                selection_metadata.get("highest_significant_harmonic_hz")
+            ),
+            "highest_significant_harmonic_index": _json_safe(
+                selection_metadata.get("highest_significant_harmonic_index")
+            ),
+            "selection_metadata": _json_safe(dict(selection_metadata)),
+        }
+        entries[request.cache_key] = entry
+        _prune_entries(entries)
+        cache["schema_version"] = CACHE_SCHEMA_VERSION
+        cache["entries"] = entries
+        _set_manifest_cache(manifest, cache)
+        _write_manifest_if_changed(request.manifest_path, manifest)
+        return saved_at
 
 
 def clear_cached_group_harmonic_selections(project_root: str | Path | None) -> int:
@@ -486,17 +489,20 @@ def clear_cached_group_harmonic_selections(project_root: str | Path | None) -> i
     if project_root in (None, ""):
         return 0
     manifest_path = Path(project_root).resolve() / "project.json"
-    manifest = _read_manifest(manifest_path)
-    if manifest is None:
+    if not manifest_path.is_file():
         return 0
-    cache = _cache_from_manifest(manifest)
-    entries = cache.get("entries")
-    count = len(entries) if isinstance(entries, Mapping) else 0
-    cache["schema_version"] = CACHE_SCHEMA_VERSION
-    cache["entries"] = {}
-    _set_manifest_cache(manifest, cache)
-    _write_manifest_if_changed(manifest_path, manifest)
-    return int(count)
+    with project_manifest_transaction(manifest_path):
+        manifest = _read_manifest(manifest_path)
+        if manifest is None:
+            return 0
+        cache = _cache_from_manifest(manifest)
+        entries = cache.get("entries")
+        count = len(entries) if isinstance(entries, Mapping) else 0
+        cache["schema_version"] = CACHE_SCHEMA_VERSION
+        cache["entries"] = {}
+        _set_manifest_cache(manifest, cache)
+        _write_manifest_if_changed(manifest_path, manifest)
+        return int(count)
 
 
 def _workbook_fingerprint(
@@ -1036,24 +1042,8 @@ def _read_manifest(manifest_path: Path) -> dict[str, object] | None:
 
 
 def _write_manifest_if_changed(manifest_path: Path, data: Mapping[str, object]) -> None:
-    payload = _json_safe(dict(data))
-    new_compact = json.dumps(payload, separators=(",", ":"), sort_keys=True, ensure_ascii=False)
-    if manifest_path.exists():
-        try:
-            current = json.loads(manifest_path.read_text(encoding="utf-8"))
-            current_compact = json.dumps(
-                _json_safe(current if isinstance(current, dict) else {}),
-                separators=(",", ":"),
-                sort_keys=True,
-                ensure_ascii=False,
-            )
-            if current_compact == new_compact:
-                return
-        except (OSError, json.JSONDecodeError):
-            pass
-    tmp_path = manifest_path.with_name(f"{manifest_path.name}.tmp")
-    tmp_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
-    tmp_path.replace(manifest_path)
+    with project_manifest_transaction(manifest_path) as transaction:
+        transaction.write(_json_safe(dict(data)))
 
 
 def _json_safe(value: object) -> object:

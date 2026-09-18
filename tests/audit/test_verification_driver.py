@@ -96,4 +96,18 @@ def test_precommit_lints_all_changed_python_files() -> None:
 
     assert ["python.exe", "-m", "ruff", "check", "src/Tools/Stats/analysis/example.py"] in commands
     assert ["python.exe", "-m", "py_compile", "src/Tools/Stats/analysis/example.py"] in commands
-    assert ["python.exe", "-m", "pytest", "-q"] in commands
+    assert ["python.exe", "-m", "pytest", "--ignore=tests/standalone_scripts", "-q"] in commands
+
+
+def test_full_ci_excludes_opt_in_standalone_script_tests(monkeypatch) -> None:
+    monkeypatch.setenv(verify.QT_OPT_IN_ENV, "1")
+    scope = verify.VerificationScope(
+        name="repo", audits=(), tests=(), include=(), manual_smoke=(),
+    )
+    commands = verify.build_commands(
+        scope, tier="full-ci", python=Path("python.exe"), changed=(),
+    )
+    assert [
+        "python.exe", "-m", "pytest", "--allow-qt-tests",
+        "--ignore=tests/standalone_scripts", "-q",
+    ] in commands

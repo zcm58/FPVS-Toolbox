@@ -42,20 +42,6 @@ remeasure an item before promoting it to an active plan.
   any remaining broad boundary is justified and logged, and focused failure
   tests cover its recovery behavior.
 
-### TD-003: Stats is outside the normal Ruff baseline
-
-- **Evidence:** `pyproject.toml` excludes `src/Tools/Stats` (66 Python files,
-  17,540 lines). An explicit Ruff scan currently reports 496 findings: 344
-  `F405`, 131 `F401`, 12 `E702`, 6 `F821`, and 3 `E402`. The wildcard-import
-  compatibility surface in `Stats/ui/stats_window_support.py` drives most
-  undefined/wildcard symbol noise.
-- **Cost:** touched Stats files can regress without the repository's normal
-  static checks, and real undefined names are buried in compatibility noise.
-- **Next slice:** first fix the six `F821` findings with focused tests. Then add
-  a touched-file lint ratchet and replace wildcard imports in small UI slices.
-- **Done when:** touched Stats files cannot add new Ruff findings and the global
-  exclusion can be narrowed or removed without a behavior-changing sweep.
-
 ### TD-004: Current Main App ownership still uses transitional package names
 
 - **Evidence:** active implementations remain under `Main_App/Shared` (11
@@ -68,22 +54,6 @@ remeasure an item before promoting it to an active plan.
   active caller proves it is needed.
 - **Done when:** each migrated responsibility has one documented owner and no
   active caller depends directly on the transitional path.
-
-### TD-006: LORETA source rebuilds do not reuse inverse-model work
-
-- **Evidence:** the retained one-click rebuild already generates both default
-  source methods, but compatible project inputs/model preparation are still
-  repeated and no project-local inverse-model cache with strict signatures is
-  present.
-- **Cost:** source-map rebuilds repeat expensive scientific setup and make
-  iterative validation slower for users and agents.
-- **Next slice:** share compatible input/model preparation across the batch
-  rebuild and add a project-local cache keyed by method, source space, montage,
-  channel set, fsaverage fingerprints, and every numerical option that changes
-  the inverse result.
-- **Done when:** repeated compatible rebuilds reuse the cached model, any
-  signature change invalidates it, and focused producer tests prove that L2-MNE
-  and eLORETA numerical semantics remain separate.
 
 ## Tracking Rules
 

@@ -138,12 +138,17 @@ def test_local_path_pattern_covers_supported_development_hosts(path):
 def test_agent_harness_requires_verification_routing_files(
     tmp_path, monkeypatch, attribute, message
 ):
-    monkeypatch.setattr(agent_audit, attribute, tmp_path / "missing")
+    missing = agent_audit.REPO_ROOT / ".agents" / f"missing-{attribute.lower()}-{tmp_path.name}"
+    assert not missing.exists()
+    monkeypatch.setattr(agent_audit, attribute, missing)
     monkeypatch.setattr(agent_audit, "_tracked_and_untracked_files", lambda: ())
 
     issues = agent_audit.check_agent_harness()
 
-    assert any(issue.message == message for issue in issues)
+    assert any(
+        issue.message == message and issue.path == missing.relative_to(agent_audit.REPO_ROOT).as_posix()
+        for issue in issues
+    )
 
 
 def test_agent_harness_runs_verification_config_validation(monkeypatch):

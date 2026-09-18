@@ -60,7 +60,7 @@ from Tools.LORETA_Visualizer.source_producers.project_eloreta_volume_export impo
 from Tools.LORETA_Visualizer.source_producers.project_l2_mne_export import (
     PROJECT_SOURCE_LOCALIZATION_FOLDER,
 )
-from Tools.LORETA_Visualizer.source_producers.project_l2_mne_hauk_source_psd_export import (
+from Tools.LORETA_Visualizer.source_producers.project_source_psd_inputs import (
     SOURCE_PARTICIPANT_ELIGIBILITY_POLICY,
     SOURCE_SAMPLE_COUNT_SELECTION_POLICY,
     ProjectHaukSourcePsdConditionSpec,
@@ -79,6 +79,7 @@ from Tools.LORETA_Visualizer.source_producers.project_time_domain_inputs import 
     ProjectTimeDomainInputRecord,
     ProjectTimeDomainInputSet,
     load_project_time_domain_inputs,
+    load_project_time_domain_raw,
 )
 from Tools.LORETA_Visualizer.source_producers.source_psd_cache import (
     SourcePsdCacheKeyInputs,
@@ -330,8 +331,7 @@ def write_project_eloreta_volume_hauk_source_psd_payloads(
     cache_miss_count = 0
     source_count = len(model.forward_model.source_points)
 
-    for index, loaded in enumerate(project_inputs.iter_loaded_raws(), start=1):
-        record = loaded.record
+    for index, record in enumerate(project_inputs.records, start=1):
         _emit_progress(
             progress_callback,
             (
@@ -358,12 +358,13 @@ def write_project_eloreta_volume_hauk_source_psd_payloads(
             )
         else:
             cache_miss_count += 1
-            source_psd_result = compute_hauk_source_psd(
-                averaged_raw=loaded.raw,
-                inverse_operator=model.inverse_operator,
-                config=source_psd_config,
-                apply_inverse_func=apply_inverse_func,
-            )
+            with load_project_time_domain_raw(record) as raw:
+                source_psd_result = compute_hauk_source_psd(
+                    averaged_raw=raw,
+                    inverse_operator=model.inverse_operator,
+                    config=source_psd_config,
+                    apply_inverse_func=apply_inverse_func,
+                )
             participant_values = _participant_values_from_source_psd(
                 source_psd_result,
                 participant_id=record.participant_id,

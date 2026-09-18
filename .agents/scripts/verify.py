@@ -185,7 +185,7 @@ def build_commands(
         return [
             [str(python), str(AGENT_AUDIT)],
             [str(python), "-m", "ruff", "check", "."],
-            [str(python), "-m", "pytest", "--allow-qt-tests", "-q"],
+            [str(python), "-m", "pytest", "--allow-qt-tests", "--ignore=tests/standalone_scripts", "-q"],
         ]
 
     commands: list[list[str]] = []
@@ -206,7 +206,7 @@ def build_commands(
         commands.append([str(python), "-m", "ruff", "check", *python_files])
         commands.append([str(python), "-m", "py_compile", *python_files])
     if tier == "precommit" and scope.name == "repo":
-        commands.append([str(python), "-m", "pytest", "-q"])
+        commands.append([str(python), "-m", "pytest", "--ignore=tests/standalone_scripts", "-q"])
     elif scope.tests:
         commands.append([str(python), "-m", "pytest", *scope.tests, "-q"])
     return commands

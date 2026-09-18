@@ -866,9 +866,11 @@ def test_processing_selection_atomic_manifest_failure_preserves_project(
     manifest_path = tmp_path / "project.json"
     original = '{\n  "preserved": true\n}'
     manifest_path.write_text(original, encoding="utf-8")
+    from Main_App.projects import manifest_store
+
     monkeypatch.setattr(
-        harmonic_selection_qc,
-        "_replace_manifest_with_retry",
+        manifest_store,
+        "_replace_manifest",
         lambda _temporary, _manifest: (_ for _ in ()).throw(
             PermissionError("locked")
         ),
@@ -881,7 +883,7 @@ def test_processing_selection_atomic_manifest_failure_preserves_project(
         )
 
     assert manifest_path.read_text(encoding="utf-8") == original
-    assert not list(tmp_path.glob(".project.json.harmonic-selection-*.tmp"))
+    assert not list(tmp_path.glob(".project.json.*.tmp"))
 
 
 def test_managed_fixed_summed_bca_uses_only_accepted_selection(

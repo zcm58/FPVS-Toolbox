@@ -40,7 +40,8 @@ ignore_missing_imports = true
 
 [tool.ruff]
 exclude = [
-    "src/Tools/Stats",
+    "src/Standalone_Scripts",
     "src/quarantine",
+    "tests/standalone_scripts",
 ]
 line-length = 120

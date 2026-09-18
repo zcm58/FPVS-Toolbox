@@ -13,6 +13,12 @@ Existing long/wide Excel reports remain unchanged. Reprocessing/exclusion
 cleanup retires both exact sibling anchors and their declared companions so
 an obsolete XLSX cannot reappear after its native replacement is removed.
 
+Dense spectral companion validation checks checksums and every array's dtype,
+shape, and truncation from its header without materializing dense values.
+Metadata-only reads allocate no dense arrays; sheet values load lazily only
+when requested, with the validated file signature checked again. Companion
+formats and the existing export schema remain unchanged.
+
 The canonical project root is runtime context: it is the directory containing
 the opened `project.json`, exposed as `Project.project_root`. It is not stored
 as an absolute manifest field, because copied, renamed, or cross-platform
@@ -29,6 +35,49 @@ Primary paths:
   It owns those implementations.
 - `src/Main_App/Shared/settings_paths.py`
 - tool modules that import, export, or generate files under `src/Tools/`
+
+## Manifest transactions
+
+`Main_App.projects.manifest_store` owns manifest publication. Active writers
+hold the public `project_manifest_transaction(manifest_path)` context across
+the entire read, validation, patch, and publish operation. This includes
+Project saves and legacy bandpass migration, frequency QC decisions, canonical
+harmonic selection/history, Stats harmonic caches, FullFFT provenance, artifact
+freshness, condition-interpolation state, dataset exclusions, and cache-clear snapshot validation. Callers
+retain their existing namespace, schema, and conflict checks; the owner does
+not merge stale complete manifests or silently replace unreadable JSON.
+
+Transactions use a resolved-path thread lock plus a native cross-process
+sidecar lock (Windows byte lock or POSIX `flock`), each with a 30-second
+acquisition limit. Nested helpers in the same thread reuse the transaction.
+The stable `.project.json.lock` sidecar is retained after release, and OS
+locks are released on process exit. The owner publishes via a unique temporary
+file in the manifest directory, flushes and fsyncs it, then atomically replaces
+the manifest. Failed writes/replacements preserve the preceding manifest and
+remove the temporary file. Windows replacement retries cover brief scanner
+locks and propagate persistent failure.
+
+`Project.save` reconciles newer disk geometry and worker-authored tool metadata
+inside this transaction. Its existing explicit tool-namespace update policy
+is unchanged. Dataset exclusion revisions still reject stale edits instead of
+merging them. Dataset discovery builds all group, participant, session, and
+recording identity from its single captured manifest using the pure
+`project_recording_context_from_manifest(root, manifest)` normalizer; it does
+not reload recording identity midway through a scan.
+
+Condition-interpolation source reconciliation holds the transaction only for
+its short read/retire/save operation. Repair execution keeps a captured repair
+namespace snapshot while EEG processing and output validation run without the
+manifest lock. Pending/completion saves compare that snapshot under the lock;
+a newer accepted request or completion receipt causes an explicit conflict
+and remains intact. Receipts from earlier requests cannot mark newer requests
+complete, and retry can adopt already generated valid outputs.
+
+`tests/project_io/test_project_manifest_transactions.py` covers partial-write
+and replacement failures, overlapping runtime metadata writers in threads and
+spawned processes, and lock recovery after abrupt process exit. Dataset-index
+tests change the on-disk manifest between capture and normalization to enforce
+snapshot consistency. These are GUI-neutral checks and require no Qt run.
 
 Disposable cache ownership, automatic QC replacement, and the Advanced settings
 cache-clearing action are documented in [Cache Maintenance](cache-maintenance.md).

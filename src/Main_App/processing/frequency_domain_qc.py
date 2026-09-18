@@ -21,6 +21,7 @@ from Main_App.processing.frequency_qc_identity import (
     resolve_frequency_qc_recording_decisions,
 )
 from Main_App.projects import (
+    project_manifest_transaction,
     ProjectDatasetIndex,
     load_project_dataset_index,
     normalize_experimental_qc_settings,
@@ -991,144 +992,290 @@ def apply_frequency_domain_qc_decision(
     )
     root = Path(project_root).resolve()
     manifest_path = root / "project.json"
-    manifest = _read_manifest(manifest_path)
-    repair_decisions = [
-        item for item in normalized_review_decisions
-        if item.get("decision") == DECISION_INTERPOLATE_CONDITION_ELECTRODE
-    ]
-    if repair_decisions:
-        if Path(str(report.get("project_root") or "")).resolve() != root:
-            raise ValueError("The electrode-repair review belongs to a different project. Reopen QC.")
-        if not _source_workbooks_are_current(root, report.get("source_workbooks")):
-            raise ValueError("The reviewed condition outputs changed. Regenerate QC before requesting a repair.")
-        if not normalize_experimental_qc_settings(
-            manifest.get("experimental_qc")
-        ).condition_specific_interpolation_enabled:
-            raise ValueError("Condition-specific interpolation was disabled. Reopen the QC review.")
-        from Main_App.processing.condition_interpolation_state import (
-            queue_condition_interpolation_decisions,
-        )
+    with project_manifest_transaction(manifest_path):
+        manifest = _read_manifest(manifest_path)
+        repair_decisions = [
+            item for item in normalized_review_decisions
+            if item.get("decision") == DECISION_INTERPOLATE_CONDITION_ELECTRODE
+        ]
+        if repair_decisions:
+            if Path(str(report.get("project_root") or "")).resolve() != root:
+                raise ValueError("The electrode-repair review belongs to a different project. Reopen QC.")
+            if not _source_workbooks_are_current(root, report.get("source_workbooks")):
+                raise ValueError("The reviewed condition outputs changed. Regenerate QC before requesting a repair.")
+            if not normalize_experimental_qc_settings(
+                manifest.get("experimental_qc")
+            ).condition_specific_interpolation_enabled:
+                raise ValueError("Condition-specific interpolation was disabled. Reopen the QC review.")
+            from Main_App.processing.condition_interpolation_state import (
+                queue_condition_interpolation_decisions,
+            )
 
-        queue_condition_interpolation_decisions(manifest, repair_decisions, report)
-    state = _metadata_from_manifest(manifest)
-    now = _now_utc_iso()
-    repeated_session = str(report.get("identity_scope") or "") == "recording"
-    replaced_decision_fingerprints = {
-        str(item.get("replaces_decision_fingerprint") or "")
-        for item in normalized_review_decisions
-        if str(item.get("replaces_decision_fingerprint") or "")
-    }
-    current_finding_fingerprints = {
-        str(item.get("finding_fingerprint") or "")
-        for item in normalized_review_decisions
-    }
-    preserved_review_decisions = [
-        item
-        for item in _review_decisions_from_state(state)
-        if str(item.get("decision") or "") in _BROAD_EXCLUSION_DECISIONS
-        and str(item.get("decision_fingerprint") or "")
-        not in replaced_decision_fingerprints
-        and str(item.get("finding_fingerprint") or "")
-        not in current_finding_fingerprints
-    ]
-    combined_review_decisions = _merge_review_decision_rows(
-        preserved_review_decisions,
-        normalized_review_decisions,
-    )
-    legacy_machine_suggestions = _merge_legacy_machine_suggestions(
-        state,
-        report.get("legacy_machine_suggestions"),
-    )
-    existing_manual = _manual_entries_from_state(state)
-    manual_by_pid = {entry["participant_id"]: dict(entry) for entry in existing_manual}
-    reviewed_participant_exclusions = {
-        _normalize_participant_id(item.get("participant_id"))
-        for item in normalized_review_decisions
-        if item.get("decision") == DECISION_EXCLUDE_PARTICIPANT
-    }
-    for raw_pid, raw_reason in (manual_participant_reasons or {}).items():
-        pid = _normalize_participant_id(raw_pid)
-        if not pid or pid in reviewed_participant_exclusions:
-            continue
-        reason = str(raw_reason or "").strip() or "No reason provided"
-        previous = manual_by_pid.get(pid, {})
-        manual_by_pid[pid] = {
-            "participant_id": pid,
-            "reason": reason,
-            "source": "manual_qc_review",
-            "added_at": str(previous.get("added_at") or now),
-            "updated_at": now,
+            queue_condition_interpolation_decisions(manifest, repair_decisions, report)
+        state = _metadata_from_manifest(manifest)
+        now = _now_utc_iso()
+        repeated_session = str(report.get("identity_scope") or "") == "recording"
+        replaced_decision_fingerprints = {
+            str(item.get("replaces_decision_fingerprint") or "")
+            for item in normalized_review_decisions
+            if str(item.get("replaces_decision_fingerprint") or "")
         }
-    manual_entries = _normalize_manual_entries(
-        sorted(manual_by_pid.values(), key=lambda item: item["participant_id"])
-    )
-    existing_manual_recordings = _manual_recording_entries_from_state(state)
-    manual_by_recording = {
-        str(entry["recording_id"]).casefold(): dict(entry)
-        for entry in existing_manual_recordings
-    }
-    reviewed_recording_exclusions = {
-        _normalize_recording_id(item.get("recording_id"))
-        for item in normalized_review_decisions
-        if item.get("decision") == DECISION_EXCLUDE_RECORDING
-    }
-    for decision in resolved_recording_decisions:
-        recording_id = str(decision.identity.recording_id)
-        if _normalize_recording_id(recording_id) in reviewed_recording_exclusions:
-            continue
-        reason = str(decision.reason or "").strip() or "No reason provided"
-        recording_key = recording_id.casefold()
-        previous = manual_by_recording.get(recording_key, {})
-        manual_by_recording[recording_key] = {
-            "recording_id": recording_id,
-            "participant_id": decision.identity.participant_id,
-            "session_id": str(decision.identity.session_id or ""),
-            "reason": reason,
-            "source": "manual_qc_review",
-            "added_at": str(previous.get("added_at") or now),
-            "updated_at": now,
+        current_finding_fingerprints = {
+            str(item.get("finding_fingerprint") or "")
+            for item in normalized_review_decisions
         }
-    manual_recording_entries = _normalize_manual_recording_entries(
-        sorted(
-            manual_by_recording.values(),
-            key=lambda item: str(item["recording_id"]).casefold(),
+        preserved_review_decisions = [
+            item
+            for item in _review_decisions_from_state(state)
+            if str(item.get("decision") or "") in _BROAD_EXCLUSION_DECISIONS
+            and str(item.get("decision_fingerprint") or "")
+            not in replaced_decision_fingerprints
+            and str(item.get("finding_fingerprint") or "")
+            not in current_finding_fingerprints
+        ]
+        combined_review_decisions = _merge_review_decision_rows(
+            preserved_review_decisions,
+            normalized_review_decisions,
         )
-    )
-    analysis_fingerprint = str(report.get("analysis_fingerprint") or "")
-    identity_scope = "recording" if repeated_session else "participant"
-    review_evidence = _build_review_evidence_payload(report)
-    decision_fingerprint = _decision_fingerprint(
-        analysis_fingerprint=analysis_fingerprint,
-        auto_electrodes=(),
-        auto_participants=(),
-        manual_participants=manual_entries,
-        auto_recording_electrodes=(() if repeated_session else None),
-        auto_recordings=(() if repeated_session else None),
-        manual_recordings=(manual_recording_entries if repeated_session else None),
-        review_decisions=combined_review_decisions,
-        identity_scope=identity_scope,
-    )
-    _require_non_oscillating_review_decision(
-        state,
-        analysis_fingerprint=analysis_fingerprint,
-        decision_fingerprint=decision_fingerprint,
-    )
-    for decision in normalized_review_decisions:
-        decision["reviewed_at"] = now
-    combined_review_decisions = _merge_review_decision_rows(
-        preserved_review_decisions,
-        normalized_review_decisions,
-    )
-    report_path = _write_frequency_domain_qc_text_report(
-        root,
-        report=report,
-        manual_participants=manual_entries,
-        manual_recordings=manual_recording_entries,
-        review_decisions=combined_review_decisions,
-        decision_fingerprint=decision_fingerprint,
-        reviewed_at=now,
-    )
-    update: dict[str, object] = {
+        legacy_machine_suggestions = _merge_legacy_machine_suggestions(
+            state,
+            report.get("legacy_machine_suggestions"),
+        )
+        existing_manual = _manual_entries_from_state(state)
+        manual_by_pid = {entry["participant_id"]: dict(entry) for entry in existing_manual}
+        reviewed_participant_exclusions = {
+            _normalize_participant_id(item.get("participant_id"))
+            for item in normalized_review_decisions
+            if item.get("decision") == DECISION_EXCLUDE_PARTICIPANT
+        }
+        for raw_pid, raw_reason in (manual_participant_reasons or {}).items():
+            pid = _normalize_participant_id(raw_pid)
+            if not pid or pid in reviewed_participant_exclusions:
+                continue
+            reason = str(raw_reason or "").strip() or "No reason provided"
+            previous = manual_by_pid.get(pid, {})
+            manual_by_pid[pid] = {
+                "participant_id": pid,
+                "reason": reason,
+                "source": "manual_qc_review",
+                "added_at": str(previous.get("added_at") or now),
+                "updated_at": now,
+            }
+        manual_entries = _normalize_manual_entries(
+            sorted(manual_by_pid.values(), key=lambda item: item["participant_id"])
+        )
+        existing_manual_recordings = _manual_recording_entries_from_state(state)
+        manual_by_recording = {
+            str(entry["recording_id"]).casefold(): dict(entry)
+            for entry in existing_manual_recordings
+        }
+        reviewed_recording_exclusions = {
+            _normalize_recording_id(item.get("recording_id"))
+            for item in normalized_review_decisions
+            if item.get("decision") == DECISION_EXCLUDE_RECORDING
+        }
+        for decision in resolved_recording_decisions:
+            recording_id = str(decision.identity.recording_id)
+            if _normalize_recording_id(recording_id) in reviewed_recording_exclusions:
+                continue
+            reason = str(decision.reason or "").strip() or "No reason provided"
+            recording_key = recording_id.casefold()
+            previous = manual_by_recording.get(recording_key, {})
+            manual_by_recording[recording_key] = {
+                "recording_id": recording_id,
+                "participant_id": decision.identity.participant_id,
+                "session_id": str(decision.identity.session_id or ""),
+                "reason": reason,
+                "source": "manual_qc_review",
+                "added_at": str(previous.get("added_at") or now),
+                "updated_at": now,
+            }
+        manual_recording_entries = _normalize_manual_recording_entries(
+            sorted(
+                manual_by_recording.values(),
+                key=lambda item: str(item["recording_id"]).casefold(),
+            )
+        )
+        analysis_fingerprint = str(report.get("analysis_fingerprint") or "")
+        identity_scope = "recording" if repeated_session else "participant"
+        review_evidence = _build_review_evidence_payload(report)
+        decision_fingerprint = _decision_fingerprint(
+            analysis_fingerprint=analysis_fingerprint,
+            auto_electrodes=(),
+            auto_participants=(),
+            manual_participants=manual_entries,
+            auto_recording_electrodes=(() if repeated_session else None),
+            auto_recordings=(() if repeated_session else None),
+            manual_recordings=(manual_recording_entries if repeated_session else None),
+            review_decisions=combined_review_decisions,
+            identity_scope=identity_scope,
+        )
+        _require_non_oscillating_review_decision(
+            state,
+            analysis_fingerprint=analysis_fingerprint,
+            decision_fingerprint=decision_fingerprint,
+        )
+        for decision in normalized_review_decisions:
+            decision["reviewed_at"] = now
+        combined_review_decisions = _merge_review_decision_rows(
+            preserved_review_decisions,
+            normalized_review_decisions,
+        )
+        report_path = _write_frequency_domain_qc_text_report(
+            root,
+            report=report,
+            manual_participants=manual_entries,
+            manual_recordings=manual_recording_entries,
+            review_decisions=combined_review_decisions,
+            decision_fingerprint=decision_fingerprint,
+            reviewed_at=now,
+        )
+        update: dict[str, object] = {
+                "schema_version": FREQUENCY_DOMAIN_QC_SCHEMA_VERSION,
+                "method_version": str(
+                    report.get("method_version") or FREQUENCY_DOMAIN_QC_METHOD_VERSION
+                ),
+                "identity_scope": identity_scope,
+                "screening_settings": dict(
+                    report.get("screening_settings")
+                    if isinstance(report.get("screening_settings"), Mapping)
+                    else {}
+                ),
+                "thresholds": dict(
+                    report.get("thresholds")
+                    if isinstance(report.get("thresholds"), Mapping)
+                    else {}
+                ),
+                "auto_participant_electrode_exclusions": [],
+                "auto_participant_exclusions": [],
+                "auto_recording_electrode_exclusions": [],
+                "auto_recording_exclusions": [],
+                "legacy_machine_suggestions": legacy_machine_suggestions,
+                "manual_participant_exclusions": manual_entries,
+                "manual_recording_exclusions": (
+                    manual_recording_entries if repeated_session else []
+                ),
+                "review_decisions": combined_review_decisions,
+                "review_evidence": review_evidence,
+                "review_complete": True,
+                "downstream_outputs_stale": True,
+                "last_review": {
+                    "reviewed_at": now,
+                    "analysis_fingerprint": analysis_fingerprint,
+                    "decision_fingerprint": decision_fingerprint,
+                    "evidence_fingerprint": str(
+                        review_evidence["evidence_fingerprint"]
+                    ),
+                    "identity_scope": identity_scope,
+                    "report_path": _manifest_safe_path(root, report_path),
+                    "review_subject_count": int(report.get("review_subject_count") or 0),
+                    "screening_status": str(report.get("screening_status") or ""),
+                    "screening_policy_version": str(
+                        report.get("screening_policy_version") or ""
+                    ),
+                },
+            }
+        if repeated_session:
+            update.update(
+                {
+                    "manual_recording_exclusions": manual_recording_entries,
+                }
+            )
+            last_review = update.get("last_review")
+            if isinstance(last_review, dict):
+                last_review["review_recording_count"] = int(
+                    report.get("review_recording_count") or 0
+                )
+        update["review_history"] = _updated_review_history(
+            state,
+            report=report,
+            decision_fingerprint=decision_fingerprint,
+            reviewed_at=now,
+        )
+        update["retired_review_decisions"] = _superseded_narrow_decisions(
+            state, combined_review_decisions,
+        )
+        state.update(update)
+        _set_metadata_in_manifest(manifest, state)
+        _write_manifest_if_changed(manifest_path, manifest)
+        return state
+
+
+def sync_frequency_domain_qc_automatic_state(
+    project_root: str | Path,
+    report: Mapping[str, object],
+) -> dict[str, object]:
+    """Persist a no-prompt/reused review without granting BCA automatic authority."""
+
+    require_frequency_domain_qc_complete(report)
+    root = Path(project_root).resolve()
+    manifest_path = root / "project.json"
+    with project_manifest_transaction(manifest_path):
+        manifest = _read_manifest(manifest_path)
+        state = _metadata_from_manifest(manifest)
+        previous_auto_electrodes = _auto_electrode_entries_from_state(state)
+        previous_auto_participants = _auto_participant_entries_from_state(state)
+        previous_auto_recording_electrodes = _auto_recording_electrode_entries_from_state(state)
+        previous_auto_recordings = _auto_recording_entries_from_state(state)
+        legacy_authority_removed = bool(
+            previous_auto_electrodes
+            or previous_auto_participants
+            or previous_auto_recording_electrodes
+            or previous_auto_recordings
+        )
+        legacy_machine_suggestions = _merge_legacy_machine_suggestions(
+            state,
+            report.get("legacy_machine_suggestions"),
+        )
+        now = _now_utc_iso()
+        current_decisions = _current_review_decisions(
+            report_flags=_iter_mapping_entries(
+                report.get("review_findings")
+                if report.get("review_findings") is not None
+                else report.get("flags")
+            ),
+            state=state,
+        )
+        current_decisions = _merge_review_decision_rows(
+            [
+                dict(item)
+                for item in _iter_mapping_entries(
+                    report.get("active_review_decisions")
+                )
+            ],
+            current_decisions,
+        )
+        repeated_session = str(report.get("identity_scope") or "") == "recording"
+        identity_scope = "recording" if repeated_session else "participant"
+        manual_entries = _manual_entries_from_state(state)
+        manual_recording_entries = _manual_recording_entries_from_state(state)
+        analysis_fingerprint = str(report.get("analysis_fingerprint") or "")
+        decision_fingerprint = _decision_fingerprint(
+            analysis_fingerprint=analysis_fingerprint,
+            auto_electrodes=(),
+            auto_participants=(),
+            manual_participants=manual_entries,
+            auto_recording_electrodes=(() if repeated_session else None),
+            auto_recordings=(() if repeated_session else None),
+            manual_recordings=(manual_recording_entries if repeated_session else None),
+            review_decisions=current_decisions,
+            identity_scope=identity_scope,
+        )
+        review_evidence = _build_review_evidence_payload(report)
+        previous_last_review = (
+            dict(state.get("last_review"))
+            if isinstance(state.get("last_review"), Mapping)
+            else {}
+        )
+        if report.get("review_reused"):
+            previous_evidence = _validated_review_evidence_from_state(root, state)
+            if previous_evidence is not None and (
+                previous_evidence.get("analysis_fingerprint") == analysis_fingerprint
+            ):
+                # Preserve what the user actually reviewed. In particular, an older
+                # receipt may bind its identity to the original cache annotations.
+                review_evidence = previous_evidence
+        update: dict[str, object] = {
             "schema_version": FREQUENCY_DOMAIN_QC_SCHEMA_VERSION,
             "method_version": str(
                 report.get("method_version") or FREQUENCY_DOMAIN_QC_METHOD_VERSION
@@ -1153,194 +1300,50 @@ def apply_frequency_domain_qc_decision(
             "manual_recording_exclusions": (
                 manual_recording_entries if repeated_session else []
             ),
-            "review_decisions": combined_review_decisions,
+            "review_decisions": current_decisions,
             "review_evidence": review_evidence,
-            "review_complete": True,
-            "downstream_outputs_stale": True,
+            "review_complete": not bool(report.get("review_required")),
             "last_review": {
-                "reviewed_at": now,
+                "reviewed_at": str(previous_last_review.get("reviewed_at") or now),
+                "synced_at": now,
                 "analysis_fingerprint": analysis_fingerprint,
                 "decision_fingerprint": decision_fingerprint,
                 "evidence_fingerprint": str(
                     review_evidence["evidence_fingerprint"]
                 ),
                 "identity_scope": identity_scope,
-                "report_path": _manifest_safe_path(root, report_path),
-                "review_subject_count": int(report.get("review_subject_count") or 0),
+                "report_path": str(previous_last_review.get("report_path") or ""),
+                "review_subject_count": int(
+                    report.get("review_subject_count") or 0
+                ),
+                "review_recording_count": int(
+                    report.get("review_recording_count") or 0
+                ),
                 "screening_status": str(report.get("screening_status") or ""),
                 "screening_policy_version": str(
                     report.get("screening_policy_version") or ""
                 ),
             },
-        }
-    if repeated_session:
-        update.update(
-            {
-                "manual_recording_exclusions": manual_recording_entries,
+            "last_automatic_qc": {
+                "reviewed_at": now,
+                "analysis_fingerprint": analysis_fingerprint,
+                "review_required": bool(report.get("review_required")),
+                "review_reused": bool(report.get("review_reused")),
+                "screening_status": str(report.get("screening_status") or ""),
+                "authority": "review_only",
             }
-        )
-        last_review = update.get("last_review")
-        if isinstance(last_review, dict):
-            last_review["review_recording_count"] = int(
-                report.get("review_recording_count") or 0
-            )
-    update["review_history"] = _updated_review_history(
-        state,
-        report=report,
-        decision_fingerprint=decision_fingerprint,
-        reviewed_at=now,
-    )
-    update["retired_review_decisions"] = _superseded_narrow_decisions(
-        state, combined_review_decisions,
-    )
-    state.update(update)
-    _set_metadata_in_manifest(manifest, state)
-    _write_manifest_if_changed(manifest_path, manifest)
-    return state
-
-
-def sync_frequency_domain_qc_automatic_state(
-    project_root: str | Path,
-    report: Mapping[str, object],
-) -> dict[str, object]:
-    """Persist a no-prompt/reused review without granting BCA automatic authority."""
-
-    require_frequency_domain_qc_complete(report)
-    root = Path(project_root).resolve()
-    manifest_path = root / "project.json"
-    manifest = _read_manifest(manifest_path)
-    state = _metadata_from_manifest(manifest)
-    previous_auto_electrodes = _auto_electrode_entries_from_state(state)
-    previous_auto_participants = _auto_participant_entries_from_state(state)
-    previous_auto_recording_electrodes = _auto_recording_electrode_entries_from_state(state)
-    previous_auto_recordings = _auto_recording_entries_from_state(state)
-    legacy_authority_removed = bool(
-        previous_auto_electrodes
-        or previous_auto_participants
-        or previous_auto_recording_electrodes
-        or previous_auto_recordings
-    )
-    legacy_machine_suggestions = _merge_legacy_machine_suggestions(
-        state,
-        report.get("legacy_machine_suggestions"),
-    )
-    now = _now_utc_iso()
-    current_decisions = _current_review_decisions(
-        report_flags=_iter_mapping_entries(
-            report.get("review_findings")
-            if report.get("review_findings") is not None
-            else report.get("flags")
-        ),
-        state=state,
-    )
-    current_decisions = _merge_review_decision_rows(
-        [
-            dict(item)
-            for item in _iter_mapping_entries(
-                report.get("active_review_decisions")
-            )
-        ],
-        current_decisions,
-    )
-    repeated_session = str(report.get("identity_scope") or "") == "recording"
-    identity_scope = "recording" if repeated_session else "participant"
-    manual_entries = _manual_entries_from_state(state)
-    manual_recording_entries = _manual_recording_entries_from_state(state)
-    analysis_fingerprint = str(report.get("analysis_fingerprint") or "")
-    decision_fingerprint = _decision_fingerprint(
-        analysis_fingerprint=analysis_fingerprint,
-        auto_electrodes=(),
-        auto_participants=(),
-        manual_participants=manual_entries,
-        auto_recording_electrodes=(() if repeated_session else None),
-        auto_recordings=(() if repeated_session else None),
-        manual_recordings=(manual_recording_entries if repeated_session else None),
-        review_decisions=current_decisions,
-        identity_scope=identity_scope,
-    )
-    review_evidence = _build_review_evidence_payload(report)
-    previous_last_review = (
-        dict(state.get("last_review"))
-        if isinstance(state.get("last_review"), Mapping)
-        else {}
-    )
-    if report.get("review_reused"):
-        previous_evidence = _validated_review_evidence_from_state(root, state)
-        if previous_evidence is not None and (
-            previous_evidence.get("analysis_fingerprint") == analysis_fingerprint
-        ):
-            # Preserve what the user actually reviewed. In particular, an older
-            # receipt may bind its identity to the original cache annotations.
-            review_evidence = previous_evidence
-    update: dict[str, object] = {
-        "schema_version": FREQUENCY_DOMAIN_QC_SCHEMA_VERSION,
-        "method_version": str(
-            report.get("method_version") or FREQUENCY_DOMAIN_QC_METHOD_VERSION
-        ),
-        "identity_scope": identity_scope,
-        "screening_settings": dict(
-            report.get("screening_settings")
-            if isinstance(report.get("screening_settings"), Mapping)
-            else {}
-        ),
-        "thresholds": dict(
-            report.get("thresholds")
-            if isinstance(report.get("thresholds"), Mapping)
-            else {}
-        ),
-        "auto_participant_electrode_exclusions": [],
-        "auto_participant_exclusions": [],
-        "auto_recording_electrode_exclusions": [],
-        "auto_recording_exclusions": [],
-        "legacy_machine_suggestions": legacy_machine_suggestions,
-        "manual_participant_exclusions": manual_entries,
-        "manual_recording_exclusions": (
-            manual_recording_entries if repeated_session else []
-        ),
-        "review_decisions": current_decisions,
-        "review_evidence": review_evidence,
-        "review_complete": not bool(report.get("review_required")),
-        "last_review": {
-            "reviewed_at": str(previous_last_review.get("reviewed_at") or now),
-            "synced_at": now,
-            "analysis_fingerprint": analysis_fingerprint,
-            "decision_fingerprint": decision_fingerprint,
-            "evidence_fingerprint": str(
-                review_evidence["evidence_fingerprint"]
-            ),
-            "identity_scope": identity_scope,
-            "report_path": str(previous_last_review.get("report_path") or ""),
-            "review_subject_count": int(
-                report.get("review_subject_count") or 0
-            ),
-            "review_recording_count": int(
-                report.get("review_recording_count") or 0
-            ),
-            "screening_status": str(report.get("screening_status") or ""),
-            "screening_policy_version": str(
-                report.get("screening_policy_version") or ""
-            ),
-        },
-        "last_automatic_qc": {
-            "reviewed_at": now,
-            "analysis_fingerprint": analysis_fingerprint,
-            "review_required": bool(report.get("review_required")),
-            "review_reused": bool(report.get("review_reused")),
-            "screening_status": str(report.get("screening_status") or ""),
-            "authority": "review_only",
         }
-    }
-    update["retired_review_decisions"] = _superseded_narrow_decisions(state, current_decisions)
-    state.update(update)
-    if legacy_authority_removed:
-        state["downstream_outputs_stale"] = True
-        state["stale_reason"] = (
-            "Legacy summed-BCA automatic exclusions were converted to review-only suggestions."
-        )
-        state["stale_at"] = now
-    _set_metadata_in_manifest(manifest, state)
-    _write_manifest_if_changed(manifest_path, manifest)
-    return state
+        update["retired_review_decisions"] = _superseded_narrow_decisions(state, current_decisions)
+        state.update(update)
+        if legacy_authority_removed:
+            state["downstream_outputs_stale"] = True
+            state["stale_reason"] = (
+                "Legacy summed-BCA automatic exclusions were converted to review-only suggestions."
+            )
+            state["stale_at"] = now
+        _set_metadata_in_manifest(manifest, state)
+        _write_manifest_if_changed(manifest_path, manifest)
+        return state
 
 
 def mark_frequency_domain_outputs_stale(
@@ -1350,13 +1353,14 @@ def mark_frequency_domain_outputs_stale(
 ) -> None:
     root = Path(project_root).resolve()
     manifest_path = root / "project.json"
-    manifest = _read_manifest(manifest_path)
-    state = _metadata_from_manifest(manifest)
-    state["downstream_outputs_stale"] = True
-    state["stale_reason"] = str(reason)
-    state["stale_at"] = _now_utc_iso()
-    _set_metadata_in_manifest(manifest, state)
-    _write_manifest_if_changed(manifest_path, manifest)
+    with project_manifest_transaction(manifest_path):
+        manifest = _read_manifest(manifest_path)
+        state = _metadata_from_manifest(manifest)
+        state["downstream_outputs_stale"] = True
+        state["stale_reason"] = str(reason)
+        state["stale_at"] = _now_utc_iso()
+        _set_metadata_in_manifest(manifest, state)
+        _write_manifest_if_changed(manifest_path, manifest)
 
 
 def mark_frequency_domain_outputs_current(project_root: str | Path) -> None:
@@ -1367,15 +1371,16 @@ def mark_frequency_domain_outputs_current(project_root: str | Path) -> None:
     require_no_pending_condition_interpolation(project_root)
     root = Path(project_root).resolve()
     manifest_path = root / "project.json"
-    manifest = _read_manifest(manifest_path)
-    state = _metadata_from_manifest(manifest)
-    if not state:
-        return
-    state["downstream_outputs_stale"] = False
-    state.pop("stale_reason", None)
-    state["last_outputs_refreshed_at"] = _now_utc_iso()
-    _set_metadata_in_manifest(manifest, state)
-    _write_manifest_if_changed(manifest_path, manifest)
+    with project_manifest_transaction(manifest_path):
+        manifest = _read_manifest(manifest_path)
+        state = _metadata_from_manifest(manifest)
+        if not state:
+            return
+        state["downstream_outputs_stale"] = False
+        state.pop("stale_reason", None)
+        state["last_outputs_refreshed_at"] = _now_utc_iso()
+        _set_metadata_in_manifest(manifest, state)
+        _write_manifest_if_changed(manifest_path, manifest)
 
 
 def is_frequency_domain_output_stale(project_root: str | Path | None) -> bool:
@@ -1755,34 +1760,37 @@ def clear_manual_frequency_domain_participant_exclusions(
 ) -> list[str]:
     root = Path(project_root).resolve()
     manifest_path = root / "project.json"
-    manifest = _read_manifest(manifest_path)
-    state = _metadata_from_manifest(manifest)
-    to_clear = {
-        _normalize_participant_id(pid)
-        for pid in participant_ids
-        if _normalize_participant_id(pid)
-    }
-    if not to_clear:
+    if not manifest_path.is_file():
         return []
-    existing = _manual_entries_from_state(state)
-    retained = [
-        entry for entry in existing if entry.get("participant_id") not in to_clear
-    ]
-    cleared = sorted(
-        entry["participant_id"]
-        for entry in existing
-        if entry.get("participant_id") in to_clear
-    )
-    if not cleared:
-        return []
-    state["manual_participant_exclusions"] = retained
-    state["downstream_outputs_stale"] = True
-    state["stale_reason"] = "Manual frequency-domain exclusions changed."
-    state["stale_at"] = _now_utc_iso()
-    state.pop("last_review", None)
-    _set_metadata_in_manifest(manifest, state)
-    _write_manifest_if_changed(manifest_path, manifest)
-    return cleared
+    with project_manifest_transaction(manifest_path):
+        manifest = _read_manifest(manifest_path)
+        state = _metadata_from_manifest(manifest)
+        to_clear = {
+            _normalize_participant_id(pid)
+            for pid in participant_ids
+            if _normalize_participant_id(pid)
+        }
+        if not to_clear:
+            return []
+        existing = _manual_entries_from_state(state)
+        retained = [
+            entry for entry in existing if entry.get("participant_id") not in to_clear
+        ]
+        cleared = sorted(
+            entry["participant_id"]
+            for entry in existing
+            if entry.get("participant_id") in to_clear
+        )
+        if not cleared:
+            return []
+        state["manual_participant_exclusions"] = retained
+        state["downstream_outputs_stale"] = True
+        state["stale_reason"] = "Manual frequency-domain exclusions changed."
+        state["stale_at"] = _now_utc_iso()
+        state.pop("last_review", None)
+        _set_metadata_in_manifest(manifest, state)
+        _write_manifest_if_changed(manifest_path, manifest)
+        return cleared
 
 
 def clear_manual_frequency_domain_recording_exclusions(
@@ -1791,36 +1799,39 @@ def clear_manual_frequency_domain_recording_exclusions(
 ) -> list[str]:
     root = Path(project_root).resolve()
     manifest_path = root / "project.json"
-    manifest = _read_manifest(manifest_path)
-    state = _metadata_from_manifest(manifest)
-    to_clear = {
-        _normalize_recording_id(recording_id)
-        for recording_id in recording_ids
-        if _normalize_recording_id(recording_id)
-    }
-    if not to_clear:
+    if not manifest_path.is_file():
         return []
-    existing = _manual_recording_entries_from_state(state)
-    retained = [
-        entry
-        for entry in existing
-        if str(entry.get("recording_id") or "").upper() not in to_clear
-    ]
-    cleared = sorted(
-        str(entry["recording_id"])
-        for entry in existing
-        if str(entry.get("recording_id") or "").upper() in to_clear
-    )
-    if not cleared:
-        return []
-    state["manual_recording_exclusions"] = retained
-    state["downstream_outputs_stale"] = True
-    state["stale_reason"] = "Manual frequency-domain recording exclusions changed."
-    state["stale_at"] = _now_utc_iso()
-    state.pop("last_review", None)
-    _set_metadata_in_manifest(manifest, state)
-    _write_manifest_if_changed(manifest_path, manifest)
-    return cleared
+    with project_manifest_transaction(manifest_path):
+        manifest = _read_manifest(manifest_path)
+        state = _metadata_from_manifest(manifest)
+        to_clear = {
+            _normalize_recording_id(recording_id)
+            for recording_id in recording_ids
+            if _normalize_recording_id(recording_id)
+        }
+        if not to_clear:
+            return []
+        existing = _manual_recording_entries_from_state(state)
+        retained = [
+            entry
+            for entry in existing
+            if str(entry.get("recording_id") or "").upper() not in to_clear
+        ]
+        cleared = sorted(
+            str(entry["recording_id"])
+            for entry in existing
+            if str(entry.get("recording_id") or "").upper() in to_clear
+        )
+        if not cleared:
+            return []
+        state["manual_recording_exclusions"] = retained
+        state["downstream_outputs_stale"] = True
+        state["stale_reason"] = "Manual frequency-domain recording exclusions changed."
+        state["stale_at"] = _now_utc_iso()
+        state.pop("last_review", None)
+        _set_metadata_in_manifest(manifest, state)
+        _write_manifest_if_changed(manifest_path, manifest)
+        return cleared
 
 
 def thresholds_summary_lines() -> list[str]:
@@ -1880,7 +1891,7 @@ def _provisional_harmonics(
     from Tools.Stats.analysis.dv_policy_group_significant import (
         build_group_significant_harmonic_selection,
     )
-    from Tools.Stats.analysis.dv_policy_settings import GROUP_SIGNIFICANT_POLICY_NAME
+    from Main_App.processing.harmonic_settings import GROUP_SIGNIFICANT_POLICY_NAME
 
     if settings.name == GROUP_SIGNIFICANT_POLICY_NAME:
         selection = build_group_significant_harmonic_selection(
@@ -3485,7 +3496,7 @@ def _find_first_bca_columns(
 
 
 def _harmonic_selection_settings(project: Any) -> Any:
-    from Tools.Stats.analysis.dv_policy_settings import (
+    from Main_App.processing.harmonic_settings import (
         GROUP_SIGNIFICANT_ELECTRODE_SCOPE_ROI_UNION,
         GROUP_SIGNIFICANT_POLICY_NAME,
         GROUP_SIGNIFICANT_SUMMATION_THROUGH_HIGHEST,
@@ -4793,19 +4804,8 @@ def _read_manifest(manifest_path: Path) -> dict[str, object]:
 
 
 def _write_manifest_if_changed(manifest_path: Path, manifest: Mapping[str, object]) -> None:
-    new_payload = json.dumps(_json_safe(dict(manifest)), sort_keys=True, separators=(",", ":"))
-    if manifest_path.exists():
-        try:
-            current = json.loads(manifest_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            current = {}
-        current_payload = json.dumps(current, sort_keys=True, separators=(",", ":"))
-        if current_payload == new_payload:
-            return
-    manifest_path.write_text(
-        json.dumps(_json_safe(dict(manifest)), indent=2, ensure_ascii=False),
-        encoding="utf-8",
-    )
+    with project_manifest_transaction(manifest_path) as transaction:
+        transaction.write(_json_safe(dict(manifest)))
 
 
 def _auto_electrode_entries_from_state(state: Mapping[str, object]) -> list[dict[str, object]]:

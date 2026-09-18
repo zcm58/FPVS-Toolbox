@@ -47,7 +47,7 @@ from .recordings import (
     RecordingInfo,
     RecordingSourceInfo,
     SessionInfo,
-    load_project_recording_context,
+    project_recording_context_from_manifest,
 )
 
 
@@ -628,7 +628,7 @@ def load_project_dataset_index(dataset_path: str | Path) -> ProjectDatasetIndex:
         else:
             scan_root = requested
         try:
-            context = load_project_recording_context(project_root)
+            context = project_recording_context_from_manifest(project_root, manifest)
         except (OSError, ValueError) as exc:
             raise DatasetIndexError(
                 f"Unable to load canonical project recording metadata: {exc}"

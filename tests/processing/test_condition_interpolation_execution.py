@@ -1,8 +1,10 @@
 """Headless orchestration checks; real EEG interpolation has separate numeric tests."""
 
 from copy import deepcopy
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 import json
+from threading import Event
 from types import SimpleNamespace
 
 import pytest
@@ -56,6 +58,17 @@ def test_absent_manifest_default_path_does_not_load_processing_io(tmp_path, monk
     monkeypatch.setattr(executor, "completion_is_current", lambda *_: pytest.fail("unexpected completion work"))
     assert executor.execute_pending_condition_interpolations(tmp_path) is False
     state_api.require_no_pending_condition_interpolation(tmp_path)
+
+
+@pytest.mark.parametrize("root_exists", [False, True])
+def test_absent_manifest_reconciliation_leaves_filesystem_untouched(tmp_path, root_exists):
+    root = tmp_path / "unmanaged_project"
+    if root_exists:
+        root.mkdir()
+    assert state_api.reconcile_condition_interpolation_sources(root) == ({}, [])
+    assert root.exists() is root_exists
+    if root_exists:
+        assert list(root.iterdir()) == []
 
 
 def test_reassigned_source_path_does_not_reuse_old_approval(tmp_path):
@@ -115,12 +128,15 @@ class _Plan:
     processing_fingerprint_version: str = "version-1"
 
 
-def test_failed_repair_retries_without_rewriting_other_condition_and_adopts_normal_receipts(tmp_path, monkeypatch):
+@pytest.mark.parametrize("concurrent_review", [None, "new_recording", "same_recording"])
+def test_failed_repair_retries_without_rewriting_other_condition_and_adopts_normal_receipts(
+    tmp_path, monkeypatch, concurrent_review,
+):
     from Main_App.processing import expected_processing_ledger as expected_api
     from Main_App.processing import recording_condition_outcomes as outcomes_api
     from Main_App.io import condition_data, spectral_data
 
-    _raw, source, _decision, _report = _project(tmp_path, "p01_visit2")
+    _raw, source, decision, report = _project(tmp_path, "p01_visit2")
     output = tmp_path / "1 - Excel Data Files"
     output.mkdir()
     faces, objects = output / "Faces.fpvs", output / "Objects.fpvs"
@@ -166,6 +182,23 @@ def test_failed_repair_retries_without_rewriting_other_condition_and_adopts_norm
     })
     calls = []
 
+    def accept_new_review():
+        from Main_App.projects import project_manifest_transaction
+
+        newer = dict(decision)
+        if concurrent_review == "new_recording":
+            ledger = load_ledger(tmp_path)
+            ledger["entries"]["P02"] = {**source, "processing_fingerprint": "processing-1"}
+            save_ledger(tmp_path, ledger)
+            newer.update(recording_id="P02", participant_id="P02")
+        else:
+            newer["electrode"] = "P9"
+        path = tmp_path / "project.json"
+        with project_manifest_transaction(path) as transaction:
+            manifest = json.loads(path.read_bytes())
+            state_api.queue_condition_interpolation_decisions(manifest, [newer], report)
+            transaction.write(manifest)
+
     def run(_root, snapshot, _record, requests, **_kwargs):
         calls.append(deepcopy(requests))
         assert snapshot["settings"]["reviewed_marker_samples"] == [101, 1807]
@@ -173,6 +206,10 @@ def test_failed_repair_retries_without_rewriting_other_condition_and_adopts_norm
         faces.write_bytes(b"repaired Faces")
         if len(calls) == 1:
             raise RuntimeError("simulated export interruption")
+        if concurrent_review:
+            # A separate writer must be free to accept QC while EEG work runs.
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                pool.submit(accept_new_review).result(timeout=10)
         return {"export_receipts": [receipt("Faces", faces, True)]}
 
     monkeypatch.setattr(executor, "_run_recording", run)
@@ -180,15 +217,30 @@ def test_failed_repair_retries_without_rewriting_other_condition_and_adopts_norm
         executor.execute_pending_condition_interpolations(tmp_path)
     assert state_api.load_condition_interpolation_state(tmp_path)["pending"]
     assert (objects.read_bytes(), objects.stat().st_mtime_ns) == untouched
+    if concurrent_review:
+        with pytest.raises(state_api.ConditionInterpolationStateConflictError, match="preserved"):
+            executor.execute_pending_condition_interpolations(tmp_path)
+        latest = state_api.load_condition_interpolation_state(tmp_path)
+        assert "p01_visit2" in latest["pending"]
+        assert "p01_visit2" not in latest["completed"]
+        assert len(latest["review_decisions"]) == 2
+        if concurrent_review == "new_recording":
+            assert latest["requests"]["P02"] == {"Faces": ["O2"]}
+            assert "P02" in latest["pending"]
+        else:
+            assert set(latest["requests"]["p01_visit2"]["Faces"]) == {"O2", "P9"}
+        assert (objects.read_bytes(), objects.stat().st_mtime_ns) == untouched
+        return
     assert executor.execute_pending_condition_interpolations(tmp_path)
     state_api.require_no_pending_condition_interpolation(tmp_path)
     assert (objects.read_bytes(), objects.stat().st_mtime_ns) == untouched
     assert len(load_ledger(tmp_path)["entries"]["p01_visit2"]["export_receipts"]) == 2
     # Emulate a completed full normal run with no feature completion receipt yet.
     state = state_api.load_condition_interpolation_state(tmp_path)
+    baseline = deepcopy(state)
     state["completed"] = {}
     state["pending"]["p01_visit2"] = {}
-    state_api.save_condition_interpolation_state(tmp_path, state)
+    state_api.save_condition_interpolation_state(tmp_path, state, expected_state=baseline)
     assert executor.execute_pending_condition_interpolations(tmp_path) is True
     assert executor.execute_pending_condition_interpolations(tmp_path) is False
     assert len(calls) == 2
@@ -204,3 +256,105 @@ def test_explicit_exclusions_suspend_repairs_but_missing_inputs_do_not():
     assert state_api.active_condition_requests(plan, "p01", requests) == {"Objects": ["P9"], "Absent": ["P10"]}
     reinstated = replace(plan, recordings=(_Recording("P01", (_Cell("Faces", "path"),)),))
     assert state_api.active_condition_requests(reinstated, "P01", requests) == requests
+
+
+def test_stale_retirement_cannot_remove_a_newly_accepted_request(tmp_path):
+    from Main_App.projects import project_manifest_transaction
+
+    _raw, source, decision, report = _project(tmp_path)
+    baseline = state_api.load_condition_interpolation_state(tmp_path)
+    retired = deepcopy(baseline)
+    retired["requests"].pop("P01")
+    retired["pending"].pop("P01")
+    ledger = load_ledger(tmp_path)
+    ledger["entries"]["P02"] = source
+    save_ledger(tmp_path, ledger)
+    path = tmp_path / "project.json"
+    with project_manifest_transaction(path) as transaction:
+        manifest = json.loads(path.read_bytes())
+        newer = {**decision, "recording_id": "P02", "participant_id": "P02"}
+        state_api.queue_condition_interpolation_decisions(manifest, [newer], report)
+        transaction.write(manifest)
+    before = path.read_bytes()
+    with pytest.raises(state_api.ConditionInterpolationStateConflictError):
+        state_api.save_condition_interpolation_state(tmp_path, retired, expected_state=baseline)
+    assert path.read_bytes() == before
+    assert set(state_api.load_condition_interpolation_state(tmp_path)["requests"]) == {"P01", "P02"}
+
+
+def test_source_retirement_serializes_with_a_concurrent_qc_acceptance(tmp_path, monkeypatch):
+    from Main_App.projects import project_manifest_transaction
+
+    raw, _source, decision, report = _project(tmp_path)
+    raw.write_bytes(b"replaced original source")
+    other_raw = tmp_path / "P02.bdf"
+    other_raw.write_bytes(b"new source")
+    ledger = load_ledger(tmp_path)
+    ledger["entries"]["P02"] = raw_file_metadata(other_raw)
+    save_ledger(tmp_path, ledger)
+    checking, release, attempted, published = (Event() for _ in range(4))
+    original_source_check = state_api._source_matches_active_path
+
+    def hold_source_check(source, identity, current_sources):
+        checking.set()
+        assert release.wait(10)
+        return original_source_check(source, identity, current_sources)
+
+    def accept_review():
+        path = tmp_path / "project.json"
+        attempted.set()
+        with project_manifest_transaction(path) as transaction:
+            manifest = json.loads(path.read_bytes())
+            newer = {**decision, "recording_id": "P02", "participant_id": "P02"}
+            state_api.queue_condition_interpolation_decisions(manifest, [newer], report)
+            transaction.write(manifest)
+        published.set()
+
+    monkeypatch.setattr(state_api, "_source_matches_active_path", hold_source_check)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        retiring = pool.submit(state_api.reconcile_condition_interpolation_sources, tmp_path)
+        try:
+            assert checking.wait(10)
+            accepting = pool.submit(accept_review)
+            assert attempted.wait(10)
+            assert not published.wait(0.1)
+        finally:
+            release.set()
+        requests, warnings = retiring.result(timeout=10)
+        accepting.result(timeout=10)
+    assert requests == {} and warnings
+    latest = state_api.load_condition_interpolation_state(tmp_path)
+    assert latest["requests"] == {"P02": {"Faces": ["O2"]}}
+    assert set(latest["pending"]) == {"P02"}
+    assert latest["retired_requests"][0]["processing_id"] == "P01"
+
+
+@pytest.mark.parametrize("cleanup_failed", [False, True])
+def test_recording_repair_respects_terminal_cleanup_after_successful_file(
+    tmp_path, monkeypatch, cleanup_failed,
+):
+    from Main_App.workers import process_runner
+
+    result = {"status": "ok", "file": str(tmp_path / "P01.bdf"), "export_receipts": []}
+
+    def run(_params, *, progress_queue):
+        progress_queue.put({"type": "progress", "result": result})
+        return {
+            "status": "error" if cleanup_failed else "success",
+            "controller_error": "RuntimeError: pool cleanup failed" if cleanup_failed else "",
+            "results": [result], "errors": [],
+        }
+
+    monkeypatch.setattr(process_runner, "run_project_parallel", run)
+    snapshot = {"settings": {}, "event_map": {"Faces": 1}, "save_folder": str(tmp_path / "outputs")}
+    record = {"processing_id": "P01", "info": {"path": result["file"], "subject_id": "P01"}}
+    logs = []
+    if cleanup_failed:
+        with pytest.raises(state_api.ConditionInterpolationPendingError, match="P01:.*pool cleanup failed"):
+            executor._run_recording(tmp_path, snapshot, record, {"P01": {"Faces": ["O2"]}}, log_func=logs.append)
+        assert logs == []
+    else:
+        assert executor._run_recording(
+            tmp_path, snapshot, record, {"P01": {"Faces": ["O2"]}}, log_func=logs.append,
+        ) is result
+        assert logs == ["Condition-electrode repair processed P01."]

@@ -60,6 +60,53 @@ def _workbook(excel_root: Path, condition: str, folder: str | None, name: str) -
     return path
 
 
+def test_index_recording_identity_uses_the_captured_manifest_snapshot(tmp_path, monkeypatch):
+    from Main_App.projects import dataset_index
+
+    root = tmp_path / "Project"
+    excel_root = _write_project(
+        root, groups={"control": ("Original group", "Control")},
+        participants={"P01": "control"},
+    )
+    path = root / "project.json"
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    manifest.update(
+        schema_version="2.2.0",
+        sessions={"baseline": {"label": "Original visit", "visit_index": 1}},
+        recording_sources={"source": {
+            "group_id": "control", "session_id": "baseline",
+            "raw_input_folder": "Raw/Control/Baseline",
+        }},
+        recordings={"P01_baseline": {
+            "participant_id": "P01", "session_id": "baseline", "source_id": "source",
+            "raw_file": "Raw/Control/Baseline/P01.bdf", "visit_index": 1,
+        }},
+    )
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    workbook = _workbook(excel_root, "Faces", "Control", "P01_baseline_Faces_Results.xlsx")
+    original_find = dataset_index.find_project_manifest_for_dataset_path
+
+    def change_disk_after_capture(requested):
+        captured = original_find(requested)
+        newer = json.loads(path.read_text(encoding="utf-8"))
+        newer["groups"]["control"]["label"] = "Later group"
+        newer["sessions"]["baseline"]["label"] = "Later visit"
+        newer["recordings"]["P01_baseline"]["days_from_baseline"] = 90
+        newer["preprocessing"] = {"manual_excluded_recordings": ["P01_baseline"]}
+        path.write_text(json.dumps(newer), encoding="utf-8")
+        return captured
+
+    monkeypatch.setattr(dataset_index, "find_project_manifest_for_dataset_path", change_disk_after_capture)
+    index = load_project_dataset_index(root)
+    assert len(index.workbooks) == 1
+    record = index.workbooks[0]
+    assert record.path == workbook
+    assert record.group_label == "Original group"
+    assert record.session_label == "Original visit"
+    assert record.days_from_baseline is None
+    assert index.manifest == manifest
+
+
 def test_native_results_replace_only_their_exact_legacy_siblings(tmp_path: Path) -> None:
     project_root = tmp_path / "Project"
     excel_root = _write_project(

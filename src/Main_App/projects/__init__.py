@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib
 from typing import Any
 
+_MANIFEST_NAMES = {"project_manifest_transaction"}
 _PROJECT_NAMES = {
     "Project",
     "DEFAULTS",
@@ -26,6 +27,7 @@ _RECORDING_NAMES = {
     "normalize_project_recordings",
     "normalize_project_sessions",
     "project_recording_context",
+    "project_recording_context_from_manifest",
 }
 _RECORDING_PREFLIGHT_NAMES = {
     "RecordingPreflightCancelled",
@@ -157,7 +159,8 @@ _PREPROCESSING_NAMES = {
 }
 
 __all__ = sorted(
-    _DATASET_INDEX_NAMES
+    _MANIFEST_NAMES
+    | _DATASET_INDEX_NAMES
     | _DATASET_PATH_NAMES
     | _EXPERIMENTAL_QC_SETTINGS_NAMES
     | _FREQUENCY_PROTOCOL_NAMES
@@ -173,6 +176,9 @@ __all__ = sorted(
 
 
 def __getattr__(name: str) -> Any:
+    if name in _MANIFEST_NAMES:
+        manifest_store = importlib.import_module("Main_App.projects.manifest_store")
+        return getattr(manifest_store, name)
     if name in _DATASET_INDEX_NAMES:
         dataset_index = importlib.import_module("Main_App.projects.dataset_index")
 

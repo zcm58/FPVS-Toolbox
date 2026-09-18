@@ -161,14 +161,16 @@ def test_failed_manifest_replace_preserves_project_and_cleans_staging(
     root = _managed_full_fft_project(tmp_path)
     manifest_path = root / "project.json"
     before = manifest_path.read_bytes()
-    original_replace = Path.replace
+    from Main_App.projects import manifest_store
+
+    original_replace = manifest_store.os.replace
 
     def fail_provenance_replace(path: Path, target: Path) -> Path:
-        if path.name == ".project.json.full-fft-provenance.tmp":
+        if target == manifest_path:
             raise PermissionError("simulated manifest replace failure")
         return original_replace(path, target)
 
-    monkeypatch.setattr(Path, "replace", fail_provenance_replace)
+    monkeypatch.setattr(manifest_store.os, "replace", fail_provenance_replace)
 
     with pytest.raises(PermissionError, match="simulated"):
         write_project_full_fft_provenance(
@@ -178,7 +180,7 @@ def test_failed_manifest_replace_preserves_project_and_cleans_staging(
         )
 
     assert manifest_path.read_bytes() == before
-    assert not (root / ".project.json.full-fft-provenance.tmp").exists()
+    assert not list(root.glob(".project.json.*.tmp"))
 
 
 def test_require_current_full_fft_provenance_uses_saved_rates_and_checks_inputs(

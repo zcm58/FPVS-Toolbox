@@ -183,8 +183,33 @@ Rules:
 - Individual preprocessing file failures emit `file_status`, remain in the
   bridge's final `errors` payload, and leave the batch active. The GUI passes
   them to the processing ledger and QC report, then shows one deduplicated
-  completion summary. `MpRunnerBridge.error` is reserved for bridge-level
-  faults; ordinary file failures must not finalize or unlock an active run.
+  completion summary. Ordinary file failures must not finalize or unlock an
+  active run. Controller faults also finish through the single `finished`
+  snapshot, so the ledger retains completed work before controls unlock.
+- `run_project_parallel()` owns the sole terminal `done` message across
+  reconciliation, pool creation, submission, harvesting, cancellation, and
+  shutdown. It includes explicit `status` (`success`, `error`, `cancelled`),
+  `controller_error`, complete result/error/exclusion lists, and
+  `interrupted_files`. Without a queue, controller exceptions still propagate
+  to the synchronous caller. Completed futures are harvested before stopping
+  an exceptional or cancelled pool; unsubmitted files remain accounted for.
+- `MpRunnerBridge` uses an in-process thread-safe queue: the controller thread
+  is its only producer, and child results arrive through executor futures.
+  Polling observes controller death before draining that queue, so a real
+  terminal message wins over synthesized abnormal-exit failure without any
+  multiprocessing feeder delay. Startup failure is delivered on the next
+  timer tick. All terminal paths release bridge state once and allow restart.
+  Queue faults request cancellation and retain the run lock until the
+  controller stops. The GUI records completed results, reports controller
+  failure, and skips downstream processing for that failed run.
+- The spawned-worker initializer calls `set_worker_thread_limits()`. It retains
+  a `threadpoolctl` limiter for already-loaded BLAS/OpenMP pools, sets the
+  environment for subsequently loaded libraries, and limits NumExpr if already
+  imported. This changes only child-process thread counts; the parent keeps its
+  existing thread policy. Scientific parameters and processing order are
+  unchanged. `tests/processing/test_worker_thread_limits.py` verifies effective
+  runtime limits across repeated tasks in one real spawned child and byte-exact
+  synthetic FIR/notch/resampling/FFT/kurtosis parity against an uncapped child.
 - Log diagnostics with structured logging.
 - Main App preprocessing cancellation is a hard-stop request: `MpRunnerBridge.cancel()`
   sets the shared cancel event, `run_project_parallel()` terminates active
@@ -203,3 +228,15 @@ python .agents/scripts/verify.py --scope processing --tier focused
 If the worker change is Stats-owned, use the `stats` scope instead. Qt worker
 and focus tests run in CI only by default; document a visible/manual smoke path
 for signal and cancellation behavior changed in the GUI.
+
+Controller lifecycle coverage: `tests/processing/test_process_runner_lifecycle.py`
+injects setup, creation, submission, worker, cancellation, and cleanup faults.
+`tests/gui/test_processing_failure_routing_static.py` exercises the actual
+bridge and completion methods with non-Qt doubles. The registered CI-only
+`tests/processing/test_mp_runner_bridge_full_pipeline_smoke.py` covers actual
+signals, abnormal controller exit, deferred startup failure, and restart.
+Visible/manual smoke: start a small run, cancel it while work is active, verify
+the completed files remain recorded and interrupted files are identified, then
+start it again. Exercise an unavailable output location or injected controller
+failure; verify one failure completion, restored controls, and no downstream
+continuation before successfully restarting. Local Qt execution remains disabled.

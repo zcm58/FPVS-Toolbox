@@ -123,6 +123,12 @@ Focused architecture pages:
   `pathlib`, Qt, and standard-library platform abstractions; confine unavoidable
   OS-specific behavior to packaging or focused system-integration adapters.
 - GUI code should orchestrate widgets, signals, and user feedback; processing logic belongs in backend, worker, or tool modules.
+- `Main_App.processing.harmonic_settings` and
+  `Main_App.processing.canonical_harmonics` own the shared versioned harmonic
+  settings and accepted-selection contract. The former Stats modules remain
+  compatibility exports. Processing, Stats, and LORETA Visualizer package entry
+  points load heavy execution/GUI exports lazily so backend contracts can be
+  imported without Qt.
 - Long-running EEG, plotting, export, and statistics work must run outside the UI thread.
 - Historical legacy behavior should be consumed through existing current-app APIs or thin adapters in purpose-based packages. Do not add new `Legacy_App` or `PySide6_App` modules.
 - Project-aware workflows should resolve files through the active project root and preserve existing generated formats.

@@ -125,6 +125,9 @@ own:
 ## Ownership
 
 Tool implementation lives inside `src/Tools/LORETA_Visualizer/`.
+The root package resolves its public `LoretaVisualizerWindow` export lazily,
+so importing source producers or their shared planning/cache owners does not
+import the Qt window.
 
 Allowed outside this directory are the narrow shell integrations described by
 this contract: Main App sidebar/page/icon wiring, project-page cleanup, focused
@@ -257,6 +260,10 @@ from already summed BCA values or compact selected-harmonic summaries.
 The Hauk source-PSD feature adds `project_time_domain_inputs.py`,
 `hauk_source_psd.py`, `project_l2_mne_hauk_source_psd_export.py`, and
 `project_eloreta_volume_hauk_source_psd_export.py` as versioned sibling paths.
+The GUI-neutral `project_source_psd_inputs.py` owns their shared ledger/cohort
+planning, sample-count reconciliation, saved-harmonic resolution, and cohort
+provenance. Both producers consume that owner directly; historical public
+planning imports from the L2 exporter remain compatibility reexports.
 Main App processing publishes one signed,
 repetition-averaged EEG Raw FIF per participant/condition plus provenance and a
 participant commit manifest. Project orchestration derives one explicit
@@ -283,6 +290,40 @@ preserved in prepared condition metadata; experimental groups are not pooled
 silently. A group-condition cell with no retained participants is omitted. A
 one-participant cell remains available as a descriptive map and records an
 insufficient-participants cluster-mask status.
+
+### Source-PSD cache order and model lifetime
+
+Every rebuild still validates committed manifests, derivative content checksums,
+sidecars, FIF headers, reference/channel contracts, and cohort/sample-count
+eligibility before using participant results. Each producer checks the compact
+participant cache using a validated record before preloading its EEG. Only a
+miss opens a preloaded Raw, scans its samples for finite values, and computes
+sources; that Raw closes even if computation fails. A warm result therefore
+avoids EEG allocation while remaining tied to exactly the bytes whose finite
+samples were accepted when the result was computed.
+
+`source_model_cache.py` reuses native inverse resources only in the current
+process, with an LRU bound of two models. L2 and eLORETA use separate method
+identities. The signature includes numerical preparation parameters (including
+eLORETA regularization and iterative settings), sampling rate, ordered channel
+and actual montage/projector/reference metadata, and MNE/NumPy/SciPy versions.
+Every lookup rehashes fixed template inputs: BEM and transform plus the L2
+hemispheres' white/sphere surfaces, or the volume model's T1 MRI. That signature
+also enters participant result keys, preventing old scientific results from
+surviving a dependency, geometry, or template change. Surface orientation modes
+share compatible inverse preparation but retain distinct participant method keys.
+
+Native resources are never pickled or persisted. The cache keeps a private deep
+copy and supplies independent mutable resources to callers before estimator
+closures are created. This trades memory for avoiding repeated forward/inverse
+solves; retained native resources are bounded to two entries, in addition to
+caller-owned working copies. A new process or cache eviction rebuilds the model.
+Warm runs still hash templates/derivatives, validate headers, copy native
+resources, and regenerate output summaries; they do not promise zero I/O.
+Synthetic tests exercise preparation call counts, eviction, mutation isolation,
+cache invalidation, and identical cold/warm participant values without reading
+or downloading real fsaverage templates. Full real-template timing and native
+solver validation remain a separate manual check.
 
 This method is deliberately Toolbox-specific where appropriate: project-selected
 significant oddball harmonics remain authoritative, exact FPVS bins are

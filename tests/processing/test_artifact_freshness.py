@@ -5,7 +5,6 @@ from pathlib import Path
 
 import pytest
 
-import Main_App.processing.artifact_freshness as freshness_module
 from Main_App.processing.artifact_freshness import (
     ANALYSIS_READY_FULL_AUDIT_ARTIFACT,
     ARTIFACT_STATUS_CURRENT,
@@ -483,7 +482,9 @@ def test_failed_atomic_manifest_replace_preserves_previous_project_state(
     def _deny_replace(_source: object, _target: object) -> None:
         raise PermissionError("locked")
 
-    monkeypatch.setattr(freshness_module.os, "replace", _deny_replace)
+    from Main_App.projects import manifest_store
+
+    monkeypatch.setattr(manifest_store.os, "replace", _deny_replace)
     with pytest.raises(PermissionError, match="locked"):
         activate_selection_freshness(
             root,
@@ -492,4 +493,4 @@ def test_failed_atomic_manifest_replace_preserves_previous_project_state(
         )
 
     assert manifest_path.read_text(encoding="utf-8") == original
-    assert list(root.glob(".project.json.artifact-freshness-*.tmp")) == []
+    assert list(root.glob(".project.json.*.tmp")) == []

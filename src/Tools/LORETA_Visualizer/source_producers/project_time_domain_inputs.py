@@ -14,6 +14,7 @@ import math
 import re
 from collections import Counter
 from collections.abc import Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -136,13 +137,22 @@ class ProjectTimeDomainInputSet:
         """Yield one preloaded Raw at a time and close it before loading the next."""
 
         for record in self.records:
-            raw = _read_and_validate_raw(record, preload=True, require_finite=True)
-            try:
+            with load_project_time_domain_raw(record) as raw:
                 yield LoadedProjectTimeDomainRaw(record=record, raw=raw)
-            finally:
-                close = getattr(raw, "close", None)
-                if callable(close):
-                    close()
+
+
+@contextmanager
+def load_project_time_domain_raw(record: ProjectTimeDomainInputRecord) -> Iterator[Any]:
+    """Preload and finite-check one validated record, closing it even on failure."""
+
+    raw = _read_and_validate_raw(record, preload=True, require_finite=True)
+    try:
+        yield raw
+    finally:
+        close = getattr(raw, "close", None)
+        if callable(close):
+            close()
+
 
 
 def default_project_time_domain_input_dir(project_root: str | Path) -> Path:
@@ -912,4 +922,5 @@ __all__ = [
     "SOURCE_TIME_DOMAIN_SIDECAR_FORMAT",
     "default_project_time_domain_input_dir",
     "load_project_time_domain_inputs",
+    "load_project_time_domain_raw",
 ]
