@@ -24,6 +24,34 @@ audit. Reasons remain optional. This supersedes the electrode-exclusion and
 mandatory-reason wording below; see the
 [condition-specific interpolation implementation](../condition-specific-interpolation.md).
 
+**2026-09-07 electrode-only review amendment:** remove the ROI amplitude
+screening feature, including ROI cohort calculations, ROI findings/decisions,
+and the associated settings controls. Historical ROI decisions remain audit
+records without active exclusion or reconfirmation authority. Stats consumes
+the electrode review and does not reconstruct the retired ROI screen. This
+supersedes the ROI cohort behavior in item 6 and its verification requirements
+below. Absolute electrode screening, grouped electrode patterns, condition
+repair, normal ROI aggregation, and QC-21 fixed-membership coverage remain.
+GUI behavior and the visible smoke path are specified in
+[the GUI contract](../../../architecture/gui.md).
+The electrode-only method uses v5 provenance. Prior ROI-bearing review receipts
+require a normal post-processing refresh; their historical decisions are not
+silently relabeled as current electrode evidence. Loading a project does not
+rewrite its history, and independently saved manual exclusions remain active.
+
+Removal verification: GUI focused gate **388 passed**; Stats focused gate
+**442 passed**; processing focused gate **1,738 passed, 5 skipped**, with the
+existing fixed-profile ROI snapshot fixture failure in
+`test_harmonic_selection_qc.py` still present alongside unrelated concurrent
+Stats normalization edits. The final GUI/model and Stats QC subset passed
+**106 tests**, settings passed **44**, and the added five-participant ROI-only
+outlier case passed without any review prompt. The electrode scanner and its
+participant/recording summaries are AST-identical to the preceding commit.
+Ruff and protected/GUI/Stats audits passed. Repository precommit stops at the
+same eight pre-existing path findings in untracked `outputs/`; those files and
+the unrelated Stats/export edits were preserved. Qt execution remains CI-only;
+the visible smoke path above is still required.
+
 1. Add a dedicated **Experimental settings** section to the project Settings
    menu. Put the QC-04 removed-electrode detector and a project-owned
    **Experimental summed-BCA screening** control there. The summed-BCA screen

@@ -1,5 +1,296 @@
 # QC Performance: Exact Numerical Reuse
 
+## Postprocessing Review Readiness And Audit Parsing (2026-09-08)
+
+Baseline: `c44665827da158de0643758b4bbb999b26d8b6b2`. The approved first batch
+from the [postprocessing QC investigation](../../reviews/postprocessing-qc-v3-investigation.md)
+adds accurate review readiness and exact-target navigation, decision consequence
+and unsaved-state copy, honest non-cancellable post-processing controls, and a
+bounded per-read memo for repeated exact frequency-label parsing.
+
+- [x] Preserve the original choices, reasons, group actions, undo and backend
+  validation; show missing choices, missing artifact confirmations and conflicts.
+- [x] Explain broad exclusion and interpolation consequences within existing
+  detail panes, retaining the supported dialog size and filter/selection state.
+- [x] Keep the shared action disabled during output preparation and saving;
+  restore existing Start/Resume behavior on completion or failure.
+- [x] Reuse at most 256 built-in string tokens, each at most 128 characters, in
+  one audit-table read; on cache allocation failure use original conversion.
+- [x] Complete frozen-baseline regressions, production timing/parity checks,
+  focused verification and independent review.
+
+No numerical operation, summation order, precision, harmonic selection, raw
+source validation, project identity, decision schema, persistence ownership or
+export format changes. No long-lived cache, preview viewer, new broad bulk
+action or saved draft is introduced. Architecture updates document presentation,
+worker-state and per-read cache ownership; statistical-method docs need no
+change because the scientific contract is unchanged.
+
+Actual production verification uses the harness's `--baseline-ref c4466582`
+option to load the frozen parser, converters and constants by AST from Git.
+Three alternating real-project pairs (12 runs across new/reused provisional
+evidence) retained identical complete ordered result fingerprints and source
+validation read counts. Median backend preparation was **30.570 → 28.479 s**
+with new evidence (**6.8%**, 2.091 s saved), and **21.523 → 19.094 s** with
+reused evidence (**11.3%**, 2.429 s saved). The manifest hash stayed unchanged
+and the write-blocking audit recorded no mutation attempts. These measurements
+exclude GUI/user time, saving, repair and export publication; durable harmonic
+caches remained available and OS caches were not flushed. No memory reduction
+is claimed. The actual parser's five-pair helper median was **11.938 → 6.882 ms**,
+reducing frequency conversions from 2,624 to 41 for the measured table.
+[Production evidence](../../reviews/postprocessing-qc-v3-implementation-evidence.json)
+retains all timings, hashes, environment details and bounds. The earlier
+investigation's prototype timings remain historical, not final-code receipts.
+
+Reproduce the real read-only comparison with the repo environment:
+
+```console
+python scripts/manual_diagnostics/investigate_postprocessing_qc.py PROJECT_ROOT NEW_DIAGNOSTIC_DIRECTORY --baseline-ref c44665827da158de0643758b4bbb999b26d8b6b2 --trials 3
+```
+
+The diagnostic directory must be outside the project and unused. No other
+CPU-heavy test or benchmark should run concurrently. This is a developer-only
+probe in `scripts/manual_diagnostics`, not a runtime workflow.
+
+Final implementation checks: processing focused **1,871 passed, 5 skipped**
+(59 existing synthetic FIR/stim warnings); GUI focused **414 passed**. The first
+GUI run exposed an extracted-callback fixture missing the new tooltip state;
+the fixture now supplies it and asserts restoration, and the full GUI rerun
+passes. The parser's focused 39 cases and the non-Qt worker lifecycle cases are
+included in these scopes. Ruff, compilation, GUI/protected/source-localization
+audits and whitespace checks pass. The repository precommit gate still stops
+before broad tests on the same eight pre-existing hard-coded paths in unrelated
+untracked `outputs/`; it is not a passing gate. Those files remain untouched.
+Independent review found and resolved post-processing thread-start cleanup,
+with no remaining actionable finding. Qt execution, visible fit, installer and
+CachyOS smoke remain unrun; the path below and the existing CI registry cover
+the required next validation. This handoff implements only the approved first
+batch; investigation proposals for viewers, broader caching and other deferred
+work remain recommendations.
+
+Visible smoke (not run locally; Qt execution is CI-only): at 1280x900 and the
+1000x650 dialog minimum, verify all actions fit with long identities. Filter and
+sort to hide a missing choice, unconfirmed repair and conflicting exclusion;
+Next needs attention must reveal the exact target and focus its combo or
+confirmation. Verify reasons/choices survive navigation, counts update when
+confirming repair, group hidden/replaced counts are accurate, and undo restores
+choices and confirmations. Cancel must leave Resume available without saving;
+acceptance must show Saving QC then Preparing Outputs with disabled controls,
+and completion/failure must restore Start/Resume and the usual tooltip. Check
+save/start failures and optional export failure without marking failed artifacts
+current. Repeat on Windows 11 and CachyOS. Local tests cover the non-Qt model
+and orchestration; registered Qt tests describe the remaining visible behavior.
+
+## Participant Exclusions Before Kurtosis Loading (2026-09-07)
+
+Baseline: `37739269`. Remove known participant exclusions from speculative
+step-2 source loading and refresh eligibility as review choices change. Select
+step-6 workers from recordings that require work, and report eligible progress
+separately from exclusions and failures. Preserve scientific calculations,
+continuous filtering for retained conditions, ordered evidence/skip results,
+cache identities, and source immutability.
+
+- [x] Filter and refresh the preload queue without GUI-thread I/O; retire
+  excluded ready buffers safely and let active reads release their own data.
+- [x] Resolve verified skips before worker resource estimates and add
+  structured eligible/excluded progress without breaking legacy callbacks.
+- [x] Wire current participant choices and clear progress into the GUI.
+- [x] Verify races, exclusion scope, eligible-only scheduling, exact evidence,
+  cancellation and cleanup; run processing/GUI gates and commit.
+
+Scope is participant-level speculative loading. Recording and condition
+exclusions retain their existing scientific authority; partial exclusions do
+not justify changing the continuous filter input. Temporary sources remain
+inside the active project's `.fpvs_processing/qc-source-*` directory.
+
+The preload constructor matches normalized, case-insensitive participant IDs
+from `RawFileInfo.subject_id`, never filenames. The GUI refreshes exclusions
+after accepted reviews and before each kurtosis scan. Refresh only changes
+thread-safe state: queued work is skipped, active reads finish safely without
+publishing excluded data, and ready buffers are retired by background
+maintenance. Borrowed Raw objects remain owned until release. Retired work is
+not restarted if a participant is re-included; normal source loading remains
+available. Maintenance and final cleanup coordinate ownership and staging
+budget, including cancellation and concurrent close.
+
+The kurtosis coordinator resolves existing participant, recording and complete
+condition exclusions before file-size or duplicate-stem resource estimates.
+Invalid plans remain explicit errors; partial exclusions retain continuous
+filtering. Ordered skip/error/evidence results and legacy progress accounting
+remain available. Structured progress reports eligible completions, exclusions
+and failures; the GUI shows `Processed X of Y eligible recordings; Z excluded`
+and a separate failure count. Zero eligible recordings complete without source
+hashing, loading or worker allocation. An excluded but still active preload
+continues to reserve its concurrency slot until it releases its data.
+
+Production files: `src/Main_App/processing/qc_source_prefetch.py`,
+`src/Main_App/workers/qc_source_prefetch_worker.py`,
+`src/Main_App/processing/kurtosis_review_scan.py`, and
+`src/Main_App/gui/preprocessing_qc_workflow.py`. Coverage is in
+`tests/processing/test_qc_source_prefetch.py`,
+`tests/processing/test_kurtosis_review_scan.py`,
+`tests/workers/test_qc_source_prefetch_worker_static.py`,
+`tests/gui/test_qc_source_prefetch_static.py`, the extracted-loop fixture in
+`tests/gui/test_kurtosis_review_dialog_static.py`, and the existing CI-only fixture
+in `tests/gui/test_qc_source_prefetch_qt.py`. This plan, the preprocessing
+contract and workers/threading contract document the changes. Project roots
+still come from the active project; no hard-coded paths, export formats,
+method fingerprints or retired-package boundaries changed.
+
+The complete serial body from `raw_plans` through its final result is AST-
+identical to `37739269`. Focused tests compare full ordered scientific payload
+bits against that unchanged body, including errors, exclusions and retained
+conditions. Initial focused checks passed 50 source/worker cases, 40 scanner
+cases, and 30 GUI-safe orchestration cases. No local Qt execution or real
+project mutation occurred.
+
+Final combined focused verification passed **142 tests** across the source,
+scanner, worker and GUI-safe orchestration files above plus preflight reuse and
+Continue checks; Ruff, compilation, GUI/protected/source-localization audits
+and whitespace checks passed. `python .agents/scripts/verify.py --scope gui
+--tier focused` passed **382 tests**. The processing driver (`--scope processing
+--tier focused`) completed with **1,690 passed, 5 skipped** and six failures:
+five were old extracted-loop test namespaces missing the new refresh helper,
+now fixed and covered by the passing combined run. The remaining fixed-profile
+harmonic-selection failure is caused by a concurrent, unrelated Stats edit
+whose canonical ROI comparison differs from its old `FZ` fixture. That test
+fails alone with the concurrent edit and passes in an isolated test process
+when only the Stats function is restored from `37739269`; no working-tree
+files were changed for that confirmation. Concurrent Stats/export edits remain
+outside this commit. The repository precommit driver (`--scope repo --tier
+precommit`) still stops on the same eight pre-existing path-audit findings in
+unrelated untracked `outputs/`. The broad gates are therefore not claimed as
+passing. Independent final review found no actionable QC regression.
+
+Visible smoke after restart: use a small project with a participant exclusion,
+leave step 2 open, and confirm that participant never appears in preload logs.
+Add a participant exclusion during review and confirm unstarted loads are
+skipped, the UI stays responsive, and step 6 reports eligible/excluded counts.
+Repeat with every participant excluded, then cancel an active preload/scan and
+confirm run-owned temporary directories disappear after cleanup. Re-including
+a participant must retain the normal loading fallback. Qt execution is CI-only
+locally under the repository policy.
+
+## Preprocessing Step 1 Follow-up (2026-09-07)
+
+Baseline: `ed089e9d`. Require exact float bits, complete scientific evidence,
+row ordering, source immutability and unchanged cache/method fingerprints.
+Allow up to eight recording threads when the shared CPU/RAM policy permits;
+keep two readers and two spectral evaluators. Do not change FFTs, BLAS thread
+counts, reference/filter order or diagnostic windows.
+
+The latest 51-file MCCTR log spans 306.971 seconds. Overlapping worker-stage
+totals identify raw-channel QC (745.621 s) as dominant, compared with condition
+reads (186.410 s), events/planning (186.393 s) and spectral work (4.689 s;
+experimental spectral screening was disabled). These totals are concurrent
+worker times, not additive wall time. A read-only 64-channel, 120-second real
+occurrence profile attributes about 0.975 of 1.619 seconds to spatial scoring,
+including repeated NaN-aware donor means on entirely finite data.
+
+- [x] Profile actual logs and a read-only real occurrence before selecting work.
+- [x] Add guarded finite-input reductions while preserving the original
+  nonfinite/unsupported-layout path and every spatial norm/dot operation.
+- [x] Verify frozen before/after float bits on edge cases and real recordings.
+- [x] Benchmark complete cold/warm step-1 scans with isolated scratch caches.
+- [x] Compare four/eight workers on synthetic and complete real scans.
+- [x] Verify the final resource-aware worker policy and document measured limits.
+
+User recordings, project manifests, review choices and existing caches remain
+unchanged by diagnostic probes. The GUI workflow does not change; its reported
+worker count now uses the same resource-aware selector as the backend.
+
+Read-only paired measurements (Windows, NumPy 2.3.1, MNE 1.9.0):
+
+| Scope | Baseline | Optimized | Observed reduction |
+| --- | ---: | ---: | ---: |
+| One recording's five analyzed occurrences, raw-QC median across two alternating comparisons per occurrence | 1.738 s | 1.257 s | 27.7% |
+| Four recordings / 24 occurrences, complete step 1, first pair | 25.879 s | 18.983 s | 26.6% |
+| Same four recordings, reversed-order pair | 34.007 s | 29.440 s | 13.4% |
+| Complete step-1 median of those pairs | 29.943 s | 24.211 s | 19.1% |
+
+Complete scan cases used fresh isolated QC caches beneath verified repository
+scratch paths; the operating-system file cache was not cleared. Four recording
+workers and all existing limits/settings remained unchanged. Both versions
+slowed during the second pair; CPU work and reads varied, and the measurements
+do not identify the cause. These are subset measurements, not a predicted
+51-recording duration or a universal performance guarantee.
+
+All ten occurrence comparisons and every complete cold scan matched the frozen
+baseline's scientific float bits and ordered payloads. Full comparisons covered
+channel metrics/findings, spectra, analyzed plans and fingerprints; only timing
+and cache-status metadata differed. An optimized warm scan took 0.323 seconds
+with four cache hits and identical scientific evidence. Raw buffers, recording
+metadata and project-manifest bytes remained unchanged. Benchmark cache folders
+were removed after each case; no real project cache was cleared or replaced.
+
+Median raw-QC worker time fell from 76.475 to 57.376 seconds across the four
+recordings. Sampled peak process RSS ranged from 1,550–1,591 MiB before to
+1,510–1,522 MiB after. RSS sampling and allocator history limit precision.
+
+The subsequent worker comparison used the optimized code in every case:
+
+| Scope | Four workers | Eight workers | Observed reduction |
+| --- | ---: | ---: | ---: |
+| Eight synthetic 64-channel, 120-second occurrences, calculation-only median | 5.509 s | 4.171 s | 24.3% |
+| Eight real recordings / 48 occurrences, complete step 1, first pair | 48.957 s | 42.799 s | 12.6% |
+| Same eight recordings, reversed-order pair | 49.828 s | 44.954 s | 9.8% |
+| Complete step-1 median of those pairs | 49.393 s | 43.877 s | 11.2% |
+
+The full worker comparison retained two readers and two spectral evaluators,
+with fresh isolated QC caches and an uncleared operating-system file cache.
+Every ordered scientific payload matched bit for bit across all four cases.
+Sampled peak RSS rose from 1,499–1,500 MiB to 1,928–2,005 MiB, and median CPU
+time rose from 121.133 to 140.594 seconds. The smaller complete-scan gain came
+with increased read/wait and per-worker calculation time. These are separate
+subset benchmarks; their percentages
+must not be added or used to predict the entire project duration.
+
+The eight-worker ceiling applies the existing shared CPU/total-RAM policy to
+requests above four, without RAM-cap bypass. Existing requests of four or
+fewer stay unchanged; unavailable resource information keeps the previous
+four-worker ceiling. For these additional-concurrency requests, RAM tiers
+permit at most two workers below 12 GiB, four below 40 GiB, seven below 80 GiB,
+and eight at 80 GiB or more when CPU/request limits allow. This uses the
+established total-RAM policy, not a new live-memory
+guarantee. It neither changes BLAS thread settings nor adds process pools.
+
+Changed files:
+
+- `src/Main_App/processing/raw_channel_qc.py`: three guarded finite reductions.
+- `src/Main_App/processing/preflight_qc.py`: shared resource-aware worker selector.
+- `src/Main_App/processing/preflight_qc_plan.py`: eight-worker ceiling.
+- `src/Main_App/gui/preprocessing_qc_workflow.py`: report the resolved worker count.
+- `tests/processing/test_raw_channel_metric_batching.py`: scalar and batch float-bit parity.
+- `tests/processing/test_raw_channel_spatial_parity.py`: frozen spatial formulas and evidence parity.
+- `tests/processing/test_preflight_qc_v2.py`: bounded worker policy and scheduling checks.
+- `.agents/verification.toml`: register the spatial parity test.
+- `docs/agent/architecture/preprocessing-contract.md`: reductions and worker contract.
+- `docs/agent/exec-plans/active/condition-aware-preflight-qc-speedup.md`: current worker ceiling.
+- `docs/agent/exec-plans/active/qc-performance.md`: scope, measurements and verification.
+
+No project paths, exported formats or processing order changed.
+
+Rejected alternatives: replacing the median and changing native BLAS thread
+counts produced different numeric bits in probes. Spectral scratch reuse had
+little impact on this project's bottleneck. More participant processes were
+not justified: recording threads already run native calculations
+concurrently, and processes add transfer, startup and memory costs.
+
+Final verification: `python .agents/scripts/verify.py --scope processing --tier focused`
+passed **1,674 tests, 5 skipped**, with the existing 56 synthetic FIR/stim
+warnings. `python .agents/scripts/verify.py --scope gui --tier focused` passed
+**375 non-GUI-execution checks**. Ruff, compilation, GUI/protected-path/source-
+localization audits, verification registration and whitespace checks passed.
+The independent final review found no actionable regression. The repository
+precommit driver (`python .agents/scripts/verify.py --scope repo --tier precommit`)
+still stops before its full test run on the same eight
+pre-existing local paths in unrelated untracked `outputs/`; those files were
+not changed. No local Qt execution occurred. Visible follow-up: restart the
+toolbox from this branch, run step 1 on a representative project, confirm the
+reported worker count respects its CPU/RAM/request limits, compare its existing
+timing log and review findings, and confirm cancellation and cached restart remain
+responsive. A complete 51-recording GUI run was not repeated by the probe.
+
 ## Native Result I/O Follow-up (2026-09-07)
 
 Scope: reduce SNR source capture reloads, retain exact Excel export cells with

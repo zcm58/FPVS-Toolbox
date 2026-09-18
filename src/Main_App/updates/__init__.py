@@ -1,9 +1,9 @@
-"""Update-checking, download, and installer helpers for FPVS Toolbox."""
+"""Backend update helpers for FPVS Toolbox."""
 
 from __future__ import annotations
 
+from Main_App.updates.github_releases import check_for_updates
 from Main_App.updates.models import (
-    CandidateRelease,
     DownloadedInstaller,
     InstallerAsset,
     UpdateCheckResult,
@@ -11,9 +11,9 @@ from Main_App.updates.models import (
 )
 
 __all__ = [
-    "CandidateRelease",
     "DownloadedInstaller",
     "InstallerAsset",
     "UpdateCheckResult",
     "UpdateError",
+    "check_for_updates",
 ]

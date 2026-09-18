@@ -22,7 +22,7 @@ def finalize_processing_host_state(host, success: bool) -> None:
         user_messages.show_error(
             "Post-processing Incomplete",
             (
-                "Post-processing did not finish. SNR plots and downstream analyses "
+                "Post-processing did not finish. One or more analysis outputs "
                 f"are not ready.\n\n{failure_reason}"
             ),
             host,

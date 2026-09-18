@@ -83,3 +83,41 @@ def test_launch_update_check_is_skipped_under_pytest(monkeypatch, qtbot) -> None
     update_manager.check_for_updates_on_launch(parent)
 
     assert started is False
+
+
+def test_background_check_uses_app_owned_cancellable_lifecycle(monkeypatch, qtbot):
+    from threading import Event
+    from Main_App.gui.update_lifecycle import UpdateLifecycle
+    from Main_App.updates.models import UpdateCheckResult
+    app = QApplication.instance()
+    lifecycle = UpdateLifecycle(app, quit_callback=lambda: None)
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    result = UpdateCheckResult("3.0.0", "3.0.0", False, None, "", None, False)
+    seen = []
+    def check(cancel):
+        assert isinstance(cancel, Event)
+        return result
+    monkeypatch.setattr(update_manager, "update_lifecycle", lambda: lifecycle)
+    monkeypatch.setattr(update_manager, "_check_for_updates_and_record", check)
+    update_manager._background_check(parent, seen.append)
+    qtbot.waitUntil(lambda: seen == [result])
+    assert not lifecycle.has_active_jobs
+    app.removeEventFilter(lifecycle)
+    lifecycle.deleteLater()
+
+
+def test_update_install_guard_blocks_toolbox_analysis_and_qc(monkeypatch, qtbot):
+    from Main_App.gui import update_install_guard as guard
+    host = QWidget()
+    qtbot.addWidget(host)
+    warnings = []
+    monkeypatch.setattr(guard, "show_warning", lambda *args: warnings.append(args))
+    host.busy = True
+    assert not guard.default_install_guard(host)
+    host.busy = False
+    host._qc_source_prefetch_bridge = object()
+    assert not guard.default_install_guard(host)
+    host._qc_source_prefetch_bridge = None
+    assert guard.default_install_guard(host)
+    assert len(warnings) == 2

@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import copy
 import json
+import math
+import os
 import shutil
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pandas as pd
 import pytest
@@ -11,6 +15,8 @@ from openpyxl import load_workbook
 
 from Main_App.processing import full_fft_provenance, harmonic_selection_qc
 from Main_App.processing.spectral_eligibility import resolve_spectral_eligibility
+from Main_App.processing.roi_settings import build_roi_definition_snapshot
+from Main_App.processing.post_processing_context import post_processing_validation_scope
 from Main_App.projects.frequency_protocol import EXPECTED_CYCLES_SOURCE_MANUAL, FrequencyProtocol
 from Main_App.projects import Project
 from Tools.LORETA_Visualizer import stats_ready_workbook as stats_ready_workbook_mod
@@ -60,13 +66,7 @@ def _current_workbook_geometry(monkeypatch: pytest.MonkeyPatch) -> None:
 
     def _released_context(_root):
         rois = harmonic_selection_qc.load_rois_from_settings()
-        snapshot = SimpleNamespace(
-            fingerprint="test-roi-definition",
-            rois=tuple(
-                SimpleNamespace(name=name, electrodes=tuple(electrodes))
-                for name, electrodes in rois.items()
-            ),
-        )
+        snapshot = build_roi_definition_snapshot(rois)
         normalization = SimpleNamespace(excluded_channels=())
         coverage = SimpleNamespace(
             fingerprint="test-roi-coverage",
@@ -723,6 +723,7 @@ def test_processing_record_persists_and_loads_every_profile(
     )
     active = manifest["tools"]["processing"]["harmonic_selection"]["active"]
 
+    assert report.selection_metadata == active["selection_metadata"]
     assert active["harmonic_selection_profile"] == profile_id
     assert active["harmonic_selection_profile_version"] == "1.0"
     assert active["selection_fingerprint"] == report.selection_metadata[
@@ -738,6 +739,159 @@ def test_processing_record_persists_and_loads_every_profile(
         not Path(str(row["path"])).is_absolute()
         for row in active["selection_metadata"]["source_workbook_fingerprints"]
     )
+
+    from Main_App.io import xlsx_read_cache_scope
+
+    uncached = Mock(wraps=harmonic_selection_qc._load_processing_harmonic_selection_uncached)
+    monkeypatch.setattr(harmonic_selection_qc, "_load_processing_harmonic_selection_uncached", uncached)
+    with xlsx_read_cache_scope(), post_processing_validation_scope():
+        first_messages, hit_messages = [], []
+        first = harmonic_selection_qc.load_processing_harmonic_selection(project, log_func=first_messages.append)
+        repeated = harmonic_selection_qc.load_processing_harmonic_selection(project, log_func=hit_messages.append)
+        assert repeated is not first
+        assert repeated.to_metadata() == first.to_metadata() == loaded.to_metadata()
+        assert hit_messages == first_messages
+        assert uncached.call_count == 1
+
+        # Publishing a sibling derivative changes no scientific input.
+        manifest["tools"].setdefault("post_processing", {})["artifact_freshness"] = {
+            "updated_at": "test publication", "artifacts": {},
+        }
+        (project_root / "project.json").write_text(json.dumps(manifest), encoding="utf-8")
+        after_publication = harmonic_selection_qc.load_processing_harmonic_selection(project)
+        assert after_publication.to_metadata() == first.to_metadata()
+        assert uncached.call_count == 1
+
+        # Even identical bytes with a restored mtime must be revalidated when
+        # a source file is replaced, rather than inheriting the cached result.
+        path = condition_root / "S1_Faces_Results.xlsx"
+        previous = path.stat()
+        replacement = path.with_suffix(".replacement")
+        replacement.write_bytes(path.read_bytes())
+        os.utime(replacement, ns=(previous.st_atime_ns, previous.st_mtime_ns))
+        replacement.replace(path)
+        replaced = harmonic_selection_qc.load_processing_harmonic_selection(project)
+        assert replaced.to_metadata() == first.to_metadata()
+        assert uncached.call_count == 2
+    harmonic_selection_qc.load_processing_harmonic_selection(project)
+    assert uncached.call_count == 3
+
+
+@pytest.mark.parametrize("profile_id", [HARMONIC_PROFILE_SIGNIFICANT_ONLY_ID, HARMONIC_PROFILE_FIXED_ID])
+def test_processing_report_matches_persisted_metadata_for_strict_full_audit_export(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, profile_id: str,
+) -> None:
+    from Main_App.exports import analysis_ready_workbook
+    from Tools.Stats.analysis.dv_policy_group_significant import clear_group_significant_selection_cache
+
+    project_root = tmp_path / profile_id
+    condition_root = project_root / "1 - Excel Data Files" / "Faces"
+    condition_root.mkdir(parents=True)
+    preprocessing = {"harmonic_selection_profile": profile_id}
+    manifest_path = project_root / "project.json"
+    manifest_path.write_text(json.dumps({
+        "schema_version": "2.1.0", "subfolders": {"excel": "1 - Excel Data Files"},
+        "event_map": {"Faces": 1}, "preprocessing": preprocessing,
+    }), encoding="utf-8")
+    workbook = condition_root / "S1_Faces_Results.xlsx"
+    _write_group_policy_workbook(workbook, scale=1)
+    # A constant local-noise neighborhood legitimately yields an undefined Z
+    # diagnostic. Harmonics above 9 Hz also distinguish numeric/lexical key sort.
+    full_fft = pd.read_excel(workbook, sheet_name="FullFFT Amplitude (uV)", index_col=0)
+    for column in full_fft:
+        if 7.4 <= float(str(column).removesuffix("_Hz")) <= 9.4:
+            full_fft[column] = 1.0
+    eligibility = resolve_spectral_eligibility(
+        protocol=TEST_FREQUENCY_PROTOCOL, sampling_rate_hz=128, analyzed_samples=1_280,
+        requested_high_pass_hz=0.1, requested_low_pass_hz=12.0,
+        applied_high_pass_hz=0.1, applied_low_pass_hz=12.0,
+    )
+    with pd.ExcelWriter(workbook, engine="openpyxl", mode="a", if_sheet_exists="replace") as writer:
+        full_fft.to_excel(writer, sheet_name="FullFFT Amplitude (uV)")
+        pd.DataFrame(eligibility.to_rows()).to_excel(writer, sheet_name="Spectral Eligibility", index=False)
+    monkeypatch.setattr(harmonic_selection_qc, "load_rois_from_settings", lambda: {"Posterior": ["O1", "O2"]})
+    project = SimpleNamespace(project_root=project_root, event_map={"Faces": 1}, preprocessing=preprocessing)
+    adaptive_metadata = []
+    real_builder = harmonic_selection_qc.build_group_significant_harmonic_selection
+
+    def capture_selection(*args, **kwargs):
+        selection = real_builder(*args, **kwargs)
+        adaptive_metadata.append(selection.to_metadata())
+        return selection
+
+    monkeypatch.setattr(harmonic_selection_qc, "build_group_significant_harmonic_selection", capture_selection)
+    expected_harmonics = (
+        [1.2, 3.6, 7.2] if profile_id == HARMONIC_PROFILE_SIGNIFICANT_ONLY_ID
+        else [1.2, 2.4, 3.6, 4.8, 7.2]
+    )
+    fingerprints = []
+    for _run in ("fresh", "cached"):
+        if _run == "cached":
+            clear_group_significant_selection_cache()
+        report = harmonic_selection_qc.run_processing_harmonic_selection_qc(project)
+        accepted = harmonic_selection_qc.load_processing_harmonic_selection_metadata(Project.load(project_root))
+        durable = json.loads(manifest_path.read_text(encoding="utf-8"))["tools"]["processing"]["harmonic_selection"]["active"]["selection_metadata"]
+        assert accepted == durable
+        assert report.selection_metadata["selected_harmonics_hz"] == pytest.approx(expected_harmonics)
+        fingerprints.append(report.selection_metadata["selection_fingerprint"])
+        assert fingerprints[-1] == accepted["selection_fingerprint"]
+        if profile_id == HARMONIC_PROFILE_SIGNIFICANT_ONLY_ID:
+            raw_z = adaptive_metadata[-1]["selection_z_by_harmonic"]
+            assert 10.8 in raw_z
+            if _run == "fresh":
+                assert not math.isfinite(raw_z[8.4])
+                assert accepted["selection_z_by_harmonic"]["8.4"] is None
+            raw = adaptive_metadata[-1]
+            normalized = harmonic_selection_qc._json_safe(raw)
+            raw_frames = analysis_ready_workbook.build_harmonic_selection_frames(raw)
+            normalized_frames = analysis_ready_workbook.build_harmonic_selection_frames(normalized)
+            assert raw_frames.keys() == normalized_frames.keys()
+            for sheet in raw_frames:
+                pd.testing.assert_frame_equal(raw_frames[sheet], normalized_frames[sheet])
+            assert harmonic_selection_qc.compute_selection_fingerprint(raw) == (
+                harmonic_selection_qc.compute_selection_fingerprint(normalized)
+            )
+        # Exercise the actual caller/persisted comparison, without replacing
+        # either the public loader or the strict export guard.
+        frames, source = analysis_ready_workbook._load_selection_frames(
+            project_root, selection_metadata=report.selection_metadata,
+            expected_release_fingerprint="test-final-release",
+        )
+        assert frames and source == "processing-time metadata"
+        assert analysis_ready_workbook._semantic_metadata_json(report.selection_metadata) == (
+            analysis_ready_workbook._semantic_metadata_json(accepted)
+        )
+        assert report.selection_metadata == accepted
+        for change in ("harmonics", "source", "release"):
+            tampered = copy.deepcopy(report.selection_metadata)
+            if change == "harmonics":
+                tampered["selected_harmonics_hz"] = [1.2]
+            elif change == "source":
+                tampered["source_workbook_fingerprints"][0]["path"] += ".changed"
+            else:
+                tampered["final_release_receipt_fingerprint"] = "stale-release"
+            with pytest.raises(RuntimeError, match="differs from the current persisted"):
+                analysis_ready_workbook._load_selection_frames(
+                    project_root, selection_metadata=tampered,
+                    expected_release_fingerprint="test-final-release",
+                )
+    assert fingerprints[0] == fingerprints[1]
+    if profile_id == HARMONIC_PROFILE_SIGNIFICANT_ONLY_ID:
+        assert adaptive_metadata[0]["selection_cache_source"] == "computed_this_run_saved_project_metadata"
+        assert adaptive_metadata[1]["selection_cache_source"] == "saved_project_metadata"
+
+
+def test_harmonic_metadata_map_preserves_null_without_accepting_invalid_values() -> None:
+    from Tools.Stats.analysis.dv_policy_group_significant import _metadata_float_map
+
+    restored = _metadata_float_map({
+        "10.8": None, "1.2": "3.5", "bad": None, "nan": None, "inf": None,
+        "2.4": "invalid", "3.6": float("nan"), "4.8": float("inf"),
+    })
+
+    assert set(restored) == {1.2, 10.8}
+    assert restored[1.2] == 3.5
+    assert math.isnan(restored[10.8])
 
 
 def test_processing_selection_load_migrates_group_cache_only_project(
@@ -1040,6 +1194,7 @@ def test_fixed_canonical_profile_drives_stats_ready_schema_and_downstream_reader
     ]
 
 
+@post_processing_validation_scope()
 def test_managed_dv_cache_tracks_reaccepted_selection_and_workbook_identity(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

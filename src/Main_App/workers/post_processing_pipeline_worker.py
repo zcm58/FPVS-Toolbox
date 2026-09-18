@@ -93,18 +93,26 @@ def _required_output_failure_reason(
     steps: list[PostProcessingStepResult],
     *,
     selection_only: bool = False,
+    requires_recording_aware_export: bool = False,
 ) -> str:
     """Return actionable core failures without treating sibling exports as blockers."""
 
     required = (
         {"stats_ready_summed_bca"}
         if selection_only
-        else _REQUIRED_OUTPUT_STEP_NAMES
+        else set(_REQUIRED_OUTPUT_STEP_NAMES)
     )
+    if requires_recording_aware_export:
+        required.add("analysis_ready_full_audit")
     completed = {step.name for step in steps if step.ok}
     return "\n".join(
         dict.fromkeys(
-            step.message or f"{step.name} did not complete."
+            (
+                "Repeated-session Stats requires the full-audit analysis-ready workbook. "
+                + (step.message or "The workbook export did not complete.")
+                if requires_recording_aware_export and step.name == "analysis_ready_full_audit"
+                else step.message or f"{step.name} did not complete."
+            )
             for step in steps
             if not step.ok and (
                 step.name in required
@@ -132,9 +140,11 @@ class PostProcessingPipelineWorker(QObject):
         resume_from_selection: bool = False,
         selection_metadata: Mapping[str, object] | None = None,
         previous_selection_fingerprint: str | None = None,
+        provisional_cache: Any | None = None,
     ) -> None:
         super().__init__()
         self._project = project
+        self._provisional_cache = provisional_cache
         self._resume_from_selection = bool(resume_from_selection)
         self._dataset_index: Any | None = None
         self._harmonic_selection_metadata: dict[str, object] | None = (
@@ -151,16 +161,21 @@ class PostProcessingPipelineWorker(QObject):
         self._pre_review_roi_coverage: Any | None = None
         self._pipeline_steps: list[PostProcessingStepResult] = []
         self._completed_phase_units = 0
+        self._requires_recording_aware_export = False
 
     @Slot()
     def run(self) -> None:
         steps: list[PostProcessingStepResult] = []
         self._pipeline_steps = steps
         self._completed_phase_units = 0
+        self._requires_recording_aware_export = False
         cache_stack = ExitStack()
         requires_processing = False
         try:
             from Main_App.io import xlsx_read_cache_scope
+            from Main_App.processing.post_processing_context import (
+                post_processing_validation_scope,
+            )
             from Main_App.processing.condition_interpolation_executor import (
                 execute_pending_condition_interpolations,
             )
@@ -169,6 +184,7 @@ class PostProcessingPipelineWorker(QObject):
             )
 
             project_root = Path(self._project.project_root).expanduser().resolve()
+            self._requires_recording_aware_export = self._is_repeated_session_project()
             # Accepted repairs must publish EEG-derived outputs before any
             # downstream index, selection or source identity is captured.
             repaired = execute_pending_condition_interpolations(
@@ -181,6 +197,7 @@ class PostProcessingPipelineWorker(QObject):
                 self._harmonic_selection_metadata = None
             require_no_pending_condition_interpolation(project_root)
             cache_stack.enter_context(xlsx_read_cache_scope())
+            cache_stack.enter_context(post_processing_validation_scope())
             self._capture_previous_selection_fingerprint(project_root)
             if self._resume_from_selection:
                 self._run_from_accepted_selection(
@@ -311,7 +328,9 @@ class PostProcessingPipelineWorker(QObject):
         ok = all(step.ok for step in steps)
         has_warnings = any(step.warning for step in steps)
         failure_reason = _required_output_failure_reason(
-            steps, selection_only=self._resume_from_selection
+            steps,
+            selection_only=self._resume_from_selection,
+            requires_recording_aware_export=self._requires_recording_aware_export,
         )
         self._record_failed_frequency_outputs(steps, failure_reason)
         completion_message = (
@@ -426,7 +445,11 @@ class PostProcessingPipelineWorker(QObject):
 
         ok = all(step.ok for step in steps)
         has_warnings = any(step.warning for step in steps)
-        failure_reason = _required_output_failure_reason(steps, selection_only=True)
+        failure_reason = _required_output_failure_reason(
+            steps,
+            selection_only=True,
+            requires_recording_aware_export=self._requires_recording_aware_export,
+        )
         completion_message = (
             f"Selection-dependent post-processing is incomplete: {failure_reason}"
             if failure_reason
@@ -495,6 +518,7 @@ class PostProcessingPipelineWorker(QObject):
                 self._project,
                 log_func=self._emit_frequency_qc_progress,
                 dataset_index=self._dataset_index,
+                provisional_cache=self._provisional_cache,
             )
 
     @contextmanager
@@ -869,24 +893,27 @@ class PostProcessingPipelineWorker(QObject):
         )
         steps: list[PostProcessingStepResult] = []
         completed_before_source_maps = POST_PROCESSING_PHASE_COUNT - len(SOURCE_OUTPUT_MODES)
-        for index, mode in enumerate(SOURCE_OUTPUT_MODES, start=1):
-            phase_id = _SOURCE_PHASE_BY_MODE[mode]
-            phase_message = _SOURCE_PHASE_MESSAGE_BY_MODE[mode]
-            self._emit_phase_progress(
-                phase_id,
-                completed_before_source_maps + index - 1,
-                phase_message,
-            )
-            steps.append(
-                self._record_artifact_freshness(
-                    self._run_source_map_mode(project_root, mode)
+        from Tools.LORETA_Visualizer.source_producers.source_psd_cache import source_psd_cache_scope
+
+        with source_psd_cache_scope():
+            for index, mode in enumerate(SOURCE_OUTPUT_MODES, start=1):
+                phase_id = _SOURCE_PHASE_BY_MODE[mode]
+                phase_message = _SOURCE_PHASE_MESSAGE_BY_MODE[mode]
+                self._emit_phase_progress(
+                    phase_id,
+                    completed_before_source_maps + index - 1,
+                    phase_message,
                 )
-            )
-            self._emit_phase_progress(
-                phase_id,
-                completed_before_source_maps + index,
-                phase_message,
-            )
+                steps.append(
+                    self._record_artifact_freshness(
+                        self._run_source_map_mode(project_root, mode)
+                    )
+                )
+                self._emit_phase_progress(
+                    phase_id,
+                    completed_before_source_maps + index,
+                    phase_message,
+                )
         return steps
 
     def _run_source_map_mode(
@@ -1251,7 +1278,9 @@ class PostProcessingPipelineWorker(QObject):
 
         completed = max(0, min(POST_PROCESSING_PHASE_COUNT, int(completed_units)))
         if _required_output_failure_reason(
-            self._pipeline_steps, selection_only=self._resume_from_selection
+            self._pipeline_steps,
+            selection_only=self._resume_from_selection,
+            requires_recording_aware_export=self._requires_recording_aware_export,
         ):
             completed = min(
                 completed, self._completed_phase_units, POST_PROCESSING_PHASE_COUNT - 1

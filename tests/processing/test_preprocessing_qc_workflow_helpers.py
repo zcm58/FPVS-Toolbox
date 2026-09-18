@@ -637,6 +637,51 @@ def test_detector_off_review_row_says_not_evaluated_without_inferred_findings() 
     )
 
 
+def test_review_episode_adapter_preserves_source_clock_and_original_evidence() -> None:
+    from Main_App.processing.qc_review_episodes import group_review_episodes
+
+    windows = [[1100, 1400], [1600, 1800]]
+    finding = {
+        "channel": "P8", "condition_label": "Faces", "occurrence": 0,
+        "occurrence_display": 1, "category": "rare_burst",
+        "diagnostic_window_count": 2, "flagged_window_union_spans": windows,
+    }
+    result = replace(_review_candidate(raw_payload={
+        "transient_review_findings": [finding],
+        "experimental_removed_electrode_detector": {"evaluation_status": "evaluated"},
+    }), condition_qc={"event_plan": {"sfreq": 100.0, "first_samp": 1000, "n_times": 1000}})
+    items = []
+    rows = workflow._remaining_review_rows(
+        workflow.PreflightQcScan(results=(result,)), set(), review_items=items,
+    )
+    item = next(item for item in items if item.kind == "Transient signals")
+    assert item.source_path == str(result.path)
+    assert item.time_spans_s == ((1.0, 4.0), (6.0, 8.0))
+    assert item.time_scope == "diagnostic_windows"
+    assert item.evidence == finding
+    assert item.export_row in rows
+    episodes = group_review_episodes([item])
+    assert len(episodes) == 2
+    assert [episode.item_indices for episode in episodes] == [(0,), (0,)]
+    assert finding["flagged_window_union_spans"] == windows
+
+
+def test_review_adapter_does_not_invent_a_source_clock() -> None:
+    result = _review_candidate(raw_payload={
+        "transient_review_findings": [{
+            "channel": "P8", "condition_label": "Faces", "occurrence_display": 1,
+            "category": "rare_burst", "flagged_window_union_spans": [[100, 200]],
+        }],
+    })
+    items = []
+    workflow._remaining_review_rows(
+        workflow.PreflightQcScan(results=(result,)), set(), review_items=items,
+    )
+    item = next(item for item in items if item.kind == "Transient signals")
+    assert item.time_spans_s == ()
+    assert item.time_scope == "unlocalized"
+
+
 def test_review_flags_workbook_preserves_group_membership(tmp_path: Path) -> None:
     host = SimpleNamespace(currentProject=SimpleNamespace(project_root=tmp_path))
 
@@ -699,3 +744,33 @@ def test_condition_crop_review_replaces_only_reviewed_exclusion_pairs(
         "P4": ["Negative Valence"],
         "P9": ["Neutral Happy"],
     }
+
+
+@pytest.mark.parametrize("timing", [
+    {"flagged_window_union_spans": [[999, 1200]]},
+    {"flagged_window_union_spans": []},
+    {"flagged_window_union_spans": [[1100, None]]},
+    {"start_sample": 999, "stop_sample": 1200},
+    {"start_sample": 1100},
+])
+def test_review_adapter_never_replaces_invalid_explicit_timing_with_occurrence_bounds(timing):
+    finding = {
+        "channel": "P8", "condition_label": "Faces", "occurrence": 0,
+        "occurrence_display": 1, "category": "rare_burst", **timing,
+    }
+    event_plan = {
+        "sfreq": 100.0, "first_samp": 1000, "n_times": 1000,
+        "spans": [{"condition_label": "Faces", "repetition_index": 0,
+                   "time_start_sample": 1000, "time_stop_sample": 2000}],
+    }
+    result = replace(_review_candidate(raw_payload={
+        "transient_review_findings": [finding],
+    }), condition_qc={"event_plan": event_plan})
+    items = []
+    workflow._remaining_review_rows(
+        workflow.PreflightQcScan(results=(result,)), set(), review_items=items,
+    )
+    item = next(item for item in items if item.kind == "Transient signals")
+    assert item.time_spans_s == ()
+    assert item.time_scope == "unlocalized"
+    assert item.evidence == finding

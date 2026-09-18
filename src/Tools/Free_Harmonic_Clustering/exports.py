@@ -14,7 +14,7 @@ import platform
 from pathlib import Path, PurePosixPath, PureWindowsPath
 import re
 import shutil
-from typing import TYPE_CHECKING, Iterable, Mapping, Sequence
+from typing import TYPE_CHECKING, Callable, Iterable, Mapping, Sequence
 from uuid import uuid4
 
 import numpy as np
@@ -32,15 +32,23 @@ from .models import (
     CohortWorkbook,
     ExportArtifact,
     ExportReceipt,
+    FreeHarmonicCancelledError,
     FreeHarmonicInputError,
     PreparedContrast,
     PreparedRepeatedSessionBatch,
     RepeatedSessionContrastFamily,
     SENSOR_ADJACENCY_VERSION,
 )
+from .visualization import (
+    ClusterMapData,
+    build_cluster_map_data,
+    build_repeated_cluster_map_data,
+)
+from .reporting import EXPLORATORY_CRITERION
 
 if TYPE_CHECKING:
     from .api import RepeatedSessionBatchResult
+    from .reporting import RepeatedSessionReport
 
 
 TOOL_TITLE = "Free Harmonic Clustering Analysis"
@@ -53,6 +61,12 @@ MANIFEST_FILENAME = "manifest.json"
 HUMAN_WORKBOOK_FILENAME = "Free_Harmonic_Clustering_Results.xlsx"
 REPEATED_SESSION_WORKBOOK_FILENAME = "Free_Harmonic_Clustering_Repeated_Session_Batch.xlsx"
 REPEATED_SESSION_EXPORT_SCHEMA_VERSION = 1
+_EXPLORATORY_DESCRIPTION = (
+    EXPLORATORY_CRITERION + " These did not survive Holm within their prespecified "
+    "family. These are not confirmed findings or "
+    "pointwise sensor/harmonic effects."
+)
+_NO_EXPLORATORY_FINDINGS = "No runs met the exploratory reporting criteria."
 HUMAN_WORKBOOK_SHEETS: tuple[str, ...] = (
     "Run Summary",
     "Significant Clusters",
@@ -1652,12 +1666,63 @@ def _artifact_manifest_row(
     }
 
 
+def _check_export_cancelled(cancel_check: Callable[[], bool] | None) -> None:
+    if cancel_check is not None and cancel_check():
+        raise FreeHarmonicCancelledError("Free Harmonic Clustering export was cancelled.")
+
+
+def _export_cluster_maps(
+    data: ClusterMapData,
+    output_directory: Path,
+    *,
+    cancel_check: Callable[[], bool] | None,
+) -> tuple[Path, ...]:
+    """Write descriptive maps inside the caller's unpublished staging tree."""
+
+    from .render_cluster_maps import cluster_map_caption, export_cluster_map_figures
+
+    _check_export_cancelled(cancel_check)
+    output_directory.mkdir(parents=True, exist_ok=False)
+    figure_paths = export_cluster_map_figures(data, output_directory, cancel_check=cancel_check)
+    _check_export_cancelled(cancel_check)
+    metadata_path = output_directory / "cluster_maps.json"
+    _write_manifest(
+        metadata_path,
+        {
+            "schema_version": 1,
+            "purpose": "descriptive harmonic slices of existing FHC clusters",
+            "run_label": data.run_label,
+            "arm_a_label": data.arm_a_label,
+            "arm_b_label": data.arm_b_label,
+            "value_label": data.value_label,
+            "background": (
+                "Analyzed arm-mean A-minus-B difference; paired subtraction "
+                "precedes averaging for paired runs."
+            ),
+            "sensor_names": list(data.sensor_names),
+            "harmonic_orders": list(data.harmonic_orders),
+            "harmonics_hz": list(data.harmonics_hz),
+            "mean_difference": data.mean_difference.tolist(),
+            "cluster_labels": data.cluster_labels.tolist(),
+            "clusters": [asdict(cluster) for cluster in data.clusters],
+            "symmetric_color_limit": data.color_limit,
+            "multiplicity_note": data.multiplicity_note,
+            "caption": cluster_map_caption(data),
+            "figures": [path.relative_to(output_directory).as_posix() for path in figure_paths],
+            "pointwise_significance_claimed": False,
+            "reselected_or_reclustered": False,
+        },
+    )
+    return (*figure_paths, metadata_path)
+
+
 def export_free_harmonic_run(
     prepared: PreparedContrast,
     result: ClusterPermutationResult,
     *,
     run_id: str | None = None,
     destination: str | Path | None = None,
+    cancel_check: Callable[[], bool] | None = None,
 ) -> ExportReceipt:
     """Publish one complete result bundle using a manifest-last directory commit."""
 
@@ -1665,6 +1730,7 @@ def export_free_harmonic_run(
         raise TypeError("prepared must be a PreparedContrast.")
     if not isinstance(result, ClusterPermutationResult):
         raise TypeError("result must be a ClusterPermutationResult.")
+    _check_export_cancelled(cancel_check)
     project_root = _resolve_project_root(prepared)
     resolved_run_id, final_directory = resolve_run_destination(
         prepared,
@@ -1830,6 +1896,7 @@ def export_free_harmonic_run(
     artifact_rows: list[dict[str, object]] = []
     try:
         for role, filename, fieldnames, rows in csv_specs:
+            _check_export_cancelled(cancel_check)
             path = staging / filename
             _write_csv(path, fieldnames, rows)
             artifact_rows.append(
@@ -1875,6 +1942,18 @@ def export_free_harmonic_run(
             )
         )
 
+        map_data = build_cluster_map_data(prepared, result)
+        for map_path in _export_cluster_maps(map_data, staging / "cluster_maps", cancel_check=cancel_check):
+            artifact_rows.append(
+                _batch_artifact_manifest_row(
+                    role="cluster_map_data" if map_path.suffix == ".json" else "cluster_map_figure",
+                    staging_path=map_path,
+                    staging_root=staging,
+                    destination=final_directory,
+                    project_root=project_root,
+                )
+            )
+        _check_export_cancelled(cancel_check)
         manifest_payload = _manifest_payload(
             run_id=resolved_run_id,
             project_root=project_root,
@@ -1888,6 +1967,7 @@ def export_free_harmonic_run(
         manifest_staging_path = staging / MANIFEST_FILENAME
         _write_manifest(manifest_staging_path, manifest_payload)
 
+        _check_export_cancelled(cancel_check)
         if final_directory.exists():
             raise FileExistsError(f"Free-harmonic run appeared during export: {final_directory}")
         os.replace(staging, final_directory)
@@ -2036,6 +2116,74 @@ def _batch_cluster_rows(
                 }
             )
     return rows
+
+
+def _exploratory_batch_rows(
+    report: "RepeatedSessionReport",
+    cluster_rows: Sequence[Mapping[str, object]],
+    membership_rows: Sequence[Mapping[str, object]],
+) -> tuple[list[dict[str, object]], list[Mapping[str, object]], list[Mapping[str, object]]]:
+    """Select existing audit rows using the shared reporting classification."""
+
+    findings = []
+    keys = set()
+    for row in report.rows:
+        if not row.is_exploratory:
+            continue
+        keys.update(
+            (row.family_id, row.condition, cluster_id)
+            for cluster_id in row.exploratory_cluster_ids
+        )
+        finding = {
+            "family_id": row.family_id,
+            "family_label": row.family_label,
+            "condition": row.condition,
+            "global_two_sided_cluster_p_value": row.global_p,
+            "holm_within_family_p_value": row.holm_family_p,
+            "holm_all_batch_p_value": row.holm_batch_p,
+            "cluster_ids": "|".join(str(value) for value in row.exploratory_cluster_ids),
+        }
+        # Keep detailed prose in bounded, wrapped worksheet rows. The complete
+        # narrative is also exported separately without Excel's cell limit.
+        for paragraph in row.detail_text.splitlines():
+            if paragraph.strip():
+                for offset in range(0, len(paragraph), 4000):
+                    findings.append({**finding, "notes": paragraph[offset:offset + 4000]})
+
+    def selected(row: Mapping[str, object]) -> bool:
+        return (row["family_id"], row["condition"], row["cluster_id"]) in keys
+
+    return (
+        findings,
+        [row for row in cluster_rows if selected(row)],
+        [row for row in membership_rows if selected(row)],
+    )
+
+
+def _write_exploratory_report(path: Path, report: "RepeatedSessionReport") -> None:
+    """Write the shared detailed narrative inside the atomic run staging area."""
+
+    lines = [
+        "# Exploratory FHC findings", "", _EXPLORATORY_DESCRIPTION, "",
+        f"{report.exploratory_count} of {len(report.rows)} condition-by-family runs met these criteria.",
+        "",
+    ]
+    for row in report.rows:
+        if row.is_exploratory:
+            detail = row.detail_text.replace("\n", "  \n")
+            lines.extend([f"## {row.condition} | {row.family_label}", "", detail, ""])
+    if not report.exploratory_count:
+        lines.extend([_NO_EXPLORATORY_FINDINGS, ""])
+    lines.extend([
+        "Exact candidate cluster rows: exploratory_clusters.csv. Exact sensor-harmonic "
+        "membership: exploratory_cluster_membership.csv. The full batch, all clusters, "
+        "and their original p-values remain in the primary workbook and CSV tables.",
+        "",
+    ])
+    with path.open("w", encoding="utf-8", newline="\n") as stream:
+        stream.write("\n".join(lines))
+        stream.flush()
+        os.fsync(stream.fileno())
 
 
 def _batch_membership_rows(
@@ -2468,6 +2616,7 @@ def _write_repeated_session_workbook(
     selection_rows: Sequence[Mapping[str, object]],
     source_rows: Sequence[Mapping[str, object]],
     methods_rows: Sequence[Mapping[str, object]],
+    exploratory_rows: Sequence[Mapping[str, object]],
 ) -> None:
     sheets = (
         "Batch Summary",
@@ -2479,6 +2628,7 @@ def _write_repeated_session_workbook(
         "Shared Harmonic Selection",
         "Source Workbooks",
         "Methods and Provenance",
+        "Exploratory Findings",
     )
     workbook = Workbook()
     workbook.active.title = sheets[0]
@@ -2691,6 +2841,27 @@ def _write_repeated_session_workbook(
         fields=("category", "item", "value", "notes"),
         rows=methods_rows,
     )
+    exploratory_fields = (
+        "family_id", "family_label", "condition", "global_two_sided_cluster_p_value",
+        "holm_within_family_p_value", "holm_all_batch_p_value", "cluster_ids", "notes",
+    )
+    sheet = workbook["Exploratory Findings"]
+    _write_table_sheet(
+        sheet,
+        title="Exploratory Findings — Not Significant After Family Holm",
+        description=_EXPLORATORY_DESCRIPTION,
+        fields=exploratory_fields,
+        rows=exploratory_rows,
+        empty_message=_NO_EXPLORATORY_FINDINGS,
+    )
+    sheet.row_dimensions[2].height = 48
+    sheet.column_dimensions["H"].width = 110
+    for row_index, row in enumerate(exploratory_rows, start=5):
+        sheet.row_dimensions[row_index].height = min(
+            409, max(30, 15 * (2 + len(str(row["notes"])) // 100)),
+        )
+        for column_index in (4, 5, 6):
+            sheet.cell(row_index, column_index).number_format = "0.########"
     workbook.save(path)
     with path.open("rb+") as stream:
         os.fsync(stream.fileno())
@@ -2725,11 +2896,13 @@ def export_repeated_session_batch(
     *,
     run_id: str | None = None,
     destination: str | Path | None = None,
+    cancel_check: Callable[[], bool] | None = None,
 ) -> ExportReceipt:
     """Atomically publish one corrected repeated-session FHC batch bundle."""
 
     if not isinstance(prepared, PreparedRepeatedSessionBatch):
         raise TypeError("prepared must be a PreparedRepeatedSessionBatch.")
+    _check_export_cancelled(cancel_check)
     outcomes = tuple(getattr(result, "outcomes", ()))
     if len(outcomes) != len(prepared.contrast_runs):
         raise ValueError("Batch result does not match the prepared contrast count.")
@@ -2753,6 +2926,7 @@ def export_repeated_session_batch(
         expected_multiplicity,
         strict=True,
     ):
+        _check_export_cancelled(cancel_check)
         actual = outcome.prepared_run
         if actual is not expected:
             raise ValueError(
@@ -2823,6 +2997,12 @@ def export_repeated_session_batch(
     selection_rows = _batch_shared_selection_rows(prepared)
     source_rows = _batch_source_rows(prepared, project_root)
     methods_rows = _batch_methods_rows(prepared, result)
+    from .reporting import build_repeated_session_report
+
+    report = build_repeated_session_report(result)
+    exploratory_rows, exploratory_clusters, exploratory_membership = _exploratory_batch_rows(
+        report, cluster_rows, membership_rows,
+    )
     created_at_utc = datetime.now(UTC).isoformat()
 
     parent = final_directory.parent
@@ -2864,9 +3044,29 @@ def export_repeated_session_batch(
         ),
         ("source_workbooks", "source_workbooks.csv", tuple(source_rows[0]) if source_rows else (), source_rows),
         ("methods_and_provenance", "methods_and_provenance.csv", ("category", "item", "value", "notes"), methods_rows),
+        (
+            "exploratory_clusters", "exploratory_clusters.csv",
+            tuple(cluster_rows[0]) if cluster_rows else ("family_id", "condition", "cluster_id"),
+            exploratory_clusters,
+        ),
+        (
+            "exploratory_cluster_membership", "exploratory_cluster_membership.csv",
+            tuple(membership_rows[0]) if membership_rows else ("family_id", "condition", "cluster_id"),
+            exploratory_membership,
+        ),
     )
     try:
+        _check_export_cancelled(cancel_check)
+        exploratory_path = staging / "exploratory_findings.md"
+        _write_exploratory_report(exploratory_path, report)
+        artifacts.append(
+            _batch_artifact_manifest_row(
+                role="exploratory_findings", staging_path=exploratory_path,
+                staging_root=staging, destination=final_directory, project_root=project_root,
+            )
+        )
         for role, filename, fields, rows in csv_specs:
+            _check_export_cancelled(cancel_check)
             if not fields:
                 raise ValueError(f"Batch export has no columns for {role}.")
             path = staging / filename
@@ -2884,7 +3084,9 @@ def export_repeated_session_batch(
         arrays_directory = staging / "contrast_arrays"
         arrays_directory.mkdir()
         array_mapping: list[dict[str, object]] = []
+        map_mapping: list[dict[str, object]] = []
         for outcome in outcomes:
+            _check_export_cancelled(cancel_check)
             slug = _batch_run_slug(outcome.family_id, outcome.condition)
             path = arrays_directory / f"{slug}.npz"
             _write_batch_arrays(path, outcome=outcome, prepared=prepared)
@@ -2904,6 +3106,28 @@ def export_repeated_session_batch(
                     "path": f"contrast_arrays/{path.name}",
                 }
             )
+            map_directory = staging / "cluster_maps" / slug
+            for map_path in _export_cluster_maps(
+                build_repeated_cluster_map_data(outcome),
+                map_directory,
+                cancel_check=cancel_check,
+            ):
+                artifacts.append(
+                    _batch_artifact_manifest_row(
+                        role="cluster_map_data" if map_path.suffix == ".json" else "cluster_map_figure",
+                        staging_path=map_path,
+                        staging_root=staging,
+                        destination=final_directory,
+                        project_root=project_root,
+                    )
+                )
+            map_mapping.append(
+                {
+                    "family_id": outcome.family_id,
+                    "condition": outcome.condition,
+                    "data_path": (map_directory / "cluster_maps.json").relative_to(staging).as_posix(),
+                }
+            )
 
         workbook_path = staging / REPEATED_SESSION_WORKBOOK_FILENAME
         _write_repeated_session_workbook(
@@ -2916,6 +3140,7 @@ def export_repeated_session_batch(
             selection_rows=selection_rows,
             source_rows=source_rows,
             methods_rows=methods_rows,
+            exploratory_rows=exploratory_rows,
         )
         artifacts.append(
             _batch_artifact_manifest_row(
@@ -3100,12 +3325,25 @@ def export_repeated_session_batch(
                 for family in RepeatedSessionContrastFamily
             },
             "results": summary_rows,
+            "exploratory_reporting": {
+                "criterion": EXPLORATORY_CRITERION,
+                "qualifying_run_count": report.exploratory_count,
+                "qualifying_cluster_count": len(exploratory_clusters),
+                "report": "exploratory_findings.md",
+                "cluster_rows": "exploratory_clusters.csv",
+                "membership_rows": "exploratory_cluster_membership.csv",
+                "changes_inference": False,
+                "pointwise_significance_claimed": False,
+            },
             "contrast_arrays": array_mapping,
+            "cluster_maps": map_mapping,
             "source_workbooks": source_rows,
             "artifacts": artifacts,
         }
         manifest_path = staging / MANIFEST_FILENAME
+        _check_export_cancelled(cancel_check)
         _write_manifest(manifest_path, manifest)
+        _check_export_cancelled(cancel_check)
         if final_directory.exists():
             raise FileExistsError(f"Free-harmonic batch appeared during export: {final_directory}")
         os.replace(staging, final_directory)

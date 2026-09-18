@@ -183,6 +183,7 @@ def test_full_run_prepares_analyzes_then_exports(
     assert export_kwargs == {
         "run_id": "run-002",
         "destination": Path("relative/output/run-002"),
+        "cancel_check": cancel,
     }
 
 

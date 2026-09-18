@@ -1,6 +1,7 @@
 import importlib.util
 import json
 import os
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -48,6 +49,44 @@ from Main_App.gui.theme import apply_fpvs_theme
 from Main_App.processing.processing_controller import RawFileInfo
 import Main_App.gui.settings_panel as settings_panel
 from Main_App.gui.settings_panel import SettingsDialog
+
+
+@pytest.mark.parametrize("accept", [False, True])
+def test_recording_additions_dialog_shows_canonical_proposal_and_explicit_confirmation(qtbot, tmp_path, accept):
+    from Main_App.gui.participant_review import ParticipantReviewDialog
+    from Main_App.processing.processing_controller import ParticipantReviewRow
+
+    raw_file = Path(tmp_path) / "Control" / "Visit2" / "P07_followup.bdf"
+    row = ParticipantReviewRow(
+        participant_id="P07", group_id="control", group_label="Control",
+        raw_file=raw_file, status="New session recording", recording_id="P07_visit2",
+        session_id="visit2", session_label="Follow-up", visit_index=2,
+    )
+    dialog = ParticipantReviewDialog([row], additions_only=True)
+    qtbot.addWidget(dialog)
+    dialog.show()
+    qtbot.waitExposed(dialog)
+
+    assert dialog.windowTitle() == "Add BDF Files"
+    assert dialog.continue_button.text() == "Add Files and Continue"
+    assert dialog.cancel_button.isDefault()
+    assert [dialog.table.item(0, column).text() for column in range(7)] == [
+        "P07", "Control", "Follow-up", "2", "P07_visit2", "P07_followup.bdf", "New session recording",
+    ]
+    assert "group_id: control" in dialog.table.item(0, 1).toolTip()
+    assert "session_id: visit2" in dialog.table.item(0, 2).toolTip()
+    assert dialog.table.item(0, 5).toolTip() == str(raw_file)
+    summary = dialog.findChild(QLabel, "participant_review_summary").text()
+    assert "configured source folder" in summary
+    assert "registry unchanged" in summary
+    assert "before planning processing" in summary
+    assert "Existing analysis outputs will need processing to finish before reuse." in summary
+    assert dialog.width() <= 1280 and dialog.height() <= 900
+    assert dialog.rect().contains(dialog.continue_button.mapTo(dialog, dialog.continue_button.rect().bottomRight()))
+    qtbot.mouseClick(dialog.continue_button if accept else dialog.cancel_button, Qt.LeftButton)
+    assert dialog.result() == (QDialog.Accepted if accept else QDialog.Rejected)
+    assert dialog.rows == [row]
+    assert not raw_file.exists()
 
 
 _RETIRED_EPOCH_KEYS = {

@@ -32,6 +32,13 @@ created. Receipt keys remain compatible (`workbook_write_receipt_v1`) and
 continue to bind exact anchor paths, hashes, validated schemas and companions.
 This changes no preprocessing or FFT operation, harmonic rule or QC decision.
 
+Reading a BCA Method Audit may reuse exact frequency-column parsing within that
+single call: at most 256 built-in string tokens of at most 128 characters each.
+Numeric values, custom string types and oversized tokens retain direct parsing.
+Cache allocation/admission failure falls back to the original parser. This
+bounded memo contains no scientific arrays, survives no read, and changes no
+row ordering, duplicate handling, exceptions, workbook validation or arithmetic.
+
 ## Entry Contract
 
 Active post-export adapter imports should use `Main_App.exports.post_export_adapter`.
@@ -51,9 +58,19 @@ whether a run succeeded. An early frequency-QC/readiness failure must preserve
 its specific reason in the saved downstream-stale state and report incomplete
 progress, even when every available participant workbook was just written.
 File recency is not evidence of a released analysis cohort. Tool guards display
-that saved reason rather than assuming an exclusion changed. Optional full-audit
-or source-map export failures do not turn successful core outputs into failures;
-valid upstream FullFFT provenance remains independent of selection derivatives.
+that saved reason rather than assuming an exclusion changed. Full-audit export
+is optional for single-session projects, but is required for repeated-session
+Stats because the legacy participant-keyed export cannot represent visits.
+Normal and selection-resume completion must report a repeated-session full-audit
+failure as incomplete, while independently valid FullFFT/SNR evidence remains
+available. Optional source-map failures do not invalidate successful core outputs.
+
+Visible smoke check (CI or an approved local visible session): finish an adaptive
+harmonic review, then verify that full-audit export succeeds on both a fresh
+selection and a saved-selection resume. In a disposable repeated-session project,
+make that export fail and confirm the completion message names the unavailable
+analysis workbook without claiming Stats readiness or invalidating upstream SNR.
+The equivalent single-session audit failure remains an optional-export warning.
 
 Preflight condition review compares the declared event map with the actual
 planned spans. A declared condition with no start occurrence requires an
@@ -62,6 +79,32 @@ processing starts. Missing conditions are not preselected for exclusion, and
 recording-level and participant-level decisions retain their existing scopes.
 This does not relax the expected recording-condition ledger release checks or
 create output receipts for absent data.
+
+Confirmed raw-file registration atomically records
+`tools.processing.pending_raw_registration` with the cumulative added
+processing IDs and their registration fingerprint. It also marks downstream
+QC, neutral FullFFT provenance and selection-derived artifacts stale and clears
+the harmonic cache entries, preserving review decisions and existing files.
+`Main_App.processing.raw_registration_state` prevents pre-review coverage,
+canonical dataset/final release, FullFFT provenance and clearing QC staleness
+from accepting an old plan that omits these IDs. The current expected plan must
+match their canonical manifest identity and condition map, and its outcomes
+must account for every added recording, including explicit valid exclusions.
+Cancelling later QC therefore cannot make Resume Post-processing release the
+previous smaller dataset. Missing visits with no registered raw recording do
+not become expected recordings.
+
+This enrollment check reconciles receipt metadata without rehashing artifacts;
+normal outcome reconciliation still defaults to full artifact validation, and
+all existing physical-artifact and scientific release checks remain required.
+Before building pre-review coverage, the workflow atomically stores compact
+completion receipts for additions with validated current processing accounting.
+These bind canonical recording identity to the expected recording and outcome
+fingerprints. Separate Single-file runs accumulate completion; later Single
+reruns do not make earlier completed additions appear pending. The cumulative
+registration fingerprint stays unchanged by completion, and direct release
+checks remain read-only. Pending additions absent from the current plan still
+block release. Projects without this marker retain their existing behavior.
 
 ## Canonical Harmonic Selection And Freshness
 
@@ -81,6 +124,17 @@ group-, ROI-, or participant-specific list. The compact
 selection metadata under `tools.processing.harmonic_selection` in
 `project.json` remain the audit source for detected versus included harmonics.
 
+The canonical selection builder applies the manifest's existing JSON conversion
+before fingerprinting, workbook generation, persistence, and report handoff.
+Harmonic-keyed maps therefore use the same string keys in memory and on disk;
+unavailable diagnostic numbers use the same null representation. This preserves
+the scientific fingerprint and ordered selection rows while allowing full-audit
+export to compare the complete caller payload against the validated persisted
+selection exactly. The export's mismatch and final-release guards remain strict.
+Saved-cache loading also retains harmonic keys with explicitly unavailable Z
+diagnostics, so rehydrating a selection cannot silently remove evidence or change
+its scientific fingerprint.
+
 Managed multi-group selection and Stats-ready export carry the stable
 manifest `group_id` separately from the human-readable `group_label`.
 Participant-to-group assignment, balanced pooling, cache identity, and
@@ -98,9 +152,11 @@ derivatives are:
 - `6 - Source Localization/L2-MNE Hauk Source PSD Beta/`; and
 - `6 - Source Localization/eLORETA Hauk Source PSD Beta/`.
 
-Accepting the same fingerprint leaves current outputs intact. Accepting a
-different fingerprint first marks all four derivatives stale, then resumes the
-normal post-processing pipeline after harmonic selection. That resume reads
+The accepted-selection/all-current shortcut leaves current outputs intact when
+the fingerprint matches. A normal full run regenerates exports; pending repair
+also overrides that shortcut. Accepting a different fingerprint first marks all
+four derivatives stale, then resumes the normal post-processing pipeline after
+harmonic selection. A continuation without pending repair reads
 the immutable processed workbooks and their existing BCA columns; it never
 loads raw EEG, filters, epochs, recomputes FFTs, or rewrites participant-
 condition workbooks. The source-map rebuild reuses durable source-ready time-
@@ -125,6 +181,49 @@ Resolved Retain decisions for prior-exclusion reconfirmations stay in the
 completed review receipt when its validated analysis is unchanged, even after
 those reconfirmation findings disappear. They add no active exclusion authority
 and do not reopen the ordinary findings solely because the visible list shrinks.
+
+Repeated-session review reports resolve `recording_assignments` from the full
+canonical project recording registry for both analyzed recordings and prior
+exclusions requiring reconfirmation. An excluded recording can therefore appear
+in `recording_summaries` with its registered participant, group, and session while
+remaining absent from the numerical `recordings`, source workbooks, and harmonic
+inputs. Unknown registry IDs still fail identity validation; saved decision text
+never supplies a replacement identity. This review metadata does not change
+scientific cohort fingerprints or exclusion scope.
+
+Post-processing validation reuse is owned by
+`Main_App.processing.post_processing_context`. An explicit context spans one
+worker's QC/selection/workbook phases; standalone export entry points create
+their own scope, and nested exports share it. Scope exit discards all retained
+results. Hits still check current project/cohort/settings/ROI identities,
+release decisions and source dependencies, and return detached values.
+Publishing artifact-freshness bookkeeping alone does not invalidate scientific
+selection. Public final-release gates remain mandatory.
+
+The independent frequency-QC context reuses only successful `current` evidence
+derived from the processing ledger. The scope retains at most one such context,
+with an 8 MiB Python-container admission cap and a 32 MiB snapshot-read cap.
+Canonical project and live ledger paths plus content SHA-256 identify reuse;
+hits return detached values and recheck the ledger after detachment. Missing,
+corrupt, invalid, oversized or changed inputs use the uncached diagnostics.
+Misses parse the exact bounded byte snapshot used for their identity and use
+that one snapshot for coverage and processing entries, preventing retention of
+mixed evidence if a mutable ledger path changes and then changes back.
+Workbook, source-provenance, selection and review-decision validation remain
+outside this ledger-only cache at their original call sites.
+
+`Main_App.processing.provisional_harmonic_cache` holds at most two provisional
+scientific results for one frequency-QC review flow. The GUI passes the same
+instance from the first worker through decision saving to the resumed worker,
+then clears it on completion, cancellation or failure. Standalone QC calls
+remain uncached unless explicitly given an instance. Ordered scientific inputs
+and source-content hashes must match before reuse. Only provisional harmonic
+evidence is cached: reports, current decisions, exclusions and final-release
+checks are rebuilt on every run.
+
+The worker's two source-map modes share one compatibility-index scope after
+workbook validation is released. Each standalone source producer also opens
+that scope; nested calls reuse it and scope exit retains no participant arrays.
 
 Original FullFFT sheets are upstream source artifacts, not Summed-BCA
 derivatives. `Main_App.processing.full_fft_provenance` records their separate
@@ -265,6 +364,13 @@ and harmonic-selection sheets make the aggregation auditable without adding
 source paths or file hashes to the statistical table. ROI Coverage records the
 expected, observed, excluded, successfully interpolated, and used electrode
 sets and counts for each released cell.
+
+Stats-ready ROI validation uses the same canonical BioSemi channel-name
+normalization as the frozen QC-21 definition snapshot. Case-only spelling
+differences such as `FCZ`/`FCz` must not invalidate an unchanged ROI, while real
+membership or ordering changes still require a new release. Full-audit numeric
+and exclusion lookups normalize frozen channel labels to the electrode table's
+uppercase keys; published coverage retains the canonical snapshot labels.
 
 RMS-normalized BCA follows the topographic normalization order described by
 Dzhelyova et al. (2017) and McCarthy and Wood (1985). For every participant x

@@ -17,6 +17,7 @@ from Tools.Free_Harmonic_Clustering.models import (
     ClusterRecord,
     CohortWorkbook,
     FreeHarmonicInputError,
+    FreeHarmonicCancelledError,
     FreeHarmonicMethodSpec,
     FrequencyWindowPlan,
     HarmonicSelection,
@@ -25,6 +26,25 @@ from Tools.Free_Harmonic_Clustering.models import (
     PreparedContrast,
     ProjectContrastRequest,
 )
+
+
+def _stub_map_figures(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Exercise export transactions cheaply; renderer tests verify real figures."""
+
+    from Tools.Free_Harmonic_Clustering import render_cluster_maps
+
+    def export_figures(data: object, output_dir: Path, *, cancel_check: object = None) -> tuple[Path, ...]:
+        paths = (output_dir / "cluster_maps_01.png", output_dir / "cluster_maps_01.pdf")
+        for path in paths:
+            path.write_bytes(b"synthetic map artifact")
+        return paths
+
+    monkeypatch.setattr(render_cluster_maps, "export_cluster_map_figures", export_figures)
+
+
+@pytest.fixture(autouse=True)
+def _map_figures(monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_map_figures(monkeypatch)
 
 
 def _sha256(path: Path) -> str:
@@ -121,8 +141,10 @@ def _prepared_and_result(tmp_path: Path) -> tuple[PreparedContrast, ClusterPermu
         z_ddof=1,
         highest_detected_order=2,
     )
-    snr_a = np.arange(1.0, 9.0).reshape(2, 2, 2)
-    snr_b = np.arange(2.0, 10.0).reshape(2, 2, 2)
+    # Match the positive H1 / negative H2 cluster direction in the result.
+    # Each arm also has H1 > H2 for the repeated-session paired fixture.
+    snr_a = np.array([[[4.0, 1.0], [3.0, 2.0]], [[8.0, 2.0], [5.0, 3.0]]])
+    snr_b = np.array([[[3.0, 2.0], [2.0, 1.0]], [[6.0, 4.0], [3.0, 2.0]]])
     values_a = snr_a / np.linalg.norm(snr_a, axis=(1, 2), keepdims=True)
     values_b = snr_b / np.linalg.norm(snr_b, axis=(1, 2), keepdims=True)
     prepared = PreparedContrast(
@@ -249,6 +271,7 @@ def test_export_publishes_complete_hashed_project_relative_bundle(tmp_path: Path
         "null_extrema.csv",
         "participants.csv",
         "source_workbooks.csv",
+        "cluster_maps",
     }
     assert {path.name for path in receipt.output_directory.iterdir()} == expected
     assert receipt.output_directory == (
@@ -268,7 +291,7 @@ def test_export_publishes_complete_hashed_project_relative_bundle(tmp_path: Path
     assert manifest["frequency_plan"]["noise_selected_indices"] == [[0, 3], [0, 4]]
     assert manifest["frequency_plan"]["target_frequency_errors_hz"] == [0.0, 0.0]
     assert manifest["schema_version"] == 2
-    assert len(manifest["artifacts"]) == 9
+    assert len(manifest["artifacts"]) == 12
     assert manifest["harmonic_selection"]["mode"] == "automatic"
     assert manifest["preparation"]["neutral_full_fft_provenance"] == {
         "method_version": "neutral-full-fft-v1",
@@ -294,6 +317,16 @@ def test_export_publishes_complete_hashed_project_relative_bundle(tmp_path: Path
         *(artifact["role"] for artifact in manifest["artifacts"]),
         "manifest",
     }
+    maps = json.loads((receipt.output_directory / "cluster_maps" / "cluster_maps.json").read_text(encoding="utf-8"))
+    assert maps["cluster_labels"] == [[1, 0], [0, 0]]
+    assert maps["pointwise_significance_claimed"] is False
+    assert maps["reselected_or_reclustered"] is False
+    np.testing.assert_allclose(
+        maps["mean_difference"],
+        prepared.values_a.mean(axis=0) - prepared.values_b.mean(axis=0),
+    )
+    assert len(maps["figures"]) == 2
+    assert all((receipt.output_directory / "cluster_maps" / name).is_file() for name in maps["figures"])
 
     with (receipt.output_directory / "source_workbooks.csv").open(encoding="utf-8", newline="") as stream:
         source_rows = list(csv.DictReader(stream))
@@ -503,3 +536,62 @@ def test_human_workbook_forces_project_controlled_formula_like_text_to_string(
     ]
     assert dangerous
     assert all(cell.data_type == "s" for cell in dangerous)
+
+
+@pytest.mark.parametrize("cancelled", [False, True])
+def test_map_render_failure_or_cancellation_discards_whole_export(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    cancelled: bool,
+) -> None:
+    from Tools.Free_Harmonic_Clustering import render_cluster_maps
+
+    prepared, result = _prepared_and_result(tmp_path)
+    cancel_requested = False
+
+    def fail_maps(data: object, output_dir: Path, *, cancel_check: object = None) -> tuple[Path, ...]:
+        nonlocal cancel_requested
+        (output_dir / "partial.png").write_bytes(b"partial")
+        if cancelled:
+            cancel_requested = True
+            return ()
+        raise OSError("synthetic map render failure")
+
+    monkeypatch.setattr(render_cluster_maps, "export_cluster_map_figures", fail_maps)
+    with pytest.raises(FreeHarmonicCancelledError if cancelled else OSError):
+        exports.export_free_harmonic_run(
+            prepared,
+            result,
+            run_id="failed-maps",
+            cancel_check=lambda: cancel_requested,
+        )
+    parent = prepared.project_root / exports.DEFAULT_RESULTS_SUBFOLDER
+    assert not (parent / "failed-maps").exists()
+    assert not list(parent.glob(".failed-maps.staging-*"))
+
+
+def test_export_cancellation_after_manifest_prevents_publication(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    prepared, result = _prepared_and_result(tmp_path)
+    write_manifest = exports._write_manifest
+    cancel_requested = False
+
+    def request_cancel(path: Path, payload: object) -> None:
+        nonlocal cancel_requested
+        write_manifest(path, payload)
+        if path.name == exports.MANIFEST_FILENAME:
+            cancel_requested = True
+
+    monkeypatch.setattr(exports, "_write_manifest", request_cancel)
+    with pytest.raises(FreeHarmonicCancelledError):
+        exports.export_free_harmonic_run(
+            prepared,
+            result,
+            run_id="cancel-before-commit",
+            cancel_check=lambda: cancel_requested,
+        )
+    parent = prepared.project_root / exports.DEFAULT_RESULTS_SUBFOLDER
+    assert not (parent / "cancel-before-commit").exists()
+    assert not list(parent.glob(".cancel-before-commit.staging-*"))

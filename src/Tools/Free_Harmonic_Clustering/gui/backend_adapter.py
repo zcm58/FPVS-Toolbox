@@ -450,8 +450,10 @@ class FreeHarmonicBackendAdapter:
         )
         if cancel_check():
             self._raise_cancelled()
-        progress(1, 1, "Publishing the completed result bundle...")
-        receipt = export_free_harmonic_run(prepared, result)  # type: ignore[arg-type]
+        progress(0, 0, "Rendering harmonic maps and publishing the result bundle...")
+        receipt = export_free_harmonic_run(
+            prepared, result, cancel_check=cancel_check,
+        )  # type: ignore[arg-type]
         return RunOutcome(result=result, receipt=receipt)
 
     def run_repeated_batch(

@@ -76,13 +76,6 @@ from Tools.Stats.analysis.stability import (
 )
 from Tools.Stats.qc.stats_outlier_exclusion import apply_hard_dv_exclusion
 from Tools.Stats.qc.stats_qc_exclusion import (
-    QC_DEFAULT_CRITICAL_ABS_FLOOR_MAXABS,
-    QC_DEFAULT_CRITICAL_ABS_FLOOR_SUMABS,
-    QC_DEFAULT_CRITICAL_THRESHOLD,
-    QC_DEFAULT_WARN_ABS_FLOOR_MAXABS,
-    QC_DEFAULT_WARN_ABS_FLOOR_SUMABS,
-    QC_DEFAULT_WARN_THRESHOLD,
-    QcExclusionReport,
     load_shared_frequency_qc_review,
     run_qc_exclusion,
 )
@@ -840,7 +833,6 @@ def _prepare_project_long_data(
     }
     _raise_if_preparation_cancelled(cancel_check, stage="before_qc")
     _emit_progress(progress_callback, 1, 5)
-    config = dict(qc_config or {})
     if project_root not in (None, ""):
         qc_report = load_shared_frequency_qc_review(
             project_root=project_root,
@@ -851,11 +843,6 @@ def _prepare_project_long_data(
         )
         if qc_state is not None:
             qc_state["report"] = qc_report
-    elif (
-        qc_state is not None
-        and isinstance(qc_state.get("report"), QcExclusionReport)
-    ):
-        qc_report = qc_state["report"]
     else:
         qc_report = run_qc_exclusion(
             subjects=selected_subjects,
@@ -863,39 +850,6 @@ def _prepare_project_long_data(
             conditions_all=[str(value) for value in (conditions_all or ())],
             rois_all=dict(rois_all or rois),
             base_freq=float(base_freq),
-            warn_threshold=float(
-                config.get("warn_threshold", QC_DEFAULT_WARN_THRESHOLD)
-            ),
-            critical_threshold=float(
-                config.get(
-                    "critical_threshold",
-                    QC_DEFAULT_CRITICAL_THRESHOLD,
-                )
-            ),
-            warn_abs_floor_sumabs=float(
-                config.get(
-                    "warn_abs_floor_sumabs",
-                    QC_DEFAULT_WARN_ABS_FLOOR_SUMABS,
-                )
-            ),
-            critical_abs_floor_sumabs=float(
-                config.get(
-                    "critical_abs_floor_sumabs",
-                    QC_DEFAULT_CRITICAL_ABS_FLOOR_SUMABS,
-                )
-            ),
-            warn_abs_floor_maxabs=float(
-                config.get(
-                    "warn_abs_floor_maxabs",
-                    QC_DEFAULT_WARN_ABS_FLOOR_MAXABS,
-                )
-            ),
-            critical_abs_floor_maxabs=float(
-                config.get(
-                    "critical_abs_floor_maxabs",
-                    QC_DEFAULT_CRITICAL_ABS_FLOOR_MAXABS,
-                )
-            ),
             log_func=message_emit,
         )
         if qc_state is not None:

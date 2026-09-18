@@ -59,7 +59,12 @@ def test_managed_workbook_coverage_comes_from_current_final_release(
         fingerprint="source-fingerprint",
     )
     final_coverage = SimpleNamespace(
-        cells=(SimpleNamespace(source_evidence=source, workbook_path=str(workbook)),)
+        cells=(SimpleNamespace(
+            source_evidence=source,
+            workbook_path=str(workbook),
+            downstream_cell_excluded=False,
+            participant_id="P1",
+        ),)
     )
     receipt = SimpleNamespace(fingerprint="release-fingerprint")
     calls: list[Path] = []
@@ -73,7 +78,9 @@ def test_managed_workbook_coverage_comes_from_current_final_release(
     result = load_managed_workbook_coverage(tmp_path)
 
     assert calls == [tmp_path]
-    assert result[workbook.resolve(strict=False)] == _coverage(workbook)
+    assert result[workbook.resolve(strict=False)] == replace(
+        _coverage(workbook), participant_id="P1"
+    )
 
 
 def test_selected_managed_workbook_must_belong_to_final_release(

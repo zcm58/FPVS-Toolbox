@@ -32,6 +32,12 @@ Array order is participant x sensor x harmonic at the public numerical
 boundary. Flattening is sensor-major (`sensor * H + harmonic`) so the combined
 graph is `spatial_adjacency kron I_H OR I_S kron complete_harmonic_adjacency`.
 
+Connected-component extraction skips empty sensors and edges only when the
+existing active-node count proves that more than half of the sensors are empty.
+The remaining union calls keep their original order; dense masks use the
+original scan loops. This is a local allocation/scan shortcut with no retained
+cache and no changes to cluster membership, mass sums, permutations or progress.
+
 ## Modules
 
 - `models.py`: immutable requests, method specifications, prepared tensors,
@@ -48,7 +54,16 @@ graph is `spatial_adjacency kron I_H OR I_S kron complete_harmonic_adjacency`.
   validation. It is developer validation code and is not imported by runtime
   GUI/API paths.
 - `api.py`: stable orchestration boundary.
+- `reporting.py`: immutable repeated-batch display/report snapshots; one shared
+  exploratory reporting criterion over existing run and cluster p-values,
+  original outcome indices, and exact membership. No inference or array retention.
 - `exports.py`: contained, atomic, provenance-rich result publication.
+- `visualization.py`: compact immutable map snapshots derived from completed
+  analyzed arm tensors and exact cluster membership, with repeated-batch
+  contrast and run-level multiplicity context.
+- `render_cluster_maps.py`: widget-free harmonic difference-map rendering and
+  publication PNG/PDF panels using the shared ROI selector geometry and
+  publication figure typography.
 - `__main__.py`: headless command entry point; no separate scientific behavior.
 - `tool_info.py`: shared tabbed Overview, Method, Interpretation, and References
   content plus the contextual harmonic fill-through explanation.
@@ -59,7 +74,12 @@ graph is `spatial_adjacency kron I_H OR I_S kron complete_harmonic_adjacency`.
   worker that prepares, permutes, and exports sequentially without touching
   widgets.
 - `gui/page.py`: embedded `FreeHarmonicClusteringPage` with one scroll-free
-  setup/results workspace plus a compact persistent status/action footer.
+  Analysis workspace and a Cluster maps tab plus a compact persistent
+  status/action footer.
+- `gui/cluster_map_view.py`: read-only single-harmonic canvas, run/cluster and
+  harmonic selectors, fixed color scale, and exact member inspection.
+- `gui/result_details_dialog.py`: focused read-only comparison and exploratory
+  details with navigation to the existing cluster maps.
 - `gui/exclusion_state.py`: versioned, atomic project-local persistence for the
   GUI's canonical recording exclusions beneath the FHC results parent.
 - `gui/recording_exclusions_dialog.py`: source-immutable editor for project-
@@ -164,12 +184,22 @@ Separate runs are separate uncorrected families.
 
 Within a repeated-session batch, each condition-level electrode x harmonic run
 first retains the same signed maximum-cluster correction. Its global two-sided
-run p-value is the strongest observed cluster's doubled two-sided p-value (or 1
-when no cluster forms). Holm correction is then applied across every declared
+run p-value is the minimum existing two-sided cluster p-value (already doubled
+from its signed-tail p), or 1 when no cluster forms. Holm correction is then applied across every declared
 condition separately within each of the four scientific family IDs, with a
 second conservative Holm layer across the entire condition x family batch.
 Those Holm values are run-level annotations; cluster-specific raw p-values are
 never presented as cross-condition adjusted values.
+
+Exploratory reporting selects stored global p < .05 with family Holm p > .05.
+Existing Holm inference passes at <= .05; a result that fails only full-batch
+Holm is therefore not an exploratory non-survivor of its prespecified family.
+The report details only clusters with their own within-run two-sided p < .05.
+Filtering never changes the declared correction family, recomputes p-values,
+or changes cluster/map membership. Original outcome indices identify maps after
+filtering. Direction comes from the prepared A/B labels, including the actual
+ordered session subtraction, not inferred chronology. Node membership and
+selected-cluster effects remain descriptive.
 
 Automatic mode selects its observed-arm ceiling before permutation and then
 holds that domain fixed. The conditional maximum-cluster null does not by
@@ -233,14 +263,20 @@ family, and whole-participant exchangeability.
   sensor x harmonic provenance remains in the exported workbook.
 - Prepared arrays remain worker-local while the automatic permutation and
   export phases run, so source workbooks are not read a second time. After the
-  result table receives plain display strings, the page retains no prepared or
-  permutation tensors.
+  result table receives plain display strings, the page retains no participant
+  or permutation tensors. A compact immutable map snapshot retains mean arm
+  differences and signed cluster labels on the sensor x harmonic domain.
 - Results is hidden before completion. Legacy Results shows current-session
   significant clusters in one bounded table ordered by ascending raw
   sign-specific p-value. Repeated Results shows one compact row per condition x
   family with the global run p-value and both Holm layers. Technical metadata
-  and full cluster tables stay in the workbook. The page has no plots or
-  run-history browser.
+  and full cluster tables stay in the workbook. All comparisons remains the
+  default; an Exploratory findings filter and a focused details dialog expose
+  nominal findings without adding a permanent detail pane. The page retains
+  only immutable report primitives alongside its compact map snapshots, and
+  clears both on setup/project changes. View cluster maps or a table
+  row double-click opens the matching cluster/run in a dedicated tab. It has
+  no run-history browser.
 - About this analysis uses shared tabbed `ToolInfoContent`. A second contextual
   information dialog explains fixed-domain fill-through and base-overlap
   exclusion.
@@ -249,6 +285,42 @@ family, and whole-participant exchangeability.
   failure, and project switching cannot publish a partial completed bundle.
 
 ## Output
+
+Every new repeated-batch bundle also contains `exploratory_findings.md`, an
+`Exploratory Findings` workbook sheet, and `exploratory_clusters.csv` plus
+`exploratory_cluster_membership.csv`. These are additive reporting artifacts
+inside the same atomic publication and checksum manifest. They record an
+explicit empty result when no run qualifies; all primary batch/cluster tables
+remain complete. No old run bundles or source data are rewritten.
+
+### Harmonic difference maps
+
+The interactive and exported maps follow the presentation of Hermann et al.
+(2026), Figures 7 and 10: a descriptive mean A-minus-B response surface per
+retained harmonic with black positive-cluster and white negative-cluster
+markers. Values are means of the actual analyzed tensors, including the
+versioned repeated-session composite semantics; they are not t values or raw
+amplitude differences. All harmonics in one contrast share symmetric color
+limits determined before any viewer filtering.
+
+The renderer reuses the attributed, GUI-neutral BioSemi64 polar coordinates
+and projection of the ROI selector. Linear interpolation inside the electrode
+convex hull is explicitly a descriptive display transformation. It does not
+interpolate p-values, change adjacency, fill mask gaps, or infer a brain
+source. A cluster can have disconnected patches within a harmonic because its
+connections traverse other harmonics. Cluster significance belongs to the
+full sensor x harmonic family; individual members and slices do not have
+independent significance. Repeated-session run-level Holm values remain
+separate from raw cluster p-values.
+
+The viewer filters to member-containing harmonics by default and also offers
+every analyzed harmonic. Exported panels always include every retained
+harmonic with one shared scale, split into bounded single-page figures. The
+PNG/PDF pairs use 600 dpi and shared Arial figure typography. Caption/data
+metadata preserves the plotted values and exact membership. These are
+independently implemented visual counterparts, not pixel-identical copies of
+the authors' FieldTrip layouts or interpolation. Figure rendering runs within
+the existing cancellable export worker and atomic run staging.
 
 Default runs publish beneath:
 

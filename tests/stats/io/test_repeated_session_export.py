@@ -152,18 +152,22 @@ def test_export_hard_fails_recording_reuse() -> None:
         build_repeated_session_long_frame(reused, contract=_contract())
 
 
-@pytest.mark.parametrize("reason", ["", "  ", None])
-def test_export_preserves_exclusion_with_optional_reason(reason) -> None:
+@pytest.mark.parametrize("reason", ["", "   ", None])
+def test_export_retains_exclusion_and_qc_evidence_when_optional_reason_is_blank(reason) -> None:
     data = _data()
     data.loc[data["participant_id"].eq("C1"), "exclusion_reason"] = reason
+    original = data.copy(deep=True)
 
     frame = build_repeated_session_long_frame(data, contract=_contract())
 
-    assert len(frame) == len(data)
     excluded = frame.loc[frame["participant_id"].eq("C1")].iloc[0]
     assert bool(excluded["excluded"])
+    assert bool(excluded["qc_flag"])
+    assert excluded["qc_notes"] == "Manual review flag"
     assert excluded["exclusion_reason"] == "No reason provided"
     assert np.isnan(float(excluded["summed_bca_uv"]))
+    pd.testing.assert_frame_equal(data, original)
+    assert len(frame) == len(data)
     assert frame.loc[~frame["excluded"], "exclusion_reason"].eq("").all()
 
 

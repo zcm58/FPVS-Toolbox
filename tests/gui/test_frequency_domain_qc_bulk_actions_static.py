@@ -154,7 +154,7 @@ def _findings():
         {**base, "finding_fingerprint": "happy"},
         {**base, "condition": "Sad", "finding_fingerprint": "sad"},
         {**base, "condition": "Angry", "finding_fingerprint": "angry"},
-        {**base, "electrode": "", "roi": "O2", "finding_fingerprint": "roi"},
+        {**base, "electrode": "Pz", "finding_fingerprint": "pz"},
         {**base, "participant_id": "P47", "recording_id": "P47-VISIT1", "finding_fingerprint": "p47"},
         {**base, "recording_id": "P26-VISIT2", "finding_fingerprint": "visit2"},
         {**base, "electrode": "CP4", "finding_fingerprint": "cp4"},
@@ -185,6 +185,8 @@ def _harness():
     dialog._bulk_snapshot = {}
     dialog._sort_column = None
     dialog._submitted_decisions = ()
+    dialog._attention = ()
+    dialog._update_progress = lambda: None
     dialog._report = {"identity_scope": "recording", "analysis_fingerprint": "analysis",
                       "review_findings": dialog._findings,
                       "condition_specific_interpolation_enabled": True}
@@ -294,7 +296,7 @@ def test_invalid_bulk_action_is_refused_before_any_state_changes():
     assert dialog.refresh_count == 0
 
 
-@pytest.mark.parametrize("selection", ["missing_group", "hidden_row", "roi"])
+@pytest.mark.parametrize("selection", ["missing_group", "hidden_row", "other"])
 def test_unavailable_group_cannot_apply_a_bulk_decision(selection):
     dialog = _harness()
     if selection == "missing_group":
@@ -303,7 +305,7 @@ def test_unavailable_group_cannot_apply_a_bulk_decision(selection):
         dialog.electrode_group_combo.value = None
         dialog.details_table.current_row = 2
     else:
-        dialog.finding_sections.tabData = lambda _index: "roi"
+        dialog.finding_sections.tabData = lambda _index: "other"
     before = _state(dialog)
 
     dialog._apply_electrode_group_decision(DECISION_INTERPOLATE_CONDITION_ELECTRODE)

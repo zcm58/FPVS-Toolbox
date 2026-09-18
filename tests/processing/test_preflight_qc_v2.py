@@ -920,6 +920,92 @@ def test_v2_settings_change_invalidates_cache(monkeypatch, tmp_path: Path) -> No
     assert second_raw.reads
 
 
+@pytest.mark.parametrize(
+    ("ram_gib", "cpu_count", "total", "requested", "expected"),
+    [
+        (128, 32, 20, 99, 8),
+        (256, 32, 20, 99, 8),
+        (64, 32, 20, 99, 7),
+        (32, 32, 20, 99, 4),
+        (16, 32, 20, 99, 4),
+        (8, 32, 20, 99, 2),
+        (128, 8, 20, 99, 7),
+        (128, 4, 20, 99, 3),
+        (128, 1, 20, 99, 1),
+        (128, None, 20, 99, 1),
+        (128, 32, 20, 6, 6),
+        (128, 32, 5, 99, 5),
+    ],
+)
+def test_preflight_worker_count_respects_resource_and_request_limits(
+    monkeypatch, ram_gib, cpu_count, total, requested, expected,
+):
+    monkeypatch.setattr(
+        preflight_qc.psutil, "virtual_memory",
+        lambda: SimpleNamespace(total=ram_gib * 1024 ** 3),
+    )
+    monkeypatch.setattr(preflight_qc.os, "cpu_count", lambda: cpu_count)
+
+    assert preflight_qc.preflight_worker_count(total, requested) == expected
+
+
+@pytest.mark.parametrize(
+    ("total", "requested", "expected"),
+    [
+        (0, 99, 1), (1, 99, 1), (3, 99, 3), (4, 99, 4),
+        (20, 4, 4), (20, 3, 3), (20, 1, 1), (20, None, 1),
+        (20, 0, 1), (20, -5, 1), (20, "invalid", 1),
+    ],
+)
+def test_existing_small_preflight_pool_never_probes_resources(
+    monkeypatch, total, requested, expected,
+):
+    def unexpected():
+        raise AssertionError("An existing pool of four or fewer needs no resource probe.")
+
+    monkeypatch.setattr(preflight_qc.psutil, "virtual_memory", unexpected)
+    monkeypatch.setattr(preflight_qc.os, "cpu_count", unexpected)
+
+    assert preflight_qc.preflight_worker_count(total, requested) == expected
+
+
+@pytest.mark.parametrize(
+    "error", [OSError, RuntimeError, ValueError, TypeError, AttributeError],
+)
+def test_resource_probe_failure_retains_previous_four_worker_cap(monkeypatch, error):
+    def unavailable():
+        raise error("Resource information is unavailable.")
+
+    monkeypatch.setattr(preflight_qc.psutil, "virtual_memory", unavailable)
+
+    assert preflight_qc.preflight_worker_count(20, 99) == 4
+    assert preflight_qc.preflight_worker_count(5, 5) == 4
+
+
+def test_extra_preflight_workers_never_bypass_ram_safety(monkeypatch):
+    monkeypatch.setattr(
+        preflight_qc.psutil, "virtual_memory",
+        lambda: SimpleNamespace(total=64 * 1024 ** 3),
+    )
+    monkeypatch.setattr(preflight_qc.os, "cpu_count", lambda: 32)
+    original = preflight_qc.compute_effective_max_workers
+    calls = []
+
+    def recorded(**kwargs):
+        calls.append(kwargs)
+        return original(**kwargs)
+
+    monkeypatch.setattr(preflight_qc, "compute_effective_max_workers", recorded)
+
+    assert preflight_qc.preflight_worker_count(20, 99) == 7
+    assert calls == [{
+        "total_ram_bytes": 64 * 1024 ** 3,
+        "cpu_count": 32,
+        "project_max_workers": 8,
+        "allow_ram_cap_bypass": False,
+    }]
+
+
 def test_v2_caps_worker_and_bdf_read_concurrency(monkeypatch, tmp_path: Path) -> None:
     data, names = _raw_data()
     paths = []
@@ -933,6 +1019,19 @@ def test_v2_caps_worker_and_bdf_read_concurrency(monkeypatch, tmp_path: Path) ->
     first_reads = threading.Barrier(2)
     first_spectra = threading.Barrier(2)
     original_spectral_qc = preflight_qc.evaluate_condition_spectral_qc_v2
+    original_executor = preflight_qc.ThreadPoolExecutor
+    executor_sizes = []
+    monkeypatch.setattr(
+        preflight_qc.psutil, "virtual_memory",
+        lambda: SimpleNamespace(total=128 * 1024 ** 3),
+    )
+    monkeypatch.setattr(preflight_qc.os, "cpu_count", lambda: 32)
+
+    def _executor(*args, **kwargs):
+        executor_sizes.append(kwargs["max_workers"])
+        return original_executor(*args, **kwargs)
+
+    monkeypatch.setattr(preflight_qc, "ThreadPoolExecutor", _executor)
 
     def _read_hook() -> None:
         nonlocal active_reads, maximum_reads, read_calls
@@ -968,7 +1067,7 @@ def test_v2_caps_worker_and_bdf_read_concurrency(monkeypatch, tmp_path: Path) ->
                 active_spectra -= 1
 
     raws = []
-    for index in range(6):
+    for index in range(10):
         path = tmp_path / f"P{index + 1:02d}.bdf"
         path.write_bytes(f"identity-{index}".encode())
         paths.append(path)
@@ -989,16 +1088,12 @@ def test_v2_caps_worker_and_bdf_read_concurrency(monkeypatch, tmp_path: Path) ->
     )
 
     assert scan.cancelled is False
-    assert preflight_qc._preflight_worker_count(20, 99) == 4
+    assert executor_sizes == [8]
+    assert preflight_qc.preflight_worker_count(20, 99) == 8
     assert 1 < maximum_reads <= 2
     assert 1 < maximum_spectra <= 2
     assert [result.participant_id for result in scan.results] == [
-        "P01",
-        "P02",
-        "P03",
-        "P04",
-        "P05",
-        "P06",
+        f"P{index + 1:02d}" for index in range(10)
     ]
 
 

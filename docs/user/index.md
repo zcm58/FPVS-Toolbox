@@ -83,6 +83,21 @@ block creation. Missing visits for individual participants are shown as
 warnings and retained. The preflight does not open BDF signal contents and does
 not infer group or session membership from generated output folders.
 
+### Adding Recordings After Processing
+
+Place new BDF files directly in the project's configured raw source folders,
+then start **Processing**. The **Add BDF Files** popup shows each new file's
+participant, group and session/visit from those folders. Choose **Add Files and
+Continue** to save the additions and continue through the normal QC workflow.
+**Cancel** leaves the registry unchanged and stops processing.
+
+The lock protects existing assignments; it permits confirmed additions without
+requiring equal participant counts or complete visits. Conflicting group
+assignments and duplicate participant/visit files still need correction.
+Opening a project alone does not register new files or prevent analysis of its
+existing valid results. Once additions are confirmed, finish Processing before
+resuming post-processing or using the expanded dataset in analysis.
+
 ### Repeated-Session Processing QC
 
 Repeated-session projects keep participant identity and recording identity

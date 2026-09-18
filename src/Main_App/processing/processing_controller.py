@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Mapping, Sequence
@@ -91,6 +92,17 @@ class ParticipantReviewRow:
     session_id: str | None = None
     session_label: str | None = None
     visit_index: int | None = None
+
+
+@dataclass(frozen=True)
+class RawRegistrationReview:
+    """Immutable folder-derived proposal; staging never changes membership."""
+
+    files: tuple[RawFileInfo, ...]
+    source_files: tuple[RawFileInfo, ...]
+    review_rows: tuple[ParticipantReviewRow, ...]
+    manifest_sha256: str
+    selected_path: Path | None = None
 
 
 # ``subject_id`` is the canonical participant label inferred from the .bdf file
@@ -637,6 +649,8 @@ def discover_raw_files(project: "Project") -> List[RawFileInfo]:
 def _discover_recording_files(
     project: "Project",
     context: ProjectRecordingContext,
+    *,
+    allow_unregistered: bool = False,
 ) -> List[RawFileInfo]:
     if not context.sessions:
         raise ValueError(
@@ -668,6 +682,7 @@ def _discover_recording_files(
             info = _recording_info_for_source_path(context, source, candidate)
             if (
                 bool(getattr(project, "groups_locked", False))
+                and not allow_unregistered
                 and info.path.resolve(strict=False) not in registered_paths
             ):
                 raise ValueError(
@@ -995,6 +1010,95 @@ def _update_project_recordings(
 def register_participants(project: "Project", files: Sequence[RawFileInfo]) -> bool:
     """Persist reviewed participant raw-file assignments to project.json."""
     return _update_project_participants(project, files)
+
+
+def prepare_raw_registration_review(
+    project: "Project", *, selected_path: Path | None = None,
+) -> RawRegistrationReview:
+    """Stage additions from canonical input folders while preserving every lock.
+
+    Only this review path permits discovering unregistered repeated recordings.
+    Ordinary batch discovery and individual raw selection remain strict until
+    the user confirms and the model durably appends the proposed identities.
+    """
+    manifest_path = Path(project.project_root) / "project.json"
+    manifest_sha256 = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+    context = _recording_context(project)
+    selected = Path(selected_path).resolve() if selected_path is not None else None
+    if context.is_repeated_session:
+        source_files = tuple(_discover_recording_files(
+            project, context, allow_unregistered=True,
+        ))
+        validate_repeated_recording_sources_for_processing(project, source_files)
+        files = tuple(info for info in source_files if selected is None or info.path == selected)
+        if selected is not None and not files:
+            raise ValueError("Selected BDF must be in a registered recording-source folder.")
+    elif selected is not None:
+        files = source_files = (raw_file_info_for_path(project, selected),)
+    else:
+        files = source_files = tuple(discover_raw_files(project))
+    rows = tuple(participant_review_rows(project, files))
+    if any(not row.status.startswith("New ") for row in rows):
+        raise ValueError(
+            "New-file registration cannot change existing participant, group, "
+            "session or raw-file assignments. Resolve the conflicting file first."
+        )
+    if hashlib.sha256(manifest_path.read_bytes()).hexdigest() != manifest_sha256:
+        raise ValueError("Project changed while discovering new files. Review the additions again.")
+    return RawRegistrationReview(files, source_files, rows, manifest_sha256, selected)
+
+
+def commit_raw_registration_review(
+    project: "Project", review: RawRegistrationReview,
+) -> list[RawFileInfo]:
+    """Revalidate exactly what was confirmed, then atomically append membership."""
+    if not review.review_rows:
+        return list(review.files)
+    manifest_path = Path(project.project_root) / "project.json"
+    if hashlib.sha256(manifest_path.read_bytes()).hexdigest() != review.manifest_sha256:
+        raise ValueError("Project changed after the review opened. Review the additions again.")
+    refreshed = prepare_raw_registration_review(project, selected_path=review.selected_path)
+    if refreshed != review:
+        raise ValueError("Raw files or assignments changed after review. Review the additions again.")
+
+    repeated = _recording_context(project).is_repeated_session
+    participants: dict[str, dict[str, Any]] = {}
+    recordings: dict[str, dict[str, Any]] = {}
+    new_paths = {row.raw_file for row in review.review_rows}
+    new_infos = [info for info in review.files if info.path in new_paths]
+    for info in new_infos:
+        existing_key, existing = _participant_record(project, info.subject_id)
+        participant_id = existing_key or info.subject_id
+        if existing is None:
+            entry: dict[str, Any] = {"group_id": info.group} if info.group else {}
+            if not repeated:
+                entry["raw_file"] = info.path
+            participants[participant_id] = entry
+        if repeated:
+            recordings[str(info.recording_id)] = {
+                "participant_id": participant_id,
+                "session_id": info.session_id,
+                "source_id": info.source_id,
+                "raw_file": info.path,
+                "visit_index": info.visit_index,
+            }
+
+    from Main_App.processing.raw_registration_state import registration_tool_updates
+
+    tool_updates = registration_tool_updates(
+        project.project_root, [info.processing_id for info in new_infos],
+    )
+    project.append_registered_inputs(
+        participants=participants,
+        recordings=recordings,
+        expected_manifest_sha256=review.manifest_sha256,
+        tool_namespace_updates=tool_updates,
+    )
+    logger.info(
+        "raw_recordings_registered",
+        extra={"project_root": str(project.project_root), "added_files": len(new_infos)},
+    )
+    return [raw_file_info_for_path(project, info.path) for info in review.files]
 
 
 def prepare_batch_file_infos(project: "Project") -> List[RawFileInfo]:

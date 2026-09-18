@@ -28,6 +28,7 @@ from openpyxl.utils import get_column_letter
 
 from Main_App.io import read_xlsx_sheet_selected_columns
 from Main_App.processing.frequency_domain_qc import load_frequency_domain_qc_state
+from Main_App.processing.post_processing_context import post_processing_validation_scope
 from Main_App.processing.roi_coverage import (
     ROI_VALUE_AVAILABLE,
     RecordingConditionRoiCoverage,
@@ -222,6 +223,7 @@ def default_analysis_ready_workbook_path(project_root: str | Path) -> Path:
     )
 
 
+@post_processing_validation_scope()
 def write_analysis_ready_workbook(
     project_root: str | Path,
     *,
@@ -720,9 +722,12 @@ def _append_record_rows(
         frozenset(),
     )
     reviewed_excluded_electrodes = frozenset(
-        coverage_cell.whole_scalp_normalization.excluded_channels
-        if coverage_cell.whole_scalp_normalization is not None
-        else ()
+        channel.strip().upper()
+        for channel in (
+            coverage_cell.whole_scalp_normalization.excluded_channels
+            if coverage_cell.whole_scalp_normalization is not None
+            else ()
+        )
     )
     auto_electrodes = (
         participant_auto_electrodes
@@ -962,7 +967,11 @@ def _append_record_rows(
             )
             raw = rms_normalized = signed_normalized = math.nan
         else:
-            roi_frame = indexed.loc[list(membership.used_channels)]
+            # QC-21 keeps canonical BioSemi spelling (for example, FCz), while
+            # the exported electrode table uses uppercase lookup keys.
+            roi_frame = indexed.loc[
+                [channel.strip().upper() for channel in membership.used_channels]
+            ]
             if isinstance(roi_frame, pd.Series):
                 roi_frame = roi_frame.to_frame().T
             raw = float(roi_frame["Raw Summed BCA"].mean(skipna=False))

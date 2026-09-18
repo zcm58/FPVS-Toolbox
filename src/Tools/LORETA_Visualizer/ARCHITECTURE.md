@@ -83,6 +83,11 @@ successful, non-applicable skips. It must not invoke those consumers, delete a
 preceding source artifact, or mark a nonexistent replacement current. The
 recording-aware source-ready derivatives remain durable inputs for a future
 recording-aware producer. Single-session orchestration remains unchanged.
+The direct compact-workbook adapter enforces this same boundary before reading
+Stats-ready or metric workbooks. It checks the canonical dataset-index recording
+mode and distinct recording IDs per participant before exclusions can hide
+extra visits; a direct caller cannot enable repeated-source aggregation by
+excluding one visit.
 
 The default L2 method, `l2_mne_hauk_source_psd_cortical_normal_v1`, selects the
 cortical surface-normal component with MNE source PSD `pick_ori="normal"`. The
@@ -614,6 +619,19 @@ exclusion files, records flagged participant status, partitions true
 multi-group projects before aggregation, and returns `L2MNEFPVSCondition`
 objects for calculation producers.
 
+Compact-workbook assembly freezes one accepted frequency-domain QC snapshot
+for its participant and workbook selection. In addition to existing whole-
+participant exclusions, it omits accepted participant-condition, recording,
+and recording-condition exclusions before sheet I/O. Canonical participant and
+recording IDs match case-insensitively with surrounding whitespace removed;
+condition names retain their exact canonical identity. Within supported
+single-recording cohorts, recording exclusions match only the canonical
+recording, and condition exclusions do not remove other conditions.
+Diagnostics identify each scoped omission, while retained map
+metadata records its omitted-workbook count and identities. A group-condition
+cell with no retained inputs remains omitted with diagnostics. This changes
+neither the selected harmonic list nor the legacy topography averaging method.
+
 The project L2-MNE exporter writes generated files under
 `6 - Source Localization/L2-MNE Cortical Surface Beta/` by default. The manifest
 can be loaded by the GUI's prepared-manifest importer. The GUI may trigger this
@@ -705,9 +723,26 @@ Toolbox neighboring-bin z-score. Only compact method-specific participant
 results are cached; source amplitudes are reproducible from the durable
 time-domain derivative and are not retained in full by default. Cache keys omit
 harmonic-cache bookkeeping fields (source label, save time, and saved cache ID)
-while the full prepared-output provenance retains them, so recalculating an
-identical harmonic selection does not repeat the participant inverse solely
-because the bookkeeping timestamp changed.
+and the global selection fingerprint while the full prepared-output provenance
+retains them. A fingerprint-only change therefore reuses identical participant
+arrays; exact harmonic/bin, derivative-checksum, numerical-model and method
+inputs remain key-bound. Project selection acceptance and artifact freshness
+still use the current full selection fingerprint.
+
+Participant caches live separately from published maps at project-local
+`.fpvs_processing/source_psd_cache/v1`, so rebuilding a map directory preserves
+them. Both source exporters enter a `source_psd_cache_scope`. On the first
+absent normalized key, a bounded read-only compatibility index discovers older
+keys that included selection fingerprints; it retains candidate filenames only
+and is discarded at the end of the export. Candidate keys must match their
+original canonical metadata hash and the complete normalized requested inputs;
+each hit revalidates metadata, NPZ checksum, array schema and finite values.
+Discovery is limited to 4,096 metadata files, 256 MiB in total, 4 MiB per file,
+and eight aliases per normalized key; exceeding a limit causes ordinary
+recomputation. Current keys are checked on every request so new writes remain
+visible in an existing scope, and corrupt current entries cannot be hidden by
+an older alias. New cache entries retain the existing atomic publication format;
+legacy entries are reused without being rewritten or moved.
 
 The legacy amplitude-derived eLORETA exporter continues to write under
 `6 - Source Localization/eLORETA Volume Beta/`. Its manifest and the legacy

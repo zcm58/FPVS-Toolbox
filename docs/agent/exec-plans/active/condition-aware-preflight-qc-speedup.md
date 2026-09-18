@@ -54,8 +54,10 @@ its filter order, or any generated scientific output.
   map. The existing preflight API remains a compatibility fallback when those
   inputs are absent.
 - QC concurrency is bounded independently from processing concurrency: at most
-  four participant workers, two simultaneous BDF reads, and two simultaneous
-  spectral evaluators.
+  eight participant workers, two simultaneous BDF reads, and two simultaneous
+  spectral evaluators. Requests above four workers additionally apply the shared
+  CPU/total-RAM tier policy without bypass; resource-query failure retains the
+  previous four-worker ceiling. See the measured follow-up in `qc-performance.md`.
 
 ## Phases
 

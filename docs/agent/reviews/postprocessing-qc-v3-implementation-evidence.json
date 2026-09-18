@@ -1,0 +1,779 @@
+{
+  "date": "2026-09-08",
+  "scope": "Actual production parser versus frozen c4466582 parser; GUI changes are not timed.",
+  "limits": [
+    "Read-only backend stage bundle, not full pipeline or user-visible latency.",
+    "No OS cache flush; previous durable harmonic caches remain available.",
+    "No real-project writes, GUI execution, export publication or memory-reduction claim."
+  ],
+  "summary": {
+    "new_evidence": {
+      "baseline": {
+        "median_s": 30.569671999954153,
+        "min_s": 30.110087500012014,
+        "max_s": 30.590024500037543
+      },
+      "production": {
+        "median_s": 28.479040500009432,
+        "min_s": 27.948640000016894,
+        "max_s": 28.495522999961395
+      },
+      "saved_s": 2.0906314999447204,
+      "reduction_percent": 6.83890720171239
+    },
+    "reused_evidence": {
+      "baseline": {
+        "median_s": 21.52304230001755,
+        "min_s": 21.39748669997789,
+        "max_s": 21.808470899995882
+      },
+      "production": {
+        "median_s": 19.093764399993233,
+        "min_s": 19.09216759999981,
+        "max_s": 19.106451600033324
+      },
+      "saved_s": 2.429277900024317,
+      "reduction_percent": 11.286870444065132
+    }
+  },
+  "real_project_pairs": {
+    "head": "c44665827da158de0643758b4bbb999b26d8b6b2",
+    "audit_parser_baseline": {
+      "requested_ref": "c44665827da158de0643758b4bbb999b26d8b6b2",
+      "commit": "c44665827da158de0643758b4bbb999b26d8b6b2",
+      "module_sha256": "fee3d767579bbc44ff3b34a14b0e52f874a7e3ecebd65eadeefd79578a47cfb6",
+      "selected_ast_sha256": "6d6a2028aa184fc57fb201b433bd8d74f189b065b55932cf40a01b180a521e85",
+      "frozen_dependencies": [
+        "SPECTRAL_METRIC_QC_SHEET_NAME",
+        "_BCA_AUDIT_REQUIRED_COLUMNS",
+        "_exact_frequency_column",
+        "_normalize_electrode",
+        "_optional_cell_text",
+        "_read_bca_method_audit_rows"
+      ]
+    },
+    "production_audit_parser_sha256": "fefba10cbc44e76aa254ae65ac7a5a16728dd13efd1aafea0544f096dcd7e04a",
+    "python": "3.13.9 (tags/v3.13.9:8183fa5, Oct 14 2025, 14:09:13) [MSC v.1944 64 bit (AMD64)]",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "processor": "Intel64 Family 6 Model 151 Stepping 2, GenuineIntel",
+    "numpy": "2.3.1",
+    "pandas": "2.3.0",
+    "scipy": "1.16.0",
+    "native_pools": [
+      {
+        "user_api": "blas",
+        "internal_api": "openblas",
+        "num_threads": 1,
+        "prefix": "libscipy_openblas",
+        "filepath": "libscipy_openblas64_-13e2df515630b4a41f92893938845698.dll",
+        "version": "0.3.29",
+        "threading_layer": "pthreads",
+        "architecture": "Haswell"
+      },
+      {
+        "user_api": "blas",
+        "internal_api": "openblas",
+        "num_threads": 1,
+        "prefix": "libscipy_openblas",
+        "filepath": "libscipy_openblas-f07f5a5d207a3a47104dca54d6d0c86a.dll",
+        "version": "0.3.28",
+        "threading_layer": "pthreads",
+        "architecture": "Haswell"
+      }
+    ],
+    "os_cache_flushed": false,
+    "coverage_persisted": false,
+    "blocked_mutations": [],
+    "manifest_sha256_before": "1c7b4f636989f8b04959d83a12004815fc2d7653b9dd2273f88e0b40bf1a1d30",
+    "manifest_sha256_after": "1c7b4f636989f8b04959d83a12004815fc2d7653b9dd2273f88e0b40bf1a1d30",
+    "rows": [
+      {
+        "label": "0_baseline_new_evidence",
+        "profiled": false,
+        "elapsed_s": 30.110087500012014,
+        "cpu_s": 28.75,
+        "rss_measurement": "20ms_process_samples",
+        "rss_start_mib": 208.66015625,
+        "rss_peak_mib": 359.4140625,
+        "counts": {
+          "open:.json": 33,
+          "open:project.json": 20,
+          "file_digest_calls": 1438,
+          "file_digest_bytes": 5504645337,
+          "open:.fpvs": 2288,
+          "open:.npz": 1573,
+          "provisional:miss": 1
+        },
+        "stages": {
+          "readiness": 0.06877760001225397,
+          "dataset_index": 0.20122940000146627,
+          "geometry": 0.5528658999828622,
+          "coverage_no_persistence": 4.665439700009301,
+          "frequency_review": 24.548843200027477
+        },
+        "qc_stages": [
+          {
+            "stage": "canonical_inputs",
+            "elapsed_s": 3.3944473000010476
+          },
+          {
+            "stage": "independent_evidence",
+            "elapsed_s": 0.13718839996727183
+          },
+          {
+            "stage": "provisional_harmonics",
+            "elapsed_s": 11.19884629995795
+          },
+          {
+            "stage": "absolute_screening",
+            "elapsed_s": 9.375954899995122
+          },
+          {
+            "stage": "report_integrity",
+            "elapsed_s": 0.4403218000079505
+          }
+        ],
+        "result_sha256": "5c7307e899eef506f12872e23fccb941f556db0488c4ef479ae54f9b37bdb5a7",
+        "flags": 7,
+        "review_required": false,
+        "subjects": 24,
+        "conditions": 6
+      },
+      {
+        "label": "0_baseline_reused_evidence",
+        "profiled": false,
+        "elapsed_s": 21.808470899995882,
+        "cpu_s": 20.875,
+        "rss_measurement": "20ms_process_samples",
+        "rss_start_mib": 269.81640625,
+        "rss_peak_mib": 312.47265625,
+        "counts": {
+          "open:.json": 25,
+          "open:project.json": 13,
+          "file_digest_calls": 723,
+          "file_digest_bytes": 2067584366,
+          "open:.fpvs": 1287,
+          "open:.npz": 1144,
+          "provisional:hit": 1
+        },
+        "stages": {
+          "readiness": 0.10981379996519536,
+          "dataset_index": 0.41930429998319596,
+          "geometry": 1.0088013000204228,
+          "coverage_no_persistence": 4.810089599981438,
+          "frequency_review": 15.390506199968513
+        },
+        "qc_stages": [
+          {
+            "stage": "canonical_inputs",
+            "elapsed_s": 3.320913199975621
+          },
+          {
+            "stage": "independent_evidence",
+            "elapsed_s": 0.13747020001756027
+          },
+          {
+            "stage": "provisional_harmonics",
+            "elapsed_s": 2.07410940004047
+          },
+          {
+            "stage": "absolute_screening",
+            "elapsed_s": 9.411990599997807
+          },
+          {
+            "stage": "report_integrity",
+            "elapsed_s": 0.4443663000129163
+          }
+        ],
+        "result_sha256": "5c7307e899eef506f12872e23fccb941f556db0488c4ef479ae54f9b37bdb5a7",
+        "flags": 7,
+        "review_required": false,
+        "subjects": 24,
+        "conditions": 6
+      },
+      {
+        "label": "0_production_new_evidence",
+        "profiled": false,
+        "elapsed_s": 28.479040500009432,
+        "cpu_s": 27.484375,
+        "rss_measurement": "20ms_process_samples",
+        "rss_start_mib": 281.2109375,
+        "rss_peak_mib": 360.53515625,
+        "counts": {
+          "open:.json": 33,
+          "open:project.json": 20,
+          "file_digest_calls": 1438,
+          "file_digest_bytes": 5504645337,
+          "open:.fpvs": 2288,
+          "open:.npz": 1573,
+          "provisional:miss": 1
+        },
+        "stages": {
+          "readiness": 0.16843429999426007,
+          "dataset_index": 0.41112730000168085,
+          "geometry": 0.9367983000120148,
+          "coverage_no_persistence": 4.873872100026347,
+          "frequency_review": 22.018187500012573
+        },
+        "qc_stages": [
+          {
+            "stage": "canonical_inputs",
+            "elapsed_s": 3.26992250001058
+          },
+          {
+            "stage": "independent_evidence",
+            "elapsed_s": 0.14060869999229908
+          },
+          {
+            "stage": "provisional_harmonics",
+            "elapsed_s": 11.363279699988198
+          },
+          {
+            "stage": "absolute_screening",
+            "elapsed_s": 6.803205500007607
+          },
+          {
+            "stage": "report_integrity",
+            "elapsed_s": 0.43959059996996075
+          }
+        ],
+        "result_sha256": "5c7307e899eef506f12872e23fccb941f556db0488c4ef479ae54f9b37bdb5a7",
+        "flags": 7,
+        "review_required": false,
+        "subjects": 24,
+        "conditions": 6
+      },
+      {
+        "label": "0_production_reused_evidence",
+        "profiled": false,
+        "elapsed_s": 19.093764399993233,
+        "cpu_s": 18.296875,
+        "rss_measurement": "20ms_process_samples",
+        "rss_start_mib": 292.7890625,
+        "rss_peak_mib": 313.5859375,
+        "counts": {
+          "open:.json": 25,
+          "open:project.json": 13,
+          "file_digest_calls": 723,
+          "file_digest_bytes": 2067584366,
+          "open:.fpvs": 1287,
+          "open:.npz": 1144,
+          "provisional:hit": 1
+        },
+        "stages": {
+          "readiness": 0.11031640000874177,
+          "dataset_index": 0.4555362000246532,
+          "geometry": 0.9150114000076428,
+          "coverage_no_persistence": 4.7927524000406265,
+          "frequency_review": 12.749373400001787
+        },
+        "qc_stages": [
+          {
+            "stage": "canonical_inputs",
+            "elapsed_s": 3.3092693999642506
+          },
+          {
+            "stage": "independent_evidence",
+            "elapsed_s": 0.13800560001982376
+          },
+          {
+            "stage": "provisional_harmonics",
+            "elapsed_s": 2.0554491000366397
+          },
+          {
+            "stage": "absolute_screening",
+            "elapsed_s": 6.713604299991857
+          },
+          {
+            "stage": "report_integrity",
+            "elapsed_s": 0.5310030999826267
+          }
+        ],
+        "result_sha256": "5c7307e899eef506f12872e23fccb941f556db0488c4ef479ae54f9b37bdb5a7",
+        "flags": 7,
+        "review_required": false,
+        "subjects": 24,
+        "conditions": 6
+      },
+      {
+        "label": "1_production_new_evidence",
+        "profiled": false,
+        "elapsed_s": 28.495522999961395,
+        "cpu_s": 27.25,
+        "rss_measurement": "20ms_process_samples",
+        "rss_start_mib": 293.51953125,
+        "rss_peak_mib": 364.19140625,
+        "counts": {
+          "open:.json": 33,
+          "open:project.json": 20,
+          "file_digest_calls": 1438,
+          "file_digest_bytes": 5504645337,
+          "open:.fpvs": 2288,
+          "open:.npz": 1573,
+          "provisional:miss": 1
+        },
+        "stages": {
+          "readiness": 0.11080520000541583,
+          "dataset_index": 0.4250204999698326,
+          "geometry": 0.9216452999971807,
+          "coverage_no_persistence": 4.8180472000385635,
+          "frequency_review": 22.149270199995954
+        },
+        "qc_stages": [
+          {
+            "stage": "canonical_inputs",
+            "elapsed_s": 3.3878275000024587
+          },
+          {
+            "stage": "independent_evidence",
+            "elapsed_s": 0.1366175999864936
+          },
+          {
+            "stage": "provisional_harmonics",
+            "elapsed_s": 11.18395189999137
+          },
+          {
+            "stage": "absolute_screening",
+            "elapsed_s": 6.994486399984453
+          },
+          {
+            "stage": "report_integrity",
+            "elapsed_s": 0.44463760004146025
+          }
+        ],
+        "result_sha256": "5c7307e899eef506f12872e23fccb941f556db0488c4ef479ae54f9b37bdb5a7",
+        "flags": 7,
+        "review_required": false,
+        "subjects": 24,
+        "conditions": 6
+      },
+      {
+        "label": "1_production_reused_evidence",
+        "profiled": false,
+        "elapsed_s": 19.09216759999981,
+        "cpu_s": 18.078125,
+        "rss_measurement": "20ms_process_samples",
+        "rss_start_mib": 300.484375,
+        "rss_peak_mib": 333.36328125,
+        "counts": {
+          "open:.json": 25,
+          "open:project.json": 13,
+          "file_digest_calls": 723,
+          "file_digest_bytes": 2067584366,
+          "open:.fpvs": 1287,
+          "open:.npz": 1144,
+          "provisional:hit": 1
+        },
+        "stages": {
+          "readiness": 0.11142079997807741,
+          "dataset_index": 0.41547330003231764,
+          "geometry": 0.9342951000435278,
+          "coverage_no_persistence": 4.854188300028909,
+          "frequency_review": 12.630867199972272
+        },
+        "qc_stages": [
+          {
+            "stage": "canonical_inputs",
+            "elapsed_s": 3.3447374000097625
+          },
+          {
+            "stage": "independent_evidence",
+            "elapsed_s": 0.1365597999538295
+          },
+          {
+            "stage": "provisional_harmonics",
+            "elapsed_s": 1.97185160004301
+          },
+          {
+            "stage": "absolute_screening",
+            "elapsed_s": 6.742323000042234
+          },
+          {
+            "stage": "report_integrity",
+            "elapsed_s": 0.43359510001027957
+          }
+        ],
+        "result_sha256": "5c7307e899eef506f12872e23fccb941f556db0488c4ef479ae54f9b37bdb5a7",
+        "flags": 7,
+        "review_required": false,
+        "subjects": 24,
+        "conditions": 6
+      },
+      {
+        "label": "1_baseline_new_evidence",
+        "profiled": false,
+        "elapsed_s": 30.590024500037543,
+        "cpu_s": 29.03125,
+        "rss_measurement": "20ms_process_samples",
+        "rss_start_mib": 299.8359375,
+        "rss_peak_mib": 355.3984375,
+        "counts": {
+          "open:.json": 33,
+          "open:project.json": 20,
+          "file_digest_calls": 1438,
+          "file_digest_bytes": 5504645337,
+          "open:.fpvs": 2288,
+          "open:.npz": 1573,
+          "provisional:miss": 1
+        },
+        "stages": {
+          "readiness": 0.1340405999799259,
+          "dataset_index": 0.42499169998336583,
+          "geometry": 0.9219334999797866,
+          "coverage_no_persistence": 4.749921799986623,
+          "frequency_review": 24.28772869997192
+        },
+        "qc_stages": [
+          {
+            "stage": "canonical_inputs",
+            "elapsed_s": 3.2946134000085294
+          },
+          {
+            "stage": "independent_evidence",
+            "elapsed_s": 0.1340646999888122
+          },
+          {
+            "stage": "provisional_harmonics",
+            "elapsed_s": 11.127250600024126
+          },
+          {
+            "stage": "absolute_screening",
+            "elapsed_s": 9.289911600004416
+          },
+          {
+            "stage": "report_integrity",
+            "elapsed_s": 0.4400526999961585
+          }
+        ],
+        "result_sha256": "5c7307e899eef506f12872e23fccb941f556db0488c4ef479ae54f9b37bdb5a7",
+        "flags": 7,
+        "review_required": false,
+        "subjects": 24,
+        "conditions": 6
+      },
+      {
+        "label": "1_baseline_reused_evidence",
+        "profiled": false,
+        "elapsed_s": 21.52304230001755,
+        "cpu_s": 20.578125,
+        "rss_measurement": "20ms_process_samples",
+        "rss_start_mib": 302.98046875,
+        "rss_peak_mib": 321.85546875,
+        "counts": {
+          "open:.json": 25,
+          "open:project.json": 13,
+          "file_digest_calls": 723,
+          "file_digest_bytes": 2067584366,
+          "open:.fpvs": 1287,
+          "open:.npz": 1144,
+          "provisional:hit": 1
+        },
+        "stages": {
+          "readiness": 0.10888159996829927,
+          "dataset_index": 0.40856280003208667,
+          "geometry": 1.0684114000177942,
+          "coverage_no_persistence": 4.813255800050683,
+          "frequency_review": 15.050003700016532
+        },
+        "qc_stages": [
+          {
+            "stage": "canonical_inputs",
+            "elapsed_s": 3.2541231000213884
+          },
+          {
+            "stage": "independent_evidence",
+            "elapsed_s": 0.13368959998479113
+          },
+          {
+            "stage": "provisional_harmonics",
+            "elapsed_s": 2.0444668999989517
+          },
+          {
+            "stage": "absolute_screening",
+            "elapsed_s": 9.237867999996524
+          },
+          {
+            "stage": "report_integrity",
+            "elapsed_s": 0.37795290001668036
+          }
+        ],
+        "result_sha256": "5c7307e899eef506f12872e23fccb941f556db0488c4ef479ae54f9b37bdb5a7",
+        "flags": 7,
+        "review_required": false,
+        "subjects": 24,
+        "conditions": 6
+      },
+      {
+        "label": "2_baseline_new_evidence",
+        "profiled": false,
+        "elapsed_s": 30.569671999954153,
+        "cpu_s": 29.375,
+        "rss_measurement": "20ms_process_samples",
+        "rss_start_mib": 302.0703125,
+        "rss_peak_mib": 363.8515625,
+        "counts": {
+          "open:.json": 33,
+          "open:project.json": 20,
+          "file_digest_calls": 1438,
+          "file_digest_bytes": 5504645337,
+          "open:.fpvs": 2288,
+          "open:.npz": 1573,
+          "provisional:miss": 1
+        },
+        "stages": {
+          "readiness": 0.16647820000071079,
+          "dataset_index": 0.4079928999999538,
+          "geometry": 0.918085900018923,
+          "coverage_no_persistence": 4.742963100026827,
+          "frequency_review": 24.26429309998639
+        },
+        "qc_stages": [
+          {
+            "stage": "canonical_inputs",
+            "elapsed_s": 3.219883000012487
+          },
+          {
+            "stage": "independent_evidence",
+            "elapsed_s": 0.1389482999802567
+          },
+          {
+            "stage": "provisional_harmonics",
+            "elapsed_s": 11.098953300039284
+          },
+          {
+            "stage": "absolute_screening",
+            "elapsed_s": 9.378028600011021
+          },
+          {
+            "stage": "report_integrity",
+            "elapsed_s": 0.4265719999675639
+          }
+        ],
+        "result_sha256": "5c7307e899eef506f12872e23fccb941f556db0488c4ef479ae54f9b37bdb5a7",
+        "flags": 7,
+        "review_required": false,
+        "subjects": 24,
+        "conditions": 6
+      },
+      {
+        "label": "2_baseline_reused_evidence",
+        "profiled": false,
+        "elapsed_s": 21.39748669997789,
+        "cpu_s": 20.375,
+        "rss_measurement": "20ms_process_samples",
+        "rss_start_mib": 301.6015625,
+        "rss_peak_mib": 321.234375,
+        "counts": {
+          "open:.json": 25,
+          "open:project.json": 13,
+          "file_digest_calls": 723,
+          "file_digest_bytes": 2067584366,
+          "open:.fpvs": 1287,
+          "open:.npz": 1144,
+          "provisional:hit": 1
+        },
+        "stages": {
+          "readiness": 0.11033869994571432,
+          "dataset_index": 0.4942661999957636,
+          "geometry": 0.9058204999892041,
+          "coverage_no_persistence": 4.767585999972653,
+          "frequency_review": 15.04896089999238
+        },
+        "qc_stages": [
+          {
+            "stage": "canonical_inputs",
+            "elapsed_s": 3.2144371999893337
+          },
+          {
+            "stage": "independent_evidence",
+            "elapsed_s": 0.13577659998554736
+          },
+          {
+            "stage": "provisional_harmonics",
+            "elapsed_s": 2.056091899983585
+          },
+          {
+            "stage": "absolute_screening",
+            "elapsed_s": 9.120436900004279
+          },
+          {
+            "stage": "report_integrity",
+            "elapsed_s": 0.5205652000149712
+          }
+        ],
+        "result_sha256": "5c7307e899eef506f12872e23fccb941f556db0488c4ef479ae54f9b37bdb5a7",
+        "flags": 7,
+        "review_required": false,
+        "subjects": 24,
+        "conditions": 6
+      },
+      {
+        "label": "2_production_new_evidence",
+        "profiled": false,
+        "elapsed_s": 27.948640000016894,
+        "cpu_s": 26.421875,
+        "rss_measurement": "20ms_process_samples",
+        "rss_start_mib": 302.07421875,
+        "rss_peak_mib": 364.28125,
+        "counts": {
+          "open:.json": 33,
+          "open:project.json": 20,
+          "file_digest_calls": 1438,
+          "file_digest_bytes": 5504645337,
+          "open:.fpvs": 2288,
+          "open:.npz": 1573,
+          "provisional:miss": 1
+        },
+        "stages": {
+          "readiness": 0.10967569996137172,
+          "dataset_index": 0.41278329998021945,
+          "geometry": 0.9314651999738999,
+          "coverage_no_persistence": 4.792947799956892,
+          "frequency_review": 21.632550800044555
+        },
+        "qc_stages": [
+          {
+            "stage": "canonical_inputs",
+            "elapsed_s": 3.3066913000075147
+          },
+          {
+            "stage": "independent_evidence",
+            "elapsed_s": 0.13542700000107288
+          },
+          {
+            "stage": "provisional_harmonics",
+            "elapsed_s": 10.958748800039757
+          },
+          {
+            "stage": "absolute_screening",
+            "elapsed_s": 6.790669200010598
+          },
+          {
+            "stage": "report_integrity",
+            "elapsed_s": 0.4391837000148371
+          }
+        ],
+        "result_sha256": "5c7307e899eef506f12872e23fccb941f556db0488c4ef479ae54f9b37bdb5a7",
+        "flags": 7,
+        "review_required": false,
+        "subjects": 24,
+        "conditions": 6
+      },
+      {
+        "label": "2_production_reused_evidence",
+        "profiled": false,
+        "elapsed_s": 19.106451600033324,
+        "cpu_s": 17.96875,
+        "rss_measurement": "20ms_process_samples",
+        "rss_start_mib": 303.52734375,
+        "rss_peak_mib": 324.26953125,
+        "counts": {
+          "open:.json": 25,
+          "open:project.json": 13,
+          "file_digest_calls": 723,
+          "file_digest_bytes": 2067584366,
+          "open:.fpvs": 1287,
+          "open:.npz": 1144,
+          "provisional:hit": 1
+        },
+        "stages": {
+          "readiness": 0.11469800001941621,
+          "dataset_index": 0.4174376999726519,
+          "geometry": 0.9385791000095196,
+          "coverage_no_persistence": 4.827754000027198,
+          "frequency_review": 12.660641600028612
+        },
+        "qc_stages": [
+          {
+            "stage": "canonical_inputs",
+            "elapsed_s": 3.327452199999243
+          },
+          {
+            "stage": "independent_evidence",
+            "elapsed_s": 0.13651919999392703
+          },
+          {
+            "stage": "provisional_harmonics",
+            "elapsed_s": 1.968335899990052
+          },
+          {
+            "stage": "absolute_screening",
+            "elapsed_s": 6.790041000000201
+          },
+          {
+            "stage": "report_integrity",
+            "elapsed_s": 0.43628299998817965
+          }
+        ],
+        "result_sha256": "5c7307e899eef506f12872e23fccb941f556db0488c4ef479ae54f9b37bdb5a7",
+        "flags": 7,
+        "review_required": false,
+        "subjects": 24,
+        "conditions": 6
+      }
+    ]
+  },
+  "helper": {
+    "status": "passed",
+    "baseline": {
+      "requested_ref": "c44665827da158de0643758b4bbb999b26d8b6b2",
+      "commit": "c44665827da158de0643758b4bbb999b26d8b6b2",
+      "module_sha256": "fee3d767579bbc44ff3b34a14b0e52f874a7e3ecebd65eadeefd79578a47cfb6",
+      "selected_ast_sha256": "6d6a2028aa184fc57fb201b433bd8d74f189b065b55932cf40a01b180a521e85",
+      "frozen_dependencies": [
+        "SPECTRAL_METRIC_QC_SHEET_NAME",
+        "_BCA_AUDIT_REQUIRED_COLUMNS",
+        "_exact_frequency_column",
+        "_normalize_electrode",
+        "_optional_cell_text",
+        "_read_bca_method_audit_rows"
+      ]
+    },
+    "production_source_sha256": "fefba10cbc44e76aa254ae65ac7a5a16728dd13efd1aafea0544f096dcd7e04a",
+    "frozen_loader_edge_frames": 9,
+    "timing": {
+      "rows": 2624,
+      "columns": [
+        "Electrode",
+        "Target Frequency Exact (Hz)",
+        "BCA Status",
+        "Reason Codes"
+      ],
+      "pairs": [
+        {
+          "order": "baseline,candidate",
+          "baseline_seconds": 0.011561400024220347,
+          "candidate_seconds": 0.006577299966011196
+        },
+        {
+          "order": "candidate,baseline",
+          "candidate_seconds": 0.006965800013858825,
+          "baseline_seconds": 0.011810099997092038
+        },
+        {
+          "order": "baseline,candidate",
+          "baseline_seconds": 0.011938100040424615,
+          "candidate_seconds": 0.006882099958602339
+        },
+        {
+          "order": "candidate,baseline",
+          "candidate_seconds": 0.0068106999970041215,
+          "baseline_seconds": 0.01268860005075112
+        },
+        {
+          "order": "baseline,candidate",
+          "baseline_seconds": 0.012187000014819205,
+          "candidate_seconds": 0.0069058999652042985
+        }
+      ],
+      "baseline_median_seconds": 0.011938100040424615,
+      "candidate_median_seconds": 0.006882099958602339,
+      "speedup": 1.7346594952464307,
+      "reduction_percent": 42.351798566788055,
+      "input_frame_sha256": "9a47210b87b95d9561a82ed2e04d4d88827677f8c54bd51cdf27b9b7bb7c9970",
+      "baseline_conversions": 2624,
+      "candidate_conversions": 41
+    }
+  },
+  "helper_label_note": "Historical helper key candidate denotes the actual production parser bound to production_source_sha256."
+}

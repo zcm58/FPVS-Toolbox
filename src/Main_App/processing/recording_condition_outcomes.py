@@ -383,6 +383,7 @@ def _validate_written_receipt(
     recording: object,
     cell: object,
     receipt: Mapping[str, Any],
+    validate_artifacts: bool = True,
 ) -> tuple[str, ...]:
     reasons: list[str] = []
     if not _receipt_is_current(receipt):
@@ -417,28 +418,29 @@ def _validate_written_receipt(
         schema = workbook_write.get("schema_validation")
         if not isinstance(schema, Mapping) or schema.get("status") != "passed":
             reasons.append("workbook_schema_not_validated")
-        recorded_artifact = workbook_write.get("artifact")
-        actual_artifact = _artifact_identity(expected_path)
-        if not isinstance(recorded_artifact, Mapping) or actual_artifact != dict(
-            recorded_artifact
-        ):
-            reasons.append("workbook_artifact_not_current")
-        from Main_App.io.condition_data import condition_companion_identity
-        from Main_App.io.spectral_data import spectral_companion_identity
+        if validate_artifacts:
+            recorded_artifact = workbook_write.get("artifact")
+            actual_artifact = _artifact_identity(expected_path)
+            if not isinstance(recorded_artifact, Mapping) or actual_artifact != dict(
+                recorded_artifact
+            ):
+                reasons.append("workbook_artifact_not_current")
+            from Main_App.io.condition_data import condition_companion_identity
+            from Main_App.io.spectral_data import spectral_companion_identity
 
-        for key, reader in (
-            ("spectral_companion", spectral_companion_identity),
-            ("condition_companion", condition_companion_identity),
-        ):
-            if key not in workbook_write:
-                continue  # Historical workbook-only receipts remain valid.
-            companion = workbook_write[key]
-            try:
-                actual_companion = reader(expected_path)
-                if not isinstance(companion, Mapping) or actual_companion != dict(companion):
+            for key, reader in (
+                ("spectral_companion", spectral_companion_identity),
+                ("condition_companion", condition_companion_identity),
+            ):
+                if key not in workbook_write:
+                    continue  # Historical workbook-only receipts remain valid.
+                companion = workbook_write[key]
+                try:
+                    actual_companion = reader(expected_path)
+                    if not isinstance(companion, Mapping) or actual_companion != dict(companion):
+                        reasons.append(f"{key}_not_current")
+                except (OSError, ValueError):
                     reasons.append(f"{key}_not_current")
-            except (OSError, ValueError):
-                reasons.append(f"{key}_not_current")
 
     integrity = receipt.get("finite_integrity")
     if not isinstance(integrity, Sequence) or isinstance(integrity, (str, bytes)):
@@ -469,6 +471,7 @@ def _reconcile_cell(
     recording: object,
     cell: object,
     receipts: Sequence[Mapping[str, Any]],
+    validate_artifacts: bool = True,
 ) -> RecordingConditionCellOutcome:
     action = str(getattr(cell, "planned_cell_action"))
     planned = int(getattr(cell, "planned_occurrence_count"))
@@ -577,6 +580,7 @@ def _reconcile_cell(
             recording=recording,
             cell=cell,
             receipt=receipt,
+            validate_artifacts=validate_artifacts,
         )
     )
     expected_occurrences = [
@@ -638,8 +642,15 @@ def _reconcile_cell(
 def reconcile_recording_condition_outputs(
     expected_plan: ExpectedRecordingConditionPlan,
     export_receipts: Sequence[Mapping[str, Any]],
+    *,
+    validate_artifacts: bool = True,
 ) -> RecordingConditionOutcomeLedger:
-    """Account for every expected cell from current receipts and explicit plans."""
+    """Account for every expected cell from current receipts and explicit plans.
+
+    Registration enrollment gates may check metadata with ``validate_artifacts``
+    false. That mode is not scientific release: normal source and final-release
+    gates must still validate workbook and companion artifacts.
+    """
 
     by_cell: dict[tuple[str, str], list[Mapping[str, Any]]] = {}
     for receipt in export_receipts:
@@ -666,6 +677,7 @@ def reconcile_recording_condition_outputs(
                     recording=recording,
                     cell=cell,
                     receipts=by_cell.get(key, ()),
+                    validate_artifacts=validate_artifacts,
                 )
             )
 

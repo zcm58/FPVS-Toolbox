@@ -65,6 +65,11 @@ recording identity from its single captured manifest using the pure
 `project_recording_context_from_manifest(root, manifest)` normalizer; it does
 not reload recording identity midway through a scan.
 
+Approved raw-input registration shares this transaction lock around its
+checksum-guarded atomic replacement. It rechecks the reviewed manifest after
+acquiring the lock and immediately before replacement; a concurrent update
+requires a fresh review rather than overwriting the newer project state.
+
 Condition-interpolation source reconciliation holds the transaction only for
 its short read/retire/save operation. Repair execution keeps a captured repair
 namespace snapshot while EEG processing and output validation run without the
@@ -146,8 +151,10 @@ FPVS Toolbox uses a strict hybrid settings model:
 - Project-owned QC-17 configuration lives separately from raw preprocessing in
   the top-level, versioned `experimental_qc` record. Its
   `summed_bca_screening` subsection defaults to enabled review-only screening
-  with the accepted absolute, count, cohort-relative, summed-response, and peak
-  thresholds. Existing projects with no record receive those defaults and
+  with the accepted absolute electrode-amplitude and flagged-cell/electrode
+  count thresholds. Retired cohort-relative ROI thresholds are ignored when
+  loading older settings and are omitted from newly saved settings. Existing
+  projects with no record receive the electrode-screening defaults and
   persist them on their next save. This settings record is distinct from
   `tools.frequency_domain_qc` findings and decisions; the Wave 1 foundation
   does not reinterpret or change prior automatic exclusion state.
@@ -461,6 +468,34 @@ group/session/source/recording fingerprint locks with the first repeated
 output. Participant-wide, recording-wide, participant-condition, and
 recording-condition exclusions remain distinct. Per-recording removed-
 electrode choices override the participant-level compatibility fallback.
+
+Opening a locked repeated-session project uses the canonical saved recording
+paths that still exist, without scanning source folders for new membership.
+Unequal visit counts, extra unregistered BDFs and unavailable raw files do not
+prevent inspection of existing processed data. Raw preparation errors are
+logged as non-blocking notices and are not reported as empty source folders.
+Batch processing still performs strict source discovery and registration checks;
+opening a project does not register additions, unlock assignments or waive
+analysis provenance, QC release or method-specific eligibility requirements.
+
+Starting processing on a locked project stages new BDFs through
+`prepare_raw_registration_review` and asks for explicit confirmation before
+registration. Configured raw roots supply the canonical group and, for v2.2,
+session/source identity. Missing individual visits remain allowed. Duplicate
+visits, conflicting filenames, changed existing assignments and missing
+registered inputs still block processing. Single-file mode proposes only the
+selected addition, while repeated-session source validation covers all sources.
+
+`Project.append_registered_inputs` is the narrow append-only exception to the
+registry lock. It revalidates the reviewed manifest revision, preserves existing
+registry entries and the lock timestamp, and atomically publishes additions,
+the updated recording fingerprint and downstream invalidation together.
+Cancel, stale confirmation or failed persistence does not add files. Ordinary
+saves reject an older registration fingerprint instead of overwriting a newer
+registry. Raw files and existing outputs are untouched by this operation.
+The processing-owned pending-registration receipt requires current expected-plan
+and outcome accounting for the additions before downstream release can resume;
+see [Post-Processing Export Contract](post-processing-export-contract.md).
 
 The shared read-only group/participant context is now available from
 `Main_App.projects`. `Main_App.projects.dataset_index` is the single

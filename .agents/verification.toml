@@ -9,7 +9,8 @@ tests = [
   "tests/processing/test_process_runner_lifecycle.py",
   "tests/processing/test_process_runner_epoch_contract.py",
   "tests/processing/test_condition_interpolation_execution.py",
-  "tests/processing/test_worker_thread_limits.py",
+    "tests/processing/test_worker_thread_limits.py",
+    "tests/processing/test_prepared_fir.py",
   "tests/gui/test_processing_failure_routing_static.py",
   "tests/project_io/test_spectral_data.py",
   "tests/plot_generator/test_spectral_companion_inputs.py",
@@ -48,6 +49,8 @@ tests = [
   "tests/settings/test_settings_manager_persistence.py",
   "tests/gui/test_roi_settings_invalidation.py",
   "tests/gui/test_signal_review_model.py",
+  "tests/gui/test_kurtosis_review_actions_static.py",
+  "tests/gui/test_preprocessing_signal_review_static.py",
   "tests/gui/test_toolbox_cache_workflow_static.py",
   "tests/gui/test_post_processing_readiness_static.py",
   "tests/gui/test_processing_failure_routing_static.py",
@@ -56,6 +59,8 @@ tests = [
   "tests/gui/test_dataset_exclusions_static.py",
   "tests/gui/test_dataset_exclusions_workflow_static.py",
   "tests/gui/test_preprocessing_qc_continue_static.py",
+  "tests/gui/test_marker_occurrence_review.py",
+  "tests/gui/test_marker_occurrence_review_static_contract.py",
   "tests/gui/test_qc_source_prefetch_static.py",
   "tests/workers/test_qc_source_prefetch_worker_static.py",
 ]
@@ -64,9 +69,9 @@ manual_smoke = ["Launch the Main App at 1280x900 and verify the home Conditions 
 
 [scopes.updates]
 audits = ["gui", "paths"]
-tests = ["tests/updates/test_update_check.py", "tests/updates/test_update_download.py"]
-include = ["src/Main_App/updates/**", "src/Main_App/gui/update_*.py", "tests/updates/**", "scripts/packaging/**"]
-manual_smoke = ["Use File > Check for Updates in a visible Main App window when GUI or installer handoff behavior changed."]
+tests = ["tests/updates"]
+include = ["src/Main_App/updates/**", "src/Main_App/gui/update*.py", "src/Main_App/updater_main.py", "src/updater.py", "tests/updates/**", "scripts/packaging/**"]
+manual_smoke = ["Use File > Check for Updates in a visible Main App window: cancel a download, retry, and confirm progress remains responsive. Verify active processing/export/QC blocks installation and normal close guards still apply. On a disposable Windows installation, exercise patch download/install/restart and standalone Update & Repair; preserve project/settings sentinels. Follow docs/agent/architecture/updater.md for legacy/full-repair, per-user, and all-users checks; never test by replacing the user's production installation."]
 
 [scopes.project-io]
 audits = ["paths"]
@@ -80,6 +85,7 @@ tests = [
   "tests/project_io/test_project_results_layout.py",
   "tests/project_io/test_project_scan_job.py",
   "tests/project_io/test_project_v2_group_schema.py",
+  "tests/project_io/test_project_recording_context.py",
   "tests/project_io/test_repeated_recording_preflight.py",
   "tests/project_io/test_repeated_session_project_setup.py",
   "tests/project_io/test_main_app_xlsx_selected_reader.py",
@@ -104,7 +110,11 @@ tests = [
   "tests/processing/test_preflight_qc_reuse.py",
   "tests/processing/test_prepared_kurtosis_cache.py",
   "tests/processing/test_qc_source_prefetch.py",
+  "tests/processing/test_qc_signal_view.py",
+  "tests/processing/test_qc_review_episodes.py",
+  "tests/processing/test_qc_review_diagnostics.py",
   "tests/processing/test_raw_channel_metric_batching.py",
+  "tests/processing/test_raw_channel_spatial_parity.py",
   "tests/gui/test_kurtosis_review_dialog_static.py",
   "tests/gui/test_marker_occurrence_review.py",
   "tests/gui/test_interpolation_burden_review_static.py",
@@ -119,6 +129,7 @@ tests = [
   "tests/processing/test_interpolation_burden_review.py",
   "tests/processing/test_frequency_domain_qc_integrity.py",
   "tests/processing/test_repeated_session_frequency_domain_qc.py",
+  "tests/processing/test_frequency_qc_identity.py",
   "tests/gui/test_processing_post_status_text.py",
   "tests/processing/test_analysis_spans.py",
   "tests/processing/test_artifact_freshness.py",
@@ -135,6 +146,10 @@ tests = [
   "tests/processing/test_missing_condition_outputs.py",
   "tests/processing/test_expected_processing_ledger.py",
   "tests/processing/test_frequency_domain_qc.py",
+  "tests/processing/test_provisional_harmonic_cache.py",
+  "tests/processing/test_post_processing_validation_context.py",
+  "tests/processing/test_independent_qc_context_reuse.py",
+  "tests/processing/test_prepared_fir.py",
   "tests/processing/test_frequency_domain_qc_review_reuse.py",
   "tests/processing/test_condition_interpolation_qc_policy.py",
   "tests/processing/test_condition_interpolation_execution.py",
@@ -150,6 +165,8 @@ tests = [
   "tests/processing/test_analysis_ready_workbook.py",
   "tests/processing/test_recording_condition_outcomes.py",
   "tests/processing/test_individual_detectability_project_coverage.py",
+  "tests/processing/test_individual_detectability_core.py",
+  "tests/processing/test_individual_detectability_managed_inputs.py",
   "tests/processing/test_project_processing_cache.py",
   "tests/processing/test_preflight_qc.py",
   "tests/processing/test_preflight_qc_cache.py",
@@ -187,6 +204,7 @@ include = [
   "src/Main_App/gui/style_tokens.py",
   "tests/gui/test_processing_post_status_text.py",
   "tests/processing/**",
+  "src/Tools/Individual_Detectability/**",
   "tests/workers/test_post_processing_pipeline_worker.py",
 ]
 manual_smoke = ["Start preprocessing at 1280x900. Leave step 2 open and confirm logs show background source preloads while Continue remains responsive. Continue through no-action marker/condition/exclusion summaries and the editable electrode review, then verify step 6 reports use of preloaded recordings and completes current decisions. Repeat by advancing immediately, changing review choices, and cancelling step 6. Verify temporary qc-source-* directories disappear when QC exits, and window Close is blocked while the prefetch bridge is active. Qt lifecycle tests are CI-only locally."]

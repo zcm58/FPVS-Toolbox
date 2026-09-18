@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import ast
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 import json
 import logging
@@ -209,6 +209,7 @@ def test_post_processing_run_reuses_and_releases_one_dataset_index() -> None:
     assert "dataset_index=self._dataset_index" in stats_source
     assert "dataset_index=self._dataset_index" in audit_source
     assert "selection_metadata=self._harmonic_selection_metadata" in audit_source
+    assert "provisional_cache=self._provisional_cache" in qc_source
 
     try_node = next(node for node in run_method.body if isinstance(node, ast.Try))
     assert any(
@@ -355,11 +356,14 @@ def test_source_psd_exporters_are_loaded_through_separate_expected_seams() -> No
     assert "project_eloreta_volume_export" not in source_text
 
 
-def _pipeline_without_qt(tmp_path, *, failed_step="", review_error=""):
+def _pipeline_without_qt(tmp_path, *, failed_step="", review_error="", repeated_session=False):
     """Run the production orchestration with exporter/signal doubles and no Qt."""
 
     tree = _worker_tree()
-    methods = ("run", "_record_failed_frequency_outputs", "_emit_phase_progress")
+    methods = (
+        "run", "_record_failed_frequency_outputs", "_emit_phase_progress",
+        "_is_repeated_session_project", "_run_from_accepted_selection",
+    )
     extracted = [_class_method(tree, name) for name in methods]
     for method in extracted:
         method.decorator_list = []
@@ -396,9 +400,18 @@ def _pipeline_without_qt(tmp_path, *, failed_step="", review_error=""):
             raise ValueError(review_error)
         return {"review_required": False}
 
+    sessions = {
+        "visit_1": {"label": "Visit 1", "visit_index": 1},
+        "visit_2": {"label": "Visit 2", "visit_index": 2},
+    } if repeated_session else {}
     worker = SimpleNamespace(
-        _project=SimpleNamespace(project_root=tmp_path),
+        _project=SimpleNamespace(project_root=tmp_path, sessions=sessions),
         _resume_from_selection=False,
+        _requires_recording_aware_export=False,
+        _harmonic_selection_metadata={"selection_fingerprint": "accepted"},
+        _selection_fingerprint=None,
+        _selection_changed=True,
+        _emit_progress=Mock(),
         _capture_previous_selection_fingerprint=Mock(),
         _run_frequency_domain_qc_review=review,
         _sync_frequency_domain_qc_automatic_state=Mock(),
@@ -445,6 +458,89 @@ def test_prerequisite_failure_persists_reason_and_never_reports_completion(tmp_p
     state = manifest["tools"]["frequency_domain_qc"]
     assert state["downstream_outputs_stale"] is True
     assert reason in state["stale_reason"]
+
+
+@pytest.mark.parametrize("outcome", ["complete", "review_pause", "review_error"])
+def test_validation_scope_ends_before_sources_and_on_every_review_exit(tmp_path, outcome):
+    from Main_App.processing.post_processing_context import (
+        CACHE_MISS, cached_validation, remember_validation, validation_scope_active,
+    )
+
+    worker = _pipeline_without_qt(tmp_path)
+    stages = []
+
+    def review():
+        assert validation_scope_active()
+        remember_validation("test", "review", {"current": True}, files=())
+        stages.append("review")
+        if outcome == "review_error":
+            raise ValueError("Review failed")
+        return {"review_required": outcome == "review_pause"}
+
+    original_export = worker._run_stats_ready_export
+    original_sources = worker._run_source_maps
+
+    def export(*args):
+        assert cached_validation("test", "review") == {"current": True}
+        stages.append("export")
+        return original_export(*args)
+
+    def sources(*args):
+        assert not validation_scope_active()
+        assert cached_validation("test", "review") is CACHE_MISS
+        stages.append("sources")
+        return original_sources(*args)
+
+    worker._run_frequency_domain_qc_review = review
+    worker._run_stats_ready_export = export
+    worker._run_source_maps = sources
+    worker.run()
+
+    assert stages == (["review", "export", "sources"] if outcome == "complete" else ["review"])
+    assert not validation_scope_active()
+    assert cached_validation("test", "review") is CACHE_MISS
+
+
+@pytest.mark.parametrize("fail_second_mode", [False, True])
+def test_source_modes_share_one_compatibility_scope_and_release_it(tmp_path, monkeypatch, fail_second_mode):
+    from Tools.LORETA_Visualizer.source_producers import source_psd_cache
+
+    worker = _pipeline_without_qt(tmp_path)
+    namespace = worker.run.__func__.__globals__
+    method = _class_method(_worker_tree(), "_run_source_maps")
+    module = ast.Module(body=[method], type_ignores=[])
+    exec(compile(ast.fix_missing_locations(module), str(WORKER_PATH), "exec"), namespace)
+    worker._is_repeated_session_project = lambda: False
+    worker._pipeline_steps = []
+    worker._emit_progress = Mock()
+    state = {"entries": 0, "active": False}
+    modes = []
+
+    @contextmanager
+    def scope():
+        state.update(entries=state["entries"] + 1, active=True)
+        try:
+            yield
+        finally:
+            state["active"] = False
+
+    def export(_root, mode):
+        assert state["active"]
+        modes.append(mode)
+        if fail_second_mode and len(modes) == 2:
+            raise ValueError("Second source export failed")
+        return mode
+
+    monkeypatch.setattr(source_psd_cache, "source_psd_cache_scope", scope)
+    worker._run_source_map_mode = export
+    run_sources = MethodType(namespace["_run_source_maps"], worker)
+    if fail_second_mode:
+        with pytest.raises(ValueError, match="Second source export failed"):
+            run_sources(tmp_path)
+    else:
+        assert run_sources(tmp_path) == ["l2_mne_source_psd", "eloreta_volume_source_psd"]
+    assert modes == ["l2_mne_source_psd", "eloreta_volume_source_psd"]
+    assert state == {"entries": 1, "active": False}
 
 
 @pytest.mark.parametrize("failed_step", ["full_fft_provenance", "harmonic_selection", "stats_ready_summed_bca"])
@@ -524,6 +620,45 @@ def test_optional_export_failure_leaves_frequency_outputs_current(tmp_path, fail
     assert (phase, completed, total) == ("post_processing_complete", 5, 5)
     manifest = json.loads((tmp_path / "project.json").read_text(encoding="utf-8"))
     assert not manifest["tools"].get("frequency_domain_qc", {}).get("downstream_outputs_stale")
+
+
+@pytest.mark.parametrize("repeated_session", [False, True])
+@pytest.mark.parametrize("selection_resume", [False, True])
+def test_full_audit_failure_is_required_only_for_repeated_stats(
+    tmp_path, repeated_session, selection_resume,
+):
+    worker = _pipeline_without_qt(
+        tmp_path, failed_step="analysis_ready_full_audit", repeated_session=repeated_session,
+    )
+    worker._resume_from_selection = selection_resume
+    worker._run_frequency_domain_qc_review = Mock(wraps=worker._run_frequency_domain_qc_review)
+    worker._run_harmonic_selection = Mock(wraps=worker._run_harmonic_selection)
+    before = (tmp_path / "project.json").read_bytes()
+
+    worker.run()
+
+    worker.finished.emit.assert_called_once()
+    result = worker.finished.emit.call_args.args[0]
+    assert result["ok"] is False
+    assert bool(result["failure_reason"]) is repeated_session
+    phase, completed, total, message = worker.phase_progress.emit.call_args.args
+    if repeated_session:
+        assert "Repeated-session Stats requires the full-audit" in result["failure_reason"]
+        assert "analysis_ready_full_audit failed" in result["failure_reason"]
+        assert phase == "post_processing_failed"
+        assert completed < total
+        assert "incomplete" in message
+        assert "optional" not in message
+    else:
+        assert (phase, completed, total) == ("post_processing_complete", 5, 5)
+        assert "optional" in message
+    if selection_resume:
+        worker._run_frequency_domain_qc_review.assert_not_called()
+        worker._run_harmonic_selection.assert_not_called()
+    # An export failure cannot invalidate already accepted upstream evidence.
+    assert (tmp_path / "project.json").read_bytes() == before
+    assert worker._dataset_index is None
+    assert worker._harmonic_selection_metadata is None
 
 
 def test_exception_after_core_outputs_does_not_report_a_required_output_failure(tmp_path):

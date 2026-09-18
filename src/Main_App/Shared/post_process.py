@@ -1190,6 +1190,7 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                     raise SpectralEligibilityError(
                         "Spectral eligibility was not resolved for this FFT input."
                     )
+                eligibility_fingerprint = condition_eligibility.fingerprint
                 for chan_idx in range(final_num_channels):
                     channel_amplitudes = fft_amplitudes[chan_idx, :]
                     for freq_idx, availability in enumerate(
@@ -1229,7 +1230,7 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                                 "FFT Input Index": data_idx + 1,
                                 "Electrode": ordered_electrode_names_for_df[chan_idx],
                                 "Eligibility Fingerprint": (
-                                    condition_eligibility.fingerprint
+                                    eligibility_fingerprint
                                 ),
                                 "Oddball Harmonic Order": (
                                     availability.target.oddball_harmonic_order

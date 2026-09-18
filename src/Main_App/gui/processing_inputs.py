@@ -23,11 +23,16 @@ from Main_App.gui.project_protocol import (
     processing_protocol_snapshot,
 )
 from Main_App.gui.recording_qc_identity import project_recording_coverage_rows
-from Main_App.gui.participant_review import review_participants_for_processing
+from Main_App.gui.participant_review import (
+    review_participants_for_processing,
+    review_recording_additions_for_processing,
+)
 from Main_App.gui.event_map import has_complete_event_map_entry
 from Main_App.processing.processing_controller import (
     participant_review_rows,
+    commit_raw_registration_review,
     prepare_batch_file_infos,
+    prepare_raw_registration_review,
     raw_file_info_for_path,
     raw_selection_start_folder,
     register_participants,
@@ -152,15 +157,23 @@ def validate_inputs(host: Any) -> bool:
         )
         return False
     raw_file_infos = []
+    registration_review = None
+    registration_project = host.currentProject
     if mode_now == "Single":
         # In single mode, require an explicit .bdf selection
         if not host.data_paths:
             QMessageBox.warning(host, "No File Selected", "Please choose one .bdf file first.")
             return False
         try:
-            raw_file_infos = [
-                raw_file_info_for_path(host.currentProject, Path(host.data_paths[0]))
-            ]
+            if bool(getattr(host.currentProject, "groups_locked", False)):
+                registration_review = prepare_raw_registration_review(
+                    host.currentProject, selected_path=Path(host.data_paths[0]),
+                )
+                raw_file_infos = list(registration_review.files)
+            else:
+                raw_file_infos = [
+                    raw_file_info_for_path(host.currentProject, Path(host.data_paths[0]))
+                ]
         except Exception as exc:
             logger.exception("Single-file source validation failed.")
             QMessageBox.warning(host, "Invalid File Selection", str(exc))
@@ -171,7 +184,11 @@ def validate_inputs(host: Any) -> bool:
     # all .bdf files from all configured group input folders are used.
     if mode_now == "Batch":
         try:
-            raw_file_infos = prepare_batch_file_infos(host.currentProject)
+            if bool(getattr(host.currentProject, "groups_locked", False)):
+                registration_review = prepare_raw_registration_review(host.currentProject)
+                raw_file_infos = list(registration_review.files)
+            else:
+                raw_file_infos = prepare_batch_file_infos(host.currentProject)
         except Exception as exc:
             logger.exception("Batch raw-file discovery failed.")
             QMessageBox.critical(host, "Project Data Error", str(exc))
@@ -183,14 +200,17 @@ def validate_inputs(host: Any) -> bool:
                 "No .bdf files found in the configured input folder(s).",
             )
             return False
-        file_paths = [info.path for info in raw_file_infos]
-        host.data_paths = [str(p) for p in file_paths]
-        host.log(f"Processing: {len(host.data_paths)} file(s) selected.")
+        if registration_review is None:
+            file_paths = [info.path for info in raw_file_infos]
+            host.data_paths = [str(p) for p in file_paths]
+            host.log(f"Processing: {len(host.data_paths)} file(s) selected.")
 
     preflight_file_infos = raw_file_infos
     try:
         recording_context = project_recording_context(host.currentProject)
-        if mode_now == "Single" and recording_context.is_repeated_session:
+        if registration_review is not None:
+            preflight_file_infos = registration_review.source_files
+        elif mode_now == "Single" and recording_context.is_repeated_session:
             preflight_file_infos = prepare_batch_file_infos(host.currentProject)
         repeated_source_report = validate_repeated_recording_sources_for_processing(
             host.currentProject,
@@ -226,7 +246,29 @@ def validate_inputs(host: Any) -> bool:
         return False
     host.validated_params = params
 
-    review_rows = participant_review_rows(host.currentProject, raw_file_infos)
+    if registration_review is not None:
+        if registration_review.review_rows:
+            reviewer = getattr(host, "review_recording_additions_for_processing", None)
+            if not callable(reviewer):
+                reviewer = review_recording_additions_for_processing
+            if not reviewer(host, registration_review.review_rows):
+                host.log("Recording additions cancelled; no files were registered and processing did not start.")
+                return False
+        try:
+            if host.currentProject is not registration_project:
+                raise ValueError("The active project changed during review. Start processing again in the intended project.")
+            raw_file_infos = commit_raw_registration_review(host.currentProject, registration_review)
+        except Exception as exc:
+            logger.exception("Recording additions could not be confirmed and saved.")
+            QMessageBox.critical(host, "Recording Files Not Added", str(exc))
+            return False
+        host.data_paths = [str(info.path) for info in raw_file_infos]
+        host.log(f"Processing: {len(host.data_paths)} file(s) selected.")
+
+    review_rows = (
+        participant_review_rows(host.currentProject, raw_file_infos)
+        if registration_review is None else []
+    )
     if review_rows:
         if any("conflict" in row.status.casefold() for row in review_rows):
             QMessageBox.warning(
@@ -857,11 +899,17 @@ def select_single_file(host: Any) -> None:
         host._update_start_enabled()
         return
     try:
-        info = raw_file_info_for_path(host.currentProject, p)
+        if bool(getattr(host.currentProject, "groups_locked", False)):
+            # Selecting an extra file is read-only. Its canonical assignment is
+            # reviewed and saved only when Processing is explicitly started.
+            proposal = prepare_raw_registration_review(host.currentProject, selected_path=p)
+            info = proposal.files[0]
+        else:
+            info = raw_file_info_for_path(host.currentProject, p)
     except Exception as exc:
         QMessageBox.warning(
             host,
-            "Outside Project",
+            "Invalid File Selection",
             str(exc),
         )
         host._update_start_enabled()

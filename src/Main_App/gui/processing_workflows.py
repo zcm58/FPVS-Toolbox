@@ -282,7 +282,7 @@ def _post_processing_source_map_outcome(result: object) -> tuple[bool, bool]:
 
 
 def _post_processing_frequency_domain_outputs_ready(result: object) -> bool:
-    """Return whether every SNR/Stats prerequisite completed successfully."""
+    """Return whether upstream frequency-domain outputs completed successfully."""
 
     if not isinstance(result, dict):
         return False
@@ -303,6 +303,10 @@ def _post_processing_frequency_domain_outputs_ready(result: object) -> bool:
 def _post_processing_failure_reason(result: object) -> str:
     """Keep failed prerequisites distinct from usable optional-export failures."""
 
+    if isinstance(result, dict):
+        reason = str(result.get("failure_reason") or "").strip()
+        if reason:
+            return reason
     if _post_processing_frequency_domain_outputs_ready(result):
         return ""
     if isinstance(result, dict):
@@ -310,9 +314,6 @@ def _post_processing_failure_reason(result: object) -> str:
             return ""
         if result.get("requires_frequency_domain_qc_review"):
             return "Frequency-domain QC review must be completed before downstream analysis."
-        reason = str(result.get("failure_reason") or "").strip()
-        if reason:
-            return reason
         steps = result.get("steps")
         if isinstance(steps, list):
             for step in steps:
@@ -598,6 +599,7 @@ def _start_post_processing_pipeline_after_processing(
     *,
     on_finished: Callable[[], None],
     completed_phase_floor: int = 0,
+    provisional_cache: Any | None = None,
 ) -> bool:
     if os.getenv("FPVS_TEST_MODE") or os.getenv("PYTEST_CURRENT_TEST"):
         return False
@@ -608,6 +610,7 @@ def _start_post_processing_pipeline_after_processing(
         return False
 
     try:
+        from Main_App.processing.provisional_harmonic_cache import ProvisionalHarmonicCache
         from Main_App.workers.post_processing_pipeline_worker import (
             POST_PROCESSING_PHASE_COUNT,
             PostProcessingPipelineWorker,
@@ -622,7 +625,9 @@ def _start_post_processing_pipeline_after_processing(
         return False
 
     thread = QThread(host)
-    worker = PostProcessingPipelineWorker(project)
+    if provisional_cache is None:
+        provisional_cache = ProvisionalHarmonicCache()
+    worker = PostProcessingPipelineWorker(project, provisional_cache=provisional_cache)
     worker.moveToThread(thread)
     host._post_processing_pipeline_thread = thread
     host._post_processing_pipeline_worker = worker
@@ -638,6 +643,8 @@ def _start_post_processing_pipeline_after_processing(
     message_label = getattr(host, "processing_message_label", None)
     if message_label is not None:
         message_label.setText(_POST_PROCESSING_STATUS_MESSAGE)
+    action_button = getattr(host, "btn_start", None)
+    previous_action_tooltip = action_button.toolTip() if action_button is not None else ""
 
     active_phase_id: str | None = None
 
@@ -742,6 +749,12 @@ def _start_post_processing_pipeline_after_processing(
                         "source-map generation steps completed.",
                         level=logging.INFO,
                     )
+            elif frequency_domain_outputs_ready and host._post_processing_failure_reason:
+                host.log(
+                    f"Post-processing is incomplete: {host._post_processing_failure_reason} "
+                    "Accepted frequency-domain data remain available.",
+                    level=logging.WARNING,
+                )
             elif frequency_domain_outputs_ready:
                 host.log(
                     "Core frequency-domain post-processing completed; SNR and standard "
@@ -751,7 +764,7 @@ def _start_post_processing_pipeline_after_processing(
                 )
             else:
                 host.log(
-                    "Post-processing is incomplete. SNR and downstream analysis outputs "
+                    "Post-processing is incomplete. One or more downstream analysis outputs "
                     f"are not ready: {host._post_processing_failure_reason}",
                     level=logging.WARNING,
                 )
@@ -769,6 +782,8 @@ def _start_post_processing_pipeline_after_processing(
                         "loreta_cached_page_refreshed_after_partial_pipeline_success"
                     )
         finally:
+            if action_button is not None:
+                action_button.setToolTip(previous_action_tooltip)
             host._post_processing_pipeline_thread = None
             host._post_processing_pipeline_worker = None
             bridge = getattr(host, "_post_processing_pipeline_bridge", None)
@@ -781,8 +796,10 @@ def _start_post_processing_pipeline_after_processing(
                     project,
                     pending_qc_report,
                     on_finished=on_finished,
+                    provisional_cache=provisional_cache,
                 )
             else:
+                provisional_cache.clear()
                 def _finish_post_processing() -> None:
                     on_finished()
                     if result.get("requires_processing"):
@@ -810,7 +827,25 @@ def _start_post_processing_pipeline_after_processing(
         "Processing finished; preparing harmonics, analysis-ready workbooks, and LORETA source maps...",
         level=logging.INFO,
     )
-    thread.start()
+    if action_button is not None:
+        action_button.setText("Preparing Outputs…")
+        action_button.setToolTip("Post-processing must finish before another action can start.")
+        action_button.setEnabled(False)
+    try:
+        thread.start()
+    except Exception as exc:  # noqa: BLE001 - let the caller release run controls
+        logger.exception("post_processing_pipeline_thread_start_failed")
+        host._post_processing_failure_reason = f"Post-processing could not start: {exc}"
+        host._post_processing_pipeline_thread = None
+        host._post_processing_pipeline_worker = None
+        host._post_processing_pipeline_bridge = None
+        provisional_cache.clear()
+        if action_button is not None:
+            action_button.setToolTip(previous_action_tooltip)
+        worker.deleteLater()
+        bridge.deleteLater()
+        thread.deleteLater()
+        return False
     return True
 
 
@@ -834,6 +869,7 @@ def _handle_frequency_domain_qc_review(
     report: dict,
     *,
     on_finished: Callable[[], None],
+    provisional_cache: Any | None = None,
 ) -> None:
     from Main_App.gui.frequency_domain_qc_dialog import FrequencyDomainQcReviewDialog
     from Main_App.gui.frequency_domain_qc_handoff import save_frequency_domain_qc_review
@@ -841,20 +877,28 @@ def _handle_frequency_domain_qc_review(
         mark_frequency_domain_outputs_stale,
     )
 
+    failure_event = "frequency_domain_qc_group_membership_failed"
+    failure_context = "resolve canonical group membership"
     try:
         participant_groups = _frequency_domain_qc_participant_groups(project)
+        failure_event = "frequency_domain_qc_review_build_failed"
+        failure_context = "build the review dialog"
         dialog = FrequencyDomainQcReviewDialog(
             report,
             host,
             participant_groups=participant_groups,
         )
     except (RuntimeError, ValueError) as exc:
-        logger.exception("frequency_domain_qc_group_membership_failed")
-        host._post_processing_failure_reason = f"Frequency-domain QC could not start: {exc}"
+        if provisional_cache is not None:
+            provisional_cache.clear()
+        logger.exception(failure_event)
+        host._post_processing_failure_reason = (
+            f"Frequency-domain QC could not {failure_context}: {exc}"
+        )
         QMessageBox.critical(host, "Frequency-Domain QC Error", str(exc))
         mark_frequency_domain_outputs_stale(
             project.project_root,
-            reason="Frequency-domain QC could not resolve canonical group membership.",
+            reason=host._post_processing_failure_reason,
         )
         on_finished()
         _set_resume_post_processing_pending(host, True)
@@ -869,9 +913,12 @@ def _handle_frequency_domain_qc_review(
             manual_participant_reasons=dialog.manual_participant_reasons(),
             manual_recording_reasons=dialog.manual_recording_reasons(),
             on_finished=on_finished,
+            provisional_cache=provisional_cache,
         )
         return
 
+    if provisional_cache is not None:
+        provisional_cache.clear()
     host._post_processing_failure_reason = (
         "Frequency-domain QC review was canceled before final harmonic selection."
     )
@@ -921,8 +968,8 @@ def resume_post_processing(
     if hasattr(host, "_busy_start"):
         host._busy_start()
     if hasattr(host, "btn_start"):
-        host.btn_start.setText("Stop Processing")
-        host.btn_start.setEnabled(True)
+        host.btn_start.setText("Preparing Outputs…")
+        host.btn_start.setEnabled(False)
 
     def _finish_resume() -> None:
         host._run_active = False

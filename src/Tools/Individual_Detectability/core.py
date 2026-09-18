@@ -1294,7 +1294,16 @@ def generate_condition_figure(
     records: list[tuple[str, int, np.ndarray, np.ndarray | None, np.ndarray | None]] = []
 
     for excel_path in condition.files:
-        pid = parse_participant_id(excel_path.stem)
+        managed_coverage = None
+        if managed_coverage_by_workbook is not None:
+            managed_coverage = managed_coverage_by_workbook.get(
+                excel_path.expanduser().resolve(strict=False)
+            )
+        pid = (
+            managed_coverage.participant_id
+            if managed_coverage is not None and managed_coverage.participant_id
+            else parse_participant_id(excel_path.stem)
+        )
         if not pid:
             log(f"Skipping {excel_path.name}: could not parse participant ID.")
             continue
@@ -1302,8 +1311,7 @@ def generate_condition_figure(
             log(f"Skipping {excel_path.name}: excluded participant {pid}.")
             continue
 
-        managed_coverage = None
-        if managed_coverage_by_workbook is not None:
+        if managed_coverage_by_workbook is not None and managed_coverage is None:
             managed_coverage = _managed_workbook_coverage_or_input_error(
                 excel_path,
                 managed_coverage_by_workbook,

@@ -128,14 +128,6 @@ from Tools.Stats.qc.stats_outlier_exclusion import (
     format_worst_value_display,
     outlier_reason_label,
 )
-from Tools.Stats.qc.stats_qc_exclusion import (
-    QC_DEFAULT_CRITICAL_ABS_FLOOR_MAXABS,
-    QC_DEFAULT_CRITICAL_ABS_FLOOR_SUMABS,
-    QC_DEFAULT_CRITICAL_THRESHOLD,
-    QC_DEFAULT_WARN_ABS_FLOOR_MAXABS,
-    QC_DEFAULT_WARN_ABS_FLOOR_SUMABS,
-    QC_DEFAULT_WARN_THRESHOLD,
-)
 from Tools.Stats.reporting.stats_run_report import StatsRunReport
 from Tools.Stats.reporting.summary import (
     StatsSummaryFrames,

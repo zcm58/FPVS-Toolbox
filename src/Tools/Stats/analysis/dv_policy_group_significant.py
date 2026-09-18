@@ -13,6 +13,7 @@ from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Seque
 import numpy as np
 import pandas as pd
 
+from Main_App.processing.roi_settings import build_roi_definition_snapshot
 from Main_App.processing.spectral_eligibility import (
     QC14_NOISE_CANDIDATE_OFFSETS,
     SPECTRAL_ELIGIBILITY_METHOD_VERSION,
@@ -1091,8 +1092,13 @@ def _metadata_float_map(value: object) -> dict[float, float]:
     for raw_key, raw_value in value.items():
         key = _metadata_optional_float(raw_key)
         map_value = _metadata_optional_float(raw_value)
-        if key is not None and map_value is not None:
-            out[float(key)] = float(map_value)
+        if key is not None:
+            if raw_value is None:
+                # Canonical JSON uses null for an undefined Z diagnostic;
+                # retain its harmonic key through cache rehydration.
+                out[float(key)] = np.nan
+            elif map_value is not None:
+                out[float(key)] = float(map_value)
     return out
 
 
@@ -2443,15 +2449,13 @@ def _prepare_group_significant_bca_data(
             roi.name: list(roi.electrodes)
             for roi in final_coverage.roi_snapshot.rois
         }
-        normalized_rois = {
-            str(name): [str(channel).strip().upper() for channel in channels]
-            for name, channels in rois_map.items()
-        }
+        normalized_rois = build_roi_definition_snapshot(rois_map).as_mapping()
         if normalized_rois != frozen_rois:
             raise RuntimeError(
                 "Group Summed BCA ROI definitions differ from the current frozen "
                 "QC-21 snapshot. Rerun post-processing."
             )
+        rois_map = normalized_rois
 
     coverage_cells: dict[tuple[str, str], object] = {}
     released_subject_data: dict[str, dict[str, str]] = {}

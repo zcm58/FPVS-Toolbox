@@ -91,6 +91,22 @@ correction. The batch additionally reports Holm-adjusted global run p-values
 across conditions within each of the four contrast families and a conservative
 Holm adjustment across every condition &times; family test in the full batch.
 </p>
+<h3>Exploratory Reporting</h3>
+<p>
+After a batch completes, the Results view can show <b>Exploratory findings</b>:
+global two-sided p &lt; .05 before cross-condition Holm correction, with family
+Holm p &gt; .05. The global p already includes within-run maximum-cluster
+correction. Full-batch Holm is shown separately. All comparisons remain in the
+default view, and changing views never reruns tests or recalculates correction.
+</p>
+<p>
+Use <b>View details</b> for the actual A-minus-B comparison, sample sizes,
+p-values, and exact cluster membership. These findings are leads for follow-up,
+not findings confirmed after family Holm correction. Cluster locations and
+selected-cluster effects are descriptive; individual electrodes or harmonics
+are not established as pointwise significant. A readable exploratory report
+and worksheet are included in every new repeated-batch export.
+</p>
 """
 
 METHOD_HTML = """
@@ -173,6 +189,24 @@ reproducible.
 
 INTERPRETATION_HTML = """
 <h2>Reading the Results</h2>
+<h3>Harmonic Cluster Maps</h3>
+<p>
+Select <b>View cluster maps</b> or double-click a result row. Choose a cluster
+and harmonic, or disable the member-only filter to inspect every analyzed
+harmonic. The background shows mean analyzed A-minus-B normalized response,
+with one symmetric color scale across the contrast. Black dots mark positive
+significant-cluster members and white dots mark negative members at that exact
+harmonic. Repeated-session maps preserve the analyzed composite definition.
+</p>
+<p>
+This follows the descriptive presentation in Hermann et al. (2026), Figures 7
+and 10, using the Toolbox ROI scalp geometry. Interpolation is only for the
+response background. Individual electrodes, colored regions, and harmonic
+slices do not have separate significance claims; p-values belong to the full
+electrode &times; harmonic cluster. Repeated-batch Holm values are separate
+run-level annotations. Matching 600-DPI PNG/PDF panels of all retained
+harmonics and reproducible map values are included in each completed bundle.
+</p>
 <p>
 The workspace shows significant clusters from the current run. The primary
 p-value is the raw, sign-specific Monte Carlo cluster p-value, evaluated at

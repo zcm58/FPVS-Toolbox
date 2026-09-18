@@ -27,6 +27,15 @@ Common long-running work:
   worker/thread-finished signals and uses a responsive event loop for final
   cleanup, never a GUI-thread `wait()` or file deletion. The main window rejects
   Close until the review and worker cleanup release the prefetch bridge.
+  Known participant exclusions never enter source hashing/loading. After each
+  accepted review stage, the GUI sends current participant exclusions through
+  the I/O-free `update_participant_exclusions` call. Pending work is vetoed;
+  active reads finish under their existing owner, and background maintenance
+  closes newly excluded ready sources and returns their staging budget.
+  Borrowed sources remain exclusively owned until scanner release. A later
+  re-inclusion can use the normal scanner fallback rather than restart
+  speculative work. The worker performs maintenance while awaiting final
+  cleanup, never by closing memmaps on the GUI thread.
   Step 6 reuses completed
   sources and stops queued speculative work. No-action steps 2, 3, and 5 show
   a brief counted summary with Continue; step 4 retains the editable electrode
@@ -38,6 +47,19 @@ Common long-running work:
   Workers receive only the files selected by that plan. Multi-group runs also
   receive a per-file output group-folder map so post-export writes into the
   condition-first/group-second Excel tree.
+- Each persistent processing pool worker owns one bounded prepared-FIR cache
+  for that batch. The initializer creates it after configuring numerical thread
+  limits. A per-file context is always reset on return or exception; only
+  immutable coefficient/kernel bytes survive between that worker's files.
+  The 4 MiB cap includes coefficient-key and result buffers. Reinitialization
+  closes the prior cache, ordinary process exit closes it, and forced pool
+  termination releases it with the process. Direct preprocessing outside an
+  explicit cache scope retains no kernel. No cache crosses worker processes,
+  batches or project settings serialization.
+  Native thread limits remain under the worker initializer's ownership and
+  stay fixed during its processing work; kernel preparation observes that
+  policy without changing it. Cache identities distinguish native library and
+  thread-count changes between calls.
 - After a successful Main App processing run, `PostProcessingPipelineWorker`
   orchestrates downstream analysis prep in a background `QThread`. The full
   order is frequency-domain QC acceptance, neutral FullFFT provenance,
@@ -79,8 +101,11 @@ Common long-running work:
   only after the save thread exits successfully. Save errors keep downstream
   outputs stale, show the failure, and release the run controls. Closing the
   app is blocked until the save finishes. The shared Start/Stop action is
-  disabled only during this non-cancellable save and restored before the
-  existing continuation/finalization runs; worker progress never steals focus.
+  disabled during this non-cancellable save. The continuation also disables the
+  action and labels it "Preparing Outputs…": the post-processing worker has no
+  cancellation API. Existing completion, failure and cancelled-review paths
+  restore Start Processing or Resume Post-processing; worker progress never
+  steals focus.
   This changes scheduling only, not decision validation or pipeline ordering.
   Visible smoke: accept a summed-BCA review, verify the main window and spinner
   remain visible/responsive while saving, then verify processing resumes. A

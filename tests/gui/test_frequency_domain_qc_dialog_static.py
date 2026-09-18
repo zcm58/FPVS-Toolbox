@@ -10,6 +10,7 @@ from types import SimpleNamespace
 import pytest
 
 from Main_App.projects.experimental_qc_settings import ExperimentalQcSettings, SummedBcaScreeningSettings
+from Main_App.gui.frequency_domain_qc_review_model import finding_section
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -21,6 +22,8 @@ def test_frequency_review_offers_no_narrow_exclusions_and_requires_confirmation_
     source = DIALOG.read_text(encoding="utf-8")
     assert "DECISION_EXCLUDE_CONDITION_ELECTRODE" not in source
     assert "DECISION_EXCLUDE_CONDITION_ROI" not in source
+    assert '"ROIs"' not in source
+    assert '"Electrode / ROI"' not in source
     assert 'report.get("condition_specific_interpolation_enabled") is True' in source
     assert "repair_allowed = can_interpolate_finding(" in source
     assert '"I confirmed an artifact in this condition."' in source
@@ -93,7 +96,7 @@ def _presentation_helpers():
     """Execute the real pure formatting helpers without importing Qt."""
     tree = ast.parse(DIALOG.read_text(encoding="utf-8"))
     helpers = [node for node in tree.body if isinstance(node, ast.FunctionDef)]
-    namespace = {"Mapping": Mapping, "re": re}
+    namespace = {"Mapping": Mapping, "re": re, "finding_section": finding_section}
     exec(compile(ast.Module(body=helpers, type_ignores=[]), str(DIALOG), "exec"), namespace)
     return namespace
 
@@ -113,7 +116,7 @@ def test_selected_evidence_keeps_original_values_and_full_recording_context(
     item = {
         "participant_id": "P01", "recording_id": "P01-visit2",
         "session_label": "Follow-up", "visit_index": 2, "condition": "Neutral Angry",
-        "roi": "A very long ROI name", "band_crossed": "cohort_warning",
+        "electrode": "PO8", "band_crossed": "cohort_warning",
         "selected_harmonics_hz": [1.2, 2.4, 3.6, 4.8],
         "expected_analyzed_oddball_cycles": 144, "analyzed_duration_seconds": 120,
         "independent_qc": ["original evidence: " + "x" * 500], **values,
@@ -127,7 +130,7 @@ def test_selected_evidence_keeps_original_values_and_full_recording_context(
     )
     for text in (
         "Participant: P01", "Recording: P01-visit2", "Follow-up (visit 2)",
-        "Group: Control", "Condition: Neutral Angry", "A very long ROI name",
+        "Group: Control", "Condition: Neutral Angry", "Electrode: PO8",
         f"Signed value: {expected_signed}", f"Absolute value: {expected_absolute}",
         "cohort_warning", "4: 1.2, 2.4, 3.6, 4.8 Hz", "144 cycles / 120 s",
         item["independent_qc"][0], "Prior reviewed decision: Retain this finding.",
@@ -142,13 +145,39 @@ def test_unavailable_input_context_keeps_each_status_instead_of_a_pass() -> None
     rows = [
         {"status": "complete", "participant_id": "P1"},
         {"status": "unavailable", "participant_id": "P9", "recording_id": "P9-visit2",
-         "condition": "Neutral Angry", "roi": "LOT", "reason_codes": ["source_workbook_missing"]},
+         "condition": "Neutral Angry", "electrode": "PO8", "reason_codes": ["source_workbook_missing"]},
+        {"status": "unavailable", "participant_id": "P2", "roi": "LOT",
+         "reason_codes": ["source_workbook_missing"]},
     ]
     unavailable = helpers["_technical_context_rows"]({"cohort_relative_rows": rows})
     assert unavailable == [rows[1]]
     assert helpers["_technical_context_text"](unavailable[0]) == (
-        "P9-visit2 / Neutral Angry / LOT: source_workbook_missing"
+        "P9-visit2 / Neutral Angry / PO8: source_workbook_missing"
     )
+
+
+@pytest.mark.parametrize("field", ["review_findings", "flags"])
+def test_old_roi_findings_never_enter_counts_or_decision_controls(field):
+    electrode = {"participant_id": "P1", "condition": "Faces", "electrode": "O2",
+                 "finding_fingerprint": "electrode"}
+    legacy = [
+        {"participant_id": "P2", "roi": "Occipital", "finding_fingerprint": "roi"},
+        {"participant_id": "P3", "electrode": "O2", "roi": "O2"},
+        {"participant_id": "P4", "finding_type": "cohort_relative_summed_bca_context"},
+        {"participant_id": "P5", "decision_scope": "participant_condition_roi"},
+        {"participant_id": "P6", "metric": "sum_abs_roi_mean"},
+        {"participant_id": "P7", "evidence": {"roi": "Occipital"}},
+    ]
+    report = {field: [legacy[0], electrode, *legacy[1:]]}
+    original = deepcopy(report)
+    helpers = _presentation_helpers()
+
+    assert helpers["_review_findings"](report) == [electrode]
+    assert helpers["_outcome_text"](report).startswith("1 finding across 1 participant")
+    assert helpers["_technical_context_rows"]({
+        "cohort_relative_rows": [{**row, "status": "unavailable"} for row in legacy],
+    }) == []
+    assert report == original
 
 
 @pytest.mark.parametrize(

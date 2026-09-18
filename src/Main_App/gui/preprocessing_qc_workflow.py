@@ -30,8 +30,11 @@ from PySide6.QtWidgets import (
 
 from Main_App.gui.components import ActionRow, make_action_button
 from Main_App.gui.open_paths import open_path_in_file_manager
-from Main_App.gui.signal_review_model import SignalReviewItem
+from Main_App.gui.signal_review_model import (
+    SignalReviewItem, episode_view_context, review_time_scope,
+)
 from Main_App.gui.signal_review_panel import SignalReviewPanel
+from Main_App.gui.marker_occurrence_panel import MarkerOccurrenceReviewPanel
 from Main_App.gui.marker_occurrence_review import (
     MARKER_DECISION_EXCLUDE,
     MARKER_DECISION_RETAIN_FULL,
@@ -41,7 +44,6 @@ from Main_App.gui.marker_occurrence_review import (
     build_marker_review_decision,
     canonical_event_plans_by_file,
     collect_marker_occurrence_reviews,
-    marker_occurrence_review_rows,
     merge_marker_review_decision,
     merge_rescanned_results,
     resolved_path_text,
@@ -64,12 +66,13 @@ from Main_App.processing.preflight_qc import (
     PreflightQcFileResult,
     PreflightQcScan,
     build_preflight_condition_crop_grid_audit,
+    preflight_worker_count,
     scan_preprocessing_qc,
     scan_recording_not_started_files,
 )
-from Main_App.processing.preflight_qc_plan import PREFLIGHT_QC_MAX_WORKERS
 from Main_App.processing.qc_source_prefetch import QcSourcePrefetch
 from Main_App.processing.kurtosis_review_scan import (
+    KurtosisReviewProgress,
     KurtosisReviewScan,
     reconcile_kurtosis_review_decisions,
     scan_kurtosis_review,
@@ -223,6 +226,7 @@ class _KurtosisReviewWorker(QObject):
     """Prepare QC-16 evidence outside the GUI thread."""
 
     progress = Signal(str, int, int)
+    status_progress = Signal(object)
     finished = Signal(object)
     failed = Signal(str)
 
@@ -261,6 +265,7 @@ class _KurtosisReviewWorker(QObject):
                 reviewed_event_plans_by_file=self._reviewed_event_plans_by_file,
                 raw_channel_qc_by_recording=self._raw_channel_qc_by_recording,
                 progress=self.progress.emit,
+                status_progress=self.status_progress.emit,
                 should_cancel=lambda: self._cancelled,
                 source_prefetch=self._source_prefetch,
             )
@@ -1113,6 +1118,17 @@ class _PreflightQcEmbeddedBridge(QObject):
         self._loop.quit()
 
 
+def _kurtosis_scan_progress_text(state: KurtosisReviewProgress) -> str:
+    processed = state.completed_eligible - state.failed_count
+    text = (
+        f"Processed {processed} of {state.eligible_total} eligible recordings; "
+        f"{state.excluded_count} excluded."
+    )
+    if state.failed_count:
+        text += f" {state.failed_count} failed."
+    return text
+
+
 class _KurtosisReviewEmbeddedBridge(QObject):
     """Marshal the QC-16 worker's results and progress to the GUI thread."""
 
@@ -1131,13 +1147,19 @@ class _KurtosisReviewEmbeddedBridge(QObject):
 
     @Slot(str, int, int)
     def on_progress(self, message: str, completed: int, total: int) -> None:
-        _set_progress(self._host, completed, total)
+        _set_label(self._host, "processing_current_file_label", message)
+
+    @Slot(object)
+    def on_status_progress(self, state: KurtosisReviewProgress) -> None:
+        if state.eligible_total:
+            _set_progress(self._host, state.completed_eligible, state.eligible_total)
+        else:
+            _set_progress(self._host, 1, 1)
         _set_label(
             self._host,
             "processing_summary_label",
-            f"Checked {completed} of {total} recording(s) for kurtosis evidence.",
+            _kurtosis_scan_progress_text(state),
         )
-        _set_label(self._host, "processing_current_file_label", message)
 
     @Slot(object)
     def on_finished(self, scan: object) -> None:
@@ -1303,7 +1325,7 @@ def _run_scan_embedded(
         max_workers = max(1, int(getattr(host, "max_workers", 1) or 1))
     except (TypeError, ValueError):
         max_workers = 1
-    worker_count = min(max_workers, len(remaining), PREFLIGHT_QC_MAX_WORKERS)
+    worker_count = preflight_worker_count(len(remaining), max_workers)
     project = getattr(host, "currentProject", None)
     project_root_value = getattr(project, "project_root", None)
     project_root = (
@@ -1478,6 +1500,20 @@ def _start_qc_source_prefetch(
     return bridge
 
 
+def _refresh_qc_source_prefetch_exclusions(
+    bridge: _QcSourcePrefetchBridge | None, params: Mapping[str, Any],
+) -> None:
+    """Update speculative eligibility without loading or closing data on the GUI."""
+    if bridge is None:
+        return
+    try:
+        bridge.source_prefetch.update_participant_exclusions(
+            params.get("manual_excluded_participants")
+        )
+    except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
+        logger.warning("qc_source_prefetch_exclusion_refresh_unavailable", exc_info=True)
+
+
 def _finish_qc_source_prefetch(host: Any, bridge: _QcSourcePrefetchBridge | None) -> None:
     """Close run-owned maps off the GUI thread before leaving the QC workflow."""
     if bridge is None:
@@ -1573,6 +1609,7 @@ def _run_kurtosis_review_scan_embedded(
         _request_cancel,
     )
     worker.progress.connect(bridge.on_progress)
+    worker.status_progress.connect(bridge.on_status_progress)
     worker.finished.connect(bridge.on_finished)
     worker.failed.connect(bridge.on_failed)
     thread.started.connect(worker.run)
@@ -1793,6 +1830,7 @@ def _review_kurtosis_findings(
         try:
             dialog = KurtosisReviewDialog(
                 reconciliation, parent=host, auto_interpolate_all=auto_all,
+                project_root=getattr(project, "project_root", None), signal_params=params,
             )
         except KurtosisReviewDialogError as exc:
             QMessageBox.critical(host, "Kurtosis Review Error", str(exc))
@@ -1821,15 +1859,6 @@ def _review_kurtosis_findings(
     )
 
 
-def _marker_review_actions() -> tuple[tuple[str, str, str], ...]:
-    return (
-        ("Use Verified Span", MARKER_DECISION_USE_CONTIGUOUS, "primary"),
-        ("Retain Full Occurrence", MARKER_DECISION_RETAIN_FULL, "secondary"),
-        ("Exclude Occurrence", MARKER_DECISION_EXCLUDE, "secondary"),
-        ("Cancel Processing", "cancel", "secondary"),
-    )
-
-
 def _show_marker_review_error(host: Any, message: str) -> None:
     box = QMessageBox(host)
     box.setIcon(QMessageBox.Warning)
@@ -1846,7 +1875,7 @@ def _collect_retain_full_marker_evidence(
 ) -> dict[str, object] | None:
     dialog = QDialog(host)
     dialog.setObjectName("marker_retain_full_evidence_dialog")
-    dialog.setWindowTitle("Evidence for Full Occurrence")
+    dialog.setWindowTitle("Evidence for Keeping the Planned Window")
     dialog.setModal(True)
     dialog.setMinimumWidth(620)
 
@@ -1864,8 +1893,8 @@ def _collect_retain_full_marker_evidence(
     layout.addWidget(title)
 
     explanation = QLabel(
-        "Retain the full proposed crop only when independent evidence shows that "
-        "stimulation continued at the expected phase through the marker finding. "
+        "Keep the planned analysis window only when independent evidence shows that "
+        "stimulation stayed continuous and correctly timed despite the marker finding. "
         "Choose the evidence type and enter a note or a log/file reference.",
         dialog,
     )
@@ -1908,7 +1937,7 @@ def _collect_retain_full_marker_evidence(
     actions.addStretch(1)
     back_button = make_action_button("Back", variant="secondary", parent=dialog)
     save_button = make_action_button(
-        "Save Evidence",
+        "Keep Window with This Evidence",
         variant="primary",
         parent=dialog,
     )
@@ -1953,7 +1982,7 @@ def _collect_verified_marker_span(
 
     dialog = QDialog(host)
     dialog.setObjectName("marker_contiguous_span_dialog")
-    dialog.setWindowTitle("Choose Verified Contiguous Span")
+    dialog.setWindowTitle("Choose a Verified Analysis Window")
     dialog.setModal(True)
     dialog.setMinimumWidth(560)
 
@@ -1961,8 +1990,9 @@ def _collect_verified_marker_span(
     layout.setContentsMargins(18, 18, 18, 18)
     layout.setSpacing(12)
     explanation = QLabel(
-        "Choose one span found by the marker check. Each listed span stays inside "
-        "this occurrence and contains exactly the expected analyzed cycles.",
+        "Choose a window that passed the marker-spacing check. Each option uses "
+        "the required analysis duration within this repetition. Signal quality "
+        "will be checked in the following steps.",
         dialog,
     )
     explanation.setWordWrap(True)
@@ -1970,14 +2000,19 @@ def _collect_verified_marker_span(
 
     span_combo = QComboBox(dialog)
     span_combo.setObjectName("marker_contiguous_span_combo")
-    for start, stop in item.contiguous_candidate_spans:
+    for index, (start, stop) in enumerate(item.contiguous_candidate_spans, start=1):
         start_s = float((start - item.first_samp) / item.sampling_rate_hz)
         stop_s = float((stop - item.first_samp) / item.sampling_rate_hz)
         duration_s = float((stop - start) / item.sampling_rate_hz)
         span_combo.addItem(
-            f"Samples [{start}, {stop}) · {start_s:.6g} to {stop_s:.6g} s "
-            f"from recording start · {duration_s:.6g} s duration",
+            f"Window {index}: {start_s:.2f}–{stop_s:.2f} s from recording start "
+            f"({duration_s:.2f} s duration)",
             (start, stop),
+        )
+        span_combo.setItemData(
+            index - 1,
+            f"Samples [{start}, {stop}); {start_s:.9g}–{stop_s:.9g} s from recording start",
+            Qt.ToolTipRole,
         )
     layout.addWidget(span_combo)
 
@@ -1985,7 +2020,7 @@ def _collect_verified_marker_span(
     actions = QHBoxLayout()
     actions.addStretch(1)
     back_button = make_action_button("Back", variant="secondary", parent=dialog)
-    use_button = make_action_button("Use This Span", variant="primary", parent=dialog)
+    use_button = make_action_button("Use This Window", variant="primary", parent=dialog)
 
     def _use() -> None:
         raw_span = span_combo.currentData()
@@ -2019,7 +2054,7 @@ def _collect_marker_exclusion_reason(
 ) -> dict[str, object] | None:
     dialog = QDialog(host)
     dialog.setObjectName("marker_exclusion_reason_dialog")
-    dialog.setWindowTitle("Exclude Occurrence")
+    dialog.setWindowTitle("Exclude This Repetition")
     dialog.setModal(True)
     dialog.setMinimumWidth(560)
 
@@ -2052,7 +2087,7 @@ def _collect_marker_exclusion_reason(
     actions.addStretch(1)
     back_button = make_action_button("Back", variant="secondary", parent=dialog)
     exclude_button = make_action_button(
-        "Exclude Occurrence",
+        "Exclude This Repetition",
         variant="primary",
         parent=dialog,
     )
@@ -2087,45 +2122,50 @@ def _show_marker_occurrence_review(
     *,
     index: int,
     total: int,
+    group_label: str = "",
 ) -> str:
     _begin_preflight_page(
         host,
         step=_REVIEW_MARKER_OCCURRENCES_STEP,
-        title="Review Marker Occurrence",
-        message=(
-            "A marker gap or extra marker needs a decision before signal-quality "
-            "checks can use this condition occurrence."
-        ),
+        title="Review marker timing",
+        message="Choose how to handle the flagged repetition before signal-quality checks continue.",
         busy=False,
         review_visible=True,
-        review_title=f"Marker occurrence {index} of {total}",
+        review_title="Choose what to analyze",
         progress_visible=False,
-        checklist=(
-            "Review the exact marker and interval evidence",
-            "Choose one occurrence-level analysis decision",
-            "Use independent evidence when retaining across a marker finding",
-        ),
     )
-    _set_label(
-        host,
-        "processing_summary_label",
-        f"Reviewing {item.participant_id} · {item.condition_label} · repetition "
-        f"{item.repetition_index + 1}.",
+    _clear_preflight_actions(host)
+    container = host.processing_files_card
+    panel = MarkerOccurrenceReviewPanel(
+        item, container, index=index, total=total, group_label=group_label,
     )
-    _set_label(
-        host,
-        "processing_current_file_label",
-        "No marker is guessed or silently discarded. Your decision applies only "
-        "to this occurrence.",
+    hidden_widgets = (
+        host.processing_status_card,
+        host.processing_files_title_label,
+        host.processing_files_table,
     )
-    _set_preflight_table(
-        host,
-        ("Evidence", "Observed"),
-        marker_occurrence_review_rows(item),
-        stretch_column=1,
-        preferred_column_widths={0: 240},
-    )
-    return _await_preflight_choice(host, _marker_review_actions())
+    visibility = [(widget, not widget.isHidden()) for widget in hidden_widgets]
+    loop = QEventLoop(host)
+    result = {"choice": "cancel"}
+
+    def choose(choice: str) -> None:
+        result["choice"] = choice
+        loop.quit()
+
+    panel.choice_requested.connect(choose)
+    try:
+        for widget, _visible in visibility:
+            widget.hide()
+        container.layout().addWidget(panel, 1)
+        panel.show()
+        loop.exec()
+        return result["choice"]
+    finally:
+        panel.hide()
+        container.layout().removeWidget(panel)
+        panel.deleteLater()
+        for widget, visible in visibility:
+            widget.setVisible(visible)
 
 
 def _review_marker_occurrences(
@@ -2153,6 +2193,7 @@ def _review_marker_occurrences(
         )
         return scan
 
+    participant_groups = _participant_group_display_map(raw_file_infos, group_labels)
     affected_path_keys: set[str] = set()
     for index, item in enumerate(review_items, start=1):
         while True:
@@ -2161,6 +2202,7 @@ def _review_marker_occurrences(
                 item,
                 index=index,
                 total=len(review_items),
+                group_label=participant_groups.get(item.participant_id, ""),
             )
             if choice == "cancel":
                 try:
@@ -3921,6 +3963,7 @@ def _remaining_review_rows(
     group_labels: Mapping[str, str] | None = None,
     *,
     review_items: list[SignalReviewItem] | None = None,
+    review_diagnostics_by_file: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> list[tuple[str, ...]]:
     labels = group_labels or {}
     recording_mode = _recording_aware(scan.results)
@@ -3967,6 +4010,26 @@ def _remaining_review_rows(
             if not channel_names and payload.get("channel"):
                 channel_names = [str(payload["channel"])]
             occurrence = payload.get("occurrence_display")
+            event_plan = (result.condition_qc or {}).get("event_plan")
+            time_spans, time_scope = review_time_scope(payload, event_plan)
+            # Spectral summaries can identify an occurrence without repeating its
+            # sample bounds. Only the exact matching event-plan span supplies them.
+            if (not time_spans and kind == "Spectral" and isinstance(event_plan, Mapping)
+                    and not {"start_sample", "stop_sample", "flagged_window_union_spans"}.intersection(payload)):
+                matching_spans = [
+                    span for span in event_plan.get("spans", ())
+                    if isinstance(span, Mapping)
+                    and payload.get("condition_label")
+                    and span.get("condition_label") == payload.get("condition_label")
+                    and payload.get("occurrence") is not None
+                    and span.get("repetition_index") == payload.get("occurrence")
+                ]
+                if len(matching_spans) == 1:
+                    span = matching_spans[0]
+                    time_spans, time_scope = review_time_scope({
+                        "start_sample": span.get("time_start_sample"),
+                        "stop_sample": span.get("time_stop_sample"),
+                    }, event_plan)
             review_items.append(
                 SignalReviewItem(
                     export_row=rows[-1],
@@ -3975,6 +4038,10 @@ def _remaining_review_rows(
                     condition=str(payload.get("condition_label") or ""),
                     occurrence=str(occurrence) if occurrence is not None else "",
                     channels=", ".join(channel_names),
+                    source_path=str(result.path),
+                    time_spans_s=time_spans,
+                    time_scope=time_scope,
+                    evidence=dict(payload),
                 )
             )
 
@@ -4323,6 +4390,54 @@ def _remaining_review_rows(
                 "Experimental raw-spectral review: Not evaluated. " + detail,
                 kind="Assessment status", title="Raw-spectral review not evaluated",
             )
+    # These extra cues never enter the detector's exclusion/interpolation state.
+    # Include them even when the original scan/kurtosis gate has no findings.
+    diagnostics_by_file = review_diagnostics_by_file or {}
+    pattern_names = {
+        "exact_flatline": "Exact flatline",
+        "candidate_clipping_plateau": "Candidate clipping plateau",
+        "abrupt_jump": "Abrupt transition",
+    }
+    for result in scan.results:
+        if (result.participant_id.casefold() in accepted_hard_exclusions
+                or result.identity_id.casefold() in accepted_hard_exclusions):
+            continue
+        report = diagnostics_by_file.get(str(result.path), {})
+        if report.get("status") == "unavailable":
+            reason = str(report.get("reason") or "The additional signal diagnostics could not be computed.")
+            append_row(
+                result,
+                f"Additional signal diagnostics unavailable: {reason} "
+                "No clean-recording verdict or repair/exclusion decision follows from this unavailable assessment.",
+                kind="Assessment status", title="Signal diagnostics unavailable", finding=report,
+            )
+        omitted = report.get("events_omitted_by_display_limit", 0)
+        if isinstance(omitted, int) and not isinstance(omitted, bool) and omitted > 0:
+            append_row(
+                result,
+                f"Display limit: {omitted} additional provisional signal cue(s) are not listed. "
+                "The displayed cues are incomplete; inspect the source signal for context. "
+                "This does not establish a clean recording or authorize interpolation or exclusion.",
+                kind="Assessment status", title="Additional signal cues omitted", finding={
+                    "events_omitted_by_display_limit": omitted, "authority": "review_only",
+                    "source_identity": report.get("source_identity", {}),
+                },
+            )
+        for event in report.get("localized_events", ()):
+            start, stop = event.get("start_s"), event.get("stop_s")
+            name = pattern_names.get(str(event.get("kind")), "Signal pattern")
+            finding = {
+                **event,
+                "occurrence_display": int(event.get("occurrence", 0)) + 1,
+                "flagged_window_union_spans": [[event.get("start_sample"), event.get("stop_sample")]],
+            }
+            append_row(
+                result,
+                f"{name}: {event.get('channel', 'Unknown channel')}, {start}–{stop} s from recording start. "
+                f"{event.get('interpretation', '')} Provisional MNE-based review cue; "
+                "this does not authorize interpolation or exclusion.",
+                kind="Signal patterns", title=name, finding=finding,
+            )
     return rows
 
 
@@ -4331,10 +4446,17 @@ def _show_suspicious_remainder(
     scan: PreflightQcScan,
     accepted_hard_exclusions: set[str],
     group_labels: Mapping[str, str],
+    *,
+    signal_params: Mapping[str, Any] | None = None,
+    kurtosis_scan: KurtosisReviewScan | None = None,
 ) -> bool:
     review_items: list[SignalReviewItem] = []
     rows = _remaining_review_rows(
-        scan, accepted_hard_exclusions, group_labels, review_items=review_items
+        scan, accepted_hard_exclusions, group_labels, review_items=review_items,
+        review_diagnostics_by_file={
+            str(result.path): result.review_diagnostics
+            for result in getattr(kurtosis_scan, "results", ())
+        },
     )
     if not rows:
         return True
@@ -4352,19 +4474,11 @@ def _show_suspicious_remainder(
         logger.exception("Failed to save data quality review flags workbook.")
         report_message = f"Could not save review flags workbook: {exc}"
 
-    _show_data_quality_notice(
-        host,
-        "Signal findings remain for review.",
-        "FPVS Toolbox found recording-, condition-, or occurrence-level signal "
-        "findings. They will not stop processing automatically, but should be "
-        "reviewed before relying on the affected results.",
-        details=report_message,
-    )
     _begin_preflight_page(
         host,
         step=_REVIEW_OTHER_FLAGS_STEP,
         title="Review Signal Flags",
-        message="Select a finding to read its evidence, then continue when ready.",
+        message="Inspect related signal findings together. These review flags do not automatically change data.",
         busy=False,
         review_visible=True,
         review_title="Review Flags",
@@ -4377,6 +4491,55 @@ def _show_suspicious_remainder(
     panel = SignalReviewPanel(
         review_items, container, amplitude_help_url=BIOSEMI_SHARED_NOISE_HELP_URL
     )
+
+    def inspect_episode(episode: object) -> None:
+        from Main_App.gui.qc_signal_viewer import QcSignalViewer
+        from Main_App.processing.qc_signal_view import request_from_source
+
+        project_root = getattr(getattr(host, "currentProject", None), "project_root", None)
+        source_path = getattr(episode, "source_path", "")
+        if not project_root or not source_path:
+            return
+        indices = getattr(episode, "item_indices", ())
+        channels = [review_items[index].channels for index in indices if review_items[index].channels]
+        channel = channels[0].split(",")[0].strip() if channels else ""
+        source_result = next((result for result in scan.results if str(result.path) == source_path), None)
+        event_plan = ((source_result.condition_qc or {}).get("event_plan", {})
+                      if source_result is not None else {})
+        spans, labels, start_seconds, occurrence_index = episode_view_context(episode, event_plan)
+        request = request_from_source(
+            source_path, project_root, signal_params or {}, channel=channel,
+            spans=spans, span_labels=labels,
+        )
+        scanned = next((result for result in getattr(kurtosis_scan, "results", ())
+                        if str(result.path) == source_path), None)
+        unavailable = set()
+        if scanned is not None:
+            from Main_App.processing.kurtosis_qc import (
+                CHANNEL_DECISION_DIRECT, KURTOSIS_DECISION_APPROVE,
+            )
+
+            # Current user receipts supersede the scan's pending repair scenario.
+            receipts = next((values for recording, values in (signal_params or {}).get(
+                KURTOSIS_REVIEW_DECISIONS_BY_RECORDING_KEY, {}).items()
+                if str(recording).casefold() == scanned.recording_id.casefold()), {})
+            for decision in (scanned.decision_plan or {}).get("channel_decisions", ()):
+                name = str(decision.get("channel") or "")
+                receipt = receipts.get(name)
+                if receipt is not None and decision.get("state") != CHANNEL_DECISION_DIRECT:
+                    blocked = receipt.get("decision") == KURTOSIS_DECISION_APPROVE
+                else:
+                    blocked = bool(decision.get("interpolation_authorized"))
+                if name and blocked:
+                    unavailable.add(name)
+            request = replace(request, diagnostics=scanned.review_diagnostics,
+                              source_identity=scanned.source_identity,
+                              unusable_channels=tuple(sorted(unavailable)))
+        request = replace(request, start_seconds=start_seconds,
+                          occurrence_index=occurrence_index or 0)
+        QcSignalViewer(request, panel).exec()
+
+    panel.inspect_requested.connect(inspect_episode)
     report_row = ActionRow(panel, alignment=Qt.AlignLeft)
     report_row.setObjectName("signal_review_report_row")
     report_status = QLabel(
@@ -4569,6 +4732,7 @@ def run_preprocessing_qc_workflow(
         if scan is None or scan.cancelled:
             return False
 
+        _refresh_qc_source_prefetch_exclusions(prefetch, params)
         if not _confirm_condition_crop_exclusions(
             host,
             params,
@@ -4577,6 +4741,7 @@ def run_preprocessing_qc_workflow(
         ):
             return False
 
+        _refresh_qc_source_prefetch_exclusions(prefetch, params)
         # The existing scan already covers unchanged included intervals. If source
         # files, marker decisions, or condition choices changed, rebuild the project-wide result via
         # the recording/occurrence caches before any later detector uses it.
@@ -4603,12 +4768,14 @@ def run_preprocessing_qc_workflow(
         ):
             return False
 
+        _refresh_qc_source_prefetch_exclusions(prefetch, params)
         accepted_hard_exclusions = _confirm_hard_exclusions(
             host,
             params,
             scan,
             group_labels,
         )
+        _refresh_qc_source_prefetch_exclusions(prefetch, params)
         try:
             current_event_plans = canonical_event_plans_by_file(scan)
             existing_event_plans.update(current_event_plans)
@@ -4619,6 +4786,7 @@ def run_preprocessing_qc_workflow(
             return False
 
         while True:
+            _refresh_qc_source_prefetch_exclusions(prefetch, params)
             scanned_auto_all = bool(params.get("kurtosis_auto_interpolate_all", False))
             kurtosis_scan = _run_kurtosis_review_scan_embedded(
                 host,
@@ -4644,6 +4812,8 @@ def run_preprocessing_qc_workflow(
             scan,
             accepted_hard_exclusions,
             group_labels,
+            signal_params=params,
+            kurtosis_scan=kurtosis_scan,
         ):
             return False
         return True

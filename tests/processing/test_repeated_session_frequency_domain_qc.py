@@ -7,6 +7,8 @@ import pandas as pd
 import pytest
 
 from Main_App.processing.frequency_domain_qc import (
+    DECISION_EXCLUDE_CONDITION,
+    DECISION_EXCLUDE_PARTICIPANT,
     DECISION_EXCLUDE_RECORDING,
     DECISION_RETAIN,
     WARNING_REASON_UNUSUAL_VALUES,
@@ -19,6 +21,11 @@ from Main_App.processing.frequency_domain_qc import (
     run_frequency_domain_qc_review,
 )
 from Main_App.processing.spectral_eligibility import resolve_spectral_eligibility
+from Main_App.processing.frequency_qc_identity import (
+    FrequencyQcReviewIdentityError,
+    frequency_qc_review_rows,
+    resolve_frequency_qc_recording_decisions,
+)
 from Main_App.projects import Project, load_project_dataset_index
 from Main_App.projects.frequency_protocol import (
     EXPECTED_CYCLES_SOURCE_MANUAL,
@@ -81,6 +88,120 @@ def test_bad_visit_is_recording_scoped_and_paired_visit_remains_available(
     )
     assert "P1__visit_1" in removed
     assert "P1__visit_2" in kept
+
+
+@pytest.mark.parametrize("exclusion", [
+    DECISION_EXCLUDE_RECORDING, DECISION_EXCLUDE_PARTICIPANT, DECISION_EXCLUDE_CONDITION,
+])
+def test_excluded_visit_reconfirmation_retains_canonical_review_identity(
+    tmp_path: Path, exclusion: str,
+) -> None:
+    project_root = _write_repeated_project(tmp_path / "Project")
+    project = Project.load(project_root)
+    initial = run_frequency_domain_qc_review(project)
+    apply_frequency_domain_qc_decision(
+        project_root,
+        initial,
+        review_decisions={
+            str(finding["finding_fingerprint"]): {
+                "decision": exclusion,
+                "reason": WARNING_REASON_UNUSUAL_VALUES,
+            }
+            for finding in initial["review_findings"]
+        },
+    )
+
+    reviewed = run_frequency_domain_qc_review(project)
+    assert reviewed["reconfirmation_findings"]
+    rows = frequency_qc_review_rows(reviewed)
+    row = next(row for row in rows if row["recording_id"] == "P1__visit_1")
+    assert row["participant_id"] == "P1"
+    assert row["session_id"] == "visit_1"
+    assert row["session_label"] == "Visit 1"
+    assert row["visit_index"] == 1
+    assert row["group_id"] == "treated"
+    assert row["source_id"] == "treated_visit_1"
+    (decision,) = resolve_frequency_qc_recording_decisions(
+        reviewed, {"p1__VISIT_1": "Keep this visit excluded."},
+    )
+    assert decision.identity.decision_key == "P1__visit_1"
+    assert decision.identity.recording_id == "P1__visit_1"
+    assert decision.identity.participant_id == "P1"
+    assert decision.identity.session_id == "visit_1"
+    assert decision.identity.session_label == "Visit 1"
+    assert decision.identity.group_id == "treated"
+
+    # The participant action deliberately excludes both visits; the recording
+    # and condition actions preserve the sibling visit's scientific inputs.
+    expected_recordings = {"P2__visit_1", "P2__visit_2"}
+    if exclusion != DECISION_EXCLUDE_PARTICIPANT:
+        expected_recordings.add("P1__visit_2")
+    assert set(reviewed["recordings"]) == expected_recordings
+    source_ids = {str(row["recording_id"]).casefold() for row in reviewed["source_workbooks"]}
+    assert source_ids == {recording_id.casefold() for recording_id in expected_recordings}
+    from Main_App.processing.harmonic_selection_qc import resolve_processing_harmonic_selection_inputs
+
+    numeric = resolve_processing_harmonic_selection_inputs(project)
+    assert set(numeric.subjects) == expected_recordings
+    assert {key for key, data in numeric.subject_data.items() if data} == expected_recordings
+    assert set(numeric.recording_assignments) == expected_recordings
+
+    apply_frequency_domain_qc_decision(
+        project_root,
+        reviewed,
+        review_decisions={
+            str(finding["finding_fingerprint"]): {
+                "decision": exclusion,
+                "reason": WARNING_REASON_UNUSUAL_VALUES,
+            }
+            for finding in reviewed["review_findings"]
+        },
+    )
+    settled = run_frequency_domain_qc_review(project)
+    assert settled["review_required"] is False
+    assert settled["review_reused"] or not settled["review_findings"]
+    assert settled["reconfirmation_findings"] == []
+    assert set(settled["recordings"]) == expected_recordings
+    settled_sources = {str(row["recording_id"]).casefold() for row in settled["source_workbooks"]}
+    assert settled_sources == {recording_id.casefold() for recording_id in expected_recordings}
+    settled_numeric = resolve_processing_harmonic_selection_inputs(project)
+    assert set(settled_numeric.subjects) == expected_recordings
+    assert {key for key, data in settled_numeric.subject_data.items() if data} == expected_recordings
+    assert set(settled_numeric.recording_assignments) == expected_recordings
+
+
+def test_reconfirmation_rejects_recording_removed_from_canonical_registry(tmp_path: Path) -> None:
+    project_root = _write_repeated_project(tmp_path / "Project")
+    project = Project.load(project_root)
+    initial = run_frequency_domain_qc_review(project)
+    apply_frequency_domain_qc_decision(
+        project_root,
+        initial,
+        review_decisions={
+            str(finding["finding_fingerprint"]): {
+                "decision": DECISION_EXCLUDE_RECORDING,
+                "reason": WARNING_REASON_UNUSUAL_VALUES,
+            }
+            for finding in initial["review_findings"]
+        },
+    )
+    # Preserve the authentic saved exclusion receipt while simulating a stale
+    # registry. Remove this fixture's workbook too, so workbook discovery is
+    # otherwise coherent and the reconfirmation identity gate is exercised.
+    index = load_project_dataset_index(project_root)
+    for record in (*index.workbooks, *index.excluded_workbooks):
+        if record.recording_id == "P1__visit_1":
+            record.path.unlink()
+    manifest_path = project_root / "project.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["recordings"].pop("P1__visit_1")
+    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    before = manifest_path.read_bytes()
+
+    with pytest.raises(FrequencyQcReviewIdentityError, match="P1__VISIT_1"):
+        run_frequency_domain_qc_review(Project.load(project_root))
+
+    assert manifest_path.read_bytes() == before
 
 
 @pytest.mark.parametrize("mutation", ("delete", "tamper"))

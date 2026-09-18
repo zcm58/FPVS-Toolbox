@@ -21,12 +21,14 @@ class _DecisionSaveBridge(QObject):
 
     def __init__(
         self, host: Any, project: Any, thread: QThread, on_finished: Callable[[], None],
+        *, provisional_cache: Any | None = None,
     ) -> None:
         super().__init__(host)
         self.host = host
         self.project = project
         self.save_thread = thread
         self.on_finished = on_finished
+        self.provisional_cache = provisional_cache
         self.result: dict[str, object] | None = None
         button = getattr(host, "btn_start", None)
         self.button_state = (
@@ -72,11 +74,16 @@ class _DecisionSaveBridge(QObject):
             )
             if _start_post_processing_pipeline_after_processing(
                 host, on_finished=self.on_finished, completed_phase_floor=1,
+                provisional_cache=self.provisional_cache,
             ):
                 return
+            if self.provisional_cache is not None:
+                self.provisional_cache.clear()
             self.on_finished()
             return
 
+        if self.provisional_cache is not None:
+            self.provisional_cache.clear()
         reason = str(result.get("error") or "The QC decisions could not be saved.")
         if result.get("stale_error"):
             reason += f"\nDownstream status could not be updated: {result['stale_error']}"
@@ -96,6 +103,7 @@ def save_frequency_domain_qc_review(
     manual_participant_reasons: Mapping[str, str],
     manual_recording_reasons: Mapping[str, str],
     on_finished: Callable[[], None],
+    provisional_cache: Any | None = None,
 ) -> None:
     """Hand off only plain review data; never block the dialog-close callback on I/O."""
     if getattr(host, "_frequency_domain_qc_save_thread", None) is not None:
@@ -109,7 +117,9 @@ def save_frequency_domain_qc_review(
         manual_recording_reasons=manual_recording_reasons,
     )
     worker.moveToThread(thread)
-    bridge = _DecisionSaveBridge(host, project, thread, on_finished)
+    bridge = _DecisionSaveBridge(
+        host, project, thread, on_finished, provisional_cache=provisional_cache,
+    )
     host._frequency_domain_qc_save_thread = thread
     host._frequency_domain_qc_save_worker = worker
     host._frequency_domain_qc_save_bridge = bridge

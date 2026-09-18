@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 import logging
 import math
 import os
@@ -130,6 +130,8 @@ class KurtosisReviewItem:
     signal_preview: tuple[float | None, ...]
     evidence: Mapping[str, object]
     review_status: str = KURTOSIS_REVIEW_PENDING_NEW
+    signal_view: Mapping[str, object] = field(default_factory=dict)
+    review_diagnostics: Mapping[str, object] = field(default_factory=dict)
 
     @property
     def review_scope(self) -> dict[str, object]:
@@ -177,9 +179,13 @@ class KurtosisReviewItem:
     def display_only_channel_health_summary(self) -> str:
         """Format other raw-channel findings without granting them authority."""
 
+        diagnostic_rows = [event for event in self.review_diagnostics.get("localized_events", ())
+                           if event.get("channel") == self.channel]
+        extra = (f"{len(diagnostic_rows)} raw signal-pattern cue(s); open Inspect signal for exact timing. "
+                 "Provisional review only, not an approved corroborator.") if diagnostic_rows else ""
         if not self.display_only_channel_health:
-            return "None reported"
-        return "; ".join(self.display_only_channel_health) + " — review-only; not an approved corroborator"
+            return extra or "None reported"
+        return "; ".join((*self.display_only_channel_health, extra) if extra else self.display_only_channel_health) + " — review-only; not an approved corroborator"
 
 
 @dataclass(frozen=True, slots=True)
@@ -199,10 +205,25 @@ class KurtosisReviewFileResult:
     decision_plan: Mapping[str, object] | None = None
     error: str | None = None
     skip_reason: str | None = None
+    review_diagnostics: Mapping[str, object] = field(default_factory=dict)
+    source_identity: Mapping[str, object] = field(default_factory=dict)
 
     @property
     def review_required_channels(self) -> tuple[str, ...]:
         return tuple(item.channel for item in self.review_items)
+
+
+@dataclass(frozen=True, slots=True)
+class KurtosisReviewProgress:
+    """Separate completed eligible work from confirmed recording exclusions."""
+
+    eligible_total: int
+    completed_eligible: int
+    excluded_count: int
+    failed_count: int = 0
+
+
+StatusProgressCallback = Callable[[KurtosisReviewProgress], None]
 
 
 @dataclass(frozen=True, slots=True)
@@ -317,6 +338,7 @@ def _scan_review_parallel(
     should_cancel: CancelCallback | None,
     max_workers: int,
     source_prefetch: QcSourcePrefetch | None = None,
+    result_progress: Callable[[int, tuple[KurtosisReviewFileResult, ...]], None] | None = None,
 ) -> KurtosisReviewScan:
     """Run independent serial scans, relaying progress on the calling thread."""
 
@@ -335,7 +357,7 @@ def _scan_review_parallel(
             pending_index += 1
             futures[
                 executor.submit(
-                    scan_kurtosis_review,
+                    _scan_kurtosis_review_serial,
                     [raw_file_infos[index]],
                     settings,
                     event_map=event_map,
@@ -343,7 +365,6 @@ def _scan_review_parallel(
                     raw_channel_qc_by_recording=raw_channel_qc_by_recording,
                     progress=lambda message, _completed, _total: messages.put(message),
                     should_cancel=stop.is_set,
-                    max_workers=1,
                     source_prefetch=source_prefetch,
                 )
             ] = index
@@ -367,6 +388,8 @@ def _scan_review_parallel(
                 index = futures.pop(future)
                 scan = future.result()
                 indexed_results[index] = scan.results
+                if result_progress is not None:
+                    result_progress(index, scan.results)
                 if scan.cancelled:
                     stop.set()
                 completed += len(scan.results)
@@ -778,6 +801,8 @@ def _review_items_from_prepared(
                 signal_source_sample_count=signal_count,
                 signal_preview=signal_values,
                 evidence=dict(evidence),
+                signal_view=dict(preview.get("signal_view") or {}),
+                review_diagnostics=dict(prepared.get("review_diagnostics") or {}),
             )
         )
     return tuple(items)
@@ -916,37 +941,19 @@ def reconcile_kurtosis_review_decisions(
     )
 
 
-def scan_kurtosis_review(
+def _validate_review_request(
     raw_file_infos: Sequence[Any],
     settings: Mapping[str, Any],
-    *,
     event_map: Mapping[str, int],
-    reviewed_event_plans_by_file: Mapping[str, Any] | None = None,
-    raw_channel_qc_by_recording: Mapping[str, Mapping[str, object]] | None = None,
-    progress: ProgressCallback | None = None,
-    should_cancel: CancelCallback | None = None,
-    max_workers: int | None = None,
-    source_prefetch: QcSourcePrefetch | None = None,
-) -> KurtosisReviewScan:
-    """Prepare current QC-16 evidence for a batch without touching widgets.
-
-    The caller should run this synchronous function in its existing worker
-    thread.  Cancellation is cooperative between load, validation, and shared
-    preprocessing stages; completed per-file results are retained. At most two
-    files run concurrently when CPU, available RAM, and memmap names allow it.
-    Progress and cancellation callbacks remain on the calling worker thread.
-    """
-
+    raw_channel_qc_by_recording: Mapping[str, Mapping[str, object]] | None,
+) -> tuple[dict[str, int], Any]:
     if isinstance(raw_file_infos, (str, bytes, bytearray)):
         raise KurtosisReviewScanError("Raw-file infos must be a sequence.")
     if not isinstance(settings, Mapping):
         raise KurtosisReviewScanError("Kurtosis review settings must be an object.")
     if not isinstance(event_map, Mapping) or not event_map:
         raise KurtosisReviewScanError("Kurtosis review requires the current condition event map.")
-    if raw_channel_qc_by_recording is not None and not isinstance(
-        raw_channel_qc_by_recording,
-        Mapping,
-    ):
+    if raw_channel_qc_by_recording is not None and not isinstance(raw_channel_qc_by_recording, Mapping):
         raise KurtosisReviewScanError("Raw-channel QC display evidence must be a recording-to-payload map.")
     try:
         canonical_event_map = {str(label).strip(): int(code) for label, code in event_map.items() if str(label).strip()}
@@ -960,24 +967,172 @@ def scan_kurtosis_review(
         raise KurtosisReviewScanError(f"Kurtosis review requires a valid project frequency protocol: {exc}") from exc
     if not protocol.is_ready:
         raise KurtosisReviewScanError("Kurtosis review requires a confirmed project frequency protocol.")
+    return canonical_event_map, protocol
 
-    # Once step 6 needs the sources, abandon untouched speculative loads.
-    # Retain completed sources and let an active read finish, without adding
-    # that reader to two simultaneous full-recording preprocessing jobs.
+
+def scan_kurtosis_review(
+    raw_file_infos: Sequence[Any],
+    settings: Mapping[str, Any],
+    *,
+    event_map: Mapping[str, int],
+    reviewed_event_plans_by_file: Mapping[str, Any] | None = None,
+    raw_channel_qc_by_recording: Mapping[str, Mapping[str, object]] | None = None,
+    progress: ProgressCallback | None = None,
+    status_progress: StatusProgressCallback | None = None,
+    should_cancel: CancelCallback | None = None,
+    max_workers: int | None = None,
+    source_prefetch: QcSourcePrefetch | None = None,
+) -> KurtosisReviewScan:
+    """Classify current exclusions before allocating numerical review workers.
+
+    The legacy progress callback counts all requested entries, including skips.
+    Structured progress counts eligible completions and exclusions separately;
+    failed eligible entries count as completed, with their own failure count.
+    Both callbacks and the caller's cancellation callback run on this thread.
+    """
+
+    canonical_event_map, protocol = _validate_review_request(
+        raw_file_infos, settings, event_map, raw_channel_qc_by_recording,
+    )
+    _configured_channel_limit(settings)
+    # Stop untouched speculative loads even when every requested entry is
+    # excluded. An active load still reserves one of the two large-job slots.
     prefetch_loading = source_prefetch.begin_consumption() if source_prefetch is not None else False
-    worker_count = _review_worker_count(raw_file_infos, 1 if prefetch_loading else max_workers)
+    total = len(raw_file_infos)
+    indexed_results: dict[int, KurtosisReviewFileResult] = {}
+    eligible_indices: list[int] = []
+    eligible_infos: list[Any] = []
+
+    def report_status() -> None:
+        if status_progress is None:
+            return
+        excluded = sum(result.status == KURTOSIS_REVIEW_FILE_STATUS_SKIPPED for result in indexed_results.values())
+        failed = sum(result.status == KURTOSIS_REVIEW_FILE_STATUS_ERROR for result in indexed_results.values())
+        status_progress(KurtosisReviewProgress(
+            eligible_total=total - excluded,
+            completed_eligible=len(indexed_results) - excluded,
+            excluded_count=excluded,
+            failed_count=failed,
+        ))
+
+    def finished_scan(*, cancelled: bool) -> KurtosisReviewScan:
+        return KurtosisReviewScan(
+            tuple(indexed_results[index] for index in sorted(indexed_results)),
+            cancelled=cancelled,
+        )
+
+    raw_plans = (reviewed_event_plans_by_file if reviewed_event_plans_by_file is not None
+                 else settings.get("_fpvs_preflight_event_plans_by_file"))
+    plans = raw_plans if isinstance(raw_plans, Mapping) else {}
+    excluded_participants = {value.casefold() for value in normalize_manual_excluded_participants(settings.get("manual_excluded_participants"))}
+    excluded_recordings = {value.casefold() for value in normalize_manual_excluded_recordings(settings.get("manual_excluded_recordings"))}
+    participant_conditions = normalize_manual_excluded_participant_conditions(settings.get("manual_excluded_participant_conditions"))
+    recording_conditions = normalize_manual_excluded_recording_conditions(settings.get("manual_excluded_recording_conditions"))
+    for index, info in enumerate(raw_file_infos):
+        if should_cancel and should_cancel():
+            report_status()
+            if progress:
+                progress("Kurtosis review scan cancelled", len(indexed_results), total)
+            return finished_scan(cancelled=True)
+        identity = _identity(info)
+        path, participant, recording, *_session = identity
+        known_result = None
+        if participant.casefold() in excluded_participants or recording.casefold() in excluded_recordings:
+            known_result = _skipped_result(identity, reason=KURTOSIS_REVIEW_SKIP_RECORDING_EXCLUDED)
+        else:
+            try:
+                event_plan = _event_plan_for_path(plans, path)
+                source_plan = validate_source_analysis_span_context(
+                    event_plan_payload=event_plan,
+                    event_map=canonical_event_map,
+                    protocol=protocol,
+                )
+                conditions = _condition_labels(source_plan)
+                if not conditions or all(
+                    is_participant_condition_excluded(participant_conditions, participant, condition)
+                    or is_recording_condition_excluded(recording_conditions, recording, condition)
+                    for condition in conditions
+                ):
+                    known_result = _skipped_result(
+                        identity, reason=KURTOSIS_REVIEW_SKIP_ALL_CONDITIONS_EXCLUDED,
+                        analyzed_conditions=conditions,
+                    )
+            except Exception as exc:
+                logger.exception("kurtosis_review_scan_failed file=%s participant_id=%s recording_id=%s", path, participant, recording)
+                known_result = _error_result(identity, exc)
+        if known_result is not None:
+            indexed_results[index] = known_result
+            if progress:
+                verb = "Skipped" if known_result.status == KURTOSIS_REVIEW_FILE_STATUS_SKIPPED else "Could not review"
+                progress(f"{verb} {path.name}", len(indexed_results), total)
+        else:
+            eligible_indices.append(index)
+            eligible_infos.append(info)
+
+    # Confirmed skips and invalid metadata never contribute source sizes or
+    # duplicate memmap stems to the numerical worker estimate.
+    report_status()
+    if should_cancel and should_cancel():
+        if progress:
+            progress("Kurtosis review scan cancelled", len(indexed_results), total)
+        return finished_scan(cancelled=True)
+    if not eligible_infos:
+        return finished_scan(cancelled=False)
+    worker_count = _review_worker_count(eligible_infos, 1 if prefetch_loading else max_workers)
+    completed_before_work = len(indexed_results)
+
+    def relay_progress(message: str, completed: int, _total: int) -> None:
+        if progress:
+            progress(message, completed_before_work + completed, total)
+
+    def accept_results(index: int, results: tuple[KurtosisReviewFileResult, ...]) -> None:
+        if results:
+            indexed_results[eligible_indices[index]] = results[0]
+            report_status()
+
     if worker_count > 1:
-        return _scan_review_parallel(
-            raw_file_infos,
-            settings,
-            event_map=canonical_event_map,
+        scan = _scan_review_parallel(
+            eligible_infos, settings, event_map=canonical_event_map,
             reviewed_event_plans_by_file=reviewed_event_plans_by_file,
             raw_channel_qc_by_recording=raw_channel_qc_by_recording,
-            progress=progress,
-            should_cancel=should_cancel,
-            max_workers=worker_count,
-            source_prefetch=source_prefetch,
+            progress=relay_progress, should_cancel=should_cancel,
+            max_workers=worker_count, source_prefetch=source_prefetch,
+            result_progress=accept_results,
         )
+        return finished_scan(cancelled=scan.cancelled)
+
+    completed = 0
+    for index, info in enumerate(eligible_infos):
+        scan = _scan_kurtosis_review_serial(
+            [info], settings, event_map=canonical_event_map,
+            reviewed_event_plans_by_file=reviewed_event_plans_by_file,
+            raw_channel_qc_by_recording=raw_channel_qc_by_recording,
+            progress=lambda message, current_completed, _total: relay_progress(message, completed + current_completed, total),
+            should_cancel=should_cancel, source_prefetch=source_prefetch,
+        )
+        accept_results(index, scan.results)
+        completed += len(scan.results)
+        if scan.cancelled:
+            return finished_scan(cancelled=True)
+    return finished_scan(cancelled=False)
+
+
+def _scan_kurtosis_review_serial(
+    raw_file_infos: Sequence[Any],
+    settings: Mapping[str, Any],
+    *,
+    event_map: Mapping[str, int],
+    reviewed_event_plans_by_file: Mapping[str, Any] | None = None,
+    raw_channel_qc_by_recording: Mapping[str, Mapping[str, object]] | None = None,
+    progress: ProgressCallback | None = None,
+    should_cancel: CancelCallback | None = None,
+    source_prefetch: QcSourcePrefetch | None = None,
+) -> KurtosisReviewScan:
+    """Keep the serial numerical path independent of batch scheduling."""
+
+    canonical_event_map, protocol = _validate_review_request(
+        raw_file_infos, settings, event_map, raw_channel_qc_by_recording,
+    )
 
     raw_plans = (
         reviewed_event_plans_by_file
@@ -1071,15 +1226,24 @@ def scan_kurtosis_review(
                     progress(f"Skipped excluded conditions in {path.name}", index, total)
                 continue
 
+            from Main_App.processing.qc_signal_view import source_content_identity
+
+            review_source_identity = None
+            prefetched_identity = getattr(source_prefetch, "source_content_identity_for", None)
+            if source_prefetch is not None and not callable(prefetched_identity):
+                review_source_identity = source_content_identity(path, should_cancel=should_cancel)
             load_started = perf_counter()
             if source_prefetch is not None:
                 if progress:
                     progress(f"Preparing {path.name} for kurtosis review", index - 1, total)
                 raw = source_prefetch.take(path, settings=settings, should_cancel=should_cancel)
                 prefetched = raw is not None
+                if prefetched and callable(prefetched_identity):
+                    review_source_identity = prefetched_identity(raw)
                 if should_cancel and should_cancel():
                     return KurtosisReviewScan(tuple(results), cancelled=True)
             if raw is None:
+                review_source_identity = source_content_identity(path, should_cancel=should_cancel)
                 if progress:
                     progress(f"Loading {path.name} with BioSemi64 geometry", index - 1, total)
                 raw = load_utils.load_eeg_file(
@@ -1095,6 +1259,8 @@ def scan_kurtosis_review(
                 progress(f"Using preloaded recording {path.name}", index - 1, total)
             if raw is None:
                 raise KurtosisReviewScanError("The EEG loader returned no Raw data.")
+            if review_source_identity is None:
+                raise KurtosisReviewScanError("Source content identity is unavailable for diagnostic review.")
             validate_raw_biosemi64_geometry(
                 raw,
                 expected_retained_channels=BIOSEMI64_CHANNELS[:channel_limit],
@@ -1204,6 +1370,35 @@ def scan_kurtosis_review(
                 direct_bad_channels = tuple(raw_qc_result.channels_to_interpolate)
             if progress:
                 progress(f"Preprocessing {path.name} for kurtosis review", index - 1, total)
+            review_diagnostics = {}
+            diagnostics_started = perf_counter()
+            try:
+                from Main_App.processing.qc_review_diagnostics import build_raw_qc_review_diagnostics
+
+                review_diagnostics = build_raw_qc_review_diagnostics(
+                    raw,
+                    occurrences=[{
+                        "start_sample": span["source_coordinates"]["start_relative_sample"],
+                        "stop_sample": span["source_coordinates"]["stop_relative_sample"],
+                        "condition_label": span["condition_label"],
+                        "occurrence": span["repetition_index"],
+                        "occurrence_key": span["occurrence_key"],
+                    } for span in restricted_plan["spans"]],
+                    ref_channels=ref_pair, unusable_channels=direct_bad_channels,
+                    should_cancel=should_cancel,
+                )
+            except InterruptedError:
+                return KurtosisReviewScan(tuple(results), cancelled=True)
+            except Exception:  # Diagnostic-only: preparation/scientific evidence still proceeds.
+                if should_cancel and should_cancel():
+                    return KurtosisReviewScan(tuple(results), cancelled=True)
+                logger.debug("qc_review_diagnostics_unavailable file=%s", path, exc_info=True)
+                review_diagnostics = {
+                    "authority": "review_only", "status": "unavailable",
+                    "reason": "Additional raw signal diagnostics could not be computed for this recording. Inspect the signal directly.",
+                    "evaluation_scope": "all_analyzed_occurrences", "localized_events": [],
+                }
+            _log_scan_timing(path, "raw_review_diagnostics", diagnostics_started)
             prepare_started = perf_counter()
             prepared = prepare_kurtosis_review_evidence(
                 raw,
@@ -1219,6 +1414,16 @@ def scan_kurtosis_review(
                 copy_raw=False,
             )
             _log_scan_timing(path, "preprocessing_and_evidence", prepare_started)
+            preview = dict(prepared.get("signal_preview") or {})
+            post_load_identity = (preview.get("signal_view") or {}).get("checkpoint_source_identity")
+            if not post_load_identity:
+                post_load_identity = source_content_identity(path, should_cancel=should_cancel)
+            if post_load_identity != review_source_identity:
+                raise KurtosisReviewScanError("Recording changed while QC evidence was prepared. Run QC again.")
+            review_diagnostics = {**review_diagnostics, "source_identity": review_source_identity} if review_diagnostics else {}
+            prepared = {**prepared, "review_diagnostics": review_diagnostics}
+            preview["signal_view"] = {**dict(preview.get("signal_view") or {}), "source_identity": review_source_identity}
+            prepared["signal_preview"] = preview
             raw_channel_qc: Mapping[object, object] | None = None
             if raw_channel_qc_by_recording is not None:
                 raw_qc_found, raw_qc_payload = _casefold_mapping_entry(
@@ -1266,6 +1471,8 @@ def scan_kurtosis_review(
                     review_items=review_items,
                     evidence=dict(evidence),
                     decision_plan=dict(decision_plan),
+                    review_diagnostics=review_diagnostics,
+                    source_identity=review_source_identity,
                 )
             )
         except Exception as exc:
@@ -1313,9 +1520,11 @@ __all__ = [
     "KurtosisReviewFileResult",
     "KurtosisReviewDecisionReconciliation",
     "KurtosisReviewItem",
+    "KurtosisReviewProgress",
     "KurtosisReviewScan",
     "KurtosisReviewScanError",
     "ProgressCallback",
+    "StatusProgressCallback",
     "reconcile_kurtosis_review_decisions",
     "scan_kurtosis_review",
 ]

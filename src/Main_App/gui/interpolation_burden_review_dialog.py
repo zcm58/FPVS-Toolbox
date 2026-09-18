@@ -190,6 +190,12 @@ class InterpolationBurdenReviewDialog(AppDialog):
 
         actions = ActionRow(self)
         actions.setObjectName("interpolation_burden_review_actions")
+        self.support_button = actions.add_button(
+            make_action_button("Inspect repair support", variant="secondary", parent=actions)
+        )
+        self.support_button.setObjectName("interpolation_burden_repair_support")
+        self.support_button.clicked.connect(self._inspect_repair_support)
+        self.table.setCurrentCell(0, 0)
         self.cancel_button = actions.add_button(
             make_action_button("Cancel", variant="secondary", parent=actions)
         )
@@ -201,6 +207,19 @@ class InterpolationBurdenReviewDialog(AppDialog):
         self.cancel_button.clicked.connect(self.reject)
         self.apply_button.clicked.connect(self._validate_and_accept)
         self.root_layout.addWidget(actions)
+
+    def _inspect_repair_support(self) -> None:
+        from Main_App.gui.qc_repair_support import RepairSupportDialog
+
+        row = self.table.currentRow()
+        if row < 0:
+            return
+        item = self._batch.items[row]
+        RepairSupportDialog(
+            channels=item.eligible_scalp_channels,
+            repair_channels=item.finding.successfully_interpolated_channels,
+            confirmed=True, parent=self,
+        ).exec()
 
     def choices(self) -> dict[str, InterpolationBurdenReviewChoice]:
         """Return all explicit choices or raise with a user-facing validation error."""

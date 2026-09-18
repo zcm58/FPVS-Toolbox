@@ -8,6 +8,7 @@ import math
 from pathlib import Path
 
 from Main_App import SettingsManager
+from Main_App.processing.post_processing_context import post_processing_validation_scope
 from Main_App.processing.artifact_freshness import (
     STATS_READY_SUMMED_BCA_ARTIFACT,
     StalePostProcessingArtifactError,
@@ -63,6 +64,7 @@ def stats_ready_workbook_exists(project_root: str | Path) -> bool:
     return True
 
 
+@post_processing_validation_scope()
 def write_loreta_stats_ready_workbook(
     project_root: str | Path,
     *,

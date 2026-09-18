@@ -44,6 +44,7 @@ class CheckpointIdentity:
     source: Path
     source_stat: tuple[int, int, int]
     key: str
+    source_sha256: str = ""
 
 
 @dataclass(frozen=True)
@@ -130,7 +131,7 @@ def checkpoint_identity(raw, params: dict, preprocessing_fingerprint: str) -> Ch
             "current_samples_sha256": _sample_digest(raw, params),
         }
         encoded = json.dumps(identity, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
-        return CheckpointIdentity(root, folder, source, before, hashlib.sha256(encoded).hexdigest())
+        return CheckpointIdentity(root, folder, source, before, hashlib.sha256(encoded).hexdigest(), digest)
     except (OSError, ValueError, TypeError, RuntimeError):
         logger.debug("prepared_kurtosis_cache_identity_unavailable", exc_info=True)
         return None

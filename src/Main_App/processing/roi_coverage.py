@@ -1058,8 +1058,12 @@ def require_canonical_released_dataset_index(
     """Return a fresh canonical index after rejecting stale same-root identity."""
 
     from Main_App.projects import load_project_dataset_index
+    from Main_App.processing.raw_registration_state import (
+        require_registered_raw_processing_complete,
+    )
 
     root = _resolved_project_root(project_root)
+    require_registered_raw_processing_complete(root)
     canonical = load_project_dataset_index(root)
     if dataset_index is not None:
         supplied_root = Path(dataset_index.project_root).expanduser().resolve(
@@ -1628,6 +1632,16 @@ def build_pre_review_roi_coverage(
         from Main_App.processing.processing_ledger import load_ledger
 
         processing_ledger = load_ledger(root)
+    from Main_App.processing.raw_registration_state import (
+        record_registered_raw_processing_completion,
+        require_registered_raw_processing_complete,
+    )
+
+    if persist:
+        record_registered_raw_processing_completion(root, outcome_ledger=outcome_ledger)
+    require_registered_raw_processing_complete(
+        root, ledger=processing_ledger, outcome_ledger=outcome_ledger,
+    )
     snapshot = roi_snapshot or snapshot_rois_from_settings()
     if not snapshot.rois:
         raise RoiCoverageGateError("At least one frozen ROI is required.")
@@ -1811,9 +1825,15 @@ def load_roi_coverage(
 ) -> RoiCoverageLedger | None:
     from Main_App.processing.processing_ledger import load_ledger
 
-    raw = load_ledger(_resolved_project_root(project_root)).get(
-        ROI_COVERAGE_LEDGER_KEY
+    return _roi_coverage_from_ledger(
+        load_ledger(_resolved_project_root(project_root)), stage=stage,
     )
+
+
+def _roi_coverage_from_ledger(
+    ledger: Mapping[str, Any], *, stage: str,
+) -> RoiCoverageLedger | None:
+    raw = ledger.get(ROI_COVERAGE_LEDGER_KEY)
     if not isinstance(raw, Mapping):
         return None
     payload = raw.get(stage)
@@ -1896,9 +1916,15 @@ def load_final_release_receipt(
 ) -> FinalReleaseReceipt | None:
     from Main_App.processing.processing_ledger import load_ledger
 
-    payload = load_ledger(_resolved_project_root(project_root)).get(
-        FINAL_RELEASE_RECEIPT_KEY
+    return _final_release_receipt_from_ledger(
+        load_ledger(_resolved_project_root(project_root))
     )
+
+
+def _final_release_receipt_from_ledger(
+    ledger: Mapping[str, Any],
+) -> FinalReleaseReceipt | None:
+    payload = ledger.get(FINAL_RELEASE_RECEIPT_KEY)
     if payload is None:
         return None
     if not isinstance(payload, Mapping):
@@ -1933,17 +1959,59 @@ def require_current_final_release(
 ]:
     """Load and revalidate the durable QC-20/QC-21 release chain."""
 
-    from Main_App.processing.processing_ledger import load_ledger
+    from Main_App.processing.processing_ledger import ledger_path, load_ledger
+    from Main_App.processing.post_processing_context import (
+        CACHE_MISS,
+        cached_validation,
+        capture_validation_files,
+        remember_validation,
+        validation_scope_active,
+    )
     from Main_App.processing.recording_condition_outcomes import (
         load_recording_condition_outcomes,
     )
+    from Main_App.processing.raw_registration_state import (
+        require_registered_raw_processing_complete,
+    )
 
     root = _resolved_project_root(project_root)
-    outcomes = load_recording_condition_outcomes(load_ledger(root))
+    require_registered_raw_processing_complete(root)
+    cache_key = (str(root), str(expected_decision_fingerprint))
+    cached = cached_validation("final_release", cache_key)
+    if cached is not CACHE_MISS:
+        return cached
+    scoped = validation_scope_active()
+    ledger_files = (
+        capture_validation_files([ledger_path(root)], hash_contents=True) if scoped else ()
+    )
+    ledger = load_ledger(root)
+    outcomes = load_recording_condition_outcomes(ledger)
     if outcomes is None:
         raise RoiCoverageGateError(
             "QC-20 final release requires a current recording-condition output ledger."
         )
+    dependency_paths: list[Path] = []
+    companion_paths: list[Path] = []
+    if scoped:
+        for cell in outcomes.cells:
+            if cell.status not in {CELL_READY, CELL_PARTIALLY_RETAINED}:
+                continue
+            export = cell.export_receipt or {}
+            workbook = Path(str(export.get("path") or ""))
+            dependency_paths.append(workbook)
+            written = export.get("workbook_write") or {}
+            if not isinstance(written, Mapping):
+                continue
+            for kind in ("condition_companion", "spectral_companion"):
+                descriptor = written.get(kind)
+                if isinstance(descriptor, Mapping) and descriptor.get("path"):
+                    companion_paths.append(workbook.parent / str(descriptor["path"]))
+    # Keep the existing SHA protection for workbook/native-result receipts.
+    # Companions retain the shared reader's bounded checksum/signature policy.
+    source_files = (
+        *capture_validation_files(dependency_paths, hash_contents=True),
+        *capture_validation_files(companion_paths),
+    )
     for cell in outcomes.cells:
         if cell.status not in {CELL_READY, CELL_PARTIALLY_RETAINED}:
             continue
@@ -1983,7 +2051,7 @@ def require_current_final_release(
                     "QC-20 final release has a different data companion: "
                     f"{cell.processing_id}/{cell.condition_label}."
                 )
-    coverage = load_roi_coverage(root, stage=ROI_COVERAGE_STAGE_FINAL)
+    coverage = _roi_coverage_from_ledger(ledger, stage=ROI_COVERAGE_STAGE_FINAL)
     if coverage is None:
         raise RoiCoverageGateError("QC-21 final ROI coverage has not been recorded.")
     expected_receipt = require_final_release_readiness(
@@ -1991,12 +2059,16 @@ def require_current_final_release(
         coverage,
         expected_decision_fingerprint=expected_decision_fingerprint,
     )
-    receipt = load_final_release_receipt(root)
+    receipt = _final_release_receipt_from_ledger(ledger)
     if receipt is None or receipt != expected_receipt:
         raise RoiCoverageGateError(
             "QC-20 final-release receipt is missing or stale; rerun reviewed post-processing."
         )
-    return outcomes, coverage, receipt
+    result = outcomes, coverage, receipt
+    remember_validation(
+        "final_release", cache_key, result, files=(*ledger_files, *source_files),
+    )
+    return result
 
 
 def require_project_final_release(

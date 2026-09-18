@@ -7,16 +7,24 @@ import os
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from threading import Event
 from time import perf_counter
 from typing import Any
 
-from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal
+from PySide6.QtCore import QObject, QRunnable, Signal
 from PySide6.QtWidgets import QWidget
 
 from Main_App.Shared.settings_manager import SettingsManager
 from Main_App.gui.update_dialog import UpdateDialog
-from Main_App.updates.github_releases import check_for_updates
+from Main_App.gui.update_lifecycle import UpdateTaskResult, update_lifecycle
+from Main_App.updates.application import APP_VERSION
+from Main_App.updates.helper_client import HelperClient
 from Main_App.updates.models import UpdateCheckResult
+
+
+def check_for_updates(cancel_event: Event | None = None) -> UpdateCheckResult:
+    return HelperClient().check(APP_VERSION, cancel_event=cancel_event)
+
 
 _LOG = logging.getLogger(__name__)
 
@@ -58,10 +66,7 @@ def check_for_updates_async(
         _show_update_dialog(app, auto_check=True)
         return
 
-    job = _CheckJob()
-    job.sigs.result.connect(lambda result: _on_silent_result(app, result, notify_if_no_update))
-    job.sigs.error.connect(lambda msg: _on_silent_error(app, msg))
-    QThreadPool.globalInstance().start(job)
+    _background_check(app, lambda result: _on_silent_result(app, result, notify_if_no_update))
 
 
 def check_for_updates_on_launch(app: QWidget) -> None:
@@ -74,10 +79,7 @@ def check_for_updates_on_launch(app: QWidget) -> None:
         _log(app, "Skipping update check (checked recently).")
         return
 
-    job = _CheckJob()
-    job.sigs.result.connect(lambda result: _on_launch_result(app, result))
-    job.sigs.error.connect(lambda msg: _log(app, f"Update check failed: {msg}"))
-    QThreadPool.globalInstance().start(job)
+    _background_check(app, lambda result: _on_launch_result(app, result))
 
 
 class _UpdateSignals(QObject):
@@ -134,8 +136,8 @@ def _safe_emit(signal: Any, *args: object) -> bool:
         raise
 
 
-def _check_for_updates_and_record() -> UpdateCheckResult:
-    result = check_for_updates()
+def _check_for_updates_and_record(cancel_event: Event | None = None) -> UpdateCheckResult:
+    result = check_for_updates(cancel_event=cancel_event)
     _record_successful_check()
     return result
 
@@ -237,3 +239,22 @@ def _record_successful_check() -> None:
 
 def _running_under_pytest() -> bool:
     return "PYTEST_CURRENT_TEST" in os.environ
+
+
+def _background_check(app: QWidget, on_result) -> None:
+    """Keep startup workers alive and cancellable across application shutdown."""
+    job = update_lifecycle().start_task(lambda _progress, cancel: _check_for_updates_and_record(cancel))
+    app.destroyed.connect(job.cancel)
+
+    def completed(outcome: UpdateTaskResult) -> None:
+        if outcome.cancelled:
+            return
+        if outcome.error is not None:
+            _on_silent_error(app, str(outcome.error))
+        else:
+            try:
+                on_result(outcome.value)
+            except RuntimeError:
+                _LOG.debug("Update host closed before result presentation.")
+
+    job.finished.connect(completed)

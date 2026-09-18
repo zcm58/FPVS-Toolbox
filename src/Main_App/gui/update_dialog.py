@@ -2,58 +2,79 @@
 
 from __future__ import annotations
 
+import logging
+import os
 from collections.abc import Callable
-from pathlib import Path
-from typing import Any
+from threading import Event
 
-from PySide6.QtCore import QObject, QThread, QTimer, QUrl, Signal, Slot
+from PySide6.QtCore import Qt, QTimer, QUrl, Slot
 from PySide6.QtGui import QCloseEvent, QDesktopServices
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
-    QPlainTextEdit,
+    QMessageBox,
     QProgressBar,
     QVBoxLayout,
     QWidget,
 )
 
-from config import FPVS_TOOLBOX_VERSION
-from Main_App.gui.components import confirm, make_action_button, show_warning
-from Main_App.gui.typography import apply_font_role
-from Main_App.updates.downloader import download_installer
-from Main_App.updates.github_releases import check_for_updates
-from Main_App.updates.installer import launch_installer
-from Main_App.updates.models import DownloadedInstaller, InstallerAsset, UpdateCheckResult
+from Main_App.updates.application import APP_VERSION as __version__
+from Main_App.gui.updater_presentation import (
+    action_button,
+    apply_toolbox_theme,
+    mark_primary_action,
+    mark_secondary_action,
+)
+from Main_App.gui.updater_presentation import elide_middle
+from Main_App.gui.update_lifecycle import (
+    ProgressReporter,
+    UpdateCallback,
+    UpdateJob,
+    UpdateLifecycle,
+    UpdateTaskResult,
+    update_lifecycle,
+)
+from Main_App.gui.update_install_guard import default_install_guard
+from Main_App.updates.helper_client import HelperClient
+from Main_App.updates.models import (
+    DownloadedInstaller,
+    InstallerAsset,
+    UpdateCheckResult,
+    UpdatePhase,
+)
 
-ProgressReporter = Callable[[int, int | None], None]
-TaskCallback = Callable[[ProgressReporter], object]
+_LOGGER = logging.getLogger(__name__)
+_MINIMUM_SIZE = (680, 600)
+_DEFAULT_SIZE = (760, 620)
+_PROGRESS_MAXIMUM = 1000
 
 
-class _UpdateTaskWorker(QObject):
-    succeeded = Signal(object)
-    failed = Signal(object)
-    progress_changed = Signal(int, object)
-    finished = Signal()
+def _check_update(progress: ProgressReporter, cancel_event: Event) -> UpdateCheckResult:
+    return HelperClient().check(
+        __version__, cancel_event=cancel_event, phase_callback=lambda phase: progress(phase, None)
+    )
 
-    def __init__(self, callback: TaskCallback) -> None:
-        super().__init__()
-        self._callback = callback
 
-    @Slot()
-    def run(self) -> None:
-        try:
-            result = self._callback(self._emit_progress)
-        except Exception as error:
-            self.failed.emit(error)
-        else:
-            self.succeeded.emit(result)
-        finally:
-            self.finished.emit()
+def _download_update(
+    asset: InstallerAsset,
+    progress: ProgressReporter,
+    cancel_event: Event,
+) -> DownloadedInstaller:
+    return HelperClient().download(
+        asset,
+        progress_callback=progress,
+        cancel_event=cancel_event,
+        phase_callback=lambda phase: progress(phase, None),
+    )
 
-    def _emit_progress(self, downloaded: int, total: int | None) -> None:
-        self.progress_changed.emit(downloaded, total)
+
+def _launch_update(downloaded: DownloadedInstaller, cancel_event: Event) -> object:
+    return HelperClient().launch_install(
+        downloaded, parent_pid=os.getpid(), cancel_event=cancel_event
+    )
 
 
 class UpdateDialog(QDialog):
@@ -64,31 +85,41 @@ class UpdateDialog(QDialog):
         *,
         parent: QWidget | None = None,
         auto_check: bool = True,
-        check_callback: Callable[[], UpdateCheckResult] = check_for_updates,
+        check_callback: Callable[[Event], UpdateCheckResult] | None = None,
+        check_task: UpdateCallback | None = None,
         download_callback: Callable[
-            [InstallerAsset, ProgressReporter],
+            [InstallerAsset, ProgressReporter, Event],
             DownloadedInstaller,
-        ] = lambda asset, progress: download_installer(asset, progress_callback=progress),
-        installer_launcher: Callable[[Path], object] = launch_installer,
+        ] = _download_update,
+        installer_launcher: Callable[[DownloadedInstaller, Event], object] = _launch_update,
         initial_result: UpdateCheckResult | None = None,
         on_before_install: Callable[[], bool] | None = None,
         quit_app: Callable[[], None] | None = None,
+        lifecycle: UpdateLifecycle | None = None,
     ) -> None:
         super().__init__(parent)
         self.setObjectName("update_dialog")
-        self.setProperty("fpvsSurface", True)
         self.setWindowTitle("Check for Updates")
-        self.setMinimumWidth(680)
+        self.setMinimumSize(*_MINIMUM_SIZE)
+        self.resize(*_DEFAULT_SIZE)
 
         self._check_callback = check_callback
+        self._check_task = check_task
         self._download_callback = download_callback
         self._installer_launcher = installer_launcher
         self._on_before_install = on_before_install or (lambda: default_install_guard(parent))
-        self._quit_app = quit_app or self._quit_application
-        self._thread: QThread | None = None
-        self._worker: _UpdateTaskWorker | None = None
+        self._quit_app = quit_app or (parent.close if parent is not None else self._quit_application)
+        self._lifecycle = lifecycle or update_lifecycle()
+        self._job: UpdateJob | None = None
+        self._task_kind: str | None = None
+        self._close_pending = False
+        self._close_result = int(QDialog.DialogCode.Rejected)
         self._result: UpdateCheckResult | None = None
         self._downloaded_installer: DownloadedInstaller | None = None
+        self._disposed = Event()
+        disposed = self._disposed
+        self.destroyed.connect(lambda _object=None: disposed.set())
+        self._lifecycle.shutdown_started.connect(self._handle_application_shutdown)
 
         self._build_ui()
         self._set_idle_state()
@@ -104,7 +135,6 @@ class UpdateDialog(QDialog):
 
         self.title_label = QLabel("FPVS Toolbox updates", self)
         self.title_label.setObjectName("update_dialog_title")
-        apply_font_role(self.title_label, "update_title")
         layout.addWidget(self.title_label)
 
         self.status_label = QLabel("Ready to check for updates.", self)
@@ -114,177 +144,271 @@ class UpdateDialog(QDialog):
 
         versions_layout = QVBoxLayout()
         versions_layout.setSpacing(4)
-        self.current_version_label = QLabel(f"Current version: {FPVS_TOOLBOX_VERSION}", self)
+        self.current_version_label = QLabel(f"Current version: {__version__}", self)
         self.latest_version_label = QLabel("Latest version: Not checked yet", self)
+        self.current_version_label.setWordWrap(True)
+        self.latest_version_label.setWordWrap(True)
         versions_layout.addWidget(self.current_version_label)
         versions_layout.addWidget(self.latest_version_label)
         layout.addLayout(versions_layout)
 
         self.notes_heading_label = QLabel("What's New", self)
         self.notes_heading_label.setObjectName("update_dialog_notes_heading")
-        self.notes_heading_label.setProperty("subsectionHeader", True)
         layout.addWidget(self.notes_heading_label)
-
-        self.notes_edit = QPlainTextEdit(self)
-        self.notes_edit.setObjectName("update_dialog_notes")
-        self.notes_edit.setReadOnly(True)
-        self.notes_edit.setMinimumHeight(110)
-        self.notes_edit.setPlainText("Release notes will appear when an update is available.")
-        layout.addWidget(self.notes_edit)
+        self.notes_label = QLabel("Release notes will appear when an update is available.", self)
+        self.notes_label.setObjectName("update_dialog_notes")
+        self.notes_label.setWordWrap(True)
+        self.notes_label.setTextFormat(Qt.TextFormat.PlainText)
+        self.notes_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        layout.addWidget(self.notes_label)
+        layout.addStretch(1)
 
         self.progress_bar = QProgressBar(self)
         self.progress_bar.setObjectName("update_dialog_progress")
         self.progress_bar.setVisible(False)
         layout.addWidget(self.progress_bar)
 
-        notes_row = QHBoxLayout()
-        notes_row.setSpacing(8)
-        self.release_notes_button = make_action_button(
-            "View Full Release Notes",
-            variant="tertiary",
-            parent=self,
-        )
-        self.release_notes_button.setObjectName("update_dialog_release_notes_button")
-        self.release_notes_button.clicked.connect(self._open_release_notes)
-        notes_row.addWidget(self.release_notes_button)
-        notes_row.addStretch(1)
-        layout.addLayout(notes_row)
-
         button_row = QHBoxLayout()
         button_row.setSpacing(8)
+        self.release_notes_button = action_button("View Full Release Notes", self)
+        self.release_notes_button.setObjectName("update_dialog_release_notes_button")
+        mark_secondary_action(self.release_notes_button)
+        self.release_notes_button.clicked.connect(self._open_release_notes)
+        button_row.addWidget(self.release_notes_button)
         button_row.addStretch(1)
-        self.check_button = make_action_button("Check Again", parent=self)
-        self.download_button = make_action_button("Download Update", variant="primary", parent=self)
-        self.install_button = make_action_button("Install and Restart", variant="primary", parent=self)
-        self.close_button = make_action_button("Close", variant="secondary", parent=self)
-        for button in (
-            self.check_button,
-            self.download_button,
-            self.install_button,
-            self.close_button,
-        ):
-            button_row.addWidget(button)
+        layout.addLayout(button_row)
+
+        self.button_box = QWidget(self)
+        self.button_box.setObjectName("update_dialog_button_box")
+        actions_layout = QGridLayout(self.button_box)
+        actions_layout.setContentsMargins(0, 0, 0, 0)
+        actions_layout.setHorizontalSpacing(8)
+        actions_layout.setVerticalSpacing(8)
+        actions_layout.setColumnStretch(0, 1)
+        actions_layout.setColumnStretch(1, 1)
+        self.check_button = action_button("Check Again", self.button_box)
+        self.check_button.setObjectName("update_dialog_check_button")
+        self.download_button = action_button("Download Update", self.button_box)
+        self.download_button.setObjectName("update_dialog_download_button")
+        self.install_button = action_button("Install and Restart", self.button_box)
+        self.install_button.setObjectName("update_dialog_install_button")
+        self.close_button = action_button("Close", self.button_box)
+        self.close_button.setObjectName("update_dialog_close_button")
+        actions_layout.addWidget(self.check_button, 0, 0)
+        actions_layout.addWidget(self.download_button, 0, 1)
+        actions_layout.addWidget(self.install_button, 1, 0)
+        actions_layout.addWidget(self.close_button, 1, 1)
+        mark_secondary_action(self.check_button)
+        mark_primary_action(self.download_button)
+        mark_primary_action(self.install_button)
+        mark_secondary_action(self.close_button)
         self.check_button.clicked.connect(self.start_update_check)
         self.download_button.clicked.connect(self.start_download)
         self.install_button.clicked.connect(self.install_and_restart)
         self.close_button.clicked.connect(self._dismiss_dialog)
-        layout.addLayout(button_row)
+        layout.addWidget(self.button_box)
+        apply_toolbox_theme(self)
         self._fit_action_buttons()
-
-    def closeEvent(self, event: QCloseEvent) -> None:
-        if self._thread is not None:
-            event.ignore()
-            return
-        super().closeEvent(event)
 
     @Slot()
     def start_update_check(self) -> None:
-        if self._thread is not None:
+        if (
+            self._disposed.is_set()
+            or self._job is not None
+            or self._close_pending
+            or self._lifecycle.is_shutting_down
+        ):
             return
         self._result = None
         self._downloaded_installer = None
         self._set_busy_state("Checking GitHub Releases...")
         self.progress_bar.setVisible(False)
-        self._start_task(lambda _progress: self._check_callback(), self._handle_check_result)
+        check_callback = self._check_callback
+        self._lifecycle.manual_check_requested.emit()
+        self._start_task(
+            "check",
+            self._check_task
+            or (
+                _check_update
+                if check_callback is None
+                else lambda _progress, cancel: check_callback(cancel)
+            ),
+        )
 
     def show_update_result(self, result: UpdateCheckResult) -> None:
         """Populate the dialog from an already-completed update check."""
 
-        self._handle_check_result(result)
+        if not self._disposed.is_set() and self._job is None and not self._close_pending:
+            self._handle_check_result(result)
 
     @Slot()
     def start_download(self) -> None:
-        if self._thread is not None:
+        if (
+            self._disposed.is_set()
+            or self._job is not None
+            or self._close_pending
+            or self._lifecycle.is_shutting_down
+        ):
             return
-        if self._result is None or self._result.installer_asset is None:
+        if self._result is None:
             return
         asset = self._result.installer_asset
+        if asset is None or asset.sha256 is None:
+            return
         self._downloaded_installer = None
-        self._set_busy_state("Downloading update...")
+        self._set_busy_state("Downloading and verifying the update...")
         self.progress_bar.setRange(0, 0)
         self.progress_bar.setVisible(True)
+        download_callback = self._download_callback
         self._start_task(
-            lambda progress: self._download_callback(asset, progress),
-            self._handle_download_result,
+            "download",
+            lambda progress, cancel: download_callback(asset, progress, cancel),
         )
 
     @Slot()
     def install_and_restart(self) -> None:
-        if self._downloaded_installer is None:
+        if (
+            self._disposed.is_set()
+            or self._job is not None
+            or self._downloaded_installer is None
+            or self._close_pending
+            or self._lifecycle.is_shutting_down
+        ):
             return
-        if not confirm(
+        answer = QMessageBox.question(
             self,
             "Install Update",
             "FPVS Toolbox needs to close to install the update.\n\n"
             "Install the update and restart FPVS Toolbox?",
-        ):
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
             return
-        if not self._on_before_install():
+        # Confirmation and Save can enter nested GUI event loops. The parent or app
+        # may have closed while either prompt was open; never continue into a dead
+        # dialog or launch an installer after that cancellation.
+        if self._disposed.is_set() or self._close_pending or self._lifecycle.is_shutting_down:
             return
-        try:
-            self._installer_launcher(self._downloaded_installer.path)
-        except Exception as error:
-            show_warning(self, "Install Update", str(error))
+        if self._on_before_install is not None and not self._on_before_install():
             return
-        self.accept()
-        self._quit_app()
+        if self._disposed.is_set() or self._close_pending or self._lifecycle.is_shutting_down:
+            return
+        downloaded = self._downloaded_installer
+        if downloaded is None:
+            return
+        installer_launcher = self._installer_launcher
+        self._set_busy_state("Preparing FPVS Toolbox Updater. Toolbox will close when it is ready...")
+        self.progress_bar.setRange(0, 0)
+        self.progress_bar.setVisible(True)
+        self._start_task(
+            "install",
+            lambda _progress, cancel: installer_launcher(downloaded, cancel),
+            keep_success_on_cancel=True,
+            on_committed_success=self._quit_app,
+        )
 
     def _start_task(
         self,
-        callback: TaskCallback,
-        result_handler: Callable[[object], None],
+        kind: str,
+        callback: UpdateCallback,
+        *,
+        keep_success_on_cancel: bool = False,
+        on_committed_success: Callable[[], None] | None = None,
     ) -> None:
-        thread = QThread(self)
-        worker = _UpdateTaskWorker(callback)
-        worker.moveToThread(thread)
-        thread.started.connect(worker.run)
-        worker.succeeded.connect(result_handler)
-        worker.failed.connect(self._handle_task_error)
-        worker.progress_changed.connect(self._handle_download_progress)
-        worker.finished.connect(thread.quit)
-        worker.finished.connect(worker.deleteLater)
-        thread.finished.connect(thread.deleteLater)
-        thread.finished.connect(self._handle_thread_finished)
-        self._thread = thread
-        self._worker = worker
-        thread.start()
+        job = self._lifecycle.start_task(
+            callback,
+            keep_success_on_cancel=keep_success_on_cancel,
+            on_committed_success=on_committed_success,
+        )
+        job.finished.connect(self._handle_task_finished)
+        job.progress_changed.connect(self._handle_download_progress)
+        self.destroyed.connect(job.cancel)
+        self._job = job
+        self._task_kind = kind
+
+    @Slot(object)
+    def _handle_task_finished(self, outcome: object) -> None:
+        kind = self._task_kind
+        self._job = None
+        self._task_kind = None
+        if not isinstance(outcome, UpdateTaskResult) and (
+            self._close_pending or self._lifecycle.is_shutting_down
+        ):
+            super().done(self._close_result)
+            return
+        if not isinstance(outcome, UpdateTaskResult):
+            self._handle_task_error(TypeError("Updater returned an unexpected outcome."), kind)
+        elif kind == "install" and outcome.error is None and not outcome.cancelled:
+            # Launch has committed. A late close/cancel cannot undo Popen, and the app
+            # must exit, but only now that the launch/verification worker has stopped.
+            self._close_pending = False
+            self.accept()
+            return
+        elif self._close_pending or self._lifecycle.is_shutting_down:
+            super().done(self._close_result)
+            return
+        elif outcome.cancelled:
+            self._handle_task_cancelled()
+        elif outcome.error is not None:
+            self._handle_task_error(outcome.error, kind)
+        elif kind == "check":
+            self._handle_check_result(outcome.value)
+        elif kind == "download":
+            self._handle_download_result(outcome.value)
 
     @Slot(object)
     def _handle_check_result(self, result: object) -> None:
         if not isinstance(result, UpdateCheckResult):
-            self._handle_task_error(TypeError("Update check returned an unexpected result."))
+            self._handle_task_error(
+                TypeError("Update check returned an unexpected result."), "check"
+            )
             return
-
         self._result = result
+        self._downloaded_installer = None
+        self.progress_bar.setVisible(False)
         self.current_version_label.setText(f"Current version: {result.current_version}")
         self.latest_version_label.setText(f"Latest version: {result.latest_version}")
         self.release_notes_button.setEnabled(result.release_url is not None)
         if result.release_notes_summary:
-            self.notes_edit.setPlainText(result.release_notes_summary)
+            self._set_notes_text(result.release_notes_summary)
         elif result.release_url is not None:
-            self.notes_edit.setPlainText("No release notes were provided for this release.")
+            self._set_notes_text("No release notes were provided for this release.")
         else:
-            self.notes_edit.setPlainText("Release notes will appear when an update is available.")
+            self._set_notes_text("Release notes will appear when an update is available.")
 
-        if result.update_available and result.installer_asset is not None:
-            self.status_label.setText(
-                "A new FPVS Toolbox version is available. The installer replaces app files only; "
-                "projects, settings, logs, and generated outputs stay outside the install folder."
-            )
-            self.download_button.setEnabled(True)
+        if result.update_available:
+            asset = result.installer_asset
+            verified_asset = asset is not None and asset.sha256 is not None
+            if verified_asset:
+                assert asset is not None
+                download_kind = "Patch" if asset.kind == "patch" else "Full installer"
+                download_size = (
+                    f" ({asset.size_bytes / 1_000_000:.1f} MB)"
+                    if asset.size_bytes is not None
+                    else ""
+                )
+                selection = f"{download_kind}{download_size}."
+                if result.selection_reason:
+                    selection += f" {result.selection_reason}"
+                self.status_label.setText(
+                    f"A new FPVS Toolbox version is available. {selection}\n\n"
+                    "Updates replace application files. Your projects, settings, "
+                    "analysis results, and logs are preserved."
+                )
+            else:
+                self.status_label.setText(
+                    "A new FPVS Toolbox version is available, but in-app installation is "
+                    "unavailable because this release lacks valid trusted installer metadata "
+                    "(including its SHA-256 checksum). "
+                    "Use View Full Release Notes to open the release page."
+                )
+            self.download_button.setEnabled(verified_asset)
             self._set_close_button_text("Remind Me Later")
-        elif result.update_available and result.installer_asset is None:
-            self.status_label.setText(
-                "A newer FPVS Toolbox release exists, but its GitHub release metadata is incomplete. "
-                "The expected Windows installer asset was not found."
-            )
-            self.download_button.setEnabled(False)
-            self._set_close_button_text("Close")
         else:
             self.status_label.setText("FPVS Toolbox is up to date.")
             self.download_button.setEnabled(False)
             self._set_close_button_text("Close")
-
         self.check_button.setEnabled(True)
         self.install_button.setEnabled(False)
         self.close_button.setEnabled(True)
@@ -292,45 +416,84 @@ class UpdateDialog(QDialog):
     @Slot(object)
     def _handle_download_result(self, result: object) -> None:
         if not isinstance(result, DownloadedInstaller):
-            self._handle_task_error(TypeError("Update download returned an unexpected result."))
+            self._handle_task_error(
+                TypeError("Update download returned an unexpected result."), "download"
+            )
             return
         self._downloaded_installer = result
-        self.status_label.setText("The update is ready to install.")
+        self.status_label.setText("The update is verified and ready to install.")
         self.download_button.setEnabled(True)
         self.install_button.setEnabled(True)
         self.check_button.setEnabled(True)
         self.close_button.setEnabled(True)
+        self._set_close_button_text("Close")
         self.progress_bar.setVisible(True)
-        self.progress_bar.setRange(0, max(1, result.size_bytes))
-        self.progress_bar.setValue(result.size_bytes)
+        self.progress_bar.setRange(0, _PROGRESS_MAXIMUM)
+        self.progress_bar.setValue(_PROGRESS_MAXIMUM)
 
-    @Slot(object)
-    def _handle_task_error(self, error: object) -> None:
-        self.status_label.setText(
-            "The update operation could not be completed. Check your internet connection "
-            "or release metadata and try again later from File > Check for Updates."
-        )
-        self.notes_edit.setPlainText(str(error) or "GitHub Releases could not be reached.")
+    def _handle_task_error(self, error: object, kind: str | None = None) -> None:
+        _LOGGER.warning("Updater operation failed", extra={"operation": kind, "error": str(error)})
+        if kind == "download":
+            message = "The update download could not be completed. Retry starts a new download."
+        elif kind == "install":
+            message = "The installer could not be verified or launched. Download the update again."
+            self._downloaded_installer = None
+        else:
+            message = (
+                "The update check could not be completed. Check your internet connection "
+                "and try again later from File > Check for Updates."
+            )
+        self.status_label.setText(message)
+        self._set_notes_text(str(error) or "The update operation could not be completed.")
         self.progress_bar.setVisible(False)
         self.check_button.setEnabled(True)
-        self.download_button.setEnabled(False)
+        self.download_button.setEnabled(self._download_available())
         self.install_button.setEnabled(False)
         self.close_button.setEnabled(True)
         self._set_close_button_text("Close")
 
-    @Slot(int, object)
-    def _handle_download_progress(self, downloaded: int, total: object) -> None:
-        if isinstance(total, int) and total > 0:
-            self.progress_bar.setRange(0, total)
-            self.progress_bar.setValue(min(downloaded, total))
+    @Slot(object, object)
+    def _handle_download_progress(self, downloaded: object, total: object) -> None:
+        if self._close_pending or self._job is None:
+            return
+        if isinstance(downloaded, UpdatePhase):
+            self.status_label.setText(downloaded.text)
+            result = downloaded.result
+            if result is not None and self._task_kind == "check":
+                self.current_version_label.setText(f"Current version: {result.current_version}")
+                self.latest_version_label.setText(f"Latest version: {result.latest_version}")
+                self._set_notes_text(result.release_notes_summary)
+            self.progress_bar.setRange(0, 0)
+            self.progress_bar.setVisible(True)
+            return
+        if isinstance(downloaded, int) and isinstance(total, int) and total > 0:
+            # Qt widgets accept signed 32-bit integers, but supported downloads can
+            # exceed 2 GiB. Keep Python-sized byte math and pass only scaled units.
+            scaled = max(0, min(downloaded, total)) * _PROGRESS_MAXIMUM // total
+            self.progress_bar.setRange(0, _PROGRESS_MAXIMUM)
+            self.progress_bar.setValue(scaled)
         else:
             self.progress_bar.setRange(0, 0)
         self.progress_bar.setVisible(True)
 
-    @Slot()
-    def _handle_thread_finished(self) -> None:
-        self._thread = None
-        self._worker = None
+    def _handle_task_cancelled(self) -> None:
+        self._downloaded_installer = None
+        self.status_label.setText("The update operation was canceled. Retry starts from zero.")
+        self.progress_bar.setVisible(False)
+        self.check_button.setEnabled(True)
+        self.download_button.setEnabled(self._download_available())
+        self.install_button.setEnabled(False)
+        self.close_button.setEnabled(True)
+        self._set_close_button_text("Close")
+
+    def _download_available(self) -> bool:
+        asset = None if self._result is None else self._result.installer_asset
+        return bool(
+            self._result is not None
+            and self._result.update_available
+            and asset is not None
+            and asset.sha256 is not None
+        )
 
     def _set_idle_state(self) -> None:
         self.release_notes_button.setEnabled(False)
@@ -345,12 +508,52 @@ class UpdateDialog(QDialog):
         self.check_button.setEnabled(False)
         self.download_button.setEnabled(False)
         self.install_button.setEnabled(False)
-        self.close_button.setEnabled(False)
+        self.close_button.setEnabled(True)
+        self._set_close_button_text("Cancel and Close")
 
     @Slot()
     def _dismiss_dialog(self) -> None:
+        self.reject()
+
+    def reject(self) -> None:
+        self.done(int(QDialog.DialogCode.Rejected))
+
+    def done(self, result: int) -> None:
+        if self._job is not None:
+            self._request_close(result)
+            return
+        self._close_pending = True
+        super().done(result)
+
+    def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
+        if self._job is not None:
+            self._request_close(int(QDialog.DialogCode.Rejected))
+            event.ignore()
+            return
+        super().closeEvent(event)
+
+    def _request_close(self, result: int) -> None:
+        self._close_pending = True
+        self._close_result = result
+        self.check_button.setEnabled(False)
+        self.download_button.setEnabled(False)
+        self.install_button.setEnabled(False)
         self.close_button.setEnabled(False)
-        QTimer.singleShot(0, self.reject)
+        self._set_close_button_text("Canceling...")
+        self.status_label.setText(
+            "Canceling the update operation and waiting for it to finish safely. "
+            "Incomplete downloads are discarded; a retry starts from zero. "
+            "A network check may need to reach its timeout."
+        )
+        if self._job is not None:
+            self._job.cancel()
+
+    @Slot()
+    def _handle_application_shutdown(self) -> None:
+        if self._job is not None:
+            self._request_close(int(QDialog.DialogCode.Rejected))
+        else:
+            self.reject()
 
     def _set_close_button_text(self, text: str) -> None:
         self.close_button.setText(text)
@@ -366,10 +569,15 @@ class UpdateDialog(QDialog):
         for button in buttons:
             text_width = button.fontMetrics().horizontalAdvance(button.text())
             button.setMinimumWidth(max(button.minimumSizeHint().width(), text_width + 36))
-        required_width = sum(button.minimumWidth() for button in buttons) + (
-            12 * max(0, len(buttons) - 1)
-        ) + 60
-        self.setMinimumWidth(max(self.minimumWidth(), required_width))
+        required_width = max(button.minimumWidth() for button in buttons) * 2 + 8 + 36
+        self.setMinimumWidth(max(_MINIMUM_SIZE[0], required_width))
+
+    def _set_notes_text(self, text: str) -> None:
+        # A compact preview keeps every action visible at the minimum size. The full
+        # release/error value remains available by tooltip and release-page action.
+        words = (elide_middle(word, 64) for word in text.split())
+        self.notes_label.setText(elide_middle(" ".join(words), 240))
+        self.notes_label.setToolTip(text)
 
     def _open_release_notes(self) -> None:
         if self._result is None or self._result.release_url is None:
@@ -381,54 +589,3 @@ class UpdateDialog(QDialog):
         app = QApplication.instance()
         if app is not None:
             app.quit()
-
-
-def default_install_guard(parent: QWidget | None) -> bool:
-    """Block installer launch while Toolbox has active processing/export work."""
-
-    if parent is None:
-        return True
-    if not _host_has_active_work(parent):
-        return True
-
-    show_warning(
-        parent,
-        "Update Blocked",
-        "Processing or export work is still running. Finish or stop the active operation "
-        "before installing an update.",
-    )
-    return False
-
-
-def _host_has_active_work(host: QWidget) -> bool:
-    if bool(getattr(host, "busy", False)):
-        return True
-    if bool(getattr(host, "_run_active", False)):
-        return True
-    if bool(getattr(host, "_pending_finalize", False)):
-        return True
-    if bool(getattr(host, "_post_backlog", None)):
-        return True
-    for attr_name in (
-        "processing_thread",
-        "detection_thread",
-        "_post_thread",
-        "_thread",
-        "_worker_thread",
-    ):
-        if _handle_is_active(getattr(host, attr_name, None)):
-            return True
-    return getattr(host, "_post_worker", None) is not None
-
-
-def _handle_is_active(handle: Any) -> bool:
-    if handle is None:
-        return False
-    for method_name in ("isRunning", "is_alive"):
-        method = getattr(handle, method_name, None)
-        if callable(method):
-            try:
-                return bool(method())
-            except RuntimeError:
-                return False
-    return False

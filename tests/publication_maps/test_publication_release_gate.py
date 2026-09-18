@@ -9,6 +9,7 @@ import pytest
 from Main_App.processing.roi_coverage import RoiCoverageGateError
 from Tools.Publication_Maps import metrics as publication_metrics
 from Tools.Publication_Maps.models import (
+    PublicationMapCohortError,
     PublicationMapInputError,
     PublicationMapRequest,
     PublicationMetric,
@@ -146,6 +147,59 @@ def _released_source(path: Path):
         observed_auxiliary_rows=(),
         source_evidence_fingerprint="source-fingerprint",
     )
+
+
+@pytest.mark.parametrize("source_present", (False, True))
+def test_final_excluded_cell_never_becomes_a_released_source(
+    tmp_path: Path, monkeypatch, source_present: bool,
+) -> None:
+    from Main_App.processing import roi_coverage
+
+    path = tmp_path / "P1_Faces_Results.xlsx"
+    cell = SimpleNamespace(
+        workbook_path=str(path), downstream_cell_excluded=True,
+        source_evidence=object() if source_present else None,
+    )
+    monkeypatch.setattr(roi_coverage, "require_project_final_release", lambda _root: (
+        object(), SimpleNamespace(cells=(cell,), fingerprint="coverage"),
+        SimpleNamespace(fingerprint="release"),
+    ))
+
+    release = publication_metrics._require_managed_publication_release(tmp_path)
+
+    assert release.sources_by_workbook == {}
+    assert release.excluded_workbook_paths == frozenset({path.resolve()})
+
+
+def test_scoped_exclusions_cannot_silently_remove_a_requested_condition(tmp_path: Path) -> None:
+    path = tmp_path / "P1_Faces_Results.xlsx"
+    release = publication_metrics._ManagedPublicationRelease(
+        sources_by_workbook={}, final_coverage_fingerprint="coverage",
+        final_release_receipt_fingerprint="release",
+        excluded_workbook_paths=frozenset({path.resolve()}),
+    )
+
+    with pytest.raises(PublicationMapCohortError, match="after QC exclusions.*Faces"):
+        publication_metrics._apply_managed_publication_exclusions(
+            (_workbook(path),), release, conditions=("Faces",),
+        )
+
+
+def test_excluded_cells_cannot_mask_ambiguous_final_coverage(tmp_path: Path, monkeypatch) -> None:
+    from Main_App.processing import roi_coverage
+
+    path = tmp_path / "P1_Faces_Results.xlsx"
+    cells = tuple(SimpleNamespace(
+        workbook_path=str(path), downstream_cell_excluded=excluded,
+        source_evidence=None,
+    ) for excluded in (True, False))
+    monkeypatch.setattr(roi_coverage, "require_project_final_release", lambda _root: (
+        object(), SimpleNamespace(cells=cells, fingerprint="coverage"),
+        SimpleNamespace(fingerprint="release"),
+    ))
+
+    with pytest.raises(CanonicalHarmonicSelectionError, match="duplicate final QC-21 coverage"):
+        publication_metrics._require_managed_publication_release(tmp_path)
 
 
 def _workbook(path: Path) -> WorkbookEntry:

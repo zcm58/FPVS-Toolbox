@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from copy import deepcopy
+from dataclasses import replace
 from fractions import Fraction
 from pathlib import Path
 from types import SimpleNamespace
@@ -15,6 +17,7 @@ from Main_App.gui.marker_occurrence_review import (
     canonical_event_plans_by_file,
     collect_marker_occurrence_reviews,
     marker_occurrence_review_rows,
+    marker_occurrence_review_summary,
     merge_marker_review_decision,
     merge_rescanned_results,
     resolved_path_text,
@@ -178,6 +181,148 @@ def test_review_times_are_relative_to_the_raw_sample_origin(tmp_path: Path) -> N
     assert "0.666667 to 1.66667 seconds from recording start" in rows[
         "Flagged interval evidence"
     ]
+
+
+def _review_item(tmp_path: Path):
+    return collect_marker_occurrence_reviews(
+        SimpleNamespace(results=(_result(tmp_path / "P01.bdf"),))
+    )[0]
+
+
+def test_summary_keeps_identity_required_duration_and_scientific_action_keys(tmp_path: Path) -> None:
+    item = replace(
+        _review_item(tmp_path), expected_analyzed_cycles=140,
+        oddball_rate_hz=Fraction(7, 6), repetition_index=2,
+    )
+    summary = marker_occurrence_review_summary(item)
+
+    assert summary.context == "P01 · Pre at visit 1 · Faces · Repetition 3"
+    assert summary.source == "P01.bdf · P01_visit-1"
+    assert summary.required_analysis == "Each retained window must contain 140 oddball cycles (120 seconds)."
+    assert tuple(choice.decision for choice in summary.choices) == (
+        MARKER_DECISION_USE_CONTIGUOUS, MARKER_DECISION_RETAIN_FULL, MARKER_DECISION_EXCLUDE,
+    )
+    assert all(choice.enabled for choice in summary.choices)
+    verified, planned, excluded = summary.choices
+    assert "120 seconds" in verified.description
+    assert "marker-spacing check" in verified.description
+    assert "120-second window" in planned.description
+    assert "independent evidence" in planned.description
+    assert "Other repetitions remain eligible" in excluded.description
+    assert "raw file is kept" in excluded.description
+
+
+@pytest.mark.parametrize("session_label, session_id, expected", [
+    ("Luteal", "visit-1", "P01 · Luteal · Faces · Repetition 1"),
+    (None, "visit-1", "P01 · visit-1 · Faces · Repetition 1"),
+    (None, None, "P01 · Faces · Repetition 1"),
+])
+def test_summary_uses_session_identity_without_exposing_empty_fields(
+    tmp_path: Path, session_label: str | None, session_id: str | None, expected: str,
+) -> None:
+    item = replace(_review_item(tmp_path), session_label=session_label, session_id=session_id)
+    assert marker_occurrence_review_summary(item).context == expected
+    legacy = replace(item, participant_id="", recording_id=None)
+    summary = marker_occurrence_review_summary(legacy)
+    assert summary.context.startswith("Unknown participant · ")
+    assert summary.source == "P01.bdf"
+
+
+@pytest.mark.parametrize("reason, gaps, missing, early, expected", [
+    ("insufficient_project_oddball_markers", 0, 0, 0,
+     "Fewer than two distinct markers with the project's code 55 were found."),
+    ("shorter_than_expected_analyzed_cycles", 0, 0, 0,
+     "The markers cover less than the required 2 seconds of data."),
+    ("missing_marker_gap", 2, 3, 0,
+     "Long marker gaps: 2; about 3 markers may be missing."),
+    ("early_or_extra_marker", 0, 0, 4,
+     "4 marker intervals were unusually short."),
+    ("future_marker_finding", 0, 0, 0,
+     "The marker timing needs review before this repetition can be analyzed."),
+])
+def test_summary_explains_actual_finding_without_claiming_stimulation_stopped(
+    tmp_path: Path, reason: str, gaps: int, missing: int, early: int, expected: str,
+) -> None:
+    item = replace(
+        _review_item(tmp_path), review_reasons=(reason,), missing_gap_count=gaps,
+        estimated_missing_markers=missing, early_or_extra_count=early,
+    )
+    summary = marker_occurrence_review_summary(item)
+    assert summary.finding == (
+        expected + " Markers alone cannot tell whether the visual stimulation was interrupted."
+    )
+    assert reason not in summary.finding
+
+
+@pytest.mark.parametrize("start, stop, expected_enabled", [
+    (None, None, False), (10, None, False), (None, 34, False), (0, 24, True),
+])
+@pytest.mark.parametrize("has_candidates", [False, True])
+def test_summary_disables_only_unavailable_retention_actions(
+    tmp_path: Path, start: int | None, stop: int | None,
+    expected_enabled: bool, has_candidates: bool,
+) -> None:
+    item = replace(
+        _review_item(tmp_path), proposed_start_sample=start, proposed_stop_sample=stop,
+        contiguous_candidate_spans=((12, 36),) if has_candidates else (),
+    )
+    choices = {choice.decision: choice for choice in marker_occurrence_review_summary(item).choices}
+    assert choices[MARKER_DECISION_USE_CONTIGUOUS].enabled is has_candidates
+    assert choices[MARKER_DECISION_RETAIN_FULL].enabled is expected_enabled
+    assert choices[MARKER_DECISION_EXCLUDE].enabled is True
+    for decision, enabled in (
+        (MARKER_DECISION_USE_CONTIGUOUS, has_candidates),
+        (MARKER_DECISION_RETAIN_FULL, expected_enabled),
+    ):
+        assert choices[decision].description.startswith("Unavailable:") is not enabled
+    if not has_candidates:
+        with pytest.raises(MarkerOccurrenceReviewError, match="not supplied"):
+            build_marker_review_decision(item, MARKER_DECISION_USE_CONTIGUOUS, selected_span=(12, 36))
+    if not expected_enabled:
+        with pytest.raises(MarkerOccurrenceReviewError, match="too short"):
+            build_marker_review_decision(
+                item, MARKER_DECISION_RETAIN_FULL,
+                evidence_type="presentation_log", evidence_note="Reviewed presentation timing.",
+            )
+    assert build_marker_review_decision(item, MARKER_DECISION_EXCLUDE)["decision"] == MARKER_DECISION_EXCLUDE
+
+
+def test_summary_stays_compact_with_large_diagnostic_evidence(tmp_path: Path) -> None:
+    item = _review_item(tmp_path)
+    baseline = marker_occurrence_review_summary(item)
+    expanded = replace(
+        item, interval_evidence=tuple(f"diagnostic-interval-{i}: " + "x" * 1000 for i in range(1000)),
+        raw_marker_samples=tuple(range(10000)), retained_marker_samples=tuple(range(10000)),
+    )
+    assert marker_occurrence_review_summary(expanded) == baseline
+    many_candidates = replace(expanded, contiguous_candidate_spans=tuple((i, i + 24) for i in range(10000)))
+    summary = marker_occurrence_review_summary(many_candidates)
+    assert "10000 windows" in summary.choices[0].description
+    assert len(summary.finding) + sum(len(choice.description) for choice in summary.choices) < 1000
+    assert "diagnostic-interval" not in repr(summary)
+    assert expanded.interval_evidence[-1].startswith("diagnostic-interval-999:")
+
+
+def test_summary_leaves_detailed_evidence_and_decision_receipts_unchanged(tmp_path: Path) -> None:
+    item = _review_item(tmp_path)
+    original_item = deepcopy(item)
+    original_rows = marker_occurrence_review_rows(item)
+    decision_inputs = (
+        (MARKER_DECISION_USE_CONTIGUOUS, {"selected_span": (12, 36)}),
+        (MARKER_DECISION_RETAIN_FULL, {"evidence_type": "photodiode_trace", "evidence_reference": "trace.csv"}),
+        (MARKER_DECISION_EXCLUDE, {"reason": "Presentation stopped."}),
+    )
+    before = tuple(build_marker_review_decision(item, decision, reviewed_at_utc=REVIEWED_AT_UTC, **values)
+                   for decision, values in decision_inputs)
+
+    marker_occurrence_review_summary(item)
+
+    assert item == original_item
+    assert marker_occurrence_review_rows(item) == original_rows
+    assert dict(original_rows)["Raw marker samples"] == "10, 10, 12, 18, 30, 36"
+    assert "samples 18-30" in dict(original_rows)["Flagged interval evidence"]
+    assert tuple(build_marker_review_decision(item, decision, reviewed_at_utc=REVIEWED_AT_UTC, **values)
+                 for decision, values in decision_inputs) == before
 
 
 def test_retain_full_requires_evidence_type_and_note_or_reference(

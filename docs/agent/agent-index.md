@@ -14,6 +14,7 @@ shell-specific setup is needed.
 | Task | First command |
 | --- | --- |
 | General repo invariant check | `python .agents/scripts/audit/agent_audit.py` |
+| App updates, independent updater, patch/full installer packaging | `python .agents/scripts/verify.py --scope updates --tier focused` |
 | GUI, PySide6 imports, QAction, CustomTkinter/Tkinter boundaries | `python .agents/skills/pyside6-gui-cleanup/scripts/audit_gui_imports.py` |
 | Retired paths, legacy boundaries, removed features | `python .agents/skills/legacy-boundary-review/scripts/audit_protected_edits.py` |
 | Project paths, dialogs, exports, generated files | `python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py` |
@@ -28,6 +29,7 @@ shell-specific setup is needed.
 | Task | Skill | Focused docs |
 | --- | --- | --- |
 | PySide6 GUI, widgets, menus, workers, processing orchestration, status UX | `pyside6-gui-cleanup` | `docs/agent/architecture/gui.md`; `docs/agent/architecture/workers-threading.md` |
+| Updater, verified downloads, patch inventories, installer lifecycle | `project-path-audit` plus GUI skills for changed surfaces | `docs/agent/architecture/updater.md` |
 | Main App package layout, ownership, folder naming, retired package boundaries | `legacy-boundary-review` | `docs/agent/architecture/main-app-target-layout.md`; `docs/agent/architecture/legacy-boundaries.md` |
 | EEG preprocessing ownership, entry points, or processing order | `legacy-boundary-review` + `pyside6-gui-cleanup` | `docs/agent/architecture/preprocessing-contract.md` |
 | Removed-electrode auto-detection thresholds, QC calibration, or accuracy testing | `legacy-boundary-review` | `docs/agent/quality/removed-electrode-detection-calibration.md`; `docs/agent/architecture/preprocessing-contract.md` |

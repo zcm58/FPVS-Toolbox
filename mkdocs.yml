@@ -61,4 +61,7 @@ nav:
       - Individual Detectability: tools/individual-level-detectability.md
   - Reference:
       - Methods and References: reference/index.md
+      - Preprocessing QC Review: reference/preprocessing-qc-review.md
+      - Missing Condition Outputs: reference/missing-condition-outputs.md
+      - Spectral Data Files: reference/spectral-data-files.md
       - Source-PSD Reporting: reference/methods-reporting-checklist.md

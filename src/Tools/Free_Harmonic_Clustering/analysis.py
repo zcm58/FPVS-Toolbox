@@ -19,7 +19,7 @@ from dataclasses import dataclass
 import hashlib
 import math
 from time import perf_counter
-from typing import Callable, Literal, Sequence
+from typing import Callable, Iterable, Literal, Sequence
 import warnings
 
 import numpy as np
@@ -938,8 +938,22 @@ def _union_find_active_node_groups(
         if rank[left_root] == rank[right_root]:
             rank[left_root] += 1
 
+    sensors: Iterable[int] = range(sensor_count)
+    edges: Iterable[tuple[int, int]] = spatial_edges
+    if nodes.size * 2 < sensor_count:
+        # This bound guarantees that at least half the sensors are empty.
+        # Skip only empty work, retaining sensor/edge/union and mass-sum order.
+        # Dense maps keep the original loops without per-edge guard overhead.
+        active_sensors = np.any(active, axis=1)
+        sensors = map(int, np.flatnonzero(active_sensors))
+        edges = (
+            (left, right)
+            for left, right in spatial_edges
+            if active_sensors[left] and active_sensors[right]
+        )
+
     # Complete free-harmonic connectivity within each sensor.
-    for sensor in range(sensor_count):
+    for sensor in sensors:
         harmonics = np.flatnonzero(active[sensor])
         if harmonics.size > 1:
             first = sensor * harmonic_count + int(harmonics[0])
@@ -947,7 +961,7 @@ def _union_find_active_node_groups(
                 union(first, sensor * harmonic_count + int(harmonic))
 
     # Spatial connectivity is restricted to equal harmonic indices.
-    for left_sensor, right_sensor in spatial_edges:
+    for left_sensor, right_sensor in edges:
         shared_harmonics = np.flatnonzero(np.logical_and(active[left_sensor], active[right_sensor]))
         for harmonic in shared_harmonics:
             harmonic_index = int(harmonic)

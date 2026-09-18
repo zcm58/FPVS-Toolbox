@@ -1661,50 +1661,6 @@ class SettingsDialog(QDialog):
         )
         summed_bca_card.content_layout.addLayout(absolute_grid)
 
-        cohort_header = SubsectionHeaderLabel(
-            "Optional cohort-relative context",
-            summed_bca_card,
-        )
-        summed_bca_card.content_layout.addWidget(cohort_header)
-        cohort_grid = QGridLayout()
-        cohort_specs = (
-            (
-                "cohort_warning_robust_score",
-                "Robust score warning:",
-                screening.cohort_warning_robust_score,
-            ),
-            (
-                "cohort_extreme_robust_score",
-                "Robust score extreme:",
-                screening.cohort_extreme_robust_score,
-            ),
-            (
-                "cohort_warning_sum_floor_uv",
-                "Sum floor warning (uV):",
-                screening.cohort_warning_sum_floor_uv,
-            ),
-            (
-                "cohort_extreme_sum_floor_uv",
-                "Sum floor extreme (uV):",
-                screening.cohort_extreme_sum_floor_uv,
-            ),
-            (
-                "cohort_warning_peak_floor_uv",
-                "Peak floor warning (uV):",
-                screening.cohort_warning_peak_floor_uv,
-            ),
-            (
-                "cohort_extreme_peak_floor_uv",
-                "Peak floor extreme (uV):",
-                screening.cohort_extreme_peak_floor_uv,
-            ),
-        )
-        self._add_experimental_threshold_grid(
-            cohort_grid,
-            cohort_specs,
-            summed_bca_card,
-        )
-        summed_bca_card.content_layout.addLayout(cohort_grid)
         summed_bca_layout.addWidget(summed_bca_card)
         summed_bca_layout.addStretch(1)
 
@@ -3560,24 +3516,7 @@ class SettingsDialog(QDialog):
             broad_extreme_review_unique_electrodes=values[
                 "broad_extreme_review_unique_electrodes"
             ],
-            cohort_warning_robust_score=values[
-                "cohort_warning_robust_score"
-            ],
-            cohort_extreme_robust_score=values[
-                "cohort_extreme_robust_score"
-            ],
-            cohort_warning_sum_floor_uv=values[
-                "cohort_warning_sum_floor_uv"
-            ],
-            cohort_extreme_sum_floor_uv=values[
-                "cohort_extreme_sum_floor_uv"
-            ],
-            cohort_warning_peak_floor_uv=values[
-                "cohort_warning_peak_floor_uv"
-            ],
-            cohort_extreme_peak_floor_uv=values[
-                "cohort_extreme_peak_floor_uv"
-            ],
+
         )
         raw_spectral = (
             self.project.experimental_qc_settings.raw_spectral_screening.with_enabled(

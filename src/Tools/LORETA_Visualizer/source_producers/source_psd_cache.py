@@ -13,9 +13,11 @@ import json
 import os
 import re
 import zipfile
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Iterator, Mapping, Sequence
 from uuid import uuid4
 
 import numpy as np
@@ -44,13 +46,38 @@ _ARRAY_NAMES = (
     "noise_std_values",
     "noise_offsets_used",
 )
-_HARMONIC_SELECTION_CACHE_BOOKKEEPING_FIELDS = frozenset(
+_HARMONIC_SELECTION_PROVENANCE_FIELDS = frozenset(
     {
         "selection_cache_key",
         "selection_cache_saved_at",
         "selection_cache_source",
+        "selection_fingerprint",
     }
 )
+_LEGACY_INDEX_MAX_FILES = 4096
+_LEGACY_INDEX_MAX_BYTES = 256 * 1024 * 1024
+_LEGACY_METADATA_MAX_BYTES = 4 * 1024 * 1024
+_LEGACY_CANDIDATES_PER_KEY = 8
+_legacy_indices: ContextVar[dict[Path, dict[str, tuple[str, ...]]] | None] = ContextVar(
+    "source_psd_legacy_indices", default=None
+)
+
+
+@contextmanager
+def source_psd_cache_scope() -> Iterator[None]:
+    """Index historical keys at most once per project during one producer run.
+
+    Only candidate filenames are retained. Every hit still validates its full
+    metadata and numerical archive; no participant arrays survive the scope.
+    """
+    if _legacy_indices.get() is not None:
+        yield
+        return
+    token = _legacy_indices.set({})
+    try:
+        yield
+    finally:
+        _legacy_indices.reset(token)
 
 
 def scientific_source_psd_method_metadata(
@@ -58,25 +85,32 @@ def scientific_source_psd_method_metadata(
 ) -> dict[str, Any]:
     """Return method metadata containing only scientific cache-key inputs.
 
-    Harmonic-selection cache provenance is retained in prepared manifests and
-    sidecars, but it does not change the participant source calculation.  A
-    recalculation that produces the same scientific selection should therefore
-    reuse the same participant source-PSD cache entry.
+    Harmonic-selection provenance, including its project-wide fingerprint,
+    stays in prepared manifests and sidecars. It does not change a participant
+    calculation when its exact harmonic/bin, derivative and model inputs agree.
     """
 
     normalized = _canonical_mapping(method_metadata, label="method_metadata")
+    return _without_selection_provenance(normalized)
+
+
+def _without_selection_provenance(normalized: dict[str, Any]) -> dict[str, Any]:
     custom_metadata = normalized.get("custom_metadata")
     if not isinstance(custom_metadata, dict):
         return normalized
     harmonic_selection = custom_metadata.get("harmonic_selection")
     if not isinstance(harmonic_selection, dict):
         return normalized
-    custom_metadata["harmonic_selection"] = {
-        key: value
-        for key, value in harmonic_selection.items()
-        if key not in _HARMONIC_SELECTION_CACHE_BOOKKEEPING_FIELDS
+    return {
+        **normalized,
+        "custom_metadata": {
+            **custom_metadata,
+            "harmonic_selection": {
+                key: value for key, value in harmonic_selection.items()
+                if key not in _HARMONIC_SELECTION_PROVENANCE_FIELDS
+            },
+        },
     }
-    return normalized
 
 
 @dataclass(frozen=True)
@@ -342,6 +376,106 @@ def load_source_psd_cache_entry(
         raise TypeError("key_inputs must be SourcePsdCacheKeyInputs.")
     cache_key = key_inputs.cache_key
     paths = source_psd_cache_paths(project_root, cache_key)
+    lookup = _load_source_psd_cache_paths(key_inputs, paths, cache_key=cache_key)
+    if lookup.status != CACHE_STATUS_MISS_NOT_FOUND:
+        return lookup
+    # A corrupt current entry remains a miss, rather than being concealed by
+    # an older file. Historical aliases are considered only for absent keys.
+    indices = _legacy_indices.get()
+    if indices is None:
+        legacy_index = _build_legacy_source_psd_index(paths.root)
+    else:
+        if paths.root not in indices:
+            indices[paths.root] = _build_legacy_source_psd_index(paths.root)
+        legacy_index = indices[paths.root]
+    for legacy_key in legacy_index.get(cache_key, ()):
+        try:
+            legacy_paths = source_psd_cache_paths(project_root, legacy_key)
+        except (OSError, ValueError):
+            continue  # An unrelated redirected legacy entry is never trusted.
+        candidate = _load_source_psd_cache_paths(
+            key_inputs, legacy_paths, cache_key=cache_key, legacy=True
+        )
+        if candidate.hit:
+            return candidate
+    return lookup
+
+
+def _legacy_normalized_key(payload: object, stored_key: str) -> str | None:
+    """Validate the original key before removing only known provenance fields."""
+    if not isinstance(payload, Mapping) or set(payload) != {
+        "format", "derivative_checksum_sha256", "numerical_model_metadata",
+        "method_metadata", "frequency_metadata",
+    } or payload.get("format") != SOURCE_PSD_CACHE_KEY_FORMAT:
+        return None
+    try:
+        # json.loads already materialized plain JSON types. Serialize those
+        # directly instead of repeatedly copying the large project audit tree.
+        def encoded(value):
+            return json.dumps(
+                value, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False
+            ).encode("utf-8")
+
+        if hashlib.sha256(encoded(payload)).hexdigest() != stored_key:
+            return None
+        method = payload["method_metadata"]
+        if not isinstance(method, dict):
+            return None
+        normalized = {**payload, "method_metadata": _without_selection_provenance(method)}
+        return hashlib.sha256(encoded(normalized)).hexdigest()
+    except (TypeError, ValueError):
+        return None
+
+
+def _build_legacy_source_psd_index(root: Path) -> dict[str, tuple[str, ...]]:
+    """Bound compatibility discovery; limits only cause safe recomputation."""
+    candidates: dict[str, list[str]] = {}
+    remaining_bytes = _LEGACY_INDEX_MAX_BYTES
+    try:
+        for index, path in enumerate(root.glob("*.json")):
+            if index >= _LEGACY_INDEX_MAX_FILES or remaining_bytes <= 0:
+                break
+            key = path.stem
+            if not _CACHE_KEY_RE.fullmatch(key) or path.is_symlink():
+                continue
+            try:
+                if path.resolve(strict=False).parent != root:
+                    continue
+                size = path.stat().st_size
+                if size > _LEGACY_METADATA_MAX_BYTES or size > remaining_bytes:
+                    continue
+                remaining_bytes -= size
+                with path.open("rb") as stream:
+                    data = stream.read(size + 1)
+                if len(data) > size:
+                    continue  # Changed in flight; do not index this version.
+                metadata = json.loads(data)
+                if not isinstance(metadata, dict) or (
+                    metadata.get("format") != SOURCE_PSD_CACHE_FORMAT
+                    or metadata.get("cache_key") != key
+                ):
+                    continue
+                normalized_key = _legacy_normalized_key(metadata.get("key_payload"), key)
+                if normalized_key is None or normalized_key == key:
+                    continue
+                matches = candidates.setdefault(normalized_key, [])
+                if len(matches) < _LEGACY_CANDIDATES_PER_KEY:
+                    matches.append(key)
+            except (OSError, UnicodeError, ValueError):
+                continue
+    except OSError:
+        return {}
+    return {key: tuple(values) for key, values in candidates.items()}
+
+
+def _load_source_psd_cache_paths(
+    key_inputs: SourcePsdCacheKeyInputs,
+    paths: SourcePsdCachePaths,
+    *,
+    cache_key: str,
+    legacy: bool = False,
+) -> SourcePsdCacheLookup:
+    stored_key = paths.metadata_path.stem
     arrays_exists = paths.arrays_path.is_file()
     metadata_exists = paths.metadata_path.is_file()
     if not arrays_exists and not metadata_exists:
@@ -355,14 +489,18 @@ def load_source_psd_cache_entry(
         return _miss(cache_key, paths, CACHE_STATUS_MISS_METADATA_UNREADABLE, str(exc))
     if not isinstance(metadata, dict) or metadata.get("format") != SOURCE_PSD_CACHE_FORMAT:
         return _miss(cache_key, paths, CACHE_STATUS_MISS_SCHEMA, "Cache metadata format mismatch.")
-    if metadata.get("cache_key") != cache_key:
+    if metadata.get("cache_key") != stored_key:
         return _miss(cache_key, paths, CACHE_STATUS_MISS_KEY, "Stored cache key mismatch.")
-    try:
-        stored_key_payload = _canonical_json_bytes(metadata.get("key_payload"))
-        requested_key_payload = _canonical_json_bytes(key_inputs.canonical_payload())
-    except (TypeError, ValueError) as exc:
-        return _miss(cache_key, paths, CACHE_STATUS_MISS_KEY, str(exc))
-    if stored_key_payload != requested_key_payload:
+    if legacy:
+        payload_matches = _legacy_normalized_key(metadata.get("key_payload"), stored_key) == cache_key
+    else:
+        try:
+            stored_key_payload = _canonical_json_bytes(metadata.get("key_payload"))
+            requested_key_payload = _canonical_json_bytes(key_inputs.canonical_payload())
+        except (TypeError, ValueError) as exc:
+            return _miss(cache_key, paths, CACHE_STATUS_MISS_KEY, str(exc))
+        payload_matches = stored_key_payload == requested_key_payload
+    if not payload_matches:
         return _miss(cache_key, paths, CACHE_STATUS_MISS_KEY, "Stored scientific key payload mismatch.")
     if metadata.get("arrays_file") != paths.arrays_path.name:
         return _miss(cache_key, paths, CACHE_STATUS_MISS_SCHEMA, "Stored arrays filename mismatch.")
@@ -566,6 +704,7 @@ __all__ = [
     "load_source_psd_cache_entry",
     "source_psd_cache_paths",
     "source_psd_cache_root",
+    "source_psd_cache_scope",
     "scientific_source_psd_method_metadata",
     "store_source_psd_cache_entry",
 ]

@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from copy import deepcopy
 import math
+from pathlib import Path
+from collections.abc import Mapping
+from dataclasses import replace
 
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QCloseEvent, QPainter, QPen, QPolygonF
@@ -182,6 +185,8 @@ class KurtosisReviewDialog(AppDialog):
         *,
         reviewer_identity: str | None = None,
         auto_interpolate_all: bool = False,
+        project_root: Path | str | None = None,
+        signal_params: Mapping[str, object] | None = None,
     ) -> None:
         if isinstance(review, KurtosisReviewDecisionReconciliation):
             scan = review.scan
@@ -199,7 +204,7 @@ class KurtosisReviewDialog(AppDialog):
         super().__init__(
             "Kurtosis Electrode Review",
             parent,
-            size=SurfaceSize(1260, 720, min_width=980, min_height=560),
+            size=SurfaceSize(1240, 820, min_width=1100, min_height=650),
         )
         self.setObjectName("kurtosis_review_dialog")
         self.setModal(True)
@@ -207,6 +212,8 @@ class KurtosisReviewDialog(AppDialog):
         self._current_receipts = deepcopy(current_receipts)
         self._reviewer_identity = str(reviewer_identity or "").strip() or None
         self._auto_interpolate_all = bool(auto_interpolate_all)
+        self._project_root = Path(project_root) if project_root is not None else None
+        self._signal_params = dict(signal_params or {})
         self._decision_controls: dict[tuple[str, str], QComboBox] = {}
         self._reason_controls: dict[tuple[str, str], QLineEdit] = {}
         self._invalid_reason: QLineEdit | None = None
@@ -229,6 +236,7 @@ class KurtosisReviewDialog(AppDialog):
         )
         self._accepted_receipts: dict[str, dict[str, dict[str, object]]] | None = None
         self._validate_unique_items()
+        self._bulk_undo: tuple[tuple[int, int, str], ...] = ()
         self._build_ui()
 
     def _validate_unique_items(self) -> None:
@@ -290,7 +298,7 @@ class KurtosisReviewDialog(AppDialog):
         self.table.setObjectName("kurtosis_review_table")
         self.table.setHorizontalHeaderLabels(headers)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.table.setAlternatingRowColors(True)
         self.table.setWordWrap(False)
         self.table.verticalHeader().setVisible(False)
@@ -328,6 +336,8 @@ class KurtosisReviewDialog(AppDialog):
             decision.model().item(3).setEnabled(False)
             decision.setCurrentIndex(0)
             decision.currentIndexChanged.connect(self._clear_error)
+            decision.currentIndexChanged.connect(self._refresh_action_scope)
+            decision.activated.connect(self._discard_bulk_undo)
             decision.activated.connect(lambda _index, row=row: self.table.setCurrentCell(row, 0))
             self.table.setCellWidget(row, 5, decision)
 
@@ -335,6 +345,7 @@ class KurtosisReviewDialog(AppDialog):
             reason.setObjectName(f"kurtosis_review_reason_{row}")
             reason.setPlaceholderText("Reason (optional)")
             reason.textChanged.connect(self._clear_error)
+            reason.textEdited.connect(self._discard_bulk_undo)
             self.table.setCellWidget(row, 6, reason)
             key = (item.recording_id.casefold(), item.channel.casefold())
             self._decision_controls[key] = decision
@@ -354,16 +365,59 @@ class KurtosisReviewDialog(AppDialog):
         self.auto_checkbox.toggled.connect(self._refresh_automatic_rows)
         self.auto_all_checkbox.toggled.connect(self._refresh_automatic_rows)
         self.show_auto_checkbox.toggled.connect(self._refresh_automatic_rows)
+        self.auto_checkbox.clicked.connect(self._discard_bulk_undo)
+        self.auto_all_checkbox.clicked.connect(self._discard_bulk_undo)
+
+        review_actions = ActionRow(self, alignment=Qt.AlignmentFlag.AlignLeft)
+        self.inspect_button = review_actions.add_button(
+            make_action_button("Inspect signal", variant="secondary", parent=review_actions)
+        )
+        self.inspect_button.setObjectName("kurtosis_inspect_signal")
+        self.inspect_button.clicked.connect(self._inspect_signal)
+        self.support_button = review_actions.add_button(
+            make_action_button("Repair support", variant="secondary", parent=review_actions)
+        )
+        self.support_button.setObjectName("kurtosis_repair_support")
+        self.support_button.clicked.connect(self._inspect_repair_support)
+        self.next_button = review_actions.add_button(
+            make_action_button("Next undecided", variant="secondary", parent=review_actions)
+        )
+        self.next_button.setObjectName("kurtosis_next_undecided")
+        self.next_button.clicked.connect(self._next_undecided)
+        self.selected_decision = QComboBox(review_actions)
+        self.selected_decision.setAccessibleName("Decision for selected undecided electrodes")
+        self.selected_decision.addItem("Interpolate", KURTOSIS_DECISION_APPROVE)
+        self.selected_decision.addItem("Keep channel", KURTOSIS_DECISION_REJECT)
+        self.selected_decision.currentIndexChanged.connect(self._refresh_action_scope)
+        review_actions.row_layout.addWidget(self.selected_decision)
+        self.selected_button = review_actions.add_button(
+            make_action_button("Apply to selected", variant="secondary", parent=review_actions)
+        )
+        self.selected_button.setObjectName("kurtosis_apply_selected_pending")
+        self.selected_button.clicked.connect(self._apply_selected_pending)
+        self.undo_button = review_actions.add_button(
+            make_action_button("Undo bulk edit", variant="secondary", parent=review_actions)
+        )
+        self.undo_button.setObjectName("kurtosis_undo_bulk")
+        self.undo_button.setEnabled(False)
+        self.undo_button.clicked.connect(self._undo_bulk_edit)
+        self.root_layout.addWidget(review_actions)
+        self.scope_label = QLabel(self)
+        self.scope_label.setObjectName("kurtosis_action_scope")
+        self.scope_label.setWordWrap(True)
+        self.root_layout.addWidget(self.scope_label)
+        self.table.itemSelectionChanged.connect(self._refresh_action_scope)
 
         actions = ActionRow(self)
         actions.setObjectName("kurtosis_review_actions")
         self.mark_all_button = actions.add_button(
-            make_action_button("Interpolate all flagged", variant="secondary", parent=actions)
+            make_action_button("Interpolate all undecided", variant="secondary", parent=actions)
         )
         self.mark_all_button.setObjectName("kurtosis_review_interpolate_all")
         self.mark_all_button.setToolTip(
-            "Select interpolation for all flagged electrodes above the configured threshold "
-            "and fill the reason with 'User auto mark'. Then click Apply decisions."
+            "Select interpolation only for visible undecided manual flags above the "
+            "configured threshold. Existing decisions, reasons and automatic policies "
+            "are preserved. Undo is available before Apply decisions."
         )
         self.mark_all_button.clicked.connect(self._mark_all_flagged)
         self.cancel_button = actions.add_button(make_action_button("Cancel", variant="secondary", parent=actions))
@@ -376,20 +430,146 @@ class KurtosisReviewDialog(AppDialog):
         self.apply_button.clicked.connect(self._validate_and_accept)
         self.root_layout.addWidget(actions)
         self._refresh_automatic_rows()
+        self._refresh_action_scope()
 
     def _mark_all_flagged(self) -> None:
-        # Make this explicit bulk choice (including hidden >10 rows) use the
-        # requested reason instead of the experimental policy's generated reason.
-        self.auto_all_checkbox.setChecked(False)
-        self.auto_checkbox.setChecked(False)
-        for item in self._items:
-            score = item.signed_normalized_score
-            if score is None or not math.isfinite(score) or abs(score) <= item.threshold:
-                continue
+        self._apply_bulk_decision(self._pending_manual_rows(), KURTOSIS_DECISION_APPROVE)
+
+    def _pending_manual_rows(self) -> tuple[int, ...]:
+        automatic = self._selected_automatic_rows()
+        return tuple(
+            row for row, item in enumerate(self._items)
+            if row not in automatic and not self.table.isRowHidden(row)
+            and not self._decision_controls[
+                (item.recording_id.casefold(), item.channel.casefold())
+            ].currentData()
+            and item.signed_normalized_score is not None
+            and math.isfinite(item.signed_normalized_score)
+            and abs(item.signed_normalized_score) > item.threshold
+        )
+
+    def _selected_pending_rows(self) -> tuple[int, ...]:
+        selected = {index.row() for index in self.table.selectionModel().selectedRows()}
+        return tuple(row for row in self._pending_manual_rows() if row in selected)
+
+    def _apply_selected_pending(self) -> None:
+        self._apply_bulk_decision(
+            self._selected_pending_rows(), str(self.selected_decision.currentData())
+        )
+
+    def _apply_bulk_decision(self, rows: tuple[int, ...], decision_value: str) -> None:
+        if not rows:
+            return
+        snapshots = []
+        for row in rows:
+            item = self._items[row]
             key = (item.recording_id.casefold(), item.channel.casefold())
-            decision = self._decision_controls[key]
-            decision.setCurrentIndex(decision.findData(KURTOSIS_DECISION_APPROVE))
-            self._reason_controls[key].setText("User auto mark")
+            control = self._decision_controls[key]
+            snapshots.append((row, control.currentIndex(), self._reason_controls[key].text()))
+            control.setCurrentIndex(control.findData(decision_value))
+        self._bulk_undo = tuple(snapshots)
+        self.undo_button.setEnabled(True)
+        self._refresh_action_scope()
+
+    def _discard_bulk_undo(self, *_args: object) -> None:
+        self._bulk_undo = ()
+        self.undo_button.setEnabled(False)
+
+    def _undo_bulk_edit(self) -> None:
+        snapshots = self._bulk_undo
+        self._bulk_undo = ()
+        for row, index, reason in snapshots:
+            item = self._items[row]
+            key = (item.recording_id.casefold(), item.channel.casefold())
+            self._decision_controls[key].setCurrentIndex(index)
+            self._reason_controls[key].setText(reason)
+        self.undo_button.setEnabled(False)
+        self._refresh_action_scope()
+
+    def _next_undecided(self) -> None:
+        automatic = self._selected_automatic_rows()
+        current = self.table.currentRow()
+        rows = list(range(current + 1, len(self._items))) + list(range(current + 1))
+        for row in rows:
+            item = self._items[row]
+            key = (item.recording_id.casefold(), item.channel.casefold())
+            if row not in automatic and not self._decision_controls[key].currentData():
+                self.table.setCurrentCell(row, 0)
+                self.table.scrollToItem(self.table.item(row, 0))
+                return
+
+    def _refresh_action_scope(self, *_args: object) -> None:
+        if not hasattr(self, "scope_label"):
+            return
+        rows = self._selected_pending_rows()
+        recordings = {self._items[row].recording_id for row in rows}
+        all_rows = self._pending_manual_rows()
+        all_recordings = {self._items[row].recording_id for row in all_rows}
+        self.selected_button.setEnabled(bool(rows))
+        self.mark_all_button.setEnabled(bool(all_rows))
+        self.scope_label.setText(
+            f"Selected action: {len(rows)} undecided electrode(s) across "
+            f"{len(recordings)} recording(s). All undecided: {len(all_rows)} electrode(s) "
+            f"across {len(all_recordings)} recording(s). 0 hidden rows affected. "
+            "Interpolation applies across every analyzed condition in each recording."
+        )
+        current = self.table.currentRow()
+        self.inspect_button.setEnabled(current >= 0 and self._project_root is not None)
+        self.support_button.setEnabled(current >= 0)
+
+    def _inspect_repair_support(self) -> None:
+        from Main_App.gui.qc_repair_support import RepairSupportDialog
+
+        row = self.table.currentRow()
+        if row < 0:
+            return
+        item = self._items[row]
+        channels, repair_channels, unavailable_donors = self._repair_context(item)
+        RepairSupportDialog(
+            channels=channels, repair_channels=repair_channels, confirmed=False, parent=self,
+            unusable_channels=unavailable_donors,
+        ).exec()
+
+    def _repair_context(self, item: KurtosisReviewItem) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
+        """Describe current/proposed repairs while withholding undecided donors."""
+        channels = tuple(item.evidence.get("geometry_identity", {}).get("retained_scalp_channels", ()))
+        repair_channels = set(getattr(item, "signal_view", {}).get("upstream_bad_channels", ()))
+        current_channels = {candidate.channel for candidate in self._items
+                            if candidate.recording_id == item.recording_id}
+        for channel, receipt in self._current_receipts.get(item.recording_id, {}).items():
+            if channel not in current_channels and receipt.get("decision") == KURTOSIS_DECISION_APPROVE:
+                repair_channels.add(channel)
+        automatic = self._selected_automatic_rows()
+        unavailable_donors = set(repair_channels)
+        for index, candidate in enumerate(self._items):
+            if candidate.recording_id != item.recording_id:
+                continue
+            key = (candidate.recording_id.casefold(), candidate.channel.casefold())
+            if index in automatic or self._decision_controls[key].currentData() == KURTOSIS_DECISION_APPROVE:
+                repair_channels.add(candidate.channel)
+            if not self._decision_controls[key].currentData():
+                unavailable_donors.add(candidate.channel)
+        # The current electrode is shown as a proposed repair while undecided.
+        key = (item.recording_id.casefold(), item.channel.casefold())
+        if not self._decision_controls[key].currentData():
+            repair_channels.add(item.channel)
+        unavailable_donors.update(repair_channels)
+        return channels, tuple(sorted(repair_channels)), tuple(sorted(unavailable_donors))
+
+    def _inspect_signal(self) -> None:
+        # Reader/worker imports stay lazy; loading and diagnostics belong to the viewer worker.
+        from Main_App.gui.qc_signal_viewer import QcSignalViewer
+        from Main_App.processing.qc_signal_view import request_from_kurtosis_item
+
+        row = self.table.currentRow()
+        if row < 0 or self._project_root is None:
+            return
+        request = request_from_kurtosis_item(
+            self._items[row], self._project_root, self._signal_params
+        )
+        _channels, _repairs, unavailable_donors = self._repair_context(self._items[row])
+        request = replace(request, unusable_channels=unavailable_donors)
+        QcSignalViewer(request, self).exec()
 
     def _selected_automatic_rows(self) -> frozenset[int]:
         if self.auto_all_checkbox.isChecked():
@@ -431,11 +611,13 @@ class KurtosisReviewDialog(AppDialog):
                 self.preview.hide()
         elif current >= 0:
             self._show_selected_evidence(current)
+        self._refresh_action_scope()
 
     def _show_selected_evidence(self, row: int, *_args: object) -> None:
         if row < 0:
             self.details.clear()
             self.preview.hide()
+            self._refresh_action_scope()
             return
         item = self._items[row]
         automatic = row in self._selected_automatic_rows()
@@ -451,6 +633,7 @@ class KurtosisReviewDialog(AppDialog):
         )
         self.preview.set_signal(item.signal_preview, item.signal_unit, item.signal_source_sample_count)
         self.preview.show()
+        self._refresh_action_scope()
 
     def _clear_error(self, *_args: object) -> None:
         self.error_banner.hide()

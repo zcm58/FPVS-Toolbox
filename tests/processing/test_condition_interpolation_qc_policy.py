@@ -76,7 +76,7 @@ def test_narrow_exclusions_are_not_accepted(action, enabled):
 
 
 def test_roi_cannot_be_interpolated_as_a_group():
-    with pytest.raises(ValueError, match="not an ROI"):
+    with pytest.raises(ValueError, match="ROI-level.*no longer supported"):
         qc.validate_frequency_domain_qc_review_decisions(
             _report(enabled=True, roi=True), _decision(artifact_confirmed=True),
         )
@@ -112,12 +112,54 @@ def test_legacy_electrode_exclusion_is_inactive_even_before_review():
     assert not exclusions.excluded_electrodes_by_participant_condition
 
 
-def test_roi_finding_can_still_exclude_the_whole_condition():
+@pytest.mark.parametrize("action", [
+    qc.DECISION_RETAIN,
+    qc.DECISION_EXCLUDE_CONDITION,
+    qc.DECISION_EXCLUDE_PARTICIPANT,
+    qc.DECISION_EXCLUDE_RECORDING,
+])
+def test_roi_findings_cannot_receive_current_review_decisions(action):
+    with pytest.raises(ValueError, match="ROI-level.*no longer supported"):
+        qc.validate_frequency_domain_qc_review_decisions(
+            _report(roi=True, recording=True), _decision(action),
+        )
+
+
+@pytest.mark.parametrize("action", [
+    qc.DECISION_EXCLUDE_CONDITION,
+    qc.DECISION_EXCLUDE_PARTICIPANT,
+    qc.DECISION_EXCLUDE_RECORDING,
+])
+@pytest.mark.parametrize("identity", [
+    {"roi": "Posterior"},
+    {"roi": "Posterior", "electrode": "O2"},
+    {"decision_scope": "recording_condition_roi"},
+    {"decision_scope": "participant_condition_roi"},
+])
+def test_legacy_roi_decision_cannot_exclude_any_data(action, identity):
+    exclusions = qc._frequency_domain_exclusions_from_rows(
+        state={}, decisions=[{
+            "decision": action, "participant_id": "P1", "recording_id": "P1_VISIT2",
+            "condition": "Faces", **identity,
+        }], manual_entries=[], manual_recording_entries=[],
+    )
+    assert not exclusions.excluded_participants
+    assert not exclusions.excluded_recordings
+    assert not exclusions.excluded_participant_conditions
+    assert not exclusions.excluded_recording_conditions
+    assert not exclusions.excluded_electrodes_by_participant_condition
+
+
+@pytest.mark.parametrize("action, attribute, expected", [
+    (qc.DECISION_EXCLUDE_CONDITION, "excluded_recording_conditions", {("P1_VISIT2", "Faces")}),
+    (qc.DECISION_EXCLUDE_PARTICIPANT, "excluded_participants", {"P1"}),
+    (qc.DECISION_EXCLUDE_RECORDING, "excluded_recordings", {"P1_VISIT2"}),
+])
+def test_electrode_finding_still_supports_explicit_broader_decisions(action, attribute, expected):
     rows = qc.validate_frequency_domain_qc_review_decisions(
-        _report(roi=True), _decision(qc.DECISION_EXCLUDE_CONDITION),
+        _report(recording=True), _decision(action),
     )
     exclusions = qc._frequency_domain_exclusions_from_rows(
         state={}, decisions=rows, manual_entries=[], manual_recording_entries=[],
     )
-    assert exclusions.excluded_participant_conditions == {("P1", "Faces")}
-    assert not exclusions.excluded_electrodes_by_participant_condition
+    assert getattr(exclusions, attribute) == expected

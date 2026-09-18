@@ -48,6 +48,7 @@ class InterpolationBurdenReviewItem:
     group_label: str | None
     default_scope: str
     evidence_status: str
+    eligible_scalp_channels: tuple[str, ...] = ()
 
     @property
     def processing_id(self) -> str:
@@ -354,6 +355,7 @@ def collect_interpolation_burden_review(
                     else INTERPOLATION_BURDEN_SCOPE_PARTICIPANT
                 ),
                 evidence_status=evidence_status,
+                eligible_scalp_channels=burden.eligible_scalp_channels,
             )
         )
 

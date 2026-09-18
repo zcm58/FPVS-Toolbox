@@ -378,12 +378,28 @@ recording/participant decision review; continuing does not promote their
 channels to interpolation targets. Technical integrity failures and saved
 manual exclusions remain independent. Each review row begins unselected and
 must be explicitly kept or excluded; an exclusion can use recording or
-participant scope. V4 caps participant workers at four,
-simultaneous BDF reads at two, and simultaneous spectral evaluators at two. A
+participant scope. Participant concurrency is capped at eight; requests above
+the previous four-worker ceiling must also satisfy the shared CPU/total-RAM
+tier policy without a RAM-cap bypass. Resource-query failure retains the
+four-worker ceiling. Requests already bounded to four or fewer retain their
+existing behavior. The GUI and backend share `preflight_worker_count` so the
+reported count matches the scheduling policy. Simultaneous BDF reads remain
+capped at two, and simultaneous spectral evaluators at two. A
 condition buffer larger than 256 MiB is filled in 10-second chunks into a
 temporary condition-only float64 memmap; no full-recording preflight memmap is
-created. V4 preserves deterministic result order and checks cancellation
+created. The scheduler preserves deterministic result order and checks cancellation
 between condition reads, diagnostic windows, FFT channel batches, and cache writes.
+
+Raw-channel metrics and spatial normalization use guarded finite-float64
+reductions to avoid redundant NaN masks and scratch copies. Unsupported
+layouts or nonfinite values retain the original NaN-aware formulas. Spatial
+donor finiteness is checked once per row; the median, donor order, finite-index
+copies, norm/dot operations and BLAS thread settings remain unchanged. Frozen
+baseline tests compare IEEE float bits, ordered findings and complete evidence
+payloads, including nonfinite, signed-zero, overflow and strided inputs. This
+optimization does not change thresholds, authority, dependency versions or
+cache identities; existing exact evidence remains reusable.
+
 Successful participant results
 are cached atomically under the active project root at
 `.fpvs_processing/preflight_qc/v7_analyzed_condition_scope`; a missing, corrupt, or
@@ -717,6 +733,22 @@ Filtering:
   downsample target rate. When filtering now runs before downsampling, the
   sample count is scaled to the current sampling rate to preserve the same
   filter duration and MNE transition-band validity.
+- `Main_App.processing.prepared_fir` may reuse only MNE's exact direct
+  `np.convolve(h, h[::-1])` result in an explicit processing-worker batch.
+  A runtime and implementation guard protects an isolated copy of the existing
+  MNE call chain; it never patches MNE/NumPy globals. Filter design, warnings,
+  annotation segmentation, padding, FFT sizing and application still run for
+  each file. Unsupported runtimes or implementations use public `Raw.filter`;
+  unsupported coefficients use the original convolution without retention.
+  No filtering, resampling, Hann-notch or statistical
+  method/version settings change.
+- Kernel identity includes the live native BLAS configuration: even identical
+  coefficients can produce different last bits at different thread counts.
+  Unavailable/unrecognized configuration bypasses reuse, and a visible change
+  during convolution prevents admission. The processing worker owns a stable
+  native-thread policy; concurrent external reconfiguration during a native
+  call is outside that ownership contract, not an atomicity guarantee supplied
+  by this cache. No thread count is forced or changed by kernel preparation.
 - The code logs filter snapshot, mutation, Nyquist, range, applied-cutoff, and
   mismatch diagnostics. These messages are part of the current regression
   surface because they help diagnose accidental cutoff changes.
@@ -841,7 +873,13 @@ Kurtosis review and interpolation:
   this authority. The two stages must agree on selection metadata and donor
   exclusions for unchanged inputs; genuinely changed evidence still requires review.
 - The scan may run at most two independent recordings concurrently, guarded by
-  available CPU/RAM and distinct loader memmap names. Each job retains the
+  available CPU/RAM and distinct loader memmap names. Verified whole-participant,
+  recording, and all-analyzed-condition exclusions are resolved before resource
+  estimates or scheduling. Excluded file sizes and duplicate stems cannot
+  reduce the worker pool for retained recordings. Missing or invalid source
+  plans remain errors, not inferred exclusions. An active speculative read
+  still counts against loading concurrency even if its participant has just
+  been excluded. Each job retains the
   shared processing order and numerical implementation and stops before
   interpolation/final reference even when automatic decisions are ready. If
   review turns off an auto-on scan's policy, the workflow rescans to collect
@@ -849,6 +887,13 @@ Kurtosis review and interpolation:
   be reused without an extra copy. Results retain input order, progress callbacks
   run on the calling worker, and cancellation waits for active stages to close
   their Raw objects. Stage timings separate loading/preprocessing from scoring.
+- Structured kurtosis progress reports eligible total, completed eligible
+  entries, exclusions and failures independently. The GUI reports successful
+  processing separately from exclusions and failed entries; an all-excluded
+  scan completes at zero eligible recordings. The existing three-argument
+  progress callback retains its full-request accounting for compatibility.
+  Skip/error records remain in original input order, and these scheduling and
+  presentation changes do not alter numerical evidence or cache fingerprints.
 - A decision receipt is valid only for its recording, channel, evidence
   fingerprint, processing settings, analyzed spans, and BioSemi64 geometry.
   Changed evidence requires review again. Only authorized channels are appended
@@ -920,6 +965,51 @@ results.
   behavior and generated outputs are unchanged.
 
 ## Focused Verification
+
+### Diagnostic inspection and review presentation
+
+`processing/qc_signal_view.py` owns bounded, read-only signal requests and
+peak-preserving extrema previews. `workers/qc_signal_view_worker.py` performs
+source/checkpoint reads; `gui/qc_signal_viewer.py` owns presentation and
+cancellation. The viewer can inspect acquisition samples, the configured
+initial-reference preview, reference-channel comparisons, and the existing
+float64 pre-interpolation checkpoint. Exact source and target sample grids are
+carried separately; occurrence gaps are never displayed as continuous EEG.
+Prepared views validate the active project-root checkpoint, source identity,
+array dimensions and evidence identity. Each read verifies content hashes before
+reusing a bounded overview, including same-size edits with restored timestamps.
+Panning reuses the overview after verification and reads only bounded detail
+samples. Closing cancels and waits through signals, never a
+blocking GUI-thread wait.
+
+`processing/qc_review_episodes.py` groups coincident diagnostic-window coverage
+within one recording, condition and occurrence. Every underlying finding is
+retained. Whole-occurrence or unlocalized evidence cannot bridge independent
+time windows. This grouping is presentation only, with no new cause,
+independence, duration or decision-authority claim.
+
+`processing/qc_review_diagnostics.py` adapts MNE's public
+`preprocessing.annotate_amplitude` to bounded channel/occurrence slices and
+describes exact flatlines, repeated extreme plateau candidates and abrupt
+consecutive-sample transitions. Results retain method/MNE version, settings,
+sample fingerprints, exact assessed intervals, output limits and unavailable
+states. The scanner assesses already-loaded acquisition data before the
+existing preprocessing function mutates it. Neither returned annotations nor
+MNE bad-channel suggestions are applied. New shadow evidence never enters the
+kurtosis corroborator registry and cannot authorize interpolation/exclusion.
+See [calibration requirements](../quality/kurtosis-screening-calibration.md).
+
+Kurtosis review supports selected undecided manual decisions, next-undecided
+navigation and undo. Bulk actions preserve existing choices, reasons and
+automatic policies and exclude hidden/automatic rows. The proposed repair map
+includes current choices and upstream repairs, excludes undecided candidates
+as donors, and states whole-recording consequences. The confirmed burden
+review receives the actual normalized retained scalp set and successful repair
+channels; it does not reconstruct that denominator from the nominal cap size.
+`gui/qc_repair_support.py` presents this donor geometry without a new risk
+threshold. Optional spatial holdout uses MNE interpolation on bounded copied
+samples of usable electrodes; its descriptive error is not damaged-electrode
+ground truth or a release criterion.
 
 Use the processing scope for preprocessing ownership, routing, or behavior
 changes. The driver selects `.venv1` or `.venv` and excludes Qt execution

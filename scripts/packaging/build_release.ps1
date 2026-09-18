@@ -1,7 +1,10 @@
 param(
     [switch]$SkipInstall,
     [string]$InnoCompiler,
-    [switch]$SkipSmoke
+    [switch]$SkipSmoke,
+    [switch]$AllowVisibleGui,
+    [string[]]$BaselineInventory = @(),
+    [string[]]$BaselineInventorySha256 = @()
 )
 
 $ErrorActionPreference = "Stop"
@@ -40,23 +43,9 @@ try {
 
     Write-Output ""
     Write-Output "Building FPVS Toolbox installer..."
-    if ($InnoCompiler -and $SkipSmoke) {
-        & $BuildInstallerScript -InnoCompiler $InnoCompiler -SkipSmoke
-        Assert-LastCommandSucceeded "$BuildInstallerScript -InnoCompiler $InnoCompiler -SkipSmoke"
-    }
-    elseif ($InnoCompiler) {
-        & $BuildInstallerScript -InnoCompiler $InnoCompiler
-        Assert-LastCommandSucceeded "$BuildInstallerScript -InnoCompiler $InnoCompiler"
-    }
-    elseif ($SkipSmoke) {
-        & $BuildInstallerScript -SkipSmoke
-        Assert-LastCommandSucceeded "$BuildInstallerScript -SkipSmoke"
-    }
-    else {
-        & $BuildInstallerScript
-        Assert-LastCommandSucceeded $BuildInstallerScript
-    }
-
+    & $BuildInstallerScript -InnoCompiler $InnoCompiler -SkipSmoke:$SkipSmoke -AllowVisibleGui:$AllowVisibleGui `
+        -BaselineInventory $BaselineInventory -BaselineInventorySha256 $BaselineInventorySha256
+    Assert-LastCommandSucceeded $BuildInstallerScript
     Write-Output ""
     Write-Output "FPVS Toolbox release build completed successfully."
 }

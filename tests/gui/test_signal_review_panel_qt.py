@@ -133,6 +133,69 @@ def test_duplicate_findings_are_kept(qtbot, review_items):
     assert panel.tree.topLevelItem(0).childCount() == 2
 
 
+def test_episode_selection_keeps_linked_evidence_through_filters_and_emits_inspection(qtbot, review_items):
+    first = replace(
+        review_items[0], source_path="/project/p13.bdf",
+        time_spans_s=((10.0, 20.0),), time_scope="diagnostic_windows",
+    )
+    second = replace(
+        first, title="Brief burst", channels="T7", kind="Amplitude",
+        export_row=(*first.export_row[:-1], "Second detector evidence remains complete."),
+        time_spans_s=((15.0, 25.0),),
+    )
+    panel = SignalReviewPanel((first, second))
+    qtbot.addWidget(panel)
+    root = panel.tree.topLevelItem(0)
+    episode = root.child(0)
+    assert root.childCount() == 1
+    assert episode.childCount() == 2
+    assert "10–25 s" in episode.text(0)
+    assert first.details in panel.details_view.toPlainText()
+    assert second.details in panel.details_view.toPlainText()
+    assert "not independent confirmations" in panel.details_view.toPlainText()
+    assert panel.inspect_button.isEnabled()
+    with qtbot.waitSignal(panel.inspect_requested) as emitted:
+        panel.inspect_button.click()
+    assert emitted.args[0].item_indices == (0, 1)
+    assert emitted.args[0].time_spans_s == ((10.0, 25.0),)
+    assert emitted.args[0].source_path == "/project/p13.bdf"
+
+    for index in (1, 0):
+        panel.tree.setCurrentItem(episode.child(index))
+        with qtbot.waitSignal(panel.inspect_requested) as selected_leaf:
+            panel.inspect_button.click()
+        assert selected_leaf.args[0].item_indices == (index,)
+        assert selected_leaf.args[0].time_spans_s == ((10.0, 25.0),)
+        assert selected_leaf.args[0].source_path == "/project/p13.bdf"
+    panel.tree.setCurrentItem(episode)
+    with qtbot.waitSignal(panel.inspect_requested) as selected_group:
+        panel.inspect_button.click()
+    assert selected_group.args[0].item_indices == (0, 1)
+
+    panel.search_edit.setText("T7")
+    episode = panel.tree.topLevelItem(0).child(0)
+    assert episode.childCount() == 1
+    assert "1 of 2 review items" in panel.count_label.text()
+    assert first.details in panel.details_view.toPlainText()
+    assert second.details in panel.details_view.toPlainText()
+    assert "hidden by the current filters" in panel.details_view.toPlainText()
+
+
+def test_nonlocalized_inspection_never_invents_an_interval(qtbot, review_items):
+    item = replace(review_items[2], source_path="/project/p13.bdf")
+    panel = SignalReviewPanel((item,))
+    qtbot.addWidget(panel)
+    assert "No localized interval" in panel.details_context_label.text()
+    with qtbot.waitSignal(panel.inspect_requested) as emitted:
+        panel.inspect_button.click()
+    assert emitted.args[0].time_spans_s == ()
+    assert emitted.args[0].start_seconds is None
+    assert emitted.args[0].end_seconds is None
+
+    panel.search_edit.setText("no matching finding")
+    assert not panel.inspect_button.isEnabled()
+
+
 def test_long_evidence_fits_bounded_themed_workspace(qtbot, review_items):
     app = QApplication.instance()
     previous_stylesheet = app.styleSheet()

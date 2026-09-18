@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import sys
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -18,8 +19,10 @@ import numpy as np
 import pandas as pd
 
 from Main_App.processing.frequency_qc_identity import (
+    FrequencyQcReviewIdentityError,
     resolve_frequency_qc_recording_decisions,
 )
+from Main_App.processing.provisional_harmonic_cache import ProvisionalHarmonicCache
 from Main_App.projects import (
     project_manifest_transaction,
     ProjectDatasetIndex,
@@ -43,9 +46,9 @@ QUALITY_CHECK_FOLDER = "Quality Check"
 FREQUENCY_DOMAIN_QC_REPORT_NAME = "Frequency_Domain_QC_Review.txt"
 FREQUENCY_DOMAIN_QC_METADATA_PATH = ("tools", "frequency_domain_qc")
 FREQUENCY_DOMAIN_QC_SCHEMA_VERSION = 4
-FREQUENCY_DOMAIN_QC_METHOD_VERSION = "experimental_summed_bca_review_v4"
+FREQUENCY_DOMAIN_QC_METHOD_VERSION = "experimental_summed_bca_electrode_review_v5"
 REPEATED_FREQUENCY_DOMAIN_QC_METHOD_VERSION = (
-    "experimental_summed_bca_recording_review_v4"
+    "experimental_summed_bca_recording_electrode_review_v5"
 )
 FREQUENCY_DOMAIN_QC_INTEGRITY_METHOD_VERSION = "selected_bca_finite_v1"
 FREQUENCY_DOMAIN_QC_DECISION_VERSION = "frequency_qc_review_decision_v2"
@@ -85,6 +88,8 @@ _BCA_AUDIT_REQUIRED_COLUMNS = (
     "BCA Status",
     "Reason Codes",
 )
+_MAX_BCA_AUDIT_FREQUENCY_TOKENS = 256
+_MAX_BCA_AUDIT_FREQUENCY_TOKEN_LENGTH = 128
 
 WARNING_REASON_UNUSUAL_VALUES = "Unusual frequency-domain values"
 WARNING_REASON_NOISY_SPECTRUM = "Noisy spectrum"
@@ -255,14 +260,6 @@ class _SummedBcaInspection:
 
 
 @dataclass(frozen=True)
-class _CohortSummedBcaInspection:
-    rows: tuple[dict[str, object], ...]
-    flags: tuple[dict[str, object], ...]
-    roi_fingerprint: str
-    cohort_fingerprint: str
-
-
-@dataclass(frozen=True)
 class _IndependentQcContext:
     source_identity: dict[str, object]
     cells: dict[tuple[str, str], dict[str, object]]
@@ -274,6 +271,7 @@ def run_frequency_domain_qc_review(
     *,
     log_func: Callable[[str], None] | None = None,
     dataset_index: ProjectDatasetIndex | None = None,
+    provisional_cache: ProvisionalHarmonicCache | None = None,
 ) -> dict[str, object]:
     """Build a provisional summed-BCA QC report for the active project."""
 
@@ -348,7 +346,7 @@ def run_frequency_domain_qc_review(
     _start_stage("independent_evidence", "Checking preprocessing evidence…")
     independent_qc_context = _load_independent_qc_context(project_root)
     _start_stage("provisional_harmonics", "Preparing candidate harmonics…")
-    selected_harmonics, provisional_metadata = _provisional_harmonics(
+    provisional_inputs = dict(
         project_root=project_root,
         subjects=subjects,
         conditions=ordered_conditions,
@@ -388,6 +386,11 @@ def run_frequency_domain_qc_review(
             )
         ),
     )
+    selected_harmonics, provisional_metadata = (
+        _provisional_harmonics(**provisional_inputs)
+        if provisional_cache is None
+        else provisional_cache.resolve(_provisional_harmonics, **provisional_inputs)
+    )
     _log(
         "Frequency-domain QC is reviewing provisional summed BCA values "
         f"across {len(selected_harmonics)} harmonic(s)."
@@ -417,32 +420,8 @@ def run_frequency_domain_qc_review(
         flag["harmonic_selection_fingerprint"] = harmonic_selection_fingerprint
         _attach_independent_qc_evidence(flag, independent_qc_context)
         flag["finding_fingerprint"] = _frequency_qc_finding_fingerprint(flag)
-    _start_stage("cohort_context", "Comparing condition and ROI amplitudes…")
-    cohort_inspection = _collect_cohort_summed_bca_context(
-        subjects=subjects,
-        conditions=ordered_conditions,
-        subject_data=subject_data,
-        selected_harmonics=selected_harmonics,
-        rois=rois,
-        settings=screening_settings,
-        recording_assignments=(recording_assignments if repeated_session else None),
-        protocol_metadata=protocol_metadata,
-        screening_enabled=screening_settings.enabled,
-        excluded_electrodes_by_subject_condition=(
-            condition_electrode_exclusions
-        ),
-        excluded_conditions=condition_exclusions,
-    )
-    cohort_flags = list(cohort_inspection.flags)
-    cohort_rows = [dict(row) for row in cohort_inspection.rows]
-    for row in cohort_rows:
-        row["harmonic_selection_fingerprint"] = harmonic_selection_fingerprint
-    for flag in cohort_flags:
-        flag["harmonic_selection_fingerprint"] = harmonic_selection_fingerprint
-        _attach_independent_qc_evidence(flag, independent_qc_context)
-        flag["finding_fingerprint"] = _frequency_qc_finding_fingerprint(flag)
     _start_stage("report_integrity", "Preparing review findings…")
-    machine_findings = [*flags, *cohort_flags]
+    machine_findings = list(flags)
     technical_integrity_failures = list(
         inspection.technical_integrity_failures
     )
@@ -489,8 +468,6 @@ def run_frequency_domain_qc_review(
             "frequency_protocol_fingerprint": protocol_metadata.get(
                 "frequency_protocol_fingerprint"
             ),
-            "roi_definition_fingerprint": cohort_inspection.roi_fingerprint,
-            "cohort_fingerprint": cohort_inspection.cohort_fingerprint,
             "independent_qc_source_fingerprint": independent_qc_context.source_identity.get(
                 "fingerprint"
             ),
@@ -513,8 +490,6 @@ def run_frequency_domain_qc_review(
         recording_assignments=(recording_assignments if repeated_session else None),
         screening_settings=screening_settings,
         provisional_metadata=provisional_metadata,
-        roi_definition_fingerprint=cohort_inspection.roi_fingerprint,
-        cohort_fingerprint=cohort_inspection.cohort_fingerprint,
         source_workbooks=source_workbooks,
         source_fingerprint=source_fingerprint,
         previous_review_evidence=previous_review_evidence,
@@ -526,8 +501,6 @@ def run_frequency_domain_qc_review(
             selected_harmonics=selected_harmonics,
             harmonic_selection_fingerprint=harmonic_selection_fingerprint,
             protocol_metadata=protocol_metadata,
-            roi_definition_fingerprint=cohort_inspection.roi_fingerprint,
-            cohort_fingerprint=cohort_inspection.cohort_fingerprint,
             independent_qc_context=independent_qc_context,
         )
     )
@@ -633,12 +606,10 @@ def run_frequency_domain_qc_review(
         "frequency_protocol": protocol_metadata,
         "provisional_harmonic_metadata": provisional_metadata,
         "flags": flags,
-        "cohort_relative_rows": cohort_rows,
-        "cohort_relative_flags": cohort_flags,
+        "cohort_relative_rows": [],
+        "cohort_relative_flags": [],
         "reconfirmation_findings": reconfirmation_findings,
         "review_findings": review_findings,
-        "roi_definition_fingerprint": cohort_inspection.roi_fingerprint,
-        "cohort_fingerprint": cohort_inspection.cohort_fingerprint,
         "harmonic_selection_fingerprint": harmonic_selection_fingerprint,
         "source_workbooks": source_workbooks,
         "source_fingerprint": source_fingerprint,
@@ -678,6 +649,15 @@ def run_frequency_domain_qc_review(
         "generated_at": _now_utc_iso(),
     }
     if repeated_session:
+        # Prior exclusions can need reconfirmation after leaving the numerical
+        # cohort. Resolve their review identity from the full project registry.
+        review_assignments = _recording_assignments_from_index(
+            dataset_index,
+            recording_ids=[
+                *subjects,
+                *(str(row.get("recording_id") or "") for row in summaries),
+            ],
+        )
         report.update(
             {
                 "identity_scope": "recording",
@@ -689,10 +669,7 @@ def run_frequency_domain_qc_review(
                     key=str.casefold,
                 ),
                 "recordings": list(subjects),
-                "recording_assignments": [
-                    dict(recording_assignments[recording_id])
-                    for recording_id in subjects
-                ],
+                "recording_assignments": list(review_assignments.values()),
                 "recording_summaries": summaries,
                 "participant_summaries": [],
                 "machine_recording_electrode_suggestions": machine_electrodes,
@@ -740,6 +717,32 @@ def require_frequency_domain_qc_complete(
     )
 
 
+def is_roi_frequency_qc_entry(row: Mapping[str, object]) -> bool:
+    """Identify retired ROI review evidence, including historical decision rows."""
+
+    if str(row.get("roi") or "").strip():
+        return True
+    if any(
+        str(row.get(key) or "").strip().casefold().replace("-", "_")
+        in {"roi", "condition_roi", "participant_condition_roi", "recording_condition_roi"}
+        for key in ("scope", "decision_scope", "target_type", "target_scope")
+    ):
+        return True
+    metric = str(row.get("metric") or "").strip().casefold()
+    finding_type = str(row.get("finding_type") or "").strip().casefold()
+    if "roi" in metric.split("_") or "roi" in finding_type.split("_"):
+        return True
+    if (
+        finding_type == "cohort_relative_summed_bca_context"
+        and not str(row.get("electrode") or "").strip()
+    ):
+        return True
+    evidence = row.get("evidence")
+    return isinstance(evidence, Mapping) and is_roi_frequency_qc_entry(
+        {"electrode": row.get("electrode"), **evidence}
+    )
+
+
 def validate_frequency_domain_qc_review_decisions(
     report: Mapping[str, object],
     decisions: Mapping[str, object] | Sequence[Mapping[str, object]] | None,
@@ -751,6 +754,11 @@ def validate_frequency_domain_qc_review_decisions(
         if report.get("review_findings") is not None
         else report.get("flags")
     )
+    retired_fingerprints = {
+        str(item.get("finding_fingerprint") or "")
+        for item in raw_findings if is_roi_frequency_qc_entry(item)
+    }
+    raw_findings = [item for item in raw_findings if not is_roi_frequency_qc_entry(item)]
     flags = {
         str(item.get("finding_fingerprint") or ""): dict(item)
         for item in raw_findings
@@ -786,6 +794,13 @@ def validate_frequency_domain_qc_review_decisions(
     elif decisions is not None:
         raise ValueError("Summed-BCA review decisions must be a mapping or list.")
 
+    if any(
+        key in retired_fingerprints or is_roi_frequency_qc_entry(row)
+        for key, row in raw_by_fingerprint.items()
+    ):
+        raise ValueError(
+            "ROI-level summed-BCA review is no longer supported; regenerate the electrode review."
+        )
     if not bool(report.get("screening_enabled", True)):
         if raw_by_fingerprint:
             raise ValueError(
@@ -829,7 +844,7 @@ def validate_frequency_domain_qc_review_decisions(
         condition = str(finding.get("condition") or "").strip()
         electrode = _normalize_electrode(finding.get("electrode"))
         roi = str(finding.get("roi") or "").strip()
-        if not participant_id or not condition or not (electrode or roi):
+        if not participant_id or not condition or not electrode:
             raise ValueError(
                 "Summed-BCA finding identity is incomplete; regenerate the review."
             )
@@ -849,12 +864,8 @@ def validate_frequency_domain_qc_review_decisions(
             "decision": decision,
             "decision_scope": (
                 "recording_condition_electrode"
-                if scope == "recording" and electrode
-                else "recording_condition_roi"
                 if scope == "recording"
                 else "participant_condition_electrode"
-                if electrode
-                else "participant_condition_roi"
             ),
             "participant_id": participant_id,
             "recording_id": recording_id,
@@ -1217,6 +1228,11 @@ def sync_frequency_domain_qc_automatic_state(
         previous_auto_participants = _auto_participant_entries_from_state(state)
         previous_auto_recording_electrodes = _auto_recording_electrode_entries_from_state(state)
         previous_auto_recordings = _auto_recording_entries_from_state(state)
+        retired_roi_authority_removed = any(
+            is_roi_frequency_qc_entry(row)
+            and row.get("decision") in _BROAD_EXCLUSION_DECISIONS
+            for row in _review_decisions_from_state(state, include_retired_roi=True)
+        )
         legacy_authority_removed = bool(
             previous_auto_electrodes
             or previous_auto_participants
@@ -1242,6 +1258,7 @@ def sync_frequency_domain_qc_automatic_state(
                 for item in _iter_mapping_entries(
                     report.get("active_review_decisions")
                 )
+                if not is_roi_frequency_qc_entry(item)
             ],
             current_decisions,
         )
@@ -1335,9 +1352,12 @@ def sync_frequency_domain_qc_automatic_state(
         }
         update["retired_review_decisions"] = _superseded_narrow_decisions(state, current_decisions)
         state.update(update)
-        if legacy_authority_removed:
+        if legacy_authority_removed or retired_roi_authority_removed:
             state["downstream_outputs_stale"] = True
             state["stale_reason"] = (
+                "Retired ROI-level summed-BCA review exclusions are no longer applied; "
+                "regenerate downstream outputs."
+                if retired_roi_authority_removed else
                 "Legacy summed-BCA automatic exclusions were converted to review-only suggestions."
             )
             state["stale_at"] = now
@@ -1367,8 +1387,12 @@ def mark_frequency_domain_outputs_current(project_root: str | Path) -> None:
     from Main_App.processing.condition_interpolation_state import (
         require_no_pending_condition_interpolation,
     )
+    from Main_App.processing.raw_registration_state import (
+        require_registered_raw_processing_complete,
+    )
 
     require_no_pending_condition_interpolation(project_root)
+    require_registered_raw_processing_complete(project_root)
     root = Path(project_root).resolve()
     manifest_path = root / "project.json"
     with project_manifest_transaction(manifest_path):
@@ -1395,13 +1419,23 @@ def load_frequency_domain_qc_state(project_root: str | Path | None) -> dict[str,
         return {}
     manifest = _read_manifest(Path(project_root).resolve() / "project.json")
     state = _metadata_from_manifest(manifest)
+    if any(
+        is_roi_frequency_qc_entry(row)
+        and row.get("decision") != DECISION_RETAIN
+        for row in _review_decisions_from_state(state, include_retired_roi=True)
+    ):
+        state["downstream_outputs_stale"] = True
+        state["stale_reason"] = (
+            "Retired ROI-level summed-BCA review exclusions are no longer applied; "
+            "regenerate downstream outputs."
+        )
     if any(row.get("decision") not in REVIEW_DECISIONS
            for row in _review_decisions_from_state(state)):
         # Surface the retired policy through the common tool-readiness gate,
         # without rewriting project history merely when a project is opened.
         state["downstream_outputs_stale"] = True
         state["stale_reason"] = (
-            "Saved electrode or ROI exclusions need a new QC decision. "
+            "Saved electrode exclusions need a new QC decision. "
             "These exclusions are no longer applied; resume post-processing review."
         )
     return state
@@ -1449,6 +1483,8 @@ def _frequency_domain_exclusions_from_rows(
     participant_condition_electrodes: dict[tuple[str, str], set[str]] = defaultdict(set)
     recording_condition_electrodes: dict[tuple[str, str], set[str]] = defaultdict(set)
     for decision in decisions:
+        if is_roi_frequency_qc_entry(decision):
+            continue
         action = str(decision.get("decision") or "")
         participant_id = _normalize_participant_id(decision.get("participant_id"))
         recording_id = _normalize_recording_id(decision.get("recording_id"))
@@ -1516,6 +1552,7 @@ def _review_decision_state_rows_are_hash_valid(
     raw = _raw_state_rows(state, "review_decisions")
     if raw is None:
         return False, []
+    raw = [row for row in raw if not is_roi_frequency_qc_entry(row)]
     normalized = _review_decisions_from_state(state)
     decision_fingerprints = [
         str(item.get("decision_fingerprint") or "") for item in normalized
@@ -2185,419 +2222,6 @@ def _collect_summed_bca_flags(
     )
 
 
-def _collect_cohort_summed_bca_context(
-    *,
-    subjects: Sequence[str],
-    conditions: Sequence[str],
-    subject_data: Mapping[str, Mapping[str, str]],
-    selected_harmonics: Sequence[float],
-    rois: Mapping[str, Sequence[str]],
-    settings: SummedBcaScreeningSettings,
-    recording_assignments: Mapping[str, Mapping[str, object]] | None,
-    protocol_metadata: Mapping[str, object],
-    screening_enabled: bool,
-    excluded_electrodes_by_subject_condition: Mapping[
-        tuple[str, str], frozenset[str]
-    ] | None = None,
-    excluded_conditions: Iterable[tuple[str, str]] = (),
-) -> _CohortSummedBcaInspection:
-    """Build optional cohort-relative context from the exact candidate list."""
-
-    roi_definitions = {
-        str(name).strip(): tuple(
-            dict.fromkeys(
-                _normalize_electrode(channel)
-                for channel in channels
-                if _normalize_electrode(channel)
-            )
-        )
-        for name, channels in rois.items()
-        if str(name).strip()
-    }
-    roi_fingerprint = _hash_payload(
-        {
-            "method": "fixed_roi_definition_v1",
-            "rois": {
-                name: list(channels)
-                for name, channels in sorted(roi_definitions.items())
-            },
-        }
-    )
-    cohort_payload = {
-        "subjects": list(subjects),
-        "conditions": list(conditions),
-        "recording_assignments": _json_safe(recording_assignments or {}),
-        "roi_definition_fingerprint": roi_fingerprint,
-        "selected_harmonics_hz": [
-            round(float(value), 4) for value in selected_harmonics
-        ],
-        "frequency_protocol_fingerprint": protocol_metadata.get(
-            "frequency_protocol_fingerprint"
-        ),
-        "settings": settings.to_manifest(),
-        "excluded_electrodes_by_subject_condition": [
-            {
-                "identity": identity,
-                "condition": condition,
-                "electrodes": sorted(electrodes),
-            }
-            for (identity, condition), electrodes in sorted(
-                (excluded_electrodes_by_subject_condition or {}).items()
-            )
-        ],
-    }
-    excluded_keys = {
-        (str(identity).casefold(), str(condition).casefold())
-        for identity, condition in excluded_conditions
-    }
-    if excluded_keys:
-        cohort_payload["excluded_conditions"] = sorted(excluded_keys)
-    cohort_fingerprint = _hash_payload(cohort_payload)
-    if not screening_enabled:
-        return _CohortSummedBcaInspection(
-            rows=(),
-            flags=(),
-            roi_fingerprint=roi_fingerprint,
-            cohort_fingerprint=cohort_fingerprint,
-        )
-
-    from Main_App.io import (
-        MissingXlsxColumnsError,
-        read_xlsx_sheet_selected_columns,
-    )
-
-    columns = [f"{float(freq):.4f}_Hz" for freq in selected_harmonics]
-    rows: list[dict[str, object]] = []
-    for subject in subjects:
-        for condition in conditions:
-            file_path = str(subject_data.get(subject, {}).get(condition) or "")
-            identity = _frequency_qc_cell_identity(
-                subject=str(subject),
-                condition=str(condition),
-                file_path=file_path,
-                recording_assignments=recording_assignments,
-            )
-            reviewed_exclusion = (
-                str(subject).casefold(), str(condition).casefold()
-            ) in excluded_keys
-            if reviewed_exclusion or not file_path or not Path(file_path).is_file():
-                for roi_name, roi_channels in roi_definitions.items():
-                    rows.append(
-                        {
-                            **identity,
-                            **protocol_metadata,
-                            "roi": roi_name,
-                            "roi_electrodes": list(roi_channels),
-                            "status": (
-                                "excluded_by_review" if reviewed_exclusion
-                                else "technical_input_unavailable"
-                            ),
-                            "reason_codes": [
-                                "reviewed_condition_exclusion" if reviewed_exclusion
-                                else "source_workbook_missing"
-                            ],
-                            "roi_definition_fingerprint": roi_fingerprint,
-                            "cohort_fingerprint": cohort_fingerprint,
-                        }
-                    )
-                continue
-            try:
-                frame = read_xlsx_sheet_selected_columns(
-                    file_path,
-                    sheet_name="BCA (uV)",
-                    required_columns=["Electrode", *columns],
-                )
-            except (MissingXlsxColumnsError, OSError, ValueError) as exc:
-                for roi_name, roi_channels in roi_definitions.items():
-                    rows.append(
-                        {
-                            **identity,
-                            **protocol_metadata,
-                            "roi": roi_name,
-                            "roi_electrodes": list(roi_channels),
-                            "status": "technical_input_unavailable",
-                            "reason_codes": [
-                                "source_workbook_unreadable_or_incomplete"
-                            ],
-                            "technical_detail": str(exc),
-                            "roi_definition_fingerprint": roi_fingerprint,
-                            "cohort_fingerprint": cohort_fingerprint,
-                        }
-                    )
-                continue
-            electrode_labels = [
-                _normalize_electrode(value) for value in frame["Electrode"]
-            ]
-            if len(electrode_labels) != len(set(electrode_labels)):
-                duplicate_status = ["duplicate_electrode_rows"]
-            else:
-                duplicate_status = []
-            indexed = frame.copy()
-            indexed.index = electrode_labels
-            cell_exclusions = (
-                excluded_electrodes_by_subject_condition or {}
-            ).get(
-                (_normalize_recording_id(subject), str(condition)),
-                frozenset(),
-            )
-            for roi_name, roi_channels in roi_definitions.items():
-                missing_channels = [
-                    channel for channel in roi_channels if channel not in indexed.index
-                ]
-                excluded_channels = [
-                    channel for channel in roi_channels if channel in cell_exclusions
-                ]
-                reasons = list(duplicate_status)
-                if missing_channels:
-                    reasons.append("fixed_roi_members_missing")
-                if excluded_channels:
-                    reasons.append("fixed_roi_members_excluded_by_review")
-                if not roi_channels:
-                    reasons.append("fixed_roi_empty")
-                if reasons:
-                    rows.append(
-                        {
-                            **identity,
-                            **protocol_metadata,
-                            "roi": roi_name,
-                            "roi_electrodes": list(roi_channels),
-                            "missing_electrodes": missing_channels,
-                            "excluded_electrodes": excluded_channels,
-                            "status": "technical_input_unavailable",
-                            "reason_codes": reasons,
-                            "roi_definition_fingerprint": roi_fingerprint,
-                            "cohort_fingerprint": cohort_fingerprint,
-                        }
-                    )
-                    continue
-                numeric = indexed.loc[list(roi_channels), columns].apply(
-                    pd.to_numeric,
-                    errors="coerce",
-                )
-                values = numeric.to_numpy(dtype=float)
-                if values.size == 0 or not np.isfinite(values).all():
-                    rows.append(
-                        {
-                            **identity,
-                            **protocol_metadata,
-                            "roi": roi_name,
-                            "roi_electrodes": list(roi_channels),
-                            "status": "technical_input_unavailable",
-                            "reason_codes": ["roi_harmonic_values_nonfinite"],
-                            "roi_definition_fingerprint": roi_fingerprint,
-                            "cohort_fingerprint": cohort_fingerprint,
-                        }
-                    )
-                    continue
-                harmonic_means = values.mean(axis=0)
-                peak_index = int(np.argmax(np.abs(harmonic_means)))
-                rows.append(
-                    {
-                        **identity,
-                        **protocol_metadata,
-                        "roi": roi_name,
-                        "roi_electrodes": list(roi_channels),
-                        "status": "complete",
-                        "reason_codes": [],
-                        "selected_harmonics_hz": [
-                            round(float(value), 4) for value in selected_harmonics
-                        ],
-                        "selected_harmonic_count": len(selected_harmonics),
-                        "sum_abs_roi_mean_uv": float(
-                            np.sum(np.abs(harmonic_means))
-                        ),
-                        "peak_abs_roi_mean_uv": float(
-                            abs(harmonic_means[peak_index])
-                        ),
-                        "peak_signed_roi_mean_uv": float(
-                            harmonic_means[peak_index]
-                        ),
-                        "peak_harmonic_hz": round(
-                            float(selected_harmonics[peak_index]),
-                            4,
-                        ),
-                        "roi_definition_fingerprint": roi_fingerprint,
-                        "cohort_fingerprint": cohort_fingerprint,
-                    }
-                )
-
-    cohort_fingerprint = _hash_payload(
-        {
-            **cohort_payload,
-            "rows": [
-                {
-                    key: _json_safe(row.get(key))
-                    for key in (
-                        "participant_id",
-                        "recording_id",
-                        "condition",
-                        "roi",
-                        "status",
-                        "reason_codes",
-                        "selected_harmonics_hz",
-                        "sum_abs_roi_mean_uv",
-                        "peak_abs_roi_mean_uv",
-                        "peak_signed_roi_mean_uv",
-                        "peak_harmonic_hz",
-                    )
-                }
-                for row in rows
-            ],
-        }
-    )
-    for row in rows:
-        row["cohort_fingerprint"] = cohort_fingerprint
-
-    flags: list[dict[str, object]] = []
-    for condition in conditions:
-        for roi_name in roi_definitions:
-            cell_rows = [
-                row
-                for row in rows
-                if row.get("condition") == condition
-                and row.get("roi") == roi_name
-                and row.get("status") == "complete"
-            ]
-            for metric, value_key, warning_score, extreme_score, warning_floor, extreme_floor in (
-                (
-                    "sum_abs_roi_mean",
-                    "sum_abs_roi_mean_uv",
-                    settings.cohort_warning_robust_score,
-                    settings.cohort_extreme_robust_score,
-                    settings.cohort_warning_sum_floor_uv,
-                    settings.cohort_extreme_sum_floor_uv,
-                ),
-                (
-                    "peak_abs_roi_mean",
-                    "peak_abs_roi_mean_uv",
-                    settings.cohort_warning_robust_score,
-                    settings.cohort_extreme_robust_score,
-                    settings.cohort_warning_peak_floor_uv,
-                    settings.cohort_extreme_peak_floor_uv,
-                ),
-            ):
-                values = np.asarray(
-                    [float(row[value_key]) for row in cell_rows],
-                    dtype=float,
-                )
-                center, spread, spread_method = _cohort_robust_center_spread(values)
-                for row, value in zip(cell_rows, values):
-                    score = _cohort_robust_score(float(value), center, spread)
-                    row[f"{metric}_robust_center_uv"] = center
-                    row[f"{metric}_robust_spread_uv"] = spread
-                    row[f"{metric}_robust_spread_method"] = spread_method
-                    row[f"{metric}_robust_score"] = score
-                    severity = ""
-                    threshold_used = None
-                    floor_used = None
-                    if score >= extreme_score and value >= extreme_floor:
-                        severity = "extreme"
-                        threshold_used = extreme_score
-                        floor_used = extreme_floor
-                    elif score >= warning_score and value >= warning_floor:
-                        severity = "warning"
-                        threshold_used = warning_score
-                        floor_used = warning_floor
-                    if not severity:
-                        continue
-                    finding = {
-                        **{
-                            key: row.get(key)
-                            for key in (
-                                "participant_id",
-                                "recording_id",
-                                "session_id",
-                                "visit_index",
-                                "condition",
-                                "workbook_path",
-                                "frequency_protocol_fingerprint",
-                                "expected_analyzed_oddball_cycles",
-                                "analyzed_duration_seconds",
-                            )
-                        },
-                        "finding_type": "cohort_relative_summed_bca_context",
-                        "roi": roi_name,
-                        "metric": metric,
-                        "value_uv": float(value),
-                        "robust_center_uv": center,
-                        "robust_spread_uv": spread,
-                        "robust_spread_method": spread_method,
-                        "robust_score": score,
-                        "threshold_used": threshold_used,
-                        "absolute_floor_used_uv": floor_used,
-                        "severity": severity,
-                        "band_crossed": f"cohort_{severity}",
-                        "selected_harmonics_hz": list(
-                            row.get("selected_harmonics_hz") or []
-                        ),
-                        "selected_harmonic_count": int(
-                            row.get("selected_harmonic_count") or 0
-                        ),
-                        "peak_harmonic_hz": row.get("peak_harmonic_hz"),
-                        "peak_signed_roi_mean_uv": row.get(
-                            "peak_signed_roi_mean_uv"
-                        ),
-                        "roi_definition_fingerprint": roi_fingerprint,
-                        "cohort_fingerprint": cohort_fingerprint,
-                        "independent_qc": [],
-                        "independent_qc_status": (
-                            "shared_experimental_context_only"
-                        ),
-                    }
-                    finding["finding_fingerprint"] = (
-                        _frequency_qc_finding_fingerprint(finding)
-                    )
-                    flags.append(finding)
-
-    return _CohortSummedBcaInspection(
-        rows=tuple(rows),
-        flags=tuple(
-            sorted(
-                flags,
-                key=lambda item: (
-                    str(
-                        item.get("recording_id")
-                        or item.get("participant_id")
-                        or ""
-                    ).casefold(),
-                    str(item.get("condition") or "").casefold(),
-                    str(item.get("roi") or "").casefold(),
-                    str(item.get("metric") or ""),
-                ),
-            )
-        ),
-        roi_fingerprint=roi_fingerprint,
-        cohort_fingerprint=cohort_fingerprint,
-    )
-
-
-def _cohort_robust_center_spread(
-    values: np.ndarray,
-) -> tuple[float, float, str]:
-    finite = values[np.isfinite(values)]
-    if finite.size == 0:
-        return float("nan"), float("nan"), "unavailable"
-    center = float(np.median(finite))
-    mad = float(np.median(np.abs(finite - center)))
-    if mad > 0.0:
-        return center, float(1.4826 * mad), "scaled_mad"
-    q1, q3 = np.percentile(finite, [25, 75])
-    iqr = float(q3 - q1)
-    if iqr > 0.0:
-        return center, float(0.7413 * iqr), "scaled_iqr_fallback"
-    return center, 0.0, "zero_spread_fallback"
-
-
-def _cohort_robust_score(value: float, center: float, spread: float) -> float:
-    if not np.isfinite(value) or not np.isfinite(center):
-        return float("nan")
-    if spread > 0.0:
-        return float((value - center) / spread)
-    if value == center:
-        return 0.0
-    return float("inf") if value > center else float("-inf")
-
-
 def _read_bca_method_audit_rows(
     *,
     file_path: str,
@@ -2640,11 +2264,35 @@ def _read_bca_method_audit_rows(
             tuple(row.get(column) for column in _BCA_AUDIT_REQUIRED_COLUMNS)
             for _, row in frame.iterrows()
         )
+    # Each target repeats across electrodes. Reuse only immutable built-in text
+    # within this table; other scalar types retain the original conversion.
+    try:
+        frequency_columns: dict[str, str] | None = dict()
+    except MemoryError:
+        frequency_columns = None
     for raw_electrode, raw_frequency, raw_status, raw_reasons in row_values:
         electrode = _normalize_electrode(
             _optional_cell_text(raw_electrode)
         )
-        column = _exact_frequency_column(raw_frequency)
+        cacheable = (
+            type(raw_frequency) is str
+            and len(raw_frequency) <= _MAX_BCA_AUDIT_FREQUENCY_TOKEN_LENGTH
+        )
+        column = None
+        if cacheable and frequency_columns is not None:
+            try:
+                column = frequency_columns.get(raw_frequency)
+            except MemoryError:
+                frequency_columns = None
+        if column is None:
+            # Keep converter errors outside cache-only allocation recovery.
+            column = _exact_frequency_column(raw_frequency)
+            if cacheable and frequency_columns is not None:
+                try:
+                    if len(frequency_columns) < _MAX_BCA_AUDIT_FREQUENCY_TOKENS:
+                        frequency_columns[raw_frequency] = column
+                except MemoryError:
+                    frequency_columns = None
         if not electrode or not column:
             continue
         reason_codes = tuple(
@@ -3076,8 +2724,6 @@ def _analysis_fingerprint(
     recording_assignments: Mapping[str, Mapping[str, object]] | None = None,
     screening_settings: SummedBcaScreeningSettings | None = None,
     provisional_metadata: Mapping[str, object] | None = None,
-    roi_definition_fingerprint: str = "",
-    cohort_fingerprint: str = "",
     source_workbooks: Sequence[Mapping[str, object]] | None = None,
     source_fingerprint: str = "",
     previous_review_evidence: Mapping[str, object] | None = None,
@@ -3112,8 +2758,6 @@ def _analysis_fingerprint(
             {key: value for key, value in (provisional_metadata or {}).items()
              if key not in _HARMONIC_CACHE_ANNOTATIONS}
         ),
-        "roi_definition_fingerprint": str(roi_definition_fingerprint),
-        "cohort_fingerprint": str(cohort_fingerprint),
         "source_fingerprint": str(source_fingerprint),
         "workbooks": workbooks,
         "flags": [
@@ -3133,7 +2777,7 @@ def _analysis_fingerprint(
                     flag.get("independent_qc_fingerprint") or ""
                 ),
             }
-            for flag in flags
+            for flag in flags if not is_roi_frequency_qc_entry(flag)
         ],
     }
     if recording_assignments is not None:
@@ -3187,7 +2831,7 @@ def _analysis_fingerprint(
                             flag.get("independent_qc_fingerprint") or ""
                         ),
                     }
-                    for flag in flags
+                    for flag in flags if not is_roi_frequency_qc_entry(flag)
                 ],
             }
         )
@@ -3292,7 +2936,8 @@ def _decision_fingerprint(
                     if key != "reviewed_at"
                 }
                 for item in sorted(
-                    (review_decisions or ()),
+                    (row for row in (review_decisions or ())
+                     if not is_roi_frequency_qc_entry(row)),
                     key=lambda row: str(
                         row.get("decision_fingerprint")
                         or row.get("finding_fingerprint")
@@ -3381,8 +3026,6 @@ def _write_frequency_domain_qc_text_report(
             or "None"
         ),
         f"- Analysis fingerprint: {report.get('analysis_fingerprint') or ''}",
-        f"- ROI definition fingerprint: {report.get('roi_definition_fingerprint') or ''}",
-        f"- Cohort fingerprint: {report.get('cohort_fingerprint') or ''}",
         "",
         "Experimental review thresholds",
         f"- Warning: > {thresholds.get('warning_summed_bca_uv', 10)} uV",
@@ -3400,7 +3043,7 @@ def _write_frequency_domain_qc_text_report(
         "",
         "Reviewed findings and decisions",
     ]
-    normalized_decisions = [dict(item) for item in review_decisions]
+    normalized_decisions = [dict(item) for item in review_decisions if not is_roi_frequency_qc_entry(item)]
     if normalized_decisions:
         for entry in normalized_decisions:
             evidence = (
@@ -3409,10 +3052,8 @@ def _write_frequency_domain_qc_text_report(
                 else {}
             )
             identity = str(entry.get("recording_id") or entry.get("participant_id") or "")
-            target = str(entry.get("electrode") or entry.get("roi") or "")
+            target = str(entry.get("electrode") or "")
             signed = evidence.get("summed_bca_uv")
-            if signed is None:
-                signed = evidence.get("peak_signed_roi_mean_uv")
             absolute = evidence.get("abs_summed_bca_uv")
             if absolute is None:
                 absolute = evidence.get("value_uv")
@@ -3445,22 +3086,6 @@ def _write_frequency_domain_qc_text_report(
                 lines.append(f"- {entry['recording_id']}: {entry['reason']}")
         else:
             lines.append("- None")
-    technical_rows = [
-        item
-        for item in _iter_mapping_entries(report.get("cohort_relative_rows"))
-        if item.get("status") != "complete"
-    ]
-    lines.extend(["", "Cohort-context technical statuses"])
-    if technical_rows:
-        for entry in technical_rows:
-            identity = str(entry.get("recording_id") or entry.get("participant_id") or "")
-            lines.append(
-                f"- {identity} / {entry.get('condition') or ''} / "
-                f"{entry.get('roi') or ''}: {entry.get('status') or ''}; "
-                f"reasons={entry.get('reason_codes') or []}"
-            )
-    else:
-        lines.append("- None")
     legacy = _iter_mapping_entries(report.get("legacy_machine_suggestions"))
     lines.extend(["", "Preserved legacy machine suggestions (inactive)"])
     if legacy:
@@ -3611,16 +3236,27 @@ def _filter_preprocessing_manual_recording_exclusions(
 
 def _recording_assignments_from_index(
     dataset_index: ProjectDatasetIndex,
+    *,
+    recording_ids: Iterable[str],
 ) -> dict[str, dict[str, object]]:
+    """Resolve review identities, including excluded recordings, canonically."""
+
     assignments: dict[str, dict[str, object]] = {}
     group_by_participant = dataset_index.participant_group_id_map()
-    for recording_id in dataset_index.recording_ids:
-        recording = dataset_index.recordings.get(recording_id)
-        if recording is None:
-            raise RuntimeError(
-                "Repeated-session frequency-domain QC is missing the canonical "
-                f"recording assignment for {recording_id}."
+    canonical_ids = {
+        recording_id.casefold(): recording_id
+        for recording_id in dataset_index.recordings
+    }
+    for submitted_id in recording_ids:
+        recording_id = canonical_ids.get(submitted_id.strip().casefold())
+        if recording_id is None:
+            raise FrequencyQcReviewIdentityError(
+                "Frequency-QC report contains unknown or stale recording "
+                f"identity {submitted_id!r}; it is absent from the project registry."
             )
+        if recording_id in assignments:
+            continue
+        recording = dataset_index.recordings[recording_id]
         session = dataset_index.sessions.get(recording.session_id)
         assignments[recording_id] = {
             "recording_id": recording_id,
@@ -3857,18 +3493,138 @@ def _normalized_processing_qc_entry(
     return payload
 
 
+_INDEPENDENT_QC_CACHE_MAX_BYTES = 8 * 1024 * 1024
+_INDEPENDENT_QC_LEDGER_MAX_BYTES = 32 * 1024 * 1024
+
+
+def _independent_qc_context_fits_cache(value: _IndependentQcContext) -> bool:
+    """Bound retained Python containers as well as the ledger's serialized size."""
+    seen: set[int] = set()
+    size = 0
+
+    def fits(item: object) -> bool:
+        nonlocal size
+        if id(item) in seen:
+            return True
+        seen.add(id(item))
+        size += sys.getsizeof(item)
+        if size > _INDEPENDENT_QC_CACHE_MAX_BYTES:
+            return False
+        if isinstance(item, dict):
+            return all(fits(key) and fits(child) for key, child in item.items())
+        if isinstance(item, (tuple, list)):
+            return all(fits(child) for child in item)
+        return item is None or type(item) in (str, bool, int, float)
+
+    return fits((value.source_identity, value.cells, value.processing_entries))
+
+
 def _load_independent_qc_context(project_root: Path) -> _IndependentQcContext:
+    """Reuse only current ledger-derived evidence inside one validation operation.
+
+    Review decisions and workbook validation remain at their original call sites.
+    Every hit rehashes the ledger; live path resolution also detects a retargeted
+    project/ledger link, which resolved file snapshots alone cannot detect.
+    """
+    from Main_App.processing import post_processing_context as context
+    from Main_App.processing.processing_ledger import ledger_path
+
+    if not context.validation_scope_active():
+        return _read_independent_qc_context(project_root)
+
+    def live_key() -> tuple[str, str]:
+        return (
+            str(project_root.resolve()),
+            str(ledger_path(project_root).resolve()),
+        )
+
+    key = None
+    files = ()
+    try:
+        candidate_key = live_key()
+        if Path(candidate_key[1]).stat().st_size <= _INDEPENDENT_QC_LEDGER_MAX_BYTES:
+            files = context.capture_validation_files([candidate_key[1]], hash_contents=True)
+            if all(identity is not None for _, identity in files):
+                key = candidate_key
+                cached = context.cached_validation("independent_qc_ledger", (key, files))
+                if cached is not context.CACHE_MISS:
+                    # Reject edits during detachment as well as initial validation.
+                    if live_key() == key and context.validation_files_unchanged(files):
+                        return cached
+                    key = None
+    except (OSError, RuntimeError, MemoryError):
+        # Missing/unreadable paths and cache-only allocation failures must retain
+        # the uncached loader's diagnostics and error precedence.
+        key = None
+
+    ledger_snapshot = None
+    if key is not None:
+        try:
+            with Path(key[1]).open("rb") as stream:
+                encoded_ledger = stream.read(_INDEPENDENT_QC_LEDGER_MAX_BYTES + 1)
+            if (
+                len(encoded_ledger) <= _INDEPENDENT_QC_LEDGER_MAX_BYTES
+                and hashlib.sha256(encoded_ledger).hexdigest() == files[0][1][-1]
+            ):
+                parsed_ledger = json.loads(encoded_ledger.decode("utf-8"))
+                if isinstance(parsed_ledger, dict):
+                    if not isinstance(parsed_ledger.get("entries"), dict):
+                        parsed_ledger["entries"] = {}
+                    parsed_ledger.setdefault("schema_version", 1)
+                    ledger_snapshot = parsed_ledger
+        except (OSError, ValueError, RuntimeError, MemoryError):
+            pass
+        if ledger_snapshot is None:
+            key = None
+
+    # The cache must bind the context to the exact bytes it parsed, rather than
+    # rereading a mutable path that could change and return to its original target.
+    # Keep normalizer execution outside cache-only exception handling.
+    value = (
+        _read_independent_qc_context(project_root)
+        if ledger_snapshot is None
+        else _read_independent_qc_context(project_root, ledger_snapshot=ledger_snapshot)
+    )
+    if ledger_snapshot is not None and value.source_identity.get("status") != "current":
+        # The original loader owns warnings and precedence for invalid inputs.
+        return _read_independent_qc_context(project_root)
+    if key is None:
+        return value
+    try:
+        if (
+            value.source_identity.get("status") == "current"
+            and _independent_qc_context_fits_cache(value)
+            and live_key() == key
+        ):
+            context.remember_validation(
+                "independent_qc_ledger", (key, files), value, files=files,
+                max_namespace_entries=1,
+            )
+    except (OSError, RuntimeError, MemoryError):
+        pass
+    return value
+
+
+def _read_independent_qc_context(
+    project_root: Path,
+    *,
+    ledger_snapshot: Mapping[str, object] | None = None,
+) -> _IndependentQcContext:
     from Main_App.processing.processing_ledger import load_ledger
     from Main_App.processing.roi_coverage import (
         ROI_COVERAGE_STAGE_PRE_REVIEW,
         RoiCoverageGateError,
+        _roi_coverage_from_ledger,
         load_roi_coverage,
     )
 
     try:
-        coverage = load_roi_coverage(
-            project_root,
-            stage=ROI_COVERAGE_STAGE_PRE_REVIEW,
+        coverage = (
+            load_roi_coverage(project_root, stage=ROI_COVERAGE_STAGE_PRE_REVIEW)
+            if ledger_snapshot is None
+            else _roi_coverage_from_ledger(
+                ledger_snapshot, stage=ROI_COVERAGE_STAGE_PRE_REVIEW,
+            )
         )
     except (OSError, TypeError, ValueError, RoiCoverageGateError) as exc:
         core = {
@@ -3897,7 +3653,7 @@ def _load_independent_qc_context(project_root: Path) -> _IndependentQcContext:
             processing_entries={},
         )
 
-    ledger = load_ledger(project_root)
+    ledger = load_ledger(project_root) if ledger_snapshot is None else ledger_snapshot
     raw_entries = ledger.get("entries")
     entries = raw_entries if isinstance(raw_entries, Mapping) else {}
     entry_by_identity = {
@@ -4016,7 +3772,6 @@ def _attach_independent_qc_evidence(
     source = cell.get("source_evidence")
     source = dict(source) if isinstance(source, Mapping) else {}
     electrode = _normalize_electrode(finding.get("electrode"))
-    roi_name = str(finding.get("roi") or "").strip()
     coverage_row: dict[str, object] = {
         "source": "qc21_pre_review_coverage",
         "status": "current",
@@ -4041,40 +3796,6 @@ def _attach_independent_qc_evidence(
                 "successfully_interpolated": electrode in interpolated,
             }
         )
-    elif roi_name:
-        roi_rows = [
-            dict(row)
-            for row in _iter_mapping_entries(cell.get("roi_memberships"))
-            if str(row.get("roi_name") or "").casefold() == roi_name.casefold()
-        ]
-        if len(roi_rows) == 1:
-            roi_row = roi_rows[0]
-            target_channels = [
-                str(value) for value in roi_row.get("expected_channels") or []
-            ]
-            coverage_row.update(
-                {
-                    "roi": roi_name,
-                    "roi_membership_status": str(roi_row.get("status") or ""),
-                    "roi_membership_fingerprint": str(
-                        roi_row.get("fingerprint") or ""
-                    ),
-                    "expected_channels": target_channels,
-                    "observed_channels": list(
-                        roi_row.get("observed_channels") or []
-                    ),
-                    "interpolated_channels": list(
-                        roi_row.get("interpolated_channels") or []
-                    ),
-                }
-            )
-        else:
-            coverage_row.update(
-                {
-                    "roi": roi_name,
-                    "status": "current_roi_membership_missing",
-                }
-            )
     evidence.append(coverage_row)
 
     processing = context.processing_entries.get(identity.casefold())
@@ -4182,11 +3903,13 @@ def _technical_status_rows(report: Mapping[str, object]) -> list[dict[str, objec
         rows.extend(
             {"category": category, **dict(item)}
             for item in _iter_mapping_entries(report.get(key))
+            if not is_roi_frequency_qc_entry(item)
         )
     rows.extend(
         {"category": "cohort_context", **dict(item)}
         for item in _iter_mapping_entries(report.get("cohort_relative_rows"))
         if str(item.get("status") or "") != "complete"
+        and not is_roi_frequency_qc_entry(item)
     )
     source = report.get("independent_qc_source")
     if isinstance(source, Mapping) and str(source.get("status") or "") != "current":
@@ -4226,10 +3949,6 @@ def _build_review_evidence_payload(
                 "frequency_protocol_fingerprint"
             )
         ),
-        "roi_definition_fingerprint": str(
-            report.get("roi_definition_fingerprint") or ""
-        ),
-        "cohort_fingerprint": str(report.get("cohort_fingerprint") or ""),
         "source_workbooks": [
             dict(item)
             for item in _iter_mapping_entries(report.get("source_workbooks"))
@@ -4240,18 +3959,22 @@ def _build_review_evidence_payload(
         ),
         "ordinary_findings": [
             dict(item) for item in _iter_mapping_entries(report.get("flags"))
+            if not is_roi_frequency_qc_entry(item)
         ],
         "cohort_findings": [
             dict(item)
             for item in _iter_mapping_entries(report.get("cohort_relative_flags"))
+            if not is_roi_frequency_qc_entry(item)
         ],
         "cohort_rows": [
             dict(item)
             for item in _iter_mapping_entries(report.get("cohort_relative_rows"))
+            if not is_roi_frequency_qc_entry(item)
         ],
         "reconfirmation_findings": [
             dict(item)
             for item in _iter_mapping_entries(report.get("reconfirmation_findings"))
+            if not is_roi_frequency_qc_entry(item)
         ],
         "finite_input_status": dict(report.get("finite_input_status") or {}),
         "technical_integrity_failures": [
@@ -4259,10 +3982,12 @@ def _build_review_evidence_payload(
             for item in _iter_mapping_entries(
                 report.get("technical_integrity_failures")
             )
+            if not is_roi_frequency_qc_entry(item)
         ],
         "unavailable_by_method": [
             dict(item)
             for item in _iter_mapping_entries(report.get("unavailable_by_method"))
+            if not is_roi_frequency_qc_entry(item)
         ],
         "technical_statuses": _technical_status_rows(report),
     }
@@ -4309,6 +4034,17 @@ def _validated_review_evidence_from_state(
         payload.get("version") != FREQUENCY_DOMAIN_QC_REVIEW_EVIDENCE_VERSION
         or not recorded
         or _hash_payload(payload) != recorded
+    ):
+        return None
+    if payload.get("roi_definition_fingerprint") or payload.get("cohort_fingerprint"):
+        return None
+    if any(
+        is_roi_frequency_qc_entry(row)
+        for key in (
+            "ordinary_findings", "cohort_findings", "cohort_rows",
+            "reconfirmation_findings", "technical_statuses",
+        )
+        for row in _iter_mapping_entries(payload.get(key))
     ):
         return None
     last_review = state.get("last_review")
@@ -4412,11 +4148,14 @@ def _frequency_qc_finding_fingerprint(
 
 def _review_decisions_from_state(
     state: Mapping[str, object],
+    *, include_retired_roi: bool = False,
 ) -> list[dict[str, object]]:
     if not bool(state.get("review_complete")):
         return []
     normalized: list[dict[str, object]] = []
     for raw in _iter_mapping_entries(state.get("review_decisions")):
+        if not include_retired_roi and is_roi_frequency_qc_entry(raw):
+            continue
         row = dict(raw)
         if row.get("version") != FREQUENCY_DOMAIN_QC_DECISION_VERSION:
             continue
@@ -4521,8 +4260,11 @@ def _superseded_narrow_decisions(
     return _merge_review_decision_rows(
         _iter_mapping_entries(state.get("retired_review_decisions")),
         [
-            row for row in _review_decisions_from_state(state)
-            if row.get("decision") not in {*_BROAD_EXCLUSION_DECISIONS, DECISION_RETAIN}
+            row for row in _review_decisions_from_state(
+                {**state, "review_complete": True}, include_retired_roi=True,
+            )
+            if (is_roi_frequency_qc_entry(row)
+                or row.get("decision") not in {*_BROAD_EXCLUSION_DECISIONS, DECISION_RETAIN})
             and str(row.get("decision_fingerprint") or "") not in current_ids
         ],
     )
@@ -4535,8 +4277,6 @@ def _review_exclusion_reconfirmation_findings(
     selected_harmonics: Sequence[float],
     harmonic_selection_fingerprint: str,
     protocol_metadata: Mapping[str, object],
-    roi_definition_fingerprint: str,
-    cohort_fingerprint: str,
     independent_qc_context: _IndependentQcContext,
 ) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
     """Carry stable exclusions and reopen those bound to older evidence."""
@@ -4613,8 +4353,6 @@ def _review_exclusion_reconfirmation_findings(
             "analyzed_duration_seconds": protocol_metadata.get(
                 "analyzed_duration_seconds"
             ),
-            "roi_definition_fingerprint": roi_definition_fingerprint,
-            "cohort_fingerprint": cohort_fingerprint,
             "prior_independent_qc_fingerprint": str(
                 evidence.get("independent_qc_fingerprint") or ""
             ),

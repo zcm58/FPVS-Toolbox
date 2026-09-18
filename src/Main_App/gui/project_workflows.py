@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Callable
 
@@ -22,6 +23,7 @@ from Main_App.projects.project_manager import (
     open_existing_project as _open_existing_project,
 )
 from Main_App.projects.preprocessing_settings import normalize_preprocessing_settings
+from Main_App.projects import project_recording_context
 from Main_App.projects.grouping import project_group_context
 from Main_App.workers.project_processing_cache_worker import (
     ProjectProcessingCacheResetWorker,
@@ -511,6 +513,20 @@ def reset_project_context_workspace(host: Any) -> bool:
     return True
 
 
+def _raw_paths_for_project_open(project: Any) -> list[Path]:
+    """Populate the shell from saved recordings without admitting new inputs.
+
+    Opening existing analyses does not require balanced visits or revalidating
+    a raw folder as a new processing batch. Processing keeps its strict scan.
+    """
+    if getattr(project, "groups_locked", False):
+        context = project_recording_context(project)
+        if context.is_repeated_session:
+            return [recording.raw_file for recording in context.recordings
+                    if recording.raw_file.is_file()]
+    return prepare_batch_files(project)
+
+
 def load_project(
     host: Any,
     project: Any,
@@ -518,14 +534,20 @@ def load_project(
 ) -> None:
     _load_project(host, project)
 
-    # Auto-populate data_paths from the project's registered raw source(s).
-    # This scan must not mutate participant metadata; processing performs the
-    # explicit review/register step.
+    # Opening an existing analysis is independent of discovering a new batch.
+    # Never change recording membership while opening a project.
+    raw_discovery_failed = False
     try:
-        file_paths = prepare_batch_files(project)
+        file_paths = _raw_paths_for_project_open(project)
     except Exception as exc:
         logger.exception("Project raw-file discovery failed during load.")
-        QMessageBox.critical(host, "Project Data Error", str(exc))
+        host.log(
+            f"Raw inputs could not be prepared: {exc}. "
+            "The project remains open; existing processed data can still be inspected. "
+            "Resolve the raw-input issue before processing.",
+            level=logging.WARNING,
+        )
+        raw_discovery_failed = True
         file_paths = []
     host.data_paths = [str(p) for p in file_paths]
 
@@ -543,21 +565,21 @@ def load_project(
                 "Project data folder set: "
                 f"{project.input_folder} ({len(host.data_paths)} .bdf files)"
             )
-    else:
+    elif not raw_discovery_failed:
         if context.has_group_metadata:
             configured = "; ".join(
                 f"{group.label}: {group.raw_input_folder}"
                 for group in context.groups
             )
             host.log(
-                "Warning: no .bdf files found in registered group folders: "
-                f"{configured}",
+                "No available registered raw files for processing in group folders: "
+                f"{configured}. Existing processed data remain available for inspection.",
                 level=logging.WARNING,
             )
         else:
             host.log(
-                "Warning: no .bdf files found in project input folder: "
-                f"{project.input_folder}",
+                "No raw files available for processing in project input folder: "
+                f"{project.input_folder}. Existing processed data remain available for inspection.",
                 level=logging.WARNING,
             )
 

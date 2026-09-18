@@ -24,13 +24,22 @@ Primary paths:
 - `src/Main_App/gui/project_workflows.py`: project open/create/load/save GUI
   orchestration and the confirmed active-project processing-cache reset used by
   `MainWindow` compatibility wrappers.
+  Opening a locked repeated-session project uses existing registered raw paths
+  rather than scanning new source files as a processing batch. Raw input issues
+  remain non-blocking log notices while processed-data inspection stays available;
+  analysis tools retain their own provenance and eligibility checks. Visible
+  smoke: open a processed project with unequal visit counts and an extra BDF in
+  a source folder; confirm it opens without a Project Data Error or false empty
+  folder warning, preserves registered membership, and opens existing analyses.
+  Repeat with an unavailable raw folder; starting processing must still report
+  the actual source/registration issue. No local Qt execution is required.
 - `src/Main_App/gui/processing_workflows.py`: processing run start/stop,
   queue polling, worker completion/error, and finalization GUI orchestration
   used by `MainWindow` compatibility wrappers.
 - `src/Main_App/gui/frequency_domain_qc_dialog.py`: modal review dialog shown
   after condition processing and before final harmonic selection for experimental
-  summed-BCA flags. Separate Individual electrodes and ROIs tabs share a searchable
-  five-column list; ambiguous targets remain visible under Other findings.
+  summed-BCA flags. Individual electrodes and Other findings sections share a
+  searchable five-column list; ROI review is retired.
   The list keeps identities, conditions, targets, absolute values, and decision status visible without horizontal
   scrolling. A resizable selected-finding pane shows complete signed/absolute
   evidence, canonical group/session identity, and the existing decision choices
@@ -45,8 +54,12 @@ Primary paths:
   filters and Clear filters resets search, column and electrode-group filters.
   Switching sections resets these filters; column menus show values for the
   current section and electrode group. Hidden findings still require decisions.
-  Next undecided follows the displayed sort order across all findings, switching
-  sections and clearing filters if needed. Unknown participants or missing
+  Readiness counts distinguish missing choices, unconfirmed interpolation and
+  conflicting exclusion scopes. Next needs attention follows the displayed sort
+  order across all findings, switching sections and clearing filters if needed,
+  and focuses the exact choice or artifact confirmation requiring attention.
+  These presentation checks do not replace validation when submitting or saving.
+  Unknown participants or missing
   required grouped assignments block review instead of inferring membership.
   No scientific calculations or exclusion authority belong to this presentation.
   `frequency_domain_qc_review_model.py` groups existing electrode findings by
@@ -56,17 +69,22 @@ Primary paths:
   fill existing fingerprint-keyed decisions, including flags hidden by filters;
   interpolation is offered only when the project's experimental
   `condition_specific_interpolation_enabled` setting is on (default off).
-  Individual electrode and whole-ROI exclusions are never offered; ROI findings
-  support retain or whole condition, recording or participant exclusion.
+  Individual electrode and whole-ROI exclusions are never offered. Existing
+  whole condition, recording and participant exclusions retain their exact scopes.
   Each repair requires an explicit artifact-confirmation checkbox; the group
   checkbox confirms every listed condition and resets when the group changes.
   A large summed-BCA response alone is not sufficient artifact evidence.
   The backend applies repair before final reference and regenerates analysis;
   the dialog never repairs spectral metrics. No other participant,
-  recording, electrode, ROI or unflagged condition is added. Per-finding choices
+  recording, electrode or unflagged condition is added to a repair. Per-finding choices
   remain editable and optional reason text is preserved in the review controls.
   Undo restores the last group's prior choices, reasons and artifact confirmations;
   a later individual decision, reason or confirmation edit invalidates it.
+  The selected-finding pane explains each decision's consequences: retention adds
+  no exclusion, broader exclusions include unflagged data in that scope while
+  preserving processed files, and repair regenerates outputs with re-referencing
+  that can change other channels. Group actions show hidden/replaced choices.
+  Footer copy identifies choices as unsaved until submission and saving complete.
   The existing validator and persistence
   remain authoritative (including their existing retained-reason normalization).
   Visible smoke (Qt execution is CI-only locally): open the review at 1280x900,
@@ -74,17 +92,17 @@ Primary paths:
   choose decisions/reasons, sort by participant, condition and value, combine
   column filters with search, and confirm choices and evidence persist on the
   same finding. Check column-menu Apply, Cancel, Select all and Clear selection,
-  zero matches, clear-column/reset, numeric ordering, and next-hidden-undecided.
-  Inspect long evidence and unavailable-input context, use Next undecided, then
+  zero matches, clear-column/reset, numeric ordering, and hidden attention targets.
+  Inspect long evidence and unavailable-input context, use Next needs attention, then
   verify incomplete Apply is rejected and completed choices submit normally.
-  Switch electrode/ROI tabs, select one participant-recording electrode group,
+  Switch available sections, select one participant-recording electrode group,
   filter to one condition, and verify the group panel still lists every affected
   flag. With the experimental setting off, confirm no electrode/ROI exclusion
   or interpolation action is offered. Enable it in Settings, reopen review,
   confirm that repair is blocked until the artifact checkbox is checked, and
   verify changing groups or manual decisions requires fresh confirmation.
   Retain/interpolate the group, undo, then override one finding and verify the
-  other participants, recordings and ROI decisions are unchanged. Exercise this
+  other participants and recordings are unchanged. Exercise this
   path in the registered `test_frequency_domain_qc_dialog_qt.py` CI coverage;
   pure grouping and actual bulk-action tests run in the local GUI scope.
 - `src/Main_App/gui/frequency_domain_qc_handoff.py`: asynchronous accepted-review
@@ -113,6 +131,18 @@ Primary paths:
   single/batch mode UI state, `.bdf` file selection, start-button readiness,
   trigger-detection placeholder behavior, and preprocessing parameter assembly
   used by `MainWindow` compatibility wrappers.
+  On locked projects, new raw inputs are staged for an **Add BDF Files** review
+  through `participant_review.py`. The shared dialog shows canonical
+  participant/group/session identity, filenames and full-path tooltips;
+  **Add Files and Continue** confirms append-only registration before normal QC
+  and processing. Cancel leaves the registry unchanged and starts no processing.
+  The proposal is revalidated after confirmation and a changed active project
+  or failed save stops before planning. Single-file selection remains read-only
+  until the same confirmation at processing start. Metadata staging does not
+  load EEG samples. Visible smoke: confirm and cancel new participants and
+  missing visits, verify existing assignments and outputs survive, and check
+  both processing modes and the dialog at 1280x900 on Windows and CachyOS.
+  Qt dialog execution remains CI-only locally.
 - `src/Main_App/gui/preprocessing_qc_workflow.py`: embedded preprocessing
   data-quality review phases. It scans for BioSemi recordings that were never
   started, reviews auto-detected physically removed electrodes in the manual
@@ -140,6 +170,26 @@ Primary paths:
   relayed through the worker and take effect between condition reads,
   time-domain blocks, FFT channel batches, and cache writes; widgets remain
   signal consumers and never read BDF data directly.
+- `src/Main_App/gui/marker_occurrence_review.py` and
+  `marker_occurrence_panel.py`: Step 2 presents a compact, recording-aware
+  explanation of the actual marker finding and three choices with consequences.
+  Required duration comes from the declared cycles/rate; availability comes
+  only from the existing proposed crop and verified candidate list. The former
+  "Retain Full Occurrence" label is now **Keep planned window**, reflecting
+  its unchanged fixed crop and independent-evidence requirement. No choice
+  is recommended or applied automatically. Canonical group, participant,
+  session, file, condition and repetition remain visible. Complete original
+  sample/time/interval evidence opens on demand in a read-only **Technical
+  details** dialog. The embedded panel temporarily replaces the generic status,
+  checklist and evidence table and restores their visibility on decision,
+  cancellation or failure. It performs no raw I/O, inference or persistence.
+  Visible smoke (Qt is CI-only locally): at 1280x900, review gap, short-marker
+  coverage and extra-marker cases; check all actions and explanations fit,
+  unavailable windows stay disabled, Details/Close makes no decision, each
+  follow-up Back returns to the same repetition, and Cancel stops processing.
+  After an accepted choice, confirm the next decision and subsequent QC pages
+  restore normally. CI coverage is in `test_marker_occurrence_panel_qt.py`;
+  pure summary, decision and lifecycle checks run in the local GUI scope.
 - `src/Main_App/gui/signal_review_model.py` and `signal_review_panel.py`:
   presentation-only Step 7 signal-review browser. The workflow attaches short
   type, condition, occurrence, and channel fields while collecting the existing
@@ -361,12 +411,22 @@ Resume Post-processing with the saved ROI list; they must not take the
 harmonic-only shortcut with old QC evidence. Once that handoff is committed,
 canceling QC keeps the saved ROI edits and leaves outputs stale. Rollback of
 an earlier, uncommitted settings transaction restores the visible ROI editor
-as well as the saved settings. Historical QC evidence remains audit history;
-only findings computed with the current ROI definitions enter the new review.
+as well as the saved settings. Historical QC evidence remains audit history.
+The Experimental Summed-BCA Review screens individual electrodes only: it has
+no ROI findings tab, ROI amplitude decisions, or cohort-relative ROI controls.
+Saved ROI findings and decisions are audit-only and cannot enter the active
+review, its counts, or its exclusion actions. Electrode grouping, explicit
+Retain decisions, and enabled condition-specific interpolation remain available.
+ROI definitions still govern normal aggregation, harmonic-profile provenance,
+and the fixed-electrode coverage checks before final release.
 
-Visible smoke: remove a temporary ROI, save with rebuild now, and confirm that
-frequency QC omits it. Cancel review, reopen Settings, and confirm the ROI is
-still absent; Resume Post-processing should use the same remaining ROIs.
+Visible smoke: open a project with historical electrode and ROI findings and
+resume post-processing. Confirm that only electrode findings are counted and
+reviewable, with no ROIs tab or ROI cohort controls in Experimental settings.
+Retain one electrode finding and verify the electrode-group actions and
+enabled artifact-confirmed interpolation still work. Remove a temporary ROI,
+save with rebuild now, then cancel review and reopen Settings; the ROI should
+still be absent, and Resume Post-processing should use the remaining ROIs.
 Repeat Save with rebuild later and confirm QC is marked stale. Qt behavior is
 covered in CI; local checks exercise the routing without loading Qt.
 
@@ -549,10 +609,17 @@ Updater boundary:
 
 - `Main_App.gui.update_manager` schedules startup checks and opens the update
   dialog for manual checks or installable startup updates.
-- `Main_App.gui.update_dialog` owns the visible dialog, progress bar, final
-  confirmation, and busy-processing install guard.
-- `Main_App.updates.github_releases`, `downloader`, and `installer` own
-  network metadata, installer cache writes, and subprocess installer launch.
+- `Main_App.gui.update_dialog` presents discovery, download progress, and
+  explicit install confirmation. `update_lifecycle` keeps workers alive until
+  completion or cancellation; `update_install_guard` blocks handoff during
+  processing, export, and QC work. The existing main-window close path is
+  preserved, and no update functions are added to `main_window.py`.
+- `Main_App.updates.helper_client` calls the separately packaged updater over
+  a private versioned protocol. Its backend owns network metadata, cache,
+  verification, installation, and restart. `updater_window` is its independent
+  Update & Repair surface and uses the Toolbox theme/component adapters.
+- See [updater.md](updater.md) for the shared Studio contracts, Toolbox
+  adapters, install scopes, packaging, migration, and verification requirements.
 - A failed check, missing asset, ambiguous asset, download failure, or launch
   failure must surface as an error/no-install state. Do not silently open the
   GitHub release page as a fallback update path.

@@ -631,6 +631,85 @@ def _span_display(
     )
 
 
+@dataclass(frozen=True, slots=True)
+class MarkerReviewChoice:
+    decision: str
+    label: str
+    description: str
+    enabled: bool
+
+
+@dataclass(frozen=True, slots=True)
+class MarkerOccurrenceReviewSummary:
+    context: str
+    source: str
+    finding: str
+    required_analysis: str
+    choices: tuple[MarkerReviewChoice, ...]
+
+
+def marker_occurrence_review_summary(
+    item: MarkerOccurrenceReviewItem,
+) -> MarkerOccurrenceReviewSummary:
+    """Explain existing evidence and choices without selecting or changing data."""
+    duration = _fraction_display(Fraction(item.expected_analyzed_cycles) / item.oddball_rate_hz)
+    findings: list[str] = []
+    reasons = set(item.review_reasons)
+    if "insufficient_project_oddball_markers" in reasons:
+        findings.append(f"Fewer than two distinct markers with the project's code {item.oddball_marker_code} were found.")
+    if "shorter_than_expected_analyzed_cycles" in reasons:
+        findings.append(f"The markers cover less than the required {duration} seconds of data.")
+    if item.missing_gap_count:
+        gaps = "gap" if item.missing_gap_count == 1 else "gaps"
+        missing = "marker" if item.estimated_missing_markers == 1 else "markers"
+        findings.append(
+            f"Long marker {gaps}: {item.missing_gap_count}; about "
+            f"{item.estimated_missing_markers} {missing} may be missing."
+        )
+    if item.early_or_extra_count:
+        intervals = "interval was" if item.early_or_extra_count == 1 else "intervals were"
+        findings.append(f"{item.early_or_extra_count} marker {intervals} unusually short.")
+    if not findings:
+        findings.append("The marker timing needs review before this repetition can be analyzed.")
+    findings.append("Markers alone cannot tell whether the visual stimulation was interrupted.")
+
+    candidate_count = len(item.contiguous_candidate_spans)
+    windows = "window" if candidate_count == 1 else "windows"
+    verified = (
+        f"{candidate_count} {windows} passed the marker-spacing check. "
+        f"Use {duration} seconds; data outside that window will not enter this repetition's analysis."
+        if candidate_count else
+        f"Unavailable: no uninterrupted marker sequence provides the required {duration} seconds."
+    )
+    full_available = item.proposed_start_sample is not None and item.proposed_stop_sample is not None
+    planned = (
+        f"Keep the planned {duration}-second window despite the marker finding. "
+        "Requires a log, photodiode trace or other independent evidence that stimulation stayed continuous and correctly timed."
+        if full_available else
+        "Unavailable: the markers do not define a long enough planned analysis window."
+    )
+    context = " · ".join(value for value in (
+        item.participant_id or "Unknown participant", item.session_label or item.session_id,
+        item.condition_label, f"Repetition {item.repetition_index + 1}",
+    ) if value)
+    source = " · ".join(dict.fromkeys(value for value in (item.path.name, item.recording_id) if value))
+    return MarkerOccurrenceReviewSummary(
+        context=context,
+        source=source,
+        finding=" ".join(findings),
+        required_analysis=f"Each retained window must contain {item.expected_analyzed_cycles} oddball cycles ({duration} seconds).",
+        choices=(
+            MarkerReviewChoice(MARKER_DECISION_USE_CONTIGUOUS, "Use verified window…", verified, bool(candidate_count)),
+            MarkerReviewChoice(MARKER_DECISION_RETAIN_FULL, "Keep planned window…", planned, full_available),
+            MarkerReviewChoice(
+                MARKER_DECISION_EXCLUDE, "Exclude this repetition…",
+                "Leave this condition repetition out of analysis. Other repetitions remain eligible; the raw file is kept.",
+                True,
+            ),
+        ),
+    )
+
+
 def marker_occurrence_review_rows(
     item: MarkerOccurrenceReviewItem,
 ) -> tuple[tuple[str, str], ...]:
@@ -718,10 +797,13 @@ __all__ = [
     "MARKER_DECISION_USE_CONTIGUOUS",
     "MarkerOccurrenceReviewError",
     "MarkerOccurrenceReviewItem",
+    "MarkerOccurrenceReviewSummary",
+    "MarkerReviewChoice",
     "build_marker_review_decision",
     "canonical_event_plans_by_file",
     "collect_marker_occurrence_reviews",
     "marker_occurrence_review_rows",
+    "marker_occurrence_review_summary",
     "merge_marker_review_decision",
     "merge_rescanned_results",
     "resolved_path_text",

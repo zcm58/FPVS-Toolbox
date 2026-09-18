@@ -1113,7 +1113,14 @@ def _spatial_neighbor_map_from_positions(
 
 def _zscore_rows(data: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     centered = data - np.nanmedian(data, axis=1, keepdims=True)
-    scale = np.nanstd(centered, axis=1)
+    # Preserve the existing median and reduction order. Ordinary finite
+    # float64 rows do not need nanstd's extra sample copy and NaN masks.
+    if (centered.dtype == np.dtype(np.float64)
+            and centered.strides[1] == centered.itemsize
+            and bool(np.isfinite(centered).all())):
+        scale = np.std(centered, axis=1)
+    else:
+        scale = np.nanstd(centered, axis=1)
     safe_scale = np.where(scale > 0.0, scale, np.nan)
     return centered / safe_scale[:, None], scale
 
@@ -1149,6 +1156,10 @@ def _spatial_predictability_scores_with_neighbors(
     channel_lookup = {channel: index for index, channel in enumerate(channels)}
     excluded = {str(channel) for channel in donor_exclusions}
     z_data, row_scale = _zscore_rows(data)
+    # Cache finiteness per donor row, so one unusable channel does not disable
+    # the finite path for other neighborhoods. Keep donor and BLAS input order.
+    finite_rows = (np.isfinite(z_data).all(axis=1) if z_data.dtype == np.dtype(np.float64)
+                   else np.zeros(len(channels), dtype=bool))
     scores: dict[str, float] = {}
     for channel in channels:
         row_index = channel_lookup[channel]
@@ -1166,7 +1177,9 @@ def _spatial_predictability_scores_with_neighbors(
         if len(neighbor_indices) < config.spatial_min_neighbors:
             continue
 
-        prediction = np.nanmean(z_data[neighbor_indices], axis=0)
+        donor_data = z_data[neighbor_indices]
+        prediction = (np.mean(donor_data, axis=0) if bool(np.all(finite_rows[neighbor_indices]))
+                      else np.nanmean(donor_data, axis=0))
         observed = z_data[row_index]
         finite = np.isfinite(observed) & np.isfinite(prediction)
         if int(np.sum(finite)) < config.spatial_min_neighbors:
@@ -1863,10 +1876,17 @@ def _v2_channel_metrics(channel: str, values: np.ndarray) -> RawChannelMetricSet
     """Apply the v1 float64 formulas with one vectorized percentile call."""
 
     values64 = np.asarray(values, dtype=np.float64)
-    percentiles = np.nanpercentile(values64, [0.05, 0.5, 99.5, 99.95])
+    finite_row = (values64.size > 0 and values64.strides == (values64.itemsize,)
+                  and bool(np.isfinite(values64).all()))
+    if finite_row:
+        percentiles = np.percentile(values64, [0.05, 0.5, 99.5, 99.95])
+        std_uv = float(np.std(values64) * 1e6)
+    else:
+        percentiles = np.nanpercentile(values64, [0.05, 0.5, 99.5, 99.95])
+        std_uv = float(np.nanstd(values64) * 1e6)
     return RawChannelMetricSet(
         channel=channel,
-        std_uv=float(np.nanstd(values64) * 1e6),
+        std_uv=std_uv,
         p2p_99_uv=float((percentiles[2] - percentiles[1]) * 1e6),
         p2p_999_uv=float((percentiles[3] - percentiles[0]) * 1e6),
         full_p2p_uv=float(

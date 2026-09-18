@@ -386,6 +386,7 @@ def run_free_harmonic_clustering(
         result,
         run_id=run_id,
         destination=destination,
+        cancel_check=cancel_check,
     )
     return FreeHarmonicRun(prepared=prepared, result=result, receipt=receipt)
 
@@ -542,6 +543,7 @@ def run_repeated_session_fhc_batch(
         result,
         run_id=run_id,
         destination=destination,
+        cancel_check=cancel_check,
     )
     return RepeatedSessionBatchRun(
         prepared=prepared,
