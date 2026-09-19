@@ -24,6 +24,7 @@ from Tools.Plot_Generator.output_interface import PlotOutputInterfaceMixin
 from Tools.Plot_Generator.session_rendering import SessionPlotRenderingMixin
 from Tools.Plot_Generator.session_workflow import SessionPlotWorkflowMixin
 from Tools.Plot_Generator.worker_config import PlotWorkerConfig
+from Tools.Plot_Generator.export_plan import FigureExport
 
 logger = logging.getLogger(__name__)
 _DEFAULT_ODDBALL_FREQ = 1.2
@@ -85,6 +86,7 @@ class _Worker(
         workbook_session_ids: Sequence[str] | None = None,
         session_comparison_ids: Sequence[str] | None = None,
         session_group_ids: Sequence[str] | None = None,
+        export_plan: tuple[FigureExport, ...] | None = None,
     ) -> None:
         super().__init__()
         self.config = PlotWorkerConfig(
@@ -121,6 +123,7 @@ class _Worker(
             workbook_session_ids=workbook_session_ids,
             session_comparison_ids=session_comparison_ids,
             session_group_ids=session_group_ids,
+            export_plan=export_plan,
         )
         self.folder = self.config.folder
         self.condition = self.config.condition
@@ -135,6 +138,7 @@ class _Worker(
         self.y_max = self.config.y_max
 
         self.out_dir = Path(self.config.out_dir)
+        self._figure_export_plan = self.config.export_plan
         self.stem_color = self.config.stem_color.lower()
         self.stem_color_b = self.config.stem_color_b.lower()
         self.condition_b = self.config.condition_b

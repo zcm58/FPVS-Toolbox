@@ -62,6 +62,7 @@ from Main_App.gui.settings_panel import EmbeddedSettingsPage
 from Main_App.gui.sidebar import init_sidebar
 from Main_App.gui.ui_main import init_ui
 from Main_App.gui import project_workflows
+from Main_App.gui import project_drafts
 from Main_App.gui import processing_workflows
 from Main_App.gui import processing_inputs
 from Main_App.gui import post_export_workflows
@@ -1000,6 +1001,9 @@ class MainWindow(QMainWindow):
     def saveProjectSettings(self) -> None:
         project_workflows.save_project_settings(self)
 
+    def _refresh_project_dirty_indicator(self) -> None:
+        project_drafts.refresh_dirty_indicator(self)
+
     # --------------------------- UI helpers --------------------------- #
     def _sync_input_folder_display(self) -> None:
         project_workflows.sync_input_folder_display(self)
@@ -1143,6 +1147,9 @@ class MainWindow(QMainWindow):
                 "Cancellation was requested. Wait for all active analysis "
                 "steps to stop before closing FPVS Toolbox.",
             )
+            event.ignore()
+            return
+        if not project_drafts.confirm_project_draft_exit(self):
             event.ignore()
             return
         free_harmonic_page = getattr(

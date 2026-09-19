@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Sequence
 
-from PySide6.QtCore import QSignalBlocker, Qt
+from PySide6.QtCore import QSignalBlocker, Qt, Signal
 from PySide6.QtWidgets import (
     QLabel,
     QListWidgetItem,
@@ -30,6 +30,8 @@ from Main_App.gui.roi_visual_editor_state import ROIEditorCollection, ROIEditorE
 
 class ROISettingsEditor(QWidget):
     """Visual-first ROI editor that preserves the existing settings pair API."""
+
+    draft_changed = Signal()
 
     def __init__(
         self,
@@ -140,6 +142,7 @@ class ROISettingsEditor(QWidget):
             "New ROI draft added. Name it and choose at least one electrode on the map.",
             "info",
         )
+        self.draft_changed.emit()
 
     def remove_active_entry(self) -> None:
         self._clear_pending_confirmations()
@@ -162,6 +165,7 @@ class ROISettingsEditor(QWidget):
         self.show_status(
             f"Removed {removed.display_name} from this Settings draft.", "info"
         )
+        self.draft_changed.emit()
 
     def clear_active_roi(self) -> str | None:
         entry = self._active_entry()
@@ -240,6 +244,8 @@ class ROISettingsEditor(QWidget):
         finally:
             self._rebuilding = False
         self._sync_active_roi()
+
+        self.draft_changed.emit()
 
     def active_roi_index(self) -> int:
         return self.roi_list.currentRow()
@@ -337,6 +343,8 @@ class ROISettingsEditor(QWidget):
         self._sync_map_context()
         self._refresh_accessibility()
 
+        self.draft_changed.emit()
+
     def _on_map_selection_changed(self, label: str, checked: bool) -> None:
         self._clear_pending_confirmations()
         entry = self._active_entry()
@@ -355,6 +363,7 @@ class ROISettingsEditor(QWidget):
         row = self.roi_list.currentRow()
         self._update_list_item(row)
         self._sync_active_roi()
+        self.draft_changed.emit()
 
     def _sync_active_roi(self) -> None:
         entry = self._active_entry()

@@ -3,24 +3,24 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from Main_App.gui import processing_inputs
+from Main_App.gui.condition_input_model import validate_condition_rows
 from Main_App.projects import FrequencyProtocol, Project
 
 
-class _Edit:
-    def __init__(self, text: str) -> None:
-        self._text = text
+@pytest.fixture
+def condition_validation(monkeypatch):
+    calls = []
 
-    def text(self) -> str:
-        return self._text
+    def validated_rows(host, *, focus_error=False):
+        calls.append((tuple(host.event_rows), focus_error))
+        mapping, errors = validate_condition_rows(host.event_rows)
+        return None if errors else mapping
 
-
-class _EventRow:
-    def __init__(self, label: str, code: int) -> None:
-        self._edits = [_Edit(label), _Edit(str(code))]
-
-    def findChildren(self, _widget_type):
-        return list(self._edits)
+    monkeypatch.setattr(processing_inputs, "validated_event_map", validated_rows)
+    return calls
 
 
 def _ready_project(root: Path, *, marker_code: int = 55) -> Project:
@@ -37,18 +37,20 @@ def _ready_project(root: Path, *, marker_code: int = 55) -> Project:
     return project
 
 
-def test_processing_params_use_one_frozen_project_protocol_snapshot(tmp_path) -> None:
+def test_processing_params_use_one_frozen_project_protocol_snapshot(tmp_path, condition_validation) -> None:
     project = _ready_project(tmp_path / "project")
     host = SimpleNamespace(
         currentProject=project,
         file_mode=SimpleNamespace(get=lambda: "Batch"),
         settings=object(),
-        event_rows=[_EventRow("Condition A", 11)],
+        event_rows=[("Condition A", "11")],
     )
 
     params = processing_inputs.build_validated_params(host)
 
     assert params is not None
+    assert condition_validation == [((("Condition A", "11"),), True)]
+    assert params["event_id_map"] == {"Condition A": 11}
     assert params["frequency_protocol"] is project.frequency_protocol
     assert params["frequency_protocol"].oddball_rate_hz.numerator == 3
     assert params["frequency_protocol"].oddball_rate_hz.denominator == 10
@@ -65,6 +67,7 @@ def test_processing_params_use_one_frozen_project_protocol_snapshot(tmp_path) ->
 def test_processing_params_block_incomplete_protocol_before_event_parsing(
     tmp_path,
     monkeypatch,
+    condition_validation,
 ) -> None:
     project = Project.load(tmp_path / "project")
     warnings: list[tuple[str, str]] = []
@@ -80,6 +83,7 @@ def test_processing_params_block_incomplete_protocol_before_event_parsing(
     )
 
     assert processing_inputs.build_validated_params(host) is None
+    assert condition_validation == []
     assert warnings == [
         (
             "FPVS Protocol Required",
@@ -92,6 +96,7 @@ def test_processing_params_block_incomplete_protocol_before_event_parsing(
 def test_processing_params_reject_marker_condition_code_collision(
     tmp_path,
     monkeypatch,
+    condition_validation,
 ) -> None:
     project = _ready_project(tmp_path / "project", marker_code=55)
     warnings: list[tuple[str, str]] = []
@@ -104,9 +109,10 @@ def test_processing_params_reject_marker_condition_code_collision(
         currentProject=project,
         file_mode=SimpleNamespace(get=lambda: "Batch"),
         settings=object(),
-        event_rows=[_EventRow("Condition A", 55)],
+        event_rows=[("Condition A", "55")],
     )
 
     assert processing_inputs.build_validated_params(host) is None
+    assert condition_validation == [((("Condition A", "55"),), True)]
     assert warnings[0][0] == "Invalid FPVS Protocol"
     assert "also a condition-onset code" in warnings[0][1]

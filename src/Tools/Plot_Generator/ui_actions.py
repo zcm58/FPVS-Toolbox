@@ -17,6 +17,11 @@ def build_generation_action_row(owner, root_layout) -> None:
     )
     owner.workflow_status.setObjectName("snr_plot_workflow_status")
     owner.workflow_status.setAccessibleName("SNR plot generation status")
+    owner.fix_setup_btn = make_action_button("Fix setup", compact=True, parent=owner.workflow_status)
+    owner.fix_setup_btn.setObjectName("snr_fix_setup")
+    owner.fix_setup_btn.clicked.connect(owner._focus_setup_issue)
+    owner.fix_setup_btn.hide()
+    owner.workflow_status.banner_layout.addWidget(owner.fix_setup_btn)
     owner.workflow_status.hide()
     root_layout.addWidget(owner.workflow_status)
 

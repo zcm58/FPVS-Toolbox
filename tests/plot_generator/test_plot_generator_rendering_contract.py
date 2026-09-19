@@ -132,6 +132,7 @@ def test_session_figure_stacks_normal_width_group_panels_without_differences(
     figures = []
 
     def capture_save(figure, _path, *_args, **_kwargs) -> None:
+        Path(_path).write_bytes(b"rendered figure")
         if figure not in figures:
             figures.append(figure)
 
@@ -234,6 +235,7 @@ def test_single_and_overlay_figures_use_shared_width_and_show_participant_n(
     legends: list[list[str]] = []
 
     def capture_save(figure, _path, *_args, **_kwargs) -> None:
+        Path(_path).write_bytes(b"rendered figure")
         dimensions.append(tuple(float(value) for value in figure.get_size_inches()))
         legends.append(figure.axes[0].get_legend_handles_labels()[1])
 
@@ -290,6 +292,7 @@ def test_png_uses_fast_lossless_compression_without_changing_pdf_options(
     calls: list[tuple[Path, dict[str, object]]] = []
 
     def capture_save(_figure, path, *_args, **kwargs) -> None:
+        Path(path).write_bytes(b"rendered figure")
         calls.append((Path(path), kwargs))
 
     monkeypatch.setattr("matplotlib.figure.Figure.savefig", capture_save)
@@ -310,6 +313,7 @@ def test_oddball_markers_are_batched_per_curve(
     figures = []
 
     def capture_save(figure, _path, *_args, **_kwargs) -> None:
+        Path(_path).write_bytes(b"rendered figure")
         if figure not in figures:
             figures.append(figure)
 
@@ -346,7 +350,7 @@ def test_sanitized_figure_stem_collisions_get_unique_hashed_names(
 ) -> None:
     monkeypatch.setattr(
         "matplotlib.figure.Figure.savefig",
-        lambda *_args, **_kwargs: None,
+        lambda _figure, path, **_kwargs: Path(path).write_bytes(b"rendered figure"),
     )
     harness = _RenderHarness(tmp_path)
 

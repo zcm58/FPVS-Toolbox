@@ -10,7 +10,7 @@ import pytest
 pytest.importorskip("PySide6")
 pytest.importorskip("pytestqt")
 
-from PySide6.QtCore import QItemSelectionModel, QModelIndex, Qt  # noqa: E402
+from PySide6.QtCore import QItemSelectionModel, QModelIndex, QPoint, Qt  # noqa: E402
 from PySide6.QtWidgets import QLabel  # noqa: E402
 
 from Main_App.gui.kurtosis_review_dialog import KurtosisReviewDialog  # noqa: E402
@@ -58,7 +58,7 @@ def dialog(qtbot, tmp_path):
         pending_status_by_recording={},
     )
     widget = KurtosisReviewDialog(reconciliation, project_root=tmp_path)
-    qtbot.addWidget(widget)
+    qtbot.addWidget(widget, before_close_func=lambda review: review._remember_initial_review_state())
     widget.show()
     qtbot.waitExposed(widget)
     for row in range(len(items)):
@@ -91,6 +91,20 @@ def _select(dialog, *rows):
 def _draft(dialog):
     return tuple((_decision(dialog, row).currentData(), _reason(dialog, row).text())
                  for row in range(len(dialog._items)))
+
+
+def test_discard_guard_tracks_policy_and_choices_not_evidence_visibility(dialog):
+    # Existing fixture populates draft notes after the captured startup state.
+    assert dialog._review_state() != dialog._initial_review_state
+    state = dialog._review_state()
+    dialog.show_auto_checkbox.setChecked(True)
+    assert dialog._review_state() == state
+    dialog.auto_checkbox.setChecked(False)
+    assert dialog._review_state() != state
+    dialog.auto_checkbox.setChecked(True)
+    assert dialog._review_state() == state
+    _decision(dialog, 0).setCurrentIndex(1)
+    assert dialog._review_state() != state
 
 
 def test_bulk_button_preserves_existing_decisions_reasons_receipts_and_policy(qtbot, dialog):
@@ -154,7 +168,8 @@ def test_manual_edit_or_policy_change_invalidates_bulk_undo(qtbot, dialog, edit)
     elif edit == "automatic_policy":
         qtbot.mouseClick(dialog.auto_checkbox, Qt.MouseButton.LeftButton)
     else:
-        qtbot.mouseClick(dialog.auto_all_checkbox, Qt.MouseButton.LeftButton)
+        qtbot.mouseClick(dialog.auto_all_checkbox, Qt.MouseButton.LeftButton,
+                         pos=QPoint(8, dialog.auto_all_checkbox.height() // 2))
     assert not dialog.undo_button.isEnabled()
     assert dialog._bulk_undo == ()
     draft = _draft(dialog)
@@ -176,12 +191,14 @@ def test_next_undecided_reaches_invalid_statistic_and_wraps(qtbot, dialog):
 def test_automatic_policy_toggle_restores_choices_and_immediately_updates_actions(qtbot, dialog):
     _select(dialog, 0, 1, 2)
     before = _draft(dialog)
-    qtbot.mouseClick(dialog.auto_all_checkbox, Qt.MouseButton.LeftButton)
+    qtbot.mouseClick(dialog.auto_all_checkbox, Qt.MouseButton.LeftButton,
+                         pos=QPoint(8, dialog.auto_all_checkbox.height() // 2))
     assert not dialog.mark_all_button.isEnabled()
     assert not dialog.selected_button.isEnabled()
     assert dialog.table.currentRow() == 5
     assert "All undecided: 0 electrode(s) across 0 recording(s)" in dialog.scope_label.text()
-    qtbot.mouseClick(dialog.auto_all_checkbox, Qt.MouseButton.LeftButton)
+    qtbot.mouseClick(dialog.auto_all_checkbox, Qt.MouseButton.LeftButton,
+                         pos=QPoint(8, dialog.auto_all_checkbox.height() // 2))
     assert _draft(dialog) == before
     assert dialog.mark_all_button.isEnabled()
     assert dialog.auto_checkbox.isChecked()

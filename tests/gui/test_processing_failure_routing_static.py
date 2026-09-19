@@ -15,11 +15,48 @@ from unittest.mock import Mock
 
 import pytest
 
+from Main_App.gui.condition_input_model import validate_condition_rows
+from Main_App.gui.run_outcome_model import summarize_run
+
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
+@pytest.mark.parametrize("activity_attr", [
+    "_run_active", "_settings_post_processing_activity_active",
+    "_settings_full_fft_grid_qc_thread", "_settings_harmonic_recalc_thread",
+])
+@pytest.mark.parametrize("saved", [False, True])
+def test_save_and_leave_waits_for_work_started_during_settings_save(monkeypatch, activity_attr, saved):
+    event_map = ModuleType("Main_App.gui.event_map")
+    event_map.validated_event_map = lambda *_args, **_kwargs: {}
+    monkeypatch.setitem(sys.modules, "Main_App.gui.event_map", event_map)
+    namespace = {
+        "has_project_changes": lambda _host: True,
+        "has_condition_changes": lambda _host: False,
+        "QMessageBox": SimpleNamespace(Save=1, Discard=2, Cancel=4, question=lambda *_: 1),
+    }
+    _load_function("src/Main_App/gui/project_drafts.py", "_save_work_is_active", namespace)
+    confirm = _load_function("src/Main_App/gui/project_drafts.py", "confirm_project_draft_exit", namespace)
+    host = SimpleNamespace(open_settings_window=Mock())
+
+    def save():
+        setattr(host, activity_attr, True)
+        return saved
+
+    host._settings_page = SimpleNamespace(has_unsaved_changes=lambda: True, save_pending_changes=save)
+    assert not confirm(host)
+    host.open_settings_window.assert_not_called()
+
+
 def _load_function(relative_path, name, namespace, *, class_name=None, outer_function=None):
+    namespace.setdefault("present_last_run", Mock())
+    namespace.setdefault("remember_saved_setup", Mock())
+    namespace.setdefault("summarize_run", summarize_run)
+    namespace.setdefault("selected_single_file", lambda host: host.data_paths[0] if host.data_paths else "")
+    namespace.setdefault("validated_event_map", lambda host, **_: validate_condition_rows([
+        tuple(edit.text() for edit in row.findChildren(object)) for row in host.event_rows
+    ])[0])
     path = REPO_ROOT / relative_path
     tree = ast.parse(path.read_text(encoding="utf-8"))
     owner = tree if class_name is None else next(
@@ -228,7 +265,7 @@ def test_completion_preserves_failure_details_and_shows_one_summary(tmp_path):
     finalized = []
     host = SimpleNamespace(
         settings=SimpleNamespace(debug_enabled=lambda: False), validated_params={},
-        log=Mock(), _processing_plan=object(), currentProject=object(), _busy_stop=Mock(),
+        log=Mock(), _processing_plan=SimpleNamespace(run_files=(), states=()), currentProject=object(), _busy_stop=Mock(),
     )
     host._finalize_processing = lambda *args, **kwargs: finalized.append(host._processing_summary_reported)
     finished(host, {"results": [], "errors": [error], "cancelled": False})
@@ -254,6 +291,21 @@ def test_reported_failures_do_not_open_second_completion_dialog():
     assert not messages.mock_calls
     host._set_controls_enabled.assert_called_once_with(True)
     assert not host.busy
+
+
+def test_suppressed_completion_dialogs_do_not_label_success_as_cancelled():
+    presenter = Mock()
+    finalize = _load_function(
+        "src/Main_App/gui/processing_completion.py", "finalize_processing_host_state",
+        {"user_messages": Mock(), "gc": gc, "datetime": datetime, "present_last_run": presenter},
+    )
+    host = SimpleNamespace(
+        _suppress_completion_dialogs=True, _processing_run_cancelled=False,
+        _processing_summary_reported=True, log=Mock(), _set_controls_enabled=Mock(),
+        progress_bar=Mock(),
+    )
+    finalize(host, True)
+    presenter.assert_called_once_with(host, success=True, cancelled=False)
 
 
 @pytest.mark.parametrize(
@@ -305,7 +357,7 @@ def test_completion_does_not_report_an_entirely_failed_batch_as_success(
     )
     host = SimpleNamespace(
         settings=SimpleNamespace(debug_enabled=lambda: False), validated_params={},
-        log=Mock(), _processing_plan=object(), currentProject=object(),
+        log=Mock(), _processing_plan=SimpleNamespace(run_files=(), states=()), currentProject=object(),
         _busy_stop=Mock(), _finalize_processing=Mock(),
     )
     controller_error = "Pool shutdown failed" if case == "controller_failure_after_success" else ""
@@ -453,7 +505,7 @@ def test_ledger_save_failure_does_not_claim_processing_success(tmp_path):
     host = SimpleNamespace(
         settings=SimpleNamespace(debug_enabled=lambda: False), validated_params={},
         log=Mock(), _busy_stop=Mock(), _finalize_processing=Mock(),
-        _processing_plan=object(), currentProject=object(),
+        _processing_plan=SimpleNamespace(run_files=(), states=()), currentProject=object(),
     )
     finished(host, {"results": [{"file": str(tmp_path / "p9.bdf"), "status": "ok"}]})
 
@@ -879,6 +931,8 @@ def _registration_validation_harness(tmp_path, *, mode="Batch", additions=True):
     manifest.write_text(json.dumps({"recordings": project.recordings}), encoding="utf-8")
     old = SimpleNamespace(path=tmp_path / "P1.bdf", processing_id="P1_visit1")
     new = SimpleNamespace(path=tmp_path / "P2.bdf", processing_id="P2_visit2")
+    old.path.touch()
+    new.path.touch()
     new_row = SimpleNamespace(participant_id="P2", group_id="control", group_label="Control",
                               session_id="visit2", session_label="Follow-up", raw_file=new.path,
                               recording_id="P2_visit2", status="New participant and recording")

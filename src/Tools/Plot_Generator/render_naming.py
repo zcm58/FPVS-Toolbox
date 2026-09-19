@@ -52,6 +52,12 @@ def claim_figure_stem(
 
     title = str(base_title or "").strip() or "SNR Plot"
     roi_label = str(roi or "").strip() or "ROI"
+    plan = getattr(owner, "_figure_export_plan", None)
+    if plan is not None:
+        for item in plan:
+            if item.identity == (title, roi_label, suffix):
+                return item.png_path.stem
+        raise ValueError("The requested figure is not in the confirmed export plan.")
     identity = f"{title}\x00{roi_label}\x00{suffix}"
     base_stem = safe_figure_stem(base_title=title, roi=roi_label)
     candidate = f"{base_stem}{suffix}"
@@ -62,8 +68,8 @@ def claim_figure_stem(
     if claimed is None:
         claimed = set()
         setattr(owner, "_snr_claimed_figure_stems", claimed)
-    if candidate not in claimed:
-        claimed.add(candidate)
+    if candidate.casefold() not in claimed:
+        claimed.add(candidate.casefold())
         return candidate
 
     attempt = 0
@@ -73,8 +79,8 @@ def claim_figure_stem(
             identity=identity,
             salt=str(attempt),
         )
-        if alternate not in claimed:
-            claimed.add(alternate)
+        if alternate.casefold() not in claimed:
+            claimed.add(alternate.casefold())
             return alternate
         attempt += 1
 

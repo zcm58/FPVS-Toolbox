@@ -95,6 +95,7 @@ def test_custom_legend_labels_payload(qtbot, tmp_path, monkeypatch):
     win.legend_b_peaks_edit.setText("B Peaks")
 
     win._generate()
+    qtbot.waitUntil(lambda: "kwargs" in captured)
 
     kwargs = captured["kwargs"]
     assert kwargs["legend_custom_enabled"] is True
@@ -115,6 +116,7 @@ def test_blank_custom_label_payload(qtbot, tmp_path, monkeypatch):
     win.legend_b_peaks_edit.setText("B Peaks")
 
     win._generate()
+    qtbot.waitUntil(lambda: "kwargs" in captured)
 
     kwargs = captured["kwargs"]
     assert kwargs["legend_custom_enabled"] is True

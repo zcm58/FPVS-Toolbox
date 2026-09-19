@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+from dataclasses import replace
 from pathlib import Path
 from threading import get_ident
 import time
@@ -60,6 +62,7 @@ from Tools.Free_Harmonic_Clustering.gui.operation_registry import (  # noqa: E40
     register_active_operation,
     release_active_operation,
 )
+from tests.gui.ux_capture import ux_capture_theme  # noqa: E402, F401
 
 
 class _FakeBackend:
@@ -229,6 +232,44 @@ def _page(
     return page
 
 
+def test_duplicate_group_setup_has_visible_reason_and_focus_action(qtbot, tmp_path):
+    page = _page(qtbot, tmp_path)
+    page.resize(1280, 900)
+    page.activateWindow()
+    page.design_combo.setCurrentIndex(page.design_combo.findData(GuiAnalysisDesign.INDEPENDENT_GROUPS.value))
+    page.independent_group_b_combo.setCurrentIndex(page.independent_group_a_combo.currentIndex())
+    assert not page.run_analysis_button.isEnabled()
+    assert page.workflow_status.isVisible()
+    assert "two different groups" in page.workflow_status.text()
+    qtbot.mouseClick(page.fix_setup_button, QtCore.Qt.LeftButton)
+    qtbot.waitUntil(lambda: page.focusWidget() is page.independent_group_b_combo)
+    screenshot_dir = os.environ.get("FPVS_UX_SCREENSHOT_DIR")
+    if screenshot_dir:
+        path = Path(screenshot_dir)
+        path.mkdir(parents=True, exist_ok=True)
+        page.grab().save(str(path / "fhc_setup_validation.png"))
+    page.independent_group_b_combo.setCurrentIndex(1)
+    assert page.run_analysis_button.isEnabled()
+    assert page.workflow_status.isHidden()
+    page._on_inspection_completed(replace(
+        _options(tmp_path), grid_compatible=False,
+        compatibility_message=(
+            "The selected recordings do not share a compatible FullFFT frequency grid. "
+            "Review the processing settings and regenerate the affected condition outputs "
+            "before running Free Harmonic Clustering Analysis."
+        ),
+    ))
+    page.layout().activate()
+    assert page.width() == 1280 and page.height() == 900
+    for control in (page.workflow_status, page.run_analysis_button, page.open_results_button):
+        assert page.rect().contains(QtCore.QRect(control.mapTo(page, QtCore.QPoint()), control.size()))
+    assert page.workflow_status.label.height() >= page.workflow_status.label.heightForWidth(
+        page.workflow_status.label.width()
+    )
+    if screenshot_dir:
+        page.grab().save(str(Path(screenshot_dir) / "fhc_long_validation.png"))
+
+
 def test_project_setup_is_dynamic_and_results_folder_is_reachable(
     qtbot,
     tmp_path: Path,
@@ -313,8 +354,7 @@ def test_project_setup_is_dynamic_and_results_folder_is_reachable(
     assert page.harmonic_mode_combo.currentText() == "Hermann automatic selection"
     assert page.paired_condition_a_combo.count() == 3
     assert page.paired_group_filter_combo.itemData(0) is None
-    assert "Run Analysis" in page.workflow_status.text()
-    assert "show the results below" in page.workflow_status.text()
+    assert page.workflow_status.isHidden()
     assert (
         page.run_analysis_button.text()
         == "Run Free Harmonic Clustering Analysis"
@@ -395,11 +435,8 @@ def test_repeated_project_uses_prespecified_batch_without_page_scroll(
     assert page.findChildren(QtWidgets.QScrollArea) == []
     assert "BC Group" in page.repeated_groups_value.text()
     assert "Control Group" in page.repeated_groups_value.text()
-    assert page.repeated_sessions_value.text() == (
-        "Luteal Phase (Visit 1) -> Follicular Phase (Visit 2)"
-    )
-    assert "All 4 project conditions" in page.repeated_conditions_value.text()
-    assert "Visit 2 - Visit 1" in page.repeated_batch_value.text()
+    assert tuple(session.label for session in page._options.sessions) == ("Luteal Phase", "Follicular Phase")
+    assert page._options.conditions == ("Neutral Angry", "Angry Control", "Neutral Happy", "Neutral Sad")
     assert not hasattr(page, "repeated_order_warning")
     assert page.review_exclusions_button.isEnabled()
     assert (
@@ -806,7 +843,7 @@ def test_worker_preserves_typed_post_processing_failure() -> None:
     assert invalid_failures == ["Invalid FullFFT state."]
 
 
-def test_diagnostics_status_points_to_exclusion_review(
+def test_valid_diagnostics_context_keeps_compact_idle_footer(
     qtbot,
     tmp_path: Path,
 ) -> None:
@@ -816,9 +853,9 @@ def test_diagnostics_status_points_to_exclusion_review(
         diagnostics=("Two project-QC exclusions are active.",),
     )
 
-    assert "Run Analysis" in page.workflow_status.text()
-    assert "cohort and input details" in page.workflow_status.text()
-    assert "results workbook" in page.workflow_status.text()
+    assert page.workflow_status.isHidden()
+    assert page.run_analysis_button.isEnabled()
+    assert page._options.diagnostics == ("Two project-QC exclusions are active.",)
 
 
 def test_real_qthread_inspection_keeps_gui_responsive_and_shuts_down(

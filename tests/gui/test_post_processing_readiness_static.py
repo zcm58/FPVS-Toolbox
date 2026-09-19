@@ -19,6 +19,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _load_function(relative_path, name, namespace, *, class_name=None):
+    namespace.setdefault("present_last_run", Mock())
     path = REPO_ROOT / relative_path
     tree = ast.parse(path.read_text(encoding="utf-8"))
     owner = tree if class_name is None else next(

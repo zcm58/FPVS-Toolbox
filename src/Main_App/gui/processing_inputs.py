@@ -27,7 +27,8 @@ from Main_App.gui.participant_review import (
     review_participants_for_processing,
     review_recording_additions_for_processing,
 )
-from Main_App.gui.event_map import has_complete_event_map_entry
+from Main_App.gui.event_map import validated_event_map
+from Main_App.gui.project_drafts import refresh_dirty_indicator
 from Main_App.processing.processing_controller import (
     participant_review_rows,
     commit_raw_registration_review,
@@ -60,10 +61,6 @@ from Main_App.processing.removed_electrode_detection import (
     REMOVED_ELECTRODE_DETECTION_MODE_OFF,
     manual_removed_electrodes_are_enabled,
     normalize_manual_removed_electrodes_map,
-)
-from Main_App.gui.project_workflows import (
-    WINDOWS_FORBIDDEN_CONDITION_CHARS_TEXT,
-    _illegal_condition_chars,
 )
 
 logger = logging.getLogger(__name__)
@@ -161,9 +158,12 @@ def validate_inputs(host: Any) -> bool:
     registration_project = host.currentProject
     if mode_now == "Single":
         # In single mode, require an explicit .bdf selection
-        if not host.data_paths:
-            QMessageBox.warning(host, "No File Selected", "Please choose one .bdf file first.")
+        selected = selected_single_file(host)
+        if not selected or not Path(selected).is_file() or Path(selected).suffix.lower() != ".bdf":
+            host._update_start_enabled()
+            QMessageBox.warning(host, "No File Selected", "Please choose an available .bdf file first.")
             return False
+        host.data_paths = [selected]
         try:
             if bool(getattr(host.currentProject, "groups_locked", False)):
                 registration_review = prepare_raw_registration_review(
@@ -595,38 +595,9 @@ def build_validated_params(host: Any) -> dict | None:
         normalized.get("line_noise_frequency_hz"),
     )
 
-    # Event map from UI rows → {label: int_id}
-    event_map: dict[str, int] = {}
-    for row in host.event_rows:
-        edits = row.findChildren(QLineEdit)
-        if len(edits) >= 2:
-            label_edit = edits[0]
-            label = label_edit.text().strip()
-            ident = edits[1].text().strip()
-            if label:
-                illegal_chars = _illegal_condition_chars(label)
-                if illegal_chars:
-                    bad = " ".join(illegal_chars)
-                    QMessageBox.warning(
-                        host,
-                        "Invalid Condition Name",
-                        (
-                            "Condition names cannot contain characters that are invalid for "
-                            "Windows file/folder names.\n\n"
-                            f"Condition: {label}\n"
-                            f"Illegal character(s): {bad}\n\n"
-                            "Please rename this condition using only allowed characters.\n"
-                            f"Not allowed: {WINDOWS_FORBIDDEN_CONDITION_CHARS_TEXT}"
-                        ),
-                    )
-                    try:
-                        label_edit.setFocus()
-                        label_edit.selectAll()
-                    except Exception:
-                        pass
-                    return None
-            if label and ident.isdigit():
-                event_map[label] = int(ident)
+    event_map = validated_event_map(host, focus_error=True)
+    if event_map is None:
+        return None
     if not event_map:
         QMessageBox.warning(host, "No Events", "Please add at least one event map entry.")
         return None
@@ -855,22 +826,41 @@ def update_start_enabled(host: Any) -> None:
         False,
     ):
         return
-    event_map_ready = has_complete_event_map_entry(host)
+    mapping = validated_event_map(host)
+    event_map_ready = bool(mapping)
+    refresh_dirty_indicator(host)
     try:
         mode = host.file_mode.get()
     except Exception:
         mode = "Batch"
     if mode == "Single":
-        txt = getattr(host, "le_input_file", None).text() if hasattr(host, "le_input_file") else ""
+        txt = selected_single_file(host)
         ok = (
             event_map_ready
             and bool(txt)
             and Path(txt).suffix.lower() == ".bdf"
-            and Path(txt).exists()
+            and Path(txt).is_file()
         )
         btn.setEnabled(ok)
+        reason = "Select an available BDF file." if event_map_ready and not ok else ""
     else:
         btn.setEnabled(event_map_ready)
+        reason = ""
+    if not event_map_ready:
+        reason = "Correct the condition rows above." if mapping is None else "Add a condition name and recorded marker ID."
+    label = getattr(host, "processing_readiness_label", None)
+    if label is not None:
+        label.setText(reason)
+        label.setVisible(bool(reason))
+
+
+def selected_single_file(host: Any) -> str:
+    """Use the displayed selection consistently for readiness and launch."""
+    field = getattr(host, "le_input_file", None)
+    if field is not None:
+        return field.text().strip()
+    paths = getattr(host, "data_paths", [])
+    return str(paths[0]) if paths else ""
 
 
 def select_single_file(host: Any) -> None:

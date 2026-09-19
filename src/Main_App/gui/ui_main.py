@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
 from Main_App.gui.header_bar import HeaderBar
 from Main_App.gui.menu_bar import build_menu_bar
 from Main_App.gui.processing_log_dialog import ProcessingLogDialog
+from Main_App.gui.run_outcome import build_last_run_panel
 from .style_tokens import (
     BROWSE_BUTTON_WIDTH,
     EVENT_ID_COLUMN_WIDTH,
@@ -332,15 +333,27 @@ def init_ui(self) -> None:
     self.event_layout = QVBoxLayout(self.event_container)
     self.event_layout.setContentsMargins(0, 0, 0, 0)
     self.event_layout.setSpacing(4)
+    self.event_layout.setAlignment(Qt.AlignTop)
     scroll.setWidget(self.event_container)
 
     event_group_layout.addWidget(scroll, 1)
     setup_layout.addWidget(grp_event, 1)
+    self.last_run_panel = build_last_run_panel(self, setup_panel)
+    setup_layout.addWidget(self.last_run_panel)
+    self.processing_readiness_label = QLabel(setup_panel)
+    self.processing_readiness_label.setObjectName("processing_readiness_label")
+    self.processing_readiness_label.setWordWrap(True)
+    self.processing_readiness_label.hide()
+    setup_layout.addWidget(self.processing_readiness_label)
 
     # Start Row
     run_panel = ActionRow(setup_panel, alignment=Qt.AlignRight, spacing=10)
     run_panel.setObjectName("run_panel")
     self.run_panel = run_panel
+    self.project_draft_status = QLabel(run_panel)
+    self.project_draft_status.setObjectName("project_draft_status")
+    self.project_draft_status.setAccessibleName("Project save status")
+    run_panel.row_layout.insertWidget(0, self.project_draft_status)
 
     self.processing_log_dialog = ProcessingLogDialog(self)
     self.text_log = self.processing_log_dialog.viewer

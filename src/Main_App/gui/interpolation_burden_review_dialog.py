@@ -16,11 +16,11 @@ from PySide6.QtWidgets import (
 
 from Main_App.gui.components import (
     ActionRow,
-    AppDialog,
     StatusBanner,
     SurfaceSize,
     make_action_button,
 )
+from Main_App.gui.components.review_dialog import ReviewDialog
 from Main_App.processing.interpolation_burden import (
     INTERPOLATION_BURDEN_DECISION_EXCLUDE,
     INTERPOLATION_BURDEN_DECISION_RETAIN,
@@ -34,7 +34,7 @@ from Main_App.processing.interpolation_burden_review import (
 )
 
 
-class InterpolationBurdenReviewDialog(AppDialog):
+class InterpolationBurdenReviewDialog(ReviewDialog):
     """Require an unambiguous decision for every pending finding."""
 
     def __init__(
@@ -56,6 +56,14 @@ class InterpolationBurdenReviewDialog(AppDialog):
         self._scope_controls: dict[str, QComboBox] = {}
         self._reason_controls: dict[str, QLineEdit] = {}
         self._build_ui()
+        self._remember_initial_review_state()
+
+    def _review_state(self) -> tuple:
+        return tuple(
+            (key, control.currentData(), self._reason_controls[key].text(),
+             self._scope_controls[key].currentData() if key in self._scope_controls else None)
+            for key, control in self._decision_controls.items()
+        )
 
     def _build_ui(self) -> None:
         banner = StatusBanner(
@@ -92,7 +100,7 @@ class InterpolationBurdenReviewDialog(AppDialog):
         headers = [
             "Participant",
             "Recording",
-            "Session / phase-at-visit",
+            "Session / phase",
             "Visit",
             "Burden",
             "Interpolated electrodes",
@@ -106,6 +114,7 @@ class InterpolationBurdenReviewDialog(AppDialog):
         self.table = QTableWidget(len(self._batch.items), len(headers), self)
         self.table.setObjectName("interpolation_burden_review_table")
         self.table.setHorizontalHeaderLabels(headers)
+        self.table.horizontalHeaderItem(2).setToolTip("Session / phase-at-visit")
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.table.verticalHeader().setVisible(False)
@@ -158,6 +167,7 @@ class InterpolationBurdenReviewDialog(AppDialog):
             decision.addItem("Exclude", INTERPOLATION_BURDEN_DECISION_EXCLUDE)
             decision.setCurrentIndex(0)
             decision.currentIndexChanged.connect(self.error_banner.hide)
+            decision.currentIndexChanged.connect(self._update_attention)
             self.table.setCellWidget(row, 7, decision)
             self._decision_controls[item.processing_id] = decision
 
@@ -188,6 +198,11 @@ class InterpolationBurdenReviewDialog(AppDialog):
         self.table.resizeRowsToContents()
         self.root_layout.addWidget(self.table, 1)
 
+        self.progress_label = QLabel(self)
+        self.progress_label.setObjectName("interpolation_burden_review_progress")
+        self.progress_label.setWordWrap(True)
+        self.root_layout.addWidget(self.progress_label)
+
         actions = ActionRow(self)
         actions.setObjectName("interpolation_burden_review_actions")
         self.support_button = actions.add_button(
@@ -196,6 +211,11 @@ class InterpolationBurdenReviewDialog(AppDialog):
         self.support_button.setObjectName("interpolation_burden_repair_support")
         self.support_button.clicked.connect(self._inspect_repair_support)
         self.table.setCurrentCell(0, 0)
+        self.next_button = actions.add_button(
+            make_action_button("Next needs attention", variant="secondary", parent=actions)
+        )
+        self.next_button.setObjectName("interpolation_burden_review_next")
+        self.next_button.clicked.connect(self._next_needs_attention)
         self.cancel_button = actions.add_button(
             make_action_button("Cancel", variant="secondary", parent=actions)
         )
@@ -207,6 +227,30 @@ class InterpolationBurdenReviewDialog(AppDialog):
         self.cancel_button.clicked.connect(self.reject)
         self.apply_button.clicked.connect(self._validate_and_accept)
         self.root_layout.addWidget(actions)
+        self._update_attention()
+
+    def _pending_rows(self) -> list[int]:
+        return [row for row, item in enumerate(self._batch.items)
+                if not self._decision_controls[item.processing_id].currentData()]
+
+    def _update_attention(self, *_args: object) -> None:
+        remaining = len(self._pending_rows())
+        self.progress_label.setText(
+            f"{len(self._batch.items) - remaining} of {len(self._batch.items)} recordings ready to submit"
+            + (f" · {remaining} need a decision" if remaining else "")
+        )
+        self.next_button.setEnabled(bool(remaining))
+
+    def _focus_decision(self, row: int) -> None:
+        self.table.setCurrentCell(row, 7)
+        self.table.scrollTo(self.table.model().index(row, 7))
+        self._decision_controls[self._batch.items[row].processing_id].setFocus()
+
+    def _next_needs_attention(self) -> None:
+        pending = self._pending_rows()
+        if pending:
+            current = self.table.currentRow()
+            self._focus_decision(next((row for row in pending if row > current), pending[0]))
 
     def _inspect_repair_support(self) -> None:
         from Main_App.gui.qc_repair_support import RepairSupportDialog
@@ -253,6 +297,9 @@ class InterpolationBurdenReviewDialog(AppDialog):
         except InterpolationBurdenReviewError as exc:
             self.error_banner.set_text(str(exc))
             self.error_banner.show()
+            pending = self._pending_rows()
+            if pending:
+                self._focus_decision(pending[0])
             return
         self.accept()
 

@@ -449,6 +449,11 @@ class FreeHarmonicClusteringPage(QWidget):
             variant="info",
         )
         self.workflow_status.setObjectName("free_harmonic_workflow_status")
+        self.fix_setup_button = make_action_button("Fix setup", compact=True, parent=self.workflow_status)
+        self.fix_setup_button.setObjectName("free_harmonic_fix_setup")
+        self.fix_setup_button.clicked.connect(self._focus_setup_issue)
+        self.fix_setup_button.hide()
+        self.workflow_status.banner_layout.addWidget(self.fix_setup_button)
         footer_layout.addWidget(self.workflow_status)
         self.progress_bar = QProgressBar(footer)
         self.progress_bar.setObjectName("free_harmonic_progress_bar")
@@ -1667,6 +1672,25 @@ class FreeHarmonicClusteringPage(QWidget):
     def _update_buttons(self) -> None:
         busy = self._thread is not None
         error = self._setup_error()
+        target = None
+        if error and self._options is not None:
+            if "different groups" in error:
+                target = self.independent_group_b_combo
+            elif "different conditions" in error:
+                target = self.paired_condition_b_combo
+            elif self._selected_harmonic_mode() is GuiHarmonicMode.FIXED_HIGHEST:
+                target = self.fixed_highest_combo
+        self._setup_issue_target = target
+        self.fix_setup_button.setVisible(not busy and target is not None)
+        if not busy and error and not self._inspection_failed:
+            self.workflow_status.set_variant("warning")
+            self.workflow_status.set_text(error)
+            self.workflow_status.setAccessibleDescription(error)
+            self.workflow_status.show()
+            self._setup_hint_active = True
+        elif not busy and not error and getattr(self, "_setup_hint_active", False):
+            self.workflow_status.hide()
+            self._setup_hint_active = False
         self.run_analysis_button.setEnabled(not busy and error is None)
         self.run_analysis_button.setVisible(not busy)
         self.cancel_button.setVisible(busy)
@@ -1693,6 +1717,11 @@ class FreeHarmonicClusteringPage(QWidget):
         self.fixed_highest_combo.setEnabled(
             not busy and fixed and self._options is not None and self.fixed_highest_combo.count() > 0
         )
+
+    def _focus_setup_issue(self) -> None:
+        target = getattr(self, "_setup_issue_target", None)
+        if target is not None and target.isEnabled():
+            target.setFocus()
 
     def _results_parent(self) -> Path:
         return self._backend.results_parent(self._project_root)

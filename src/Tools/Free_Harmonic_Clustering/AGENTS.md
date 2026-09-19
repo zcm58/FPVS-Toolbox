@@ -167,6 +167,10 @@ the page implementation.
 
 - Use the shared `SectionCard`, `StatusBanner`, `ActionRow`, and tabbed
   `ToolInfoContent` patterns. Do not nest cards.
+- If setup disables Run, display the actionable reason in the existing footer.
+  A local Fix setup action focuses the relevant editable selector without
+  changing the chosen contrast. Remove resolved setup guidance without hiding
+  operation errors or completion warnings.
 - Route missing or stale FullFFT provenance through the Main App's shared
   **Post-processing Required** dialog. The page emits the affected project and
   reason; it must not show the raw provenance failure in its footer or launch a

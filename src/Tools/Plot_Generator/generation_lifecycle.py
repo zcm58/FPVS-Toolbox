@@ -51,6 +51,7 @@ class PlotGeneratorLifecycleMixin:
         self._worker_reported_cancelled = False
         self._worker_outcome_received = False
         self._late_cancel_after_commit = False
+        self._approved_export_plan = None
 
     def _set_workflow_status(self, text: str, variant: str = "info") -> None:
         update_workflow_status(self, text, variant)
@@ -58,6 +59,15 @@ class PlotGeneratorLifecycleMixin:
     def _set_generation_navigation_locked(self, locked: bool) -> None:
         """Keep embedded Main App navigation stable while a worker is active."""
 
+        for name in (
+            "params_box", "advanced_box", "legend_group", "group_box",
+            "input_folder_btn", "output_folder_btn", "load_defaults_btn",
+        ):
+            widget = getattr(self, name, None)
+            if widget is not None:
+                widget.setEnabled(not locked)
+        if locked and hasattr(self, "fix_setup_btn"):
+            self.fix_setup_btn.hide()
         if locked:
             if getattr(self, "_snr_navigation_locked", False):
                 return

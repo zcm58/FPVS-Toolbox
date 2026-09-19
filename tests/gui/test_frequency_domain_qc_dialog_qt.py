@@ -14,6 +14,7 @@ from PySide6.QtGui import QAction  # noqa: E402
 from PySide6.QtWidgets import QAbstractItemView, QDialog, QLabel, QPlainTextEdit  # noqa: E402
 
 from Main_App.gui import frequency_domain_qc_dialog as module  # noqa: E402
+from tests.gui.ux_capture import capture, ux_capture_theme  # noqa: E402, F401
 from Main_App.processing.frequency_domain_qc import (  # noqa: E402
     DECISION_INTERPOLATE_CONDITION_ELECTRODE,
     DECISION_EXCLUDE_RECORDING,
@@ -25,8 +26,8 @@ def _report(scope="recording"):
     findings, summaries, assignments = [], [], []
     groups = {}
     for index, condition in enumerate(("Faces", "Objects", "Neutral")):
-        participant = f"P{index + 1:02d}_" + "long_participant_identifier_" * 5
-        recording = participant + "__long_recording_session_identifier_" * 4
+        participant = f"P{index + 1:02d}_" + "LONG_PARTICIPANT_IDENTIFIER_" * 5
+        recording = participant + "__LONG_RECORDING_SESSION_IDENTIFIER_" * 4
         identity = {
             "participant_id": participant,
             "recording_id": recording if scope == "recording" else "",
@@ -86,7 +87,7 @@ def _report(scope="recording"):
 def _dialog(qtbot, scope="recording", size=(1180, 780)):
     report, groups = _report(scope)
     dialog = module.FrequencyDomainQcReviewDialog(report, participant_groups=groups)
-    qtbot.addWidget(dialog)
+    qtbot.addWidget(dialog, before_close_func=lambda review: review._remember_initial_review_state())
     dialog.resize(*size)
     dialog.show()
     qtbot.waitExposed(dialog)
@@ -98,6 +99,32 @@ def _context(dialog):
     viewer = page if isinstance(page, QPlainTextEdit) else page.findChild(QPlainTextEdit)
     assert viewer is not None
     return viewer.toPlainText()
+
+
+def test_discard_guard_tracks_choices_reasons_and_confirmation_not_filters(qtbot):
+    dialog, report = _dialog(qtbot)
+    initial = dialog._initial_review_state
+    dialog.search_edit.setText("Faces")
+    assert dialog._review_state() == initial
+    fingerprint = report["review_findings"][0]["finding_fingerprint"]
+    combo, reason = dialog._decision_controls[fingerprint]
+    combo.setCurrentIndex(combo.findData(DECISION_INTERPOLATE_CONDITION_ELECTRODE))
+    selected = dialog._review_state()
+    assert selected != initial
+    dialog._artifact_controls[fingerprint].setChecked(True)
+    assert dialog._review_state() != selected
+    confirmed = dialog._review_state()
+    reason.setText("Visible artifact")
+    assert dialog._review_state() != confirmed
+
+
+def test_review_without_repair_controls_has_unchanged_initial_snapshot(qtbot):
+    report, groups = _report()
+    report["condition_specific_interpolation_enabled"] = False
+    dialog = module.FrequencyDomainQcReviewDialog(report, participant_groups=groups)
+    qtbot.addWidget(dialog)
+    assert not dialog._artifact_controls
+    assert dialog._review_state() == dialog._initial_review_state
 
 
 @pytest.mark.parametrize("size", [(1000, 650), (1180, 780)])
@@ -123,6 +150,7 @@ def test_compact_review_fits_without_horizontal_table_scrolling(qtbot, size, sco
     assert unsaved.isVisibleTo(dialog)
     assert dialog.rect().contains(unsaved.mapTo(dialog, unsaved.rect().bottomRight()))
     assert dialog.rect().contains(dialog.next_button.mapTo(dialog, dialog.next_button.rect().bottomRight()))
+    capture(dialog, f"frequency-qc-{scope}-{size[0]}x{size[1]}")
 
 
 def test_decisions_and_optional_reasons_survive_navigation_and_filtering(qtbot):
@@ -259,7 +287,7 @@ def test_next_attention_reveals_conflicting_recording_choice_without_changing_an
     qtbot.mouseClick(dialog.next_button, Qt.MouseButton.LeftButton)
     selected = dialog.details_table.currentRow()
     finding_index = dialog._finding_index(selected)
-    assert findings[finding_index]["recording_id"] == "P1_visit1"
+    assert findings[finding_index]["recording_id"] == "P1_VISIT1"
     assert "Conflicting recording choices" in dialog.evidence_view.toPlainText()
     qtbot.waitUntil(dialog._row_controls[finding_index][0].hasFocus)
     assert dialog.search_edit.text() == ""
@@ -270,7 +298,7 @@ def test_next_attention_reveals_conflicting_recording_choice_without_changing_an
     assert warnings and not dialog.review_decisions()
     assert _decision_state(dialog, findings) == before
     for finding in findings:
-        if finding["recording_id"] == "P1_visit1":
+        if finding["recording_id"] == "P1_VISIT1":
             combo, _reason = dialog._decision_controls[finding["finding_fingerprint"]]
             combo.setCurrentIndex(combo.findData(DECISION_EXCLUDE_RECORDING))
     assert not dialog.next_button.isEnabled()
@@ -333,6 +361,7 @@ def test_sorted_findings_keep_evidence_decisions_and_reasons_on_exact_fingerprin
     first_combo, first_reason = dialog._decision_controls[first["finding_fingerprint"]]
     first_combo.setCurrentIndex(first_combo.findData(DECISION_INTERPOLATE_CONDITION_ELECTRODE))
     first_reason.setText("Only this recording, condition and electrode")
+    dialog._artifact_controls[first["finding_fingerprint"]].setChecked(True)
 
     dialog._sort_findings(1, Qt.SortOrder.DescendingOrder)
     first_row = _visual_row(dialog, first["finding_fingerprint"])
@@ -341,7 +370,7 @@ def test_sorted_findings_keep_evidence_decisions_and_reasons_on_exact_fingerprin
     assert first_combo.isVisibleTo(dialog.decision_stack)
     assert first["recording_id"] in dialog.evidence_view.toPlainText()
     assert first["condition"] in dialog.evidence_view.toPlainText()
-    assert dialog.details_table.item(first_row, 4).text() == "Excl. electrode"
+    assert dialog.details_table.item(first_row, 4).text() == "Interpolate"
 
     dialog._set_column_filter(1, {second["condition"]})
     assert _visible_fingerprints(dialog) == [second["finding_fingerprint"]]
@@ -385,7 +414,7 @@ def test_header_filters_combine_with_search_and_clear_zero_results(qtbot, monkey
     dialog._clear_filters()
     assert dialog.search_edit.text() == ""
     assert dialog._column_filters == {}
-    assert len(_visible_fingerprints(dialog)) == 2
+    assert len(_visible_fingerprints(dialog)) == 3
     assert dialog.decision_stack.isEnabled()
     assert second_combo.currentData() == DECISION_RETAIN
 
@@ -425,7 +454,7 @@ def test_header_popup_applies_checks_and_escape_keeps_previous_filter(qtbot):
     assert clear_action is not None
     qtbot.mouseClick(clear_menu, Qt.MouseButton.LeftButton,
                      pos=clear_menu.actionGeometry(clear_action).center())
-    assert len(_visible_fingerprints(dialog)) == 2
+    assert len(_visible_fingerprints(dialog)) == 3
 
 
 def test_header_sort_action_orders_exact_numeric_values_not_rounded_labels(qtbot):
@@ -434,7 +463,7 @@ def test_header_sort_action_orders_exact_numeric_values_not_rounded_labels(qtbot
     for finding, amplitude in zip(report["review_findings"], amplitudes):
         finding.update(summed_bca_uv=-amplitude, abs_summed_bca_uv=amplitude, value_uv=amplitude)
     dialog = module.FrequencyDomainQcReviewDialog(report, participant_groups=groups)
-    qtbot.addWidget(dialog)
+    qtbot.addWidget(dialog, before_close_func=lambda review: review._remember_initial_review_state())
     dialog.show()
     qtbot.waitExposed(dialog)
     assert dialog.details_table.item(0, 3).text() == dialog.details_table.item(2, 3).text()
@@ -445,14 +474,14 @@ def test_header_sort_action_orders_exact_numeric_values_not_rounded_labels(qtbot
                      pos=menu.actionGeometry(ascending).center())
     fingerprints = [finding["finding_fingerprint"] for finding in report["review_findings"]]
     assert _table_fingerprints(dialog) == [fingerprints[2], fingerprints[0], fingerprints[1]]
-    assert _visible_fingerprints(dialog) == [fingerprints[0], fingerprints[1]]
+    assert _visible_fingerprints(dialog) == [fingerprints[2], fingerprints[0], fingerprints[1]]
     menu = _open_column_menu(qtbot, dialog, 3)
     descending = menu.findChild(QAction, "column_filter_sort_descending")
     assert descending is not None
     qtbot.mouseClick(menu, Qt.MouseButton.LeftButton,
                      pos=menu.actionGeometry(descending).center())
     assert _table_fingerprints(dialog) == [fingerprints[1], fingerprints[0], fingerprints[2]]
-    assert _visible_fingerprints(dialog) == [fingerprints[1], fingerprints[0]]
+    assert _visible_fingerprints(dialog) == [fingerprints[1], fingerprints[0], fingerprints[2]]
     # Opening another filter must not claim that a different sort was applied.
     menu = _open_column_menu(qtbot, dialog, 1)
     header = dialog.details_table.horizontalHeader()
@@ -460,7 +489,7 @@ def test_header_sort_action_orders_exact_numeric_values_not_rounded_labels(qtbot
     assert header.sortIndicatorOrder() == Qt.SortOrder.DescendingOrder
     qtbot.keyClick(menu, Qt.Key.Key_Escape)
     assert _table_fingerprints(dialog) == [fingerprints[1], fingerprints[0], fingerprints[2]]
-    assert _visible_fingerprints(dialog) == [fingerprints[1], fingerprints[0]]
+    assert _visible_fingerprints(dialog) == [fingerprints[1], fingerprints[0], fingerprints[2]]
 
 
 def test_next_undecided_uses_sorted_order_and_reveals_column_filtered_target(qtbot):
@@ -468,7 +497,7 @@ def test_next_undecided_uses_sorted_order_and_reveals_column_filtered_target(qtb
     first, second, third = report["review_findings"]
     dialog._sort_findings(1, Qt.SortOrder.DescendingOrder)
     assert _table_fingerprints(dialog) == [second["finding_fingerprint"], third["finding_fingerprint"], first["finding_fingerprint"]]
-    assert _visible_fingerprints(dialog) == [second["finding_fingerprint"], first["finding_fingerprint"]]
+    assert _visible_fingerprints(dialog) == [second["finding_fingerprint"], third["finding_fingerprint"], first["finding_fingerprint"]]
     second_combo, _ = dialog._decision_controls[second["finding_fingerprint"]]
     second_combo.setCurrentIndex(second_combo.findData(DECISION_RETAIN))
     dialog._set_column_filter(1, {second["condition"]})
@@ -486,14 +515,14 @@ def _grouped_dialog(qtbot):
     report, _ = _report()
     template = report["review_findings"][0]
     identities = [
-        ("P1", "P1_visit1", "O2", "Faces"),
-        ("P1", "P1_visit1", "O2", "Objects"),
-        ("P1", "P1_visit1", "O2", "Neutral"),
-        ("P1", "P1_visit1", "O2", "Faces"),
-        ("P1", "P1_visit2", "O2", "Faces"),
-        ("P2", "P2_visit1", "O2", "Faces"),
-        ("P1", "P1_visit1", "CP4", "Faces"),
-        ("P1", "P1_visit1", "Pz", "Faces"),
+        ("P1", "P1_VISIT1", "O2", "Faces"),
+        ("P1", "P1_VISIT1", "O2", "Objects"),
+        ("P1", "P1_VISIT1", "O2", "Neutral"),
+        ("P1", "P1_VISIT1", "O2", "Faces"),
+        ("P1", "P1_VISIT2", "O2", "Faces"),
+        ("P2", "P2_VISIT1", "O2", "Faces"),
+        ("P1", "P1_VISIT1", "CP4", "Faces"),
+        ("P1", "P1_VISIT1", "Pz", "Faces"),
     ]
     findings = []
     for index, (participant, recording, electrode, condition) in enumerate(identities):
@@ -510,7 +539,7 @@ def _grouped_dialog(qtbot):
     assignments = [
         {"participant_id": participant, "recording_id": recording,
          "group_id": "control", "session_id": recording, "visit_index": 1}
-        for participant, recording in (("P1", "P1_visit1"), ("P1", "P1_visit2"), ("P2", "P2_visit1"))
+        for participant, recording in (("P1", "P1_VISIT1"), ("P1", "P1_VISIT2"), ("P2", "P2_VISIT1"))
     ]
     report.update(
         review_findings=findings, flags=findings, subjects=["P1", "P2"],
@@ -518,16 +547,18 @@ def _grouped_dialog(qtbot):
         review_decisions=[], review_prefill_decisions=[], cohort_relative_rows=[],
     )
     dialog = module.FrequencyDomainQcReviewDialog(report, participant_groups={"P1": "Control", "P2": "Control"})
-    qtbot.addWidget(dialog)
+    qtbot.addWidget(dialog, before_close_func=lambda review: review._remember_initial_review_state())
     dialog.resize(1180, 780)
     dialog.show()
     qtbot.waitExposed(dialog)
     return dialog, findings
 
 
-def _select_electrode_group(dialog, key=("P1", "P1_visit1", "O2")):
+def _select_electrode_group(dialog, key=("P1", "P1_VISIT1", "O2")):
     combo = dialog.electrode_group_combo
-    index = combo.findData(key)
+    # Tuple payloads are Python objects; QVariant.findData does not compare
+    # independently constructed tuples consistently across PySide6 versions.
+    index = next((row for row in range(combo.count()) if combo.itemData(row) == key), -1)
     assert index >= 0
     combo.setCurrentIndex(index)
 
@@ -552,7 +583,7 @@ def test_legacy_roi_findings_have_no_tab_controls_or_unavailable_counter(qtbot):
     report.update(review_findings=[*findings, legacy], flags=[*findings, legacy],
                   cohort_relative_rows=[{**legacy, "status": "unavailable"}])
     dialog = module.FrequencyDomainQcReviewDialog(report, participant_groups=groups)
-    qtbot.addWidget(dialog)
+    qtbot.addWidget(dialog, before_close_func=lambda review: review._remember_initial_review_state())
     dialog.show()
     qtbot.waitExposed(dialog)
     tabs = dialog.finding_sections
@@ -578,7 +609,7 @@ def test_legacy_roi_only_report_offers_no_review_targets(qtbot):
     roi = {**report["review_findings"][-1], "electrode": "", "roi": "Occipital"}
     report.update(review_findings=[roi], flags=[roi], review_decisions=[], review_prefill_decisions=[])
     dialog = module.FrequencyDomainQcReviewDialog(report, participant_groups=groups)
-    qtbot.addWidget(dialog)
+    qtbot.addWidget(dialog, before_close_func=lambda review: review._remember_initial_review_state())
     dialog.show()
     qtbot.waitExposed(dialog)
     assert dialog.finding_sections.count() == 1
@@ -601,7 +632,7 @@ def test_electrode_group_applies_to_filtered_flags_and_exact_receipts_only(qtbot
     assert dialog.detail_tabs.currentWidget() is dialog.bulk_panel
     assert "4 flags" in dialog.bulk_scope_label.text()
     scope = dialog.bulk_scope_view.toPlainText()
-    for text in ("P1", "P1_visit1", "O2", "3 conditions", "Faces", "Objects", "Neutral"):
+    for text in ("P1", "P1_VISIT1", "O2", "3 conditions", "Faces", "Objects", "Neutral"):
         assert text in scope
     dialog._sort_findings(1, Qt.SortOrder.DescendingOrder)
     dialog._set_column_filter(1, {"Objects"})
@@ -632,7 +663,7 @@ def test_electrode_group_applies_to_filtered_flags_and_exact_receipts_only(qtbot
         finding["finding_fingerprint"] for finding in targets
     }
     assert {(receipt["participant_id"], receipt["recording_id"], receipt["electrode"])
-            for receipt in excluded} == {("P1", "P1_visit1", "O2")}
+            for receipt in excluded} == {("P1", "P1_VISIT1", "O2")}
     assert {receipt["decision_scope"] for receipt in excluded} == {"recording_condition_electrode"}
     assert receipts[targets[0]["finding_fingerprint"]]["reason"] == "Face-specific note"
 
@@ -688,7 +719,7 @@ def test_experimental_setting_controls_only_condition_electrode_repair(qtbot, en
     report, groups = _report()
     report["condition_specific_interpolation_enabled"] = enabled
     dialog = module.FrequencyDomainQcReviewDialog(report, participant_groups=groups)
-    qtbot.addWidget(dialog)
+    qtbot.addWidget(dialog, before_close_func=lambda review: review._remember_initial_review_state())
     for finding in report["review_findings"]:
         combo, _ = dialog._decision_controls[finding["finding_fingerprint"]]
         offered = combo.findData(DECISION_INTERPOLATE_CONDITION_ELECTRODE) >= 0
@@ -735,6 +766,6 @@ def test_bulk_artifact_confirmation_cannot_carry_over_to_another_recording(qtbot
     _select_electrode_group(dialog)
     dialog.bulk_artifact_check.setChecked(True)
     assert dialog.bulk_interpolate_button.isEnabled()
-    _select_electrode_group(dialog, ("P1", "P1_visit2", "O2"))
+    _select_electrode_group(dialog, ("P1", "P1_VISIT2", "O2"))
     assert not dialog.bulk_artifact_check.isChecked()
     assert not dialog.bulk_interpolate_button.isEnabled()

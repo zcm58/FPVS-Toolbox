@@ -41,7 +41,7 @@ from Main_App.gui.components import (
     make_action_button,
     make_form_layout,
 )
-from Main_App.gui.icons import sidebar_icon
+from Main_App.gui.components import make_info_button
 from Main_App.gui.manual_removed_electrodes_dialog import ManualRemovedElectrodesDialog
 from Main_App.gui.participant_condition_exclusions_dialog import (
     ParticipantConditionExclusionsDialog,
@@ -56,6 +56,13 @@ from Main_App.gui.project_protocol import (
 )
 from Main_App.gui.recording_qc_identity import project_recording_coverage_rows
 from Main_App.gui.roi_settings_editor import ROISettingsEditor
+from Main_App.gui.settings_feedback import (
+    PREPROCESSING_FIELDS,
+    SettingsDraftTracker,
+    mark_invalid,
+    preprocessing_error_field,
+    refresh_preprocessing_feedback,
+)
 from Main_App.processing.processing_controller import prepare_batch_file_infos
 from Main_App.processing.processing_ledger import load_ledger
 from Main_App.processing.missing_condition_outputs import missing_output_exclusions_changed
@@ -279,12 +286,14 @@ class SettingsDialog(QDialog):
         self.cond_edit = None
         self.id_edit = None
         self._build_ui()
+        self._draft_tracker = SettingsDraftTracker(self)
+        self._pending_save_succeeded = False
 
     # ------------------------------------------------------------------
     # UI Construction
     # ------------------------------------------------------------------
     def _build_ui(self) -> None:
-        self.setWindowTitle("Settings")
+        self.setWindowTitle("Settings[*]")
         layout = QVBoxLayout(self)
 
         self.tabs = QTabWidget()
@@ -297,6 +306,12 @@ class SettingsDialog(QDialog):
             " border: none; background: transparent; }"
         )
         layout.addWidget(self.tabs, 1)
+
+        self.settings_validation_status = StatusBanner("", self, variant="warning")
+        self.settings_validation_status.setObjectName("settings_validation_status")
+        self.settings_validation_status.label.setTextFormat(Qt.PlainText)
+        self.settings_validation_status.hide()
+        layout.addWidget(self.settings_validation_status)
 
         preproc_tab = self._init_preproc_tab(self.tabs)
         self._preproc_tab_index = self.tabs.indexOf(preproc_tab)
@@ -391,13 +406,29 @@ class SettingsDialog(QDialog):
             "Max Parallel Workers Override (0=Auto):",
         ]
         self.preproc_edits: list[QLineEdit] = []
+        self.preproc_error_labels: list[QLabel] = []
         for i, label_text in enumerate(params):
             row, col = divmod(i, 2)
             lbl = QLabel(label_text, self.group_preproc)
+            lbl.setWordWrap(True)
             edit = QLineEdit(self.group_preproc)
+            edit.setAccessibleName(label_text.rstrip(":"))
+            lbl.setBuddy(edit)
             self.preproc_edits.append(edit)
+            field = QWidget(self.group_preproc)
+            field_layout = QVBoxLayout(field)
+            field_layout.setContentsMargins(0, 0, 0, 0)
+            field_layout.setSpacing(2)
+            field_layout.addWidget(edit)
+            error = QLabel(field)
+            error.setObjectName(f"preproc_{i}_error")
+            error.setWordWrap(True)
+            error.setTextFormat(Qt.PlainText)
+            error.hide()
+            field_layout.addWidget(error)
+            self.preproc_error_labels.append(error)
             grid.addWidget(lbl, row, col * 2)
-            grid.addWidget(edit, row, col * 2 + 1)
+            grid.addWidget(field, row, col * 2 + 1)
 
         pre_keys = [
             ("preprocessing", "low_pass", str(PREPROCESSING_DEFAULTS["low_pass"]), "low_pass"),
@@ -526,6 +557,10 @@ class SettingsDialog(QDialog):
         mapping_label = QLabel("Channel mapping profile:", self.group_preproc)
         mapping_label.setToolTip(mapping_tooltip)
         self.electrode_mapping_profile_combo = QComboBox(self.group_preproc)
+        self.electrode_mapping_profile_combo.setSizeAdjustPolicy(
+            QComboBox.AdjustToMinimumContentsLengthWithIcon
+        )
+        self.electrode_mapping_profile_combo.setMinimumContentsLength(24)
         self.electrode_mapping_profile_combo.setObjectName(
             "settings_electrode_mapping_profile"
         )
@@ -566,6 +601,7 @@ class SettingsDialog(QDialog):
             "max_parallel_workers_override",
         ]
         for edit, canonical in zip(self.preproc_edits, canonical_keys):
+            edit.textChanged.connect(lambda _text: refresh_preprocessing_feedback(self))
             edit.editingFinished.connect(
                 lambda canon=canonical, field=edit: self._on_preproc_edit_finished(canon, field)
             )
@@ -1357,23 +1393,11 @@ class SettingsDialog(QDialog):
             "Its findings require review and are separate from manual lists."
         )
 
-        self.removed_electrode_detection_info_button = QToolButton(detector_card)
-        self.removed_electrode_detection_info_button.setObjectName(
-            "settings_removed_electrode_detection_info"
-        )
-        self.removed_electrode_detection_info_button.setIcon(
-            sidebar_icon("info", 16)
-        )
-        self.removed_electrode_detection_info_button.setToolTip(
-            "About experimental removed-electrode detection"
-        )
-        self.removed_electrode_detection_info_button.setCursor(
-            Qt.PointingHandCursor
-        )
-        self.removed_electrode_detection_info_button.setProperty("compact", True)
-        self.removed_electrode_detection_info_button.setProperty(
-            "iconButton",
-            True,
+        self.removed_electrode_detection_info_button = make_info_button(
+            parent=detector_card,
+            object_name="settings_removed_electrode_detection_info",
+            tooltip="About experimental removed-electrode detection",
+            size=16,
         )
         self.removed_electrode_detection_info_button.clicked.connect(
             self._show_removed_electrode_detection_info
@@ -1997,8 +2021,23 @@ class SettingsDialog(QDialog):
             )
             return protocol
         except FrequencyProtocolError as exc:
-            QMessageBox.warning(self, "Invalid FPVS Protocol", str(exc))
+            self._show_settings_validation(str(exc))
             self.tabs.setCurrentIndex(self._protocol_tab_index)
+            message = str(exc).casefold()
+            controls = (
+                (("presentation", "base"), self.protocol_presentation_rate_edit),
+                (("cycle",), self.protocol_expected_cycles_edit),
+                (("marker", "code"), self.protocol_oddball_marker_code_edit),
+            )
+            field = next(
+                (edit for terms, edit in controls if any(term in message for term in terms)),
+                self.protocol_direct_oddball_rate_edit
+                if self._protocol_input_mode() == ODDBALL_INPUT_MODE_DIRECT_HZ
+                else self.protocol_oddball_every_n_edit,
+            )
+            mark_invalid(field, str(exc))
+            field.setFocus()
+            field.selectAll()
             return None
 
     def _project_protocol_signature(self) -> object:
@@ -2418,7 +2457,7 @@ class SettingsDialog(QDialog):
             ),
         )
 
-    def _resume_frequency_domain_post_processing(self) -> None:
+    def _resume_frequency_domain_post_processing(self, *, all_settings_saved: bool = False) -> None:
         host = getattr(self, "host", None) or self.parent()
         if host is None:
             return
@@ -2426,8 +2465,12 @@ class SettingsDialog(QDialog):
 
         if self._settings_post_processing_activity_is_active():
             self._handoff_settings_activity_to_frequency_post_processing()
-        else:
+            if all_settings_saved:
+                self._settings_save_completed()
+        elif all_settings_saved:
             self.accept()
+        # Recalculate saves its own inputs only. Keep unrelated Settings drafts
+        # in their cached page while processing, rather than discarding them.
         resume_post_processing(host)
 
     def _on_recalculate_harmonics_clicked(self) -> None:
@@ -2870,7 +2913,7 @@ class SettingsDialog(QDialog):
             if frequency_postprocessing_resume_started:
                 return
             frequency_postprocessing_resume_started = True
-            self._resume_frequency_domain_post_processing()
+            self._resume_frequency_domain_post_processing(all_settings_saved=accept_on_success)
 
         def _release_worker() -> None:
             owner._settings_full_fft_grid_qc_thread = None
@@ -3438,6 +3481,7 @@ class SettingsDialog(QDialog):
             self._manual_removed_electrodes_by_recording = (
                 dialog.manual_removed_electrodes_by_recording()
             )
+            self._draft_tracker.changed()
 
     def _manage_dataset_exclusions(self) -> None:
         from Main_App.gui.dataset_exclusions_workflow import show_dataset_exclusions
@@ -3462,37 +3506,65 @@ class SettingsDialog(QDialog):
         return False
 
     def _on_tab_changed(self, index: int) -> None:
-        if getattr(self, "_tab_change_guard", False):
-            return
-
-        previous = getattr(self, "_last_tab_index", 0)
-        if (
-            previous == getattr(self, "_preproc_tab_index", -1)
-            and index != getattr(self, "_preproc_tab_index", -1)
-        ):
-            if not self._validate_preproc_fields():
-                self._tab_change_guard = True
-                self.tabs.setCurrentIndex(getattr(self, "_preproc_tab_index", 0))
-                self._tab_change_guard = False
-                self._last_tab_index = getattr(self, "_preproc_tab_index", 0)
-                return
-
+        # Drafts may be incomplete while the user edits related fields/tabs.
         self._last_tab_index = index
 
     # ------------------------------------------------------------------
     def _focus_invalid_preproc_field(self, message: str) -> None:
-        msg_lower = message.lower()
-        target_idx = None
-        if "low-pass" in msg_lower or "'low_pass'" in msg_lower:
-            target_idx = 0
-        elif "high-pass" in msg_lower or "'high_pass'" in msg_lower:
-            target_idx = 1
-        elif "'max_parallel_workers_override'" in msg_lower:
-            target_idx = 8
-        if target_idx is not None and target_idx < len(self.preproc_edits):
-            edit = self.preproc_edits[target_idx]
+        key = preprocessing_error_field(message)
+        if key is not None:
+            self.tabs.setCurrentIndex(self._preproc_tab_index)
+            edit = self.preproc_edits[PREPROCESSING_FIELDS.index(key)]
+            refresh_preprocessing_feedback(self)
+        else:
+            self.tabs.setCurrentIndex(self._harmonic_tab_index)
+            if self._fixed_harmonic_list_selected():
+                mode = self.fixed_harmonic_input_mode_combo.currentData()
+                edit = (
+                    self.fixed_harmonic_upper_index_edit
+                    if mode == FIXED_HARMONIC_INPUT_UPPER_HARMONIC
+                    else self.fixed_harmonic_upper_frequency_edit
+                    if mode == FIXED_HARMONIC_INPUT_UPPER_FREQUENCY
+                    else self.fixed_harmonic_freqs_edit
+                )
+            else:
+                edit = self.harmonic_selection_electrodes_edit
+        if edit.isEnabled():
+            mark_invalid(edit, message)
             edit.setFocus()
             edit.selectAll()
+
+    def _show_settings_validation(self, message: str) -> None:
+        self.settings_validation_status.set_text(message)
+        self.settings_validation_status.show()
+
+    def has_unsaved_changes(self) -> bool:
+        tracker = getattr(self, "_draft_tracker", None)
+        return tracker is not None and tracker.is_dirty()
+
+    def save_pending_changes(self) -> bool:
+        self._pending_save_succeeded = False
+        try:
+            self._save()
+        except OSError as exc:
+            logger.exception("settings_draft_save_failed")
+            QMessageBox.critical(self, "Save Error", str(exc))
+        owner = self.host or self
+        return bool(
+            self._pending_save_succeeded
+            and not getattr(owner, "_run_active", False)
+            and not getattr(owner, "_settings_post_processing_activity_active", False)
+            and not self._full_fft_grid_review_is_running()
+            and not self._harmonic_recalculation_is_running()
+        )
+
+    def _settings_save_completed(self) -> None:
+        self._pending_save_succeeded = True
+        self._draft_tracker.mark_saved()
+
+    def accept(self) -> None:
+        self._settings_save_completed()
+        super().accept()
 
     def _experimental_qc_settings_from_editor(self) -> ExperimentalQcSettings:
         if self.project is None:
@@ -3538,7 +3610,7 @@ class SettingsDialog(QDialog):
         try:
             return self._experimental_qc_settings_from_editor()
         except ExperimentalQcSettingsError as exc:
-            QMessageBox.warning(self, "Invalid Experimental Settings", str(exc))
+            self._show_settings_validation(str(exc))
             self.tabs.setCurrentIndex(self._experimental_tab_index)
             self.experimental_tabs.setCurrentIndex(
                 self._experimental_summed_bca_tab_index
@@ -3546,6 +3618,7 @@ class SettingsDialog(QDialog):
             message = str(exc).casefold()
             for field_name, edit in self.summed_bca_threshold_edits.items():
                 if field_name.casefold() in message:
+                    mark_invalid(edit, str(exc))
                     edit.setFocus()
                     edit.selectAll()
                     break
@@ -3590,7 +3663,7 @@ class SettingsDialog(QDialog):
             QMessageBox.warning(self, "Project Settings Unavailable", str(exc))
             return None
         except ValueError as exc:
-            QMessageBox.warning(self, "Invalid Settings", str(exc))
+            self._show_settings_validation(str(exc))
             self._focus_invalid_preproc_field(str(exc))
             return None
 
@@ -3598,9 +3671,7 @@ class SettingsDialog(QDialog):
         return self._validated_preproc_payload() is not None
 
     def _on_preproc_edit_finished(self, canonical: str, field: QLineEdit) -> None:  # noqa: ARG002
-        if not self._validate_preproc_fields():
-            field.setFocus()
-            field.selectAll()
+        refresh_preprocessing_feedback(self)
 
     def _confirm_parallel_worker_override(self, normalized: Dict[str, Any]) -> bool:
         override = int(normalized.get("max_parallel_workers_override", 0))
@@ -3878,7 +3949,7 @@ class SettingsDialog(QDialog):
         if recalculate_harmonics_after_save:
             if frequency_analysis_changed:
                 self._clear_harmonic_settings_rollback()
-                self._resume_frequency_domain_post_processing()
+                self._resume_frequency_domain_post_processing(all_settings_saved=True)
                 return
             if self._start_full_fft_grid_review(
                 recalculate_after=True,
@@ -4059,6 +4130,7 @@ class EmbeddedSettingsPage(SettingsDialog):
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
     def accept(self) -> None:
+        self._settings_save_completed()
         self._return_to_home()
 
     def reject(self) -> None:
@@ -4087,4 +4159,7 @@ class EmbeddedSettingsPage(SettingsDialog):
             if workspace_stack is not None:
                 workspace_stack.removeWidget(self)
             host._settings_page = None
+            refresh = getattr(host, "_refresh_project_dirty_indicator", None)
+            if callable(refresh):
+                refresh()
             self.deleteLater()

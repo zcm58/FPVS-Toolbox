@@ -6,13 +6,16 @@ import gc
 from datetime import datetime
 
 from Main_App.Shared import user_messages
+from Main_App.gui.run_outcome import present_last_run
 
 
 def finalize_processing_host_state(host, success: bool) -> None:
     """Show completion feedback and reset host state after processing."""
 
-    cancelled = bool(getattr(host, "_suppress_completion_dialogs", False))
-    if cancelled and not success:
+    dialogs_suppressed = bool(getattr(host, "_suppress_completion_dialogs", False))
+    cancelled = bool(getattr(host, "_processing_run_cancelled", False))
+    present_last_run(host, success=success, cancelled=cancelled)
+    if dialogs_suppressed and not success:
         host.log("--- Processing Run Cancelled by User ---")
         return
 
@@ -31,7 +34,9 @@ def finalize_processing_host_state(host, success: bool) -> None:
         host.log("--- Processing Run Finished with Exclusions or Failures ---")
     elif success:
         host.log("--- Processing Run Completed Successfully ---")
-        if host.validated_params and host.data_paths:
+        if getattr(host, "_last_run_outcome", None) is not None:
+            host.log(host._last_run_outcome.text(cancelled=False, failure_reason="", success=True))
+        elif host.validated_params and host.data_paths:
             output_folder = host.save_folder_path.get()
             file_count = len(host.data_paths)
             user_messages.show_info(
@@ -61,7 +66,12 @@ def finalize_processing_host_state(host, success: bool) -> None:
     host._set_controls_enabled(True)
     host.log(f"--- GUI Controls Re-enabled at {datetime.now()} ---")
 
-    host.data_paths = []
+    mode = getattr(host, "file_mode", None)
+    if mode is None or mode.get() != "Single":
+        host.data_paths = []
+    refresh = getattr(host, "_update_start_enabled", None)
+    if callable(refresh):
+        refresh()
     host._max_progress = 1
     host.progress_bar.set(0.0)
     host._current_progress = 0.0
