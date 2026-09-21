@@ -304,8 +304,8 @@ family, and whole-participant exchangeability.
   A repeated-session project is recognized from canonical inspection options
   and replaces the legacy selector with a compact stable-group summary and a
   project-persistent analysis-only recording-exclusion dialog with optional
-  reasons. One run action starts the applicable workflow. A concise Results
-  section appears beneath Setup when complete; detailed cohort, exclusion,
+  reasons. One run action starts the applicable workflow. Completed comparisons
+  appear in the dedicated Results tab; detailed cohort, exclusion,
   contrast-family, direction, harmonic, source-coverage, and participant x
   sensor x harmonic provenance remains in the exported workbook.
 - Prepared arrays remain worker-local while the automatic permutation and
@@ -324,12 +324,35 @@ family, and whole-participant exchangeability.
   clears both on setup/project changes. View cluster maps or a table
   row double-click opens the matching cluster/run in a dedicated tab. It has
   no run-history browser.
+- The Results card and active table expand into the available tab height.
+  A compact filter/action row sits above the table. Rows use the current font
+  with a minimum 32-pixel height, single-line elision, and full-text tooltips;
+  never calculate wrapped row heights while the tab is hidden. Comparison
+  labels consume flexible width and family Holm p-values align to the right.
+  The page retains its existing typography and content-native table scrolling.
+  No-results status and actions stay compact when both result tables are hidden.
+  CI geometry coverage in
+  `tests/gui/test_free_harmonic_clustering_page.py::test_results_use_available_height_and_keep_ten_comparisons_visible`
+  checks ten long-label comparisons across 1280x800 and 1280x900 page sizes,
+  full row visibility, table expansion, toolbar/footer visibility, and unchanged
+  labels and original run identities. This layout change does not alter
+  inference, correction, exports, filtering rules, or map membership.
 - About this analysis uses shared tabbed `ToolInfoContent`. A second contextual
   information dialog explains fixed-domain fill-through and base-overlap
   exclusion.
 - Long preparation, permutations, repeated-batch multiplicity correction where
   applicable, and export run sequentially on one worker thread. Cancellation,
   failure, and project switching cannot publish a partial completed bundle.
+
+Visible/manual Results smoke (local Qt execution remains opt-in): open FHC in
+a 1280x900 Main App workspace and complete a ten-comparison plan. Confirm the
+table fills the Results tab and all ten rows are readable together, with
+filters and details/maps actions above it. Resize the window, switch tabs,
+and apply each result filter; rows must stay compact and the selected
+comparison must still open its original details and maps. Check long labels
+in tooltips, a filter with no matches, and a legacy run with no significant
+clusters. Status and actions must remain compact and visible. Larger result
+sets should scroll only inside the table.
 
 ## Output
 

@@ -582,15 +582,15 @@ class FreeHarmonicClusteringPage(QWidget):
             self.results_panel,
             object_name="free_harmonic_results_card",
         )
-        results_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        layout.addWidget(results_card)
-        layout.addStretch(1)
+        results_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        layout.addWidget(results_card, 1)
         self.result_status = StatusBanner(
             "No result has been run.",
             results_card.content,
             variant="info",
         )
         self.result_status.setObjectName("free_harmonic_result_status")
+        self.result_status.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         results_card.content_layout.addWidget(self.result_status)
         self.significant_table = self._new_result_table(
             results_card.content,
@@ -606,10 +606,10 @@ class FreeHarmonicClusteringPage(QWidget):
         self.significant_table.setMinimumHeight(160)
         self.significant_table.setSizePolicy(
             QSizePolicy.Expanding,
-            QSizePolicy.Preferred,
+            QSizePolicy.Expanding,
         )
         self.significant_table.hide()
-        results_card.content_layout.addWidget(self.significant_table)
+        results_card.content_layout.addWidget(self.significant_table, 1)
         self.batch_table = self._new_result_table(
             results_card.content,
             "free_harmonic_repeated_batch_table",
@@ -623,7 +623,7 @@ class FreeHarmonicClusteringPage(QWidget):
         self.batch_table.setMinimumHeight(220)
         self.batch_table.setSizePolicy(
             QSizePolicy.Expanding,
-            QSizePolicy.Preferred,
+            QSizePolicy.Expanding,
         )
         self.batch_table.hide()
         self.batch_table.horizontalHeaderItem(2).setToolTip(
@@ -633,7 +633,8 @@ class FreeHarmonicClusteringPage(QWidget):
         self.batch_table.setColumnWidth(0, 220)
         self.batch_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         self.batch_table.horizontalHeader().setStretchLastSection(False)
-        results_card.content_layout.addWidget(self.batch_table)
+        self.batch_table.horizontalHeaderItem(2).setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        results_card.content_layout.addWidget(self.batch_table, 1)
         self.result_view_label = QLabel("Result view:", results_card.content)
         self.result_view_combo = QComboBox(results_card.content)
         self.result_view_combo.setObjectName("free_harmonic_result_view")
@@ -669,7 +670,11 @@ class FreeHarmonicClusteringPage(QWidget):
         )
         result_actions.row_layout.insertWidget(0, self.result_view_label)
         result_actions.row_layout.insertWidget(1, self.result_view_combo)
-        results_card.content_layout.addWidget(result_actions)
+        result_actions.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        # Keep view controls directly above the expanding result viewport.
+        results_card.content_layout.insertWidget(1, result_actions)
+        # Only absorb spare space when neither result table is visible.
+        results_card.content_layout.addStretch(0)
         self.results_panel.hide()
 
     @staticmethod
@@ -685,8 +690,19 @@ class FreeHarmonicClusteringPage(QWidget):
         table.setSelectionBehavior(QAbstractItemView.SelectRows)
         table.setSelectionMode(QAbstractItemView.SingleSelection)
         table.setAlternatingRowColors(True)
-        table.verticalHeader().setVisible(False)
+        table.setWordWrap(False)
+        table.setTextElideMode(Qt.ElideRight)
+        table.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
+        # Rows must not be sized against the hidden tab's provisional widths.
+        # Full labels remain available through tooltips and result details.
+        rows = table.verticalHeader()
+        rows.setVisible(False)
+        rows.setSectionResizeMode(QHeaderView.Fixed)
+        row_height = max(32, table.fontMetrics().height() + 12)
+        rows.setMinimumSectionSize(row_height)
+        rows.setDefaultSectionSize(row_height)
         header = table.horizontalHeader()
+        header.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         header.setStretchLastSection(True)
         for column in range(len(headers)):
             header.setSectionResizeMode(column, QHeaderView.ResizeToContents)
@@ -1835,13 +1851,13 @@ class FreeHarmonicClusteringPage(QWidget):
                 item.setData(Qt.UserRole, row.run_index)
                 item.setToolTip(value)
                 if column == 2:
+                    item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
                     item.setToolTip(f"Stored family Holm p = {row.holm_family_p:.8g}; classification uses the unrounded value. Global and full-plan p values are in View details.")
                 self.batch_table.setItem(row_index, column, item)
             if previous is not None and row.run_index == previous.run_index:
                 selected_row = row_index
         if rows:
             self.batch_table.selectRow(selected_row)
-        self.batch_table.resizeRowsToContents()
         empty_note = (
             " No comparisons match this view."
             if not rows
@@ -1898,6 +1914,7 @@ class FreeHarmonicClusteringPage(QWidget):
             for column, key in enumerate(("direction", "sensors", "harmonics", "mass", "raw_p")):
                 item = QTableWidgetItem(display[key])
                 item.setData(Qt.UserRole, getattr(cluster, "cluster_id", None))
+                item.setToolTip(display[key])
                 self.significant_table.setItem(row, column, item)
 
     # -------------------------------------------------------------- utilities

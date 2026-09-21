@@ -838,6 +838,14 @@ Downsampling:
 
 Kurtosis review and interpolation:
 
+- The GUI binds `project_root` from the active `Project` in the kurtosis
+  worker's settings copy. This runtime context must reach the scanner as well
+  as the process runner; adding it only in the runner silently disables
+  checkpoint publication during review and repeats the
+  reference/filter/downsample/scoring prefix. Keep the location out of the
+  shared validated settings so existing processing-ledger fingerprints remain
+  unchanged. It is not a saved absolute manifest setting. The review page
+  explains continuation at interpolation after current decisions are accepted.
 - QC preparation may reuse an exact checkpoint under the active project's
   `.fpvs_cache/prepared_kurtosis/`. `prepared_kurtosis_cache.py` owns atomic,
   checksummed uncompressed NumPy archives with float64 samples;
@@ -1053,6 +1061,21 @@ python .agents/scripts/verify.py --scope processing --tier focused
 
 Processing-window pytest-qt coverage runs in CI only by default. For GUI wiring
 changes, also document a visible/manual processing smoke path.
+
+For the kurtosis checkpoint handoff, start a fresh processing run in a visible
+1280x900 workspace with Debug logging enabled. Complete step 6 and confirm its
+text explains reuse after review. Accept the current channel decisions, then
+check the processing log for
+`Reusing exact prepared kurtosis checkpoint` for unchanged recordings: source
+validation still runs, followed by the authorized interpolation and final
+reference. Cancel review and confirm processing does not continue. On a later
+run, change a filter setting and confirm the old checkpoint/decision evidence
+is not reused. Checkpoints belong under that project's
+`.fpvs_cache/prepared_kurtosis/`; switching projects must use the newly opened
+project's root. The headless GUI-settings/scanner handoff regression lives in
+`tests/processing/test_project_frequency_protocol_inputs.py`; damaged/missing
+cache fallback and stale-receipt rejection remain covered by
+`tests/processing/test_prepared_kurtosis_cache.py`.
 
 For the QC-15 Settings smoke path, launch the application normally, open a
 project, and visit **Settings > Preprocessing**. Confirm that **Electrode
