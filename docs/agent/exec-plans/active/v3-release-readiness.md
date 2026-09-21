@@ -4,6 +4,150 @@
 
 Active. This is the release ledger for the first v3 release candidate.
 
+Native-result completion follow-up on 2026-09-10: Semantic Categories completed
+processing successfully, but the GUI's remaining Excel-only output snapshots
+left `_last_job_success` false and replaced the completion message with
+"No Excel files were generated." A read-only public dataset-index and companion
+validation found all 135 current-run native condition results present and valid,
+including their spectral and metric arrays/checksums. The active cohort contains
+130 results with one existing manual frequency-QC exclusion;
+all five excluded result files also remain present. Final release readiness passed.
+This is a completion-detection/copy fix, not a data recovery or reprocessing task.
+No project data, settings, exclusions or scientific methods were changed.
+The GUI and post-export worker now use `Main_App.io.result_outputs` for native
+and historical result anchors, with compatible wrapper/payload names. Both
+success and missing-output messages say result files. The helper detects all
+135 actual project results; 22 new headless tests cover native/legacy writes,
+overwrites, unchanged prior outputs, orphan companions, error paths and worker
+payloads. Focused GUI and project-I/O gates passed 534 and 312 tests; the focused
+post-export bundle passed 37. The native completion/empty-output smoke path is
+recorded in `.agents/verification.toml`; Qt execution remains CI-only locally.
+The final repo precommit gate passed 4,617 tests with seven skips and 67
+warnings. Agent audits, Ruff, compilation and diff checks passed; existing
+CI-only popup tests now include native results. The first GUI gate encountered
+the new-test registry guard; registering the headless test file resolved it
+before the successful focused and final runs.
+
+Recording marker support on 2026-09-10 supersedes the condition-only cohort
+configuration described below. A read-only audit of all 27 registered Semantic
+Categories BDF Status channels found mixed acquisition schemas. One cohort uses
+condition codes 1..5 -> oddball codes 51..55; another cohort uses shared
+code 55. The new opt-in protocol v1.3 saves complete, explicit mappings for each
+canonical recording. Unassigned recordings fail with a Settings remedy;
+neither filenames nor event counts select a schema automatically. Existing
+v1.1/v1.2 canonical payloads and fingerprints remain unchanged. All recordings
+share the same full-project protocol fingerprint, while approved marker plans
+and cached source spans bind the canonical recording identity as well.
+
+The Protocol page opens a focused recording schema dialog using public project
+registry identities. New rows require assignment, custom saved values survive
+template edits, selected-row bulk assignment is explicit, and cancelling keeps
+changes out of saved Settings. Missing marker evidence no longer claims the
+recording itself is too short. Implementation extends the existing protocol
+and processing owners plus `gui/recording_marker_schemas.py` and
+`gui/recording_marker_schemas_dialog.py`; no processing order, cycle count,
+trigger onset boundary, exclusion policy, or raw/processed data changes.
+
+The corrected protocol was exercised through the actual marker planner for
+all 27 BDFs: all 259 detected occurrences had 147 configured markers and passed
+marker timing without review. Uneven onset repetitions remain faithfully
+represented, including recordings with five blocks, nine blocks, and unequal
+counts across conditions. They were not repaired by guessing additional events.
+After verifying the Toolbox process had closed, all 27 explicit assignments
+were saved to the Semantic Categories manifest. Only `frequency_protocol`
+changed; an exact backup was saved beside it as
+`project.json.before-recording-markers-20260910-171536-201659.bak`. The saved
+protocol was reloaded and matched the protocol used for the full cohort audit.
+Focused project-I/O and
+GUI gates passed 312 and 512 tests respectively; processing passed 2,027 tests
+with five skips and 59 warnings. Qt execution remains CI-only;
+the visible schema assignment/QC smoke path is in `.agents/verification.toml`.
+The final repo precommit gate passed 4,595 tests with seven skips and 67
+warnings; all agent audits, Ruff, compilation and diff checks passed. Qt
+interaction was not executed locally, and developer-only standalone tests
+remained outside this task's verification scope.
+
+Condition marker support on 2026-09-10: an explicit project-only Protocol
+switch maps each canonical condition onset to its oddball marker. Mapped
+projects use protocol v1.2; existing shared-code v1.1 payloads and fingerprints
+remain unchanged. Full mapping coverage and onset/oddball disjointness are
+required. QC planning, reviewed-span validation, runner epoch/source metadata,
+post-processing cropping and expected-ledger checks resolve the same code.
+The mapping fingerprints prior decisions and outputs stale; it changes no
+expected cycle count, duration, preprocessing order, or crop alignment rule.
+After the user closed the Toolbox, Semantic Categories was explicitly configured
+for onset codes 1..5 -> oddball codes 51..55. Only its protocol JSON value was
+changed, with an exact original-manifest backup next to project.json; its
+144-cycle/120-second setting was preserved. No raw or processed data was changed.
+The protocol/public export owners are `Main_App/projects/frequency_protocol.py`
+and `projects/__init__.py`; GUI adapters are `gui/project_protocol.py` and
+`gui/settings_panel.py`; processing changes are in `processing/marker_integrity.py`,
+`Performance/process_runner.py`, `Shared/post_process.py`, and
+`processing/expected_processing_ledger.py`. No retired paths or global trigger
+defaults changed.
+
+Verification: the project-I/O focused gate passed 293 tests; the final GUI gate
+passed 502 locally safe tests including the alias regression. The final adapter/static
+bundle passed 22 tests, including a single editable row for condition aliases
+sharing an onset. The processing gate had 2,006 passes and five skips plus one
+Windows temporary-file PermissionError in an unchanged test; its immediate rerun
+passed. The repo precommit gate then passed 4,549 tests with seven skips and 67
+warnings. Agent audits, Ruff, compilation and diff checks passed. A read-only
+Status-channel inspection of registered study-participant confirmed two repetitions per
+condition, each with 147 markers of its assigned code and none of the other
+51..55 codes: the former shared-55 rule missed eight of ten blocks. No EEG
+preprocessing or local Qt execution was run; two GUI tests remain CI-only, and
+the visible Protocol/QC smoke path is recorded in `.agents/verification.toml`.
+
+FHC loading recovery on 2026-09-10: missing or incomplete project protocols now
+show the specific reason and an Open Protocol Settings action, without leaving
+the family card in a loading state. Returning after protocol confirmation loads
+the same page; failed/cancelled inspections offer retry after worker exit and
+hide stale family choices. Old export rates do not bypass protocol confirmation
+or neutral FullFFT provenance validation. Raw discovery and repeated-source
+preflight retain canonical IDs for exact registered raw paths, so historical
+participant IDs survive changes in filename inference; source/group conflicts,
+duplicate ownership and new-file confirmation remain checked. No user project
+manifest or source data was edited. The FHC focused gate passes 315 tests,
+the GUI gate passes 480 locally safe tests, and project-I/O passes 253 tests;
+eight headless loading-state regressions and
+CI-only GUI recovery cases cover the reported workflow. The visible smoke path
+includes protocol repair, cancelled/failed loading, retry and stale-state reset.
+Final repo precommit passed 4,514 tests with seven skips and 67 warnings after
+updating the existing static assertion to recognize the shared protocol
+validator. The focused recovery/routing bundle passed 68 tests. Agent audits,
+Ruff, compilation and diff whitespace checks passed. Developer-only standalone
+tests were excluded under their opt-in boundary; no local Qt run was performed.
+
+FHC analysis-family update on 2026-09-10: new GUI runs use the explicitly
+requested `fhc_analysis_families_v2` contract. Setup freezes between-group,
+optional paired-condition, within-group visit, and group-difference-in-visit-
+change comparisons. Both groups' visit changes share one Holm family; the
+two-group/two-visit/four-condition default is 4/8/4 comparisons. Single-group
+and additional-group designs use the same paired/independent engines. Exact
+comparison identity and seeds are separate from correction membership.
+Legacy v1 APIs and result bundles retain their original behavior. New outputs
+save the immutable plan, fingerprint, family results, descriptive cluster maps,
+and actual per-comparison participant identities beneath the project's FHC
+results directory. No Stats tool or standard harmonic-profile code changed.
+
+The FHC focused gate passed 308 tests; the GUI-focused gate passed 472 locally
+safe tests. Additional independent integration coverage runs all four families
+through real preparation/inference/export on synthetic inputs, with figure
+rendering stubbed. This is software regression coverage, not calibration of
+the new scientific extension. Qt execution remains CI-only; the updated
+`.agents/verification.toml` smoke path covers Setup/Results/maps at 1280x900,
+4/8/4 family counts, reference/all-pairs choices, persistent independent plan
+and exclusion preferences, cancellation, and original map indices after
+filtering. Review comparisons shows planned directions/counts; eligible Ns
+are resolved during preparation and reported after completion.
+The repository precommit gate passed 4,493 tests with seven skips; the
+developer-only standalone-script tests were excluded under their opt-in
+boundary. A final export/reporting regression bundle passed 18 tests after
+the presentation was checked to depend on comparison semantics independently
+of its correction-family label. Agent audits, Ruff, compilation and diff
+whitespace checks passed. No local Qt run or new powered calibration was run.
+
 Linux settings-path recovery on 2026-08-30: ported `185d803f` with Windows
 override and `%LOCALAPPDATA%` behavior explicitly preserved. Invalid relative
 XDG config roots now use the stable home fallback on non-Windows systems.

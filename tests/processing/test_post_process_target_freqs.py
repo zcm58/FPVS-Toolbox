@@ -298,3 +298,91 @@ def test_post_process_exports_filter_domain_and_structured_notch_hole(tmp_path) 
     fifty_hz = eligibility.loc[eligibility["Target Frequency (Hz)"] == 50.0].iloc[0]
     assert not fifty_hz["BCA Available"]
     assert "target_inside_applied_notch" in fifty_hz["Unavailable Reasons"]
+
+
+@pytest.mark.parametrize("marker_mode", ["global", "condition", "recording_flat", "recording_session"])
+def test_evoked_export_uses_the_conditions_configured_oddball_marker(
+    tmp_path, monkeypatch, marker_mode: str,
+) -> None:
+    import importlib
+
+    module = importlib.import_module("Main_App.Shared.post_process")
+    sampling_rate = 128.0
+    sample_count = 7_680
+    info = mne.create_info(["Oz"], sampling_rate, ["eeg"])
+    with info._unlock():
+        info["highpass"] = 0.1
+        info["lowpass"] = 60.0
+    evoked = mne.EvokedArray(
+        np.random.default_rng(24).normal(size=(1, sample_count + 64)) * 1e-6,
+        info, tmin=0.0, verbose=False,
+    )
+    protocol = FrequencyProtocol.from_recurrence(
+        10, 5, expected_analyzed_oddball_cycles=120,
+        expected_analyzed_oddball_cycles_source=EXPECTED_CYCLES_SOURCE_MANUAL,
+    )
+    marker_code = 55 if marker_mode == "global" else 51
+    identity_settings = {}
+    if marker_mode == "condition":
+        protocol = protocol.with_condition_oddball_marker_codes({1: marker_code})
+    elif marker_mode.startswith("recording"):
+        protocol = protocol.with_recording_oddball_marker_codes({
+            "CANONICAL": {1: marker_code}, "P01": {1: 55},
+        })
+        identity_key = "_fpvs_recording_id" if marker_mode == "recording_session" else "_fpvs_participant_id"
+        identity_settings[identity_key] = "CANONICAL"
+    distractor_code = 51 if marker_mode == "global" else 55
+    events = np.asarray([
+        [0, 0, 1], [32, 0, distractor_code],
+        *[[sample, 0, marker_code] for sample in range(64, sample_count + 1, 64)],
+    ], dtype=np.int64)
+    monkeypatch.setattr(
+        module, "_load_events_for_file",
+        lambda **_kwargs: (events, sample_count + 64),
+    )
+    crop_calls = []
+    original_crop = module._attempt_legacy_55_onbin_crop
+
+    def capture_crop(**kwargs):
+        result = original_crop(**kwargs)
+        crop_calls.append((kwargs["oddball_marker_code"], result[3], result[0].shape))
+        return result
+
+    monkeypatch.setattr(module, "_attempt_legacy_55_onbin_crop", capture_crop)
+    app = SimpleNamespace(
+        save_folder_path=SimpleNamespace(get=lambda: str(tmp_path)),
+        settings={
+            "frequency_protocol": protocol, "high_pass": 0.1, "low_pass": 60.0,
+            "line_noise_filter_enabled": False,
+            **identity_settings,
+        },
+        preprocessed_data={"Condition A": [evoked]},
+        data_paths=[str(tmp_path / "P01.bdf")],
+        validated_params={"event_id_map": {"Condition A": 1}},
+        log=lambda _message: None,
+    )
+
+    post_process(app, ["Condition A"])
+
+    assert crop_calls == [(marker_code, 64, (1, sample_count))]
+    assert len(list(tmp_path.rglob("*.fpvs"))) == 1
+
+
+@pytest.mark.parametrize("identity", [None, "UNREGISTERED"])
+def test_post_process_requires_canonical_identity_for_recording_marker_maps(tmp_path, identity):
+    protocol = _ready_protocol().with_recording_oddball_marker_codes({"P01": {1: 51}})
+    settings = {"frequency_protocol": protocol}
+    if identity is not None:
+        settings["_fpvs_participant_id"] = identity
+    app = SimpleNamespace(
+        save_folder_path=SimpleNamespace(get=lambda: str(tmp_path)),
+        settings=settings,
+        preprocessed_data={"Condition A": [object()]},
+        data_paths=[str(tmp_path / "P01.bdf")],
+        log=lambda _message: None,
+    )
+
+    with pytest.raises(SpectralEligibilityError, match="recording|Recording"):
+        post_process(app, ["Condition A"])
+
+    assert not list(tmp_path.iterdir())

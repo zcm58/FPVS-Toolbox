@@ -56,5 +56,5 @@ def test_fhc_snapshot_uses_project_protocol_not_application_settings() -> None:
     path = ROOT / "src" / "Main_App" / "gui" / "main_window.py"
     source = _method_source(path, "MainWindow", "_free_harmonic_frequency_snapshot")
 
-    assert "normalize_frequency_protocol(project.frequency_protocol)" in source
+    assert "processing_protocol_snapshot(getattr(self, 'currentProject', None))" in source
     assert "self.settings.get" not in source

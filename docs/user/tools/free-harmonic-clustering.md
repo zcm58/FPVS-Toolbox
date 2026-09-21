@@ -30,8 +30,17 @@ must contain:
 - the complete supported BioSemi64 sensor set on one shared FullFFT frequency
   grid.
 
-Repeated-session v2.2 projects are recognized automatically. The repeated
-workflow requires exactly two stable groups and two ordered sessions. It keeps
+If the project protocol is missing or incomplete, FHC explains what needs
+attention and shows **Open Protocol Settings**. Confirm the presentation and
+oddball rates, expected analyzed oddball cycles, and oddball marker in
+**Settings > Protocol**, save, then return to FHC to load the project design.
+Older export metadata does not automatically confirm these settings. This
+blocked state does not start a loading worker. If loading fails or is cancelled,
+the explanation replaces the loading message and **Retry loading** becomes
+available after the worker exits.
+
+Repeated-session v2.2 projects are recognized automatically. Planned analyses
+support one or more stable groups and two ordered sessions. They keep
 canonical participant, recording, group, session, and visit identity throughout
 preparation, so two visits are paired and are never treated as independent
 participants.
@@ -44,7 +53,9 @@ oddball rates, cohort/QC identity, and processing/export identity. Missing,
 stale, or conflicting provenance opens the shared **Post-processing Required**
 dialog. Choose **Run Post-processing** to refresh the downstream files from the
 existing processed EEG data; EEG preprocessing is not rerun. After the neutral
-record is current, the FHC setup reloads automatically.
+record is current, the FHC setup reloads automatically. Older exports without
+the current electrode-geometry/protocol record can instead require EEG
+reprocessing; follow the specific reason shown in the dialog.
 
 The neutral record contains no standard Stats profile or selected Summed-BCA
 harmonic list. Free Harmonic Clustering always performs its own Hermann
@@ -55,9 +66,48 @@ cohort, frequency-QC decision, processing/export identity, rate, or grid does.
 
 ## Available Workflows
 
+### Analysis Families (New GUI Runs)
+
+In **Setup**, choose the scientific questions you intend to test before running
+the analysis. FHC builds a frozen comparison list from the project's canonical
+groups, conditions and visits. **Review comparisons** shows exactly which
+comparisons belong to each correction family. Eligible participant counts are
+determined during preparation and reported with the completed results.
+
+| Family | Comparisons included |
+| --- | --- |
+| Between-group differences | Each group pair for each condition; averaged over both visits in repeated designs. |
+| Between-condition differences | Planned paired condition comparisons within each group; averaged over both visits in repeated designs. Choose all pairs or comparisons against one reference condition. |
+| Within-group visit changes | First selected visit minus second selected visit, for every condition and group, in **one shared family**. |
+| Between-group differences in visit change | Each group pair's difference in the participant visit changes, for every condition. This is the group-by-visit interaction. |
+
+For two groups, two visits and four conditions, the default plan contains
+**4 between-group tests, 8 within-group visit tests, and 4 group-change tests**.
+These are three correction families. Condition comparisons are optional in
+multi-group and repeated projects. A single-group flat project defaults to one
+family of paired condition comparisons. A condition by itself is not a paired
+condition contrast or a test against zero.
+
+Holm correction applies across all planned comparisons within each family.
+The **Results** tab distinguishes results that pass family Holm from
+exploratory findings with global p < .05 that fail family Holm. The additional
+full-plan Holm is a conservative summary, not a second primary threshold.
+Filters change the displayed rows only; they never recalculate correction.
+
+Only participants with the complete cells needed for a comparison are used.
+Missing visits or excluded recordings do not remove their unrelated conditions.
+If a planned comparison cannot run, the plan stops with an explanation; it
+does not quietly drop the test and reduce the correction denominator.
+
+The plan and its fingerprint are saved with each new result folder. Changing
+Setup creates a new plan for the next run and does not reinterpret old results.
+The new contract is `fhc_analysis_families_v2`; legacy APIs and their earlier
+results retain the policies below. Higher-order group-by-condition,
+visit-by-condition and three-way interactions remain unavailable.
+
 ### Legacy One-Contrast Workflow
 
-Choose one ordered two-level contrast:
+The legacy headless API retains one ordered two-level contrast:
 
 - **Paired Conditions:** Condition A minus Condition B for the same complete
   participants. You may restrict the cohort to one canonical project group; the
@@ -76,8 +126,8 @@ run legacy contrasts is not automatically corrected as one larger family.
 
 ### Repeated-Session Full Batch
 
-For a repeated-session project, the GUI replaces the legacy contrast selector
-with one prespecified full batch. Every project condition is analyzed in four
+The legacy `fhc_repeated_session_batch_v1` API and historical GUI results use
+one prespecified full batch. Every project condition is analyzed in four
 participant-level contrast families:
 
 1. **Groups averaged over sessions:** average the two session SNR tensors within
@@ -100,7 +150,9 @@ Free Harmonic Clustering batches until changed. Reasons are optional; blank
 reasons appear as `No reason provided` in the audit. These exclusions do not
 change project QC or any source file. CLI exclusions apply only to that batch.
 
-The session direction is later visit minus earlier visit. If every participant
+The historical GUI used later visit minus earlier visit; API requests encode
+their two ordered sessions explicitly. New analysis-family plans display the
+first selected visit minus the second selected visit. If every participant
 completed sessions in the same order—as in the Birth Control project—phase is
 perfectly confounded with visit order, elapsed time, repetition, and
 habituation. Results must therefore be called **session/phase-at-visit** effects,
@@ -117,9 +169,10 @@ cluster p-values.
 ## Selecting Harmonics
 
 The default **Hermann automatic selection** profile calculates grand-spectrum
-z-scores for both contrast arms. It detects oddball harmonics using strict
-`z > 3.29`, takes the highest detected harmonic in either arm, and fills through
-that upper harmonic. If neither arm has an eligible detection, preparation
+z-scores separately in each required group x visit x condition cell (without a
+visit factor in flat projects). It detects oddball harmonics using strict
+`z > 3.29`, takes the highest detected harmonic in any cell, and fills through
+that upper harmonic once for the plan. If no cell has an eligible detection, preparation
 stops with a no-harmonics-selected result instead of inventing a fallback.
 
 The optional **Fixed harmonic list** control asks for the highest oddball
@@ -141,13 +194,13 @@ selection remains unchanged.
 
 ## Run the Analysis
 
-For a legacy project, define one comparison and select **Run Free Harmonic
-Clustering Analysis** once.
-For a repeated-session project, review the detected groups, ordered sessions,
-all-condition plan, and optional analysis-only recording exclusions, then
+Review the detected groups, ordered sessions when applicable, analysis families,
+condition comparisons, and optional analysis-only recording exclusions, then
 select **Run Free Harmonic Clustering Analysis**. The tool prepares the data
 and continues through all permutations and export without another confirmation.
-A concise result appears beneath the setup controls when the run completes.
+The **Results** tab shows the completed comparisons; **Cluster maps** shows their
+descriptive electrode-by-harmonic patterns. Family choices persist for this
+project separately from recording exclusions.
 
 ## Explore Cluster Maps
 
@@ -344,8 +397,8 @@ interaction contrast, or cross-condition Holm layer. The repeated workflow
 reuses the locked numerical cluster-permutation core, but that is a software
 inheritance statement rather than new calibration evidence.
 
-The workspace has no result plots or historical-run browser. It
-shows the current session's latest result. Use **Open Results Folder** to review
+The workspace shows the current session's latest results and cluster maps; it
+has no historical-run browser. Use **Open Results Folder** to review
 earlier additive runs.
 
 ## Outputs
@@ -357,7 +410,18 @@ A successful run creates a new, non-overwriting directory below:
   Free Harmonic Clustering Analysis/<run-id>/
 ```
 
-Its primary human-readable file is
+New analysis-family runs write
+`Free_Harmonic_Clustering_Analysis_Families.xlsx`. It contains Families,
+Comparisons, All Clusters, Cluster Membership, Participants, Cohort Audit,
+Exclusions, Source Workbooks, Harmonic Selection, and Methods and Provenance.
+`analysis_plan.json` and the manifest preserve the plan, comparison IDs,
+correction-family assignments, fingerprint, seeds and both Holm summaries.
+Each comparison has its own arrays, node statistics and cluster-map files.
+`exploratory_findings.md` describes the nominal findings that failed family
+Holm. The Participants sheet records actual inclusion by comparison and arm;
+the visit-coverage audit alone does not imply inclusion in every comparison.
+
+The legacy one-contrast API's primary human-readable file is
 `Free_Harmonic_Clustering_Results.xlsx`, organized into these worksheets:
 
 1. Run Summary
@@ -370,7 +434,7 @@ Its primary human-readable file is
 8. Node Statistics
 9. Null Distribution
 
-A repeated-session batch instead writes
+The legacy repeated-session batch API writes
 `Free_Harmonic_Clustering_Repeated_Session_Batch.xlsx` in one additive batch
 directory. It includes the batch/run summary, both Holm layers, all cluster and
 membership rows, the complete-pair cohort and exclusion audit, shared harmonic

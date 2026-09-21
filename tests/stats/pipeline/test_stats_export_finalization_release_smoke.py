@@ -62,7 +62,7 @@ def test_stats_export_finalization_release_smoke(
         if isinstance(item, dict)
     ]
     assert app_stub._last_job_success is True
-    assert any("no Excel outputs were detected" in message for message in queued_messages)
+    assert any("no result files were detected" in message for message in queued_messages)
 
     for method in ("critical", "information", "warning", "question"):
         monkeypatch.setattr(

@@ -12,6 +12,7 @@ from PySide6.QtCore import QSize, QThread, QTimer, Qt, QUrl, Signal, Slot
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QCheckBox,
     QComboBox,
     QDialog,
     QHeaderView,
@@ -43,6 +44,12 @@ from Tools.Free_Harmonic_Clustering.tool_info import (
 )
 
 from .backend_adapter import FreeHarmonicBackend, FreeHarmonicBackendAdapter
+from ..analysis_plan import AnalysisFamily, build_analysis_plan
+from ..models import FreeHarmonicInputError
+from .analysis_plan_state import (
+    AnalysisPlanPreferences, AnalysisPlanStateError,
+    load_analysis_plan_preferences, save_analysis_plan_preferences,
+)
 from .exclusion_state import (
     ExclusionStateError,
     load_project_recording_exclusions,
@@ -56,6 +63,8 @@ from .models import (
     GuiHarmonicMode,
     ProjectAnalysisOptions,
     ProjectFrequencySnapshot,
+    PlannedAnalysisSetup,
+    PlannedAnalysisWorkerOutcome,
     RepeatedBatchSetup,
     RepeatedBatchWorkerOutcome,
     RunOutcome,
@@ -68,6 +77,7 @@ from .recording_exclusions_dialog import RecordingExclusionsDialog
 from .workers import (
     AnalysisWorker,
     ProjectInspectionWorker,
+    PlannedAnalysisWorker,
     RepeatedSessionBatchWorker,
 )
 
@@ -102,12 +112,14 @@ class FreeHarmonicClusteringPage(QWidget):
     """Project-bound, source-immutable analysis workspace page."""
 
     post_processing_required = Signal(str, str, str)
+    protocol_settings_required = Signal()
 
     def __init__(
         self,
         project_root: str | Path,
         frequency_snapshot: ProjectFrequencySnapshot | Mapping[str, object] | None,
         *,
+        frequency_error: str | None = None,
         backend: FreeHarmonicBackend | None = None,
         auto_discover: bool = True,
         parent: QWidget | None = None,
@@ -120,7 +132,7 @@ class FreeHarmonicClusteringPage(QWidget):
         self._backend = backend or FreeHarmonicBackendAdapter()
         self._project_root = Path(project_root).expanduser().resolve(strict=False)
         self._frequency_snapshot: ProjectFrequencySnapshot | None = None
-        self._frequency_error: str | None = None
+        self._frequency_error: str | None = str(frequency_error) if frequency_error else None
         try:
             if frequency_snapshot is not None:
                 self._frequency_snapshot = ProjectFrequencySnapshot.coerce(
@@ -144,6 +156,8 @@ class FreeHarmonicClusteringPage(QWidget):
         self._updating_controls = False
         self._retired = False
         self._inspection_failed = False
+        self._analysis_plan_state_error = ""
+        self._recording_exclusion_state_error = ""
 
         self._build_ui()
         self._connect_signals()
@@ -215,16 +229,18 @@ class FreeHarmonicClusteringPage(QWidget):
         self.results_panel = QWidget(self.workspace)
         self.results_panel.setObjectName("free_harmonic_results_panel")
         workspace_layout.addWidget(self.setup_panel, 0)
-        workspace_layout.addWidget(self.results_panel, 1)
+        workspace_layout.addStretch(1)
         self.result_tabs = QTabWidget(self)
         self.result_tabs.setObjectName("free_harmonic_result_tabs")
-        self.result_tabs.addTab(self.workspace, "Analysis")
+        self.result_tabs.addTab(self.workspace, "Setup")
+        self.result_tabs.addTab(self.results_panel, "Results")
+        self.result_tabs.setTabEnabled(1, False)
         self.map_panel = QWidget(self.result_tabs)
         self.map_panel.setObjectName("free_harmonic_map_panel")
         self.map_layout = QVBoxLayout(self.map_panel)
         self.map_layout.setContentsMargins(24, 8, 24, 8)
         self.result_tabs.addTab(self.map_panel, "Cluster maps")
-        self.result_tabs.setTabEnabled(1, False)
+        self.result_tabs.setTabEnabled(2, False)
         root_layout.addWidget(self.result_tabs, 1)
 
         self._build_setup_panel()
@@ -436,6 +452,57 @@ class FreeHarmonicClusteringPage(QWidget):
             if label is not None:
                 label.setFixedWidth(120)
 
+        # Historical single-contrast controls remain for v1 integration adapters;
+        # new runs use one explicit family plan on the visible setup surface.
+        self.comparison_card.hide()
+        self.plan_card = SectionCard("Analysis families", content, object_name="free_harmonic_plan_card")
+        cards_layout.insertWidget(0, self.plan_card, 3)
+        self.plan_context_label = QLabel("Loading project design...", self.plan_card.content)
+        self.plan_context_label.setWordWrap(True)
+        self.plan_card.content_layout.addWidget(self.plan_context_label)
+        self.family_checks = {}
+        family_labels = {
+            AnalysisFamily.BETWEEN_GROUPS: "Between-group differences",
+            AnalysisFamily.BETWEEN_CONDITIONS: "Between-condition differences",
+            AnalysisFamily.WITHIN_GROUP_VISITS: "Within-group visit changes",
+            AnalysisFamily.GROUP_VISIT_CHANGE: "Between-group differences in visit change",
+        }
+        for family, label in family_labels.items():
+            check = QCheckBox(label, self.plan_card.content)
+            check.setObjectName(f"free_harmonic_family_{family.value}")
+            self.family_checks[family] = check
+            self.plan_card.content_layout.addWidget(check)
+        self.condition_plan_row = QWidget(self.plan_card.content)
+        condition_form = make_form_layout()
+        self.condition_plan_row.setLayout(condition_form)
+        self.condition_mode_combo = QComboBox(self.condition_plan_row)
+        self.condition_mode_combo.setObjectName("free_harmonic_condition_comparisons")
+        self.condition_mode_combo.addItem("Compare each condition with a reference", "reference")
+        self.condition_mode_combo.addItem("All pairs of conditions", "all_pairs")
+        condition_form.addRow("Condition tests:", self.condition_mode_combo)
+        self.reference_condition_combo = QComboBox(self.condition_plan_row)
+        self.reference_condition_combo.setObjectName("free_harmonic_reference_condition")
+        self.reference_condition_label = QLabel("Reference:", self.condition_plan_row)
+        condition_form.addRow(self.reference_condition_label, self.reference_condition_combo)
+        self.plan_card.content_layout.addWidget(self.condition_plan_row)
+        self.plan_summary_label = QLabel("Choose the questions to include in this analysis.", self.plan_card.content)
+        self.plan_summary_label.setObjectName("free_harmonic_plan_summary")
+        self.plan_summary_label.setWordWrap(True)
+        self.plan_card.content_layout.addWidget(self.plan_summary_label)
+        self.review_comparisons_button = make_action_button("Review comparisons...", compact=True, parent=self.plan_card.content)
+        self.review_comparisons_button.setObjectName("free_harmonic_review_comparisons")
+        self.plan_card.content_layout.addWidget(self.review_comparisons_button, 0, Qt.AlignLeft)
+        repeated_form.removeWidget(exclusion_row)
+        self.plan_exclusion_row = exclusion_row
+        self.plan_card.content_layout.addWidget(exclusion_row)
+        self.family_correction_note = QLabel(
+            "Each selected family is corrected with Holm at .05. Both groups' visit changes share one family. "
+            "Exploratory findings remain available in Results.", self.plan_card.content,
+        )
+        self.family_correction_note.setWordWrap(True)
+        self.family_correction_note.setProperty("caption", True)
+        self.plan_card.content_layout.addWidget(self.family_correction_note)
+
     def _build_workflow_footer(self, root_layout: QVBoxLayout) -> None:
         footer = QWidget(self)
         footer.setObjectName("free_harmonic_workflow_footer")
@@ -473,6 +540,14 @@ class FreeHarmonicClusteringPage(QWidget):
             parent=footer,
         )
         self.open_results_button.setObjectName("free_harmonic_open_results_button")
+        self.protocol_settings_button = make_action_button(
+            "Open Protocol Settings", variant="primary", parent=footer,
+        )
+        self.protocol_settings_button.setObjectName("free_harmonic_protocol_settings_button")
+        self.retry_loading_button = make_action_button(
+            "Retry loading", variant="secondary", parent=footer,
+        )
+        self.retry_loading_button.setObjectName("free_harmonic_retry_loading_button")
         action_height = max(
             self.open_results_button.sizeHint().height(),
             self.run_analysis_button.sizeHint().height(),
@@ -482,6 +557,8 @@ class FreeHarmonicClusteringPage(QWidget):
         self.workflow_actions = make_action_row(
             (
                 self.open_results_button,
+                self.protocol_settings_button,
+                self.retry_loading_button,
                 self.cancel_button,
                 self.run_analysis_button,
             ),
@@ -532,12 +609,10 @@ class FreeHarmonicClusteringPage(QWidget):
             results_card.content,
             "free_harmonic_repeated_batch_table",
             (
-                "Contrast family",
-                "Condition",
-                "Within-run clusters",
-                "Global p",
-                "Holm p (family)",
-                "Holm p (full batch)",
+                "Analysis family",
+                "Comparison",
+                "Family Holm p",
+                "Interpretation",
             ),
         )
         self.batch_table.setMinimumHeight(220)
@@ -547,14 +622,18 @@ class FreeHarmonicClusteringPage(QWidget):
         )
         self.batch_table.hide()
         self.batch_table.horizontalHeaderItem(2).setToolTip(
-            "Clusters passing the existing within-run threshold. This count does "
-            "not mean the comparison passes either run-level Holm correction."
+            "The primary result: Holm correction across every planned comparison in this family."
         )
+        self.batch_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Interactive)
+        self.batch_table.setColumnWidth(0, 220)
+        self.batch_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.batch_table.horizontalHeader().setStretchLastSection(False)
         results_card.content_layout.addWidget(self.batch_table)
         self.result_view_label = QLabel("Result view:", results_card.content)
         self.result_view_combo = QComboBox(results_card.content)
         self.result_view_combo.setObjectName("free_harmonic_result_view")
         self.result_view_combo.addItem("All comparisons", "all")
+        self.result_view_combo.addItem("Pass family Holm", "confirmed")
         self.result_view_combo.addItem("Exploratory findings", "exploratory")
         self.result_view_combo.setToolTip(
             "Exploratory findings have nominal global p < .05 and family Holm "
@@ -634,6 +713,10 @@ class FreeHarmonicClusteringPage(QWidget):
         ):
             combo.currentIndexChanged.connect(self._on_setup_changed)
         self.run_analysis_button.clicked.connect(self._run_analysis)
+        self.protocol_settings_button.clicked.connect(
+            lambda _checked=False: self.protocol_settings_required.emit()
+        )
+        self.retry_loading_button.clicked.connect(self._begin_project_inspection)
         self.review_exclusions_button.clicked.connect(
             self._review_recording_exclusions
         )
@@ -645,12 +728,18 @@ class FreeHarmonicClusteringPage(QWidget):
         self.result_view_combo.currentIndexChanged.connect(self._refresh_batch_table)
         self.batch_table.itemSelectionChanged.connect(self._update_result_actions)
         self.view_details_button.clicked.connect(self._open_result_details)
+        for check in self.family_checks.values():
+            check.toggled.connect(self._on_plan_choices_changed)
+        self.condition_mode_combo.currentIndexChanged.connect(self._on_plan_choices_changed)
+        self.reference_condition_combo.currentIndexChanged.connect(self._on_plan_choices_changed)
+        self.review_comparisons_button.clicked.connect(self._review_analysis_plan)
 
     # ---------------------------------------------------------- project state
     def refresh_project_context(
         self,
         project_root: str | Path | None = None,
         frequency_snapshot: ProjectFrequencySnapshot | Mapping[str, object] | None | object = _FREQUENCY_UNSET,
+        frequency_error: str | None = None,
     ) -> bool:
         """Refresh changed project/frequency inputs; identical context is a no-op."""
 
@@ -662,30 +751,30 @@ class FreeHarmonicClusteringPage(QWidget):
             else Path(project_root).expanduser().resolve(strict=False)
         )
         snapshot = self._frequency_snapshot
-        frequency_error: str | None = None
+        resolved_error: str | None = None
         if frequency_snapshot is _FREQUENCY_UNSET:
-            frequency_error = self._frequency_error
+            resolved_error = frequency_error or self._frequency_error
         elif frequency_snapshot is None:
             snapshot = None
-            frequency_error = "Frequency settings are missing or invalid."
+            resolved_error = frequency_error or "Confirm this project's protocol in Settings > Protocol before loading FHC."
         else:
             try:
                 snapshot = ProjectFrequencySnapshot.coerce(frequency_snapshot)
             except (TypeError, ValueError, OverflowError) as exc:
                 snapshot = None
-                frequency_error = str(exc)
+                resolved_error = frequency_error or str(exc)
 
         if (
             root == self._project_root
             and snapshot == self._frequency_snapshot
-            and frequency_error == self._frequency_error
+            and resolved_error == self._frequency_error
         ):
             if self._inspection_failed and self._thread is None:
                 self._begin_project_inspection()
                 return True
             return False
 
-        context = (root, snapshot, frequency_error)
+        context = (root, snapshot, resolved_error)
         if self._thread is not None:
             self._pending_context = context
             self.cancel_active_work()
@@ -712,11 +801,14 @@ class FreeHarmonicClusteringPage(QWidget):
         self._frequency_snapshot = snapshot
         self._frequency_error = frequency_error
         self._options = None
+        self._analysis_plan_state_error = ""
+        self._recording_exclusion_state_error = ""
         self._recording_exclusions = ()
         self._inspection_failed = False
         self._pending_post_processing_reason = None
         self._clear_results()
         self._clear_choice_controls()
+        self._set_unavailable_plan("Preparing to load project design...")
         self._update_results_folder_button()
         self._begin_project_inspection()
 
@@ -727,6 +819,8 @@ class FreeHarmonicClusteringPage(QWidget):
             self._show_frequency_or_ready_status()
             self._update_buttons()
             return
+        self._inspection_failed = False
+        self._set_unavailable_plan("Loading project design...")
         worker = ProjectInspectionWorker(
             self._backend,
             self._project_root,
@@ -750,17 +844,19 @@ class FreeHarmonicClusteringPage(QWidget):
         self._inspection_failed = False
         self._load_recording_exclusions(value)
         self._populate_choice_controls(value)
+        self._populate_analysis_plan(value)
         if not value.grid_compatible:
             self.workflow_status.set_variant("error")
             self.workflow_status.set_text(value.compatibility_message)
-        elif value.is_repeated_session and (
-            len(value.groups) != 2 or len(value.sessions) != 2
-        ):
+        elif value.is_repeated_session and len(value.sessions) != 2:
             self.workflow_status.set_variant("error")
             self.workflow_status.set_text(
-                "The repeated-session FHC batch requires exactly two stable "
-                "groups and two ordered sessions."
+                "Repeated-session analysis requires two ordered visits."
             )
+        elif self._analysis_plan_state_error:
+            self._show_error(self._analysis_plan_state_error)
+        elif self._recording_exclusion_state_error:
+            self._show_error(self._recording_exclusion_state_error)
         else:
             self.workflow_status.hide()
         self._update_buttons()
@@ -865,6 +961,151 @@ class FreeHarmonicClusteringPage(QWidget):
             else f"{count} recording exclusion(s), with audit reasons."
         )
 
+    def _populate_analysis_plan(self, options: ProjectAnalysisOptions) -> None:
+        """Offer only scientific questions supported by the inspected design."""
+
+        self._updating_controls = True
+        try:
+            self.review_comparisons_button.show()
+            self.plan_exclusion_row.show()
+            self.review_exclusions_button.show()
+            self.exclusion_count_label.show()
+            self.family_correction_note.show()
+            self.reference_condition_combo.clear()
+            for condition in options.conditions:
+                self.reference_condition_combo.addItem(condition, condition)
+            between = len(options.groups) >= 2
+            repeated = options.is_repeated_session and len(options.sessions) == 2
+            applicable = {
+                AnalysisFamily.BETWEEN_GROUPS: between,
+                AnalysisFamily.BETWEEN_CONDITIONS: len(options.conditions) >= 2,
+                AnalysisFamily.WITHIN_GROUP_VISITS: repeated,
+                AnalysisFamily.GROUP_VISIT_CHANGE: between and repeated,
+            }
+            defaults = {family for family, available in applicable.items() if available and family is not AnalysisFamily.BETWEEN_CONDITIONS}
+            if not defaults and applicable[AnalysisFamily.BETWEEN_CONDITIONS]:
+                defaults.add(AnalysisFamily.BETWEEN_CONDITIONS)
+            saved = None
+            self._analysis_plan_state_error = ""
+            try:
+                saved = load_analysis_plan_preferences(self._results_parent())
+                if saved and any(not applicable[AnalysisFamily(value)] for value in saved.families):
+                    raise AnalysisPlanStateError("Saved families no longer match this project. Review and choose the analysis families again.")
+                if saved and saved.condition_mode == "reference" and AnalysisFamily.BETWEEN_CONDITIONS.value in saved.families and saved.reference_condition not in options.conditions:
+                    raise AnalysisPlanStateError("The saved reference condition is unavailable. Choose the reference condition again.")
+            except AnalysisPlanStateError as exc:
+                self._analysis_plan_state_error = str(exc)
+                saved = None
+            selected = defaults if saved is None else {AnalysisFamily(value) for value in saved.families}
+            for family, check in self.family_checks.items():
+                check.setVisible(applicable[family])
+                check.setChecked(family in selected)
+            default_all_pairs = not between and not repeated
+            self.condition_mode_combo.setCurrentIndex(
+                (1 if default_all_pairs else 0) if saved is None
+                else (0 if saved.condition_mode == "reference" else 1)
+            )
+            if saved is not None:
+                index = self.reference_condition_combo.findData(saved.reference_condition)
+                if index >= 0:
+                    self.reference_condition_combo.setCurrentIndex(index)
+            group_text = ", ".join(group.label for group in options.groups) or "All participants"
+            visits = ""
+            if repeated:
+                visits = f" Visit change: {options.sessions[0].label} − {options.sessions[1].label}."
+            self.plan_context_label.setText(f"{group_text} · {len(options.conditions)} conditions.{visits}")
+            self.family_correction_note.setText(
+                "Holm correction applies within each selected family at .05. "
+                + ("All groups' visit changes share one family. " if repeated else "")
+                + "Exploratory findings remain available in Results."
+            )
+        finally:
+            self._updating_controls = False
+        self._update_plan_summary()
+
+    def _plan_preferences(self) -> AnalysisPlanPreferences:
+        return AnalysisPlanPreferences(
+            families=tuple(family.value for family, check in self.family_checks.items() if check.isChecked()),
+            condition_mode=str(self.condition_mode_combo.currentData()),
+            reference_condition=str(self.reference_condition_combo.currentData() or ""),
+        )
+
+    def _current_analysis_plan(self):
+        if self._options is None:
+            raise ValueError("Project inputs have not been loaded.")
+        from ..models import RecordingExclusionRequest
+
+        options = self._options
+        preferences = self._plan_preferences()
+        pairs = ()
+        if AnalysisFamily.BETWEEN_CONDITIONS.value in preferences.families and preferences.condition_mode == "reference":
+            if preferences.reference_condition not in options.conditions:
+                raise ValueError("Choose the reference condition.")
+            pairs = tuple((condition, preferences.reference_condition) for condition in options.conditions if condition != preferences.reference_condition)
+        return build_analysis_plan(
+            self._project_root,
+            group_ids=tuple(group.group_id for group in options.groups),
+            conditions=options.conditions,
+            session_ids=tuple(session.session_id for session in options.sessions) if options.is_repeated_session else (),
+            families=preferences.families,
+            condition_pairs=pairs,
+            recording_exclusions=tuple(RecordingExclusionRequest(item.recording_id, item.reason) for item in self._recording_exclusions),
+            project_options=options,
+        )
+
+    def _current_planned_setup(self) -> PlannedAnalysisSetup:
+        if self._analysis_plan_state_error:
+            raise ValueError(self._analysis_plan_state_error)
+        if self._recording_exclusion_state_error:
+            raise ValueError(self._recording_exclusion_state_error)
+        harmonic_mode, fixed_order, maximum = self._current_harmonic_domain()
+        return PlannedAnalysisSetup(self._current_analysis_plan(), harmonic_mode, fixed_order, maximum)
+
+    @Slot()
+    def _on_plan_choices_changed(self) -> None:
+        if self._updating_controls:
+            return
+        self._analysis_plan_state_error = ""
+        self._on_setup_changed()
+
+    def _update_plan_summary(self) -> None:
+        selected = self.family_checks[AnalysisFamily.BETWEEN_CONDITIONS].isChecked()
+        self.condition_plan_row.setVisible(selected)
+        reference = selected and self.condition_mode_combo.currentData() == "reference"
+        self.reference_condition_combo.setVisible(reference)
+        self.reference_condition_label.setVisible(reference)
+        if self._options is None:
+            return
+        try:
+            plan = self._current_analysis_plan()
+        except (ValueError, FreeHarmonicInputError) as exc:
+            self.plan_summary_label.setText(str(exc))
+            self.review_comparisons_button.setEnabled(False)
+            return
+        counts = {}
+        for row in plan.comparisons:
+            counts[row.family_label] = counts.get(row.family_label, 0) + 1
+        self.plan_summary_label.setText(
+            f"{len(plan.comparisons)} planned comparisons in {len(counts)} {'family' if len(counts) == 1 else 'families'}:\n"
+            + "\n".join(f"{label}: {count}" for label, count in counts.items())
+        )
+        self.review_comparisons_button.setEnabled(self._thread is None)
+
+    @Slot()
+    def _review_analysis_plan(self) -> None:
+        try:
+            plan = self._current_analysis_plan()
+        except (ValueError, FreeHarmonicInputError) as exc:
+            self._show_error(str(exc))
+            return
+        from .analysis_plan_dialog import AnalysisPlanDialog
+
+        dialog = AnalysisPlanDialog(plan, self)
+        try:
+            dialog.exec()
+        finally:
+            dialog.deleteLater()
+
     # ------------------------------------------------------------- interaction
     def _selected_design(self) -> GuiAnalysisDesign | None:
         value = self.design_combo.currentData()
@@ -917,6 +1158,7 @@ class FreeHarmonicClusteringPage(QWidget):
                 "Setup changed. Run the analysis again to use the new choices."
             )
         self._update_direction_label()
+        self._update_plan_summary()
         self._update_buttons()
 
     @Slot()
@@ -980,9 +1222,7 @@ class FreeHarmonicClusteringPage(QWidget):
         )
 
     def _load_recording_exclusions(self, options: ProjectAnalysisOptions) -> None:
-        if not options.is_repeated_session:
-            self._recording_exclusions = ()
-            return
+        self._recording_exclusion_state_error = ""
         try:
             self._recording_exclusions = load_project_recording_exclusions(
                 self._results_parent(),
@@ -990,6 +1230,7 @@ class FreeHarmonicClusteringPage(QWidget):
             )
         except ExclusionStateError as exc:
             self._recording_exclusions = ()
+            self._recording_exclusion_state_error = "Saved recording exclusions could not be loaded. Review recording exclusions before running this plan."
             logger.warning(
                 "fhc_recording_exclusions_load_failed",
                 extra={"project_root": str(self._project_root), "error": str(exc)},
@@ -1085,19 +1326,16 @@ class FreeHarmonicClusteringPage(QWidget):
         if self._retired:
             return "This project-bound page has been retired."
         if self._frequency_snapshot is None:
-            return "Open Project Settings and provide valid base and oddball frequencies."
+            return self._frequency_error or "Confirm the project protocol in Settings > Protocol."
         if self._options is None:
-            return "Project inputs are still loading."
+            return "Project inputs could not be loaded. Retry loading after resolving the issue." if self._inspection_failed else "Project inputs are still loading."
         if not self._options.grid_compatible:
             return self._options.compatibility_message or "FullFFT grid is incompatible."
         if not self._options.eligible_orders:
             return "No eligible non-base oddball harmonics are available on the FullFFT grid."
         try:
-            if self._selected_design() is GuiAnalysisDesign.REPEATED_SESSION_BATCH:
-                self._current_repeated_batch_setup()
-            else:
-                self._current_setup()
-        except ValueError as exc:
+            self._current_planned_setup()
+        except (ValueError, FreeHarmonicInputError) as exc:
             return str(exc)
         return None
 
@@ -1109,6 +1347,23 @@ class FreeHarmonicClusteringPage(QWidget):
             return
         assert self._options is not None
         assert self._frequency_snapshot is not None
+        setup = self._current_planned_setup()
+        try:
+            save_analysis_plan_preferences(self._results_parent(), self._plan_preferences())
+        except AnalysisPlanStateError as exc:
+            self._show_error(str(exc))
+            return
+        self._clear_results()
+        worker = PlannedAnalysisWorker(self._backend, self._frequency_snapshot, setup)
+        self._start_operation(
+            worker, stage="analysis_plan",
+            message="Checking eligible participants for the frozen analysis plan...",
+            on_completed=self._on_planned_analysis_completed,
+        )
+
+    def _run_legacy_analysis(self) -> None:
+        """Retained v1 route for historical integration callers."""
+
         if self._selected_design() is GuiAnalysisDesign.REPEATED_SESSION_BATCH:
             setup = self._current_repeated_batch_setup()
             self._clear_results()
@@ -1145,6 +1400,16 @@ class FreeHarmonicClusteringPage(QWidget):
             on_completed=self._on_analysis_completed,
         )
 
+    def _on_planned_analysis_completed(self, value: object) -> None:
+        if not isinstance(value, PlannedAnalysisWorkerOutcome):
+            self._show_error("The family analysis returned an invalid result.")
+            return
+        from ..planned_reporting import build_analysis_plan_report
+
+        self._populate_family_report(build_analysis_plan_report(value.run.result))
+        self._set_cluster_maps(value.maps)
+        self._show_completed_results(value.map_warning)
+
     def _on_analysis_completed(self, value: object) -> None:
         if not isinstance(value, AnalysisWorkerOutcome) or not isinstance(
             value.run_outcome,
@@ -1176,12 +1441,12 @@ class FreeHarmonicClusteringPage(QWidget):
             self.map_view.set_maps(maps)
         elif self.map_view is not None:
             self.map_view.clear()
-        self.result_tabs.setTabEnabled(1, bool(maps))
+        self.result_tabs.setTabEnabled(2, bool(maps))
         self._update_result_actions()
 
     @Slot()
     def _open_cluster_maps(self, *_args: object) -> None:
-        if self.map_view is None or not self.result_tabs.isTabEnabled(1):
+        if self.map_view is None or not self.result_tabs.isTabEnabled(2):
             return
         if not self.batch_table.isHidden():
             row = self._selected_report_row()
@@ -1194,7 +1459,7 @@ class FreeHarmonicClusteringPage(QWidget):
                 cluster_id = item.data(Qt.UserRole)
                 if cluster_id is not None:
                     self.map_view.select_cluster(int(cluster_id))
-        self.result_tabs.setCurrentIndex(1)
+        self.result_tabs.setCurrentIndex(2)
 
     def _selected_report_row(self) -> RepeatedSessionReportRow | None:
         item = self.batch_table.item(self.batch_table.currentRow(), 0)
@@ -1211,7 +1476,7 @@ class FreeHarmonicClusteringPage(QWidget):
         has_selection = self._selected_report_row() is not None
         self.view_details_button.setEnabled(has_selection)
         self.view_maps_button.setEnabled(
-            self.result_tabs.isTabEnabled(1)
+            self.result_tabs.isTabEnabled(2)
             and (self.batch_table.isHidden() or has_selection)
         )
 
@@ -1225,7 +1490,7 @@ class FreeHarmonicClusteringPage(QWidget):
         dialog = ResultDetailsDialog(
             row,
             self,
-            maps_available=self.result_tabs.isTabEnabled(1),
+            maps_available=self.result_tabs.isTabEnabled(2),
         )
         dialog.maps_requested.connect(self._open_repeated_result_map)
         try:
@@ -1237,17 +1502,19 @@ class FreeHarmonicClusteringPage(QWidget):
     def _open_repeated_result_map(self, run_index: int) -> None:
         if (
             self.map_view is not None
-            and self.result_tabs.isTabEnabled(1)
+            and self.result_tabs.isTabEnabled(2)
             and any(row.run_index == run_index for row in self._batch_report_rows)
         ):
             self.map_view.select_run(run_index)
-            self.result_tabs.setCurrentIndex(1)
+            self.result_tabs.setCurrentIndex(2)
 
     def _show_completed_results(self, map_warning: str = "") -> None:
         """Reveal display-only results without retaining worker analysis arrays."""
 
         self._has_result = True
         self.results_panel.show()
+        self.result_tabs.setTabEnabled(1, True)
+        self.result_tabs.setCurrentIndex(1)
         self._update_results_folder_button()
         self.workflow_status.hide()
         if map_warning:
@@ -1261,7 +1528,6 @@ class FreeHarmonicClusteringPage(QWidget):
         options = self._options
         if (
             options is None
-            or not options.is_repeated_session
             or self._thread is not None
         ):
             return
@@ -1278,9 +1544,10 @@ class FreeHarmonicClusteringPage(QWidget):
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         exclusions = dialog.exclusions()
-        if exclusions == self._recording_exclusions:
+        if exclusions == self._recording_exclusions and not self._recording_exclusion_state_error:
             return
         self._recording_exclusions = exclusions
+        self._recording_exclusion_state_error = ""
         self._update_exclusion_count_label()
         self._on_setup_changed()
         try:
@@ -1365,6 +1632,8 @@ class FreeHarmonicClusteringPage(QWidget):
         if not self._retired:
             if self._active_stage == "inspection":
                 self._inspection_failed = True
+                self._options = None
+                self._set_unavailable_plan("Project inputs could not be loaded.")
             self._show_error(message or "The analysis operation failed.")
 
     @Slot(str)
@@ -1375,6 +1644,7 @@ class FreeHarmonicClusteringPage(QWidget):
         self._options = None
         self._clear_results()
         self._clear_choice_controls()
+        self._set_unavailable_plan("Post-processing is required before loading analysis families.")
         self._pending_post_processing_reason = str(reason)
         self.workflow_status.hide()
         logger.warning(
@@ -1390,6 +1660,8 @@ class FreeHarmonicClusteringPage(QWidget):
         if not self._retired:
             if self._active_stage == "inspection":
                 self._inspection_failed = True
+                self._options = None
+                self._set_unavailable_plan("Project input loading was cancelled.")
             self.workflow_status.show()
             self.workflow_status.set_variant("warning")
             self.workflow_status.set_text(
@@ -1510,12 +1782,15 @@ class FreeHarmonicClusteringPage(QWidget):
         self.significant_table.hide()
         self.significant_table.setRowCount(0)
         report = build_repeated_session_report(getattr(run, "result", run))
+        self._populate_family_report(report)
+
+    def _populate_family_report(self, report: object) -> None:
+        self.significant_table.hide()
+        self.significant_table.setRowCount(0)
         self._batch_report_rows = report.rows
         within_family_significant = sum(row.holm_family_p <= 0.05 for row in report.rows)
-        all_batch_significant = sum(row.holm_batch_p <= 0.05 for row in report.rows)
         self._batch_summary_text = (
-            f"{len(report.rows)} comparisons: {within_family_significant} pass family "
-            f"Holm; {all_batch_significant} pass full-batch Holm. "
+            f"{len(report.rows)} comparisons: {within_family_significant} pass family Holm. "
             f"{report.exploratory_count} exploratory "
             f"{'finding' if report.exploratory_count == 1 else 'findings'} "
             "(nominal global p < .05, family Holm p > .05)."
@@ -1535,8 +1810,10 @@ class FreeHarmonicClusteringPage(QWidget):
 
         previous = self._selected_report_row()
         exploratory = self.result_view_combo.currentData() == "exploratory"
+        confirmed = self.result_view_combo.currentData() == "confirmed"
         rows = tuple(
-            row for row in self._batch_report_rows if not exploratory or row.is_exploratory
+            row for row in self._batch_report_rows
+            if (not exploratory or row.is_exploratory) and (not confirmed or row.holm_family_p <= 0.05)
         )
         self.batch_table.setRowCount(0)
         self.batch_table.setRowCount(len(rows))
@@ -1544,26 +1821,25 @@ class FreeHarmonicClusteringPage(QWidget):
         for row_index, row in enumerate(rows):
             values = (
                 row.family_label,
-                row.condition,
-                str(row.within_run_cluster_count),
-                f"{row.global_p:.4f}",
+                row.comparison_label or row.condition,
                 f"{row.holm_family_p:.4f}",
-                f"{row.holm_batch_p:.4f}",
+                "Passes family Holm" if row.holm_family_p <= 0.05 else "Exploratory" if row.is_exploratory else "Does not pass",
             )
             for column, value in enumerate(values):
                 item = QTableWidgetItem(value)
                 item.setData(Qt.UserRole, row.run_index)
-                if column >= 3:
-                    stored_p = (row.global_p, row.holm_family_p, row.holm_batch_p)[column - 3]
-                    item.setToolTip(f"Stored p = {stored_p:.8g}; classification uses the unrounded value.")
+                item.setToolTip(value)
+                if column == 2:
+                    item.setToolTip(f"Stored family Holm p = {row.holm_family_p:.8g}; classification uses the unrounded value. Global and full-plan p values are in View details.")
                 self.batch_table.setItem(row_index, column, item)
             if previous is not None and row.run_index == previous.run_index:
                 selected_row = row_index
         if rows:
             self.batch_table.selectRow(selected_row)
+        self.batch_table.resizeRowsToContents()
         empty_note = (
-            " No comparisons meet the exploratory criteria."
-            if exploratory and not rows
+            " No comparisons match this view."
+            if not rows
             else ""
         )
         self.result_status.set_text(self._batch_summary_text + empty_note)
@@ -1622,6 +1898,7 @@ class FreeHarmonicClusteringPage(QWidget):
     # -------------------------------------------------------------- utilities
     def _reset_session_views(self) -> None:
         self._clear_results()
+        self._set_unavailable_plan("Ready to load project design.")
         self.design_stack.setCurrentIndex(0)
         self.fixed_highest_label.hide()
         self.fixed_highest_combo.parentWidget().hide()
@@ -1637,6 +1914,7 @@ class FreeHarmonicClusteringPage(QWidget):
         ):
             widget.hide()
         self.result_tabs.setCurrentIndex(0)
+        self.result_tabs.setTabEnabled(1, False)
         self._set_cluster_maps(())
         self.significant_table.setRowCount(0)
         self.significant_table.hide()
@@ -1649,26 +1927,51 @@ class FreeHarmonicClusteringPage(QWidget):
     def _show_frequency_or_ready_status(self) -> None:
         self.workflow_status.show()
         if self._frequency_snapshot is None:
-            detail = f" ({self._frequency_error})" if self._frequency_error else ""
+            self._set_unavailable_plan("The project protocol needs confirmation before analysis families can load.")
             self.workflow_status.set_variant("error")
             self.workflow_status.set_text(
-                "Free Harmonic Clustering requires valid base and oddball "
-                f"frequencies from Project Settings{detail}"
+                self._frequency_error or "Confirm this project's stimulation frequencies, expected cycle count, "
+                "and oddball marker in Settings > Protocol, then return to FHC."
             )
         else:
+            self._set_unavailable_plan("Ready to load project design.")
             self.workflow_status.set_variant("info")
             self.workflow_status.set_text("Ready to load project inputs.")
+        self._update_buttons()
+
+    def _set_unavailable_plan(self, message: str) -> None:
+        """Do not display stale choices or a loading claim when inspection stops."""
+        self.plan_context_label.setText(message)
+        self.plan_summary_label.setText("")
+        for check in self.family_checks.values():
+            check.hide()
+        for widget in (
+            self.condition_plan_row, self.review_comparisons_button,
+            self.plan_exclusion_row, self.review_exclusions_button,
+            self.exclusion_count_label, self.family_correction_note,
+        ):
+            widget.hide()
 
     def _show_error(self, message: str) -> None:
+        if self._active_stage == "inspection" and self._options is None:
+            self._inspection_failed = True
+            self._set_unavailable_plan("Project inputs could not be loaded.")
         self.workflow_status.show()
         self.workflow_status.set_variant("error")
         self.workflow_status.set_text(str(message))
+        self._update_buttons()
 
     def _update_buttons(self) -> None:
         busy = self._thread is not None
         error = self._setup_error()
         self.run_analysis_button.setEnabled(not busy and error is None)
+        self.run_analysis_button.setToolTip(error or "Run the selected comparisons using the frozen family plan.")
         self.run_analysis_button.setVisible(not busy)
+        missing_protocol = self._frequency_snapshot is None
+        self.protocol_settings_button.setVisible(not busy and missing_protocol)
+        self.protocol_settings_button.setEnabled(not busy and not self._retired)
+        self.retry_loading_button.setVisible(not busy and self._inspection_failed and not missing_protocol)
+        self.retry_loading_button.setEnabled(not busy and not self._retired)
         self.cancel_button.setVisible(busy)
         self.cancel_button.setEnabled(busy)
         self.workflow_actions.setVisible(True)
@@ -1680,12 +1983,9 @@ class FreeHarmonicClusteringPage(QWidget):
         )
         self.harmonic_mode_combo.setEnabled(not busy and self._options is not None)
         self.design_stack.setEnabled(not busy and self._options is not None)
-        repeated = (
-            self._selected_design() is GuiAnalysisDesign.REPEATED_SESSION_BATCH
-        )
+        self.plan_card.setEnabled(not busy and self._options is not None)
         self.review_exclusions_button.setEnabled(
             not busy
-            and repeated
             and self._options is not None
             and bool(self._options.recordings)
         )

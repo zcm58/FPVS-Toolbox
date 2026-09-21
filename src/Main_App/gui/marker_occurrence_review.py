@@ -403,8 +403,7 @@ def build_marker_review_decision(
             )
         if item.proposed_start_sample is None or item.proposed_stop_sample is None:
             raise MarkerOccurrenceReviewError(
-                "This occurrence is too short for the declared analyzed cycles and "
-                "cannot be retained without padding."
+                "The planned analysis window is unavailable. " + _unavailable_window_reason(item)
             )
         return {
             **_decision_receipt(
@@ -648,6 +647,17 @@ class MarkerOccurrenceReviewSummary:
     choices: tuple[MarkerReviewChoice, ...]
 
 
+def _unavailable_window_reason(item: MarkerOccurrenceReviewItem) -> str:
+    if "insufficient_project_oddball_markers" in item.review_reasons or len(item.retained_marker_samples) < 2:
+        return (
+            f"Fewer than two distinct markers with configured code {item.oddball_marker_code} were found. "
+            "Check this recording's trigger schema in Settings > Protocol; these markers do not establish the available analysis duration."
+        )
+    if "shorter_than_expected_analyzed_cycles" in item.review_reasons:
+        return "The markers cover less than the required analysis duration."
+    return "The marker evidence does not define a valid planned analysis window."
+
+
 def marker_occurrence_review_summary(
     item: MarkerOccurrenceReviewItem,
 ) -> MarkerOccurrenceReviewSummary:
@@ -686,7 +696,7 @@ def marker_occurrence_review_summary(
         f"Keep the planned {duration}-second window despite the marker finding. "
         "Requires a log, photodiode trace or other independent evidence that stimulation stayed continuous and correctly timed."
         if full_available else
-        "Unavailable: the markers do not define a long enough planned analysis window."
+        "Unavailable: " + _unavailable_window_reason(item)
     )
     context = " · ".join(value for value in (
         item.participant_id or "Unknown participant", item.session_label or item.session_id,
@@ -723,7 +733,7 @@ def marker_occurrence_review_rows(
         )
         if item.proposed_start_sample is not None
         and item.proposed_stop_sample is not None
-        else "Unavailable; occurrence is shorter than the required analysis"
+        else "Unavailable; " + _unavailable_window_reason(item)
     )
     candidates = (
         " | ".join(

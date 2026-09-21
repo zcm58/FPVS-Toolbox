@@ -10,6 +10,7 @@ from Main_App.gui.project_protocol import (
     ProjectProtocolRequiredError,
     ProtocolEditorValues,
     build_manual_protocol,
+    condition_marker_editor_rows,
     duration_summary,
     editor_values_for_protocol,
     protocol_settings_save_requested,
@@ -293,6 +294,112 @@ def test_processing_snapshot_returns_same_frozen_ready_value() -> None:
     assert snapshot is protocol
     with pytest.raises(AttributeError):
         snapshot.oddball_every_n = 10
+
+
+def _mapped_protocol():
+    return FrequencyProtocol.from_recurrence("6", 5, expected_analyzed_oddball_cycles=144, expected_analyzed_oddball_cycles_source="manual").with_condition_oddball_marker_codes({1: 51, 2: 52, 3: 53, 4: 54, 5: 55})
+
+
+def _build_editor_protocol(protocol, **changes):
+    values = editor_values_for_protocol(protocol)
+    fields = dict(
+        presentation_rate_hz=values.presentation_rate_hz,
+        oddball_input_mode=values.oddball_input_mode,
+        oddball_every_n=values.oddball_every_n,
+        oddball_rate_hz=values.entered_oddball_rate_hz,
+        expected_analyzed_oddball_cycles=values.expected_analyzed_oddball_cycles,
+        oddball_marker_code=values.oddball_marker_code,
+        existing_protocol=protocol, require_ready=True,
+    )
+    return build_manual_protocol(**(fields | changes))
+
+
+def test_unrelated_protocol_rebuild_preserves_exact_condition_marker_mapping():
+    protocol = _mapped_protocol()
+    rebuilt = _build_editor_protocol(protocol)
+    assert rebuilt.fingerprint == protocol.fingerprint
+    changed_rate = _build_editor_protocol(protocol, presentation_rate_hz="3")
+    assert changed_rate.condition_oddball_marker_codes == protocol.condition_oddball_marker_codes
+    assert editor_values_for_protocol(changed_rate).condition_oddball_markers_enabled
+
+
+def test_explicit_marker_mapping_disable_restores_one_shared_code_even_with_invalid_drafts():
+    protocol = _mapped_protocol()
+    disabled = _build_editor_protocol(
+        protocol, condition_oddball_markers_enabled=False,
+        condition_oddball_marker_codes=(("1", "incomplete edit"),),
+    )
+    assert disabled.condition_oddball_marker_codes == ()
+    assert disabled.oddball_marker_code_for_condition(1) == 55
+    assert disabled.oddball_marker_code_for_condition(5) == 55
+    assert not editor_values_for_protocol(disabled).condition_oddball_markers_enabled
+
+
+def test_enabled_mapping_uses_explicit_edited_values_and_cannot_be_empty():
+    protocol = FrequencyProtocol.from_recurrence("6", 5, expected_analyzed_oddball_cycles=144, expected_analyzed_oddball_cycles_source="manual")
+    mapped = _build_editor_protocol(
+        protocol, condition_oddball_markers_enabled=True,
+        condition_oddball_marker_codes=(("1", "51"), ("2", "52")),
+    )
+    assert mapped.condition_oddball_marker_codes == ((1, 51), (2, 52))
+    assert protocol.condition_oddball_marker_codes == ()
+    with pytest.raises(FrequencyProtocolError, match="every condition"):
+        _build_editor_protocol(protocol, condition_oddball_markers_enabled=True, condition_oddball_marker_codes=())
+
+
+def test_condition_editor_rows_use_onset_identity_after_renaming_and_reordering():
+    values = editor_values_for_protocol(_mapped_protocol())
+    rows = condition_marker_editor_rows({"Semantic Response": 3, "Color renamed": 1, "Color Response 2": 2}, values)
+    assert rows == (("Color renamed", "1", "51"), ("Color Response 2", "2", "52"), ("Semantic Response", "3", "53"))
+    assert condition_marker_editor_rows({"New condition": 6}, values) == (("New condition", "6", ""),)
+
+
+def test_mapping_change_and_disable_are_detected_by_settings_save_policy():
+    initial = editor_values_for_protocol(_mapped_protocol())
+    assert not protocol_settings_save_requested(initial, initial, protocol_tab_active=False)
+    changed = replace(initial, condition_oddball_marker_codes=(("1", "77"),))
+    disabled = replace(initial, condition_oddball_markers_enabled=False)
+    assert protocol_settings_save_requested(initial, changed, protocol_tab_active=False)
+    assert protocol_settings_save_requested(initial, disabled, protocol_tab_active=False)
+    other_drafts = replace(disabled, condition_oddball_marker_codes=(("1", "draft"),))
+    assert not protocol_settings_save_requested(disabled, other_drafts, protocol_tab_active=False)
+
+
+def test_condition_aliases_share_one_editable_marker_and_roundtrip_unchanged():
+    from Main_App.projects import validate_protocol_condition_codes
+
+    protocol = _mapped_protocol().with_condition_oddball_marker_codes({1: 51, 2: 52})
+    event_map = {"Faces": 1, "Faces alias": 1, "Objects": 2}
+    rows = condition_marker_editor_rows(event_map, editor_values_for_protocol(protocol))
+    assert rows == (("Faces / Faces alias", "1", "51"), ("Objects", "2", "52"))
+    rebuilt = _build_editor_protocol(
+        protocol, condition_oddball_markers_enabled=True,
+        condition_oddball_marker_codes=tuple((onset, marker) for _label, onset, marker in rows),
+    )
+    validate_protocol_condition_codes(rebuilt, event_map.values())
+    assert rebuilt.fingerprint == protocol.fingerprint
+
+
+def test_recording_trigger_schemas_survive_unrelated_protocol_rebuild():
+    protocol = _mapped_protocol().with_recording_oddball_marker_codes({
+        "P01": {onset: onset + 50 for onset in range(1, 6)},
+        "P22": {onset: 55 for onset in range(1, 6)},
+    })
+    assert _build_editor_protocol(protocol).fingerprint == protocol.fingerprint
+    changed = _build_editor_protocol(protocol, expected_analyzed_oddball_cycles="120")
+    assert changed.recording_oddball_marker_codes == protocol.recording_oddball_marker_codes
+    disabled = _build_editor_protocol(protocol, recording_oddball_markers_enabled=False)
+    assert disabled.recording_oddball_marker_codes == ()
+    assert disabled.condition_oddball_marker_codes == protocol.condition_oddball_marker_codes
+    initial = editor_values_for_protocol(protocol)
+    off = replace(initial, recording_oddball_markers_enabled=False)
+    assert protocol_settings_save_requested(initial, off, protocol_tab_active=False)
+    assert not protocol_settings_save_requested(off, replace(off, recording_oddball_marker_codes=()), protocol_tab_active=False)
+
+
+def test_new_recording_schema_mode_cannot_silently_use_the_project_default():
+    with pytest.raises(FrequencyProtocolError, match="every recording"):
+        _build_editor_protocol(_mapped_protocol(), recording_oddball_markers_enabled=True, recording_oddball_marker_codes=())
 
 
 def test_protocol_values_remain_independent_between_projects(tmp_path) -> None:

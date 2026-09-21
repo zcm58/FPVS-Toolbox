@@ -90,7 +90,7 @@ class _SelectedCohort:
 @dataclass(frozen=True, slots=True)
 class _RepeatedBatchCohort:
     conditions: tuple[str, ...]
-    groups: tuple[ProjectGroupOption, ProjectGroupOption]
+    groups: tuple[ProjectGroupOption, ...]
     sessions: tuple[ProjectSessionOption, ProjectSessionOption]
     source_records: tuple[WorkbookRecord, ...]
     record_by_cell: Mapping[tuple[str, str, str], WorkbookRecord]
@@ -583,6 +583,8 @@ def _select_repeated_batch_cohort(
     index: ProjectDatasetIndex,
     request: RepeatedSessionBatchRequest,
     project_root: Path,
+    *,
+    validate_electrodes: bool = True,
 ) -> _RepeatedBatchCohort:
     """Freeze complete per-condition pairs and a recording-aware audit."""
 
@@ -866,7 +868,7 @@ def _select_repeated_batch_cohort(
         for identity, electrodes in electrode_exclusions.items()
         if electrodes
     }
-    if electrode_exclusions:
+    if electrode_exclusions and validate_electrodes:
         details = [
             f"{recording_id} / {condition}: {', '.join(sorted(electrodes))}"
             for (recording_id, condition), electrodes in sorted(
@@ -891,7 +893,7 @@ def _select_repeated_batch_cohort(
     )
     return _RepeatedBatchCohort(
         conditions=conditions,
-        groups=(groups[0], groups[1]),
+        groups=groups,
         sessions=(sessions[0], sessions[1]),
         source_records=tuple(source_records),
         record_by_cell=record_by_cell,

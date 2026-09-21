@@ -32,6 +32,14 @@ created. Receipt keys remain compatible (`workbook_write_receipt_v1`) and
 continue to bind exact anchor paths, hashes, validated schemas and companions.
 This changes no preprocessing or FFT operation, harmonic rule or QC decision.
 
+Processing completion must recognize published `.fpvs` results as well as
+historical Excel outputs. The GUI and post-export worker share the same
+format-aware output snapshot, retaining the existing modification-time/size
+change checks for current-run writes. Companion archives, temporary files and
+metadata sidecars alone do not establish a completed result. Completion and
+missing-output messages refer to result files rather than assuming Excel;
+scientific readiness and export-receipt validation remain separate checks.
+
 Reading a BCA Method Audit may reuse exact frequency-column parsing within that
 single call: at most 256 built-in string tokens of at most 128 characters each.
 Numeric values, custom string types and oversized tokens retain direct parsing.

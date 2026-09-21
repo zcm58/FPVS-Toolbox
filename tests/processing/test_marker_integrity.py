@@ -131,6 +131,91 @@ def test_clean_occurrence_uses_declared_cycle_count_and_exact_project_code() -> 
     assert not approved.is_excluded
 
 
+def _valence_marker_plan(
+    onsets: list[tuple[int, int]],
+    event_map: dict[str, int],
+    *,
+    marker_count: int = 147,
+) -> MarkerIntegrityPlan:
+    protocol = FrequencyProtocol.from_recurrence(
+        6,
+        5,
+        expected_analyzed_oddball_cycles=144,
+        expected_analyzed_oddball_cycles_source=EXPECTED_CYCLES_SOURCE_MANUAL,
+        oddball_marker_code=55,
+    )
+    rows = []
+    for onset, condition_code in onsets:
+        rows.append([onset, 0, condition_code])
+        # At 256 Hz, 1.2 Hz markers alternate 213/214-sample intervals.
+        rows.extend(
+            [onset + 256 + (index * 640 + 1) // 3, 0, 55]
+            for index in range(marker_count)
+        )
+    return build_marker_integrity_plan(
+        events=np.asarray(rows, dtype=np.int64),
+        event_map=event_map,
+        sampling_rate_hz=256,
+        n_times=onsets[-1][0] + 80000,
+        protocol=protocol,
+    )
+
+
+def test_repeated_condition_runs_each_keep_the_declared_144_cycle_span() -> None:
+    plan = _valence_marker_plan(
+        [(0, 24), (40000, 24)],
+        {"High Arousal High Valence": 24},
+    )
+
+    assert plan.unresolved_occurrences == ()
+    assert [item.repetition_index for item in plan.occurrences] == [0, 1]
+    assert [item.raw_marker_count for item in plan.occurrences] == [147, 147]
+    assert [item.expected_analyzed_cycles for item in plan.occurrences] == [144, 144]
+    approved = [approve_clean_occurrence(item) for item in plan.occurrences]
+    assert [(item.start_sample, item.stop_sample) for item in approved] == [
+        (256, 30976),
+        (40256, 70976),
+    ]
+
+
+def test_excess_continuous_markers_do_not_trigger_review_by_count_alone() -> None:
+    plan = _valence_marker_plan(
+        [(0, 24)],
+        {"High Arousal High Valence": 24},
+        marker_count=294,
+    )
+    occurrence = plan.occurrences[0]
+
+    assert occurrence.raw_marker_count == 294
+    assert occurrence.review_reasons == ()
+    assert occurrence.status == MARKER_STATUS_READY
+    approved = approve_clean_occurrence(occurrence)
+    assert (approved.start_sample, approved.stop_sample) == (256, 30976)
+
+
+def test_undeclared_condition_onset_combines_blocks_and_flags_the_interblock_gap() -> None:
+    onsets = [(0, 24), (40000, 13), (80000, 21)]
+    event_map = {"High Arousal High Valence": 24, "Condition 21": 21}
+    incomplete_plan = _valence_marker_plan(onsets, event_map)
+    combined = incomplete_plan.occurrences[0]
+
+    assert combined.condition_code == 24
+    assert combined.block_stop_sample == 80000
+    assert combined.raw_marker_count == 294
+    assert combined.review_reasons == ("missing_marker_gap",)
+
+    # Every real condition start must be declared, including intervening blocks;
+    # shared oddball code 55 cannot identify their condition or infer boundaries.
+    complete_plan = _valence_marker_plan(onsets, {**event_map, "Condition 13": 13})
+    assert complete_plan.unresolved_occurrences == ()
+    assert [item.condition_code for item in complete_plan.occurrences] == [24, 13, 21]
+    assert [item.raw_marker_count for item in complete_plan.occurrences] == [147] * 3
+    assert complete_plan.occurrences[0].block_stop_sample == 40000
+    for occurrence in complete_plan.occurrences:
+        approved = approve_clean_occurrence(occurrence)
+        assert approved.stop_sample - approved.start_sample == 30720
+
+
 def test_only_exact_same_sample_duplicates_are_collapsed_and_reported() -> None:
     plan = _plan([10, 10, 16, 22, 28, 34])
     occurrence = plan.occurrences[0]
@@ -190,6 +275,154 @@ def test_condition_specific_code_is_never_guessed_from_observed_events() -> None
     assert occurrence.review_reasons == (
         "insufficient_project_oddball_markers",
     )
+
+
+def _condition_marker_fixture():
+    event_map = {f"Condition {code}": code for code in range(1, 6)}
+    protocol = _protocol().with_condition_oddball_marker_codes(
+        {code: 50 + code for code in event_map.values()}
+    )
+    rows = []
+    for condition_code in event_map.values():
+        onset = 60 * (condition_code - 1)
+        marker_code = 50 + condition_code
+        rows.append([onset, 0, condition_code])
+        rows.extend(
+            [onset + sample, 0, marker_code]
+            for sample in (0, 10, 10, 16, 22, 28, 34, 60)
+        )
+        # A different condition's code must not contaminate this occurrence.
+        rows.append([onset + 12, 0, 51 + condition_code % 5])
+    return np.asarray(rows[::-1], dtype=np.int64), event_map, protocol
+
+
+def test_condition_marker_map_selects_only_declared_occurrence_code() -> None:
+    events, event_map, protocol = _condition_marker_fixture()
+    original_events = events.copy()
+    plan = build_marker_integrity_plan(
+        events=events, event_map=event_map, sampling_rate_hz=12,
+        n_times=300, protocol=protocol,
+    )
+
+    assert len(plan.occurrences) == 5
+    for occurrence in plan.occurrences:
+        onset = 60 * (occurrence.condition_code - 1)
+        assert occurrence.oddball_marker_code == 50 + occurrence.condition_code
+        assert occurrence.raw_marker_samples == tuple(
+            onset + sample for sample in (10, 10, 16, 22, 28, 34)
+        )
+        assert occurrence.collapsed_duplicate_count == 1
+        assert occurrence.status == MARKER_STATUS_READY
+        assert (
+            occurrence.proposed_start_sample, occurrence.proposed_stop_sample
+        ) == (onset + 10, onset + 34)
+    np.testing.assert_array_equal(events, original_events)
+
+
+def test_condition_marker_map_does_not_replace_missing_markers_with_other_codes() -> None:
+    events, event_map, protocol = _condition_marker_fixture()
+    events[(events[:, 0] > 60) & (events[:, 0] < 120) & (events[:, 2] == 52), 2] = 55
+    plan = build_marker_integrity_plan(
+        events=events, event_map=event_map, sampling_rate_hz=12,
+        n_times=300, protocol=protocol,
+    )
+
+    occurrence = plan.occurrences[1]
+    assert occurrence.oddball_marker_code == 52
+    assert occurrence.raw_marker_samples == ()
+    assert occurrence.review_reasons == ("insufficient_project_oddball_markers",)
+    assert all(
+        other.status == MARKER_STATUS_READY
+        for other in plan.occurrences if other.condition_code != 2
+    )
+
+
+def test_condition_marker_map_requires_every_configured_condition() -> None:
+    events, event_map, _protocol_with_map = _condition_marker_fixture()
+    protocol = _protocol().with_condition_oddball_marker_codes({1: 51})
+
+    with pytest.raises(MarkerIntegrityError, match="condition"):
+        build_marker_integrity_plan(
+            events=events, event_map=event_map, sampling_rate_hz=12,
+            n_times=300, protocol=protocol,
+        )
+
+
+def test_single_marker_plan_fingerprints_remain_unchanged() -> None:
+    plan = _plan([10, 16, 22, 28, 34])
+
+    assert _protocol().fingerprint == (
+        "fabd2e754934df421fa7c14565d1d51119ae1bbb975536bf7ff42f6d97b12479"
+    )
+    assert plan.fingerprint == (
+        "f9d2c0081b1d5c1e7592b461cbae24215ed8c7b888bc3b1ecf90a8c975d44be2"
+    )
+    assert plan.occurrences[0].fingerprint == (
+        "37ae5505d521176b9a09fc9698a8ba79739907cac2f0ad06215110f7af616e5d"
+    )
+
+
+def _recording_marker_fixture(recording_id: str):
+    mapping = {"SCP10": {1: 51, 2: 52}, "SCP22": {1: 55, 2: 55}}
+    protocol = _protocol().with_recording_oddball_marker_codes(mapping)
+    rows = []
+    for code in (1, 2):
+        onset = 60 * (code - 1)
+        rows.append([onset, 0, code])
+        rows.extend([onset + sample, 0, mapping[recording_id][code]] for sample in (10, 16, 22, 28, 34))
+    return np.asarray(rows), {"Color": 1, "Objects": 2}, protocol
+
+
+@pytest.mark.parametrize("recording_id,expected", [("SCP10", [51, 52]), ("SCP22", [55, 55])])
+def test_recording_markers_share_global_protocol_but_bind_occurrence_plan(recording_id, expected):
+    events, event_map, protocol = _recording_marker_fixture(recording_id)
+    plan = plan_preflight_qc_events(
+        events=events, event_map=event_map, sfreq=12, n_times=120,
+        frequency_protocol=protocol, recording_id=recording_id,
+    )
+    assert plan.unresolved_occurrences == ()
+    marker_plan = plan.marker_integrity_plan
+    assert marker_plan["protocol_fingerprint"] == protocol.fingerprint
+    assert marker_plan["recording_id"] == recording_id
+    assert [occurrence["oddball_marker_code"] for occurrence in marker_plan["occurrences"]] == expected
+    approved = validate_approved_event_plan(
+        event_plan_payload=plan.to_payload(), events=events, event_map=event_map,
+        sampling_rate_hz=12, n_times=120, protocol=protocol, recording_id=recording_id,
+    )
+    assert len(approved) == 2
+    assert all(span.disposition == "automatic_clean" for span in approved)
+
+
+@pytest.mark.parametrize("recording_id", [None, "missing"])
+def test_recording_marker_plan_never_guesses_missing_recording_identity(recording_id):
+    events, event_map, protocol = _recording_marker_fixture("SCP10")
+    with pytest.raises(MarkerIntegrityError, match="[Rr]ecording"):
+        build_marker_integrity_plan(
+            events=events, event_map=event_map, sampling_rate_hz=12, n_times=120,
+            protocol=protocol, recording_id=recording_id,
+        )
+
+
+def test_recording_marker_validation_rejects_another_recordings_saved_plan():
+    events, event_map, protocol = _recording_marker_fixture("SCP10")
+    plan = plan_preflight_qc_events(
+        events=events, event_map=event_map, sfreq=12, n_times=120,
+        frequency_protocol=protocol, recording_id="SCP10",
+    )
+    with pytest.raises(MarkerIntegrityError, match="recording identity is stale"):
+        validate_approved_event_plan(
+            event_plan_payload=plan.to_payload(), events=events, event_map=event_map,
+            sampling_rate_hz=12, n_times=120, protocol=protocol, recording_id="SCP22",
+        )
+
+
+def test_unused_recording_identity_preserves_condition_only_marker_plan():
+    events, event_map, protocol = _condition_marker_fixture()
+    kwargs = dict(events=events, event_map=event_map, sampling_rate_hz=12, n_times=300, protocol=protocol)
+    original = build_marker_integrity_plan(**kwargs)
+    identified = build_marker_integrity_plan(**kwargs, recording_id="SCP10")
+    assert identified.to_payload() == original.to_payload()
+    assert "recording_id" not in identified.to_payload()
 
 
 def test_long_occurrence_is_capped_to_project_target() -> None:
@@ -519,6 +752,72 @@ def test_runner_validation_rejects_changed_event_stream() -> None:
             event_map={"Faces": 1},
             protocol=protocol,
         )
+
+
+def test_runner_validation_resolves_marker_code_for_each_approved_condition() -> None:
+    events, event_map, protocol = _condition_marker_fixture()
+    plan = plan_preflight_qc_events(
+        events=events, event_map=event_map, sfreq=12, n_times=300,
+        frequency_protocol=protocol,
+    )
+    payload = plan.to_payload()
+
+    approved = validate_approved_event_plan(
+        event_plan_payload=payload, events=events, event_map=event_map,
+        sampling_rate_hz=12, n_times=300, protocol=protocol,
+    )
+
+    assert [span.condition_code for span in approved] == [1, 2, 3, 4, 5]
+    assert [span.stop_sample - span.start_sample for span in approved] == [24] * 5
+    payload["marker_integrity_plan"]["occurrences"][1]["oddball_marker_code"] = 55
+    with pytest.raises(MarkerIntegrityError, match="marker code is stale"):
+        validate_approved_event_plan(
+            event_plan_payload=payload, events=events, event_map=event_map,
+            sampling_rate_hz=12, n_times=300, protocol=protocol,
+        )
+
+
+def test_saved_condition_marker_plan_is_invalidated_when_mapping_changes() -> None:
+    events, event_map, protocol = _condition_marker_fixture()
+    plan = plan_preflight_qc_events(
+        events=events, event_map=event_map, sfreq=12, n_times=300,
+        frequency_protocol=protocol,
+    )
+    changed_protocol = protocol.with_condition_oddball_marker_codes(
+        {1: 61, 2: 52, 3: 53, 4: 54, 5: 55}
+    )
+
+    with pytest.raises(MarkerIntegrityError, match="protocol is stale"):
+        validate_approved_event_plan(
+            event_plan_payload=plan.to_payload(), events=events, event_map=event_map,
+            sampling_rate_hz=12, n_times=300, protocol=changed_protocol,
+        )
+
+
+def test_condition_specific_manual_review_receipt_survives_runner_validation() -> None:
+    events, event_map, protocol = _condition_marker_fixture()
+    events = events[~((events[:, 0] == 76) & (events[:, 2] == 52))]
+    marker_plan = build_marker_integrity_plan(
+        events=events, event_map=event_map, sampling_rate_hz=12,
+        n_times=300, protocol=protocol,
+    )
+    occurrence = marker_plan.occurrences[1]
+    assert "missing_marker_gap" in occurrence.review_reasons
+    decision = _review_decision(marker_plan, occurrence, MARKER_DECISION_EXCLUDE)
+    preflight_plan = plan_preflight_qc_events(
+        events=events, event_map=event_map, sfreq=12, n_times=300,
+        frequency_protocol=protocol,
+        marker_review_decisions={occurrence.occurrence_key: asdict(decision)},
+        marker_review_scope=_review_scope(),
+    )
+
+    approved = validate_approved_event_plan(
+        event_plan_payload=preflight_plan.to_payload(), events=events,
+        event_map=event_map, sampling_rate_hz=12, n_times=300, protocol=protocol,
+    )
+
+    assert [span.condition_code for span in approved if span.is_excluded] == [2]
+    assert sum(span.disposition == "automatic_clean" for span in approved) == 4
 
 
 def _original_interval_payloads(samples, *, sampling_rate_hz, oddball_rate_hz):

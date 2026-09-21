@@ -118,6 +118,26 @@ def test_source_plan_records_absolute_relative_and_nonzero_origin() -> None:
     assert relative_spans_from_plan(source_plan) == ((10, 34),)
 
 
+def test_source_context_binds_recording_even_when_two_recordings_use_same_markers():
+    protocol = _protocol().with_recording_oddball_marker_codes({"P01": {1: 55}, "P02": {1: 55}})
+    event_plan = plan_preflight_qc_events(
+        events=_source_events(), event_map={"Faces": 1}, sfreq=12, n_times=60,
+        first_samp=100, frequency_protocol=protocol, recording_id="P01",
+    ).to_payload()
+    kwargs = dict(event_plan_payload=event_plan, event_map={"Faces": 1}, protocol=protocol)
+    valid = validate_source_analysis_span_context(**kwargs, recording_id="P01")
+    assert valid["protocol_fingerprint"] == protocol.fingerprint
+    with pytest.raises(AnalysisSpanPlanError, match="recording identity is stale"):
+        validate_source_analysis_span_context(**kwargs, recording_id="P02")
+    with pytest.raises(AnalysisSpanPlanError, match="canonical recording identity"):
+        validate_source_analysis_span_context(**kwargs)
+    validated = validate_source_analysis_span_plan(
+        **kwargs, recording_id="P01", events=_source_events(),
+        sampling_rate_hz=12, n_times=60, first_samp=100,
+    )
+    assert validated == valid
+
+
 def test_target_realization_uses_v3_stim_grid_and_exact_duration() -> None:
     source_plan = read_source_analysis_span_plan(_event_plan())
     target_plan = realize_target_analysis_span_plan(

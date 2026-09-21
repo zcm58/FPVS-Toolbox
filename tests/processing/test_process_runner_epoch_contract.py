@@ -72,6 +72,9 @@ def _protocol_settings(
     presentation_rate_hz: float,
     oddball_every_n: int,
     expected_cycles: int,
+    condition_marker_codes: dict[int, int] | None = None,
+    recording_marker_codes: dict[str, dict[int, int]] | None = None,
+    marker_recording_id: str | None = None,
 ) -> dict[str, object]:
     protocol = FrequencyProtocol.from_recurrence(
         presentation_rate_hz,
@@ -79,15 +82,22 @@ def _protocol_settings(
         expected_analyzed_oddball_cycles=expected_cycles,
         expected_analyzed_oddball_cycles_source=EXPECTED_CYCLES_SOURCE_MANUAL,
     )
+    if condition_marker_codes is not None:
+        protocol = protocol.with_condition_oddball_marker_codes(condition_marker_codes)
+    if recording_marker_codes is not None:
+        protocol = protocol.with_recording_oddball_marker_codes(recording_marker_codes)
     plan = plan_preflight_qc_events(
         events=events,
         event_map=event_map,
         sfreq=sfreq,
         n_times=n_times,
         frequency_protocol=protocol,
+        recording_id=marker_recording_id,
     )
     return {
         "frequency_protocol": protocol,
+        **({"_fpvs_participant_id_by_file": {str(file_path.resolve()): marker_recording_id}}
+           if marker_recording_id is not None else {}),
         "_fpvs_preflight_event_plans_by_file": {
             str(file_path.resolve()): plan.to_payload()
         },
@@ -1585,26 +1595,34 @@ def test_run_full_pipeline_returns_partial_receipts_when_export_fails(
     ]
 
 
-def test_run_full_pipeline_uses_one_project_oddball_marker_across_conditions(
+@pytest.mark.parametrize(
+    "condition_specific_markers,recording_specific_markers,canonical_identity",
+    [(False, False, True), (True, False, True), (True, True, True), (True, True, False)],
+)
+def test_run_full_pipeline_uses_declared_project_markers_for_each_condition(
     monkeypatch,
     tmp_path: Path,
+    condition_specific_markers: bool,
+    recording_specific_markers: bool,
+    canonical_identity: bool,
 ) -> None:
     info = mne.create_info(["Cz", "Pz", "Status"], sfreq=256.0, ch_types=["eeg", "eeg", "stim"])
     raw = _with_biosemi64_montage(
         mne.io.RawArray(np.zeros((3, 5000), dtype=float), info, verbose=False)
     )
+    marker_codes = {1: 51, 2: 52} if condition_specific_markers else {1: 55, 2: 55}
     events = np.asarray(
         [
             [100, 0, 1],
-            [200, 0, 55],
-            [413, 0, 55],
-            [627, 0, 55],
-            [840, 0, 55],
+            [200, 0, marker_codes[1]],
+            [413, 0, marker_codes[1]],
+            [627, 0, marker_codes[1]],
+            [840, 0, marker_codes[1]],
             [2200, 0, 2],
-            [2300, 0, 55],
-            [2513, 0, 55],
-            [2727, 0, 55],
-            [2940, 0, 55],
+            [2300, 0, marker_codes[2]],
+            [2513, 0, marker_codes[2]],
+            [2727, 0, marker_codes[2]],
+            [2940, 0, marker_codes[2]],
         ],
         dtype=int,
     )
@@ -1643,7 +1661,8 @@ def test_run_full_pipeline_uses_one_project_oddball_marker_across_conditions(
         _capture_post_export,
     )
 
-    def _failed_source_derivative(**_kwargs):
+    def _failed_source_derivative(**kwargs):
+        captured["source_protocols"] = kwargs["resolved_protocol_by_condition"]
         raise RuntimeError("fixture source derivative failure")
 
     monkeypatch.setattr(
@@ -1674,13 +1693,22 @@ def test_run_full_pipeline_uses_one_project_oddball_marker_across_conditions(
                 presentation_rate_hz=6,
                 oddball_every_n=5,
                 expected_cycles=3,
+                condition_marker_codes=(marker_codes if condition_specific_markers else None),
+                recording_marker_codes=({"SCP10": marker_codes, "SCP22": {1: 55, 2: 55}} if recording_specific_markers else None),
+                marker_recording_id=("SCP10" if recording_specific_markers else None),
             ),
+            **({"_fpvs_participant_id_by_file": {}} if not canonical_identity else {}),
         },
         event_map={"fruit": 1, "veg": 2},
         save_folder=tmp_path / "out",
         project_root=tmp_path / "project",
     )
 
+    if not canonical_identity:
+        assert result["status"] == "error"
+        assert "canonical recording identity" in result["error"]
+        assert "epochs_dict" not in captured
+        return
     assert result["status"] == "ok"
     fruit_epochs = captured["epochs_dict"]["fruit"][0]
     veg_epochs = captured["epochs_dict"]["veg"][0]
@@ -1690,8 +1718,10 @@ def test_run_full_pipeline_uses_one_project_oddball_marker_across_conditions(
     assert veg_epochs.metadata["crop_mode"].tolist() == [
         "project_marker_plan_target_grid_v2"
     ]
-    assert fruit_epochs.metadata["oddball_id"].tolist() == [55]
-    assert veg_epochs.metadata["oddball_id"].tolist() == [55]
+    assert fruit_epochs.metadata["oddball_id"].tolist() == [marker_codes[1]]
+    assert veg_epochs.metadata["oddball_id"].tolist() == [marker_codes[2]]
+    assert captured["source_protocols"]["fruit"]["oddball_marker_code"] == marker_codes[1]
+    assert captured["source_protocols"]["veg"]["oddball_marker_code"] == marker_codes[2]
     assert int(fruit_epochs.get_data().shape[2]) % 640 == 0
     assert int(veg_epochs.get_data().shape[2]) % 640 == 0
     assert result["post_export_ok"] is True

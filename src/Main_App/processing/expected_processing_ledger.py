@@ -1260,6 +1260,7 @@ def _approved_occurrences_from_event_plan(
     *,
     event_rows: Sequence[tuple[str, int]],
     protocol: FrequencyProtocol,
+    recording_id: str,
 ) -> tuple[dict[int, tuple[ExpectedOccurrencePlan, ...]], dict[str, Any]]:
     try:
         # Validate the stored event-plan fingerprint and the independently
@@ -1285,6 +1286,13 @@ def _approved_occurrences_from_event_plan(
     if str(marker_plan.get("protocol_fingerprint") or "") != protocol.fingerprint:
         raise ExpectedRecordingConditionPlanError(
             "Approved event plan was built from a different project protocol."
+        )
+    if protocol.recording_oddball_marker_codes and (
+        str(marker_plan.get("recording_id") or "").casefold()
+        != str(recording_id).casefold()
+    ):
+        raise ExpectedRecordingConditionPlanError(
+            "Approved marker plan uses a different canonical recording identity."
         )
     sampling_rate_identity = _fraction_identity(
         marker_plan.get("sampling_rate_hz"),
@@ -1388,7 +1396,9 @@ def _approved_occurrences_from_event_plan(
                 "Marker occurrence condition label is stale."
             )
         if int(raw_occurrence.get("oddball_marker_code", -1)) != int(
-            protocol.oddball_marker_code
+            protocol.oddball_marker_code_for_condition(
+                condition_code, recording_id=recording_id
+            )
         ):
             raise ExpectedRecordingConditionPlanError(
                 "Marker occurrence uses a stale project oddball code."
@@ -1845,6 +1855,7 @@ def build_expected_recording_condition_plan(
                     event_plan,
                     event_rows=event_rows,
                     protocol=protocol,
+                    recording_id=state.processing_id,
                 )
             )
 

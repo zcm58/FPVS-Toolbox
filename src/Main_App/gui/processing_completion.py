@@ -39,7 +39,7 @@ def finalize_processing_host_state(host, success: bool) -> None:
                 (
                     f"Analysis finished for {file_count} "
                     f"file{'s' if file_count != 1 else ''}.\n"
-                    f"Excel files saved to:\n{output_folder}"
+                    f"Result files saved to:\n{output_folder}"
                 ),
                 host,
             )

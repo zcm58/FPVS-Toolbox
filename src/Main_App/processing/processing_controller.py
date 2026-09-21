@@ -49,7 +49,8 @@ class RawFileInfo:
     Metadata tracked for each discovered raw file.
 
     - path: absolute Path to the .bdf file.
-    - subject_id: canonical participant label inferred from the file name.
+    - subject_id: registered participant label, or filename-derived identity
+      for a raw file that has not been registered yet.
     - group: optional experimental group_id, inferred from the folder
       where the file was discovered (for multi-group projects).
     """
@@ -327,6 +328,16 @@ def _same_path(left: Path | None, right: Path) -> bool:
         return left == right
 
 
+def _registered_participant_ids_by_path(project: "Project") -> dict[Path, str]:
+    """Keep registered raw-file ownership independent of filename heuristics."""
+
+    return {
+        participant.raw_file.resolve(strict=False): participant.participant_id
+        for participant in project_group_context(project).participants
+        if participant.raw_file is not None
+    }
+
+
 def _recording_source_for_path(
     context: ProjectRecordingContext,
     file_path: Path,
@@ -345,7 +356,6 @@ def _recording_info_for_source_path(
     file_path: Path,
 ) -> RawFileInfo:
     resolved = file_path.resolve(strict=False)
-    subject_id = _infer_subject_id(resolved)
     session = context.session(source.session_id)
     try:
         registered = context.recording_for_raw_path(resolved)
@@ -358,16 +368,11 @@ def _recording_info_for_source_path(
                 f"'{registered.source_id}', but its raw file was discovered in "
                 f"source '{source.source_id}'."
             )
-        if registered.participant_id.casefold() != subject_id.casefold():
-            raise ValueError(
-                f"Recording '{registered.recording_id}' is registered to participant "
-                f"'{registered.participant_id}', but filename '{resolved.name}' "
-                f"resolves to '{subject_id}'. Repair project.json or rename the file."
-            )
         recording_id = registered.recording_id
         subject_id = registered.participant_id
         days_from_baseline = registered.days_from_baseline
     else:
+        subject_id = _infer_subject_id(resolved)
         recording_id = f"{subject_id}__{session.session_id}"
         days_from_baseline = None
     return RawFileInfo(
@@ -430,8 +435,8 @@ def _validate_known_raw_files(
         if participant_id.casefold() != discovered.subject_id.casefold():
             raise ValueError(
                 f"Participant '{participant_id}' is registered to {raw_file.name}, "
-                "but that filename resolves to participant ID "
-                f"'{discovered.subject_id}'. Repair project.json or rename the file."
+                "but discovery returned participant ID "
+                f"'{discovered.subject_id}'. Repair the participant registry."
             )
 
     if missing_metadata:
@@ -584,9 +589,16 @@ def raw_file_info_for_path(project: "Project", file_path: Path) -> RawFileInfo:
                 "Selected .bdf file is outside this project's registered input folder."
             )
 
+    registered_subject_id = _registered_participant_ids_by_path(project).get(
+        selected_path
+    )
     info = RawFileInfo(
         path=selected_path,
-        subject_id=_infer_subject_id(selected_path),
+        subject_id=(
+            registered_subject_id
+            if registered_subject_id is not None
+            else _infer_subject_id(selected_path)
+        ),
         group=group_id,
     )
     _validate_locked_assignment(project, info)
@@ -606,6 +618,7 @@ def discover_raw_files(project: "Project") -> List[RawFileInfo]:
 
     files: List[RawFileInfo] = []
     seen_subjects: Dict[str, RawFileInfo] = {}
+    registered_participant_ids = _registered_participant_ids_by_path(project)
     for group_name, folder in _iter_group_folders(project):
         folder_path = Path(folder)
         if not folder_path.is_dir():
@@ -617,9 +630,14 @@ def discover_raw_files(project: "Project") -> List[RawFileInfo]:
             if not is_bdf_file(candidate):
                 continue
             file_path = candidate.resolve()
+            registered_subject_id = registered_participant_ids.get(file_path)
             info = RawFileInfo(
                 path=file_path,
-                subject_id=_infer_subject_id(file_path),
+                subject_id=(
+                    registered_subject_id
+                    if registered_subject_id is not None
+                    else _infer_subject_id(file_path)
+                ),
                 group=group_name,
             )
             subject_key = info.subject_id.casefold()
@@ -628,7 +646,7 @@ def discover_raw_files(project: "Project") -> List[RawFileInfo]:
                 raise ValueError(
                     "Duplicate participant ID detected: "
                     f"{info.subject_id}. Files '{previous.path}' and "
-                    f"'{info.path}' infer the same participant ID. A project "
+                    f"'{info.path}' resolve to the same participant ID. A project "
                     "cannot process more than one .bdf per participant in v2.1."
                 )
             _validate_locked_assignment(project, info)

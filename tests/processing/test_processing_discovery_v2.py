@@ -171,6 +171,119 @@ def test_repeated_discovery_preserves_two_recordings_for_one_participant(
     )
 
 
+@pytest.mark.parametrize("groups_locked", [False, True])
+def test_registered_raw_path_preserves_participant_identity(
+    tmp_path: Path, groups_locked: bool,
+) -> None:
+    raw_dir = tmp_path / "raw"
+    raw_dir.mkdir()
+    raw_file = raw_dir / "SC_P10.bdf"
+    raw_file.write_bytes(b"")
+    project = _build_group_project(tmp_path, {
+        "semantic": {
+            "label": "Semantic", "folder_name": "Semantic",
+            "raw_input_folder": raw_dir,
+        },
+    })
+    project.participants = {
+        "SCP10": {"group_id": "semantic", "raw_file": raw_file},
+    }
+    project.groups_locked = groups_locked
+    project.save()
+    manifest_before = (project.project_root / "project.json").read_bytes()
+
+    files = discover_raw_files(project)
+
+    assert [(info.subject_id, info.output_stem) for info in files] == [
+        ("SCP10", "SCP10"),
+    ]
+    assert raw_file_info_for_path(project, raw_file) == files[0]
+    assert participant_review_rows(project, files) == []
+    assert register_participants(project, files) is False
+    assert (project.project_root / "project.json").read_bytes() == manifest_before
+
+
+def test_registered_raw_identity_still_rejects_duplicate_participants(
+    tmp_path: Path,
+) -> None:
+    raw_dir = tmp_path / "raw"
+    raw_dir.mkdir()
+    registered = raw_dir / "SC_P10.bdf"
+    registered.write_bytes(b"")
+    (raw_dir / "SCP10.bdf").write_bytes(b"")
+    project = _build_group_project(tmp_path, {
+        "semantic": {
+            "label": "Semantic", "folder_name": "Semantic",
+            "raw_input_folder": raw_dir,
+        },
+    })
+    project.participants = {
+        "SCP10": {"group_id": "semantic", "raw_file": registered},
+    }
+
+    with pytest.raises(ValueError, match="Duplicate participant ID"):
+        discover_raw_files(project)
+
+
+def test_registered_raw_path_cannot_belong_to_two_participants(tmp_path: Path) -> None:
+    raw_dir = tmp_path / "raw"
+    raw_dir.mkdir()
+    registered = raw_dir / "SC_P10.bdf"
+    registered.write_bytes(b"")
+    project = _build_group_project(tmp_path, {
+        "semantic": {
+            "label": "Semantic", "folder_name": "Semantic",
+            "raw_input_folder": raw_dir,
+        },
+    })
+    project.participants = {
+        participant_id: {"group_id": "semantic", "raw_file": registered}
+        for participant_id in ("SCP10", "P10")
+    }
+
+    with pytest.raises(ValueError, match="same raw_file"):
+        discover_raw_files(project)
+    with pytest.raises(ValueError, match="same raw_file"):
+        raw_file_info_for_path(project, registered)
+
+
+def test_repeated_registered_raw_path_preserves_participant_and_recording_identity(
+    tmp_path: Path,
+) -> None:
+    project, folders = _build_repeated_project(tmp_path)
+    project.participants = {
+        "SCP10": {"group_id": "bc"}, "SCP20": {"group_id": "control"},
+    }
+    for source_id, folder in folders.items():
+        group_id, session_id = source_id.split("_", 1)
+        participant_id = "SCP10" if group_id == "bc" else "SCP20"
+        raw_file = folder / f"SC_P{participant_id[-2:]}.bdf"
+        raw_file.write_bytes(b"")
+        project.recordings[f"{participant_id}__{session_id}"] = {
+            "participant_id": participant_id, "session_id": session_id,
+            "source_id": source_id, "raw_file": raw_file,
+            "visit_index": project.sessions[session_id]["visit_index"],
+        }
+    project.groups_locked = True
+    project.save()
+    manifest_before = (project.project_root / "project.json").read_bytes()
+
+    files = discover_raw_files(project)
+
+    assert {(info.subject_id, info.recording_id) for info in files} == {
+        (participant_id, f"{participant_id}__{session_id}")
+        for participant_id in ("SCP10", "SCP20")
+        for session_id in ("luteal", "follicular")
+    }
+    assert raw_file_info_for_path(project, files[0].path) == files[0]
+    report = validate_repeated_recording_sources_for_processing(project, files)
+    assert report is not None
+    assert {row.participant_id for row in report.rows} == {"SCP10", "SCP20"}
+    assert {row.recording_id for row in report.rows} == set(project.recordings)
+    assert prepare_raw_registration_review(project).review_rows == ()
+    assert (project.project_root / "project.json").read_bytes() == manifest_before
+
+
 def test_repeated_discovery_allows_a_missing_session_but_rejects_group_drift(
     tmp_path: Path,
 ) -> None:

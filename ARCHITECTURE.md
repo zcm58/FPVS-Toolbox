@@ -73,10 +73,13 @@ Primary areas:
   `FullFFT Amplitude (uV)` condition workbooks through the canonical project
   dataset index, recomputes the paper-specific SNR/z preparation, preserves the
   participant x sensor x harmonic tensor, and runs one paired or independent
-  two-level cluster-permutation contrast for flat projects. Canonical two-group,
-  two-session projects instead use a separately versioned, all-condition
-  four-family batch with complete participant pairs, one shared harmonic
-  domain, and run-level Holm correction. New analyses use the fixed 197-edge
+  two-level cluster-permutation contrast per planned comparison. New GUI runs
+  freeze a versioned analysis-family plan for flat or two-visit projects, with
+  paired condition comparisons, group comparisons, visit changes, and group
+  differences in visit change. All groups' visit changes share one Holm family;
+  legacy one-contrast and repeated-batch APIs remain available unchanged.
+  Planned runs use one shared harmonic domain and complete required participant
+  cells. New analyses use the fixed 197-edge
   FieldTrip-style clean-room BioSemi64 graph and publish an additive polished
   Excel/run-bundle export. It is separate from locked Standard FPVS Screening
   and does not consume Stats-ready Summed BCA exports or the standard selected
