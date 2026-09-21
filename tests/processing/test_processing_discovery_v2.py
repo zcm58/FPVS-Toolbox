@@ -634,10 +634,11 @@ def test_prepare_batch_files_does_not_persist_before_review(tmp_path) -> None:
 
     assert "participants" not in saved
 
-def test_register_participants_persists_group_id_and_raw_file(tmp_path) -> None:
+@pytest.mark.parametrize("filename", ["P01.bdf", "SC_P01.bdf", "study-p01-run2.bdf"])
+def test_register_participants_persists_group_id_and_raw_file(tmp_path, filename) -> None:
     control_dir = tmp_path / "raw" / "Control"
     control_dir.mkdir(parents=True)
-    p01 = control_dir / "P01.bdf"
+    p01 = control_dir / filename
     p01.write_bytes(b"")
     project = _build_group_project(
         tmp_path,
@@ -661,6 +662,8 @@ def test_register_participants_persists_group_id_and_raw_file(tmp_path) -> None:
         "group_id": "control",
         "raw_file": str(p01),
     }
+    reloaded = Project.load(project.project_root)
+    assert [info.subject_id for info in discover_raw_files(reloaded)] == ["P01"]
 
 
 def test_register_participants_hard_fails_group_assignment_conflict(tmp_path) -> None:

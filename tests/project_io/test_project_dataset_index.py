@@ -227,6 +227,60 @@ def test_project_dataset_index_reports_unassigned_workbook_without_folder_infere
     assert {row.code for row in index.diagnostics} == {"unassigned_participant"}
 
 
+@pytest.mark.parametrize("excluded", [False, True])
+def test_index_preserves_legacy_raw_stem_results_after_pid_correction(tmp_path, excluded):
+    root = tmp_path / "Project"
+    excel_root = _write_project(root, groups={}, participants={"P10": ""})
+    manifest_path = root / "project.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["participants"] = {"P10": {"raw_file": "Raw/SC_P10.bdf"}}
+    if excluded:
+        manifest["preprocessing"] = {"manual_excluded_participant_conditions": {"P10": ["Faces"]}}
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    workbook = _workbook(excel_root, "Faces", None, "SCP10_Faces_Results.xlsx")
+    before = manifest_path.read_bytes()
+
+    index = load_project_dataset_index(root)
+
+    records = index.excluded_workbooks if excluded else index.workbooks
+    assert [(row.participant_id, row.path) for row in records] == [("P10", workbook)]
+    assert {row.code for row in index.diagnostics} == (
+        {"excluded_participant_condition"} if excluded else set()
+    )
+    assert manifest_path.read_bytes() == before
+
+
+def test_index_rejects_raw_stem_alias_that_is_another_participants_id(tmp_path):
+    root = tmp_path / "Project"
+    _write_project(root, groups={}, participants={})
+    path = root / "project.json"
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    manifest["participants"] = {
+        "P10": {"raw_file": "Raw/SC_P10.bdf"},
+        "SCP10": {"raw_file": "Raw/SCP10.bdf"},
+    }
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    with pytest.raises(DatasetIndexError, match="raw filename alias.*SCP10"):
+        load_project_dataset_index(root)
+
+
+@pytest.mark.parametrize("raw_file", [None, "Raw/Other_P10.bdf", "Raw/SC_P11.bdf"])
+def test_index_does_not_guess_unregistered_raw_stem_aliases(tmp_path, raw_file):
+    root = tmp_path / "Project"
+    excel_root = _write_project(root, groups={}, participants={"P10": ""})
+    path = root / "project.json"
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    manifest["participants"] = {"P10": {"raw_file": raw_file}}
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    _workbook(excel_root, "Faces", None, "SCP10_Faces_Results.xlsx")
+
+    index = load_project_dataset_index(root)
+
+    assert index.workbooks[0].participant_id == "SCP10"
+    assert {row.code for row in index.diagnostics} == {"unassigned_participant"}
+
+
 def test_project_dataset_index_keeps_manifest_group_when_folder_mismatches(
     tmp_path: Path,
 ) -> None:
