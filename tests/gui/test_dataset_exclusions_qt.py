@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+import sys
 
 import pytest
 
 pytest.importorskip("PySide6")
 pytest.importorskip("pytestqt")
 
-from PySide6.QtCore import QObject, Qt, QTimer, Signal  # noqa: E402
-from PySide6.QtWidgets import QDialog  # noqa: E402
+from PySide6.QtCore import QObject, QPoint, QPointF, Qt, QTimer, Signal  # noqa: E402
+from PySide6.QtGui import QWheelEvent  # noqa: E402
+from PySide6.QtWidgets import QApplication, QDialog  # noqa: E402
 
 from Main_App.gui import dataset_exclusions_dialog as module  # noqa: E402
 
@@ -139,3 +141,45 @@ def test_cancel_never_saves_pending_choices(qtbot, monkeypatch, tmp_path):
     dialog.cancel_button.click()
     assert len(calls) == 1
     assert dialog.result() == QDialog.Rejected
+
+
+def test_scrolling_large_exclusion_list_does_not_reload_or_change_drafts(
+    qtbot, qapp, monkeypatch, tmp_path, capfd,
+):
+    from Main_App.gui.update_lifecycle import UpdateLifecycle
+
+    rows = tuple(SimpleNamespace(
+        identity=f"p:P{index:02d}", participant_id=f"P{index:02d}",
+        recording_id="", group_label="", has_processed_data=False,
+        scope="include", reason="", details=("Unregistered participant",),
+    ) for index in range(54))
+    monkeypatch.setattr(sys.modules[__name__], "_snapshot", lambda root: SimpleNamespace(
+        project_root=root, revision="scroll-fixture", rows=rows,
+    ))
+    lifecycle = UpdateLifecycle(qapp, quit_callback=lambda: None)
+    try:
+        dialog, _, calls = _dialog(qtbot, monkeypatch, tmp_path)
+        dialog.table.selectRow(10)
+        dialog.scope_combo.setCurrentIndex(dialog.scope_combo.findData("skip_processing"))
+        before = (dict(dialog._scopes), dict(dialog._reasons), dialog.table.currentRow())
+        viewport = dialog.table.viewport()
+        position = viewport.rect().center()
+        scroll = dialog.table.verticalScrollBar()
+        values = []
+        for delta in [-120] * 30 + [120] * 30:
+            QApplication.sendEvent(viewport, QWheelEvent(
+                QPointF(position), QPointF(viewport.mapToGlobal(position)), QPoint(),
+                QPoint(0, delta), Qt.NoButton, Qt.NoModifier, Qt.ScrollUpdate, False,
+            ))
+            qapp.processEvents()
+            values.append(scroll.value())
+        assert max(values) > min(values)
+        assert (dialog._scopes, dialog._reasons, dialog.table.currentRow()) == before
+        assert len(calls) == 1  # Only the initial load; no project reads on scroll.
+        assert not lifecycle.is_shutting_down
+        assert "Error calling Python override" not in capfd.readouterr().err
+    finally:
+        qapp.removeEventFilter(lifecycle)
+        qapp.lastWindowClosed.disconnect(lifecycle._last_window_closed)
+        qapp.aboutToQuit.disconnect(lifecycle._about_to_quit)
+        lifecycle.deleteLater()

@@ -10,6 +10,7 @@ from threading import Event
 
 import pytest
 from PySide6.QtCore import QCoreApplication, QEvent, Qt, QThread
+from PySide6.QtGui import QStandardItem
 from PySide6.QtWidgets import QLabel, QMessageBox, QWidget
 from shiboken6 import isValid
 
@@ -287,6 +288,15 @@ def _downloaded_fixture(tmp_path: Path) -> DownloadedInstaller:
         sha256=asset.sha256,
         asset=asset,
     )
+
+
+def test_quit_filter_ignores_unrelated_item_wrapper_from_reported_trace(qapp, deferred_updates):
+    lifecycle, _, _ = deferred_updates
+    # Replay the exact dispatcher/item pair reported during exclusions scrolling.
+    # A Quit-only filter must pass unrelated deliveries through without delegating
+    # them to QObject's typed, otherwise no-op eventFilter overload.
+    assert lifecycle.eventFilter(qapp.eventDispatcher(), QStandardItem("scope")) is False
+    assert not lifecycle.is_shutting_down
 
 
 def test_shutdown_flushes_bounded_local_persistence(qtbot, deferred_updates) -> None:
