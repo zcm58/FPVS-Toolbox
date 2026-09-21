@@ -11,6 +11,15 @@ schemas, harmonic-selection caches, project metadata, ledgers, QC state, or
 source workbooks. Both layers validate the same neutral, processing-owned
 FullFFT provenance; neither requires the standard Stats harmonic cache.
 
+The Main App supplies either a snapshot from the confirmed project protocol
+or its precise validation reason. A missing snapshot blocks inspection and
+offers a `protocol_settings_required` signal that the host routes to Settings >
+Protocol. FHC never substitutes application defaults or historical export rates
+for a confirmed protocol. Returning with repaired settings restarts inspection;
+failed or cancelled inspections clear stale design choices and expose retry
+only after worker exit. Neutral FullFFT provenance validation remains a separate
+processing-owned gate.
+
 ## Data Flow
 
 ```text
@@ -73,8 +82,8 @@ cache and no changes to cluster membership, mass sums, permutations or progress.
 - `gui/workers.py`: cancellable inspection plus one signal-driven analysis
   worker that prepares, permutes, and exports sequentially without touching
   widgets.
-- `gui/page.py`: embedded `FreeHarmonicClusteringPage` with one scroll-free
-  Analysis workspace and a Cluster maps tab plus a compact persistent
+- `gui/page.py`: embedded `FreeHarmonicClusteringPage` with scroll-free
+  Setup, Results, and Cluster maps tabs plus a compact persistent
   status/action footer.
 - `gui/cluster_map_view.py`: read-only single-harmonic canvas, run/cluster and
   harmonic selectors, fixed color scale, and exact member inspection.
@@ -82,12 +91,50 @@ cache and no changes to cluster membership, mass sums, permutations or progress.
   details with navigation to the existing cluster maps.
 - `gui/exclusion_state.py`: versioned, atomic project-local persistence for the
   GUI's canonical recording exclusions beneath the FHC results parent.
+- `gui/analysis_plan_state.py`: independently versioned project-local choices
+  for future plans; does not rewrite exclusion preferences or historical plans.
 - `gui/recording_exclusions_dialog.py`: source-immutable editor for project-
   persistent canonical recording exclusions; reasons are optional and blank
   explanations persist as `No reason provided` in the audit.
 - `gui/__init__.py`: small embedded-GUI import surface.
 
 ## Contrast Modes
+
+New GUI analyses use `fhc_analysis_families_v2`. `analysis_plan.py` enumerates
+immutable comparisons and assigns correction families before spectra are read.
+`planned_inputs.py` owns common-cell preparation, `planned_analysis.py` applies
+the existing paired/independent permutation engines and plan-level Holm,
+`planned_reporting.py` makes participant-free result/map snapshots, and
+`planned_exports.py` publishes the complete plan atomically. No Stats-owned
+code or selected harmonic list is used.
+
+The four available scientific families are between-group differences,
+between-condition differences, within-group visit changes, and between-group
+differences in visit change. All group pairs share the between-group family;
+all selected condition pairs and groups share the between-condition family;
+all groups' visit changes share ONE family. Thus two groups, two visits and
+four conditions default to 4/8/4 comparisons in three families. The condition
+family is optional in multi-group/repeated designs and defaults to all pairs
+in single-group flat designs. Reference comparisons can instead be selected.
+Higher-order condition interactions and omnibus models are not implemented.
+
+Repeated plans have two explicitly ordered visits. Change is first selected
+visit minus second selected visit. Complete required cells are selected per
+comparison, preserving narrow recording-condition exclusions. Session-average
+group or condition comparisons average candidate SNR within participant before
+one L2 normalization. Visit comparisons normalize the visits separately;
+group-change contrasts compare those differences without renormalization.
+The shared selector uses only the union of required eligible plan cells.
+
+Comparison IDs encode scientific recipes, independently of correction-family
+assignments. The v2 random seeds depend on comparison ID and base seed, not
+family membership or list position. Each plan has a content fingerprint,
+immutable copy in its output, and separately saved GUI preferences. Failed
+planned tests abort the complete run; output filters do not alter Holm counts.
+The additional full-plan Holm is calculated from original run-global p-values.
+The v1 empirical calibration is not validation of this new planned pipeline.
+
+The following legacy entry points retain their earlier contracts and outputs:
 
 - `independent_groups`: one condition, two canonical project groups, whole-
   participant label permutation with observed group sizes preserved, and a

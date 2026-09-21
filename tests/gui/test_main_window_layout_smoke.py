@@ -1480,6 +1480,7 @@ def test_fhc_post_processing_remedy_refreshes_current_page(
         {
             "project_root": project_root.resolve(),
             "frequency_snapshot": frequency_snapshot,
+            "frequency_error": None,
         }
     ]
 
@@ -1522,6 +1523,7 @@ def test_fhc_page_routes_post_processing_request_to_main_window(
 
     class FakeFreeHarmonicPage(QWidget):
         post_processing_required = Signal(str, str, str)
+        protocol_settings_required = Signal()
 
         def __init__(
             self,

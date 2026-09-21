@@ -12,6 +12,9 @@ from typing import Any, Mapping, TypeAlias
 
 LEGACY_FREQUENCY_PROTOCOL_VERSION = "1.0.0"
 FREQUENCY_PROTOCOL_VERSION = "1.1.0"
+# Only projects opting into condition-specific markers use this extension.
+CONDITION_MARKER_PROTOCOL_VERSION = "1.2.0"
+RECORDING_MARKER_PROTOCOL_VERSION = "1.3.0"
 
 ODDBALL_INPUT_MODE_RECURRENCE = "oddball_every_n"
 ODDBALL_INPUT_MODE_DIRECT_HZ = "oddball_rate_hz"
@@ -114,6 +117,52 @@ def _fraction_text(value: Fraction) -> str:
     return f"{sign}{whole}.{decimal}" if decimal else f"{sign}{whole}"
 
 
+def _condition_marker_codes(value: Any) -> tuple[tuple[int, int], ...]:
+    """Normalize immutable onset-to-oddball pairs without inferring any codes."""
+
+    pairs = value.items() if isinstance(value, Mapping) else value
+    if not isinstance(pairs, (tuple, list)) and not isinstance(value, Mapping):
+        raise FrequencyProtocolError(
+            "condition_oddball_marker_codes must map condition onset codes to oddball codes."
+        )
+    normalized: dict[int, int] = {}
+    for pair in pairs:
+        if not isinstance(pair, (tuple, list)) or len(pair) != 2:
+            raise FrequencyProtocolError("Each condition marker entry must contain two codes.")
+        onset = _positive_integer(pair[0], field_name="condition_onset_code")
+        marker = _positive_integer(pair[1], field_name="condition_oddball_marker_code")
+        if onset in normalized:
+            raise FrequencyProtocolError(f"Duplicate condition onset code {onset} in marker mapping.")
+        normalized[onset] = marker
+    return tuple(sorted(normalized.items()))
+
+
+def _recording_marker_codes(value: Any) -> tuple[tuple[str, tuple[tuple[int, int], ...]], ...]:
+    """Normalize explicit recording assignments, never paths or inferred IDs."""
+
+    pairs = value.items() if isinstance(value, Mapping) else value
+    if not isinstance(pairs, (tuple, list)) and not isinstance(value, Mapping):
+        raise FrequencyProtocolError("recording_oddball_marker_codes must map recording IDs to condition markers.")
+    normalized: dict[str, tuple[tuple[int, int], ...]] = {}
+    seen: set[str] = set()
+    for pair in pairs:
+        if not isinstance(pair, (tuple, list)) or len(pair) != 2:
+            raise FrequencyProtocolError("Each recording marker entry must contain an ID and condition mapping.")
+        raw_id, raw_codes = pair
+        if not isinstance(raw_id, str) or not raw_id.strip():
+            raise FrequencyProtocolError("Recording marker assignments require nonempty canonical recording IDs.")
+        recording_id = raw_id.strip()
+        key = recording_id.casefold()
+        if key in seen:
+            raise FrequencyProtocolError(f"Duplicate recording ID {recording_id!r} in marker assignments.")
+        codes = _condition_marker_codes(raw_codes)
+        if not codes:
+            raise FrequencyProtocolError(f"Recording {recording_id!r} requires an explicit condition marker mapping.")
+        seen.add(key)
+        normalized[recording_id] = codes
+    return tuple(sorted(normalized.items(), key=lambda item: item[0].casefold()))
+
+
 def _nearest_recurrence_candidates(
     presentation_rate_hz: Fraction,
     entered_oddball_rate_hz: Fraction,
@@ -165,13 +214,33 @@ class FrequencyProtocol:
     expected_analyzed_oddball_cycles_source: str | None
     oddball_marker_code: int | None
     oddball_marker_code_source: str | None
+    condition_oddball_marker_codes: tuple[tuple[int, int], ...] = ()
+    recording_oddball_marker_codes: tuple[tuple[str, tuple[tuple[int, int], ...]], ...] = ()
 
     def __post_init__(self) -> None:
-        if self.version != FREQUENCY_PROTOCOL_VERSION:
+        if self.version not in {
+            FREQUENCY_PROTOCOL_VERSION, CONDITION_MARKER_PROTOCOL_VERSION,
+            RECORDING_MARKER_PROTOCOL_VERSION,
+        }:
             raise FrequencyProtocolError(
                 "Unsupported frequency protocol version "
-                f"{self.version!r}; expected {FREQUENCY_PROTOCOL_VERSION!r}."
+                f"{self.version!r}; expected {FREQUENCY_PROTOCOL_VERSION!r} or "
+                f"{CONDITION_MARKER_PROTOCOL_VERSION!r} or {RECORDING_MARKER_PROTOCOL_VERSION!r}."
             )
+        condition_markers = _condition_marker_codes(self.condition_oddball_marker_codes)
+        recording_markers = _recording_marker_codes(self.recording_oddball_marker_codes)
+        expected_version = (
+            RECORDING_MARKER_PROTOCOL_VERSION if recording_markers else
+            CONDITION_MARKER_PROTOCOL_VERSION if condition_markers else FREQUENCY_PROTOCOL_VERSION
+        )
+        if self.version != expected_version:
+            raise FrequencyProtocolError(
+                "The nonempty marker assignments require protocol version "
+                f"{expected_version}; single-code, condition, and recording schemas "
+                "must retain their respective version."
+            )
+        object.__setattr__(self, "condition_oddball_marker_codes", condition_markers)
+        object.__setattr__(self, "recording_oddball_marker_codes", recording_markers)
         valid_statuses = {
             FREQUENCY_PROTOCOL_STATUS_READY,
             FREQUENCY_PROTOCOL_STATUS_INCOMPLETE,
@@ -184,6 +253,10 @@ class FrequencyProtocol:
             self.status == FREQUENCY_PROTOCOL_STATUS_CONFIRMATION_REQUIRED
         )
         if marker_confirmation_required:
+            if condition_markers or recording_markers:
+                raise FrequencyProtocolError(
+                    "A confirmation-required protocol cannot claim confirmed condition marker codes."
+                )
             protocol_values = (
                 self.presentation_rate_hz,
                 self.oddball_input_mode,
@@ -464,6 +537,8 @@ class FrequencyProtocol:
                 ),
                 oddball_marker_code=value.get("oddball_marker_code"),
                 oddball_marker_code_source=value.get("oddball_marker_code_source"),
+                condition_oddball_marker_codes=value.get("condition_oddball_marker_codes", ()),
+                recording_oddball_marker_codes=value.get("recording_oddball_marker_codes", ()),
             )
         if not status:
             status = (
@@ -518,6 +593,8 @@ class FrequencyProtocol:
             expected_analyzed_oddball_cycles_source=source,
             oddball_marker_code=value.get("oddball_marker_code"),
             oddball_marker_code_source=value.get("oddball_marker_code_source"),
+            condition_oddball_marker_codes=value.get("condition_oddball_marker_codes", ()),
+            recording_oddball_marker_codes=value.get("recording_oddball_marker_codes", ()),
         )
 
     @property
@@ -542,7 +619,7 @@ class FrequencyProtocol:
     def canonical_payload(self) -> dict[str, Any]:
         """Return the deterministic JSON-compatible scientific identity."""
 
-        return {
+        payload: dict[str, Any] = {
             "version": self.version,
             "status": self.status,
             "presentation_rate_hz": (
@@ -564,6 +641,16 @@ class FrequencyProtocol:
             "oddball_marker_code": self.oddball_marker_code,
             "oddball_marker_code_source": self.oddball_marker_code_source,
         }
+        if self.condition_oddball_marker_codes:
+            payload["condition_oddball_marker_codes"] = {
+                str(onset): marker for onset, marker in self.condition_oddball_marker_codes
+            }
+        if self.recording_oddball_marker_codes:
+            payload["recording_oddball_marker_codes"] = {
+                recording_id: {str(onset): marker for onset, marker in codes}
+                for recording_id, codes in self.recording_oddball_marker_codes
+            }
+        return payload
 
     def canonical_json(self) -> str:
         return json.dumps(
@@ -613,6 +700,71 @@ class FrequencyProtocol:
             oddball_marker_code=marker_code,
             oddball_marker_code_source=source,
         )
+
+    def with_condition_oddball_marker_codes(self, mapping: Any) -> "FrequencyProtocol":
+        """Opt into an explicit condition mapping, or restore one shared code."""
+
+        if self.status == FREQUENCY_PROTOCOL_STATUS_CONFIRMATION_REQUIRED:
+            raise FrequencyProtocolError("Confirm the project protocol before setting condition markers.")
+        markers = _condition_marker_codes(mapping)
+        return replace(
+            self,
+            version=(RECORDING_MARKER_PROTOCOL_VERSION if self.recording_oddball_marker_codes else
+                     CONDITION_MARKER_PROTOCOL_VERSION if markers else FREQUENCY_PROTOCOL_VERSION),
+            condition_oddball_marker_codes=markers,
+        )
+
+    def with_recording_oddball_marker_codes(self, mapping: Any) -> "FrequencyProtocol":
+        """Save explicit schemas for a mixed-acquisition project, or disable them."""
+
+        if self.status == FREQUENCY_PROTOCOL_STATUS_CONFIRMATION_REQUIRED:
+            raise FrequencyProtocolError("Confirm the project protocol before setting recording markers.")
+        recordings = _recording_marker_codes(mapping)
+        return replace(
+            self,
+            version=(RECORDING_MARKER_PROTOCOL_VERSION if recordings else
+                     CONDITION_MARKER_PROTOCOL_VERSION if self.condition_oddball_marker_codes else
+                     FREQUENCY_PROTOCOL_VERSION),
+            recording_oddball_marker_codes=recordings,
+        )
+
+    def recording_marker_codes(self, recording_id: str | None) -> tuple[tuple[int, int], ...]:
+        """Require a canonical recording assignment without guessing a fallback."""
+
+        if not isinstance(recording_id, str) or not recording_id.strip():
+            raise FrequencyProtocolError(
+                "This project's trigger schemas require a canonical recording ID before processing."
+            )
+        key = recording_id.strip().casefold()
+        for configured_id, codes in self.recording_oddball_marker_codes:
+            if configured_id.casefold() == key:
+                return codes
+        raise FrequencyProtocolError(
+            f"No oddball trigger schema is assigned to recording {recording_id!r}. "
+            "Assign it in Settings > Protocol > Recording trigger schemas before processing."
+        )
+
+    def oddball_marker_code_for_condition(
+        self, condition_onset_code: Any, *, recording_id: str | None = None,
+    ) -> int:
+        """Resolve the exact configured marker; mapped projects never fall back."""
+
+        onset = _positive_integer(condition_onset_code, field_name="condition_onset_code")
+        codes = (
+            self.recording_marker_codes(recording_id)
+            if self.recording_oddball_marker_codes else self.condition_oddball_marker_codes
+        )
+        if codes:
+            for configured_onset, marker in codes:
+                if configured_onset == onset:
+                    return marker
+            raise FrequencyProtocolError(
+                f"No oddball marker is configured for condition onset code {onset}. "
+                "Complete the condition marker mapping in Settings > Protocol."
+            )
+        if self.oddball_marker_code is None:
+            raise FrequencyProtocolError("Confirm the project oddball marker code before processing.")
+        return self.oddball_marker_code
 
     def expected_analyzed_samples(self, sampling_rate_hz: RateValue) -> int:
         """Return the exact target sample count or reject an incompatible grid."""
@@ -688,7 +840,7 @@ def validate_protocol_condition_codes(
     protocol: FrequencyProtocol,
     condition_onset_codes: Any,
 ) -> None:
-    """Reject a project marker code that is also a condition-onset code."""
+    """Require complete marker assignment, disjoint from all condition onsets."""
 
     if protocol.oddball_marker_code is None:
         raise FrequencyProtocolError(
@@ -703,9 +855,32 @@ def validate_protocol_condition_codes(
         raise FrequencyProtocolError(
             "condition_onset_codes must be an iterable of positive integers."
         ) from exc
-    if protocol.oddball_marker_code in onset_codes:
+    if protocol.condition_oddball_marker_codes:
+        mapping = dict(protocol.condition_oddball_marker_codes)
+        if set(mapping) != onset_codes:
+            missing = sorted(onset_codes - set(mapping))
+            unknown = sorted(set(mapping) - onset_codes)
+            raise FrequencyProtocolError(
+                "Condition oddball marker mapping must cover exactly the project's "
+                f"condition onset codes (missing: {missing}; unknown: {unknown}). "
+                "Update Settings > Protocol."
+            )
+        marker_codes = set(mapping.values())
+    else:
+        marker_codes = {protocol.oddball_marker_code}
+    for recording_id, codes in protocol.recording_oddball_marker_codes:
+        mapping = dict(codes)
+        if set(mapping) != onset_codes:
+            raise FrequencyProtocolError(
+                f"Recording {recording_id!r} marker mapping must cover exactly the project's "
+                f"condition onset codes (missing: {sorted(onset_codes - set(mapping))}; "
+                f"unknown: {sorted(set(mapping) - onset_codes)}). Update Settings > Protocol."
+            )
+        marker_codes.update(mapping.values())
+    conflicts = marker_codes & onset_codes
+    if conflicts:
         raise FrequencyProtocolError(
-            f"Oddball marker code {protocol.oddball_marker_code} is also a "
+            f"Oddball marker code {min(conflicts)} is also a "
             "condition-onset code. Choose a distinct project marker code."
         )
 

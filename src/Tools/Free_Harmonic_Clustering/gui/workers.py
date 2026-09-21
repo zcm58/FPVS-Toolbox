@@ -27,6 +27,8 @@ from .models import (
     AnalysisWorkerOutcome,
     ProjectAnalysisOptions,
     ProjectFrequencySnapshot,
+    PlannedAnalysisSetup,
+    PlannedAnalysisWorkerOutcome,
     RepeatedBatchSetup,
     RepeatedBatchWorkerOutcome,
 )
@@ -270,8 +272,34 @@ class RepeatedSessionBatchWorker(_CancellableWorker):
         return RepeatedBatchWorkerOutcome(run=run, maps=maps, map_warning=map_warning)
 
 
+class PlannedAnalysisWorker(_CancellableWorker):
+    """Prepare and run the immutable family plan away from the GUI thread."""
+
+    def __init__(
+        self, backend: FreeHarmonicBackend, frequencies: ProjectFrequencySnapshot,
+        setup: PlannedAnalysisSetup,
+    ) -> None:
+        super().__init__()
+        self._backend = backend
+        self._frequencies = frequencies
+        self._setup = setup
+
+    def _execute(self) -> object:
+        from ..planned_reporting import build_planned_cluster_map_data
+
+        run = self._backend.run_planned_analysis(
+            self._frequencies, self._setup,
+            progress=self._emit_progress, cancel_check=self._should_cancel,
+        )
+        maps, warning = _map_snapshots_after_publish(
+            lambda: tuple(build_planned_cluster_map_data(outcome) for outcome in run.result.outcomes),
+        )
+        return PlannedAnalysisWorkerOutcome(run=run, maps=maps, map_warning=warning)
+
+
 __all__ = [
     "AnalysisWorker",
     "ProjectInspectionWorker",
+    "PlannedAnalysisWorker",
     "RepeatedSessionBatchWorker",
 ]

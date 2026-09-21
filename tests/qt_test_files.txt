@@ -18,6 +18,7 @@ tests/gui/test_main_window_processing.py
 tests/gui/test_marker_occurrence_panel_qt.py
 tests/gui/test_nonblocking_qmessagebox.py
 tests/gui/test_participant_condition_exclusions_dialog.py
+tests/gui/test_protocol_condition_markers.py
 tests/gui/test_qc_group_membership.py
 tests/gui/test_qc_signal_viewer_qt.py
 tests/gui/test_qc_source_prefetch_qt.py

@@ -24,6 +24,10 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QSizePolicy,
     QToolButton,
+    QAbstractItemView,
+    QHeaderView,
+    QTableWidget,
+    QTableWidgetItem,
 )
 
 from Main_App.Shared.settings_manager import SettingsManager
@@ -49,6 +53,7 @@ from Main_App.gui.participant_condition_exclusions_dialog import (
 from Main_App.gui.project_protocol import (
     ProtocolEditorValues,
     build_manual_protocol,
+    condition_marker_editor_rows,
     duration_summary,
     editor_values_for_protocol,
     protocol_settings_save_requested,
@@ -674,6 +679,47 @@ class SettingsDialog(QDialog):
             QLabel("Oddball marker code:", protocol_card),
             self.protocol_oddball_marker_code_edit,
         )
+        self.protocol_condition_markers_check = QCheckBox(
+            "Use a different oddball marker for each condition",
+            protocol_card,
+        )
+        self.protocol_condition_markers_check.setObjectName(
+            "settings_protocol_condition_markers_enabled"
+        )
+        self.protocol_condition_markers_check.setToolTip(
+            "Applies only to this project. Turn off to use the shared oddball marker code for every condition."
+        )
+        protocol_form.addRow(self.protocol_condition_markers_check)
+        self.protocol_condition_markers_table = QTableWidget(0, 3, protocol_card)
+        self.protocol_condition_markers_table.setObjectName(
+            "settings_protocol_condition_marker_codes"
+        )
+        self.protocol_condition_markers_table.setHorizontalHeaderLabels(
+            ("Condition", "Onset marker", "Oddball marker")
+        )
+        self.protocol_condition_markers_table.setSelectionBehavior(QAbstractItemView.SelectItems)
+        self.protocol_condition_markers_table.setAlternatingRowColors(True)
+        self.protocol_condition_markers_table.verticalHeader().hide()
+        self.protocol_condition_markers_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.protocol_condition_markers_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        self.protocol_condition_markers_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        self.protocol_condition_markers_table.setFixedHeight(168)
+        protocol_form.addRow(self.protocol_condition_markers_table)
+        self.protocol_recording_markers_check = QCheckBox("Recording-specific trigger schemas", protocol_card)
+        self.protocol_recording_markers_check.setObjectName("settings_protocol_recording_markers_enabled")
+        protocol_form.addRow(self.protocol_recording_markers_check)
+        self.protocol_recording_markers_button = make_action_button("Configure recording schemas…", compact=True, parent=protocol_card)
+        self.protocol_recording_markers_button.setObjectName("settings_protocol_recording_markers_configure")
+        self.protocol_recording_markers_summary = QLabel("No recording schemas configured.", protocol_card)
+        self.protocol_recording_markers_summary.setWordWrap(True)
+        self.protocol_recording_markers_row = QWidget(protocol_card)
+        recording_marker_layout = QHBoxLayout(self.protocol_recording_markers_row)
+        recording_marker_layout.setContentsMargins(0, 0, 0, 0)
+        recording_marker_layout.addWidget(self.protocol_recording_markers_button)
+        recording_marker_layout.addWidget(self.protocol_recording_markers_summary, 1)
+        protocol_form.addRow(self.protocol_recording_markers_row)
+        self._recording_marker_codes = values.recording_oddball_marker_codes if values is not None else ()
+        self.protocol_recording_markers_check.setChecked(bool(self._recording_marker_codes))
         self.protocol_marker_code_help = QLabel(
             "Oddball marker code: Event code emitted for each oddball in every "
             "condition. Default: 55.",
@@ -727,6 +773,19 @@ class SettingsDialog(QDialog):
             self.protocol_oddball_marker_code_edit.setText(
                 values.oddball_marker_code
             )
+            marker_rows = condition_marker_editor_rows(
+                getattr(self.project, "event_map", {}) or {}, values,
+            )
+            self.protocol_condition_markers_table.setRowCount(len(marker_rows))
+            for row, (condition, onset, marker) in enumerate(marker_rows):
+                for column, text in enumerate((condition, onset, marker)):
+                    item = QTableWidgetItem(text)
+                    if column < 2:
+                        item.setFlags(item.flags() & ~Qt.ItemIsEditable)
+                    if column == 0:
+                        item.setData(Qt.UserRole, onset)
+                    self.protocol_condition_markers_table.setItem(row, column, item)
+            self.protocol_condition_markers_check.setChecked(values.condition_oddball_markers_enabled)
 
         project_enabled = self.project is not None
         for widget in (
@@ -736,6 +795,10 @@ class SettingsDialog(QDialog):
             self.protocol_direct_oddball_rate_edit,
             self.protocol_expected_cycles_edit,
             self.protocol_oddball_marker_code_edit,
+            self.protocol_condition_markers_check,
+            self.protocol_condition_markers_table,
+            self.protocol_recording_markers_check,
+            self.protocol_recording_markers_button,
         ):
             widget.setEnabled(project_enabled)
 
@@ -757,6 +820,10 @@ class SettingsDialog(QDialog):
         self.protocol_oddball_marker_code_edit.textChanged.connect(
             self._refresh_protocol_preview
         )
+        self.protocol_condition_markers_check.toggled.connect(self._refresh_protocol_preview)
+        self.protocol_condition_markers_table.itemChanged.connect(self._refresh_protocol_preview)
+        self.protocol_recording_markers_check.toggled.connect(self._refresh_protocol_preview)
+        self.protocol_recording_markers_button.clicked.connect(self._configure_recording_marker_schemas)
         self._protocol_requires_confirmation = bool(
             values is not None and values.requires_confirmation
         )
@@ -1884,6 +1951,19 @@ class SettingsDialog(QDialog):
             requires_confirmation=bool(
                 getattr(self, "_protocol_requires_confirmation", False)
             ),
+            condition_oddball_markers_enabled=self.protocol_condition_markers_check.isChecked(),
+            condition_oddball_marker_codes=tuple(
+                (
+                    str(self.protocol_condition_markers_table.item(row, 0).data(Qt.UserRole)),
+                    self.protocol_condition_markers_table.item(row, 2).text(),
+                )
+                for row in range(self.protocol_condition_markers_table.rowCount())
+            ),
+            recording_oddball_markers_enabled=self.protocol_recording_markers_check.isChecked(),
+            recording_oddball_marker_codes=tuple(
+                (recording_id, tuple((str(onset), str(marker)) for onset, marker in codes))
+                for recording_id, codes in self._recording_marker_codes
+            ),
         )
 
     def _protocol_save_requested(self) -> bool:
@@ -1900,7 +1980,7 @@ class SettingsDialog(QDialog):
             ),
         )
 
-    def _protocol_from_editor(self, *, require_ready: bool) -> FrequencyProtocol:
+    def _protocol_from_editor(self, *, require_ready: bool, include_recordings: bool = True) -> FrequencyProtocol:
         values = self._protocol_editor_values()
         return build_manual_protocol(
             presentation_rate_hz=values.presentation_rate_hz,
@@ -1913,9 +1993,57 @@ class SettingsDialog(QDialog):
             oddball_marker_code=values.oddball_marker_code,
             existing_protocol=self.project.frequency_protocol,
             require_ready=require_ready,
+            condition_oddball_markers_enabled=values.condition_oddball_markers_enabled,
+            condition_oddball_marker_codes=values.condition_oddball_marker_codes,
+            recording_oddball_markers_enabled=values.recording_oddball_markers_enabled if include_recordings else False,
+            recording_oddball_marker_codes=values.recording_oddball_marker_codes if include_recordings else (),
         )
 
+    def _validate_recording_marker_configuration(self, protocol: FrequencyProtocol) -> None:
+        if protocol.recording_oddball_marker_codes:
+            from .recording_marker_schemas import recording_marker_editor_rows, validate_recording_marker_assignments
+
+            validate_recording_marker_assignments(recording_marker_editor_rows(self.project), protocol.recording_oddball_marker_codes)
+
+    def _configure_recording_marker_schemas(self) -> None:
+        if self.project is None:
+            return
+        from .recording_marker_schemas import recording_marker_editor_rows
+        from .recording_marker_schemas_dialog import RecordingMarkerSchemasDialog
+
+        try:
+            template = self._protocol_from_editor(require_ready=False, include_recordings=False)
+            onsets = tuple((getattr(self.project, "event_map", {}) or {}).values())
+            validate_protocol_condition_codes(template, onsets)
+            identities = recording_marker_editor_rows(self.project)
+            if not identities:
+                raise FrequencyProtocolError("Register the project's recordings before assigning their trigger schemas.")
+        except ValueError as exc:
+            self.protocol_status.set_variant("warning")
+            self.protocol_status.set_text(str(exc))
+            self.protocol_status.show()
+            return
+        dialog = RecordingMarkerSchemasDialog(identities, template, onsets, self._recording_marker_codes, self)
+        try:
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                self._recording_marker_codes = dialog.marker_codes()
+                self._refresh_protocol_preview()
+        finally:
+            dialog.deleteLater()
+
     def _refresh_protocol_preview(self, *_args: object) -> None:
+        recording_markers = self.protocol_recording_markers_check.isChecked()
+        self.protocol_recording_markers_row.setVisible(recording_markers)
+        self.protocol_recording_markers_summary.setText(f"{len(self._recording_marker_codes)} recording schemas configured.")
+        condition_markers = self.protocol_condition_markers_check.isChecked()
+        self.protocol_condition_markers_table.setVisible(condition_markers)
+        self.protocol_oddball_marker_code_edit.setEnabled(self.project is not None and not condition_markers)
+        self.protocol_marker_code_help.setText(
+            "Enter the oddball marker emitted in each condition. Every condition needs a value; "
+            "turn off this option to use the shared code above."
+            if condition_markers else
+            "Oddball marker code: Event code emitted for each oddball in every condition. Default: 55."
+        )
         if self.project is None:
             self.protocol_resolved_oddball_rate_edit.setText("—")
             self.protocol_derived_duration_edit.setText("Open a project to edit")
@@ -1936,6 +2064,7 @@ class SettingsDialog(QDialog):
                 protocol,
                 (getattr(self.project, "event_map", {}) or {}).values(),
             )
+            self._validate_recording_marker_configuration(protocol)
         except FrequencyProtocolError as exc:
             self.protocol_resolved_oddball_rate_edit.setText("Invalid protocol")
             self.protocol_derived_duration_edit.setText("—")
@@ -1980,9 +2109,15 @@ class SettingsDialog(QDialog):
             )
         else:
             self.protocol_status.set_variant("success")
+            markers = (
+                f"{len(protocol.recording_oddball_marker_codes)} recording-specific trigger schemas"
+                if protocol.recording_oddball_marker_codes else
+                f"{len(protocol.condition_oddball_marker_codes)} condition-specific oddball markers"
+                if protocol.condition_oddball_marker_codes else
+                f"oddball marker code {protocol.oddball_marker_code}"
+            )
             self.protocol_status.set_text(
-                f"Every {protocol.oddball_every_n} stimuli; oddball marker code "
-                f"{protocol.oddball_marker_code}; ready to save for this project."
+                f"Every {protocol.oddball_every_n} stimuli; {markers}; ready to save for this project."
             )
         self.protocol_status.setVisible(True)
 
@@ -1995,6 +2130,7 @@ class SettingsDialog(QDialog):
                 protocol,
                 (getattr(self.project, "event_map", {}) or {}).values(),
             )
+            self._validate_recording_marker_configuration(protocol)
             return protocol
         except FrequencyProtocolError as exc:
             QMessageBox.warning(self, "Invalid FPVS Protocol", str(exc))
@@ -2014,6 +2150,10 @@ class SettingsDialog(QDialog):
                 self.protocol_direct_oddball_rate_edit.text().strip(),
                 self.protocol_expected_cycles_edit.text().strip(),
                 self.protocol_oddball_marker_code_edit.text().strip(),
+                self.protocol_condition_markers_check.isChecked(),
+                self._protocol_editor_values().condition_oddball_marker_codes,
+                self.protocol_recording_markers_check.isChecked(),
+                self._protocol_editor_values().recording_oddball_marker_codes,
             )
 
     def _harmonic_settings_signature_from_settings(self, settings: Any) -> tuple[object, ...]:

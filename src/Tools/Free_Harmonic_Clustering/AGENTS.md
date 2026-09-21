@@ -84,11 +84,26 @@ current-session result while delegating long work to signal-driven workers.
   project-local FHC preference file and create additive completed run bundles,
   but it must not change `project.json`, shared project settings, participant
   metadata, ledgers, QC decisions, or processed workbooks.
-- Preserve exactly one ordered two-level contrast per legacy run. The
-  `fhc_repeated_session_batch_v1` extension is the only all-condition batch:
-  it requires two stable groups and two ordered sessions and runs the four
-  prespecified participant-level families documented in `ARCHITECTURE.md`.
-  It is not an omnibus model builder. A historical-run browser and
+- Preserve the legacy one-contrast and `fhc_repeated_session_batch_v1` APIs
+  and historical outputs. New GUI runs use `fhc_analysis_families_v2`: flat or
+  two-visit plans with between-group, optional between-condition, within-group
+  visit, and group-difference-in-visit-change families. All selected groups'
+  within-visit comparisons share ONE correction family. A two-group,
+  two-visit, four-condition default is 4/8/4 tests in three families.
+- Freeze exact comparisons, directions, exclusions, and correction assignments
+  before inference. Comparison identities and v2 seeds are independent of
+  correction-family membership. Holm uses every planned comparison in its
+  family; an unavailable comparison fails the plan rather than shrinking the
+  denominator. Filtering results never changes correction. Preserve v1 seeds
+  in v1 APIs; the new plan has its own stable comparison-based seed schedule.
+- Planned between-condition tests use complete paired participants within each
+  group. Repeated between-group/condition arms average candidate SNR across
+  visits before one L2 normalization; visit changes subtract separately
+  normalized profiles, without normalizing the change again. Freeze one
+  shared harmonic domain over required plan cells. The old single-contrast
+  calibration does not validate this extension.
+- The plan is not an omnibus model builder. Higher-order condition interactions
+  remain unavailable pending separate numerical validation. A historical-run browser and
   clipboard/manuscript helpers remain out of scope.
 - Harmonic difference maps are descriptive views of completed inference.
   Reuse the ROI selector's attributed BioSemi64 geometry for presentation;
@@ -155,6 +170,9 @@ Keep the package root small. Public callers should use:
 - `prepare_repeated_session_batch(...)`
 - `run_repeated_session_fhc_batch(...)`
 - `export_repeated_session_batch(...)`
+- `analysis_plan.build_analysis_plan(...)`
+- `planned_analysis.prepare_analysis_plan(...)` / `run_analysis_plan(...)`
+- `planned_exports.export_analysis_plan_result(...)`
 
 Do not expose pandas frames, MNE objects, or XML-reader internals.
 
@@ -171,25 +189,27 @@ the page implementation.
   **Post-processing Required** dialog. The page emits the affected project and
   reason; it must not show the raw provenance failure in its footer or launch a
   post-processing worker itself.
-- Use an **Analysis** tab and a dedicated **Cluster maps** tab. Flat and repeated projects use **Run Free
-  Harmonic Clustering Analysis**. Repeated projects are recognized
-  automatically and replace the flat-project selectors with a compact stable-
-  group summary and a project-persistent analysis-only recording-exclusion
-  dialog with optional reasons. A concise Results section appears only after
-  completion; detailed cohort, contrast-family, direction, harmonic, method,
-  and run provenance remains in the exported workbook.
+- Use **Setup**, **Results**, and **Cluster maps** tabs. Show applicable family
+  choices, condition-pair policy, and a reviewable comparison list before a run.
+  Store plan preferences separately from recording-exclusion preferences below
+  the project's FHC results parent; saving either must preserve the other.
+  Export the immutable analysis plan and fingerprint in each additive bundle.
+  Keep correction-family and comparison labels distinct, including both groups'
+  visit-change rows. Detailed participant, method, and source provenance remain
+  in the workbook and manifest.
 - Keep the embedded task pages free of page-level scroll areas. Bounded result
   tables may scroll internally when their data exceeds the available viewport.
-- Legacy Results shows current-session significant clusters ordered by
-  ascending raw tail p. Repeated Results shows the condition x family global p
-  plus both Holm layers in one bounded table. It does not print assignment
+- Planned Results shows the correction family, exact comparison, primary
+  family Holm p and interpretation. Raw/global and full-plan Holm values are
+  available through View details and exports. It does not print assignment
   count, degrees of freedom, cluster-forming threshold, or seed in the main
   GUI. Full details remain in the exported workbook; past runs remain
   available through Open Results Folder.
-- The primary human-readable artifact is a polished
-  `Free_Harmonic_Clustering_Results.xlsx` workbook. Retain machine-readable
-  CSV, compressed-array, and manifest artifacts alongside it.
-- Repeated batches use
+- New plans use `Free_Harmonic_Clustering_Analysis_Families.xlsx` plus the frozen
+  `analysis_plan.json`, CSV, compressed analyzed arrays, and manifest. Describe
+  visit-change tensors explicitly; do not label them raw amplitudes or freshly
+  L2-normalized profiles. Legacy single-contrast outputs retain
+  `Free_Harmonic_Clustering_Results.xlsx`. Legacy repeated batches retain
   `Free_Harmonic_Clustering_Repeated_Session_Batch.xlsx` with consolidated
   batch/cohort/multiplicity audit tables and the same reproducibility bundle.
 - Preparation, permutation inference, multiplicity correction where applicable,

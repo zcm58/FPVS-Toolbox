@@ -16,7 +16,11 @@ from typing import Any
 
 import numpy as np
 
-from Main_App.processing.marker_integrity import validate_approved_event_plan
+from Main_App.processing.marker_integrity import (
+    MarkerIntegrityError,
+    marker_recording_identity,
+    validate_approved_event_plan,
+)
 from Main_App.projects.frequency_protocol import FrequencyProtocol
 
 ANALYSIS_SPAN_PLAN_VERSION = "analysis_span_plan_v2_v3_stim_alignment"
@@ -367,6 +371,7 @@ def validate_source_analysis_span_context(
     event_plan_payload: Mapping[str, Any],
     event_map: Mapping[str, int],
     protocol: FrequencyProtocol,
+    recording_id: str | None = None,
 ) -> dict[str, Any]:
     """Bind an internally valid source plan to the current project context."""
 
@@ -375,6 +380,14 @@ def validate_source_analysis_span_context(
         raise AnalysisSpanPlanError(
             "Source analysis-span protocol is stale relative to the project."
         )
+    try:
+        recording_identity = marker_recording_identity(protocol, recording_id)
+    except MarkerIntegrityError as exc:
+        raise AnalysisSpanPlanError(str(exc)) from exc
+    if recording_identity is not None:
+        marker_plan = event_plan_payload.get("marker_integrity_plan")
+        if not isinstance(marker_plan, Mapping) or marker_plan.get("recording_id") != recording_identity:
+            raise AnalysisSpanPlanError("Source analysis-span recording identity is stale.")
     planned_event_map = event_plan_payload.get("condition_event_map")
     if not isinstance(planned_event_map, Mapping):
         raise AnalysisSpanPlanError(
@@ -402,6 +415,7 @@ def validate_source_analysis_span_plan(
     first_samp: int,
     event_map: Mapping[str, int],
     protocol: FrequencyProtocol,
+    recording_id: str | None = None,
 ) -> dict[str, Any]:
     """Validate an exact reviewed preflight plan against the source Raw."""
 
@@ -409,6 +423,7 @@ def validate_source_analysis_span_plan(
         event_plan_payload=event_plan_payload,
         event_map=event_map,
         protocol=protocol,
+        recording_id=recording_id,
     )
     validate_approved_event_plan(
         event_plan_payload=event_plan_payload,
@@ -418,6 +433,7 @@ def validate_source_analysis_span_plan(
         first_samp=first_samp,
         event_map=event_map,
         protocol=protocol,
+        recording_id=recording_id,
     )
     source_grid = plan["source_grid"]
     if float(source_grid["sfreq_hz"]) != float(sampling_rate_hz):

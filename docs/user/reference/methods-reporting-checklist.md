@@ -80,6 +80,17 @@ testing, or another specialized estimand.
 
 ### Preprocessing signal QC
 
+- Report the oddball trigger schema: one shared code, or the explicit
+  condition-onset-to-oddball mapping when codes differ by condition. Record
+  this project-specific choice with the protocol fingerprint.
+- If acquisition trigger conventions differed between recordings, report the
+  explicit schema assigned to each canonical recording ID (participant ID in a
+  single-session project), the evidence supporting those assignments, and any
+  unresolved recordings. Retain the full project protocol fingerprint shared
+  by all recordings and the recording-bound marker review plans. Distinguish
+  changes in trigger codes from changes in stimulation rate or analyzed
+  duration. Report unexpected condition-onset/repetition counts separately;
+  marker mapping does not merge, relabel, or supply missing occurrences.
 - Report that signal-based QC used the exact marker-reviewed analyzed
   condition-occurrence spans, with project presentation rate, oddball rule,
   expected oddball cycles, and actual analyzed duration. State which
@@ -473,12 +484,28 @@ tensors, spatial adjacency, dependency version, or expected outputs.
 
 ### Design and inputs
 
+- For `fhc_analysis_families_v2`, retain the plan version, fingerprint, exact
+  comparison list and correction-family assignments. Report selected groups,
+  conditions, ordered visits and condition-pair policy. Both groups' visit
+  changes share one family: two groups x two visits x four conditions default
+  to 4/8/4 comparisons in three families. Condition comparisons are an optional
+  fourth family, or the single family in a flat single-group design.
+- State the complete-cell participant N for each planned comparison and any
+  narrow recording-condition exclusions. Report the first selected visit minus
+  second selected visit direction explicitly. A planned test that cannot run
+  aborts the complete plan, rather than shrinking its Holm denominator.
+- Report family Holm as primary and full-plan Holm as a separate conservative
+  summary, each calculated from original run-global two-sided p-values.
+  Results filters do not change the frozen families. Record the v2
+  comparison-based seed schedule; old v1 seeds and correction policies remain
+  part of historical runs. The legacy single-contrast calibration does not
+  validate the planned analysis-family extension.
 - State whether the run used a paired condition contrast or an independent
   two-group contrast. For independent groups, report canonical `group_id`
   values and N per group. For paired conditions, report complete paired N.
 - Report the one declared contrast and its direction (`arm A - arm B`). A set
   of separate condition runs is not automatically corrected across conditions.
-- For a repeated-session batch, report the two canonical group IDs, the two
+- For a legacy v1 repeated-session batch, report the two canonical group IDs, the two
   canonical session IDs/labels and visit indices, all declared conditions, and
   the four prespecified families: session-averaged groups, Visit 2 minus Visit
   1 within each group, and the between-group difference in participant session
@@ -552,7 +579,7 @@ tensors, spatial adjacency, dependency version, or expected outputs.
   domain, adjacency, cluster-entry threshold, contrast family, and valid whole-
   participant exchangeability. It favors spatially or harmonically extended
   effects and does not correct a collection of separately run contrasts.
-- For a repeated batch, report the global two-sided run p-value, Holm p-value
+- For a legacy v1 repeated batch, report the global two-sided run p-value, Holm p-value
   across conditions within each of the four family IDs, and conservative Holm
   p-value across all condition x family runs. These are run-level corrections;
   do not label a cluster's raw sign-specific p-value as Holm-adjusted.

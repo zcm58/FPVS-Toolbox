@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 from PySide6.QtCore import QObject, Signal, Slot
 
-from Main_App.Shared.file_filters import is_excel_output_file
+from Main_App.io.result_outputs import result_output_snapshot
 from Main_App.exports.post_export_adapter import LegacyCtx, run_post_export
 
 
@@ -66,24 +66,7 @@ class PostProcessWorker(QObject):
 
             output_root = Path(save_folder_value).resolve() if save_folder_value else None
 
-            def _excel_snapshot() -> dict[str, tuple[int, int]]:
-                if output_root is None or not output_root.is_dir():
-                    return {}
-                snapshot: dict[str, tuple[int, int]] = {}
-                for path in output_root.rglob("*.xls*"):
-                    if not is_excel_output_file(path):
-                        continue
-                    try:
-                        stat_result = path.stat()
-                    except OSError:
-                        continue
-                    snapshot[str(path.resolve())] = (
-                        int(stat_result.st_mtime_ns),
-                        int(stat_result.st_size),
-                    )
-                return snapshot
-
-            before_snapshot = _excel_snapshot()
+            before_snapshot = result_output_snapshot(output_root)
 
             export_receipts: list[dict[str, Any]] = []
             ctx = LegacyCtx(
@@ -96,8 +79,9 @@ class PostProcessWorker(QObject):
             )
 
             run_post_export(ctx, self._labels)
-            after_snapshot = _excel_snapshot()
+            after_snapshot = result_output_snapshot(output_root)
 
+            # Retain the signal payload keys for callers; both formats count.
             generated_excel_paths = sorted(
                 path
                 for path, signature in after_snapshot.items()

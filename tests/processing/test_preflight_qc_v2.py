@@ -433,6 +433,36 @@ def test_v3_reads_exact_locked_condition_samples_and_reuses_cache(
     assert stim_arguments == ["Trigger", "Trigger"]
 
 
+@pytest.mark.parametrize("recording_id", [None, "P06__visit1"])
+def test_preflight_resolves_recording_markers_using_registered_input_identity(
+    monkeypatch, tmp_path: Path, recording_id: str | None,
+) -> None:
+    raw_path = tmp_path / "unrelated_filename.bdf"
+    raw_path.write_bytes(b"synthetic identity")
+    data, names = _raw_data()
+    raw = _LazyRaw(data, names)
+    events = _event_rows()
+    events[events[:, 2] == 55, 2] = 51
+    _install_lazy_fakes(monkeypatch, [raw], events)
+    identity = recording_id or "P06"
+    settings = _settings()
+    protocol = settings["frequency_protocol"].with_recording_oddball_marker_codes({identity: {1: 51}})
+    settings["frequency_protocol"] = protocol
+
+    scan = preflight_qc.scan_preprocessing_qc(
+        [RawFileInfo(raw_path, "P06", "control", recording_id=recording_id)],
+        settings, project_root=tmp_path, event_map={"Faces": 1},
+    )
+
+    result = scan.results[0]
+    assert result.load_error is None
+    marker_plan = result.condition_qc["event_plan"]["marker_integrity_plan"]
+    assert marker_plan["recording_id"] == identity
+    assert marker_plan["protocol_fingerprint"] == protocol.fingerprint
+    assert marker_plan["occurrences"][0]["oddball_marker_code"] == 51
+    assert raw.reads == [(tuple(range(len(names) - 1)), 300, 940)]
+
+
 def test_preflight_preserves_detector_off_without_signal_candidate_leakage(
     monkeypatch,
     tmp_path: Path,

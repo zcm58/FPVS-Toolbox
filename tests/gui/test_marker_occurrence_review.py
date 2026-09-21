@@ -279,12 +279,30 @@ def test_summary_disables_only_unavailable_retention_actions(
         with pytest.raises(MarkerOccurrenceReviewError, match="not supplied"):
             build_marker_review_decision(item, MARKER_DECISION_USE_CONTIGUOUS, selected_span=(12, 36))
     if not expected_enabled:
-        with pytest.raises(MarkerOccurrenceReviewError, match="too short"):
+        with pytest.raises(MarkerOccurrenceReviewError, match="analysis window is unavailable"):
             build_marker_review_decision(
                 item, MARKER_DECISION_RETAIN_FULL,
                 evidence_type="presentation_log", evidence_note="Reviewed presentation timing.",
             )
     assert build_marker_review_decision(item, MARKER_DECISION_EXCLUDE)["decision"] == MARKER_DECISION_EXCLUDE
+
+
+def test_missing_configured_markers_do_not_claim_that_the_recording_is_too_short(tmp_path):
+    item = replace(
+        _review_item(tmp_path), raw_marker_samples=(), retained_marker_samples=(),
+        proposed_start_sample=None, proposed_stop_sample=None,
+        review_reasons=("insufficient_project_oddball_markers",),
+    )
+    proposed = dict(marker_occurrence_review_rows(item))["Proposed full crop"]
+    assert "configured code 55" in proposed
+    assert "Settings > Protocol" in proposed
+    assert "shorter" not in proposed and "too short" not in proposed
+    summary = marker_occurrence_review_summary(item)
+    planned = next(choice for choice in summary.choices if choice.decision == MARKER_DECISION_RETAIN_FULL)
+    assert not planned.enabled
+    assert "trigger schema" in planned.description
+    with pytest.raises(MarkerOccurrenceReviewError, match="configured code 55"):
+        build_marker_review_decision(item, MARKER_DECISION_RETAIN_FULL, evidence_type="log", evidence_note="Reviewed")
 
 
 def test_summary_stays_compact_with_large_diagnostic_evidence(tmp_path: Path) -> None:

@@ -148,6 +148,7 @@ def plan_preflight_qc_events(
     n_times: int,
     first_samp: int = 0,
     frequency_protocol: FrequencyProtocol,
+    recording_id: str | None = None,
     marker_review_decisions: Mapping[str, Mapping[str, Any]] | None = None,
     marker_review_scope: Mapping[str, Any] | None = None,
 ) -> PreflightQcEventPlan:
@@ -193,6 +194,7 @@ def plan_preflight_qc_events(
         n_times=sample_count,
         first_samp=sample_origin,
         protocol=frequency_protocol,
+        recording_id=recording_id,
     )
     _, n_step, step_error = compute_onbin_step(
         fs=sample_rate,

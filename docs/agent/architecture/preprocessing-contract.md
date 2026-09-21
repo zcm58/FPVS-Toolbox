@@ -166,6 +166,38 @@ Settings must not resume harmonic selection or post-processing against the old
 outcome ledger. This review reuses the existing worker-side ledger read.
 
 Epoch building in the process runner must preserve locked FFT crop behavior.
+Marker identification uses the project protocol's code for each condition-onset
+ID. An opt-in condition mapping applies consistently to preflight marker review,
+approved occurrence validation, runner epoch/source metadata, post-processing
+crop selection, and expected-ledger checks. Markers assigned to other conditions
+do not contribute to the current occurrence. The mapping changes neither the
+expected cycle count nor the filter/resampling/reference order or crop rules;
+changing it invalidates the earlier protocol-bound review and processing state.
+
+Protocol v1.3 additionally supports explicitly assigned recording-specific
+marker maps when acquisition trigger conventions changed within a project.
+`recording_oddball_marker_codes` uses canonical recording IDs; a single-session
+project uses its registered participant IDs. Every assigned recording carries
+its complete condition-onset-to-oddball map. Missing recording identity, an
+unassigned recording, or an incomplete condition map stops processing; the
+runner never guesses from the filename, observed trigger counts, or another
+recording's schema. The configured project condition map can be copied into a
+recording assignment, but it is not an implicit fallback.
+
+The same immutable project protocol, including all recording assignments,
+travels through every file's run settings, marker review, cache/ledger identity,
+and output provenance. Its fingerprint is shared across recordings; do not
+replace it with a reduced per-recording protocol. Only marker resolution uses
+the current canonical recording ID. Recording-specific marker plans also bind
+that ID, so a reviewed plan cannot be reused for another recording. Expected
+ledger validation checks both the global protocol fingerprint and this recording
+binding. Post-processing requires canonical run identity before exporting either
+Epochs or legacy Evoked inputs under a recording-specific protocol.
+
+These assignments change trigger interpretation only. They do not merge adjacent
+condition-onset blocks, relabel an unexpected onset, or infer a missing condition.
+An unexpected repetition count remains a separate condition/occurrence finding.
+
 When valid `55_onbin` repetition crops exist for a condition, those repetitions
 must keep `N % N_step == 0` and metadata `N_mod_step == 0`. Do not downgrade
 the whole condition or any repetition to fixed-epoch fallback. Do not silently

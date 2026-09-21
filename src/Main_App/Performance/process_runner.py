@@ -1776,6 +1776,10 @@ def _run_full_pipeline_for_file(
         ref_pair = (str(ref_ch1), str(ref_ch2))
 
         frequency_protocol = _project_frequency_protocol(settings)
+        marker_recording_id = (
+            _recording_id_for_file(file_path, settings)
+            or _mapped_text_for_file(file_path, settings, "_fpvs_participant_id_by_file")
+        )
         event_plan_payload = _preflight_event_plan_for_file(file_path, settings)
         unresolved_occurrences = event_plan_payload.get("unresolved_occurrences")
         if unresolved_occurrences not in (None, [], ()):
@@ -1786,6 +1790,7 @@ def _run_full_pipeline_for_file(
             event_plan_payload=event_plan_payload,
             event_map=event_map,
             protocol=frequency_protocol,
+            recording_id=marker_recording_id,
         )
         excluded_condition_labels = _excluded_condition_labels_for_file(
             file_path,
@@ -1901,6 +1906,7 @@ def _run_full_pipeline_for_file(
                 first_samp=int(raw.first_samp),
                 event_map=event_map,
                 protocol=frequency_protocol,
+                recording_id=marker_recording_id,
             )
             source_analysis_span_plan = (
                 restrict_source_analysis_span_plan_by_condition(
@@ -2413,7 +2419,9 @@ def _run_full_pipeline_for_file(
                     raise RuntimeError("Raw marker evidence is malformed.")
                 first_marker = int(retained_samples[0]) if retained_samples else None
                 last_marker = int(retained_samples[-1]) if retained_samples else None
-                marker_code = int(frequency_protocol.oddball_marker_code)
+                marker_code = frequency_protocol.oddball_marker_code_for_condition(
+                    code_int, recording_id=marker_recording_id,
+                )
                 df_hz = sfreq / float(n_used)
                 k0 = float(frequency_protocol.oddball_rate_hz) * n_used / sfreq
                 f_bin_hz = round(k0) * df_hz
@@ -2640,7 +2648,9 @@ def _run_full_pipeline_for_file(
                             frequency_protocol.expected_analyzed_oddball_cycles
                         ),
                         "oddball_marker_code": (
-                            frequency_protocol.oddball_marker_code
+                            frequency_protocol.oddball_marker_code_for_condition(
+                                event_map[label], recording_id=marker_recording_id,
+                            )
                         ),
                         "frequency_protocol_version": frequency_protocol.version,
                         "frequency_protocol_fingerprint": (

@@ -559,27 +559,35 @@ class MainWindow(QMainWindow):
         """Return the active read-only analysis-frequency snapshot, if valid."""
 
         from Tools.Free_Harmonic_Clustering.gui import ProjectFrequencySnapshot
-        from Main_App.projects import normalize_frequency_protocol
+        from Main_App.gui.project_protocol import (
+            ProjectProtocolRequiredError,
+            processing_protocol_snapshot,
+        )
 
+        self._free_harmonic_frequency_error = None
         try:
-            project = self.currentProject
-            protocol = normalize_frequency_protocol(project.frequency_protocol)
-            if (
-                not protocol.is_ready
-                or protocol.presentation_rate_hz is None
-                or protocol.oddball_rate_hz is None
-            ):
-                raise ValueError("project frequency protocol is incomplete")
+            protocol = processing_protocol_snapshot(
+                getattr(self, "currentProject", None)
+            )
             return ProjectFrequencySnapshot(
                 oddball_frequency_hz=float(protocol.oddball_rate_hz),
                 base_frequency_hz=float(protocol.presentation_rate_hz),
             )
-        except (AttributeError, TypeError, ValueError):
+        except ProjectProtocolRequiredError as exc:
+            self._free_harmonic_frequency_error = str(exc)
             logger.warning(
-                "free_harmonic_clustering_frequency_metadata_invalid",
-                exc_info=True,
+                "free_harmonic_clustering_protocol_required: %s",
+                exc,
             )
             return None
+
+    def open_fhc_protocol_settings(self) -> None:
+        """Show the protocol editor for a blocked project-bound FHC page."""
+
+        self.open_settings_window()
+        page = self._ensure_settings_page()
+        page.tabs.setCurrentIndex(page._protocol_tab_index)
+        page.protocol_presentation_rate_edit.setFocus()
 
     def _ensure_free_harmonic_clustering_page(self) -> QWidget:
         from Tools.Free_Harmonic_Clustering.gui import FreeHarmonicClusteringPage
@@ -604,11 +612,13 @@ class MainWindow(QMainWindow):
             page = FreeHarmonicClusteringPage(
                 project_root=project_root,
                 frequency_snapshot=self._free_harmonic_frequency_snapshot(),
+                frequency_error=getattr(self, "_free_harmonic_frequency_error", None),
                 parent=self.workspace_stack,
             )
             page.post_processing_required.connect(
                 self.request_post_processing_rebuild
             )
+            page.protocol_settings_required.connect(self.open_fhc_protocol_settings)
             page.setObjectName("embedded_free_harmonic_clustering_page")
             self.workspace_stack.addWidget(page)
             self._free_harmonic_clustering_page = page
@@ -616,6 +626,7 @@ class MainWindow(QMainWindow):
             page.refresh_project_context(
                 project_root=project_root,
                 frequency_snapshot=self._free_harmonic_frequency_snapshot(),
+                frequency_error=getattr(self, "_free_harmonic_frequency_error", None),
             )
         return page
 
@@ -923,6 +934,7 @@ class MainWindow(QMainWindow):
         page.refresh_project_context(
             project_root=requested_root,
             frequency_snapshot=self._free_harmonic_frequency_snapshot(),
+            frequency_error=getattr(self, "_free_harmonic_frequency_error", None),
         )
 
     def show_about_dialog(self) -> None:

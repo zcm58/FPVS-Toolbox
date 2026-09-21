@@ -291,6 +291,7 @@ def test_scan_validates_raw_and_limits_evidence_to_current_conditions(
         "participant_id": "P01",
         "recording_id": "P01__visit-1",
     }
+    assert captured["validated_plan"]["recording_id"] == "P01__visit-1"
     assert captured["prepare"]["direct_bad_channels"] == ("Fp2",)
     assert captured["prepare"]["copy_raw"] is False
     assert captured["prepare"]["params"]["_fpvs_source_analysis_span_plan"] == {

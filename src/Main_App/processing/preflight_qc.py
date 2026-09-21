@@ -1781,6 +1781,7 @@ def _scan_one_preflight_file_v2(
             n_times=int(raw.n_times),
             first_samp=int(raw.first_samp),
             frequency_protocol=frequency_protocol,
+            recording_id=recording_id or participant_id,
             marker_review_decisions=marker_review_decisions,
             marker_review_scope={
                 "source_file_path": str(file_path.resolve()),

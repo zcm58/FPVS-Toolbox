@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from collections.abc import Mapping, Sequence
 from fractions import Fraction
 from typing import Any
 
@@ -38,6 +39,10 @@ class ProtocolEditorValues:
     expected_analyzed_oddball_cycles: str
     oddball_marker_code: str
     requires_confirmation: bool
+    condition_oddball_markers_enabled: bool = False
+    condition_oddball_marker_codes: tuple[tuple[str, str], ...] = ()
+    recording_oddball_markers_enabled: bool = False
+    recording_oddball_marker_codes: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = ()
 
 
 def _exact_rate_text(value: Fraction | None) -> str:
@@ -85,6 +90,14 @@ def editor_values_for_protocol(protocol: FrequencyProtocol) -> ProtocolEditorVal
     """Map a protocol to editable text without confirming inferred legacy values."""
 
     protocol = normalize_frequency_protocol(protocol)
+    marker_mapping = tuple(
+        (str(onset), str(marker))
+        for onset, marker in protocol.condition_oddball_marker_codes
+    )
+    recording_mapping = tuple(
+        (recording_id, tuple((str(onset), str(marker)) for onset, marker in codes))
+        for recording_id, codes in protocol.recording_oddball_marker_codes
+    )
     if protocol.status == FREQUENCY_PROTOCOL_STATUS_CONFIRMATION_REQUIRED:
         presentation_rate = (
             protocol.presentation_rate_hz or DEFAULT_PRESENTATION_RATE_HZ
@@ -112,6 +125,10 @@ def editor_values_for_protocol(protocol: FrequencyProtocol) -> ProtocolEditorVal
             ),
             oddball_marker_code=str(DEFAULT_ODDBALL_MARKER_CODE),
             requires_confirmation=True,
+            condition_oddball_markers_enabled=bool(marker_mapping),
+            condition_oddball_marker_codes=marker_mapping,
+            recording_oddball_markers_enabled=bool(recording_mapping),
+            recording_oddball_marker_codes=recording_mapping,
         )
 
     direct_rate = (
@@ -131,6 +148,10 @@ def editor_values_for_protocol(protocol: FrequencyProtocol) -> ProtocolEditorVal
         ),
         oddball_marker_code=str(protocol.oddball_marker_code or ""),
         requires_confirmation=False,
+        condition_oddball_markers_enabled=bool(marker_mapping),
+        condition_oddball_marker_codes=marker_mapping,
+        recording_oddball_markers_enabled=bool(recording_mapping),
+        recording_oddball_marker_codes=recording_mapping,
     )
 
 
@@ -144,6 +165,10 @@ def build_manual_protocol(
     oddball_marker_code: str,
     existing_protocol: FrequencyProtocol | None = None,
     require_ready: bool = False,
+    condition_oddball_markers_enabled: bool | None = None,
+    condition_oddball_marker_codes: Mapping[object, object] | Sequence[tuple[object, object]] | None = None,
+    recording_oddball_markers_enabled: bool | None = None,
+    recording_oddball_marker_codes: Mapping[object, object] | Sequence[tuple[object, object]] | None = None,
 ) -> FrequencyProtocol:
     """Validate editor text and return one immutable canonical protocol."""
 
@@ -211,11 +236,63 @@ def build_manual_protocol(
             source=ODDBALL_MARKER_SOURCE_LEGACY_DEFAULT_55,
         )
 
+    if condition_oddball_markers_enabled is None:
+        marker_mapping = existing.condition_oddball_marker_codes if existing is not None else ()
+    elif condition_oddball_markers_enabled:
+        marker_mapping = (
+            condition_oddball_marker_codes
+            if condition_oddball_marker_codes is not None
+            else existing.condition_oddball_marker_codes if existing is not None else ()
+        )
+        if not marker_mapping:
+            raise FrequencyProtocolError("Enter an oddball marker for every condition, or turn off condition-specific markers.")
+    else:
+        marker_mapping = ()
+    if marker_mapping:
+        protocol = protocol.with_condition_oddball_marker_codes(marker_mapping)
+
+    if recording_oddball_markers_enabled is None:
+        recording_mapping = existing.recording_oddball_marker_codes if existing is not None else ()
+    elif recording_oddball_markers_enabled:
+        recording_mapping = (
+            recording_oddball_marker_codes if recording_oddball_marker_codes is not None
+            else existing.recording_oddball_marker_codes if existing is not None else ()
+        )
+        if not recording_mapping:
+            raise FrequencyProtocolError("Configure a trigger schema for every recording, or turn off recording-specific trigger schemas.")
+    else:
+        recording_mapping = ()
+    if recording_mapping:
+        protocol = protocol.with_recording_oddball_marker_codes(recording_mapping)
+
     if require_ready and not protocol.is_ready:
         raise FrequencyProtocolError(
             "Enter the expected number of analyzed oddball cycles before saving."
         )
     return protocol
+
+
+def condition_marker_editor_rows(
+    event_map: Mapping[str, object],
+    values: ProtocolEditorValues,
+) -> tuple[tuple[str, str, str], ...]:
+    """Order editable condition markers by onset code, preserving their identity."""
+
+    saved = dict(values.condition_oddball_marker_codes)
+    try:
+        labels_by_onset: dict[int, list[str]] = {}
+        for label, code in event_map.items():
+            onset = int(str(code).strip())
+            labels_by_onset.setdefault(onset, []).append(str(label))
+    except (TypeError, ValueError) as exc:
+        raise FrequencyProtocolError("Condition onset markers must be whole numbers.") from exc
+    return tuple(
+        (
+            " / ".join(labels), str(onset),
+            saved.get(str(onset), "" if values.condition_oddball_markers_enabled else values.oddball_marker_code),
+        )
+        for onset, labels in sorted(labels_by_onset.items())
+    )
 
 
 def protocol_settings_save_requested(
@@ -226,6 +303,12 @@ def protocol_settings_save_requested(
 ) -> bool:
     """Return whether Settings should validate and persist the protocol editor."""
 
+    if not initial_values.condition_oddball_markers_enabled and not current_values.condition_oddball_markers_enabled:
+        initial_values = replace(initial_values, condition_oddball_marker_codes=())
+        current_values = replace(current_values, condition_oddball_marker_codes=())
+    if not initial_values.recording_oddball_markers_enabled and not current_values.recording_oddball_markers_enabled:
+        initial_values = replace(initial_values, recording_oddball_marker_codes=())
+        current_values = replace(current_values, recording_oddball_marker_codes=())
     return bool(protocol_tab_active or current_values != initial_values)
 
 
@@ -260,6 +343,7 @@ __all__ = (
     "ProjectProtocolRequiredError",
     "ProtocolEditorValues",
     "build_manual_protocol",
+    "condition_marker_editor_rows",
     "duration_summary",
     "editor_values_for_protocol",
     "protocol_settings_save_requested",

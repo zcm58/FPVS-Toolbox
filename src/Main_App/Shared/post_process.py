@@ -40,6 +40,7 @@ from Main_App.processing.output_integrity import (
 from Main_App.processing.condition_electrode_interpolation import condition_interpolation_export_provenance
 from Main_App.projects.frequency_protocol import (
     FrequencyProtocol,
+    FrequencyProtocolError,
     normalize_frequency_protocol,
 )
 from Main_App.projects.grouping import (
@@ -388,6 +389,14 @@ def _resolve_frequency_protocol(app: Any) -> FrequencyProtocol:
             "Post-processing requires a ready project frequency protocol with an "
             "expected analyzed oddball-cycle count."
         )
+    if protocol.recording_oddball_marker_codes:
+        try:
+            protocol.recording_marker_codes(
+                settings.get("_fpvs_recording_id")
+                or settings.get("_fpvs_participant_id")
+            )
+        except FrequencyProtocolError as exc:
+            raise SpectralEligibilityError(str(exc)) from exc
     return protocol
 
 
@@ -926,13 +935,17 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                                 stream_end_sample=int(stream_end_sample),
                                 epoch_tmin_sec=float(epoch_tmin_sec),
                                 oddball_rate_hz=frequency_protocol.oddball_rate_hz,
-                                oddball_marker_code=int(
-                                    frequency_protocol.oddball_marker_code
+                                oddball_marker_code=frequency_protocol.oddball_marker_code_for_condition(
+                                    condition_id,
+                                    recording_id=(
+                                        app.settings.get("_fpvs_recording_id")
+                                        or app.settings.get("_fpvs_participant_id")
+                                    ),
                                 ),
                             )
                             num_channels, num_times = avg_data.shape
                         except Exception as crop_err:
-                            app.log(f"    Warn: 55-based crop attempt failed in legacy path: {crop_err}")
+                            app.log(f"    Warn: Project-marker crop attempt failed in legacy path: {crop_err}")
                             fallback_reason = "crop_exception"
                     _log_export_timing(
                         "legacy_event_crop",
@@ -1598,7 +1611,7 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
         )
 
     if not any_results_saved:
-        app.log("Warning: Post-processing completed, but no Excel files were saved.")
+        app.log("Warning: Post-processing completed, but no result files were saved.")
     del current_epochs_data_source
     gc.collect()
     _log_export_timing("post_process_total", post_started, pid=pid, path=parent_folder)

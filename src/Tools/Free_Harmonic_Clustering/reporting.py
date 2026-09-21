@@ -33,6 +33,7 @@ class RepeatedSessionReportRow:
     is_exploratory: bool
     detail_text: str
     exploratory_cluster_ids: tuple[int, ...]
+    comparison_label: str = ""
 
 
 @dataclass(frozen=True, slots=True)

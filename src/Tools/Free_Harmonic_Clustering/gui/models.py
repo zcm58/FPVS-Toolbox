@@ -281,6 +281,25 @@ class RepeatedBatchWorkerOutcome:
     map_warning: str = ""
 
 
+@dataclass(frozen=True, slots=True)
+class PlannedAnalysisSetup:
+    """Frozen comparison plan and harmonic choices passed to one worker."""
+
+    plan: object
+    harmonic_mode: GuiHarmonicMode
+    fixed_highest_harmonic_order: int | None
+    max_harmonic_hz: float
+
+
+@dataclass(frozen=True, slots=True)
+class PlannedAnalysisWorkerOutcome:
+    """Published family analysis with compact display-only map snapshots."""
+
+    run: RunOutcome
+    maps: tuple[ClusterMapData, ...] = ()
+    map_warning: str = ""
+
+
 __all__ = [
     "AnalysisRecordingExclusion",
     "AnalysisSetup",
@@ -290,6 +309,8 @@ __all__ = [
     "GuiHarmonicMode",
     "ProjectAnalysisOptions",
     "ProjectFrequencySnapshot",
+    "PlannedAnalysisSetup",
+    "PlannedAnalysisWorkerOutcome",
     "RecordingChoice",
     "RepeatedBatchSetup",
     "RepeatedBatchWorkerOutcome",

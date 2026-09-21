@@ -229,197 +229,130 @@ def _page(
     return page
 
 
-def test_project_setup_is_dynamic_and_results_folder_is_reachable(
-    qtbot,
-    tmp_path: Path,
-) -> None:
+def test_missing_protocol_metadata_explains_blocker_and_opens_settings(qtbot, tmp_path):
+    reason = "Semantic Categories has no oddball frequency in its protocol metadata."
+    page = FreeHarmonicClusteringPage(
+        tmp_path, None, frequency_error=reason,
+        backend=_FakeBackend(tmp_path / "results"), auto_discover=False,
+    )
+    qtbot.addWidget(page)
+    page.show()
+    qtbot.waitExposed(page)
+    page._begin_project_inspection()
+    assert not page.has_active_work
+    assert "loading" not in page.plan_context_label.text().casefold()
+    assert reason in page.workflow_status.text()
+    assert all(not check.isVisible() for check in page.family_checks.values())
+    assert not page.review_comparisons_button.isVisible()
+    assert not page.run_analysis_button.isEnabled()
+    assert page.protocol_settings_button.isVisible()
+    assert page.protocol_settings_button.isEnabled()
+    assert not page.retry_loading_button.isVisible()
+    requested = []
+    page.protocol_settings_required.connect(lambda: requested.append(True))
+    qtbot.mouseClick(page.protocol_settings_button, QtCore.Qt.LeftButton)
+    assert requested == [True]
+
+
+def test_frequency_repair_and_inspection_retry_recover_the_same_page(qtbot, tmp_path, monkeypatch):
+    page = FreeHarmonicClusteringPage(
+        tmp_path, None, frequency_error="Missing base frequency.",
+        backend=_FakeBackend(tmp_path / "results"), auto_discover=False,
+    )
+    qtbot.addWidget(page)
+    page.show()
+    qtbot.waitExposed(page)
+    started = []
+    monkeypatch.setattr(page, "_start_operation", lambda worker, **kwargs: started.append((worker, kwargs)))
+    assert page.refresh_project_context(frequency_snapshot=ProjectFrequencySnapshot(1.2, 6.0))
+    assert len(started) == 1 and started[0][1]["stage"] == "inspection"
+    page._active_stage = "inspection"
+    page._on_operation_failed("The processed workbook is temporarily unavailable.")
+    page._update_buttons()
+    assert "loading" not in page.plan_context_label.text().casefold()
+    assert page.retry_loading_button.isVisible() and page.retry_loading_button.isEnabled()
+    assert not page.protocol_settings_button.isVisible()
+    qtbot.mouseClick(page.retry_loading_button, QtCore.Qt.LeftButton)
+    assert len(started) == 2
+    page._on_inspection_completed(_options(tmp_path))
+    assert page.run_analysis_button.isEnabled()
+    assert not page.retry_loading_button.isVisible()
+    assert not page.protocol_settings_button.isVisible()
+    assert page.review_comparisons_button.isVisible()
+
+
+def test_project_setup_is_dynamic_and_results_folder_is_reachable(qtbot, tmp_path):
+    from Tools.Free_Harmonic_Clustering.analysis_plan import AnalysisFamily
+
     page = _page(qtbot, tmp_path)
     page.resize(1280, 900)
     QtWidgets.QApplication.processEvents()
-
-    assert page.project_root == tmp_path.resolve()
-    header_text = {
-        label.text() for label in page.findChildren(QtWidgets.QLabel)
-    }
-    assert "Free Harmonic Clustering Analysis" in header_text
-    assert "CLUSTER ANALYSIS TOOL" not in header_text
-    assert not any(text.startswith("Compare one ordered") for text in header_text)
-    assert "BETA ANALYSIS TOOL" not in header_text
-    assert page.result_tabs.count() == 2
-    assert page.result_tabs.tabText(0) == "Analysis"
-    assert page.result_tabs.tabText(1) == "Cluster maps"
+    assert [page.result_tabs.tabText(index) for index in range(3)] == ["Setup", "Results", "Cluster maps"]
     assert not page.result_tabs.isTabEnabled(1)
+    assert not page.result_tabs.isTabEnabled(2)
     assert page.findChildren(QtWidgets.QScrollArea) == []
-    assert page.setup_panel.isVisible()
-    assert page.results_panel.isHidden()
-    comparison_card = page.findChild(
-        QtWidgets.QWidget,
-        "free_harmonic_comparison_card",
-    )
-    harmonics_card = page.findChild(
-        QtWidgets.QWidget,
-        "free_harmonic_harmonics_card",
-    )
-    assert comparison_card is page.comparison_card
-    assert harmonics_card is page.harmonics_card
-    assert not comparison_card.isAncestorOf(harmonics_card)
-    assert not harmonics_card.isAncestorOf(comparison_card)
-    assert comparison_card.geometry().top() == harmonics_card.geometry().top()
-    assert harmonics_card.geometry().bottom() < comparison_card.geometry().bottom()
-    assert comparison_card.width() > harmonics_card.width()
-    assert (
-        harmonics_card.sizePolicy().verticalPolicy()
-        == QtWidgets.QSizePolicy.Maximum
-    )
-    assert comparison_card.height() < page.workspace.height() * 0.75
-    comparison_field_x = {
-        widget.mapTo(comparison_card, QtCore.QPoint(0, 0)).x()
-        for widget in (
-            page.design_combo,
-            page.paired_condition_a_combo,
-            page.paired_condition_b_combo,
-            page.paired_group_filter_combo,
-        )
-    }
-    assert len(comparison_field_x) == 1
-    assert (
-        page.harmonic_mode_combo.mapTo(harmonics_card, QtCore.QPoint(0, 0)).x()
-        == page.design_combo.mapTo(comparison_card, QtCore.QPoint(0, 0)).x()
-    )
-    for removed_object_name in (
-        "free_harmonic_beta_banner",
-        "free_harmonic_profile_card",
-        "free_harmonic_discovery_note",
-        "free_harmonic_swap_button",
-        "free_harmonic_setup_card",
-        "free_harmonic_main_tabs",
-        "free_harmonic_review_tab",
-        "free_harmonic_results_tabs",
-        "free_harmonic_result_run_summary",
-    ):
-        assert page.findChild(QtWidgets.QWidget, removed_object_name) is None
-    assert page.setup_panel.isAncestorOf(page.design_combo)
-    assert page.results_panel.isAncestorOf(page.significant_table)
-    for widget in (
-        page.workflow_status,
-        page.progress_bar,
-        page.workflow_actions,
-        page.run_analysis_button,
-        page.cancel_button,
-        page.open_results_button,
-    ):
-        assert page.isAncestorOf(widget)
-    assert page.design_combo.currentText() == "Paired Conditions"
-    assert page.harmonic_mode_combo.currentText() == "Hermann automatic selection"
-    assert page.paired_condition_a_combo.count() == 3
-    assert page.paired_group_filter_combo.itemData(0) is None
-    assert "Run Analysis" in page.workflow_status.text()
-    assert "show the results below" in page.workflow_status.text()
-    assert (
-        page.run_analysis_button.text()
-        == "Run Free Harmonic Clustering Analysis"
-    )
-    assert page.open_results_button.isEnabled()
-    for combo in (
-        page.paired_condition_a_combo,
-        page.paired_condition_b_combo,
-        page.paired_group_filter_combo,
-        page.independent_group_a_combo,
-        page.independent_group_b_combo,
-    ):
-        assert (
-            combo.sizePolicy().horizontalPolicy()
-            == QtWidgets.QSizePolicy.Expanding
-        )
-        assert combo.minimumContentsLength() >= 24
-    assert (
-        page.design_stack.sizePolicy().horizontalPolicy()
-        == QtWidgets.QSizePolicy.Expanding
-    )
-
-    page.harmonic_mode_combo.setCurrentIndex(1)
-    assert page.fixed_highest_combo.isEnabled()
-    assert [
-        page.fixed_highest_combo.itemData(index)
-        for index in range(page.fixed_highest_combo.count())
-    ] == [1, 2, 3, 4, 6]
-    fixed_harmonic_labels = [
-        page.fixed_highest_combo.itemText(index)
-        for index in range(page.fixed_highest_combo.count())
-    ]
-    assert "H5 (6 Hz)" not in fixed_harmonic_labels
-
-    requested_a = page.paired_condition_b_combo.currentData()
-    page.paired_condition_a_combo.setCurrentIndex(
-        page.paired_condition_b_combo.currentIndex()
-    )
-    assert page.paired_condition_a_combo.currentData() == requested_a
-    assert (
-        page.paired_condition_a_combo.currentData()
-        != page.paired_condition_b_combo.currentData()
-    )
-    requested_b = page.paired_condition_a_combo.currentData()
-    page.paired_condition_b_combo.setCurrentIndex(
-        page.paired_condition_a_combo.currentIndex()
-    )
-    assert page.paired_condition_b_combo.currentData() == requested_b
-    assert (
-        page.paired_condition_a_combo.currentData()
-        != page.paired_condition_b_combo.currentData()
-    )
-    assert "positive clusters indicate" in page.direction_label.text()
-    assert page._setup_error() is None
+    assert page.plan_card.isVisible()
+    assert page.comparison_card.isHidden()
+    assert page.family_checks[AnalysisFamily.BETWEEN_GROUPS].isChecked()
+    assert not page.family_checks[AnalysisFamily.WITHIN_GROUP_VISITS].isVisible()
+    assert page._current_analysis_plan().comparisons[0].condition == "Neutral Happy"
+    assert "3 planned comparisons in 1 family" in page.plan_summary_label.text()
     assert page.run_analysis_button.isEnabled()
+    assert page.open_results_button.isEnabled()
+    assert page.plan_card.geometry().top() == page.harmonics_card.geometry().top()
+    assert page.plan_card.width() > page.harmonics_card.width()
+    assert page.plan_card.height() <= page.workspace.height()
+    page.harmonic_mode_combo.setCurrentIndex(1)
+    assert page.fixed_highest_combo.isVisible()
+    assert page.fixed_highest_combo.isEnabled()
+    assert [page.fixed_highest_combo.itemData(index) for index in range(page.fixed_highest_combo.count())] == [1, 2, 3, 4, 6]
 
-    page._active_stage = "inspection"
-    page._on_operation_cancelled()
-    assert page._inspection_failed
 
+def test_repeated_project_uses_prespecified_batch_without_page_scroll(qtbot, tmp_path, monkeypatch):
+    from Tools.Free_Harmonic_Clustering.analysis_plan import AnalysisFamily
+    from Tools.Free_Harmonic_Clustering.gui.workers import PlannedAnalysisWorker
+    from Tools.Free_Harmonic_Clustering.gui.analysis_plan_state import load_analysis_plan_preferences
 
-def test_repeated_project_uses_prespecified_batch_without_page_scroll(
-    qtbot,
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
     page = _page(qtbot, tmp_path)
     page._on_inspection_completed(_repeated_options(tmp_path.resolve()))
     page.resize(1280, 900)
     QtWidgets.QApplication.processEvents()
-
-    assert page.design_combo.count() == 1
-    assert page.design_combo.currentData() == (
-        GuiAnalysisDesign.REPEATED_SESSION_BATCH.value
-    )
-    assert not page.design_combo.isEnabled()
-    assert page.design_stack.currentIndex() == 2
+    plan = page._current_analysis_plan()
+    counts = {family: sum(row.family_id == family.value for row in plan.comparisons) for family in plan.families}
+    assert counts == {AnalysisFamily.BETWEEN_GROUPS: 4, AnalysisFamily.WITHIN_GROUP_VISITS: 8, AnalysisFamily.GROUP_VISIT_CHANGE: 4}
+    assert plan.session_ids == ("luteal_phase", "follicular_phase")
+    assert "Luteal Phase − Follicular Phase" in page.plan_context_label.text()
     assert page.findChildren(QtWidgets.QScrollArea) == []
-    assert "BC Group" in page.repeated_groups_value.text()
-    assert "Control Group" in page.repeated_groups_value.text()
-    assert page.repeated_sessions_value.text() == (
-        "Luteal Phase (Visit 1) -> Follicular Phase (Visit 2)"
-    )
-    assert "All 4 project conditions" in page.repeated_conditions_value.text()
-    assert "Visit 2 - Visit 1" in page.repeated_batch_value.text()
-    assert not hasattr(page, "repeated_order_warning")
     assert page.review_exclusions_button.isEnabled()
-    assert (
-        page.run_analysis_button.text()
-        == "Run Free Harmonic Clustering Analysis"
-    )
     assert page._setup_error() is None
-
-    started: list[tuple[object, str]] = []
-    monkeypatch.setattr(
-        page,
-        "_start_operation",
-        lambda worker, *, stage, **_kwargs: started.append((worker, stage)),
-    )
+    started = []
+    monkeypatch.setattr(page, "_start_operation", lambda worker, *, stage, **kwargs: started.append((worker, stage)))
     qtbot.mouseClick(page.run_analysis_button, QtCore.Qt.LeftButton)
-
-    assert len(started) == 1
     worker, stage = started[0]
-    assert isinstance(worker, RepeatedSessionBatchWorker)
-    assert stage == "repeated_session_batch"
+    assert isinstance(worker, PlannedAnalysisWorker)
+    assert stage == "analysis_plan"
+    assert worker._setup.plan.fingerprint == plan.fingerprint
+    assert load_analysis_plan_preferences(page._results_parent()).families == tuple(family.value for family in plan.families)
+
+
+def test_single_group_repeated_plan_and_condition_reference_share_their_families(qtbot, tmp_path):
+    from dataclasses import replace
+    from Tools.Free_Harmonic_Clustering.analysis_plan import AnalysisFamily
+
+    options = _repeated_options(tmp_path.resolve())
+    options = replace(options, groups=options.groups[:1], recordings=tuple(row for row in options.recordings if row.group_id == options.groups[0].group_id))
+    page = _page(qtbot, tmp_path)
+    page._on_inspection_completed(options)
+    assert page.run_analysis_button.isEnabled()
+    assert not page.family_checks[AnalysisFamily.BETWEEN_GROUPS].isVisible()
+    assert page.family_checks[AnalysisFamily.WITHIN_GROUP_VISITS].isChecked()
+    page.family_checks[AnalysisFamily.BETWEEN_CONDITIONS].setChecked(True)
+    plan = page._current_analysis_plan()
+    condition_rows = [row for row in plan.comparisons if row.kind is AnalysisFamily.BETWEEN_CONDITIONS]
+    assert len(condition_rows) == 3
+    assert all(row.condition_b == options.conditions[0] for row in condition_rows)
+    page.condition_mode_combo.setCurrentIndex(page.condition_mode_combo.findData("all_pairs"))
+    assert sum(row.kind is AnalysisFamily.BETWEEN_CONDITIONS for row in page._current_analysis_plan().comparisons) == 6
 
 
 def test_recording_exclusion_dialog_accepts_optional_reason_and_is_analysis_only(
@@ -559,14 +492,14 @@ def test_repeated_batch_result_table_shows_both_holm_layers(
     assert page.significant_table.isHidden()
     assert page.batch_table.rowCount() == 16
     assert page.batch_table.item(0, 0).text() == "Session Averaged Groups"
-    assert page.batch_table.item(0, 4).text() == "0.0400"
-    assert page.batch_table.item(0, 5).text() == "0.1600"
+    assert page.batch_table.item(0, 2).text() == "0.0400"
+    assert page.batch_table.item(0, 3).text() == "Passes family Holm"
     assert "16 pass family Holm" in page.result_status.text()
-    assert "0 pass full-batch Holm" in page.result_status.text()
+    assert "full-batch Holm" not in page.result_status.text()
     assert "0 exploratory findings" in page.result_status.text()
     assert page.result_view_combo.currentText() == "All comparisons"
-    assert page.batch_table.horizontalHeaderItem(2).text() == "Within-run clusters"
-    assert "run-level Holm" in page.batch_table.horizontalHeaderItem(2).toolTip()
+    assert page.batch_table.horizontalHeaderItem(2).text() == "Family Holm p"
+    assert "every planned comparison" in page.batch_table.horizontalHeaderItem(2).toolTip()
 
 
 def test_exploratory_filter_uses_stored_boundaries_and_original_map_indices(
@@ -615,19 +548,18 @@ def test_exploratory_filter_uses_stored_boundaries_and_original_map_indices(
         raise AssertionError("A reporting view must not start processing or export.")
 
     monkeypatch.setattr(page, "_start_operation", unexpected_work)
-    page.result_view_combo.setCurrentIndex(1)
+    page.result_view_combo.setCurrentIndex(page.result_view_combo.findData("exploratory"))
     assert page.batch_table.rowCount() == 2
-    assert page.batch_table.item(0, 3).text() == "0.0402"
-    assert page.batch_table.item(0, 4).text() == "0.1608"
-    assert page.batch_table.item(0, 5).text() == "0.6029"
+    assert page.batch_table.item(0, 2).text() == "0.1608"
+    assert page.batch_table.item(0, 3).text() == "Exploratory"
     assert [page.batch_table.item(row, 0).data(QtCore.Qt.UserRole) for row in range(2)] == [1, 4]
-    assert "0.049999" in page.batch_table.item(1, 3).toolTip()
+    assert "0.199996" in page.batch_table.item(1, 2).toolTip()
     assert page._batch_report_rows is snapshot
     page.batch_table.selectRow(1)
     qtbot.mouseClick(page.view_maps_button, QtCore.Qt.LeftButton)
     assert page.map_view.selected_run == 4
-    assert page.result_tabs.currentIndex() == 1
-    page.result_tabs.setCurrentIndex(0)
+    assert page.result_tabs.currentIndex() == 2
+    page.result_tabs.setCurrentIndex(1)
 
     def open_selected_maps(dialog):
         assert dialog._run_index == 4
@@ -636,9 +568,9 @@ def test_exploratory_filter_uses_stored_boundaries_and_original_map_indices(
 
     monkeypatch.setattr(ResultDetailsDialog, "exec", open_selected_maps)
     qtbot.mouseClick(page.view_details_button, QtCore.Qt.LeftButton)
-    assert page.result_tabs.currentIndex() == 1
+    assert page.result_tabs.currentIndex() == 2
     assert page.map_view.selected_run == 4
-    page.result_tabs.setCurrentIndex(0)
+    page.result_tabs.setCurrentIndex(1)
     page.result_view_combo.setCurrentIndex(0)
     assert page.batch_table.rowCount() == 5
     assert page._selected_report_row().run_index == 4
@@ -649,9 +581,9 @@ def test_exploratory_empty_view_and_context_reset(qtbot, tmp_path: Path) -> None
     page._on_inspection_completed(_repeated_options(tmp_path.resolve()))
     run = _repeated_report_run(("Neutral Happy",), ((0.05, 0.2, 0.8),))
     page._on_repeated_batch_completed(RepeatedBatchWorkerOutcome(run=run))
-    page.result_view_combo.setCurrentIndex(1)
+    page.result_view_combo.setCurrentIndex(page.result_view_combo.findData("exploratory"))
     assert page.batch_table.rowCount() == 0
-    assert "No comparisons meet the exploratory criteria" in page.result_status.text()
+    assert "No comparisons match this view" in page.result_status.text()
     assert not page.view_details_button.isEnabled()
     assert not page.view_maps_button.isEnabled()
     assert page._selected_report_row() is None
@@ -663,7 +595,7 @@ def test_exploratory_empty_view_and_context_reset(qtbot, tmp_path: Path) -> None
     assert page.view_details_button.isHidden()
     assert page.results_panel.isHidden()
     page._on_repeated_batch_completed(RepeatedBatchWorkerOutcome(run=run))
-    page.result_view_combo.setCurrentIndex(1)
+    page.result_view_combo.setCurrentIndex(page.result_view_combo.findData("exploratory"))
     assert page.refresh_project_context(project_root=tmp_path, frequency_snapshot=None)
     assert page._batch_report_rows == ()
     assert page.result_view_combo.currentIndex() == 0
@@ -816,9 +748,9 @@ def test_diagnostics_status_points_to_exclusion_review(
         diagnostics=("Two project-QC exclusions are active.",),
     )
 
-    assert "Run Analysis" in page.workflow_status.text()
-    assert "cohort and input details" in page.workflow_status.text()
-    assert "results workbook" in page.workflow_status.text()
+    assert page.review_comparisons_button.isEnabled()
+    assert page.run_analysis_button.isEnabled()
+    assert page._options.diagnostics == ("Two project-QC exclusions are active.",)
 
 
 def test_real_qthread_inspection_keeps_gui_responsive_and_shuts_down(
@@ -954,8 +886,9 @@ def test_valid_independent_setup_enables_one_click_analysis(
 
     assert len(started_operations) == 1
     worker, stage = started_operations[0]
-    assert isinstance(worker, AnalysisWorker)
-    assert stage == "analysis"
+    from Tools.Free_Harmonic_Clustering.gui.workers import PlannedAnalysisWorker
+    assert isinstance(worker, PlannedAnalysisWorker)
+    assert stage == "analysis_plan"
 
 
 @pytest.mark.parametrize("preview_failure", [False, True])
@@ -1162,7 +1095,7 @@ def test_results_appear_in_compact_single_screen_without_run_metadata(
         )
     )
 
-    assert page.setup_panel.isVisible()
+    assert not page.setup_panel.isVisible()
     assert page.results_panel.isVisible()
     assert page._has_result
     assert page.result_view_combo.isHidden()
@@ -1175,13 +1108,13 @@ def test_results_appear_in_compact_single_screen_without_run_metadata(
     assert page.workflow_actions.isVisible()
     assert page.significant_table.rowCount() == 1
     assert page.significant_table.item(0, 4).text() == "0.0043"
-    assert page.result_tabs.isTabEnabled(1)
+    assert page.result_tabs.isTabEnabled(2)
     assert page.map_view.maps == (map_snapshot,)
     page.significant_table.selectRow(0)
     qtbot.mouseClick(page.view_maps_button, QtCore.Qt.LeftButton)
-    assert page.result_tabs.currentIndex() == 1
+    assert page.result_tabs.currentIndex() == 2
     assert page.map_view.selected_cluster == significant.cluster_id
-    page.result_tabs.setCurrentIndex(0)
+    page.result_tabs.setCurrentIndex(1)
     assert "1 significant cluster found" in page.result_status.text()
     assert "interpret it cautiously" in page.result_status.text()
     visible_text = " ".join(

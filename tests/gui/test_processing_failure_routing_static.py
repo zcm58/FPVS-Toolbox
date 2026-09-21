@@ -919,3 +919,115 @@ def test_single_file_picker_stages_extra_file_without_confirming_or_saving(tmp_p
     assert host._selected_bdf == str(chosen)
     host.le_input_file.setText.assert_called_once_with(str(chosen))
     assert not namespace["QMessageBox"].mock_calls
+
+
+def _fhc_frequency_snapshot_method():
+    return _load_function(
+        "src/Main_App/gui/main_window.py",
+        "_free_harmonic_frequency_snapshot",
+        {"logger": logging.getLogger(__name__)},
+        class_name="MainWindow",
+    )
+
+
+@pytest.mark.parametrize("state", ["missing", "unconfirmed", "cycles", "invalid", "marker_upgrade"])
+def test_fhc_frequency_failure_has_specific_settings_remedy_without_traceback(state, caplog):
+    from Main_App.projects import FrequencyProtocol
+
+    project = SimpleNamespace()
+    if state == "unconfirmed":
+        project.frequency_protocol = FrequencyProtocol.confirmation_required()
+    elif state == "cycles":
+        project.frequency_protocol = FrequencyProtocol.from_recurrence("7.5", 6)
+    elif state == "invalid":
+        project.frequency_protocol = {"version": "unsupported"}
+    elif state == "marker_upgrade":
+        protocol = FrequencyProtocol.from_recurrence(
+            "7.5", 6, expected_analyzed_oddball_cycles=120,
+            expected_analyzed_oddball_cycles_source="manual",
+        ).to_manifest()
+        protocol["version"] = "1.0.0"
+        protocol.pop("oddball_marker_code")
+        protocol.pop("oddball_marker_code_source")
+        project.frequency_protocol = protocol
+    host = SimpleNamespace(currentProject=project)
+
+    with caplog.at_level(logging.WARNING):
+        snapshot = _fhc_frequency_snapshot_method()(host)
+
+    assert snapshot is None
+    assert "Settings > Protocol" in host._free_harmonic_frequency_error
+    expected = "analyzed oddball cycles" if state == "cycles" else (
+        "invalid" if state == "invalid" else "Confirm"
+    )
+    assert expected in host._free_harmonic_frequency_error
+    assert all(record.exc_info is None for record in caplog.records)
+
+
+def test_fhc_frequency_retry_uses_confirmed_project_rates_and_clears_previous_error():
+    from Main_App.projects import FrequencyProtocol
+
+    host = SimpleNamespace(
+        currentProject=SimpleNamespace(frequency_protocol=FrequencyProtocol.confirmation_required()),
+        settings=Mock(side_effect=AssertionError("Global settings are not project evidence")),
+    )
+    snapshot_for = _fhc_frequency_snapshot_method()
+    assert snapshot_for(host) is None
+    host.currentProject.frequency_protocol = FrequencyProtocol.from_recurrence(
+        "7.5", 6, expected_analyzed_oddball_cycles=120,
+        expected_analyzed_oddball_cycles_source="manual",
+    )
+
+    snapshot = snapshot_for(host)
+
+    assert snapshot.base_frequency_hz == 7.5
+    assert snapshot.oddball_frequency_hz == 1.25
+    assert host._free_harmonic_frequency_error is None
+    assert not host.settings.mock_calls
+
+
+def test_fhc_missing_protocol_does_not_promote_legacy_export_rates(tmp_path):
+    from Main_App.projects import Project
+
+    manifest = {
+        "name": "Legacy project",
+        "tools": {"processing": {"full_fft_provenance": {
+            "schema_version": 1,
+            "method_version": "project_full_fft_provenance_v1",
+            "status": "current", "base_frequency_hz": 6.0,
+            "oddball_frequency_hz": 1.2,
+        }}},
+    }
+    manifest_path = tmp_path / "project.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    original_bytes = manifest_path.read_bytes()
+    project = Project(tmp_path, manifest)
+    host = SimpleNamespace(currentProject=project)
+
+    assert _fhc_frequency_snapshot_method()(host) is None
+
+    assert "Confirm" in host._free_harmonic_frequency_error
+    assert project.frequency_protocol.presentation_rate_hz is None
+    assert project.frequency_protocol.oddball_rate_hz is None
+    assert "frequency_protocol" not in project.manifest
+    assert manifest_path.read_bytes() == original_bytes
+
+
+def test_fhc_protocol_remedy_opens_existing_protocol_tab_without_saving():
+    opener = _load_function(
+        "src/Main_App/gui/main_window.py", "open_fhc_protocol_settings", {},
+        class_name="MainWindow",
+    )
+    page = SimpleNamespace(
+        tabs=Mock(), _protocol_tab_index=3,
+        protocol_presentation_rate_edit=Mock(),
+        _save_settings=Mock(),
+    )
+    host = SimpleNamespace(open_settings_window=Mock(), _ensure_settings_page=Mock(return_value=page))
+
+    opener(host)
+
+    host.open_settings_window.assert_called_once_with()
+    page.tabs.setCurrentIndex.assert_called_once_with(3)
+    page.protocol_presentation_rate_edit.setFocus.assert_called_once_with()
+    page._save_settings.assert_not_called()

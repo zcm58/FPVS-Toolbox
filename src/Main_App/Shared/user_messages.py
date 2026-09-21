@@ -42,7 +42,7 @@ def _message_box(parent: Any, title: str, message: str, kind: str) -> None:
             QMessageBox.warning(
                 parent,
                 "Processing Finished",
-                "No Excel files were generated. Check the log for details.",
+                "No result files were generated. Check the log for details.",
             )
             return
 

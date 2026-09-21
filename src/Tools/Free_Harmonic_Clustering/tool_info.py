@@ -20,16 +20,14 @@ by summing BCA values across harmonics.
   <li><b>Paired Conditions:</b> Condition A minus Condition B for the same
   complete participants, optionally within one canonical project group.</li>
   <li><b>Independent Groups:</b> Group A minus Group B for one condition.</li>
-  <li><b>Repeated-Session Full Batch:</b> for a project with exactly two stable
-  groups and two ordered sessions, run all project conditions through four
-  prespecified contrast families.</li>
+  <li><b>Analysis families:</b> plan group differences, condition differences,
+  within-group visit changes, and group differences in visit change. Repeated
+  designs use two explicitly ordered visits.</li>
 </ul>
 <p>
-Each legacy run tests one ordered contrast. Positive clusters indicate A &gt; B
-and negative clusters indicate A &lt; B. Set A and B directly in the setup
-controls; select them in the opposite order to reverse the contrast. The
-repeated-session batch uses the fixed directions described in its dedicated
-tab.
+Positive clusters indicate A &gt; B and negative clusters indicate A &lt; B.
+Review the exact comparisons and their correction families in Setup before
+running the analysis. Results and Cluster maps have their own tabs.
 </p>
 
 <h3>Project-Bound Workflow</h3>
@@ -54,23 +52,30 @@ results folder containing a polished Excel workbook and reproducibility files.
 """
 
 REPEATED_SESSION_HTML = """
-<h2>Repeated-Session Full Batch</h2>
+<h2>Planned Analysis Families</h2>
 <p>
-For projects with exactly two stable groups and two ordered sessions, the tool
-runs every project condition through four prespecified contrast families:
+Choose the applicable scientific questions before running. Each selected
+family applies one Holm correction across all its planned comparisons:
 </p>
 <ol>
-  <li><b>Groups averaged over sessions:</b> compare the two groups after
-  averaging each complete participant's two session tensors.</li>
-  <li><b>Session contrast in Group 1:</b> paired later-visit minus earlier-visit
-  tensors.</li>
-  <li><b>Session contrast in Group 2:</b> the same paired contrast.</li>
-  <li><b>Group difference in session change:</b> compare participant
-  later-minus-earlier difference tensors between groups. This is the direct
+  <li><b>Between-group differences:</b> every selected group pair, per condition;
+  repeated designs average each complete participant's visits before normalization.</li>
+  <li><b>Between-condition differences:</b> paired condition comparisons within
+  each group, either all pairs or comparisons with a reference condition.</li>
+  <li><b>Within-group visit changes:</b> paired first-selected-visit minus
+  second-selected-visit comparisons. All groups share one correction family.</li>
+  <li><b>Group difference in session change:</b> compare the participant visit
+  differences between groups, without normalizing the difference again. This is the direct
   group-by-session interaction contrast.</li>
 </ol>
 <p>
-The primary batch uses complete, phase-balanced participant pairs for every
+Two groups, two visits and four conditions default to 4 between-group, 8
+within-group visit, and 4 group-change comparisons in three families.
+Condition comparisons are optional; a single-group flat project uses one
+condition-comparison family. Higher-order condition interactions are unavailable.
+</p>
+<p>
+The primary plan uses complete, phase-balanced participant pairs for every
 contrast. Missing sessions are reported as coverage; they are never imputed or
 zero-filled. Analysis-only recording exclusions can be added before a run with
 an optional reason. These exclusions are exported with the batch but do not
@@ -78,7 +83,8 @@ change project QC or source files.
 </p>
 <h3>Direction and Fixed Order</h3>
 <p>
-The session direction is always later visit minus earlier visit. When every
+The session direction is first selected visit minus second selected visit,
+shown explicitly in Setup and saved with the plan. When every
 participant completed sessions in the same order, session/phase-at-visit is
 perfectly confounded with visit order, elapsed time, repetition, and
 habituation. Results must not be described as an isolated physiological phase
@@ -87,9 +93,11 @@ effect.
 <h3>Multiplicity</h3>
 <p>
 Each condition-level run retains its electrode &times; harmonic maximum-cluster
-correction. The batch additionally reports Holm-adjusted global run p-values
-across conditions within each of the four contrast families and a conservative
-Holm adjustment across every condition &times; family test in the full batch.
+correction. The plan additionally reports Holm-adjusted global run p-values
+across all comparisons within each declared family and a separate conservative
+Holm adjustment across the full plan. Family Holm is the primary correction.
+An unavailable planned comparison stops the whole plan; it is not silently
+dropped from the correction. Legacy v1 results retain their earlier families.
 </p>
 <h3>Exploratory Reporting</h3>
 <p>
@@ -105,7 +113,7 @@ p-values, and exact cluster membership. These findings are leads for follow-up,
 not findings confirmed after family Holm correction. Cluster locations and
 selected-cluster effects are descriptive; individual electrodes or harmonics
 are not established as pointwise significant. A readable exploratory report
-and worksheet are included in every new repeated-batch export.
+is included in every new plan export, alongside the immutable plan and fingerprint.
 </p>
 """
 
@@ -157,11 +165,12 @@ fill-through rule. In both modes, candidates are derived from the active
 project and available FFT grid, and every base-rate overlap is excluded.
 </p>
 <p>
-The repeated-session batch freezes one shared harmonic domain across all
-groups, sessions, conditions, and contrast families. Its automatic selector
-calculates z separately in every declared group &times; session &times; condition cell,
+New analysis plans freeze one shared harmonic domain across the required
+groups, sessions, conditions, and contrast families. The automatic selector
+calculates z separately in every required group &times; session &times; condition cell
+(without the session factor in flat projects),
 uses the highest strict detection in any cell, and fills through once for the
-batch. This prevents a contrast from receiving a more favorable domain merely
+plan. This prevents a contrast from receiving a more favorable domain merely
 because its observed arms selected a different ceiling.
 </p>
 
@@ -299,7 +308,7 @@ FREE_HARMONIC_CLUSTERING_TOOL_INFO = ToolInfoContent(
         ToolInfoTab("method", "Method", METHOD_HTML),
         ToolInfoTab(
             "repeated_sessions",
-            "Repeated Sessions",
+            "Analysis Families",
             REPEATED_SESSION_HTML,
         ),
         ToolInfoTab("interpretation", "Interpretation", INTERPRETATION_HTML),

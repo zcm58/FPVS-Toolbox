@@ -22,21 +22,24 @@ import Main_App.gui.main_window as main_window_module
     ("generated_paths", "create_excel", "expected_popup"),
     [(["dummy.xlsx"], False, False), ([], True, False), ([], False, True)],
 )
+@pytest.mark.parametrize("suffix", [".xlsx", ".fpvs"])
 def test_should_show_no_excel_popup_respects_generated_and_disk(
     tmp_path: Path,
     generated_paths: list[str],
     create_excel: bool,
     expected_popup: bool,
+    suffix: str,
 ) -> None:
     output_root = tmp_path / "1 - Excel Data Files"
     output_root.mkdir()
     if create_excel:
-        (output_root / "P01_results.xlsx").touch()
+        (output_root / f"P01_results{suffix}").touch()
 
     assert _should_show_no_excel_popup(generated_paths, output_root) is expected_popup
 
 
-def test_on_post_finished_marks_existing_excel_as_success(tmp_path: Path, qtbot) -> None:
+@pytest.mark.parametrize("suffix", [".xlsx", ".fpvs"])
+def test_on_post_finished_marks_existing_excel_as_success(tmp_path: Path, qtbot, suffix: str) -> None:
     QApplication.instance() or QApplication([])
 
     win = MainWindow()
@@ -44,7 +47,7 @@ def test_on_post_finished_marks_existing_excel_as_success(tmp_path: Path, qtbot)
 
     output_root = tmp_path / "1 - Excel Data Files"
     output_root.mkdir()
-    (output_root / "P01_results.xlsx").touch()
+    (output_root / f"P01_results{suffix}").touch()
 
     win._last_job_success = False
     win._on_post_finished(
@@ -53,7 +56,7 @@ def test_on_post_finished_marks_existing_excel_as_success(tmp_path: Path, qtbot)
             "cancelled": False,
             "output_root": str(output_root),
             "generated_excel_paths": [],
-            "existing_excel_paths": [str(output_root / "P01_results.xlsx")],
+            "existing_excel_paths": [str(output_root / f"P01_results{suffix}")],
         }
     )
 
@@ -119,9 +122,11 @@ def test_export_with_post_process_keeps_prior_success_when_later_file_has_no_exc
     assert win._last_job_success is True
 
 
+@pytest.mark.parametrize("suffix", [".xlsx", ".fpvs"])
 def test_refresh_run_excel_success_from_disk_detects_outputs_written_during_run(
     tmp_path: Path,
     qtbot,
+    suffix: str,
 ) -> None:
     QApplication.instance() or QApplication([])
 
@@ -133,7 +138,7 @@ def test_refresh_run_excel_success_from_disk_detects_outputs_written_during_run(
     win._run_excel_output_root = str(output_root)
     win._run_excel_snapshot_before = {}
 
-    (output_root / "P01_results.xlsx").write_text("ok", encoding="utf-8")
+    (output_root / f"P01_results{suffix}").write_text("ok", encoding="utf-8")
     win._refresh_run_excel_success_from_disk()
 
     assert win._last_job_success is True

@@ -103,6 +103,7 @@ def _approved_event_plan(
     decisions: dict[str, dict[str, object]] | None = None,
     n_times: int = 100,
     first_samp: int = 0,
+    recording_id: str | None = None,
 ) -> dict[str, object]:
     resolved_protocol = protocol or _protocol()
     event_array = np.asarray(events, dtype=np.int64)
@@ -122,6 +123,7 @@ def _approved_event_plan(
             n_times=n_times,
             first_samp=first_samp,
             protocol=resolved_protocol,
+            recording_id=recording_id,
         )
         occurrences = {
             occurrence.occurrence_key: occurrence
@@ -155,6 +157,7 @@ def _approved_event_plan(
         n_times=n_times,
         first_samp=first_samp,
         frequency_protocol=resolved_protocol,
+        recording_id=recording_id,
         marker_review_decisions=audited_decisions,
         marker_review_scope=review_scope,
     ).to_payload()
@@ -254,6 +257,117 @@ def test_expected_matrix_binds_every_condition_and_exact_approved_span(
         cell.occurrences[0].to_payload()["final_outcome"] is None
         for cell in recording.cells
     )
+
+
+def test_expected_matrix_preserves_each_conditions_configured_oddball_code(
+    tmp_path: Path,
+) -> None:
+    event_map = {f"Condition {code}": code for code in range(1, 6)}
+    protocol = _protocol().with_condition_oddball_marker_codes(
+        {code: 50 + code for code in range(1, 6)}
+    )
+    events = []
+    for code in range(1, 6):
+        start = (code - 1) * 50
+        events.extend([[start, 0, code], *[
+            [start + offset, 0, 50 + code] for offset in (10, 20, 30)
+        ]])
+    event_plan = _approved_event_plan(
+        event_map=event_map, events=events, protocol=protocol, n_times=250,
+    )
+
+    expected = build_expected_recording_condition_plan(
+        processing_plan=_processing_plan(tmp_path, event_map=event_map),
+        event_map=event_map,
+        frequency_protocol=protocol,
+        approved_event_plans={"P01": event_plan},
+    )
+
+    assert [
+        item["oddball_marker_code"]
+        for item in event_plan["marker_integrity_plan"]["occurrences"]
+    ] == [51, 52, 53, 54, 55]
+    assert all(
+        cell.planned_cell_action == EXPECTED_CELL_ACTION_PROCESS
+        for cell in expected.recordings[0].cells
+    )
+    assert [
+        cell.occurrences[0].source_start_sample
+        for cell in expected.recordings[0].cells
+    ] == [10, 60, 110, 160, 210]
+    assert expected.protocol_fingerprint == protocol.fingerprint
+    assert ExpectedRecordingConditionPlan.from_payload(expected.to_payload()) == expected
+
+
+def test_expected_matrix_rejects_approved_plan_from_changed_condition_marker_mapping(
+    tmp_path: Path,
+) -> None:
+    event_map = {"Condition A": 1}
+    protocol = _protocol().with_condition_oddball_marker_codes({1: 51})
+    event_plan = _approved_event_plan(
+        event_map=event_map,
+        events=[[0, 0, 1], [10, 0, 51], [20, 0, 51], [30, 0, 51]],
+        protocol=protocol,
+    )
+
+    with pytest.raises(ExpectedRecordingConditionPlanError, match="different project protocol"):
+        build_expected_recording_condition_plan(
+            processing_plan=_processing_plan(tmp_path, event_map=event_map),
+            event_map=event_map,
+            frequency_protocol=protocol.with_condition_oddball_marker_codes({1: 52}),
+            approved_event_plans={"P01": event_plan},
+        )
+
+
+def test_expected_matrix_uses_recording_marker_maps_with_one_global_protocol(
+    tmp_path: Path,
+) -> None:
+    event_map = {"Condition A": 1, "Condition B": 2}
+    protocol = _protocol().with_recording_oddball_marker_codes({
+        "P01": {1: 51, 2: 52}, "P02": {1: 55, 2: 55},
+    })
+    infos = []
+    approved = {}
+    for participant_id, codes in (("P01", (51, 52)), ("P02", (55, 55))):
+        path = tmp_path / f"{participant_id}.bdf"
+        path.write_bytes(b"raw")
+        infos.append(RawFileInfo(path.resolve(), participant_id))
+        approved[participant_id] = _approved_event_plan(
+            event_map=event_map, protocol=protocol, recording_id=participant_id,
+            events=[
+                [0, 0, 1], [10, 0, codes[0]], [20, 0, codes[0]], [30, 0, codes[0]],
+                [50, 0, 2], [60, 0, codes[1]], [70, 0, codes[1]], [80, 0, codes[1]],
+            ],
+        )
+
+    expected = build_expected_recording_condition_plan(
+        processing_plan=_processing_plan(tmp_path, event_map=event_map, infos=tuple(infos)),
+        event_map=event_map, frequency_protocol=protocol,
+        approved_event_plans=approved,
+    )
+
+    assert expected.protocol_fingerprint == protocol.fingerprint
+    assert expected.protocol_payload == protocol.to_manifest()
+    assert all(
+        cell.planned_cell_action == EXPECTED_CELL_ACTION_PROCESS
+        for recording in expected.recordings for cell in recording.cells
+    )
+    assert [
+        [cell.occurrences[0].source_start_sample for cell in recording.cells]
+        for recording in expected.recordings
+    ] == [[10, 60], [10, 60]]
+    assert all(
+        plan["marker_integrity_plan"]["protocol_fingerprint"] == protocol.fingerprint
+        for plan in approved.values()
+    )
+    assert ExpectedRecordingConditionPlan.from_payload(expected.to_payload()) == expected
+
+    with pytest.raises(ExpectedRecordingConditionPlanError, match="recording identity"):
+        build_expected_recording_condition_plan(
+            processing_plan=_processing_plan(tmp_path, event_map=event_map, infos=tuple(infos)),
+            event_map=event_map, frequency_protocol=protocol,
+            approved_event_plans={"P01": approved["P02"], "P02": approved["P02"]},
+        )
 
 
 def test_expected_matrix_preserves_missing_condition_as_unresolved_cell(

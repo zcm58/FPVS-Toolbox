@@ -6,6 +6,59 @@ there is no timed delay or requirement to wait for preloading to finish.
 
 ## Marker timing review
 
+If oddball triggers differ by condition, open **Settings > Protocol**, enable
+**Use a different oddball marker for each condition**, and enter every
+condition's oddball code in the table. For example, condition onset codes 1–5
+can use oddball codes 51–55 respectively. These are distinct from the onset
+markers themselves. Save and start a fresh processing run; the previous run's
+marker decisions do not apply to the changed schema. The switch applies only
+to the active project. Without recording-specific schemas, switching it off
+restores the shared marker code.
+Expected analyzed cycles and duration remain separate protocol settings.
+
+If trigger conventions changed during data collection, one condition mapping
+cannot describe every file. For example, some recordings may use codes 51–55
+for conditions 1–5, while later recordings use 55 in every condition. Configure
+the assignments explicitly:
+
+1. In **Settings > Protocol**, enter the project condition markers to use as a
+   template, such as `1 → 51` through `5 → 55`.
+2. Enable **Recording-specific trigger schemas** and open **Configure recording
+   schemas…**.
+3. For each registered recording, choose **Project condition markers** or
+   **Shared marker**, and enter the shared code where applicable. Select
+   multiple rows to apply the same choice together. Review the displayed
+   assigned markers before applying.
+4. Choose **Apply schemas**, then save Settings and start a fresh processing
+   run. Applying the dialog alone does not save the project.
+
+Every registered recording needs an explicit assignment. A new recording stays
+unassigned until reviewed; the application does not guess its schema from its
+filename or automatically switch to whichever trigger code appears. Confirm
+assignments using the recording's trigger evidence and acquisition records.
+Turning off recording-specific schemas returns to the configured project-wide
+condition markers or shared code.
+
+Marker schemas do not change condition-onset codes or combine adjacent blocks.
+If one condition appears three times and another only once, investigate that
+onset pattern separately. Likewise, the number of recorded oddball markers does
+not automatically set the expected analyzed cycle count or duration.
+
+Repeated runs of the same condition are reviewed and cropped separately, then
+averaged sample-by-sample in the time domain before the FFT. For example, two
+runs analyzed at 144 oddball cycles and 1.2 Hz each produce one 120-second
+averaged waveform. Do not double the expected cycle count because a condition
+was presented twice. The recorded marker count can exceed the analyzed cycle
+count; that alone does not trigger a timing warning.
+
+The project's condition map must include every condition-start code in the
+recording. If a start code is omitted, its following oddball markers can be
+assigned to the preceding condition, and the pause between conditions can
+appear as a missing-marker gap. Confirm the omitted code's meaning against the
+acquisition design and correct the condition map before restarting processing.
+To leave a known condition out of analysis, retain its start code in the map
+and use explicit condition exclusions so its boundaries remain recognizable.
+
 Step 2 shows one flagged repetition at a time: the affected recording, a short
 explanation of the marker finding, and the required analysis duration.
 

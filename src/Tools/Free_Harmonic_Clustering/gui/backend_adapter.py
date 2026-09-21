@@ -21,6 +21,7 @@ from .models import (
     GuiHarmonicMode,
     ProjectAnalysisOptions,
     ProjectFrequencySnapshot,
+    PlannedAnalysisSetup,
     RecordingChoice,
     RepeatedBatchSetup,
     RunOutcome,
@@ -81,6 +82,11 @@ class FreeHarmonicBackend(Protocol):
     ) -> object: ...
 
     def results_parent(self, project_root: Path) -> Path: ...
+
+    def run_planned_analysis(
+        self, frequencies: ProjectFrequencySnapshot, setup: PlannedAnalysisSetup,
+        *, progress: ProgressSink, cancel_check: CancelCheck,
+    ) -> RunOutcome: ...
 
 
 def _attribute(value: object, *names: str, default: Any = None) -> Any:
@@ -527,6 +533,43 @@ class FreeHarmonicBackendAdapter:
             progress_callback=report,
             cancel_check=cancel_check,
         )
+
+    def run_planned_analysis(
+        self,
+        frequencies: ProjectFrequencySnapshot,
+        setup: PlannedAnalysisSetup,
+        *,
+        progress: ProgressSink,
+        cancel_check: CancelCheck,
+    ) -> RunOutcome:
+        """Execute exactly the reviewed plan and publish an additive bundle."""
+
+        from ..planned_analysis import run_analysis_plan
+        from ..planned_exports import export_analysis_plan_result
+
+        spec = _method_spec_from_gui(
+            frequencies,
+            harmonic_mode=setup.harmonic_mode,
+            fixed_highest_harmonic_order=setup.fixed_highest_harmonic_order,
+            max_harmonic_hz=setup.max_harmonic_hz,
+        )
+
+        def report(stage: str, completed: int, total: int) -> None:
+            labels = {
+                "preparation": "Preparing eligible participant profiles...",
+                "inference": "Running the planned cluster comparisons...",
+                "multiplicity": "Applying Holm correction within each analysis family...",
+            }
+            progress(int(completed), int(total), labels.get(stage, str(stage)))
+
+        result = run_analysis_plan(
+            setup.plan, spec, progress_callback=report, cancel_check=cancel_check,
+        )
+        if cancel_check():
+            self._raise_cancelled()
+        progress(0, 0, "Saving the analysis plan, family results, and cluster maps...")
+        receipt = export_analysis_plan_result(result, cancel_check=cancel_check)
+        return RunOutcome(result=result, receipt=receipt)
 
     def results_parent(self, project_root: Path) -> Path:
         from Tools.Free_Harmonic_Clustering.exports import DEFAULT_RESULTS_SUBFOLDER

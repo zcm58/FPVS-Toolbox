@@ -230,6 +230,7 @@ def preflight_repeated_recording_sources(
 ) -> RecordingPreflightReport:
     """Audit BDF identity and pairing using canonical source ownership only.
 
+    Registered raw paths retain their participant and recording identities.
     Filename token rules are optional diagnostics. They never assign group or
     session membership; canonical source metadata remains the sole owner.
 
@@ -252,6 +253,10 @@ def preflight_repeated_recording_sources(
         )
     )
     session_by_id = {session.session_id.casefold(): session for session in sessions}
+    registered_by_path = {
+        recording.raw_file.resolve(strict=False): recording
+        for recording in context.recordings
+    }
     group_ids = tuple(group.group_id for group in context.groups)
     issues: list[RecordingPreflightIssue] = []
     rows: list[RecordingPreflightRow] = []
@@ -340,8 +345,13 @@ def preflight_repeated_recording_sources(
         session = session_by_id[source.session_id.casefold()]
         for path in direct_files:
             check_cancelled()
-            participant_id = infer_raw_participant_id(path)
-            recording_id = f"{participant_id}__{session.session_id}"
+            registered = registered_by_path.get(path)
+            if registered is not None:
+                participant_id = registered.participant_id
+                recording_id = registered.recording_id
+            else:
+                participant_id = infer_raw_participant_id(path)
+                recording_id = f"{participant_id}__{session.session_id}"
             rows.append(
                 RecordingPreflightRow(
                     participant_id=participant_id,

@@ -1046,6 +1046,7 @@ def scan_kurtosis_review(
                     event_plan_payload=event_plan,
                     event_map=canonical_event_map,
                     protocol=protocol,
+                    recording_id=recording,
                 )
                 conditions = _condition_labels(source_plan)
                 if not conditions or all(
@@ -1188,6 +1189,7 @@ def _scan_kurtosis_review_serial(
                 event_plan_payload=event_plan,
                 event_map=canonical_event_map,
                 protocol=protocol,
+                recording_id=recording,
             )
             all_conditions = _condition_labels(source_plan)
             if not all_conditions:
@@ -1284,6 +1286,7 @@ def _scan_kurtosis_review_serial(
                 first_samp=int(raw.first_samp),
                 event_map=canonical_event_map,
                 protocol=protocol,
+                recording_id=recording,
             )
             restricted_plan = restrict_source_analysis_span_plan_by_condition(
                 validated_plan,

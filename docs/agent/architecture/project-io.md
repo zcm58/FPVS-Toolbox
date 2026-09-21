@@ -34,6 +34,13 @@ Disposable cache ownership, automatic QC replacement, and the Advanced settings
 cache-clearing action are documented in [Cache Maintenance](cache-maintenance.md).
 Cache removal preserves analysis companions, review decisions, and ledgers.
 
+Raw discovery, individual raw selection, and repeated-source preflight retain
+the canonical participant/recording identity when an exact raw path is already
+registered. Filename inference assigns identities only to unregistered inputs;
+it must not rename historical participant IDs. Registry source/group conflicts,
+duplicate identities or raw-path ownership, missing raw files, and confirmation
+of new inputs remain validated independently.
+
 ## Dataset Exclusion Management
 
 `processing/dataset_exclusions.py` is the GUI-neutral adapter for a single
@@ -126,6 +133,41 @@ FPVS Toolbox uses a strict hybrid settings model:
   `manual`. Saving an unrelated Settings tab preserves an unresolved protocol
   unchanged. Processing and harmonic recalculation still require a ready,
   explicitly confirmed protocol.
+- Projects can opt into condition-specific oddball marker identity through
+  protocol v1.2 `condition_oddball_marker_codes`. JSON keys are condition-onset
+  codes, with their explicitly assigned oddball code as the value. The immutable
+  protocol normalizes sorted pairs and resolves markers by onset code, never
+  condition label or display order. The mapping must cover exactly the declared
+  onset codes; no oddball code may overlap any onset code, and missing entries
+  never fall back to the shared code. Settings > Protocol owns the project-only
+  switch and bounded mapping table. The mapping enters the protocol fingerprint,
+  invalidating earlier marker decisions and processing identities. Single-code
+  projects keep their v1.1 payload and fingerprint exactly; when recording
+  schemas are disabled, turning off the condition switch restores that contract.
+  Older app versions reject v1.2 rather than
+  silently processing a mapped project as shared-code data.
+- Protocol v1.3 adds `recording_oddball_marker_codes`: explicit canonical
+  recording-ID-to-condition-map assignments for projects with mixed acquisition
+  trigger conventions. Flat projects use registered participant IDs; repeated
+  projects use registered recording IDs. Each inner map covers every declared
+  condition-onset code and rejects onset/oddball collisions. Normalization keeps
+  deterministic immutable pairs. The runtime resolver requires a canonical ID
+  and a configured map; neither missing identity nor an unassigned recording
+  falls back to project condition markers or the shared code.
+  Settings > Protocol owns the opt-in **Recording-specific trigger schemas**
+  editor. Its canonical registry rows let users explicitly assign the project
+  condition markers or a shared marker, individually or in selected batches.
+  New recordings remain unassigned; Apply requires complete registered coverage,
+  and only saving Settings persists the draft. Disabling recording schemas
+  returns to the configured project-wide condition/shared scheme.
+  All recordings retain the same full protocol payload and fingerprint in run
+  settings and export provenance. Per-recording resolution does not create
+  independent protocol hashes. A marker plan additionally binds its recording
+  ID; a plan belonging to another recording is rejected even when trigger codes
+  happen to match. Changing assignments invalidates earlier protocol-bound
+  reviews and processing reuse. Existing v1.1/v1.2 projects keep their previous
+  payloads and fingerprints when no recording maps are enabled. Trigger maps
+  never rewrite condition-onset events or silently merge their occurrences.
 - Electrode geometry is project-specific scientific state in the
   `preprocessing` namespace. `electrode_montage` currently accepts only
   `biosemi64`, displayed as **BioSemi ActiveTwo 64**. The default

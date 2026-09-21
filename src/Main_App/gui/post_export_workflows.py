@@ -9,7 +9,7 @@ from typing import Any, Callable
 
 from PySide6.QtCore import QThread
 
-from Main_App.Shared.file_filters import is_excel_output_file
+from Main_App.io.result_outputs import result_output_paths, result_output_snapshot
 from Main_App.workers.processing_worker import PostProcessWorker
 
 logger = logging.getLogger(__name__)
@@ -17,33 +17,13 @@ logger.addHandler(logging.NullHandler())
 
 
 def excel_paths_in_output_root(output_root: Path | str | None) -> list[Path]:
-    if not output_root:
-        return []
-    root = Path(output_root)
-    if not root.is_dir():
-        return []
-    return sorted(p.resolve() for p in root.rglob("*.xls*") if is_excel_output_file(p))
+    """Compatibility name: includes native result manifests and Excel outputs."""
+    return result_output_paths(output_root)
 
 
 def excel_snapshot(output_root: Path | str | None) -> dict[str, tuple[int, int]]:
-    if not output_root:
-        return {}
-    root = Path(output_root)
-    if not root.is_dir():
-        return {}
-    snapshot: dict[str, tuple[int, int]] = {}
-    for path in root.rglob("*.xls*"):
-        if not is_excel_output_file(path):
-            continue
-        try:
-            stat_result = path.stat()
-        except OSError:
-            continue
-        snapshot[str(path.resolve())] = (
-            int(stat_result.st_mtime_ns),
-            int(stat_result.st_size),
-        )
-    return snapshot
+    """Compatibility name: snapshot both supported result formats."""
+    return result_output_snapshot(output_root)
 
 
 def excel_snapshot_has_changes(
@@ -107,13 +87,13 @@ def on_post_finished(
 
         if not generated_excel_paths and not show_no_excel_popup:
             host.log(
-                "Excel outputs already existed; no new files were written during this run.",
+                "Result files already existed; no new files were written during this run.",
                 level=logging.INFO,
             )
 
         if payload.get("error") and existing_excel_paths:
             host.log(
-                "Excel export reported an error, but Excel outputs were found on disk.",
+                "Result export reported an error, but result files were found on disk.",
                 level=logging.WARNING,
             )
 
@@ -197,28 +177,29 @@ def export_with_post_process(
     log: logging.Logger = logger,
 ) -> None:
     """
-    Run shared post_process then classify whether Excel output was produced.
+    Run shared post_process then classify whether result output was produced.
 
     Uses a snapshot of files with mtime_ns+size to detect writes/overwrites.
     If no deltas are detectable but the exporter did not report "no files saved"
-    and Excel files still exist, treat as success to avoid false negatives on
+    and result files still exist, treat as success to avoid false negatives on
     coarse timestamp filesystems.
     """
     excel_dir = host.save_folder_path.get() if hasattr(host.save_folder_path, "get") else ""
     if not excel_dir or not Path(excel_dir).is_dir():
-        host.gui_queue.put({"type": "error", "message": f"Excel output folder not found:\n{excel_dir}"})
+        host.gui_queue.put({"type": "error", "message": f"Result output folder not found:\n{excel_dir}"})
         host._last_job_success = False
         return
 
     out_path = Path(excel_dir)
 
     original_log = host.log
-    legacy_reported_no_excel = False
+    reported_no_results = False
 
     def queue_log(message: str, level: int = logging.INFO) -> None:
-        nonlocal legacy_reported_no_excel
-        if "no excel files were saved" in str(message).lower():
-            legacy_reported_no_excel = True
+        nonlocal reported_no_results
+        lowered = str(message).lower()
+        if "no result files were saved" in lowered or "no excel files were saved" in lowered:
+            reported_no_results = True
         host.gui_queue.put({"type": "log", "message": message})
         log.log(level, message)
 
@@ -245,17 +226,17 @@ def export_with_post_process(
                 {
                     "type": "log",
                     "message": (
-                        f"Excel export completed ({created} new file(s), "
+                        f"Result export completed ({created} new file(s), "
                         f"{overwritten} overwritten file(s))."
                     ),
                 }
             )
-        elif legacy_reported_no_excel or post_count == 0:
+        elif reported_no_results or post_count == 0:
             host._last_job_success = host._run_had_successful_export
             host.gui_queue.put(
                 {
                     "type": "log",
-                    "message": "Post-process finished but no Excel outputs were detected.",
+                    "message": "Post-process finished but no result files were detected.",
                 }
             )
         else:
@@ -265,13 +246,13 @@ def export_with_post_process(
                 {
                     "type": "log",
                     "message": (
-                        "Post-process finished with existing Excel outputs and no detectable "
+                        "Post-process finished with existing result files and no detectable "
                         "timestamp/size changes; treating export as successful."
                     ),
                 }
             )
     except Exception as err:
-        log.exception("Excel export failed")
+        log.exception("Result export failed")
         host._last_job_success = host._run_had_successful_export
         host.gui_queue.put({"type": "error", "message": str(err)})
     finally:

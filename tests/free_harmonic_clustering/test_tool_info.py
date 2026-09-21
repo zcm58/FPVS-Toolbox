@@ -43,9 +43,10 @@ def test_repeated_session_tab_states_batch_and_fixed_order_limits() -> None:
 
     assert tabs["repeated_sessions"].html == REPEATED_SESSION_HTML
     copy = " ".join(REPEATED_SESSION_HTML.casefold().split())
-    assert "four prespecified contrast families" in copy
+    assert "all groups share one correction family" in copy
+    assert "three families" in copy
     assert "group difference in session change" in copy
-    assert "later visit minus earlier visit" in copy
+    assert "first selected visit minus second selected visit" in copy
     assert "perfectly confounded" in copy
     assert "holm-adjusted" in copy
     assert "do not change project qc" in copy

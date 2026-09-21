@@ -42,6 +42,27 @@ class MarkerIntegrityError(ValueError):
     """Raised when marker evidence or a review decision is invalid."""
 
 
+def marker_recording_identity(
+    protocol: FrequencyProtocol, recording_id: str | None,
+) -> str | None:
+    """Bind recording-specific marker plans to an explicitly supplied registry ID."""
+
+    if not protocol.recording_oddball_marker_codes:
+        return None
+    requested = str(recording_id or "").strip()
+    if not requested:
+        raise MarkerIntegrityError(
+            "Recording-specific oddball markers require a canonical recording identity "
+            "(participant ID for a single-session project)."
+        )
+    for configured_id, _mapping in protocol.recording_oddball_marker_codes:
+        if configured_id.casefold() == requested.casefold():
+            return configured_id
+    raise MarkerIntegrityError(
+        f"No recording-specific oddball markers are configured for '{requested}'."
+    )
+
+
 def _positive_fraction(value: Any, *, field_name: str) -> Fraction:
     if isinstance(value, bool):
         raise MarkerIntegrityError(f"{field_name} must be a finite positive number.")
@@ -256,6 +277,7 @@ class MarkerIntegrityPlan:
     event_digest: str
     protocol_fingerprint: str
     occurrences: tuple[MarkerOccurrencePlan, ...]
+    recording_id: str | None = None
 
     @property
     def unresolved_occurrences(self) -> tuple[MarkerOccurrencePlan, ...]:
@@ -273,7 +295,7 @@ class MarkerIntegrityPlan:
         return hashlib.sha256(encoded).hexdigest()
 
     def _identity_payload(self) -> dict[str, Any]:
-        return {
+        payload = {
             "method_version": self.method_version,
             "sampling_rate_hz": _fraction_text(self.sampling_rate_hz),
             "first_samp": self.first_samp,
@@ -282,6 +304,9 @@ class MarkerIntegrityPlan:
             "protocol_fingerprint": self.protocol_fingerprint,
             "occurrences": [item.to_payload() for item in self.occurrences],
         }
+        if self.recording_id is not None:
+            payload["recording_id"] = self.recording_id
+        return payload
 
     def to_payload(self) -> dict[str, Any]:
         payload = self._identity_payload()
@@ -549,6 +574,7 @@ def build_marker_integrity_plan(
     n_times: int,
     first_samp: int = 0,
     protocol: FrequencyProtocol,
+    recording_id: str | None = None,
 ) -> MarkerIntegrityPlan:
     """Build occurrence-local marker evidence from one immutable protocol."""
 
@@ -577,6 +603,13 @@ def build_marker_integrity_plan(
         raise MarkerIntegrityError("A non-empty condition event map is required.")
     try:
         validate_protocol_condition_codes(protocol, labels_by_code)
+        recording_identity = marker_recording_identity(protocol, recording_id)
+        marker_codes_by_condition = {
+            code: protocol.oddball_marker_code_for_condition(
+                code, recording_id=recording_identity,
+            )
+            for code in labels_by_code
+        }
         expected_samples = protocol.expected_analyzed_samples(sample_rate)
     except FrequencyProtocolError as exc:
         raise MarkerIntegrityError(str(exc)) from exc
@@ -589,10 +622,13 @@ def build_marker_integrity_plan(
             "No configured condition onset events were found in the recording."
         )
 
-    marker_code = int(protocol.oddball_marker_code)
-    marker_samples = tuple(
-        int(row[0]) for row in normalized if int(row[2]) == marker_code
-    )
+    marker_samples_by_code: dict[int, list[int]] = {
+        code: [] for code in set(marker_codes_by_condition.values())
+    }
+    for row in normalized:
+        code = int(row[2])
+        if code in marker_samples_by_code:
+            marker_samples_by_code[code].append(int(row[0]))
     expected_interval_samples = sample_rate / protocol.oddball_rate_hz
     repetition_counts: dict[int, int] = defaultdict(int)
     occurrences: list[MarkerOccurrencePlan] = []
@@ -603,6 +639,8 @@ def build_marker_integrity_plan(
                 "Configured condition onset is outside the Raw sample grid."
             )
         condition_code = int(onset_row[2])
+        marker_code = marker_codes_by_condition[condition_code]
+        marker_samples = marker_samples_by_code[marker_code]
         repetition_index = repetition_counts[condition_code]
         repetition_counts[condition_code] += 1
         block_stop = (
@@ -613,9 +651,9 @@ def build_marker_integrity_plan(
         # Normalization already sorted these integer samples stably. Preserve
         # the original open interval and every duplicate without rescanning
         # all recording events for each condition occurrence.
-        raw_samples = marker_samples[
+        raw_samples = tuple(marker_samples[
             bisect_right(marker_samples, onset_sample):bisect_left(marker_samples, block_stop)
-        ]
+        ])
         retained_samples, duplicate_groups = _deduplicate_exact_samples(raw_samples)
         intervals = _interval_findings(
             retained_samples,
@@ -705,6 +743,7 @@ def build_marker_integrity_plan(
         event_digest=_event_digest(normalized),
         protocol_fingerprint=protocol.fingerprint,
         occurrences=tuple(occurrences),
+        recording_id=recording_identity,
     )
 
 
@@ -955,6 +994,7 @@ def validate_approved_event_plan(
     first_samp: int = 0,
     event_map: Mapping[str, int],
     protocol: FrequencyProtocol,
+    recording_id: str | None = None,
 ) -> tuple[ApprovedOccurrenceSpan, ...]:
     """Validate preflight's exact approved spans without rebuilding crop logic."""
 
@@ -965,6 +1005,9 @@ def validate_approved_event_plan(
         raise MarkerIntegrityError("Preflight event plan is missing marker integrity data.")
     if marker_plan.get("method_version") != MARKER_INTEGRITY_METHOD_VERSION:
         raise MarkerIntegrityError("Preflight marker policy version is not current.")
+    recording_identity = marker_recording_identity(protocol, recording_id)
+    if recording_identity is not None and marker_plan.get("recording_id") != recording_identity:
+        raise MarkerIntegrityError("Preflight marker plan recording identity is stale.")
     sample_rate = _positive_fraction(
         sampling_rate_hz,
         field_name="sampling_rate_hz",
@@ -998,6 +1041,7 @@ def validate_approved_event_plan(
         n_times=n_times,
         first_samp=sample_origin,
         protocol=protocol,
+        recording_id=recording_identity,
     )
     if planned_fingerprint != rebuilt_plan.fingerprint:
         raise MarkerIntegrityError(
@@ -1055,7 +1099,11 @@ def validate_approved_event_plan(
             )
         if str(occurrence.get("fingerprint") or "") != approved.marker_plan_fingerprint:
             raise MarkerIntegrityError("Approved occurrence evidence fingerprint is stale.")
-        if int(occurrence.get("oddball_marker_code", -1)) != protocol.oddball_marker_code:
+        if int(occurrence.get("oddball_marker_code", -1)) != (
+            protocol.oddball_marker_code_for_condition(
+                approved.condition_code, recording_id=recording_identity,
+            )
+        ):
             raise MarkerIntegrityError("Approved occurrence marker code is stale.")
         allowed_dispositions = {
             "automatic_clean",
