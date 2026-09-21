@@ -240,7 +240,10 @@ class UpdateLifecycle(QObject):
             if self._jobs and not self._allow_quit:
                 self.request_shutdown()
                 return True
-        return super().eventFilter(watched, event)
+        # QObject's base filter only returns False. Avoid sending unrelated
+        # application-wide deliveries back through PySide's typed overload;
+        # the item wrapper in the reported exclusions-scroll callback fails it.
+        return False
 
     @Slot(object)
     def _job_finished(self, result: object) -> None:

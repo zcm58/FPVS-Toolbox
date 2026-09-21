@@ -23,7 +23,7 @@ def test_plot_contains_baseline_line(tmp_path, monkeypatch):
         captured["fig"] = fig
 
     monkeypatch.setattr(module.plt, "close", dummy_close)
-    monkeypatch.setattr(module.matplotlib.figure.Figure, "savefig", lambda self, *a, **k: None)
+    monkeypatch.setattr(module.matplotlib.figure.Figure, "savefig", lambda self, path, **k: path.write_bytes(b"rendered figure"))
 
     worker = module._Worker(
         folder=str(tmp_path),

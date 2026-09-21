@@ -27,6 +27,7 @@ def test_plot_title_is_omitted_and_title_roi_names_output(tmp_path, monkeypatch)
 
     def fake_savefig(self, path, *args, **kwargs):
         saved_paths.append(path)
+        path.write_bytes(b"rendered figure")
 
     monkeypatch.setattr(module.matplotlib.figure.Figure, "savefig", fake_savefig)
 
@@ -70,6 +71,7 @@ def test_overlay_plot_uses_title_and_roi_for_output_name(tmp_path, monkeypatch):
 
     def fake_savefig(self, path, *args, **kwargs):
         saved_paths.append(path)
+        path.write_bytes(b"rendered figure")
 
     monkeypatch.setattr(module.plt, "close", dummy_close)
     monkeypatch.setattr(module.matplotlib.figure.Figure, "savefig", fake_savefig)

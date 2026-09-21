@@ -154,6 +154,7 @@ class PlotGeneratorWorkflowMixin(PlotGeneratorLifecycleMixin):
             prepared_dataset_index=(
                 self._batch_dataset_index if self._all_conditions else None
             ),
+            export_plan=getattr(self, "_approved_export_plan", None),
             **group_kwargs,
         )
         self._launch_worker()
@@ -332,6 +333,9 @@ class PlotGeneratorWorkflowMixin(PlotGeneratorLifecycleMixin):
             group_kwargs = self._group_worker_kwargs(overlay_groups, selected_groups)
             group_kwargs.update(self._session_worker_kwargs())
             legend_payload = self._legend_settings_payload()
+            if getattr(self, "_approved_export_plan", None) is None:
+                self._begin_export_preflight()
+                return
             if self._project is not None:
                 self._persist_project_plot_settings(include_paths=True)
 
@@ -395,6 +399,7 @@ class PlotGeneratorWorkflowMixin(PlotGeneratorLifecycleMixin):
                         str(self._project_root) if self._project_root else None
                     ),
                     spectral_qc_enabled=self.spectral_qc_check.isChecked(),
+                    export_plan=self._approved_export_plan,
                     **group_kwargs,
                 )
                 self._launch_worker()
@@ -427,6 +432,7 @@ class PlotGeneratorWorkflowMixin(PlotGeneratorLifecycleMixin):
                 )
                 self._start_next_condition()
         except Exception as exc:
+            self._approved_export_plan = None
             self._append_log("SNR plot generation failed. See logs for details.")
             self._set_workflow_status(
                 "SNR plot generation failed. Review the generation log for details.",

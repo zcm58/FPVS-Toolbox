@@ -165,6 +165,7 @@ def test_plot_generator_single_group_defaults(qtbot, tmp_path, monkeypatch, plot
 
     win.condition_combo.setCurrentText("CondA")
     win._generate()
+    qtbot.waitUntil(lambda: bool(plot_records))
 
     assert plot_records
     assert plot_records[-1]["group_curves"] == {}
@@ -220,6 +221,7 @@ def test_plot_generator_multigroup_overlay(qtbot, tmp_path, monkeypatch, plot_sm
 
     win.condition_combo.setCurrentText("CondA")
     win._generate()
+    qtbot.waitUntil(lambda: bool(plot_records))
 
     curves = plot_records[-1]["group_curves"]
     assert list(curves.keys()) == [win.group_list.item(1).data(Qt.UserRole)]
@@ -259,6 +261,7 @@ def test_plot_generator_unassigned_subjects_logged(qtbot, tmp_path, monkeypatch,
 
     win.condition_combo.setCurrentText("CondA")
     win._generate()
+    qtbot.waitUntil(lambda: bool(plot_records))
 
     log_text = win.log.toPlainText()
     assert "lack canonical group assignments" in log_text

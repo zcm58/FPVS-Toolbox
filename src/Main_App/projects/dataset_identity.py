@@ -6,10 +6,39 @@ import re
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
+from .raw_identity import infer_raw_participant_id
+
 _LEGACY_PARTICIPANT_PATTERN = re.compile(
     r"(P\d+[A-Za-z]*|Sub\d+[A-Za-z]*|S\d+[A-Za-z]*)",
     re.IGNORECASE,
 )
+
+
+def raw_filename_participant_aliases(raw_files: Mapping[str, Path | None]) -> dict[str, str]:
+    """Link old sanitized raw-stem exports to their registered canonical owner.
+
+    Only a source whose parsed ID agrees with its registration provides an
+    alias. Never guess from a workbook's embedded P-number or cross owners.
+    """
+
+    owners = {participant_id.casefold(): participant_id for participant_id in raw_files}
+    aliases: dict[str, str] = {}
+    for participant_id, raw_file in raw_files.items():
+        if raw_file is None or infer_raw_participant_id(raw_file).casefold() != participant_id.casefold():
+            continue
+        alias = re.sub(r"[^a-zA-Z0-9]", "", raw_file.stem)
+        key = alias.casefold()
+        if not key or key == participant_id.casefold():
+            continue
+        owner = owners.get(key)
+        if owner is not None and owner.casefold() != participant_id.casefold():
+            raise ValueError(
+                f"Ambiguous raw filename alias '{alias}' belongs to both "
+                f"'{owner}' and '{participant_id}'. Repair the participant registrations."
+            )
+        owners[key] = participant_id
+        aliases[key] = participant_id
+    return aliases
 
 
 def infer_workbook_participant_id(

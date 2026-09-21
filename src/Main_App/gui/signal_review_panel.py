@@ -47,6 +47,7 @@ class SignalReviewPanel(QWidget):
         self._items = tuple(items)
         self._episodes = group_review_episodes(self._items)
         self._selected_episode: QcReviewEpisode | None = None
+        self._expanded_groups: dict[tuple, bool] = {}
         self._recording_count = len({item.recording_key for item in self._items})
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
@@ -147,6 +148,15 @@ class SignalReviewPanel(QWidget):
         self._rebuild_tree()
 
     def _rebuild_tree(self) -> None:
+        selected = self.tree.currentItem()
+        selected_key = selected.data(0, Qt.ItemDataRole.UserRole) if selected is not None else None
+        for root_index in range(self.tree.topLevelItemCount()):
+            root = self.tree.topLevelItem(root_index)
+            self._expanded_groups[root.data(0, Qt.ItemDataRole.UserRole)] = root.isExpanded()
+            for child_index in range(root.childCount()):
+                child = root.child(child_index)
+                if child.childCount():
+                    self._expanded_groups[child.data(0, Qt.ItemDataRole.UserRole)] = child.isExpanded()
         terms = self.search_edit.text().casefold().split()
         kind = self.kind_combo.currentData()
         matching_indices = set()
@@ -173,6 +183,7 @@ class SignalReviewPanel(QWidget):
 
         self.tree.clear()
         first_child: QTreeWidgetItem | None = None
+        selected_child: QTreeWidgetItem | None = None
         for recording_episodes in grouped.values():
             identity = self._items[recording_episodes[0][1].item_indices[0]].recording_label
             count = len({
@@ -180,6 +191,11 @@ class SignalReviewPanel(QWidget):
                 for index in episode.item_indices if index in matching_indices
             })
             root = QTreeWidgetItem(self.tree, [f"{identity}  ·  {count} review item{'s' if count != 1 else ''}"])
+            root_key = ("recording", recording_episodes[0][1].recording_key)
+            root.setData(0, Qt.ItemDataRole.UserRole, root_key)
+            root.setExpanded(self._expanded_groups.get(root_key, first_child is None))
+            if root_key == selected_key:
+                selected_child = root
             root.setFirstColumnSpanned(True)
             root.setToolTip(0, identity)
             root.setFont(0, font_for_role("subsection_header", self.tree.font()))
@@ -195,26 +211,29 @@ class SignalReviewPanel(QWidget):
                         label += f" ({matching_count} matching)"
                     episode_root = QTreeWidgetItem(root, [label, episode.condition, episode.occurrence, ""])
                     episode_root.setData(0, Qt.ItemDataRole.UserRole, ("episode", episode_index))
+                    episode_root.setExpanded(self._expanded_groups.get(("episode", episode_index), first_child is None))
+                    if ("episode", episode_index) == selected_key:
+                        selected_child = episode_root
                     episode_root.setToolTip(0, episode.timing_note)
                     if first_child is None:
                         first_child = episode_root
-                        root.setExpanded(True)
-                        episode_root.setExpanded(True)
                 for index in episode.item_indices:
                     if index not in matching_indices:
                         continue
                     item = self._items[index]
                     child = QTreeWidgetItem(episode_root, [item.title, item.condition, item.occurrence, item.channels])
                     child.setData(0, Qt.ItemDataRole.UserRole, ("item", index, episode_index))
+                    if ("item", index, episode_index) == selected_key:
+                        selected_child = child
                     for column in range(4):
                         child.setToolTip(column, child.text(column))
                     if first_child is None:
                         first_child = child
-                        root.setExpanded(True)
 
         if first_child is not None:
-            self.tree.setCurrentItem(first_child)
-            self.tree.scrollToItem(first_child)
+            target = selected_child if selected_child is not None else first_child
+            self.tree.setCurrentItem(target)
+            self.tree.scrollToItem(target)
         else:
             self._selected_episode = None
             self.inspect_button.setEnabled(False)

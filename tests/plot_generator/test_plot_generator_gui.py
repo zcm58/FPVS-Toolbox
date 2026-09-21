@@ -1,9 +1,15 @@
-from PySide6.QtWidgets import QMessageBox
+import os
+from pathlib import Path
+
+from PySide6.QtWidgets import QDialog, QMessageBox
+from PySide6.QtCore import QObject, QPoint, QRect, QTimer, Qt, Signal
+import pytest
 
 import Tools.Plot_Generator.gui as plot_gui
 from Main_App.processing.roi_settings import ALL_ROIS_OPTION
 from Tools.Plot_Generator.gui import PlotGeneratorWindow
 from Tools.Plot_Generator.plot_settings import PlotSettingsManager
+from tests.gui.ux_capture import ux_capture_theme  # noqa: F401
 
 
 def test_scalp_controls_are_not_exposed(qtbot, tmp_path):
@@ -127,3 +133,149 @@ def test_refresh_rois_preserves_valid_selection_and_blocks_empty_configuration(
     assert window.workflow_status.property("statusVariant") == "warning"
     assert "Settings > ROIs" in window.workflow_status.text()
     assert captured_worker_payload == ({"Keep": ["O1"]}, "Keep")
+
+
+def test_disabled_overlay_explains_problem_and_focuses_second_condition(qtbot, tmp_path, monkeypatch):
+    monkeypatch.setattr(plot_gui, "load_rois_from_settings", lambda *_: {"ROI": ["Cz"]})
+    window = PlotGeneratorWindow()
+    qtbot.addWidget(window)
+    window.folder_edit.setText(str(tmp_path))
+    window.out_edit.setText(str(tmp_path / "plots"))
+    window.condition_combo.clear()
+    window.condition_b_combo.clear()
+    window.condition_combo.addItems(["A", "B"])
+    window.condition_b_combo.addItems(["A", "B"])
+    window.overlay_check.setChecked(True)
+    window.resize(1280, 900)
+    window.show()
+    qtbot.waitExposed(window)
+    window.activateWindow()
+    window._check_required()
+    assert not window.gen_btn.isEnabled()
+    for button in (window.input_folder_btn, window.output_folder_btn):
+        assert button.width() >= button.sizeHint().width()
+    assert window.workflow_status.isVisible()
+    assert "two different conditions" in window.workflow_status.text()
+    qtbot.mouseClick(window.fix_setup_btn, Qt.LeftButton)
+    qtbot.waitUntil(lambda: window.focusWidget() is window.condition_b_combo)
+    screenshot_dir = os.environ.get("FPVS_UX_SCREENSHOT_DIR")
+    if screenshot_dir:
+        path = Path(screenshot_dir)
+        path.mkdir(parents=True, exist_ok=True)
+        window.grab().save(str(path / "snr_setup_validation.png"))
+    window.condition_b_combo.setCurrentText("B")
+    assert window.gen_btn.isEnabled()
+    assert window.workflow_status.isHidden()
+    window._session_control_error = (
+        "Choose a valid session comparison. The selected recording set is missing "
+        "canonical session identities; review the project's recording registration "
+        "and select two different registered sessions before generating plots."
+    )
+    window._check_required()
+    window.layout().activate()
+    assert window.width() == 1280 and window.height() == 900
+    for control in (window.workflow_status, window.gen_btn, window.cancel_btn):
+        assert window.rect().contains(QRect(control.mapTo(window, QPoint()), control.size()))
+    assert window.workflow_status.label.height() >= window.workflow_status.label.heightForWidth(
+        window.workflow_status.label.width()
+    )
+    if screenshot_dir:
+        window.grab().save(str(Path(screenshot_dir) / "snr_long_validation.png"))
+
+
+@pytest.mark.parametrize("choice", ["replace", "keep", "cancel"])
+def test_export_preflight_confirms_collisions_before_launch(qtbot, tmp_path, monkeypatch, choice):
+    monkeypatch.setattr(plot_gui, "load_rois_from_settings", lambda *_: {"ROI": ["Cz"]})
+    plans = []
+
+    class Worker(QObject):
+        progress = Signal(str, int, int)
+        finished = Signal(dict)
+
+        def __init__(self, *_args, **kwargs):
+            super().__init__()
+            plans.append(kwargs["export_plan"])
+
+        def run(self):
+            self.finished.emit({"generated_paths": [], "failed_items": [], "warning_items": []})
+
+    monkeypatch.setattr(plot_gui, "_Worker", Worker, raising=False)
+    window = PlotGeneratorWindow()
+    qtbot.addWidget(window)
+    window.folder_edit.setText(str(tmp_path))
+    window.out_edit.setText(str(tmp_path))
+    window.condition_combo.clear()
+    window.condition_combo.addItem("A")
+    window.title_edit.setText("A")
+    window.roi_combo.setCurrentText("ROI")
+    png, pdf = tmp_path / "A - ROI.png", tmp_path / "A - ROI.pdf"
+    png.write_bytes(b"old png")
+    pdf.write_bytes(b"old pdf")
+    prompts = []
+
+    def decide(choices):
+        prompts.append(choices)
+        assert plans == []
+        assert not window.params_box.isEnabled()
+        return {"replace": choices.replace, "keep": choices.keep_both, "cancel": None}[choice]
+
+    monkeypatch.setattr(window, "_choose_export_collision_action", decide)
+    window._generate()
+    qtbot.waitUntil(lambda: bool(prompts) and not window.has_active_generation(), timeout=5000)
+    assert len(prompts) == 1
+    assert window.params_box.isEnabled()
+    assert png.read_bytes() == b"old png"
+    assert pdf.read_bytes() == b"old pdf"
+    if choice == "cancel":
+        assert not plans
+    else:
+        assert len(plans) == 1
+        expected = "A - ROI.png" if choice == "replace" else "A - ROI (2).png"
+        assert plans[0][0].png_path.name == expected
+
+
+@pytest.mark.parametrize("action", ["Keep both", "Replace existing", "Cancel", "Escape"])
+def test_collision_dialog_safe_default_real_actions_and_geometry(qtbot, tmp_path, monkeypatch, action):
+    from Tools.Plot_Generator.export_plan import inspect_destinations
+
+    window = PlotGeneratorWindow()
+    qtbot.addWidget(window)
+    window.resize(1280, 900)
+    window.show()
+    qtbot.waitExposed(window)
+    (tmp_path / "A - ROI.png").write_bytes(b"old")
+    choices = inspect_destinations(str(tmp_path), (("A", "ROI", ""),))
+    observed = {}
+    # The suite normally auto-dismisses QMessageBox; this case exercises the real popup.
+    monkeypatch.setattr(QMessageBox, "exec", lambda box: QDialog.exec(box))
+
+    def choose():
+        dialog = window.findChild(QMessageBox)
+        try:
+            observed["default"] = dialog.defaultButton().text()
+            observed["fits"] = dialog.width() <= 1280 and dialog.height() <= 900
+            observed["buttons_fit"] = all(
+                dialog.rect().contains(QRect(button.mapTo(dialog, QPoint()), button.size()))
+                for button in dialog.buttons()
+            )
+            screenshot_dir = os.environ.get("FPVS_UX_SCREENSHOT_DIR")
+            if screenshot_dir:
+                path = Path(screenshot_dir)
+                path.mkdir(parents=True, exist_ok=True)
+                dialog.grab().save(str(path / f"snr_collision_{action.lower().replace(' ', '_')}.png"))
+            if action == "Escape":
+                qtbot.keyClick(dialog, Qt.Key_Escape)
+            elif action == "Cancel":
+                dialog.button(QMessageBox.Cancel).click()
+            else:
+                next(button for button in dialog.buttons() if button.text() == action).click()
+        finally:
+            if dialog.isVisible():
+                dialog.reject()
+
+    QTimer.singleShot(0, choose)
+    result = window._choose_export_collision_action(choices)
+    assert observed == {"default": "Keep both", "fits": True, "buttons_fit": True}
+    expected = {"Keep both": choices.keep_both, "Replace existing": choices.replace}.get(action)
+    assert result == expected
+    assert (tmp_path / "A - ROI.png").read_bytes() == b"old"

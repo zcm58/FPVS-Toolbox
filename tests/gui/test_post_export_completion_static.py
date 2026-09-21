@@ -166,5 +166,3 @@ def test_worker_reports_both_formats_through_compatible_payload(tmp_path, suffix
     payload = worker.finished.emit.call_args.args[0]
     assert payload["generated_excel_paths"] == [str(anchor.resolve())]
     assert payload["existing_excel_paths"] == [str(anchor.resolve())]
-
-

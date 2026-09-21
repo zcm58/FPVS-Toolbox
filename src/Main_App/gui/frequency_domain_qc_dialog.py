@@ -30,13 +30,13 @@ from PySide6.QtWidgets import (
 
 from Main_App.gui.components import (
     ActionRow,
-    AppDialog,
     ColumnFilterMenu,
     StatusBanner,
     SubsectionHeaderLabel,
     SurfaceSize,
     make_action_button,
 )
+from Main_App.gui.components.review_dialog import ReviewDialog
 from Main_App.processing.frequency_domain_qc import (
     DECISION_EXCLUDE_CONDITION,
     DECISION_INTERPOLATE_CONDITION_ELECTRODE,
@@ -78,7 +78,7 @@ class _ReviewTableItem(QTableWidgetItem):
         return super().__lt__(other)
 
 
-class FrequencyDomainQcReviewDialog(AppDialog):
+class FrequencyDomainQcReviewDialog(ReviewDialog):
     """Collect explicit choices without treating a BCA flag as an exclusion."""
 
     def __init__(
@@ -122,6 +122,15 @@ class FrequencyDomainQcReviewDialog(AppDialog):
         self._submitted_decisions: tuple[dict[str, object], ...] = ()
         self.setModal(True)
         self._build_ui()
+        self._remember_initial_review_state()
+
+    def _review_state(self) -> tuple:
+        return tuple(
+            (fingerprint, combo.currentData(), reason.text(),
+             self._artifact_controls[fingerprint].isChecked()
+             if fingerprint in self._artifact_controls else False)
+            for fingerprint, (combo, reason) in self._decision_controls.items()
+        )
 
     def review_decisions(self) -> tuple[dict[str, object], ...]:
         return tuple(dict(item) for item in self._submitted_decisions)

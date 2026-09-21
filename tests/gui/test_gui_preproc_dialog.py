@@ -49,6 +49,7 @@ from Main_App.gui.theme import apply_fpvs_theme
 from Main_App.processing.processing_controller import RawFileInfo
 import Main_App.gui.settings_panel as settings_panel
 from Main_App.gui.settings_panel import SettingsDialog
+from tests.gui.ux_capture import capture as capture_ux
 
 
 @pytest.mark.parametrize("accept", [False, True])
@@ -414,7 +415,12 @@ def test_protocol_tab_requires_explicit_legacy_confirmation(
     )
 
     dlg._save()
-    assert warnings[0][0] == "Invalid FPVS Protocol"
+    assert not warnings
+    dlg.tabs.setCurrentIndex(dlg._protocol_tab_index)
+    dlg._save()
+    assert not dlg.settings_validation_status.isHidden()
+    assert dlg.tabs.currentIndex() == dlg._protocol_tab_index
+    assert dlg.protocol_expected_cycles_edit.property("invalid")
     assert "frequency_protocol" not in json.loads(
         (project_root / "project.json").read_text(encoding="utf-8")
     )
@@ -538,6 +544,7 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
     qtbot.addWidget(win)
     win.loadProject(project)
 
+    win.settings.set_roi_pairs(_DEFAULT_ROI_PAIRS)
     dlg = SettingsDialog(win.settings, win, project)
     qtbot.addWidget(dlg)
 
@@ -638,7 +645,7 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
     assert detector_card.isAncestorOf(dlg.removed_electrode_detection_info_button)
     assert detector_card.isAncestorOf(dlg.manual_removed_electrodes_enabled_check)
     assert detector_card.isAncestorOf(dlg.manual_removed_electrodes_button)
-    assert cards["Processing QC"].isAncestorOf(dlg.manual_participant_exclusions_button)
+    assert cards["Processing QC"].isAncestorOf(dlg.dataset_exclusions_button)
     assert dlg.auto_detect_removed_electrodes_check.isChecked() is True
     assert dlg.removed_electrode_detection_mode_combo.currentData() == "auto"
     assert dlg.removed_electrode_detection_mode_combo.itemText(0) == (
@@ -650,7 +657,7 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
     assert dlg.manual_removed_electrodes_button.isEnabled() is True
     assert dlg.summed_bca_explanation_label.text() == SUMMED_BCA_SCREENING_BRIEF_TEXT
     assert dlg.summed_bca_screening_enabled_check.isChecked() is True
-    assert len(dlg.summed_bca_threshold_edits) == 11
+    assert len(dlg.summed_bca_threshold_edits) == 5
     assert all(
         summed_bca_card.isAncestorOf(edit)
         for edit in dlg.summed_bca_threshold_edits.values()
@@ -839,11 +846,15 @@ def test_experimental_sections_fit_embedded_workspace(experimental_settings_page
         name = widget.objectName() or type(widget).__name__
         assert widget.isVisibleTo(host), name
         minimum_height = widget.minimumSizeHint().height()
+        icon_only = isinstance(widget, QAbstractButton) and widget.property("iconButton") and not widget.text()
+        if icon_only:
+            minimum_height = widget.iconSize().height() + 4
         if isinstance(widget, QLabel) and widget.wordWrap():
             minimum_height = max(minimum_height, widget.heightForWidth(widget.width()))
         assert widget.height() >= minimum_height, name
         if isinstance(widget, (QLineEdit, QComboBox, QAbstractButton)):
-            assert widget.width() >= widget.minimumSizeHint().width(), name
+            minimum_width = widget.iconSize().width() + 4 if icon_only else widget.minimumSizeHint().width()
+            assert widget.width() >= minimum_width, name
         ancestor = widget.parentWidget()
         while ancestor is not None:
             bounds = QRect(widget.mapTo(ancestor, QPoint(0, 0)), widget.size())
@@ -874,7 +885,7 @@ def test_experimental_sections_fit_embedded_workspace(experimental_settings_page
     )
     assert page.removed_electrode_detection_mode_combo.currentData() is None
     assert len(page.raw_spectral_advanced_value_labels) == 8
-    assert len(page.summed_bca_threshold_edits) == 11
+    assert len(page.summed_bca_threshold_edits) == 5
 
     for index, controls in enumerate(expected_controls):
         sections.setCurrentIndex(index)
@@ -897,18 +908,10 @@ def test_experimental_sections_fit_embedded_workspace(experimental_settings_page
         footer = page.findChild(QWidget, "settings_experimental_footer")
         assert footer is not None
         buttons = {button.text(): button for button in footer.findChildren(QPushButton)}
-        assert set(buttons) == {"Change Projects Root...", "Save", "Cancel"}
+        assert set(buttons) == {"Save", "Cancel"}
         for button in buttons.values():
             assert_unclipped(button)
-        root_bounds = QRect(
-            buttons["Change Projects Root..."].mapTo(footer, QPoint(0, 0)),
-            buttons["Change Projects Root..."].size(),
-        )
-        save_bounds = QRect(
-            buttons["Save"].mapTo(footer, QPoint(0, 0)), buttons["Save"].size()
-        )
-        assert root_bounds.right() < save_bounds.left()
-        assert root_bounds.top() <= save_bounds.center().y() <= root_bounds.bottom()
+        capture_ux(host, f"settings-experimental-section-{index}")
 
 
 def test_invalid_experimental_threshold_reveals_its_section(
@@ -927,8 +930,9 @@ def test_invalid_experimental_threshold_reveals_its_section(
 
     assert page._validated_experimental_qc_settings() is None
 
-    assert warnings and warnings[0][0] == "Invalid Experimental Settings"
-    assert "warning_summed_bca_uv" in warnings[0][1]
+    assert not warnings
+    assert not page.settings_validation_status.isHidden()
+    assert "warning_summed_bca_uv" in page.settings_validation_status.text()
     assert page.experimental_tabs.currentWidget().isAncestorOf(edit)
     assert edit.isVisibleTo(page)
     qtbot.waitUntil(edit.hasFocus)
@@ -947,6 +951,9 @@ def test_harmonic_setting_change_after_processing_prompts_recalculation(
     win = MainWindow()
     qtbot.addWidget(win)
     win.loadProject(project)
+    # Keep this a harmonic-only edit, independent of migrated local ROI settings.
+    win.settings.set_roi_pairs(_DEFAULT_ROI_PAIRS)
+    win.settings.save()
 
     dlg = SettingsDialog(win.settings, win, project)
     qtbot.addWidget(dlg)
@@ -989,6 +996,8 @@ def test_selection_derivative_signature_tracks_analysis_and_roi_inputs(
     win = MainWindow()
     qtbot.addWidget(win)
     win.loadProject(project)
+    win.settings.set_roi_pairs(_DEFAULT_ROI_PAIRS)
+    win.settings.save()
     dlg = SettingsDialog(win.settings, win, project)
     qtbot.addWidget(dlg)
     monkeypatch.setattr(dlg, "_project_has_processed_outputs", lambda: True)
@@ -1034,7 +1043,7 @@ def test_saving_roi_removal_invalidates_qc_and_preserves_deletion(
     monkeypatch.setattr(QMessageBox, "warning", lambda *_a, **_kw: None)
     resumed = []
     monkeypatch.setattr(
-        dlg, "_resume_frequency_domain_post_processing", lambda: resumed.append(True),
+        dlg, "_resume_frequency_domain_post_processing", lambda **_kwargs: resumed.append(True),
     )
     monkeypatch.setattr(dlg, "_start_full_fft_grid_review", lambda **_kw: pytest.fail(
         "ROI edits must rebuild frequency QC before harmonic selection"
@@ -1311,10 +1320,14 @@ def test_cancelled_grid_review_can_restore_staged_harmonic_settings(
     win = MainWindow()
     qtbot.addWidget(win)
     win.loadProject(project)
+    win.settings.set_roi_pairs([("Saved ROI", ["O1", "O2"])])
+    win.settings.save()
     dlg = SettingsDialog(win.settings, win, project)
     qtbot.addWidget(dlg)
     original_protocol = project.frequency_protocol
     original_rois = win.settings.get_roi_pairs()
+    original_editor_rois = dlg.roi_editor.get_pairs()
+    assert original_editor_rois == [*original_rois, *_DEFAULT_ROI_PAIRS]
     observed_rois: list[tuple[str, list[tuple[str, list[str]]]]] = []
     win._stats_page = SimpleNamespace(
         refresh_rois=lambda: observed_rois.append(
@@ -1354,7 +1367,7 @@ def test_cancelled_grid_review_can_restore_staged_harmonic_settings(
     assert reloaded.preprocessing["harmonic_selection_profile"] == "legacy_fpvs_toolbox"
     assert reloaded.frequency_protocol == original_protocol
     assert win.settings.get_roi_pairs() == original_rois
-    assert dlg.roi_editor.get_pairs() == original_rois
+    assert dlg.roi_editor.get_pairs() == original_editor_rois
     assert (
         "plot",
         [("Temporary", ["OZ"]), *_DEFAULT_ROI_PAIRS],
@@ -1433,6 +1446,8 @@ def test_embedded_settings_harmonic_save_uses_post_processing_activity_page(
     win = MainWindow()
     qtbot.addWidget(win)
     win.loadProject(project)
+    win.settings.set_roi_pairs(_DEFAULT_ROI_PAIRS)
+    win.settings.save()
     win.show()
     win.open_settings_window()
     page = win._settings_page
@@ -1784,7 +1799,7 @@ def test_changed_fft_exclusions_resume_when_grid_thread_finishes_inside_review(
     monkeypatch.setattr(
         dlg,
         "_resume_frequency_domain_post_processing",
-        lambda: resumed.append(True),
+        lambda **_kwargs: resumed.append(True),
     )
 
     class _NestedReviewDialog:
@@ -2108,7 +2123,7 @@ def test_dialog_saves_bandpass_mapping(tmp_path, qtbot, monkeypatch):
     assert saved["preprocessing"]["high_pass"] == 0.2
 
 
-def test_preproc_tab_blocks_invalid_bandpass_when_leaving_tab(tmp_path, qtbot, monkeypatch):
+def test_preproc_validation_allows_navigation_but_blocks_invalid_save(tmp_path, qtbot, monkeypatch):
     os.environ["XDG_CONFIG_HOME"] = str(tmp_path)
     project = _prep_project(tmp_path)
 
@@ -2136,8 +2151,14 @@ def test_preproc_tab_blocks_invalid_bandpass_when_leaving_tab(tmp_path, qtbot, m
     dlg.preproc_edits[1].setText("50")
     dlg.tabs.setCurrentIndex(stats_tab_index)
 
+    assert dlg.tabs.currentIndex() == stats_tab_index
+    assert not warnings
+    dlg._save()
     assert dlg.tabs.currentIndex() == dlg._preproc_tab_index
-    assert warnings
+    assert dlg.focusWidget() is dlg.preproc_edits[0]
+    assert dlg.settings_validation_status.isVisible()
+    assert "Low-pass" in dlg.settings_validation_status.text()
+    assert not warnings
 
     dlg.preproc_edits[0].setText("60")
     dlg.preproc_edits[1].setText("0.5")

@@ -684,6 +684,7 @@ def test_group_overlay_skips_roi_when_every_selected_group_lacks_data(
 
     def _save_figure(_figure, path, *_args, **_kwargs) -> None:
         saved_paths.append(Path(path))
+        Path(path).write_bytes(b"rendered figure")
 
     monkeypatch.setattr("matplotlib.figure.Figure.savefig", _save_figure)
     monkeypatch.setattr(

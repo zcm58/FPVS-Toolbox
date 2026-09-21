@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (  # noqa: E402
 from Main_App.gui.signal_review_model import SignalReviewItem  # noqa: E402
 from Main_App.gui.signal_review_panel import SignalReviewPanel  # noqa: E402
 from Main_App.gui.theme import apply_fpvs_theme  # noqa: E402
+from tests.gui.ux_capture import capture, ux_capture_theme  # noqa: E402, F401
 
 
 @pytest.fixture
@@ -103,7 +104,30 @@ def test_filters_search_complete_evidence_and_clear_stale_selection(
     assert panel.details_view.toPlainText() == review_items[2].details
     panel.kind_combo.setCurrentIndex(0)
     assert panel.tree.topLevelItemCount() == 2
-    assert panel.details_view.toPlainText() == review_items[0].details
+    assert panel.details_view.toPlainText() == review_items[2].details
+
+
+def test_filter_keeps_matching_selection_and_expanded_recordings(review_panel, review_items):
+    panel = review_panel
+    first_root = panel.tree.topLevelItem(0)
+    second_root = panel.tree.topLevelItem(1)
+    first_root.setExpanded(False)
+    second_root.setExpanded(True)
+    panel.tree.setCurrentItem(second_root.child(0))
+
+    panel.search_edit.setText("P13")
+    assert not panel.tree.topLevelItem(0).isExpanded()
+    assert panel.tree.topLevelItem(1).isExpanded()
+    assert panel.details_view.toPlainText() == review_items[2].details
+    panel.search_edit.setText("Follow-up")
+    assert panel.details_view.toPlainText() == review_items[2].details
+    capture(panel, "signal-review-filtered-selection")
+    panel.search_edit.clear()
+    assert not panel.tree.topLevelItem(0).isExpanded()
+    assert panel.tree.topLevelItem(1).isExpanded()
+    assert panel.details_view.toPlainText() == review_items[2].details
+
+    capture(panel, "signal-review-restored-selection")
 
 
 def test_keyboard_selection_updates_complete_evidence(qtbot, review_panel, review_items):

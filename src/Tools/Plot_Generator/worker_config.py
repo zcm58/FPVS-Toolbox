@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Sequence
 
 from Main_App.projects import ProjectDatasetIndex
+from .export_plan import FigureExport
 
 
 @dataclass(frozen=True)
@@ -45,3 +46,4 @@ class PlotWorkerConfig:
     workbook_session_ids: Sequence[str] | None = None
     session_comparison_ids: Sequence[str] | None = None
     session_group_ids: Sequence[str] | None = None
+    export_plan: tuple[FigureExport, ...] | None = None

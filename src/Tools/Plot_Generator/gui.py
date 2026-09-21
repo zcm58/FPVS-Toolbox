@@ -29,6 +29,7 @@ from Tools.Plot_Generator.gui_settings import (
     _project_plot_input_folder,
 )
 from Tools.Plot_Generator.generation_workflow import PlotGeneratorWorkflowMixin
+from Tools.Plot_Generator.export_workflow import PlotExportWorkflowMixin
 from Tools.Plot_Generator.analysis_context import project_plot_default_upper_hz
 from Tools.Plot_Generator.ui_sections import PlotGeneratorUiSectionsMixin
 from Tools.Plot_Generator.selection_state import (
@@ -52,6 +53,7 @@ logger = logging.getLogger(__name__)
 
 
 class PlotGeneratorWindow(
+    PlotExportWorkflowMixin,
     PlotGeneratorWorkflowMixin,
     PlotGeneratorUiSectionsMixin,
     PlotGeneratorSessionSelectionMixin,
@@ -210,6 +212,7 @@ class PlotGeneratorWindow(
         self._thread: QThread | None = None
         self._worker: object | None = None
         self._generated_paths: list[str] = []
+        self._approved_export_plan = None
         self._failed_items: list[dict[str, str]] = []
         self._warning_items: list[dict[str, str]] = []
         self._spectral_qc_flags: list[dict[str, object]] = []
@@ -343,25 +346,33 @@ class PlotGeneratorWindow(
         required = bool(input_folder and output_folder and condition_a)
         status = ""
         variant = "info"
+        target = None
         if not self.roi_map:
             required = False
             status = "No valid ROIs are configured. Update Settings > ROIs before generating SNR plots."
             variant = "warning"
         elif not input_folder:
             status = "Choose the processed Excel folder."
+            target = self.input_folder_btn
         elif not output_folder:
             status = "Choose the plot output folder."
+            target = self.output_folder_btn
         elif not condition_a:
             status = "Choose a condition to plot."
+            target = self.condition_combo
         elif self.overlay_check.isChecked() and not condition_b:
             required = False
             status = "Choose a second condition for the overlay."
+            target = self.condition_b_combo
         elif self.overlay_check.isChecked() and condition_a == condition_b:
             required = False
+            status = "Choose two different conditions for the overlay."
+            target = self.condition_b_combo
         elif self._group_overlay_enabled() and not self._selected_groups():
             required = False
             status = "Select at least one project group to plot."
             variant = "warning"
+            target = self.group_list
         elif self._session_control_error:
             required = False
             status = self._session_control_error
@@ -373,10 +384,18 @@ class PlotGeneratorWindow(
                 required = False
                 status = str(exc)
                 variant = "warning"
-        self.gen_btn.setEnabled(required)
+        busy = getattr(self, "_thread", None) is not None or getattr(self, "_worker", None) is not None
+        self.gen_btn.setEnabled(required and not busy)
         self.open_output_btn.setEnabled(bool(output_folder))
-        if getattr(self, "_thread", None) is None and getattr(self, "_worker", None) is None:
-            if variant == "warning":
+        self._setup_issue_target = target
+        self.fix_setup_btn.setVisible(bool(status) and target is not None and not busy)
+        if not busy:
+            if status:
                 self._set_workflow_status(status, variant)
             else:
                 self.workflow_status.hide()
+
+    def _focus_setup_issue(self) -> None:
+        target = getattr(self, "_setup_issue_target", None)
+        if target is not None:
+            target.setFocus()

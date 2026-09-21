@@ -9,7 +9,6 @@ from typing import Sequence
 import numpy as np
 
 from Main_App.exports.figure_style import (
-    FIGURE_EXPORT_DPI,
     FIGURE_STANDARD_LANDSCAPE_SIZE_IN,
     apply_axis_text_style,
     figure_legend_kwargs,
@@ -20,12 +19,12 @@ from Tools.Plot_Generator.render_naming import (
     claim_figure_stem,
 )
 from Tools.Plot_Generator.rendering import (
-    _PNG_COMPRESSION_LEVEL,
     _add_reference_lines,
     _closest_frequency_indices,
     plt,
 )
 from Tools.Plot_Generator.session_aggregation import SessionSNRAggregation
+from Tools.Plot_Generator.export_plan import save_worker_figure_pair
 
 FIXED_ORDER_CAVEAT = (
     "Phase is confounded with visit order and elapsed time because every participant "
@@ -147,12 +146,8 @@ class SessionPlotRenderingMixin:
             self._mark_timing("plot_render", render_started)
             save_started = time.perf_counter()
             try:
-                fig.savefig(
-                    png_path,
-                    dpi=FIGURE_EXPORT_DPI,
-                    pil_kwargs={"compress_level": _PNG_COMPRESSION_LEVEL},
-                )
-                fig.savefig(pdf_path, format="pdf", dpi=FIGURE_EXPORT_DPI)
+                if not save_worker_figure_pair(self, fig, png_path, pdf_path):
+                    return
             finally:
                 self._mark_timing("file_save", save_started)
                 plt.close(fig)

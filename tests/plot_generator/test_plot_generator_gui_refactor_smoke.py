@@ -29,7 +29,8 @@ def test_condition_changes_do_not_require_removed_scalp_titles(qtbot, tmp_path):
     win.condition_combo.setCurrentText("CondB")
     qtbot.wait(50)
     assert not win.gen_btn.isEnabled()
-    assert win.workflow_status.isHidden()
+    assert not win.workflow_status.isHidden()
+    assert "two different conditions" in win.workflow_status.text()
     assert win.progress_bar.isHidden()
 
     win.condition_b_combo.setCurrentText("CondA")
@@ -39,9 +40,14 @@ def test_condition_changes_do_not_require_removed_scalp_titles(qtbot, tmp_path):
 
 
 @pytest.mark.usefixtures("qtbot")
-def test_idle_status_and_progress_do_not_consume_page_rows(qtbot):
+def test_valid_idle_status_and_progress_do_not_consume_page_rows(qtbot, tmp_path):
     win = PlotGeneratorWindow()
     qtbot.addWidget(win)
+    win.folder_edit.setText(str(tmp_path))
+    win.out_edit.setText(str(tmp_path / "plots"))
+    win.condition_combo.addItem("Condition A")
+    win.condition_combo.setCurrentText("Condition A")
+    win._check_required()
     win.show()
     qtbot.waitExposed(win)
 

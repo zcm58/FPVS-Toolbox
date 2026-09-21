@@ -22,6 +22,7 @@ from .dataset_identity import (
     infer_workbook_participant_id,
     is_multi_group_manifest,
     participant_group_label_map_from_manifest,
+    raw_filename_participant_aliases,
 )
 from .dataset_paths import (
     DatasetIndexError,
@@ -698,6 +699,14 @@ def load_project_dataset_index(dataset_path: str | Path) -> ProjectDatasetIndex:
         participant_id.casefold(): participant_id
         for participant_id in participants
     }
+    if not repeated_session_project:
+        try:
+            participant_lookup.update(raw_filename_participant_aliases({
+                participant.participant_id: participant.raw_file
+                for participant in participants.values()
+            }))
+        except ValueError as exc:
+            raise DatasetIndexError(str(exc)) from exc
     for path in workbook_paths:
         condition, layout, observed_group = workbook_location(
             path,

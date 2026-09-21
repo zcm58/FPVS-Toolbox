@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+from dataclasses import replace
 from pathlib import Path
 from threading import get_ident
 import time
@@ -60,6 +62,7 @@ from Tools.Free_Harmonic_Clustering.gui.operation_registry import (  # noqa: E40
     register_active_operation,
     release_active_operation,
 )
+from tests.gui.ux_capture import ux_capture_theme  # noqa: E402, F401
 
 
 class _FakeBackend:
@@ -738,7 +741,7 @@ def test_worker_preserves_typed_post_processing_failure() -> None:
     assert invalid_failures == ["Invalid FullFFT state."]
 
 
-def test_diagnostics_status_points_to_exclusion_review(
+def test_valid_diagnostics_context_keeps_compact_idle_footer(
     qtbot,
     tmp_path: Path,
 ) -> None:
@@ -1256,3 +1259,28 @@ def test_main_window_close_waits_for_retired_page_operations(
         release_active_operation(token)
 
     assert not has_active_operations()
+
+
+def test_incompatible_grid_has_visible_reason_and_fits_workspace(qtbot, tmp_path):
+    page = _page(qtbot, tmp_path)
+    page.resize(1280, 900)
+    page._on_inspection_completed(replace(
+        _options(tmp_path), grid_compatible=False,
+        compatibility_message=(
+            "The selected recordings do not share a compatible FullFFT frequency grid. "
+            "Review the processing settings and regenerate the affected condition outputs "
+            "before running Free Harmonic Clustering Analysis."
+        ),
+    ))
+    assert not page.run_analysis_button.isEnabled()
+    assert page.workflow_status.isVisible()
+    page.layout().activate()
+    assert page.width() == 1280 and page.height() == 900
+    for control in (page.workflow_status, page.run_analysis_button, page.open_results_button):
+        assert page.rect().contains(QtCore.QRect(control.mapTo(page, QtCore.QPoint()), control.size()))
+    assert page.workflow_status.label.height() >= page.workflow_status.label.heightForWidth(
+        page.workflow_status.label.width()
+    )
+    screenshot_dir = os.environ.get("FPVS_UX_SCREENSHOT_DIR")
+    if screenshot_dir:
+        page.grab().save(str(Path(screenshot_dir) / "fhc_long_validation.png"))

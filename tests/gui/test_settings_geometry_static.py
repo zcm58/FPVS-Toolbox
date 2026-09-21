@@ -99,6 +99,7 @@ def _panel(tmp_path, mapping):
         fixed_harmonic_input_mode_combo=_Combo(["frequency_list"], "frequency_list"),
         fixed_harmonic_upper_index_edit=edit(""), fixed_harmonic_upper_frequency_edit=edit(""),
         _focus_invalid_preproc_field=Mock(),
+        _show_settings_validation=Mock(),
         _harmonic_policy_payload_from_preprocessing=lambda normalized: normalized,
     )
     _load_methods(panel)
@@ -172,5 +173,8 @@ def test_settings_geometry_refresh_failure_blocks_save_validation(tmp_path, fail
     panel.project.refresh_electrode_geometry_settings = Mock(side_effect=failure)
 
     assert panel._validated_preproc_payload() is None
-    panel.messages.warning.assert_called_once()
-    assert str(failure) in panel.messages.warning.call_args.args[2]
+    if isinstance(failure, OSError):
+        panel.messages.warning.assert_called_once()
+        assert str(failure) in panel.messages.warning.call_args.args[2]
+    else:
+        panel._show_settings_validation.assert_called_once_with(str(failure))

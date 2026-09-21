@@ -13,6 +13,23 @@ Existing long/wide Excel reports remain unchanged. Reprocessing/exclusion
 cleanup retires both exact sibling anchors and their declared companions so
 an obsolete XLSX cannot reappear after its native replacement is removed.
 
+Raw discovery and registration share `projects/raw_identity.py`: a separated
+`P10` token in `SC_P10.bdf` is participant `P10`, not `SCP10`. Existing manifest
+IDs are validated rather than silently renamed because exclusions and other
+participant-owned state may depend on them. An explicit repair must preserve
+those references and reject conflicting identities. No raw filename change is
+needed for a correctly separated participant token.
+
+For single-session projects, the dataset index recognizes historical exports
+named from a sanitized registered raw stem (for example,
+`SCP10_Faces_Results.xlsx`). It maps that prefix to `P10` only when the registered
+raw file itself parses to `P10`. Alias collisions with another participant are
+errors, and arbitrary embedded P-numbers do not establish identity. Existing
+workbooks keep their names, canonical exclusions still apply, and repeated-session
+recording identity remains unchanged. Regression coverage lives in
+`tests/project_io/test_project_dataset_index.py` and
+`tests/processing/test_processing_discovery_v2.py`.
+
 Dense spectral companion validation checks checksums and every array's dtype,
 shape, and truncation from its header without materializing dense values.
 Metadata-only reads allocate no dense arrays; sheet values load lazily only

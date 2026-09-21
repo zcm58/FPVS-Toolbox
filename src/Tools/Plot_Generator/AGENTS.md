@@ -17,6 +17,10 @@ Current ownership map:
   worker outcomes, and completion/thread-exit handling.
 - `generation_outcome.py`: pure worker-payload normalization and
   completion-summary formatting used by the GUI workflow.
+- `export_workflow.py`: background destination preflight and the GUI-only
+  Replace existing / Keep both / Cancel decision before a generation run.
+- `export_plan.py`: GUI-neutral approved figure-pair destinations, freshness
+  checks, staged rendering, and rollback if publishing a PNG/PDF pair fails.
 - `ui_sections.py`, `ui_actions.py`, `ui_header.py`, `log_dialog.py`, `gui_settings.py`,
   `selection_state.py`, `project_paths.py`, and `manifest_utils.py`: focused
   GUI, settings, selection, and thin shared-project adapters.
@@ -170,9 +174,22 @@ v2.1 project contract:
 - Publication output is figures only: write matching PNG and PDF files directly
   to the selected output folder. Do not create per-run subfolders, plotted-
   source spreadsheets, spectral-QC workbooks, or JSON manifests.
+- Check destination metadata on a background worker before generation. Ask
+  about existing figure pairs once per requested batch; default to Keep both,
+  suffix only colliding pairs, and preserve ordinary filenames for new outputs.
+  Cancel must not change existing files. Freeze setup controls until the run
+  exits so rendering uses the confirmed destination plan. A destination changed
+  after confirmation must stop publication rather than overwrite it. Render
+  both files in temporary staging, preserve the original pair on render failure
+  or pre-publication cancellation, and roll back a failed pair publication.
+  If the filesystem also blocks restoration, retain the backup staging folder
+  and report its recovery path instead of deleting the only recovery copy.
+  Direct workers without a GUI-approved plan may create new files only.
 - Keep the embedded SNR page free of page-level scrolling. Use the compact
   title-only header, hide idle status/progress rows, and keep detailed run
   messages in the focused generation-log dialog opened by **View Log**.
+  Hide idle status only when setup is valid. Blocked setup must show its
+  actionable reason; Fix setup focuses an applicable input without changing it.
 - Spectral QC is report-only. If no cells can be evaluated because participant
   or shared-electrode coverage is insufficient, record the evidence as
   unavailable with a reason; never present zero evaluated cells as a completed
@@ -213,6 +230,14 @@ python .agents/scripts/verify.py --scope plot-generator --tier focused
 
 The driver selects `.venv1` or `.venv`, runs locally safe worker/rendering
 checks, and leaves Plot Generator pytest-qt coverage to CI by default.
+
+Visible smoke for export decisions: generate the same condition/ROI twice;
+verify Keep both preserves the original PNG/PDF pair, Replace changes only the
+approved pair, Cancel changes neither, and collision-free runs do not prompt.
+Repeat with All Conditions, group overlays, and session comparison. Cancel
+during preflight/rendering and verify controls unlock after worker exit. At
+1280x900, choose the same condition on both overlay sides; confirm the reason
+and Fix setup action fit, focus Condition B, and disappear after correction.
 
 Future feature/fix plans:
 

@@ -11,6 +11,8 @@ from typing import Any, Callable, Mapping
 import psutil
 from PySide6.QtCore import QObject, QThread, QTimer, Slot
 from PySide6.QtWidgets import QDialog, QMessageBox
+from Main_App.gui.run_outcome_model import summarize_run
+from Main_App.gui.run_outcome import present_last_run
 
 from Main_App.diagnostics.audit import format_audit_summary, write_audit_json
 from Main_App.gui import shell_status
@@ -989,6 +991,7 @@ def resume_post_processing(
             QMessageBox.warning(host, "Post-processing Incomplete", failure_reason)
         else:
             host.log("Post-processing resume finished.", level=logging.INFO)
+        present_last_run(host, success=not bool(failure_reason))
         if on_finished is not None:
             try:
                 on_finished()
@@ -1519,6 +1522,11 @@ def start_processing(host: Any, *, log: logging.Logger = logger) -> None:
                 f"{refreshed} skipped file(s).",
                 level=logging.INFO,
             )
+        host._last_run_outcome = None
+        host._last_run_issue_report = ""
+        panel = getattr(host, "last_run_panel", None)
+        if panel is not None:
+            panel.hide()
         host._processing_plan = chosen_plan
         host._processing_run_mode = "Single" if is_single_ui else "Batch"
         host._processing_user_choice = chosen_plan.choice
@@ -1898,6 +1906,7 @@ def on_processing_finished(host: Any, payload: dict | None = None) -> None:
                     plan,
                     [*results, *error_results, *excluded_results],
                 )
+                host._last_run_issue_report = str(qc_summary_path)
                 host.log(
                     f"Preprocessing QC Report saved: {qc_summary_path}",
                     level=logging.INFO,
@@ -1910,6 +1919,18 @@ def on_processing_finished(host: Any, payload: dict | None = None) -> None:
                 )
 
     def _finish_processing_run() -> None:
+        run_paths = {str(path.resolve()) for path in plan.run_files} if plan is not None else set()
+        states = plan.states if plan is not None else ()
+        host._last_run_outcome = summarize_run(
+            results=results, failures=[*failed_run_results, *error_results], exclusions=excluded_results,
+            reused_files=[str(state.info.path) for state in states
+                          if state.status == "completed" and str(state.info.path.resolve()) not in run_paths],
+            previously_excluded=[str(state.info.path) for state in states
+                                 if state.status == "excluded" and str(state.info.path.resolve()) not in run_paths],
+            interrupted_files=interrupted_files, condition_warnings=condition_warning_results,
+        )
+        folder = getattr(host, "save_folder_path", None)
+        host._last_run_output_folder = str(folder.get()) if hasattr(folder, "get") else ""
         # Prefer the original worker error over the ledger's derived failure for
         # the same file, while retaining ledger-only incomplete-output findings.
         summary_by_file = {
@@ -2063,6 +2084,7 @@ def finalize_processing(
     if cancelled:
         success = False
 
+    host._processing_run_cancelled = cancelled
     host._run_active = False
     try:
         host._start_guard.end()

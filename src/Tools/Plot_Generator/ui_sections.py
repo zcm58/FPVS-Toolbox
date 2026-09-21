@@ -106,15 +106,15 @@ class PlotGeneratorUiSectionsMixin:
         file_grid.addWidget(output_picker, 1, 1)
         file_grid.setColumnStretch(1, 1)
 
+        picker_button_style = "QPushButton { text-align: left; padding-left: 10px; }"
+        self.input_folder_btn.setStyleSheet(picker_button_style)
+        self.output_folder_btn.setStyleSheet(picker_button_style)
         picker_button_width = max(
             self.input_folder_btn.sizeHint().width(),
             self.output_folder_btn.sizeHint().width(),
         )
         self.input_folder_btn.setFixedWidth(picker_button_width)
         self.output_folder_btn.setFixedWidth(picker_button_width)
-        picker_button_style = "QPushButton { text-align: left; padding-left: 10px; }"
-        self.input_folder_btn.setStyleSheet(picker_button_style)
-        self.output_folder_btn.setStyleSheet(picker_button_style)
 
         file_layout.addLayout(file_grid)
 

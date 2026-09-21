@@ -9,7 +9,7 @@ from collections.abc import Mapping
 from dataclasses import replace
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QCloseEvent, QPainter, QPen, QPolygonF
+from PySide6.QtGui import QColor, QPainter, QPen, QPolygonF
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -27,11 +27,11 @@ from PySide6.QtWidgets import (
 
 from Main_App.gui.components import (
     ActionRow,
-    AppDialog,
     StatusBanner,
     SurfaceSize,
     make_action_button,
 )
+from Main_App.gui.components.review_dialog import ReviewDialog
 from Main_App.gui.style_tokens import (
     ACCENT_COLOR,
     BORDER_COLOR,
@@ -175,7 +175,7 @@ def _review_status_text(item: KurtosisReviewItem) -> str:
     return "New finding"
 
 
-class KurtosisReviewDialog(AppDialog):
+class KurtosisReviewDialog(ReviewDialog):
     """Review pending channels with an optional, auditable experimental rule."""
 
     def __init__(
@@ -238,6 +238,14 @@ class KurtosisReviewDialog(AppDialog):
         self._validate_unique_items()
         self._bulk_undo: tuple[tuple[int, int, str], ...] = ()
         self._build_ui()
+        self._remember_initial_review_state()
+
+    def _review_state(self) -> tuple:
+        return (
+            self.auto_all_checkbox.isChecked(), self.auto_checkbox.isChecked(),
+            tuple((key, control.currentData(), self._reason_controls[key].text())
+                  for key, control in self._decision_controls.items()),
+        )
 
     def _validate_unique_items(self) -> None:
         keys = [(item.recording_id.casefold(), item.channel.casefold()) for item in self._items]
@@ -703,14 +711,6 @@ class KurtosisReviewDialog(AppDialog):
         if self.result() != QDialog.DialogCode.Accepted:
             raise KurtosisReviewDialogError("Kurtosis review was not completed.")
         return self.auto_all_checkbox.isChecked()
-
-    def reject(self) -> None:
-        self._accepted_receipts = None
-        super().reject()
-
-    def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
-        self._accepted_receipts = None
-        super().closeEvent(event)
 
 
 __all__ = [

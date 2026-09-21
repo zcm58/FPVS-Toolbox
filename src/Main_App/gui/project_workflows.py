@@ -8,12 +8,13 @@ from types import SimpleNamespace
 from typing import Any, Callable
 
 from PySide6.QtCore import QThread
-from PySide6.QtWidgets import QApplication, QLineEdit, QMessageBox
+from PySide6.QtWidgets import QLineEdit, QMessageBox
 
 from Main_App.processing.processing_controller import prepare_batch_files
 from Main_App.processing.project_processing_cache import ProjectProcessingCacheUsage
-from Main_App.gui.op_guard import OpGuard
 from Main_App.gui import shell_status
+from Main_App.gui.project_drafts import confirm_project_draft_exit, remember_saved_setup
+from Main_App.gui.event_map import validated_event_map
 from Main_App.projects.project_manager import (
     edit_project_settings as _edit_project_settings,
     loadProject as _load_project,
@@ -77,6 +78,8 @@ def new_project(host: Any) -> None:
         new_project_from_fpvs_config(host)
         return
     if choice == NEW_PROJECT_MANUAL:
+        if not confirm_project_draft_exit(host):
+            return
         _new_project(host)
         current_project = getattr(host, "currentProject", None)
         if current_project is not None and current_project is not previous_project:
@@ -86,6 +89,8 @@ def new_project(host: Any) -> None:
 
 
 def new_project_from_fpvs_config(host: Any) -> None:
+    if not confirm_project_draft_exit(host):
+        return
     project = _new_project_from_fpvs_config(host, host)
     if project is not None:
         notify_project_ready(host)
@@ -94,6 +99,8 @@ def new_project_from_fpvs_config(host: Any) -> None:
 
 
 def open_existing_project(host: Any) -> None:
+    if not confirm_project_draft_exit(host):
+        return
     _open_existing_project(host, host)
 
 
@@ -102,11 +109,15 @@ def import_fpvs_config_project(host: Any) -> None:
 
 
 def open_project_path(host: Any, folder: str) -> None:
+    if not confirm_project_draft_exit(host):
+        return
     _open_project_path(host, folder)
     notify_project_ready(host)
 
 
 def edit_project_settings(host: Any) -> None:
+    if not confirm_project_draft_exit(host):
+        return
     _edit_project_settings(host)
     sync_input_folder_display(host)
     host._update_start_enabled()
@@ -533,6 +544,15 @@ def load_project(
     entry_adapter_factory: Callable[[QLineEdit], Any],
 ) -> None:
     _load_project(host, project)
+    selected_file = getattr(host, "le_input_file", None)
+    if selected_file is not None:
+        selected_file.clear()
+    host._selected_bdf = None
+    remember_saved_setup(host)
+    outcome = getattr(host, "last_run_panel", None)
+    if outcome is not None:
+        outcome.hide()
+    host._last_run_outcome = None
 
     # Opening an existing analysis is independent of discovering a new batch.
     # Never change recording membership while opening a project.
@@ -618,91 +638,33 @@ def load_project(
     host.max_bad_channels_alert_entry = make_entry(p.get("max_bad_chans"))
 
 
-def save_project_settings(host: Any) -> None:
-    """Persist project options and event map. Non-blocking, idempotent."""
+def save_project_settings(host: Any) -> bool:
+    """Validate and persist the complete setup draft without success popups."""
     if not getattr(host, "currentProject", None):
         QMessageBox.warning(host, "No Project", "Please open or create a project first.")
-        return
-
-    guard = getattr(host, "_save_guard", None)
-    if guard is None:
-        host._save_guard = OpGuard()
-        guard = host._save_guard
-    if not guard.start():
-        QMessageBox.information(host, "Busy", "Save already in progress.")
-        return
-
+        return False
+    mapping = validated_event_map(host, focus_error=True)
+    if mapping is None:
+        host.show_home_page()
+        validated_event_map(host, focus_error=True)
+        return False
+    project = host.currentProject
+    old_map = dict(project.event_map or {})
+    old_opts = dict(project.options or {})
+    opts = dict(old_opts)
+    single = getattr(host, "rb_single", None)
+    opts["mode"] = "single" if single is not None and single.isChecked() else "batch"
+    project.event_map, project.options = mapping, opts
     try:
-        try:
-            host.clearFocus()
-            QApplication.processEvents()
-        except Exception:
-            pass
-
-        old_map: dict[str, int] = dict(getattr(host.currentProject, "event_map", {}) or {})
-        old_opts: dict = dict(getattr(host.currentProject, "options", {}) or {})
-
-        opts = getattr(host.currentProject, "options", {})
-        if not isinstance(opts, dict):
-            opts = {}
-        opts["mode"] = (
-            "single"
-            if getattr(host, "rb_single", None) and host.rb_single.isChecked()
-            else "batch"
-        )
-        host.currentProject.options = opts
-
-        mapping: dict[str, int] = {}
-        for row in getattr(host, "event_rows", []):
-            edits = row.findChildren(QLineEdit)
-            if len(edits) < 2:
-                continue
-            label_edit = edits[0]
-            label = label_edit.text().strip()
-            ident = edits[1].text().strip()
-            if not label:
-                continue
-            illegal_chars = _illegal_condition_chars(label)
-            if illegal_chars:
-                bad = " ".join(illegal_chars)
-                QMessageBox.warning(
-                    host,
-                    "Invalid Condition Name",
-                    (
-                        "Condition names cannot contain characters that are invalid for "
-                        "Windows file/folder names.\n\n"
-                        f"Condition: {label}\n"
-                        f"Illegal character(s): {bad}\n\n"
-                        "Please rename this condition using only allowed characters.\n"
-                        f"Not allowed: {WINDOWS_FORBIDDEN_CONDITION_CHARS_TEXT}"
-                    ),
-                )
-                try:
-                    label_edit.setFocus()
-                    label_edit.selectAll()
-                except Exception:
-                    pass
-                return
-            try:
-                mapping[label] = int(ident)
-            except Exception:
-                # Ignore non-integer IDs silently to match prior behavior.
-                continue
-
-        if mapping == old_map and opts == old_opts:
-            return
-
-        host.currentProject.event_map = mapping
-        host.currentProject.save()
-
-        QMessageBox.information(host, "Project Saved", "All settings written to project.json.")
-    except Exception as e:
-        QMessageBox.critical(host, "Save Error", str(e))
-    finally:
-        try:
-            guard.end()
-        except Exception:
-            pass
+        if mapping != old_map or opts != old_opts:
+            project.save()
+    except Exception as exc:
+        project.event_map, project.options = old_map, old_opts
+        QMessageBox.critical(host, "Save Error", str(exc))
+        return False
+    remember_saved_setup(host)
+    host.log("Project settings saved.")
+    return True
 
 
 def sync_input_folder_display(host: Any) -> None:

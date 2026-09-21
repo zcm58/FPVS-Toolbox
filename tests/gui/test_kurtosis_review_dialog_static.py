@@ -28,7 +28,7 @@ def test_kurtosis_review_dialog_uses_pyside6_and_shared_components() -> None:
     assert "PySide6.QtGui" in imports
     assert "PySide6.QtWidgets" in imports
     assert "Main_App.gui.components" in imports
-    assert "class KurtosisReviewDialog(AppDialog):" in source
+    assert "class KurtosisReviewDialog(ReviewDialog):" in source
     assert "Tkinter" not in source
     assert "CustomTkinter" not in source
     application_constructor = "Q" + "Application("
@@ -101,9 +101,9 @@ def test_cancel_and_close_cannot_expose_review_receipts() -> None:
     source = _source(DIALOG_PATH)
 
     assert "self.cancel_button.clicked.connect(self.reject)" in source
-    assert "def reject(self)" in source
-    assert "def closeEvent(self, event: QCloseEvent)" in source
-    assert "self._accepted_receipts = None" in source
+    assert "class KurtosisReviewDialog(ReviewDialog):" in source
+    assert "self._remember_initial_review_state()" in source
+    assert "self._accepted_receipts: dict[str, dict[str, dict[str, object]]] | None = None" in source
     assert "self.result() != QDialog.DialogCode.Accepted" in source
     assert "downstream processing remains blocked" in source
 

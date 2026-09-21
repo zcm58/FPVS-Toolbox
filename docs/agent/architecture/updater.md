@@ -30,6 +30,12 @@ extraction into a common backend straightforward. Product names, repo identity,
 GUI adapters, version discovery, and registration remain product-specific;
 do not couple Toolbox project or EEG contracts to the updater.
 
+The application-wide `UpdateLifecycle.eventFilter` consumes only application
+Quit events while updater jobs need shutdown coordination. Other deliveries
+return `False` directly: calling the no-op QObject base filter adds an unnecessary
+PySide argument conversion, which failed for an item wrapper reported during
+Dataset Exclusions scrolling. Keep ordinary GUI events outside updater work.
+
 `Main_App.Project` remains available through a lazy compatibility attribute.
 The updater must not import project models, `config`, NumPy, MNE, analysis tools,
 or the main window. `config.py:FPVS_TOOLBOX_VERSION` remains the single source
@@ -136,6 +142,13 @@ Keep public GitHub release notes to brief, nontechnical changes. Do not include
 validation details; for example, "Improved app updates and patch installation."
 
 ## Verification and manual acceptance
+
+Scroll regression: in Dataset Exclusions with more than one screen of entries,
+scroll the table both ways after editing a scope. Confirm choices and selection
+remain intact, no reload/save is triggered, and no event-filter tracebacks appear.
+`test_dataset_exclusions_qt.py` exercises 60 visible wheel events against a
+54-entry synthetic list with the updater lifecycle installed; the updater GUI
+suite replays the reported dispatcher/item callback and verifies Quit handling.
 
 ```console
 python .agents/scripts/verify.py --scope updates --tier focused

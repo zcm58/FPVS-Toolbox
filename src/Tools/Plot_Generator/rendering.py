@@ -10,7 +10,6 @@ import matplotlib
 import numpy as np
 
 from Main_App.exports.figure_style import (
-    FIGURE_EXPORT_DPI,
     FIGURE_STANDARD_LANDSCAPE_SIZE_IN,
     apply_axis_text_style,
     apply_matplotlib_figure_style,
@@ -22,6 +21,7 @@ from Tools.Plot_Generator.render_naming import (
     claim_figure_stem,
     safe_figure_stem,
 )
+from Tools.Plot_Generator.export_plan import save_worker_figure_pair
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -38,7 +38,6 @@ plt.rcParams.update(
 _DEFAULT_A_PEAKS = "A-Peaks"
 _DEFAULT_B_PEAKS = "B-Peaks"
 _GROUP_MARKERS = ("o", "^", "s", "D", "P", "X", "v", "<", ">")
-_PNG_COMPRESSION_LEVEL = 1
 
 # Compatibility re-export for tests and older callers of the private helper.
 _safe_figure_stem = safe_figure_stem
@@ -334,12 +333,8 @@ class PlotRenderingMixin:
             self._mark_timing("plot_render", render_started)
             save_started = time.perf_counter()
             try:
-                fig.savefig(
-                    out_path,
-                    dpi=FIGURE_EXPORT_DPI,
-                    pil_kwargs={"compress_level": _PNG_COMPRESSION_LEVEL},
-                )
-                fig.savefig(pdf_path, format="pdf", dpi=FIGURE_EXPORT_DPI)
+                if not save_worker_figure_pair(self, fig, out_path, pdf_path):
+                    return
             finally:
                 self._mark_timing("file_save", save_started)
                 plt.close(fig)
@@ -473,16 +468,8 @@ class PlotRenderingMixin:
             self._mark_timing("plot_render", render_started)
             save_started = time.perf_counter()
             try:
-                fig.savefig(
-                    out_path,
-                    dpi=FIGURE_EXPORT_DPI,
-                    pil_kwargs={"compress_level": _PNG_COMPRESSION_LEVEL},
-                )
-                fig.savefig(
-                    pdf_path,
-                    format="pdf",
-                    dpi=FIGURE_EXPORT_DPI,
-                )
+                if not save_worker_figure_pair(self, fig, out_path, pdf_path):
+                    return
             finally:
                 self._mark_timing("file_save", save_started)
                 plt.close(fig)

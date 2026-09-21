@@ -33,6 +33,9 @@ class _Widget:
     set_text = setText
     setToolTip = setText
 
+    def setAccessibleDescription(self, value):
+        self.accessible_description = str(value)
+
     def set_variant(self, value):
         self.variant = value
 
@@ -94,7 +97,7 @@ def _page(tmp_path, *, snapshot=None, reason="Protocol metadata is missing base_
     for name in (
         "plan_context_label", "plan_summary_label", "condition_plan_row", "reference_condition_combo",
         "review_comparisons_button", "review_exclusions_button", "plan_exclusion_row", "exclusion_count_label", "family_correction_note",
-        "workflow_status", "protocol_settings_button", "retry_loading_button", "run_analysis_button",
+        "workflow_status", "fix_setup_button", "protocol_settings_button", "retry_loading_button", "run_analysis_button",
         "cancel_button", "workflow_actions", "design_combo", "harmonic_mode_combo", "design_stack",
         "plan_card", "fixed_highest_combo", "progress_bar", "paired_condition_a_combo",
         "paired_condition_b_combo", "paired_group_filter_combo", "independent_condition_combo",
@@ -102,6 +105,10 @@ def _page(tmp_path, *, snapshot=None, reason="Protocol metadata is missing base_
     ):
         setattr(page, name, _Widget())
     page.family_checks = {name: _Widget() for name in ("between_groups", "between_conditions", "within_group_visits", "group_visit_change")}
+    page._setup_error = lambda: (
+        page._frequency_error if page._frequency_snapshot is None
+        else "Project inputs are not available."
+    )
     page.plan_context_label.value = "Loading project design..."
     page.plan_summary_label.value = "16 old comparisons"
     for method in methods:

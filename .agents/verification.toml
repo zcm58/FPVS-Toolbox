@@ -42,6 +42,8 @@ tests = [
   "tests/gui/test_protocol_condition_markers_static.py",
   "tests/gui/test_recording_marker_schemas_static.py",
   "tests/gui/test_post_export_completion_static.py",
+  "tests/gui/test_condition_input_model.py",
+  "tests/gui/test_run_outcome_model.py",
   "tests/gui/test_roi_electrode_selector_state.py",
   "tests/gui/test_frequency_domain_qc_handoff_static.py",
   "tests/workers/test_frequency_domain_qc_decision_worker_static.py",
@@ -218,6 +220,7 @@ manual_smoke = ["Start preprocessing at 1280x900. Leave step 2 open and confirm 
 [scopes.plot-generator]
 audits = ["gui", "paths"]
 tests = [
+  "tests/plot_generator/test_export_plan.py",
   "tests/plot_generator/test_plot_generator_baseline.py",
   "tests/plot_generator/test_plot_generator_analysis_context.py",
   "tests/plot_generator/test_plot_generator_cancellation.py",

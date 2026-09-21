@@ -11,6 +11,12 @@ Primary paths:
   and migrated GUI surfaces. It re-exports presentation widgets and adds
   standard window/dialog shells, action rows, surface sizing, and message
   helpers.
+- `src/Main_App/gui/components/review_dialog.py`: shared discard protection for
+  frequency-domain, kurtosis and interpolation-burden QC review dialogs. Each
+  captures its populated initial choices; Cancel, Escape and window close ask
+  before discarding changed decisions, reasons, scopes or repair confirmations.
+  View-only filtering does not prompt, and applying still requires each review's
+  existing validation. Keep reviewing is the default and escape action.
 - `src/Main_App/gui/widgets/`: shared PySide6 presentation primitives for
   reusable buttons, cards, form rows, the busy spinner, the welcome brain
   animation, and inline status widgets.
@@ -33,6 +39,19 @@ Primary paths:
   folder warning, preserves registered membership, and opens existing analyses.
   Repeat with an unavailable raw folder; starting processing must still report
   the actual source/registration issue. No local Qt execution is required.
+- `condition_input_model.py` validates complete condition drafts for both Save
+  and Start; `event_map.py` presents row errors without dropping entered values.
+  `project_drafts.py` tracks condition/mode and cached Settings changes at project
+  replacement and exit. Save must finish before leaving; an asynchronous save
+  keeps the current project active. Ordinary sidebar navigation preserves drafts.
+- `settings_feedback.py` owns Settings value snapshots and inline preprocessing
+  feedback. Selection-only ROI navigation is not an edit; incomplete ROI entries
+  are drafts. Full saves rebase the snapshot; partial harmonic recalculation
+  retains unrelated Settings edits. Invalid fields do not trap keyboard focus;
+  Save selects the invalid tab and field and shows inline guidance.
+- `run_outcome_model.py` summarizes actual recording results; `run_outcome.py`
+  presents the session-local last outcome and existing output/report/log actions.
+  Completion retains the selected single BDF, while a missing file disables Start.
 - `src/Main_App/gui/processing_workflows.py`: processing run start/stop,
   queue polling, worker completion/error, and finalization GUI orchestration
   used by `MainWindow` compatibility wrappers.
@@ -127,6 +146,12 @@ Primary paths:
   and recording/all-visits scope, and confirm the same choices survive hiding
   and revealing rows. Verify full paths and recovery guidance in the detail pane,
   no horizontal table scroll, and Cancel leaves saved exclusions unchanged.
+- `src/Main_App/gui/interpolation_burden_review_dialog.py`: explicit post-processing
+  retain/exclude choices with a remaining-decision count and Next needs attention.
+  Incomplete Apply scrolls and focuses the first unfinished decision. This adds
+  navigation only; thresholds, recording/all-visits scopes and saving are unchanged.
+  Visible smoke: use a long repeated-session list at 1280x900, leave one late row
+  undecided, and verify navigation, focus, footer visibility and guarded dismissal.
 - `src/Main_App/gui/processing_inputs.py`: processing input validation,
   single/batch mode UI state, `.bdf` file selection, start-button readiness,
   trigger-detection placeholder behavior, and preprocessing parameter assembly
@@ -198,8 +223,10 @@ Primary paths:
   identity, with text search and finding-type filters. Its resizable evidence
   pane shows the selected item's complete text. Disabled and unevaluated checks
   are assessment statuses, not detected signal problems; repeated findings are
-  retained. The browser temporarily replaces the shared status narrative and
-  table, restoring their visibility on Continue, Cancel, or failure. A compact
+  retained. Matching selected findings and recording/episode expansion survive
+  search and type-filter changes. The browser temporarily replaces the shared
+  status narrative and table, restoring their visibility on Continue, Cancel,
+  or failure. A compact
   workbook action opens the exact saved active-project report through the
   cross-platform path helper and reports open/save failures inline.
 - `src/Main_App/gui/post_export_workflows.py`: GUI-side post-processing worker
@@ -742,13 +769,13 @@ without clipping, including all eight read-only Raw-Spectral Advanced rows,
 and the bottom action row remains visible. Repeat with the supported display
 scaling settings on Windows and Linux. Confirm automatic detection has only
 Off and On choices, manual lists can be edited and enabled independently,
-and all eleven summed-BCA thresholds survive switching sub-tabs, Save, and
+and all five summed-BCA thresholds survive switching sub-tabs, Save, and
 reopen. Confirm condition-specific interpolation is off for new and older
 projects, survives Save/reopen when enabled, and only allows individual
 electrode repair after artifact confirmation in frequency QC.
 Enter an invalid summed-BCA value, switch to Electrodes, and Save:
-after dismissing the warning, Summed-BCA Screening must be visible with the
-invalid field selected. For an older project with no saved detector choice,
+Summed-BCA Screening must be visible with inline guidance and the invalid field
+selected. For an older project with no saved detector choice,
 verify the prompt and warning fit, and saving another setting leaves the
 choice pending. Check Preprocessing, Protocol, Harmonics, Stats, ROIs, and
 Advanced retain their controls above the compact footer. Qt execution remains

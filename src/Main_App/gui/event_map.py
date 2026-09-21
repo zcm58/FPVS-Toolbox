@@ -7,12 +7,15 @@ from PySide6.QtGui import QIntValidator, QValidator
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLineEdit,
+    QLabel,
     QPushButton,
     QScrollArea,
+    QVBoxLayout,
     QWidget,
 )
 
 from Main_App.gui.components import make_remove_button
+from Main_App.gui.condition_input_model import validate_condition_rows
 from .style_tokens import EVENT_ID_COLUMN_WIDTH
 
 EntryAdapterT = TypeVar("EntryAdapterT")
@@ -126,18 +129,45 @@ def is_valid_event_map_id(id_edit: QLineEdit) -> bool:
 
 
 def has_complete_event_map_entry(owner: object) -> bool:
-    """Return whether any live row has a condition and valid trigger ID."""
+    """Return whether the complete draft is valid and contains a condition."""
+    mapping, errors = validate_condition_rows(condition_row_values(owner))
+    return bool(mapping) and not errors
 
-    for row in live_event_map_rows(owner):
-        label_edit, id_edit = event_row_edits(row)
-        if (
-            label_edit is not None
-            and id_edit is not None
-            and bool(label_edit.text().strip())
-            and is_valid_event_map_id(id_edit)
-        ):
-            return True
-    return False
+
+def condition_row_values(owner: object) -> list[tuple[str, str]]:
+    return [
+        (label.text(), ident.text())
+        for row in getattr(owner, "event_rows", [])
+        for label, ident in [event_row_edits(row)]
+        if label is not None and ident is not None
+    ]
+
+
+def validated_event_map(owner: object, *, focus_error: bool = False) -> dict[str, int] | None:
+    """Present field errors and optionally focus the first invalid control."""
+    mapping, errors = validate_condition_rows(condition_row_values(owner))
+    rows = getattr(owner, "event_rows", [])
+    for index, row in enumerate(rows):
+        messages = [error.message for error in errors if error.row == index]
+        message = row.findChild(QLabel, "condition_row_error")
+        if message is not None:
+            message.setText(" ".join(messages))
+            message.setVisible(bool(messages))
+        for field, edit in zip(("label", "id"), event_row_edits(row)):
+            if edit is not None:
+                field_message = " ".join(error.message for error in errors if error.row == index and error.field == field)
+                edit.setAccessibleDescription(field_message)
+                edit.setToolTip(field_message)
+    if errors and focus_error:
+        first = errors[0]
+        edit = event_row_edits(rows[first.row])[0 if first.field == "label" else 1]
+        if edit is not None:
+            area = event_map_scroll_area(owner)
+            if area is not None:
+                area.ensureWidgetVisible(edit)
+            edit.setFocus(Qt.OtherFocusReason)
+            edit.selectAll()
+    return None if errors else mapping
 
 
 def _refresh_start_enabled(owner: object) -> None:
@@ -195,8 +225,11 @@ def add_event_row(owner: object, label: str = "", ident: str = "") -> None:
     row.setObjectName("event_map_row")
     row.setAttribute(Qt.WA_StyledBackground, True)
     row.setProperty("event_map_row", True)
-    hl = QHBoxLayout(row)
-    hl.setContentsMargins(0, 2, 0, 2)
+    row_layout = QVBoxLayout(row)
+    row_layout.setContentsMargins(0, 2, 0, 2)
+    row_layout.setSpacing(2)
+    hl = QHBoxLayout()
+    hl.setContentsMargins(0, 0, 0, 0)
     hl.setSpacing(8)
 
     le_label = QLineEdit(label, row)
@@ -228,6 +261,12 @@ def add_event_row(owner: object, label: str = "", ident: str = "") -> None:
     hl.addWidget(le_label, 1)
     hl.addWidget(le_id, 0)
     hl.addWidget(btn_rm, 0, Qt.AlignVCenter)
+    row_layout.addLayout(hl)
+    error_label = QLabel(row)
+    error_label.setObjectName("condition_row_error")
+    error_label.setWordWrap(True)
+    error_label.hide()
+    row_layout.addWidget(error_label)
     getattr(owner, "event_layout").addWidget(row)
     bind_event_map_row_widgets(owner, row)
     owner.log("Added event map row")
