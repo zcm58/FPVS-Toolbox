@@ -9,22 +9,21 @@ graphical interface. Its workflow covers project setup, preprocessing,
 frequency-domain measures, statistical analysis, and publication-oriented
 visualization.
 
-FPVS Toolbox was designed with non-expert users in mind and is actively used in
-FPVS-EEG research.
+FPVS Toolbox is currently a beta software, and features are subject to change. This package 
+is under active development and is being used and tested daily. 
+
 
 ## Features
 
-- Automated batch preprocessing: referencing, filtering, resampling,
-  kurtosis-based channel rejection, and channel interpolation
-- Epoch extraction and frequency-domain metrics, including FFT amplitude,
-  signal-to-noise ratio (SNR), baseline-corrected amplitude (BCA), and z-scores
-- Structured Excel outputs for statistical analysis
-- Built-in tools for SNR plots, scalp maps, sequence diagrams, and other
-  publication-oriented figures
+- Parallel workflows for rapid processing of large FPVS-oddball datasets
+- Outputs data in both long and wide format, making statistical analysis with outside software simpler
+- Tools to streamline the creation of high quality figures such as SNR plots and top down 2D topographical maps
+- LORETA source localization adapted from Hauk et al (2022) and Hauk et al (2025). (experimental) 
+
 
 ## Installation
 
-A prebuilt Windows installer is provided with each release.
+A standalone .exe Windows installer is provided with each release.
 
 1. Download the installer from the
    [Releases page](https://github.com/zcm58/FPVS-Toolbox-Repo/releases).
