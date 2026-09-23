@@ -1,0 +1,1712 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="User documentation, tool guides, and method references for FPVS Toolbox.">
+      
+      
+      
+        <link rel="canonical" href="https://zcm58.github.io/FPVS-Toolbox-Repo/tools/statistics/">
+      
+      
+        <link rel="prev" href="../">
+      
+      
+        <link rel="next" href="../free-harmonic-clustering/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Standard FPVS Screening - FPVS Toolbox</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    <body dir="ltr">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#standard-fpvs-screening" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="FPVS Toolbox" class="md-header__button md-logo" aria-label="FPVS Toolbox" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            FPVS Toolbox
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Standard FPVS Screening
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+          <a href="javascript:void(0)" class="md-search__icon md-icon" title="Share" aria-label="Share" data-clipboard data-clipboard-text="" data-md-component="search-share" tabindex="-1">
+            
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9a3 3 0 0 0-3 3 3 3 0 0 0 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.15c-.05.21-.08.43-.08.66 0 1.61 1.31 2.91 2.92 2.91s2.92-1.3 2.92-2.91A2.92 2.92 0 0 0 18 16.08"/></svg>
+          </a>
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/zcm58/FPVS-Toolbox-Repo" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    zcm58/FPVS-Toolbox-Repo
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Tools
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../reference/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+  
+
+<nav class="md-nav md-nav--primary md-nav--lifted md-nav--integrated" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="FPVS Toolbox" class="md-nav__button md-logo" aria-label="FPVS Toolbox" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    FPVS Toolbox
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/zcm58/FPVS-Toolbox-Repo" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    zcm58/FPVS-Toolbox-Repo
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tools
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_2" id="__nav_2_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Tools
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Standard FPVS Screening
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Standard FPVS Screening
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#questions-answered" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Questions Answered
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#before-you-run" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Before You Run
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#repeated-session-phase-at-visit-analysis" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Repeated-Session / Phase-at-Visit Analysis
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#available-observations-and-missing-conditions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Available Observations and Missing Conditions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#summed-bca-and-harmonic-selection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Summed BCA and Harmonic Selection
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Summed BCA and Harmonic Selection">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#why-provenance-changes-response-interpretation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why provenance changes response interpretation
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#locked-standard-methods" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Locked Standard Methods
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#single-group-screening" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Single-Group Screening
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Single-Group Screening">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#single-group-anova-compatibility" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Single-group ANOVA compatibility
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#two-group-screening" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Two-Group Screening
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Two-Group Screening">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#direct-group-cell-differences" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Direct group-cell differences
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#two-group-anova-compatibility" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Two-group ANOVA compatibility
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#diagnostics-and-sensitivity-checks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Diagnostics and Sensitivity Checks
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reading-at-a-glance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reading At a Glance
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#adolescent-and-observational-samples" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Adolescent and Observational Samples
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#outputs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Outputs
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#published-method-context" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Published-Method Context
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../free-harmonic-clustering/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Free Harmonic Clustering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sensitivity-analysis/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sensitivity Analysis
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../snr-plot-generator/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SNR Plots
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../publication-maps/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scalp Maps
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../loreta-visualizer/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    LORETA Visualizer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sequence-figure/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sequence Figure
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ratio-calculator/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ratio Calculator
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../individual-level-detectability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Individual Detectability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../reference/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_3" id="__nav_3_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/methods-reporting-checklist/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Source-PSD Reporting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="standard-fpvs-screening">Standard FPVS Screening<a class="headerlink" href="#standard-fpvs-screening" title="Permanent link">&para;</a></h1>
+<p>Standard FPVS Screening turns processed FPVS workbooks into a common Summed
+baseline-corrected amplitude (Summed BCA) outcome and runs a transparent first
+round of statistical checks. It is designed to answer a small set of common
+FPVS questions consistently. It is not the final project-specific statistical
+model for every study.</p>
+<p>Repeated-session projects open a separate paired change workflow in the same
+Stats window. They are never scanned as flat groups or routed through the
+Standard Screening model.</p>
+<p>Standard FPVS Screening is currently available under <strong>Beta Tools</strong>. Enable
+Beta Tools in <strong>Settings &gt; Advanced</strong>, then close and reopen FPVS Toolbox. The
+beta placement reflects the screen's intentionally bounded publication role;
+it does not change the locked calculations or workbook outputs described here.</p>
+<p>Use a planned custom analysis when the scientific question requires covariates,
+random slopes, longitudinal or nested structure, more than two groups,
+equivalence testing, a different response scale, or another specialized
+estimand.</p>
+<h2 id="questions-answered">Questions Answered<a class="headerlink" href="#questions-answered" title="Permanent link">&para;</a></h2>
+<p>The screen keeps four questions separate:</p>
+<ol>
+<li><strong>Positive oddball response:</strong> is mean Summed BCA greater than zero in a
+   Condition x ROI cell?</li>
+<li><strong>Condition/ROI pattern:</strong> does the primary linear mixed model (LMM) support
+   variation by Condition, ROI, or their interaction?</li>
+<li><strong>Interaction explanation:</strong> when the corrected Condition x ROI interaction
+   is supported, which fitted-model comparisons help explain it?</li>
+<li><strong>Two-group pattern:</strong> in a project with exactly two canonical groups, do
+   Group A and Group B differ in particular Condition x ROI cells, and is there
+   a broader joint group-related pattern?</li>
+</ol>
+<p>A positive response within a group is not evidence that two groups differ.
+Likewise, a nonsignificant result does not prove absence or equivalence.</p>
+<h2 id="before-you-run">Before You Run<a class="headerlink" href="#before-you-run" title="Permanent link">&para;</a></h2>
+<p>Use this tool after preprocessing and post-processing have created one Excel
+workbook per participant and condition under the project's
+<code>1 - Excel Data Files</code> folder. For factorial screening, select at least two
+conditions and two ROIs.</p>
+<p>The tool reads processed workbooks, project settings, ROI definitions, and
+canonical participant/group assignments from <code>project.json</code>. Before a run, you
+can:</p>
+<ul>
+<li>choose conditions and ROIs;</li>
+<li>review participants, group sizes, and data coverage;</li>
+<li>apply manual participant exclusions;</li>
+<li>review quality-control and non-finite/outlier flags; and</li>
+<li>choose optional robustness or leave-one-out sensitivity checks.</li>
+</ul>
+<p>Project metadata determines the mode:</p>
+<ul>
+<li>a single-group project runs single-group screening;</li>
+<li>a project with exactly two canonical groups runs two-group screening; and</li>
+<li>a project with three or more canonical groups is stopped with a message to
+  use a planned custom model.</li>
+</ul>
+<p>The screen does not offer an "ignore groups" shortcut. If pooling participants
+is scientifically justified, create a separately defined single-group project
+so the design and provenance remain explicit.</p>
+<h2 id="repeated-session-phase-at-visit-analysis">Repeated-Session / Phase-at-Visit Analysis<a class="headerlink" href="#repeated-session-phase-at-visit-analysis" title="Permanent link">&para;</a></h2>
+<p>For a v2.2 project, <code>participant_id</code> identifies the person, <code>group_id</code>
+identifies the stable between-participant group, and <code>recording_id</code> plus
+<code>session_id</code> identify each repeated visit. Choose <strong>Open Repeated-Session
+Analysis</strong> after post-processing has created the canonical full-audit workbook.
+The dialog:</p>
+<ul>
+<li>shows the two stable groups and two ordered sessions;</li>
+<li>reports complete recording pairs and missing visits separately by group;</li>
+<li>requires you to select the prespecified Condition x ROI outcomes for the
+  current run; and</li>
+<li>retains recording-level QC, exclusions, missingness, and pair status in the
+  result workbook.</li>
+</ul>
+<p>Version 1 supports exactly two stable groups and two ordered sessions. For each
+selected Condition x ROI outcome, it calculates one participant change:</p>
+<pre><code class="language-text">participant change = visit 2 Summed BCA - visit 1 Summed BCA
+</code></pre>
+<p>The primary test is a two-sided Welch comparison of those participant changes
+between the two groups. It reports the signed difference in change, 95%
+confidence interval, Welch statistic and degrees of freedom, raw p-value,
+Holm-adjusted p-value, complete-pair N per group, and Hedges g. One primary
+Holm family spans every outcome you selected. A selected outcome that is not
+estimable remains in the declared family and audit; the Toolbox does not drop
+it to make the correction smaller.</p>
+<p>Secondary results test the paired change within each group using a two-sided
+one-sample t-test of participant changes. Those tests use one separate Holm
+family across both groups and all selected outcomes and report Cohen's dz.
+There is no imputation, no automatic statistical fallback, and no one-click
+Group x Session x Condition x ROI model. Participants with only one visit do
+not contribute to that outcome's paired change but remain visible in the
+participant, outcome, and coverage audits.</p>
+<p>When every participant completes luteal first and follicular second, menstrual
+phase is perfectly aligned with visit order, elapsed time, repetition,
+practice, and habituation. No statistical model can separate those effects in
+that design. Report the contrast as <strong>session 2 (follicular) minus session 1
+(luteal)</strong> or <strong>session/phase-at-visit</strong>, not as an isolated physiological
+phase effect. The between-group difference in change can still reflect
+group-specific order or retest effects.</p>
+<h2 id="available-observations-and-missing-conditions">Available Observations and Missing Conditions<a class="headerlink" href="#available-observations-and-missing-conditions" title="Permanent link">&para;</a></h2>
+<p>The eligible cohort is frozen after QC and manual exclusions. The primary LMM
+then uses every finite retained observation from that cohort. A participant who
+is missing one condition can still contribute all other usable conditions.</p>
+<p>Missing or non-finite Summed BCA values are not filled, averaged over, or
+imputed. The report distinguishes:</p>
+<ul>
+<li>frozen participants;</li>
+<li>participants contributing at least one finite retained observation;</li>
+<li>fully complete and partially observed conditions;</li>
+<li>missing participant-condition-ROI cells;</li>
+<li>per-cell sample sizes; and</li>
+<li>conditions excluded because a required fixed-effect cell had no finite data.</li>
+</ul>
+<p>A structurally empty fixed-effect cell blocks the requested factorial model;
+the Toolbox does not invent that cell or silently change the scientific
+question.</p>
+<p>Likelihood-based use of available observations assumes missingness is
+ignorable, commonly described as <strong>missing at random (MAR)</strong> after conditioning
+on variables in the model. If exclusion still depends on an unobserved response
+after accounting for modeled variables - <strong>missing not at random (MNAR)</strong> -
+estimates and p-values may be biased. Review missingness reasons and coverage
+tables rather than treating MAR as guaranteed.</p>
+<h2 id="summed-bca-and-harmonic-selection">Summed BCA and Harmonic Selection<a class="headerlink" href="#summed-bca-and-harmonic-selection" title="Permanent link">&para;</a></h2>
+<p>The Toolbox saves one project-wide harmonic-selection profile and one exact
+list of harmonics to include in Summed BCA. The same included list is applied
+to every participant, group, condition, electrode, and ROI. Standard FPVS
+Screening and the standard analysis workbooks read that saved result; they do
+not silently select another list.</p>
+<p>New projects use <strong>Dzhelyova/Poncet — stop after two consecutive failures
+(recommended)</strong>. Existing projects that predate named profiles retain
+<strong>Legacy FPVS Toolbox — through highest with isolated-peak guard</strong> until you
+explicitly change them, so upgrading the Toolbox does not silently change old
+results.</p>
+<p>The <strong>Harmonics</strong> tab in Settings offers four profiles:</p>
+<table>
+<thead>
+<tr>
+<th>Profile</th>
+<th>What defines the Summed-BCA harmonics?</th>
+<th>Interpretation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Dzhelyova/Poncet — stop after two consecutive failures (recommended)</strong></td>
+<td>Tests eligible oddball harmonics in order. It stops after two consecutive non-base candidates fail strict <code>z &gt; 1.64</code> and includes every eligible harmonic through the one before that pair.</td>
+<td>Literature-style, but still adaptive and selected from this sample.</td>
+</tr>
+<tr>
+<td><strong>Fixed / preregistered harmonic domain</strong></td>
+<td>Uses an exact Hz list, all oddball harmonics through an upper harmonic index, or all through an upper frequency; the Toolbox always removes dynamically identified base-rate overlaps.</td>
+<td>Preferred for confirmatory work when the domain was genuinely specified independently.</td>
+</tr>
+<tr>
+<td><strong>Significant-only (exploratory)</strong></td>
+<td>Searches the bounded domain and includes only candidates with strict <code>z &gt; 1.64</code>.</td>
+<td>Same-sample exploratory selection; it is not across-harmonic multiplicity correction.</td>
+</tr>
+<tr>
+<td><strong>Legacy FPVS Toolbox — through highest with isolated-peak guard</strong></td>
+<td>Preserves the earlier equal-workbook grand average, fills eligible harmonics through the highest detection, and applies the one-pass isolated-highest guard described below.</td>
+<td>Reproducibility profile for existing analyses, not a claim of exact alignment with every publication.</td>
+</tr>
+</tbody>
+</table>
+<p>For the two adaptive non-legacy profiles, the common selector is balanced in a
+specific order. Participants are first averaged within every declared group x
+condition cell. Groups then receive equal weight within each condition. A
+local-Z spectrum is calculated separately for each condition, and the
+condition Z-scores receive equal weight. This keeps a larger group or a
+condition with more available workbooks from defining the common outcome just
+because it has more files. It also gives each member of a smaller group more
+influence, so it is an explicit estimand choice rather than a universally best
+weighting rule. If an entire declared group x condition cell is missing,
+adaptive selection stops with a message to complete the dataset or use a fixed
+domain; it does not quietly redistribute that cell's weight.</p>
+<p>Non-legacy adaptive profiles use all retained scalp electrodes by default. A
+focal paradigm can instead save a frozen a-priori electrode mask. Later edits
+to Stats ROIs cannot change either selection. The mutable union of Stats ROI
+electrodes remains available only in the Legacy profile.</p>
+<p>For each candidate harmonic, the noise window spans +/-10 FFT bins around the
+target. The target bin and its immediately adjacent bins are excluded, then the
+single lowest and single highest finite noise values are removed before the
+mean and population standard deviation are calculated. Adaptive detection is
+strictly greater than <code>1.64</code>; equality does not pass. Base-rate overlaps are
+excluded from selection and summation.</p>
+<p>For the recommended two-failure profile, a base-rate overlap is skipped and
+does not count as one of the two failures. If the configured harmonic ceiling
+is reached before two consecutive eligible failures occur, the Toolbox stops
+instead of pretending that the stopping rule succeeded. Increase the BCA
+upper limit and recalculate, or use a justified fixed domain.</p>
+<p>Legacy alone uses the earlier fill-through rule. Its one-pass guard activates
+when more than 10 eligible non-base harmonics lie strictly between the two
+highest detected peaks: the isolated upper peak stays recorded as detected,
+but it and all intervening harmonics above the next-highest peak are omitted
+from the sum. Base overlaps do not count and exactly 10 intervening harmonics
+remains allowed.</p>
+<p>The fixed-profile overlap rule is mandatory, not an optional checkbox: a
+requested frequency that coincides with the base rate or one of its harmonics
+is recorded as excluded and never enters Summed BCA.</p>
+<p>The processing workflow records the selection in
+<code>Quality Check/Harmonic_Selection_Summary.xlsx</code> and in project metadata. A
+missing or stale selection must be recalculated before screening proceeds; the
+Stats tool does not silently invent another list. Use
+<strong>Settings &gt; Harmonics &gt; Recalculate Harmonics</strong>.
+The screening page links to that Settings workflow but does not delete or
+recalculate the processing-time selection itself. Before recalculation starts,
+Settings snapshots the saved project method plus the relevant app analysis and
+ROI settings. Cancelling the FFT-grid/exclusion review, or failing validation
+before a replacement selection is saved, restores that snapshot and leaves
+current artifacts unchanged. Starting the worker alone does not stale the old
+outputs.</p>
+<p>When you change a Summed-BCA definition, choose <strong>Save</strong>, and confirm the
+immediate rebuild, the Settings page stays alive and guarded in the background
+while the main post-processing activity screen opens. The spinner, progress
+bar, current phase, and status text show the FullFFT-grid check, harmonic
+selection, workbook rebuild, and source-map phases. Project navigation remains
+locked, and the processing action is disabled because this run cannot be
+cancelled after selection begins. A successful rebuild returns to Home. If the
+review is cancelled or validation, grid review, or selection fails before a
+replacement selection is saved, the previous settings are restored and the
+Settings page is shown again. Using <strong>Recalculate Harmonics</strong> directly may
+instead keep Settings visible and report status within the Harmonics tab.</p>
+<p>Once a replacement selection is saved, that method becomes the project
+definition; a later export failure preserves the last reproducible files but
+records them as stale or failed for the newly required selection rather than
+presenting them as current. The Settings page is shown again so the warning and
+remedy remain available.</p>
+<p>Changing participant-condition FFT-crop exclusions changes the active FullFFT
+cohort. After that review is accepted, the Toolbox resumes frequency-domain QC
+and neutral FullFFT provenance before recalculating selection. This remains a
+post-processing-only run: raw EEG preprocessing and participant FFT export are
+not repeated.</p>
+<p>After an accepted selection changes, the Toolbox marks the Stats-ready and
+full-audit workbooks plus the current L2-MNE and eLORETA Hauk source-PSD map
+directories stale. It rebuilds the workbooks from the existing processed FullFFT
+and BCA sheets and rebuilds the maps from durable source-ready time-domain
+derivatives. It does not reload BDF files, filter or epoch EEG, or recompute
+participant FFT workbooks. If the scientific selection fingerprint is
+unchanged and every recorded derivative still exists and is current, no
+rebuild is needed. A failed replacement keeps the preceding reproducible
+artifact and records that it is not current for the new selection.</p>
+<p>Free Harmonic Clustering is a separate analysis. It reads the original
+<code>FullFFT Amplitude (uV)</code> sheets, validates neutral FullFFT provenance, and owns
+its own harmonic domain. Changing a standard Summed-BCA profile does not change
+or stale the clustering domain merely because the standard included list
+changed.</p>
+<h3 id="why-provenance-changes-response-interpretation">Why provenance changes response interpretation<a class="headerlink" href="#why-provenance-changes-response-interpretation" title="Permanent link">&para;</a></h3>
+<p>When significant harmonics are selected from the same participants whose
+response is tested against zero, the response p-values are labelled
+<strong>exploratory post-selection</strong>. At a Glance still reports the response evidence
+but identifies it as exploratory and says that the harmonics were selected from
+this sample.</p>
+<p>A response test can be described as independently selected only when the fixed
+harmonic list was specified independently of the analyzed responses and that
+provenance is documented. Changing a label cannot make an adaptive selection
+independent.</p>
+<p>Harmonic-selection provenance affects the response-versus-zero interpretation.
+It does not automatically invalidate the Condition, ROI, or group contrasts,
+which answer different questions.</p>
+<h2 id="locked-standard-methods">Locked Standard Methods<a class="headerlink" href="#locked-standard-methods" title="Permanent link">&para;</a></h2>
+<p>The screen fixes the main statistical choices so they cannot be changed after
+seeing the data:</p>
+<table>
+<thead>
+<tr>
+<th>Question</th>
+<th>Standard method</th>
+<th>Holm family</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Positive response, single group</td>
+<td>One-sample t-test of mean Summed BCA greater than zero in each Condition x ROI cell</td>
+<td><code>response_core_cells</code></td>
+</tr>
+<tr>
+<td>Positive response, two groups</td>
+<td>The same one-sided t-test within every Group x Condition x ROI cell</td>
+<td><code>group_response_cells</code></td>
+</tr>
+<tr>
+<td>Primary factorial pattern</td>
+<td>Participant-random-intercept LMM with hierarchy-preserving likelihood-ratio block tests</td>
+<td><code>omnibus_effects_strict</code></td>
+</tr>
+<tr>
+<td>Single-group interaction explanation</td>
+<td>Two-sided <code>LMM-derived model-estimated contrast</code> comparisons</td>
+<td><code>planned_contrasts</code></td>
+</tr>
+<tr>
+<td>Direct Group A - Group B cells</td>
+<td>Two-sided <code>LMM-derived model-estimated contrast</code> in every estimable Condition x ROI cell</td>
+<td><code>group_core_cells</code></td>
+</tr>
+<tr>
+<td>Balanced ANOVA compatibility</td>
+<td>Secondary ANOVA effects, only when exact balance requirements are met</td>
+<td><code>anova_compatibility_effects</code></td>
+</tr>
+</tbody>
+</table>
+<p>The nominal alpha is 0.05. Holm family-wise correction is applied separately
+within each named family. A result in one family does not change which tests
+belong to another family.</p>
+<p>Normality and other diagnostics do not automatically select or replace the
+primary test.</p>
+<h2 id="single-group-screening">Single-Group Screening<a class="headerlink" href="#single-group-screening" title="Permanent link">&para;</a></h2>
+<p>The scientific formula is:</p>
+<pre><code class="language-text">Summed BCA ~ Condition * ROI + (1 | Participant)
+</code></pre>
+<p>Condition and ROI use sum coding. The accepted final model is fitted with REML
+to estimate coefficients. The primary Condition, ROI, and Condition x ROI
+questions use explicit hierarchy-preserving full-versus-reduced models refitted
+with maximum likelihood and asymptotic chi-square likelihood-ratio tests. These
+block tests must be reported using their exported labels; they are not
+Kenward-Roger or Satterthwaite F tests and should not be relabelled as pure
+Type-III effects.</p>
+<p>The three primary LMM block p-values are corrected together with Holm in
+<code>omnibus_effects_strict</code>.</p>
+<p>Positive-response one-sample t-tests are prespecified as one-sided:</p>
+<pre><code class="language-text">H1: mean Summed BCA &gt; 0
+</code></pre>
+<p>All estimable Condition x ROI response cells are corrected together with Holm
+in <code>response_core_cells</code>. A negative response cannot satisfy this directional
+hypothesis.</p>
+<p>When the corrected primary Condition x ROI interaction is supported, the tool
+uses two-sided <code>LMM-derived model-estimated contrast</code> comparisons to explain the
+pattern:</p>
+<ul>
+<li>Condition differences within each ROI; and</li>
+<li>ROI differences within each Condition.</li>
+</ul>
+<p>These fitted-model Wald contrasts report signed estimates, standard errors,
+95% confidence intervals, asymptotic z statistics, and two-sided p-values. The
+<code>planned_contrasts</code> family is Holm-corrected. Automatic interaction
+explanations are not shown when the corrected primary interaction is
+unsupported.</p>
+<h3 id="single-group-anova-compatibility">Single-group ANOVA compatibility<a class="headerlink" href="#single-group-anova-compatibility" title="Permanent link">&para;</a></h3>
+<p>Repeated-measures ANOVA is a secondary compatibility check, not the primary
+analysis. It runs automatically only when every included participant has
+exactly one finite value in every declared Condition x ROI cell. Missing,
+duplicate, or non-finite cells skip ANOVA without failing the LMM screen.</p>
+<p>When it runs, the ANOVA reports its canonical sphericity and
+Greenhouse-Geisser handling. Its effects are Holm-corrected in
+<code>anova_compatibility_effects</code>. Compatibility results never gate, replace, or
+change the primary LMM conclusion.</p>
+<h2 id="two-group-screening">Two-Group Screening<a class="headerlink" href="#two-group-screening" title="Permanent link">&para;</a></h2>
+<p>Standard two-group screening requires exactly two canonical groups with valid
+<code>project.json</code> assignments, at least two retained participants contributing
+data in each group, and finite observations in every required fixed-effect
+cell. Missing or unknown group assignments are not guessed from folders.</p>
+<p>The scientific formula is:</p>
+<pre><code class="language-text">Summed BCA ~ Group * Condition * ROI + (1 | Participant)
+</code></pre>
+<p>Group, Condition, and ROI use sum coding. Final estimates use REML. The
+hierarchy-preserving omnibus comparisons refit full and reduced models with
+maximum likelihood on the same finite observed row set and use an asymptotic
+chi-square reference.</p>
+<p>Four group-related LMM rows are Holm-corrected together in
+<code>omnibus_effects_strict</code>:</p>
+<ul>
+<li><strong>Any group-related effect</strong>, a joint test of all fixed terms containing
+  Group, not a pure average Group main effect;</li>
+<li><strong>Group x Condition x ROI interaction</strong>, the three-way term;</li>
+<li><strong>Group x Condition-related block</strong>, which jointly includes the
+  Group x Condition and three-way terms; and</li>
+<li><strong>Group x ROI-related block</strong>, which jointly includes the Group x ROI and
+  three-way terms.</li>
+</ul>
+<p>Positive responses are also tested with a one-sample t-test within every
+Group x Condition x ROI cell using the one-sided greater-than-zero question.
+Holm correction is applied once across the complete <code>group_response_cells</code>
+family. Comparing whether one group is significant and another is not is not a
+test of a group difference.</p>
+<h3 id="direct-group-cell-differences">Direct group-cell differences<a class="headerlink" href="#direct-group-cell-differences" title="Permanent link">&para;</a></h3>
+<p>The direct prespecified comparison is Group A minus Group B in every estimable
+Condition x ROI cell. Each is a two-sided
+<code>LMM-derived model-estimated contrast</code> from the same accepted LMM used for the
+omnibus inference. Rows report the signed estimate, standard error, 95%
+confidence interval, asymptotic Wald z statistic, two-sided p-value, and
+observed coverage. Missing responses are not imputed.</p>
+<p>All estimable cells are Holm-corrected together in <code>group_core_cells</code>. This
+family always runs when its cells are estimable. It is <strong>not gated</strong> by the
+joint group-related test. A localized cell difference and a nonsignificant
+joint group pattern can therefore coexist; neither result proves equivalence,
+causation, or diagnostic value.</p>
+<h3 id="two-group-anova-compatibility">Two-group ANOVA compatibility<a class="headerlink" href="#two-group-anova-compatibility" title="Permanent link">&para;</a></h3>
+<p>The secondary multi-group ANOVA check requires:</p>
+<ul>
+<li>exactly two groups;</li>
+<li>equal group sizes; and</li>
+<li>one finite, unique value for every participant x Condition x ROI cell.</li>
+</ul>
+<p>It collapses each declared Condition x ROI combination into a within-participant
+<code>response-cell</code> factor and tests a broad Group x response-cell mixed-ANOVA
+compatibility question. It does <strong>not</strong> separately decompose
+Group x Condition, Group x ROI, or Group x Condition x ROI. Failure to meet
+these balance requirements skips the compatibility check without changing the
+primary LMM screen.</p>
+<h2 id="diagnostics-and-sensitivity-checks">Diagnostics and Sensitivity Checks<a class="headerlink" href="#diagnostics-and-sensitivity-checks" title="Permanent link">&para;</a></h2>
+<p>The detailed workbook records finite-value and per-cell N checks, variance and
+normality diagnostics, residual tails, LMM convergence and singularity, exact
+coverage, and ANOVA sphericity when compatibility ANOVA runs.</p>
+<p>Shapiro-Wilk and other normality checks are diagnostic only. They do not
+automatically switch the primary analysis.</p>
+<p>Optional supporting checks can include robust or rank-based summaries and
+leave-one-participant-out stability. These remain labelled as sensitivity
+evidence. A sensitivity-only finding is not promoted to a primary conclusion.</p>
+<p>The standard available-observation route does not queue the current max-|t|
+resampling procedure because that implementation requires a complete
+participant-by-cell matrix. Treat any max-|t| result from a legacy or separate
+custom complete-design analysis as additional sensitivity evidence, not part
+of Standard FPVS Screening.</p>
+<p>Mixed-model likelihood-ratio and Wald p-values use asymptotic reference
+distributions. This deserves particular caution in small samples. Inspect
+estimates, confidence intervals, model warnings, and stability rather than
+reducing the analysis to significant/nonsignificant labels.</p>
+<h2 id="reading-at-a-glance">Reading At a Glance<a class="headerlink" href="#reading-at-a-glance" title="Permanent link">&para;</a></h2>
+<p>At a Glance answers the screening questions in this order:</p>
+<ol>
+<li>positive oddball-response evidence;</li>
+<li>the primary LMM Condition/ROI pattern;</li>
+<li><code>LMM-derived model-estimated contrast</code> explanations when the corrected
+   interaction supports them; and</li>
+<li>in two-group mode, direct Group A - Group B cell differences followed by
+   the broader joint group-related pattern.</li>
+</ol>
+<p>It names at most two supported rows and does not reproduce p-values or the test
+inventory. Balanced-only compatibility ANOVA never enters the headline.</p>
+<p>At a Glance also states the first-round/custom-model boundary. A nonsignificant
+group result does not prove equivalence, and group results describe
+associations in the analyzed sample, not causes or diagnoses.</p>
+<p>Use the workbook for exact estimates, intervals, p-values, formulas,
+correction-family membership, coverage, assumptions, diagnostics, and
+limitations.</p>
+<h2 id="adolescent-and-observational-samples">Adolescent and Observational Samples<a class="headerlink" href="#adolescent-and-observational-samples" title="Permanent link">&para;</a></h2>
+<p>For a sample of 13--15-year-old students, report the exact age range,
+recruitment population, group definitions, and exclusions. The standard model
+does not adjust for age, gender, medication, depression, recruitment source, or
+other potential confounders.</p>
+<p>Describe group results as associations in this analyzed student sample. Do not
+claim that anxiety caused a neural difference or that an FPVS response is
+diagnostic. If covariates are part of the scientific question, specify them in
+advance and use the Stats-Ready export with a validated custom model.</p>
+<h2 id="outputs">Outputs<a class="headerlink" href="#outputs" title="Permanent link">&para;</a></h2>
+<p>Results are written under <code>3 - Statistical Analysis Results</code> in the active
+project. The current standard report is named:</p>
+<ul>
+<li><code>Native Single-Group Available-Case LMM Results.xlsx</code>; or</li>
+<li><code>Native Multi-Group Available-Case LMM Results.xlsx</code>.</li>
+</ul>
+<p>The separate repeated-session workflow writes
+<code>Repeated_Session_Change_Analysis.xlsx</code>. It contains the primary between-group
+change tests, secondary within-group paired changes, participant deltas,
+participant-session audit, outcome-pair audit, pair coverage, locked method
+metadata, the canonical recording-aware long data, and a machine-readable
+schema. The workbook always carries the fixed-order confounding warning.</p>
+<p>It includes:</p>
+<ul>
+<li>At a Glance and Detailed Methods;</li>
+<li>the complete test inventory and correction families;</li>
+<li>LMM estimates, confidence intervals, Wald contrasts, and p-value provenance;</li>
+<li>design coverage, exclusions, group assignments, and analysis settings;</li>
+<li>ANOVA compatibility status, balance audit, and numeric results when eligible;</li>
+<li>diagnostics, sensitivities, warnings, and limitations; and</li>
+<li>the underlying source result tables.</li>
+</ul>
+<p>If narrative assembly fails after the statistical steps finish, the tool
+attempts to preserve numeric frames in a fallback workbook and labels the
+report failure explicitly.</p>
+<p><strong>Export Stats-Ready Workbook</strong> writes <code>Stats_Ready_Summed_BCA.xlsx</code> for JASP,
+R/RStudio, SAS, or another package. It contains long and wide Summed BCA data,
+participant identifiers, stable canonical <code>group_id</code> values, separate display
+<code>group_label</code> values, and harmonic-selection evidence. The ID drives pooling
+and inference; the label is descriptive, so two groups with the same display
+label remain distinct.
+Use it for covariates, other random-effects structures, more than two groups,
+Kenward-Roger/Satterthwaite inference, equivalence tests, or another final
+model not offered by Standard FPVS Screening.</p>
+<p>Every completed data-processing run also writes
+<code>Analysis_Ready_Summed_BCA_Full_Audit.xlsx</code> automatically. This second workbook
+is designed for an outside statistician or a custom RStudio workflow. Its
+primary <code>ROI Long</code> sheet contains all available processed participants and
+conditions, including observations currently excluded by Toolbox QC. For v2.2
+projects its row identity also includes Recording ID, Session ID and label,
+Visit Index, Days From Baseline, and stable Group ID. Two visits therefore
+remain two rows and cannot overwrite one another. Those
+decisions appear as <code>Current Toolbox Exclusion</code>, <code>QC Flag</code>, and <code>QC Notes</code>
+fields; they do not remove values. Separate sheets provide raw, RMS-normalized,
+and signed-mean-normalized wide data, electrode-level values, whole-scalp
+values, harmonic-specific RMS scales, ROI definitions, and the harmonic-
+selection record. Missing conditions stay missing rather than being filled
+with zero.</p>
+<p>For RMS-normalized BCA, the Toolbox follows the topographic sequence used by
+Dzhelyova et al. (2017). At each selected harmonic, electrode BCA values are
+divided by the whole-scalp vector length, calculated as the square root of the
+sum of squared BCA values across electrodes. The normalized electrode values
+are then summed across harmonics and averaged within each ROI. Although this is
+called RMS normalization in that publication, the stated calculation is a
+root-sum-square and does not divide by the number of electrodes. Signed-mean
+normalization is separate: raw electrode BCA is first summed across harmonics,
+then divided by the whole-scalp signed mean and averaged within ROI.</p>
+<p>The full-audit workbook uses the harmonic list already accepted at processing
+time. Including flagged observations does not cause the Toolbox to select a
+different harmonic list. <code>ROI Long</code> is the recommended starting sheet for R;
+the wide sheets are convenient for software that expects one participant per
+row. Any exclusions or alternate models remain the external analyst's explicit
+decision.</p>
+<p>Retain <code>Quality Check/Harmonic_Selection_Summary.xlsx</code>, the corresponding
+project metadata, method ID/version, selection fingerprint, detected and
+included lists, stopping reason, electrode mask, pooling-cell Ns/weights, and
+artifact-freshness record with the analysis.</p>
+<h2 id="published-method-context">Published-Method Context<a class="headerlink" href="#published-method-context" title="Permanent link">&para;</a></h2>
+<p>The core approach has direct FPVS precedent:</p>
+<ul>
+<li><a href="https://academic.oup.com/cercor/article/27/8/4106/3056435">Dzhelyova et al. (2017)</a>
+  used condition-wise grand spectra and a two-consecutive-nonsignificant-
+  harmonic stopping convention. The named Dzhelyova/Poncet profile reproduces
+  that stopping concept; its balanced multi-group pooling is an explicit
+  Toolbox extension.</li>
+<li>A fixed harmonic range is the clearest confirmatory choice when prior work or
+  a preregistration justifies it independently. The Legacy isolated-highest
+  greater-than-10 gap guard has no direct publication counterpart and is kept
+  as a versioned reproducibility method.</li>
+<li><a href="https://doi.org/10.1016/j.ijpsycho.2025.113212">Vandenheever et al. (2025)</a>
+  analyzed summed BCA with ROI and anxiety-group models, a participant random
+  intercept, and multiplicity-adjusted planned contrasts.</li>
+<li><a href="https://doi.org/10.1111/jcpp.13201">Van der Donck et al. (2020)</a> used REML
+  mixed models of expression, ROI, and group with participant random
+  intercepts and residual-assumption checks.</li>
+<li><a href="https://doi.org/10.3389/fpsyt.2020.00332">Vettori et al. (2020)</a> used a
+  Group x Stimulus x ROI mixed model, participant random intercepts, and
+  fitted-model post-hoc tests.</li>
+<li><a href="https://doi.org/10.1186/s12916-024-03610-w">Samaey et al. (2024)</a> analyzed
+  FPVS amplitudes in adolescents aged 12--16 using mixed models, participant
+  random effects, covariates, and multiplicity-adjusted contrasts.</li>
+<li><a href="https://doi.org/10.1016/j.biopsycho.2018.09.002">Feuerriegel et al. (2018)</a>
+  provides FPVS precedent for repeated-measures ANOVA on summed harmonics with
+  Greenhouse-Geisser handling and Holm correction.</li>
+<li><a href="https://doi.org/10.1111/psyp.14052">Keil et al. (2022)</a> recommend a priori
+  ROIs, multiplicity control across ROIs, and maximum-statistic permutation
+  methods for joint frequency-domain inference.</li>
+</ul>
+<p>The Toolbox adapts these practices; it does not exactly reproduce any one
+paper. In particular, <code>statsmodels</code> asymptotic ML likelihood-ratio tests and
+Wald contrasts are not Kenward-Roger or Satterthwaite F tests. Holm is not
+numerically identical to Bonferroni or Tukey. Compatibility ANOVA and optional
+sensitivity checks remain secondary to the primary LMM.</p>
+<p>See the
+<a href="../../reference/methods-reporting-checklist/#standard-fpvs-screening">statistical methods reporting checklist</a>
+before writing a manuscript or preregistration.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../" class="md-footer__link md-footer__link--prev" aria-label="Previous: Overview">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                Overview
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../free-harmonic-clustering/" class="md-footer__link md-footer__link--next" aria-label="Next: Free Harmonic Clustering">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                Free Harmonic Clustering
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.tracking", "navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.top", "navigation.footer", "navigation.expand", "navigation.indexes", "toc.integrate", "toc.follow", "content.code.copy", "search.suggest", "search.highlight", "search.share"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

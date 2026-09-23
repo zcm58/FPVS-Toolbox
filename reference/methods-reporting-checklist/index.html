@@ -1,0 +1,1915 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="User documentation, tool guides, and method references for FPVS Toolbox.">
+      
+      
+      
+        <link rel="canonical" href="https://zcm58.github.io/FPVS-Toolbox-Repo/reference/methods-reporting-checklist/">
+      
+      
+        <link rel="prev" href="../">
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Source-PSD Reporting - FPVS Toolbox</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    <body dir="ltr">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#methods-and-reporting-checklists" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="FPVS Toolbox" class="md-header__button md-logo" aria-label="FPVS Toolbox" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            FPVS Toolbox
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Source-PSD Reporting
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+          <a href="javascript:void(0)" class="md-search__icon md-icon" title="Share" aria-label="Share" data-clipboard data-clipboard-text="" data-md-component="search-share" tabindex="-1">
+            
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9a3 3 0 0 0-3 3 3 3 0 0 0 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.15c-.05.21-.08.43-.08.66 0 1.61 1.31 2.91 2.92 2.91s2.92-1.3 2.92-2.91A2.92 2.92 0 0 0 18 16.08"/></svg>
+          </a>
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/zcm58/FPVS-Toolbox-Repo" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    zcm58/FPVS-Toolbox-Repo
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../tools/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Tools
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+  
+
+<nav class="md-nav md-nav--primary md-nav--lifted md-nav--integrated" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="FPVS Toolbox" class="md-nav__button md-logo" aria-label="FPVS Toolbox" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    FPVS Toolbox
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/zcm58/FPVS-Toolbox-Repo" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    zcm58/FPVS-Toolbox-Repo
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../tools/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tools
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_2" id="__nav_2_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Tools
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tools/statistics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Standard FPVS Screening
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tools/free-harmonic-clustering/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Free Harmonic Clustering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tools/sensitivity-analysis/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sensitivity Analysis
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tools/snr-plot-generator/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SNR Plots
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tools/publication-maps/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scalp Maps
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tools/loreta-visualizer/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    LORETA Visualizer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tools/sequence-figure/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sequence Figure
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tools/ratio-calculator/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ratio Calculator
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tools/individual-level-detectability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Individual Detectability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_3" id="__nav_3_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Source-PSD Reporting
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Source-PSD Reporting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#standard-fpvs-screening" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Standard FPVS Screening
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Standard FPVS Screening">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#design-and-population" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Design and population
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#summed-bca-and-selection-provenance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Summed BCA and selection provenance
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#external-full-audit-dataset" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        External full-audit dataset
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#primary-statistical-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Primary statistical model
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#balanced-only-anova-compatibility" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Balanced-only ANOVA compatibility
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#diagnostics-and-multiple-comparisons" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Diagnostics and multiple comparisons
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sensitivity-and-interpretation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sensitivity and interpretation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#records-to-retain" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Records to retain
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#repeated-session-change-analysis" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Repeated-Session Change Analysis
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Repeated-Session Change Analysis">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#design-and-identity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Design and identity
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#outcomes-and-inference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Outcomes and inference
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#records-to-retain_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Records to retain
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#free-harmonic-clustering-analysis" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Free Harmonic Clustering Analysis
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Free Harmonic Clustering Analysis">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#design-and-inputs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Design and inputs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#harmonics-and-normalization" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Harmonics and normalization
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cluster-inference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cluster inference
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#hauk-informed-source-psd-workflow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Hauk-Informed Source-PSD Workflow
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Hauk-Informed Source-PSD Workflow">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#processing-time-derivative" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Processing-Time Derivative
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#current-source-calculations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Current Source Calculations
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#toolbox-neighboring-bin-rule" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Toolbox Neighboring-Bin Rule
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#legacy-and-deferred-paths" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Legacy And Deferred Paths
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#manuscript-or-preregistration-checklist" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Manuscript Or Preregistration Checklist
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#references" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        References
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="methods-and-reporting-checklists">Methods and Reporting Checklists<a class="headerlink" href="#methods-and-reporting-checklists" title="Permanent link">&para;</a></h1>
+<h2 id="standard-fpvs-screening">Standard FPVS Screening<a class="headerlink" href="#standard-fpvs-screening" title="Permanent link">&para;</a></h2>
+<p>Use this checklist for a manuscript, preregistration, report, or shared analysis
+that relies on Standard FPVS Screening. The native screen is a transparent
+first round of common FPVS checks, not a universal final statistical model.
+Use a planned custom model when the question requires covariates, random
+slopes, longitudinal or nested structure, more than two groups, equivalence
+testing, or another specialized estimand.</p>
+<h3 id="design-and-population">Design and population<a class="headerlink" href="#design-and-population" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Report the FPVS Toolbox release or commit and whether the project ran in
+  native <strong>single-group</strong> or <strong>two-group</strong> mode.</li>
+<li>Identify the primary outcome as Summed baseline-corrected amplitude (Summed
+  BCA, in microvolts) and state which screening questions were relevant:
+  positive response, Condition/ROI pattern, interaction explanation, and/or
+  two-group differences.</li>
+<li>Report participant age range, recruitment population, inclusion/exclusion
+  rules, every canonical group definition, and N per group.</li>
+<li>Report QC and manual exclusions before the analysis. State that the eligible
+  participant cohort was frozen before the model used its finite available
+  observations.</li>
+<li>Report frozen N, contributing N, fully complete and partially observed
+  conditions, structurally empty/excluded cells, missing or non-finite cell
+  counts, and observed N per model or comparison cell.</li>
+<li>State that missing responses were not imputed. Explain that likelihood-based
+  available-observation inference assumes ignorable/missing-at-random (MAR)
+  missingness conditional on modeled variables, while missing-not-at-random
+  (MNAR) exclusions can bias estimates and p-values.</li>
+<li>For a multi-group project, state that group assignments came from canonical
+  <code>project.json</code> <code>group_id</code> values rather than folder-name inference. Standard
+  screening supports exactly two groups; use a planned custom model for three
+  or more groups.</li>
+</ul>
+<h3 id="summed-bca-and-selection-provenance">Summed BCA and selection provenance<a class="headerlink" href="#summed-bca-and-selection-provenance" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Report the named harmonic-selection profile, stable method ID/version,
+  canonical selection fingerprint, configured search ceiling, and whether the
+  project inherited Legacy behavior or explicitly saved a new-project profile.</li>
+<li>Report evaluated, detected, and included oddball harmonics as separate lists,
+  plus exact BCA columns, base-rate-overlap exclusions, stopping/cutoff reason,
+  and any candidates that were not evaluated after stopping. Do not call every
+  included fill-through harmonic significant.</li>
+<li>For either adaptive non-legacy profile, report the all-scalp or frozen
+  a-priori selection mask; participant Ns within every declared group x
+  condition cell; equal group weights within condition; condition-specific Z
+  calculation; and equal condition weights. State that entirely missing
+  declared cells block adaptive selection rather than being silently
+  renormalized. Explain that equal group weighting defines the common-selector
+  estimand and gives members of a smaller group more influence.</li>
+<li>For an adaptive non-Legacy repeated-session project, report that workbooks
+  and frequency-domain
+  exclusions were recording-scoped while participants remained the pairing
+  unit. Report recording-to-participant, stable-group, session, visit, and
+  source assignments; observed and missing visits; participant N within every
+  declared group x session x task-condition selector cell; equal group weights;
+  session- and task-condition-specific local Z calculations; and equal weighting
+  of all session x task-condition Z scores. State that one common harmonic list
+  was applied across sessions, that individual missing visits were not imputed,
+  and that an entirely empty declared cell blocked adaptive selection. For a
+  fixed/preregistered profile, state that every available recording was checked
+  against the same fixed domain without adaptive pooling.</li>
+<li>For adaptive profiles, report strict <code>z &gt; 1.64</code> and the neighboring-bin rule:
+  +/-10 FFT bins, excluding target - 1, target, and target + 1, then removing
+  one finite minimum and maximum before the mean and population SD. For the
+  Dzhelyova/Poncet profile, report the two consecutive eligible failures and
+  preceding cutoff; state whether the search ceiling was sufficient to observe
+  the stop. For Significant-only, state that only local threshold detections
+  were included and that this is not across-harmonic error correction.</li>
+<li>For Fixed/preregistered, report whether the input was an exact Hz list, upper
+  oddball-harmonic index, or upper frequency, plus every dynamic base-overlap
+  exclusion and the independent source/preregistration for that domain. State
+  that dynamic base-overlap exclusion was mandatory, not user-selectable.</li>
+<li>For Legacy, report its saved electrode scope, equal-available-workbook
+  pooling, fill-through-highest rule, and whether the one-pass isolated-highest
+  guard changed the sum. The guard drops the isolated highest detected peak
+  only when more than 10 eligible non-base harmonics lie strictly between the
+  two highest detections; exactly 10 remains allowed and the upper peak stays
+  recorded as detected.</li>
+<li>State whether the harmonic list was selected independently, was a fixed but
+  unverified list, or was selected adaptively from the same sample.</li>
+<li>If the list was selected from the analyzed sample, label
+  response-versus-zero p-values <strong>exploratory post-selection</strong>.</li>
+<li>State that one common included list was applied uniformly across
+  participants, groups, conditions, electrodes, and ROIs. If the profile was
+  changed, report whether the Stats-ready and full-audit workbooks and the
+  canonical L2-MNE/eLORETA Hauk source-PSD map directories were current for the
+  same fingerprint; retain older reports with their original fingerprint
+  rather than silently relabeling them.</li>
+<li>For exported multi-group data, retain and report the stable canonical
+  <code>group_id</code> used for pooling/inference separately from the human-readable
+  <code>group_label</code>. Display labels are not identifiers and need not be unique.</li>
+<li>State that the standard response question is prespecified as one-sided:
+  <code>H1: mean Summed BCA &gt; 0</code>. A negative response cannot satisfy that
+  directional hypothesis.</li>
+</ul>
+<h3 id="external-full-audit-dataset">External full-audit dataset<a class="headerlink" href="#external-full-audit-dataset" title="Permanent link">&para;</a></h3>
+<ul>
+<li>When analyzing <code>Analysis_Ready_Summed_BCA_Full_Audit.xlsx</code>, state that the
+  workbook retains all available processed participant, condition, ROI, and
+  electrode values. Toolbox QC decisions are flags, not automatic exclusions
+  in this file.</li>
+<li>Report which flagged observations, if any, the external analysis excluded
+  and give the prespecified rule. Do not describe the full-audit row count as
+  the inferential sample size if the external model used a subset.</li>
+<li>State that raw ROI Summed BCA is the mean, across available ROI electrodes,
+  of each electrode's BCA summed over the accepted processing-time harmonics.
+  RMS normalization is harmonic-specific: at each accepted harmonic, divide
+  every electrode BCA by the scalp vector length
+  <code>sqrt(sum(electrode_bca**2))</code>, then sum the normalized electrode values over
+  harmonics and average them within ROI (Dzhelyova et al., 2017; McCarthy &amp;
+  Wood, 1985). Note that this published "RMS" formula is root-sum-square, not
+  conventional root mean square. Signed-mean normalization instead divides
+  each electrode's raw post-harmonic sum by the whole-scalp signed mean before
+  ROI averaging.</li>
+<li>Retain the workbook's ROI definitions and harmonic-selection sheets with the
+  analysis record. Missing conditions are blank and must not be recoded as
+  zero.</li>
+</ul>
+<h3 id="primary-statistical-model">Primary statistical model<a class="headerlink" href="#primary-statistical-model" title="Permanent link">&para;</a></h3>
+<p>The standard contract is fixed at alpha 0.05, finite available observations,
+a participant random intercept, one-sided positive-response tests, two-sided
+model-derived contrasts, and Holm family-wise correction. These are not
+selectable analysis profiles.</p>
+<p>For a single-group analysis, report:</p>
+<ul>
+<li>the conceptual sum-coded model
+  <code>Summed BCA ~ Condition * ROI + (1 | Participant)</code>;</li>
+<li>the finite observed row set, participant grouping, accepted
+  random-intercept structure, optimizer, convergence, and singularity status;</li>
+<li>that the accepted final coefficient model used REML;</li>
+<li>that Condition, ROI, and Condition x ROI were tested with explicit
+  hierarchy-preserving full-versus-reduced models fitted with maximum
+  likelihood on the same rows, using asymptotic chi-square likelihood-ratio
+  tests;</li>
+<li>that the three primary LMM block tests were Holm-corrected together in
+  <code>omnibus_effects_strict</code>, and that their exported hierarchy-preserving labels
+  should not be relabelled as pure Type-III effects;</li>
+<li>the one-sided positive-response one-sample t-tests across all estimable
+  Condition x ROI cells and their single Holm family,
+  <code>response_core_cells</code>; and</li>
+<li>when the corrected Condition x ROI interaction was supported, the two-sided
+  <code>LMM-derived model-estimated contrast</code> comparisons of conditions within ROI
+  and ROIs within condition, Holm-corrected in <code>planned_contrasts</code>. State that
+  these automatic explanations were gated by the corrected primary
+  interaction.</li>
+</ul>
+<p>For a two-group analysis, report:</p>
+<ul>
+<li>the conceptual sum-coded model
+  <code>Summed BCA ~ Group * Condition * ROI + (1 | Participant)</code>;</li>
+<li>that exactly two canonical groups were present, with at least two retained
+  participants contributing observations in each group and finite data in
+  every required fixed-effect cell;</li>
+<li>the finite observed row set, participant grouping, accepted
+  random-intercept structure, optimizer, convergence, and singularity status;</li>
+<li>that final coefficient estimates used REML and hierarchy-preserving
+  full-versus-reduced omnibus models used ML on the same rows with asymptotic
+  chi-square likelihood-ratio tests;</li>
+<li>the four Holm-corrected rows in <code>omnibus_effects_strict</code>: Any group-related
+  effect, Group x Condition x ROI, Group x Condition-related block, and
+  Group x ROI-related block. Explain that "Any group-related effect" jointly
+  tests all fixed terms containing Group and is not a pure average Group main
+  effect;</li>
+<li>the one-sided response-versus-zero one-sample t-tests within every estimable
+  Group x Condition x ROI cell, Holm-corrected once in
+  <code>group_response_cells</code>; and</li>
+<li>the prespecified two-sided Group A minus Group B
+  <code>LMM-derived model-estimated contrast</code> in every estimable Condition x ROI
+  cell. Report signed estimates, standard errors, 95% confidence intervals,
+  asymptotic Wald z statistics, raw and Holm-adjusted p-values, and observed
+  coverage. These rows form <code>group_core_cells</code> and run independently of the
+  joint omnibus decision.</li>
+</ul>
+<p>Do not infer a group difference by comparing whether the two within-group
+response tests are individually significant. Do not describe a localized
+group-cell contrast as conditional on a significant joint group test; the
+direct contrast family is intentionally ungated.</p>
+<h3 id="balanced-only-anova-compatibility">Balanced-only ANOVA compatibility<a class="headerlink" href="#balanced-only-anova-compatibility" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Describe repeated-measures or mixed ANOVA as a secondary compatibility
+  check, never as the primary analysis.</li>
+<li>For single-group mode, state that ANOVA ran only if every included
+  participant had exactly one finite value in every Condition x ROI cell.</li>
+<li>For two-group mode, state that ANOVA additionally required exactly two
+  equal-sized groups. Its Group x response-cell result is a broad collapsed
+  compatibility check and does not separately decompose Group x Condition,
+  Group x ROI, or Group x Condition x ROI.</li>
+<li>Report the balance audit and why ANOVA ran or was skipped. When it ran,
+  report degrees of freedom, F statistics, partial eta squared, sphericity and
+  Greenhouse-Geisser handling where applicable, and Holm adjustment in
+  <code>anova_compatibility_effects</code>.</li>
+<li>State that compatibility ANOVA never gated, replaced, or changed the primary
+  LMM conclusion.</li>
+</ul>
+<p>Do not describe the Toolbox's <code>statsmodels</code> ML likelihood-ratio p-values as
+Kenward-Roger or Satterthwaite results. They are also not numerical replicas of
+the F tests with Kenward-Roger-adjusted denominator degrees of freedom reported
+in the cited R/lmer FPVS analyses. This distinction is especially important for
+small samples.</p>
+<h3 id="diagnostics-and-multiple-comparisons">Diagnostics and multiple comparisons<a class="headerlink" href="#diagnostics-and-multiple-comparisons" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Report finite-value, per-cell N, variance, Shapiro-Wilk, residual-tail,
+  convergence, and singularity diagnostics that were estimable.</li>
+<li>State that normality checks were diagnostic only and did not automatically
+  select or replace the prespecified primary test.</li>
+<li>Name every comparison family, its family ID and size, alpha, raw p-value,
+  adjusted p-value, and adjustment method. The fixed Holm families are
+  <code>response_core_cells</code>, <code>group_response_cells</code>, <code>group_core_cells</code>,
+  <code>planned_contrasts</code>, <code>omnibus_effects_strict</code>, and
+  <code>anova_compatibility_effects</code>, as applicable to the mode and estimable tests.</li>
+<li>Distinguish Greenhouse-Geisser correction for an ANOVA sphericity problem
+  from Holm multiplicity adjustment across a named family. They address
+  different problems and are not interchangeable.</li>
+<li>State that the standard available-observation route did not queue max-|t|
+  resampling because the current implementation requires a complete
+  participant-by-cell matrix. If a legacy or custom complete-design max-|t|
+  result is reported separately, give its permutation/sign-flip scheme, seed,
+  exact-enumeration status or draw count, and exchangeability assumption.</li>
+<li>Do not call Holm "Bonferroni" or "Tukey." Published FPVS studies use all
+  three in different settings, but their adjusted p-values and contrast-family
+  definitions are not interchangeable.</li>
+</ul>
+<h3 id="sensitivity-and-interpretation">Sensitivity and interpretation<a class="headerlink" href="#sensitivity-and-interpretation" title="Permanent link">&para;</a></h3>
+<ul>
+<li>List every robust, rank-based, and leave-one-participant-out sensitivity
+  requested, including the trim fraction and other applicable settings.</li>
+<li>Keep sensitivity-only findings labelled as sensitivity evidence. Do not
+  promote a result because one of several methods happened to be significant.</li>
+<li>Report estimates, confidence intervals, effect sizes, N, exact p-values, and
+  the correction used; do not report only "significant" or "not significant."</li>
+<li>State that mixed-model likelihood-ratio and Wald p-values use asymptotic
+  reference distributions and deserve particular caution in small samples.</li>
+<li>Translate a nonsignificant result as "the analysis did not provide evidence
+  of a difference." Do not infer equivalence or absence without a prespecified
+  equivalence test.</li>
+<li>For an observational 13--15-year-old sample, describe group differences as
+  associations in the analyzed sample. Do not infer that anxiety caused the
+  response or that the measure is diagnostic.</li>
+<li>State which covariates were and were not modeled. The native model does not
+  currently adjust for age, gender, depression, medication, recruitment site,
+  or other possible confounders. Use a prespecified external model when those
+  variables are part of the research question.</li>
+</ul>
+<h3 id="records-to-retain">Records to retain<a class="headerlink" href="#records-to-retain" title="Permanent link">&para;</a></h3>
+<p>Keep the following with the analysis record:</p>
+<ul>
+<li>the native workbook,
+  <code>Native Single-Group Available-Case LMM Results.xlsx</code> or
+  <code>Native Multi-Group Available-Case LMM Results.xlsx</code>, including At a Glance,
+  Detailed Methods, Test Inventory, Correction Families, Limitations, source
+  result frames, coverage, exclusions, group assignments, and the ANOVA
+  compatibility audit;</li>
+<li><code>Stats_Ready_Summed_BCA.xlsx</code> if external analyses were run;</li>
+<li><code>Quality Check/Harmonic_Selection_Summary.xlsx</code> and the corresponding
+  project metadata;</li>
+<li>model warnings, sensitivity settings, random seed, and the FPVS Toolbox
+  release/commit; and</li>
+<li>the analysis plan or preregistration that establishes ROI, harmonic,
+  direction, model, covariate, and multiplicity decisions.</li>
+</ul>
+<p>The core Summed BCA factorial models have direct FPVS precedent in
+<a href="https://doi.org/10.1016/j.ijpsycho.2025.113212">Vandenheever et al. (2025)</a>,
+<a href="https://doi.org/10.1111/jcpp.13201">Van der Donck et al. (2020)</a>,
+<a href="https://doi.org/10.3389/fpsyt.2020.00332">Vettori et al. (2020)</a>, and
+<a href="https://doi.org/10.1186/s12916-024-03610-w">Samaey et al. (2024)</a>.
+<a href="https://doi.org/10.1016/j.biopsycho.2018.09.002">Feuerriegel et al. (2018)</a>
+provides an FPVS repeated-measures ANOVA/Greenhouse-Geisser/Holm precedent.
+<a href="https://doi.org/10.1111/psyp.14052">Keil et al. (2022)</a> provide broader
+frequency-domain guidance for a priori ROIs, multiplicity correction, and
+maximum-statistic resampling. These sources support the method family; they do
+not make the Toolbox an exact reproduction of any one published pipeline.</p>
+<h2 id="repeated-session-change-analysis">Repeated-Session Change Analysis<a class="headerlink" href="#repeated-session-change-analysis" title="Permanent link">&para;</a></h2>
+<p>Use this checklist when the native v1 repeated-session workflow is used rather
+than Standard FPVS Screening.</p>
+<h3 id="design-and-identity">Design and identity<a class="headerlink" href="#design-and-identity" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Report exactly two stable between-participant groups and exactly two ordered
+  within-participant sessions. Retain canonical participant, recording, group,
+  session, source, and visit IDs from <code>project.json</code>.</li>
+<li>Report the session labels, visit indices, acquisition interval or
+  <code>days_from_baseline</code> when available, N recordings, N unique participants, N
+  complete pairs per group, every missing visit, duplicate/conflicting source
+  finding, and each recording- or recording-condition exclusion.</li>
+<li>State that one participant may contribute at most one recording per session,
+  group is stable across sessions, and missing visits were not imputed.</li>
+<li>If phase order was fixed, state explicitly that phase is perfectly
+  confounded with visit order, elapsed time, repetition, practice, and
+  habituation. Describe the estimand as session/phase-at-visit or, for example,
+  <code>session 2 (follicular) - session 1 (luteal)</code>. Do not claim an isolated
+  physiological phase effect.</li>
+</ul>
+<h3 id="outcomes-and-inference">Outcomes and inference<a class="headerlink" href="#outcomes-and-inference" title="Permanent link">&para;</a></h3>
+<ul>
+<li>List every prespecified Condition x ROI outcome selected in the GUI before
+  the run. The primary family must include every declared outcome, including a
+  declared outcome that proved non-estimable.</li>
+<li>Define the participant delta as visit 2 minus visit 1. Define the primary
+  estimand as Group A minus Group B in those participant deltas and report the
+  group order used for the sign.</li>
+<li>Report the two-sided Welch test of participant deltas, complete-pair N per
+  group, mean and SD of group deltas, difference in change, SE, 95% CI, Welch
+  statistic and degrees of freedom, raw and Holm-adjusted p-values, family ID
+  and size, Hedges g, and inferential status code.</li>
+<li>Label paired within-group changes as secondary. Report their two-sided
+  one-sample t-test of participant deltas, N, visit means, mean change, 95% CI,
+  Cohen's dz, and the separate Holm family spanning both groups and every
+  declared outcome.</li>
+<li>State that inference was complete-pair separately by outcome, with no
+  imputation, no cross-outcome complete-case deletion, and no automatic
+  fallback. Do not replace this contract after seeing convergence or p-values
+  with a full four-way model or a legacy backup test.</li>
+<li>Interpret a nonsignificant result as failure to establish a difference, not
+  proof of equivalence or no change. In an observational group comparison, do
+  not make causal or diagnostic claims.</li>
+</ul>
+<h3 id="records-to-retain_1">Records to retain<a class="headerlink" href="#records-to-retain_1" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>Repeated_Session_Change_Analysis.xlsx</code>, including primary, secondary,
+  participant deltas, participant-session audit, outcome-pair audit, pair
+  coverage, method metadata, canonical long data, and schema;</li>
+<li><code>Analysis_Ready_Summed_BCA_Full_Audit.xlsx</code>, retaining Recording ID, Session
+  ID and label, Visit Index, Days From Baseline, Group ID, QC flags, and
+  exclusion reasons;</li>
+<li><code>Quality Check/Harmonic_Selection_Summary.xlsx</code>, the one common harmonic
+  list and fingerprint used across both sessions, and recording-aware pooling
+  cell Ns/weights; and</li>
+<li>the source preflight report or correction log for any identity conflict,
+  missing visit, filename/source mismatch, or renamed/reassigned raw file.</li>
+</ul>
+<h2 id="free-harmonic-clustering-analysis">Free Harmonic Clustering Analysis<a class="headerlink" href="#free-harmonic-clustering-analysis" title="Permanent link">&para;</a></h2>
+<p>Use this checklist for embedded Free Harmonic Clustering Analysis. It
+is a clean-room implementation of the sensor x harmonic method described by
+<a href="https://doi.org/10.1111/psyp.70361">Hermann et al.</a> and informed by their
+<a href="https://github.com/oliver-hermann1/FPVS_Multiharmonic">public implementation</a>,
+not a claim of numerical identity with the authors' unpublished normalized
+tensors, spatial adjacency, dependency version, or expected outputs.</p>
+<h3 id="design-and-inputs">Design and inputs<a class="headerlink" href="#design-and-inputs" title="Permanent link">&para;</a></h3>
+<ul>
+<li>State whether the run used a paired condition contrast or an independent
+  two-group contrast. For independent groups, report canonical <code>group_id</code>
+  values and N per group. For paired conditions, report complete paired N.</li>
+<li>Report the one declared contrast and its direction (<code>arm A - arm B</code>). A set
+  of separate condition runs is not automatically corrected across conditions.</li>
+<li>For a repeated-session batch, report the two canonical group IDs, the two
+  canonical session IDs/labels and visit indices, all declared conditions, and
+  the four prespecified families: session-averaged groups, Visit 2 minus Visit
+  1 within each group, and the between-group difference in participant session
+  change. State that all primary families used complete phase-balanced pairs;
+  report complete-pair and missing-visit N by group and condition.</li>
+<li>When session/phase is aligned with visit order, call the contrast
+  <code>session/phase-at-visit</code> and state that phase cannot be separated from visit
+  order, elapsed time, repetition, habituation, or other retest effects.</li>
+<li>Report all ledger, participant-condition, whole-participant, and frequency-
+  domain QC exclusions. Missing nodes were not zero-filled or omitted with
+  varying degrees of freedom.</li>
+<li>Report the BioSemi64 channel set/order, FFT duration/bin width, base and
+  oddball frequencies, ceiling, and complete +/-0.1-Hz window preflight.</li>
+<li>State that project metadata, participant/group assignments, QC decisions,
+  and source workbooks were read without modification and that the completed
+  output was published as a new additive run.</li>
+<li>Retain the neutral FullFFT provenance method version plus source, cohort,
+  frequency-QC, processing/export, and grid fingerprints. State that this
+  processing-owned record, not the standard Stats harmonic cache, validated
+  the inputs. A standard Summed-BCA profile/list change does not define or
+  invalidate the clustering domain; a FullFFT/cohort/QC/rate/grid change does.</li>
+</ul>
+<h3 id="harmonics-and-normalization">Harmonics and normalization<a class="headerlink" href="#harmonics-and-normalization" title="Permanent link">&para;</a></h3>
+<ul>
+<li>State that raw amplitude came from original <code>FullFFT Amplitude (uV)</code>
+  workbooks. Saved Toolbox SNR, z-score, BCA, and Stats-ready Summed BCA were
+  not used as substitutes.</li>
+<li>State whether Hermann automatic selection or a preregistered fixed highest
+  harmonic was used. For automatic selection, report the per-arm
+  grand-spectrum selector, sample-SD convention, exact <code>z &gt; 3.29</code> detections,
+  and highest detection. In either mode, report the fill-through-highest
+  retained list and every dynamically derived base-rate-overlap exclusion.</li>
+<li>Report the SNR rule: target amplitude divided by mean surrounding amplitude
+  within +/-0.1 Hz after excluding the target and immediately adjacent FFT
+  bins, without min/max trimming.</li>
+<li>State that each participant/arm sensor x harmonic tensor was L2-normalized.
+  Inference concerns the relative spatial/harmonic distribution, not total
+  response magnitude.</li>
+<li>State whether the analyzed sample selected the harmonic domain. The paper-
+  faithful default is adaptive/same-data selection, not an independently fixed
+  confirmatory domain.</li>
+<li>For a repeated batch, report the one shared-domain fingerprint and selection
+  provenance across all group x session x condition cells. Describe the exact
+  tensor rules: normalize the within-participant two-session mean once for the
+  session-averaged group family; normalize each session separately before
+  paired Visit 2 minus Visit 1; and do not renormalize that difference before
+  the between-group change comparison.</li>
+</ul>
+<h3 id="cluster-inference">Cluster inference<a class="headerlink" href="#cluster-inference" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Report paired t or pooled independent t, degrees of freedom, two-sided entry
+  alpha <code>.01</code>, exact t threshold, and signed summed-t cluster mass.</li>
+<li>Report the version and hash of the fixed 197-edge FieldTrip-style BioSemi64
+  spatial reconstruction, and state that it is an independent Toolbox graph,
+  not the authors' adjacency matrix. Every retained harmonic at one sensor was
+  adjacent to every other retained harmonic; spatial neighbors connected only
+  at the same harmonic; singleton clusters were allowed.</li>
+<li>Report whole-participant sign flips/swaps or group-label permutations with
+  group sizes preserved, assignment count, RNG/seed, and assignment hash.</li>
+<li>Report separate maximum-positive/minimum-negative nulls, strict Monte Carlo
+  comparison, <code>+1</code> p correction, and Monte Carlo confidence intervals.</li>
+<li>State that raw cluster p-values were sign-specific and evaluated at <code>.025</code>
+  per direction for a two-tailed family alpha <code>.05</code>; report doubled p-values
+  when included in the export.</li>
+<li>Report every observed cluster, membership, mass, cluster-level p/interval,
+  and descriptive cluster-average Cohen's d. Effect sizes are post-selection
+  and shape-dependent.</li>
+<li>State the weak/global FWER limitation: significant clusters do not make
+  individual sensors, harmonics, cells, or boundaries pointwise significant.</li>
+<li>State that cluster-level control is conditional on the declared candidate
+  domain, adjacency, cluster-entry threshold, contrast family, and valid whole-
+  participant exchangeability. It favors spatially or harmonically extended
+  effects and does not correct a collection of separately run contrasts.</li>
+<li>For a repeated batch, report the global two-sided run p-value, Holm p-value
+  across conditions within each of the four family IDs, and conservative Holm
+  p-value across all condition x family runs. These are run-level corrections;
+  do not label a cluster's raw sign-specific p-value as Holm-adjusted.</li>
+<li>For Hermann automatic selection, state that the domain was selected from the
+  observed arms and then held fixed during permutation. Conditional cluster
+  correction alone does not establish unconditional error control for the
+  combined workflow.</li>
+<li>State the validation layer and status accurately. The deterministic
+  24-replicate x 199-assignment, at-most-five-rejection harness is software
+  regression smoke only and must not be reported as calibrated FWER evidence.</li>
+<li>If relying on the reviewed powered-calibration receipt, cite its
+  Toolbox commit, frozen configuration/generator and adjacency identities,
+  paired and independent designs, regimes, 4,000 replicate count, 10,000
+  assignments per replicate, seeds, rejection definition, rejection counts,
+  and exact Clopper-Pearson bounds. The frozen v1 run recorded 111/2,000
+  independent-group rejections (<code>.0555</code>; one-sided 97.5% upper bound <code>.06645</code>)
+  and 91/2,000 paired-condition rejections (<code>.0455</code>; upper bound <code>.05557</code>),
+  with every design-by-regime guardrail passing. Do not generalize this bounded
+  simulation evidence beyond its frozen regimes, present it as universal proof
+  or power, or imply that it validates the truth of a real-data finding.</li>
+<li>State explicitly that the reviewed powered receipt covers the frozen legacy
+  paired-condition and independent-group workflows only. It does not validate
+  the repeated-session shared selector, composite tensors, group-by-session
+  interaction contrast, or cross-condition Holm layers.</li>
+</ul>
+<p>Retain <code>Free_Harmonic_Clustering_Results.xlsx</code>, the run manifest, compressed
+arrays, machine-readable result tables, source-workbook provenance, exact
+adjacency edges, null extrema or hash, Toolbox commit, and analysis
+plan/preregistration.</p>
+<p>For repeated batches, also retain the complete-pair cohort/coverage audit,
+analysis-only recording exclusions and their required reasons, shared-domain
+tables/fingerprint, per-run derived seeds, both Holm layers, and the fixed-order
+confounding statement. Analysis-specific exclusions are source-immutable and
+must not be presented as changes to project QC.</p>
+<h2 id="hauk-informed-source-psd-workflow">Hauk-Informed Source-PSD Workflow<a class="headerlink" href="#hauk-informed-source-psd-workflow" title="Permanent link">&para;</a></h2>
+<p>This page describes the current source-localization workflow in FPVS
+Toolbox. It prepares signed time-domain EEG during normal processing and later
+uses MNE to estimate independent L2 minimum-norm cortical and eLORETA volume
+source amplitudes. The default current method identifiers are
+<code>l2_mne_hauk_source_psd_cortical_normal_v1</code> and
+<code>eloreta_volume_hauk_source_psd_vector_norm_v1</code>.</p>
+<p>The workflow is informed by the source-spectrum approach used by Hauk et al.
+(2021) and by the public
+<a href="https://github.com/olafhauk/FPVS_sweep"><code>olafhauk/FPVS_sweep</code></a> scripts. It is a
+documented FPVS Toolbox adaptation, not a claim that the Toolbox exactly
+reproduces that study's combined EEG/MEG, individual-MRI, preprocessing, or
+neighboring-bin pipeline.</p>
+<h3 id="processing-time-derivative">Processing-Time Derivative<a class="headerlink" href="#processing-time-derivative" title="Permanent link">&para;</a></h3>
+<p>After the normal condition epochs have been created and the Excel export has
+succeeded, FPVS Toolbox writes one source-ready derivative for each processed
+participant and condition. It selects EEG channels only and takes the
+sample-by-sample arithmetic mean across repetitions while the values are still
+signed volts. Thus, responses with opposite polarity can cancel; the Toolbox
+does not rectify the signal, average magnitudes, or average repetition PSDs.</p>
+<p>The derivative reuses the processed epoch's exact sample count (<code>N</code>), sampling
+frequency, <code>55_onbin</code> crop/bin provenance, montage, channel order, bad-channel
+state, and final average-reference state. It contains no FFT, source estimate,
+or neighboring-bin statistic.</p>
+<p>The generated layout is:</p>
+<pre><code class="language-text">6 - Source Localization/
+  Source-Ready Time Domain v1/
+    &lt;condition label&gt;/
+      [&lt;group&gt;/]
+        &lt;participant&gt;_&lt;condition_id&gt;_avg_raw.fif
+        &lt;participant&gt;_&lt;condition_id&gt;_avg_raw.json
+    manifests/
+      [&lt;group&gt;/]
+        &lt;participant&gt;.json
+</code></pre>
+<p>The condition folder comes first and the optional group folder comes second.
+<code>condition_id</code> is the stable project event ID. The JSON beside each FIF records
+provenance and checksums; the participant manifest is written last as the commit
+marker after every expected condition pair succeeds. Missing, stale,
+checksum-mismatched, or incompatible derivatives are rejected rather than
+silently replaced with amplitude workbooks.</p>
+<p>If derivative publication fails, the completed Excel export is preserved. The
+processing ledger records the source-readiness warning and treats the missing
+source output as work that must be rescheduled; it does not label a missing
+derivative as reusable.</p>
+<p>Source-map generation uses the versioned
+<code>available_case_by_group_condition_v1</code> cohort policy. Saved whole-participant
+QC exclusions remove that participant from every source cohort. A completed
+participant with an explicitly missing or saved-QC-excluded condition is
+omitted only from that participant-condition cell and can still contribute to
+other conditions with valid derivatives. A participant with unknown source
+availability, no remaining source condition, or a globally incomplete source
+derivative is omitted from every source condition. Source-only omissions do
+not alter available Excel outputs or automatically enter the project's general
+exclusion workbook. The prepared manifest, participant sidecar, validation
+report identify every omitted participant-condition and reason; the processing
+log and LORETA status may summarize large omission sets by scope and reason.
+Files that claim to be retained but fail checksum, compatibility, or manifest
+validation still stop the source build.</p>
+<p>These signed FIF/JSON derivatives are sufficient input for the source-method
+orientation changes described below. If they are already present and valid,
+you can rebuild the source maps without reprocessing the participant EEG.</p>
+<h3 id="current-source-calculations">Current Source Calculations<a class="headerlink" href="#current-source-calculations" title="Permanent link">&para;</a></h3>
+<p>The normal source build is intentionally EEG-only and generates both current
+methods. They use the same signed FIF derivatives, available-case
+group-condition source cohorts,
+saved oddball harmonics, exact FPVS frequency bins, and neighboring-bin z-score
+algorithm. They do not share source values: each inverse produces and caches
+its own participant source-amplitude and z-score arrays.</p>
+<p>Both methods use the Toolbox BioSemi64 channel geometry with the <code>fsaverage</code>
+template rather than individual MRI/coregistration, MEG, or EEG/MEG fusion. The
+cortical inverse is MNE-native
+L2-MNE with <code>method="MNE"</code>, <code>loose=0.2</code>, <code>depth=None</code>, <code>fixed=False</code>, and
+<code>lambda2=1/9</code>; it does not apply dSPM, sLORETA, or eLORETA normalization. By
+default it uses <code>pick_ori="normal"</code> to select the cortical surface-normal
+component and records method identity
+<code>l2_mne_hauk_source_psd_cortical_normal_v1</code>. This is closer to the Hauk source
+estimator than the older pooled-orientation implementation. Source Map Options
+can instead select "Legacy MNE pooled orientation" to reproduce older
+<code>l2_mne_hauk_source_psd_v1</code> maps; the two results use separate method labels,
+provenance, and caches.
+Both L2 variants are cortical source models: candidate sources and displayed
+values live on the reconstructed cortical sheet. They do not estimate arbitrary
+interior, cerebellar, brainstem, or other non-cortical volume locations.</p>
+<p>The independent volume inverse uses <code>method="eLORETA"</code>, a 10 mm fsaverage
+volume grid, <code>loose=1.0</code>, <code>depth=None</code>, <code>fixed=False</code>, and <code>lambda2=1/9</code>. Its
+current method identity is <code>eloreta_volume_hauk_source_psd_vector_norm_v1</code>.
+It preserves complex exact-bin coefficients through a vector inverse rather
+than accepting a basis-dependent scalar pooling of free orientations.
+This eLORETA method is the separate FPVS Toolbox volumetric extension. Its
+candidate sources lie on the inner-skull-BEM-bounded fsaverage volume grid, so
+a prepared location need not lie inside either cerebral pial surface and grid
+membership alone does not assign a tissue label. Pial and whole-brain meshes in
+the viewer are anatomical context only; they do not define or clip the volume
+source space and do not remove values from automatic color-scale calculations.
+Because the Toolbox workflow does not require a separate resting/noise
+recording, it builds MNE's ad-hoc diagonal EEG noise covariance. This is an
+intentional Toolbox adaptation of the Hauk reference pipeline, which used a
+recorded resting covariance, and must be reported with the inverse settings.</p>
+<p>For each participant and condition, the producer:</p>
+<ol>
+<li>loads the exact canonical included oddball harmonics already selected and
+   saved for the project during post-processing. It does not reconstruct the
+   profile's stopping or fill rule from the detected list;</li>
+<li>requires every selected harmonic and every required neighboring position to
+   fall on an exact FFT bin for the derivative's <code>N</code> and sampling frequency;</li>
+<li>for default L2-MNE, calls <code>mne.minimum_norm.compute_source_psd</code> on the
+   complete repetition-averaged Raw time series with <code>n_fft=N</code>, zero overlap,
+   the Hann setting, and <code>pick_ori="normal"</code>, then validates nonnegative source
+   power and takes its square root to obtain cortical-normal source amplitude;</li>
+<li>for current eLORETA, mean-removes the signed sensor time series, computes
+   complex periodic-Hann coefficients at only the exact required FFT bins,
+   calls <code>mne.minimum_norm.apply_inverse(..., pick_ori="vector")</code>, and computes
+   the rotation-invariant amplitude
+   <code>sqrt(abs(Cx)^2 + abs(Cy)^2 + abs(Cz)^2)</code> at each volume source and bin;</li>
+<li>sums corresponding target and neighboring-bin amplitudes across the selected
+   harmonics in source space; and</li>
+<li>converts that summed target to a neighboring-bin z score at each source.</li>
+</ol>
+<p>Nearest-bin substitution is forbidden. If a nominal harmonic is off-grid, a
+required bin is absent, or the complete neighboring window would cross the FFT
+range, the source build stops with a prerequisite/error message. It does not
+round the requested frequency to a nearby result.</p>
+<p>The current source calculations consume the saved harmonic-selection record
+and committed time-domain derivatives, not <code>FullFFT Amplitude (uV)</code> or the
+Stats-ready workbook. Stats-ready export and source generation are sibling
+consumers after harmonic selection, so failure of the Stats-ready export alone
+does not invalidate otherwise complete source inputs.</p>
+<p>The eLORETA calculation is a Hauk-informed extension of the published
+source-spectrum sequence, not a claim that Hauk et al. implemented this exact
+EEG-only fsaverage eLORETA volume workflow. In particular, an L2-MNE z-score
+array is never transformed or relabeled as eLORETA. The historical method ID
+<code>eloreta_volume_hauk_source_psd_v1</code> identifies older signed-FIF eLORETA maps
+whose free-orientation scalar pooling was basis-dependent; those maps remain
+loadable but are not relabeled as corrected vector-norm results.</p>
+<p>All orientation selection, inverse calculation, vector pooling, harmonic
+aggregation, and z scoring happen in source producers before the visualizer
+loads a payload. Cortical-surface, 3D-volume, and MRI-slice
+choices change only the display of saved values.</p>
+<p>For volumetric results, orthogonal MRI slices are the preferred view for
+approximate anatomical localization. The interactive 3D view interpolates the
+retained volume-grid values into a readable contour. That interpolation is
+display-only: its triangles and intermediate colored locations were not
+separately tested, the contour is not an anatomical structure, and its visible
+extent is not an inferential cluster boundary. A cerebral pial mesh or
+skull-stripped whole-brain shell may provide spatial context, but neither
+performs an additional source filter. Report anatomical descriptions cautiously
+because the estimates use EEG-only template anatomy rather than individual MRI
+and coregistration.</p>
+<p>For projects with more than one canonical participant group, the Toolbox
+creates a separate source summary and cluster-inference input for each group and
+condition. It does not silently pool experimental groups into one source map.
+Single-group and ungrouped projects retain the condition labels used elsewhere
+in the project.</p>
+<p>A one-participant group can support a descriptive source-space summary but not
+the one-sample cluster-permutation inference used for the saved display mask.
+In that case the Toolbox exports the descriptive L2-MNE/eLORETA map, records
+the mask as unavailable because of insufficient participants, and treats the
+unmasked display as exploratory. Do not report that map as a group-level
+cluster-permutation result.</p>
+<h3 id="toolbox-neighboring-bin-rule">Toolbox Neighboring-Bin Rule<a class="headerlink" href="#toolbox-neighboring-bin-rule" title="Permanent link">&para;</a></h3>
+<p>For every selected harmonic, the target uses offset <code>0</code>. Noise candidates use
+offsets <code>-10..-2</code> and <code>+2..+10</code>, giving nine bins on each side and excluding
+offsets <code>-1</code>, <code>0</code>, and <code>+1</code>. Corresponding offsets are first summed across all
+selected harmonics. At each source point, the Toolbox then pools the 18 summed
+noise values, removes exactly one global minimum and one global maximum, and
+computes the mean and population standard deviation over the remaining 16
+values (<code>ddof=0</code>). The saved value is:</p>
+<pre><code class="language-text">z = (summed target amplitude - trimmed noise mean) / trimmed noise population SD
+</code></pre>
+<p>This exact offset and trimming policy is an intentional Toolbox rule. Report it
+explicitly rather than describing the output only as a generic Hauk z score.</p>
+<h3 id="legacy-and-deferred-paths">Legacy And Deferred Paths<a class="headerlink" href="#legacy-and-deferred-paths" title="Permanent link">&para;</a></h3>
+<p>Existing amplitude-derived L2-MNE Hauk z-score and eLORETA prepared manifests
+remain importable in the visualizer and are labeled legacy/exploratory. They do
+not serve as fallback inputs for either current source-PSD workflow. Normal
+manual and post-processing rebuilds create both time-domain methods. The signed-
+FIF IDs <code>l2_mne_hauk_source_psd_v1</code> and
+<code>eloreta_volume_hauk_source_psd_v1</code> are also historical: the former remains an
+explicit GUI-selectable reproduction mode, while the latter remains loadable
+but records a basis-dependent orientation result. MEG fusion, individual-MRI
+modeling, and alternative phase-sensitive estimators beyond the current
+exact-bin vector eLORETA route remain possible later additions.</p>
+<h3 id="manuscript-or-preregistration-checklist">Manuscript Or Preregistration Checklist<a class="headerlink" href="#manuscript-or-preregistration-checklist" title="Permanent link">&para;</a></h3>
+<p>Report at least:</p>
+<ul>
+<li>the FPVS Toolbox release or commit and both method identifiers,
+  normally <code>l2_mne_hauk_source_psd_cortical_normal_v1</code> and
+  <code>eloreta_volume_hauk_source_psd_vector_norm_v1</code>; if the L2 legacy toggle was
+  used, report <code>l2_mne_hauk_source_psd_v1</code> and the pooled-orientation choice;</li>
+<li>that source inputs were EEG-only, signed, sample-wise repetition averages in
+  volts, and the number of repetitions contributing to each derivative;</li>
+<li>preprocessing, reference, montage/channel, epoch crop, <code>N</code>, sampling
+  frequency, and resulting frequency resolution;</li>
+<li>that the saved project harmonic-selection profile and fingerprint were
+  reused, with exact detected and included frequencies, stopping reason,
+  selection electrode mask, and any profile-specific exclusions or Legacy gap-
+  guard decision;</li>
+<li>the EEG-only <code>fsaverage</code> BioSemi64 template limitation and the absence of
+  individual MRI/coregistration, MEG, and modality fusion;</li>
+<li>the MNE version, cortical spacing, volume-grid spacing, each method's
+  independent inverse settings, ad-hoc diagonal EEG noise covariance, and
+  source settings;</li>
+<li>that L2-MNE used a cortical-sheet source domain while eLORETA used the
+  independent 10 mm volumetric source domain; pial or whole-brain display
+  anatomy did not clip the prepared volume estimates;</li>
+<li>L2 <code>pick_ori="normal"</code> and square-root PSD amplitude conversion, plus eLORETA
+  exact-bin complex periodic-Hann coefficients, <code>pick_ori="vector"</code>, and
+  <code>sqrt(sum(abs(Cxyz)^2))</code> orientation pooling;</li>
+<li>the exact-bin/no-nearest-bin requirement;</li>
+<li>amplitude conversion, harmonic aggregation, offsets <code>-10..-2</code> and <code>+2..+10</code>,
+  one global minimum/maximum removal, and population SD (<code>ddof=0</code>);</li>
+<li>participant exclusions, flagged-participant policy, group summary, and each
+  method's source-space cluster inference, plus L2-MNE ROI/lateralization
+  settings, saved whole-participant and participant-condition QC exclusions,
+  and every source-only available-case omission and its reason;</li>
+<li>whether a reported volume figure used MRI slices or the 3D contour, and that
+  slice/contour interpolation was display-only rather than additional tested
+  locations or inferential extent; and</li>
+<li>that cortical-normal L2 follows the Hauk estimator more closely but remains
+  Toolbox-adapted, and that vector-norm eLORETA is a Toolbox extension, citing
+  both the study and public code reference below.</li>
+</ul>
+<p>Retain the source-ready FIF/JSON pairs, participant commit manifests, harmonic
+selection record, and prepared source-output manifest with the analysis record.
+Together they provide the provenance needed to audit the source figures.</p>
+<h3 id="references">References<a class="headerlink" href="#references" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Hauk, O., Rice, G. E., Volfart, A., Magnabosco, F., Lambon Ralph, M. A., &amp;
+  Rossion, B. (2021). <a href="https://doi.org/10.1016/j.neuroimage.2021.118460">Face-selective responses in combined EEG/MEG recordings
+  with fast periodic visual stimulation
+  (FPVS)</a>. <em>NeuroImage, 242</em>,
+  118460.</li>
+<li>Hauk, O. <a href="https://github.com/olafhauk/FPVS_sweep"><code>olafhauk/FPVS_sweep</code>: Python scripts for an FPVS frequency-sweep
+  experiment</a>, including the public
+  <code>FPVS_PSD_Source_sweep.py</code> source-spectrum script.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../" class="md-footer__link md-footer__link--prev" aria-label="Previous: Methods and References">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                Methods and References
+              </div>
+            </div>
+          </a>
+        
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.tracking", "navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.top", "navigation.footer", "navigation.expand", "navigation.indexes", "toc.integrate", "toc.follow", "content.code.copy", "search.suggest", "search.highlight", "search.share"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

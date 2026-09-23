@@ -1,0 +1,1376 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="User documentation, tool guides, and method references for FPVS Toolbox.">
+      
+      
+      
+        <link rel="canonical" href="https://zcm58.github.io/FPVS-Toolbox-Repo/tools/free-harmonic-clustering/">
+      
+      
+        <link rel="prev" href="../statistics/">
+      
+      
+        <link rel="next" href="../sensitivity-analysis/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Free Harmonic Clustering - FPVS Toolbox</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    <body dir="ltr">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#free-harmonic-clustering-analysis" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="FPVS Toolbox" class="md-header__button md-logo" aria-label="FPVS Toolbox" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            FPVS Toolbox
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Free Harmonic Clustering
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+          <a href="javascript:void(0)" class="md-search__icon md-icon" title="Share" aria-label="Share" data-clipboard data-clipboard-text="" data-md-component="search-share" tabindex="-1">
+            
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9a3 3 0 0 0-3 3 3 3 0 0 0 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.15c-.05.21-.08.43-.08.66 0 1.61 1.31 2.91 2.92 2.91s2.92-1.3 2.92-2.91A2.92 2.92 0 0 0 18 16.08"/></svg>
+          </a>
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/zcm58/FPVS-Toolbox-Repo" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    zcm58/FPVS-Toolbox-Repo
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Tools
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../reference/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+  
+
+<nav class="md-nav md-nav--primary md-nav--lifted md-nav--integrated" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="FPVS Toolbox" class="md-nav__button md-logo" aria-label="FPVS Toolbox" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    FPVS Toolbox
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/zcm58/FPVS-Toolbox-Repo" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    zcm58/FPVS-Toolbox-Repo
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tools
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_2" id="__nav_2_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Tools
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../statistics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Standard FPVS Screening
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Free Harmonic Clustering
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Free Harmonic Clustering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#before-you-start" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Before You Start
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#available-workflows" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Available Workflows
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Available Workflows">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#legacy-one-contrast-workflow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Legacy One-Contrast Workflow
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#repeated-session-full-batch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Repeated-Session Full Batch
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#selecting-harmonics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Selecting Harmonics
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#run-the-analysis" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Run the Analysis
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#hermann-compatible-statistical-profile" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Hermann-Compatible Statistical Profile
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reading-results" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reading Results
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#outputs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Outputs
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reporting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reporting
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#references" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        References
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sensitivity-analysis/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sensitivity Analysis
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../snr-plot-generator/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SNR Plots
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../publication-maps/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scalp Maps
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../loreta-visualizer/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    LORETA Visualizer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sequence-figure/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sequence Figure
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ratio-calculator/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ratio Calculator
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../individual-level-detectability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Individual Detectability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../reference/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_3" id="__nav_3_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/methods-reporting-checklist/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Source-PSD Reporting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="free-harmonic-clustering-analysis">Free Harmonic Clustering Analysis<a class="headerlink" href="#free-harmonic-clustering-analysis" title="Permanent link">&para;</a></h1>
+<p>Free Harmonic Clustering Analysis is a project-bound analysis for
+comparing how an FPVS oddball response is distributed across both electrodes
+and harmonics. Unlike a summed-harmonic analysis, it retains each participant's
+electrode x harmonic array and uses connected cluster mass for permutation
+inference.</p>
+<p>The implementation is an independent, clean-room adaptation of the method
+described by <a href="https://doi.org/10.1111/psyp.70361">Hermann et al. (2026)</a>. It
+follows the paper and public implementation where the available information is
+sufficient, but it is not a copy and is not claimed to be numerically identical
+to the authors' unpublished normalized arrays, software state, or adjacency
+matrix.</p>
+<h2 id="before-you-start">Before You Start<a class="headerlink" href="#before-you-start" title="Permanent link">&para;</a></h2>
+<p>Choose the abbreviated <strong>Free Harmonic Clustering</strong> entry in the default Quick
+Tools list to open <strong>Free Harmonic Clustering Analysis</strong>. The active project
+must contain:</p>
+<ul>
+<li>valid base and oddball frequency metadata;</li>
+<li>current neutral FullFFT provenance in <code>project.json</code> that matches the
+  processed workbooks, active cohort/QC state, processing export, and current
+  Project Settings;</li>
+<li>canonical conditions, participants, and, for an independent-groups run,
+  canonical group assignments;</li>
+<li>processed condition workbooks with compatible <code>FullFFT Amplitude (uV)</code>
+  sheets; and</li>
+<li>the complete supported BioSemi64 sensor set on one shared FullFFT frequency
+  grid.</li>
+</ul>
+<p>Repeated-session v2.2 projects are recognized automatically. The repeated
+workflow requires exactly two stable groups and two ordered sessions. It keeps
+canonical participant, recording, group, session, and visit identity throughout
+preparation, so two visits are paired and are never treated as independent
+participants.</p>
+<p>The tool reads these values dynamically. It does not provide local frequency,
+group, condition, or participant overrides. Both the setup inspection and the
+direct preparation API validate the same processing-owned neutral record:
+project-relative source workbooks, exact FullFFT grid/resolution, base and
+oddball rates, cohort/QC identity, and processing/export identity. Missing,
+stale, or conflicting provenance opens the shared <strong>Post-processing Required</strong>
+dialog. Choose <strong>Run Post-processing</strong> to refresh the downstream files from the
+existing processed EEG data; EEG preprocessing is not rerun. After the neutral
+record is current, the FHC setup reloads automatically.</p>
+<p>The neutral record contains no standard Stats profile or selected Summed-BCA
+harmonic list. Free Harmonic Clustering always performs its own Hermann
+automatic or fixed-ceiling preparation from original FullFFT amplitude. A
+standard profile change, or stale Stats-ready/full-audit workbook by itself,
+does not alter or block this analysis. A changed FullFFT workbook, active
+cohort, frequency-QC decision, processing/export identity, rate, or grid does.</p>
+<h2 id="available-workflows">Available Workflows<a class="headerlink" href="#available-workflows" title="Permanent link">&para;</a></h2>
+<h3 id="legacy-one-contrast-workflow">Legacy One-Contrast Workflow<a class="headerlink" href="#legacy-one-contrast-workflow" title="Permanent link">&para;</a></h3>
+<p>Choose one ordered two-level contrast:</p>
+<ul>
+<li><strong>Paired Conditions:</strong> Condition A minus Condition B for the same complete
+  participants. You may restrict the cohort to one canonical project group; the
+  default uses all eligible participants.</li>
+<li><strong>Independent Groups:</strong> Group A minus Group B for one condition. Whole
+  participant arrays are relabeled while the observed group sizes are
+  preserved.</li>
+</ul>
+<p>The direction is always displayed as A minus B. Positive clusters indicate
+A &gt; B and negative clusters indicate A &lt; B. Set A and B directly in Setup;
+select them in the opposite order to reverse the contrast.</p>
+<p>Legacy one-contrast mode does not run an omnibus test, group x condition
+interaction, or automatic batch across conditions. A collection of separately
+run legacy contrasts is not automatically corrected as one larger family.</p>
+<h3 id="repeated-session-full-batch">Repeated-Session Full Batch<a class="headerlink" href="#repeated-session-full-batch" title="Permanent link">&para;</a></h3>
+<p>For a repeated-session project, the GUI replaces the legacy contrast selector
+with one prespecified full batch. Every project condition is analyzed in four
+participant-level contrast families:</p>
+<ol>
+<li><strong>Groups averaged over sessions:</strong> average the two session SNR tensors within
+   each complete participant, L2-normalize that participant mean once, then
+   compare Group A minus Group B by whole-participant label permutation.</li>
+<li><strong>Session/phase-at-visit within Group A:</strong> L2-normalize each session tensor,
+   calculate Visit 2 minus Visit 1 within participant, and use whole-participant
+   sign flips.</li>
+<li><strong>Session/phase-at-visit within Group B:</strong> use the same paired calculation
+   within the second group.</li>
+<li><strong>Group difference in session change:</strong> compare the participant-level Visit
+   2 minus Visit 1 normalized-session difference tensors between groups. This
+   is the direct group-by-session interaction contrast; the difference tensor
+   is not normalized again.</li>
+</ol>
+<p>All four families use complete, phase-balanced pairs for the relevant
+condition. Missing sessions remain visible in the cohort audit and are never
+imputed or zero-filled. The GUI can add recording-specific exclusions for one
+batch only; every selected recording requires a reason, is exported in the
+audit, and does not change project QC or any source file.</p>
+<p>The session direction is later visit minus earlier visit. If every participant
+completed sessions in the same order—as in the Birth Control project—phase is
+perfectly confounded with visit order, elapsed time, repetition, and
+habituation. Results must therefore be called <strong>session/phase-at-visit</strong> effects,
+not isolated menstrual-phase effects.</p>
+<p>Each condition-level result retains maximum-cluster correction across its
+electrode x harmonic nodes. The batch then applies Holm correction to the
+global two-sided run p-values across conditions within each of the four
+prespecified contrast families. It also reports a conservative Holm adjustment
+across every condition x family test in the full batch. These are run-level
+corrections; raw cluster p-values are not relabelled as cross-condition-adjusted
+cluster p-values.</p>
+<h2 id="selecting-harmonics">Selecting Harmonics<a class="headerlink" href="#selecting-harmonics" title="Permanent link">&para;</a></h2>
+<p>The default <strong>Hermann automatic selection</strong> profile calculates grand-spectrum
+z-scores for both contrast arms. It detects oddball harmonics using strict
+<code>z &gt; 3.29</code>, takes the highest detected harmonic in either arm, and fills through
+that upper harmonic. If neither arm has an eligible detection, preparation
+stops with a no-harmonics-selected result instead of inventing a fallback.</p>
+<p>The optional <strong>Fixed harmonic list</strong> control asks for the highest oddball
+harmonic to include. It then fills through from the first eligible oddball
+harmonic to that upper end. It is not a selector for one isolated harmonic.</p>
+<p>For both modes, candidate frequencies are derived from the project's oddball
+frequency, base frequency, FullFFT grid, and available upper frequency. Every
+oddball harmonic that coincides with a base-rate harmonic is excluded. No
+particular base rate, oddball rate, or upper frequency is hard-coded.</p>
+<p>The repeated-session batch derives and freezes one shared harmonic domain
+across all included groups, sessions, conditions, and contrast families. In
+automatic mode it computes selector z-scores separately in every declared
+group x session x condition cell, takes the highest strict detection in any
+cell, and fills through once for the whole batch. This keeps the candidate node
+family comparable throughout the batch. Legacy one-contrast automatic
+selection remains unchanged.</p>
+<h2 id="run-the-analysis">Run the Analysis<a class="headerlink" href="#run-the-analysis" title="Permanent link">&para;</a></h2>
+<p>For a legacy project, define one comparison and select <strong>Run Free Harmonic
+Clustering Analysis</strong> once.
+For a repeated-session project, review the detected groups, ordered sessions,
+all-condition plan, fixed-order warning, and optional analysis-only recording
+exclusions, then select <strong>Run Free Harmonic Clustering Analysis</strong>. The tool
+prepares the data and continues through all permutations and export without
+another confirmation. A concise result appears beneath the setup controls when
+the run completes.</p>
+<p>The main workspace intentionally omits dense preparation and technical run
+summaries. The completed workbook records the full cohort, exclusions,
+incomplete pairs, harmonic-selection audit, prepared data shape, source
+validation, assignment count, threshold, seed, and other method provenance.</p>
+<p>Preparation builds the numerical arrays once and reuses them for the
+permutation run, avoiding a second workbook read. Condition workbooks are read
+with a deduplicated selected-column plan and converted to contiguous numerical
+arrays for vectorized calculation.</p>
+<p>The same repeated batch is available headlessly. Session A is the positive
+side of the change, so the Birth Control direction is follicular Visit 2 minus
+luteal Visit 1. Repeat <code>--condition</code> in the planned order; any
+<code>--exclude-recording</code> value must include a nonempty <code>RECORDING_ID=REASON</code>:</p>
+<pre><code class="language-powershell">python -m Tools.Free_Harmonic_Clustering repeated-session `
+  --project-root &quot;&lt;managed-project-root&gt;&quot; `
+  --condition &quot;Neutral Angry&quot; --condition &quot;Angry Control&quot; `
+  --condition &quot;Neutral Happy&quot; --condition &quot;Neutral Sad&quot; `
+  --group-a bc_group --group-b control_group `
+  --session-a follicular_phase --session-b luteal_phase `
+  --exclude-recording &quot;participant-id__session-id=User-declared outlier&quot;
+</code></pre>
+<h2 id="hermann-compatible-statistical-profile">Hermann-Compatible Statistical Profile<a class="headerlink" href="#hermann-compatible-statistical-profile" title="Permanent link">&para;</a></h2>
+<p>The first release exposes no advanced method controls. It uses:</p>
+<ul>
+<li>target SNR divided by the mean surrounding amplitude within +/-0.1 Hz,
+  excluding the target and its immediately adjacent FFT bins;</li>
+<li>L2 normalization of each participant and contrast arm across the full
+  electrode x harmonic array;</li>
+<li>a two-sided node-entry alpha of <code>.01</code>;</li>
+<li>signed summed-t cluster mass;</li>
+<li>complete free-harmonic adjacency at each electrode;</li>
+<li>a fixed, versioned 197-edge FieldTrip-style BioSemi64 spatial graph;</li>
+<li>10,000 whole-participant assignments by default; and</li>
+<li>separate positive and negative extreme-cluster null distributions.</li>
+</ul>
+<p>The 197-edge spatial graph is an independent clean-room reconstruction of a
+FieldTrip-style BioSemi64 neighborhood graph. It is not the authors' adjacency
+matrix. The exact edge list, version, and hash are retained with each run.</p>
+<p>Paired analyses permute whole participant differences through sign flips.
+Independent-group analyses shuffle whole participant labels while preserving
+group sizes. This applies to the corresponding repeated-session families as
+well as legacy contrasts. Sensors and harmonics are never shuffled separately.</p>
+<h2 id="reading-results">Reading Results<a class="headerlink" href="#reading-results" title="Permanent link">&para;</a></h2>
+<p>For a legacy contrast, the main workspace reports whether significant clusters
+were found and shows only those clusters, ordered by raw sign-specific p-value.
+For a repeated-session batch, it shows one compact row per condition x contrast
+family with the number of significant clusters, global run p-value,
+within-family Holm p-value, and full-batch Holm p-value. The page does not use a
+page-level scroll area; result tables scroll internally when needed. Use
+<strong>Open Results Folder</strong> for complete cluster tables and technical run details.
+The primary raw cluster p-value is evaluated at <code>.025</code> per direction for a
+two-tailed family alpha of <code>.05</code>. The doubled p-value is included as a
+secondary two-sided presentation, not as a second test. A Monte Carlo interval
+records uncertainty from the finite number of assignments.</p>
+<p>A positive cluster means that the L2-normalized response is relatively stronger
+for A than B over the connected electrode x harmonic cells. A negative cluster
+means the reverse. Because of normalization, the test concerns response shape
+and distribution, not overall response magnitude.</p>
+<p>Inference is cluster-level and provides weak/global family-wise error control
+for the one declared electrode x harmonic family when whole-participant
+assignments are exchangeable. That control is conditional on the candidate
+domain, adjacency, node-entry threshold, and contrast family. It does not
+correct a collection of separately run legacy contrasts. The repeated-session
+batch's Holm layers address its prespecified run-level families, not arbitrary
+analyses outside that batch. Cluster inference tends to favor spatially or
+harmonically extended effects. A significant cluster does not
+make any individual electrode, harmonic, cell, or boundary pointwise
+significant. Cluster-average effect sizes are descriptive, post-selection, and
+shape-dependent. Higher harmonics can reflect a more complex evoked waveform,
+but one harmonic should not be assigned to one neural process in isolation.</p>
+<p>Automatic mode chooses its ceiling from the observed arms and holds that
+ceiling fixed during permutations. The cluster permutation therefore controls
+the conditional family defined by that prepared domain; this fact alone does
+not prove unconditional error control for the combined adaptive-selection and
+permutation procedure.</p>
+<p>The Toolbox separates software regression testing from formal statistical
+calibration. Routine automated testing repeats 24 seeded null analyses with 199
+assignments each and permits at most five global rejections. This small envelope
+is only a gross-error smoke check.</p>
+<p>A separate powered protocol is frozen for 4,000 null replicates: 2,000 paired
+and 2,000 independent, divided among four 500-replicate regimes per design,
+using the production 10,000 assignments. Its design-level and regime-level
+exact-binomial guardrails were fixed before execution. The reviewed run passed
+every guardrail: independent groups rejected in 111/2,000 replicates (<code>.0555</code>;
+one-sided 97.5% exact upper bound <code>.06645</code>) and paired conditions in 91/2,000
+(<code>.0455</code>; upper bound <code>.05557</code>). All eight 500-replicate regime cells passed;
+the largest was 31/500 (<code>.062</code>; one-sided 95% upper bound <code>.08276</code>). There were
+no errors or no-selection replicates, and the deterministic execution check
+passed.</p>
+<p>This result is bounded empirical evidence for the frozen simulated regimes,
+not mathematical proof of universal error control, a power analysis, or
+evidence that any real-data result is true. Automatic-mode cluster inference
+remains conditional on the candidate domain, adjacency, node-entry threshold,
+contrast family, and valid whole-participant exchangeability. Do not report the
+24 x 199 smoke as calibrated evidence or generalize the powered result beyond
+its documented regimes.</p>
+<p>The powered receipt covers only the frozen legacy paired-condition and
+independent-group workflows. It does <strong>not</strong> validate the repeated-session
+batch, its shared multi-cell harmonic selector, composite participant tensors,
+interaction contrast, or cross-condition Holm layer. The repeated workflow
+reuses the locked numerical cluster-permutation core, but that is a software
+inheritance statement rather than new calibration evidence.</p>
+<p>The workspace has no result plots or historical-run browser. It
+shows the current session's latest result. Use <strong>Open Results Folder</strong> to review
+earlier additive runs.</p>
+<h2 id="outputs">Outputs<a class="headerlink" href="#outputs" title="Permanent link">&para;</a></h2>
+<p>A successful run creates a new, non-overwriting directory below:</p>
+<pre><code class="language-text">&lt;project&gt;/3 - Statistical Analysis Results/
+  Free Harmonic Clustering Analysis/&lt;run-id&gt;/
+</code></pre>
+<p>Its primary human-readable file is
+<code>Free_Harmonic_Clustering_Results.xlsx</code>, organized into these worksheets:</p>
+<ol>
+<li>Run Summary</li>
+<li>Significant Clusters</li>
+<li>All Clusters</li>
+<li>Cluster Membership</li>
+<li>Harmonic Selection</li>
+<li>Participants and Exclusions</li>
+<li>Methods and Provenance</li>
+<li>Node Statistics</li>
+<li>Null Distribution</li>
+</ol>
+<p>A repeated-session batch instead writes
+<code>Free_Harmonic_Clustering_Repeated_Session_Batch.xlsx</code> in one additive batch
+directory. It includes the batch/run summary, both Holm layers, all cluster and
+membership rows, the complete-pair cohort and exclusion audit, shared harmonic
+selection, methods/provenance, node statistics, signed null distributions, and
+source-workbook audit. Machine-readable per-run tables and compressed arrays
+remain beside it.</p>
+<p>The workbook uses frozen headers, filters, readable widths, consistent numeric
+precision, and restrained significance highlighting. Machine-readable CSV,
+compressed-array, and manifest artifacts remain beside it for reproducibility.</p>
+<p>The tool is source-immutable: it never modifies <code>project.json</code>, project
+settings, participant metadata, QC ledgers or decisions, or processed
+workbooks. Failed or cancelled work does not publish a completed result bundle.</p>
+<h2 id="reporting">Reporting<a class="headerlink" href="#reporting" title="Permanent link">&para;</a></h2>
+<p>Report the ordered contrast and design, cohort and exclusions, exact harmonic
+domain and its selection provenance, L2 normalization, graph version/hash,
+node-entry threshold, assignment count and seed, cluster mass, membership, raw
+sign-specific p-value, Monte Carlo interval, doubled p-value when shown, and
+descriptive effect size. Also retain the neutral FullFFT provenance method and
+source/cohort/QC/processing fingerprints exported with the run. Retain the
+complete result bundle with the analysis record.</p>
+<p>For a repeated-session batch, additionally report the two ordered canonical
+sessions and visit indices, the fixed-order confounding, complete-pair N by
+group/condition, all analysis-specific recording exclusions and reasons, the
+four tensor constructions, the shared batch harmonic-domain fingerprint, and
+the global run p-value with both within-family and all-batch Holm values. Do not
+describe a cluster's raw p-value as Holm-adjusted, and do not interpret the FHC
+result as a test of total Raw BCA magnitude.</p>
+<p>See the <a href="../../reference/methods-reporting-checklist/#free-harmonic-clustering-analysis">Free Harmonic Clustering reporting
+checklist</a>
+for the full manuscript and provenance checklist.</p>
+<h2 id="references">References<a class="headerlink" href="#references" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Hermann, O., Wong Hiu Ching, W., &amp; Stothart, G. (2026).
+  <a href="https://doi.org/10.1111/psyp.70361">Preserving harmonic structure in FPVS-oddball: A two-dimensional
+  cluster-based permutation approach</a>.
+  <em>Psychophysiology, 63</em>(7), e70361.</li>
+<li><a href="https://github.com/oliver-hermann1/FPVS_Multiharmonic">Hermann et al. public <code>FPVS_Multiharmonic</code>
+  repository</a>.</li>
+<li><a href="../../reference/methods-reporting-checklist/#free-harmonic-clustering-analysis">FPVS Toolbox methods and reporting
+  checklist</a>.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../statistics/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Standard FPVS Screening">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                Standard FPVS Screening
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../sensitivity-analysis/" class="md-footer__link md-footer__link--next" aria-label="Next: Sensitivity Analysis">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                Sensitivity Analysis
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.tracking", "navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.top", "navigation.footer", "navigation.expand", "navigation.indexes", "toc.integrate", "toc.follow", "content.code.copy", "search.suggest", "search.highlight", "search.share"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>
