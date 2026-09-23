@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QSizePolicy,
     QStyle,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -32,6 +33,10 @@ from Tools.Plot_Generator.gui_settings import (
     _LEGEND_DEFAULT_B_PEAKS,
 )
 from Tools.Plot_Generator.log_dialog import SNRGenerationLogDialog
+from Tools.Plot_Generator.condition_controls import (
+    build_extra_condition_selectors, build_extra_legend_fields, build_overlay_count,
+    configure_condition_combo,
+)
 from Tools.Plot_Generator.ui_actions import build_generation_action_row
 from Tools.Plot_Generator.ui_header import build_snr_tool_header
 
@@ -126,6 +131,7 @@ class PlotGeneratorUiSectionsMixin:
         params_layout.setSpacing(8)
 
         self.condition_combo = QComboBox()
+        configure_condition_combo(self.condition_combo)
         self.condition_combo.setAccessibleName("Condition to plot")
         self.condition_combo.setToolTip("Select the condition to plot")
         self.condition_combo.currentTextChanged.connect(self._update_chart_title_state)
@@ -138,6 +144,7 @@ class PlotGeneratorUiSectionsMixin:
         self.color_a_btn.clicked.connect(lambda: self._choose_color("a"))
 
         self.condition_b_combo = QComboBox()
+        configure_condition_combo(self.condition_b_combo)
         self.condition_b_combo.setAccessibleName("Second condition to compare")
         self.condition_b_combo.setToolTip("Select second condition")
 
@@ -206,6 +213,7 @@ class PlotGeneratorUiSectionsMixin:
         selectors_grid.addWidget(self.condB_container, 1, 0)
         selectors_grid.setColumnStretch(0, 1)
         selectors_grid.setColumnStretch(1, 1)
+        build_extra_condition_selectors(self, selectors_grid)
 
         self._selectors_grid = selectors_grid
         params_layout.addLayout(selectors_grid)
@@ -266,6 +274,7 @@ class PlotGeneratorUiSectionsMixin:
         overlay_layout.setSpacing(8)
         overlay_layout.addStretch(1)
         overlay_layout.addWidget(self.overlay_check)
+        build_overlay_count(self, overlay_layout)
         overlay_layout.addStretch(1)
 
         params_layout.addWidget(self.overlay_row)
@@ -373,6 +382,7 @@ class PlotGeneratorUiSectionsMixin:
         self._legend_auto_values: dict[str, str] = {}
         self._legend_manual_overrides: set[str] = set()
         self._syncing_legend_defaults = False
+        build_extra_legend_fields(self, legend_form)
 
         self.group_box = SectionCard("Group Options")
         self.group_box.setMaximumHeight(180)
@@ -516,9 +526,17 @@ class PlotGeneratorUiSectionsMixin:
         content_layout.addWidget(left_column, 1)
         content_layout.addWidget(right_column, 1)
         root_layout.addWidget(file_box)
-        root_layout.addWidget(content_widget)
-        root_layout.addWidget(self.legend_group)
-        root_layout.addStretch(1)
+        self.setup_tabs = QTabWidget()
+        self.setup_tabs.setObjectName("snr_setup_tabs")
+        self.setup_tabs.setAccessibleName("SNR plot setup and legend labels")
+        self.setup_tabs.addTab(content_widget, "Plot setup")
+        legend_page = QWidget()
+        legend_page_layout = QVBoxLayout(legend_page)
+        legend_page_layout.setContentsMargins(0, 0, 0, 0)
+        legend_page_layout.addWidget(self.legend_group)
+        legend_page_layout.addStretch(1)
+        self.setup_tabs.addTab(legend_page, "Legend labels")
+        root_layout.addWidget(self.setup_tabs, 1)
 
         build_generation_action_row(self, root_layout)
 

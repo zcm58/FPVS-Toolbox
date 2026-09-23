@@ -181,6 +181,30 @@ class PlotSourceDataMixin:
             pending[roi] = (curve_a, curve_b)
         self._set_pending_source_curves(frequencies_hz, pending)
 
+    def _prepare_condition_overlay_source_curves(
+        self,
+        *,
+        frequencies_hz: Sequence[float],
+        conditions: Sequence[str],
+        subject_data: Sequence[Mapping[str, Mapping[str, Sequence[float]]]],
+        plotted_data: Sequence[Mapping[str, Sequence[float]]],
+    ) -> None:
+        pending: dict[str, tuple[SourceCurve, ...]] = {}
+        self.overlay_roi_sample_sizes = {condition: {} for condition in conditions}
+        for roi in plotted_data[0]:
+            curves = []
+            for condition, subjects, averages in zip(conditions, subject_data, plotted_data):
+                curve = build_source_curve(
+                    curve_id=f"{condition}:{roi}", condition=condition, roi=roi,
+                    plotted_values=averages[roi], subject_data=subjects,
+                    participant_ids=self._participants_with_roi(subjects, roi),
+                    frequency_count=len(frequencies_hz),
+                )
+                self.overlay_roi_sample_sizes[condition][roi] = curve.participant_n_roi
+                curves.append(curve)
+            pending[roi] = tuple(curves)
+        self._set_pending_source_curves(frequencies_hz, pending)
+
     def _set_pending_source_curves(
         self,
         frequencies_hz: Sequence[float],

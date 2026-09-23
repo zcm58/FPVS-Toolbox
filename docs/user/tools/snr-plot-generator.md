@@ -53,11 +53,24 @@ For a single-group project, you can:
 
 - create a separate spectrum for one condition or queue all conditions;
 - choose one ROI or generate plots for all defined ROIs; and
-- overlay two different conditions on the same plot.
+- overlay two to five different conditions on the same plot.
 
 Each curve is the participant-average SNR spectrum for that condition and ROI.
 Its legend includes the number of participants contributing at least one finite
 value to the ROI.
+
+Enable **Overlay Comparison**, then choose how many conditions to compare.
+Select a different condition in each visible row. Each condition has its own
+color and peak-marker shape. **Plot setup** contains condition, ROI, and axis
+controls; **Legend labels** contains the optional curve and peak labels.
+Optional legend labels let you shorten long
+condition names without renaming the project conditions.
+
+For three or more conditions, the legend sits below the axes and long labels
+wrap. The figure grows vertically to accommodate the legend while retaining
+the normal plotting area and readable text, so the legend cannot cover peaks.
+**All Conditions** still creates separate figures; it does not select every
+condition for an overlay.
 
 ## Multi-Group Projects
 
@@ -87,7 +100,7 @@ Selected display labels remain mapped to canonical project group IDs during
 aggregation, so renamed folders or presentation labels cannot change group
 identity.
 
-Condition A/B overlay is hidden in multi-group mode because group overlay is the
+Condition overlay is hidden in multi-group mode because group overlay is the
 supported comparison for that mode. The first and second color and legend
 controls map to the first two selected groups. Additional selected groups use
 automatic distinct colors, marker shapes, and their project labels.
@@ -172,8 +185,8 @@ defers closing until the worker has stopped.
 
 All participant workbooks contributing to one figure must use the same FullSNR
 frequency grid. A workbook with a different grid is skipped and reported rather
-than being averaged into the wrong frequency positions. A two-condition overlay
-also requires the two accepted condition grids to match. If they do not, the
+than being averaged into the wrong frequency positions. A condition overlay
+also requires all selected conditions' accepted grids to match. If they do not, the
 tool reports the mismatch and writes no overlay figure.
 
 SNR is a descriptive frequency-domain normalization. A peak can help show that
@@ -187,7 +200,8 @@ itself an inferential significance test.
 3. Select the condition and ROI scope.
 4. For a repeated-session project, choose **Condition (one session)** or
    **Session comparison**, then select the canonical session or session pair.
-5. For a single-group project, optionally enable a two-condition overlay.
+5. For a single-group project, optionally enable **Overlay Comparison** and
+   select two to five different conditions.
 6. For a multi-group project, select the groups to include; group overlay is
    required and enabled automatically.
 7. Adjust labels, ranges, colors, and optional spectral QC.

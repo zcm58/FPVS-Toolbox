@@ -112,7 +112,9 @@ def test_plot_generator_gui_layout_smoke(qtbot):
     assert "ROI" in subsection_titles
     assert "Axis Ranges" in subsection_titles
     assert window.axis_ranges_label.isVisible()
-    assert window.legend_group.isVisible()
+    assert not window.legend_group.isVisible()
+    assert window.setup_tabs.tabText(0) == "Plot setup"
+    assert window.setup_tabs.tabText(1) == "Legend labels"
     assert window.gen_btn.property("primary") is True
     assert window.cancel_btn.property("danger") is True
     action_row = window.findChild(ActionRow, "plot_generator_bottom_actions")
@@ -140,17 +142,11 @@ def test_plot_generator_gui_layout_smoke(qtbot):
     assert abs(params_bottom - advanced_bottom) <= 2
     input_output_card = window.findChild(SectionCard, "snr_input_output_card")
     assert input_output_card is not None
-    file_left = input_output_card.mapTo(window, QPoint(0, 0)).x()
-    legend_left = window.legend_group.mapTo(window, QPoint(0, 0)).x()
-    assert abs(legend_left - file_left) <= 2
-    assert abs(window.legend_group.width() - input_output_card.width()) <= 2
     left_layout = window.params_box.parentWidget().layout()
     assert left_layout.indexOf(window.params_box) < left_layout.indexOf(window.group_box)
     columns = window.findChild(QWidget, "snr_plot_content_columns")
     assert columns is not None
-    columns_bottom = columns.mapTo(window, QPoint(0, 0)).y() + columns.height()
-    legend_top = window.legend_group.mapTo(window, QPoint(0, 0)).y()
-    assert legend_top > columns_bottom
+    assert window.setup_tabs.widget(0) is columns
     assert not window.group_box.isVisible()
     legend_label_widths = {
         label.width()
@@ -178,6 +174,8 @@ def test_plot_generator_gui_layout_smoke(qtbot):
         assert abs(condition_b_x - condition_a_x) <= 2
         assert condition_b_y > condition_a_y
         assert window.condition_b_combo.width() <= window.condition_combo.width() + 2
+        window.setup_tabs.setCurrentIndex(1)
+        assert window.legend_group.isVisible()
         assert window.legend_condition_b_label.isVisible()
         assert window.legend_condition_b_edit.isVisible()
         assert window.legend_b_peaks_label.isVisible()
@@ -203,6 +201,7 @@ def test_plot_generator_gui_layout_smoke(qtbot):
             field_right = field.mapTo(window.legend_group, QPoint(0, 0)).x() + field.width()
             assert field_right <= window.legend_group.width()
 
+    window.setup_tabs.setCurrentIndex(0)
     window.overlay_check.setChecked(not window.overlay_check.isChecked())
     qtbot.wait(50)
     assert window.condition_b_label.isVisible() == initial_visible

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from contextlib import ExitStack
 
 from PySide6.QtCore import QSignalBlocker, Qt
 from PySide6.QtWidgets import (
@@ -45,6 +46,48 @@ def _group_color_assignment(
 
 class PlotGeneratorSelectionMixin:
     """Selection and group-state helpers for PlotGeneratorWindow."""
+
+    def _overlay_condition_combos(self) -> list:
+        return [self.condition_combo, self.condition_b_combo, *self.extra_condition_combos][
+            : self.overlay_count_spin.value()
+        ]
+
+    def _selected_overlay_conditions(self) -> tuple[str, ...]:
+        return tuple(combo.currentText().strip() for combo in self._overlay_condition_combos())
+
+    def _condition_overlay_validation(self) -> tuple[str, object | None]:
+        if not self.overlay_check.isChecked():
+            return "", None
+        seen = set()
+        for index, combo in enumerate(self._overlay_condition_combos()):
+            condition = combo.currentText().strip()
+            letter = "ABCDE"[index]
+            if not condition or condition == ALL_CONDITIONS_OPTION:
+                return f"Choose Condition {letter} for the overlay, or reduce the condition count.", combo
+            if condition in seen:
+                message = (
+                    "Choose two different conditions for the overlay."
+                    if self.overlay_count_spin.value() == 2
+                    else f"Condition {letter} repeats '{condition}'. Choose a different condition."
+                )
+                return message, combo
+            seen.add(condition)
+        return "", None
+
+    def _on_overlay_count_changed(self, _count: int) -> None:
+        self._update_selector_columns(self.overlay_check.isChecked())
+        self._update_legend_group_visibility()
+        self._check_required()
+
+    def _extra_overlay_worker_kwargs(self) -> dict[str, tuple]:
+        count = self.overlay_count_spin.value() - 2
+        letters = "cde"[:count]
+        return {
+            "extra_conditions": self._selected_overlay_conditions()[2:],
+            "extra_colors": tuple(self.extra_colors[:count]),
+            "legend_extra_conditions": tuple(self._legend_fields[f"condition_{letter}_label"].text() for letter in letters),
+            "legend_extra_peaks": tuple(self._legend_fields[f"{letter}_peaks_label"].text() for letter in letters),
+        }
 
     def _ensure_condition_a_valid_for_overlay(self) -> None:
         if (
@@ -176,15 +219,19 @@ class PlotGeneratorSelectionMixin:
                 except OSError:
                     subfolders = []
 
-            with QSignalBlocker(self.condition_combo), QSignalBlocker(
-                self.condition_b_combo
-            ):
-                self.condition_combo.clear()
-                self.condition_b_combo.clear()
+            combos = [self.condition_combo, self.condition_b_combo, *self.extra_condition_combos]
+            with ExitStack() as blockers:
+                for combo in combos:
+                    blockers.enter_context(QSignalBlocker(combo))
+                    combo.clear()
                 if subfolders:
                     self.condition_combo.addItem(ALL_CONDITIONS_OPTION)
                     self.condition_combo.addItems(subfolders)
-                    self.condition_b_combo.addItems(subfolders)
+                    for index, combo in enumerate(combos[1:], start=1):
+                        combo.addItems(subfolders)
+                        combo.setCurrentIndex(index if index < len(subfolders) else -1)
+            for combo in combos:
+                combo.setToolTip(combo.currentText())
             if (
                 self.overlay_check.isChecked()
                 or self._group_overlay_enabled()
@@ -195,6 +242,7 @@ class PlotGeneratorSelectionMixin:
             else:
                 self._set_all_conditions_enabled(True)
             self._update_chart_title_state(self.condition_combo.currentText())
+            self._sync_legend_defaults_with_conditions()
             self._check_required()
         finally:
             self._populating_conditions = False

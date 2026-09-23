@@ -24,6 +24,7 @@ from Main_App.projects import (
     SNR_SUBFOLDER_NAME,
 )
 from Tools.Plot_Generator.plot_settings import PlotSettingsManager
+from Tools.Plot_Generator.condition_controls import EXTRA_CONDITION_COLORS
 from Tools.Plot_Generator.gui_settings import (
     PlotGeneratorSettingsMixin,
     _project_plot_input_folder,
@@ -87,6 +88,7 @@ class PlotGeneratorWindow(
         default_spectral_qc_enabled = True
         self.stem_color = self.plot_mgr.get_stem_color()
         self.stem_color_b = self.plot_mgr.get_second_color()
+        self.extra_colors = list(EXTRA_CONDITION_COLORS)
         self._project_root: Path | None = None
         self._project: Project | None = None
         self._canonical_project_excel_root: Path | None = None
@@ -157,6 +159,9 @@ class PlotGeneratorWindow(
                 default_out = str(project_settings.get("output_folder") or default_out)
                 self.stem_color = str(project_settings.get("stem_color") or self.stem_color)
                 self.stem_color_b = str(project_settings.get("stem_color_b") or self.stem_color_b)
+                extra_colors = project_settings.get("extra_colors", ())
+                if isinstance(extra_colors, (list, tuple)) and len(extra_colors) == 3:
+                    self.extra_colors = [str(color) for color in extra_colors]
                 default_spectral_qc_enabled = bool(
                     project_settings.get(
                         "spectral_qc_enabled",
@@ -263,9 +268,12 @@ class PlotGeneratorWindow(
         self._check_required()
 
     def _update_legend_group_visibility(self) -> None:
-        self.legend_group.setVisible(
-            not getattr(self, "_session_comparison_active", lambda: False)()
-        )
+        show_legend = not self._session_comparison_active()
+        self.legend_group.setVisible(show_legend)
+        if hasattr(self, "setup_tabs"):
+            if not show_legend and self.setup_tabs.currentIndex() == 1:
+                self.setup_tabs.setCurrentIndex(0)
+            self.setup_tabs.setTabVisible(1, show_legend)
         group_overlay = self._group_overlay_enabled()
         show_b = self.overlay_check.isChecked() or group_overlay
         if group_overlay:
@@ -283,6 +291,11 @@ class PlotGeneratorWindow(
         self.legend_a_peaks_edit.setEnabled(custom)
         self.legend_condition_b_edit.setEnabled(custom and show_b)
         self.legend_b_peaks_edit.setEnabled(custom and show_b)
+        for index, widgets in enumerate(self.extra_legend_widgets):
+            visible = self.overlay_check.isChecked() and index < self.overlay_count_spin.value() - 2
+            for widget in widgets:
+                widget.setVisible(visible)
+                widget.setEnabled(custom and visible)
         if custom:
             self._sync_legend_defaults_with_conditions()
 
@@ -292,6 +305,10 @@ class PlotGeneratorWindow(
         self._selectors_grid.setColumnStretch(0, 1)
         self._selectors_grid.setColumnStretch(1, 1)
         self.condB_container.setVisible(overlay_on)
+        self.overlay_count_label.setVisible(overlay_on)
+        self.overlay_count_spin.setVisible(overlay_on)
+        for index, container in enumerate(self.extra_condition_containers):
+            container.setVisible(overlay_on and index < self.overlay_count_spin.value() - 2)
 
     def _select_folder(self) -> None:
         folder = QFileDialog.getExistingDirectory(self, "Select Excel Folder")
@@ -306,17 +323,24 @@ class PlotGeneratorWindow(
             self.out_edit.setText(folder)
 
     def _choose_color(self, which: str) -> None:
-        init = self.stem_color if which == "a" else self.stem_color_b
+        if which in "cde":
+            init = self.extra_colors["cde".index(which)]
+        else:
+            init = self.stem_color if which == "a" else self.stem_color_b
         color = QColorDialog.getColor(QColor(init), self)
         if color.isValid():
             if which == "a":
                 self.stem_color = color.name()
                 self.color_a_btn.setStyleSheet(f"background-color: {self.stem_color};")
                 self.plot_mgr.set_stem_color(self.stem_color)
-            else:
+            elif which == "b":
                 self.stem_color_b = color.name()
                 self.color_b_btn.setStyleSheet(f"background-color: {self.stem_color_b};")
                 self.plot_mgr.set_second_color(self.stem_color_b)
+            else:
+                index = "cde".index(which)
+                self.extra_colors[index] = color.name()
+                self.extra_color_buttons[index].setStyleSheet(f"background-color: {color.name()};")
             if hasattr(self, "_update_group_color_widgets"):
                 self._update_group_color_widgets()
             if not self._persist_project_plot_settings(include_paths=False):
@@ -342,7 +366,7 @@ class PlotGeneratorWindow(
         input_folder = self.folder_edit.text().strip()
         output_folder = self.out_edit.text().strip()
         condition_a = self.condition_combo.currentText().strip()
-        condition_b = self.condition_b_combo.currentText().strip()
+        overlay_issue, overlay_target = self._condition_overlay_validation()
         required = bool(input_folder and output_folder and condition_a)
         status = ""
         variant = "info"
@@ -360,14 +384,10 @@ class PlotGeneratorWindow(
         elif not condition_a:
             status = "Choose a condition to plot."
             target = self.condition_combo
-        elif self.overlay_check.isChecked() and not condition_b:
+        elif overlay_issue:
             required = False
-            status = "Choose a second condition for the overlay."
-            target = self.condition_b_combo
-        elif self.overlay_check.isChecked() and condition_a == condition_b:
-            required = False
-            status = "Choose two different conditions for the overlay."
-            target = self.condition_b_combo
+            status = overlay_issue
+            target = overlay_target
         elif self._group_overlay_enabled() and not self._selected_groups():
             required = False
             status = "Select at least one project group to plot."
@@ -398,4 +418,5 @@ class PlotGeneratorWindow(
     def _focus_setup_issue(self) -> None:
         target = getattr(self, "_setup_issue_target", None)
         if target is not None:
+            self.setup_tabs.setCurrentIndex(0)
             target.setFocus()

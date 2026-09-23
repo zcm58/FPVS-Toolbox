@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from collections.abc import Sequence
 
 
 GROUP_OVERLAY_SUFFIX = "_group_overlay"
@@ -13,6 +14,12 @@ _ILLEGAL_FILENAME_CHARS = re.compile(r'[<>:"/\\\\|?*\x00-\x1f]+')
 # enforce conservative path limits.
 _MAX_FIGURE_STEM_CHARS = 96
 _STEM_HASH_CHARS = 12
+
+
+def condition_overlay_title(conditions: Sequence[str]) -> str:
+    """Use the same ordered comparison name for preflight and rendering."""
+
+    return " vs ".join(conditions)
 
 
 def _stem_with_hash(stem: str, *, identity: str, salt: str = "") -> str:
@@ -89,5 +96,6 @@ __all__ = [
     "GROUP_OVERLAY_SUFFIX",
     "SESSION_COMPARISON_SUFFIX",
     "claim_figure_stem",
+    "condition_overlay_title",
     "safe_figure_stem",
 ]

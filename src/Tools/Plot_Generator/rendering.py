@@ -19,9 +19,11 @@ from Main_App.exports.figure_style import (
 from Tools.Plot_Generator.render_naming import (
     GROUP_OVERLAY_SUFFIX,
     claim_figure_stem,
+    condition_overlay_title,
     safe_figure_stem,
 )
 from Tools.Plot_Generator.export_plan import save_worker_figure_pair
+from Tools.Plot_Generator.overlay_legend import add_condition_overlay_legend
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -349,6 +351,8 @@ class PlotRenderingMixin:
         freqs: List[float],
         data_a: Dict[str, List[float]],
         data_b: Dict[str, List[float]],
+        *,
+        extra_data=(),
     ) -> None:
         if self._cancellation_checkpoint():
             return
@@ -356,69 +360,45 @@ class PlotRenderingMixin:
         freq_array = np.asarray(freqs, dtype=float)
         oddball_indices = _closest_frequency_indices(freq_array, odd_freqs)
 
+        conditions = (self.condition, self.condition_b or "", *getattr(self, "extra_conditions", ()))
+        datasets = (data_a, data_b, *extra_data)
+        if len(conditions) != len(datasets):
+            raise ValueError("Every selected overlay condition requires its own data.")
+        extra_count = len(conditions) - 2
+        colors = (self.stem_color, self.stem_color_b, *(
+            getattr(self, "extra_colors", ()) or ("#009E73", "#CC79A7", "#D5A000")[:extra_count]
+        ))
+        labels = (self.legend_condition_a, self.legend_condition_b, *(
+            getattr(self, "legend_extra_conditions", ()) or (None,) * extra_count
+        ))
+        peak_labels = (self.legend_a_peaks, self.legend_b_peaks, *(
+            getattr(self, "legend_extra_peaks", ()) or (None,) * extra_count
+        ))
+
         for roi in data_a:
             if self._cancellation_checkpoint():
                 return
             render_started = time.perf_counter()
             fig, ax = plt.subplots(figsize=FIGURE_STANDARD_LANDSCAPE_SIZE_IN)
 
-            ax.plot(
-                freqs,
-                data_a[roi],
-                color=self.stem_color,
-                label=_label_with_sample_size(
-                    self._resolve_legend_label(
-                        self.legend_condition_a,
-                        self.condition,
-                    ),
-                    self.overlay_roi_sample_sizes.get(
-                        self.condition,
-                        {},
-                    ).get(roi),
-                ),
-            )
-            ax.plot(
-                freqs,
-                data_b.get(roi, []),
-                color=self.stem_color_b,
-                label=_label_with_sample_size(
-                    self._resolve_legend_label(
-                        self.legend_condition_b,
-                        self.condition_b or "",
-                    ),
-                    self.overlay_roi_sample_sizes.get(
-                        self.condition_b or "",
-                        {},
-                    ).get(roi),
-                ),
-            )
-
-            if oddball_indices.size:
-                marker_frequencies = freq_array[oddball_indices]
-                ax.scatter(
-                    marker_frequencies,
-                    np.asarray(data_a[roi], dtype=float)[oddball_indices],
-                    marker="o",
-                    facecolor=self.stem_color,
-                    edgecolor="black",
-                    zorder=4,
-                    label=self._resolve_legend_label(
-                        self.legend_a_peaks,
-                        _DEFAULT_A_PEAKS,
+            for index, (condition, data) in enumerate(zip(conditions, datasets)):
+                ax.plot(
+                    freqs, data[roi], color=colors[index],
+                    label=_label_with_sample_size(
+                        self._resolve_legend_label(labels[index], condition),
+                        self.overlay_roi_sample_sizes.get(condition, {}).get(roi),
                     ),
                 )
-                values_b = data_b.get(roi, [])
-                if values_b:
+
+            if oddball_indices.size:
+                for index, data in enumerate(datasets):
                     ax.scatter(
-                        marker_frequencies,
-                        np.asarray(values_b, dtype=float)[oddball_indices],
-                        marker="^",
-                        facecolor=self.stem_color_b,
-                        edgecolor="black",
-                        zorder=4,
+                        freq_array[oddball_indices],
+                        np.asarray(data[roi], dtype=float)[oddball_indices],
+                        marker=_group_marker(index), facecolor=colors[index],
+                        edgecolor="black", zorder=4,
                         label=self._resolve_legend_label(
-                            self.legend_b_peaks,
-                            _DEFAULT_B_PEAKS,
+                            peak_labels[index], f"{chr(ord('A') + index)}-Peaks",
                         ),
                     )
 
@@ -442,16 +422,19 @@ class PlotRenderingMixin:
                 ax.axhline(1.0, color="gray", linestyle="--", linewidth=1)
 
             handles, _labels = ax.get_legend_handles_labels()
-            if handles:
+            if handles and len(conditions) == 2:
                 ax.legend(loc="upper right", frameon=True, **figure_legend_kwargs())
 
             ax.set_xlabel(self.xlabel, **figure_text_kwargs("axis_label"))
             ax.set_ylabel(self.ylabel, **figure_text_kwargs("axis_label"))
             apply_axis_text_style(ax)
-            base = self.title or f"{self.condition} vs {self.condition_b}"
+            base = self.title or condition_overlay_title(conditions)
             ax.grid(axis="y", linestyle=":", linewidth=0.8, color="gray")
 
-            fig.tight_layout()
+            if len(conditions) > 2:
+                add_condition_overlay_legend(fig, ax)
+            else:
+                fig.tight_layout()
             if self._cancellation_checkpoint():
                 plt.close(fig)
                 return

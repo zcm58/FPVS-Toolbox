@@ -47,3 +47,7 @@ class PlotWorkerConfig:
     session_comparison_ids: Sequence[str] | None = None
     session_group_ids: Sequence[str] | None = None
     export_plan: tuple[FigureExport, ...] | None = None
+    extra_conditions: Sequence[str] = ()
+    extra_colors: Sequence[str] = ()
+    legend_extra_conditions: Sequence[str | None] = ()
+    legend_extra_peaks: Sequence[str | None] = ()

@@ -224,6 +224,7 @@ tests = [
   "tests/plot_generator/test_plot_generator_baseline.py",
   "tests/plot_generator/test_plot_generator_analysis_context.py",
   "tests/plot_generator/test_plot_generator_cancellation.py",
+  "tests/plot_generator/test_plot_generator_condition_request.py",
   "tests/plot_generator/test_plot_generator_default_boundary.py",
   "tests/plot_generator/test_plot_generator_excel_inputs.py",
   "tests/plot_generator/test_plot_generator_export_pdf_smoke.py",
@@ -234,6 +235,7 @@ tests = [
   "tests/plot_generator/test_plot_generator_group_integrity.py",
   "tests/plot_generator/test_plot_generator_lifecycle_state.py",
   "tests/plot_generator/test_plot_generator_manifest_utils.py",
+  "tests/plot_generator/test_plot_generator_multi_condition.py",
   "tests/plot_generator/test_plot_generator_oddballs_from_xmax.py",
   "tests/plot_generator/test_plot_generator_project_input_policy.py",
   "tests/plot_generator/test_plot_generator_spectral_qc.py",
@@ -246,7 +248,7 @@ tests = [
   "tests/plot_generator/test_plot_generator_worker_config.py",
 ]
 include = ["src/Tools/Plot_Generator/**", "tests/plot_generator/**"]
-manual_smoke = ["At 1280 x 900, open SNR Plots and verify the page has no page-level scrollbar; only the SNR Plots title and About action appear in the header; the two folder fields/buttons align; legend controls do not clip; and status/progress are hidden while idle. In a repeated-session two-group project, confirm Session comparison is the default, both selectors show canonical labels with Visit 1/2, the fixed-order caveat is visible, and no paired-difference option is shown. Generate a session comparison and confirm the exported figure contains exactly two vertically stacked, full-width group panels with both session curves and participant n, with no SNR-difference panels. Switch to Condition (one session) and confirm the existing condition/group workflow uses only the selected visit. Open View Log and confirm the full log appears in a focused modal. Generate one plot and confirm status/progress appear while running, progress hides on completion, no routine success modal appears, and Open Plot Folder reaches matching PNG/PDF files written directly to 2 - SNR Plots. Start another run, cancel it, and confirm progress/navigation remain active until the worker exits, then progress hides while the warning remains."]
+manual_smoke = ["At 1280 x 900, enable Overlay Comparison in a single-group project and select two, three, then five distinct conditions. Confirm Plot setup and Legend labels tabs fit without page scrolling, extra selectors and labels appear only for active rows, each color can be edited, and Generate plus View Log remain visible. Choose a duplicate condition and confirm generation is blocked with a useful Fix setup focus target. Reduce the count and verify hidden conditions are absent from the export. Customize C/E curve and peak labels, toggle custom labels, reset defaults, reopen the project, and verify saved values and automatic condition-name updates. Generate five conditions with long labels: compare PNG/PDF curve values, participant counts, colors, distinct peak markers, and complete legend below the axes. Repeat a colliding export with Keep both and Replace, and cancel during extra-condition loading. Ensure setup stays locked until worker exit. Check All Conditions, mandatory group overlay and two-session comparison retain their separate behavior. Local Qt execution is CI-only unless a safe visible session is explicitly approved.", "At 1280 x 900, open SNR Plots and verify the page has no page-level scrollbar; only the SNR Plots title and About action appear in the header; the two folder fields/buttons align; legend controls do not clip; and status/progress are hidden while idle. In a repeated-session two-group project, confirm Session comparison is the default, both selectors show canonical labels with Visit 1/2, the fixed-order caveat is visible, and no paired-difference option is shown. Generate a session comparison and confirm the exported figure contains exactly two vertically stacked, full-width group panels with both session curves and participant n, with no SNR-difference panels. Switch to Condition (one session) and confirm the existing condition/group workflow uses only the selected visit. Open View Log and confirm the full log appears in a focused modal. Generate one plot and confirm status/progress appear while running, progress hides on completion, no routine success modal appears, and Open Plot Folder reaches matching PNG/PDF files written directly to 2 - SNR Plots. Start another run, cancel it, and confirm progress/navigation remain active until the worker exits, then progress hides while the warning remains."]
 
 [scopes.publication-maps]
 audits = ["gui", "paths"]

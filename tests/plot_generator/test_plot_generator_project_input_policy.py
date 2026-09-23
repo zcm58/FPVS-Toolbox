@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from Main_App.projects import Project
 from Tools.Plot_Generator.gui_settings import (
     PlotGeneratorSettingsMixin,
@@ -26,6 +28,12 @@ class _Value:
         return self._value
 
     def isChecked(self):
+        return self._value
+
+    def setChecked(self, value):
+        self._value = value
+
+    def currentText(self):
         return self._value
 
 
@@ -99,6 +107,7 @@ def test_multigroup_project_settings_drop_stale_saved_input_folder() -> None:
         _ui_initializing=False,
         stem_color="#ff0000",
         stem_color_b="#0000ff",
+        extra_colors=["#009E73", "#CC79A7", "#D5A000"],
         folder_edit=_Value("C:/Browse/Other"),
         out_edit=_Value("C:/Project/2 - SNR Plots"),
         _append_log=lambda _message: None,
@@ -131,6 +140,7 @@ def test_plot_settings_survive_successive_project_disk_roundtrips(
         _ui_initializing=False,
         stem_color="#111111",
         stem_color_b="#222222",
+        extra_colors=["#009E73", "#CC79A7", "#D5A000"],
         folder_edit=_Value(str(project_root / "1 - Excel Data Files")),
         out_edit=_Value(str(project_root / "2 - SNR Plots")),
         spectral_qc_check=_Value(True),
@@ -140,7 +150,16 @@ def test_plot_settings_survive_successive_project_disk_roundtrips(
         legend_a_peaks_edit=_Value("A Peaks"),
         legend_b_peaks_edit=_Value("B Peaks"),
         _append_log=lambda _message: None,
+        _legend_auto_values={},
     )
+    window._legend_fields = {
+        "condition_a_label": window.legend_condition_a_edit,
+        "condition_b_label": window.legend_condition_b_edit,
+        "a_peaks_label": window.legend_a_peaks_edit,
+        "b_peaks_label": window.legend_b_peaks_edit,
+        "condition_c_label": _Value("Condition C"),
+        "c_peaks_label": _Value("C Peaks"),
+    }
 
     window._persist_legend_settings()
     assert window._persist_project_plot_settings(include_paths=True)
@@ -149,14 +168,17 @@ def test_plot_settings_survive_successive_project_disk_roundtrips(
     disk_manifest["tools"]["stats"] = {"external_marker": "preserve"}
     manifest_path.write_text(json.dumps(disk_manifest, indent=2), encoding="utf-8")
     window.legend_condition_a_edit = _Value("Updated Condition A")
+    window._legend_fields["condition_a_label"] = window.legend_condition_a_edit
     window._persist_legend_settings()
 
     saved = json.loads(manifest_path.read_text(encoding="utf-8"))
     snr_plot = saved["tools"]["snr_plot"]
     assert snr_plot["legend_labels"]["condition_a_label"] == "Updated Condition A"
+    assert snr_plot["legend_labels"]["condition_c_label"] == "Condition C"
     assert snr_plot["plot_settings"] == {
         "stem_color": "#111111",
         "stem_color_b": "#222222",
+        "extra_colors": ["#009E73", "#CC79A7", "#D5A000"],
         "spectral_qc_enabled": True,
         "input_folder": str(project_root / "1 - Excel Data Files"),
         "output_folder": str(project_root / "2 - SNR Plots"),
@@ -194,6 +216,7 @@ def test_force_legend_defaults_replaces_stale_group_labels() -> None:
         _syncing_legend_defaults=False,
         _group_overlay_enabled=lambda: True,
         _selected_groups=lambda: ["After Creatine", "Before Creatine"],
+        extra_condition_combos=[],
     )
 
     window._force_legend_defaults()
@@ -226,3 +249,51 @@ def test_group_color_assignment_follows_selected_group_order() -> None:
         "#005500",
         "#ff00ff",
     ) == ("#d9dee8", False, "Not selected")
+
+
+def _legend_window_for_reload(conditions, labels=None):
+    fields = {
+        key: _LegendField()
+        for letter in "abcde"
+        for key in (f"condition_{letter}_label", f"{letter}_peaks_label")
+    }
+    return _FakeWindow(
+        _project=_SavingProject(manifest={"tools": {"snr_plot": {"legend_labels": labels or {}}}}),
+        _project_root=None,
+        _ui_initializing=True,
+        condition_combo=_Value(conditions[0]),
+        condition_b_combo=_Value(conditions[1]),
+        extra_condition_combos=[_Value(condition) for condition in conditions[2:]],
+        legend_custom_check=_Value(True),
+        _legend_fields=fields,
+        _legend_auto_values={},
+        _legend_manual_overrides=set(),
+        _syncing_legend_defaults=False,
+        _toggle_custom_legend_labels=lambda _checked: None,
+    )
+
+
+@pytest.mark.parametrize("custom", [False, True])
+def test_extra_legend_automatic_values_survive_reopen_before_condition_population(custom):
+    original = _legend_window_for_reload(["A", "B", "Patterns", "D", "E"])
+    original._force_legend_defaults()
+    if custom:
+        original._legend_fields["condition_c_label"].setText("Custom C")
+        original._on_legend_condition_label_edited("condition_c_label")
+        original._legend_fields["e_peaks_label"].setText("Custom E peaks")
+        original._mark_legend_manual_override("e_peaks_label")
+    saved = original._legend_settings_payload()
+    assert saved["extra_auto_values"]["condition_c_label"] == "Patterns"
+    assert "condition_a_label" not in saved["extra_auto_values"]
+
+    reopened = _legend_window_for_reload(["", "", "", "", ""], saved)
+    reopened._load_legend_settings()
+    reopened.extra_condition_combos[0]._value = "Animals"
+    reopened._sync_legend_defaults_with_conditions()
+    assert reopened._legend_fields["condition_c_label"].text() == ("Custom C" if custom else "Animals")
+    assert reopened._legend_fields["c_peaks_label"].text() == ("Custom C Peaks" if custom else "Animals Peaks")
+    reopened.extra_condition_combos[0]._value = "Tools"
+    reopened._sync_legend_defaults_with_conditions()
+    assert reopened._legend_fields["condition_c_label"].text() == ("Custom C" if custom else "Tools")
+    if custom:
+        assert reopened._legend_fields["e_peaks_label"].text() == "Custom E peaks"

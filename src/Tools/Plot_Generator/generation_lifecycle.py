@@ -62,6 +62,7 @@ class PlotGeneratorLifecycleMixin:
         for name in (
             "params_box", "advanced_box", "legend_group", "group_box",
             "input_folder_btn", "output_folder_btn", "load_defaults_btn",
+            "folder_edit", "out_edit",
         ):
             widget = getattr(self, name, None)
             if widget is not None:

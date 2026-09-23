@@ -15,8 +15,8 @@ from PySide6.QtCore import QObject, Signal
 
 from Tools.Plot_Generator.aggregation import PlotAggregationMixin
 from Tools.Plot_Generator.data_collection import PlotDataCollectionMixin
+from Tools.Plot_Generator.condition_overlay_workflow import ConditionOverlayWorkflowMixin
 from Tools.Plot_Generator.excel_inputs import (
-    _frequency_grids_match,
     _infer_subject_id_from_path,
 )
 from Tools.Plot_Generator.rendering import PlotRenderingMixin, matplotlib, plt
@@ -39,6 +39,7 @@ __all__ = [
 class _Worker(
     QObject,
     PlotDataCollectionMixin,
+    ConditionOverlayWorkflowMixin,
     PlotAggregationMixin,
     PlotRenderingMixin,
     SessionPlotWorkflowMixin,
@@ -87,6 +88,10 @@ class _Worker(
         session_comparison_ids: Sequence[str] | None = None,
         session_group_ids: Sequence[str] | None = None,
         export_plan: tuple[FigureExport, ...] | None = None,
+        extra_conditions: Sequence[str] = (),
+        extra_colors: Sequence[str] = (),
+        legend_extra_conditions: Sequence[str | None] = (),
+        legend_extra_peaks: Sequence[str | None] = (),
     ) -> None:
         super().__init__()
         self.config = PlotWorkerConfig(
@@ -124,6 +129,10 @@ class _Worker(
             session_comparison_ids=session_comparison_ids,
             session_group_ids=session_group_ids,
             export_plan=export_plan,
+            extra_conditions=tuple(extra_conditions),
+            extra_colors=tuple(extra_colors),
+            legend_extra_conditions=tuple(legend_extra_conditions),
+            legend_extra_peaks=tuple(legend_extra_peaks),
         )
         self.folder = self.config.folder
         self.condition = self.config.condition
@@ -143,6 +152,10 @@ class _Worker(
         self.stem_color_b = self.config.stem_color_b.lower()
         self.condition_b = self.config.condition_b
         self.overlay = self.config.overlay
+        self.extra_conditions = self.config.extra_conditions
+        self.extra_colors = self.config.extra_colors
+        self.legend_extra_conditions = self.config.legend_extra_conditions
+        self.legend_extra_peaks = self.config.legend_extra_peaks
         self._analysis_base_freq = self._read_analysis_float("base_freq", 6.0)
         self._analysis_oddball_freq = self._read_analysis_float(
             "oddball_freq", _DEFAULT_ODDBALL_FREQ
@@ -434,67 +447,8 @@ class _Worker(
             self._record_failure(item=self.condition, error=group_mode_error)
             self._emit(group_mode_error, 0, 0)
             return
-        if self.overlay and self.condition_b:
-            files_a = self._list_excel_files(self.condition)
-            if self._cancellation_checkpoint():
-                return
-            files_b = self._list_excel_files(self.condition_b)
-            if self._cancellation_checkpoint():
-                return
-            total_a = len(files_a)
-            total_b = len(files_b)
-            total = total_a + total_b
-            freqs_a, data_a = self._collect_data(
-                self.condition,
-                excel_files=files_a,
-                offset=0,
-                total_override=total,
-            )
-            if self._cancellation_checkpoint():
-                return
-            freqs_b, data_b = self._collect_data(
-                self.condition_b,
-                excel_files=files_b,
-                offset=total_a,
-                total_override=total,
-            )
-            if self._cancellation_checkpoint():
-                return
-            if freqs_a and data_a and freqs_b and data_b:
-                if not _frequency_grids_match(freqs_a, freqs_b):
-                    comparison = f"{self.condition} vs {self.condition_b}"
-                    self._record_failure(
-                        item=comparison,
-                        error="Condition overlay FullSNR frequency grid mismatch",
-                    )
-                    self._emit(
-                        f"Cannot overlay {comparison}: the two conditions use "
-                        "different FullSNR frequency grids. Reprocess both "
-                        "conditions with the same frequency-grid settings.",
-                        total,
-                        total,
-                    )
-                    return
-                self._clamp_x_max_to_observed_frequency_grid(freqs_a, freqs_b)
-                avg_a = self._aggregate_roi_data(data_a)
-                if self._cancellation_checkpoint():
-                    return
-                avg_b = self._aggregate_roi_data(data_b)
-                if self._cancellation_checkpoint():
-                    return
-                avg_a, avg_b = self._matched_overlay_roi_data(avg_a, avg_b)
-                if avg_a and avg_b:
-                    self._revalidate_analysis_context_for_output()
-                    self._prepare_overlay_source_curves(
-                        frequencies_hz=freqs_a,
-                        condition_a=self.condition,
-                        subject_data_a=data_a,
-                        plotted_data_a=avg_a,
-                        condition_b=self.condition_b,
-                        subject_data_b=data_b,
-                        plotted_data_b=avg_b,
-                    )
-                    self._plot_overlay(freqs_a, avg_a, avg_b)
+        if self.overlay:
+            self._run_condition_overlay()
             return
 
         freqs, subject_data = self._collect_data(self.condition)

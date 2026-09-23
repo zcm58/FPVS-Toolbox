@@ -17,6 +17,7 @@ from Tools.Plot_Generator.generation_outcome import (
     managed_analysis_matches_active_project,
 )
 from Tools.Plot_Generator.selection_state import ALL_CONDITIONS_OPTION
+from Tools.Plot_Generator.render_naming import condition_overlay_title
 from Tools.Plot_Generator.spectral_qc_alerts import whole_participant_exclusion_candidates
 
 
@@ -266,7 +267,7 @@ class PlotGeneratorWorkflowMixin(PlotGeneratorLifecycleMixin):
         log_context = {
             "operation": "snr_plot_generate",
             "project_root": str(self._project_root) if self._project_root else None,
-            "compare_two_conditions": self.overlay_check.isChecked(),
+            "condition_overlay": self.overlay_check.isChecked(),
             "custom_labels_enabled": self.legend_custom_check.isChecked(),
             "session_mode": self._session_mode(),
         }
@@ -303,11 +304,9 @@ class PlotGeneratorWorkflowMixin(PlotGeneratorLifecycleMixin):
                 QMessageBox.critical(self, "Error", "Invalid axis limits.")
                 return
 
-            if (
-                self.overlay_check.isChecked()
-                and self.condition_combo.currentText()
-                == self.condition_b_combo.currentText()
-            ):
+            overlay_issue, _target = self._condition_overlay_validation()
+            if overlay_issue:
+                self._check_required()
                 return
 
             overlay_groups = self._group_overlay_enabled()
@@ -354,10 +353,11 @@ class PlotGeneratorWorkflowMixin(PlotGeneratorLifecycleMixin):
             self._clear_generation_result_state()
             self._animate_progress_to(0)
             if self.overlay_check.isChecked():
-                cond_a = self.condition_combo.currentText()
-                cond_b = self.condition_b_combo.currentText()
+                conditions = self._selected_overlay_conditions()
+                cond_a, cond_b = conditions[:2]
+                overlay_title = condition_overlay_title(conditions)
                 self._set_workflow_status(
-                    f"Generating condition overlay: {cond_a} vs {cond_b}",
+                    f"Generating condition overlay: {overlay_title}",
                     "info",
                 )
                 roi_payload = self._worker_roi_selection()
@@ -369,7 +369,7 @@ class PlotGeneratorWorkflowMixin(PlotGeneratorLifecycleMixin):
                     return
                 roi_map_for_worker, selected_roi = roi_payload
                 self._append_log(
-                    f"Generating overlay '{cond_a}' vs '{cond_b}' for ROI selection '{selected_roi}'."
+                    f"Generating overlay '{overlay_title}' for ROI selection '{selected_roi}'."
                 )
                 self._thread = _thread_class()()
                 self._worker_outcome_received = False
@@ -378,7 +378,7 @@ class PlotGeneratorWorkflowMixin(PlotGeneratorLifecycleMixin):
                     cond_a,
                     roi_map_for_worker,
                     selected_roi,
-                    self.title_edit.text(),
+                    self.title_edit.text() or overlay_title,
                     self.xlabel_edit.text(),
                     self.ylabel_edit.text(),
                     x_min,
@@ -400,6 +400,7 @@ class PlotGeneratorWorkflowMixin(PlotGeneratorLifecycleMixin):
                     ),
                     spectral_qc_enabled=self.spectral_qc_check.isChecked(),
                     export_plan=self._approved_export_plan,
+                    **self._extra_overlay_worker_kwargs(),
                     **group_kwargs,
                 )
                 self._launch_worker()

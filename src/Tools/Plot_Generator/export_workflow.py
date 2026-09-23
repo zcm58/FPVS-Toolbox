@@ -9,7 +9,7 @@ from PySide6.QtCore import QObject, QThread, Signal, Slot
 from PySide6.QtWidgets import QMessageBox
 
 from .export_plan import ExportChoices, inspect_destinations
-from .render_naming import GROUP_OVERLAY_SUFFIX, SESSION_COMPARISON_SUFFIX
+from .render_naming import GROUP_OVERLAY_SUFFIX, SESSION_COMPARISON_SUFFIX, condition_overlay_title
 from .selection_state import ALL_CONDITIONS_OPTION
 
 logger = logging.getLogger(__name__)
@@ -49,7 +49,7 @@ class PlotExportWorkflowMixin:
         condition = self.condition_combo.currentText()
         overlay = self.overlay_check.isChecked()
         if overlay:
-            titles = (self.title_edit.text() or f"{condition} vs {self.condition_b_combo.currentText()}",)
+            titles = (self.title_edit.text() or condition_overlay_title(self._selected_overlay_conditions()),)
         elif condition == ALL_CONDITIONS_OPTION:
             titles = tuple(self.condition_combo.itemText(i) for i in range(1, self.condition_combo.count()))
         else:

@@ -31,7 +31,12 @@ Detailed run messages and workbook warnings are available through
 
 <h3>Comparison Modes</h3>
 <p>
-Single-group projects can overlay two conditions. Multi-group projects use a
+Single-group projects can overlay two to five different conditions. Enable
+<b>Overlay Comparison</b> and choose the number of conditions, then select each
+condition and its color. Optional legend labels can shorten displayed names.
+For three or more conditions, the legend wraps below the axes and the figure
+grows vertically to keep the data area clear. <b>All Conditions</b> creates
+separate figures instead of an overlay. Multi-group projects use a
 one-condition group overlay based on participant assignments in project.json;
 workbooks without a matching assignment are omitted from group curves and
 reported in the log. Each group legend shows the number of participants that

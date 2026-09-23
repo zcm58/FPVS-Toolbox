@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 
-from PySide6.QtWidgets import QDialog, QMessageBox
+from PySide6.QtWidgets import QDialog, QMessageBox, QScrollArea
 from PySide6.QtCore import QObject, QPoint, QRect, QTimer, Qt, Signal
 import pytest
 
@@ -181,6 +181,62 @@ def test_disabled_overlay_explains_problem_and_focuses_second_condition(qtbot, t
     )
     if screenshot_dir:
         window.grab().save(str(Path(screenshot_dir) / "snr_long_validation.png"))
+
+
+def test_five_conditions_fit_validate_and_freeze_at_supported_size(qtbot, tmp_path, monkeypatch):
+    monkeypatch.setattr(plot_gui, "load_rois_from_settings", lambda *_: {"ROI": ["Cz"]})
+    conditions = [f"Condition {letter} with a long descriptive experimental name" for letter in "ABCDE"]
+    excel = tmp_path / "excel"
+    for condition in conditions:
+        (excel / condition).mkdir(parents=True)
+    window = PlotGeneratorWindow()
+    qtbot.addWidget(window)
+    window.folder_edit.setText(str(excel))
+    window._populate_conditions(str(excel))
+    window.out_edit.setText(str(tmp_path / "plots"))
+    window.overlay_check.setChecked(True)
+    window.overlay_count_spin.setValue(5)
+    window.resize(1280, 900)
+    window.show()
+    qtbot.waitExposed(window)
+    window.activateWindow()
+    assert window._selected_overlay_conditions() == tuple(conditions)
+    assert window.gen_btn.isEnabled()
+    assert not window.findChildren(QScrollArea)
+    assert window.width() == 1280 and window.height() == 900
+    for control in (*window._overlay_condition_combos(), window.overlay_count_spin, window.gen_btn):
+        assert control.isVisible()
+        assert window.rect().contains(QRect(control.mapTo(window, QPoint()), control.size()))
+    assert all(combo.toolTip() == condition for combo, condition in zip(window._overlay_condition_combos(), conditions))
+
+    window.extra_condition_combos[-1].setCurrentIndex(0)
+    assert not window.gen_btn.isEnabled()
+    assert "Condition E repeats" in window.workflow_status.text()
+    window.setup_tabs.setCurrentIndex(1)
+    qtbot.mouseClick(window.fix_setup_btn, Qt.LeftButton)
+    qtbot.waitUntil(lambda: window.focusWidget() is window.extra_condition_combos[-1])
+    assert window.setup_tabs.currentIndex() == 0
+    window.extra_condition_combos[-1].setCurrentIndex(4)
+    assert window.gen_btn.isEnabled()
+
+    window.setup_tabs.setCurrentIndex(1)
+    for field in window._legend_fields.values():
+        assert field.isVisible()
+        assert window.rect().contains(QRect(field.mapTo(window, QPoint()), field.size()))
+    controls = [
+        *window._overlay_condition_combos(), *window.extra_color_buttons,
+        *window._legend_fields.values(), window.overlay_count_spin,
+        window.folder_edit, window.out_edit, window.spectral_qc_check,
+    ]
+    window._set_generation_navigation_locked(True)
+    assert all(not control.isEnabled() for control in controls)
+    window._set_generation_navigation_locked(False)
+    assert all(control.isEnabled() for control in controls)
+
+    window.overlay_count_spin.setValue(2)
+    window.setup_tabs.setCurrentIndex(0)
+    assert all(container.isHidden() for container in window.extra_condition_containers)
+    assert window._selected_overlay_conditions() == tuple(conditions[:2])
 
 
 @pytest.mark.parametrize("choice", ["replace", "keep", "cancel"])

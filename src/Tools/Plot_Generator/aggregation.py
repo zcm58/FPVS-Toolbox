@@ -8,6 +8,7 @@ from typing import Dict, Iterable, List
 import numpy as np
 
 from Main_App.processing.roi_settings import ALL_ROIS_OPTION
+from .render_naming import condition_overlay_title
 
 
 def _nanmean_columns(rows: List[List[float]]) -> List[float]:
@@ -124,6 +125,34 @@ class PlotAggregationMixin:
             {roi: data_a[roi] for roi in shared},
             {roi: data_b[roi] for roi in shared},
         )
+
+    def _matched_condition_overlay_roi_data(self, conditions, datasets):
+        """Keep only ROIs supported by every selected condition."""
+
+        if len(conditions) == 2:
+            data_a, data_b = self._matched_overlay_roi_data(*datasets)
+            return [data_a, data_b] if data_a and data_b else []
+        available_rois = dict.fromkeys(roi for data in datasets for roi in data)
+        for condition, data in zip(conditions, datasets):
+            for roi in available_rois:
+                if roi in data:
+                    continue
+                message = (
+                    f"Condition overlay omitted ROI '{roi}' because "
+                    f"'{condition}' has no usable participant data."
+                )
+                self._emit(f"Warning: {message}", 0, 0)
+                self._record_warning(
+                    code="overlay_roi_unavailable", item=f"{condition}:{roi}", message=message
+                )
+        shared = [roi for roi in available_rois if all(roi in data for data in datasets)]
+        if not shared:
+            comparison = condition_overlay_title(conditions)
+            error = "No ROI has usable participant data in every selected condition"
+            self._record_failure(item=comparison, error=error)
+            self._emit(f"Cannot overlay {comparison}: {error.lower()}.", 0, 0)
+            return []
+        return [{roi: data[roi] for roi in shared} for data in datasets]
 
     def _build_group_curves(
         self,

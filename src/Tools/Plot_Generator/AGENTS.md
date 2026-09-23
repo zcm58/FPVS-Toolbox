@@ -24,6 +24,8 @@ Current ownership map:
 - `ui_sections.py`, `ui_actions.py`, `ui_header.py`, `log_dialog.py`, `gui_settings.py`,
   `selection_state.py`, `project_paths.py`, and `manifest_utils.py`: focused
   GUI, settings, selection, and thin shared-project adapters.
+- `condition_controls.py`: progressive third-through-fifth condition selectors
+  and optional legend fields within the setup/legend tabs.
 - `worker.py`: `_Worker` QObject shell, signals, stop state, timing, run
   orchestration, finished payload emission, and compatibility re-exports for
   older imports.
@@ -55,6 +57,10 @@ Current ownership map:
 - `rendering.py`: line and overlay plot rendering plus Matplotlib `Agg`
   configuration; `render_naming.py` owns widget-free, collision-safe artifact
   stems.
+- `condition_overlay_workflow.py`: ordered two-to-five-condition collection,
+  shared-grid validation, aggregation, and source-curve bookkeeping.
+- `overlay_legend.py`: measured wrapping and figure-height allocation for
+  condition legends outside the data axes.
 - `session_controls.py`: pure canonical session-selector state;
   `session_selection.py` owns its GUI binding and request validation, while
   `session_rendering.py` owns the figure-only fixed-order interpretation caveat.
@@ -134,9 +140,16 @@ v2.1 project contract:
   presentation labels must not become group identity.
 - Never average FullSNR workbooks positionally when their selected frequency
   grids differ. Skip and report the incompatible workbook instead.
-- Never draw a two-condition overlay unless the two accepted condition grids
-  also match. Report the mismatch and write no overlay rather than plotting
-  condition B values against condition A's physical frequencies.
+- Condition overlays accept two to five distinct conditions in selection order.
+  Keep the existing two-condition worker arguments and saved A/B styles
+  compatible; additional conditions extend that request without changing
+  single-condition, group-overlay, or session-comparison behavior.
+- Never draw a condition overlay unless every accepted condition grid matches.
+  Report the mismatch and write no overlay rather than plotting any condition's
+  values against another condition's physical frequencies.
+- Three-to-five-condition legends belong below the axes. Wrap long labels and
+  grow the figure vertically to retain the data area's physical height and
+  shared publication typography; do not shrink text or cover findings.
 - Resolve the selected input folder through the shared dataset index before
   reading source workbooks. Managed projects must use the current neutral
   FullFFT provenance's frozen project-protocol rates and exact workbook family;
@@ -236,8 +249,13 @@ verify Keep both preserves the original PNG/PDF pair, Replace changes only the
 approved pair, Cancel changes neither, and collision-free runs do not prompt.
 Repeat with All Conditions, group overlays, and session comparison. Cancel
 during preflight/rendering and verify controls unlock after worker exit. At
-1280x900, choose the same condition on both overlay sides; confirm the reason
-and Fix setup action fit, focus Condition B, and disappear after correction.
+1280x900, select two, three, and five overlay conditions and confirm setup,
+legend labels, and the generation actions fit without page-level scrolling.
+Choose a duplicate condition; confirm the reason and Fix setup action fit,
+focus the conflicting selector, and disappear after correction. Change the
+condition count and verify hidden rows do not enter the request. Generate a
+five-condition plot with long legend labels and check all curves, distinct
+markers, participant counts, and complete labels below the axes in both files.
 
 Future feature/fix plans:
 
