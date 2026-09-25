@@ -505,6 +505,72 @@ def test_repeated_batch_result_table_shows_both_holm_layers(
     assert "every planned comparison" in page.batch_table.horizontalHeaderItem(2).toolTip()
 
 
+def test_results_use_available_height_and_keep_ten_comparisons_visible(
+    qtbot,
+    tmp_path: Path,
+) -> None:
+    page = _page(qtbot, tmp_path)
+    page._on_inspection_completed(_repeated_options(tmp_path.resolve()))
+    page.resize(1280, 800)
+    QtWidgets.QApplication.processEvents()
+    run = _repeated_report_run(("Semantic Response",), ((0.01, 0.04, 0.16),) * 10)
+    report = build_repeated_session_report(run.result)
+    report = replace(
+        report,
+        rows=tuple(
+            replace(
+                row,
+                family_label="Between-condition differences",
+                comparison_label=(
+                    f"All participants: Mixed Response {index + 1} during the first "
+                    "recording session - Semantic Response during the second recording session"
+                ),
+            )
+            for index, row in enumerate(report.rows)
+        ),
+    )
+
+    # Production fills the table before activating Results. Long labels must not
+    # leave row heights based on the hidden table's initial narrow column widths.
+    assert not page.result_tabs.isTabEnabled(1)
+    page._populate_family_report(report)
+    page._show_completed_results()
+    table = page.batch_table
+    for height in (800, 900, 800):
+        page.resize(1280, height)
+        QtWidgets.QApplication.processEvents()
+        assert page.result_tabs.currentIndex() == 1
+        assert page.width() == 1280 and page.height() == height
+        assert page.findChildren(QtWidgets.QScrollArea) == []
+        assert table.height() > page.result_tabs.height() * 0.60
+        assert table.horizontalScrollBar().maximum() == 0
+        assert table.verticalScrollBar().value() == 0
+        for index, row in enumerate(report.rows):
+            item = table.item(index, 1)
+            cell_rect = table.visualItemRect(item)
+            assert not cell_rect.isEmpty()
+            assert table.viewport().rect().contains(cell_rect)
+            assert table.rowHeight(index) >= table.fontMetrics().height() + 8
+            assert item.text() == row.comparison_label
+            assert item.toolTip() == row.comparison_label
+            assert item.data(QtCore.Qt.UserRole) == row.run_index
+        for widget in (
+            page.result_view_combo,
+            page.view_details_button,
+            page.view_maps_button,
+            page.workflow_actions,
+        ):
+            assert widget.isVisible()
+            assert page.rect().contains(widget.mapTo(page, QtCore.QPoint(0, 0)))
+            assert page.rect().contains(widget.mapTo(page, widget.rect().bottomRight()))
+        assert page.result_view_combo.mapTo(page, QtCore.QPoint(0, 0)).y() < (
+            table.mapTo(page, QtCore.QPoint(0, 0)).y()
+        )
+    assert table.fontMetrics().horizontalAdvance(report.rows[0].comparison_label) > (
+        table.columnWidth(1)
+    )
+
+
 def test_exploratory_filter_uses_stored_boundaries_and_original_map_indices(
     qtbot,
     tmp_path: Path,

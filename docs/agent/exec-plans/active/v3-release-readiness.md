@@ -4,6 +4,53 @@
 
 Active. This is the release ledger for the first v3 release candidate.
 
+FHC Results density on 2026-09-21: the Results card/table now use the available
+tab height instead of leaving it to a blank spacer. Font-aware single-line
+rows avoid hidden-tab wrapping that previously inflated rows to roughly
+100 pixels. The view filter and details/maps actions sit above the table;
+family Holm p-values align right, and full labels remain in tooltips/details.
+Shared typography, result identities, filtering, statistics, exports, and map
+membership are unchanged. The existing CI Qt page suite now defines a
+ten-comparison geometry regression across 1280x800 and 1280x900 page sizes.
+The tool's architecture document records the visible smoke path, including
+long labels, resizing, filtering, and empty results. Qt was not run locally.
+
+FHC verification: `--scope free-harmonic-clustering --tier focused` passed
+317 tests and `--scope gui --tier focused` passed 562 tests. The final
+`--scope repo --tier precommit` run passed all audits, Ruff, and compilation;
+pytest reported 5,174 passed, 11 skipped, and one failure in the unchanged
+preflight-cache concurrent-writer test when Windows denied `os.replace`
+with `WinError 5`. An elevated rerun of
+`python -m pytest -q tests/processing/test_preflight_qc_cache.py` passed all
+16 tests. That test bypasses GUI wiring and writes only to its own temporary
+project root; the file-access failure did not reproduce, and no unrelated
+cache change was made. The new Qt geometry test is compiled but awaits CI
+execution; the visible smoke path remains pending.
+
+Kurtosis checkpoint handoff on 2026-09-21: the GUI binds the active
+`Project.project_root` in the kurtosis worker's settings copy. Previously
+only the final runner supplied it, so review silently disabled prepared-cache
+publication and final processing repeated the reference/filter/downsample/
+scoring prefix. The existing exact float64 checkpoint now bridges those paths;
+source validation and current decision authority still run before interpolation
+and final reference. The shared settings and existing processing-ledger
+fingerprints stay unchanged. The review page explains this continuation. No
+scientific method, processing order, output format, or retired package changed. Headless
+regressions cover switching active projects and real scanner-to-preprocessing
+reuse from GUI-built settings, with exact sample/evidence/receipt equality and
+guards against repeated filtering, resampling, and kurtosis. A separate real
+BDF-loader probe confirmed reuse across independent memmap loads. The visible
+1280x900 review/cancel/settings-change smoke path is recorded in the
+preprocessing contract; local Qt execution remains disabled.
+
+Verification: the final `--scope repo --tier precommit` gate passed 5,175 tests
+with 11 skips and 69 warnings; all agent audits, Ruff, and compilation passed.
+The new handoff regression also fails under an in-memory restoration of the
+original missing-root wiring. The initial sandboxed processing gate encountered
+Windows worker-pipe and temporary-directory permission failures; those same
+tests passed in the final gate outside the sandbox. No user recordings or
+project settings were changed during verification.
+
 Native-result completion follow-up on 2026-09-10: Semantic Categories completed
 processing successfully, but the GUI's remaining Excel-only output snapshots
 left `_last_job_success` false and replaced the completion message with
