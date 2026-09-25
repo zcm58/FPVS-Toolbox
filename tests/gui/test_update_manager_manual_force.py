@@ -85,6 +85,27 @@ def test_launch_update_check_is_skipped_under_pytest(monkeypatch, qtbot) -> None
     assert started is False
 
 
+def test_manual_dialog_signal_supersedes_registered_launch_check(monkeypatch, qtbot):
+    from Main_App.gui.update_lifecycle import UpdateLifecycle
+
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    lifecycle = UpdateLifecycle(QApplication.instance(), quit_callback=lambda: None)
+    monkeypatch.setattr(update_manager, "update_lifecycle", lambda: lifecycle)
+    monkeypatch.setattr(update_manager, "_running_under_pytest", lambda: False)
+    monkeypatch.setattr(update_manager, "_should_skip_update_check", lambda: False)
+    monkeypatch.setattr(update_manager, "_start_update_cache_housekeeping", lambda *_args: None)
+    state = update_manager.prepare_startup_update_check(parent)
+
+    lifecycle.manual_check_requested.emit()
+    update_manager.check_for_updates_on_launch(parent)
+
+    assert state.superseded
+    assert not lifecycle.has_active_jobs
+    QApplication.instance().removeEventFilter(lifecycle)
+    lifecycle.deleteLater()
+
+
 def test_background_check_uses_app_owned_cancellable_lifecycle(monkeypatch, qtbot):
     from threading import Event
     from Main_App.gui.update_lifecycle import UpdateLifecycle

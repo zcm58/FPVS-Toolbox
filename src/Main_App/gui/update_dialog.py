@@ -37,7 +37,7 @@ from Main_App.gui.update_lifecycle import (
     UpdateTaskResult,
     update_lifecycle,
 )
-from Main_App.gui.update_install_guard import default_install_guard
+from Main_App.gui.update_install_guard import close_after_update, default_install_guard
 from Main_App.updates.helper_client import HelperClient
 from Main_App.updates.models import (
     DownloadedInstaller,
@@ -108,7 +108,10 @@ class UpdateDialog(QDialog):
         self._download_callback = download_callback
         self._installer_launcher = installer_launcher
         self._on_before_install = on_before_install or (lambda: default_install_guard(parent))
-        self._quit_app = quit_app or (parent.close if parent is not None else self._quit_application)
+        self._quit_app = quit_app or (
+            (lambda: close_after_update(parent))
+            if parent is not None else self._quit_application
+        )
         self._lifecycle = lifecycle or update_lifecycle()
         self._job: UpdateJob | None = None
         self._task_kind: str | None = None

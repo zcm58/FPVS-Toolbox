@@ -1,6 +1,7 @@
 # Independent updater
 
-FPVS Toolbox uses the FPVS Studio v1.7.0 updater design, adapted to its
+FPVS Toolbox uses the FPVS Studio independent updater design, including its
+September 2026 compact progress workflow, adapted to Toolbox's
 purpose-based packages. File > Check for Updates checks and downloads through
 a separate process. After Install and Restart, an independent window waits for
 Toolbox to close, applies the verified patch or full installer, and restarts
@@ -21,6 +22,7 @@ the user's computer.
 | `gui.update_manager`, `update_dialog`, `update_lifecycle` | Existing startup debounce/manual menu, progress, application-owned workers and safe shutdown |
 | `gui.update_install_guard`, `updater_presentation`, `updater_window` | Toolbox active-work checks, shared components/theme, independent repair GUI |
 | `src/updater.py`, `Main_App.updater_main` | Lightweight entry point, private worker mode, standalone GUI and packaging diagnostics |
+| `diagnostics.packaged_smoke`, `src/main.py` diagnostic dispatch | Isolated main-bundle dependency and explicitly opted-in visible Main Window probes |
 | `scripts/packaging/` | Main/helper specs, inventories, direct patches, native setup and lifecycle fixtures |
 
 Keep protocol, asset/result schemas, download integrity, handoff sequencing,
@@ -29,6 +31,26 @@ security modules retain their original boundaries to keep review and future
 extraction into a common backend straightforward. Product names, repo identity,
 GUI adapters, version discovery, and registration remain product-specific;
 do not couple Toolbox project or EEG contracts to the updater.
+
+Startup checks are registered before the one-second launch timer and run once
+per window, subject to the existing 24-hour successful-check debounce. A manual
+check cancels and supersedes a pending startup scan; late startup results never
+reopen a dismissed manual dialog. Cancellation still drains through the
+application-owned lifecycle before worker disposal.
+
+Separate startup housekeeping calls the existing guarded cache cleanup once per
+window even when the network check is debounced or superseded. It runs in a
+lifecycle-owned worker, cancels with shutdown, and logs failures without
+interrupting startup. Manual checks cancel only the network scan. The packaged
+Main Window probe suppresses both startup tasks.
+
+The managed apply window uses a 480x140 minimum and 560x160 default. It retains
+the target version across technical phase changes, shows indeterminate progress
+during installation and completed progress on success, and expands to show the
+full error plus Repair/Close when needed. The target version is in-process
+presentation data; the private protocol remains version 1. Title-bar Close and
+Escape can request cancellation before installation commits; committed setup
+continues to completion.
 
 The application-wide `UpdateLifecycle.eventFilter` consumes only application
 Quit events while updater jobs need shutdown coordination. Other deliveries
@@ -76,7 +98,12 @@ remain portable to CachyOS.
    does not repeatedly hash the installed scientific runtime while checking.
 2. Download streams into a guarded temporary cache file, reports progress,
    verifies expected size/SHA-256, then publishes the file and receipt.
-3. Explicit install confirmation checks Toolbox's processing/export/QC guards.
+3. Explicit install confirmation checks Toolbox's processing/export/QC guards,
+   including unparented SNR/Scalp workers and globally registered FHC operations.
+   Save/Discard/Cancel for project drafts resolves before handoff; saving that
+   starts background work blocks installation until it finishes. Draft consent
+   applies only during the immediate successful-handoff close call; ordinary
+   closes retain their prompt and all existing active-work close guards.
    A staged helper validates the request and acknowledges ownership before
    Toolbox follows its existing close path. Closing an update dialog cancels
    uncommitted work without destroying running Qt threads.
@@ -138,6 +165,23 @@ The helper build preserves and checks the main bundle's build-time version
 metadata. A mismatched or older main bundle must be rebuilt; changing helper
 metadata cannot relabel an existing main executable.
 
+`smoke_packaged_app.ps1` is mandatory unless the maintainer explicitly requests
+the development-only `-SkipSmoke` bypass. Missing/failed smoke is an error.
+The default probe launches the frozen main executable in a GUI-free diagnostic
+mode, verifies its exact config/embedded version and frozen executable identity,
+and imports the scientific dependencies. `-AllowVisibleGui` additionally reaches
+the actual Main Window, runs the native event loop and exits deterministically.
+Without that opt-in the build explicitly reports visible acceptance as pending;
+dependency checks alone never certify GUI or installation behavior. Reports are
+written beneath `build/packaged-smoke/` with unique names and bounded process
+timeouts. Both modes isolate settings, legacy migration, caches and projects;
+the visible probe suppresses startup update/network/old-executable cleanup.
+
+Inno now requires explicit display and numeric Windows versions. The build
+derives the latter from the canonical version, so an RC such as `3.0.0rc1`
+retains its display/asset identity while Windows file metadata uses `3.0.0.0`.
+There is no silent installer-version fallback.
+
 Keep public GitHub release notes to brief, nontechnical changes. Do not include
 validation details; for example, "Improved app updates and patch installation."
 
@@ -167,6 +211,13 @@ production registration before and after.
 
 Before a public release, use a disposable Windows installation to confirm:
 
+- Open and dismiss File > Check for Updates immediately after launch; verify
+  the startup timer/result never creates a second prompt. During handoff, try
+  Save, Discard and Cancel with unsaved setup changes; Cancel never launches the
+  helper and Discard is not requested again after handoff.
+- Check compact managed progress at 480x140 and 560x160 with long version text;
+  exercise pre-commit cancellation, committed-close protection, success/restart,
+  and expanded failure details with full-installer repair.
 - File > Check for Updates stays responsive during discovery/download,
   cancellation and retry; minimum dialog size and long status text fit.
 - Processing, export and QC block installation; normal close guards remain

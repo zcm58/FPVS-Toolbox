@@ -91,6 +91,7 @@ class UpdatePhase:
     text: str
     result: UpdateCheckResult | None = None
     install_committed: bool = False
+    target_version: str | None = None
 
 
 @dataclass(frozen=True)

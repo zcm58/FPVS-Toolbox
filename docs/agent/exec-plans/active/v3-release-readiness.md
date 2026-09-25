@@ -4,6 +4,21 @@
 
 Active. This is the release ledger for the first v3 release candidate.
 
+Updater workflow parity on 2026-09-25: the Studio-derived updater now has the
+compact target-version progress window, manual checks supersede startup checks,
+guarded download-cache housekeeping runs independently of the network debounce,
+and project Save/Discard/Cancel resolves before the independent handoff. Active
+FHC operations and unparented SNR/Scalp/project workers also block installation.
+Normal app-close safeguards remain intact. The mandatory packaged smoke now
+validates frozen/version/dependency identity and offers an explicitly opted-in,
+isolated native Main Window probe. Inno display and numeric Windows versions are
+separate, with required inputs and no stale fallback. User update/repair guidance
+is linked in the docs navigation. See the updater architecture for the exact
+boundaries and visible smoke path. No version bump or release publication is
+part of this parity change. See the
+[verification handoff](../../reviews/updater-workflow-parity.md) for results and
+the remaining native installer and visible acceptance checks.
+
 FHC Results density on 2026-09-21: the Results card/table now use the available
 tab height instead of leaving it to a blank spacer. Font-aware single-line
 rows avoid hidden-tab wrapping that previously inflated rows to roughly
@@ -465,11 +480,11 @@ threshold/p-value rules, or relevant numerical dependencies change.
 
 - [ ] Change `FPVS_TOOLBOX_VERSION` only when the RC branch is frozen; use an
       RC such as `3.0.0rc1`, then `3.0.0` for the stable rebuild.
-- [ ] Separate display/package version from Inno's numeric Windows file version
+- [x] Separate display/package version from Inno's numeric Windows file version
       so prerelease labels do not enter `VersionInfoVersion`.
-- [ ] Remove or synchronize the Inno script's stale `2.1.0` fallback and test
+- [x] Remove the Inno script's fallback version and test
       version drift as a packaging error.
-- [ ] Add `scripts/packaging/smoke_packaged_app.ps1`. A release build must fail
+- [x] Add `scripts/packaging/smoke_packaged_app.ps1`. A release build must fail
       when the smoke is missing or fails; it must not silently skip it.
 - [ ] Have the packaged smoke launch the frozen executable, verify the reported
       version, import lazy runtime dependencies, reach the Main Window, and

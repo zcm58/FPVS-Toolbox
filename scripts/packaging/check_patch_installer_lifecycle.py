@@ -26,6 +26,7 @@ from build_installer_inventory import (
     sha256_file,
 )
 from build_patch import PATCH_MARKER_NAME, prepare_patch
+from updater_metadata import windows_version
 
 PRODUCTION_APP_ID = "77E578C2-2B30-4015-AE3F-9CE6191423F4"
 
@@ -160,6 +161,7 @@ def main() -> int:
             str(arguments.inno_compiler.resolve()),
             "/Qp",
             f"/DAppVersion={version}",
+            f"/DWindowsVersion={windows_version(version)}",
             f"/DAppIdGuid={app_id}",
             f"/DBundleRoot={bundles[version]}",
             f"/DOwnedInventoryRoot={inventories[version]}",

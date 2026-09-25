@@ -15,7 +15,7 @@ from updater_metadata import version_data
 metadata, _version = version_data(REPO_ROOT)
 datas = [(str(metadata), ".")]
 binaries = []
-hiddenimports = ['mne.io.bdf', 'scipy', 'scipy._cyutility', 'pandas', 'numpy', 'statsmodels', 'pyvista', 'statsmodels', 'patsy']
+hiddenimports = ['mne.io.edf', 'scipy', 'scipy._cyutility', 'pandas', 'numpy', 'statsmodels', 'pyvista', 'patsy']
 datas += collect_data_files('mne')
 tmp_ret = collect_all('mne')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]

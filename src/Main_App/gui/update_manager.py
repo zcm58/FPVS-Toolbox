@@ -16,8 +16,14 @@ from PySide6.QtWidgets import QWidget
 
 from Main_App.Shared.settings_manager import SettingsManager
 from Main_App.gui.update_dialog import UpdateDialog
-from Main_App.gui.update_lifecycle import UpdateTaskResult, update_lifecycle
+from Main_App.gui.update_lifecycle import (
+    UpdateJob,
+    UpdateLifecycle,
+    UpdateTaskResult,
+    update_lifecycle,
+)
 from Main_App.updates.application import APP_VERSION
+from Main_App.updates.cache import cleanup_update_cache
 from Main_App.updates.helper_client import HelperClient
 from Main_App.updates.models import UpdateCheckResult
 
@@ -37,6 +43,70 @@ class _UpdateInfo:
 
     latest: str
     url: str
+
+
+@dataclass
+class _StartupUpdateState:
+    """Give an explicit check priority over this host's deferred startup scan."""
+
+    lifecycle: UpdateLifecycle
+    started: bool = False
+    superseded: bool = False
+    disposed: bool = False
+    job: UpdateJob | None = None
+    cache_started: bool = False
+    cache_job: UpdateJob | None = None
+
+    def supersede(self) -> None:
+        self.superseded = True
+        if self.job is not None:
+            self.job.cancel()
+
+    def dispose(self, _object: object = None) -> None:
+        self.disposed = True
+        self.supersede()
+        if self.cache_job is not None:
+            self.cache_job.cancel()
+        try:
+            self.lifecycle.manual_check_requested.disconnect(self.supersede)
+        except RuntimeError:
+            _LOG.debug("Startup update host was already disconnected.")
+
+
+def prepare_startup_update_check(app: QWidget) -> _StartupUpdateState:
+    """Register manual-check cancellation before the launch timer can fire."""
+
+    state = getattr(app, "_startup_update_check", None)
+    if not isinstance(state, _StartupUpdateState):
+        state = _StartupUpdateState(update_lifecycle())
+        setattr(app, "_startup_update_check", state)
+        state.lifecycle.manual_check_requested.connect(state.supersede)
+        app.destroyed.connect(state.dispose)
+    return state
+
+
+def _start_update_cache_housekeeping(app: QWidget, state: _StartupUpdateState) -> None:
+    """Run bounded local maintenance independently of network-check preferences."""
+
+    if state.cache_started or state.disposed or state.lifecycle.is_shutting_down:
+        return
+    state.cache_started = True
+    job = state.lifecycle.start_task(
+        lambda _progress, cancel: cleanup_update_cache(APP_VERSION, cancel_event=cancel)
+    )
+    state.cache_job = job
+    app.destroyed.connect(job.cancel)
+
+    def completed(outcome: UpdateTaskResult) -> None:
+        if state.cache_job is job:
+            state.cache_job = None
+        if outcome.error is not None and not outcome.cancelled:
+            _LOG.warning(
+                "Startup update-cache housekeeping could not complete",
+                extra={"error": str(outcome.error)},
+            )
+
+    job.finished.connect(completed)
 
 
 def cleanup_old_executable() -> None:
@@ -63,6 +133,7 @@ def check_for_updates_async(
         return
 
     if not silent:
+        prepare_startup_update_check(app).supersede()
         _show_update_dialog(app, auto_check=True)
         return
 
@@ -75,11 +146,29 @@ def check_for_updates_on_launch(app: QWidget) -> None:
     if _running_under_pytest():
         _log(app, "Skipping update check during pytest.")
         return
+    state = prepare_startup_update_check(app)
+    if state.disposed or state.lifecycle.is_shutting_down:
+        return
+    _start_update_cache_housekeeping(app, state)
+    if state.started or state.superseded:
+        return
+    state.started = True
     if _should_skip_update_check():
         _log(app, "Skipping update check (checked recently).")
         return
 
-    _background_check(app, lambda result: _on_launch_result(app, result))
+    def present_result(result: UpdateCheckResult) -> None:
+        if not state.superseded and not state.disposed and not state.lifecycle.is_shutting_down:
+            _on_launch_result(app, result)
+
+    job = _background_check(app, present_result)
+    state.job = job
+
+    def clear_job(_outcome: UpdateTaskResult) -> None:
+        if state.job is job:
+            state.job = None
+
+    job.finished.connect(clear_job)
 
 
 class _UpdateSignals(QObject):
@@ -241,7 +330,7 @@ def _running_under_pytest() -> bool:
     return "PYTEST_CURRENT_TEST" in os.environ
 
 
-def _background_check(app: QWidget, on_result) -> None:
+def _background_check(app: QWidget, on_result) -> UpdateJob:
     """Keep startup workers alive and cancellable across application shutdown."""
     job = update_lifecycle().start_task(lambda _progress, cancel: _check_for_updates_and_record(cancel))
     app.destroyed.connect(job.cancel)
@@ -258,3 +347,4 @@ def _background_check(app: QWidget, on_result) -> None:
                 _LOG.debug("Update host closed before result presentation.")
 
     job.finished.connect(completed)
+    return job

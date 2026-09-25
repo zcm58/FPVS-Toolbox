@@ -47,7 +47,13 @@ try {
         -BaselineInventory $BaselineInventory -BaselineInventorySha256 $BaselineInventorySha256
     Assert-LastCommandSucceeded $BuildInstallerScript
     Write-Output ""
-    Write-Output "FPVS Toolbox release build completed successfully."
+    if ($SkipSmoke) {
+        Write-Warning 'Development artifacts built with -SkipSmoke; packaged-app validation is still required.'
+    } elseif (-not $AllowVisibleGui) {
+        Write-Output 'FPVS Toolbox artifacts built with dependency checks. Visible packaged-app acceptance remains pending.'
+    } else {
+        Write-Output 'FPVS Toolbox release build and packaged-app smoke completed successfully.'
+    }
 }
 finally {
     Pop-Location

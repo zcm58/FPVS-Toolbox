@@ -316,7 +316,10 @@ def run_apply(
         watchdog = _CancellationWatchdog(cancel, grace_seconds=CANCELLED_WORKER_EXIT_SECONDS)
         Thread(target=read_control, name="updater-handoff", daemon=True).start()
         if phase_callback is not None:
-            phase_callback(UpdatePhase("Preparing the verified update handoff..."))
+            phase_callback(UpdatePhase(
+                "Preparing the verified update handoff...",
+                target_version=downloaded.asset.version,
+            ))
         prepared = prepare_install(downloaded, request["parent_pid"], cancel_event=cancel)
         check_cancel(cancel)
         nonce = uuid.uuid4().hex

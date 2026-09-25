@@ -32,6 +32,7 @@ from Main_App.updates.models import (
     UpdateCancelled,
     UpdateCheckResult,
     UpdateError,
+    UpdatePhase,
 )
 
 
@@ -380,6 +381,7 @@ def test_apply_handoff_requires_matching_accept_before_running(
 ) -> None:
     downloaded = _downloaded(tmp_path)
     events = []
+    phases = []
     prepared = SimpleNamespace(
         run=lambda **k: events.append("run"), close=lambda: events.append("close")
     )
@@ -394,10 +396,15 @@ def test_apply_handoff_requires_matching_accept_before_running(
             downloaded=helper_protocol.download_to_dict(downloaded),
             parent_pid=None,
         )
-        future = pool.submit(helper_service.run_apply, input_stream, output_stream)
+        future = pool.submit(
+            helper_service.run_apply, input_stream, output_stream, phase_callback=phases.append
+        )
         ready = helper_protocol.read_message(receiver)
         assert ready["kind"] == "ready"
         assert not events
+        assert phases == [UpdatePhase(
+            "Preparing the verified update handoff...", target_version=downloaded.asset.version
+        )]
         helper_protocol.write_message(
             sender, "accept", nonce=ready["nonce"] if accept else "0" * 32
         )

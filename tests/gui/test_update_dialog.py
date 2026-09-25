@@ -867,7 +867,46 @@ def test_standalone_handoff_does_not_claim_to_be_toolbox(qtbot, deferred_updates
     assert calls[0]["parent_pid"] is None
 
 
-@pytest.mark.parametrize("size", [(620, 340), (700, 380)])
+@pytest.mark.parametrize("size", [(480, 140), (560, 160)])
+def test_apply_progress_is_minimal_and_preserves_target_version(qtbot, deferred_updates, size):
+    lifecycle, jobs, _ = deferred_updates
+    window = ApplyUpdateDialog(lambda _progress, _cancel: None, lifecycle=lifecycle)
+    qtbot.addWidget(window)
+    window.resize(*size)
+    window.show()
+    qtbot.waitUntil(lambda: bool(jobs) and jobs[-1]._started)
+    assert window.status_label.text() == "Updating FPVS Toolbox... Please wait..."
+    assert window.status_label.textFormat() == Qt.TextFormat.PlainText
+    version = "2026.12.123rc10"
+    jobs[-1].progress_changed.emit(UpdatePhase("Preparing", target_version=version), None)
+    jobs[-1].progress_changed.emit(
+        UpdatePhase("Installing; keep this window open", install_committed=True), None
+    )
+    assert window.status_label.text() == (
+        f"Updating FPVS Toolbox to version {version}... Please wait..."
+    )
+    assert not window.details_label.isVisible()
+    assert not window.repair_button.isVisible()
+    assert not window.close_button.isVisible()
+    assert window.progress_bar.isVisible()
+    assert window.progress_bar.minimum() == window.progress_bar.maximum() == 0
+    assert not window.progress_bar.isTextVisible()
+    qtbot.wait(1)
+    assert window.width() == size[0]
+    assert window.height() == size[1]
+    assert window.status_label.height() >= window.status_label.heightForWidth(
+        window.status_label.width()
+    )
+    assert_visible_children_within_parent(window)
+    jobs[-1].finish()
+    assert window.status_label.text() == "FPVS Toolbox was updated and restarted successfully."
+    assert window.progress_bar.value() == window.progress_bar.maximum() == 100
+    assert window.progress_bar.isVisible()
+    assert not window.details_label.isVisible()
+    assert not window.close_button.isVisible()
+
+
+@pytest.mark.parametrize("size", [(480, 140), (560, 160)])
 def test_apply_progress_failure_keeps_repair_and_complete_error_accessible(
     qtbot, deferred_updates, size
 ):
@@ -880,11 +919,28 @@ def test_apply_progress_failure_keeps_repair_and_complete_error_accessible(
     error = "Target verification failed. " + "FPVSToolbox-long-file-name.dll " * 60
     jobs[-1].finish(error=UpdateError(error))
     assert window.details_label.toPlainText() == error
+    assert window.details_label.isVisible()
     assert window.repair_button.isVisible()
+    assert window.close_button.isVisible()
     assert window.close_button.isEnabled()
     assert not window.progress_bar.isVisible()
+    assert window.width() >= 560
+    assert window.height() >= 340
     qtbot.wait(1)
     assert_visible_children_within_parent(window)
+
+
+def test_apply_failure_without_error_text_explains_repair(qtbot, deferred_updates):
+    lifecycle, jobs, _ = deferred_updates
+    window = ApplyUpdateDialog(lambda _progress, _cancel: None, lifecycle=lifecycle)
+    qtbot.addWidget(window)
+    window.show()
+    qtbot.waitUntil(lambda: bool(jobs) and jobs[-1]._started)
+    jobs[-1].finish(error=UpdateError(""))
+    assert window.details_label.toPlainText() == "Open Update & Repair to retry the full installer."
+    assert window.details_label.isVisible()
+    assert window.repair_button.isVisible()
+    assert window.close_button.isVisible()
 
 
 def test_apply_late_cancel_cannot_hide_installer_failure(qtbot, deferred_updates):
@@ -931,8 +987,58 @@ def test_apply_cancel_waits_for_worker_before_close(qtbot, deferred_updates):
     assert jobs[-1].cancel_event.is_set()
     jobs[-1].finish(error=UpdateCancelled("Canceled before launch"))
     assert "canceled before installation" in window.status_label.text()
+    assert window.close_button.isVisible()
+    assert window.close_button.isEnabled()
+    assert not window.details_label.isVisible()
+    assert not window.repair_button.isVisible()
     window.close()
     assert not window.isVisible()
+
+
+@pytest.mark.parametrize("accept_drafts", [True, False])
+def test_default_handoff_resolves_drafts_before_launch_and_closes_once(
+    qtbot, monkeypatch, tmp_path, accept_drafts,
+):
+    from Main_App.gui import update_install_guard as guard
+
+    events = []
+
+    class Host(QWidget):
+        def closeEvent(self, event):  # noqa: N802
+            events.append(("close", getattr(self, "_update_exit_confirmed", False)))
+            event.accept()
+
+    host = Host()
+    qtbot.addWidget(host)
+    host.show()
+    lifecycle = UpdateLifecycle(QCoreApplication.instance(), quit_callback=lambda: None)
+    monkeypatch.setattr(guard, "_has_active_tool_operations", lambda: False)
+    monkeypatch.setattr(
+        guard, "_confirm_project_draft_exit",
+        lambda _host: events.append("drafts") or accept_drafts,
+    )
+    monkeypatch.setattr(QMessageBox, "question", lambda *_a, **_kw: QMessageBox.StandardButton.Yes)
+    dialog = UpdateDialog(
+        parent=host, auto_check=False, lifecycle=lifecycle,
+        installer_launcher=lambda _downloaded, _cancel: events.append("launch"),
+    )
+    qtbot.addWidget(dialog)
+    asset = _available_update().installer_asset
+    dialog._handle_download_result(DownloadedInstaller(tmp_path / asset.name, 10, asset.sha256, asset))
+    dialog.open()
+    dialog.install_and_restart()
+    if accept_drafts:
+        qtbot.waitUntil(lambda: ("close", True) in events)
+        assert events == ["drafts", "launch", ("close", True)]
+        assert host._update_exit_confirmed is False
+    else:
+        assert events == ["drafts"]
+        assert dialog._job is None
+        assert host.isVisible()
+        assert not getattr(host, "_update_exit_confirmed", False)
+        dialog.close()
+    QCoreApplication.instance().removeEventFilter(lifecycle)
+    lifecycle.deleteLater()
 
 
 def assert_visible_children_within_parent(root: QWidget) -> None:

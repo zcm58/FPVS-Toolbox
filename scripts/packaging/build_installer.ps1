@@ -50,13 +50,9 @@ function Assert-BundleInput {
 
 function Invoke-PackagedSmoke {
     if (-not (Test-Path -LiteralPath $SmokePackagedAppScript)) {
-        Write-Output "No packaged app smoke script configured for Toolbox; skipping packaged smoke check."
-        return
+        throw "Packaged app smoke script was not found: $SmokePackagedAppScript"
     }
-    & $SmokePackagedAppScript -ExePath $BundleExePath
-    if ($LASTEXITCODE -ne 0) {
-        throw "Packaged app smoke check failed with exit code ${LASTEXITCODE}."
-    }
+    & $SmokePackagedAppScript -ExePath $BundleExePath -ExpectedVersion (Get-AppVersion) -AllowVisibleGui:$AllowVisibleGui
 }
 
 function Resolve-InnoCompiler {
@@ -116,9 +112,13 @@ try {
     if (-not $SkipSmoke) {
         Write-Output "Running packaged app smoke check before installer build..."
         Invoke-PackagedSmoke
+    } else {
+        Write-Warning 'Packaged app smoke explicitly skipped. This is an unverified development installer, not release validation.'
     }
 
     $appVersion = Get-AppVersion
+    $windowsVersion = & $Python (Join-Path $PSScriptRoot 'updater_metadata.py') --windows-version $appVersion
+    if ($LASTEXITCODE -ne 0) { throw 'Could not derive the numeric Windows installer version.' }
     $inventoryRoot = Join-Path $RepoRoot 'build/installer-inventory'
     Invoke-Native -File $Python -Arguments @(
         (Join-Path $PSScriptRoot 'build_installer_inventory.py'),
@@ -130,6 +130,7 @@ try {
 
     Invoke-Native -File $isccPath -Arguments @(
         "/DAppVersion=$appVersion",
+        "/DWindowsVersion=$windowsVersion",
         "/DOwnedInventoryRoot=$inventoryRoot",
         "/O$InstallerOutputDir",
         "/FFPVSToolbox-$appVersion-setup",
@@ -156,7 +157,7 @@ try {
         $patchBuild = Join-Path $patchRoot 'patch-build.json'
         $patch = Get-Content -LiteralPath $patchBuild -Raw | ConvertFrom-Json
         Invoke-Native -File $isccPath -Arguments @(
-            "/DAppVersion=$appVersion", "/DOwnedInventoryRoot=$inventoryRoot",
+            "/DAppVersion=$appVersion", "/DWindowsVersion=$windowsVersion", "/DOwnedInventoryRoot=$inventoryRoot",
             "/DPatchFromVersion=$($patch.from_version)", "/DPatchRoot=$patchRoot",
             "/DPatchSourceSHA256=$($patch.source_inventory_sha256)",
             "/DPatchTargetSHA256=$($patch.target_inventory_sha256)",

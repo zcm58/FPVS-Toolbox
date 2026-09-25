@@ -1,6 +1,9 @@
 #define AppName "FPVS Toolbox"
 #ifndef AppVersion
-#define AppVersion "0.0.0-dev"
+  #error AppVersion is required. Use scripts/packaging/build_installer.ps1.
+#endif
+#ifndef WindowsVersion
+  #error WindowsVersion is required. Use scripts/packaging/build_installer.ps1.
 #endif
 #define AppPublisher "Zack Murphy"
 #define AppExeName "FPVS_Toolbox.exe"
@@ -25,6 +28,8 @@
 AppId={{{#AppIdGuid}}
 AppName={#AppName}
 AppVersion={#AppVersion}
+VersionInfoVersion={#WindowsVersion}
+VersionInfoTextVersion={#AppVersion}
 AppVerName={#AppName} {#AppVersion}
 AppPublisher={#AppPublisher}
 AppPublisherURL=https://github.com/zcm58/FPVS-Toolbox-Repo
