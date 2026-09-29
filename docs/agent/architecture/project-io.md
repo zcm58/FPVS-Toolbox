@@ -2,6 +2,17 @@
 
 Project-aware workflows should resolve paths from the active project root, not from the process current directory or a developer-machine path.
 
+The Unicorn acquisition foundation adds a read-only
+`Main_App.io.studio_acquisition_evidence` adapter for Studio's candidate handoff:
+top-level schema string `1.0`, nested RecordingSnapshot schema integer `1`, and
+`candidate_receiver_validation_pending` status. It preserves ordered send attempts
+and errors, participant/session evidence, raw unknowns and run-relative clocks.
+Code-order comparison requires a caller-reviewed recording ID/hash association;
+it does not infer participant membership, import a project, produce EEG samples,
+estimate a timing offset, or approve scientific processing. Canonical project
+registration and persistence remain owned by the existing APIs below. Production
+project schemas and legacy preprocessing dictionaries are unchanged in this slice.
+
 Processed condition discovery supports native `.fpvs` manifest anchors and
 historical `.xlsx` workbooks through `Main_App.projects.dataset_index`.
 `Main_App.projects.list_result_files` owns flat/recursive file eligibility and

@@ -7,6 +7,52 @@ explicitly changes the processing pipeline.
 
 ## Entry Contract
 
+### Acquisition Inspection Foundation
+
+`Main_App.io.load_utils.inspect_eeg_recording(path, settings,
+event_authority=...)` is a separate **read-only inspection result**, not a Raw
+loader or a QC release. It composes `io.acquisition_profiles`, `io.bdf_format`,
+and `io.recording_events`. Scientific processing is always unavailable from this
+entry point while the [Unicorn implementation plan](../exec-plans/active/unicorn-hybrid-black-support.md)
+is completing qualification and pipeline integration. The existing full/lazy
+BioSemi loaders below, their settings and scientific identities are unchanged.
+
+- The immutable built-in registry separates format, acquisition, montage,
+  event decoding and capability definitions. Unknown IDs/versions and incompatible
+  combinations fail. Missing acquisition settings resolve internally as legacy
+  BioSemi without modifying saved settings or adding fingerprint fields.
+- Explicit Unicorn contracts select `unicorn_hybrid_black` / `unicorn8`, version
+  `1.0`, native 250 Hz, eight-channel `average_scalp`, no resampling/interpolation,
+  and unavailable normalized kurtosis/spatial capabilities. These are proposed
+  processing constraints, not implemented alternate preprocessing routes.
+- The factory `EEG 1`-`EEG 8` mapping is opt-in with an evidence reference.
+  Anatomical labels are never inferred from channel count. Template-coordinate
+  source metadata is declared, but a generic runtime geometry validator and
+  coordinate fingerprint remain later integration work.
+- Byte inspection retains signal ranges/units, native samples, source SHA256,
+  fractional record origin and BDF+ TALs, including notes/timekeeping. It checks
+  record sizes and timestamps before any MNE flattening. BDF+D is inspectable but
+  blocked; BDF+C gaps, malformed times and truncated data cannot enter analysis.
+- Each nonzero validated Unicorn Status sample is one event, including adjacent
+  repeats/decreases. Annotations use explicit numeric or named mappings, never
+  alphabetical IDs. Marker events are sorted chronologically while original
+  annotation storage order and descriptions are retained. Authority is explicit;
+  dual-source conflicts, off-grid times and native-sample collisions fail.
+- `?V` is preserved as unqualified, not silently interpreted as microvolts.
+  Valid file structure and matching markers cannot establish wireless sample
+  integrity, known amplitude, raw logger configuration, or physical onset timing.
+- Inspection summaries are detached, path-free evidence, with a separately named
+  inspection fingerprint. They do not replace preprocessing/ledger fingerprints
+  and cannot authorize cached processing or downstream analysis.
+
+Tests independently generate BDF/BDF+ format cases and cross-check a known EEG
+scale with MNE. A sanitized 426-event receipt binds the original test-signal BDF
+checksum and exact marker positions; it is not participant EEG or hardware
+qualification. A third test-only profile reaches the same inspector without
+device-name dispatch. Full/lazy/prefetch and preprocessing parity remain open.
+
+### Production BioSemi Entry
+
 `load_eeg_file(app, filepath, ref_pair=None, first_n_channels=None,
 electrode_mapping_profile=None, electrode_montage=None)` expects the host
 object to provide:

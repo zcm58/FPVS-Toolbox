@@ -1,13 +1,12 @@
 # Unicorn Hybrid Black Support
 
-Status: Planned
+Status: Active implementation
 
-Created: 2026-09-25. Updated: 2026-09-28 for explicit BDF+ support and a
-modular loader that can accept future electrode montages. This document records
-the user's requested implementation plan; it does not authorize implementation in the plan-writing task or claim
-that Unicorn recordings currently work in FPVS Toolbox. Keep this file in
-`future/` until implementation is explicitly started, then move it to `active/`
-and update the execution-plan index. All implementation phases below are pending.
+Created: 2026-09-25. Implementation authorized and started: 2026-09-29 on
+`codex/unicorn-headset-support`, based on `codex/v3-release` at `4aac39c8`.
+The 2026-09-28 revision requires explicit BDF+ support and a modular loader
+that can accept future electrode montages. Checkboxes below track demonstrated
+capabilities; source inspection alone does not qualify scientific processing.
 
 Companion plan: FPVS-Studio-2.0 repository,
 `docs/exec-plans/active/unicorn-hybrid-black-support.md` (current Studio
@@ -48,6 +47,10 @@ The user has fixed these boundaries:
 - Disable EEG interpolation for Unicorn, including automatic, manual,
   recording-wide, and condition-specific repair routes. Missing channels or
   samples must never be zero-filled or reconstructed to resemble BioSemi64.
+- User decision on 2026-09-29: use the explicitly named eight-scalp-channel
+  average reference (`average_scalp`), not a retained-reference alternative.
+  Physical acquisition reference and amplitude qualification remain evidence
+  questions; neither physical mastoid electrode is a recorded scalp channel.
 - Preserve the core FFT/BCA/SNR arithmetic, neighboring-noise definitions,
   protocol-owned harmonic rules, repeated-measures identities, and export
   contracts. Device differences must remain visible in provenance.
@@ -305,11 +308,11 @@ trigger timing or making a new purchase a hidden prerequisite.
 
 ## Preprocessing and Analysis Policy
 
-The unresolved reference decision must be made explicit before scientific
-qualification: document the headset's acquisition reference and decide whether
-the Unicorn analysis retains it or applies an explicitly named eight-channel
-average reference. Do not silently use the existing EXG-pair or final-reference
-defaults. Persist the decision and invalidate derived outputs when it changes.
+The user selected the explicitly named eight-channel average reference on
+2026-09-29. Document the headset's acquisition reference before scientific
+qualification; the analysis decision does not establish that hardware fact.
+Do not silently use the existing EXG-pair or final-reference defaults. Persist
+the decision and invalidate derived outputs when it changes.
 Eight-channel and 64-channel average references are not equivalent measurements.
 
 Keep supported FIR/notch settings in their existing sequence at 250 Hz; do not
@@ -365,10 +368,12 @@ electrodes is insufficient.
 
 ### Phase 0 - Freeze fixtures and remaining decisions
 
-- [ ] Package/reproduce the retained classic-BDF receiver evidence as an
+- [x] Package/reproduce the retained classic-BDF receiver evidence as an
   anonymized, checksum-bound regression fixture with expected codes/sample indices.
   Record Recorder version/configuration and outstanding acquisition unknowns.
-- [ ] Add independent BDF+C fixtures with Status-only, annotation-only, and dual
+  The portable fixture is a sanitized receipt with exact events and raw-source
+  checksums, not a redistributed recording or a scientific-qualification claim.
+- [x] Add independent BDF+C fixtures with Status-only, annotation-only, and dual
   event sources, plus BDF+D/gap/malformed-time cases. Generated format fixtures
   must not be presented as proof that this Recorder writes BDF+.
 - [ ] Obtain known amplitude/reference and mapping evidence; record raw/processed
@@ -518,8 +523,8 @@ Run additional affected consumer scopes only when implementation reaches those
 boundaries. Register new coverage in the normal verification configuration.
 Qt execution remains CI-only or explicitly approved in a safe visible local
 environment; acquisition and physical-timing checks require separate execution
-authorization and available equipment. No tests, EEG acquisition, or hardware
-qualification are part of this documentation-only task.
+authorization and available equipment. Implementation authorization covers
+software changes, source-evidence inspection, and backend verification.
 
 ## Completion Checklist
 
@@ -544,15 +549,79 @@ qualification are part of this documentation-only task.
 - [ ] Documentation and execution-plan status match demonstrated capability,
   with software and research timing validation reported separately.
 
-## Plan-Revision Verification
+## Implementation Log
 
-Only this plan and its entry in `docs/agent/exec-plans/README.md` are intended
-changes in the plan-writing task. Runtime architecture and scientific contracts
-are unchanged, so their current documentation must not be rewritten to describe
-planned support as already available. Record narrow documentation checks in the
-handoff; implementation checkboxes remain pending. For this revision, check
-`git diff --check`, local Markdown link targets, required support/regression
-criteria, and the exact two-file documentation scope. Runtime tests/Qt/hardware
-execution are not required to validate this plan-only change. Current architecture
-docs remain unchanged because this revision changes future acceptance criteria,
-not implemented ownership or supported workflows.
+- 2026-09-29: Created the implementation branch from the current release branch
+  and activated this plan. Initial protected-path and project-path audits pass.
+  Reviewing retained Recorder evidence, Studio handoff, and current loading,
+  event, preprocessing, and provenance contracts before shared runtime edits.
+- 2026-09-29: Added read-only inspection behind
+  `Main_App.io.load_utils.inspect_eeg_recording`, immutable versioned acquisition
+  definitions, strict BDF/BDF+C/BDF+D byte inspection, explicit native-grid
+  marker decoding/reconciliation, and a candidate Studio handoff adapter.
+  No existing BioSemi loading, preprocessing, settings, fingerprints, or GUI
+  choices were changed. This is the Phase 0 / early Phase 1 foundation, not
+  completed headset support; the remaining phase gates stay unchecked.
+- Independently read the original retained BDF through the new inspector:
+  SHA256 `9fa2e01480fae7a1500f92cc8739fa2a036f9b87b1f00fef429712a73c6a6a0c`,
+  22,621 samples, 426 events with exact receipt code/sample equality. Scientific
+  processing stays blocked. EEG dimension bytes are literally `3F 56` (`?V`),
+  not a text-decoding artifact, and CNT has nonidentity physical scaling.
+- Read-only amplitude probe on that same BDF/CSV pair: header-calibrated EEG
+  versus CSV differs by at most 0.05699 physical units (one digital LSB is
+  0.089407); CNT differs by at most 0.47695 (one LSB is 0.953674). MNE 1.9
+  returns the EEG header-physical values unchanged for `?V` (EEG 1 maximum
+  absolute value 75,379.1526), not volts. Thus the vendor's documented microvolt
+  interpretation cannot pass unchanged into the volts-based pipeline. This is
+  evidence for a future explicitly qualified unit rule, not permission to silently
+  add one or claim hardware amplitude accuracy. The generated-format regression
+  freezes this reader behavior for a nonzero `?V` signal.
+- Manufacturer layout evidence: the
+  [numbered cap diagram](https://github.com/unicorn-bi/Unicorn-Suite-Hybrid-Black-User-Manual/blob/main/UnicornHybridBlack.md#connect--disconnect-unicorn-hybrid-eeg-electrodes)
+  ([diagram](https://raw.githubusercontent.com/unicorn-bi/Unicorn-Suite-Hybrid-Black-User-Manual/main/img/img3.png))
+  plus the Recorder's channel numbering supports the factory mapping EEG 1-8
+  to Fz, C3, Cz, C4, Pz, PO7, Oz, PO8. Registered factory mapping is explicit
+  opt-in, not authority to infer custom wiring. The user chose eight-channel
+  average reference. No channel-number-only or missing-EXG inference is used.
+- Studio's observed envelope uses top-level string schema `1.0`, nested
+  RecordingSnapshot integer schema `1`, and status
+  `candidate_receiver_validation_pending`. The adapter preserves that status,
+  repeated/error attempts, and run-relative callback times. A caller-reviewed
+  recording binding is necessary for code-order comparison; no sample alignment
+  or calibration is inferred. The companion active plan's 148-marker follow-up
+  reports about 118.31 ms interval growth over 146 oddball intervals; it does
+  not establish a causal explanation or justify a timing correction.
+
+### Remaining qualification and integration gates
+
+- Qualify the Recorder's `?V` interpretation against known amplitude/reader
+  scaling, acquisition reference, raw-logging evidence, and CNT/VALID/DT loss
+  semantics. A vendor layout diagram does not establish any of these.
+- Integrate the context through lazy/full/prefetch loading and every production
+  event consumer. The new 426-event decoder regression is not a claim that the
+  unchanged production event consumers preserve those markers already.
+- Complete native-250/no-interpolation preprocessing, explicit manual QC,
+  cache/ledger/FullFFT identities, ROI/spatial/mixed-device gates, and project/GUI
+  integration before enabling Unicorn in the application. The third synthetic
+  profile test currently reaches inspection only, not common preprocessing.
+- Hardware/timing validation remains separately authorized. There is no new
+  purchase, SDK dependency, resampling, guessed timing offset, or raw-file edit.
+
+### Verification of the inspection foundation
+
+- New focused contracts: 217 passed, including a generated one-sample-per-record
+  classic-BDF replay of all 426 retained receipt events through the public
+  inspector. This replay is explicitly not the vendor recording; original-byte
+  verification was the separate read-only check recorded above.
+- `verify.py --scope project-io --tier focused`: 488 passed before the final
+  receipt-replay test addition; the final new-contract rerun above includes it.
+- `verify.py --scope processing --tier focused`: 2,122 passed, 5 skipped.
+- `verify.py --scope repo --tier precommit`: all audits, Ruff and compilation
+  passed; 5,418 tests passed, 11 skipped. The final receipt-replay test/helper
+  adjustment subsequently passed the 217-test focused rerun.
+- Initial sandboxed project-I/O execution had two Windows named-pipe access
+  failures; the approved outside-sandbox rerun passed. No production workaround
+  or test behavior change was made for these environment restrictions.
+- No Qt, live Recorder, headset acquisition, physical timing experiment, or
+  project-processing run was launched. Existing short-fixture filter and
+  statistics warnings remain; these are not new scientific qualification.

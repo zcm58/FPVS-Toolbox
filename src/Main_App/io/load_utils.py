@@ -24,6 +24,7 @@ from Main_App.Shared.load_utils import (
     load_eeg_file,
     open_preflight_eeg_file,
 )
+from Main_App.io.recording_inspection import inspect_eeg_recording
 
 __all__ = [
     "BDF_RECORDING_NOT_STARTED_REASON",
@@ -34,6 +35,7 @@ __all__ = [
     "_emit_reader_warnings",
     "format_bdf_recording_not_started_message",
     "inspect_bdf_header",
+    "inspect_eeg_recording",
     "is_bdf_recording_not_started",
     "_map_present_case_insensitive",
     "_memmap_dir_for_pid",
