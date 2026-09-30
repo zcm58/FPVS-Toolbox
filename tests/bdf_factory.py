@@ -8,6 +8,7 @@ def write_bdf(
     path: Path, *, variant="BDF+C", record_onsets=("0", "1"),
     annotations=(), status=True, eeg_names=("Fz",), unit="uV",
     samples_per_record=250, record_duration="1", signal_values=None,
+    signal_units=None, physical_ranges=None, digital_ranges=None,
 ) -> Path:
     def field(value, width):
         encoded = str(value).encode("ascii")
@@ -41,11 +42,11 @@ def write_bdf(
     columns = [
         [field(name, 16) for name in labels],
         [field("", 80) for _ in labels],
-        [field(unit if name in eeg_names else "", 8) for name in labels],
-        [field(-8388608, 8) for _ in labels],
-        [field(8388607, 8) for _ in labels],
-        [field(-8388608, 8) for _ in labels],
-        [field(8388607, 8) for _ in labels],
+        [field((signal_units or {}).get(name, unit if name in eeg_names else ""), 8) for name in labels],
+        [field((physical_ranges or {}).get(name, (-8388608, 8388607))[0], 8) for name in labels],
+        [field((physical_ranges or {}).get(name, (-8388608, 8388607))[1], 8) for name in labels],
+        [field((digital_ranges or {}).get(name, (-8388608, 8388607))[0], 8) for name in labels],
+        [field((digital_ranges or {}).get(name, (-8388608, 8388607))[1], 8) for name in labels],
         [field("", 80) for _ in labels],
         [field(256 if name == "BDF Annotations" else samples_per_record, 8) for name in labels],
         [field("", 32) for _ in labels],

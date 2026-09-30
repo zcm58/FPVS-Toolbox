@@ -9,6 +9,9 @@ import pytest
 
 import Main_App.Shared.load_utils as shared_load_utils
 import Main_App.io.load_utils as load_utils
+import Main_App.io.recording_inspection as recording_inspection
+import Main_App.io.unicorn_raw as unicorn_raw
+import Main_App.io.unicorn_units as unicorn_units
 from Main_App.io.eeg_geometry import (
     BIOSEMI64_1020_AB_CHANNEL_MAP,
     BIOSEMI64_CHANNELS,
@@ -58,6 +61,30 @@ def _app(logs: list[str]):
         settings=SimpleNamespace(get=lambda section, key, default=None: default),
         log=logs.append,
     )
+
+
+@pytest.fixture(params=("legacy_default", "explicit_biosemi"))
+def biosemi_without_unicorn_units(monkeypatch, request):
+    def _unexpected_unicorn_units(*_args, **_kwargs):
+        pytest.fail("BioSemi production loading must never invoke Unicorn unit correction")
+
+    for owner in (unicorn_units, unicorn_raw, recording_inspection, shared_load_utils, load_utils):
+        for name in ("resolve_unicorn_unit_policy", "unicorn_eeg_samples_in_volts", "open_unicorn_recording_raw"):
+            if hasattr(owner, name):
+                monkeypatch.setattr(owner, name, _unexpected_unicorn_units)
+    app = _app([])
+    if request.param == "explicit_biosemi":
+        app.currentProject.preprocessing.update({
+            "electrode_montage": "biosemi64",
+            "electrode_mapping_profile": "anatomical_labels",
+            "acquisition_profile": {
+                "id": "biosemi_active_two_64", "version": "1.0",
+                "montage_id": "biosemi64", "montage_version": "1.0",
+                "event_decoder_id": "biosemi_edge", "event_decoder_version": "1.0",
+                "reference_policy": "biosemi_exg_pair_then_average",
+            },
+        })
+    return app
 
 
 def _write_bdf_header(path, *, header_bytes: int = 512, data_records: int = 0, channels: int = 1) -> None:
@@ -137,6 +164,62 @@ def test_shared_load_eeg_file_preserves_bdf_channel_and_montage_contract(monkeyp
     assert identity["coordinate_fingerprint"] == BIOSEMI64_COORDINATE_FINGERPRINT
     assert identity["retained_scalp_channel_count"] == 64
     assert "BDF loaded successfully." in logs
+
+
+def test_public_full_biosemi_loader_preserves_nonzero_volts_without_unicorn_correction(
+    monkeypatch, tmp_path, biosemi_without_unicorn_units,
+):
+    header_raw, loaded_raw = _raw(), _raw()
+    expected = np.arange(1, loaded_raw._data.size + 1, dtype=float).reshape(loaded_raw._data.shape) * 1e-6
+    loaded_raw._data[:] = expected
+    calls = []
+
+    def _read(_filepath, **kwargs):
+        calls.append(dict(kwargs))
+        return header_raw if len(calls) == 1 else loaded_raw
+
+    monkeypatch.setattr(shared_load_utils.mne.io, "read_raw_bdf", _read)
+    monkeypatch.setattr(shared_load_utils, "_memmap_dir_for_pid", lambda: tmp_path)
+
+    raw = load_utils.load_eeg_file(biosemi_without_unicorn_units, str(tmp_path / "biosemi.bdf"))
+
+    assert raw is loaded_raw
+    np.testing.assert_array_equal(raw.get_data(), expected)
+    assert len(calls) == 2
+    assert calls[0]["preload"] is False
+    assert calls[1]["preload"] == str(tmp_path / "biosemi_raw.dat")
+    assert all("units" not in call for call in calls)
+    assert loaded_raw.load_data_calls == 1
+    assert load_utils.load_eeg_file is shared_load_utils.load_eeg_file
+
+
+def test_public_lazy_biosemi_loader_preserves_nonzero_volts_without_unicorn_correction(
+    monkeypatch, tmp_path, biosemi_without_unicorn_units,
+):
+    header_raw, lazy_raw = _raw(), _raw()
+    expected = -np.arange(1, lazy_raw._data.size + 1, dtype=float).reshape(lazy_raw._data.shape) * 1e-6
+    lazy_raw._data[:] = expected
+    calls = []
+
+    def _read(_filepath, **kwargs):
+        calls.append(dict(kwargs))
+        return header_raw if len(calls) == 1 else lazy_raw
+
+    monkeypatch.setattr(shared_load_utils.mne.io, "read_raw_bdf", _read)
+    monkeypatch.setattr(shared_load_utils, "_memmap_dir_for_pid", lambda: pytest.fail("Lazy load created a memmap"))
+
+    with load_utils.open_preflight_eeg_file(
+        biosemi_without_unicorn_units, str(tmp_path / "biosemi.bdf"),
+    ) as raw:
+        assert raw is lazy_raw
+        np.testing.assert_array_equal(raw.get_data(), expected)
+        assert lazy_raw.load_data_calls == 0
+        assert lazy_raw.close_calls == 0
+
+    assert len(calls) == 2
+    assert all(call["preload"] is False and "units" not in call for call in calls)
+    assert header_raw.close_calls == lazy_raw.close_calls == 1
+    assert load_utils.open_preflight_eeg_file is shared_load_utils.open_preflight_eeg_file
 
 
 def test_run_owned_preload_preserves_geometry_and_uses_its_unique_path(monkeypatch, tmp_path):

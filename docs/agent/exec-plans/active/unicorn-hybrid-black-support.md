@@ -194,6 +194,16 @@ records, and separate source-integrity evidence. Validate BDF physical/digital
 ranges and reader scaling against a known input before choosing any conversion. Do not
 multiply EEG already converted to volts by another microvolt scale factor.
 
+User decision on 2026-09-30: apply a documented unit correction only within
+explicit Unicorn modular support, never BioSemi. The inspection sample and
+context-owned MNE reader boundaries implement `unicorn_recorder_eeg_units`
+v1.0: the observed eight-channel
+Recorder `?V` header pattern is interpreted as microvolts after BDF physical
+calibration and converted to volts. The exact pattern and fail-closed limits
+are documented in the loading contract. Standard `uV`/`mV`/`V` inputs receive
+normal unit conversion only. This is software compatibility, not a hardware
+calibration or release of the remaining integrity/processing gates.
+
 ### BDF+ annotations and canonical events
 
 Continuous BDF+ support must work with Status-only markers, annotation-only
@@ -573,9 +583,9 @@ software changes, source-evidence inspection, and backend verification.
   returns the EEG header-physical values unchanged for `?V` (EEG 1 maximum
   absolute value 75,379.1526), not volts. Thus the vendor's documented microvolt
   interpretation cannot pass unchanged into the volts-based pipeline. This is
-  evidence for a future explicitly qualified unit rule, not permission to silently
-  add one or claim hardware amplitude accuracy. The generated-format regression
-  freezes this reader behavior for a nonzero `?V` signal.
+  evidence for the subsequently user-authorized explicit unit rule recorded
+  below, not a claim of hardware amplitude accuracy. The generated-format
+  regression freezes this reader behavior for a nonzero `?V` signal.
 - Manufacturer layout evidence: the
   [numbered cap diagram](https://github.com/unicorn-bi/Unicorn-Suite-Hybrid-Black-User-Manual/blob/main/UnicornHybridBlack.md#connect--disconnect-unicorn-hybrid-eeg-electrodes)
   ([diagram](https://raw.githubusercontent.com/unicorn-bi/Unicorn-Suite-Hybrid-Black-User-Manual/main/img/img3.png))
@@ -594,10 +604,11 @@ software changes, source-evidence inspection, and backend verification.
 
 ### Remaining qualification and integration gates
 
-- Qualify the Recorder's `?V` interpretation against known amplitude/reader
-  scaling, acquisition reference, raw-logging evidence, and CNT/VALID/DT loss
-  semantics. A vendor layout diagram does not establish any of these.
-- Integrate the context through lazy/full/prefetch loading and every production
+- Complete hardware amplitude calibration, acquisition reference, raw-logging
+  evidence, and CNT/VALID/DT loss semantics. The authorized software unit
+  interpretation does not qualify these; a layout diagram does not either.
+- Integrate the unit-correct Raw context through application-level
+  lazy/full/prefetch orchestration and every production
   event consumer. The new 426-event decoder regression is not a claim that the
   unchanged production event consumers preserve those markers already.
 - Complete native-250/no-interpolation preprocessing, explicit manual QC,
@@ -606,6 +617,100 @@ software changes, source-evidence inspection, and backend verification.
   profile test currently reaches inspection only, not common preprocessing.
 - Hardware/timing validation remains separately authorized. There is no new
   purchase, SDK dependency, resampling, guessed timing offset, or raw-file edit.
+
+### Unicorn-only unit correction (2026-09-30)
+
+- Implemented the user-authorized unit rule in `io.unicorn_units`. It rejects
+  default/explicit BioSemi, unrelated profiles and changed built-in definitions.
+  Neither the shared BioSemi full/lazy loaders nor preprocessing/FFT code was
+  modified. A named `?V` exception requires the exact reviewed EEG labels,
+  physical/digital ranges and native rate; other unknown units still fail closed.
+- Optional `inspect_eeg_recording(..., include_eeg_samples=True)` now obtains
+  original EEG integers in the same source-checked read as the header, applies
+  BDF slope and offset then physical-unit-to-volts scaling, and returns an
+  immutable, source-ordered sample view. Original header units, raw bytes,
+  events and auxiliary signals remain unchanged. The versioned per-channel
+  interpretation participates in the inspection summary/fingerprint only;
+  it is not permission to use processing caches or enable scientific analysis.
+- Rechecked the original retained BDF read-only with the new public inspection
+  option: the same SHA256 `9fa2e01480fae7a1500f92cc8739fa2a036f9b87b1f00fef429712a73c6a6a0c`,
+  eight EEG channels, 22,621 samples each, 426 markers, and EEG 1 maximum absolute
+  value 0.0753791526185961 V. Only the existing acquisition-qualification and
+  integration blockers remain. This test-signal recording does not establish
+  physiological amplitudes or hardware calibration.
+- Added independent generated BDF/BDF+C calibration tests, recognized-unit MNE
+  comparisons for lazy/preloaded reads, a known-microvolt tone check, source and
+  marker preservation, no double correction, unknown/mismatched header failures,
+  discontinuity blocking, and explicit/default BioSemi exclusion. Direct public
+  full/lazy BioSemi regressions additionally assert unchanged nonzero data and
+  that Unicorn conversion functions are never called.
+- Updated the loading contract and registered the new focused tests. No project
+  path, export, GUI, legacy/retired package, or processing-order changes.
+- `verify.py --scope project-io --tier focused`: 520 passed, with Ruff,
+  compilation and path audit passing. The first sandboxed run encountered the
+  existing Windows named-pipe restriction in two multiprocessing tests; the
+  approved outside-sandbox rerun passed without code workarounds.
+- `verify.py --scope repo --tier precommit`: all audits, Ruff and compilation
+  passed; 5,454 tests passed, 11 skipped. This approved outside-sandbox run also
+  covers the processing tests that encountered Windows temp-file/named-pipe
+  access restrictions in the separate sandboxed processing gate. The isolated
+  BioSemi loader test file passed all 21 cases. No Qt or hardware acquisition
+  was launched; the existing short-fixture filter/statistics warnings remain.
+- Full/lazy/prefetch production Raw integration, cache propagation and the
+  remaining scientific qualification gates above are still pending. This
+  increment implements unit-corrected inspection, not full Unicorn analysis.
+
+### MNE header interpretation follow-up (2026-09-30)
+
+- Added `Main_App.io.load_utils.open_unicorn_recording_raw`, implemented by
+  `io.unicorn_raw`, so the approved broken header is now interpreted by an actual
+  MNE reader rather than only an inspection sample converter. It yields Raw plus
+  the original inspection and reader provenance through one context-managed API.
+  Lazy, RAM-preloaded and owned disk-preloaded modes all use stock MNE calibration
+  exactly once. Existing BioSemi full/lazy functions remain unchanged aliases.
+- MNE 1.9 rejects overwriting a nonempty `?V` unit and cannot lazily read a
+  file-like overlay. The adapter creates an exclusive temporary copy under the
+  active project's `.fpvs_processing/unicorn_reader/reader-*` directory, verifies
+  both source and copied bytes against inspection SHA256, patches only the eight
+  approved EEG dimension fields to `uV` using the same descriptor, and checks file
+  and directory identities before MNE reads. No original bytes are rewritten.
+- Preserve original channel order, native 250 Hz, eight EEG roles, Status as stim,
+  and CNT/VALID/DT as misc. Reject other/mixed-rate channels, discontinuities,
+  malformed unit patterns, unverified mappings and conflicting event evidence
+  before MNE. Canonical recorded events remain authoritative; a new MNE event
+  search is not substituted. No reference or geometry identity is applied yet.
+- Retain original source hash/header units, unit policy, normalized-copy hash,
+  exact field patches and adapter/MNE versions in detached reader provenance.
+  Keep all unqualified-acquisition/integration gates and
+  `scientific_processing_allowed=False`. This solves header interpretation at
+  the MNE boundary, not application-level profile selection, prefetch adoption,
+  QC release, preprocessing, or downstream cache/analysis integration.
+- Context cleanup closes owned memmaps and removes only the two named reader
+  files and their unique directory, never a caller-selected tree. Failed MNE
+  construction releases traceback-local mappings before Windows cleanup while
+  preserving traceback locations and the original exception.
+- Retained original recording check: all three modes returned eight by 22,621
+  EEG samples at 250 Hz and the identical 426-event canonical table. Maximum
+  absolute difference from the independent digital calibration was
+  5.812e-17 V. Source SHA256 remained
+  `9fa2e01480fae7a1500f92cc8739fa2a036f9b87b1f00fef429712a73c6a6a0c`;
+  eight unit fields were normalized in each temporary copy, and cleanup was
+  verified after every mode. No hardware acquisition or Qt was launched.
+- Verification: 52 new reader cases plus two failure-path cases passed outside
+  the Windows sandbox. The final focused project-I/O gate passed 574 tests,
+  with audit, Ruff and compilation passing. BioSemi guard tests now also reject
+  calls to this new reader.
+- The broad precommit gate passed all audits, Ruff and compilation; 5,506 tests
+  passed and 11 skipped, with two failures in unchanged code:
+  `test_prepared_source_payload_json_cache_reuses_unchanged_file` failed its
+  cache-invalidation assertion, and
+  `test_replace_handles_complete_or_partial_existing_pair[both]` encountered
+  Windows access denied while replacing a staged PDF. Both affected test files
+  passed an isolated outside-sandbox rerun (26 passed). No unrelated fixes were
+  made; the broad gate was not clean in a single run.
+- Updated the loading contract and focused verification registry. Project-root
+  selection remains explicit; no hard-coded runtime paths, project metadata,
+  export formats, shared preprocessing, or retired packages were changed.
 
 ### Verification of the inspection foundation
 

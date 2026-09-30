@@ -38,9 +38,11 @@ BioSemi loaders below, their settings and scientific identities are unchanged.
   alphabetical IDs. Marker events are sorted chronologically while original
   annotation storage order and descriptions are retained. Authority is explicit;
   dual-source conflicts, off-grid times and native-sample collisions fail.
-- `?V` is preserved as unqualified, not silently interpreted as microvolts.
-  Valid file structure and matching markers cannot establish wireless sample
-  integrity, known amplitude, raw logger configuration, or physical onset timing.
+- Original units, including `?V`, remain unchanged in the format evidence.
+  The explicit built-in Unicorn profile alone resolves the versioned
+  `io.unicorn_units` interpretation described below. Valid file structure and
+  matching markers cannot establish wireless sample integrity, hardware amplitude
+  calibration, raw logger configuration, or physical onset timing.
 - Inspection summaries are detached, path-free evidence, with a separately named
   inspection fingerprint. They do not replace preprocessing/ledger fingerprints
   and cannot authorize cached processing or downstream analysis.
@@ -50,6 +52,87 @@ scale with MNE. A sanitized 426-event receipt binds the original test-signal BDF
 checksum and exact marker positions; it is not participant EEG or hardware
 qualification. A third test-only profile reaches the same inspector without
 device-name dispatch. Full/lazy/prefetch and preprocessing parity remain open.
+
+### Unicorn-Only Unit Interpretation
+
+The user-authorized `unicorn_recorder_eeg_units` v1.0 policy belongs to
+`Main_App.io.unicorn_units`, not the format parser or shared BioSemi loader.
+It rejects absent/default, explicit BioSemi, unrelated, and modified acquisition
+definitions. No filename, channel-count heuristic, global MNE setting, or
+fallback can select this correction.
+
+The literal `?V` exception requires the observed Recorder 1.24.02 pattern:
+all eight `EEG 1`-`EEG 8` channels explicitly mapped, native 250 Hz, physical
+ranges -750000 to 750000, full signed 24-bit digital ranges, and only the
+observed optional CNT/VALID/DT/Status auxiliaries. Any mismatch remains
+unqualified. The manufacturer's Recorder documentation identifies EEG as
+microvolts; the retained BDF/CSV comparison supports this software unit rule,
+not absolute hardware gain calibration. Correctly labelled `uV`, `mV`, and `V`
+use ordinary prefix conversion; unknown units fail closed.
+
+`inspect_eeg_recording(..., include_eeg_samples=True)` optionally retains the
+eight original digital EEG signals during the same source-checked read and
+returns `eeg_samples_volts` in source order. The conversion applies the BDF
+slope **and offset**, then the physical-to-volts factor exactly once. It never
+accepts MNE-scaled data as input, mutates a Raw, scales telemetry or Status,
+changes source bytes, or writes a project/cache artifact. Repeated reads derive
+fresh values from original integers. Nonfinite/unrepresentable calibration and
+discontinuous sample views fail explicitly. Without this opt-in, inspection
+continues to materialize only Status.
+
+The detached inspection summary/fingerprint retains policy ID/version, source
+and interpreted units, per-channel factors, conversion order and source hash.
+The sample view remains inspection-only: it cannot authorize processing, QC,
+or cache reuse. The context-owned Raw adapter below now consumes the same
+versioned interpretation. Application-level dispatch, prefetch adoption and
+scientific processing integration remain later plan gates. BioSemi loading,
+identities, preprocessing and the shared volts-to-microvolts FFT conversion
+are unchanged.
+
+### Unicorn MNE Reader
+
+`Main_App.io.load_utils.open_unicorn_recording_raw(path, settings,
+project_root=..., event_authority=..., preload=False)` yields a context wrapper
+with `raw`, original `inspection`, and detached `reader_provenance`. Supported
+preload choices are `False` (lazy), `True` (RAM), and `"memmap"` (owned disk
+preload). All three use stock MNE BDF reading, with EEG in volts. Keep Raw and
+any disk-preloaded use inside the context. Invoke this file-I/O boundary from a
+worker, not a GUI callback.
+
+MNE 1.9 cannot overwrite nonempty `?V` units through its `units` argument, and
+cannot lazily consume a file-like header overlay. This adapter therefore creates
+one exclusive, run-owned copy beneath the caller's absolute active project root:
+`.fpvs_processing/unicorn_reader/reader-*/reader.bdf`. It verifies the source
+and copied bytes against the original inspection SHA256, then changes only
+the eight approved dimension fields to `uV` using the same open descriptor.
+Original recordings are never opened for writing. Correctly labelled inputs
+are copied without header changes. MNE performs physical calibration and SI
+conversion itself; no post-read rescaling or private MNE calibration state is
+used. Temporary file and directory identities are checked before MNE opens them.
+
+The adapter rejects non-Unicorn contracts before I/O and rejects structural,
+unit, mapping and event inspection errors before MNE. Every ordinary channel
+must share native 250 Hz; mixed-rate telemetry cannot cause implicit MNE
+resampling. Only the eight mapped EEG channels, CNT/VALID/DT auxiliaries and
+the configured Status role are accepted. Source channel order and labels are
+preserved, auxiliaries are `misc`, and Status is `stim`. No reference or montage
+is applied by this unit-correction adapter. Canonical events and original
+BDF+ timing evidence remain authoritative rather than a fresh `find_events`
+call or an inferred time origin.
+
+The wrapper retains `scientific_processing_allowed=False` and the unresolved
+acquisition/integration issues. Its provenance binds the original source SHA256,
+inspection fingerprint, unit policy, adapter/MNE versions, normalized-copy
+SHA256 and exact patched fields. `raw.filenames` points to the temporary reader
+copy and must not replace original recording identity. These receipts are not
+production cache/checkpoint eligibility.
+
+Context exit closes Raw and explicitly releases an owned memmap before removing
+only `reader.bdf`, `samples.dat` and their uniquely owned directory. Error paths
+retain traceback locations while releasing incomplete MNE construction frames
+that can otherwise keep Windows mappings open. Redirected/replaced directories
+are never recursively removed. Existing BioSemi full/lazy APIs and the current
+BioSemi-only prefetch coordinator do not dispatch through this adapter.
 
 ### Production BioSemi Entry
 

@@ -23,6 +23,10 @@ from Main_App.io.recording_events import (
     CanonicalEvents, EventAuthority, RecordingAnnotation, RecordingEventError,
     decode_annotation_events, decode_sample_status, reconcile_event_sources,
 )
+from Main_App.io.unicorn_units import (
+    UnicornUnitError, UnicornUnitPolicy, require_unicorn_contract,
+    resolve_unicorn_unit_policy, unicorn_eeg_samples_in_volts,
+)
 
 
 @dataclass(frozen=True)
@@ -38,6 +42,8 @@ class RecordingInspection:
     events: CanonicalEvents | None
     issues: tuple[InspectionIssue, ...]
     event_policy_json: str
+    eeg_unit_policy: UnicornUnitPolicy | None = None
+    eeg_samples_volts: tuple[tuple[str, tuple[float, ...]], ...] | None = None
 
     @property
     def scientific_processing_allowed(self) -> bool:
@@ -45,7 +51,7 @@ class RecordingInspection:
 
     def summary(self) -> dict:
         """Detached path-free inspection evidence, never an analysis fingerprint."""
-        return {
+        result = {
             "schema_version": "recording_inspection_v1",
             "source_sha256": self.source.file_sha256,
             "format": self.source.header.variant,
@@ -78,6 +84,9 @@ class RecordingInspection:
             "physical_timing": "unknown_uncalibrated",
             "scientific_processing_allowed": False,
         }
+        if self.eeg_unit_policy is not None:
+            result["eeg_unit_policy"] = self.eeg_unit_policy.summary()
+        return result
 
     @property
     def inspection_fingerprint(self) -> str:
@@ -91,6 +100,7 @@ def inspect_eeg_recording(
     named_annotation_codes: Mapping[str, int] | None = None,
     marker_labels: tuple[str, ...] = (), status_channel: str = "Status",
     registry: AcquisitionRegistry = BUILTIN_REGISTRY,
+    include_eeg_samples: bool = False,
 ) -> RecordingInspection:
     """Inspect explicitly selected sample/annotation encodings on a native grid.
 
@@ -98,8 +108,14 @@ def inspect_eeg_recording(
     exclusion, or manual-QC approval is produced. BDF+D evidence is retained but
     never converted to a fictitious continuous event grid. Legacy BioSemi edge
     decoding remains in the unchanged production loader until common integration.
+    Explicit Unicorn inspection can opt into an in-memory EEG sample view in
+    volts. This is not a Raw loader or permission to process the recording.
     """
     contract = resolve_acquisition_contract(settings, registry=registry)
+    if not isinstance(include_eeg_samples, bool):
+        raise ValueError("include_eeg_samples must be boolean.")
+    if include_eeg_samples:
+        require_unicorn_contract(contract)
     if contract.event_decoder.id not in {"unicorn_sample", "explicit_annotations"}:
         raise ValueError("This inspection entry point requires an explicit sample/annotation acquisition profile.")
     capabilities = contract.profile.capabilities
@@ -119,8 +135,17 @@ def inspect_eeg_recording(
         raise ValueError("Selected decoder and profile capabilities do not support the event authority.")
     for decoder in required_decoders:
         registry.lookup("event_decoders", decoder, "1.0")
-    source = inspect_bdf_format(path, optional_digital_channels=(status_channel,))
+    eeg_channels = tuple(name for name, _ in contract.source_to_canonical_items) if include_eeg_samples else ()
+    if status_channel.casefold() in {name.casefold() for name, _ in contract.source_to_canonical_items}:
+        raise ValueError("Status and scalp EEG roles must not overlap.")
+    source = inspect_bdf_format(path, optional_digital_channels=(status_channel, *eeg_channels))
     issues = [InspectionIssue("format_continuity", detail) for detail in source.processing_blockers]
+    unit_policy = None
+    if contract.profile.id == "unicorn_hybrid_black":
+        try:
+            unit_policy = resolve_unicorn_unit_policy(contract, source.header)
+        except UnicornUnitError as exc:
+            issues.append(InspectionIssue("unit_contract", str(exc)))
     signals = {signal.label.casefold(): signal for signal in source.header.signals if not signal.is_annotation}
     expected_rate = Decimal(str(capabilities.native_sfreq))
     expected_samples = source.header.record_duration * expected_rate
@@ -133,14 +158,16 @@ def inspect_eeg_recording(
             continue
         if signal.samples_per_record != expected_samples:
             issues.append(InspectionIssue("native_grid", f"{name} does not have the profile's native sampling grid."))
-        if signal.physical_dimension not in {"uV", "mV", "V"}:
+        if signal.physical_dimension not in {"uV", "mV", "V"} and unit_policy is None:
             issues.append(InspectionIssue("unqualified_unit", f"{name} has unqualified physical unit {signal.physical_dimension!r}; no scaling inferred."))
     if contract.label_mapping_evidence_status == "unverified":
         issues.append(InspectionIssue("unverified_mapping", "The selected source-to-electrode mapping lacks reviewed evidence."))
     events = None
+    status_signals = tuple((name, values) for name, values in source.digital_signals
+                           if name.casefold() == status_channel.casefold())
     if not any(issue.code in {"native_grid", "format_continuity"} for issue in issues):
         try:
-            actual_decoders = {"unicorn_sample"} if source.digital_signals else set()
+            actual_decoders = {"unicorn_sample"} if status_signals else set()
             has_annotations = any(signal.is_annotation for signal in source.header.signals)
             if has_annotations:
                 actual_decoders.add("explicit_annotations")
@@ -163,8 +190,8 @@ def inspect_eeg_recording(
             if not has_annotations:
                 annotations = None
             status = None
-            if source.digital_signals:
-                channel, values = source.digital_signals[0]
+            if status_signals:
+                channel, values = status_signals[0]
                 signal = signals[channel.casefold()]
                 if not signal.identity_scaling or signal.samples_per_record != expected_samples:
                     raise RecordingEventError("Status needs verified identity scaling and the native EEG sample grid.")
@@ -173,7 +200,7 @@ def inspect_eeg_recording(
         except (RecordingEventError, AcquisitionProfileError) as exc:
             issues.append(InspectionIssue("event_contract", str(exc)))
     issues.extend((
-        InspectionIssue("unqualified_acquisition", "Raw logging, amplitude interpretation and CNT/VALID/DT loss semantics require source-specific qualification."),
+        InspectionIssue("unqualified_acquisition", "Raw logging, hardware amplitude calibration and CNT/VALID/DT loss semantics require source-specific qualification."),
         InspectionIssue("integration_pending", "Native preprocessing, manual QC release, provenance and downstream capability gates are not yet integrated; inspection does not authorize processing."),
     ))
     policy = json.dumps({
@@ -181,4 +208,5 @@ def inspect_eeg_recording(
         "named_annotation_codes": dict(named_annotation_codes or {}),
         "marker_labels": list(marker_labels), "status_channel": status_channel,
     }, sort_keys=True)
-    return RecordingInspection(contract, source, events, tuple(issues), policy)
+    eeg_samples = unicorn_eeg_samples_in_volts(contract, source) if include_eeg_samples else None
+    return RecordingInspection(contract, source, events, tuple(issues), policy, unit_policy, eeg_samples)
