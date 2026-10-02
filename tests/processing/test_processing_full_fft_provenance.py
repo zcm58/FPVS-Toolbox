@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import shutil
 
@@ -181,6 +182,45 @@ def test_failed_manifest_replace_preserves_project_and_cleans_staging(
 
     assert manifest_path.read_bytes() == before
     assert not list(root.glob(".project.json.*.tmp"))
+
+
+@pytest.mark.parametrize("staging_kind", ["file", "symlink"])
+def test_manifest_write_preserves_predictable_staging_path(
+    tmp_path: Path,
+    staging_kind: str,
+) -> None:
+    root = _managed_full_fft_project(tmp_path)
+    victim = tmp_path / "outside.txt"
+    outside_content = b"outside content\n"
+    victim.write_bytes(outside_content)
+    predictable_staging = root / ".project.json.full-fft-provenance.tmp"
+    if staging_kind == "symlink":
+        try:
+            predictable_staging.symlink_to(victim)
+        except OSError as exc:
+            if os.name == "nt" and exc.winerror == 1314:
+                pytest.skip("Windows symlink creation requires additional privileges")
+            raise
+    else:
+        predictable_staging.write_bytes(outside_content)
+
+    written = write_project_full_fft_provenance(
+        root,
+        base_frequency_hz=6.0,
+        oddball_frequency_hz=1.2,
+    )
+
+    assert victim.read_bytes() == outside_content
+    assert predictable_staging.read_bytes() == outside_content
+    assert predictable_staging.is_symlink() is (staging_kind == "symlink")
+    manifest_path = root / "project.json"
+    assert not manifest_path.is_symlink()
+    saved = json.loads(manifest_path.read_bytes())
+    assert saved["tools"]["processing"]["full_fft_provenance"]["fingerprints"][
+        "sources"
+    ] == written.source_fingerprint
+    assert saved["tools"]["unrelated"] == {"preserved": True}
+    assert set(root.glob(".project.json.*.tmp")) == {predictable_staging}
 
 
 def test_require_current_full_fft_provenance_uses_saved_rates_and_checks_inputs(
