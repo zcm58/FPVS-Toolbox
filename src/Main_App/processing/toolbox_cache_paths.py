@@ -104,15 +104,15 @@ def owned_cache_file(location: CacheLocation, path: Path) -> bool:
                 and (len(namespace) == 1 or namespace[1] in {"events", "occurrences"})
                 and bool(re.fullmatch(r"(?:(?:index-state|[0-9a-f]{64})\.json|\.index-[^/]+\.tmp)", name)))
     patterns = {
-        "preprocessed": r".+_[0-9a-f]{16}(?:_raw(?:-\d+)?\.fif|\.json(?:\.tmp)?)",
+        "preprocessed": r"(?:.+_[0-9a-f]{16}(?:_raw(?:-\d+)?\.fif|\.json(?:\.tmp)?)|\..+_[0-9a-f]{16}\.json\.[a-z0-9_]{8}\.tmp)",
         "kurtosis": r"(?:[0-9a-f]{64}\.[0-9a-f]{20}\.npz|latest\.json|\.(?:pending|manifest)-[^/]+\.tmp)",
         "preflight": r"(?:[0-9a-f]{64}\.json|\.[0-9a-f]{64}\.[^/]+\.tmp)",
         "source_psd": r"(?:[0-9a-f]{64}\.(?:npz|json)|\.[0-9a-f]{64}\.[0-9a-f]{32}\.(?:npz|json)\.tmp)",
-        "detectability": r".+__[0-9a-f]{16}__[0-9a-f]{16}\.npz(?:\.tmp)?",
+        "detectability": r"(?:.+__[0-9a-f]{16}__[0-9a-f]{16}\.npz(?:\.tmp)?|\..+__[0-9a-f]{16}__[0-9a-f]{16}\.npz\.[a-z0-9_]{8}\.tmp)",
         "updates": r"(?i)FPVS[^/]*\.exe",
         "memmap": r".+_raw\.dat",
         "meshes": r"[0-9a-f]{64}(?:\.npz|\.\d+\.[0-9a-f]{32}\.tmp\.npz)",
-        "mri_templates": r"brain_0p5mm(?:\.tmp)?\.nii",
+        "mri_templates": r"(?:brain_0p5mm(?:\.tmp)?\.nii|\.brain_0p5mm\.nii\.[a-z0-9_]{8}\.tmp)",
     }
     if not re.fullmatch(patterns[location.kind], name):
         return False
@@ -123,9 +123,11 @@ def owned_cache_file(location: CacheLocation, path: Path) -> bool:
     if location.kind == "source_psd":
         return len(relative.parts) == 2 and relative.parts[0] == "v1"
     if location.kind == "memmap":
-        if len(relative.parts) != 2 or not re.fullmatch(r"pid_\d+", relative.parts[0]):
+        from Main_App.io.memmap_paths import memmap_process_id
+        if len(relative.parts) != 2:
             return False
-        return not process_is_alive(int(relative.parts[0][4:]))
+        pid = memmap_process_id(relative.parts[0])
+        return pid is not None and not process_is_alive(pid)
     if location.kind == "mri_templates":
         return len(relative.parts) == 2 and bool(re.fullmatch(r"[0-9a-f]{64}", relative.parts[0]))
     return len(relative.parts) == 1

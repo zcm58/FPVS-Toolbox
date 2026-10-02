@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 import json
 from pathlib import Path
+from Main_App.io.atomic_write import atomic_write
 
 from .models import AnalysisRecordingExclusion
 
@@ -77,7 +78,6 @@ def save_project_recording_exclusions(
     """Atomically persist the current project-specific FHC exclusions."""
 
     path = exclusion_state_path(results_parent)
-    temporary = path.with_suffix(f"{path.suffix}.tmp")
     payload = {
         "schema_version": EXCLUSION_STATE_SCHEMA_VERSION,
         "recording_exclusions": [
@@ -90,11 +90,8 @@ def save_project_recording_exclusions(
     }
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        temporary.write_text(
-            json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
-            encoding="utf-8",
-        )
-        temporary.replace(path)
+        with atomic_write(path) as stream:
+            stream.write(json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
     except OSError as exc:
         raise ExclusionStateError(
             f"Could not save FHC recording exclusions to {path}: {exc}"

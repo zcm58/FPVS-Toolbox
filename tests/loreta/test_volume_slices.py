@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import os
 
 import numpy as np
 import pytest
@@ -105,6 +106,29 @@ def test_loreta_display_mri_template_cache_refreshes_when_source_changes(tmp_pat
     assert second_template == first_template
     assert second_template.stat().st_mtime_ns >= first_mtime
     assert float(np.nanmax(nib.load(str(second_template)).get_fdata(dtype=np.float32))) == 3.0
+
+
+def test_display_mri_writer_does_not_follow_predictable_staging_hardlink(tmp_path) -> None:
+    from Tools.LORETA_Visualizer.volume_slices import _write_loreta_display_mri_template
+    nib = pytest.importorskip("nibabel")
+    source = tmp_path / "brain.mgz"
+    nib.save(nib.MGHImage(np.full((4, 4, 4), 3.0, dtype=np.float32), np.eye(4)), str(source))
+    target = tmp_path / "output" / "brain_0p5mm.nii"
+    target.parent.mkdir()
+    victim = tmp_path / "outside.txt"
+    victim.write_bytes(b"outside content")
+    staging = target.with_name("brain_0p5mm.tmp.nii")
+    os.link(victim, staging)
+
+    _write_loreta_display_mri_template(source, target)
+
+    assert victim.read_bytes() == b"outside content"
+    assert staging.read_bytes() == b"outside content"
+    result = nib.load(str(target))
+    assert result.shape == (8, 8, 8)
+    assert np.all(result.get_fdata(dtype=np.float32) == 3.0)
+    assert np.allclose(result.affine, nib.load(str(source)).header.get_vox2ras_tkr() @ np.diag([0.5, 0.5, 0.5, 1.0]))
+    assert set(target.parent.iterdir()) == {target, staging}
 
 
 def test_volume_slice_panels_crop_to_anatomy_for_high_detail_rendering() -> None:

@@ -39,6 +39,7 @@ def test_inventory_and_clear_only_owned_caches_preserving_science(tmp_path):
     root = _project(tmp_path / "project")
     files = [_prepared(root), _preflight(root)]
     for relative in (
+        f".fpvs_cache/preprocessed/.participant_{'b' * 16}.json.abc12345.tmp",
         f".fpvs_cache/prepared_kurtosis/{'c' * 24}/{KEY}.{'d' * 20}.npz",
         f".fpvs_cache/prepared_kurtosis/{'c' * 24}/latest.json",
         f".fpvs_processing/preflight_qc/v7_analyzed_condition_scope/events/{KEY}.json",
@@ -47,6 +48,7 @@ def test_inventory_and_clear_only_owned_caches_preserving_science(tmp_path):
         ".fpvs_processing/preflight_qc/v7_analyzed_condition_scope/.slots/.index-stale.tmp",
         f".fpvs_processing/source_psd_cache/v1/{KEY}.npz",
         f"1 - Excel Data Files/Condition/_individual_detectability_cache/P1__{'a' * 16}__{'b' * 16}.npz",
+        f"1 - Excel Data Files/Condition/_individual_detectability_cache/.P1__{'a' * 16}__{'b' * 16}.npz.abc12345.tmp",
     ):
         files.append(_write(root / relative))
     preserved = [_write(root / relative, b"keep") for relative in (
@@ -55,6 +57,7 @@ def test_inventory_and_clear_only_owned_caches_preserving_science(tmp_path):
         ".fpvs_processing/processing_ledger.json", ".fpvs_processing/processing_runs.jsonl",
         ".fpvs_processing/review_decisions.json", ".fpvs_cache/mne/fsaverage/template.fif",
         ".fpvs_cache/preprocessed/user-notes.txt", ".fpvs_cache/preprocessed/input.bdf",
+        ".fpvs_cache/preprocessed/.user-notes.abc12345.tmp",
     )]
     manifest = (root / "project.json").read_bytes()
     inventory = service.inspect_toolbox_caches(active_project_root=root)
@@ -215,13 +218,16 @@ def test_app_cache_allowlist_keeps_live_maps_partial_updates_and_templates(tmp_p
     monkeypatch.setattr(paths, "process_is_alive", lambda pid: pid == 123)
     disposable = [_write(root / relative) for relative in (
         "updates/FPVSToolbox-3.0.exe", "memmap/pid_456/participant_raw.dat",
+        "memmap/pid_456-abc12345/participant_raw.dat",
         f"meshes/{KEY}.npz", f"mri_templates/{KEY}/brain_0p5mm.nii")]
+    disposable.append(_write(root / f"mri_templates/{KEY}/.brain_0p5mm.nii.abc12345.tmp"))
     kept = [_write(root / relative, b"keep") for relative in (
         "updates/FPVSToolbox-3.0.exe.part", "updates/unrelated.exe",
         "memmap/pid_123/participant_raw.dat", "mne/fsaverage/mri/brain.mgz", "settings/settings.ini")]
+    kept.append(_write(root / "memmap/pid_123-abc12345/participant_raw.dat", b"keep"))
     inventory = service.inspect_toolbox_caches()
     result = service.clear_toolbox_caches(inventory)
-    assert result.removed_files == 4 and not result.errors
+    assert result.removed_files == 6 and not result.errors
     assert all(not path.exists() for path in disposable)
     assert all(path.read_bytes() == b"keep" for path in kept)
 

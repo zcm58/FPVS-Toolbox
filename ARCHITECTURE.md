@@ -44,6 +44,8 @@ Primary areas:
   processing-controller helpers, neutral ROI settings, project-local neutral FullFFT provenance, and
   per-artifact freshness for derivatives of the accepted harmonic selection.
 - `src/Main_App/io/`: canonical Main App I/O import surface. It owns the shared
+  exclusive atomic writer (`atomic_write.py`), guarded in-place lock/log opens
+  (`safe_file.py`), private process memory-map paths (`memmap_paths.py`),
   exact-column/header reader, separate uncompressed dense-spectral and compact
   condition-table NumPy companions, and legacy XLSX compatibility. It delegates BDF loading to the
   existing shared implementation while the repo moves toward purpose-based

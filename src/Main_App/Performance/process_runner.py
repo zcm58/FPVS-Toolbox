@@ -18,7 +18,6 @@ import atexit
 import hashlib
 import json
 import shutil
-import tempfile
 import os
 import time
 import traceback
@@ -31,6 +30,9 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, List, Mapping, Optional, 
 
 import Main_App.processing.preprocess as backend_preprocess
 from Main_App.diagnostics import log_router
+from Main_App.io.atomic_write import atomic_write
+from Main_App.io.safe_file import regular_file_info
+from Main_App.processing.preflight_qc_pruning import safe_cache_directory
 from Main_App.exports.source_time_domain_export import (
     source_ready_project_relative_path,
     write_source_ready_time_domain_derivatives,
@@ -40,6 +42,7 @@ from Main_App.io.load_utils import (
     format_bdf_recording_not_started_message,
     inspect_bdf_header,
 )
+from Main_App.io.memmap_paths import memmap_process_id, memmap_root, process_memmap_directory
 from Main_App.io.eeg_geometry import (
     BIOSEMI64_CHANNELS,
     attach_raw_biosemi64_geometry,
@@ -663,27 +666,14 @@ def _worker_init() -> None:
     _WORKER_FIR_CACHE = PreparedFirCache()
     atexit.register(_WORKER_FIR_CACHE.close)
 
-    # --- Memmap cleanup on worker exit ---
-    from pathlib import Path as _Path
-    base = _Path(tempfile.gettempdir()) / "fpvs_memmap"
-    pid_dir = base / f"pid_{os.getpid()}"
-    pid_dir.mkdir(parents=True, exist_ok=True)
-
-    def _cleanup_pid_dir() -> None:
-        try:
-            shutil.rmtree(pid_dir, ignore_errors=True)  # remove memmaps for this worker
-        except Exception:
-            pass
-
-    atexit.register(_cleanup_pid_dir)
+    # The shared directory owner registers cleanup for every allocated namespace.
+    pid_dir = process_memmap_directory()
     logger.debug("[MP STAGE] worker_init_done pid=%d memmap_dir=%s", os.getpid(), pid_dir)
 
 
 def _memmap_path_for_file(file_path: Path) -> Path:
-    """Mirror the loader's deterministic per-PID memmap path for cleanup."""
-    pid_dir = Path(tempfile.gettempdir()) / "fpvs_memmap" / f"pid_{os.getpid()}"
-    pid_dir.mkdir(parents=True, exist_ok=True)
-    return pid_dir / (file_path.stem + "_raw.dat")
+    """Use the loader's private process directory for file cleanup."""
+    return process_memmap_directory() / (file_path.stem + "_raw.dat")
 
 
 def _make_error_result(
@@ -1324,10 +1314,13 @@ def _store_preprocessed_cache(
     )
     cache_key = _preproc_cache_key(payload)
     raw_path, meta_path = _preproc_cache_paths(project_root, file_path, cache_key)
-    raw_path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_meta_path = meta_path.with_suffix(".json.tmp")
 
     try:
+        if not safe_cache_directory(project_root.absolute(), raw_path.parent.absolute()):
+            raise OSError(f"Refusing a redirected preprocessed cache directory: {raw_path.parent}")
+        raw_path.parent.mkdir(parents=True, exist_ok=True)
+        if not safe_cache_directory(project_root.absolute(), raw_path.parent.absolute()):
+            raise OSError(f"Refusing a redirected preprocessed cache directory: {raw_path.parent}")
         exact_filter_info = snapshot_preprocessed_filter_info(
             raw.info, settings, cache_key=cache_key,
         )
@@ -1362,6 +1355,9 @@ def _store_preprocessed_cache(
             analysis_span_plan=settings.get("_fpvs_realized_analysis_span_plan"),
             geometry=geometry_identity,
         )
+        regular_file_info(raw_path)
+        for split_path in raw_path.parent.glob(f"{raw_path.stem}-*.fif"):
+            regular_file_info(split_path)
         raw.save(str(raw_path), overwrite=True, verbose=False,
                  **({"fmt": "double"} if condition_proof is not None else {}))
         metadata = {
@@ -1471,11 +1467,8 @@ def _store_preprocessed_cache(
             ),
             **_review_metadata_from_settings(settings),
         }
-        tmp_meta_path.write_text(
-            json.dumps(metadata, sort_keys=True, default=str),
-            encoding="utf-8",
-        )
-        os.replace(tmp_meta_path, meta_path)
+        with atomic_write(meta_path) as stream:
+            stream.write(json.dumps(metadata, sort_keys=True, default=str))
         pruned = _prune_stale_preprocessed_cache(
             cache_dir=raw_path.parent,
             source_path=str(file_path.resolve()),
@@ -1489,10 +1482,6 @@ def _store_preprocessed_cache(
             )
         return "stored"
     except Exception as exc:
-        try:
-            tmp_meta_path.unlink(missing_ok=True)  # type: ignore[arg-type]
-        except OSError:
-            pass
         logger.warning(
             "preproc_cache_write_failed file=%s cache=%s error=%s",
             file_path.name,
@@ -2970,15 +2959,13 @@ def _terminate_executor_workers(pool: Any) -> int:
 def _scavenge_stale_memmaps() -> None:
     """Remove memmap PID folders for processes that are no longer alive."""
     try:
-        from pathlib import Path as _Path
         import psutil as _psutil
-        base = _Path(tempfile.gettempdir()) / "fpvs_memmap"
+        base = memmap_root()
         if not base.exists():
             return
         for d in base.glob("pid_*"):
-            try:
-                pid = int(d.name.split("_", 1)[1])
-            except Exception:
+            pid = memmap_process_id(d.name)
+            if pid is None or d.is_symlink() or getattr(d, "is_junction", lambda: False)():
                 continue
             if not _psutil.pid_exists(pid):
                 shutil.rmtree(d, ignore_errors=True)
@@ -2986,8 +2973,8 @@ def _scavenge_stale_memmaps() -> None:
             base.rmdir()  # remove root if empty
         except OSError:
             pass
-    except Exception:
-        pass
+    except OSError:
+        logger.debug("stale_memory_map_directory_retained", exc_info=True)
 
 
 def run_project_parallel(

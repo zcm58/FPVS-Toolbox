@@ -117,7 +117,12 @@ original recordings, exports, or the repository's MNE/fsaverage cache.
   or mapped by this path.
 - `.set`/EEGLAB loading is intentionally unsupported in the active toolbox.
 - Disk-backed preload files are created under
-  `tempfile.gettempdir()/fpvs_memmap/pid_<process-id>/<file-stem>_raw.dat`.
+  `tempfile.gettempdir()/fpvs_memmap/pid_<process-id>-<random>/<file-stem>_raw.dat`.
+  `Main_App.io.memmap_paths` exclusively creates one private directory per
+  process and validates its identity on reuse. Loader, worker initialization,
+  and per-file cleanup use this same owner; an existing guessed PID directory
+  is never reused. Cleanup rejects redirected containers and retains live maps.
+  Dead-process cleanup recognizes both historical and private PID names.
 - Loading does not resample data.
 - Before either full or reduced loading, the loader performs a header-only BDF
   read and validates the complete acquisition geometry contract. A reduced

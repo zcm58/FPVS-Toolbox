@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
 import numpy as np
+from Main_App.io.atomic_write import atomic_write
 
 from Tools.LORETA_Visualizer.prepared_payload_validator import (
     PREPARED_SOURCE_MANIFEST_FORMAT,
@@ -1960,8 +1961,6 @@ def _unique_participant_payload_file_name(condition_id: str, aggregation: str, u
 
 
 def _write_json(path: Path, payload: Mapping[str, Any]) -> None:
-    temp_path = path.with_suffix(path.suffix + ".tmp")
-    with temp_path.open("w", encoding="utf-8") as handle:
+    with atomic_write(path) as handle:
         json.dump(payload, handle, indent=2)
         handle.write("\n")
-    temp_path.replace(path)

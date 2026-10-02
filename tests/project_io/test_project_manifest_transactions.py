@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import multiprocessing
 import os
+from pathlib import Path
+from types import SimpleNamespace
 import time
 from concurrent.futures import ThreadPoolExecutor
 
@@ -10,6 +12,92 @@ import pytest
 
 from Main_App.projects import manifest_store, project_manifest_transaction
 from Main_App.projects.project import Project
+
+
+def test_manifest_lock_rejects_hardlink_without_touching_outside_file(tmp_path):
+    root = tmp_path / "project"
+    root.mkdir()
+    path = root / "project.json"
+    path.write_text('{"preserved": true}', encoding="utf-8")
+    victim = tmp_path / "outside.txt"
+    victim.write_bytes(b"")
+    os.link(victim, root / ".project.json.lock")
+    with pytest.raises(OSError, match="linked|regular"):
+        with project_manifest_transaction(path) as transaction:
+            transaction.write({"must_not_publish": True})
+    assert victim.read_bytes() == b""
+    assert json.loads(path.read_bytes()) == {"preserved": True}
+
+
+@pytest.mark.parametrize("entry_point", ["transaction", "project"])
+def test_manifest_write_rejects_symlink_to_outside_file(tmp_path, entry_point):
+    root = tmp_path / "project"
+    root.mkdir()
+    victim = tmp_path / "outside.json"
+    before = b'{"preserved": true}'
+    victim.write_bytes(before)
+    path = root / "project.json"
+    try:
+        path.symlink_to(victim)
+    except OSError as exc:
+        if os.name == "nt" and exc.winerror == 1314:
+            pytest.skip("Windows symlink creation requires additional privileges")
+        raise
+    with pytest.raises(OSError, match="linked|regular"):
+        if entry_point == "project":
+            project = Project.load(root)
+            project.save()
+        else:
+            with project_manifest_transaction(path) as transaction:
+                transaction.write({"must_not_publish": True})
+    assert victim.read_bytes() == before
+    assert path.is_symlink()
+    assert not (tmp_path / ".outside.json.lock").exists()
+
+
+@pytest.mark.parametrize("leaf", ["project.json", ".project.json.lock"])
+def test_manifest_rejects_windows_reparse_files(tmp_path, monkeypatch, leaf):
+    path = tmp_path / "project.json"
+    path.write_bytes(b"{}")
+    target = tmp_path / leaf
+    if target != path:
+        target.write_bytes(b"")
+    before = target.read_bytes()
+    original = Path.lstat
+
+    def reparse_info(source, *args, **kwargs):
+        info = original(source, *args, **kwargs)
+        if source == target:
+            return SimpleNamespace(st_mode=info.st_mode, st_nlink=info.st_nlink, st_file_attributes=0x400)
+        return info
+
+    monkeypatch.setattr(Path, "lstat", reparse_info)
+    with pytest.raises(OSError, match="linked|regular"):
+        with project_manifest_transaction(path):
+            pytest.fail("Accepted a reparse file")
+    assert target.read_bytes() == before
+
+
+def test_manifest_lock_rejects_replacement_during_open(tmp_path, monkeypatch):
+    path = tmp_path / "project.json"
+    path.write_bytes(b"{}")
+    lock = tmp_path / ".project.json.lock"
+    lock.write_bytes(b"")
+    victim = tmp_path / "outside.txt"
+    victim.write_bytes(b"outside content")
+    original = os.open
+
+    def replace_lock(source, flags, *args, **kwargs):
+        if Path(source) == lock:
+            lock.unlink()
+            os.link(victim, lock)
+        return original(source, flags, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", replace_lock)
+    with pytest.raises(OSError, match="linked|regular|changed"):
+        with project_manifest_transaction(path):
+            pytest.fail("Accepted a changed lock")
+    assert victim.read_bytes() == b"outside content"
 
 
 def _worker_update(root, kind, ready, start):
@@ -97,7 +185,11 @@ def test_project_save_failure_preserves_manifest_and_releases_transaction(tmp_pa
 
     with monkeypatch.context() as patch:
         if failure == "partial_write":
-            patch.setattr(manifest_store.os, "fdopen", InterruptedWrite)
+            patch.setattr(
+                manifest_store.os, "fdopen",
+                lambda *args, **kwargs: InterruptedWrite(*args, **kwargs)
+                if args[1] == "wb" else original_fdopen(*args, **kwargs),
+            )
         else:
             patch.setattr(manifest_store.os, "replace", denied)
         with pytest.raises(OSError, match="injected"):

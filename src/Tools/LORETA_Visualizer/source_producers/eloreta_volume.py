@@ -13,6 +13,7 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+from Main_App.io.atomic_write import atomic_write
 from typing import Any, Mapping, Sequence
 
 import numpy as np
@@ -1336,11 +1337,9 @@ def _unique_participant_payload_file_name(condition_id: str, aggregation: str, u
 
 
 def _write_json(path: Path, payload: Mapping[str, Any]) -> None:
-    temp_path = path.with_suffix(path.suffix + ".tmp")
-    with temp_path.open("w", encoding="utf-8") as handle:
+    with atomic_write(path) as handle:
         json.dump(payload, handle, indent=2)
         handle.write("\n")
-    temp_path.replace(path)
 
 
 def _emit_progress(progress_callback: ProgressCallback | None, message: str) -> None:

@@ -6,6 +6,7 @@ audits = ["paths", "protected", "stats-structure"]
 tests = [
   "tests/audit/test_backend_import_boundaries.py",
   "tests/project_io/test_project_manifest_transactions.py",
+  "tests/project_io/test_atomic_write_security.py",
   "tests/processing/test_process_runner_lifecycle.py",
   "tests/processing/test_process_runner_epoch_contract.py",
   "tests/processing/test_condition_interpolation_execution.py",
@@ -86,6 +87,7 @@ tests = [
   "tests/project_io/test_active_project_root.py",
   "tests/project_io/test_project_dataset_index.py",
   "tests/project_io/test_project_manifest_transactions.py",
+  "tests/project_io/test_atomic_write_security.py",
   "tests/project_io/test_project_enumeration_io.py",
   "tests/project_io/test_project_group_context.py",
   "tests/project_io/test_project_geometry_persistence.py",
@@ -192,6 +194,7 @@ tests = [
   "tests/processing/test_removed_electrode_detection.py",
   "tests/processing/test_roi_settings.py",
   "tests/processing/test_shared_load_utils.py",
+  "tests/processing/test_memmap_security.py",
   "tests/workers/test_post_processing_pipeline_worker.py",
   "tests/workers/test_post_processing_pipeline_worker_static.py",
 ]

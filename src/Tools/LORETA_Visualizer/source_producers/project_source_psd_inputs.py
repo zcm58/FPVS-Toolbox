@@ -13,6 +13,8 @@ import re
 import time
 from typing import Any
 
+from Main_App.io.atomic_write import atomic_write
+
 from Main_App.processing.harmonic_selection_qc import load_processing_harmonic_selection
 from Main_App.processing.processing_ledger import PROCESSING_FINGERPRINT_VERSION, load_ledger
 from Main_App.projects import normalize_manual_excluded_participant_conditions
@@ -677,15 +679,8 @@ def _enrich_source_psd_provenance(
                 merged_row_metadata = dict(row_metadata) if isinstance(row_metadata, Mapping) else {}
                 merged_row_metadata["project_group"] = condition_metadata
                 row["metadata"] = merged_row_metadata
-        temporary = target.with_suffix(target.suffix + ".tmp")
-        try:
-            temporary.write_text(
-                json.dumps(payload, indent=2, ensure_ascii=False, allow_nan=False) + "\n",
-                encoding="utf-8",
-            )
-            _replace_file(temporary, target)
-        finally:
-            temporary.unlink(missing_ok=True)
+        with atomic_write(target, replace=_replace_file) as stream:
+            stream.write(json.dumps(payload, indent=2, ensure_ascii=False, allow_nan=False) + "\n")
 
 
 def _condition_group_provenance(

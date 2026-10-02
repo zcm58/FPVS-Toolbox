@@ -35,6 +35,10 @@ retain live memory maps and publication-lock files, and report skipped or
 failed items. Unregistered custom output folders are not searched. The Stats
 manifest cache is separate from the accepted harmonic selection; only that
 cache record is removable and the active project object must be synchronized.
+The allowlist includes only recognized randomized staging names for preprocessed
+metadata, detectability NPZ files, and MRI templates. Private memory-map PID
+names follow the shared `io/memmap_paths.py` parser; historical PID names remain
+eligible only when their process is inactive.
 
 Downloaded anatomical templates, project settings, source recordings, analysis
 companions/exports, processing ledgers, and review decisions are preserved.

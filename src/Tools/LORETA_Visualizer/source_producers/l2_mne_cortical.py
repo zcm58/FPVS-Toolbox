@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 import numpy as np
+from Main_App.io.atomic_write import atomic_write
 
 from config import DEFAULT_ELECTRODE_NAMES_64
 from Tools.LORETA_Visualizer.prepared_payload_validator import (
@@ -769,11 +770,9 @@ def _slug(value: str) -> str:
 
 
 def _write_json(path: Path, payload: Mapping[str, Any]) -> None:
-    temp_path = path.with_suffix(path.suffix + ".tmp")
-    with temp_path.open("w", encoding="utf-8") as handle:
+    with atomic_write(path) as handle:
         json.dump(payload, handle, indent=2)
         handle.write("\n")
-    temp_path.replace(path)
 
 
 def _parse_args() -> argparse.Namespace:
