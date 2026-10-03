@@ -17,16 +17,26 @@ from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 
+from Main_App.io.safe_file import open_regular_file, regular_file_info
+
 _locks: dict[Path, threading.RLock] = {}
 _locks_guard = threading.Lock()
 _local = threading.local()
+
+
+def manifest_file_path(manifest_path: str | Path) -> Path:
+    """Normalize the parent without following the manifest's final component."""
+    source = Path(manifest_path)
+    path = source.parent.resolve() / source.name
+    regular_file_info(path)
+    return path
 
 
 @contextmanager
 def project_manifest_transaction(manifest_path: str | Path) -> Iterator["ManifestTransaction"]:
     """Serialize updates across threads and processes, including nested helpers."""
 
-    path = Path(manifest_path).resolve()
+    path = manifest_file_path(manifest_path)
     with _locks_guard:
         lock = _locks.setdefault(path, threading.RLock())
     if not lock.acquire(timeout=30.0):
@@ -38,7 +48,7 @@ def project_manifest_transaction(manifest_path: str | Path) -> Iterator["Manifes
         if path in active:
             yield active[path]
             return
-        with path.with_name(f".{path.name}.lock").open("a+b") as stream:
+        with open_regular_file(path.with_name(f".{path.name}.lock")) as stream:
             if os.name == "nt":
                 import msvcrt
 
@@ -105,6 +115,7 @@ class ManifestTransaction:
 
         if getattr(_local, "active", {}).get(self.path) is not self:
             raise RuntimeError("Project manifest publication requires an active transaction.")
+        regular_file_info(self.path)
         parsed = json.loads(payload)
         if not isinstance(parsed, dict):
             raise ValueError(f"Project manifest must contain an object: {self.path}")

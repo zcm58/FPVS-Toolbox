@@ -67,6 +67,10 @@ not merge stale complete manifests or silently replace unreadable JSON.
 Transactions use a resolved-path thread lock plus a native cross-process
 sidecar lock (Windows byte lock or POSIX `flock`), each with a 30-second
 acquisition limit. Nested helpers in the same thread reuse the transaction.
+Only the manifest's parent is resolved; linked, hard-linked, reparse, and
+nonregular manifest leaves are rejected. `Main_App.io.safe_file` opens the
+sidecar exclusively when absent and checks both the path and descriptor identity
+before lock initialization. Processing run-log appends use the same guard.
 The stable `.project.json.lock` sidecar is retained after release, and OS
 locks are released on process exit. The owner publishes via a unique temporary
 file in the manifest directory, flushes and fsyncs it, then atomically replaces
@@ -104,6 +108,18 @@ snapshot consistency. These are GUI-neutral checks and require no Qt run.
 Disposable cache ownership, automatic QC replacement, and the Advanced settings
 cache-clearing action are documented in [Cache Maintenance](cache-maintenance.md).
 Cache removal preserves analysis companions, review decisions, and ledgers.
+
+`Main_App.io.atomic_write` owns exclusive staging for non-manifest publications:
+the processing ledger, preprocessed-cache metadata, Individual Detectability
+NPZ caches, FHC preferences, source-export JSON/text/provenance, and MRI display
+templates. Callers keep their serializers and replacement-retry policies;
+the helper writes through the `mkstemp` descriptor, flushes/fsyncs, replaces the
+destination, and cleans its own staging file on failure. Existing guessed
+`.tmp` links are never opened. Ledger/log writes reject redirected processing
+state directories; FIF-cache writes reject redirected directories and linked
+FIF leaves before MNE serialization. Regression coverage is in
+`tests/project_io/test_atomic_write_security.py`, manifest transaction tests,
+`tests/processing/test_preprocessed_cache_filter_info.py`, and the MRI slice tests.
 
 Raw discovery, individual raw selection, and repeated-source preflight retain
 the canonical participant/recording identity when an exact raw path is already

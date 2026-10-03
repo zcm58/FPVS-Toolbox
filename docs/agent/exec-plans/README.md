@@ -14,8 +14,10 @@ Keep plans compact and current. Record phase status, decisions, touched areas, r
 ## Planned Work
 
 - [Unicorn Hybrid Black support](future/unicorn-hybrid-black-support.md): planned
-  raw BDF+ workflow with native 250 Hz, interpolation disabled, explicit device
-  provenance, and unchanged BioSemi processing. No implementation has started.
+  modular format/acquisition/montage/event loading with raw BDF and continuous
+  BDF+ annotation support, explicit discontinuity gates, native 250 Hz, no Unicorn
+  interpolation, and unchanged BioSemi processing. Future montages extend the
+  registry through contract tests. No Toolbox implementation has started.
 
 ## Active QC Implementation
 

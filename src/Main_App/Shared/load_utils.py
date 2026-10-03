@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import logging
 import os
-import tempfile
 import warnings
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -141,10 +140,10 @@ def format_bdf_recording_not_started_message(file_names: Sequence[str]) -> str:
 
 
 def _memmap_dir_for_pid() -> Path:
-    """Per-process memmap directory to avoid worker collisions."""
-    d = Path(tempfile.gettempdir()) / "fpvs_memmap" / f"pid_{os.getpid()}"
-    d.mkdir(parents=True, exist_ok=True)
-    return d
+    """Private per-process memmap directory shared with worker cleanup."""
+    from Main_App.io.memmap_paths import process_memmap_directory
+
+    return process_memmap_directory()
 
 
 _cached_1010 = cached_biosemi64_montage

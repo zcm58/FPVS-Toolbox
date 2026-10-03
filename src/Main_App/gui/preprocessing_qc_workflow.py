@@ -1555,12 +1555,13 @@ def _run_kurtosis_review_scan_embedded(
         title="Review Kurtosis Findings",
         message=(
             "FPVS Toolbox is preparing current kurtosis evidence from the exact "
-            "analyzed intervals."
+            "analyzed intervals. Prepared data can be reused after review to "
+            "continue processing from the interpolation step."
         ),
         busy=True,
         review_visible=False,
         checklist=(
-            "Apply the same filter and downsample stages used by processing",
+            "Prepare or reuse the filter and downsample stages used by processing",
             "Calculate kurtosis from included analyzed occurrences",
             "Reuse only decisions whose evidence fingerprint is still current",
         ),
@@ -1579,7 +1580,8 @@ def _run_kurtosis_review_scan_embedded(
     thread = QThread(host)
     worker = _KurtosisReviewWorker(
         raw_file_infos,
-        params,
+        # Keep runtime cache location out of scientific/ledger settings.
+        settings={**params, "project_root": str(host.currentProject.project_root)},
         event_map=event_map,
         reviewed_event_plans_by_file=reviewed_event_plans_by_file,
         raw_channel_qc_by_recording=raw_channel_qc_by_recording,
