@@ -300,6 +300,8 @@ class SettingsDialog(QDialog):
     def _build_ui(self) -> None:
         self.setWindowTitle("Settings[*]")
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(10)
 
         self.tabs = QTabWidget()
         self.tabs.setObjectName("settings_tabs")
@@ -324,11 +326,12 @@ class SettingsDialog(QDialog):
         self._protocol_tab_index = self.tabs.indexOf(protocol_tab)
         harmonic_tab = self._init_harmonic_tab(self.tabs)
         self._harmonic_tab_index = self.tabs.indexOf(harmonic_tab)
-        self._init_stats_tab(self.tabs)
         self._init_rois_tab(self.tabs)
+        self._init_quality_control_tab(self.tabs)
         experimental_tab = self._init_experimental_tab(self.tabs)
         self._experimental_tab_index = self.tabs.indexOf(experimental_tab)
-        self._init_advanced_tab(self.tabs)
+        self._init_application_tab(self.tabs)
+        self._add_settings_footer(layout)
         self._initial_protocol_editor_values = self._protocol_editor_values()
         self._initial_harmonic_settings_signature = (
             self._harmonic_settings_signature_from_preprocessing(
@@ -347,50 +350,49 @@ class SettingsDialog(QDialog):
 
     def _add_settings_footer(
         self,
-        tab: QWidget,
         layout: QVBoxLayout,
-        object_name: str,
-        *,
-        compact: bool = False,
-        show_change_root: bool = False,
     ) -> None:
-        footer = QWidget(tab)
-        footer.setObjectName(object_name)
-        footer_layout = QHBoxLayout(footer) if compact else QVBoxLayout(footer)
+        footer = QWidget(self)
+        footer.setObjectName("settings_footer")
+        footer_layout = QHBoxLayout(footer)
         footer_layout.setContentsMargins(0, 0, 0, 0)
         footer_layout.setSpacing(8)
-
-        footer_buttons: list[QWidget] = []
-        if show_change_root:
-            change_root = make_action_button("Change Projects Root...", parent=footer)
-            change_root.setObjectName(f"{object_name}_change_root")
-            change_root.clicked.connect(lambda: changeProjectsRoot(self))
-            footer_layout.addWidget(change_root)
-            self.btn_changeRoot = change_root
-            footer_buttons.append(change_root)
-        if compact:
-            footer_layout.addStretch(1)
+        note = QLabel("Save applies changes across all settings pages.", footer)
+        note.setWordWrap(True)
+        footer_layout.addWidget(note, 1)
 
         actions = ActionRow(footer, alignment=Qt.AlignRight)
-        actions.setObjectName(f"{object_name}_actions")
+        actions.setObjectName("settings_footer_actions")
         save_btn = make_action_button("Save", variant="primary", parent=actions)
         cancel_btn = make_action_button("Cancel", variant="secondary", parent=actions)
-        save_btn.setObjectName(f"{object_name}_save")
-        cancel_btn.setObjectName(f"{object_name}_cancel")
+        save_btn.setObjectName("settings_footer_save")
+        cancel_btn.setObjectName("settings_footer_cancel")
         save_btn.clicked.connect(self._save)
         cancel_btn.clicked.connect(self.reject)
         actions.add_button(save_btn)
         actions.add_button(cancel_btn)
         footer_layout.addWidget(actions)
-        footer_buttons.extend((save_btn, cancel_btn))
-        self._settings_footer_buttons.extend(footer_buttons)
+        self._settings_footer_buttons.extend((save_btn, cancel_btn))
 
         layout.addWidget(footer)
+
+    def _add_settings_scope(self, layout: QVBoxLayout, text: str) -> None:
+        note = QLabel(text, layout.parentWidget())
+        note.setWordWrap(True)
+        note.setTextFormat(Qt.PlainText)
+        layout.addWidget(note)
 
     # ------------------------------------------------------------------
     def _init_preproc_tab(self, tabs: QTabWidget) -> QWidget:
         tab = QWidget()
         layout = QVBoxLayout(tab)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(10)
+        self._add_settings_scope(
+            layout,
+            "Signal preparation for the current project."
+            if self.project is not None else "Application preprocessing preferences. Open a project to edit its processing settings.",
+        )
 
         self.group_preproc = SectionCard(
             "Preprocessing Parameters",
@@ -399,16 +401,18 @@ class SettingsDialog(QDialog):
             content_layout=QGridLayout(),
         )
         grid = self.group_preproc.content_layout
+        for column, stretch in enumerate((2, 3, 2, 3)):
+            grid.setColumnStretch(column, stretch)
         params = [
-            "Low Pass (Hz):",
-            "High Pass (Hz):",
-            "Downsample (Hz):",
-            "Rejection Z-Thresh:",
-            "Ref Chan 1:",
-            "Ref Chan 2:",
-            "Max Chan Idx Keep:",
-            "Max Bad Chans (Flag):",
-            "Max Parallel Workers Override (0=Auto):",
+            "Low-pass filter (Hz):",
+            "High-pass filter (Hz):",
+            "Downsample rate (Hz):",
+            "Kurtosis flag threshold (absolute score):",
+            "Initial reference channel 1:",
+            "Initial reference channel 2:",
+            "Last channel index to keep:",
+            "Bad-channel count warning:",
+            "Parallel workers (0 = automatic):",
         ]
         self.preproc_edits: list[QLineEdit] = []
         self.preproc_error_labels: list[QLabel] = []
@@ -499,7 +503,7 @@ class SettingsDialog(QDialog):
         grid.addWidget(self.line_noise_filter_enabled_check, line_noise_row, 0, 1, 2)
 
         line_noise_frequency_label = QLabel(
-            "Recording-site mains frequency:",
+            "Mains frequency:",
             self.group_preproc,
         )
         line_noise_frequency_label.setToolTip(line_noise_tooltip)
@@ -592,7 +596,6 @@ class SettingsDialog(QDialog):
         layout.addWidget(self.group_preproc)
 
         layout.addStretch(1)
-        self._add_settings_footer(tab, layout, "settings_preproc_footer")
         tabs.addTab(tab, "Preprocessing")
         canonical_keys = [
             "low_pass",
@@ -871,7 +874,6 @@ class SettingsDialog(QDialog):
         self.oddball_freq_edit = self.protocol_resolved_oddball_rate_edit
 
         layout.addStretch(1)
-        self._add_settings_footer(tab, layout, "settings_protocol_footer")
         tabs.addTab(tab, "Protocol")
         return tab
 
@@ -886,7 +888,6 @@ class SettingsDialog(QDialog):
         self._add_harmonic_selection_section(tab, layout, project_pp)
 
         layout.addStretch(1)
-        self._add_settings_footer(tab, layout, "settings_harmonic_footer")
         tabs.addTab(tab, "Harmonics")
         return tab
 
@@ -1242,30 +1243,6 @@ class SettingsDialog(QDialog):
         self._update_harmonic_selection_controls()
 
     # ------------------------------------------------------------------
-    def _init_stats_tab(self, tabs: QTabWidget) -> None:
-        tab = QWidget()
-        layout = QVBoxLayout(tab)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(10)
-
-        analysis_group = SectionCard(
-            "Analysis Defaults",
-            tab,
-            object_name="settings_stats_analysis_card",
-        )
-        analysis_form = make_form_layout()
-
-        self.alpha_edit = QLineEdit(self.manager.get("analysis", "alpha", "0.05"))
-        analysis_form.addRow(QLabel("ANOVA alpha value:"), self.alpha_edit)
-        analysis_group.content_layout.addLayout(analysis_form)
-        layout.addWidget(analysis_group)
-
-        layout.addStretch(1)
-        self._add_settings_footer(tab, layout, "settings_stats_footer")
-
-        tabs.addTab(tab, "Stats")
-
-    # ------------------------------------------------------------------
     def _init_rois_tab(self, tabs: QTabWidget) -> None:
         tab = QWidget()
         layout = QVBoxLayout(tab)
@@ -1288,9 +1265,11 @@ class SettingsDialog(QDialog):
             montage_label=montage_labels[current_montage],
         )
         self.roi_editor.setObjectName("settings_rois_editor")
+        self.roi_editor.montage_label.setText(
+            f"Montage: {montage_labels[current_montage]} — ROI presets are shared across projects."
+        )
         self.roi_editor.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         layout.addWidget(self.roi_editor, 1)
-        self._add_settings_footer(tab, layout, "settings_rois_footer", compact=True)
 
         self._roi_tab_index = tabs.addTab(tab, "ROIs")
 
@@ -1332,6 +1311,7 @@ class SettingsDialog(QDialog):
         self._experimental_summed_bca_tab_index = self.experimental_tabs.addTab(
             summed_bca_page, "Summed-BCA Screening"
         )
+        self._init_beta_tools_page(self.experimental_tabs)
 
         if self.project is not None:
             qc_preproc = self._project_preprocessing()
@@ -1349,8 +1329,18 @@ class SettingsDialog(QDialog):
             )
             experimental_settings = ExperimentalQcSettings()
 
+        interpolation_card = SectionCard(
+            "Experimental Interpolation",
+            electrodes_page,
+            object_name="settings_experimental_interpolation_card",
+        )
+        self._add_settings_scope(
+            interpolation_card.content_layout,
+            "Current project only. Review defaults do not change previously accepted repairs."
+            if self.project is not None else "Open a project to edit experimental QC settings.",
+        )
         self.kurtosis_auto_interpolate_all_check = QCheckBox(
-            "Auto interpolate all kurtosis flags (experimental)", electrodes_page,
+            "Auto interpolate all kurtosis flags", interpolation_card,
         )
         self.kurtosis_auto_interpolate_all_check.setObjectName(
             "settings_kurtosis_auto_interpolate_all"
@@ -1363,11 +1353,30 @@ class SettingsDialog(QDialog):
             "configured absolute normalized-score threshold. Off: use the kurtosis "
             "review dialog. Invalid statistics still need review."
         )
-        electrodes_layout.addWidget(self.kurtosis_auto_interpolate_all_check)
+        interpolation_card.content_layout.addWidget(self.kurtosis_auto_interpolate_all_check)
+
+        self.kurtosis_review_auto_interpolate_extreme_check = QCheckBox(
+            "Default to automatic interpolation for kurtosis |score| > 10 in review",
+            interpolation_card,
+        )
+        self.kurtosis_review_auto_interpolate_extreme_check.setObjectName(
+            "settings_kurtosis_review_auto_interpolate_extreme"
+        )
+        self.kurtosis_review_auto_interpolate_extreme_check.setChecked(
+            experimental_settings.kurtosis_review_auto_interpolate_extreme
+        )
+        self.kurtosis_review_auto_interpolate_extreme_check.setToolTip(
+            "Sets the initial choice for new kurtosis review decisions. You can override "
+            "it in review and must still apply decisions. Exactly 10 remains manual. "
+            "Auto interpolate all kurtosis flags takes precedence when enabled."
+        )
+        interpolation_card.content_layout.addWidget(
+            self.kurtosis_review_auto_interpolate_extreme_check
+        )
 
         self.condition_specific_interpolation_enabled_check = QCheckBox(
-            "Allow condition-specific interpolation in frequency QC (experimental)",
-            electrodes_page,
+            "Allow condition-specific interpolation in frequency QC",
+            interpolation_card,
         )
         self.condition_specific_interpolation_enabled_check.setObjectName(
             "settings_condition_specific_interpolation_enabled"
@@ -1381,7 +1390,8 @@ class SettingsDialog(QDialog):
             "alone is not evidence of an artifact. Off by default; switching "
             "off prevents new repairs and keeps previously accepted repairs."
         )
-        electrodes_layout.addWidget(self.condition_specific_interpolation_enabled_check)
+        interpolation_card.content_layout.addWidget(self.condition_specific_interpolation_enabled_check)
+        electrodes_layout.addWidget(interpolation_card)
 
         removed_detection_mode = normalize_removed_electrode_detection_mode(
             qc_preproc.get("removed_electrode_detection_mode"),
@@ -1662,7 +1672,6 @@ class SettingsDialog(QDialog):
         self.raw_spectral_advanced_value_labels: dict[str, QLabel] = {}
         for row, (name, value) in enumerate(raw_spectral_specs):
             name_label = QLabel(f"{name}:", self.raw_spectral_advanced_values)
-            name_label.setWordWrap(True)
             value_label = QLabel(str(value), self.raw_spectral_advanced_values)
             value_label.setWordWrap(True)
             key = name.casefold().replace(" ", "_")
@@ -1758,6 +1767,7 @@ class SettingsDialog(QDialog):
         project_controls_enabled = self.project is not None
         for control in (
             self.kurtosis_auto_interpolate_all_check,
+            self.kurtosis_review_auto_interpolate_extreme_check,
             self.condition_specific_interpolation_enabled_check,
             self.removed_electrode_detection_mode_combo,
             self.removed_electrode_detection_info_button,
@@ -1775,13 +1785,34 @@ class SettingsDialog(QDialog):
             )
             self.removed_electrode_detection_status.setVisible(True)
 
-        self._add_settings_footer(
-            tab,
-            layout,
-            "settings_experimental_footer",
-        )
         tabs.addTab(tab, "Experimental")
         return tab
+
+    def _init_beta_tools_page(self, tabs: QTabWidget) -> None:
+        page = QWidget()
+        page.setObjectName("settings_experimental_beta_tools_page")
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 12, 0, 0)
+        layout.setSpacing(10)
+        card = SectionCard(
+            "Beta Tools", page, object_name="settings_experimental_beta_tools_card",
+        )
+        self._add_settings_scope(
+            card.content_layout,
+            "Application-wide. Show the optional Beta Tools section in the sidebar.",
+        )
+        self.beta_tools_check = QCheckBox("Enable Beta Tools", card)
+        self.beta_tools_check.setObjectName("settings_enable_beta_tools")
+        self.beta_tools_check.setChecked(self.manager.beta_tools_enabled())
+        card.content_layout.addWidget(self.beta_tools_check)
+        self._add_settings_scope(
+            card.content_layout,
+            "Save, then close and reopen FPVS Toolbox to update tool visibility. "
+            "Beta tools may change as they are developed.",
+        )
+        layout.addWidget(card)
+        layout.addStretch(1)
+        tabs.addTab(page, "Beta Tools")
 
     def _add_experimental_threshold_grid(
         self,
@@ -1808,11 +1839,13 @@ class SettingsDialog(QDialog):
         grid.setColumnStretch(1, 1)
         grid.setColumnStretch(3, 1)
 
-    def _init_advanced_tab(self, tabs: QTabWidget) -> None:
+    def _init_application_tab(self, tabs: QTabWidget) -> None:
         tab = QWidget()
+        tab.setObjectName("settings_application_tab")
         layout = QVBoxLayout(tab)
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(10)
+        self._add_settings_scope(layout, "Application preferences apply across projects.")
 
         advanced_group = SectionCard(
             "Application Options",
@@ -1822,15 +1855,17 @@ class SettingsDialog(QDialog):
         advanced_form = make_form_layout()
 
         debug_default = self.manager.get("debug", "enabled", "False").lower() == "true"
-        self.debug_check = QCheckBox("Enable Debug", advanced_group)
+        self.debug_check = QCheckBox("Enable debug logging", advanced_group)
         self.debug_check.setObjectName("settings_enable_debug")
         self.debug_check.setChecked(debug_default)
-        advanced_form.addRow(QLabel("Debug Mode", advanced_group), self.debug_check)
+        self.debug_check.setToolTip("Enabling debug logging requires closing and reopening FPVS Toolbox.")
+        advanced_form.addRow(QLabel("Diagnostics", advanced_group), self.debug_check)
 
-        self.beta_tools_check = QCheckBox("Enable Beta Tools", advanced_group)
-        self.beta_tools_check.setObjectName("settings_enable_beta_tools")
-        self.beta_tools_check.setChecked(self.manager.beta_tools_enabled())
-        advanced_form.addRow(QLabel("Beta Tools", advanced_group), self.beta_tools_check)
+        self.btn_changeRoot = make_action_button("Change Projects Root...", parent=advanced_group)
+        self.btn_changeRoot.setObjectName("settings_advanced_footer_change_root")
+        self.btn_changeRoot.clicked.connect(lambda: changeProjectsRoot(self))
+        advanced_form.addRow(QLabel("Project storage", advanced_group), self.btn_changeRoot)
+        self._settings_footer_buttons.append(self.btn_changeRoot)
 
         self.clear_toolbox_cache_button = make_action_button(
             "Clear Toolbox Cache…", compact=True, parent=advanced_group,
@@ -1847,6 +1882,31 @@ class SettingsDialog(QDialog):
 
         advanced_group.content_layout.addLayout(advanced_form)
         layout.addWidget(advanced_group)
+
+        analysis_group = SectionCard(
+            "Analysis Defaults", tab, object_name="settings_stats_analysis_card",
+        )
+        analysis_form = make_form_layout()
+        self.alpha_edit = QLineEdit(self.manager.get("analysis", "alpha", "0.05"))
+        alpha_label = QLabel("ANOVA alpha value:", analysis_group)
+        alpha_label.setBuddy(self.alpha_edit)
+        analysis_form.addRow(alpha_label, self.alpha_edit)
+        analysis_group.content_layout.addLayout(analysis_form)
+        layout.addWidget(analysis_group)
+        layout.addStretch(1)
+        tabs.addTab(tab, "Application")
+
+    def _init_quality_control_tab(self, tabs: QTabWidget) -> None:
+        tab = QWidget()
+        tab.setObjectName("settings_quality_control_tab")
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(10)
+        self._add_settings_scope(
+            layout,
+            "Manage exclusions for the current project and inspect the standard QC thresholds."
+            if self.project is not None else "Open a project to manage dataset exclusions.",
+        )
 
         if self.project is not None:
             qc_preproc = self._project_preprocessing()
@@ -1924,14 +1984,7 @@ class SettingsDialog(QDialog):
         layout.addWidget(qc_group)
 
         layout.addStretch(1)
-        self._add_settings_footer(
-            tab,
-            layout,
-            "settings_advanced_footer",
-            show_change_root=True,
-        )
-
-        tabs.addTab(tab, "Advanced")
+        tabs.addTab(tab, "Quality Control")
 
     def _clear_toolbox_cache(self) -> None:
         from Main_App.gui.toolbox_cache_workflow import show_toolbox_cache_clear
@@ -1939,7 +1992,7 @@ class SettingsDialog(QDialog):
         show_toolbox_cache_clear(self)
 
     def _add_frequency_domain_qc_settings(self, parent: QWidget) -> None:
-        header = SubsectionHeaderLabel("Frequency-domain QC thresholds", parent)
+        header = SubsectionHeaderLabel("Frequency-domain QC thresholds (read-only)", parent)
         parent.content_layout.addWidget(header)
 
         self.frequency_domain_qc_thresholds_label = QLabel(
@@ -3741,6 +3794,9 @@ class SettingsDialog(QDialog):
             ).with_raw_spectral_screening(raw_spectral)
             .with_condition_specific_interpolation_enabled(
                 self.condition_specific_interpolation_enabled_check.isChecked()
+            )
+            .with_kurtosis_review_auto_interpolate_extreme(
+                self.kurtosis_review_auto_interpolate_extreme_check.isChecked()
             )
         )
 

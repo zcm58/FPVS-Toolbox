@@ -570,8 +570,8 @@ columns.
 
 The project preprocessing setting `manual_excluded_participants` stores
 participant IDs that should be skipped without removing their raw `.bdf` files
-from the project. These exclusions are edited in Settings > Advanced >
-Processing QC and may also be populated by downstream QC tools such as the SNR
+from the project. These exclusions are edited in Settings > Quality Control >
+Manage Dataset Exclusions and may also be populated by downstream QC tools such as the SNR
 Plot Generator when a whole-participant spectral failure is detected. The
 process runner resolves the PID through the same participant/file mapping used
 for manual removed-electrode metadata and records an `excluded` preflight result
@@ -879,10 +879,15 @@ Kurtosis review and interpolation:
   `gui_enabled_experimental_abs_z_gt_10_v1` receipt and
   `experimental_automatic` channel decision, not an individual manual approval
   or independent corroboration. Disabling it restores individual review.
+  Settings > Experimental > Electrodes saves the project preference
+  `kurtosis_review_auto_interpolate_extreme` (default True) for the initial
+  checkbox state of new review decisions. The review can override it and still
+  requires Apply decisions; the preference does not change existing receipts,
+  numerical scoring, or processing/cache fingerprints.
   A separate per-project `kurtosis_auto_interpolate_all` preference (default
   False) authorizes every valid flag above the existing configured absolute
   normalized threshold, and takes precedence over the >10 rule. Settings >
-  Experimental and the review dialog expose this policy. Its versioned
+  Experimental > Electrodes and the review dialog expose this policy. Its versioned
   `gui_enabled_experimental_all_flags_v1` authority is experimental; invalid
   statistics still need an explicit decision. Turning it off invalidates
   auto-all receipts even for scores above 10. The policy is included in the

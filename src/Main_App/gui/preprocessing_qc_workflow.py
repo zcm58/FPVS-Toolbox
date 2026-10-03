@@ -1830,6 +1830,10 @@ def _review_kurtosis_findings(
         try:
             dialog = KurtosisReviewDialog(
                 reconciliation, parent=host, auto_interpolate_all=auto_all,
+                auto_interpolate_extreme=(
+                    project.experimental_qc_settings.kurtosis_review_auto_interpolate_extreme
+                    if project is not None else True
+                ),
                 project_root=getattr(project, "project_root", None), signal_params=params,
             )
         except KurtosisReviewDialogError as exc:

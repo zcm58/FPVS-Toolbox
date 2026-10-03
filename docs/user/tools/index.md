@@ -4,7 +4,8 @@ Each guide explains what the corresponding FPVS Toolbox tool does, its required
 inputs, the files it creates, and the main interpretation limits.
 
 The sidebar shows default tools first. A separate **Beta Tools** subsection is
-appended only after you enable Beta Tools in Settings > Advanced and reopen
+appended only after you enable Beta Tools in **Settings > Experimental > Beta
+Tools**, save, and reopen
 FPVS Toolbox. Before each beta tool opens for the first time in an app session,
 FPVS Toolbox warns that the tool is in beta and its features may change.
 

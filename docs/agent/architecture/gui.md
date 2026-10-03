@@ -280,24 +280,28 @@ Settings page, Standard FPVS Screening, Sensitivity Analysis, SNR Plot Generator
 Free Harmonic Clustering Analysis, Individual Detectability, and Ratio Calculator
 are embedded in this workspace stack.
 
-The Settings page groups project processing values under Preprocessing, the
-project-wide presentation/oddball protocol under Protocol, project-specific
-harmonic selection and summation under Harmonics, analysis defaults under
-Stats, ROI definitions under ROIs, project-owned review controls under
-Experimental, and app-level toggles such as Debug Mode and Beta Tools under
-Advanced. Experimental uses three flat sub-tabs: **Electrodes** contains
-kurtosis interpolation, the default-off condition-specific interpolation option
+The Settings page has seven tabs: **Preprocessing**, **Protocol**, **Harmonics**,
+**ROIs**, **Quality Control**, **Experimental**, and **Application**. The first
+four contain project processing values, the presentation/oddball protocol,
+harmonic selection/summation, and ROI definitions respectively. Quality Control
+contains Dataset Exclusions and read-only frequency-domain QC thresholds.
+Application groups the Stats alpha under **Analysis Defaults**, plus Debug Mode,
+cache controls and **Change Projects Root...**. Experimental uses four flat
+sub-tabs: **Electrodes** contains kurtosis interpolation, the default-off
+condition-specific interpolation option
 for frequency QC, the explicit On/Off choice for the lab-calibrated
 automatic removed-electrode detector, and its independently enabled manual
 removed-electrode lists; **Raw-Spectral Review** contains the review switch
 and expandable read-only thresholds; **Summed-BCA Screening** contains the
-versioned review limits. The condition-specific interpolation setting controls
-new repair requests; turning it off keeps previously accepted signal repairs.
+versioned review limits; **Beta Tools** contains the application-wide visibility
+toggle, applied after saving and restarting. The condition-specific interpolation
+setting controls new repair requests; turning it off keeps previously accepted
+signal repairs.
 Each section has its own vertical space within the
 supported workspace, including when raw-spectral details are expanded.
 Settings tab panes stay unframed around their section cards; both levels disable
-native tab-bar base drawing to avoid a gray line behind the styled tabs. Each main tab
-keeps Save and Cancel in its footer. Invalid
+native tab-bar base drawing to avoid a gray line behind the styled tabs. One shared
+Save/Cancel footer applies the full Settings draft from every tab. Invalid
 summed-BCA input reveals its sub-tab before focusing the affected field.
 The ROI map uses BioSemi64 anatomical labels, matching the default preprocessing
 geometry. The former `10-10` ROI-preset
@@ -308,13 +312,17 @@ Visible smoke (Qt is CI-only locally): open Settings from an existing project,
 check Preprocessing and ROIs show only BioSemi64, confirm saved ROI memberships
 remain intact, and switch main/Experimental tabs to check the native gray
 line is absent. Save/reopen and confirm ROI lists are unchanged.
-Advanced exposes the unified Dataset Exclusions manager, distinguishing
+Quality Control exposes the unified Dataset Exclusions manager, distinguishing
 skipping processing from excluding already-processed data from analysis, and
 retains read-only frequency-domain QC thresholds. Changing analysis exclusions
 marks downstream frequency-domain outputs stale and requires regeneration.
-The **Change Projects Root...** action is available only
-from the Advanced footer. Do not put app-level visibility or diagnostics
-toggles in the Preprocessing tab.
+The exclusions dialog retains its own explicit Apply/Cancel transaction.
+The project preference `kurtosis_review_auto_interpolate_extreme` (default True)
+sets the initial >10 experimental checkbox for new kurtosis review decisions.
+It is editable under **Experimental > Electrodes**; per-review overrides and
+**Apply decisions** remain authoritative. This review default does not change
+existing receipts, scoring, processing fingerprints, or the precedence of
+auto-all. Do not put app-level visibility or diagnostics toggles in Preprocessing.
 
 The ROIs tab is a flat, visual-first embedded editor without an enclosing
 `SectionCard`. A scalable BioSemi64 scalp map fills the left side and an ordered
@@ -763,9 +771,9 @@ project with no cycle count cannot start processing; and verify a marker code
 matching a condition-onset code is rejected. Keep Qt execution in CI unless the
 user has approved a visible local Qt session.
 
-For Experimental-tab changes, open a project at 1280x900 and visit all three
-Experimental sub-tabs. Confirm every label and threshold field is readable
-without clipping, including all eight read-only Raw-Spectral Advanced rows,
+For Settings changes, open a project at 1280x900 and visit all seven main tabs
+and four Experimental sub-tabs. Confirm every label and threshold field is
+readable without clipping, including all eight read-only Raw-Spectral Advanced rows,
 and the bottom action row remains visible. Repeat with the supported display
 scaling settings on Windows and Linux. Confirm automatic detection has only
 Off and On choices, manual lists can be edited and enabled independently,
@@ -777,6 +785,16 @@ Enter an invalid summed-BCA value, switch to Electrodes, and Save:
 Summed-BCA Screening must be visible with inline guidance and the invalid field
 selected. For an older project with no saved detector choice,
 verify the prompt and warning fit, and saving another setting leaves the
-choice pending. Check Preprocessing, Protocol, Harmonics, Stats, ROIs, and
-Advanced retain their controls above the compact footer. Qt execution remains
+choice pending. Change values across several tabs, Save from a different tab,
+and reopen to confirm every edit persists; repeat with Cancel and confirm no
+draft is saved. Check Application > Analysis Defaults contains Stats alpha,
+Quality Control opens Dataset Exclusions and shows read-only thresholds, and
+Application contains debug, cache and projects-root controls. Toggle the >10
+review default under Experimental > Electrodes, Save/reopen, and start a new
+kurtosis review: confirm its initial checkbox follows the saved default, can
+still be overridden for the current review, and saves decisions only after
+Apply decisions. Confirm existing receipts remain valid and auto-all retains
+precedence. Toggle Beta Tools in its Experimental sub-tab, Save, restart, and
+confirm sidebar visibility updates. All controls and the single shared footer
+must fit without page-level scrolling. Qt execution remains
 CI-only unless a safe visible local session is explicitly approved.

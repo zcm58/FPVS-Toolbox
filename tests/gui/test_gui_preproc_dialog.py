@@ -259,6 +259,8 @@ def test_dialog_loads_saves_project(tmp_path, qtbot):
     dlg.auto_detect_removed_electrodes_check.setChecked(False)
     assert dlg.removed_electrode_detection_mode_combo.currentData() == "off"
     dlg.summed_bca_screening_enabled_check.setChecked(False)
+    assert dlg.kurtosis_review_auto_interpolate_extreme_check.isChecked()
+    dlg.kurtosis_review_auto_interpolate_extreme_check.setChecked(False)
     assert not dlg.condition_specific_interpolation_enabled_check.isChecked()
     dlg.condition_specific_interpolation_enabled_check.setChecked(True)
     dlg.summed_bca_threshold_edits["warning_summed_bca_uv"].setText("12.5")
@@ -289,6 +291,7 @@ def test_dialog_loads_saves_project(tmp_path, qtbot):
     )
     assert reloaded.preprocessing["auto_detect_removed_electrodes"] is False
     assert reloaded.preprocessing["removed_electrode_detection_mode"] == "off"
+    assert reloaded.experimental_qc_settings.kurtosis_review_auto_interpolate_extreme is False
     assert reloaded.experimental_qc_settings.summed_bca_screening.enabled is False
     assert reloaded.experimental_qc_settings.condition_specific_interpolation_enabled is True
     assert (
@@ -318,6 +321,7 @@ def test_dialog_loads_saves_project(tmp_path, qtbot):
     dlg2 = SettingsDialog(win.settings, win, reloaded)
     qtbot.addWidget(dlg2)
     assert dlg2.preproc_edits[2].text() == "256"
+    assert not dlg2.kurtosis_review_auto_interpolate_extreme_check.isChecked()
     assert not hasattr(dlg2, "stim_edit")
     assert not hasattr(dlg2, "save_fif_check")
     assert dlg2.line_noise_filter_enabled_check.isChecked() is False
@@ -494,14 +498,22 @@ def test_dialog_loads_saves_app_line_noise_settings_without_project(tmp_path, qt
     assert dlg2.line_noise_frequency_combo.isEnabled() is False
 
 
-def test_settings_dialog_beta_tools_save_prompts_for_restart(tmp_path, qtbot, monkeypatch):
+@pytest.mark.parametrize("with_project", [False, True])
+def test_settings_dialog_beta_tools_save_prompts_for_restart(
+    tmp_path, qtbot, monkeypatch, with_project,
+):
+    from Main_App.Shared.settings_manager import SettingsManager
+
     monkeypatch.setenv("FPVS_CONFIG_HOME", str(tmp_path / "config"))
-    project = _prep_project(tmp_path)
+    manager = SettingsManager(str(tmp_path / "settings.ini"))
+    monkeypatch.setattr("Main_App.gui.main_window.SettingsManager", lambda: manager)
+    project = _prep_project(tmp_path) if with_project else None
 
     QApplication.instance() or QApplication([])
     win = MainWindow()
     qtbot.addWidget(win)
-    win.loadProject(project)
+    if project is not None:
+        win.loadProject(project)
     win.settings.set_beta_tools_enabled(False)
     win.settings.save()
 
@@ -517,10 +529,12 @@ def test_settings_dialog_beta_tools_save_prompts_for_restart(tmp_path, qtbot, mo
     assert dlg.beta_tools_check.isChecked() is False
 
     dlg.beta_tools_check.setChecked(True)
-    dlg._save()
+    dlg.findChild(QPushButton, "settings_footer_save").click()
 
     expected_message = "Please close and reopen FPVS Toolbox for your changes to take effect."
-    assert ("Tool Visibility Updated", expected_message) in info_calls
+    assert ("Tool Visibility Updated", expected_message) in info_calls, (
+        dlg.settings_validation_status.label.text(), dlg.roi_editor.status.label.text()
+    )
     assert win.settings.beta_tools_enabled() is True
 
     dlg2 = SettingsDialog(win.settings, win, project)
@@ -532,6 +546,54 @@ def test_settings_dialog_beta_tools_save_prompts_for_restart(tmp_path, qtbot, mo
 
     assert info_calls.count(("Tool Visibility Updated", expected_message)) == 2
     assert win.settings.beta_tools_enabled() is False
+
+
+@pytest.mark.parametrize("with_project", [False, True])
+def test_experimental_cancel_discards_beta_and_review_drafts_before_reopen(
+    tmp_path, qtbot, monkeypatch, with_project,
+):
+    monkeypatch.setenv("FPVS_CONFIG_HOME", str(tmp_path / "config"))
+    QApplication.instance() or QApplication([])
+    win = MainWindow()
+    qtbot.addWidget(win)
+    project = _prep_project(tmp_path) if with_project else None
+    if project is not None:
+        win.loadProject(project)
+    win.settings.set_beta_tools_enabled(False)
+    win.settings.save()
+
+    win.open_settings_window()
+    page = win._settings_page
+    assert (page.project is not None) is with_project
+    page.tabs.setCurrentIndex(page._experimental_tab_index)
+    beta_tab_index = next(
+        index for index in range(page.experimental_tabs.count())
+        if page.experimental_tabs.tabText(index) == "Beta Tools"
+    )
+    page.experimental_tabs.setCurrentIndex(beta_tab_index)
+    assert page.experimental_tabs.currentWidget().isAncestorOf(page.beta_tools_check)
+    assert page.beta_tools_check.isEnabled()
+    assert page.raw_spectral_screening_enabled_check.isEnabled() is with_project
+    review_preference = page.kurtosis_review_auto_interpolate_extreme_check
+    assert review_preference.isEnabled() is with_project
+    assert review_preference.isChecked()
+    if with_project:
+        review_preference.setChecked(False)
+    page.beta_tools_check.setChecked(True)
+    assert page.has_unsaved_changes()
+    page.findChild(QPushButton, "settings_footer_cancel").click()
+
+    assert win._settings_page is None
+    assert not win.settings.beta_tools_enabled()
+    win.open_settings_window()
+    reopened = win._settings_page
+    assert reopened is not page
+    assert not reopened.beta_tools_check.isChecked()
+    assert reopened.kurtosis_review_auto_interpolate_extreme_check.isChecked()
+    assert not reopened.has_unsaved_changes()
+    if project is not None:
+        reloaded = Project.load(project.project_root)
+        assert reloaded.experimental_qc_settings.kurtosis_review_auto_interpolate_extreme is True
 
 
 def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatch):
@@ -566,10 +628,10 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
         "Preprocessing",
         "Protocol",
         "Harmonics",
-        "Stats",
         "ROIs",
+        "Quality Control",
         "Experimental",
-        "Advanced",
+        "Application",
     ]
     assert "General" not in [dlg.tabs.tabText(i) for i in range(dlg.tabs.count())]
     assert "Oddball" not in [dlg.tabs.tabText(i) for i in range(dlg.tabs.count())]
@@ -637,7 +699,7 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
     assert dlg.fixed_harmonic_upper_index_edit.isEnabled() is True
     assert dlg.fixed_harmonic_upper_frequency_edit.isEnabled() is False
     assert cards["Application Options"].isAncestorOf(dlg.debug_check)
-    assert cards["Application Options"].isAncestorOf(dlg.beta_tools_check)
+    assert not cards["Application Options"].isAncestorOf(dlg.beta_tools_check)
     detector_card = cards["Experimental Removed-Electrode Detection"]
     summed_bca_card = cards["Experimental Summed-BCA Screening"]
     assert detector_card.isAncestorOf(dlg.auto_detect_removed_electrodes_check)
@@ -706,23 +768,23 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
     protocol_tab_index = next(
         i for i in range(dlg.tabs.count()) if dlg.tabs.tabText(i) == "Protocol"
     )
-    stats_tab_index = next(
-        i for i in range(dlg.tabs.count()) if dlg.tabs.tabText(i) == "Stats"
-    )
     rois_tab_index = next(
         i for i in range(dlg.tabs.count()) if dlg.tabs.tabText(i) == "ROIs"
     )
-    advanced_tab_index = next(
-        i for i in range(dlg.tabs.count()) if dlg.tabs.tabText(i) == "Advanced"
+    application_tab_index = next(
+        i for i in range(dlg.tabs.count()) if dlg.tabs.tabText(i) == "Application"
+    )
+    quality_control_tab_index = next(
+        i for i in range(dlg.tabs.count()) if dlg.tabs.tabText(i) == "Quality Control"
     )
     experimental_tab_index = next(
         i for i in range(dlg.tabs.count()) if dlg.tabs.tabText(i) == "Experimental"
     )
     harmonics_tab = dlg.tabs.widget(harmonics_tab_index)
     protocol_tab = dlg.tabs.widget(protocol_tab_index)
-    stats_tab = dlg.tabs.widget(stats_tab_index)
     rois_tab = dlg.tabs.widget(rois_tab_index)
-    advanced_tab = dlg.tabs.widget(advanced_tab_index)
+    application_tab = dlg.tabs.widget(application_tab_index)
+    quality_control_tab = dlg.tabs.widget(quality_control_tab_index)
     experimental_tab = dlg.tabs.widget(experimental_tab_index)
     assert not preproc_tab.isAncestorOf(cards["Application Options"])
     assert not preproc_tab.isAncestorOf(cards["Harmonic Selection and Summation"])
@@ -730,42 +792,36 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
     assert protocol_tab.objectName() == "settings_protocol_tab"
     assert harmonics_tab.isAncestorOf(cards["Harmonic Selection and Summation"])
     assert harmonics_tab.objectName() == "settings_harmonics_tab"
-    assert advanced_tab.isAncestorOf(cards["Application Options"])
-    assert advanced_tab.isAncestorOf(cards["Processing QC"])
+    assert application_tab.isAncestorOf(cards["Application Options"])
+    assert application_tab.isAncestorOf(cards["Analysis Defaults"])
+    assert application_tab.isAncestorOf(dlg.alpha_edit)
+    assert application_tab.isAncestorOf(dlg.btn_changeRoot)
+    assert application_tab.isAncestorOf(dlg.clear_toolbox_cache_button)
+    assert quality_control_tab.isAncestorOf(cards["Processing QC"])
+    assert quality_control_tab.isAncestorOf(dlg.frequency_domain_qc_thresholds_label)
     assert experimental_tab.isAncestorOf(detector_card)
     assert experimental_tab.isAncestorOf(summed_bca_card)
+    assert experimental_tab.isAncestorOf(dlg.beta_tools_check)
     assert experimental_tab.objectName() == "settings_experimental_tab"
     assert rois_tab.isAncestorOf(dlg.roi_editor)
     assert rois_tab.findChild(SectionCard, "settings_rois_card") is None
-    assert preproc_tab.findChild(ActionRow, "settings_preproc_footer_actions") is not None
-    assert protocol_tab.findChild(ActionRow, "settings_protocol_footer_actions") is not None
-    assert harmonics_tab.findChild(ActionRow, "settings_harmonic_footer_actions") is not None
-    assert stats_tab.findChild(ActionRow, "settings_stats_footer_actions") is not None
-    assert rois_tab.findChild(ActionRow, "settings_rois_footer_actions") is not None
-    assert experimental_tab.findChild(
-        ActionRow,
-        "settings_experimental_footer_actions",
-    ) is not None
-    assert advanced_tab.findChild(ActionRow, "settings_advanced_footer_actions") is not None
-    assert preproc_tab.findChild(QWidget, "settings_preproc_footer") is not None
-    assert protocol_tab.findChild(QWidget, "settings_protocol_footer") is not None
-    assert harmonics_tab.findChild(QWidget, "settings_harmonic_footer") is not None
-    assert stats_tab.findChild(QWidget, "settings_stats_footer") is not None
-    assert rois_tab.findChild(QWidget, "settings_rois_footer") is not None
-    assert advanced_tab.findChild(QWidget, "settings_advanced_footer") is not None
+    footer = dlg.findChild(QWidget, "settings_footer")
+    assert footer is not None
+    assert not dlg.tabs.isAncestorOf(footer)
+    assert footer.findChild(ActionRow, "settings_footer_actions") is not None
+    assert [button.text() for button in footer.findChildren(QPushButton)] == ["Save", "Cancel"]
+    assert set(dlg._settings_footer_buttons) == {
+        dlg.findChild(QPushButton, "settings_footer_save"),
+        dlg.findChild(QPushButton, "settings_footer_cancel"),
+        dlg.btn_changeRoot,
+    }
     assert not dlg.tabs.tabBar().drawBase()
     assert not dlg.experimental_tabs.tabBar().drawBase()
-    assert preproc_tab.findChild(QWidget, "settings_preproc_footer_change_root") is None
-    assert harmonics_tab.findChild(QWidget, "settings_harmonic_footer_change_root") is None
-    assert stats_tab.findChild(QWidget, "settings_stats_footer_change_root") is None
-    assert rois_tab.findChild(QWidget, "settings_rois_footer_change_root") is None
-    assert (
-        advanced_tab.findChild(QWidget, "settings_advanced_footer_change_root")
-        is dlg.btn_changeRoot
-    )
     assert rois_tab.findChild(QWidget, "settings_rois_toolbar") is None
     assert dlg.roi_editor.current_montage() == ROI_MONTAGE_BIOSEMI64
-    assert dlg.roi_editor.montage_label.text() == "Montage: BioSemi 64"
+    assert dlg.roi_editor.montage_label.text() == (
+        "Montage: BioSemi 64 — ROI presets are shared across projects."
+    )
     assert [entry.name for entry in dlg.roi_editor.entries[:3]] == [
         "LOT",
         "ROT",
@@ -840,6 +896,7 @@ def test_experimental_sections_fit_embedded_workspace(experimental_settings_page
         "Electrodes",
         "Raw-Spectral Review",
         "Summed-BCA Screening",
+        "Beta Tools",
     ]
 
     def assert_unclipped(widget):
@@ -866,6 +923,7 @@ def test_experimental_sections_fit_embedded_workspace(experimental_settings_page
     expected_controls = (
         (
             page.kurtosis_auto_interpolate_all_check,
+            page.kurtosis_review_auto_interpolate_extreme_check,
             page.condition_specific_interpolation_enabled_check,
             page.removed_electrode_detection_mode_combo,
             page.removed_electrode_detection_info_button,
@@ -882,6 +940,7 @@ def test_experimental_sections_fit_embedded_workspace(experimental_settings_page
             page.summed_bca_screening_enabled_check,
             *page.summed_bca_threshold_edits.values(),
         ),
+        (page.beta_tools_check,),
     )
     assert page.removed_electrode_detection_mode_combo.currentData() is None
     assert len(page.raw_spectral_advanced_value_labels) == 8
@@ -905,7 +964,7 @@ def test_experimental_sections_fit_embedded_workspace(experimental_settings_page
             ):
                 assert_unclipped(widget)
 
-        footer = page.findChild(QWidget, "settings_experimental_footer")
+        footer = page.findChild(QWidget, "settings_footer")
         assert footer is not None
         buttons = {button.text(): button for button in footer.findChildren(QPushButton)}
         assert set(buttons) == {"Save", "Cancel"}
@@ -1120,7 +1179,7 @@ def test_settings_save_refreshes_cached_stats_and_plot_roi_consumers(
 
     assert manager.get_roi_pairs() == [("Visual ROI", ["O1"])]
 
-    save_button = dlg.findChild(QPushButton, "settings_rois_footer_save")
+    save_button = dlg.findChild(QPushButton, "settings_footer_save")
     assert save_button is not None
     save_button.click()
 
@@ -1188,7 +1247,7 @@ def test_embedded_settings_cancel_discards_roi_draft_before_reopen(
     ]
     cancel_button = canceled_page.findChild(
         QPushButton,
-        "settings_rois_footer_cancel",
+        "settings_footer_cancel",
     )
     assert cancel_button is not None
     cancel_button.click()
@@ -1223,12 +1282,12 @@ def test_settings_save_blocks_a_partially_defined_visual_roi(
     dlg.roi_editor.map_widget.electrode_buttons["Oz"].click()
     assert dlg.roi_editor.validate_draft() is False
 
-    stats_index = next(
+    application_index = next(
         index
         for index in range(dlg.tabs.count())
-        if dlg.tabs.tabText(index) == "Stats"
+        if dlg.tabs.tabText(index) == "Application"
     )
-    dlg.tabs.setCurrentIndex(stats_index)
+    dlg.tabs.setCurrentIndex(application_index)
     dlg._save()
 
     assert manager.get_roi_pairs() == [("Committed", ["O1"])]
@@ -1266,12 +1325,12 @@ def test_embedded_visual_roi_editor_fits_the_supported_workspace(tmp_path, qtbot
     qtbot.wait(1)
 
     roi_tab = page.tabs.widget(page._roi_tab_index)
-    footer = roi_tab.findChild(QWidget, "settings_rois_footer")
+    footer = page.findChild(QWidget, "settings_footer")
     assert win.size().width() == 1280
     assert win.size().height() == 900
     assert roi_tab.findChildren(QScrollArea) == []
     assert roi_tab.findChild(SectionCard, "settings_rois_card") is None
-    assert roi_tab.findChild(QWidget, "settings_rois_footer_change_root") is None
+    assert not roi_tab.isAncestorOf(page.btn_changeRoot)
     assert page.roi_editor.map_widget.minimumWidth() >= 600
     assert page.roi_editor.map_widget.minimumHeight() >= 550
     assert all(
@@ -1280,10 +1339,12 @@ def test_embedded_visual_roi_editor_fits_the_supported_workspace(tmp_path, qtbot
     )
     assert page.roi_editor.unmapped_pane.isVisibleTo(roi_tab)
     assert page.roi_editor.status.isVisibleTo(roi_tab)
-    for widget in (page.roi_editor.map_widget, page.roi_editor.roi_pane, footer):
+    for widget in (page.roi_editor.map_widget, page.roi_editor.roi_pane):
         assert widget is not None
         assert roi_tab.rect().contains(widget.mapTo(roi_tab, widget.rect().topLeft()))
         assert roi_tab.rect().contains(widget.mapTo(roi_tab, widget.rect().bottomRight()))
+    assert footer is not None
+    assert page.rect().contains(QRect(footer.mapTo(page, QPoint(0, 0)), footer.size()))
 
 
 def test_explicit_harmonic_recalculation_persists_project_selection_inputs(
@@ -1424,6 +1485,7 @@ def test_harmonic_worker_failure_before_selection_restores_staged_settings(
     ).get("tools")
     assert after_start_tools == before_tools
     assert win._settings_worker_navigation_locked is True
+    assert all(not button.isEnabled() for button in dlg._settings_footer_buttons)
 
     fake_worker.finished.emit({"ok": False, "error": "selection failed"})
     fake_thread.finished.emit()
@@ -1432,6 +1494,7 @@ def test_harmonic_worker_failure_before_selection_restores_staged_settings(
     assert reloaded.preprocessing["harmonic_selection_profile"] == "legacy_fpvs_toolbox"
     assert win._settings_harmonic_recalc_thread is None
     assert win._settings_worker_navigation_locked is False
+    assert all(button.isEnabled() for button in dlg._settings_footer_buttons)
 
 
 def test_embedded_settings_harmonic_save_uses_post_processing_activity_page(
@@ -2143,15 +2206,15 @@ def test_preproc_validation_allows_navigation_but_blocks_invalid_save(tmp_path, 
     dlg.show()
     qtbot.waitExposed(dlg)
 
-    stats_tab_index = next(
-        i for i in range(dlg.tabs.count()) if dlg.tabs.tabText(i) == "Stats"
+    application_tab_index = next(
+        i for i in range(dlg.tabs.count()) if dlg.tabs.tabText(i) == "Application"
     )
     dlg.tabs.setCurrentIndex(dlg._preproc_tab_index)
     dlg.preproc_edits[0].setText("0.1")
     dlg.preproc_edits[1].setText("50")
-    dlg.tabs.setCurrentIndex(stats_tab_index)
+    dlg.tabs.setCurrentIndex(application_tab_index)
 
-    assert dlg.tabs.currentIndex() == stats_tab_index
+    assert dlg.tabs.currentIndex() == application_tab_index
     assert not warnings
     dlg._save()
     assert dlg.tabs.currentIndex() == dlg._preproc_tab_index
@@ -2162,9 +2225,9 @@ def test_preproc_validation_allows_navigation_but_blocks_invalid_save(tmp_path, 
 
     dlg.preproc_edits[0].setText("60")
     dlg.preproc_edits[1].setText("0.5")
-    dlg.tabs.setCurrentIndex(stats_tab_index)
+    dlg.tabs.setCurrentIndex(application_tab_index)
 
-    assert dlg.tabs.currentIndex() == stats_tab_index
+    assert dlg.tabs.currentIndex() == application_tab_index
 
 
 def test_parallel_worker_override_warning_blocks_save_on_no(tmp_path, qtbot, monkeypatch):

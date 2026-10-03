@@ -179,6 +179,50 @@ def test_condition_specific_interpolation_roundtrip_keeps_other_experimental_set
     assert enabled.with_condition_specific_interpolation_enabled(False) == original
 
 
+@pytest.mark.parametrize("version", ["1.0.0", "1.1.0", EXPERIMENTAL_QC_SETTINGS_SCHEMA_VERSION])
+def test_extreme_kurtosis_review_default_preserves_historical_selection(version):
+    settings = normalize_experimental_qc_settings({"schema_version": version})
+    assert settings.kurtosis_review_auto_interpolate_extreme is True
+    assert ExperimentalQcSettings().kurtosis_review_auto_interpolate_extreme is True
+
+
+@pytest.mark.parametrize("invalid", [None, "maybe", 2, [], {}])
+def test_invalid_extreme_kurtosis_review_default_is_rejected(invalid):
+    with pytest.raises(ExperimentalQcSettingsError, match="kurtosis_review_auto_interpolate_extreme"):
+        ExperimentalQcSettings(kurtosis_review_auto_interpolate_extreme=invalid)
+
+
+def test_extreme_kurtosis_review_default_survives_other_qc_setting_edits():
+    settings = normalize_experimental_qc_settings(
+        {"kurtosis_review_auto_interpolate_extreme": "false"}
+    )
+    updated = (
+        settings.with_summed_bca_screening({"enabled": False})
+        .with_raw_spectral_screening({"enabled": False})
+        .with_condition_specific_interpolation_enabled(True)
+    )
+    assert updated.kurtosis_review_auto_interpolate_extreme is False
+    assert normalize_experimental_qc_settings(updated.to_manifest()) == updated
+    enabled = updated.with_kurtosis_review_auto_interpolate_extreme(True)
+    assert enabled.kurtosis_review_auto_interpolate_extreme is True
+    assert enabled.with_kurtosis_review_auto_interpolate_extreme(False) == updated
+
+
+def test_extreme_kurtosis_review_default_persists_without_changing_processing(tmp_path):
+    _write_legacy_project(tmp_path, preprocessing={"low_pass": 42})
+    project = Project.load(tmp_path)
+    preprocessing = dict(project.preprocessing)
+    settings = project.experimental_qc_settings.with_kurtosis_review_auto_interpolate_extreme(False)
+    project.update_experimental_qc_settings(settings)
+    project.save()
+
+    reopened = Project.load(tmp_path)
+    assert reopened.experimental_qc_settings.kurtosis_review_auto_interpolate_extreme is False
+    assert reopened.preprocessing == preprocessing
+    saved = json.loads((tmp_path / "project.json").read_text(encoding="utf-8"))
+    assert saved["tools"]["processing"]["historical_artifact"] == "keep"
+
+
 def test_raw_spectral_policy_rejects_unversioned_threshold_edits() -> None:
     payload = RawSpectralScreeningSettings().to_manifest()
     payload["minimum_local_mean_ratio"] = 24.0

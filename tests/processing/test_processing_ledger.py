@@ -160,6 +160,20 @@ def test_experimental_auto_all_kurtosis_changes_processing_fingerprint(tmp_path)
     assert automatic != manual
 
 
+def test_kurtosis_review_default_does_not_invalidate_completed_processing(tmp_path) -> None:
+    project, _info = _project_with_raw(tmp_path)
+    settings = _settings()
+    original = build_processing_fingerprint(project, settings, project.event_map)
+    project.update_experimental_qc_settings(
+        project.experimental_qc_settings.with_kurtosis_review_auto_interpolate_extreme(False)
+    )
+    project.save()
+    reopened = Project.load(project.project_root)
+
+    assert reopened.experimental_qc_settings.kurtosis_review_auto_interpolate_extreme is False
+    assert build_processing_fingerprint(reopened, settings, reopened.event_map) == original
+
+
 def test_classification_fingerprint_uses_canonical_limit_when_alias_is_none(
     tmp_path,
 ) -> None:

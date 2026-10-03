@@ -11,6 +11,12 @@ Use this directory for durable plans that need to survive across agent runs.
 
 Keep plans compact and current. Record phase status, decisions, touched areas, required doc updates, and verification commands. Small one-off changes do not need an execution plan.
 
+## Planned Work
+
+- [Unicorn Hybrid Black support](future/unicorn-hybrid-black-support.md): planned
+  raw BDF+ workflow with native 250 Hz, interpolation disabled, explicit device
+  provenance, and unchanged BioSemi processing. No implementation has started.
+
 ## Active QC Implementation
 
 - [QC scientific review and protocol flexibility](active/qc-scientific-and-protocol-flexibility.md):

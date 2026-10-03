@@ -160,7 +160,8 @@ def test_preprocessing_workflow_runs_and_persists_the_fail_closed_review() -> No
 def test_experimental_selection_is_visible_optional_and_auditable() -> None:
     source = _source(DIALOG_PATH)
     assert "Experimental: auto-interpolate |normalized score| >" in source
-    assert "self.auto_checkbox.setChecked(True)" in source
+    assert "self.auto_checkbox.setChecked(self._auto_interpolate_extreme)" in source
+    assert "auto_interpolate_extreme: bool = True" in source
     assert "qualifies_for_experimental_kurtosis_auto(channel)" in source
     assert "self.auto_all_checkbox.setChecked(self._auto_interpolate_all)" in source
     assert "experimental_auto=automatic and not automatic_all" in source
@@ -318,11 +319,17 @@ def test_experimental_preference_accessor_requires_acceptance():
 
 
 @pytest.mark.parametrize("accepted", [False, True])
-def test_workflow_only_reads_and_saves_new_preference_after_acceptance(accepted):
+@pytest.mark.parametrize("extreme_default", [False, True])
+def test_workflow_only_reads_and_saves_new_preference_after_acceptance(accepted, extreme_default):
     calls = []
     preference = "kurtosis_auto_interpolate_all"
     decisions_key = "decisions"
-    project = SimpleNamespace(preprocessing={preference: False}, project_root=ROOT)
+    project = SimpleNamespace(
+        preprocessing={preference: False}, project_root=ROOT,
+        experimental_qc_settings=SimpleNamespace(
+            kurtosis_review_auto_interpolate_extreme=extreme_default,
+        ),
+    )
 
     def update(values):
         calls.append(("update", deepcopy(values)))
@@ -334,10 +341,11 @@ def test_workflow_only_reads_and_saves_new_preference_after_acceptance(accepted)
     host = SimpleNamespace(currentProject=project)
 
     class Dialog:
-        def __init__(self, reconciliation, *, parent, auto_interpolate_all, project_root, signal_params):
+        def __init__(self, reconciliation, *, parent, auto_interpolate_all, auto_interpolate_extreme, project_root, signal_params):
             assert parent is host
             assert project_root == ROOT
             assert signal_params is params
+            assert auto_interpolate_extreme is extreme_default
             calls.append(("dialog", auto_interpolate_all))
 
         def exec(self):
@@ -380,6 +388,7 @@ def test_workflow_only_reads_and_saves_new_preference_after_acceptance(accepted)
         assert len(calls) == 2
         assert project.preprocessing == {preference: False}
         assert params == {preference: False}
+    assert project.experimental_qc_settings.kurtosis_review_auto_interpolate_extreme is extreme_default
 
 
 @pytest.mark.parametrize("saved", [{}, {"kurtosis_auto_interpolate_all": False}, {"kurtosis_auto_interpolate_all": True}])

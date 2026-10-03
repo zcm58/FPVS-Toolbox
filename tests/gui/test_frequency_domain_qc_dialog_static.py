@@ -33,7 +33,10 @@ def test_frequency_review_offers_no_narrow_exclusions_and_requires_confirmation_
 
 
 @pytest.mark.parametrize("enabled", [False, True])
-def test_experimental_editor_roundtrips_interpolation_capability_without_changing_other_settings(enabled):
+@pytest.mark.parametrize("extreme_default", [False, True])
+def test_experimental_editor_roundtrips_interpolation_capability_without_changing_other_settings(
+    enabled, extreme_default,
+):
     path = REPO_ROOT / "src/Main_App/gui/settings_panel.py"
     source = path.read_text(encoding="utf-8")
     tree = ast.parse(source)
@@ -51,9 +54,13 @@ def test_experimental_editor_roundtrips_interpolation_capability_without_changin
         summed_bca_screening_enabled_check=SimpleNamespace(isChecked=lambda: True),
         raw_spectral_screening_enabled_check=SimpleNamespace(isChecked=lambda: False),
         condition_specific_interpolation_enabled_check=SimpleNamespace(isChecked=lambda: enabled),
+        kurtosis_review_auto_interpolate_extreme_check=SimpleNamespace(isChecked=lambda: extreme_default),
     )
     result = namespace[method.name](controls)
-    assert result == original.with_condition_specific_interpolation_enabled(enabled)
+    assert result == (
+        original.with_condition_specific_interpolation_enabled(enabled)
+        .with_kurtosis_review_auto_interpolate_extreme(extreme_default)
+    )
     assert "experimental_settings.condition_specific_interpolation_enabled" in source
 
 

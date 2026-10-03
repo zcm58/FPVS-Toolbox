@@ -4,6 +4,34 @@
 
 Active. This is the release ledger for the first v3 release candidate.
 
+Settings organization follow-up on 2026-09-25: seven purpose-based tabs now
+separate Quality Control, Experimental, and Application controls. Stats alpha
+is under Application > Analysis Defaults; Beta Tools is under Experimental.
+One shared Save/Cancel footer covers all pages. Experimental > Electrodes now
+exposes the persisted default-On >10 kurtosis-review checkbox preference for
+new decisions, preserving per-review overrides, Apply decisions, accepted
+receipts, numerical methods, and processing fingerprints. Current navigation
+and method docs plus the GUI manual-smoke route are updated. The user approved
+visible local Qt verification on 2026-09-25. Screenshot review identified and
+resolved a nine-pixel dialog-height overflow by combining the ROI scope note
+with the montage label; balanced form columns also reduce label wrapping.
+
+Verification: `verify.py --scope gui --tier focused` passed 564 tests and
+`--scope project-io --tier focused` passed 338. The targeted experimental
+settings, kurtosis-review and processing-fingerprint bundle passed 195 tests.
+The repo precommit gate passed all audits, Ruff and compilation, then reported
+5,209 passes, 11 skips and five FHC export failures caused by Windows temporary
+path lengths. All five failed tests passed when rerun with a fresh short
+`--basetemp`; FHC source and test files were unchanged. Registered Qt coverage
+now checks tab/control placement, shared actions, Save/Cancel, projectless beta
+availability and the review default. All 28 approved visible Qt checks passed
+on Windows, including seven main tabs, four Experimental sections, project
+round-trip, beta restart prompting, per-review overrides, Enter to save and
+Escape to cancel. Final screenshots showed no clipping or overlap at the
+tested dialog and 1280x900 embedded workspace sizes. Evidence is in
+`%TEMP%/fpvs-settings-visual-20260925`; Linux and other display scaling settings
+were not exercised. Test preferences are isolated from legacy machine settings.
+
 Native-result completion follow-up on 2026-09-10: Semantic Categories completed
 processing successfully, but the GUI's remaining Excel-only output snapshots
 left `_last_job_success` false and replaced the completion message with

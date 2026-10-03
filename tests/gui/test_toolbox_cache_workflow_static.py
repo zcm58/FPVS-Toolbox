@@ -164,8 +164,8 @@ def test_modal_workflow_releases_navigation_and_start_guard(raises, tmp_path):
 def test_settings_exposes_cache_action_and_worker_imports_no_widgets():
     settings = ast.parse((ROOT / "src/Main_App/gui/settings_panel.py").read_text(encoding="utf-8"))
     dialog = next(node for node in settings.body if isinstance(node, ast.ClassDef) and node.name == "SettingsDialog")
-    advanced = next(node for node in dialog.body if isinstance(node, ast.FunctionDef) and node.name == "_init_advanced_tab")
-    assert any(isinstance(node, ast.Constant) and node.value == "Clear Toolbox Cache…" for node in ast.walk(advanced))
-    assert "self._clear_toolbox_cache" in ast.unparse(advanced)
+    application = next(node for node in dialog.body if isinstance(node, ast.FunctionDef) and node.name == "_init_application_tab")
+    assert any(isinstance(node, ast.Constant) and node.value == "Clear Toolbox Cache…" for node in ast.walk(application))
+    assert "self._clear_toolbox_cache" in ast.unparse(application)
     worker = ast.parse(WORKER.read_text(encoding="utf-8"))
     assert all(node.module not in {"PySide6.QtWidgets", "PySide6.QtGui"} for node in ast.walk(worker) if isinstance(node, ast.ImportFrom))

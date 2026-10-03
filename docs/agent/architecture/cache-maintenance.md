@@ -48,7 +48,7 @@ continues to preserve saved processing and analysis exclusion decisions.
 
 ## Visible Smoke (Local Qt Execution Is Not Required)
 
-Open Settings → Advanced while idle and choose Clear Toolbox Cache. Confirm
+Open Settings → Application while idle and choose Clear Toolbox Cache. Confirm
 the count/size and optional location details, then Cancel and verify no files
 changed. Repeat with disposable test-project caches, clear them, and confirm
 results/settings/decisions remain. Check Stop, missing/locked files, and busy

@@ -5,7 +5,7 @@ in a single figure for a manuscript, poster, presentation, preregistration, or
 study handout. Three conditions are selected by default.
 
 Sequence Figure is currently available under **Beta Tools**. Enable Beta Tools
-in **Settings > Advanced**, then close and reopen FPVS Toolbox.
+in **Settings > Experimental > Beta Tools**, save, then close and reopen FPVS Toolbox.
 
 ## Layout
 
