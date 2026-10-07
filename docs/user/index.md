@@ -27,7 +27,8 @@ Settings groups controls into **Preprocessing**, **Protocol**, **Harmonics**,
 **ROIs**, **Quality Control**, **Experimental**, and **Application**. Use
 **Quality Control** for dataset exclusions and read-only frequency-QC limits.
 **Experimental** contains **Electrodes**, **Raw-Spectral Review**,
-**Summed-BCA Screening**, and **Beta Tools**. Use **Application > Analysis
+**Summed-BCA Screening**, **Performance**, and **Beta Tools**. Performance holds
+project-only RAM preloading, which is off by default. Use **Application > Analysis
 Defaults** for the Stats alpha; Application also contains debug, cache and
 projects-root controls.
 

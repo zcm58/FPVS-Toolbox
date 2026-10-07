@@ -295,14 +295,15 @@ four contain project processing values, the presentation/oddball protocol,
 harmonic selection/summation, and ROI definitions respectively. Quality Control
 contains Dataset Exclusions and read-only frequency-domain QC thresholds.
 Application groups the Stats alpha under **Analysis Defaults**, plus Debug Mode,
-cache controls and **Change Projects Root...**. Experimental uses four flat
+cache controls and **Change Projects Root...**. Experimental uses five flat
 sub-tabs: **Electrodes** contains kurtosis interpolation, the default-off
 condition-specific interpolation option
 for frequency QC, the explicit On/Off choice for the lab-calibrated
 automatic removed-electrode detector, and its independently enabled manual
 removed-electrode lists; **Raw-Spectral Review** contains the review switch
 and expandable read-only thresholds; **Summed-BCA Screening** contains the
-versioned review limits; **Beta Tools** contains the application-wide visibility
+versioned review limits; **Performance** contains the project-only, default-off
+RAM preload switch; **Beta Tools** contains the application-wide visibility
 toggle, applied after saving and restarting. The condition-specific interpolation
 setting controls new repair requests; turning it off keeps previously accepted
 signal repairs.
@@ -816,7 +817,7 @@ matching a condition-onset code is rejected. Keep Qt execution in CI unless the
 user has approved a visible local Qt session.
 
 For Settings changes, open a project at 1280x900 and visit all seven main tabs
-and four Experimental sub-tabs. Confirm every label and threshold field is
+and five Experimental sub-tabs. Confirm every label and threshold field is
 readable without clipping, including all eight read-only Raw-Spectral Advanced rows,
 and the bottom action row remains visible. Repeat with the supported display
 scaling settings on Windows and Linux. Confirm automatic detection has only
@@ -838,7 +839,10 @@ review default under Experimental > Electrodes, Save/reopen, and start a new
 kurtosis review: confirm its initial checkbox follows the saved default, can
 still be overridden for the current review, and saves decisions only after
 Apply decisions. Confirm existing receipts remain valid and auto-all retains
-precedence. Toggle Beta Tools in its Experimental sub-tab, Save, restart, and
-confirm sidebar visibility updates. All controls and the single shared footer
+precedence. Under Experimental > Performance, confirm RAM preloading starts off,
+is disabled without a project, survives Save/reopen for that project, and Cancel
+discards the draft. Verify it is absent from Preprocessing and reachable by
+keyboard on the Performance page. Toggle Beta Tools in its Experimental sub-tab,
+Save, restart, and confirm sidebar visibility updates. All controls and the single shared footer
 must fit without page-level scrolling. Qt execution remains
 CI-only unless a safe visible local session is explicitly approved.

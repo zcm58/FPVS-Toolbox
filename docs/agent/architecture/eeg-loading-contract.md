@@ -118,7 +118,7 @@ original recordings, exports, or the repository's MNE/fsaverage cache.
   file as `status="excluded"` instead of a processing error.
 - BDF files load through `mne.io.read_raw_bdf(...)`.
 - Raw BDF loading remains disk-preloaded by default. A project-only,
-  default-off experimental Settings > Preprocessing switch uses MNE
+  default-off Settings > Experimental > Performance switch uses MNE
   `preload=True` for preflight QC, interactive QC prefetch or its scanner
   fallback, and processing cache misses. It creates no full-recording memmap;
   a memory allocation failure in the ordinary loader is a load failure, never
@@ -142,8 +142,8 @@ original recordings, exports, or the repository's MNE/fsaverage cache.
   Dead-process cleanup recognizes both historical and private PID names.
 - The RAM switch is an execution/storage choice and must not change the
   processing fingerprint or preprocessed-Raw cache key. Confirm in a visible
-  1280x900 project Settings session that the switch is visible below montage
-  controls, starts off, Cancel discards it,
+  1280x900 project Settings session that the switch is visible under
+  Experimental > Performance, starts off, Cancel discards it,
   Save persists it for that project, and a cache-miss run uses RAM only while
   enabled. Loader logs report `preload_mode='ram'` or `'disk'`. Check that the
   QC prefetch creates no `qc-source-*` disk staging

@@ -4,6 +4,17 @@
 
 Active. This is the release ledger for the first v3 release candidate.
 
+RAM-setting location follow-up on 2026-10-06: the existing toggle now lives in
+Settings > Experimental > Performance, with the same project-only value,
+default-off state and shared Save/Cancel draft handling. Preprocessing no longer
+contains the toggle. Registered Qt coverage checks the five Experimental pages,
+RAM parentage and project/projectless state, Cancel, Save and reopening. The
+visible 1280x900 keyboard and persistence smoke route is recorded in `gui.md`;
+local Qt execution remains unrun under the GUI skill's explicit-approval rule.
+Verification: the GUI focused gate passed 586 tests. The repo precommit gate
+passed all audits, Ruff and compilation, then 5,395 tests (two skipped; 73
+existing warnings).
+
 Menu follow-up on 2026-10-06: Toolbox now follows Studio's File/View/Tools
 organization. File separates project actions, settings/cache maintenance,
 updates/About, and Exit. View returns to Home; Tools reuses the sidebar's
@@ -26,7 +37,7 @@ Qt execution and installer rebuilding were not performed; the visible
 live OS theme changes; Toolbox retains its shared font family.
 
 RAM-preload follow-up on 2026-10-06: the project-only, default-off Experimental
-RAM preload switch in Settings > Preprocessing now passes through ordinary
+RAM preload switch in Settings > Experimental > Performance passes through ordinary
 processing, preflight QC, kurtosis scanning and source prefetch. Disk loading
 remains the default. RAM prefetch creates no staging directory, caps retained
 buffers at 25% of available memory, and keeps the existing exclusive handoff,

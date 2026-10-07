@@ -466,20 +466,6 @@ class SettingsDialog(QDialog):
             else:
                 edit.setText(self.manager.get(sec, opt, fallback))
 
-        self.experimental_ram_preload_check = QCheckBox(
-            "Experimental: preload BDF recordings into RAM", self.group_preproc
-        )
-        self.experimental_ram_preload_check.setObjectName("experimental_ram_preload_check")
-        self.experimental_ram_preload_check.setToolTip(
-            "Use memory instead of temporary disk files when loading raw BDFs "
-            "for QC and processing. QC prefetch uses at most 25% of available "
-            "memory. Large recordings and parallel workers can exhaust RAM."
-        )
-        self.experimental_ram_preload_check.setChecked(
-            bool(project_pp.get("experimental_ram_preload", False)) if project_pp else False
-        )
-        self.experimental_ram_preload_check.setEnabled(self.project is not None)
-
         if project_pp is not None:
             line_noise_settings = project_pp
         else:
@@ -609,7 +595,6 @@ class SettingsDialog(QDialog):
         }
         grid.addWidget(mapping_label, montage_row, 2)
         grid.addWidget(self.electrode_mapping_profile_combo, montage_row, 3)
-        grid.addWidget(self.experimental_ram_preload_check, montage_row + 1, 0, 1, 4)
 
         layout.addWidget(self.group_preproc)
 
@@ -1357,7 +1342,6 @@ class SettingsDialog(QDialog):
         self._experimental_summed_bca_tab_index = self.experimental_tabs.addTab(
             summed_bca_page, "Summed-BCA Screening"
         )
-        self._init_beta_tools_page(self.experimental_tabs)
 
         if self.project is not None:
             qc_preproc = self._project_preprocessing()
@@ -1374,6 +1358,39 @@ class SettingsDialog(QDialog):
                 }
             )
             experimental_settings = ExperimentalQcSettings()
+
+        performance_page = QWidget()
+        performance_page.setObjectName("settings_experimental_performance_page")
+        performance_layout = QVBoxLayout(performance_page)
+        performance_layout.setContentsMargins(0, 12, 0, 0)
+        performance_layout.setSpacing(10)
+        ram_card = SectionCard(
+            "RAM Preloading", performance_page,
+            object_name="settings_experimental_ram_preload_card",
+        )
+        self._add_settings_scope(
+            ram_card.content_layout,
+            "Current project only. Off by default."
+            if self.project is not None else "Open a project to edit RAM preloading.",
+        )
+        self.experimental_ram_preload_check = QCheckBox(
+            "Preload BDF recordings into RAM", ram_card,
+        )
+        self.experimental_ram_preload_check.setObjectName("experimental_ram_preload_check")
+        self.experimental_ram_preload_check.setToolTip(
+            "Use memory instead of temporary disk files when loading raw BDFs "
+            "for QC and processing. QC prefetch uses at most 25% of available "
+            "memory. Large recordings and parallel workers can exhaust RAM."
+        )
+        self.experimental_ram_preload_check.setChecked(
+            bool(qc_preproc.get("experimental_ram_preload", False))
+        )
+        self.experimental_ram_preload_check.setEnabled(self.project is not None)
+        ram_card.content_layout.addWidget(self.experimental_ram_preload_check)
+        performance_layout.addWidget(ram_card)
+        performance_layout.addStretch(1)
+        self.experimental_tabs.addTab(performance_page, "Performance")
+        self._init_beta_tools_page(self.experimental_tabs)
 
         interpolation_card = SectionCard(
             "Experimental Interpolation",

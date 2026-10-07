@@ -849,6 +849,7 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
     experimental_tab = dlg.tabs.widget(experimental_tab_index)
     assert not preproc_tab.isAncestorOf(cards["Application Options"])
     assert not preproc_tab.isAncestorOf(cards["Harmonic Selection and Summation"])
+    assert not preproc_tab.isAncestorOf(dlg.experimental_ram_preload_check)
     assert protocol_tab.isAncestorOf(cards["Project FPVS Protocol"])
     assert protocol_tab.objectName() == "settings_protocol_tab"
     assert harmonics_tab.isAncestorOf(cards["Harmonic Selection and Summation"])
@@ -862,6 +863,7 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
     assert quality_control_tab.isAncestorOf(dlg.frequency_domain_qc_thresholds_label)
     assert experimental_tab.isAncestorOf(detector_card)
     assert experimental_tab.isAncestorOf(summed_bca_card)
+    assert experimental_tab.isAncestorOf(dlg.experimental_ram_preload_check)
     assert experimental_tab.isAncestorOf(dlg.beta_tools_check)
     assert experimental_tab.objectName() == "settings_experimental_tab"
     assert rois_tab.isAncestorOf(dlg.roi_editor)
@@ -957,6 +959,7 @@ def test_experimental_sections_fit_embedded_workspace(experimental_settings_page
         "Electrodes",
         "Raw-Spectral Review",
         "Summed-BCA Screening",
+        "Performance",
         "Beta Tools",
     ]
 
@@ -1001,6 +1004,7 @@ def test_experimental_sections_fit_embedded_workspace(experimental_settings_page
             page.summed_bca_screening_enabled_check,
             *page.summed_bca_threshold_edits.values(),
         ),
+        (page.experimental_ram_preload_check,),
         (page.beta_tools_check,),
     )
     assert page.removed_electrode_detection_mode_combo.currentData() is None
@@ -2365,6 +2369,16 @@ def test_experimental_ram_preload_toggle_is_saved_per_project(tmp_path, qtbot, m
 
     draft = SettingsDialog(win.settings, win, project)
     qtbot.addWidget(draft)
+    performance_index = next(
+        index for index in range(draft.experimental_tabs.count())
+        if draft.experimental_tabs.tabText(index) == "Performance"
+    )
+    performance_page = draft.experimental_tabs.widget(performance_index)
+    assert performance_page.objectName() == "settings_experimental_performance_page"
+    ram_card = performance_page.findChild(SectionCard, "settings_experimental_ram_preload_card")
+    assert ram_card is not None
+    assert ram_card.isAncestorOf(draft.experimental_ram_preload_check)
+    assert draft.experimental_ram_preload_check.isEnabled()
     assert draft.experimental_ram_preload_check.isChecked() is False
     draft.experimental_ram_preload_check.setChecked(True)
     draft.reject()
@@ -2377,3 +2391,12 @@ def test_experimental_ram_preload_toggle_is_saved_per_project(tmp_path, qtbot, m
 
     reloaded = Project.load(project.project_root)
     assert reloaded.preprocessing["experimental_ram_preload"] is True
+
+    reopened = SettingsDialog(win.settings, win, reloaded)
+    qtbot.addWidget(reopened)
+    assert reopened.experimental_ram_preload_check.isChecked() is True
+
+    projectless = SettingsDialog(win.settings, win)
+    qtbot.addWidget(projectless)
+    assert projectless.experimental_ram_preload_check.isEnabled() is False
+    assert projectless.experimental_ram_preload_check.isChecked() is False
