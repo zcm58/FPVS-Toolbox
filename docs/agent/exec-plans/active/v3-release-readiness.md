@@ -4,6 +4,27 @@
 
 Active. This is the release ledger for the first v3 release candidate.
 
+Menu follow-up on 2026-10-06: Toolbox now follows Studio's File/View/Tools
+organization. File separates project actions, settings/cache maintenance,
+updates/About, and Exit. View returns to Home; Tools reuses the sidebar's
+default and optional beta registrations and shared beta acknowledgements.
+The existing theme owner retains a separately owned native menu style and
+explicit startup palette before applying the Toolbox light theme. Local
+foreground-only menu rules preserve native geometry and selection backgrounds
+with the shared 13px text size. Existing callbacks, action aliases, Welcome
+visibility and processing/cache-reset menu locks remain intact.
+
+The GUI focused gate passed all audits, Ruff and compilation, then 586 tests.
+The repo precommit gate passed all audits, Ruff and compilation, then 5,395
+tests (two skipped; 73 existing warnings). Pure checks cover native-style
+ownership, palette retention through repeated
+theme changes and explicit style-creation failure. Registered Qt smoke coverage
+checks menu grouping, Home, tool visibility/routing and shared beta warnings.
+Qt execution and installer rebuilding were not performed; the visible
+1280x900 long-label, keyboard and action checks are documented in
+`docs/agent/architecture/gui.md`. The captured palette does not refresh during
+live OS theme changes; Toolbox retains its shared font family.
+
 RAM-preload follow-up on 2026-10-06: the project-only, default-off Experimental
 RAM preload switch in Settings > Preprocessing now passes through ordinary
 processing, preflight QC, kurtosis scanning and source prefetch. Disk loading

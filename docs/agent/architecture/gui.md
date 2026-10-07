@@ -21,7 +21,16 @@ Primary paths:
   reusable buttons, cards, form rows, the busy spinner, the welcome brain
   animation, and inline status widgets.
 - `src/Main_App/gui/theme.py`: shared FPVS light palette and stylesheet helpers
-  used by the main app and tool windows.
+  used by the main app and tool windows. `apply_native_menu_appearance` retains
+  the platform menu style and palette before the Toolbox theme is applied;
+  menu bars and popup menus use that retained appearance separately from the
+  application's light palette and widget stylesheet.
+- `src/Main_App/gui/menu_bar.py`: File/View/Tools construction and tool-action
+  wiring. `file_menu.py` groups New/Open/Save, Settings/Reset Processing Cache,
+  Check for Updates/About, and Exit with separators. View contains Home.
+  Tools reuses the sidebar's default and beta registrations, with full labels
+  and a conditional Beta Tools submenu. Existing MainWindow callbacks retain
+  project validation, processing guards and beta acknowledgements.
 - `src/Main_App/gui/typography.py`: canonical font family, role sizes, font
   weights, monospace font, and QSS font helpers used by the main app,
   component layer, and migrated tool windows.
@@ -483,12 +492,13 @@ still be absent, and Resume Post-processing should use the remaining ROIs.
 Repeat Save with rebuild later and confirm QC is marked stale. Qt behavior is
 covered in CI; local checks exercise the routing without loading Qt.
 
-The sidebar's default tool list is Free Harmonic Clustering Analysis and SNR
-Plots, in that order. Scalp Maps, Standard FPVS Screening, Sensitivity
+The sidebar and Tools menu share the default tool list: Free Harmonic Clustering
+Analysis and SNR Plots, in that order. Scalp Maps, Standard FPVS Screening, Sensitivity
 Analysis, LORETA Visualizer, Sequence Figure, Ratio Calculator, and Individual
 Detectability are beta tools: they remain
 embedded workspace pages, but the sidebar appends them beneath a visible
-**Beta Tools** subsection only when the global Settings option
+**Beta Tools** subsection and Tools adds a matching submenu only when the global
+Settings option
 `tools.enable_beta_tools` is enabled and the app has been restarted.
 
 The Beta Tools registry owns the shared gate: every entry in `BETA_TOOL_SPECS`
@@ -496,7 +506,23 @@ is connected through `MainWindow._open_beta_tool`, so adding a beta tool to the
 registry must not require per-tool warning code. Before that tool's opener runs
 for the first time in each app session, show an OK-only warning titled `Beta
 Tool` with the text `This tool is currently in beta. Features are subject to
-change.` Track acknowledgement separately for each beta registry role.
+change.` Track acknowledgement separately for each beta registry role, shared
+between sidebar and menu entry points.
+
+Visible menu acceptance (Qt is CI-only locally): at 1280x900, verify native
+File/View/Tools appearance, separated File groups, and complete long labels
+including Reset Project Processing Cache and Free Harmonic Clustering Analysis.
+Use Alt, arrow keys and Escape to open, traverse and dismiss menus; verify
+View > Home returns from an embedded page and selects Home in the sidebar.
+On a disposable project, exercise New/Open/Save, Settings, cache-reset
+confirmation/cancellation, Check for Updates, About and Exit with their existing
+draft and processing guards. Confirm menus are hidden on Welcome and disabled
+during processing/cache reset, then restored when work ends. Disable Beta Tools,
+restart and confirm both entry points hide them; enable and restart, then open
+every default and beta tool from the menu. Verify project/stale-output guards,
+one warning per beta role across menu and sidebar, and no warning for default
+tools. Local Qt execution remains unrun without a safe visible-environment
+approval.
 
 When the active project changes through create/open/import/path workflows, the
 main shell must return to Home and discard project-bound embedded page instances.
