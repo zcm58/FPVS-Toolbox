@@ -66,7 +66,7 @@ def test_all_users_install_uses_elevation_only_after_integrity_check(tmp_path, m
     digest = hashlib.sha256(payload).hexdigest()
     asset = InstallerAsset(
         name,
-        f"https://github.com/zcm58/FPVS-Toolbox-Repo/releases/download/v3.1.0/{name}",
+        f"https://github.com/zcm58/FPVS-Toolbox-Releases/releases/download/v3.1.0/{name}",
         len(payload),
         digest,
         "3.1.0",
@@ -90,6 +90,16 @@ def test_all_users_install_uses_elevation_only_after_integrity_check(tmp_path, m
 def test_config_remains_the_single_source_version_owner():
     config = Path(__file__).resolve().parents[2] / "src/config.py"
     assert APP_VERSION == source_version(config)
+
+
+def test_main_app_and_independent_helper_share_public_release_identity():
+    from config import FPVS_TOOLBOX_REPO_PAGE, FPVS_TOOLBOX_UPDATE_API
+    from Main_App.updates.application import RELEASE_REPOSITORY
+    from Main_App.updates.github_releases import DEFAULT_RELEASES_API_URL
+
+    assert RELEASE_REPOSITORY == "zcm58/FPVS-Toolbox-Releases"
+    assert FPVS_TOOLBOX_UPDATE_API == DEFAULT_RELEASES_API_URL
+    assert FPVS_TOOLBOX_REPO_PAGE == f"https://github.com/{RELEASE_REPOSITORY}/releases"
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows UAC API adapter")

@@ -44,7 +44,13 @@ version owner; the build extracts it without importing config and embeds
 
 ## Toolbox identity and installation
 
-- Repository: `zcm58/FPVS-Toolbox-Repo`.
+- Public release repository: `zcm58/FPVS-Toolbox-Releases`.
+- Private source repository: `zcm58/FPVS-Toolbox-Repo`; never use it for
+  installed-client requests or public release assets.
+- `Main_App.updates.application` owns the public repository identity and API/page
+  URLs. Both the main application configuration and independent helper consume
+  these values. Exact repository, version, filename and SHA-256 checks remain
+  required. The installed application carries no GitHub credentials.
 - Application: `FPVS_Toolbox.exe`; independent helper:
   `Updater/FPVS Toolbox Updater.exe`, with its own Python/Qt runtime.
 - Existing Inno AppId is preserved:
@@ -96,6 +102,26 @@ untrusted URLs, checksum failures, and registration mismatches remain visible
 errors rather than silent browser/download fallbacks.
 
 ## Packaging and migration
+
+The 2026-10-07 private-source migration changes the public release address for
+the upcoming 3.0.0 build. Existing 2.1.2 and earlier installers remain unchanged
+and still request the old address; their automatic checks stop working when
+the source repository becomes private. The user explicitly accepted a manual
+upgrade to the first installer using the new address. Do not add a private-repo
+fallback, embed credentials, relabel an old installer, or publish unreleased
+3.0.0 development builds as part of this repository migration.
+
+The public repository has independent documentation-only Git history. Its
+release tags must reference its own `main` branch, never private source commits.
+Only installers, update JSON, checksum sidecars and brief release notes cross
+the boundary. Do not push source branches/tags or upload source archives, build
+logs, internal inventories or debug artifacts. GitHub's automatic source
+archives then contain only the public repository's files. Existing release
+licenses are unchanged. See the explicit public publishing commands in
+`docs/agent/guides/development.md`.
+
+The documentation site is intentionally unpublished after this migration;
+the user deferred its restoration. The documentation workflow validates only.
 
 Older Toolbox builds do not bundle this helper or an authenticated ownership
 inventory. They need the first full installer containing this implementation.

@@ -92,6 +92,54 @@ The updater expects the GitHub Release asset name:
 FPVSToolbox-<version>-setup.exe
 ```
 
+### Publishing from private source
+
+Keep `origin` pointed at private `zcm58/FPVS-Toolbox-Repo`. Publish built assets
+to public `zcm58/FPVS-Toolbox-Releases` explicitly; never push source refs to the
+public repository or rely on an inferred repository in a release command.
+Build-time GitHub authentication belongs on the maintainer's machine or in
+private CI secrets only. The installed main application and updater do not
+need credentials.
+
+After the required release checks, use an authenticated GitHub CLI (`gh`) to
+create a draft in the public repository. This example assumes a full installer
+without patches; set the actual release version and reviewed notes file:
+
+```powershell
+$releaseVersion = '3.0.0'
+$releaseRepo = 'zcm58/FPVS-Toolbox-Releases'
+gh release create "v$releaseVersion" --repo $releaseRepo --target main --draft `
+  --title "FPVS Toolbox $releaseVersion" --notes-file build/release-notes.md `
+  "installers/FPVSToolbox-$releaseVersion-setup.exe" `
+  "installers/FPVSToolbox-$releaseVersion-setup.exe.sha256" `
+  "installers/FPVSToolbox-Update-$releaseVersion.json" `
+  "installers/FPVSToolbox-Update-$releaseVersion.json.sha256"
+```
+
+For supported direct patches, also explicitly attach each generated patch
+`.exe` and its `.sha256` sidecar to that same draft. Upload only the files named
+by the verified target release; do not use a broad folder wildcard. Check the
+uploaded filenames, sizes and GitHub SHA-256 digests against the local files,
+and confirm every patch named in the update JSON is present before publishing:
+
+```powershell
+gh release edit "v$releaseVersion" --repo $releaseRepo --draft=false --latest
+```
+
+The public tag is created on the public repository's `main` branch. Preserve
+the private source commit and authenticated ownership inventories in private
+release records. Do not upload source ZIPs, raw `.py` files, internal logs or
+inventories, and do not mirror private tags into the public repository.
+
+The 2026-10-07 repository migration does not publish 3.0.0. Historical installers
+remain unchanged; users of 2.1.2 and earlier need to manually install 3.0.0
+when available before automatic updates work at the new address.
+
+GitHub unpublished the documentation site when the source became private. The
+user chose to leave it unpublished for now. `.github/workflows/docs.yml` keeps
+strict documentation validation with read-only permissions and does not deploy.
+Restore public documentation hosting only when explicitly requested.
+
 After uploading a release, manually smoke the installer update path on Windows:
 
 ```powershell

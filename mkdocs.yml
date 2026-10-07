@@ -1,9 +1,9 @@
 site_name: FPVS Toolbox
 site_description: User documentation, tool guides, and method references for FPVS Toolbox.
 site_url: https://zcm58.github.io/FPVS-Toolbox-Repo/
-repo_url: https://github.com/zcm58/FPVS-Toolbox-Repo
-repo_name: zcm58/FPVS-Toolbox-Repo
-edit_uri: edit/main/docs/user/
+repo_url: https://github.com/zcm58/FPVS-Toolbox-Releases
+repo_name: zcm58/FPVS-Toolbox-Releases
+edit_uri: ""
 docs_dir: docs/user
 site_dir: site
 strict: true

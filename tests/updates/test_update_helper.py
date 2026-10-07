@@ -39,7 +39,7 @@ def _asset() -> InstallerAsset:
     name = "FPVSToolbox-2.0.0-setup.exe"
     return InstallerAsset(
         name,
-        f"https://github.com/zcm58/FPVS-Toolbox-Repo/releases/download/v2.0.0/{name}",
+        f"https://github.com/zcm58/FPVS-Toolbox-Releases/releases/download/v2.0.0/{name}",
         9,
         hashlib.sha256(b"installer").hexdigest(),
         "2.0.0",

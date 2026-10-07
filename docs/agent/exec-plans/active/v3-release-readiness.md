@@ -4,6 +4,33 @@
 
 Active. This is the release ledger for the first v3 release candidate.
 
+Private-source migration on 2026-10-07: `zcm58/FPVS-Toolbox-Repo` is private,
+with all original remote refs preserved. Public distribution now lives in
+`zcm58/FPVS-Toolbox-Releases`, whose independent main branch and release tags
+contain only its README. All 28 historical installer assets were copied with
+size/SHA-256 verification; the latest public installer remains 2.1.2. Anonymous
+repository/release/raw-source requests to the source repository return 404,
+while the release repository remains publicly accessible. No 3.0.0 installer
+was built or published. The user chose to defer that release and accepted the
+one-time manual upgrade from older installers when 3.0.0 becomes available.
+
+The 3.0.0 main application and independent updater share the public release
+identity, retaining exact URL/version/filename and SHA-256 checks without
+client credentials. The focused updates gate passed 433 tests with four skips.
+A live, unauthenticated backend probe selected/downloaded public 2.1.2 and
+matched its original 141,503,904-byte installer digest; 3.0.0 correctly received
+no downgrade offer. No installer or GUI was executed. Public documentation is
+intentionally unpublished at the user's request; the docs workflow now only
+validates, and the strict documentation build passed.
+
+The repo precommit gate passed its audits, Ruff and compilation, then reported
+5,371 passes, 24 skips and five existing FHC export failures under the deep
+repository `test_tmp` path. All five exact failed nodes passed with a fresh
+short absolute `--basetemp` (`C:\fpa11d66`); no FHC code or tests changed. The
+failures were in exploratory exports, the planned-family integration export,
+and repeated-session batch export/cancellation. Local Qt execution and a
+rebuilt-installer/manual-upgrade smoke remain deferred to the 3.0.0 release.
+
 RAM-setting location follow-up on 2026-10-06: the existing toggle now lives in
 Settings > Experimental > Performance, with the same project-only value,
 default-off state and shared Save/Cancel draft handling. Preprocessing no longer

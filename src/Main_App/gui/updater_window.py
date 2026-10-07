@@ -323,7 +323,7 @@ def run_visible_smoke(app: QApplication, report: Path) -> int:
     asset = InstallerAsset(
         name="FPVSToolbox-99.0.0-setup.exe",
         download_url=(
-            "https://github.com/zcm58/FPVS-Toolbox-Repo/releases/download/v99.0.0/"
+            "https://github.com/zcm58/FPVS-Toolbox-Releases/releases/download/v99.0.0/"
             "FPVSToolbox-99.0.0-setup.exe"
         ),
         version="99.0.0",

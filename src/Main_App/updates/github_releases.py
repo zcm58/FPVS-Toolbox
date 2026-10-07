@@ -16,6 +16,7 @@ from urllib.request import Request, urlopen
 from packaging.version import InvalidVersion, Version
 
 from Main_App.updates.application import APP_VERSION as __version__
+from Main_App.updates.application import RELEASE_REPOSITORY, RELEASES_API_URL
 from Main_App.updates.cache_io import check_cancel
 from Main_App.updates.models import (
     CandidateRelease,
@@ -34,7 +35,7 @@ from Main_App.updates.validation import (
     validate_response_url,
 )
 
-DEFAULT_RELEASES_API_URL = "https://api.github.com/repos/zcm58/FPVS-Toolbox-Repo/releases"
+DEFAULT_RELEASES_API_URL = RELEASES_API_URL
 _SUMMARY_LIMIT = 600
 _MAX_METADATA_BYTES = 2 * 1024 * 1024
 METADATA_TIMEOUT_SECONDS = 5
@@ -69,7 +70,7 @@ def fetch_release_metadata(releases_api_url: str, *, cancel_event: Event | None 
     if (
         parsed_url.scheme != "https"
         or parsed_url.netloc.lower() != "api.github.com"
-        or parsed_url.path != "/repos/zcm58/FPVS-Toolbox-Repo/releases"
+        or parsed_url.path != f"/repos/{RELEASE_REPOSITORY}/releases"
         or parsed_url.fragment
     ):
         raise UpdateError("Update checks require an HTTPS GitHub Releases URL.")
