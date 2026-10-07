@@ -9,9 +9,11 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import warnings
 from contextlib import contextmanager
 from dataclasses import dataclass
+from fractions import Fraction
 from pathlib import Path
 from typing import Any, Dict, Iterable, Iterator, Optional, Sequence, Set, Tuple
 
@@ -108,6 +110,78 @@ def inspect_bdf_header(filepath: str | Path) -> Optional[BdfPreflightInfo]:
         record_duration=_parse_bdf_float(fixed_header[244:252]),
         channel_count=_parse_bdf_int(fixed_header[252:256]),
     )
+
+
+def read_bdf_sampling_rate_hz(
+    filepath: str | Path, *, stim_channel: str = "Status"
+) -> Fraction:
+    """Read an exact common data/stim sampling rate without reading signal samples.
+
+    BDF signal-header fields are grouped by field, rather than by channel.
+    Annotation channels have their own sample counts and do not define the EEG
+    grid. Mixed data/stim rates fail instead of relying on reader resampling.
+    File access errors propagate; malformed headers raise ``ValueError``.
+    """
+    if not isinstance(stim_channel, str) or not stim_channel.strip():
+        raise ValueError("A nonempty BDF stimulus channel is required.")
+
+    def _text(value: bytes, field: str) -> str:
+        try:
+            return value.decode("ascii").strip()
+        except UnicodeDecodeError as exc:
+            raise ValueError(f"BDF {field} must contain ASCII text.") from exc
+
+    def _integer(value: bytes, field: str) -> int:
+        try:
+            text = _text(value, field)
+            if not re.fullmatch(r"[+-]?[0-9]+", text):
+                raise ValueError("Not an integer field.")
+            return int(text)
+        except ValueError as exc:
+            raise ValueError(f"BDF {field} must be an integer.") from exc
+
+    with Path(filepath).open("rb") as stream:
+        fixed = stream.read(256)
+        if len(fixed) != 256:
+            raise ValueError("BDF fixed header is truncated.")
+        if fixed[:8] != b"\xffBIOSEMI":
+            raise ValueError("BDF header must have the BioSemi identification code.")
+        channels = _integer(fixed[252:256], "channel count")
+        header_bytes = _integer(fixed[184:192], "header length")
+        if channels <= 0 or header_bytes != (channels + 1) * 256:
+            raise ValueError("BDF header length must match its positive channel count.")
+        if _integer(fixed[236:244], "data record count") < -1:
+            raise ValueError("BDF data record count must be -1 or nonnegative.")
+        duration_text = _text(fixed[244:252], "record duration")
+        try:
+            if not re.fullmatch(r"[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?", duration_text):
+                raise ValueError("Record duration must be decimal.")
+            duration = Fraction(duration_text)
+        except (ValueError, ZeroDivisionError) as exc:
+            raise ValueError("BDF record duration must be a positive decimal.") from exc
+        if duration <= 0:
+            raise ValueError("BDF record duration must be a positive decimal.")
+        signals = stream.read(channels * 256)
+        if len(signals) != channels * 256:
+            raise ValueError("BDF signal header is truncated.")
+
+    data_rates: list[Fraction] = []
+    stimulus_matches = 0
+    for index in range(channels):
+        label = _text(signals[index * 16 : (index + 1) * 16], "channel label")
+        offset = channels * 216 + index * 8
+        samples = _integer(signals[offset : offset + 8], "samples per data record")
+        if not label or samples <= 0:
+            raise ValueError("BDF channel labels and positive sample counts are required.")
+        if label.casefold() in {"edf annotations", "bdf annotations"}:
+            continue
+        data_rates.append(Fraction(samples, 1) / duration)
+        stimulus_matches += label.casefold() == stim_channel.strip().casefold()
+    if stimulus_matches != 1:
+        raise ValueError(f"BDF must contain exactly one {stim_channel!r} stimulus channel.")
+    if len(set(data_rates)) != 1:
+        raise ValueError("BDF data and stimulus channels must share one sampling rate.")
+    return data_rates[0]
 
 
 def is_bdf_recording_not_started(filepath: str | Path) -> bool:

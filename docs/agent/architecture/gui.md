@@ -375,14 +375,32 @@ The Protocol tab edits only the active project's versioned FPVS protocol. It
 accepts a presentation rate plus either an every-N-stimuli recurrence or a
 direct oddball rate that resolves to a whole-stimulus recurrence, shows the
 canonical oddball rate, stores a positive expected analyzed oddball-cycle
-count, derives duration read-only, and stores the project oddball marker code.
+count, and stores the project oddball marker code. New projects default to
+**Duration (seconds)**. **Auto from Studio** preserves the imported planned
+bound and shows the resolved duration read-only. **Cycles (advanced)** retains
+explicit-cycle editing, and existing fixed-cycle projects open in that mode.
+The resolved duration preview shows any complete-cycle/grid flooring before
+saving. The preprocessing downsample draft participates in automatic/duration
+resolution; it cannot silently reuse an old target grid. Unchanged hidden
+controls do not create Settings drafts. Manual and Studio input policies are
+pure adapters over the canonical project protocol, not separate FFT methods.
 Existing projects without trustworthy protocol metadata show proposed legacy
-rates but remain unconfirmed until the user supplies the cycle count and saves
+rates but remain unconfirmed until the user supplies a duration or advanced
+cycle count and saves
 from Protocol. Marker-less v1.0 records keep their known rates and cycle fields
 while requiring marker confirmation; records without a cycle count still
 require one. Saving from another unchanged Settings tab leaves either
 unresolved form untouched; it does not turn a
 proposal into project provenance.
+
+Visible smoke for window setup: at 1280x900, create a project and verify
+Duration entry, use the default 6 Hz/every 5 protocol, enter 121 seconds at
+256 Hz and check the 120-second preview,
+change downsample, Save/reopen and Cancel/reopen. Import a Studio project and
+verify Auto, marker edits retaining Auto and an explicit Advanced override.
+Check keyboard access, long condition-marker names and the shared Save/Cancel
+footer without page-level scrolling. Registered Qt tests cover these controls;
+local Qt execution requires an explicitly approved visible environment.
 Processing input validation consumes the resulting frozen project protocol,
 derives the temporary numeric compatibility fields from it, and blocks before
 QC when the protocol is unconfirmed, incomplete, invalid, or uses the same code

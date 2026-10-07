@@ -83,7 +83,9 @@ manual_smoke = ["Use File > Check for Updates in a visible Main App window: canc
 [scopes.project-io]
 audits = ["paths"]
 tests = [
+  "tests/project_io/test_fpvs_config_import.py",
   "tests/project_io/test_frequency_protocol.py",
+  "tests/project_io/test_analysis_window.py",
   "tests/project_io/test_active_project_root.py",
   "tests/project_io/test_project_dataset_index.py",
   "tests/project_io/test_project_manifest_transactions.py",
@@ -113,6 +115,7 @@ tests = [
   "tests/processing/test_process_runner_lifecycle.py",
   "tests/processing/test_worker_thread_limits.py",
   "tests/processing/test_project_frequency_protocol_inputs.py",
+  "tests/processing/test_analysis_window_setup.py",
   "tests/processing/test_preflight_qc_pruning.py",
   "tests/processing/test_qc_cache_maintenance_integration.py",
   "tests/processing/test_toolbox_cache.py",

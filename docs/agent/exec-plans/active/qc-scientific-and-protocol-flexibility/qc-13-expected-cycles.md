@@ -28,19 +28,75 @@ a separate future change; spectra were not truncated by this correction.
 
 ## Accepted Behavior
 
+### Full-length setup follow-up, 2026-10-06
+
+Implemented. The user approved automatic planned-window setup from Studio and
+duration-first manual entry. Keep one planned length per project. Studio's
+sequence count times oddball repeats gives presentations, whose first-to-last
+oddball markers bound one fewer complete cycle. Resolve the largest complete
+cycle count inside that planned bound against both source and effective target
+sampling grids; do not infer the target from a participant's available length.
+Persist the input policy and resolved cycles in the canonical protocol identity.
+Existing explicit cycle protocols retain their numerical identity. Manual
+duration entry previews the actual compatible duration; advanced cycle entry
+remains available. Header discovery reads no EEG signal data.
+
+Shorter-window analysis and common-segment analysis are separate secondary
+features, outside this change. Preserve the full-length mismatch/review gate,
+preprocessing order, averaging, FFT normalization and spectral eligibility.
+Verify import round trips, differing project lengths, exact source/target grids,
+invalid/mixed Studio counts, legacy identity, GUI parser/draft behavior and
+unchanged rejection of short recordings. Local Qt execution remains disabled;
+register coverage and document a visible smoke route.
+
+Implementation files for this follow-up:
+
+- `src/Main_App/projects/analysis_window.py`, `frequency_protocol.py` and
+  `fpvs_config_import.py`: exact planned inputs, one canonical versioned target
+  and strict current Studio schedule imports.
+- `src/Main_App/gui/project_protocol.py`, `settings_panel.py` and
+  `processing_inputs.py`: Duration/Automatic/Advanced setup and project-wide
+  sampling-grid resolution before QC and artifact classification.
+- `src/Main_App/Shared/load_utils.py` and `src/Main_App/io/load_utils.py`:
+  canonical header-only BDF sampling-rate discovery, with explicit failures.
+- `tests/project_io/test_analysis_window.py` and
+  `test_fpvs_config_import.py`; `tests/processing/test_analysis_window_setup.py`,
+  `test_project_frequency_protocol_inputs.py` and `test_shared_load_utils.py`;
+  `tests/gui/test_project_protocol.py`,
+  `test_protocol_condition_markers_static.py`, `test_gui_preproc_dialog.py` and
+  `test_processing_failure_routing_static.py`: protocol, import, setup and
+  existing orchestration regression coverage. The two new test files are
+  registered in `.agents/verification.toml`; Qt coverage uses the existing
+  registry and was not executed locally.
+
+Project-I/O, GUI, EEG-loading, FFT-crop and methods-reporting contracts document
+these rules. The visible smoke route is in
+`docs/agent/architecture/gui.md`. Existing RAM-preload edits were preserved.
+
+Verification completed, 2026-10-06: the repository precommit gate passed all
+audits, changed-file Ruff and compilation, and 5,391 tests (two skipped;
+73 existing warnings). Both actual current Studio FPVS Oddball and Cognitive
+Load FPVS exports passed import, source-grid resolution, save and reopen checks.
+Independent review confirmed project-wide Single-mode discovery, synchronized
+top-level/nested protocol identities, and early rejection of runtime-incompatible
+rational source rates. The existing static registration harness now loads the
+real setup helper. No local Qt execution, hardware/PsychoPy launch, scientific
+method change, shorter-window implementation or installer rebuild was performed.
+
 1. Extend the project frequency protocol with a positive integer
    `expected_analyzed_oddball_cycles` and its source (`fpvs_studio_import` or
    `manual`). Define it as complete cycles in the intended FFT span, equal to
    the oddball target's FFT-bin index `k = f_oddball * N / fs`; never treat it
    as an oddball-presentation or trigger count.
-   Do not add per-condition lengths. Show derived seconds read-only as
-   `cycles / oddball_rate`; cycles remain the saved user-facing value.
-2. Map the future FPVS Studio `project.json` field into the same normalized
-   protocol. Validate imported values exactly as manual values and retain the
-   Studio schema/provenance needed to diagnose a mismatch. Do not create a
-   second runtime protocol model for imported projects. Reject or require
-   confirmation for an ambiguous generic event/count field.
-3. Require this value during manual project setup before processing. Changes
+   Do not add per-condition lengths. Show resolved seconds as
+   `cycles / oddball_rate`; duration-first entry and Studio Auto are the basic
+   controls, while cycles remain an advanced saved value.
+2. Map current Studio's authored sequence/repeat fields using the documented
+   first-to-last marker rule into the same normalized protocol. Validate the
+   common planned length and retain the input policy/sampling grids. Do not
+   create a second runtime protocol or infer a target from generic event counts.
+3. Require a resolved positive count from Auto, duration or advanced cycle
+   entry during setup before processing. Changes
    invalidate affected preprocessing, FFT/BCA, QC, harmonic-selection, and
    Stats artifacts through the shared protocol fingerprint.
    For an existing project with no field, recover a candidate only from

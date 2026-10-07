@@ -232,8 +232,8 @@ def test_processing_params_block_incomplete_protocol_before_event_parsing(
     assert warnings == [
         (
             "FPVS Protocol Required",
-            "Enter the expected number of analyzed oddball cycles in Settings > "
-            "Protocol and save before processing.",
+            "Enter the intended analysis duration or advanced analyzed oddball cycles "
+            "in Settings > Protocol and save before processing.",
         )
     ]
 

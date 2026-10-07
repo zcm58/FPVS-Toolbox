@@ -463,6 +463,67 @@ def test_protocol_tab_direct_rate_updates_implied_recurrence(
     assert str(reloaded.frequency_protocol.entered_oddball_rate_hz) == "2"
 
 
+def test_protocol_tab_duration_entry_and_processing_grid_are_saved(tmp_path, qtbot):
+    project = _prep_project(tmp_path)
+    project.update_frequency_protocol(FrequencyProtocol.from_recurrence("6", 5))
+    project.save()
+    manager = SettingsManager(str(tmp_path / "settings.ini"))
+    dialog = SettingsDialog(manager, project=project)
+    qtbot.addWidget(dialog)
+
+    assert dialog.protocol_analysis_window_mode_combo.currentData() == "manual_duration"
+    assert dialog.protocol_expected_cycles_edit.isHidden()
+    assert not dialog.protocol_requested_duration_edit.isHidden()
+    dialog.protocol_requested_duration_edit.setText("121")
+    assert dialog.protocol_derived_duration_edit.text() == "120 seconds"
+    dialog.preproc_edits[2].setText("300")
+    assert dialog.protocol_expected_cycles_edit.text() == "145"
+    dialog._save()
+
+    reloaded = Project.load(project.project_root)
+    assert reloaded.frequency_protocol.expected_analyzed_oddball_cycles == 145
+    assert str(reloaded.frequency_protocol.analysis_window.requested_duration_seconds) == "121"
+    assert str(reloaded.frequency_protocol.analysis_window.target_sampling_rate_hz) == "300"
+    reopened = SettingsDialog(manager, project=reloaded)
+    qtbot.addWidget(reopened)
+    assert reopened.protocol_analysis_window_mode_combo.currentData() == "manual_duration"
+    assert reopened.protocol_requested_duration_edit.text() == "121"
+    assert not reopened._protocol_save_requested()
+
+
+def test_protocol_tab_studio_auto_preserves_policy_until_advanced_override(tmp_path, qtbot):
+    from fractions import Fraction
+    from Main_App.projects.analysis_window import AnalysisWindow
+
+    project = _prep_project(tmp_path)
+    project.update_frequency_protocol(project.frequency_protocol.with_analysis_window(AnalysisWindow(
+        mode="studio_planned", maximum_oddball_cycles=145,
+        requested_duration_seconds=None, target_sampling_rate_hz=Fraction(256),
+    )))
+    project.save()
+    manager = SettingsManager(str(tmp_path / "settings.ini"))
+    dialog = SettingsDialog(manager, project=project)
+    qtbot.addWidget(dialog)
+    assert dialog.protocol_analysis_window_mode_combo.currentData() == "studio_planned"
+    assert dialog.protocol_requested_duration_edit.isHidden()
+    assert dialog.protocol_expected_cycles_edit.isHidden()
+    assert dialog.protocol_derived_duration_edit.text() == "120 seconds"
+    dialog.protocol_oddball_marker_code_edit.setText("77")
+    dialog._save()
+    assert Project.load(project.project_root).frequency_protocol.analysis_window.mode == "studio_planned"
+
+    advanced = SettingsDialog(manager, project=project)
+    qtbot.addWidget(advanced)
+    advanced.protocol_analysis_window_mode_combo.setCurrentIndex(
+        advanced.protocol_analysis_window_mode_combo.findData("cycles")
+    )
+    assert not advanced.protocol_expected_cycles_edit.isHidden()
+    advanced._save()
+    reloaded = Project.load(project.project_root)
+    assert reloaded.frequency_protocol.expected_analyzed_oddball_cycles == 144
+    assert reloaded.frequency_protocol.analysis_window is None
+
+
 def test_dialog_loads_saves_app_line_noise_settings_without_project(tmp_path, qtbot):
     QApplication.instance() or QApplication([])
     manager = SettingsManager(str(tmp_path / "settings.ini"))

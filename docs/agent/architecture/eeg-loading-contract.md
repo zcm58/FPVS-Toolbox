@@ -7,6 +7,14 @@ explicitly changes the processing pipeline.
 
 ## Entry Contract
 
+`Main_App.io.load_utils.read_bdf_sampling_rate_hz()` probes only fixed and
+signal headers for automatic analysis-window setup. It returns an exact rate,
+validates BDF structure and a common non-annotation data/stim grid, and reads no
+EEG samples or MNE Raw. Malformed headers and file-access errors propagate.
+Existing not-started recordings retain their explicit exclusion policy. The
+processing setup rejects nonterminating fractional rates that cannot retain
+their exact identity through the current runtime's decimal float grid.
+
 `load_eeg_file(app, filepath, ref_pair=None, first_n_channels=None,
 electrode_mapping_profile=None, electrode_montage=None)` expects the host
 object to provide:

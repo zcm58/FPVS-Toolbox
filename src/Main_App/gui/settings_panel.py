@@ -51,6 +51,9 @@ from Main_App.gui.participant_condition_exclusions_dialog import (
     ParticipantConditionExclusionsDialog,
 )
 from Main_App.gui.project_protocol import (
+    ANALYSIS_WINDOW_MODE_CYCLES,
+    ANALYSIS_WINDOW_MODE_DURATION,
+    ANALYSIS_WINDOW_MODE_STUDIO,
     ProtocolEditorValues,
     build_manual_protocol,
     condition_marker_editor_rows,
@@ -692,6 +695,25 @@ class SettingsDialog(QDialog):
             self.protocol_direct_oddball_rate_edit,
         )
 
+        self.protocol_analysis_window_mode_combo = QComboBox(protocol_card)
+        self.protocol_analysis_window_mode_combo.setObjectName("settings_protocol_analysis_window_mode")
+        if values is not None and values.analysis_window_mode == ANALYSIS_WINDOW_MODE_STUDIO:
+            self.protocol_analysis_window_mode_combo.addItem("Automatic from Studio", ANALYSIS_WINDOW_MODE_STUDIO)
+        self.protocol_analysis_window_mode_combo.addItem("Duration (seconds)", ANALYSIS_WINDOW_MODE_DURATION)
+        self.protocol_analysis_window_mode_combo.addItem("Cycle count (advanced)", ANALYSIS_WINDOW_MODE_CYCLES)
+        analysis_mode_label = QLabel("Analysis window:", protocol_card)
+        analysis_mode_label.setBuddy(self.protocol_analysis_window_mode_combo)
+        protocol_form.addRow(analysis_mode_label, self.protocol_analysis_window_mode_combo)
+        self.protocol_requested_duration_edit = QLineEdit(protocol_card)
+        self.protocol_requested_duration_edit.setObjectName("settings_protocol_requested_duration_seconds")
+        self.protocol_requested_duration_edit.setPlaceholderText("120")
+        self.protocol_requested_duration_edit.setToolTip(
+            "The maximum intended FFT duration. Toolbox retains complete oddball cycles "
+            "compatible with the recording and processing sample grids."
+        )
+        duration_label = QLabel("Analysis duration (seconds):", protocol_card)
+        duration_label.setBuddy(self.protocol_requested_duration_edit)
+        protocol_form.addRow(duration_label, self.protocol_requested_duration_edit)
         self.protocol_expected_cycles_edit = QLineEdit(protocol_card)
         self.protocol_expected_cycles_edit.setObjectName(
             "settings_protocol_expected_analyzed_cycles"
@@ -700,10 +722,10 @@ class SettingsDialog(QDialog):
         self.protocol_expected_cycles_edit.setToolTip(
             "The project-wide number of complete oddball cycles intended for the FFT."
         )
-        protocol_form.addRow(
-            QLabel("Expected analyzed oddball cycles:", protocol_card),
-            self.protocol_expected_cycles_edit,
-        )
+        cycles_label = QLabel("Analyzed oddball cycles (advanced):", protocol_card)
+        cycles_label.setBuddy(self.protocol_expected_cycles_edit)
+        protocol_form.addRow(cycles_label, self.protocol_expected_cycles_edit)
+        self._protocol_form = protocol_form
 
         self.protocol_oddball_marker_code_edit = QLineEdit(protocol_card)
         self.protocol_oddball_marker_code_edit.setObjectName(
@@ -809,6 +831,10 @@ class SettingsDialog(QDialog):
             self.protocol_expected_cycles_edit.setText(
                 values.expected_analyzed_oddball_cycles
             )
+            self.protocol_analysis_window_mode_combo.setCurrentIndex(
+                self.protocol_analysis_window_mode_combo.findData(values.analysis_window_mode)
+            )
+            self.protocol_requested_duration_edit.setText(values.requested_duration_seconds)
             self.protocol_oddball_marker_code_edit.setText(
                 values.oddball_marker_code
             )
@@ -833,6 +859,8 @@ class SettingsDialog(QDialog):
             self.protocol_oddball_every_n_edit,
             self.protocol_direct_oddball_rate_edit,
             self.protocol_expected_cycles_edit,
+            self.protocol_analysis_window_mode_combo,
+            self.protocol_requested_duration_edit,
             self.protocol_oddball_marker_code_edit,
             self.protocol_condition_markers_check,
             self.protocol_condition_markers_table,
@@ -856,6 +884,9 @@ class SettingsDialog(QDialog):
         self.protocol_expected_cycles_edit.textChanged.connect(
             self._refresh_protocol_preview
         )
+        self.protocol_analysis_window_mode_combo.currentIndexChanged.connect(self._refresh_protocol_preview)
+        self.protocol_requested_duration_edit.textChanged.connect(self._refresh_protocol_preview)
+        self.preproc_edits[PREPROCESSING_FIELDS.index("downsample")].textChanged.connect(self._refresh_protocol_preview)
         self.protocol_oddball_marker_code_edit.textChanged.connect(
             self._refresh_protocol_preview
         )
@@ -2024,6 +2055,9 @@ class SettingsDialog(QDialog):
             oddball_every_n=self.protocol_oddball_every_n_edit.text(),
             entered_oddball_rate_hz=self.protocol_direct_oddball_rate_edit.text(),
             expected_analyzed_oddball_cycles=self.protocol_expected_cycles_edit.text(),
+            analysis_window_mode=str(self.protocol_analysis_window_mode_combo.currentData()),
+            requested_duration_seconds=self.protocol_requested_duration_edit.text(),
+            target_sampling_rate_hz=self.preproc_edits[PREPROCESSING_FIELDS.index("downsample")].text(),
             oddball_marker_code=self.protocol_oddball_marker_code_edit.text(),
             requires_confirmation=bool(
                 getattr(self, "_protocol_requires_confirmation", False)
@@ -2067,6 +2101,9 @@ class SettingsDialog(QDialog):
             expected_analyzed_oddball_cycles=(
                 values.expected_analyzed_oddball_cycles
             ),
+            analysis_window_mode=values.analysis_window_mode,
+            requested_duration_seconds=values.requested_duration_seconds,
+            target_sampling_rate_hz=values.target_sampling_rate_hz,
             oddball_marker_code=values.oddball_marker_code,
             existing_protocol=self.project.frequency_protocol,
             require_ready=require_ready,
@@ -2109,6 +2146,9 @@ class SettingsDialog(QDialog):
             dialog.deleteLater()
 
     def _refresh_protocol_preview(self, *_args: object) -> None:
+        analysis_mode = str(self.protocol_analysis_window_mode_combo.currentData())
+        self._protocol_form.setRowVisible(self.protocol_expected_cycles_edit, analysis_mode == ANALYSIS_WINDOW_MODE_CYCLES)
+        self._protocol_form.setRowVisible(self.protocol_requested_duration_edit, analysis_mode == ANALYSIS_WINDOW_MODE_DURATION)
         recording_markers = self.protocol_recording_markers_check.isChecked()
         self.protocol_recording_markers_row.setVisible(recording_markers)
         self.protocol_recording_markers_summary.setText(f"{len(self._recording_marker_codes)} recording schemas configured.")
@@ -2167,12 +2207,20 @@ class SettingsDialog(QDialog):
         self.protocol_derived_duration_edit.setText(
             duration_summary(protocol.derived_analyzed_seconds)
         )
+        if analysis_mode != ANALYSIS_WINDOW_MODE_CYCLES:
+            previous = self.protocol_expected_cycles_edit.blockSignals(True)
+            self.protocol_expected_cycles_edit.setText(str(protocol.expected_analyzed_oddball_cycles or ""))
+            self.protocol_expected_cycles_edit.blockSignals(previous)
+        if analysis_mode == ANALYSIS_WINDOW_MODE_STUDIO:
+            previous = self.protocol_requested_duration_edit.blockSignals(True)
+            self.protocol_requested_duration_edit.setText(editor_values_for_protocol(protocol).requested_duration_seconds)
+            self.protocol_requested_duration_edit.blockSignals(previous)
         if getattr(self, "_protocol_requires_confirmation", False):
             self.protocol_status.set_variant("warning")
             if protocol.expected_analyzed_oddball_cycles is None:
                 self.protocol_status.set_text(
-                    "Review the retained or proposed protocol, enter the expected "
-                    "analyzed oddball cycles, then save from Protocol to confirm it."
+                    "Review the retained or proposed protocol, choose an analysis "
+                    "duration or advanced cycle count, then save from Protocol to confirm it."
                 )
             else:
                 self.protocol_status.set_text(
@@ -2182,7 +2230,7 @@ class SettingsDialog(QDialog):
         elif not protocol.is_ready:
             self.protocol_status.set_variant("warning")
             self.protocol_status.set_text(
-                "Enter the expected analyzed oddball cycles before processing."
+                "Enter the intended analysis duration before processing, or choose an advanced cycle count."
             )
         else:
             self.protocol_status.set_variant("success")
@@ -2211,10 +2259,18 @@ class SettingsDialog(QDialog):
             return protocol
         except FrequencyProtocolError as exc:
             self._show_settings_validation(str(exc))
-            self.tabs.setCurrentIndex(self._protocol_tab_index)
             message = str(exc).casefold()
+            if "target sampling rate" in message:
+                self.tabs.setCurrentIndex(self._preproc_tab_index)
+                field = self.preproc_edits[PREPROCESSING_FIELDS.index("downsample")]
+                mark_invalid(field, str(exc))
+                field.setFocus()
+                field.selectAll()
+                return None
+            self.tabs.setCurrentIndex(self._protocol_tab_index)
             controls = (
                 (("presentation", "base"), self.protocol_presentation_rate_edit),
+                (("duration",), self.protocol_requested_duration_edit),
                 (("cycle",), self.protocol_expected_cycles_edit),
                 (("marker", "code"), self.protocol_oddball_marker_code_edit),
             )
@@ -2241,6 +2297,8 @@ class SettingsDialog(QDialog):
                 self.protocol_oddball_every_n_edit.text().strip(),
                 self.protocol_direct_oddball_rate_edit.text().strip(),
                 self.protocol_expected_cycles_edit.text().strip(),
+                self.protocol_analysis_window_mode_combo.currentData(),
+                self.protocol_requested_duration_edit.text().strip(),
                 self.protocol_oddball_marker_code_edit.text().strip(),
                 self.protocol_condition_markers_check.isChecked(),
                 self._protocol_editor_values().condition_oddball_marker_codes,

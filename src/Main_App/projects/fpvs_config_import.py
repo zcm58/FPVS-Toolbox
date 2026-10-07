@@ -28,6 +28,9 @@ from Main_App.projects.preprocessing_settings import (
 )
 
 CONFIG_SUFFIX = ".fpvsconfig"
+SUPPORTED_CONFIG_VERSIONS = (
+    "1.0.0", "1.1.0", "1.2.0", "1.3.0", "1.4.0", "1.5.0", "1.6.0", "1.7.0", "1.8.0",
+)
 WINDOWS_FORBIDDEN_PROJECT_CHARS = set('<>:"/\\|?*')
 _WINDOWS_RESERVED_NAMES = {
     "CON",
@@ -68,10 +71,15 @@ def read_fpvs_config(path: Path) -> FPVSConfigImport:
         raise FPVSConfigImportError("FPVS config must contain a JSON object.")
 
     schema_version = payload.get("schema_version")
-    if schema_version != "1.0.0":
+    if schema_version not in SUPPORTED_CONFIG_VERSIONS:
         raise FPVSConfigImportError(
             "Unsupported FPVS config schema version: "
-            f"{schema_version!r}. Expected '1.0.0'."
+            f"{schema_version!r}. Supported versions: {', '.join(SUPPORTED_CONFIG_VERSIONS)}."
+        )
+    category = payload.get("experiment_category", "fpvs_oddball")
+    if category not in ("fpvs_oddball", "cognitive_load_fpvs"):
+        raise FPVSConfigImportError(
+            f"Unsupported Studio experiment category for FPVS processing: {category!r}."
         )
 
     project = payload.get("project")
@@ -179,10 +187,24 @@ def _frequency_protocol_from_config(
     *,
     oddball_marker_code: int,
 ) -> FrequencyProtocol | None:
-    """Read an explicitly named Studio protocol without inferring generic fields."""
+    """Normalize rates and resolve current Studio's planned marker-window bound."""
 
     raw_protocol = payload.get("frequency_protocol")
-    if raw_protocol is None:
+    if "protocol" in payload:
+        if raw_protocol is not None:
+            raise FPVSConfigImportError(
+                "FPVS config declares both protocol and frequency_protocol; provide one rate definition."
+            )
+        studio_protocol = payload["protocol"]
+        if not isinstance(studio_protocol, Mapping):
+            raise FPVSConfigImportError("protocol must be an object.")
+        raw_protocol = {
+            "presentation_rate_hz": studio_protocol.get("base_hz"),
+            "oddball_every_n": studio_protocol.get("oddball_every_n"),
+        }
+    elif raw_protocol is None:
+        if payload.get("schema_version") not in ("1.0.0", "1.1.0"):
+            raise FPVSConfigImportError("FPVS config is missing its protocol object.")
         return None
     if not isinstance(raw_protocol, Mapping):
         raise FPVSConfigImportError("frequency_protocol must be an object.")
@@ -210,7 +232,7 @@ def _frequency_protocol_from_config(
             raise FPVSConfigImportError(
                 f"Unsupported frequency_protocol.oddball_input_mode: {mode!r}."
             )
-        return FrequencyProtocol.from_recurrence(
+        protocol = FrequencyProtocol.from_recurrence(
             presentation_rate,
             raw_protocol.get("oddball_every_n"),
             expected_analyzed_oddball_cycles=cycles,
@@ -218,8 +240,35 @@ def _frequency_protocol_from_config(
             oddball_marker_code=oddball_marker_code,
             oddball_marker_code_source=ODDBALL_MARKER_SOURCE_FPVS_STUDIO_IMPORT,
         )
+        if "protocol" in payload:
+            maximum_cycles = _studio_planned_cycle_bound(payload)
+            return protocol.with_studio_window(
+                maximum_cycles,
+                target_sampling_rate_hz=new_project_preprocessing_settings()["downsample"],
+            )
+        return protocol
     except FrequencyProtocolError as exc:
         raise FPVSConfigImportError(f"Invalid frequency_protocol: {exc}") from exc
+
+
+def _studio_planned_cycle_bound(payload: Mapping[str, Any]) -> int:
+    """M presented oddballs provide M-1 first-to-last marker intervals."""
+
+    shared_counts: tuple[int, int] | None = None
+    for index, condition in enumerate(payload["conditions"]):
+        counts = (
+            _required_int(condition.get("sequence_count"), f"conditions[{index}].sequence_count"),
+            _required_int(
+                condition.get("oddball_cycle_repeats_per_sequence"),
+                f"conditions[{index}].oddball_cycle_repeats_per_sequence",
+            ),
+        )
+        if shared_counts is not None and counts != shared_counts:
+            raise FPVSConfigImportError(
+                "Every Studio condition must declare the same sequence count and oddball repeats."
+            )
+        shared_counts = counts
+    return shared_counts[0] * shared_counts[1] - 1
 
 
 def _manual_removed_electrodes_from_config(

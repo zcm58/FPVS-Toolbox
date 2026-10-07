@@ -209,7 +209,7 @@ FPVS Toolbox uses a strict hybrid settings model:
   divided by that recurrence. The direct value as entered is retained for
   audit but is excluded from the canonical scientific fingerprint. A new
   project seeds 6 Hz/every 5 but remains
-  `incomplete` until a positive expected cycle count is supplied. An existing
+  `incomplete` until a duration or advanced cycle count is supplied. An existing
   manifest with no protocol loads as `confirmation_required` and a routine
   save keeps the record absent, so historical outputs are not silently
   relabeled with guessed defaults. Marker-less protocol v1.0 records retain
@@ -429,10 +429,36 @@ FPVS Toolbox uses a strict hybrid settings model:
   the user clears them in Settings.
 - `%APPDATA%\FPVS_Toolbox\*.ini` files and old Qt `QSettings` locations are legacy migration inputs only; do not add new writers there.
 - Do not write settings to the install directory, repo directory, `Program Files`, or the process current working directory.
+- Protocol v1.4 adds an optional `analysis_window` owned by
+  `Main_App.projects.analysis_window`. It stores Studio's planned maximum cycle
+  bound or a manually requested duration, plus configured target and verified
+  source sampling rates. Resolved cycles remain the downstream authority. The
+  resolver uses the least common multiple of `denominator(fs / f_oddball)`
+  across source and effective target grids (no upsampling), then floors inside
+  the planned bound. These inputs and the resolved count share one fingerprint.
+  Prior v1.1-v1.3 records retain their exact manifest and numerical identities;
+  an explicit Advanced override removes the automatic policy. Before QC and
+  artifact classification, source headers finalize and save one project-wide
+  target, including all configured sources during Single mode. Previously
+  verified source grids remain relevant when processing a subset. Recording
+  duration and observed marker counts never set this target.
 - FPVS Studio `.fpvsconfig` import is a project-shell helper under
-  `Main_App.projects.fpvs_config_import`. It imports `project.name`,
+  `Main_App.projects.fpvs_config_import`. It accepts known config schemas
+  `1.0.0` through `1.8.0` for FPVS Oddball and Cognitive Load FPVS; unknown
+  schemas and other experiment categories fail explicitly. It imports `project.name`,
   `conditions[].name`/`conditions[].trigger_code` into `project.json`
-  `event_map`, and optional per-participant manually removed electrode metadata
+  `event_map`, `triggers.oddball_trigger_code`, and current Studio
+  `protocol.base_hz`/`protocol.oddball_every_n` through the canonical
+  `FrequencyProtocol` validator. Legacy `frequency_protocol` payloads remain
+  supported; declaring both protocol shapes is an error. Current Studio
+  conditions must agree on positive sequence and oddball-repeat counts. Their
+  product is the number of presentations; one fewer bounds the first-to-last
+  oddball marker window. This explicit Studio schedule rule seeds Auto against
+  the initial target grid; source headers finalize it before QC. Completed
+  session summaries do not replace the bound or certify complete EEG data.
+  Legacy explicit analyzed-cycle declarations remain authoritative. No observed
+  participant span supplies the planned target implicitly. The importer also
+  reads optional per-participant manually removed electrode metadata
   into `preprocessing.manual_removed_electrodes`. Supported Studio-side
   scaffold shapes are a top-level PID-to-electrodes map such as
   `manual_removed_electrodes` or participant entries carrying

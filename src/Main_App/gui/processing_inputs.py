@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from fractions import Fraction
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -17,6 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 import config
+from Main_App.io.load_utils import inspect_bdf_header, read_bdf_sampling_rate_hz
 from Main_App.gui.manual_removed_electrodes_dialog import ManualRemovedElectrodesDialog
 from Main_App.gui.project_protocol import (
     ProjectProtocolRequiredError,
@@ -290,6 +292,20 @@ def validate_inputs(host: Any) -> bool:
             logger.exception("Failed to save participant review updates.")
             QMessageBox.critical(host, "Project Save Error", str(exc))
             return False
+    window_sources = preflight_file_infos
+    protocol = params.get("frequency_protocol")
+    if (
+        mode_now == "Single" and protocol is not None and protocol.analysis_window is not None
+        and not recording_context.is_repeated_session
+    ):
+        try:
+            window_sources = [*preflight_file_infos, *prepare_batch_file_infos(host.currentProject)]
+        except (OSError, ValueError) as exc:
+            logger.exception("Project-wide analysis-window source discovery failed.")
+            QMessageBox.warning(host, "Analysis Window Unavailable", str(exc))
+            return False
+    if not _resolve_analysis_window_for_processing(host, window_sources, params):
+        return False
     planning_settings, event_map = _planning_settings_from_params(params)
     pre_qc_plan = classify_processing_inputs(
         host.currentProject,
@@ -553,6 +569,56 @@ def _ensure_manual_removed_electrodes_reviewed(
         if recording_aware
         else "Manual removed-electrode list reviewed for current BDF pool."
     )
+    return True
+
+
+def _resolve_analysis_window_for_processing(host: Any, source_infos: Any, params: dict) -> bool:
+    """Freeze one planned target on header grids before QC or artifact reuse."""
+
+    protocol = params.get("frequency_protocol")
+    if protocol is None or protocol.analysis_window is None:
+        return True
+    project = host.currentProject
+    try:
+        analysis = params.get("analysis")
+        if not isinstance(analysis, dict):
+            raise FrequencyProtocolError("The analysis run-settings snapshot is missing or invalid.")
+        # Keep previously verified grids when processing a subset. A short
+        # recording's sample count/marker span is deliberately never consulted.
+        rates = set(protocol.analysis_window.source_sampling_rates_hz)
+        for info in source_infos:
+            header = inspect_bdf_header(info.path)
+            if header is not None and header.recording_not_started:
+                continue  # Existing explicit no-recording exclusion policy.
+            rates.add(read_bdf_sampling_rate_hz(info.path, stim_channel=params["stim_channel"]))
+        for rate in rates:
+            if Fraction(str(float(rate))) != rate:
+                raise FrequencyProtocolError(
+                    f"The source sampling rate ({rate} Hz) is not supported by the "
+                    "current exact processing grid. Use an acquisition sampling rate "
+                    "with an exact decimal representation."
+                )
+        resolved = protocol.resolve_analysis_window(
+            target_sampling_rate_hz=params["downsample"], source_sampling_rates_hz=tuple(rates),
+        )
+        if resolved != protocol:
+            project.update_frequency_protocol(resolved)
+            try:
+                project.save()
+            except (OSError, ValueError):
+                project.update_frequency_protocol(protocol)
+                raise
+        params["frequency_protocol"] = project.frequency_protocol
+        params["frequency_protocol_fingerprint"] = project.frequency_protocol.fingerprint
+        params["analysis"] = {
+            **analysis,
+            "frequency_protocol": project.frequency_protocol.to_manifest(),
+            "frequency_protocol_fingerprint": project.frequency_protocol.fingerprint,
+        }
+    except (OSError, ValueError) as exc:
+        logger.exception("Planned FFT window could not be resolved and saved.")
+        QMessageBox.warning(host, "Analysis Window Unavailable", str(exc))
+        return False
     return True
 
 

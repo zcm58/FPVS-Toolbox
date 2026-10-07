@@ -966,6 +966,7 @@ def _registration_validation_harness(tmp_path, *, mode="Batch", additions=True):
         "PREPROCESSING_CANONICAL_KEYS": (), "FFT_MULTINOTCH_METHOD_VERSION": "unchanged",
         "FFT_MULTINOTCH_HALF_WIDTH_HZ": 1, "FFT_MULTINOTCH_COMPONENT_COUNT": 1,
     }
+    _load_function("src/Main_App/gui/processing_inputs.py", "_resolve_analysis_window_for_processing", namespace)
     validate = _load_function("src/Main_App/gui/processing_inputs.py", "validate_inputs", namespace)
     return validate, host, proposal, namespace, timeline, manifest
 
