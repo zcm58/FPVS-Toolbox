@@ -2351,3 +2351,29 @@ def test_parallel_worker_override_warning_allows_save_on_yes(tmp_path, qtbot, mo
 
     reloaded = Project.load(project.project_root)
     assert reloaded.preprocessing["max_parallel_workers_override"] == 6
+
+
+def test_experimental_ram_preload_toggle_is_saved_per_project(tmp_path, qtbot, monkeypatch):
+    os.environ["XDG_CONFIG_HOME"] = str(tmp_path)
+    project = _prep_project(tmp_path)
+
+    QApplication.instance() or QApplication([])
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win.loadProject(project)
+    monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: None)
+
+    draft = SettingsDialog(win.settings, win, project)
+    qtbot.addWidget(draft)
+    assert draft.experimental_ram_preload_check.isChecked() is False
+    draft.experimental_ram_preload_check.setChecked(True)
+    draft.reject()
+    assert Project.load(project.project_root).preprocessing["experimental_ram_preload"] is False
+
+    saved = SettingsDialog(win.settings, win, project)
+    qtbot.addWidget(saved)
+    saved.experimental_ram_preload_check.setChecked(True)
+    saved._save()
+
+    reloaded = Project.load(project.project_root)
+    assert reloaded.preprocessing["experimental_ram_preload"] is True

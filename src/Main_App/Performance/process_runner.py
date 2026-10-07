@@ -1857,6 +1857,7 @@ def _run_full_pipeline_for_file(
             stage = "load"
             logger.debug("[PIPELINE STAGE] file=%s stage=load_start", file_path.name)
             section_started = time.perf_counter()
+            ram_preload = settings.get("experimental_ram_preload", False) is True
             raw = load_eeg_file(
                 _App(),
                 str(file_path),
@@ -1867,6 +1868,7 @@ def _run_full_pipeline_for_file(
                     "electrode_mapping_profile"
                 ),
                 electrode_montage=settings.get("electrode_montage"),
+                **({"preload_in_memory": True} if ram_preload else {}),
             )
             _record_timing("load", section_started)
             if raw is None:

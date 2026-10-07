@@ -1256,6 +1256,7 @@ def _scan_kurtosis_review_serial(
                     stim_channel=stim_channel,
                     electrode_mapping_profile=settings.get("electrode_mapping_profile"),
                     electrode_montage=BIOSEMI64_MONTAGE_ID,
+                    **({"preload_in_memory": True} if settings.get("experimental_ram_preload") is True else {}),
                 )
             elif progress:
                 progress(f"Using preloaded recording {path.name}", index - 1, total)

@@ -110,6 +110,8 @@ _GEOMETRY_INDEPENDENT_EXCLUSION_REASONS = frozenset(
 )
 _DOWNSTREAM_ONLY_PREPROCESSING_KEYS = frozenset(
     {
+        # Loader storage changes neither EEG values nor processing identity.
+        "experimental_ram_preload",
         "interpolation_burden_review_decisions",
         # These describe how a detector choice was obtained, not the signal
         # transformation. The effective mode remains fingerprinted separately.

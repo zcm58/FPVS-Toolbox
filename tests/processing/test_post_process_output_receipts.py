@@ -106,6 +106,22 @@ def test_current_run_receipt_links_atomic_workbook_and_exact_span(tmp_path):
     }
 
 
+def test_single_session_receipt_uses_registered_participant_not_raw_filename(tmp_path):
+    app = _app(tmp_path, _epochs())
+    del app.settings["_fpvs_recording_id"]
+    app.settings["_fpvs_participant_id"] = "P11"
+    app.settings["output_recording_stem"] = "P11"
+    app.data_paths = [str(tmp_path / "SC_P11.bdf")]
+
+    post_process(app, ["Faces"])
+
+    receipt = app.export_receipts[0]
+    assert receipt["recording_id"] == "P11"
+    assert receipt["participant_id"] == "P11"
+    assert {item["recording_id"] for item in receipt["finite_integrity"]} == {"P11"}
+    assert receipt["path"].endswith("P11_Faces_Results.fpvs")
+
+
 def test_512_hz_export_preserves_full_spectra_and_calculated_snr(tmp_path):
     from Main_App.io.result_manifest import read_result_manifest
 

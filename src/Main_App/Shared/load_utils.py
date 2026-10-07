@@ -689,19 +689,25 @@ def load_eeg_file(
     electrode_montage: Optional[str] = None,
     *,
     preload_path: str | Path | None = None,
+    preload_in_memory: bool = False,
 ) -> Optional[mne.io.BaseRaw]:
-    """Load an EEG file with disk-backed memmap and apply montage without resampling.
+    """Load an EEG file and apply montage without resampling.
 
     A run-owned caller may supply a new absolute ``preload_path`` inside its
     private temporary directory. That caller owns the Raw and file cleanup.
     Existing destinations are never overwritten through this opt-in path.
+    Experimental in-memory preloading creates no full-recording memmap.
     """
+    if preload_in_memory and preload_path is not None:
+        raise ValueError("RAM preloading cannot use a disk preload path.")
     ext = os.path.splitext(filepath)[1].lower()
     base = os.path.basename(filepath)
     app.log(f"[LOADER START] {base}: ext='{ext}'")
     raw: Optional[mne.io.BaseRaw] = None
     try:
-        if preload_path is None:
+        if preload_in_memory:
+            memmap_path = None
+        elif preload_path is None:
             memmap_dir = _memmap_dir_for_pid()
             memmap_path = str(memmap_dir / (Path(filepath).stem + "_raw.dat"))
         else:
@@ -733,6 +739,7 @@ def load_eeg_file(
             f"[LOADER DEBUG] {base}: stim='{stim_name}' "
             f"ref_pair={ref_pair} montage='{resolved_montage}' "
             f"mapping_profile='{resolved_mapping_profile}' "
+            f"preload_mode='{'ram' if preload_in_memory else 'disk'}' "
             f"memmap_path='{memmap_path}'"
         )
 
@@ -785,7 +792,7 @@ def load_eeg_file(
                     )
                     raw = mne.io.read_raw_bdf(
                         filepath,
-                        preload=memmap_path,
+                        preload=True if preload_in_memory else memmap_path,
                         stim_channel=stim_name if stim_name else "Status",
                         include=include_channels,
                         verbose=False,

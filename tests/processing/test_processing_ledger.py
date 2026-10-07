@@ -152,6 +152,21 @@ def test_detector_choice_provenance_does_not_change_processing_fingerprint(
     )
 
 
+def test_ram_preload_storage_mode_does_not_change_processing_fingerprint(tmp_path) -> None:
+    project, _info = _project_with_raw(tmp_path)
+    settings = _settings()
+    disk_fingerprint = build_processing_fingerprint(project, settings, project.event_map)
+
+    project.preprocessing = {**project.preprocessing, "experimental_ram_preload": True}
+    ram_fingerprint = build_processing_fingerprint(
+        project,
+        {**settings, "experimental_ram_preload": True},
+        project.event_map,
+    )
+
+    assert ram_fingerprint == disk_fingerprint
+
+
 def test_experimental_auto_all_kurtosis_changes_processing_fingerprint(tmp_path) -> None:
     project, _info = _project_with_raw(tmp_path)
     settings = {**_settings(), "kurtosis_auto_interpolate_all": False}

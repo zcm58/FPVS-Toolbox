@@ -84,6 +84,7 @@ def _panel(tmp_path, mapping):
         electrode_montage_combo=_Combo(["biosemi64"], "biosemi64"),
         electrode_mapping_profile_combo=_Combo([ANATOMICAL, AB], mapping),
         preproc_edits=[edit(defaults[key]) for key in canonical],
+        experimental_ram_preload_check=check(defaults["experimental_ram_preload"]),
         line_noise_filter_enabled_check=check(False),
         kurtosis_auto_interpolate_all_check=check(True),
         line_noise_frequency_combo=_Combo([50, 60], 60),

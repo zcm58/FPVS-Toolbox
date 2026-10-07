@@ -117,8 +117,17 @@ original recordings, exports, or the repository's MNE/fsaverage cache.
   exclusion warning and returns `None`, while the process runner reports the
   file as `status="excluded"` instead of a processing error.
 - BDF files load through `mne.io.read_raw_bdf(...)`.
-- The normal processing loader remains disk-preloaded and unchanged. Only the
-  explicit preflight context uses `preload=False` for on-demand condition reads.
+- Raw BDF loading remains disk-preloaded by default. A project-only,
+  default-off experimental Settings > Preprocessing switch uses MNE
+  `preload=True` for preflight QC, interactive QC prefetch or its scanner
+  fallback, and processing cache misses. It creates no full-recording memmap;
+  a memory allocation failure in the ordinary loader is a load failure, never
+  a silent fallback to disk. RAM QC prefetch is bounded to 25% of available
+  memory and releases its buffers at the existing exclusive handoff/cleanup
+  points. Preprocessed FIF cache hits and the separate lazy preflight context
+  retain their established loading behavior.
+- Only the explicit preflight context uses `preload=False` for on-demand
+  condition reads.
 - Preflight keeps ordinary condition intervals in RAM. An interval exceeding
   256 MiB is copied in 10-second reads to an automatically removed,
   condition-only float64 temporary memmap; the complete BDF is never preloaded
@@ -131,6 +140,14 @@ original recordings, exports, or the repository's MNE/fsaverage cache.
   and per-file cleanup use this same owner; an existing guessed PID directory
   is never reused. Cleanup rejects redirected containers and retains live maps.
   Dead-process cleanup recognizes both historical and private PID names.
+- The RAM switch is an execution/storage choice and must not change the
+  processing fingerprint or preprocessed-Raw cache key. Confirm in a visible
+  1280x900 project Settings session that the switch is visible below montage
+  controls, starts off, Cancel discards it,
+  Save persists it for that project, and a cache-miss run uses RAM only while
+  enabled. Loader logs report `preload_mode='ram'` or `'disk'`. Check that the
+  QC prefetch creates no `qc-source-*` disk staging
+  directory in RAM mode. Qt execution remains CI-only locally.
 - Loading does not resample data.
 - Before either full or reduced loading, the loader performs a header-only BDF
   read and validates the complete acquisition geometry contract. A reduced

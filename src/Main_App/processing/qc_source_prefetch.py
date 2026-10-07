@@ -1,6 +1,6 @@
 """Run-owned source prefetch between interactive QC and kurtosis preparation.
 
-Only the loader's unmodified, disk-backed Raw is retained. Participant
+Only the loader's unmodified Raw is retained. Participant
 exclusions gate speculative work; a recording is lent once to an exclusive
 consumer, with scientific review choices and processing remaining downstream.
 The producer and final cleanup must run outside the GUI thread.
@@ -18,6 +18,8 @@ import shutil
 import tempfile
 from threading import Condition, Event
 from typing import Any
+
+import psutil
 
 from Main_App.io import load_utils
 from Main_App.io.eeg_geometry import BIOSEMI64_MONTAGE_ID
@@ -123,6 +125,7 @@ class QcSourcePrefetch:
     ) -> None:
         self._project_root = Path(project_root)
         self._settings = _loader_settings(settings)
+        self._ram_preload = settings.get("experimental_ram_preload", False) is True
         self._excluded_participants = {
             value.casefold() for value in normalize_manual_excluded_participants(
                 settings.get("manual_excluded_participants")
@@ -153,7 +156,7 @@ class QcSourcePrefetch:
         self._resolved_root: Path | None = None
 
     def run(self) -> None:
-        """Prepare eligible sources without allocating a recording-sized copy."""
+        """Prepare eligible sources without making a second recording-sized copy."""
         with self._condition:
             if self._started or self._closed:
                 return
@@ -165,13 +168,18 @@ class QcSourcePrefetch:
                         or not any(entry.status == "pending" for entry in self._entries.values())):
                     return
             root = self._project_root.resolve(strict=True)
-            parent = checked_path(root / ".fpvs_processing", root)
-            parent.mkdir(parents=True, exist_ok=True)
             self._resolved_root = root
-            # Explicit cleanup avoids a TemporaryDirectory finalizer deleting
-            # through a redirected path after our containment check rejected it.
-            self._run_directory = Path(tempfile.mkdtemp(prefix="qc-source-", dir=parent))
-            checked_path(self._run_directory, root)
+            if self._ram_preload:
+                self._max_bytes = min(
+                    self._max_bytes, int(psutil.virtual_memory().available * 0.25)
+                )
+            else:
+                parent = checked_path(root / ".fpvs_processing", root)
+                parent.mkdir(parents=True, exist_ok=True)
+                # Explicit cleanup avoids a TemporaryDirectory finalizer deleting
+                # through a redirected path after our containment check rejected it.
+                self._run_directory = Path(tempfile.mkdtemp(prefix="qc-source-", dir=parent))
+                checked_path(self._run_directory, root)
             for index, entry in enumerate(self._entries.values()):
                 self.maintain()
                 if self._cancelled.is_set():
@@ -205,17 +213,23 @@ class QcSourcePrefetch:
             estimate = int(identity[1]) * 4
             with self._condition:
                 available_budget = self._max_bytes - self._retained_bytes
-            available_disk = max(0, shutil.disk_usage(self._run_directory).free - _DISK_RESERVE_BYTES)
-            if estimate > min(available_budget, available_disk):
+            if self._ram_preload:
+                available_storage = int(psutil.virtual_memory().available * 0.25)
+            else:
+                available_storage = max(
+                    0, shutil.disk_usage(self._run_directory).free - _DISK_RESERVE_BYTES
+                )
+            if estimate > min(available_budget, available_storage):
                 return
             source_digest = _source_sha256(entry.path, lambda: self._entry_cancelled(entry))
             if (source_digest is None or _source_identity(entry.path) != identity
                     or self._entry_cancelled(entry)):
                 return
-            entry.preload_path = self._run_directory / f"{index:06d}_raw.dat"
+            if not self._ram_preload:
+                entry.preload_path = self._run_directory / f"{index:06d}_raw.dat"
             raw = load_utils.load_eeg_file(
                 _LoaderLog(), str(entry.path), **self._settings,
-                preload_path=entry.preload_path,
+                **({"preload_in_memory": True} if self._ram_preload else {"preload_path": entry.preload_path}),
             )
             entry.raw = raw
             if raw is None:
@@ -223,9 +237,10 @@ class QcSourcePrefetch:
             data = getattr(raw, "_data", None)
             entry.mmap = getattr(data, "_mmap", None)
             entry.size_bytes = int(getattr(data, "nbytes", 0))
-            # Keep only actual disk-backed results; unsupported loader states
-            # fall back instead of silently retaining whole recordings in RAM.
-            if (entry.mmap is None or self._entry_cancelled(entry)
+            # Keep only the requested storage mode; unsupported loader states
+            # fall back instead of silently switching storage modes.
+            wrong_storage = (entry.mmap is not None) if self._ram_preload else (entry.mmap is None)
+            if (wrong_storage or entry.size_bytes <= 0 or self._entry_cancelled(entry)
                     or _source_sha256(entry.path, lambda: self._entry_cancelled(entry)) != source_digest
                     or _source_identity(entry.path) != identity):
                 return
@@ -322,7 +337,8 @@ class QcSourcePrefetch:
     ) -> Any | None:
         """Wait cooperatively for this source and transfer it at most once."""
         try:
-            if _loader_settings(settings) != self._settings:
+            if (_loader_settings(settings) != self._settings
+                    or (settings.get("experimental_ram_preload", False) is True) != self._ram_preload):
                 return None
         except (TypeError, ValueError, OverflowError):
             return None

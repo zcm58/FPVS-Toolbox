@@ -294,6 +294,7 @@ _FIELDS: tuple[_Field, ...] = (
         0,
         _INT,
     ),
+    _Field("experimental_ram_preload", ("experimental_ram_preload",), False, _BOOL),
     _Field(
         "harmonic_selection_policy",
         ("harmonic_selection_policy", "dv_policy_name", "bca_harmonic_policy"),

@@ -230,9 +230,11 @@ def _configure_active_scan(
     return captured
 
 
+@pytest.mark.parametrize("ram_preload", [False, True])
 def test_scan_validates_raw_and_limits_evidence_to_current_conditions(
     tmp_path,
     monkeypatch,
+    ram_preload,
 ) -> None:
     path = (tmp_path / "P01_visit-1.bdf").resolve()
     path.touch()
@@ -244,6 +246,7 @@ def test_scan_validates_raw_and_limits_evidence_to_current_conditions(
         [_info(path, "P01", "P01__visit-1")],
         _settings(
             manual_excluded_participant_conditions={"p01": ["faces"]},
+            experimental_ram_preload=ram_preload,
         ),
         event_map={"Faces": 1, "Objects": 2},
         reviewed_event_plans_by_file={str(path): {"reviewed": True}},
@@ -301,6 +304,7 @@ def test_scan_validates_raw_and_limits_evidence_to_current_conditions(
     loader_kwargs = captured["loader_calls"][0][1]
     assert loader_kwargs["electrode_montage"] == BIOSEMI64_MONTAGE_ID
     assert loader_kwargs["first_n_channels"] == len(BIOSEMI64_CHANNELS)
+    assert loader_kwargs.get("preload_in_memory", False) is ram_preload
     geometry_kwargs = captured["geometry"][1]
     assert geometry_kwargs["expected_retained_channels"] == BIOSEMI64_CHANNELS
     assert geometry_kwargs["require_runtime_identity"] is True

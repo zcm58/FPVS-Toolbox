@@ -4,6 +4,43 @@
 
 Active. This is the release ledger for the first v3 release candidate.
 
+RAM-preload follow-up on 2026-10-06: the project-only, default-off Experimental
+RAM preload switch in Settings > Preprocessing now passes through ordinary
+processing, preflight QC, kurtosis scanning and source prefetch. Disk loading
+remains the default. RAM prefetch creates no staging directory, caps retained
+buffers at 25% of available memory, and keeps the existing exclusive handoff,
+source validation and cleanup rules. Scientific processing fingerprints and
+preprocessed-Raw cache keys exclude this storage choice. Review fixed a missing
+flag in the compatibility controller's local parameter snapshot. The associated
+single-session export receipt fix prefers the registered participant ID over a
+raw filename alias; explicit repeated-session recording IDs retain precedence.
+
+Implementation uses the existing `Main_App/Shared/load_utils.py`,
+`Shared/post_process.py`, `Performance/process_runner.py`,
+`gui/processing_inputs.py`, `gui/settings_panel.py`,
+`projects/preprocessing_settings.py` and `processing/` owners
+`preflight_qc.py`, `kurtosis_review_scan.py`, `qc_source_prefetch.py`,
+`processing_controller.py` and `processing_ledger.py`. Existing focused tests
+cover loading, flag propagation, exact preprocessing equality, cache identity,
+receipts and cleanup. Protected-path audits leave retired `Legacy_App` and
+`PySide6_App` paths untouched. Project-local prefetch paths continue to use the
+active `Project.project_root`; no hard-coded acquisition paths were added.
+
+The developer diagnostic `scripts/manual_diagnostics/benchmark_bdf_preload.py`
+creates only synthetic BDFs in its temporary directory. Four workers with four
+60-second recordings produced identical SHA-256 values after real preprocessing
+in disk and RAM modes. This small correctness probe is not a representative
+production speed estimate. GUI execution and installer rebuilding were not
+performed. The visible 1280x900 Save/Cancel/cache-miss smoke route is documented
+in `docs/agent/architecture/eeg-loading-contract.md`.
+
+Verification: the final `verify.py --scope repo --tier precommit` gate passed
+all audits, Ruff and compilation, then 5,393 tests (two skipped; 73 existing
+warnings). The focused RAM-loading/cache/receipt/settings bundle passed
+366 tests; two additional compatibility-controller cases passed. The synthetic
+probe used `benchmark_bdf_preload.py --seconds 60 --rounds 1`. Its buffers and
+recordings were temporary; no real research data was read or changed.
+
 Settings organization follow-up on 2026-09-25: seven purpose-based tabs now
 separate Quality Control, Experimental, and Application controls. Stats alpha
 is under Application > Analysis Defaults; Beta Tools is under Experimental.

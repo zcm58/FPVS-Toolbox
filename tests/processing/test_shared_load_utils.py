@@ -277,6 +277,43 @@ def test_shared_load_eeg_file_preserves_bdf_channel_and_montage_contract(monkeyp
     assert "BDF loaded successfully." in logs
 
 
+def test_shared_load_eeg_file_ram_preload_uses_no_disk_map(monkeypatch, tmp_path):
+    header_raw, loaded_raw = _raw(), _raw()
+    calls = []
+
+    def reader(_filepath, **kwargs):
+        calls.append(kwargs)
+        return header_raw if len(calls) == 1 else loaded_raw
+
+    monkeypatch.setattr(shared_load_utils.mne.io, "read_raw_bdf", reader)
+    monkeypatch.setattr(
+        shared_load_utils,
+        "_memmap_dir_for_pid",
+        lambda: pytest.fail("RAM mode created a disk preload directory"),
+    )
+
+    raw = load_utils.load_eeg_file(
+        _app([]), str(tmp_path / "sample.bdf"), preload_in_memory=True
+    )
+
+    assert raw is loaded_raw
+    assert calls[0]["preload"] is False
+    assert calls[1]["preload"] is True
+    assert loaded_raw.load_data_calls == 1
+    assert read_raw_biosemi64_geometry(raw) is not None
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_ram_preload_rejects_run_owned_disk_path(tmp_path):
+    with pytest.raises(ValueError, match="cannot use a disk preload path"):
+        load_utils.load_eeg_file(
+            _app([]),
+            str(tmp_path / "sample.bdf"),
+            preload_path=tmp_path / "raw.dat",
+            preload_in_memory=True,
+        )
+
+
 def test_run_owned_preload_preserves_geometry_and_uses_its_unique_path(monkeypatch, tmp_path):
     header_raw, loaded_raw = _raw(), _raw()
     calls = []

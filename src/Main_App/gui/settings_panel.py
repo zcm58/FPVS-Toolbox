@@ -466,6 +466,20 @@ class SettingsDialog(QDialog):
             else:
                 edit.setText(self.manager.get(sec, opt, fallback))
 
+        self.experimental_ram_preload_check = QCheckBox(
+            "Experimental: preload BDF recordings into RAM", self.group_preproc
+        )
+        self.experimental_ram_preload_check.setObjectName("experimental_ram_preload_check")
+        self.experimental_ram_preload_check.setToolTip(
+            "Use memory instead of temporary disk files when loading raw BDFs "
+            "for QC and processing. QC prefetch uses at most 25% of available "
+            "memory. Large recordings and parallel workers can exhaust RAM."
+        )
+        self.experimental_ram_preload_check.setChecked(
+            bool(project_pp.get("experimental_ram_preload", False)) if project_pp else False
+        )
+        self.experimental_ram_preload_check.setEnabled(self.project is not None)
+
         if project_pp is not None:
             line_noise_settings = project_pp
         else:
@@ -595,6 +609,7 @@ class SettingsDialog(QDialog):
         }
         grid.addWidget(mapping_label, montage_row, 2)
         grid.addWidget(self.electrode_mapping_profile_combo, montage_row, 3)
+        grid.addWidget(self.experimental_ram_preload_check, montage_row + 1, 0, 1, 4)
 
         layout.addWidget(self.group_preproc)
 
@@ -4262,6 +4277,7 @@ class SettingsDialog(QDialog):
         ]
         for edit, canonical in zip(self.preproc_edits, canonical_keys):
             values[canonical] = edit.text()
+        values["experimental_ram_preload"] = self.experimental_ram_preload_check.isChecked()
         values["line_noise_filter_enabled"] = (
             self.line_noise_filter_enabled_check.isChecked()
         )

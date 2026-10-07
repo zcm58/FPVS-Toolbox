@@ -103,6 +103,13 @@ The canonical file-level process runner is
 12. Finalize the preprocessing audit with `finalize_preproc_audit`.
 13. Clean up worker memory and temporary memmap paths.
 
+The default-off experimental RAM-preload setting changes how raw BDFs are
+materialized during QC and at step 3. It is passed from the project preprocessing
+manifest through the GUI's validated parameters to the workers and is excluded
+from scientific processing fingerprints and cache identity. Switching it does
+not change preprocessing order, rates, numerical methods, or exports. A cache
+hit skips BDF loading, so speed comparisons must use comparable cache misses.
+
 The loader and preprocessed-Raw cache must supply a validated canonical
 BioSemi64 runtime identity before raw QC or preprocessing continues. Cache
 identity includes the montage, mapping profile, geometry/coordinate

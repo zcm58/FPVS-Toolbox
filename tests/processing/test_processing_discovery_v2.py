@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 
 import Main_App.gui.processing_inputs as processing_inputs_module
+import Main_App.processing.processing_controller as processing_controller_module
 from Main_App.gui.processing_inputs import validate_inputs
 from Main_App.processing.processing_controller import (
     RawFileInfo,
@@ -942,3 +943,56 @@ def test_validate_inputs_cancelled_review_does_not_register_participants(tmp_pat
     saved = json.loads((project.project_root / "project.json").read_text(encoding="utf-8"))
 
     assert "participants" not in saved
+
+
+@pytest.mark.parametrize("ram_preload", [False, True])
+def test_compatibility_processing_forwards_project_ram_preload_without_changing_pipeline(
+    tmp_path, monkeypatch, ram_preload,
+) -> None:
+    project = Project.load(tmp_path / "project")
+    project.input_folder.mkdir(parents=True, exist_ok=True)
+    (project.input_folder / "P01.bdf").write_bytes(b"")
+    project.event_map = {"Faces": 1}
+    if ram_preload:
+        project.update_preprocessing({**project.preprocessing, "experimental_ram_preload": True})
+    else:
+        assert project.preprocessing["experimental_ram_preload"] is False
+    project.save()
+    raw = SimpleNamespace(info={"ch_names": [], "sfreq": 256})
+    stages = []
+    loader_calls = []
+    messages = []
+
+    def load(_host, path, **kwargs):
+        stages.append("load")
+        loader_calls.append((Path(path), kwargs))
+        return raw
+
+    def preprocess(current_raw, params, _log, _filename):
+        assert current_raw is raw
+        assert params["experimental_ram_preload"] is ram_preload
+        stages.append("preprocess")
+        return raw, 0
+
+    monkeypatch.setattr(processing_controller_module, "inspect_bdf_header", lambda _path: None)
+    monkeypatch.setattr(processing_controller_module, "load_eeg_file", load)
+    monkeypatch.setattr(processing_controller_module, "_promote_refs_to_eeg", lambda *_args: None)
+    monkeypatch.setattr(processing_controller_module, "begin_preproc_audit", lambda *_args: None)
+    monkeypatch.setattr(processing_controller_module, "finalize_preproc_audit", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(processing_controller_module, "perform_preprocessing", preprocess)
+    monkeypatch.setattr(processing_controller_module, "process_data", lambda *_args: stages.append("process"))
+    monkeypatch.setattr(processing_controller_module, "post_process", lambda *_args: stages.append("export"))
+    monkeypatch.setattr(processing_controller_module, "_animate_progress_to", lambda *_args: None)
+    host = SimpleNamespace(
+        currentProject=project, rb_batch=SimpleNamespace(isChecked=lambda: True),
+        log=lambda message, **_kwargs: messages.append(message),
+    )
+
+    processing_controller_module.start_processing(host)
+
+    assert stages == ["load", "preprocess", "process", "export"]
+    assert loader_calls == [(
+        (project.input_folder / "P01.bdf").resolve(),
+        {"preload_in_memory": True} if ram_preload else {},
+    )]
+    assert messages[-1] == "Processing complete"

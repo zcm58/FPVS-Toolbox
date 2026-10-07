@@ -89,8 +89,11 @@ def _run_identity_payload(app: Any, *, fallback_recording_id: str) -> dict[str, 
         "processing_fingerprint_version": str(
             settings.get("_fpvs_processing_fingerprint_version") or ""
         ),
+        # Single-session plans use the registered participant ID, not a raw filename alias.
         "recording_id": str(
-            settings.get("_fpvs_recording_id") or fallback_recording_id
+            settings.get("_fpvs_recording_id")
+            or settings.get("_fpvs_participant_id")
+            or fallback_recording_id
         ),
         "participant_id": str(
             settings.get("_fpvs_participant_id") or fallback_recording_id

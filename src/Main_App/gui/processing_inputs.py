@@ -737,6 +737,7 @@ def build_validated_params(host: Any) -> dict | None:
         "kurtosis_auto_interpolate_all": bool(normalized.get("kurtosis_auto_interpolate_all", False)),
         "stim_channel": stim_channel,
         "save_preprocessed_fif": False,
+        "experimental_ram_preload": bool(normalized["experimental_ram_preload"]),
         "event_id_map": event_map,
         "frequency_protocol": frequency_protocol,
         "frequency_protocol_fingerprint": frequency_protocol.fingerprint,

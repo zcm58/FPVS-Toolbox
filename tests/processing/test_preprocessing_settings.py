@@ -241,6 +241,13 @@ def test_negative_max_parallel_workers_override_raises():
         normalize_preprocessing_settings({"max_parallel_workers_override": -1})
 
 
+def test_experimental_ram_preload_defaults_off_and_normalizes_boolean():
+    assert normalize_preprocessing_settings({})["experimental_ram_preload"] is False
+    assert normalize_preprocessing_settings({"experimental_ram_preload": "true"})[
+        "experimental_ram_preload"
+    ] is True
+
+
 def test_auto_detect_removed_electrodes_boolean_aliases():
     normalized = normalize_preprocessing_settings({"detect_removed_electrodes": "false"})
     assert normalized["auto_detect_removed_electrodes"] is False
