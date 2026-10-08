@@ -105,6 +105,13 @@ After the required release checks, use an authenticated GitHub CLI (`gh`) to
 create a draft in the public repository. This example assumes a full installer
 without patches; set the actual release version and reviewed notes file:
 
+Enable GitHub immutable releases on `zcm58/FPVS-Toolbox-Releases` before future
+publication. Attach every asset to the draft before publishing; an immutable
+published release cannot receive replacement or additional assets. This setting
+applies to future releases and does not lock historical installers retrospectively.
+The maintainer enabled it on October 8, 2026 and verified `enabled: true`; no
+existing release, tag or asset changed during that setting update.
+
 ```powershell
 $releaseVersion = '3.0.0'
 $releaseRepo = 'zcm58/FPVS-Toolbox-Releases'
@@ -124,12 +131,21 @@ and confirm every patch named in the update JSON is present before publishing:
 
 ```powershell
 gh release edit "v$releaseVersion" --repo $releaseRepo --draft=false --latest
+gh release verify "v$releaseVersion" --repo $releaseRepo
+gh release verify-asset "v$releaseVersion" `
+  "installers/FPVSToolbox-$releaseVersion-setup.exe" --repo $releaseRepo
 ```
 
 The public tag is created on the public repository's `main` branch. Preserve
 the private source commit and authenticated ownership inventories in private
 release records. Do not upload source ZIPs, raw `.py` files, internal logs or
 inventories, and do not mirror private tags into the public repository.
+
+GitHub's immutable-release attestation binds the public tag and exact assets;
+the release-only tag does not identify the private source build. Retain the
+exact private source commit/build association in the release record. The local
+packaging scripts build artifacts and do not publish them. See
+[GitHub release verification](https://docs.github.com/en/code-security/how-tos/secure-your-supply-chain/secure-your-dependencies/verify-release-integrity).
 
 The 2026-10-07 repository migration does not publish 3.0.0. Historical installers
 remain unchanged; users of 2.1.2 and earlier need to manually install 3.0.0
