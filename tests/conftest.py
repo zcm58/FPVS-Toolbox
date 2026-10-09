@@ -76,7 +76,6 @@ _AUTO_MARK_RULES = {
         "worker",
     ),
     "plot_generator": ("plot_generator",),
-    "ratio": ("ratio_calculator",),
     "smoke": ("smoke",),
     "integration": ("e2e", "integration", "pipeline"),
 }

@@ -4,8 +4,8 @@
 
 Active. The processing foundation and shared processed-workbook index are
 implemented and covered by focused tests. Publication Maps now uses the shared
-index and explicit group selection. Ratio Calculator and Individual
-Detectability remain to be migrated without changes to their scientific
+index and explicit group selection. Individual Detectability remains to be
+migrated without changes to its scientific
 calculations or existing exports.
 
 Last reviewed against the repository on 2026-08-16.
@@ -237,7 +237,7 @@ the manifest assignment.
    while preserving its canonical-Excel-root and manifest-membership policies.
 6. [x] Add group-aware selection to Publication Maps without changing map
    calculations.
-7. [ ] Migrate Ratio Calculator and Individual Detectability from flat-folder
+7. [ ] Migrate Individual Detectability from flat-folder
    globbing to indexed records before offering per-group output controls.
 
 Every migrated figure/summary tool must follow the same group behavior unless
@@ -289,7 +289,7 @@ selection, and diagnostics only.
 - [x] Stats compatibility wrapper migrated to the shared index.
 - [x] Processing QC and LORETA cross-tool Stats dependencies removed.
 - [x] Plot Generator discovery migrated to the shared index.
-- [ ] Ratio Calculator and Individual Detectability migrated and given explicit
+- [ ] Individual Detectability migrated and given explicit
       group selection where appropriate. Publication Maps is complete.
 
 ## Verification

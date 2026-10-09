@@ -142,7 +142,7 @@ snapshot; Stats ROI resolution and aggregation, including
 `analysis/dv_policy_fixed_predefined.py`,
 `analysis/dv_policy_group_significant.py`, and legacy-compatible aggregation;
 analysis-ready workbook export; harmonic-selection input validation; Stats
-experimental QC, Plot Generator, Ratio Calculator, and any other consumer that
+experimental QC, Plot Generator, and any other consumer that
 independently derives ROI/normalized values; QC/freshness provenance; and
 Stats/reporting surfaces.
 Reuse QC-15's canonical BioSemi64 identity and do not add another

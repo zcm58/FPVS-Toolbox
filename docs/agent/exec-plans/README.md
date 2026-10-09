@@ -13,9 +13,6 @@ Keep plans compact and current. Record phase status, decisions, touched areas, r
 
 ## Planned Work
 
-- [Ratio Calculator removal](future/ratio-calculator-removal.md): keep the tool
-  available under Beta Tools for now, defer its specific defects during v3
-  stabilization, and remove it in a separately scoped future implementation.
 - [Unicorn Hybrid Black support](future/unicorn-hybrid-black-support.md): planned
   modular format/acquisition/montage/event loading with raw BDF and continuous
   BDF+ annotation support, explicit discontinuity gates, native 250 Hz, no Unicorn

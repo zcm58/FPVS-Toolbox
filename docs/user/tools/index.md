@@ -18,5 +18,4 @@ FPVS Toolbox warns that the tool is in beta and its features may change.
 | [Sensitivity Analysis](sensitivity-analysis.md) | Beta | Estimate the minimum detectable effect from manually entered design assumptions. |
 | [LORETA Visualizer](loreta-visualizer.md) | Beta | Inspect beta template-space estimates of FPVS response patterns. |
 | [Sequence Figure](sequence-figure.md) | Beta | Create a five-image FPVS stimulus-sequence diagram. |
-| [Ratio Calculator](ratio-calculator.md) | Beta | Explore paired condition A/B ratios for BCA, SNR, and z-score summaries. |
 | [Individual Detectability](individual-level-detectability.md) | Beta | Create participant-level summed-harmonic z-score and SNR panels. |

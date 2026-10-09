@@ -42,7 +42,6 @@ from Tools.Publication_Maps.gui import (
     PublicationMapsWindow,
 )
 from Tools.Publication_Maps.generation_outcome import PublicationMapsWorkerOutcome
-from Tools.Ratio_Calculator.gui import RatioCalculatorWindow
 from Tools.Sensitivity_Analysis.gui import SensitivityAnalysisWindow
 from Tools.Stats import StatsWindow
 
@@ -61,7 +60,6 @@ BETA_TOOL_ROLES = [
     "btn_sensitivity_analysis",
     "btn_loreta_visualizer",
     "btn_sequence_figure",
-    "btn_ratio",
     "btn_individual_detectability",
 ]
 BETA_TOOL_LABELS = [
@@ -70,7 +68,6 @@ BETA_TOOL_LABELS = [
     "Sensitivity Analysis",
     "LORETA Visualizer",
     "Sequence Figure",
-    "Ratio Calculator",
     "Individual Detectability",
 ]
 BETA_TOOL_ACCESSIBLE_NAMES = [
@@ -79,7 +76,6 @@ BETA_TOOL_ACCESSIBLE_NAMES = [
     "Sensitivity Analysis",
     "LORETA Visualizer",
     "Sequence Figure",
-    "Ratio Calculator",
     "Individual Detectability",
 ]
 
@@ -797,48 +793,6 @@ def test_sidebar_settings_embeds_in_main_workspace(
     assert selected_roles == ["btn_settings"]
 
     win._settings_page.reject()
-    qtbot.wait(20)
-
-    assert win.workspace_stack.currentWidget() is win.homeWidget
-    selected_roles = [
-        widget.property("role")
-        for widget in win.sidebar.findChildren(QWidget)
-        if widget.property("selected") is True
-    ]
-    assert selected_roles == ["btn_home"]
-
-
-def test_sidebar_ratio_calculator_embeds_in_main_workspace(
-    tmp_path: Path,
-    qtbot,
-    monkeypatch,
-) -> None:
-    win = _build_window(tmp_path, qtbot, monkeypatch, enable_beta_tools=True)
-    monkeypatch.setattr(win, "_acknowledge_beta_tool_warning", lambda _key: None)
-    project_root = tmp_path / "project"
-    project_root.mkdir()
-    win.currentProject = SimpleNamespace(
-        project_root=project_root,
-        input_folder=project_root,
-        subfolders={},
-    )
-    win.stacked.setCurrentIndex(1)
-    qtbot.wait(20)
-
-    qtbot.mouseClick(_sidebar_button(win, "btn_ratio"), Qt.LeftButton)
-    qtbot.wait(20)
-
-    assert isinstance(win.workspace_stack.currentWidget(), RatioCalculatorWindow)
-    assert win.workspace_stack.currentWidget().objectName() == "embedded_ratio_calculator_page"
-    assert win._ratio_calculator_page._project_root == project_root
-    selected_roles = [
-        widget.property("role")
-        for widget in win.sidebar.findChildren(QWidget)
-        if widget.property("selected") is True
-    ]
-    assert selected_roles == ["btn_ratio"]
-
-    qtbot.mouseClick(_sidebar_button(win, "btn_home"), Qt.LeftButton)
     qtbot.wait(20)
 
     assert win.workspace_stack.currentWidget() is win.homeWidget
@@ -1632,7 +1586,6 @@ def test_fhc_page_routes_post_processing_request_to_main_window(
         ("btn_sensitivity_analysis", "open_sensitivity_analysis"),
         ("btn_loreta_visualizer", "open_loreta_visualizer"),
         ("btn_sequence_figure", "open_sequence_figure"),
-        ("btn_ratio", "open_ratio_calculator"),
         ("btn_individual_detectability", "open_individual_detectability"),
     ],
 )

@@ -65,7 +65,7 @@ Primary areas:
 - `src/Main_App/Performance/`: process-runner and multiprocessing support for heavy processing.
 - `src/Main_App/Legacy_App/`: retired historical package. Do not recreate it; active code belongs in purpose-based `Main_App` packages.
 - `src/Main_App/PySide6_App/`: retired historical package designation. Do not recreate it; PySide6 runtime code now lives under purpose-based `Main_App` packages.
-- `src/Tools/`: embedded GUI tools for preprocessing, plotting, ratios,
+- `src/Tools/`: embedded GUI tools for preprocessing, plotting,
   statistics, detectability, scalp maps, sequence figures, and the LORETA
   Visualizer. User-facing tool entry points are routed through the Main App GUI.
 - `src/Tools/Sequence_Figure/`: embedded publication-figure tool for drawing FPVS stimulus-sequence illustrations from manually selected stimulus images. Its renderer is widget-free and exports PNG/PDF/SVG figures; it is separate from the SNR Plot Generator.

@@ -10,6 +10,8 @@ import pytest
 from Main_App.io.condition_data import (
     ConditionDataError,
     condition_manifest_frame,
+    read_condition_sheet,
+    read_condition_sheet_header,
     write_condition_companion,
 )
 from Tools.Plot_Generator.source_identity import (
@@ -24,7 +26,6 @@ from Tools.Publication_Maps.metrics import (
 )
 from Tools.Publication_Maps.models import PublicationMapInputError, WorkbookEntry
 from Tools.Publication_Maps.xlsx_metric_reader import read_metric_sheet_selected_columns
-from Tools.Ratio_Calculator.compute import read_participant_file
 from Tools.Stats.io.excel_io import safe_read_excel
 
 
@@ -55,10 +56,12 @@ def test_all_compact_metric_readers_preserve_saved_values_without_excel_copies(
         raise AssertionError("Compact values must not be read through pandas Excel")
 
     monkeypatch.setattr(pd, "read_excel", no_excel_values)
-    snr, z, bca, columns = read_participant_file(workbook)
-    assert columns == ["1.2000_Hz", "2.4000_Hz"]
-    for name, actual in (("SNR", snr), ("Z Score", z), ("BCA (uV)", bca)):
-        pd.testing.assert_frame_equal(actual, frames[name], check_exact=True)
+    for name, expected in frames.items():
+        assert read_condition_sheet_header(workbook, sheet_name=name) == [
+            "Electrode", "1.2000_Hz", "2.4000_Hz",
+        ]
+        compact = read_condition_sheet(workbook, sheet_name=name)
+        pd.testing.assert_frame_equal(compact, expected, check_exact=True)
         scalp = read_metric_sheet_selected_columns(
             workbook, sheet_name=name,
             required_columns=["Electrode", "1.2000_Hz", "9.6000_Hz"],
@@ -94,8 +97,8 @@ def test_cached_compact_values_and_publication_identities_reject_damaged_compani
         companion.write_bytes(data)
     with pytest.raises(ConditionDataError, match="[Cc]ompanion"):
         safe_read_excel(workbook, sheet_name="BCA (uV)")
-    with pytest.raises(ValueError, match="[Cc]ompanion"):
-        read_participant_file(workbook)
+    with pytest.raises(ConditionDataError, match="[Cc]ompanion"):
+        read_condition_sheet(workbook, sheet_name="BCA (uV)")
     with pytest.raises(SNRPublicationError, match="[Cc]ompanion"):
         verify_source_snapshot_after_read(workbook, snapshot=snapshot)
     with pytest.raises(PublicationMapInputError, match="[Cc]ompanion"):

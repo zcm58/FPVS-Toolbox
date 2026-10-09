@@ -56,7 +56,6 @@ BETA_TOOL_SPECS = (
     ("btn_sensitivity_analysis", "Sensitivity Analysis", "sensitivity", "open_sensitivity_analysis"),
     ("btn_loreta_visualizer", "LORETA Visualizer", "loreta", "open_loreta_visualizer"),
     ("btn_sequence_figure", "Sequence Figure", "sequence", "open_sequence_figure"),
-    ("btn_ratio", "Ratio Calculator", "ratio", "open_ratio_calculator"),
     ("btn_individual_detectability", "Individual Detectability", "detectability", "open_individual_detectability"),
 )
 

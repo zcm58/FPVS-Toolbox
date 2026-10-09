@@ -286,7 +286,7 @@ application shell navigation. Inside the application shell, `workspace_stack`
 switches the right-hand workspace content while preserving the persistent
 sidebar and project header. The preprocessing page remains `homeWidget`; the
 Settings page, Standard FPVS Screening, Sensitivity Analysis, SNR Plot Generator,
-Free Harmonic Clustering Analysis, Individual Detectability, and Ratio Calculator
+Free Harmonic Clustering Analysis and Individual Detectability
 are embedded in this workspace stack.
 
 The Settings page has seven tabs: **Preprocessing**, **Protocol**, **Harmonics**,
@@ -378,8 +378,7 @@ pairs plus the existing montage and custom-preset keys. After a committed ROI
 change or rollback, Settings refreshes the cached Stats and SNR pages
 independently. SNR reloads through `Main_App.processing.roi_settings`, preserves
 a still-valid selected ROI, and otherwise returns to `(All ROIs)`; active
-worker requests remain snapshotted. Ratio Calculator retains its existing
-signature-based live refresh.
+worker requests remain snapshotted.
 
 The Protocol tab edits only the active project's versioned FPVS protocol. It
 accepts a presentation rate plus either an every-N-stimuli recurrence or a
@@ -495,7 +494,7 @@ covered in CI; local checks exercise the routing without loading Qt.
 
 The sidebar and Tools menu share the default tool list: Free Harmonic Clustering
 Analysis and SNR Plots, in that order. Scalp Maps, Standard FPVS Screening, Sensitivity
-Analysis, LORETA Visualizer, Sequence Figure, Ratio Calculator, and Individual
+Analysis, LORETA Visualizer, Sequence Figure, and Individual
 Detectability are beta tools: they remain
 embedded workspace pages, but the sidebar appends them beneath a visible
 **Beta Tools** subsection and Tools adds a matching submenu only when the global
@@ -631,8 +630,8 @@ App shell verifies that identity against the active project and owns the call
 to the existing post-processing workflow. Tool pages must not start their own
 post-processing workers.
 
-`ActionRow` is now used by the main shell, Settings, Plot Generator, Ratio
-Calculator, Stats, and focused dialogs.
+`ActionRow` is now used by the main shell, Settings, Plot Generator, Stats,
+and focused dialogs.
 When migrating more action rows, preserve button labels, order, variants,
 enabled states, signal connections, and object names, then add focused smoke
 coverage for the touched surface.
@@ -648,7 +647,7 @@ complex for one page; content without tabs retains the original single-browser
 dialog.
 
 `PathPickerRow` is used by Plot Generator and Individual Detectability.
-`StatusBanner` is used by Stats, Ratio Calculator, and Individual Detectability.
+`StatusBanner` is used by Stats and Individual Detectability.
 Keep path defaults, filters, settings keys,
 project-root behavior, and file-dialog Cancel no-op behavior owned by the
 surface workflow; the shared widgets are presentation contracts, not I/O

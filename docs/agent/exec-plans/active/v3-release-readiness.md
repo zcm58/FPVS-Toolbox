@@ -4,6 +4,20 @@
 
 Active. This is the release ledger for the first v3 release candidate.
 
+Tool inventory follow-up on 2026-10-09: the sidebar and Tools menu now share
+exactly six beta surfaces through `Main_App.gui.sidebar.BETA_TOOL_SPECS`.
+Runtime, icon, test, verification, and documentation inventories agree.
+Project data, existing generated results, processing, and statistical methods
+retain their existing behavior.
+
+Verification: the focused GUI gate passed 598 tests; the repository audit
+bundle passed 25. The broad non-Qt precommit gate passed all audits, Ruff,
+compilation, and 5,395 tests with 24 skips using a fresh short non-temp fixture
+root. The strict documentation build passed. Registered GUI coverage remains
+CI-only. Visible smoke: toggle Beta Tools and restart, verify the sidebar and
+Tools menu contain the same supported inventory, and open the remaining tools.
+No local Qt workflow ran and no installer was rebuilt.
+
 Priority-bug follow-up on 2026-10-09: condition names that collapse to the same
 case-insensitive output name after numeric-prefix stripping now fail draft
 validation, expected-plan creation, processing planning, direct worker startup,
@@ -19,11 +33,6 @@ context on open while retaining manual inputs and immutable running-export
 specifications; a project-context version prevents old results reattaching even
 after an A-to-B-to-A switch. Focused GUI/updater architecture and tool-local
 instructions record the visible smoke paths; local Qt execution remains unrun.
-
-Ratio Calculator stays in the centralized opt-in Beta Tools registration.
-Its same-label ratio and configured-data-root defects are explicitly deferred
-for [future removal](../future/ratio-calculator-removal.md); no Ratio runtime
-implementation was changed.
 
 Verification: focused gates passed processing (2,125 tests; six skips), GUI
 (597), project I/O (431; 12 skips), updates (435; four skips), and Sequence
@@ -480,8 +489,8 @@ processing plus two default tools:
 - SNR Plots.
 
 The following tools remain opt-in beta surfaces: Scalp Maps, Standard FPVS
-Screening, Sensitivity Analysis, LORETA Visualizer, Sequence Figure, Ratio
-Calculator, and Individual Detectability. They must open safely from the
+Screening, Sensitivity Analysis, LORETA Visualizer, Sequence Figure, and
+Individual Detectability. They must open safely from the
 packaged app, but finishing or promoting them is not a v3.0.0 requirement.
 
 "Default" is a support tier, not a universal scientific-validation claim.
@@ -730,7 +739,7 @@ threshold/p-value rules, or relevant numerical dependencies change.
   permutation workflows and reviewed powered null-calibration evidence.
 - Embedded PySide6 tool workflows with centralized default/beta navigation.
 - A new opt-in beta suite: Scalp Maps, Standard FPVS Screening, Sensitivity
-  Analysis, LORETA Visualizer, Sequence Figure, Ratio Calculator, and
+  Analysis, LORETA Visualizer, Sequence Figure, and
   Individual Detectability.
 
 ### Minor feature inventory over v2.1.2

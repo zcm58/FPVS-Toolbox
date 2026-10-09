@@ -43,10 +43,6 @@ _SIDEBAR_ICON_PATHS = {
     "chart": """
         <path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>
     """,
-    "ratio": """
-        <circle cx="12" cy="6" r="1.5"/><path d="M6 12h12"/>
-        <circle cx="12" cy="18" r="1.5"/>
-    """,
     "detectability": """
         <circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/>
         <path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>
@@ -169,11 +165,6 @@ def sidebar_icon(kind: str, size: int = 20) -> QIcon:
     """
     del size
     return QIcon(_SidebarSvgIconEngine(kind))
-
-
-@lru_cache(maxsize=4)
-def division_icon(size: int = 16) -> QIcon:
-    return sidebar_icon("ratio", size)
 
 
 @lru_cache(maxsize=4)

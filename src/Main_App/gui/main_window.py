@@ -50,7 +50,6 @@ from Main_App.workers.mp_env import (
 from Tools.Individual_Detectability.main_window import IndividualDetectabilityWindow
 from Tools.Plot_Generator.plot_generator import PlotGeneratorWindow
 from Tools.Publication_Maps.gui import PublicationMapsWindow
-from Tools.Ratio_Calculator.gui import RatioCalculatorWindow
 from Tools.Sensitivity_Analysis.gui import SensitivityAnalysisWindow
 from Tools.Sequence_Figure.gui import SequenceFigureWindow
 from Tools.Stats import StatsWindow as PysideStatsWindow
@@ -660,25 +659,6 @@ class MainWindow(QMainWindow):
             page.refresh_lmm_seed()
         self.workspace_stack.setCurrentWidget(page)
         self._set_sidebar_selection("btn_sensitivity_analysis")
-
-    def _ensure_ratio_calculator_page(self) -> RatioCalculatorWindow:
-        page = getattr(self, "_ratio_calculator_page", None)
-        if page is None:
-            project_root = None
-            project = getattr(self, "currentProject", None)
-            if project is not None and hasattr(project, "project_root"):
-                project_root = str(project.project_root)
-            page = RatioCalculatorWindow(parent=self, project_root=project_root)
-            page.setObjectName("embedded_ratio_calculator_page")
-            self.workspace_stack.addWidget(page)
-            self._ratio_calculator_page = page
-        return page
-
-    def open_ratio_calculator(self) -> None:
-        if hasattr(self, "stacked"):
-            self.stacked.setCurrentIndex(1)
-        self.workspace_stack.setCurrentWidget(self._ensure_ratio_calculator_page())
-        self._set_sidebar_selection("btn_ratio")
 
     def _ensure_individual_detectability_page(self) -> IndividualDetectabilityWindow:
         page = getattr(self, "_individual_detectability_page", None)

@@ -24,10 +24,6 @@ Primary paths:
   `_Worker` QObject shell, worker config, Excel input/data collection helpers,
   ROI/group aggregation helpers, Matplotlib rendering,
   and manifest helpers.
-- `src/Tools/Ratio_Calculator/`: ratio calculator GUI, pipeline, exports,
-  and plots. `gui.py` keeps the public window facade while focused GUI mixins
-  own condition selection, section assembly, ROI state, participant state,
-  settings/validation, and run/status/log workflow.
 - `src/Tools/Individual_Detectability/`: detectability tool core, GUI, and worker.
 - `src/Tools/Sensitivity_Analysis/`: standalone manual sensitivity calculator
   for minimum detectable Cohen's dz, Cohen's f, or a simulation-based
@@ -552,5 +548,5 @@ python .agents/scripts/verify.py --scope stats --tier focused
 ```
 
 Run the affected tool scope as well when Stats changes cross into Publication
-Maps, Ratio Calculator, or Plot Generator. Stats window/layout pytest-qt tests
+Maps or Plot Generator. Stats window/layout pytest-qt tests
 are CI-only by default.

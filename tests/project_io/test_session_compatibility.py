@@ -42,11 +42,11 @@ def test_unmigrated_tool_gate_blocks_repeated_project(tmp_path: Path) -> None:
 
     reason = repeated_session_tool_block_reason(
         project_root,
-        tool_name="Ratio Calculator",
+        tool_name="Tool",
     )
 
     assert reason is not None
-    assert "Ratio Calculator" in reason
+    assert "Tool" in reason
     assert "prevents multiple visits" in reason
 
 
