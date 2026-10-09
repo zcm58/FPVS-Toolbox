@@ -35,6 +35,10 @@ from Main_App.projects.preprocessing_settings import (
     normalize_manual_excluded_recording_conditions,
     normalize_manual_excluded_recordings,
 )
+from Main_App.projects.grouping import (
+    GroupConfigurationError,
+    validate_condition_output_names,
+)
 
 if TYPE_CHECKING:
     from Main_App.processing.processing_ledger import (
@@ -1199,8 +1203,9 @@ def _validate_expected_event_map(
             "Each project condition requires a distinct onset code."
         )
     try:
+        validate_condition_output_names(labels)
         validate_protocol_condition_codes(protocol, codes)
-    except FrequencyProtocolError as exc:
+    except (FrequencyProtocolError, GroupConfigurationError) as exc:
         raise ExpectedRecordingConditionPlanError(str(exc)) from exc
 
 

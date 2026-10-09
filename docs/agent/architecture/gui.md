@@ -529,7 +529,24 @@ When the active project changes through create/open/import/path workflows, the
 main shell must return to Home and discard project-bound embedded page instances.
 Tools should be recreated from the new `currentProject` on the next sidebar
 open so stale project roots, default folders, and settings editors cannot
-survive a project switch.
+survive a project switch. Sequence Figure retains its manual image/label inputs
+and any running export; its cached page refreshes the project root, output
+default, and result-folder action on each open. An in-flight export keeps its
+original immutable specification and thread ownership through cleanup.
+
+Main-window close is deferred during processing, finalization, queued
+post-processing, a Sequence Figure export, and owned background-thread cleanup,
+without waiting on the UI thread.
+Visible smoke: start a disposable processing run and attempt Exit during the
+run and post-processing; confirm close is refused until completion or stop
+cleanup. Start a Sequence Figure export and attempt Exit and update installation;
+both must be refused through thread cleanup, then allowed when idle. Follow the
+tool-local project-switch smoke in `src/Tools/Sequence_Figure/AGENTS.md`.
+In the condition editor, enter `1 - Faces` and `2 - Faces` (then `2 - faces`);
+confirm the later row shows an output-name error and processing is disabled.
+Rename the second condition to `2 - Objects`, confirm validation clears, and
+verify the usual `Faces` and `Objects` output names in a disposable run.
+Local Qt execution remains CI-only without explicit safe-visible approval.
 
 The main shell default and minimum size is `1280x900` to provide enough
 workspace area for embedded tools without requiring individual pop-out windows.

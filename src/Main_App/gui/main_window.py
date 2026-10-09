@@ -18,7 +18,7 @@ from collections import deque
 import psutil
 
 # Qt / PySide6
-from PySide6.QtCore import QObject, QEvent, QTimer, Signal, Slot
+from PySide6.QtCore import QObject, QEvent, QThread, QTimer, Signal, Slot
 from PySide6.QtGui import QCloseEvent, QAction, QShowEvent  # noqa: F401
 from PySide6.QtWidgets import (
     QApplication,
@@ -707,11 +707,11 @@ class MainWindow(QMainWindow):
 
     def _ensure_sequence_figure_page(self) -> SequenceFigureWindow:
         page = getattr(self, "_sequence_figure_page", None)
+        project_root = None
+        project = getattr(self, "currentProject", None)
+        if project is not None and hasattr(project, "project_root"):
+            project_root = str(project.project_root)
         if page is None:
-            project_root = None
-            project = getattr(self, "currentProject", None)
-            if project is not None and hasattr(project, "project_root"):
-                project_root = str(project.project_root)
             page = SequenceFigureWindow(
                 parent=self.workspace_stack,
                 project_root=project_root,
@@ -719,6 +719,8 @@ class MainWindow(QMainWindow):
             page.setObjectName("embedded_sequence_figure_page")
             self.workspace_stack.addWidget(page)
             self._sequence_figure_page = page
+        else:
+            page.set_project_root(project_root)
         return page
 
     def open_sequence_figure(self) -> None:
@@ -1096,6 +1098,31 @@ class MainWindow(QMainWindow):
             )
             event.ignore()
             return
+        if (
+            getattr(self, "_run_active", False)
+            or getattr(self, "_pending_finalize", False)
+            or getattr(self, "_post_backlog", None)
+            or getattr(self, "_post_worker", None) is not None
+        ):
+            QMessageBox.information(
+                self,
+                "Processing In Progress",
+                "Finish the active run, or use Stop Processing when available "
+                "and wait for cleanup, before closing FPVS Toolbox.",
+            )
+            event.ignore()
+            return
+        sequence_page = getattr(self, "_sequence_figure_page", None)
+        has_active_generation = getattr(sequence_page, "has_active_generation", None)
+        if callable(has_active_generation) and has_active_generation():
+            QMessageBox.information(
+                self,
+                "Sequence Figure Export In Progress",
+                "Wait for the Sequence Figure export to finish before closing "
+                "FPVS Toolbox.",
+            )
+            event.ignore()
+            return
         plot_generator_page = getattr(self, "_plot_generator_page", None)
         if plot_generator_page is not None:
             has_active_generation = getattr(
@@ -1161,6 +1188,15 @@ class MainWindow(QMainWindow):
             )
             event.ignore()
             return
+        if any(thread.isRunning() for thread in self.findChildren(QThread)):
+            QMessageBox.information(
+                self,
+                "Background Work In Progress",
+                "Wait for active background work and cleanup to finish before "
+                "closing FPVS Toolbox.",
+            )
+            event.ignore()
+            return
         if not project_drafts.confirm_project_draft_exit(self):
             event.ignore()
             return
@@ -1174,10 +1210,6 @@ class MainWindow(QMainWindow):
         sensitivity_page = getattr(self, "_sensitivity_analysis_page", None)
         if sensitivity_page is not None:
             sensitivity_page.shutdown()
-        if self._post_worker and self._post_thread:
-            self._post_worker.stop()
-            self._post_thread.quit()
-            self._post_thread.wait(2000)
         super().closeEvent(event)
 
     def _update_start_enabled(self) -> None:

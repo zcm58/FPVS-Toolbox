@@ -26,6 +26,10 @@ def _host_has_active_work(host: QWidget) -> bool:
     # Do not start an install handoff while any child worker is still active.
     if any(_handle_is_active(thread) for thread in host.findChildren(QThread)):
         return True
+    sequence_page = getattr(host, "_sequence_figure_page", None)
+    has_active_generation = getattr(sequence_page, "has_active_generation", None)
+    if callable(has_active_generation) and has_active_generation():
+        return True
     if getattr(host, "_qc_source_prefetch_bridge", None) is not None:
         return True
     if getattr(host, "_frequency_domain_qc_save_thread", None) is not None:

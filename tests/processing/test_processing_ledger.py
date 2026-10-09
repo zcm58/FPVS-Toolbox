@@ -1341,6 +1341,59 @@ def test_expected_outputs_reject_unsafe_condition_folder(tmp_path) -> None:
         classify_processing_inputs(project, [info], _settings(), project.event_map)
 
 
+@pytest.mark.parametrize("labels", [
+    ("1 - Faces", "2 - Faces"),
+    ("1 - Faces", "2 - faces"),
+    ("Faces/Objects", "Faces-Objects"),
+])
+def test_expected_outputs_reject_condition_name_collisions_before_planning(
+    tmp_path, monkeypatch, labels,
+) -> None:
+    project, info = _project_with_raw(tmp_path)
+    project.event_map = {label: index + 1 for index, label in enumerate(labels)}
+    monkeypatch.setattr(
+        processing_ledger_module, "load_ledger",
+        lambda *_args: pytest.fail("Colliding condition names must fail before ledger reads."),
+    )
+
+    with pytest.raises(GroupConfigurationError, match="same output name"):
+        processing_ledger_module._expected_excel_paths(project, info, labels)
+
+    with pytest.raises(GroupConfigurationError, match="same output name"):
+        classify_processing_inputs(project, [info], _settings(), project.event_map)
+
+
+def test_distinct_prefixed_conditions_preserve_existing_output_names(tmp_path) -> None:
+    project, info = _project_with_raw(tmp_path)
+    project.event_map = {"1 - Faces": 1, "2 - Objects": 2}
+
+    plan = classify_processing_inputs(project, [info], _settings(), project.event_map)
+
+    assert [(path.parent.name, path.name) for path in plan.states[0].expected_outputs] == [
+        ("Faces", "P01_Faces_Results.fpvs"),
+        ("Objects", "P01_Objects_Results.fpvs"),
+    ]
+
+
+@pytest.mark.parametrize("labels", [
+    ("1 - Faces", "2 - Faces"),
+    ("1 - Faces", "2 - faces"),
+])
+def test_direct_pipeline_rejects_collisions_before_worker_setup(tmp_path, monkeypatch, labels):
+    monkeypatch.setattr(
+        process_runner, "_settings_for_file",
+        lambda *_args: pytest.fail("Colliding names must fail before worker setup or BDF loading."),
+    )
+
+    with pytest.raises(GroupConfigurationError, match="same output name"):
+        process_runner._run_full_pipeline_for_file(
+            Path("P01.bdf"), {}, {label: index + 1 for index, label in enumerate(labels)},
+            tmp_path, tmp_path,
+        )
+
+    assert not list(tmp_path.iterdir())
+
+
 def test_grouped_expected_outputs_require_group_id(tmp_path) -> None:
     project, info = _project_with_raw(tmp_path)
     project.groups = {

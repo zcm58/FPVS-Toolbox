@@ -59,6 +59,8 @@ class SequenceFigureWindow(QWidget):
         self._thread: QThread | None = None
         self._worker: SequenceFigureWorker | None = None
         self._last_result: SequenceFigureResult | None = None
+        self._project_context_version = 0
+        self._export_context_version = 0
         self._build_ui()
         self._apply_project_defaults()
 
@@ -186,6 +188,23 @@ class SequenceFigureWindow(QWidget):
         if figures_dir.exists() and figures_dir.is_dir():
             self._set_output_folder(figures_dir)
 
+    def set_project_root(self, project_root: str | None) -> None:
+        """Refresh project defaults without discarding manual inputs or a running export."""
+        root = Path(project_root).resolve() if project_root else None
+        if root == self._project_root:
+            return
+        self._project_root = root
+        self._project_context_version += 1
+        self._output_folder = ""
+        self.output_row.line_edit.clear()
+        self._last_result = None
+        self.open_btn.setEnabled(False)
+        self._apply_project_defaults()
+
+    def has_active_generation(self) -> bool:
+        """Retain the export guard until the owned thread finishes cleanup."""
+        return self._thread is not None
+
     def _select_image(self, condition: int, slot: int) -> None:
         start_dir = self._suggest_dialog_dir()
         file_path, _ = QFileDialog.getOpenFileName(
@@ -212,7 +231,8 @@ class SequenceFigureWindow(QWidget):
 
     def _suggest_dialog_dir(self) -> str:
         image_paths = [path for row in self._image_paths for path in row]
-        for path_text in [self._output_folder, *image_paths]:
+        project_folder = str(self._project_root) if self._project_root is not None else ""
+        for path_text in [self._output_folder, project_folder, *image_paths]:
             if path_text:
                 path = Path(path_text)
                 folder = path if path.is_dir() else path.parent
@@ -221,12 +241,15 @@ class SequenceFigureWindow(QWidget):
         return str(self._project_root) if self._project_root is not None else ""
 
     def _start_export(self) -> None:
+        if self.has_active_generation():
+            return
         spec = self._build_spec()
         if spec is None:
             return
         self.export_btn.setEnabled(False)
         self.export_btn.setText("Rendering...")
         self.open_btn.setEnabled(False)
+        self._export_context_version = self._project_context_version
 
         self._thread = QThread()
         self._worker = SequenceFigureWorker(spec)
@@ -288,25 +311,24 @@ class SequenceFigureWindow(QWidget):
             self.condition_tabs.setTabText(condition, text.strip() or f"Condition {condition + 1}")
 
     def _on_failed(self, message: str) -> None:
-        self.export_btn.setEnabled(True)
-        self.export_btn.setText(_EXPORT_BUTTON_TEXT)
         self.open_btn.setEnabled(self._last_result is not None)
         show_error(self, "Export Failed", message)
         self._worker = None
 
     def _on_finished(self, result: object) -> None:
-        self.export_btn.setEnabled(True)
-        self.export_btn.setText(_EXPORT_BUTTON_TEXT)
-        self.open_btn.setEnabled(True)
         self._worker = None
         if not isinstance(result, SequenceFigureResult):
             self._on_failed("Unexpected export result.")
             return
-        self._last_result = result
+        if self._export_context_version == self._project_context_version:
+            self._last_result = result
+        self.open_btn.setEnabled(self._last_result is not None)
         show_info(self, "Export Complete", _export_message(result))
 
     def _on_thread_finished(self) -> None:
         self._thread = None
+        self.export_btn.setEnabled(True)
+        self.export_btn.setText(_EXPORT_BUTTON_TEXT)
 
     def _open_output_folder(self) -> None:
         if not self._output_folder:

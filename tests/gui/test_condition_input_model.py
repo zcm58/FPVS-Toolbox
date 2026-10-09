@@ -29,3 +29,21 @@ def test_duplicate_marker_ids_are_not_reinterpreted_by_presentation_validation()
     mapping, errors = validate_condition_rows([("Faces", "1"), ("Objects", "1")])
     assert not errors
     assert mapping == {"Faces": 1, "Objects": 1}
+
+
+@pytest.mark.parametrize("labels", [
+    ("1 - Faces", "2 - Faces"),
+    ("1 - Faces", "2 - faces"),
+    ("Faces", "faces"),
+    ("Faces", "2-Faces"),
+])
+def test_condition_output_collisions_identify_the_later_name(labels):
+    rows = [(label, str(index + 1)) for index, label in enumerate(labels)]
+    mapping, errors = validate_condition_rows(rows)
+
+    assert mapping == {labels[0]: 1}
+    assert len(errors) == 1
+    assert errors[0].row == 1
+    assert errors[0].field == "label"
+    assert "output name" in errors[0].message
+    assert rows == [(labels[0], "1"), (labels[1], "2")]

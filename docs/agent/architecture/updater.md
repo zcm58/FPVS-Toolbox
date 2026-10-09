@@ -196,7 +196,9 @@ Before a public release, use a disposable Windows installation to confirm:
 - File > Check for Updates stays responsive during discovery/download,
   cancellation and retry; minimum dialog size and long status text fit.
 - Processing, export and QC block installation; normal close guards remain
-  effective. A second running Toolbox process prevents replacement.
+  effective. Sequence Figure's page-owned export thread also blocks handoff
+  through thread cleanup. Check install/Exit during export and retry after
+  completion. A second running Toolbox process prevents replacement.
 - A supported direct patch installs and restarts; an old installation takes
   the full installer and becomes eligible for the next supported patch.
 - Standalone Update & Repair works with the main runtime missing; a failed

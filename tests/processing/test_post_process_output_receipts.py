@@ -9,6 +9,7 @@ import pytest
 
 from Main_App.Shared.post_process import post_process
 from Main_App.processing.output_integrity import OutputIntegrityError
+from Main_App.projects.grouping import GroupConfigurationError
 from Main_App.projects.frequency_protocol import (
     EXPECTED_CYCLES_SOURCE_MANUAL,
     FrequencyProtocol,
@@ -104,6 +105,33 @@ def test_current_run_receipt_links_atomic_workbook_and_exact_span(tmp_path):
         "retained_eeg",
         "bca",
     }
+
+
+@pytest.mark.parametrize("labels", [
+    ("1 - Faces", "2 - Faces"),
+    ("1 - Faces", "2 - faces"),
+])
+def test_colliding_conditions_fail_before_metrics_or_existing_result_overwrite(
+    tmp_path, monkeypatch, labels,
+):
+    app = _app(tmp_path, _epochs())
+    app.preprocessed_data = {label: [object()] for label in labels}
+    previous = tmp_path / "Faces" / "P01__visit_1_Faces_Results.fpvs"
+    previous.parent.mkdir()
+    previous.write_bytes(b"previous-result")
+    monkeypatch.setattr(
+        "Main_App.Shared.post_process._resolve_frequency_protocol",
+        lambda *_args: pytest.fail("Colliding names must fail before metric setup."),
+    )
+
+    with pytest.raises(GroupConfigurationError, match="same output name"):
+        post_process(app, list(labels))
+
+    assert previous.read_bytes() == b"previous-result"
+    assert app.export_receipts == []
+    assert sorted(path.relative_to(tmp_path).as_posix() for path in tmp_path.rglob("*")) == [
+        "Faces", "Faces/P01__visit_1_Faces_Results.fpvs",
+    ]
 
 
 def test_single_session_receipt_uses_registered_participant_not_raw_filename(tmp_path):

@@ -1,6 +1,8 @@
 # Ratio Calculator
 
 Ratio Calculator is a beta exploratory tool for paired condition comparisons.
+It remains available under **Beta Tools** and is planned for removal in a
+future release.
 For each participant and ROI, it computes condition A divided by condition B for
 summed BCA, summed SNR, and summed z-score values.
 

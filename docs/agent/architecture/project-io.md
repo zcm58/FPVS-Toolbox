@@ -539,6 +539,12 @@ The processing contract is deliberately strict:
 - The processing ledger computes expected condition/group workbook paths before
   work starts. The active process runner passes a per-source-file group folder
   to post-processing, which writes the condition-first/group-second layout.
+- Condition output names retain their established numeric-prefix stripping and
+  separator replacement. GUI draft validation, processing/expected-plan creation,
+  direct workers, and standard condition export reject labels that share the same
+  normalized output name, compared ignoring case on both Windows and Linux,
+  before processing or replacing any results. Valid output names and formats are
+  unchanged; advanced recipe naming retains its separate export contract.
 - QC-20's versioned expected-plan record builds the complete
   recording-by-condition matrix from the processing plan before numerical
   result accounting. It keys recordings by canonical recording ID when one

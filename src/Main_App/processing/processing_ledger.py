@@ -81,9 +81,11 @@ from Main_App.processing.expected_processing_ledger import (
     save_expected_recording_condition_plan as save_expected_recording_condition_plan,
 )
 from Main_App.projects.grouping import (
+    condition_output_folder_name as _condition_folder_name,
     project_group_context,
     resolve_group_output_directory,
     resolve_output_directory,
+    validate_condition_output_names,
 )
 from Main_App.projects.preprocessing_settings import (
     normalize_manual_excluded_participants,
@@ -635,14 +637,6 @@ def _project_subfolder(project: Any, key: str, default_name: str) -> Path:
     return path if path.is_absolute() else project_root / path
 
 
-def _condition_folder_name(label: str) -> str:
-    return re.sub(
-        r"^\d+\s*-\s*",
-        "",
-        str(label).replace("/", "-").replace("\\", "-").strip(),
-    )
-
-
 def _group_folder_name(project: Any, group_id: str | None) -> str | None:
     context = project_group_context(project)
     if not group_id:
@@ -659,6 +653,7 @@ def _expected_excel_paths(
     info: RawFileInfo,
     condition_labels: Sequence[str],
 ) -> tuple[Path, ...]:
+    validate_condition_output_names(condition_labels)
     root = _excel_root(project)
     group_folder = _group_folder_name(project, info.group)
     paths: list[Path] = []
@@ -995,6 +990,7 @@ def classify_processing_inputs(
     event_map: Mapping[str, int],
 ) -> ProcessingPlan:
     condition_labels = tuple(str(label) for label in event_map.keys())
+    validate_condition_output_names(condition_labels)
     fingerprint = build_processing_fingerprint(project, settings, event_map)
     geometry_identity = _configured_geometry_identity(settings)
     excluded_participants = {

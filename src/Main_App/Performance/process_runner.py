@@ -1615,6 +1615,9 @@ def _run_full_pipeline_for_file(
       post_export → source-ready time-domain derivative →
       preproc audit (after) → cleanup.
     """
+    from Main_App.projects import validate_condition_output_names
+
+    validate_condition_output_names(event_map)
     t0 = time.perf_counter()
     timings_ms: Dict[str, int] = {}
     export_receipts: List[Dict[str, object]] = []

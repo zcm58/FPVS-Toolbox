@@ -4,6 +4,38 @@
 
 Active. This is the release ledger for the first v3 release candidate.
 
+Priority-bug follow-up on 2026-10-09: condition names that collapse to the same
+case-insensitive output name after numeric-prefix stripping now fail draft
+validation, expected-plan creation, processing planning, direct worker startup,
+and export before results can be overwritten. Valid folder names, filenames,
+processing order, and scientific calculations retain their existing behavior;
+the shared naming owner is `Main_App.projects.grouping`.
+
+The main-window close path now refuses active processing, pending finalization,
+queued/active post-processing, and owned background-thread cleanup without a
+blocking wait. Sequence Figure exposes its page-owned export lifecycle to both
+close and update-install guards. Its cached page refreshes project/output
+context on open while retaining manual inputs and immutable running-export
+specifications; a project-context version prevents old results reattaching even
+after an A-to-B-to-A switch. Focused GUI/updater architecture and tool-local
+instructions record the visible smoke paths; local Qt execution remains unrun.
+
+Ratio Calculator stays in the centralized opt-in Beta Tools registration.
+Its same-label ratio and configured-data-root defects are explicitly deferred
+for [future removal](../future/ratio-calculator-removal.md); no Ratio runtime
+implementation was changed.
+
+Verification: focused gates passed processing (2,125 tests; six skips), GUI
+(597), project I/O (431; 12 skips), updates (435; four skips), and Sequence
+Figure (36). Repo precommit passed all audits, Ruff, and compilation, then
+reported 5,400 passes, 24 skips, and eight fixture-location failures: four FHC
+exports exceeded Windows path limits and four LORETA fixtures were rejected
+under the system temp directory by the existing cache-location policy. All
+eight exact failed nodes passed with a fresh short non-temp absolute
+`--basetemp=C:/f418e` (eight passes). FHC/LORETA code and tests were unchanged.
+The strict documentation build passed. Registered Qt execution and the visible
+smoke paths remain CI/manual verification; no installer was rebuilt.
+
 Private-source migration on 2026-10-07: `zcm58/FPVS-Toolbox-Repo` is private,
 with all original remote refs preserved. Public distribution now lives in
 `zcm58/FPVS-Toolbox-Releases`, whose independent main branch and release tags

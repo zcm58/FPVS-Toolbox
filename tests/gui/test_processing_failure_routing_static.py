@@ -22,6 +22,65 @@ from Main_App.gui.run_outcome_model import summarize_run
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
+def _close_window_double(monkeypatch):
+    path = REPO_ROOT / "src/Main_App/gui/main_window.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    owner = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "MainWindow")
+    close = next(node for node in owner.body if isinstance(node, ast.FunctionDef) and node.name == "closeEvent")
+
+    class BaseWindow:
+        def closeEvent(self, event):
+            event.accept()
+
+        def findChildren(self, _kind):
+            return getattr(self, "_background_threads", [])
+
+    module = ModuleType("Tools.Free_Harmonic_Clustering.gui")
+    module.has_active_operations = lambda: False
+    module.cancel_all_active_operations = Mock()
+    monkeypatch.setitem(sys.modules, module.__name__, module)
+    messages = SimpleNamespace(information=Mock())
+    namespace = {
+        "BaseWindow": BaseWindow, "QMessageBox": messages, "QThread": object,
+        "project_drafts": SimpleNamespace(confirm_project_draft_exit=lambda _host: True),
+    }
+    shell = ast.ClassDef(
+        name="WindowDouble", bases=[ast.Name(id="BaseWindow", ctx=ast.Load())],
+        keywords=[], body=[close], decorator_list=[],
+    )
+    body = [ast.ImportFrom(module="__future__", names=[ast.alias(name="annotations")], level=0), shell]
+    exec(compile(ast.fix_missing_locations(ast.Module(body=body, type_ignores=[])), str(path), "exec"), namespace)
+    window = namespace["WindowDouble"]()
+    window._post_worker = window._post_thread = None
+    return window, messages
+
+
+@pytest.mark.parametrize("activity", [
+    "_run_active", "_pending_finalize", "_post_backlog", "_post_worker",
+    "sequence_export", "post_thread_cleanup", "idle",
+])
+def test_main_window_close_waits_for_processing_and_sequence_export(monkeypatch, activity):
+    window, messages = _close_window_double(monkeypatch)
+    if activity == "sequence_export":
+        window._sequence_figure_page = SimpleNamespace(has_active_generation=lambda: True)
+    elif activity == "post_thread_cleanup":
+        window._background_threads = [SimpleNamespace(isRunning=lambda: True)]
+    elif activity != "idle":
+        setattr(window, activity, [object()] if activity == "_post_backlog" else True)
+    event = SimpleNamespace(ignore=Mock(), accept=Mock())
+
+    window.closeEvent(event)
+
+    if activity == "idle":
+        event.accept.assert_called_once()
+        event.ignore.assert_not_called()
+        messages.information.assert_not_called()
+    else:
+        event.ignore.assert_called_once()
+        event.accept.assert_not_called()
+        messages.information.assert_called_once()
+
+
 @pytest.mark.parametrize("activity_attr", [
     "_run_active", "_settings_post_processing_activity_active",
     "_settings_full_fft_grid_qc_thread", "_settings_harmonic_recalc_thread",
