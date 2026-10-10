@@ -17,6 +17,9 @@ from Main_App.io.eeg_geometry import (
     BIOSEMI64_CHANNELS,
     biosemi64_geometry_identity,
 )
+from Main_App.io.atomic_write import atomic_write
+from Main_App.io.safe_file import open_regular_file
+from Main_App.processing.preflight_qc_pruning import safe_cache_directory
 from Main_App.io.result_manifest import (
     RESULT_MANIFEST_SUFFIX,
     resolve_result_path,
@@ -78,9 +81,11 @@ from Main_App.processing.expected_processing_ledger import (
     save_expected_recording_condition_plan as save_expected_recording_condition_plan,
 )
 from Main_App.projects.grouping import (
+    condition_output_folder_name as _condition_folder_name,
     project_group_context,
     resolve_group_output_directory,
     resolve_output_directory,
+    validate_condition_output_names,
 )
 from Main_App.projects.preprocessing_settings import (
     normalize_manual_excluded_participants,
@@ -107,6 +112,8 @@ _GEOMETRY_INDEPENDENT_EXCLUSION_REASONS = frozenset(
 )
 _DOWNSTREAM_ONLY_PREPROCESSING_KEYS = frozenset(
     {
+        # Loader storage changes neither EEG values nor processing identity.
+        "experimental_ram_preload",
         "interpolation_burden_review_decisions",
         # These describe how a detector choice was obtained, not the signal
         # transformation. The effective mode remains fingerprinted separately.
@@ -630,14 +637,6 @@ def _project_subfolder(project: Any, key: str, default_name: str) -> Path:
     return path if path.is_absolute() else project_root / path
 
 
-def _condition_folder_name(label: str) -> str:
-    return re.sub(
-        r"^\d+\s*-\s*",
-        "",
-        str(label).replace("/", "-").replace("\\", "-").strip(),
-    )
-
-
 def _group_folder_name(project: Any, group_id: str | None) -> str | None:
     context = project_group_context(project)
     if not group_id:
@@ -654,6 +653,7 @@ def _expected_excel_paths(
     info: RawFileInfo,
     condition_labels: Sequence[str],
 ) -> tuple[Path, ...]:
+    validate_condition_output_names(condition_labels)
     root = _excel_root(project)
     group_folder = _group_folder_name(project, info.group)
     paths: list[Path] = []
@@ -944,12 +944,10 @@ def load_ledger(project_root: Path) -> dict[str, Any]:
 
 
 def save_ledger(project_root: Path, ledger: Mapping[str, Any]) -> None:
-    state_dir = processing_state_dir(project_root)
-    state_dir.mkdir(parents=True, exist_ok=True)
+    _ensure_processing_state_dir(project_root)
     path = ledger_path(project_root)
-    tmp_path = path.with_suffix(".json.tmp")
-    tmp_path.write_text(json.dumps(ledger, indent=2, default=str), encoding="utf-8")
-    _replace_ledger_with_retry(tmp_path, path)
+    with atomic_write(path, replace=_replace_ledger_with_retry) as stream:
+        stream.write(json.dumps(ledger, indent=2, default=str))
 
 
 def _replace_ledger_with_retry(temporary_path: Path, ledger_path: Path) -> None:
@@ -968,12 +966,21 @@ def _replace_ledger_with_retry(temporary_path: Path, ledger_path: Path) -> None:
 
 
 def append_run_log(project_root: Path, record: Mapping[str, Any]) -> None:
-    state_dir = processing_state_dir(project_root)
-    state_dir.mkdir(parents=True, exist_ok=True)
+    _ensure_processing_state_dir(project_root)
     payload = dict(record)
     payload.setdefault("timestamp", _now_iso())
-    with runs_path(project_root).open("a", encoding="utf-8") as stream:
+    with open_regular_file(runs_path(project_root), append=True) as stream:
         stream.write(json.dumps(payload, sort_keys=True, default=str) + "\n")
+
+
+def _ensure_processing_state_dir(project_root: Path) -> None:
+    root = Path(project_root).absolute()
+    directory = processing_state_dir(root)
+    if not safe_cache_directory(root, directory):
+        raise OSError(f"Refusing a redirected processing state directory: {directory}")
+    directory.mkdir(parents=True, exist_ok=True)
+    if not safe_cache_directory(root, directory):
+        raise OSError(f"Refusing a redirected processing state directory: {directory}")
 
 
 def classify_processing_inputs(
@@ -983,6 +990,7 @@ def classify_processing_inputs(
     event_map: Mapping[str, int],
 ) -> ProcessingPlan:
     condition_labels = tuple(str(label) for label in event_map.keys())
+    validate_condition_output_names(condition_labels)
     fingerprint = build_processing_fingerprint(project, settings, event_map)
     geometry_identity = _configured_geometry_identity(settings)
     excluded_participants = {

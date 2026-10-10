@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+from fractions import Fraction
+from io import BytesIO
 from types import SimpleNamespace
 
 import mne
@@ -98,6 +100,142 @@ def _write_bdf_header(path, *, header_bytes: int = 512, data_records: int = 0, c
     _put(244, 252, 1)
     _put(252, 256, channels)
     path.write_bytes(bytes(header) + (b" " * max(0, header_bytes - 256)))
+
+
+def _write_sampling_bdf(
+    path, *, labels=("Fp1", "EXG1", "Status"), samples=(512, 512, 512), duration="1"
+):
+    def _field(value, width):
+        encoded = str(value).encode("ascii")
+        assert len(encoded) <= width
+        return encoded.ljust(width, b" ")
+
+    channels = len(labels)
+    fixed = bytearray(b" " * 256)
+    fixed[:8] = b"\xffBIOSEMI"
+    fixed[184:192] = _field((channels + 1) * 256, 8)
+    fixed[192:236] = _field("24BIT", 44)
+    fixed[236:244] = _field(1, 8)
+    fixed[244:252] = _field(duration, 8)
+    fixed[252:256] = _field(channels, 4)
+    fields = (
+        (labels, 16), (("",) * channels, 80), (("uV",) * channels, 8),
+        ((-262144,) * channels, 8), ((262143,) * channels, 8),
+        ((-8388608,) * channels, 8), ((8388607,) * channels, 8),
+        (("",) * channels, 80), (samples, 8), (("",) * channels, 32),
+    )
+    signal_header = b"".join(_field(value, width) for values, width in fields for value in values)
+    path.write_bytes(bytes(fixed) + signal_header + bytes(sum(samples) * 3))
+    return (channels + 1) * 256
+
+
+@pytest.mark.parametrize(
+    ("duration", "samples", "expected"),
+    [("1", 512, Fraction(512)), ("0.5", 1024, Fraction(2048)), ("0.3", 10, Fraction(100, 3))],
+)
+def test_sampling_rate_header_is_exact_and_reads_no_signal_samples(
+    monkeypatch, tmp_path, duration, samples, expected
+):
+    path = tmp_path / "sampling.bdf"
+    header_bytes = _write_sampling_bdf(path, samples=(samples,) * 3, duration=duration)
+    original_bytes = path.read_bytes()
+
+    class HeaderOnlyStream(BytesIO):
+        def read(self, size=-1):
+            if size < 0 or self.tell() + size > header_bytes:
+                pytest.fail("Sampling-rate inspection attempted to read EEG samples")
+            return super().read(size)
+
+    monkeypatch.setattr(shared_load_utils.Path, "open", lambda *_a, **_k: HeaderOnlyStream(original_bytes))
+    monkeypatch.setattr(
+        shared_load_utils.mne.io, "read_raw_bdf", lambda *_a, **_k: pytest.fail("MNE was opened")
+    )
+
+    assert load_utils.read_bdf_sampling_rate_hz(path) == expected
+    assert load_utils.read_bdf_sampling_rate_hz is shared_load_utils.read_bdf_sampling_rate_hz
+
+
+def test_sampling_rate_header_ignores_annotation_rates_and_matches_custom_stim(tmp_path):
+    path = tmp_path / "annotations.bdf"
+    _write_sampling_bdf(
+        path, labels=("Fp1", "Triggers", "BDF Annotations", "EDF Annotations"),
+        samples=(512, 512, 80, 96),
+    )
+
+    assert load_utils.read_bdf_sampling_rate_hz(path, stim_channel="triggers") == Fraction(512)
+
+
+@pytest.mark.parametrize("samples", [(256, 512, 512), (512, 512, 256)])
+def test_sampling_rate_header_rejects_mixed_data_or_stim_rates(tmp_path, samples):
+    path = tmp_path / "mixed.bdf"
+    _write_sampling_bdf(path, samples=samples)
+
+    with pytest.raises(ValueError, match="must share one sampling rate"):
+        load_utils.read_bdf_sampling_rate_hz(path)
+
+
+@pytest.mark.parametrize("labels", [("Fp1", "EXG1", "Triggers"), ("Fp1", "Status", "status")])
+def test_sampling_rate_header_requires_one_configured_stim_channel(tmp_path, labels):
+    path = tmp_path / "stim.bdf"
+    _write_sampling_bdf(path, labels=labels)
+
+    with pytest.raises(ValueError, match="exactly one 'Status'"):
+        load_utils.read_bdf_sampling_rate_hz(path)
+
+
+@pytest.mark.parametrize(
+    ("start", "stop", "replacement", "message"),
+    [
+        (0, 8, b"0       ", "identification code"),
+        (184, 192, b"512     ", "header length"),
+        (252, 256, b"0   ", "channel count"),
+        (236, 244, b"-2      ", "data record count"),
+        (244, 252, b"0       ", "positive decimal"),
+        (244, 252, b"NaN     ", "positive decimal"),
+        (244, 252, b"1/2     ", "positive decimal"),
+        (244, 252, b"1_0     ", "positive decimal"),
+        (244, 252, b"\xff       ", "ASCII text"),
+        (256, 272, b" " * 16, "channel labels"),
+        (904, 912, b"0       ", "positive sample counts"),
+        (904, 912, b"invalid ", "samples per data record"),
+        (904, 912, b"5_12    ", "samples per data record"),
+    ],
+)
+def test_sampling_rate_header_rejects_malformed_fields(tmp_path, start, stop, replacement, message):
+    path = tmp_path / "malformed.bdf"
+    _write_sampling_bdf(path)
+    payload = bytearray(path.read_bytes())
+    payload[start:stop] = replacement
+    path.write_bytes(payload)
+
+    with pytest.raises(ValueError, match=message):
+        load_utils.read_bdf_sampling_rate_hz(path)
+
+
+@pytest.mark.parametrize("retained_bytes", [255, 1023])
+def test_sampling_rate_header_rejects_truncated_headers(tmp_path, retained_bytes):
+    path = tmp_path / "truncated.bdf"
+    _write_sampling_bdf(path)
+    path.write_bytes(path.read_bytes()[:retained_bytes])
+
+    with pytest.raises(ValueError, match="header is truncated"):
+        load_utils.read_bdf_sampling_rate_hz(path)
+
+
+def test_sampling_rate_header_preserves_not_started_detection(tmp_path):
+    path = tmp_path / "not-started.bdf"
+    header_bytes = _write_sampling_bdf(path)
+    payload = bytearray(path.read_bytes()[:header_bytes])
+    payload[236:244] = b"0       "
+    path.write_bytes(payload)
+
+    assert load_utils.is_bdf_recording_not_started(path)
+    assert load_utils.read_bdf_sampling_rate_hz(path) == Fraction(512)
+
+
+def test_sampling_rate_header_propagates_file_access_errors(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        load_utils.read_bdf_sampling_rate_hz(tmp_path / "missing.bdf")
 
 
 def test_shared_bdf_preflight_identifies_header_only_recording_not_started(tmp_path):
@@ -220,6 +358,43 @@ def test_public_lazy_biosemi_loader_preserves_nonzero_volts_without_unicorn_corr
     assert all(call["preload"] is False and "units" not in call for call in calls)
     assert header_raw.close_calls == lazy_raw.close_calls == 1
     assert load_utils.open_preflight_eeg_file is shared_load_utils.open_preflight_eeg_file
+
+
+def test_shared_load_eeg_file_ram_preload_uses_no_disk_map(monkeypatch, tmp_path):
+    header_raw, loaded_raw = _raw(), _raw()
+    calls = []
+
+    def reader(_filepath, **kwargs):
+        calls.append(kwargs)
+        return header_raw if len(calls) == 1 else loaded_raw
+
+    monkeypatch.setattr(shared_load_utils.mne.io, "read_raw_bdf", reader)
+    monkeypatch.setattr(
+        shared_load_utils,
+        "_memmap_dir_for_pid",
+        lambda: pytest.fail("RAM mode created a disk preload directory"),
+    )
+
+    raw = load_utils.load_eeg_file(
+        _app([]), str(tmp_path / "sample.bdf"), preload_in_memory=True
+    )
+
+    assert raw is loaded_raw
+    assert calls[0]["preload"] is False
+    assert calls[1]["preload"] is True
+    assert loaded_raw.load_data_calls == 1
+    assert read_raw_biosemi64_geometry(raw) is not None
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_ram_preload_rejects_run_owned_disk_path(tmp_path):
+    with pytest.raises(ValueError, match="cannot use a disk preload path"):
+        load_utils.load_eeg_file(
+            _app([]),
+            str(tmp_path / "sample.bdf"),
+            preload_path=tmp_path / "raw.dat",
+            preload_in_memory=True,
+        )
 
 
 def test_run_owned_preload_preserves_geometry_and_uses_its_unique_path(monkeypatch, tmp_path):

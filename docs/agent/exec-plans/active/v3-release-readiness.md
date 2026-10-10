@@ -4,6 +4,171 @@
 
 Active. This is the release ledger for the first v3 release candidate.
 
+Tool inventory follow-up on 2026-10-09: the sidebar and Tools menu now share
+exactly six beta surfaces through `Main_App.gui.sidebar.BETA_TOOL_SPECS`.
+Runtime, icon, test, verification, and documentation inventories agree.
+Project data, existing generated results, processing, and statistical methods
+retain their existing behavior.
+
+Verification: the focused GUI gate passed 598 tests; the repository audit
+bundle passed 25. The broad non-Qt precommit gate passed all audits, Ruff,
+compilation, and 5,395 tests with 24 skips using a fresh short non-temp fixture
+root. The strict documentation build passed. Registered GUI coverage remains
+CI-only. Visible smoke: toggle Beta Tools and restart, verify the sidebar and
+Tools menu contain the same supported inventory, and open the remaining tools.
+No local Qt workflow ran and no installer was rebuilt.
+
+Priority-bug follow-up on 2026-10-09: condition names that collapse to the same
+case-insensitive output name after numeric-prefix stripping now fail draft
+validation, expected-plan creation, processing planning, direct worker startup,
+and export before results can be overwritten. Valid folder names, filenames,
+processing order, and scientific calculations retain their existing behavior;
+the shared naming owner is `Main_App.projects.grouping`.
+
+The main-window close path now refuses active processing, pending finalization,
+queued/active post-processing, and owned background-thread cleanup without a
+blocking wait. Sequence Figure exposes its page-owned export lifecycle to both
+close and update-install guards. Its cached page refreshes project/output
+context on open while retaining manual inputs and immutable running-export
+specifications; a project-context version prevents old results reattaching even
+after an A-to-B-to-A switch. Focused GUI/updater architecture and tool-local
+instructions record the visible smoke paths; local Qt execution remains unrun.
+
+Verification: focused gates passed processing (2,125 tests; six skips), GUI
+(597), project I/O (431; 12 skips), updates (435; four skips), and Sequence
+Figure (36). Repo precommit passed all audits, Ruff, and compilation, then
+reported 5,400 passes, 24 skips, and eight fixture-location failures: four FHC
+exports exceeded Windows path limits and four LORETA fixtures were rejected
+under the system temp directory by the existing cache-location policy. All
+eight exact failed nodes passed with a fresh short non-temp absolute
+`--basetemp=C:/f418e` (eight passes). FHC/LORETA code and tests were unchanged.
+The strict documentation build passed. Registered Qt execution and the visible
+smoke paths remain CI/manual verification; no installer was rebuilt.
+
+Private-source migration on 2026-10-07: `zcm58/FPVS-Toolbox-Repo` is private,
+with all original remote refs preserved. Public distribution now lives in
+`zcm58/FPVS-Toolbox-Releases`, whose independent main branch and release tags
+contain only its README. All 28 historical installer assets were copied with
+size/SHA-256 verification; the latest public installer remains 2.1.2. Anonymous
+repository/release/raw-source requests to the source repository return 404,
+while the release repository remains publicly accessible. No 3.0.0 installer
+was built or published. The user chose to defer that release and accepted the
+one-time manual upgrade from older installers when 3.0.0 becomes available.
+
+The 3.0.0 main application and independent updater share the public release
+identity, retaining exact URL/version/filename and SHA-256 checks without
+client credentials. The focused updates gate passed 433 tests with four skips.
+A live, unauthenticated backend probe selected/downloaded public 2.1.2 and
+matched its original 141,503,904-byte installer digest; 3.0.0 correctly received
+no downgrade offer. No installer or GUI was executed. Public documentation is
+intentionally unpublished at the user's request; the docs workflow now only
+validates, and the strict documentation build passed.
+
+The repo precommit gate passed its audits, Ruff and compilation, then reported
+5,371 passes, 24 skips and five existing FHC export failures under the deep
+repository `test_tmp` path. All five exact failed nodes passed with a fresh
+short absolute `--basetemp` (`C:\fpa11d66`); no FHC code or tests changed. The
+failures were in exploratory exports, the planned-family integration export,
+and repeated-session batch export/cancellation. Local Qt execution and a
+rebuilt-installer/manual-upgrade smoke remain deferred to the 3.0.0 release.
+
+RAM-setting location follow-up on 2026-10-06: the existing toggle now lives in
+Settings > Experimental > Performance, with the same project-only value,
+default-off state and shared Save/Cancel draft handling. Preprocessing no longer
+contains the toggle. Registered Qt coverage checks the five Experimental pages,
+RAM parentage and project/projectless state, Cancel, Save and reopening. The
+visible 1280x900 keyboard and persistence smoke route is recorded in `gui.md`;
+local Qt execution remains unrun under the GUI skill's explicit-approval rule.
+Verification: the GUI focused gate passed 586 tests. The repo precommit gate
+passed all audits, Ruff and compilation, then 5,395 tests (two skipped; 73
+existing warnings).
+
+Menu follow-up on 2026-10-06: Toolbox now follows Studio's File/View/Tools
+organization. File separates project actions, settings/cache maintenance,
+updates/About, and Exit. View returns to Home; Tools reuses the sidebar's
+default and optional beta registrations and shared beta acknowledgements.
+The existing theme owner retains a separately owned native menu style and
+explicit startup palette before applying the Toolbox light theme. Local
+foreground-only menu rules preserve native geometry and selection backgrounds
+with the shared 13px text size. Existing callbacks, action aliases, Welcome
+visibility and processing/cache-reset menu locks remain intact.
+
+The GUI focused gate passed all audits, Ruff and compilation, then 586 tests.
+The repo precommit gate passed all audits, Ruff and compilation, then 5,395
+tests (two skipped; 73 existing warnings). Pure checks cover native-style
+ownership, palette retention through repeated
+theme changes and explicit style-creation failure. Registered Qt smoke coverage
+checks menu grouping, Home, tool visibility/routing and shared beta warnings.
+Qt execution and installer rebuilding were not performed; the visible
+1280x900 long-label, keyboard and action checks are documented in
+`docs/agent/architecture/gui.md`. The captured palette does not refresh during
+live OS theme changes; Toolbox retains its shared font family.
+
+RAM-preload follow-up on 2026-10-06: the project-only, default-off Experimental
+RAM preload switch in Settings > Experimental > Performance passes through ordinary
+processing, preflight QC, kurtosis scanning and source prefetch. Disk loading
+remains the default. RAM prefetch creates no staging directory, caps retained
+buffers at 25% of available memory, and keeps the existing exclusive handoff,
+source validation and cleanup rules. Scientific processing fingerprints and
+preprocessed-Raw cache keys exclude this storage choice. Review fixed a missing
+flag in the compatibility controller's local parameter snapshot. The associated
+single-session export receipt fix prefers the registered participant ID over a
+raw filename alias; explicit repeated-session recording IDs retain precedence.
+
+Implementation uses the existing `Main_App/Shared/load_utils.py`,
+`Shared/post_process.py`, `Performance/process_runner.py`,
+`gui/processing_inputs.py`, `gui/settings_panel.py`,
+`projects/preprocessing_settings.py` and `processing/` owners
+`preflight_qc.py`, `kurtosis_review_scan.py`, `qc_source_prefetch.py`,
+`processing_controller.py` and `processing_ledger.py`. Existing focused tests
+cover loading, flag propagation, exact preprocessing equality, cache identity,
+receipts and cleanup. Protected-path audits leave retired `Legacy_App` and
+`PySide6_App` paths untouched. Project-local prefetch paths continue to use the
+active `Project.project_root`; no hard-coded acquisition paths were added.
+
+The developer diagnostic `scripts/manual_diagnostics/benchmark_bdf_preload.py`
+creates only synthetic BDFs in its temporary directory. Four workers with four
+60-second recordings produced identical SHA-256 values after real preprocessing
+in disk and RAM modes. This small correctness probe is not a representative
+production speed estimate. GUI execution and installer rebuilding were not
+performed. The visible 1280x900 Save/Cancel/cache-miss smoke route is documented
+in `docs/agent/architecture/eeg-loading-contract.md`.
+
+Verification: the final `verify.py --scope repo --tier precommit` gate passed
+all audits, Ruff and compilation, then 5,393 tests (two skipped; 73 existing
+warnings). The focused RAM-loading/cache/receipt/settings bundle passed
+366 tests; two additional compatibility-controller cases passed. The synthetic
+probe used `benchmark_bdf_preload.py --seconds 60 --rounds 1`. Its buffers and
+recordings were temporary; no real research data was read or changed.
+
+Settings organization follow-up on 2026-09-25: seven purpose-based tabs now
+separate Quality Control, Experimental, and Application controls. Stats alpha
+is under Application > Analysis Defaults; Beta Tools is under Experimental.
+One shared Save/Cancel footer covers all pages. Experimental > Electrodes now
+exposes the persisted default-On >10 kurtosis-review checkbox preference for
+new decisions, preserving per-review overrides, Apply decisions, accepted
+receipts, numerical methods, and processing fingerprints. Current navigation
+and method docs plus the GUI manual-smoke route are updated. The user approved
+visible local Qt verification on 2026-09-25. Screenshot review identified and
+resolved a nine-pixel dialog-height overflow by combining the ROI scope note
+with the montage label; balanced form columns also reduce label wrapping.
+
+Verification: `verify.py --scope gui --tier focused` passed 564 tests and
+`--scope project-io --tier focused` passed 338. The targeted experimental
+settings, kurtosis-review and processing-fingerprint bundle passed 195 tests.
+The repo precommit gate passed all audits, Ruff and compilation, then reported
+5,209 passes, 11 skips and five FHC export failures caused by Windows temporary
+path lengths. All five failed tests passed when rerun with a fresh short
+`--basetemp`; FHC source and test files were unchanged. Registered Qt coverage
+now checks tab/control placement, shared actions, Save/Cancel, projectless beta
+availability and the review default. All 28 approved visible Qt checks passed
+on Windows, including seven main tabs, four Experimental sections, project
+round-trip, beta restart prompting, per-review overrides, Enter to save and
+Escape to cancel. Final screenshots showed no clipping or overlap at the
+tested dialog and 1280x900 embedded workspace sizes. Evidence is in
+`%TEMP%/fpvs-settings-visual-20260925`; Linux and other display scaling settings
+were not exercised. Test preferences are isolated from legacy machine settings.
+
 FHC Results density on 2026-09-21: the Results card/table now use the available
 tab height instead of leaving it to a blank spacer. Font-aware single-line
 rows avoid hidden-tab wrapping that previously inflated rows to roughly
@@ -324,8 +489,8 @@ processing plus two default tools:
 - SNR Plots.
 
 The following tools remain opt-in beta surfaces: Scalp Maps, Standard FPVS
-Screening, Sensitivity Analysis, LORETA Visualizer, Sequence Figure, Ratio
-Calculator, and Individual Detectability. They must open safely from the
+Screening, Sensitivity Analysis, LORETA Visualizer, Sequence Figure, and
+Individual Detectability. They must open safely from the
 packaged app, but finishing or promoting them is not a v3.0.0 requirement.
 
 "Default" is a support tier, not a universal scientific-validation claim.
@@ -574,7 +739,7 @@ threshold/p-value rules, or relevant numerical dependencies change.
   permutation workflows and reviewed powered null-calibration evidence.
 - Embedded PySide6 tool workflows with centralized default/beta navigation.
 - A new opt-in beta suite: Scalp Maps, Standard FPVS Screening, Sensitivity
-  Analysis, LORETA Visualizer, Sequence Figure, Ratio Calculator, and
+  Analysis, LORETA Visualizer, Sequence Figure, and
   Individual Detectability.
 
 ### Minor feature inventory over v2.1.2

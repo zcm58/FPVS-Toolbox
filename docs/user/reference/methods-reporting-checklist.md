@@ -97,6 +97,11 @@ testing, or another specialized estimand.
   occurrences were not evaluated and why; do not count them as clean or as an
   unflagged denominator.
 - Report the source and analyzed sampling rates and crop-alignment version.
+  For automatic window setup, report Studio Auto or requested duration, the
+  planned maximum, verified sampling grids and resolved analyzed duration/cycles.
+  Distinguish presented oddballs from complete first-to-last marker intervals
+  and analyzed cycles. Retain the input policy with the protocol fingerprint;
+  shortened recordings do not automatically redefine the project target.
   Downsampled BDF crops use the actual stimulus-onset sample consistent with
   v3, with the project-declared exact analyzed length. Original trigger sample
   coordinates are retained. Do not describe v3-compatible downsampling as
@@ -131,7 +136,11 @@ testing, or another specialized estimand.
   repairs, experimental automatic repairs, and unresolved or stale evidence.
   Report use of the optional experimental `|normalized score| > 10.0` rule
   (`gui_enabled_experimental_abs_z_gt_10_v1`); its cutoff is experimental, not
-  a validated artifact classifier. Also report whether the project enabled
+  a validated artifact classifier. **Settings > Experimental > Electrodes**
+  stores its starting checkbox state for new review decisions
+  (`kurtosis_review_auto_interpolate_extreme`, default On). Report the policy
+  actually applied in the review; this preference alone does not replace the
+  review decision or change existing receipts. Also report whether the project enabled
   experimental auto interpolation of all valid flags above its configured
   absolute normalized-score threshold (`kurtosis_auto_interpolate_all`, default
   Off; `gui_enabled_experimental_all_flags_v1`). This takes precedence over the

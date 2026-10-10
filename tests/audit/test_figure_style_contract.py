@@ -31,7 +31,6 @@ FIGURE_RENDERER_FILES = (
     "src/Tools/Plot_Generator/rendering.py",
     "src/Tools/Publication_Maps/rendering.py",
     "src/Tools/Publication_Maps/session_rendering.py",
-    "src/Tools/Ratio_Calculator/plots.py",
     "src/Tools/Individual_Detectability/core.py",
     "src/Tools/LORETA_Visualizer/renderer.py",
 )

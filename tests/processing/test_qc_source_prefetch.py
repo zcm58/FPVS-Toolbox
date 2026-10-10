@@ -24,6 +24,44 @@ class _Raw:
         self.close_count += 1
 
 
+def test_ram_prefetch_retains_arrays_without_disk_staging(tmp_path, monkeypatch):
+    source = tmp_path / "synthetic.bdf"
+    source.write_bytes(b"x" * 128)
+    info = SimpleNamespace(path=source, subject_id="P01")
+    loaded = []
+
+    class _RamRaw:
+        def __init__(self):
+            self._data = np.arange(8, dtype=np.float64).reshape(2, 4)
+            self.close_count = 0
+
+        def close(self):
+            self.close_count += 1
+
+    def load(_app, _source, **kwargs):
+        assert kwargs["preload_in_memory"] is True
+        assert "preload_path" not in kwargs
+        raw = _RamRaw()
+        loaded.append(raw)
+        return raw
+
+    monkeypatch.setattr(prefetch.load_utils, "load_eeg_file", load)
+    monkeypatch.setattr(prefetch.psutil, "virtual_memory", lambda: SimpleNamespace(available=4096))
+    monkeypatch.setattr(prefetch.shutil, "disk_usage", lambda _path: pytest.fail("RAM mode checked disk capacity"))
+    settings = {"experimental_ram_preload": True}
+    session = prefetch.QcSourcePrefetch(tmp_path, [info], settings)
+    session.run()
+    assert not (tmp_path / ".fpvs_processing").exists()
+    assert session.take(source, settings={}) is None
+    raw = session.take(source, settings=settings)
+    assert raw is loaded[0]
+    assert session._retained_bytes == raw._data.nbytes
+    session.release(raw)
+    session.close()
+    assert raw.close_count == 1
+    assert session._retained_bytes == 0
+
+
 @pytest.fixture
 def recordings(tmp_path, monkeypatch):
     infos = []
@@ -749,7 +787,8 @@ def test_rejected_cleanup_cannot_be_bypassed_by_mne_or_directory_finalizers(reco
 
 
 @pytest.mark.parametrize("review_only", [True, False])
-def test_real_preprocessing_is_exact_after_memmap_handoff(recordings, monkeypatch, review_only):
+@pytest.mark.parametrize("ram_preload", [False, True])
+def test_real_preprocessing_is_exact_after_prefetch_handoff(recordings, monkeypatch, review_only, ram_preload):
     from Main_App.processing import preprocess
     from tests.processing.test_preprocess_kurtosis_gate import _params, _raw
 
@@ -764,11 +803,16 @@ def test_real_preprocessing_is_exact_after_memmap_handoff(recordings, monkeypatc
         project_root=str(root), high_pass=0.5, low_pass=30.0,
         downsample_rate=80.0, enable_kurtosis_checkpoint_cache=False,
         kurtosis_auto_interpolate_all=True,
+        experimental_ram_preload=ram_preload,
     )
     mapped = []
 
     def load(_app, _source, **kwargs):
         raw = original.copy()
+        if ram_preload:
+            assert kwargs["preload_in_memory"] is True
+            assert "preload_path" not in kwargs
+            return raw
         data = np.memmap(kwargs["preload_path"], mode="w+", dtype=np.float64, shape=raw._data.shape)
         data[:] = raw._data
         raw._data = data
@@ -825,5 +869,9 @@ def test_real_preprocessing_is_exact_after_memmap_handoff(recordings, monkeypatc
         session.release(acquired)
         session.close()
         original.close()
-    assert mapped[0][0].closed
-    assert not mapped[0][1].parent.exists()
+    if ram_preload:
+        assert not mapped
+        assert not (root / ".fpvs_processing").exists()
+    else:
+        assert mapped[0][0].closed
+        assert not mapped[0][1].parent.exists()

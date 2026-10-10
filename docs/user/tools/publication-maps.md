@@ -5,7 +5,7 @@ workbooks. It supports baseline-corrected amplitude (BCA), signal-to-noise ratio
 (SNR), and summed-harmonic z-score maps.
 
 Scalp Maps is currently a beta tool. Enable **Beta Tools** in
-**Settings > Advanced**, close and reopen FPVS Toolbox, then choose **Scalp
+**Settings > Experimental > Beta Tools**, save, close and reopen FPVS Toolbox, then choose **Scalp
 Maps** from the Beta Tools section. The shared beta notice appears before the
 tool first opens in each app session.
 

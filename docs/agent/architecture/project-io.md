@@ -78,6 +78,10 @@ not merge stale complete manifests or silently replace unreadable JSON.
 Transactions use a resolved-path thread lock plus a native cross-process
 sidecar lock (Windows byte lock or POSIX `flock`), each with a 30-second
 acquisition limit. Nested helpers in the same thread reuse the transaction.
+Only the manifest's parent is resolved; linked, hard-linked, reparse, and
+nonregular manifest leaves are rejected. `Main_App.io.safe_file` opens the
+sidecar exclusively when absent and checks both the path and descriptor identity
+before lock initialization. Processing run-log appends use the same guard.
 The stable `.project.json.lock` sidecar is retained after release, and OS
 locks are released on process exit. The owner publishes via a unique temporary
 file in the manifest directory, flushes and fsyncs it, then atomically replaces
@@ -115,6 +119,18 @@ snapshot consistency. These are GUI-neutral checks and require no Qt run.
 Disposable cache ownership, automatic QC replacement, and the Advanced settings
 cache-clearing action are documented in [Cache Maintenance](cache-maintenance.md).
 Cache removal preserves analysis companions, review decisions, and ledgers.
+
+`Main_App.io.atomic_write` owns exclusive staging for non-manifest publications:
+the processing ledger, preprocessed-cache metadata, Individual Detectability
+NPZ caches, FHC preferences, source-export JSON/text/provenance, and MRI display
+templates. Callers keep their serializers and replacement-retry policies;
+the helper writes through the `mkstemp` descriptor, flushes/fsyncs, replaces the
+destination, and cleans its own staging file on failure. Existing guessed
+`.tmp` links are never opened. Ledger/log writes reject redirected processing
+state directories; FIF-cache writes reject redirected directories and linked
+FIF leaves before MNE serialization. Regression coverage is in
+`tests/project_io/test_atomic_write_security.py`, manifest transaction tests,
+`tests/processing/test_preprocessed_cache_filter_info.py`, and the MRI slice tests.
 
 Raw discovery, individual raw selection, and repeated-source preflight retain
 the canonical participant/recording identity when an exact raw path is already
@@ -204,7 +220,7 @@ FPVS Toolbox uses a strict hybrid settings model:
   divided by that recurrence. The direct value as entered is retained for
   audit but is excluded from the canonical scientific fingerprint. A new
   project seeds 6 Hz/every 5 but remains
-  `incomplete` until a positive expected cycle count is supplied. An existing
+  `incomplete` until a duration or advanced cycle count is supplied. An existing
   manifest with no protocol loads as `confirmation_required` and a routine
   save keeps the record absent, so historical outputs are not silently
   relabeled with guessed defaults. Marker-less protocol v1.0 records retain
@@ -424,10 +440,36 @@ FPVS Toolbox uses a strict hybrid settings model:
   the user clears them in Settings.
 - `%APPDATA%\FPVS_Toolbox\*.ini` files and old Qt `QSettings` locations are legacy migration inputs only; do not add new writers there.
 - Do not write settings to the install directory, repo directory, `Program Files`, or the process current working directory.
+- Protocol v1.4 adds an optional `analysis_window` owned by
+  `Main_App.projects.analysis_window`. It stores Studio's planned maximum cycle
+  bound or a manually requested duration, plus configured target and verified
+  source sampling rates. Resolved cycles remain the downstream authority. The
+  resolver uses the least common multiple of `denominator(fs / f_oddball)`
+  across source and effective target grids (no upsampling), then floors inside
+  the planned bound. These inputs and the resolved count share one fingerprint.
+  Prior v1.1-v1.3 records retain their exact manifest and numerical identities;
+  an explicit Advanced override removes the automatic policy. Before QC and
+  artifact classification, source headers finalize and save one project-wide
+  target, including all configured sources during Single mode. Previously
+  verified source grids remain relevant when processing a subset. Recording
+  duration and observed marker counts never set this target.
 - FPVS Studio `.fpvsconfig` import is a project-shell helper under
-  `Main_App.projects.fpvs_config_import`. It imports `project.name`,
+  `Main_App.projects.fpvs_config_import`. It accepts known config schemas
+  `1.0.0` through `1.8.0` for FPVS Oddball and Cognitive Load FPVS; unknown
+  schemas and other experiment categories fail explicitly. It imports `project.name`,
   `conditions[].name`/`conditions[].trigger_code` into `project.json`
-  `event_map`, and optional per-participant manually removed electrode metadata
+  `event_map`, `triggers.oddball_trigger_code`, and current Studio
+  `protocol.base_hz`/`protocol.oddball_every_n` through the canonical
+  `FrequencyProtocol` validator. Legacy `frequency_protocol` payloads remain
+  supported; declaring both protocol shapes is an error. Current Studio
+  conditions must agree on positive sequence and oddball-repeat counts. Their
+  product is the number of presentations; one fewer bounds the first-to-last
+  oddball marker window. This explicit Studio schedule rule seeds Auto against
+  the initial target grid; source headers finalize it before QC. Completed
+  session summaries do not replace the bound or certify complete EEG data.
+  Legacy explicit analyzed-cycle declarations remain authoritative. No observed
+  participant span supplies the planned target implicitly. The importer also
+  reads optional per-participant manually removed electrode metadata
   into `preprocessing.manual_removed_electrodes`. Supported Studio-side
   scaffold shapes are a top-level PID-to-electrodes map such as
   `manual_removed_electrodes` or participant entries carrying
@@ -508,6 +550,12 @@ The processing contract is deliberately strict:
 - The processing ledger computes expected condition/group workbook paths before
   work starts. The active process runner passes a per-source-file group folder
   to post-processing, which writes the condition-first/group-second layout.
+- Condition output names retain their established numeric-prefix stripping and
+  separator replacement. GUI draft validation, processing/expected-plan creation,
+  direct workers, and standard condition export reject labels that share the same
+  normalized output name, compared ignoring case on both Windows and Linux,
+  before processing or replacing any results. Valid output names and formats are
+  unchanged; advanced recipe naming retains its separate export contract.
 - QC-20's versioned expected-plan record builds the complete
   recording-by-condition matrix from the processing plan before numerical
   result accounting. It keys recordings by canonical recording ID when one

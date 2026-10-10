@@ -5,7 +5,7 @@
 Partially complete baseline. Commit `417f4b37` introduced the shared
 `SubsectionHeaderLabel` contract, routed `SectionCard` titles through it, wired
 the shared QSS helper into the theme/style-token stylesheets, and migrated the
-first curated Main App, Stats, Plot Generator, and Ratio Calculator headings.
+first curated Main App, Stats, and Plot Generator headings.
 
 This remains a future plan for any additional curated subsection-heading
 migration. Do not treat every plain `QLabel(...)` as remaining work.
@@ -35,7 +35,6 @@ Primary GUI surfaces:
 - `src/Main_App/gui/sidebar.py`
 - `src/Tools/Stats/ui/`
 - `src/Tools/Plot_Generator/`
-- `src/Tools/Ratio_Calculator/`
 - `src/Tools/Publication_Maps/`
 - `src/Tools/Individual_Detectability/`
 - `src/Tools/Sequence_Figure/`
@@ -165,22 +164,6 @@ SNR Plot tool:
 - `ROI`
 - `Axis Ranges`
 
-Ratio Calculator:
-
-- `Conditions`
-- `Condition A`
-- `Condition B`
-- `Condition A Folder`
-- `Condition B Folder`
-- `Condition A Label`
-- `Condition B Label`
-- `Output Folder`
-- `Run Label`
-- `Participant exclusions (optional)`
-- `ROIs (read-only)`
-- `Harmonic settings`
-- `Run`
-
 Scalp Maps:
 
 - `Condition A`
@@ -262,8 +245,8 @@ Status: started. Continue only with confirmed candidate headings.
 
 ### Phase 4: Surface-Specific Passes
 
-Status: started. Home/shell, Statistical Analysis, SNR Plot, and Ratio
-Calculator have initial converted headings. Remaining surfaces should be scoped
+Status: started. Home/shell, Statistical Analysis, and SNR Plot
+have initial converted headings. Remaining surfaces should be scoped
 one group at a time.
 
 Use one surface group per small change set:
@@ -276,9 +259,7 @@ Use one surface group per small change set:
    - `src/Tools/Stats/ui/`
 3. SNR Plot:
    - `src/Tools/Plot_Generator/`
-4. Ratio Calculator:
-   - `src/Tools/Ratio_Calculator/`
-5. Remaining embedded tools:
+4. Remaining embedded tools:
    - `src/Tools/Publication_Maps/`
    - `src/Tools/Individual_Detectability/`
    - `src/Tools/Sequence_Figure/`

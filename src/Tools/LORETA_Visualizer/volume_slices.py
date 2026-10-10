@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Literal
 
 import numpy as np
+from Main_App.io.atomic_write import atomic_write
 from Main_App.exports.figure_style import (
     FIGURE_EXPORT_DPI,
     apply_matplotlib_figure_style,
@@ -561,13 +562,8 @@ def _write_loreta_display_mri_template(source_path: Path, output_path: Path) -> 
     output_affine = _vox_to_ras_transform(source_image) @ scale_transform
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    temp_path = output_path.with_name(f"{output_path.stem}.tmp{output_path.suffix}")
-    try:
-        nib.save(nib.Nifti1Image(output_data, output_affine), str(temp_path))
-        temp_path.replace(output_path)
-    finally:
-        if temp_path.exists():
-            temp_path.unlink()
+    with atomic_write(output_path, binary=True) as stream:
+        nib.Nifti1Image(output_data, output_affine).to_file_map({"image": nib.FileHolder(fileobj=stream)})
     return output_path
 
 

@@ -22,6 +22,13 @@ from Main_App.projects import (
     ODDBALL_MARKER_SOURCE_MANUAL,
     normalize_frequency_protocol,
 )
+from Main_App.projects.preprocessing_settings import PREPROCESSING_DEFAULTS
+from Main_App.projects.analysis_window import AnalysisWindowError
+
+
+ANALYSIS_WINDOW_MODE_CYCLES = "cycles"
+ANALYSIS_WINDOW_MODE_DURATION = "manual_duration"
+ANALYSIS_WINDOW_MODE_STUDIO = "studio_planned"
 
 
 class ProjectProtocolRequiredError(ValueError):
@@ -43,6 +50,9 @@ class ProtocolEditorValues:
     condition_oddball_marker_codes: tuple[tuple[str, str], ...] = ()
     recording_oddball_markers_enabled: bool = False
     recording_oddball_marker_codes: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = ()
+    analysis_window_mode: str = ANALYSIS_WINDOW_MODE_CYCLES
+    requested_duration_seconds: str = ""
+    target_sampling_rate_hz: str = ""
 
 
 def _exact_rate_text(value: Fraction | None) -> str:
@@ -78,7 +88,7 @@ def duration_summary(value: Fraction | None) -> str:
     """Return exact/decimal duration text for a protocol preview."""
 
     if value is None:
-        return "Enter the expected cycle count"
+        return "Enter the intended analysis duration"
     exact = _exact_rate_text(value)
     decimal = f"{float(value):.6f}".rstrip("0").rstrip(".")
     if value.denominator == 1:
@@ -98,6 +108,20 @@ def editor_values_for_protocol(protocol: FrequencyProtocol) -> ProtocolEditorVal
         (recording_id, tuple((str(onset), str(marker)) for onset, marker in codes))
         for recording_id, codes in protocol.recording_oddball_marker_codes
     )
+    window = protocol.analysis_window
+    analysis_values = {
+        "analysis_window_mode": (
+            window.mode if window is not None else
+            ANALYSIS_WINDOW_MODE_CYCLES if protocol.expected_analyzed_oddball_cycles is not None
+            or protocol.status == FREQUENCY_PROTOCOL_STATUS_CONFIRMATION_REQUIRED else
+            ANALYSIS_WINDOW_MODE_DURATION
+        ),
+        "requested_duration_seconds": _editable_rate_text(
+            window.requested_duration_seconds if window is not None
+            and window.requested_duration_seconds is not None else protocol.derived_analyzed_seconds
+        ),
+        "target_sampling_rate_hz": _editable_rate_text(window.target_sampling_rate_hz) if window is not None else "",
+    }
     if protocol.status == FREQUENCY_PROTOCOL_STATUS_CONFIRMATION_REQUIRED:
         presentation_rate = (
             protocol.presentation_rate_hz or DEFAULT_PRESENTATION_RATE_HZ
@@ -129,6 +153,7 @@ def editor_values_for_protocol(protocol: FrequencyProtocol) -> ProtocolEditorVal
             condition_oddball_marker_codes=marker_mapping,
             recording_oddball_markers_enabled=bool(recording_mapping),
             recording_oddball_marker_codes=recording_mapping,
+            **analysis_values,
         )
 
     direct_rate = (
@@ -152,6 +177,7 @@ def editor_values_for_protocol(protocol: FrequencyProtocol) -> ProtocolEditorVal
         condition_oddball_marker_codes=marker_mapping,
         recording_oddball_markers_enabled=bool(recording_mapping),
         recording_oddball_marker_codes=recording_mapping,
+        **analysis_values,
     )
 
 
@@ -169,16 +195,27 @@ def build_manual_protocol(
     condition_oddball_marker_codes: Mapping[object, object] | Sequence[tuple[object, object]] | None = None,
     recording_oddball_markers_enabled: bool | None = None,
     recording_oddball_marker_codes: Mapping[object, object] | Sequence[tuple[object, object]] | None = None,
+    analysis_window_mode: str | None = None,
+    requested_duration_seconds: str | None = None,
+    target_sampling_rate_hz: object | None = None,
 ) -> FrequencyProtocol:
     """Validate editor text and return one immutable canonical protocol."""
 
     cycles_text = str(expected_analyzed_oddball_cycles).strip()
-    cycles: str | None = cycles_text or None
     existing = (
         normalize_frequency_protocol(existing_protocol)
         if existing_protocol is not None
         else None
     )
+    window = existing.analysis_window if existing is not None else None
+    mode = analysis_window_mode or (
+        window.mode if window is not None
+        and cycles_text == str(existing.expected_analyzed_oddball_cycles) else
+        ANALYSIS_WINDOW_MODE_CYCLES
+    )
+    if mode not in (ANALYSIS_WINDOW_MODE_CYCLES, ANALYSIS_WINDOW_MODE_DURATION, ANALYSIS_WINDOW_MODE_STUDIO):
+        raise FrequencyProtocolError("Choose an analysis duration, Studio window, or advanced cycle count.")
+    cycles: str | None = (cycles_text or None) if mode == ANALYSIS_WINDOW_MODE_CYCLES else None
     source = EXPECTED_CYCLES_SOURCE_MANUAL if cycles is not None else None
     marker_text = str(oddball_marker_code).strip()
     if oddball_input_mode == ODDBALL_INPUT_MODE_RECURRENCE:
@@ -206,6 +243,7 @@ def build_manual_protocol(
 
     if (
         existing is not None
+        and window is None
         and protocol.expected_analyzed_oddball_cycles is not None
         and protocol.expected_analyzed_oddball_cycles
         == existing.expected_analyzed_oddball_cycles
@@ -265,9 +303,35 @@ def build_manual_protocol(
     if recording_mapping:
         protocol = protocol.with_recording_oddball_marker_codes(recording_mapping)
 
+    target_rate = (
+        target_sampling_rate_hz if target_sampling_rate_hz is not None else
+        window.target_sampling_rate_hz if window is not None else
+        PREPROCESSING_DEFAULTS["downsample"]
+    )
+    if mode == ANALYSIS_WINDOW_MODE_STUDIO:
+        if window is None or window.mode != ANALYSIS_WINDOW_MODE_STUDIO:
+            raise FrequencyProtocolError("Import a Studio project before choosing its automatic analysis window.")
+        try:
+            updated_window = replace(window, target_sampling_rate_hz=target_rate)
+        except AnalysisWindowError as exc:
+            raise FrequencyProtocolError(str(exc)) from exc
+        protocol = protocol.with_analysis_window(updated_window)
+    elif mode == ANALYSIS_WINDOW_MODE_DURATION:
+        duration = (
+            requested_duration_seconds if requested_duration_seconds is not None else
+            window.requested_duration_seconds if window is not None else ""
+        )
+        if str(duration).strip():
+            protocol = protocol.with_analyzed_duration(
+                duration, target_sampling_rate_hz=target_rate,
+                source_sampling_rates_hz=window.source_sampling_rates_hz if window is not None else (),
+            )
+
     if require_ready and not protocol.is_ready:
         raise FrequencyProtocolError(
             "Enter the expected number of analyzed oddball cycles before saving."
+            if mode == ANALYSIS_WINDOW_MODE_CYCLES else
+            "Enter the intended analysis duration in seconds before saving."
         )
     return protocol
 
@@ -309,6 +373,16 @@ def protocol_settings_save_requested(
     if not initial_values.recording_oddball_markers_enabled and not current_values.recording_oddball_markers_enabled:
         initial_values = replace(initial_values, recording_oddball_marker_codes=())
         current_values = replace(current_values, recording_oddball_marker_codes=())
+    if initial_values.analysis_window_mode == current_values.analysis_window_mode:
+        if current_values.analysis_window_mode != ANALYSIS_WINDOW_MODE_CYCLES:
+            initial_values = replace(initial_values, expected_analyzed_oddball_cycles="")
+            current_values = replace(current_values, expected_analyzed_oddball_cycles="")
+        if current_values.analysis_window_mode != ANALYSIS_WINDOW_MODE_DURATION:
+            initial_values = replace(initial_values, requested_duration_seconds="")
+            current_values = replace(current_values, requested_duration_seconds="")
+        if current_values.analysis_window_mode == ANALYSIS_WINDOW_MODE_CYCLES:
+            initial_values = replace(initial_values, target_sampling_rate_hz="")
+            current_values = replace(current_values, target_sampling_rate_hz="")
     return bool(protocol_tab_active or current_values != initial_values)
 
 
@@ -333,13 +407,16 @@ def processing_protocol_snapshot(project: Any) -> FrequencyProtocol:
         )
     if protocol.status == FREQUENCY_PROTOCOL_STATUS_INCOMPLETE or not protocol.is_ready:
         raise ProjectProtocolRequiredError(
-            "Enter the expected number of analyzed oddball cycles in Settings > Protocol "
+            "Enter the intended analysis duration or advanced analyzed oddball cycles in Settings > Protocol "
             "and save before processing."
         )
     return protocol
 
 
 __all__ = (
+    "ANALYSIS_WINDOW_MODE_CYCLES",
+    "ANALYSIS_WINDOW_MODE_DURATION",
+    "ANALYSIS_WINDOW_MODE_STUDIO",
     "ProjectProtocolRequiredError",
     "ProtocolEditorValues",
     "build_manual_protocol",

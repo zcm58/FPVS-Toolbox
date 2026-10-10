@@ -13,6 +13,15 @@ App window's method-resolution order.
 
 ## Locked Invariant
 
+Full-length window setup is owned by the project protocol. Studio Auto derives
+the planned first-to-last oddball bound from authored sequence counts; Duration
+entry supplies a maximum in seconds. Both resolve one positive analyzed-cycle
+count on every verified original and effective processing sampling grid before
+QC starts. Advanced counts remain explicit. The original crop and marker review
+then validate recordings against that target; a short recording never shrinks
+the project target. Shorter-window and common-segment analyses are separate
+future features. Existing FFT normalization and averaging are unchanged.
+
 The normal processing pipeline must preserve exact oddball-bin locking for
 `55_onbin` crops. This is not a presentation detail or a tunable epoch-length
 preference: the crop length `N` must make the oddball bin index

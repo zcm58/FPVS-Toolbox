@@ -235,3 +235,183 @@ def test_read_fpvs_config_imports_exact_frequency_protocol(tmp_path) -> None:
         imported.frequency_protocol.oddball_marker_code_source
         == ODDBALL_MARKER_SOURCE_FPVS_STUDIO_IMPORT
     )
+
+
+def _write_current_studio_config(path, *, schema_version="1.2.0") -> dict:
+    _write_fpvs_config(path)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload.update(
+        schema_version=schema_version,
+        experiment_category="fpvs_oddball",
+        protocol={"base_hz": 3.0, "oddball_every_n": 10},
+        toolbox={
+            "project_title": "Semantic Categories Test",
+            "event_map": {"Fruit vs Vegetable": 1, "Veg vs Fruit": 2},
+            "oddball_trigger_code": 88,
+        },
+    )
+    payload["triggers"]["oddball_trigger_code"] = 88
+    for condition in payload["conditions"]:
+        condition["sequence_count"] = 1
+        condition["oddball_cycle_repeats_per_sequence"] = 146
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return payload
+
+
+@pytest.mark.parametrize(
+    "schema_version",
+    ["1.1.0", "1.2.0", "1.3.0", "1.4.0", "1.5.0", "1.6.0", "1.7.0", "1.8.0"],
+)
+def test_current_studio_config_creates_project_with_declared_rates(
+    tmp_path, schema_version,
+) -> None:
+    config_path = tmp_path / "current.fpvsconfig"
+    payload = _write_current_studio_config(config_path, schema_version=schema_version)
+    # Completed exports use the same setup fields. Planned events are not an FFT span.
+    payload["completed_session"] = {"ordered_runs": [{"trigger_events": [{"code": 88}]}]}
+    config_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    project = create_project_from_fpvs_config(tmp_path / "projects", config_path)
+    loaded = Project.load(project.project_root)
+
+    assert loaded.name == "Semantic Categories Test"
+    assert loaded.event_map == {"Fruit vs Vegetable": 1, "Veg vs Fruit": 2}
+    protocol = loaded.frequency_protocol
+    assert str(protocol.presentation_rate_hz) == "3"
+    assert protocol.oddball_every_n == 10
+    assert str(protocol.oddball_rate_hz) == "3/10"
+    assert protocol.oddball_marker_code == 88
+    assert protocol.oddball_marker_code_source == ODDBALL_MARKER_SOURCE_FPVS_STUDIO_IMPORT
+    assert protocol.expected_analyzed_oddball_cycles == 144
+    assert protocol.is_ready
+    assert protocol.derived_analyzed_seconds == 480
+    assert protocol.analysis_window.maximum_oddball_cycles == 145
+    assert protocol.analysis_window.mode == "studio_planned"
+
+
+@pytest.mark.parametrize("presentations,expected", [(74, 72), (146, 144), (149, 147), (302, 300)])
+def test_studio_project_lengths_resolve_independently(tmp_path, presentations, expected) -> None:
+    path = tmp_path / "project.fpvsconfig"
+    payload = _write_current_studio_config(path)
+    payload["protocol"] = {"base_hz": 6, "oddball_every_n": 5}
+    for condition in payload["conditions"]:
+        condition["oddball_cycle_repeats_per_sequence"] = presentations
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    project = create_project_from_fpvs_config(tmp_path / "projects", path)
+    loaded = Project.load(project.project_root)
+
+    assert loaded.frequency_protocol.expected_analyzed_oddball_cycles == expected
+    assert loaded.frequency_protocol.analysis_window.maximum_oddball_cycles == presentations - 1
+    assert loaded.frequency_protocol.fingerprint == project.frequency_protocol.fingerprint
+
+
+@pytest.mark.parametrize("field,value", [
+    ("sequence_count", None), ("sequence_count", True),
+    ("oddball_cycle_repeats_per_sequence", 0),
+    ("oddball_cycle_repeats_per_sequence", 146.5),
+])
+def test_invalid_studio_window_does_not_write_project(tmp_path, field, value) -> None:
+    path = tmp_path / "project.fpvsconfig"
+    payload = _write_current_studio_config(path)
+    payload["conditions"][0][field] = value
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(FPVSConfigImportError, match=field):
+        create_project_from_fpvs_config(tmp_path / "projects", path)
+    assert not (tmp_path / "projects").exists()
+
+
+def test_mixed_studio_lengths_fail_before_writing_project(tmp_path) -> None:
+    path = tmp_path / "project.fpvsconfig"
+    payload = _write_current_studio_config(path)
+    payload["conditions"][1]["oddball_cycle_repeats_per_sequence"] = 74
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(FPVSConfigImportError, match="same sequence count"):
+        create_project_from_fpvs_config(tmp_path / "projects", path)
+    assert not (tmp_path / "projects").exists()
+
+
+def test_studio_sequence_count_is_part_of_the_planned_window(tmp_path) -> None:
+    path = tmp_path / "project.fpvsconfig"
+    payload = _write_current_studio_config(path)
+    for condition in payload["conditions"]:
+        condition.update(sequence_count=2, oddball_cycle_repeats_per_sequence=74)
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    protocol = read_fpvs_config(path).frequency_protocol
+    assert protocol.analysis_window.maximum_oddball_cycles == 147
+    assert protocol.expected_analyzed_oddball_cycles == 147
+
+
+def test_current_cognitive_load_config_imports_fpvs_protocol(tmp_path) -> None:
+    config_path = tmp_path / "current.fpvsconfig"
+    payload = _write_current_studio_config(config_path)
+    payload["experiment_category"] = "cognitive_load_fpvs"
+    config_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    imported = read_fpvs_config(config_path)
+
+    assert imported.frequency_protocol is not None
+    assert str(imported.frequency_protocol.oddball_rate_hz) == "3/10"
+
+
+@pytest.mark.parametrize("schema_version", [None, "1.9.0", "2.0.0", {"version": "1.2.0"}])
+def test_unknown_studio_schema_does_not_create_project(tmp_path, schema_version) -> None:
+    config_path = tmp_path / "current.fpvsconfig"
+    _write_current_studio_config(config_path, schema_version=schema_version)
+    projects_root = tmp_path / "projects"
+
+    with pytest.raises(FPVSConfigImportError, match="Unsupported FPVS config schema"):
+        create_project_from_fpvs_config(projects_root, config_path)
+
+    assert not projects_root.exists()
+
+
+@pytest.mark.parametrize("category", ["attentional_blink", "fpvs", "unknown"])
+def test_unsupported_studio_category_does_not_create_project(tmp_path, category) -> None:
+    config_path = tmp_path / "current.fpvsconfig"
+    payload = _write_current_studio_config(config_path)
+    payload["experiment_category"] = category
+    config_path.write_text(json.dumps(payload), encoding="utf-8")
+    projects_root = tmp_path / "projects"
+
+    with pytest.raises(FPVSConfigImportError, match="Unsupported Studio experiment category"):
+        create_project_from_fpvs_config(projects_root, config_path)
+
+    assert not projects_root.exists()
+
+
+@pytest.mark.parametrize(
+    "protocol",
+    [None, [], {}, {"base_hz": 0, "oddball_every_n": 10},
+     {"base_hz": 3, "oddball_every_n": True}, {"base_hz": 3, "oddball_every_n": 1.5}],
+)
+def test_malformed_current_studio_protocol_is_rejected(tmp_path, protocol) -> None:
+    config_path = tmp_path / "current.fpvsconfig"
+    payload = _write_current_studio_config(config_path)
+    payload["protocol"] = protocol
+    config_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(FPVSConfigImportError, match="protocol"):
+        read_fpvs_config(config_path)
+
+
+def test_current_studio_config_requires_declared_protocol(tmp_path) -> None:
+    config_path = tmp_path / "current.fpvsconfig"
+    payload = _write_current_studio_config(config_path)
+    del payload["protocol"]
+    config_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(FPVSConfigImportError, match="missing its protocol"):
+        read_fpvs_config(config_path)
+
+
+def test_studio_config_rejects_ambiguous_protocol_definitions(tmp_path) -> None:
+    config_path = tmp_path / "current.fpvsconfig"
+    payload = _write_current_studio_config(config_path)
+    payload["frequency_protocol"] = {"presentation_rate_hz": 6, "oddball_every_n": 5}
+    config_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(FPVSConfigImportError, match="both protocol and frequency_protocol"):
+        read_fpvs_config(config_path)

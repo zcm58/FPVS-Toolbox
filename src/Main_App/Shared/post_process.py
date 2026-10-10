@@ -44,8 +44,10 @@ from Main_App.projects.frequency_protocol import (
     normalize_frequency_protocol,
 )
 from Main_App.projects.grouping import (
+    condition_output_folder_name,
     resolve_group_output_directory,
     resolve_output_directory,
+    validate_condition_output_names,
 )
 
 
@@ -89,8 +91,11 @@ def _run_identity_payload(app: Any, *, fallback_recording_id: str) -> dict[str, 
         "processing_fingerprint_version": str(
             settings.get("_fpvs_processing_fingerprint_version") or ""
         ),
+        # Single-session plans use the registered participant ID, not a raw filename alias.
         "recording_id": str(
-            settings.get("_fpvs_recording_id") or fallback_recording_id
+            settings.get("_fpvs_recording_id")
+            or settings.get("_fpvs_participant_id")
+            or fallback_recording_id
         ),
         "participant_id": str(
             settings.get("_fpvs_participant_id") or fallback_recording_id
@@ -556,6 +561,10 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
     but must not change metric calculation, processing order, output formats,
     filenames, sheet names, or export behavior.
     """
+    validate_condition_output_names(
+        label for label in condition_labels_present
+        if label != getattr(app, "group_name_for_output", None)
+    )
     post_started = perf_counter()
     export_timing_sink = getattr(app, "export_timing_records", None)
     export_receipts = _export_receipt_sink(app)
@@ -698,11 +707,7 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
         else:
             # Original FPVSApp single-file processing path
             raw_condition_label = cond_label_from_keys
-            sanitized_condition_label = re.sub(
-                r"^\d+\s*-\s*",
-                "",
-                raw_condition_label.replace("/", "-").replace("\\", "-").strip(),
-            )
+            sanitized_condition_label = condition_output_folder_name(raw_condition_label)
 
             folder_name_base = sanitized_condition_label
             filename_condition_part = sanitized_condition_label

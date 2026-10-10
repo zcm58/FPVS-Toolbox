@@ -12,6 +12,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from Main_App.io.atomic_write import atomic_write
 from typing import Any, Sequence
 
 from Tools.LORETA_Visualizer.source_producers.contracts import ProducedPayload
@@ -552,17 +553,14 @@ def _read_json(path: Path) -> dict[str, Any]:
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
-    temp_path = path.with_suffix(path.suffix + ".tmp")
-    with temp_path.open("w", encoding="utf-8") as handle:
+    with atomic_write(path) as handle:
         json.dump(_json_safe(payload), handle, indent=2)
         handle.write("\n")
-    temp_path.replace(path)
 
 
 def _write_text(path: Path, text: str) -> None:
-    temp_path = path.with_suffix(path.suffix + ".tmp")
-    temp_path.write_text(text, encoding="utf-8")
-    temp_path.replace(path)
+    with atomic_write(path) as handle:
+        handle.write(text)
 
 
 def _int_or_none(value: Any) -> int | None:

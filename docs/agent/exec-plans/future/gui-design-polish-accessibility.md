@@ -44,7 +44,6 @@ Primary embedded and tool surfaces:
 
 - `src/Tools/Stats/ui/`
 - `src/Tools/Plot_Generator/`
-- `src/Tools/Ratio_Calculator/`
 - `src/Tools/Publication_Maps/`
 - `src/Tools/Individual_Detectability/`
 - `src/Tools/Sequence_Figure/`
@@ -143,7 +142,6 @@ Candidate surfaces:
 - Main preprocessing input validation
 - Plot Generator required-folder and axis-limit validation
 - Stats missing-folder/ROI/settings validation
-- Ratio Calculator required-field and output-folder validation
 - Scalp Maps selection validation
 - Individual Detectability required-field validation
 
@@ -377,7 +375,7 @@ smoke path instead, such as:
 1. Launch the app normally in a visible Windows 11 or CachyOS session.
 2. Create or open a project.
 3. Use keyboard traversal through landing actions, sidebar, preprocessing
-   inputs, settings, Stats, Plot Generator, Ratio Calculator, and any touched
+   inputs, settings, Stats, Plot Generator, and any touched
    surface.
 4. Confirm focus rings are visible, command labels are clear, inline validation
    appears next to the relevant controls, and long-running work remains

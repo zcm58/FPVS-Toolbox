@@ -77,6 +77,16 @@ decision. A marker gap alone does not show that visual stimulation stopped.
 
 ## Kurtosis review
 
+In **Settings > Experimental > Electrodes**, choose whether the experimental
+**absolute normalized score > 10.0** option starts enabled for new review
+decisions. The project default is On. Save Settings to keep the preference;
+you can still override the checkbox within an individual review. Changing
+this starting preference does not change previously accepted decisions.
+The separate **Auto interpolate all kurtosis flags** policy defaults Off and
+takes precedence when enabled. Both options retain the existing review and
+receipt checks; neither changes the kurtosis calculation. Review choices are
+saved only when you choose **Apply decisions**.
+
 Select an electrode and choose **Inspect signal**. The overview preserves each
 display bin's minimum and maximum, so a short burst cannot disappear simply
 because the display picked every nth sample. Occurrences remain separate.

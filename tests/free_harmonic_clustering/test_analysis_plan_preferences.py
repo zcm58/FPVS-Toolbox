@@ -60,7 +60,7 @@ def test_invalid_saved_plans_cannot_silently_become_default_runs(tmp_path, paylo
 
 
 def test_failed_atomic_plan_write_keeps_previous_choices(tmp_path, monkeypatch):
-    from pathlib import Path
+    from Main_App.io import atomic_write
 
     previous = AnalysisPlanPreferences(("between_groups",))
     save_analysis_plan_preferences(tmp_path, previous)
@@ -68,7 +68,7 @@ def test_failed_atomic_plan_write_keeps_previous_choices(tmp_path, monkeypatch):
     def fail_replace(*_args):
         raise PermissionError("Locked by another application")
 
-    monkeypatch.setattr(Path, "replace", fail_replace)
+    monkeypatch.setattr(atomic_write.os, "replace", fail_replace)
     with pytest.raises(AnalysisPlanStateError, match="Locked"):
         save_analysis_plan_preferences(tmp_path, AnalysisPlanPreferences(("between_conditions",), "all_pairs"))
     assert load_analysis_plan_preferences(tmp_path) == previous

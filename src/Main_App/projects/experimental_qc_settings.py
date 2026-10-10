@@ -386,6 +386,7 @@ class ExperimentalQcSettings:
         default_factory=RawSpectralScreeningSettings
     )
     condition_specific_interpolation_enabled: bool = False
+    kurtosis_review_auto_interpolate_extreme: bool = True
 
     def __post_init__(self) -> None:
         schema_version = str(self.schema_version or "").strip()
@@ -409,6 +410,13 @@ class ExperimentalQcSettings:
             _coerce_bool(
                 self.condition_specific_interpolation_enabled,
                 field_name="condition_specific_interpolation_enabled",
+            ),
+        )
+        object.__setattr__(
+            self, "kurtosis_review_auto_interpolate_extreme",
+            _coerce_bool(
+                self.kurtosis_review_auto_interpolate_extreme,
+                field_name="kurtosis_review_auto_interpolate_extreme",
             ),
         )
 
@@ -443,6 +451,9 @@ class ExperimentalQcSettings:
             condition_specific_interpolation_enabled=raw.get(
                 "condition_specific_interpolation_enabled", False
             ),
+            kurtosis_review_auto_interpolate_extreme=raw.get(
+                "kurtosis_review_auto_interpolate_extreme", True
+            ),
         )
 
     def with_summed_bca_screening(
@@ -471,12 +482,20 @@ class ExperimentalQcSettings:
             "condition_specific_interpolation_enabled": (
                 self.condition_specific_interpolation_enabled
             ),
+            "kurtosis_review_auto_interpolate_extreme": (
+                self.kurtosis_review_auto_interpolate_extreme
+            ),
         }
 
     def with_condition_specific_interpolation_enabled(
         self, enabled: bool,
     ) -> "ExperimentalQcSettings":
         return replace(self, condition_specific_interpolation_enabled=enabled)
+
+    def with_kurtosis_review_auto_interpolate_extreme(
+        self, enabled: bool,
+    ) -> "ExperimentalQcSettings":
+        return replace(self, kurtosis_review_auto_interpolate_extreme=enabled)
 
 
 def normalize_summed_bca_screening_settings(

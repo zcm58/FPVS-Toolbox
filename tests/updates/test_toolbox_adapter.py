@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import json
 import subprocess
@@ -9,12 +10,33 @@ import sys
 from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 
 from Main_App.updates import helper_runtime, installer
 from Main_App.updates.application import APP_VERSION, source_version
 from Main_App.updates.models import DownloadedInstaller, InstallerAsset, UpdateError
+
+
+@pytest.mark.parametrize("active", [False, True])
+def test_install_guard_tracks_parentless_sequence_export(active):
+    path = Path(__file__).resolve().parents[2] / "src/Main_App/gui/update_install_guard.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    body = [
+        ast.ImportFrom(module="__future__", names=[ast.alias(name="annotations")], level=0),
+        *(node for node in tree.body if isinstance(node, ast.FunctionDef)),
+    ]
+    messages = Mock()
+    namespace = {"QThread": object, "show_warning": messages}
+    exec(compile(ast.fix_missing_locations(ast.Module(body=body, type_ignores=[])), str(path), "exec"), namespace)
+    host = SimpleNamespace(
+        findChildren=lambda _kind: [],
+        _sequence_figure_page=SimpleNamespace(has_active_generation=lambda: active),
+    )
+
+    assert namespace["default_install_guard"](host) is not active
+    assert messages.call_count == int(active)
 
 
 def test_source_helper_starts_from_unrelated_working_directory(tmp_path):
@@ -66,7 +88,7 @@ def test_all_users_install_uses_elevation_only_after_integrity_check(tmp_path, m
     digest = hashlib.sha256(payload).hexdigest()
     asset = InstallerAsset(
         name,
-        f"https://github.com/zcm58/FPVS-Toolbox-Repo/releases/download/v3.1.0/{name}",
+        f"https://github.com/zcm58/FPVS-Toolbox-Releases/releases/download/v3.1.0/{name}",
         len(payload),
         digest,
         "3.1.0",
@@ -90,6 +112,16 @@ def test_all_users_install_uses_elevation_only_after_integrity_check(tmp_path, m
 def test_config_remains_the_single_source_version_owner():
     config = Path(__file__).resolve().parents[2] / "src/config.py"
     assert APP_VERSION == source_version(config)
+
+
+def test_main_app_and_independent_helper_share_public_release_identity():
+    from config import FPVS_TOOLBOX_REPO_PAGE, FPVS_TOOLBOX_UPDATE_API
+    from Main_App.updates.application import RELEASE_REPOSITORY
+    from Main_App.updates.github_releases import DEFAULT_RELEASES_API_URL
+
+    assert RELEASE_REPOSITORY == "zcm58/FPVS-Toolbox-Releases"
+    assert FPVS_TOOLBOX_UPDATE_API == DEFAULT_RELEASES_API_URL
+    assert FPVS_TOOLBOX_REPO_PAGE == f"https://github.com/{RELEASE_REPOSITORY}/releases"
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows UAC API adapter")

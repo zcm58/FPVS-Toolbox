@@ -40,13 +40,18 @@ optional. Representative-data calibration remains follow-up evidence.
    detector can corroborate only after its relevant rule and BioSemi64
    calibration are accepted for that authority under QC-04/QC-15.
    The GUI also offers the separately labeled experimental `|normalized score|
-   > 10.0` rule for valid pending findings. It defaults on for this review, can
-   be disabled, and creates versioned experimental receipts rather than manual
+   > 10.0` rule for valid pending findings. Its initial checkbox state for new
+   review decisions comes from the project preference
+   `kurtosis_review_auto_interpolate_extreme` (default True), saved through
+   Settings > Experimental > Electrodes. It can still be overridden within the
+   review and requires Apply decisions. This preference does not alter existing
+   receipts, numerical scoring, or processing/cache fingerprints. The rule
+   creates versioned experimental receipts rather than manual
    approvals. Exactly 10.0 stays manual. This does not populate the registry
    or establish scientific validation of the cutoff.
    A separate project preference, `kurtosis_auto_interpolate_all` (default Off),
    authorizes all valid flags above the existing configured absolute normalized
-   threshold. It is available in Settings > Experimental and the review dialog,
+   threshold. It is available in Settings > Experimental > Electrodes and the review dialog,
    takes precedence over the >10 rule, and records distinct experimental authority.
    Invalid statistics still require review; scoring and interpolation scope do not change.
 5. Outside the enabled experimental policies, when kurtosis is the sole eligible

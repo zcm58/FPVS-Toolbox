@@ -309,7 +309,7 @@ companions. Keep old XLSX inputs readable and long/wide Excel reports intact.
 
 No raw data or user project outputs are migrated in place. Visible smoke after
 restart: process a small project, complete post-processing QC, open SNR/scalp
-maps/ratio/Stats with the same choices, and inspect long/wide Excel exports.
+maps/Stats with the same choices, and inspect long/wide Excel exports.
 Repeat with an old XLSX project and a project containing both generations.
 
 Verification: processing scope **1,308 passed, 5 skipped**, Stats scope **430

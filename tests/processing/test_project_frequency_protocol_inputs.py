@@ -80,6 +80,7 @@ def test_processing_params_use_one_frozen_project_protocol_snapshot(tmp_path, co
     assert params is not None
     assert condition_validation == [((("Condition A", "11"),), True)]
     assert params["event_id_map"] == {"Condition A": 11}
+    assert params["experimental_ram_preload"] is False
     assert params["frequency_protocol"] is project.frequency_protocol
     assert params["frequency_protocol"].oddball_rate_hz.numerator == 3
     assert params["frequency_protocol"].oddball_rate_hz.denominator == 10
@@ -209,6 +210,22 @@ def test_gui_params_allow_kurtosis_scan_to_resume_in_processing(
         current.close()
 
 
+def test_processing_params_pass_project_ram_preload_to_worker(tmp_path, condition_validation) -> None:
+    project = _ready_project(tmp_path / "project")
+    project.update_preprocessing({**project.preprocessing, "experimental_ram_preload": True})
+    host = SimpleNamespace(
+        currentProject=project,
+        file_mode=SimpleNamespace(get=lambda: "Batch"),
+        settings=object(),
+        event_rows=[("Condition A", "11")],
+    )
+
+    params = processing_inputs.build_validated_params(host)
+
+    assert params is not None
+    assert params["experimental_ram_preload"] is True
+
+
 def test_processing_params_block_incomplete_protocol_before_event_parsing(
     tmp_path,
     monkeypatch,
@@ -232,8 +249,8 @@ def test_processing_params_block_incomplete_protocol_before_event_parsing(
     assert warnings == [
         (
             "FPVS Protocol Required",
-            "Enter the expected number of analyzed oddball cycles in Settings > "
-            "Protocol and save before processing.",
+            "Enter the intended analysis duration or advanced analyzed oddball cycles "
+            "in Settings > Protocol and save before processing.",
         )
     ]
 

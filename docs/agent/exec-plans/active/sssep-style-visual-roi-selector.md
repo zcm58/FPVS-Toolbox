@@ -65,7 +65,7 @@ workbook or plot-output contract.
 | Dormant preset compatibility | Remove preset controls from the ROI screen. Preserve existing `[roi_presets]` data and APIs without loading or rewriting them from Settings. |
 | Save boundary | All map, name, add, and remove operations edit the current Settings draft. Outer Settings **Cancel** discards them; outer **Save** commits them. |
 | Projects root | Show **Change Projects Root...** only in Advanced, not in the ROI or other Settings footers. |
-| Downstream behavior | Preserve the first implementation's committed Stats/SNR refresh behavior and Ratio Calculator polling. Never mutate an active worker's snapshotted request. |
+| Downstream behavior | Preserve the first implementation's committed Stats/SNR refresh behavior. Never mutate an active worker's snapshotted request. |
 | Output contract | No changes to ROI averaging, FullSNR reads, conditions/groups/sessions, plot rendering, 600-DPI PNG/PDF pairs, names, or folders. |
 
 ## Current Backbone
@@ -89,7 +89,7 @@ FPVS already has the required persistence and analysis backbone:
   map geometry and accessible electrode controls.
 - `src/Main_App/gui/roi_electrode_selector_state.py` owns the ordered token
   ledger that preserves legacy duplicates, unmapped labels, and no-op order.
-- Plot Generator, Stats, Ratio Calculator, processing QC, and analysis-ready
+- Plot Generator, Stats, processing QC, and analysis-ready
   exports already consume the saved ROI mapping.
 
 The follow-up gap is presentation and multi-ROI coordination, not persistence
@@ -117,9 +117,7 @@ preserving `add_entry()`, `get_pairs()`, and `set_pairs()` for Settings callers.
 6. Use the outer **Cancel** to abandon the full draft, or outer **Save** to
    commit all ROI names and membership lists through the existing Settings
    workflow.
-7. After a successful commit, cached Stats and SNR pages refresh and Ratio
-   Calculator observes the same committed mapping through its existing polling
-   path.
+7. After a successful commit, cached Stats and SNR pages refresh.
 
 ## Locked Compatibility Rules
 
@@ -261,7 +259,7 @@ execution and visible cross-platform smoke remain pending.
 3. Add registered CI Qt coverage for pointer and Space toggling, active-row
    switching, overlap rings, built-in protection, right-list behavior, layout,
    and accessibility.
-4. Retain existing settings, processing, Stats, SNR, Ratio, and harmonic
+4. Retain existing settings, processing, Stats, SNR, and harmonic
    rollback regressions.
 5. Update GUI architecture and user documentation to describe the embedded
    workflow.
@@ -294,11 +292,10 @@ Focused tests and docs:
 - `tests/gui/test_roi_electrode_selector_state.py`
 - `tests/gui/test_roi_electrode_selector_qt.py`
 - `tests/gui/test_gui_preproc_dialog.py`
-- existing ROI settings, processing, Plot Generator, Stats, and Ratio tests
+- existing ROI settings, processing, Plot Generator, and Stats tests
 - `docs/agent/architecture/gui.md`
 - `docs/user/tools/snr-plot-generator.md`
 - `docs/user/tools/statistics.md`
-- `docs/user/tools/ratio-calculator.md`
 - this active plan
 
 ## Acceptance Criteria
@@ -334,8 +331,8 @@ Focused tests and docs:
   ordinary Settings saves even though preset controls are absent.
 - Outer Settings Cancel leaves persisted settings unchanged. Outer Save uses
   the current schema and harmonic recalculation/rollback path.
-- Cached SNR and Stats pages refresh after a committed change; Ratio Calculator
-  sees the same mapping; active worker requests remain snapshots.
+- Cached SNR and Stats pages refresh after a committed change; active worker
+  requests remain snapshots.
 - No ROI calculation, workbook schema, output directory, filename, DPI,
   PNG/PDF pairing, participant weighting, or scientific default changes.
 - The page fits and remains usable at 1280x900 on Windows; the shared
@@ -365,7 +362,6 @@ python .agents/scripts/verify.py --scope project-io --tier focused
 python .agents/scripts/verify.py --scope processing --tier focused
 python .agents/scripts/verify.py --scope plot-generator --tier focused
 python .agents/scripts/verify.py --scope stats --tier focused
-python .agents/scripts/verify.py --scope ratio-calculator --tier focused
 python .agents/scripts/verify.py --scope repo --tier precommit
 git diff --check
 ```
@@ -405,7 +401,7 @@ The follow-up coverage must verify:
 7. Save a no-op and confirm there is no false harmonic recalculation prompt.
    Save a real edit in a processed project and exercise existing
    recalculate/decline/rollback behavior.
-8. Confirm cached SNR and Stats pages and Ratio Calculator show the committed
+8. Confirm cached SNR and Stats pages show the committed
    mapping in the same app session.
 9. Generate one `(All ROIs)` SNR run from representative data and confirm the
    existing names, folder, and matching PNG/PDF outputs.
@@ -467,8 +463,8 @@ must not be represented as verification of the embedded follow-up:
 - GUI focused gate: passed; 8 selector-state tests passed.
 - Processing focused gate: 375 passed, 1 skipped.
 - Stats focused gate: 384 passed.
-- Direct project-I/O, Plot Generator, and Ratio Calculator safe bundles: 121,
-  110, and 7 tests passed respectively.
+- Direct project-I/O and Plot Generator safe bundles: 121 and 110 tests passed
+  respectively.
 - ROI/state/settings focused bundle: 15 passed.
 - Verification registry validation, changed-file Ruff/compilation, strict
   MkDocs build, protected/source-localization audits, and `git diff --check`
@@ -491,7 +487,7 @@ the flat/protected-built-in refinement:
 - Verification configuration passed for all 15 scopes. Both changed Qt files
   remain registered in `tests/qt_test_files.txt`.
 - Direct locally safe bundles passed: project I/O/settings, 159; processing,
-  375 with 1 skip; Plot Generator, 110; Stats, 384; Ratio Calculator, 7; and
+  375 with 1 skip; Plot Generator, 110; Stats, 384; and
   the combined ROI state/settings bundle, 18.
 - The exact-tree non-Qt suite completed with 1,935 passed and 3 skipped. Its
   only failure was the pre-existing Publication Maps repeated-layout assertion
@@ -523,7 +519,7 @@ The flat/protected-built-in refinement is complete on
   focused` passed the GUI audit, changed-file Ruff, compilation, and all 16
   GUI-neutral selector/collection tests.
 - Direct locally safe bundles passed: project I/O/settings, 123; processing,
-  375 with 1 skip; Plot Generator, 110; Stats, 384; Ratio Calculator, 7; and a
+  375 with 1 skip; Plot Generator, 110; Stats, 384; and a
   focused ROI settings/downstream bundle, 25.
 - The exact-tree non-Qt suite completed with 1,940 passed and 3 skipped. Its
   only failure is the unchanged Publication Maps repeated-layout assertion
@@ -531,7 +527,7 @@ The flat/protected-built-in refinement is complete on
   test changed in this work.
 - Strict MkDocs, protected/source-localization and Stats audits, changed-file
   Ruff/compilation, and `git diff --check` passed.
-- Project-I/O, Plot Generator, Ratio Calculator, and repository drivers stop at
+- Project-I/O, Plot Generator, and repository drivers stop at
   the same eight pre-existing hard-coded machine paths under the untracked
   `outputs/` tree. Those user files were not edited or staged; their registered
   test bundles were run directly.
@@ -578,9 +574,9 @@ Verification on the merged working tree:
 - The same driver with `--scope gui`: 284 non-Qt tests passed; GUI audit,
   changed-file Ruff, and compilation passed.
 - The same driver with `--scope stats`: 430 tests passed; Stats audits passed.
-- Project-I/O, Plot Generator, and Ratio Calculator focused drivers stop at
+- Project-I/O and Plot Generator focused drivers stop at
   eight existing machine-path findings in unrelated untracked `outputs/`.
-  Their registered non-Qt test targets were run directly together: 351 passed.
+  A combined non-Qt test bundle was run directly: 351 passed.
 - `--scope repo --tier precommit` stops at those same eight path findings.
   The unrelated output files are excluded from the merge.
 - Independent conflict/lifetime review passed. No local Qt workflow ran.
@@ -591,12 +587,12 @@ Additional integration coverage: `tests/gui/test_roi_settings_invalidation.py`
 `tests/gui/test_gui_preproc_dialog.py` and incoming
 `tests/gui/test_roi_electrode_selector_qt.py` remain registered for CI;
 the former now covers both normal and nested harmonic-worker completion with
-no shared progress page. Plot Generator and Ratio Calculator GUI refresh
-coverage remains registered for CI as before.
+no shared progress page. Plot Generator GUI refresh coverage remains registered
+for CI as before.
 
 Visible smoke remains required: at 1280x900 open Settings > ROIs, edit one
 ROI with pointer/Space, inspect overlap rings, and Cancel/reopen. Save an edit,
-verify cached Stats/SNR/Ratio consumers refresh, and confirm Advanced still
+verify cached Stats/SNR consumers refresh, and confirm Advanced still
 opens Dataset Exclusions. In a processed project, exercise ROI changes with
 rebuild-now and deferred rebuild, including a missing built-in draft. Finish a
 harmonic-only rebuild and confirm Settings returns home after worker cleanup.

@@ -147,9 +147,11 @@ def test_unscoped_preflight_preserves_group_id_without_reporting_load_error(
     assert scan.results[0].condition_qc["evaluation_status"] == "not_evaluated"
 
 
+@pytest.mark.parametrize("ram_preload", [False, True])
 def test_legacy_preflight_loader_forwards_project_geometry_and_stim(
     monkeypatch,
     tmp_path: Path,
+    ram_preload: bool,
 ) -> None:
     observed: dict[str, object] = {}
 
@@ -169,6 +171,7 @@ def test_legacy_preflight_loader_forwards_project_geometry_and_stim(
             "stim_channel": "Trigger",
             "electrode_montage": "biosemi64",
             "electrode_mapping_profile": "biosemi64_1020_ab_v1",
+            "experimental_ram_preload": ram_preload,
         },
     )
 
@@ -180,6 +183,7 @@ def test_legacy_preflight_loader_forwards_project_geometry_and_stim(
         "stim_channel": "Trigger",
         "electrode_montage": "biosemi64",
         "electrode_mapping_profile": "biosemi64_1020_ab_v1",
+        **({"preload_in_memory": True} if ram_preload else {}),
     }
 
 

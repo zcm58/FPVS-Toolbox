@@ -136,6 +136,14 @@ BioSemi-only prefetch coordinator do not dispatch through this adapter.
 
 ### Production BioSemi Entry
 
+`Main_App.io.load_utils.read_bdf_sampling_rate_hz()` probes only fixed and
+signal headers for automatic analysis-window setup. It returns an exact rate,
+validates BDF structure and a common non-annotation data/stim grid, and reads no
+EEG samples or MNE Raw. Malformed headers and file-access errors propagate.
+Existing not-started recordings retain their explicit exclusion policy. The
+processing setup rejects nonterminating fractional rates that cannot retain
+their exact identity through the current runtime's decimal float grid.
+
 `load_eeg_file(app, filepath, ref_pair=None, first_n_channels=None,
 electrode_mapping_profile=None, electrode_montage=None)` expects the host
 object to provide:
@@ -238,15 +246,37 @@ original recordings, exports, or the repository's MNE/fsaverage cache.
   exclusion warning and returns `None`, while the process runner reports the
   file as `status="excluded"` instead of a processing error.
 - BDF files load through `mne.io.read_raw_bdf(...)`.
-- The normal processing loader remains disk-preloaded and unchanged. Only the
-  explicit preflight context uses `preload=False` for on-demand condition reads.
+- Raw BDF loading remains disk-preloaded by default. A project-only,
+  default-off Settings > Experimental > Performance switch uses MNE
+  `preload=True` for preflight QC, interactive QC prefetch or its scanner
+  fallback, and processing cache misses. It creates no full-recording memmap;
+  a memory allocation failure in the ordinary loader is a load failure, never
+  a silent fallback to disk. RAM QC prefetch is bounded to 25% of available
+  memory and releases its buffers at the existing exclusive handoff/cleanup
+  points. Preprocessed FIF cache hits and the separate lazy preflight context
+  retain their established loading behavior.
+- Only the explicit preflight context uses `preload=False` for on-demand
+  condition reads.
 - Preflight keeps ordinary condition intervals in RAM. An interval exceeding
   256 MiB is copied in 10-second reads to an automatically removed,
   condition-only float64 temporary memmap; the complete BDF is never preloaded
   or mapped by this path.
 - `.set`/EEGLAB loading is intentionally unsupported in the active toolbox.
 - Disk-backed preload files are created under
-  `tempfile.gettempdir()/fpvs_memmap/pid_<process-id>/<file-stem>_raw.dat`.
+  `tempfile.gettempdir()/fpvs_memmap/pid_<process-id>-<random>/<file-stem>_raw.dat`.
+  `Main_App.io.memmap_paths` exclusively creates one private directory per
+  process and validates its identity on reuse. Loader, worker initialization,
+  and per-file cleanup use this same owner; an existing guessed PID directory
+  is never reused. Cleanup rejects redirected containers and retains live maps.
+  Dead-process cleanup recognizes both historical and private PID names.
+- The RAM switch is an execution/storage choice and must not change the
+  processing fingerprint or preprocessed-Raw cache key. Confirm in a visible
+  1280x900 project Settings session that the switch is visible under
+  Experimental > Performance, starts off, Cancel discards it,
+  Save persists it for that project, and a cache-miss run uses RAM only while
+  enabled. Loader logs report `preload_mode='ram'` or `'disk'`. Check that the
+  QC prefetch creates no `qc-source-*` disk staging
+  directory in RAM mode. Qt execution remains CI-only locally.
 - Loading does not resample data.
 - Before either full or reduced loading, the loader performs a header-only BDF
   read and validates the complete acquisition geometry contract. A reduced

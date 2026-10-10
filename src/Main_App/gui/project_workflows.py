@@ -501,7 +501,6 @@ def reset_project_context_workspace(host: Any) -> bool:
         "_settings_page",
         "_stats_page",
         "_free_harmonic_clustering_page",
-        "_ratio_calculator_page",
         "_individual_detectability_page",
         "_plot_generator_page",
         "_publication_maps_page",

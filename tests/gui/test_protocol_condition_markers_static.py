@@ -40,6 +40,8 @@ def _editor():
         protocol_oddball_every_n_edit=_Edit("5"),
         protocol_direct_oddball_rate_edit=_Edit("1.2"),
         protocol_expected_cycles_edit=_Edit("144"),
+        protocol_requested_duration_edit=_Edit("120"),
+        analysis_mode="cycles", preproc_edits=[_Edit("256")],
         protocol_oddball_marker_code_edit=_Edit("55"),
         protocol_oddball_mode_combo=SimpleNamespace(currentData=lambda: ODDBALL_INPUT_MODE_RECURRENCE),
         enabled=True,
@@ -47,6 +49,7 @@ def _editor():
         _protocol_requires_confirmation=False,
         tabs=SimpleNamespace(currentIndex=lambda: 0), _protocol_tab_index=1,
     )
+    panel.protocol_analysis_window_mode_combo = SimpleNamespace(currentData=lambda: panel.analysis_mode)
     panel.protocol_condition_markers_check = SimpleNamespace(isChecked=lambda: panel.enabled)
     panel.protocol_recording_markers_check = SimpleNamespace(isChecked=lambda: panel.recording_enabled)
     panel.protocol_condition_markers_table = SimpleNamespace(
@@ -62,6 +65,7 @@ def _editor():
         "build_manual_protocol": build_manual_protocol, "FrequencyProtocolError": FrequencyProtocolError,
         "ODDBALL_INPUT_MODE_RECURRENCE": ODDBALL_INPUT_MODE_RECURRENCE,
         "protocol_settings_save_requested": protocol_settings_save_requested,
+        "PREPROCESSING_FIELDS": ("downsample",),
     }
     module = ast.Module(body=[ast.ImportFrom(module="__future__", names=[ast.alias(name="annotations")], level=0), *methods], type_ignores=[])
     exec(compile(ast.fix_missing_locations(module), str(SOURCE), "exec"), namespace)
@@ -69,6 +73,29 @@ def _editor():
         setattr(panel, method.name, namespace[method.name].__get__(panel))
     panel._initial_protocol_editor_values = panel._protocol_editor_values()
     return panel, rows
+
+
+def test_duration_and_target_grid_use_the_actual_settings_adapter():
+    panel, _ = _editor()
+    panel.analysis_mode = "manual_duration"
+    panel.protocol_requested_duration_edit.value = "121"
+    protocol = panel._protocol_from_editor(require_ready=True)
+    assert protocol.expected_analyzed_oddball_cycles == 144
+    panel.project.frequency_protocol = protocol
+    panel._initial_protocol_editor_values = panel._protocol_editor_values()
+    panel.preproc_edits[0].value = "300"
+    assert panel._protocol_save_requested()
+    updated = panel._protocol_from_editor(require_ready=True)
+    assert updated.expected_analyzed_oddball_cycles == 145
+    assert updated.condition_oddball_marker_codes == ((1, 51), (2, 52))
+
+
+def test_inactive_duration_drafts_do_not_rewrite_saved_fixed_cycles():
+    panel, _ = _editor()
+    panel.protocol_requested_duration_edit.value = "77"
+    panel.preproc_edits[0].value = "300"
+    assert not panel._protocol_save_requested()
+    assert panel._protocol_from_editor(require_ready=True).fingerprint == panel.project.frequency_protocol.fingerprint
 
 
 def test_editor_preserves_mapping_keys_even_when_rows_are_reordered():

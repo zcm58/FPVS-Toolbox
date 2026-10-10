@@ -7,6 +7,9 @@ from types import SimpleNamespace
 import pytest
 
 from Main_App.gui.project_protocol import (
+    ANALYSIS_WINDOW_MODE_CYCLES,
+    ANALYSIS_WINDOW_MODE_DURATION,
+    ANALYSIS_WINDOW_MODE_STUDIO,
     ProjectProtocolRequiredError,
     ProtocolEditorValues,
     build_manual_protocol,
@@ -267,7 +270,7 @@ def test_protocol_save_policy_allows_unrelated_save_but_detects_edit_or_confirma
         ),
         (
             FrequencyProtocol.from_recurrence("6", 5),
-            "expected number of analyzed oddball cycles",
+            "intended analysis duration",
         ),
     ],
 )
@@ -308,6 +311,8 @@ def _build_editor_protocol(protocol, **changes):
         oddball_every_n=values.oddball_every_n,
         oddball_rate_hz=values.entered_oddball_rate_hz,
         expected_analyzed_oddball_cycles=values.expected_analyzed_oddball_cycles,
+        analysis_window_mode=values.analysis_window_mode,
+        requested_duration_seconds=values.requested_duration_seconds,
         oddball_marker_code=values.oddball_marker_code,
         existing_protocol=protocol, require_ready=True,
     )
@@ -431,3 +436,93 @@ def test_protocol_values_remain_independent_between_projects(tmp_path) -> None:
     assert reopened_a.frequency_protocol.expected_analyzed_oddball_cycles == 144
     assert reopened_b.frequency_protocol.oddball_rate_hz == Fraction(3, 10)
     assert reopened_b.frequency_protocol.expected_analyzed_oddball_cycles == 90
+
+
+def test_new_protocol_uses_duration_entry_and_saved_cycles_stay_advanced():
+    assert editor_values_for_protocol(FrequencyProtocol.from_recurrence("6", 5)).analysis_window_mode == ANALYSIS_WINDOW_MODE_DURATION
+    existing = _mapped_protocol()
+    values = editor_values_for_protocol(existing)
+    assert values.analysis_window_mode == ANALYSIS_WINDOW_MODE_CYCLES
+    assert values.requested_duration_seconds == "120"
+    assert _build_editor_protocol(existing).fingerprint == existing.fingerprint
+
+
+@pytest.mark.parametrize(("seconds", "cycles"), [("120", 144), ("60", 72), ("121", 144)])
+def test_duration_entry_resolves_complete_sample_compatible_cycles(seconds, cycles):
+    protocol = _build_editor_protocol(
+        _mapped_protocol(), analysis_window_mode=ANALYSIS_WINDOW_MODE_DURATION,
+        requested_duration_seconds=seconds, expected_analyzed_oddball_cycles="not used",
+        target_sampling_rate_hz="256",
+    )
+    assert protocol.expected_analyzed_oddball_cycles == cycles
+    assert protocol.analysis_window.mode == ANALYSIS_WINDOW_MODE_DURATION
+    assert protocol.analysis_window.requested_duration_seconds == Fraction(seconds)
+    assert protocol.condition_oddball_marker_codes == _mapped_protocol().condition_oddball_marker_codes
+    assert protocol.expected_analyzed_samples(256) == cycles * 256 * 5 // 6
+    assert _build_editor_protocol(protocol).fingerprint == protocol.fingerprint
+
+
+@pytest.mark.parametrize("seconds", ["0", "-1", "bad", ""])
+def test_duration_entry_fails_on_missing_or_invalid_duration(seconds):
+    with pytest.raises(FrequencyProtocolError):
+        _build_editor_protocol(
+            _mapped_protocol(), analysis_window_mode=ANALYSIS_WINDOW_MODE_DURATION,
+            requested_duration_seconds=seconds,
+        )
+
+
+def _studio_window_protocol():
+    from Main_App.projects.analysis_window import AnalysisWindow
+
+    return _mapped_protocol().with_analysis_window(AnalysisWindow(
+        mode=ANALYSIS_WINDOW_MODE_STUDIO, maximum_oddball_cycles=145,
+        requested_duration_seconds=None, target_sampling_rate_hz=Fraction(256),
+    ))
+
+
+def test_studio_auto_window_survives_save_and_marker_edits():
+    protocol = _studio_window_protocol()
+    values = editor_values_for_protocol(protocol)
+    assert values.analysis_window_mode == ANALYSIS_WINDOW_MODE_STUDIO
+    assert values.requested_duration_seconds == "120"
+    assert _build_editor_protocol(protocol).fingerprint == protocol.fingerprint
+    rebuilt = _build_editor_protocol(protocol, oddball_marker_code="77")
+    assert rebuilt.analysis_window == protocol.analysis_window
+    assert rebuilt.expected_analyzed_oddball_cycles == 144
+    assert rebuilt.oddball_marker_code_source == ODDBALL_MARKER_SOURCE_MANUAL
+
+
+def test_explicit_advanced_cycles_replace_studio_auto_policy():
+    protocol = _build_editor_protocol(
+        _studio_window_protocol(), analysis_window_mode=ANALYSIS_WINDOW_MODE_CYCLES,
+        expected_analyzed_oddball_cycles="144",
+    )
+    assert protocol.analysis_window is None
+    assert protocol.expected_analyzed_oddball_cycles_source == "manual"
+
+
+def test_studio_mode_requires_a_studio_import():
+    with pytest.raises(FrequencyProtocolError, match="Import a Studio project"):
+        _build_editor_protocol(_mapped_protocol(), analysis_window_mode=ANALYSIS_WINDOW_MODE_STUDIO)
+
+
+@pytest.mark.parametrize("target", ["", "bad", "0"])
+def test_studio_auto_reports_invalid_preprocessing_grid_as_editor_validation(target):
+    with pytest.raises(FrequencyProtocolError, match="Target sampling rate"):
+        _build_editor_protocol(_studio_window_protocol(), target_sampling_rate_hz=target)
+
+
+def test_only_active_analysis_window_fields_affect_protocol_save():
+    auto = editor_values_for_protocol(_studio_window_protocol())
+    assert not protocol_settings_save_requested(
+        auto, replace(auto, expected_analyzed_oddball_cycles="77", requested_duration_seconds="10"),
+        protocol_tab_active=False,
+    )
+    assert protocol_settings_save_requested(
+        auto, replace(auto, target_sampling_rate_hz="200"), protocol_tab_active=False,
+    )
+    fixed = editor_values_for_protocol(_mapped_protocol())
+    assert not protocol_settings_save_requested(
+        fixed, replace(fixed, requested_duration_seconds="10", target_sampling_rate_hz="200"),
+        protocol_tab_active=False,
+    )

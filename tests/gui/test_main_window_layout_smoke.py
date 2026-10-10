@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QLabel,
     QLineEdit,
+    QMenu,
     QMessageBox,
     QPushButton,
     QSizePolicy,
@@ -41,7 +42,6 @@ from Tools.Publication_Maps.gui import (
     PublicationMapsWindow,
 )
 from Tools.Publication_Maps.generation_outcome import PublicationMapsWorkerOutcome
-from Tools.Ratio_Calculator.gui import RatioCalculatorWindow
 from Tools.Sensitivity_Analysis.gui import SensitivityAnalysisWindow
 from Tools.Stats import StatsWindow
 
@@ -60,7 +60,6 @@ BETA_TOOL_ROLES = [
     "btn_sensitivity_analysis",
     "btn_loreta_visualizer",
     "btn_sequence_figure",
-    "btn_ratio",
     "btn_individual_detectability",
 ]
 BETA_TOOL_LABELS = [
@@ -69,7 +68,6 @@ BETA_TOOL_LABELS = [
     "Sensitivity Analysis",
     "LORETA Visualizer",
     "Sequence Figure",
-    "Ratio Calculator",
     "Individual Detectability",
 ]
 BETA_TOOL_ACCESSIBLE_NAMES = [
@@ -78,7 +76,6 @@ BETA_TOOL_ACCESSIBLE_NAMES = [
     "Sensitivity Analysis",
     "LORETA Visualizer",
     "Sequence Figure",
-    "Ratio Calculator",
     "Individual Detectability",
 ]
 
@@ -120,6 +117,12 @@ def _sidebar_button(win: main_window_module.MainWindow, role: str) -> QWidget:
     return matches[0]
 
 
+def _menu(win: main_window_module.MainWindow, object_name: str) -> QMenu:
+    menu = win.menuBar().findChild(QMenu, object_name)
+    assert menu is not None
+    return menu
+
+
 def _sidebar_tool_buttons(win: main_window_module.MainWindow) -> list[SidebarButton]:
     layout = win.sidebar_tools_group.layout()
     buttons: list[SidebarButton] = []
@@ -152,6 +155,12 @@ def test_sidebar_default_tool_order(tmp_path: Path, qtbot, monkeypatch) -> None:
         widget.property("role") for widget in win.sidebar.findChildren(QWidget)
     }
     assert not set(BETA_TOOL_ROLES) & visible_roles
+    tools_menu = _menu(win, "toolsMenu")
+    assert [action.text() for action in tools_menu.actions()] == [
+        "Free Harmonic Clustering Analysis", "SNR Plots",
+    ]
+    assert [action.objectName() for action in tools_menu.actions()] == DEFAULT_TOOL_ROLES
+    assert win.menuBar().findChild(QMenu, "betaToolsMenu") is None
     _assert_utilities_anchored_at_bottom(win)
 
 
@@ -179,6 +188,13 @@ def test_sidebar_beta_tool_order(tmp_path: Path, qtbot, monkeypatch) -> None:
     assert [button.toolTip() for button in beta_buttons] == [
         f"{name} (Beta)" for name in BETA_TOOL_ACCESSIBLE_NAMES
     ]
+    tools_actions = _menu(win, "toolsMenu").actions()
+    assert [action.objectName() for action in tools_actions[:2]] == DEFAULT_TOOL_ROLES
+    assert tools_actions[2].isSeparator()
+    beta_menu = _menu(win, "betaToolsMenu")
+    assert tools_actions[3].menu() is beta_menu
+    assert [action.objectName() for action in beta_menu.actions()] == BETA_TOOL_ROLES
+    assert [action.text() for action in beta_menu.actions()] == BETA_TOOL_ACCESSIBLE_NAMES
     _assert_utilities_anchored_at_bottom(win)
 
 
@@ -393,14 +409,38 @@ def test_main_window_layout_smoke(tmp_path: Path, qtbot, monkeypatch) -> None:
     ]
     assert any(not pixmap.isNull() for pixmap in settings_pixmaps)
 
-    help_actions = []
-    for action in win.menuBar().actions():
-        menu = action.menu()
-        if menu and menu.title() == "Help":
-            help_actions = [child.text() for child in menu.actions() if child.text()]
-            break
-    assert "Relevant Publications" not in help_actions
-    assert any(text.startswith("About") for text in help_actions)
+    assert [action.text() for action in win.menuBar().actions()] == ["File", "View", "Tools"]
+    assert win.menuBar().focusPolicy() == Qt.FocusPolicy.NoFocus
+    file_actions = _menu(win, "fileMenu").actions()
+    assert [None if action.isSeparator() else action.text() for action in file_actions] == [
+        "New Project…",
+        "Open Existing Project…",
+        "Save Project Settings",
+        None,
+        "Settings",
+        "Reset Project Processing Cache...",
+        None,
+        "Check for Updates",
+        "About…",
+        None,
+        "Exit",
+    ]
+    assert file_actions[0] is win.actionCreateNewProject
+    assert file_actions[1] is win.actionOpenExistingProject
+    assert file_actions[5] is win.actionResetProjectProcessingCache
+    assert file_actions[-1] is win.exit_action
+    assert [action.text() for action in _menu(win, "viewMenu").actions()] == ["Home"]
+
+
+def test_view_menu_returns_to_home(tmp_path: Path, qtbot, monkeypatch) -> None:
+    win = _build_window(tmp_path, qtbot, monkeypatch)
+    win.open_settings_window()
+    assert win.workspace_stack.currentWidget() is win._settings_page
+
+    _menu(win, "viewMenu").actions()[0].trigger()
+
+    assert win.workspace_stack.currentWidget() is win.homeWidget
+    assert _sidebar_button(win, "btn_home").property("selected") is True
 
 
 def test_processing_log_opens_in_focused_modal(
@@ -753,48 +793,6 @@ def test_sidebar_settings_embeds_in_main_workspace(
     assert selected_roles == ["btn_settings"]
 
     win._settings_page.reject()
-    qtbot.wait(20)
-
-    assert win.workspace_stack.currentWidget() is win.homeWidget
-    selected_roles = [
-        widget.property("role")
-        for widget in win.sidebar.findChildren(QWidget)
-        if widget.property("selected") is True
-    ]
-    assert selected_roles == ["btn_home"]
-
-
-def test_sidebar_ratio_calculator_embeds_in_main_workspace(
-    tmp_path: Path,
-    qtbot,
-    monkeypatch,
-) -> None:
-    win = _build_window(tmp_path, qtbot, monkeypatch, enable_beta_tools=True)
-    monkeypatch.setattr(win, "_acknowledge_beta_tool_warning", lambda _key: None)
-    project_root = tmp_path / "project"
-    project_root.mkdir()
-    win.currentProject = SimpleNamespace(
-        project_root=project_root,
-        input_folder=project_root,
-        subfolders={},
-    )
-    win.stacked.setCurrentIndex(1)
-    qtbot.wait(20)
-
-    qtbot.mouseClick(_sidebar_button(win, "btn_ratio"), Qt.LeftButton)
-    qtbot.wait(20)
-
-    assert isinstance(win.workspace_stack.currentWidget(), RatioCalculatorWindow)
-    assert win.workspace_stack.currentWidget().objectName() == "embedded_ratio_calculator_page"
-    assert win._ratio_calculator_page._project_root == project_root
-    selected_roles = [
-        widget.property("role")
-        for widget in win.sidebar.findChildren(QWidget)
-        if widget.property("selected") is True
-    ]
-    assert selected_roles == ["btn_ratio"]
-
-    qtbot.mouseClick(_sidebar_button(win, "btn_home"), Qt.LeftButton)
     qtbot.wait(20)
 
     assert win.workspace_stack.currentWidget() is win.homeWidget
@@ -1308,7 +1306,6 @@ def test_beta_warning_is_generic_and_shown_once_per_tool(
     qtbot,
     monkeypatch,
 ) -> None:
-    win = _build_window(tmp_path, qtbot, monkeypatch, enable_beta_tools=True)
     warning_calls: list[tuple[str, str]] = []
     events: list[str] = []
 
@@ -1319,12 +1316,19 @@ def test_beta_warning_is_generic_and_shown_once_per_tool(
 
     monkeypatch.setattr(main_window_module.QMessageBox, "warning", fake_warning)
 
-    def opener() -> None:
+    def opener(_self) -> None:
         events.append("opened")
 
-    win._open_beta_tool("btn_loreta_visualizer", opener)
-    win._open_beta_tool("btn_loreta_visualizer", opener)
-    win._open_beta_tool("btn_sequence_figure", opener)
+    monkeypatch.setattr(main_window_module.MainWindow, "open_loreta_visualizer", opener)
+    monkeypatch.setattr(main_window_module.MainWindow, "open_sequence_figure", opener)
+    win = _build_window(tmp_path, qtbot, monkeypatch, enable_beta_tools=True)
+    win.stacked.setCurrentIndex(1)
+
+    beta_menu = _menu(win, "betaToolsMenu")
+    beta_actions = {action.objectName(): action for action in beta_menu.actions()}
+    beta_actions["btn_loreta_visualizer"].trigger()
+    qtbot.mouseClick(_sidebar_button(win, "btn_loreta_visualizer"), Qt.LeftButton)
+    beta_actions["btn_sequence_figure"].trigger()
 
     assert warning_calls == [
         (
@@ -1582,7 +1586,6 @@ def test_fhc_page_routes_post_processing_request_to_main_window(
         ("btn_sensitivity_analysis", "open_sensitivity_analysis"),
         ("btn_loreta_visualizer", "open_loreta_visualizer"),
         ("btn_sequence_figure", "open_sequence_figure"),
-        ("btn_ratio", "open_ratio_calculator"),
         ("btn_individual_detectability", "open_individual_detectability"),
     ],
 )
@@ -1604,6 +1607,13 @@ def test_beta_registry_routes_every_entry_through_shared_gate(
     qtbot.mouseClick(_sidebar_button(win, role), Qt.LeftButton)
 
     assert routed == [(role, opener_name)]
+
+    action = next(
+        action for action in _menu(win, "betaToolsMenu").actions()
+        if action.objectName() == role
+    )
+    action.trigger()
+    assert routed == [(role, opener_name), (role, opener_name)]
 
 
 def test_sidebar_individual_detectability_embeds_in_main_workspace(

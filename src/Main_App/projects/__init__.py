@@ -86,6 +86,8 @@ _FREQUENCY_PROTOCOL_NAMES = {
     "validate_protocol_condition_codes",
 }
 _GROUPING_NAMES = {
+    "condition_output_folder_name",
+    "validate_condition_output_names",
     "GroupConfigurationError",
     "GroupInfo",
     "ParticipantInfo",

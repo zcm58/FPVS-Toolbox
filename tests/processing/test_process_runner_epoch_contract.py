@@ -883,9 +883,11 @@ def test_parallel_runner_skips_preflight_header_only_files_before_pool(
     assert queue.messages[-1]["excluded_count"] == 1
 
 
+@pytest.mark.parametrize("ram_preload", [False, True])
 def test_run_full_pipeline_passes_project_channel_limit_to_validating_loader(
     monkeypatch,
     tmp_path: Path,
+    ram_preload: bool,
 ) -> None:
     captured: dict[str, object] = {}
 
@@ -914,6 +916,7 @@ def test_run_full_pipeline_passes_project_channel_limit_to_validating_loader(
             "ref_channel1": "EXG1",
             "ref_channel2": "EXG2",
             "enable_preprocessed_cache": False,
+            "experimental_ram_preload": ram_preload,
                 "max_idx_keep": None,
                 "max_chan_idx_keep": 16,
                 **plan_settings,
@@ -926,6 +929,7 @@ def test_run_full_pipeline_passes_project_channel_limit_to_validating_loader(
     assert result["status"] == "error"
     assert result["stage"] == "load"
     assert captured["first_n_channels"] == 16
+    assert captured.get("preload_in_memory", False) is ram_preload
     payload = process_runner._preproc_cache_payload(
         fake_bdf,
         {
@@ -977,6 +981,15 @@ def test_preproc_cache_fingerprints_effective_detector_mode_and_manual_switch(
     )
     assert process_runner._preproc_cache_key(detector_off) != (
         process_runner._preproc_cache_key(manual_enabled)
+    )
+
+    ram_preload = process_runner._preproc_cache_payload(
+        fake_bdf,
+        {**base_settings, "experimental_ram_preload": True},
+        mne_version=str(mne.__version__),
+    )
+    assert process_runner._preproc_cache_key(detector_off) == (
+        process_runner._preproc_cache_key(ram_preload)
     )
 
     reviewed = process_runner._preproc_cache_payload(

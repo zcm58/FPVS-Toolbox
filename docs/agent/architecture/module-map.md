@@ -64,10 +64,6 @@ Current `Legacy_App` runtime couplings:
   aggregation, direct paired PNG/PDF publication, spectral-QC evidence, and
   line/overlay rendering. This tool does not own
   scalp maps.
-- `src/Tools/Ratio_Calculator/`: ratio computation, export, and plotting.
-  `gui.py` is the public window facade; `gui_condition_selection.py`,
-  `gui_sections.py`, `gui_rois.py`, `gui_participants.py`,
-  `gui_settings.py`, and `gui_run_workflow.py` own focused GUI-only behavior.
 - `src/Tools/Individual_Detectability/`: individual-level detectability workflow.
 - `src/Tools/Sequence_Figure/`: embedded FPVS stimulus sequence figure generator.
   `renderer.py` owns widget-free image validation, stimulus-slot drawing, timing

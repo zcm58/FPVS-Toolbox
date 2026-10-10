@@ -36,6 +36,8 @@ Primary areas:
   main application or scientific runtime. Keep its contracts aligned with
   FPVS Studio; Toolbox adapters and packaging are documented in
   [docs/agent/architecture/updater.md](docs/agent/architecture/updater.md).
+  Source history stays in private `FPVS-Toolbox-Repo`; client updates and
+  downloads use public, release-only `FPVS-Toolbox-Releases`.
 - `src/Main_App/gui/`: canonical Main App GUI package. It owns the main-window shell/coordinator, focused GUI workflow helpers, reusable widgets, theme helpers, menu/sidebar/header helpers, icon/style-token/update-manager helpers, and GUI operation guards. `main_window.py` has been appropriately downsized; do not target it for further refactor unless the user explicitly scopes that work.
 - `src/Main_App/gui/components/`: canonical shared component layer for new and migrated GUI surfaces. Prefer this import surface for shared cards, buttons, forms, status banners, window/dialog shells, action rows, and message helpers.
 - `src/Main_App/exports/`: canonical Main App export adapter import surface. It owns post-export adapter behavior used by workers and the process runner while shared post-processing/workbook generation remains behavior-preserving. It also owns GUI-neutral publication figure and publication-table style contracts used by export tooling. The lightweight style surface must not eagerly import Stats-owned workbook builders; heavy processing exports remain lazy compatibility attributes.
@@ -44,6 +46,8 @@ Primary areas:
   processing-controller helpers, neutral ROI settings, project-local neutral FullFFT provenance, and
   per-artifact freshness for derivatives of the accepted harmonic selection.
 - `src/Main_App/io/`: canonical Main App I/O import surface. It owns the shared
+  exclusive atomic writer (`atomic_write.py`), guarded in-place lock/log opens
+  (`safe_file.py`), private process memory-map paths (`memmap_paths.py`),
   exact-column/header reader, separate uncompressed dense-spectral and compact
   condition-table NumPy companions, and legacy XLSX compatibility. It delegates BDF loading to the
   existing shared implementation while the repo moves toward purpose-based
@@ -61,7 +65,7 @@ Primary areas:
 - `src/Main_App/Performance/`: process-runner and multiprocessing support for heavy processing.
 - `src/Main_App/Legacy_App/`: retired historical package. Do not recreate it; active code belongs in purpose-based `Main_App` packages.
 - `src/Main_App/PySide6_App/`: retired historical package designation. Do not recreate it; PySide6 runtime code now lives under purpose-based `Main_App` packages.
-- `src/Tools/`: embedded GUI tools for preprocessing, plotting, ratios,
+- `src/Tools/`: embedded GUI tools for preprocessing, plotting,
   statistics, detectability, scalp maps, sequence figures, and the LORETA
   Visualizer. User-facing tool entry points are routed through the Main App GUI.
 - `src/Tools/Sequence_Figure/`: embedded publication-figure tool for drawing FPVS stimulus-sequence illustrations from manually selected stimulus images. Its renderer is widget-free and exports PNG/PDF/SVG figures; it is separate from the SNR Plot Generator.

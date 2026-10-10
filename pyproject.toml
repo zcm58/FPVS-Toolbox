@@ -28,15 +28,10 @@ markers = [
     "project_io: marks project-root, manifest, import, export, and path discipline tests",
     "processing: marks preprocessing, post-processing, FFT/SNR, worker, and process-runner tests",
     "plot_generator: marks plot generator tests",
-    "ratio: marks ratio calculator tests",
     "smoke: marks lightweight end-to-end, import, layout, or UI smoke tests",
     "integration: marks broader tests that exercise multiple modules or a full workflow",
     "slow: marks tests that are intentionally slower than the default local feedback loop",
 ]
-
-[tool.mypy]
-exclude = '^(?!src[\\/](Tools[\\/]Ratio_Calculator[\\/]|quarantine[\\/]ratio_calculator_mypy_entry\.py$)).+\.py$'
-ignore_missing_imports = true
 
 [tool.ruff]
 exclude = [

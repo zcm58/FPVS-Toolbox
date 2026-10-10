@@ -11,6 +11,7 @@ from typing import Callable, Mapping, Sequence, TYPE_CHECKING
 
 from Main_App.projects import list_result_files
 from Main_App.io.spectral_data import spectral_companion_identity
+from Main_App.io.atomic_write import atomic_write
 from Main_App.io.xlsx_selected_reader import (
     read_xlsx_sheet_header,
     read_xlsx_sheet_selected_columns,
@@ -858,8 +859,7 @@ def _save_cache_npz(
         snr_x_arr = np.asarray(snr_x, dtype=float)
         snr_y_arr = np.asarray(snr_y, dtype=float)
 
-    tmp = cache_path.with_suffix(cache_path.suffix + ".tmp")
-    with tmp.open("wb") as stream:
+    with atomic_write(cache_path, binary=True) as stream:
         np.savez_compressed(
             stream,
             pid=np.asarray(pid),
@@ -869,15 +869,6 @@ def _save_cache_npz(
             snr_x=snr_x_arr,
             snr_y=snr_y_arr,
         )
-    try:
-        tmp.replace(cache_path)
-    except Exception:
-        try:
-            if cache_path.exists():
-                cache_path.unlink()
-        except Exception:
-            pass
-        tmp.replace(cache_path)
 
 
 # -----------------------------------------------------------------------------

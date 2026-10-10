@@ -12,6 +12,13 @@ visualization.
 FPVS Toolbox was designed with non-expert users in mind and is actively used in
 FPVS-EEG research.
 
+This repository contains private application source and development history.
+Public installers and release notes are published in
+[FPVS-Toolbox-Releases](https://github.com/zcm58/FPVS-Toolbox-Releases).
+Starting with 3.0.0, automatic update checks and downloads use that public
+repository without requiring a GitHub account. Users of 2.1.2 and earlier must
+manually install 3.0.0 when it is released to move to the new update address.
+
 ## Features
 
 - Automated batch preprocessing: referencing, filtering, resampling,
@@ -27,7 +34,7 @@ FPVS-EEG research.
 A prebuilt Windows installer is provided with each release.
 
 1. Download the installer from the
-   [Releases page](https://github.com/zcm58/FPVS-Toolbox-Repo/releases).
+   [Releases page](https://github.com/zcm58/FPVS-Toolbox-Releases/releases).
 2. Double-click the `.exe` file. Because the installer is unsigned, anti-virus software may warn you that the app is 
 from an unverified developer.
 3. Choose **More info** and then **Run anyway** to continue.

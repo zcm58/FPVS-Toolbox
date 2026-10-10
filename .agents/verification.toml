@@ -6,6 +6,7 @@ audits = ["paths", "protected", "stats-structure"]
 tests = [
   "tests/audit/test_backend_import_boundaries.py",
   "tests/project_io/test_project_manifest_transactions.py",
+  "tests/project_io/test_atomic_write_security.py",
   "tests/processing/test_process_runner_lifecycle.py",
   "tests/processing/test_process_runner_epoch_contract.py",
   "tests/processing/test_condition_interpolation_execution.py",
@@ -38,6 +39,7 @@ manual_smoke = []
 [scopes.gui]
 audits = ["gui"]
 tests = [
+  "tests/gui/test_sidebar_style_tokens.py",
   "tests/gui/test_project_protocol.py",
   "tests/gui/test_protocol_condition_markers_static.py",
   "tests/gui/test_recording_marker_schemas_static.py",
@@ -71,7 +73,7 @@ tests = [
   "tests/workers/test_qc_source_prefetch_worker_static.py",
 ]
 include = ["src/Main_App/gui/**", "src/Tools/**/gui*.py", "tests/gui/**"]
-manual_smoke = ["Run processing with native .fpvs results only and confirm Processing Complete reports result files saved to the existing project output folder without a no-Excel warning. Exercise the queued post-export worker as well as batch completion; confirm native writes/overwrites mark the run successful, an unchanged old result alone does not count as a new batch write, and an actual empty-output run still reports no result files. Repeat with a historical Excel output. Preserve the prior-run and failure messages. Qt execution is CI-only unless a safe visible environment is explicitly approved.", "In a visible 1280x900 session, open Settings > Protocol. Enable condition-specific oddball markers and verify the bounded table fits, lists conditions by onset code, and only oddball cells are editable. Assign onsets 1..5 to 51..55, save and reopen, and confirm each value persists. Switch off and confirm the shared code resumes; cancel a draft change and verify it is not saved. Reopen another project and confirm its shared code is unchanged. Enable recording-specific trigger schemas and open Configure recording schemas. Assign one recording the project condition markers and another shared code 55; use selected-row bulk assignment, cancel a draft, then apply and save. Reopen Settings and verify both explicit assignments persist. Change the condition template and confirm existing recording assignments remain unchanged. Verify custom saved marker maps remain intact and newly registered recordings stay unassigned until reviewed. Exercise a repeated-session project and confirm separate canonical recording IDs per visit. Disable recording-specific mode explicitly and confirm the project template resumes. Start fresh QC on mapped recordings and check each condition uses the correct recording marker code in Technical details. For a genuinely absent marker, confirm the unavailable-crop explanation points to trigger settings and does not claim the recording is short. GUI execution is CI-only locally.", "Launch the Main App at 1280x900 and verify the home Conditions editor fills the available vertical workspace, Start Processing stays anchored beneath it, no Log card appears, and View Log opens the retained processing messages in a modal with working Clear Log and Close actions. With Beta Tools disabled, verify only Free Harmonic Clustering and SNR Plots appear under Quick Tools. Enable Beta Tools, restart, and verify Scalp Maps, Standard FPVS Screening, Sensitivity Analysis, LORETA Visualizer, Sequence Figure, Ratio Calculator, and Individual Detectability appear under Beta Tools. Verify each beta tool shows the shared warning before its first display in that app session, does not repeat for that same tool, and the two default tools show no beta warning."]
+manual_smoke = ["At 1280x900, open Settings and visit Preprocessing, Protocol, Harmonics, ROIs, Quality Control, Experimental, and Application, plus all five Experimental subtabs. Verify controls and one shared Save/Cancel footer fit without page-level scrolling. Change values across tabs, save from another tab, and reopen to confirm persistence; repeat with Cancel and confirm drafts are discarded. Check Quality Control contains Dataset Exclusions and read-only frequency-QC thresholds; Application contains Analysis Defaults (Stats alpha), debug, cache and projects-root controls. In Experimental > Electrodes, toggle the default-On >10 kurtosis review preference, Save/reopen, and confirm a new review uses that initial checkbox state while allowing a review override. Confirm Apply decisions is still required, existing receipts are preserved, and auto-all takes precedence. In Experimental > Performance, confirm RAM preloading starts off, is disabled without a project, is reachable by keyboard, persists through Save/reopen and is discarded by Cancel; verify it is absent from Preprocessing. In Experimental > Beta Tools, change the visibility toggle, Save, restart, and verify the sidebar updates. Qt execution is CI-only unless a safe visible environment is explicitly approved.", "Run processing with native .fpvs results only and confirm Processing Complete reports result files saved to the existing project output folder without a no-Excel warning. Exercise the queued post-export worker as well as batch completion; confirm native writes/overwrites mark the run successful, an unchanged old result alone does not count as a new batch write, and an actual empty-output run still reports no result files. Repeat with a historical Excel output. Preserve the prior-run and failure messages. Qt execution is CI-only unless a safe visible environment is explicitly approved.", "In a visible 1280x900 session, open Settings > Protocol. Enable condition-specific oddball markers and verify the bounded table fits, lists conditions by onset code, and only oddball cells are editable. Assign onsets 1..5 to 51..55, save and reopen, and confirm each value persists. Switch off and confirm the shared code resumes; cancel a draft change and verify it is not saved. Reopen another project and confirm its shared code is unchanged. Enable recording-specific trigger schemas and open Configure recording schemas. Assign one recording the project condition markers and another shared code 55; use selected-row bulk assignment, cancel a draft, then apply and save. Reopen Settings and verify both explicit assignments persist. Change the condition template and confirm existing recording assignments remain unchanged. Verify custom saved marker maps remain intact and newly registered recordings stay unassigned until reviewed. Exercise a repeated-session project and confirm separate canonical recording IDs per visit. Disable recording-specific mode explicitly and confirm the project template resumes. Start fresh QC on mapped recordings and check each condition uses the correct recording marker code in Technical details. For a genuinely absent marker, confirm the unavailable-crop explanation points to trigger settings and does not claim the recording is short. GUI execution is CI-only locally.", "Launch the Main App at 1280x900 and verify the home Conditions editor fills the available vertical workspace, Start Processing stays anchored beneath it, no Log card appears, and View Log opens the retained processing messages in a modal with working Clear Log and Close actions. With Beta Tools disabled, verify only Free Harmonic Clustering and SNR Plots appear under Quick Tools. Enable Beta Tools, restart, and verify Scalp Maps, Standard FPVS Screening, Sensitivity Analysis, LORETA Visualizer, Sequence Figure, and Individual Detectability appear under Beta Tools. Verify each beta tool shows the shared warning before its first display in that app session, does not repeat for that same tool, and the two default tools show no beta warning.", "At 1280x900, verify native File/View/Tools appearance, File action groups and complete long menu labels. Use Alt, arrows and Escape to traverse and dismiss menus; use View > Home from an embedded page. On a disposable project, exercise New/Open/Save, Settings, cache-reset confirmation/cancellation, Check for Updates, About and Exit with existing guards. Confirm menus are hidden on Welcome, disabled during processing/cache reset and restored afterward. Toggle Beta Tools, save and restart; verify menu/sidebar visibility agrees, each tool uses its existing project/stale-output guards, and beta warnings are shared once per role across both entry points. Qt remains CI-only unless a safe visible environment is explicitly approved."]
 
 [scopes.updates]
 audits = ["gui", "paths"]
@@ -89,10 +91,13 @@ tests = [
   "tests/project_io/test_unicorn_raw.py",
   "tests/project_io/test_unicorn_raw_failure_paths.py",
   "tests/project_io/test_studio_acquisition_evidence.py",
+  "tests/project_io/test_fpvs_config_import.py",
   "tests/project_io/test_frequency_protocol.py",
+  "tests/project_io/test_analysis_window.py",
   "tests/project_io/test_active_project_root.py",
   "tests/project_io/test_project_dataset_index.py",
   "tests/project_io/test_project_manifest_transactions.py",
+  "tests/project_io/test_atomic_write_security.py",
   "tests/project_io/test_project_enumeration_io.py",
   "tests/project_io/test_project_group_context.py",
   "tests/project_io/test_project_geometry_persistence.py",
@@ -119,6 +124,7 @@ tests = [
   "tests/processing/test_process_runner_lifecycle.py",
   "tests/processing/test_worker_thread_limits.py",
   "tests/processing/test_project_frequency_protocol_inputs.py",
+  "tests/processing/test_analysis_window_setup.py",
   "tests/processing/test_preflight_qc_pruning.py",
   "tests/processing/test_qc_cache_maintenance_integration.py",
   "tests/processing/test_toolbox_cache.py",
@@ -200,6 +206,7 @@ tests = [
   "tests/processing/test_removed_electrode_detection.py",
   "tests/processing/test_roi_settings.py",
   "tests/processing/test_shared_load_utils.py",
+  "tests/processing/test_memmap_security.py",
   "tests/workers/test_post_processing_pipeline_worker.py",
   "tests/workers/test_post_processing_pipeline_worker_static.py",
 ]
@@ -276,17 +283,6 @@ manual_smoke = [
   "Generate the default two-row grid and then opt into the three-row difference grid for representative BCA, SNR, and Z-score maps. At the exact 5.8-inch export width and 100% scale in a US Letter Word page, confirm the canvases are exactly 4.2 and 5.9 inches high respectively; each visible scalp/head outline is vertically centered within its framed cell; no internal condition/metric title, explanatory footer, visit number, or sample-size annotation appears; `(A)` and `(B)` precede the canonical group headers; each canonical session or difference label appears once in the vertical left rail; and the main and optional difference colorbars occupy the right rail without overlap. Confirm a thin neutral outer frame boxes only the two-column map matrix, the center divider separates groups, each row gutter has a full-width divider, all headers/session labels/colorbars remain outside the frame, and nothing clips.",
   "Confirm only the transactional PNG/PDF set is published at the existing base output. Switch to Condition (one session) and confirm legacy condition/group options use only that visit. Also exercise ordinary single-map, paired-condition, and two-group outputs and confirm their appearance, output routing, cancellation, stale harmonic recovery, unreadable-workbook failure, and missing-sensor handling remain unchanged.",
 ]
-
-[scopes.ratio-calculator]
-audits = ["gui", "paths"]
-tests = [
-  "tests/ratio_calculator/test_ratio_calculator_plots.py",
-  "tests/ratio_calculator/test_ratio_calculator_file_filters.py",
-  "tests/ratio_calculator/test_ratio_calculator_output_paths.py",
-  "tests/ratio_calculator/test_ratio_calculator_worker_lifecycle.py",
-]
-include = ["src/Tools/Ratio_Calculator/**", "tests/ratio_calculator/**"]
-manual_smoke = ["With Beta Tools enabled, acknowledge the shared beta warning and open Ratio Calculator from the Main App. Start a small run and confirm Run stays disabled until completion, then re-enables; double-clicking must not start a second run. Repeat with a deliberately unreadable input workbook, confirm the existing error presentation appears, correct the input, and verify a new run can start without restarting the app."]
 
 [scopes.sequence-figure]
 audits = ["gui", "paths"]

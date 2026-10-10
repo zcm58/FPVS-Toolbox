@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 from pathlib import Path
+from Main_App.io.atomic_write import atomic_write
 
 from ..analysis_plan import AnalysisFamily
 
@@ -60,7 +61,6 @@ def save_analysis_plan_preferences(results_parent: Path, preferences: AnalysisPl
     """Atomically save future-run choices without rewriting exclusion settings."""
 
     path = Path(results_parent).expanduser().resolve(strict=False) / ANALYSIS_PLAN_STATE_FILENAME
-    temporary = path.with_suffix(".json.tmp")
     payload = {
         "schema_version": ANALYSIS_PLAN_STATE_VERSION,
         "families": list(preferences.families),
@@ -69,8 +69,8 @@ def save_analysis_plan_preferences(results_parent: Path, preferences: AnalysisPl
     }
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        temporary.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-        temporary.replace(path)
+        with atomic_write(path) as stream:
+            stream.write(json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
     except OSError as exc:
         raise AnalysisPlanStateError(f"Could not save the FHC analysis plan: {exc}") from exc
     return path

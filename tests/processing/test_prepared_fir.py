@@ -459,6 +459,8 @@ def test_worker_scope_reuses_only_its_owned_batch_cache_and_restores_on_failure(
 
 
 def test_worker_initialization_closes_previous_batch_and_registers_cleanup(monkeypatch, tmp_path):
+    from functools import partial
+    from Main_App.io import memmap_paths
     from Main_App.Performance import process_runner
 
     previous = fir.PreparedFirCache()
@@ -467,10 +469,15 @@ def test_worker_initialization_closes_previous_batch_and_registers_cleanup(monke
     monkeypatch.setattr(process_runner, "_WORKER_FIR_CACHE", previous)
     thread_limit_calls = []
     monkeypatch.setattr(process_runner, "set_worker_thread_limits", lambda: thread_limit_calls.append(True))
-    monkeypatch.setattr(process_runner.tempfile, "gettempdir", lambda: str(tmp_path))
+    monkeypatch.setattr(memmap_paths.tempfile, "gettempdir", lambda: str(tmp_path))
     finalizers = []
-    monkeypatch.setattr(process_runner.atexit, "register", finalizers.append)
+
+    def register(function, *args):
+        finalizers.append(partial(function, *args) if args else function)
+
+    monkeypatch.setattr(process_runner.atexit, "register", register)
     process_runner._worker_init()
+    private = memmap_paths.process_memmap_directory()
     assert thread_limit_calls == [True]
     current = process_runner._WORKER_FIR_CACHE
     assert current is not previous and previous._closed
@@ -480,6 +487,7 @@ def test_worker_initialization_closes_previous_batch_and_registers_cleanup(monke
     for finalize in finalizers:
         finalize()
     assert current.retained_bytes == 0 and current._closed
+    assert not private.exists()
 
 
 def test_full_preprocessing_preserves_exact_state_scientific_params_and_logs(tmp_path):

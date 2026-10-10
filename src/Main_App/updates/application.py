@@ -11,7 +11,10 @@ import json
 import sys
 from pathlib import Path
 
-RELEASE_REPOSITORY = "zcm58/FPVS-Toolbox-Repo"
+# Public, release-only repository; the source repository is private.
+RELEASE_REPOSITORY = "zcm58/FPVS-Toolbox-Releases"
+RELEASES_API_URL = f"https://api.github.com/repos/{RELEASE_REPOSITORY}/releases"
+RELEASES_PAGE_URL = f"https://github.com/{RELEASE_REPOSITORY}/releases"
 APP_NAME = "FPVS Toolbox"
 APPLICATION_FILENAME = "FPVS_Toolbox.exe"
 UPDATER_FILENAME = "FPVS Toolbox Updater.exe"

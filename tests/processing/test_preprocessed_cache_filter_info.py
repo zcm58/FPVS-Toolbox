@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 
 import mne
 import numpy as np
@@ -140,3 +141,31 @@ def test_cache_does_not_certify_mismatched_cold_filter_info(tmp_path):
     assert process_runner._store_preprocessed_cache(
         raw=raw, audit_before={}, n_rejected=0, **kwargs,
     ) == "write_error"
+
+
+def test_preprocessed_metadata_does_not_follow_predictable_staging_hardlink(tmp_path):
+    raw, kwargs, _key, _fif_path, meta_path = _cache_case(tmp_path)
+    victim = tmp_path / "outside.txt"
+    victim.write_bytes(b"outside content")
+    staging = meta_path.with_suffix(".json.tmp")
+    os.link(victim, staging)
+
+    assert process_runner._store_preprocessed_cache(
+        raw=raw, audit_before={"updated": True}, n_rejected=0, **kwargs,
+    ) == "stored"
+
+    assert victim.read_bytes() == b"outside content"
+    assert staging.read_bytes() == b"outside content"
+    assert json.loads(meta_path.read_text(encoding="utf-8"))["audit_before"] == {"updated": True}
+
+
+def test_preprocessed_fif_cache_preserves_linked_outside_file(tmp_path):
+    raw, kwargs, _key, fif_path, _meta_path = _cache_case(tmp_path)
+    fif_path.unlink()
+    victim = tmp_path / "outside.txt"
+    victim.write_bytes(b"outside content")
+    os.link(victim, fif_path)
+
+    assert process_runner._store_preprocessed_cache(raw=raw, audit_before={}, n_rejected=0, **kwargs) == "write_error"
+
+    assert victim.read_bytes() == b"outside content"

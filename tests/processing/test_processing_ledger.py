@@ -152,12 +152,41 @@ def test_detector_choice_provenance_does_not_change_processing_fingerprint(
     )
 
 
+def test_ram_preload_storage_mode_does_not_change_processing_fingerprint(tmp_path) -> None:
+    project, _info = _project_with_raw(tmp_path)
+    settings = _settings()
+    disk_fingerprint = build_processing_fingerprint(project, settings, project.event_map)
+
+    project.preprocessing = {**project.preprocessing, "experimental_ram_preload": True}
+    ram_fingerprint = build_processing_fingerprint(
+        project,
+        {**settings, "experimental_ram_preload": True},
+        project.event_map,
+    )
+
+    assert ram_fingerprint == disk_fingerprint
+
+
 def test_experimental_auto_all_kurtosis_changes_processing_fingerprint(tmp_path) -> None:
     project, _info = _project_with_raw(tmp_path)
     settings = {**_settings(), "kurtosis_auto_interpolate_all": False}
     manual = build_processing_fingerprint(project, settings, project.event_map)
     automatic = build_processing_fingerprint(project, {**settings, "kurtosis_auto_interpolate_all": True}, project.event_map)
     assert automatic != manual
+
+
+def test_kurtosis_review_default_does_not_invalidate_completed_processing(tmp_path) -> None:
+    project, _info = _project_with_raw(tmp_path)
+    settings = _settings()
+    original = build_processing_fingerprint(project, settings, project.event_map)
+    project.update_experimental_qc_settings(
+        project.experimental_qc_settings.with_kurtosis_review_auto_interpolate_extreme(False)
+    )
+    project.save()
+    reopened = Project.load(project.project_root)
+
+    assert reopened.experimental_qc_settings.kurtosis_review_auto_interpolate_extreme is False
+    assert build_processing_fingerprint(reopened, settings, reopened.event_map) == original
 
 
 def test_classification_fingerprint_uses_canonical_limit_when_alias_is_none(
@@ -1310,6 +1339,59 @@ def test_expected_outputs_reject_unsafe_condition_folder(tmp_path) -> None:
 
     with pytest.raises(GroupConfigurationError):
         classify_processing_inputs(project, [info], _settings(), project.event_map)
+
+
+@pytest.mark.parametrize("labels", [
+    ("1 - Faces", "2 - Faces"),
+    ("1 - Faces", "2 - faces"),
+    ("Faces/Objects", "Faces-Objects"),
+])
+def test_expected_outputs_reject_condition_name_collisions_before_planning(
+    tmp_path, monkeypatch, labels,
+) -> None:
+    project, info = _project_with_raw(tmp_path)
+    project.event_map = {label: index + 1 for index, label in enumerate(labels)}
+    monkeypatch.setattr(
+        processing_ledger_module, "load_ledger",
+        lambda *_args: pytest.fail("Colliding condition names must fail before ledger reads."),
+    )
+
+    with pytest.raises(GroupConfigurationError, match="same output name"):
+        processing_ledger_module._expected_excel_paths(project, info, labels)
+
+    with pytest.raises(GroupConfigurationError, match="same output name"):
+        classify_processing_inputs(project, [info], _settings(), project.event_map)
+
+
+def test_distinct_prefixed_conditions_preserve_existing_output_names(tmp_path) -> None:
+    project, info = _project_with_raw(tmp_path)
+    project.event_map = {"1 - Faces": 1, "2 - Objects": 2}
+
+    plan = classify_processing_inputs(project, [info], _settings(), project.event_map)
+
+    assert [(path.parent.name, path.name) for path in plan.states[0].expected_outputs] == [
+        ("Faces", "P01_Faces_Results.fpvs"),
+        ("Objects", "P01_Objects_Results.fpvs"),
+    ]
+
+
+@pytest.mark.parametrize("labels", [
+    ("1 - Faces", "2 - Faces"),
+    ("1 - Faces", "2 - faces"),
+])
+def test_direct_pipeline_rejects_collisions_before_worker_setup(tmp_path, monkeypatch, labels):
+    monkeypatch.setattr(
+        process_runner, "_settings_for_file",
+        lambda *_args: pytest.fail("Colliding names must fail before worker setup or BDF loading."),
+    )
+
+    with pytest.raises(GroupConfigurationError, match="same output name"):
+        process_runner._run_full_pipeline_for_file(
+            Path("P01.bdf"), {}, {label: index + 1 for index, label in enumerate(labels)},
+            tmp_path, tmp_path,
+        )
+
+    assert not list(tmp_path.iterdir())
 
 
 def test_grouped_expected_outputs_require_group_id(tmp_path) -> None:

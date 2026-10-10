@@ -6,7 +6,7 @@ import logging
 from typing import Literal, Optional
 
 from PySide6.QtGui import QColor, QPalette
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QStyle, QStyleFactory, QWidget
 
 from Main_App.gui.style_tokens import (
     ACCENT_COLOR,
@@ -48,6 +48,54 @@ LIGHT_THEME_FUSION: LightThemeName = "fusion"
 LIGHT_THEME_MATERIAL: LightThemeName = "material"
 
 DEFAULT_LIGHT_THEME: LightThemeName = LIGHT_THEME_FUSION
+
+
+def _native_menu_appearance(app: QApplication) -> tuple[QStyle, QPalette]:
+    """Retain platform menu chrome before the application applies its light theme."""
+    appearance = getattr(app, "_fpvs_native_menu_appearance", None)
+    if appearance is None:
+        style_name = app.style().objectName()
+        style = QStyleFactory.create(style_name)
+        if style is None:
+            raise RuntimeError(f"Cannot create the native menu style {style_name!r}.")
+        # QApplication owns this separate style; replacing its main style must
+        # not delete the style still used by menu bars and popup menus.
+        style.setParent(app)
+        palette = QPalette(app.palette())
+        # Freeze inherited brushes too: unset roles would otherwise resolve
+        # against the application's later Fusion/light palette.
+        for group in (QPalette.Active, QPalette.Inactive, QPalette.Disabled):
+            for role in QPalette.ColorRole:
+                if role not in (QPalette.NoRole, QPalette.NColorRoles):
+                    palette.setBrush(group, role, palette.brush(group, role))
+        appearance = (style, palette)
+        app._fpvs_native_menu_appearance = appearance
+    return appearance
+
+
+def apply_native_menu_appearance(widget: QWidget) -> None:
+    """Use the same platform-owned menu appearance as FPVS Studio."""
+    app = QApplication.instance()
+    if app is None:
+        raise RuntimeError("Native menus require an active QApplication.")
+    style, palette = _native_menu_appearance(app)
+    widget.setStyle(style)
+    widget.setPalette(palette)
+    # Override the global QWidget text color without replacing native menu
+    # drawing, spacing, borders or selection backgrounds.
+    widget.setStyleSheet(f"""
+        QMenu, QMenuBar {{
+            color: {palette.color(QPalette.Active, QPalette.WindowText).name()};
+            font-size: {css_font_size("body")};
+        }}
+        QMenu:disabled, QMenuBar:disabled,
+        QMenu::item:disabled, QMenuBar::item:disabled {{
+            color: {palette.color(QPalette.Disabled, QPalette.WindowText).name()};
+        }}
+        QMenu::item:selected:enabled {{
+            color: {palette.color(QPalette.Active, QPalette.HighlightedText).name()};
+        }}
+    """)
 
 
 def build_fpvs_app_stylesheet() -> str:
@@ -268,6 +316,7 @@ def apply_fpvs_theme(
     material_theme: str = "light_blue.xml",
 ) -> None:
     """Apply the central FPVS palette and shared stylesheet."""
+    _native_menu_appearance(app)
     chosen: LightThemeName = theme or DEFAULT_LIGHT_THEME
     if chosen == LIGHT_THEME_MATERIAL:
         apply_material_light_theme(app, theme=material_theme)

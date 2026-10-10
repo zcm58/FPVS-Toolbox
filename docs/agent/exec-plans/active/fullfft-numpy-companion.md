@@ -80,7 +80,7 @@ metrics from averaged FullFFT or change timing, noise, harmonic, or ROI math.
 
 - [x] Commit/push prior work before starting (`f356b035`).
 - [x] Separate compact companion, shared readers, and atomic publication.
-- [x] Stats, Scalp Maps, Ratio, SNR setup, QC, source identities, and cleanup.
+- [x] Stats, Scalp Maps, SNR setup, QC, source identities, and cleanup.
 - [x] Exact parity, legacy/missing/corrupt/moved data, long/wide export tests,
       measured storage benchmark, docs, and focused verification.
 - [x] After storage is complete, investigate missing start markers in two study recordings;
@@ -99,12 +99,12 @@ Stored tables match exactly. These are storage timings, not whole-app forecasts.
 
 Visible smoke (pending): process a small condition and confirm both NPZ
 companions appear beside its small workbook. Open SNR Plots, Scalp Maps,
-Stats and Ratio Calculator; complete frequency-domain QC and verify long/wide
+and Stats; complete frequency-domain QC and verify long/wide
 Excel outputs. Repeat with legacy Excel inputs. In a test copy, withhold one
 companion and confirm a clear error. No local Qt execution.
 
 Final extension checks: processing focused gate 678 passed, 1 skipped;
-combined registered non-Qt project-I/O, Stats, Plot, Scalp and Ratio targets
+combined registered non-Qt backend targets
 811 passed. Changed-file Ruff and diff checks passed. Broad precommit remains
 blocked by the same eight unrelated, pre-existing `outputs/` path findings.
 

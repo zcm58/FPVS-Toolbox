@@ -11,8 +11,8 @@ Stats window. They are never scanned as flat groups or routed through the
 Standard Screening model.
 
 Standard FPVS Screening is currently available under **Beta Tools**. Enable
-Beta Tools in **Settings > Advanced**, then close and reopen FPVS Toolbox. The
-beta placement reflects the screen's intentionally bounded publication role;
+Beta Tools in **Settings > Experimental > Beta Tools**, save, then close and
+reopen FPVS Toolbox. The beta placement reflects the screen's intentionally bounded publication role;
 it does not change the locked calculations or workbook outputs described here.
 
 Use a planned custom analysis when the scientific question requires covariates,

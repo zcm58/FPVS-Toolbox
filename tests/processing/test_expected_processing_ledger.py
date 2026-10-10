@@ -196,6 +196,30 @@ def test_expected_matrix_preserves_nonzero_source_sample_origin(
     )
 
 
+@pytest.mark.parametrize("labels", [
+    ("1 - Faces", "2 - Faces"),
+    ("1 - Faces", "2 - faces"),
+])
+def test_expected_matrix_rejects_colliding_condition_output_names(tmp_path, labels):
+    event_map = {label: index + 1 for index, label in enumerate(labels)}
+    processing_plan = _processing_plan(tmp_path, event_map=event_map)
+    event_plan = _approved_event_plan(
+        event_map=event_map,
+        events=[
+            [0, 0, 1], [10, 0, 55], [20, 0, 55], [30, 0, 55],
+            [50, 0, 2], [60, 0, 55], [70, 0, 55], [80, 0, 55],
+        ],
+    )
+
+    with pytest.raises(ExpectedRecordingConditionPlanError, match="same output name"):
+        build_expected_recording_condition_plan(
+            processing_plan=processing_plan,
+            event_map=event_map,
+            frequency_protocol=_protocol(),
+            approved_event_plans={"P01": event_plan},
+        )
+
+
 def test_expected_matrix_binds_every_condition_and_exact_approved_span(
     tmp_path: Path,
 ) -> None:

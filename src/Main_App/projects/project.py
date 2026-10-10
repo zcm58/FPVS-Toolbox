@@ -11,7 +11,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any, Dict, Mapping
 
-from .manifest_store import project_manifest_transaction
+from .manifest_store import manifest_file_path, project_manifest_transaction
 
 from .experimental_qc_settings import (
     ExperimentalQcSettings,
@@ -396,7 +396,7 @@ class Project:
     ) -> None:
         self.project_root = project_root.resolve()
         self.manifest_path = (
-            manifest_path.resolve() if manifest_path is not None else self.project_root / "project.json"
+            manifest_file_path(manifest_path if manifest_path is not None else self.project_root / "project.json")
         )
         self.manifest = manifest
         # Tool-only refreshes may replace manifest["tools"] without refreshing
@@ -620,7 +620,7 @@ class Project:
         """
         project_root = Path(path).resolve()
         resolved_manifest_path = (
-            manifest_path.resolve() if manifest_path is not None else project_root / "project.json"
+            manifest_file_path(manifest_path if manifest_path is not None else project_root / "project.json")
         )
 
         data: Dict[str, Any] = {}

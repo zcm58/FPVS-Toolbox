@@ -80,6 +80,25 @@ def _reason(dialog, row):
     return dialog._reason_controls[_key(dialog, row)]
 
 
+@pytest.mark.parametrize("auto_interpolate_extreme", [False, True])
+def test_project_extreme_review_default_keeps_per_review_override(qtbot, auto_interpolate_extreme):
+    item = _item("P1", "Fz", 15.0)
+    scan = KurtosisReviewScan((KurtosisReviewFileResult(
+        path=item.path, participant_id=item.participant_id, recording_id=item.recording_id,
+        session_id=None, session_label=None, visit_index=None, status="review_required",
+        review_items=(item,),
+    ),))
+    widget = KurtosisReviewDialog(scan, auto_interpolate_extreme=auto_interpolate_extreme)
+    qtbot.addWidget(widget, before_close_func=lambda review: review._remember_initial_review_state())
+    widget.show()
+    qtbot.waitExposed(widget)
+
+    assert widget.auto_checkbox.isChecked() is auto_interpolate_extreme
+    assert widget.table.isRowHidden(0) is auto_interpolate_extreme
+    widget.auto_checkbox.setChecked(not auto_interpolate_extreme)
+    assert widget.table.isRowHidden(0) is not auto_interpolate_extreme
+
+
 def _select(dialog, *rows):
     model = dialog.table.selectionModel()
     model.clearSelection()

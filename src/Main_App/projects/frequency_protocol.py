@@ -8,13 +8,21 @@ import math
 from dataclasses import dataclass, replace
 from decimal import Decimal
 from fractions import Fraction
-from typing import Any, Mapping, TypeAlias
+from typing import Any, Mapping, Sequence, TypeAlias
+
+from .analysis_window import (
+    AnalysisWindow,
+    AnalysisWindowError,
+    MANUAL_DURATION_WINDOW,
+    STUDIO_PLANNED_WINDOW,
+)
 
 LEGACY_FREQUENCY_PROTOCOL_VERSION = "1.0.0"
 FREQUENCY_PROTOCOL_VERSION = "1.1.0"
 # Only projects opting into condition-specific markers use this extension.
 CONDITION_MARKER_PROTOCOL_VERSION = "1.2.0"
 RECORDING_MARKER_PROTOCOL_VERSION = "1.3.0"
+ANALYSIS_WINDOW_PROTOCOL_VERSION = "1.4.0"
 
 ODDBALL_INPUT_MODE_RECURRENCE = "oddball_every_n"
 ODDBALL_INPUT_MODE_DIRECT_HZ = "oddball_rate_hz"
@@ -45,6 +53,14 @@ DEFAULT_ODDBALL_EVERY_N = 5
 DEFAULT_ODDBALL_MARKER_CODE = 55
 
 RateValue: TypeAlias = Fraction | Decimal | int | float | str
+
+
+def _protocol_version(condition_markers: Any, recording_markers: Any, window: Any = None) -> str:
+    if window is not None:
+        return ANALYSIS_WINDOW_PROTOCOL_VERSION
+    if recording_markers:
+        return RECORDING_MARKER_PROTOCOL_VERSION
+    return CONDITION_MARKER_PROTOCOL_VERSION if condition_markers else FREQUENCY_PROTOCOL_VERSION
 
 
 class FrequencyProtocolError(ValueError):
@@ -216,28 +232,33 @@ class FrequencyProtocol:
     oddball_marker_code_source: str | None
     condition_oddball_marker_codes: tuple[tuple[int, int], ...] = ()
     recording_oddball_marker_codes: tuple[tuple[str, tuple[tuple[int, int], ...]], ...] = ()
+    analysis_window: AnalysisWindow | None = None
 
     def __post_init__(self) -> None:
         if self.version not in {
             FREQUENCY_PROTOCOL_VERSION, CONDITION_MARKER_PROTOCOL_VERSION,
-            RECORDING_MARKER_PROTOCOL_VERSION,
+            RECORDING_MARKER_PROTOCOL_VERSION, ANALYSIS_WINDOW_PROTOCOL_VERSION,
         }:
             raise FrequencyProtocolError(
                 "Unsupported frequency protocol version "
                 f"{self.version!r}; expected {FREQUENCY_PROTOCOL_VERSION!r} or "
-                f"{CONDITION_MARKER_PROTOCOL_VERSION!r} or {RECORDING_MARKER_PROTOCOL_VERSION!r}."
+                f"{CONDITION_MARKER_PROTOCOL_VERSION!r}, {RECORDING_MARKER_PROTOCOL_VERSION!r} "
+                f"or {ANALYSIS_WINDOW_PROTOCOL_VERSION!r}."
             )
         condition_markers = _condition_marker_codes(self.condition_oddball_marker_codes)
         recording_markers = _recording_marker_codes(self.recording_oddball_marker_codes)
-        expected_version = (
-            RECORDING_MARKER_PROTOCOL_VERSION if recording_markers else
-            CONDITION_MARKER_PROTOCOL_VERSION if condition_markers else FREQUENCY_PROTOCOL_VERSION
-        )
+        window = self.analysis_window
+        if window is not None and not isinstance(window, AnalysisWindow):
+            try:
+                window = AnalysisWindow.from_manifest(window)
+            except AnalysisWindowError as exc:
+                raise FrequencyProtocolError(str(exc)) from exc
+        object.__setattr__(self, "analysis_window", window)
+        expected_version = _protocol_version(condition_markers, recording_markers, window)
         if self.version != expected_version:
             raise FrequencyProtocolError(
-                "The nonempty marker assignments require protocol version "
-                f"{expected_version}; single-code, condition, and recording schemas "
-                "must retain their respective version."
+                "The nonempty marker assignments and analysis-window policy require protocol version "
+                f"{expected_version}; each schema must retain its respective version."
             )
         object.__setattr__(self, "condition_oddball_marker_codes", condition_markers)
         object.__setattr__(self, "recording_oddball_marker_codes", recording_markers)
@@ -252,6 +273,8 @@ class FrequencyProtocol:
         marker_confirmation_required = (
             self.status == FREQUENCY_PROTOCOL_STATUS_CONFIRMATION_REQUIRED
         )
+        if window is not None and self.status != FREQUENCY_PROTOCOL_STATUS_READY:
+            raise FrequencyProtocolError("An analysis-window policy requires a resolved ready protocol.")
         if marker_confirmation_required:
             if condition_markers or recording_markers:
                 raise FrequencyProtocolError(
@@ -371,6 +394,19 @@ class FrequencyProtocol:
             if cycles is not None
             else FREQUENCY_PROTOCOL_STATUS_INCOMPLETE
         )
+        if window is not None:
+            try:
+                resolved_cycles = window.resolve_cycles(oddball_rate)
+            except AnalysisWindowError as exc:
+                raise FrequencyProtocolError(str(exc)) from exc
+            expected_source = (
+                EXPECTED_CYCLES_SOURCE_FPVS_STUDIO_IMPORT
+                if window.mode == STUDIO_PLANNED_WINDOW else EXPECTED_CYCLES_SOURCE_MANUAL
+            )
+            if cycles != resolved_cycles or source != expected_source:
+                raise FrequencyProtocolError(
+                    "The analyzed cycle count/source does not match the saved analysis-window policy."
+                )
         if not marker_confirmation_required and self.status != expected_status:
             raise FrequencyProtocolError(
                 f"Frequency protocol status must be {expected_status!r} for its cycle fields."
@@ -539,6 +575,7 @@ class FrequencyProtocol:
                 oddball_marker_code_source=value.get("oddball_marker_code_source"),
                 condition_oddball_marker_codes=value.get("condition_oddball_marker_codes", ()),
                 recording_oddball_marker_codes=value.get("recording_oddball_marker_codes", ()),
+                analysis_window=value.get("analysis_window"),
             )
         if not status:
             status = (
@@ -595,6 +632,7 @@ class FrequencyProtocol:
             oddball_marker_code_source=value.get("oddball_marker_code_source"),
             condition_oddball_marker_codes=value.get("condition_oddball_marker_codes", ()),
             recording_oddball_marker_codes=value.get("recording_oddball_marker_codes", ()),
+            analysis_window=value.get("analysis_window"),
         )
 
     @property
@@ -650,6 +688,8 @@ class FrequencyProtocol:
                 recording_id: {str(onset): marker for onset, marker in codes}
                 for recording_id, codes in self.recording_oddball_marker_codes
             }
+        if self.analysis_window is not None:
+            payload["analysis_window"] = self.analysis_window.to_manifest()
         return payload
 
     def canonical_json(self) -> str:
@@ -678,10 +718,79 @@ class FrequencyProtocol:
         normalized_cycles, normalized_source, status = _normalize_cycles(cycles, source)
         return replace(
             self,
+            version=_protocol_version(self.condition_oddball_marker_codes, self.recording_oddball_marker_codes),
             status=status,
             expected_analyzed_oddball_cycles=normalized_cycles,
             expected_analyzed_oddball_cycles_source=normalized_source,
+            analysis_window=None,
         )
+
+    def with_analysis_window(self, window: AnalysisWindow) -> "FrequencyProtocol":
+        """Resolve planned inputs once; keep one canonical target for every recording."""
+
+        if self.status == FREQUENCY_PROTOCOL_STATUS_CONFIRMATION_REQUIRED:
+            raise FrequencyProtocolError("Confirm the project rates before setting an analysis window.")
+        if not isinstance(window, AnalysisWindow):
+            raise FrequencyProtocolError("An analysis window must be a validated AnalysisWindow.")
+        try:
+            cycles = window.resolve_cycles(self.oddball_rate_hz)
+        except AnalysisWindowError as exc:
+            raise FrequencyProtocolError(str(exc)) from exc
+        return replace(
+            self,
+            version=ANALYSIS_WINDOW_PROTOCOL_VERSION,
+            status=FREQUENCY_PROTOCOL_STATUS_READY,
+            expected_analyzed_oddball_cycles=cycles,
+            expected_analyzed_oddball_cycles_source=(
+                EXPECTED_CYCLES_SOURCE_FPVS_STUDIO_IMPORT
+                if window.mode == STUDIO_PLANNED_WINDOW else EXPECTED_CYCLES_SOURCE_MANUAL
+            ),
+            analysis_window=window,
+        )
+
+    def with_analyzed_duration(
+        self, seconds: RateValue, *, target_sampling_rate_hz: RateValue,
+        source_sampling_rates_hz: Sequence[RateValue] = (),
+    ) -> "FrequencyProtocol":
+        try:
+            window = AnalysisWindow(
+                mode=MANUAL_DURATION_WINDOW, maximum_oddball_cycles=None,
+                requested_duration_seconds=seconds,
+                target_sampling_rate_hz=target_sampling_rate_hz,
+                source_sampling_rates_hz=tuple(source_sampling_rates_hz),
+            )
+        except AnalysisWindowError as exc:
+            raise FrequencyProtocolError(str(exc)) from exc
+        return self.with_analysis_window(window)
+
+    def with_studio_window(
+        self, maximum_oddball_cycles: int, *, target_sampling_rate_hz: RateValue,
+    ) -> "FrequencyProtocol":
+        try:
+            window = AnalysisWindow(
+                mode=STUDIO_PLANNED_WINDOW, maximum_oddball_cycles=maximum_oddball_cycles,
+                requested_duration_seconds=None, target_sampling_rate_hz=target_sampling_rate_hz,
+            )
+        except AnalysisWindowError as exc:
+            raise FrequencyProtocolError(str(exc)) from exc
+        return self.with_analysis_window(window)
+
+    def resolve_analysis_window(
+        self, *, target_sampling_rate_hz: RateValue,
+        source_sampling_rates_hz: Sequence[RateValue],
+    ) -> "FrequencyProtocol":
+        """Resolve automatic inputs on original and effective processing grids."""
+
+        if self.analysis_window is None:
+            return self
+        try:
+            window = self.analysis_window.with_sampling_rates(
+                target_sampling_rate_hz=target_sampling_rate_hz,
+                source_sampling_rates_hz=source_sampling_rates_hz,
+            )
+        except AnalysisWindowError as exc:
+            raise FrequencyProtocolError(str(exc)) from exc
+        return self.with_analysis_window(window)
 
     def with_oddball_marker_code(
         self,
@@ -709,8 +818,7 @@ class FrequencyProtocol:
         markers = _condition_marker_codes(mapping)
         return replace(
             self,
-            version=(RECORDING_MARKER_PROTOCOL_VERSION if self.recording_oddball_marker_codes else
-                     CONDITION_MARKER_PROTOCOL_VERSION if markers else FREQUENCY_PROTOCOL_VERSION),
+            version=_protocol_version(markers, self.recording_oddball_marker_codes, self.analysis_window),
             condition_oddball_marker_codes=markers,
         )
 
@@ -722,9 +830,7 @@ class FrequencyProtocol:
         recordings = _recording_marker_codes(mapping)
         return replace(
             self,
-            version=(RECORDING_MARKER_PROTOCOL_VERSION if recordings else
-                     CONDITION_MARKER_PROTOCOL_VERSION if self.condition_oddball_marker_codes else
-                     FREQUENCY_PROTOCOL_VERSION),
+            version=_protocol_version(self.condition_oddball_marker_codes, recordings, self.analysis_window),
             recording_oddball_marker_codes=recordings,
         )
 

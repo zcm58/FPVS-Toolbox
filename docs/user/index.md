@@ -21,9 +21,23 @@ data; once that run starts, its normal output step replaces the participant
 outputs being recomputed. Windows may still retain its own filesystem cache,
 which this action does not control.
 
+### Settings
+
+Settings groups controls into **Preprocessing**, **Protocol**, **Harmonics**,
+**ROIs**, **Quality Control**, **Experimental**, and **Application**. Use
+**Quality Control** for dataset exclusions and read-only frequency-QC limits.
+**Experimental** contains **Electrodes**, **Raw-Spectral Review**,
+**Summed-BCA Screening**, **Performance**, and **Beta Tools**. Performance holds
+project-only RAM preloading, which is off by default. Use **Application > Analysis
+Defaults** for the Stats alpha; Application also contains debug, cache and
+projects-root controls.
+
+The shared **Save** and **Cancel** buttons apply to edits across all Settings
+tabs. Focused review dialogs retain their own Apply/Cancel actions.
+
 ### Dataset Exclusions
 
-Open **Settings > Advanced > Processing QC > Manage Dataset Exclusions…** to
+Open **Settings > Quality Control > Manage Dataset Exclusions…** to
 manage participant and recording exclusions in one list. The table shows
 whether processed data is available and distinguishes three choices:
 
@@ -166,10 +180,10 @@ The **Workspace Tools** section of the app sidebar shows these default tools:
 Free Harmonic Clustering Analysis and SNR Plots.
 
 Scalp Maps, Standard FPVS Screening, Sensitivity Analysis, LORETA Visualizer,
-Sequence Figure, Ratio Calculator, and Individual Detectability are beta tools.
+Sequence Figure and Individual Detectability are beta tools.
 To show their separate **Beta Tools** sidebar subsection, open
-**Settings > Advanced**, enable **Beta Tools**, then close and reopen FPVS
-Toolbox. Before each beta tool opens for the first time in an app session, the
+**Settings > Experimental > Beta Tools**, enable **Beta Tools**, save, then close
+and reopen FPVS Toolbox. Before each beta tool opens for the first time in an app session, the
 Toolbox warns that the tool is in beta and its features may change.
 
 See the following sections for more information regarding each tool provided in FPVS Toolbox.
@@ -181,5 +195,4 @@ See the following sections for more information regarding each tool provided in 
 - [Sensitivity Analysis](tools/sensitivity-analysis.md)
 - [LORETA Visualizer](tools/loreta-visualizer.md)
 - [Sequence Figure](tools/sequence-figure.md)
-- [Ratio Calculator](tools/ratio-calculator.md)
 - [Individual Detectability](tools/individual-level-detectability.md)

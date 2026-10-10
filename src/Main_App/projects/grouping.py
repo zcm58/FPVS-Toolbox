@@ -6,7 +6,7 @@ import json
 import re
 from dataclasses import dataclass
 from pathlib import Path, PureWindowsPath
-from typing import Any, Mapping
+from typing import Any, Iterable, Mapping
 
 _INVALID_WINDOWS_FOLDER_CHARS = frozenset('<>:"/\\|?*')
 _RESERVED_WINDOWS_DEVICE_NAMES = {
@@ -401,6 +401,29 @@ def validate_group_folder_name(value: object) -> str:
     return folder_name
 
 
+def condition_output_folder_name(label: str) -> str:
+    """Preserve the established condition folder and filename component."""
+    return re.sub(
+        r"^\d+\s*-\s*", "",
+        str(label).replace("/", "-").replace("\\", "-").strip(),
+    )
+
+
+def validate_condition_output_names(labels: Iterable[str]) -> None:
+    """Reject condition aliases that would share a Windows result destination."""
+    seen: dict[str, str] = {}
+    for label in labels:
+        output_name = condition_output_folder_name(label)
+        key = output_name.casefold()
+        if key in seen:
+            raise GroupConfigurationError(
+                f"Conditions {seen[key]!r} and {label!r} use the same output name "
+                f"{output_name!r}. Use distinct names after removing numeric "
+                "prefixes; output names are compared ignoring case."
+            )
+        seen[key] = label
+
+
 def resolve_output_directory(parent: str | Path, folder_name: object) -> Path:
     """Resolve one safe Windows folder component below ``parent``."""
 
@@ -437,6 +460,7 @@ __all__ = [
     "GroupConfigurationError",
     "ParticipantInfo",
     "ProjectGroupContext",
+    "condition_output_folder_name",
     "load_project_group_context",
     "make_group_id",
     "normalize_project_groups",
@@ -445,4 +469,5 @@ __all__ = [
     "resolve_group_output_directory",
     "resolve_output_directory",
     "validate_group_folder_name",
+    "validate_condition_output_names",
 ]

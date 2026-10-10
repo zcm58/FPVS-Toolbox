@@ -825,6 +825,7 @@ def _load_raw_for_preflight(
         stim_channel=_configured_stim_channel(settings),
         electrode_mapping_profile=settings.get("electrode_mapping_profile"),
         electrode_montage=settings.get("electrode_montage"),
+        **({"preload_in_memory": True} if settings.get("experimental_ram_preload") is True else {}),
     )
 
 

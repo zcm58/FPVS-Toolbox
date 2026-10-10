@@ -7,11 +7,22 @@ from pathlib import Path
 
 import pytest
 from PySide6.QtCore import QPoint, QRect, Qt
-from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtWidgets import (
+    QAbstractButton,
+    QAbstractScrollArea,
+    QApplication,
+    QComboBox,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QPushButton,
+    QWidget,
+)
 
 from Main_App.Shared.settings_manager import SettingsManager
 from Main_App.gui.settings_panel import SettingsDialog
 from Main_App.gui.theme import apply_fpvs_theme
+from Main_App.projects import Project
 from tests.gui.test_gui_preproc_dialog import _prep_project
 
 
@@ -84,6 +95,38 @@ def test_settings_successful_save_clears_dirty_state(panel):
     assert panel.project.preprocessing["low_pass"] == 40.0
 
 
+def test_settings_enter_on_shared_save_persists_draft(panel, qtbot):
+    panel.preproc_edits[0].setText("40")
+    save_button = panel.findChild(QPushButton, "settings_footer_save")
+    save_button.setFocus()
+    qtbot.waitUntil(save_button.hasFocus)
+
+    with qtbot.waitSignal(panel.accepted):
+        qtbot.keyClick(save_button, Qt.Key.Key_Return)
+
+    assert not panel.isVisible()
+    assert not panel.has_unsaved_changes()
+    reloaded = Project.load(panel.project.project_root)
+    assert reloaded.preprocessing["low_pass"] == 40.0
+
+
+def test_settings_escape_cancels_draft_without_persistence(panel, qtbot):
+    original = panel.project.preprocessing["low_pass"]
+    edit = panel.preproc_edits[0]
+    edit.setText("40")
+    edit.setFocus()
+    qtbot.waitUntil(edit.hasFocus)
+    assert panel.has_unsaved_changes()
+
+    with qtbot.waitSignal(panel.rejected):
+        qtbot.keyClick(edit, Qt.Key.Key_Escape)
+
+    assert not panel.isVisible()
+    assert panel.project.preprocessing["low_pass"] == original
+    reloaded = Project.load(panel.project.project_root)
+    assert reloaded.preprocessing["low_pass"] == original
+
+
 def test_settings_failed_save_keeps_draft_and_stays_open(panel, monkeypatch):
     panel.preproc_edits[0].setText("40")
     monkeypatch.setattr(panel.project, "save", lambda: (_ for _ in ()).throw(OSError("Disk unavailable")))
@@ -122,10 +165,53 @@ def test_settings_tabs_and_actions_fit_supported_workspace(panel, qtbot, tab):
     panel.tabs.setCurrentIndex(tab)
     qtbot.wait(25)
     assert panel.width() <= 1020 and panel.height() <= 790
+    for name in ("settings_footer_save", "settings_footer_cancel"):
+        button = panel.findChild(QPushButton, name)
+        assert button is not None and button.isVisibleTo(panel), name
     for button in panel._settings_footer_buttons:
         if button.isVisible():
             bounds = QRect(button.mapTo(panel, QPoint(0, 0)), button.size())
             assert panel.rect().contains(bounds), button.objectName()
+    for widget in panel.findChildren(QWidget):
+        if not widget.isVisibleTo(panel) or not isinstance(
+            widget, (QLabel, QLineEdit, QComboBox, QAbstractButton)
+        ):
+            continue
+        ancestors = []
+        ancestor = widget.parentWidget()
+        while ancestor is not None and ancestor is not panel:
+            ancestors.append(ancestor)
+            ancestor = ancestor.parentWidget()
+        # Lists and chip viewers intentionally scroll their own content.
+        if any(isinstance(parent, QAbstractScrollArea) for parent in ancestors):
+            continue
+        name = widget.objectName() or type(widget).__name__
+        icon_only = (
+            isinstance(widget, QAbstractButton)
+            and widget.property("iconButton")
+            and not widget.text()
+        )
+        minimum_height = widget.minimumSizeHint().height()
+        electrode_button = widget in panel.roi_editor.map_widget.electrode_buttons.values()
+        if electrode_button:
+            # Map buttons have custom circular geometry and zero text padding;
+            # the native tool-button size hint includes unused style chrome.
+            minimum_height = widget.fontMetrics().height() + 6
+        elif icon_only:
+            minimum_height = widget.iconSize().height() + 4
+        if isinstance(widget, QLabel) and widget.wordWrap():
+            minimum_height = max(minimum_height, widget.heightForWidth(widget.width()))
+        assert widget.height() >= minimum_height, name
+        if isinstance(widget, (QLineEdit, QComboBox, QAbstractButton)):
+            minimum_width = (
+                widget.fontMetrics().horizontalAdvance(widget.text()) + 6
+                if electrode_button else widget.iconSize().width() + 4
+                if icon_only else widget.minimumSizeHint().width()
+            )
+            assert widget.width() >= minimum_width, name
+        for ancestor in [*ancestors, panel]:
+            bounds = QRect(widget.mapTo(ancestor, QPoint(0, 0)), widget.size())
+            assert ancestor.rect().contains(bounds), (name, ancestor.objectName())
     _capture(panel, f"settings-tab-{tab}")
 
 

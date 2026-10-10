@@ -21,7 +21,16 @@ Primary paths:
   reusable buttons, cards, form rows, the busy spinner, the welcome brain
   animation, and inline status widgets.
 - `src/Main_App/gui/theme.py`: shared FPVS light palette and stylesheet helpers
-  used by the main app and tool windows.
+  used by the main app and tool windows. `apply_native_menu_appearance` retains
+  the platform menu style and palette before the Toolbox theme is applied;
+  menu bars and popup menus use that retained appearance separately from the
+  application's light palette and widget stylesheet.
+- `src/Main_App/gui/menu_bar.py`: File/View/Tools construction and tool-action
+  wiring. `file_menu.py` groups New/Open/Save, Settings/Reset Processing Cache,
+  Check for Updates/About, and Exit with separators. View contains Home.
+  Tools reuses the sidebar's default and beta registrations, with full labels
+  and a conditional Beta Tools submenu. Existing MainWindow callbacks retain
+  project validation, processing guards and beta acknowledgements.
 - `src/Main_App/gui/typography.py`: canonical font family, role sizes, font
   weights, monospace font, and QSS font helpers used by the main app,
   component layer, and migrated tool windows.
@@ -277,27 +286,32 @@ application shell navigation. Inside the application shell, `workspace_stack`
 switches the right-hand workspace content while preserving the persistent
 sidebar and project header. The preprocessing page remains `homeWidget`; the
 Settings page, Standard FPVS Screening, Sensitivity Analysis, SNR Plot Generator,
-Free Harmonic Clustering Analysis, Individual Detectability, and Ratio Calculator
+Free Harmonic Clustering Analysis and Individual Detectability
 are embedded in this workspace stack.
 
-The Settings page groups project processing values under Preprocessing, the
-project-wide presentation/oddball protocol under Protocol, project-specific
-harmonic selection and summation under Harmonics, analysis defaults under
-Stats, ROI definitions under ROIs, project-owned review controls under
-Experimental, and app-level toggles such as Debug Mode and Beta Tools under
-Advanced. Experimental uses three flat sub-tabs: **Electrodes** contains
-kurtosis interpolation, the default-off condition-specific interpolation option
+The Settings page has seven tabs: **Preprocessing**, **Protocol**, **Harmonics**,
+**ROIs**, **Quality Control**, **Experimental**, and **Application**. The first
+four contain project processing values, the presentation/oddball protocol,
+harmonic selection/summation, and ROI definitions respectively. Quality Control
+contains Dataset Exclusions and read-only frequency-domain QC thresholds.
+Application groups the Stats alpha under **Analysis Defaults**, plus Debug Mode,
+cache controls and **Change Projects Root...**. Experimental uses five flat
+sub-tabs: **Electrodes** contains kurtosis interpolation, the default-off
+condition-specific interpolation option
 for frequency QC, the explicit On/Off choice for the lab-calibrated
 automatic removed-electrode detector, and its independently enabled manual
 removed-electrode lists; **Raw-Spectral Review** contains the review switch
 and expandable read-only thresholds; **Summed-BCA Screening** contains the
-versioned review limits. The condition-specific interpolation setting controls
-new repair requests; turning it off keeps previously accepted signal repairs.
+versioned review limits; **Performance** contains the project-only, default-off
+RAM preload switch; **Beta Tools** contains the application-wide visibility
+toggle, applied after saving and restarting. The condition-specific interpolation
+setting controls new repair requests; turning it off keeps previously accepted
+signal repairs.
 Each section has its own vertical space within the
 supported workspace, including when raw-spectral details are expanded.
 Settings tab panes stay unframed around their section cards; both levels disable
-native tab-bar base drawing to avoid a gray line behind the styled tabs. Each main tab
-keeps Save and Cancel in its footer. Invalid
+native tab-bar base drawing to avoid a gray line behind the styled tabs. One shared
+Save/Cancel footer applies the full Settings draft from every tab. Invalid
 summed-BCA input reveals its sub-tab before focusing the affected field.
 The ROI map uses BioSemi64 anatomical labels, matching the default preprocessing
 geometry. The former `10-10` ROI-preset
@@ -308,13 +322,17 @@ Visible smoke (Qt is CI-only locally): open Settings from an existing project,
 check Preprocessing and ROIs show only BioSemi64, confirm saved ROI memberships
 remain intact, and switch main/Experimental tabs to check the native gray
 line is absent. Save/reopen and confirm ROI lists are unchanged.
-Advanced exposes the unified Dataset Exclusions manager, distinguishing
+Quality Control exposes the unified Dataset Exclusions manager, distinguishing
 skipping processing from excluding already-processed data from analysis, and
 retains read-only frequency-domain QC thresholds. Changing analysis exclusions
 marks downstream frequency-domain outputs stale and requires regeneration.
-The **Change Projects Root...** action is available only
-from the Advanced footer. Do not put app-level visibility or diagnostics
-toggles in the Preprocessing tab.
+The exclusions dialog retains its own explicit Apply/Cancel transaction.
+The project preference `kurtosis_review_auto_interpolate_extreme` (default True)
+sets the initial >10 experimental checkbox for new kurtosis review decisions.
+It is editable under **Experimental > Electrodes**; per-review overrides and
+**Apply decisions** remain authoritative. This review default does not change
+existing receipts, scoring, processing fingerprints, or the precedence of
+auto-all. Do not put app-level visibility or diagnostics toggles in Preprocessing.
 
 The ROIs tab is a flat, visual-first embedded editor without an enclosing
 `SectionCard`. A scalable BioSemi64 scalp map fills the left side and an ordered
@@ -360,21 +378,38 @@ pairs plus the existing montage and custom-preset keys. After a committed ROI
 change or rollback, Settings refreshes the cached Stats and SNR pages
 independently. SNR reloads through `Main_App.processing.roi_settings`, preserves
 a still-valid selected ROI, and otherwise returns to `(All ROIs)`; active
-worker requests remain snapshotted. Ratio Calculator retains its existing
-signature-based live refresh.
+worker requests remain snapshotted.
 
 The Protocol tab edits only the active project's versioned FPVS protocol. It
 accepts a presentation rate plus either an every-N-stimuli recurrence or a
 direct oddball rate that resolves to a whole-stimulus recurrence, shows the
 canonical oddball rate, stores a positive expected analyzed oddball-cycle
-count, derives duration read-only, and stores the project oddball marker code.
+count, and stores the project oddball marker code. New projects default to
+**Duration (seconds)**. **Auto from Studio** preserves the imported planned
+bound and shows the resolved duration read-only. **Cycles (advanced)** retains
+explicit-cycle editing, and existing fixed-cycle projects open in that mode.
+The resolved duration preview shows any complete-cycle/grid flooring before
+saving. The preprocessing downsample draft participates in automatic/duration
+resolution; it cannot silently reuse an old target grid. Unchanged hidden
+controls do not create Settings drafts. Manual and Studio input policies are
+pure adapters over the canonical project protocol, not separate FFT methods.
 Existing projects without trustworthy protocol metadata show proposed legacy
-rates but remain unconfirmed until the user supplies the cycle count and saves
+rates but remain unconfirmed until the user supplies a duration or advanced
+cycle count and saves
 from Protocol. Marker-less v1.0 records keep their known rates and cycle fields
 while requiring marker confirmation; records without a cycle count still
 require one. Saving from another unchanged Settings tab leaves either
 unresolved form untouched; it does not turn a
 proposal into project provenance.
+
+Visible smoke for window setup: at 1280x900, create a project and verify
+Duration entry, use the default 6 Hz/every 5 protocol, enter 121 seconds at
+256 Hz and check the 120-second preview,
+change downsample, Save/reopen and Cancel/reopen. Import a Studio project and
+verify Auto, marker edits retaining Auto and an explicit Advanced override.
+Check keyboard access, long condition-marker names and the shared Save/Cancel
+footer without page-level scrolling. Registered Qt tests cover these controls;
+local Qt execution requires an explicitly approved visible environment.
 Processing input validation consumes the resulting frozen project protocol,
 derives the temporary numeric compatibility fields from it, and blocks before
 QC when the protocol is unconfirmed, incomplete, invalid, or uses the same code
@@ -457,12 +492,13 @@ still be absent, and Resume Post-processing should use the remaining ROIs.
 Repeat Save with rebuild later and confirm QC is marked stale. Qt behavior is
 covered in CI; local checks exercise the routing without loading Qt.
 
-The sidebar's default tool list is Free Harmonic Clustering Analysis and SNR
-Plots, in that order. Scalp Maps, Standard FPVS Screening, Sensitivity
-Analysis, LORETA Visualizer, Sequence Figure, Ratio Calculator, and Individual
+The sidebar and Tools menu share the default tool list: Free Harmonic Clustering
+Analysis and SNR Plots, in that order. Scalp Maps, Standard FPVS Screening, Sensitivity
+Analysis, LORETA Visualizer, Sequence Figure, and Individual
 Detectability are beta tools: they remain
 embedded workspace pages, but the sidebar appends them beneath a visible
-**Beta Tools** subsection only when the global Settings option
+**Beta Tools** subsection and Tools adds a matching submenu only when the global
+Settings option
 `tools.enable_beta_tools` is enabled and the app has been restarted.
 
 The Beta Tools registry owns the shared gate: every entry in `BETA_TOOL_SPECS`
@@ -470,13 +506,46 @@ is connected through `MainWindow._open_beta_tool`, so adding a beta tool to the
 registry must not require per-tool warning code. Before that tool's opener runs
 for the first time in each app session, show an OK-only warning titled `Beta
 Tool` with the text `This tool is currently in beta. Features are subject to
-change.` Track acknowledgement separately for each beta registry role.
+change.` Track acknowledgement separately for each beta registry role, shared
+between sidebar and menu entry points.
+
+Visible menu acceptance (Qt is CI-only locally): at 1280x900, verify native
+File/View/Tools appearance, separated File groups, and complete long labels
+including Reset Project Processing Cache and Free Harmonic Clustering Analysis.
+Use Alt, arrow keys and Escape to open, traverse and dismiss menus; verify
+View > Home returns from an embedded page and selects Home in the sidebar.
+On a disposable project, exercise New/Open/Save, Settings, cache-reset
+confirmation/cancellation, Check for Updates, About and Exit with their existing
+draft and processing guards. Confirm menus are hidden on Welcome and disabled
+during processing/cache reset, then restored when work ends. Disable Beta Tools,
+restart and confirm both entry points hide them; enable and restart, then open
+every default and beta tool from the menu. Verify project/stale-output guards,
+one warning per beta role across menu and sidebar, and no warning for default
+tools. Local Qt execution remains unrun without a safe visible-environment
+approval.
 
 When the active project changes through create/open/import/path workflows, the
 main shell must return to Home and discard project-bound embedded page instances.
 Tools should be recreated from the new `currentProject` on the next sidebar
 open so stale project roots, default folders, and settings editors cannot
-survive a project switch.
+survive a project switch. Sequence Figure retains its manual image/label inputs
+and any running export; its cached page refreshes the project root, output
+default, and result-folder action on each open. An in-flight export keeps its
+original immutable specification and thread ownership through cleanup.
+
+Main-window close is deferred during processing, finalization, queued
+post-processing, a Sequence Figure export, and owned background-thread cleanup,
+without waiting on the UI thread.
+Visible smoke: start a disposable processing run and attempt Exit during the
+run and post-processing; confirm close is refused until completion or stop
+cleanup. Start a Sequence Figure export and attempt Exit and update installation;
+both must be refused through thread cleanup, then allowed when idle. Follow the
+tool-local project-switch smoke in `src/Tools/Sequence_Figure/AGENTS.md`.
+In the condition editor, enter `1 - Faces` and `2 - Faces` (then `2 - faces`);
+confirm the later row shows an output-name error and processing is disabled.
+Rename the second condition to `2 - Objects`, confirm validation clears, and
+verify the usual `Faces` and `Objects` output names in a disposable run.
+Local Qt execution remains CI-only without explicit safe-visible approval.
 
 The main shell default and minimum size is `1280x900` to provide enough
 workspace area for embedded tools without requiring individual pop-out windows.
@@ -561,8 +630,8 @@ App shell verifies that identity against the active project and owns the call
 to the existing post-processing workflow. Tool pages must not start their own
 post-processing workers.
 
-`ActionRow` is now used by the main shell, Settings, Plot Generator, Ratio
-Calculator, Stats, and focused dialogs.
+`ActionRow` is now used by the main shell, Settings, Plot Generator, Stats,
+and focused dialogs.
 When migrating more action rows, preserve button labels, order, variants,
 enabled states, signal connections, and object names, then add focused smoke
 coverage for the touched surface.
@@ -578,7 +647,7 @@ complex for one page; content without tabs retains the original single-browser
 dialog.
 
 `PathPickerRow` is used by Plot Generator and Individual Detectability.
-`StatusBanner` is used by Stats, Ratio Calculator, and Individual Detectability.
+`StatusBanner` is used by Stats and Individual Detectability.
 Keep path defaults, filters, settings keys,
 project-root behavior, and file-dialog Cancel no-op behavior owned by the
 surface workflow; the shared widgets are presentation contracts, not I/O
@@ -763,9 +832,9 @@ project with no cycle count cannot start processing; and verify a marker code
 matching a condition-onset code is rejected. Keep Qt execution in CI unless the
 user has approved a visible local Qt session.
 
-For Experimental-tab changes, open a project at 1280x900 and visit all three
-Experimental sub-tabs. Confirm every label and threshold field is readable
-without clipping, including all eight read-only Raw-Spectral Advanced rows,
+For Settings changes, open a project at 1280x900 and visit all seven main tabs
+and five Experimental sub-tabs. Confirm every label and threshold field is
+readable without clipping, including all eight read-only Raw-Spectral Advanced rows,
 and the bottom action row remains visible. Repeat with the supported display
 scaling settings on Windows and Linux. Confirm automatic detection has only
 Off and On choices, manual lists can be edited and enabled independently,
@@ -777,6 +846,19 @@ Enter an invalid summed-BCA value, switch to Electrodes, and Save:
 Summed-BCA Screening must be visible with inline guidance and the invalid field
 selected. For an older project with no saved detector choice,
 verify the prompt and warning fit, and saving another setting leaves the
-choice pending. Check Preprocessing, Protocol, Harmonics, Stats, ROIs, and
-Advanced retain their controls above the compact footer. Qt execution remains
+choice pending. Change values across several tabs, Save from a different tab,
+and reopen to confirm every edit persists; repeat with Cancel and confirm no
+draft is saved. Check Application > Analysis Defaults contains Stats alpha,
+Quality Control opens Dataset Exclusions and shows read-only thresholds, and
+Application contains debug, cache and projects-root controls. Toggle the >10
+review default under Experimental > Electrodes, Save/reopen, and start a new
+kurtosis review: confirm its initial checkbox follows the saved default, can
+still be overridden for the current review, and saves decisions only after
+Apply decisions. Confirm existing receipts remain valid and auto-all retains
+precedence. Under Experimental > Performance, confirm RAM preloading starts off,
+is disabled without a project, survives Save/reopen for that project, and Cancel
+discards the draft. Verify it is absent from Preprocessing and reachable by
+keyboard on the Performance page. Toggle Beta Tools in its Experimental sub-tab,
+Save, restart, and confirm sidebar visibility updates. All controls and the single shared footer
+must fit without page-level scrolling. Qt execution remains
 CI-only unless a safe visible local session is explicitly approved.

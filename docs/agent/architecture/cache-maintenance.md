@@ -35,6 +35,10 @@ retain live memory maps and publication-lock files, and report skipped or
 failed items. Unregistered custom output folders are not searched. The Stats
 manifest cache is separate from the accepted harmonic selection; only that
 cache record is removable and the active project object must be synchronized.
+The allowlist includes only recognized randomized staging names for preprocessed
+metadata, detectability NPZ files, and MRI templates. Private memory-map PID
+names follow the shared `io/memmap_paths.py` parser; historical PID names remain
+eligible only when their process is inactive.
 
 Downloaded anatomical templates, project settings, source recordings, analysis
 companions/exports, processing ledgers, and review decisions are preserved.
@@ -48,7 +52,7 @@ continues to preserve saved processing and analysis exclusion decisions.
 
 ## Visible Smoke (Local Qt Execution Is Not Required)
 
-Open Settings → Advanced while idle and choose Clear Toolbox Cache. Confirm
+Open Settings → Application while idle and choose Clear Toolbox Cache. Confirm
 the count/size and optional location details, then Cancel and verify no files
 changed. Repeat with disposable test-project caches, clear them, and confirm
 results/settings/decisions remain. Check Stop, missing/locked files, and busy

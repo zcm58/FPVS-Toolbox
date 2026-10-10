@@ -1314,6 +1314,7 @@ def start_processing(self) -> None:
             "ref_channel2": ref2,
             "max_idx_keep": p.get("max_chan_idx_keep"),
             "stim_channel": stim,
+            "experimental_ram_preload": p.get("experimental_ram_preload", False) is True,
         }
 
         self.log(
@@ -1355,7 +1356,10 @@ def start_processing(self) -> None:
                 )
                 continue
 
-            raw = load_eeg_file(self, str(fp))
+            raw = load_eeg_file(
+                self, str(fp),
+                **({"preload_in_memory": True} if params.get("experimental_ram_preload") is True else {}),
+            )
             if raw is None:
                 self.log(
                     f"Skipping file {fp.name} because it could not be loaded.",

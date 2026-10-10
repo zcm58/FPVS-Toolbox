@@ -185,6 +185,7 @@ class KurtosisReviewDialog(ReviewDialog):
         *,
         reviewer_identity: str | None = None,
         auto_interpolate_all: bool = False,
+        auto_interpolate_extreme: bool = True,
         project_root: Path | str | None = None,
         signal_params: Mapping[str, object] | None = None,
     ) -> None:
@@ -212,6 +213,7 @@ class KurtosisReviewDialog(ReviewDialog):
         self._current_receipts = deepcopy(current_receipts)
         self._reviewer_identity = str(reviewer_identity or "").strip() or None
         self._auto_interpolate_all = bool(auto_interpolate_all)
+        self._auto_interpolate_extreme = bool(auto_interpolate_extreme)
         self._project_root = Path(project_root) if project_root is not None else None
         self._signal_params = dict(signal_params or {})
         self._decision_controls: dict[tuple[str, str], QComboBox] = {}
@@ -277,9 +279,11 @@ class KurtosisReviewDialog(ReviewDialog):
         self.auto_checkbox.setToolTip(
             "For pending findings in this review. Uses the absolute normalized score, "
             "not raw kurtosis. Turn off to review every finding manually. "
-            "Applied automatic decisions are saved with their experimental policy."
+            "The starting choice comes from Settings > Experimental > Electrodes. "
+            "Changes here apply to this review only. Applied automatic decisions "
+            "are saved with their experimental policy."
         )
-        self.auto_checkbox.setChecked(True)
+        self.auto_checkbox.setChecked(self._auto_interpolate_extreme)
         options.addWidget(self.auto_checkbox)
         options.addStretch(1)
         self.show_auto_checkbox = QCheckBox("Show automatic", self)
