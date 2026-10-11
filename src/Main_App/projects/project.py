@@ -16,6 +16,7 @@ from .manifest_store import manifest_file_path, project_manifest_transaction
 from .experimental_qc_settings import (
     ExperimentalQcSettings,
     normalize_experimental_qc_settings,
+    normalize_project_experimental_qc_settings,
 )
 from .frequency_protocol import (
     FREQUENCY_PROTOCOL_STATUS_CONFIRMATION_REQUIRED,
@@ -403,10 +404,7 @@ class Project:
         # registry attributes. Keep the loaded registration revision separate.
         self._raw_registration_baseline = _raw_registration_fingerprint(manifest)
 
-        raw_experimental_qc = manifest.get("experimental_qc")
-        self.experimental_qc_settings = normalize_experimental_qc_settings(
-            raw_experimental_qc if "experimental_qc" in manifest else None
-        )
+        self.experimental_qc_settings = normalize_project_experimental_qc_settings(manifest)
 
         self._frequency_protocol_was_persisted = "frequency_protocol" in manifest
         raw_frequency_protocol = manifest.get("frequency_protocol")
@@ -656,6 +654,8 @@ class Project:
             data["frequency_protocol"] = new_manual_frequency_protocol().to_manifest()
         if "preprocessing" not in data and not resolved_manifest_path.exists():
             data["preprocessing"] = new_project_preprocessing_settings()
+        if "experimental_qc" not in data and not resolved_manifest_path.exists():
+            data["experimental_qc"] = ExperimentalQcSettings.for_new_project().to_manifest()
 
         # Shallow-merge defaults with existing data
         merged: Dict[str, Any] = dict(DEFAULTS)

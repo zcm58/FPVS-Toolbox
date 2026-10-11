@@ -26,8 +26,15 @@ which this action does not control.
 Settings groups controls into **Preprocessing**, **Protocol**, **Harmonics**,
 **ROIs**, **Quality Control**, **Experimental**, and **Application**. Use
 **Quality Control** for dataset exclusions and read-only frequency-QC limits.
-**Experimental** contains **Electrodes**, **Raw-Spectral Review**,
-**Summed-BCA Screening**, **Performance**, and **Beta Tools**. Performance holds
+**Experimental** separates **Preprocessing QC** from **Post-processing QC**,
+alongside **Performance** and **Beta Tools**. Preprocessing QC covers raw signals,
+removed electrodes, kurtosis and raw-spectral review. Post-processing QC covers
+interpolation burden, summed-BCA review, unexpected SNR peaks and unusually large
+Stats values. Use the information buttons for a short explanation of each check.
+New projects start with these optional checks off; existing projects keep their
+saved choices and previous defaults. Basic timing, data and result-validity checks
+always run. Turning a check off does not clear explicit exclusions or undo completed
+condition repairs. Performance holds
 project-only RAM preloading, which is off by default. Use **Application > Analysis
 Defaults** for the Stats alpha; Application also contains debug, cache and
 projects-root controls.

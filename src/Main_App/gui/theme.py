@@ -73,6 +73,33 @@ def _native_menu_appearance(app: QApplication) -> tuple[QStyle, QPalette]:
     return appearance
 
 
+def _native_menu_stylesheet(palette: QPalette) -> str:
+    """Pair painted menu backgrounds with the retained platform text colors."""
+    # Native Windows painting can ignore a widget's palette after the app
+    # switches to its light theme. Give both the surface and item painters
+    # explicit color pairs; a text-only override can produce white on white.
+    return f"""
+        QMenu, QMenuBar {{
+            color: {palette.color(QPalette.Active, QPalette.WindowText).name()};
+            background-color: {palette.color(QPalette.Active, QPalette.Window).name()};
+            font-size: {css_font_size("body")};
+        }}
+        QMenu::item, QMenuBar::item {{
+            color: {palette.color(QPalette.Active, QPalette.WindowText).name()};
+            background-color: {palette.color(QPalette.Active, QPalette.Window).name()};
+        }}
+        QMenu:disabled, QMenuBar:disabled,
+        QMenu::item:disabled, QMenuBar::item:disabled {{
+            color: {palette.color(QPalette.Disabled, QPalette.WindowText).name()};
+        }}
+        QMenu::item:selected:enabled, QMenuBar::item:selected:enabled,
+        QMenuBar::item:pressed:enabled {{
+            color: {palette.color(QPalette.Active, QPalette.HighlightedText).name()};
+            background-color: {palette.color(QPalette.Active, QPalette.Highlight).name()};
+        }}
+    """
+
+
 def apply_native_menu_appearance(widget: QWidget) -> None:
     """Use the same platform-owned menu appearance as FPVS Studio."""
     app = QApplication.instance()
@@ -81,21 +108,7 @@ def apply_native_menu_appearance(widget: QWidget) -> None:
     style, palette = _native_menu_appearance(app)
     widget.setStyle(style)
     widget.setPalette(palette)
-    # Override the global QWidget text color without replacing native menu
-    # drawing, spacing, borders or selection backgrounds.
-    widget.setStyleSheet(f"""
-        QMenu, QMenuBar {{
-            color: {palette.color(QPalette.Active, QPalette.WindowText).name()};
-            font-size: {css_font_size("body")};
-        }}
-        QMenu:disabled, QMenuBar:disabled,
-        QMenu::item:disabled, QMenuBar::item:disabled {{
-            color: {palette.color(QPalette.Disabled, QPalette.WindowText).name()};
-        }}
-        QMenu::item:selected:enabled {{
-            color: {palette.color(QPalette.Active, QPalette.HighlightedText).name()};
-        }}
-    """)
+    widget.setStyleSheet(_native_menu_stylesheet(palette))
 
 
 def build_fpvs_app_stylesheet() -> str:

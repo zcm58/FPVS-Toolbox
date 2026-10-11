@@ -43,7 +43,7 @@ optional. Representative-data calibration remains follow-up evidence.
    > 10.0` rule for valid pending findings. Its initial checkbox state for new
    review decisions comes from the project preference
    `kurtosis_review_auto_interpolate_extreme` (default True), saved through
-   Settings > Experimental > Electrodes. It can still be overridden within the
+   Settings > Experimental > Preprocessing QC > Signals. It can still be overridden within the
    review and requires Apply decisions. This preference does not alter existing
    receipts, numerical scoring, or processing/cache fingerprints. The rule
    creates versioned experimental receipts rather than manual
@@ -51,7 +51,7 @@ optional. Representative-data calibration remains follow-up evidence.
    or establish scientific validation of the cutoff.
    A separate project preference, `kurtosis_auto_interpolate_all` (default Off),
    authorizes all valid flags above the existing configured absolute normalized
-   threshold. It is available in Settings > Experimental > Electrodes and the review dialog,
+   threshold. It is available in Settings > Experimental > Preprocessing QC > Signals and the review dialog,
    takes precedence over the >10 rule, and records distinct experimental authority.
    Invalid statistics still require review; scoring and interpolation scope do not change.
 5. Outside the enabled experimental policies, when kurtosis is the sole eligible

@@ -62,6 +62,30 @@ def _write_expected_output_for_first_participant(plan) -> None:
         output_path.write_text("ok", encoding="utf-8")
 
 
+def test_disabled_raw_signal_screen_is_not_reported_as_passed(tmp_path):
+    project, infos = _project_with_raws(tmp_path)
+    plan = classify_processing_inputs(project, infos[:1], _settings(), project.event_map)
+    _write_expected_output_for_first_participant(plan)
+    result = {
+        "status": "ok", "file": str(infos[0].path),
+        "geometry": biosemi64_geometry_identity(),
+        "audit": {
+            "raw_signal_screening_enabled": False,
+            "raw_qc_baseline_median_std_uv": 0.0,
+            "raw_qc_baseline_median_p2p_99_uv": 0.0,
+            "interpolation_status": "not_needed",
+            "interpolation_requested_channels": [], "interpolated_channels": [],
+        },
+    }
+    record_processing_results(
+        project, plan, [result], run_mode="Batch", user_choice="incremental", cancelled=False,
+    )
+    for results in ([result], []):
+        row = build_processing_qc_rows(project, plan, results)[0]
+        assert row["Raw Baseline QC"] == "Not evaluated (disabled)"
+        assert row["Raw Baseline Median STD (uV)"] == "None"
+
+
 def test_processing_qc_summary_rows_and_formatting(tmp_path: Path) -> None:
     project, infos = _project_with_raws(tmp_path)
     plan = classify_processing_inputs(project, infos, _settings(), project.event_map)

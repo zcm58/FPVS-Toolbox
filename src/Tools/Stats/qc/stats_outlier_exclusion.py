@@ -60,6 +60,7 @@ class OutlierExclusionSummary:
     abs_limit: float
     n_subjects_flagged: int = 0
     n_subjects_required_excluded: int = 0
+    finite_dv_screening_enabled: bool = True
 
 
 @dataclass(frozen=True)
@@ -121,11 +122,14 @@ def apply_hard_dv_exclusion(
     condition_col: str | None = None,
     roi_col: str | None = None,
     value_col: str | None = None,
+    flag_finite_extremes: bool = True,
 ) -> tuple[pd.DataFrame, OutlierExclusionReport]:
     """Flag DV outliers, excluding only participants with non-finite values."""
 
     if dv_long_df is None or dv_long_df.empty:
-        summary = OutlierExclusionSummary(0, 0, 0, float(abs_limit))
+        summary = OutlierExclusionSummary(
+            0, 0, 0, float(abs_limit), finite_dv_screening_enabled=flag_finite_extremes,
+        )
         return dv_long_df.copy(), OutlierExclusionReport(summary=summary, participants=[])
 
     participant_col = participant_col or _resolve_column_name(
@@ -142,7 +146,7 @@ def apply_hard_dv_exclusion(
     df = dv_long_df.copy()
     values = df[value_col]
     finite_mask = np.isfinite(values.to_numpy())
-    limit_mask = np.abs(values.to_numpy()) > float(abs_limit)
+    limit_mask = finite_mask & flag_finite_extremes & (np.abs(values.to_numpy()) > float(abs_limit))
     violation_mask = ~finite_mask | limit_mask
 
     violations = df.loc[violation_mask].copy()
@@ -159,7 +163,7 @@ def apply_hard_dv_exclusion(
             pid_rows = df.loc[df[participant_col] == pid]
             pid_values = pid_rows[value_col].to_numpy()
             pid_finite = np.isfinite(pid_values)
-            pid_limit = np.abs(pid_values) > float(abs_limit)
+            pid_limit = pid_finite & flag_finite_extremes & (np.abs(pid_values) > float(abs_limit))
             pid_violation = (~pid_finite) | pid_limit
             pid_violations = pid_rows.loc[pid_violation].copy()
 
@@ -222,6 +226,7 @@ def apply_hard_dv_exclusion(
         abs_limit=float(abs_limit),
         n_subjects_flagged=len(flagged_pids),
         n_subjects_required_excluded=len(required_exclusions),
+        finite_dv_screening_enabled=flag_finite_extremes,
     )
 
     return filtered_df, OutlierExclusionReport(summary=summary, participants=participants)
@@ -382,6 +387,8 @@ def build_outlier_summary_text(report: OutlierExclusionReport) -> str:
         screening_text = "ROI-level summed-BCA QC is retired; no ROI screen was performed."
     else:
         screening_text = "Dependent-variable integrity and saved review context are reported below."
+    if not summary.finite_dv_screening_enabled:
+        screening_text += " Experimental finite-value screening was disabled."
     lines = [
         screening_text,
         "Flagged for review does not automatically exclude participants.",
@@ -532,6 +539,7 @@ def merge_exclusion_reports(
         abs_limit=float(dv_report.summary.abs_limit),
         n_subjects_flagged=n_flagged,
         n_subjects_required_excluded=n_required,
+        finite_dv_screening_enabled=dv_report.summary.finite_dv_screening_enabled,
     )
     qc_metadata = {
         "source": qc_report.source,

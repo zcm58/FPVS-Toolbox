@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from Main_App.projects.project_metadata import read_project_experimental_qc_settings
 from Tools.Stats.analysis.canonical_harmonics import (
     CanonicalHarmonicSelectionError,
     SharedHarmonicSelection,
@@ -147,9 +148,22 @@ class StatsWindowExclusionsMixin:
     def _get_outlier_exclusion_payload(self) -> dict[str, object]:
         """Handle the get outlier exclusion payload step for the Stats workflow."""
         return {
-            "enabled": True,
+            "enabled": self._dv_screening_enabled(),
             "abs_limit": float(self._outlier_abs_limit),
         }
+
+    def _dv_screening_enabled(self) -> bool:
+        manifest_path = self._project_manifest_path()
+        if not manifest_path.is_file():
+            return True
+        return read_project_experimental_qc_settings(
+            manifest_path.parent
+        ).stats_dv_screening_enabled
+
+    def _refresh_dv_screening_controls(self) -> None:
+        enabled = self._dv_screening_enabled()
+        self.outlier_enable_checkbox.setChecked(enabled)
+        self.outlier_abs_limit_spin.setEnabled(enabled)
 
     def _get_qc_exclusion_payload(self) -> dict[str, object]:
         """Keep the worker call shape without retired ROI-screen settings."""
@@ -157,10 +171,10 @@ class StatsWindowExclusionsMixin:
 
     def _on_outlier_exclusion_toggled(self, state: int) -> None:
         """Handle the on outlier exclusion toggled step for the Stats workflow."""
-        self._outlier_exclusion_enabled = True
+        self._outlier_exclusion_enabled = self._dv_screening_enabled()
         spinbox = getattr(self, "outlier_abs_limit_spin", None)
         if spinbox is not None:
-            spinbox.setEnabled(True)
+            spinbox.setEnabled(self._outlier_exclusion_enabled)
 
     def _on_outlier_abs_limit_changed(self, value: float) -> None:
         """Handle the on outlier abs limit changed step for the Stats workflow."""

@@ -1959,7 +1959,9 @@ def require_current_final_release(
 ]:
     """Load and revalidate the durable QC-20/QC-21 release chain."""
 
-    from Main_App.processing.processing_ledger import ledger_path, load_ledger
+    from Main_App.processing.processing_ledger import (
+        ledger_path, load_ledger, require_current_preprocessing_qc_settings,
+    )
     from Main_App.processing.post_processing_context import (
         CACHE_MISS,
         cached_validation,
@@ -1982,7 +1984,13 @@ def require_current_final_release(
         return cached
     scoped = validation_scope_active()
     ledger_files = (
-        capture_validation_files([ledger_path(root)], hash_contents=True) if scoped else ()
+        capture_validation_files(
+            [
+                ledger_path(root), root / "project.json",
+                root / ".fpvs_processing" / "condition_interpolation_run.json",
+            ],
+            hash_contents=True,
+        ) if scoped else ()
     )
     ledger = load_ledger(root)
     outcomes = load_recording_condition_outcomes(ledger)
@@ -1990,6 +1998,16 @@ def require_current_final_release(
         raise RoiCoverageGateError(
             "QC-20 final release requires a current recording-condition output ledger."
         )
+    try:
+        require_current_preprocessing_qc_settings(
+            root, ledger=ledger,
+            required_processing_ids=(
+                cell.processing_id for cell in outcomes.cells
+                if cell.status in {CELL_READY, CELL_PARTIALLY_RETAINED}
+            ),
+        )
+    except ValueError as exc:
+        raise RoiCoverageGateError(str(exc)) from exc
     dependency_paths: list[Path] = []
     companion_paths: list[Path] = []
     if scoped:

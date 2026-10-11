@@ -27,7 +27,10 @@ from Main_App.processing.frequency_domain_qc import (
     load_frequency_domain_qc_state,
     resolve_frequency_qc_coverage_decisions,
 )
-from Main_App.processing.processing_ledger import load_ledger
+from Main_App.processing.processing_ledger import (
+    load_ledger,
+    require_current_preprocessing_qc_settings,
+)
 from Main_App.projects import (
     project_manifest_transaction,
     FrequencyProtocolError,
@@ -293,8 +296,15 @@ def _completed_ledger_state(
     project_root: Path,
     *,
     repeated_session: bool = False,
+    required_processing_ids: Iterable[str] = (),
 ) -> tuple[set[str], tuple[dict[str, object], ...], bool]:
     ledger = load_ledger(project_root)
+    try:
+        require_current_preprocessing_qc_settings(
+            project_root, ledger=ledger, required_processing_ids=required_processing_ids,
+        )
+    except ValueError as exc:
+        raise FullFftProvenanceStaleError(str(exc)) from exc
     entries = ledger.get("entries") if isinstance(ledger, Mapping) else None
     if not isinstance(entries, Mapping):
         return set(), (), False
@@ -500,6 +510,9 @@ def _source_snapshot(
     completed, processing_rows, ledger_filter_applied = _completed_ledger_state(
         project_root,
         repeated_session=repeated_session,
+        required_processing_ids=(
+            str(record.recording_id or record.participant_id) for record in index.workbooks
+        ),
     )
     manual_excluded = _manual_excluded_participants(index)
     manual_excluded_recordings = _manual_excluded_recordings(index)
@@ -928,6 +941,9 @@ def require_current_project_pre_review_geometry(
     repeated_session = index.is_repeated_session
     completed, processing_rows, ledger_filter_applied = _completed_ledger_state(
         root, repeated_session=repeated_session,
+        required_processing_ids=(
+            str(record.recording_id or record.participant_id) for record in index.workbooks
+        ),
     )
     manual_participants = _manual_excluded_participants(index)
     manual_recordings = _manual_excluded_recordings(index)

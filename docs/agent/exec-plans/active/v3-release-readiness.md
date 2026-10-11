@@ -4,6 +4,93 @@
 
 Active. This is the release ledger for the first v3 release candidate.
 
+Menu-visibility follow-up on 2026-10-11: the retained platform menu palette now
+sets matching painted backgrounds and text on menu bars, popup menus and their
+items, with matching selected/pressed and disabled colors. This addresses the
+Windows native painter using light backgrounds with the previously retained
+white text. Menu actions, routing and page visibility rules are unchanged.
+Qt-free coverage checks light/dark color pairs; CI rendering coverage models
+the mismatched native painter and checks normal, pressed, disabled and popup
+labels at standard and 1.25/1.5/2 scaling. Settings/Home/Welcome visibility is
+also covered. The native Windows manual path is in
+[`gui.md`](../../architecture/gui.md); Qt was not executed locally.
+
+Verification: the new Qt-free color-pair regression failed before the fix and
+passes for both light and dark palettes afterward. GUI focused passed 602
+tests. Repo precommit passed all audits, Ruff, compilation and 5,790 non-Qt
+tests (two skipped; 73 existing warnings), using `C:/fmenu1011a`. Strict docs,
+CI workflow YAML parsing and `git diff --check` passed. Native Windows visual
+confirmation remains outstanding; the CI render/scale tests were not run
+locally.
+
+Harmonic-help follow-up on 2026-10-11: Settings > Harmonics uses descriptive
+method names and a shared information modal for the currently selected method.
+Each page gives a brief explanation and its own publication links: seven for
+the two-failure rule, six fixed-domain examples and three significant-selection
+examples. The 2020-onward search plus foundational papers is a verified
+collection rather than a systematic census. Method variants and the lack of
+a publication for Legacy's exact isolated-peak guard are stated explicitly.
+Source evidence and exclusions are recorded in the
+[methods checklist](../../../user/reference/methods-reporting-checklist.md#harmonic-method-references).
+The profile IDs, versions, persistence and numerical selection are unchanged;
+no ownership or backend architecture change was needed.
+
+Verification: GUI focused passed 600 non-Qt tests; strict documentation build
+passed. A Qt-free catalog check parsed all four help pages and verified that
+all 16 distinct DOI links match the source-review documentation.
+`test_harmonic_method_help_opens_current_profile_without_changing_drafts`
+checks current-selection routing, links, resizing, closing and preservation of
+project/draft settings in CI, including the existing 1.25/1.5/2 scale-factor
+matrix. Native Windows checks at 1080p/100%, 4K/150% and
+the supported minimum workspace remain on the documented visible/manual path;
+Qt was not executed locally. Full repo precommit passed all audits, Ruff,
+compilation and 5,788 non-Qt tests (two skipped; 73 existing warnings), using
+`C:/fhinfo1011a`. CI workflow YAML parsing and `git diff --check` also passed.
+
+Protocol-layout follow-up on 2026-10-11: Settings > Protocol now separates
+Timing from Trigger markers. The condition table receives expandable vertical
+space outside the timing form; recording controls, status and Save/Cancel stay
+separate. The shared status remains visible on either page, and invalid inputs
+reveal the correct page. Existing project values and save/cancel behavior are
+unchanged. Geometry coverage uses fixed logical workspaces for the supported
+minimum, 1080p at 100%, 1440p at 125% and 4K at 150%; CI repeats it at scale
+factors 1.25, 1.5 and 2. Native Windows scaling and monitor-switching checks
+remain on the visible/manual path in [`gui.md`](../../architecture/gui.md).
+
+Verification: the GUI focused gate passed 600 tests. Repo precommit passed all
+audits, Ruff, compilation and 5,788 non-Qt tests (two skipped; 73 existing
+warnings) using `C:/fpl1011a`. The strict documentation build passed. The new
+`test_protocol_sections_fit_scaled_workspaces_with_marker_tables` geometry
+coverage and scale-factor runs are configured for CI; no local Qt execution
+or native Windows display verification ran.
+
+Experimental-QC follow-up on 2026-10-11: Settings > Experimental now separates
+Preprocessing QC from Post-processing QC, with brief feature information and
+dependent repair controls grouped under their parent screen. New projects
+persist optional QC off; existing projects retain their previous choices,
+including the former SNR-tool preference. Independent switches control raw
+signal review, removed-electrode detection, kurtosis, raw-spectral review,
+interpolation-burden review, summed-BCA review, SNR peaks and Stats finite-value
+flags. Trigger plans, nonfinite/corrupt results, FFT grids, canonical harmonic
+identity and complete ROI/output coverage remain mandatory.
+
+Disabled checks produce no optional findings and report disabled evidence
+accurately. Post-processing switches preserve accepted exclusions and
+condition-specific repairs. Per-recording preprocessing
+screen snapshots prevent Resume Post-processing and analysis from reusing
+outputs made under different screening choices. The settings pages, schema
+migration, runtime combinations and mandatory gates have focused regression
+coverage. Visible/manual acceptance remains documented in
+[`gui.md`](../../architecture/gui.md); registered Qt coverage remains CI-only.
+
+Verification: the final repository precommit gate passed all audits, Ruff,
+compilation and 5,786 tests (two skipped; 73 existing warnings), using a fresh
+short fixture root (`C:/fqc1011c`). The strict documentation build passed.
+Focused coverage includes all 128 combinations of the seven optional screen
+settings, independent raw-signal/detector behavior, disabled-screen integrity,
+resume/cancel behavior, legacy migration and per-recording stale-output gates.
+No local Qt workflow or installer build ran.
+
 Tool inventory follow-up on 2026-10-09: the sidebar and Tools menu now share
 exactly six beta surfaces through `Main_App.gui.sidebar.BETA_TOOL_SPECS`.
 Runtime, icon, test, verification, and documentation inventories agree.

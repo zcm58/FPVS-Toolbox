@@ -24,7 +24,15 @@ Primary paths:
   used by the main app and tool windows. `apply_native_menu_appearance` retains
   the platform menu style and palette before the Toolbox theme is applied;
   menu bars and popup menus use that retained appearance separately from the
-  application's light palette and widget stylesheet.
+  application's light palette and widget stylesheet. Local menu rules pair
+  foreground and background colors on both surfaces and items, including
+  selected/pressed states; native Windows painting can ignore the retained
+  palette and otherwise render white labels on a white background.
+  Visible smoke: with Windows light and dark application colors, open a project
+  at 1080p/100% and 4K/150%, visit Home and Settings, and open File/View/Tools.
+  Confirm normal, selected, disabled and popup labels remain legible; move the
+  window between differently scaled monitors and repeat. Menus should remain
+  hidden on Welcome. Rendering and scale-factor regression tests run in CI.
 - `src/Main_App/gui/menu_bar.py`: File/View/Tools construction and tool-action
   wiring. `file_menu.py` groups New/Open/Save, Settings/Reset Processing Cache,
   Check for Updates/About, and Exit with separators. View contains Home.
@@ -289,20 +297,37 @@ Settings page, Standard FPVS Screening, Sensitivity Analysis, SNR Plot Generator
 Free Harmonic Clustering Analysis and Individual Detectability
 are embedded in this workspace stack.
 
+The shell has no top toolbar: the project header follows the menu bar directly.
+The debug indicator uses the menu bar's top-right corner and retains the
+existing Settings toggle. `Main_App.gui.icons.application_icon` loads
+`assets/ToolBox_Icon.ico` for the application and main-window title bar; the
+PyInstaller spec also collects this logo under the bundle's `assets/` directory.
+Visible smoke: restart from source and a rebuilt Windows package, inspect the
+top-left title-bar logo on Welcome, Home and Settings, and confirm no strip
+separates File/View/Tools from the project header. Toggle Debug Mode, Save and
+return Home; only the menu-row indicator should change. Repeat at 1280x900 and
+Windows 150% scaling. Registered logo/layout coverage remains CI-only locally.
+
 The Settings page has seven tabs: **Preprocessing**, **Protocol**, **Harmonics**,
 **ROIs**, **Quality Control**, **Experimental**, and **Application**. The first
 four contain project processing values, the presentation/oddball protocol,
 harmonic selection/summation, and ROI definitions respectively. Quality Control
 contains Dataset Exclusions and read-only frequency-domain QC thresholds.
 Application groups the Stats alpha under **Analysis Defaults**, plus Debug Mode,
-cache controls and **Change Projects Root...**. Experimental uses five flat
-sub-tabs: **Electrodes** contains kurtosis interpolation, the default-off
-condition-specific interpolation option
-for frequency QC, the explicit On/Off choice for the lab-calibrated
-automatic removed-electrode detector, and its independently enabled manual
-removed-electrode lists; **Raw-Spectral Review** contains the review switch
-and expandable read-only thresholds; **Summed-BCA Screening** contains the
-versioned review limits; **Performance** contains the project-only, default-off
+cache controls and **Change Projects Root...**. Experimental separates
+**Preprocessing QC**, **Post-processing QC**, **Performance** and **Beta Tools**.
+Preprocessing QC has flat **Signals**, **Electrodes** and **Raw-Spectral Review**
+pages. Signals groups raw signal checks and kurtosis screening with its dependent
+repair policies; Electrodes retains independent automatic detection and manual
+lists. Raw-spectral review retains its expandable read-only thresholds.
+Post-processing QC contains interpolation-burden, unexpected SNR peak and Stats
+finite-value review switches on **Results**, plus summed-BCA limits and its
+dependent condition repair option on **Summed-BCA Screening**. Saved limits remain
+editable while screening is off so invalid drafts can always be corrected.
+Each screen has a brief modal explanation. New projects explicitly
+start all optional screens off; migration preserves prior choices, including a
+legacy SNR-tool preference. Mandatory input/output validity checks remain active.
+**Performance** contains the project-only, default-off
 RAM preload switch; **Beta Tools** contains the application-wide visibility
 toggle, applied after saving and restarting. The condition-specific interpolation
 setting controls new repair requests; turning it off keeps previously accepted
@@ -329,7 +354,7 @@ marks downstream frequency-domain outputs stale and requires regeneration.
 The exclusions dialog retains its own explicit Apply/Cancel transaction.
 The project preference `kurtosis_review_auto_interpolate_extreme` (default True)
 sets the initial >10 experimental checkbox for new kurtosis review decisions.
-It is editable under **Experimental > Electrodes**; per-review overrides and
+It is editable under **Experimental > Preprocessing QC > Signals**; per-review overrides and
 **Apply decisions** remain authoritative. This review default does not change
 existing receipts, scoring, processing fingerprints, or the precedence of
 auto-all. Do not put app-level visibility or diagnostics toggles in Preprocessing.
@@ -380,7 +405,16 @@ independently. SNR reloads through `Main_App.processing.roi_settings`, preserves
 a still-valid selected ROI, and otherwise returns to `(All ROIs)`; active
 worker requests remain snapshotted.
 
-The Protocol tab edits only the active project's versioned FPVS protocol. It
+The Protocol tab has flat **Timing** and **Trigger markers** pages. Timing owns
+rates, analysis-window inputs and their resolved previews. Trigger markers owns
+the shared marker, condition table and recording-schema controls. The table
+expands inside its own vertical layout and uses native table scrolling; it has
+no fixed height and does not share a form row with the timing controls. One
+status banner remains visible below both pages, and validation reveals the page
+containing an invalid field. Sizes use Qt's logical coordinates and the shared
+theme metrics, without monitor-resolution or Windows-scaling overrides.
+
+The Protocol editor edits only the active project's versioned FPVS protocol. It
 accepts a presentation rate plus either an every-N-stimuli recurrence or a
 direct oddball rate that resolves to a whole-stimulus recurrence, shows the
 canonical oddball rate, stores a positive expected analyzed oddball-cycle
@@ -421,14 +455,34 @@ Harmonics tab edits
 the processing-owned method profile rather than creating a Stats-local policy.
 Its profile choices and stable backend IDs are:
 
-- **Dzhelyova/Poncet — stop after two consecutive failures (recommended)**,
+- **Stop after two consecutive failures (recommended)**,
   `dzhelyova_poncet_two_consecutive_failures`;
 - **Fixed / preregistered harmonic domain**,
   `fixed_preregistered_domain`;
-- **Significant-only (exploratory)**,
+- **Significant harmonics only (exploratory)**,
   `significant_only_exploratory`; and
-- **Legacy FPVS Toolbox — through highest with isolated-peak guard**,
+- **Legacy Toolbox selection**,
   `legacy_fpvs_toolbox`.
+
+The information button beside Method profile opens the shared `ToolInfoDialog`
+for the currently selected profile. Brief explanations and method-specific
+publication links live in `HARMONIC_METHOD_INFO` in `settings_panel.py`;
+publication names belong in that dialog, not the selector. References must be
+checked against primary-source methods and describe any different thresholds,
+pooling, or response measures. Fixed-domain examples do not establish
+preregistration. Legacy's isolated-peak guard has no verified publication
+precedent. The source-review scope and evidence are recorded in the
+[methods checklist](../../user/reference/methods-reporting-checklist.md#harmonic-method-references).
+These are presentation changes: persisted profile IDs, versions, defaults,
+fingerprints and calculations remain unchanged.
+
+Visible smoke (Qt execution is CI-only locally): at 1080p/100% and 4K/150%,
+open Settings > Harmonics, select each method, and open its information button
+by mouse and keyboard. Check the matching title, brief explanation and only
+that method's references; follow a publication link in the browser. Resize the
+dialog down to its minimum, scroll to the last reference, and close with Close
+and Escape. Confirm Save/Cancel and draft values are unaffected by reading
+help. Repeat on the supported 1280x900 workspace and after moving monitors.
 
 The card must expose only scientifically valid controls for the selected
 profile. Fixed mode chooses an exact Hz list, upper oddball-harmonic index, or
@@ -832,8 +886,21 @@ project with no cycle count cannot start processing; and verify a marker code
 matching a condition-onset code is rejected. Keep Qt execution in CI unless the
 user has approved a visible local Qt session.
 
-For Settings changes, open a project at 1280x900 and visit all seven main tabs
-and five Experimental sub-tabs. Confirm every label and threshold field is
+For Protocol layout, use 1920x1080 at 100% Windows scaling and 3840x2160 at
+150%, then repeat at 125% and 200%, resize the window and move it between
+monitors with different scaling. Visit Timing and
+Trigger markers, enable both condition and recording-specific markers, and
+use a long condition list. Verify the table scrolls to the final condition,
+never overlaps the recording controls, and leaves the status and Save/Cancel
+visible. Switch duration/cycle modes, save and reopen, and trigger an invalid
+rate and marker to check page selection. CI covers fixed logical workspaces
+and runs the Protocol geometry regression again with `QT_SCALE_FACTOR` values
+1.25, 1.5 and 2; this does not replace native Windows display verification.
+
+For Settings changes, open a project at 1280x900 and visit all seven main tabs,
+all four Experimental sections, the three Preprocessing QC pages and both
+Post-processing QC pages. Confirm
+every information button opens a brief readable explanation and every label and threshold field is
 readable without clipping, including all eight read-only Raw-Spectral Advanced rows,
 and the bottom action row remains visible. Repeat with the supported display
 scaling settings on Windows and Linux. Confirm automatic detection has only
@@ -842,8 +909,8 @@ and all five summed-BCA thresholds survive switching sub-tabs, Save, and
 reopen. Confirm condition-specific interpolation is off for new and older
 projects, survives Save/reopen when enabled, and only allows individual
 electrode repair after artifact confirmation in frequency QC.
-Enter an invalid summed-BCA value, switch to Electrodes, and Save:
-Summed-BCA Screening must be visible with inline guidance and the invalid field
+Enter an invalid summed-BCA value, switch to Preprocessing QC, and Save:
+Post-processing QC must be visible with inline guidance and the invalid field
 selected. For an older project with no saved detector choice,
 verify the prompt and warning fit, and saving another setting leaves the
 choice pending. Change values across several tabs, Save from a different tab,
@@ -851,7 +918,7 @@ and reopen to confirm every edit persists; repeat with Cancel and confirm no
 draft is saved. Check Application > Analysis Defaults contains Stats alpha,
 Quality Control opens Dataset Exclusions and shows read-only thresholds, and
 Application contains debug, cache and projects-root controls. Toggle the >10
-review default under Experimental > Electrodes, Save/reopen, and start a new
+review default under Experimental > Preprocessing QC > Signals, Save/reopen, and start a new
 kurtosis review: confirm its initial checkbox follows the saved default, can
 still be overridden for the current review, and saves decisions only after
 Apply decisions. Confirm existing receipts remain valid and auto-all retains
@@ -862,3 +929,13 @@ keyboard on the Performance page. Toggle Beta Tools in its Experimental sub-tab,
 Save, restart, and confirm sidebar visibility updates. All controls and the single shared footer
 must fit without page-level scrolling. Qt execution remains
 CI-only unless a safe visible local session is explicitly approved.
+
+Using a disposable project, verify all optional screens off, each independently
+on, and all on. Kurtosis policy controls depend only on kurtosis screening;
+condition repair requests depend on summed-BCA review. Disabling the removed
+detector must not disable raw-signal or raw-spectral review. Manual electrodes
+and explicit exclusions remain effective. Save/reopen and Cancel must preserve
+the correct choices. Change a preprocessing screen after a completed run and
+confirm the rerun-Processing message; change summed-BCA/burden review and confirm
+Resume Post-processing. Revisit cached SNR/Stats pages to check their displayed
+QC state and next worker request follow the committed project settings.

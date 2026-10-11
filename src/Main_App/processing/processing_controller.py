@@ -1310,6 +1310,8 @@ def start_processing(self) -> None:
             ),
             "reject_thresh": p.get("rejection_z"),
             "kurtosis_auto_interpolate_all": bool(p.get("kurtosis_auto_interpolate_all", False)),
+            "raw_signal_screening_enabled": project.experimental_qc_settings.raw_signal_screening_enabled,
+            "kurtosis_screening_enabled": project.experimental_qc_settings.kurtosis_screening_enabled,
             "ref_channel1": ref1,
             "ref_channel2": ref2,
             "max_idx_keep": p.get("max_chan_idx_keep"),

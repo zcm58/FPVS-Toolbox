@@ -11,7 +11,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any, Mapping
 
 
-EXPERIMENTAL_QC_SETTINGS_SCHEMA_VERSION = "1.2.0"
+EXPERIMENTAL_QC_SETTINGS_SCHEMA_VERSION = "1.3.0"
 LEGACY_EXPERIMENTAL_QC_SETTINGS_SCHEMA_VERSION = "1.0.0"
 SUMMED_BCA_SCREENING_POLICY_VERSION = "1.0.0"
 RAW_SPECTRAL_SCREENING_POLICY_VERSION = "1.0.0"
@@ -387,6 +387,11 @@ class ExperimentalQcSettings:
     )
     condition_specific_interpolation_enabled: bool = False
     kurtosis_review_auto_interpolate_extreme: bool = True
+    raw_signal_screening_enabled: bool = True
+    kurtosis_screening_enabled: bool = True
+    interpolation_burden_review_enabled: bool = True
+    snr_spectral_screening_enabled: bool = True
+    stats_dv_screening_enabled: bool = True
 
     def __post_init__(self) -> None:
         schema_version = str(self.schema_version or "").strip()
@@ -405,6 +410,17 @@ class ExperimentalQcSettings:
         object.__setattr__(self, "schema_version", schema_version)
         object.__setattr__(self, "summed_bca_screening", screening)
         object.__setattr__(self, "raw_spectral_screening", raw_spectral)
+        for field_name in (
+            "raw_signal_screening_enabled",
+            "kurtosis_screening_enabled",
+            "interpolation_burden_review_enabled",
+            "snr_spectral_screening_enabled",
+            "stats_dv_screening_enabled",
+        ):
+            object.__setattr__(
+                self, field_name,
+                _coerce_bool(getattr(self, field_name), field_name=field_name),
+            )
         object.__setattr__(
             self, "condition_specific_interpolation_enabled",
             _coerce_bool(
@@ -433,6 +449,7 @@ class ExperimentalQcSettings:
         if schema_version not in {
             LEGACY_EXPERIMENTAL_QC_SETTINGS_SCHEMA_VERSION,
             "1.1.0",
+            "1.2.0",
             EXPERIMENTAL_QC_SETTINGS_SCHEMA_VERSION,
         }:
             raise ExperimentalQcSettingsError(
@@ -454,6 +471,40 @@ class ExperimentalQcSettings:
             kurtosis_review_auto_interpolate_extreme=raw.get(
                 "kurtosis_review_auto_interpolate_extreme", True
             ),
+            raw_signal_screening_enabled=raw.get("raw_signal_screening_enabled", True),
+            kurtosis_screening_enabled=raw.get("kurtosis_screening_enabled", True),
+            interpolation_burden_review_enabled=raw.get(
+                "interpolation_burden_review_enabled", True
+            ),
+            snr_spectral_screening_enabled=raw.get("snr_spectral_screening_enabled", True),
+            stats_dv_screening_enabled=raw.get("stats_dv_screening_enabled", True),
+        )
+
+    @classmethod
+    def for_new_project(cls) -> "ExperimentalQcSettings":
+        """Start new projects with optional QC off; retain legacy load defaults."""
+        return cls(
+            summed_bca_screening=SummedBcaScreeningSettings(enabled=False),
+            raw_spectral_screening=RawSpectralScreeningSettings(enabled=False),
+            raw_signal_screening_enabled=False,
+            kurtosis_screening_enabled=False,
+            interpolation_burden_review_enabled=False,
+            snr_spectral_screening_enabled=False,
+            stats_dv_screening_enabled=False,
+        )
+
+    def with_review_features(
+        self, *, raw_signal_screening_enabled: bool,
+        kurtosis_screening_enabled: bool, interpolation_burden_review_enabled: bool,
+        snr_spectral_screening_enabled: bool, stats_dv_screening_enabled: bool,
+    ) -> "ExperimentalQcSettings":
+        return replace(
+            self,
+            raw_signal_screening_enabled=raw_signal_screening_enabled,
+            kurtosis_screening_enabled=kurtosis_screening_enabled,
+            interpolation_burden_review_enabled=interpolation_burden_review_enabled,
+            snr_spectral_screening_enabled=snr_spectral_screening_enabled,
+            stats_dv_screening_enabled=stats_dv_screening_enabled,
         )
 
     def with_summed_bca_screening(
@@ -477,6 +528,11 @@ class ExperimentalQcSettings:
     def to_manifest(self) -> dict[str, object]:
         return {
             "schema_version": self.schema_version,
+            "raw_signal_screening_enabled": self.raw_signal_screening_enabled,
+            "kurtosis_screening_enabled": self.kurtosis_screening_enabled,
+            "interpolation_burden_review_enabled": self.interpolation_burden_review_enabled,
+            "snr_spectral_screening_enabled": self.snr_spectral_screening_enabled,
+            "stats_dv_screening_enabled": self.stats_dv_screening_enabled,
             "summed_bca_screening": self.summed_bca_screening.to_manifest(),
             "raw_spectral_screening": self.raw_spectral_screening.to_manifest(),
             "condition_specific_interpolation_enabled": (
@@ -524,6 +580,27 @@ def normalize_experimental_qc_settings(
     return ExperimentalQcSettings.from_manifest(value)
 
 
+def normalize_project_experimental_qc_settings(
+    manifest: Mapping[str, Any],
+) -> ExperimentalQcSettings:
+    """Read project QC choices, preserving the former SNR-tool preference."""
+    raw = manifest.get("experimental_qc")
+    settings = normalize_experimental_qc_settings(raw)
+    if isinstance(raw, Mapping) and "snr_spectral_screening_enabled" in raw:
+        return settings
+    tools = manifest.get("tools", {})
+    snr_plot = tools.get("snr_plot", {}) if isinstance(tools, Mapping) else {}
+    plot_settings = snr_plot.get("plot_settings", {}) if isinstance(snr_plot, Mapping) else {}
+    if isinstance(plot_settings, Mapping) and "spectral_qc_enabled" in plot_settings:
+        return replace(
+            settings,
+            snr_spectral_screening_enabled=_coerce_bool(
+                plot_settings["spectral_qc_enabled"], field_name="spectral_qc_enabled",
+            ),
+        )
+    return settings
+
+
 __all__ = [
     "EXPERIMENTAL_QC_SETTINGS_SCHEMA_VERSION",
     "LEGACY_EXPERIMENTAL_QC_SETTINGS_SCHEMA_VERSION",
@@ -536,6 +613,7 @@ __all__ = [
     "RawSpectralScreeningSettings",
     "SummedBcaScreeningSettings",
     "normalize_experimental_qc_settings",
+    "normalize_project_experimental_qc_settings",
     "normalize_raw_spectral_screening_settings",
     "normalize_summed_bca_screening_settings",
 ]

@@ -482,13 +482,15 @@ class PlotGeneratorUiSectionsMixin:
         advanced_layout.addLayout(advanced_form)
         advanced_layout.addWidget(self.axis_ranges_label)
         advanced_layout.addLayout(ranges_grid)
-        self.spectral_qc_check = QCheckBox("Flag unexpected SNR peaks")
+        self.spectral_qc_check = QCheckBox("Experimental: flag unexpected SNR peaks")
         self.spectral_qc_check.setChecked(
             bool(self._defaults.get("spectral_qc_enabled", True))
         )
         self.spectral_qc_check.setToolTip(
-            "Flag strong SNR peaks at non-base, non-oddball, non-harmonic frequencies in the completion feedback. Plot values are not changed."
+            "Choose this check in Settings > Experimental > Post-processing QC. "
+            "It flags unexpected peaks without changing plot values."
         )
+        self.spectral_qc_check.setEnabled(self._project is None)
         advanced_layout.addWidget(self.spectral_qc_check)
 
         self.generation_log_dialog = SNRGenerationLogDialog("", self)

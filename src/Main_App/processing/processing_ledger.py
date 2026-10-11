@@ -11,7 +11,7 @@ import time
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Mapping, Sequence
+from typing import TYPE_CHECKING, Any, Iterable, Mapping, Sequence
 
 from Main_App.io.eeg_geometry import (
     BIOSEMI64_CHANNELS,
@@ -55,6 +55,10 @@ from Main_App.projects.frequency_protocol import (
     FrequencyProtocolError,
     normalize_frequency_protocol,
 )
+from Main_App.projects.experimental_qc_settings import (
+    normalize_experimental_qc_settings,
+    normalize_raw_spectral_screening_settings,
+)
 
 from Main_App.processing.expected_processing_ledger import (
     EXPECTED_CELL_ACTION_EXCLUDE_CONDITION as EXPECTED_CELL_ACTION_EXCLUDE_CONDITION,
@@ -88,7 +92,9 @@ from Main_App.projects.grouping import (
     validate_condition_output_names,
 )
 from Main_App.projects.preprocessing_settings import (
+    normalize_manual_excluded_participant_conditions,
     normalize_manual_excluded_participants,
+    normalize_manual_excluded_recording_conditions,
     normalize_manual_excluded_recordings,
 )
 
@@ -198,6 +204,7 @@ class ProcessingPlan:
     condition_labels: tuple[str, ...]
     choice: str = "incremental"
     geometry_identity: Mapping[str, object] = field(default_factory=dict)
+    preprocessing_qc_settings: Mapping[str, bool] = field(default_factory=dict)
 
     @property
     def completed_count(self) -> int:
@@ -301,6 +308,7 @@ def _float_or_none(value: Any) -> float | None:
 def _raw_qc_extra_payload(source: Mapping[str, Any] | None) -> dict[str, object]:
     source = source or {}
     return {
+        "raw_signal_screening_enabled": source.get("raw_signal_screening_enabled", True),
         "raw_qc_rare_burst_channels": _string_list(
             source.get("raw_qc_rare_burst_channels", source.get("rare_burst_channels"))
         ),
@@ -850,6 +858,11 @@ def build_processing_fingerprint(
             or key not in _REPEATED_SESSION_PREPROCESSING_KEYS
         )
     }
+    # These screens were always on before they had switches. Preserve the
+    # historical hash when their effective behavior has not changed.
+    for key in ("raw_signal_screening_enabled", "kurtosis_screening_enabled"):
+        if fingerprint_settings.get(key, True) is True:
+            fingerprint_settings.pop(key, None)
     compatibility = getattr(
         project,
         "processing_fingerprint_v9_compatibility",
@@ -941,6 +954,156 @@ def load_ledger(project_root: Path) -> dict[str, Any]:
         data["entries"] = {}
     data.setdefault("schema_version", 1)
     return data
+
+
+class PreprocessingQcSettingsChangedError(ValueError):
+    """Processed recordings belong to different experimental screening settings."""
+
+
+def _preprocessing_qc_settings_snapshot(
+    settings: Mapping[str, Any], experimental_settings: object = None,
+) -> dict[str, bool]:
+    experimental = normalize_experimental_qc_settings(experimental_settings)
+    snapshot = {
+        key: settings.get(key, getattr(experimental, key))
+        for key in ("raw_signal_screening_enabled", "kurtosis_screening_enabled")
+    }
+    snapshot["raw_spectral_screening_enabled"] = normalize_raw_spectral_screening_settings(
+        settings.get("raw_spectral_screening", experimental.raw_spectral_screening)
+    ).enabled
+    if any(type(value) is not bool for value in snapshot.values()):
+        raise PreprocessingQcSettingsChangedError(
+            "Preprocessing QC settings are invalid. Check Settings and run Processing again."
+        )
+    return snapshot
+
+
+def _preprocessing_qc_required_entries(
+    root: Path, manifest: Mapping[str, Any], entries: Mapping[str, Any],
+    required_processing_ids: Iterable[str] | None = None,
+):
+    """Limit settings checks to sources that can still contribute to release."""
+    from Main_App.projects import project_recording_context_from_manifest
+    from Main_App.processing.frequency_domain_qc import frequency_domain_exclusions_from_state
+
+    context = project_recording_context_from_manifest(root, manifest)
+    registered = (
+        {row.recording_id.casefold(): row.participant_id.casefold() for row in context.recordings}
+        if context.is_repeated_session else
+        {row.participant_id.casefold(): row.participant_id.casefold() for row in context.participants}
+    )
+    # Historical ordinary projects can have processed workbooks without a
+    # participant registry. An empty registry cannot prove their removal.
+    registry_known = bool(registered) or context.is_repeated_session
+    required = set(registered) | {
+        str(identity).casefold() for identity in required_processing_ids or ()
+    }
+    preprocessing = manifest.get("preprocessing") or {}
+    tools = manifest.get("tools") or {}
+    frequency = frequency_domain_exclusions_from_state(tools.get("frequency_domain_qc") or {})
+    excluded_participants = {
+        value.casefold() for value in (
+            *normalize_manual_excluded_participants(preprocessing.get("manual_excluded_participants")),
+            *frequency.excluded_participants,
+        )
+    }
+    excluded_recordings = {
+        value.casefold() for value in (
+            *normalize_manual_excluded_recordings(preprocessing.get("manual_excluded_recordings")),
+            *frequency.excluded_recordings,
+        )
+    }
+    participant_conditions = {
+        (identity.casefold(), condition.casefold())
+        for identity, labels in normalize_manual_excluded_participant_conditions(
+            preprocessing.get("manual_excluded_participant_conditions")
+        ).items() for condition in labels
+    } | {(identity.casefold(), condition.casefold())
+         for identity, condition in frequency.excluded_participant_conditions}
+    recording_conditions = {
+        (identity.casefold(), condition.casefold())
+        for identity, labels in normalize_manual_excluded_recording_conditions(
+            preprocessing.get("manual_excluded_recording_conditions")
+        ).items() for condition in labels
+    } | {(identity.casefold(), condition.casefold())
+         for identity, condition in frequency.excluded_recording_conditions}
+    conditions = {str(label).casefold() for label in manifest.get("event_map", {})}
+    for identity, entry in entries.items():
+        if not isinstance(entry, Mapping) or entry.get("status") not in {"completed", "excluded"}:
+            continue
+        key = str(identity).casefold()
+        if registry_known and key not in required:
+            continue
+        participant = registered.get(key, str(entry.get("participant_id") or identity).casefold())
+        recording = str(entry.get("recording_id") or identity).casefold()
+        if participant in excluded_participants or recording in excluded_recordings:
+            continue
+        if conditions and all(
+            (participant, condition) in participant_conditions or (recording, condition) in recording_conditions
+            for condition in conditions
+        ):
+            continue
+        if (entry.get("status") == "excluded"
+                and entry.get("exclusion_reason") in _GEOMETRY_INDEPENDENT_EXCLUSION_REASONS):
+            continue
+        yield identity, entry
+
+
+def require_current_preprocessing_qc_settings(
+    project_root: str | Path, ledger: Mapping[str, Any] | None = None,
+    *, required_processing_ids: Iterable[str] | None = None,
+) -> None:
+    """Reject downstream reuse after a preprocessing screen changes.
+
+    Each recording owns its snapshot so processing one file cannot validate
+    another file's older outputs. Missing historical switches mean enabled.
+    Consumers can additionally require identities of unregistered legacy
+    workbooks they still use, without making unused historical entries active.
+    """
+    root = Path(project_root)
+    manifest_path = root / "project.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else {}
+    if not isinstance(manifest, Mapping):
+        raise PreprocessingQcSettingsChangedError("Project settings are invalid. Check project.json before continuing.")
+    current = _preprocessing_qc_settings_snapshot({}, manifest.get("experimental_qc"))
+    state = load_ledger(root) if ledger is None else ledger
+    entries = state.get("entries", {})
+    if not isinstance(entries, Mapping):
+        raise PreprocessingQcSettingsChangedError("Processing records are invalid. Run Processing again.")
+    legacy_snapshot = None
+    snapshot_path = root / PROCESSING_STATE_DIR / "condition_interpolation_run.json"
+    mismatches = []
+    for identity, entry in _preprocessing_qc_required_entries(
+        root, manifest, entries, required_processing_ids,
+    ):
+        stored = entry.get("preprocessing_qc_settings")
+        if stored is None:
+            # An exact historical run snapshot can prove that the existing raw
+            # spectral switch was off; a snapshot of another run cannot.
+            stored = _preprocessing_qc_settings_snapshot({})
+            if snapshot_path.exists():
+                if legacy_snapshot is None:
+                    legacy_snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
+                if (legacy_snapshot.get("version") == "condition_interpolation_run_snapshot_v1"
+                        and legacy_snapshot.get("project_root") == str(root.resolve())
+                        and bool(entry.get("processing_fingerprint"))
+                        and legacy_snapshot.get("processing_fingerprint") == entry.get("processing_fingerprint")):
+                    for record in legacy_snapshot.get("records", ()):
+                        source = record.get("raw_file_identity", {})
+                        if (str(record.get("processing_id")) == str(identity)
+                                and {"raw_file", "raw_size", "raw_mtime_ns"}.issubset(source)
+                                and all(source.get(key) == entry.get(key)
+                                        for key in ("raw_file", "raw_size", "raw_mtime_ns"))):
+                            stored = _preprocessing_qc_settings_snapshot(legacy_snapshot.get("settings", {}))
+                            break
+        if (not isinstance(stored, Mapping) or set(stored) != set(current)
+                or any(type(value) is not bool for value in stored.values()) or dict(stored) != current):
+            mismatches.append(str(identity))
+    if mismatches:
+        raise PreprocessingQcSettingsChangedError(
+            "Preprocessing QC settings changed for " + ", ".join(mismatches)
+            + ". Run Processing again before continuing post-processing or analysis."
+        )
 
 
 def save_ledger(project_root: Path, ledger: Mapping[str, Any]) -> None:
@@ -1271,6 +1434,9 @@ def classify_processing_inputs(
         fingerprint=fingerprint,
         condition_labels=condition_labels,
         geometry_identity=geometry_identity,
+        preprocessing_qc_settings=_preprocessing_qc_settings_snapshot(
+            settings, getattr(project, "experimental_qc_settings", None),
+        ),
     )
 
 
@@ -1293,6 +1459,7 @@ def with_processing_choice(plan: ProcessingPlan, choice: str) -> ProcessingPlan:
         condition_labels=plan.condition_labels,
         choice=choice,
         geometry_identity=plan.geometry_identity,
+        preprocessing_qc_settings=plan.preprocessing_qc_settings,
     )
 
 
@@ -1390,6 +1557,7 @@ def carry_forward_pre_qc_completed_states(
         condition_labels=current_plan.condition_labels,
         choice=current_plan.choice,
         geometry_identity=current_plan.geometry_identity,
+        preprocessing_qc_settings=current_plan.preprocessing_qc_settings,
     )
 
 
@@ -1860,6 +2028,7 @@ def record_processing_results(
             **raw_meta,
             "processing_fingerprint_version": PROCESSING_FINGERPRINT_VERSION,
             "processing_fingerprint": plan.fingerprint,
+            "preprocessing_qc_settings": dict(plan.preprocessing_qc_settings) or _preprocessing_qc_settings_snapshot({}),
             "geometry": geometry_identity,
             "expected_outputs": [str(path) for path in state.expected_outputs],
             "export_receipts": _export_receipts_payload(result),
@@ -1952,6 +2121,7 @@ def record_processing_results(
                 **raw_file_metadata(state.info.path),
                 "processing_fingerprint_version": PROCESSING_FINGERPRINT_VERSION,
                 "processing_fingerprint": plan.fingerprint,
+                "preprocessing_qc_settings": dict(plan.preprocessing_qc_settings) or _preprocessing_qc_settings_snapshot({}),
                 "geometry": geometry_identity,
                 "expected_outputs": [str(path) for path in state.expected_outputs],
                 "export_receipts": _export_receipts_payload(excluded_result),

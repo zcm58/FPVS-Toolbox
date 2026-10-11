@@ -1,6 +1,8 @@
+import copy
 import importlib.util
 import json
 import os
+import re
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -15,6 +17,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
     QDialog,
+    QDialogButtonBox,
     QLabel,
     QLineEdit,
     QMessageBox,
@@ -44,7 +47,7 @@ from Main_App.gui.manual_participant_exclusions_dialog import (
 from Main_App.gui.manual_removed_electrodes_dialog import ManualRemovedElectrodesDialog
 from Main_App.gui.recording_qc_identity import QcRecordingIdentity
 from Main_App.gui import processing_inputs
-from Main_App.gui.components import ActionRow, SectionCard
+from Main_App.gui.components import ActionRow, SectionCard, ToolInfoDialog
 from Main_App.gui.theme import apply_fpvs_theme
 from Main_App.processing.processing_controller import RawFileInfo
 import Main_App.gui.settings_panel as settings_panel
@@ -259,6 +262,12 @@ def test_dialog_loads_saves_project(tmp_path, qtbot):
     dlg.auto_detect_removed_electrodes_check.setChecked(False)
     assert dlg.removed_electrode_detection_mode_combo.currentData() == "off"
     dlg.summed_bca_screening_enabled_check.setChecked(False)
+    for feature in (
+        "raw_signal_screening_enabled", "kurtosis_screening_enabled",
+        "interpolation_burden_review_enabled", "snr_spectral_screening_enabled",
+        "stats_dv_screening_enabled",
+    ):
+        getattr(dlg, f"{feature}_check").setChecked(False)
     assert dlg.kurtosis_review_auto_interpolate_extreme_check.isChecked()
     dlg.kurtosis_review_auto_interpolate_extreme_check.setChecked(False)
     assert not dlg.condition_specific_interpolation_enabled_check.isChecked()
@@ -293,6 +302,11 @@ def test_dialog_loads_saves_project(tmp_path, qtbot):
     assert reloaded.preprocessing["removed_electrode_detection_mode"] == "off"
     assert reloaded.experimental_qc_settings.kurtosis_review_auto_interpolate_extreme is False
     assert reloaded.experimental_qc_settings.summed_bca_screening.enabled is False
+    assert all(not getattr(reloaded.experimental_qc_settings, feature) for feature in (
+        "raw_signal_screening_enabled", "kurtosis_screening_enabled",
+        "interpolation_burden_review_enabled", "snr_spectral_screening_enabled",
+        "stats_dv_screening_enabled",
+    ))
     assert reloaded.experimental_qc_settings.condition_specific_interpolation_enabled is True
     assert (
         reloaded.experimental_qc_settings.summed_bca_screening.warning_summed_bca_uv
@@ -640,6 +654,8 @@ def test_experimental_cancel_discards_beta_and_review_drafts_before_reopen(
     assert review_preference.isChecked()
     if with_project:
         review_preference.setChecked(False)
+        page.raw_signal_screening_enabled_check.setChecked(False)
+        page.stats_dv_screening_enabled_check.setChecked(False)
     page.beta_tools_check.setChecked(True)
     assert page.has_unsaved_changes()
     page.findChild(QPushButton, "settings_footer_cancel").click()
@@ -651,6 +667,8 @@ def test_experimental_cancel_discards_beta_and_review_drafts_before_reopen(
     assert reopened is not page
     assert not reopened.beta_tools_check.isChecked()
     assert reopened.kurtosis_review_auto_interpolate_extreme_check.isChecked()
+    assert reopened.raw_signal_screening_enabled_check.isChecked() is with_project
+    assert reopened.stats_dv_screening_enabled_check.isChecked() is with_project
     assert not reopened.has_unsaved_changes()
     if project is not None:
         reloaded = Project.load(project.project_root)
@@ -731,14 +749,15 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
     assert dlg.recalculate_harmonics_button.isEnabled() is True
     assert dlg.findChild(ActionRow, "settings_harmonic_selection_actions") is not None
     assert dlg.harmonic_summation_method_combo.itemText(0) == (
-        "Dzhelyova/Poncet — stop after two consecutive failures (recommended)"
+        "Stop after two consecutive failures (recommended)"
     )
     assert dlg.harmonic_summation_method_combo.itemText(1) == (
         "Fixed / preregistered harmonic domain"
     )
     assert dlg.harmonic_summation_method_combo.itemText(2) == (
-        "Significant-only (exploratory)"
+        "Significant harmonics only (exploratory)"
     )
+    assert dlg.harmonic_summation_method_combo.itemText(3) == "Legacy Toolbox selection"
     assert dlg.harmonic_summation_method_combo.currentData() == "legacy_fpvs_toolbox"
     assert dlg.harmonic_electrode_scope_combo.currentData() == "union_roi_electrodes"
     assert dlg.fixed_harmonic_freqs_edit.isEnabled() is False
@@ -794,8 +813,11 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
     dlg.removed_electrode_detection_info_button.click()
     assert info_calls == [
         (
-            "Conservative Removed-Electrode Detection",
-            settings_panel.REMOVED_ELECTRODE_DETECTION_INFO_TEXT,
+            "Removed-electrode detection",
+            "Suggests electrodes that may have been unplugged during recording. "
+            "Developed with one lab's BioSemi ActiveTwo 64 data, it still needs "
+            "independent validation. Review its suggestions before accepting repairs. "
+            "Saved manual electrode lists work separately.",
         )
     ]
     assert dlg.beta_tools_check.text() == "Enable Beta Tools"
@@ -912,12 +934,17 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
 
 
 @pytest.fixture
-def experimental_settings_page(tmp_path, qtbot):
+def experimental_settings_page(tmp_path, qtbot, request):
     project = _prep_project(tmp_path)
     manifest_path = project.project_root / "project.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     for key in REMOVED_ELECTRODE_DETECTION_CHOICE_CANONICAL_KEYS:
         manifest["preprocessing"].pop(key, None)
+    host_size = getattr(request, "param", (1000, 780))
+    if hasattr(request, "param"):
+        manifest["event_map"] = {
+            f"Condition {index:02d}": 100 + index for index in range(1, 61)
+        }
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
     project = Project.load(project.project_root)
 
@@ -933,7 +960,7 @@ def experimental_settings_page(tmp_path, qtbot):
         # This is the settings area inside the supported 1280 x 900 shell.
         # A fixed host prevents a large minimum size from hiding overflow by
         # silently enlarging the test window.
-        host.setFixedSize(1000, 780)
+        host.setFixedSize(*host_size)
         layout = QVBoxLayout(host)
         layout.setContentsMargins(0, 0, 0, 0)
         manager = SettingsManager(str(tmp_path / "settings.ini"))
@@ -951,100 +978,288 @@ def experimental_settings_page(tmp_path, qtbot):
         app.setStyleSheet(previous_stylesheet)
 
 
+def _assert_settings_widget_unclipped(widget, host):
+    name = widget.objectName() or type(widget).__name__
+    assert widget.isVisibleTo(host), name
+    minimum_height = widget.minimumSizeHint().height()
+    icon_only = isinstance(widget, QAbstractButton) and widget.property("iconButton") and not widget.text()
+    if icon_only:
+        minimum_height = widget.iconSize().height() + 4
+    if isinstance(widget, QLabel) and widget.wordWrap():
+        minimum_height = max(minimum_height, widget.heightForWidth(widget.width()))
+    assert widget.height() >= minimum_height, name
+    if isinstance(widget, (QLineEdit, QComboBox, QAbstractButton)):
+        minimum_width = widget.iconSize().width() + 4 if icon_only else widget.minimumSizeHint().width()
+        assert widget.width() >= minimum_width, name
+    if isinstance(widget, QLabel) and not widget.wordWrap():
+        assert widget.width() >= widget.minimumSizeHint().width(), name
+    ancestor = widget.parentWidget()
+    while ancestor is not None:
+        bounds = QRect(widget.mapTo(ancestor, QPoint(0, 0)), widget.size())
+        assert ancestor.rect().contains(bounds), (name, ancestor.objectName())
+        if ancestor is host:
+            break
+        ancestor = ancestor.parentWidget()
+
+
+def test_harmonic_method_help_opens_current_profile_without_changing_drafts(
+    experimental_settings_page, qtbot, monkeypatch,
+):
+    page = experimental_settings_page
+    page.tabs.setCurrentIndex(page._harmonic_tab_index)
+    QApplication.processEvents()
+    combo = page.harmonic_summation_method_combo
+    button = page.harmonic_method_info_button
+    assert button.objectName() == "settings_harmonic_method_info"
+    assert button.accessibleName() and button.toolTip()
+    _assert_settings_widget_unclipped(combo, page.parentWidget())
+    _assert_settings_widget_unclipped(button, page.parentWidget())
+
+    profiles = (
+        settings_panel.HARMONIC_PROFILE_LEGACY_ID,
+        settings_panel.HARMONIC_PROFILE_TWO_CONSECUTIVE_FAILURES_ID,
+        settings_panel.HARMONIC_PROFILE_FIXED_ID,
+        settings_panel.HARMONIC_PROFILE_SIGNIFICANT_ONLY_ID,
+    )
+    assert set(settings_panel.HARMONIC_METHOD_INFO) == set(profiles)
+    assert len({content.key for content in settings_panel.HARMONIC_METHOD_INFO.values()}) == 4
+    manifest_before = copy.deepcopy(page.project.manifest)
+    disk_before = page.project.manifest_path.read_bytes()
+    preferences_before = {section: dict(page.manager.config[section]) for section in page.manager.config}
+    baseline_before = copy.deepcopy(page._draft_tracker.baseline)
+    page.fixed_harmonic_freqs_edit.setText("1.2, 2.4, 4.8")
+    opened = []
+    modal_calls = []
+    original_show_tool_info = settings_panel.show_tool_info
+
+    def fail_save(*_args, **_kwargs):
+        pytest.fail("Opening harmonic method help must not save settings")
+
+    def show_info(parent, content):
+        opened.append((parent, content))
+        return original_show_tool_info(parent, content)
+
+    def inspect_modal(dialog):
+        # Exercise the real shared dialog without entering a blocking modal loop.
+        qtbot.addWidget(dialog)
+        modal_calls.append(dialog)
+        content = opened[-1][1]
+        assert dialog.parentWidget() is page
+        assert dialog.windowTitle() == content.title
+        assert dialog.objectName() == f"{content.key}_tool_info_dialog"
+        assert dialog.browser.toPlainText().strip()
+        assert dialog.browser.openExternalLinks()
+        links = set(re.findall(r'href="([^"]+)"', dialog.browser.toHtml()))
+        if combo.currentData() != settings_panel.HARMONIC_PROFILE_LEGACY_ID:
+            assert links, content.key
+        assert all(link.startswith("https://") for link in links)
+        assert (dialog.minimumWidth(), dialog.minimumHeight()) == (460, 360)
+        buttons = dialog.findChild(QDialogButtonBox)
+        close_button = buttons.button(QDialogButtonBox.StandardButton.Close)
+        dialog.show()
+        qtbot.waitExposed(dialog)
+        for width, height in ((620, 520), (460, 360), (620, 520)):
+            dialog.resize(width, height)
+            QApplication.processEvents()
+            assert (dialog.width(), dialog.height()) == (width, height)
+            _assert_settings_widget_unclipped(dialog.browser, dialog)
+            _assert_settings_widget_unclipped(close_button, dialog)
+            assert not dialog.browser.geometry().intersects(buttons.geometry())
+            assert dialog.browser.horizontalScrollBar().maximum() == 0
+        qtbot.mouseClick(close_button, Qt.LeftButton)
+        assert not dialog.isVisible()
+        return dialog.result()
+
+    monkeypatch.setattr(page.project, "save", fail_save)
+    monkeypatch.setattr(page.manager, "save", fail_save)
+    monkeypatch.setattr(settings_panel, "show_tool_info", show_info)
+    monkeypatch.setattr(ToolInfoDialog, "exec", inspect_modal)
+    # Reopening an earlier profile catches help bound to a stale selection.
+    for profile in (*profiles, profiles[1]):
+        combo.setCurrentIndex(combo.findData(profile))
+        draft_before = page._draft_tracker.snapshot()
+        assert page.has_unsaved_changes()
+        qtbot.mouseClick(button, Qt.LeftButton)
+        assert opened[-1] == (page, settings_panel.HARMONIC_METHOD_INFO[profile])
+        assert page._draft_tracker.snapshot() == draft_before
+        assert page._draft_tracker.baseline == baseline_before
+        assert page.has_unsaved_changes()
+        assert page.project.manifest == manifest_before
+        assert {section: dict(page.manager.config[section]) for section in page.manager.config} == preferences_before
+    assert len(opened) == len(modal_calls) == 5
+    assert page.project.manifest_path.read_bytes() == disk_before
+
+
 def test_experimental_sections_fit_embedded_workspace(experimental_settings_page, qtbot):
     page = experimental_settings_page
     host = page.parentWidget()
     sections = page.experimental_tabs
     assert [sections.tabText(index) for index in range(sections.count())] == [
-        "Electrodes",
-        "Raw-Spectral Review",
-        "Summed-BCA Screening",
+        "Preprocessing QC",
+        "Post-processing QC",
         "Performance",
         "Beta Tools",
     ]
-
-    def assert_unclipped(widget):
-        name = widget.objectName() or type(widget).__name__
-        assert widget.isVisibleTo(host), name
-        minimum_height = widget.minimumSizeHint().height()
-        icon_only = isinstance(widget, QAbstractButton) and widget.property("iconButton") and not widget.text()
-        if icon_only:
-            minimum_height = widget.iconSize().height() + 4
-        if isinstance(widget, QLabel) and widget.wordWrap():
-            minimum_height = max(minimum_height, widget.heightForWidth(widget.width()))
-        assert widget.height() >= minimum_height, name
-        if isinstance(widget, (QLineEdit, QComboBox, QAbstractButton)):
-            minimum_width = widget.iconSize().width() + 4 if icon_only else widget.minimumSizeHint().width()
-            assert widget.width() >= minimum_width, name
-        ancestor = widget.parentWidget()
-        while ancestor is not None:
-            bounds = QRect(widget.mapTo(ancestor, QPoint(0, 0)), widget.size())
-            assert ancestor.rect().contains(bounds), (name, ancestor.objectName())
-            if ancestor is host:
-                break
-            ancestor = ancestor.parentWidget()
+    pre_sections = page.preprocessing_qc_tabs
+    assert [pre_sections.tabText(index) for index in range(pre_sections.count())] == [
+        "Signals", "Electrodes", "Raw-Spectral Review",
+    ]
+    post_sections = page.postprocessing_qc_tabs
+    assert [post_sections.tabText(index) for index in range(post_sections.count())] == [
+        "Results", "Summed-BCA Screening",
+    ]
 
     expected_controls = (
-        (
+        (0, 0, (
+            page.raw_signal_screening_enabled_check,
+            page.kurtosis_screening_enabled_check,
             page.kurtosis_auto_interpolate_all_check,
             page.kurtosis_review_auto_interpolate_extreme_check,
-            page.condition_specific_interpolation_enabled_check,
+        )),
+        (0, 1, (
             page.removed_electrode_detection_mode_combo,
             page.removed_electrode_detection_info_button,
             page.manual_removed_electrodes_enabled_check,
             page.manual_removed_electrodes_button,
             page.removed_electrode_detection_status,
-        ),
-        (
+        )),
+        (0, 2, (
             page.raw_spectral_screening_enabled_check,
             page.raw_spectral_advanced_toggle,
             *page.raw_spectral_advanced_value_labels.values(),
-        ),
-        (
+        )),
+        (1, 0, (
+            page.interpolation_burden_review_enabled_check,
+            page.snr_spectral_screening_enabled_check,
+            page.stats_dv_screening_enabled_check,
+        )),
+        (1, 1, (
             page.summed_bca_screening_enabled_check,
+            page.condition_specific_interpolation_enabled_check,
             *page.summed_bca_threshold_edits.values(),
-        ),
-        (page.experimental_ram_preload_check,),
-        (page.beta_tools_check,),
+        )),
+        (2, None, (page.experimental_ram_preload_check,)),
+        (3, None, (page.beta_tools_check,)),
     )
     assert page.removed_electrode_detection_mode_combo.currentData() is None
     assert len(page.raw_spectral_advanced_value_labels) == 8
     assert len(page.summed_bca_threshold_edits) == 5
 
-    for index, controls in enumerate(expected_controls):
-        sections.setCurrentIndex(index)
-        section = sections.currentWidget()
+    for index, (stage, substage, controls) in enumerate(expected_controls):
+        sections.setCurrentIndex(stage)
+        substages = pre_sections if stage == 0 else post_sections
+        if substage is not None:
+            substages.setCurrentIndex(substage)
+        section = substages.currentWidget() if substage is not None else sections.currentWidget()
         qtbot.waitUntil(lambda: section.isVisibleTo(host))
-        if index == 1:
+        if substage == 2:
             assert page.raw_spectral_advanced_values.isHidden()
             qtbot.mouseClick(page.raw_spectral_advanced_toggle, Qt.LeftButton)
             qtbot.waitUntil(page.raw_spectral_advanced_values.isVisible)
         QApplication.processEvents()
         for control in controls:
             assert section.isAncestorOf(control)
-            assert_unclipped(control)
+            _assert_settings_widget_unclipped(control, host)
         for widget in section.findChildren(QWidget):
             if widget.isVisibleTo(host) and isinstance(
                 widget, (QLabel, QLineEdit, QComboBox, QAbstractButton)
             ):
-                assert_unclipped(widget)
+                _assert_settings_widget_unclipped(widget, host)
 
         footer = page.findChild(QWidget, "settings_footer")
         assert footer is not None
         buttons = {button.text(): button for button in footer.findChildren(QPushButton)}
         assert set(buttons) == {"Save", "Cancel"}
         for button in buttons.values():
-            assert_unclipped(button)
+            _assert_settings_widget_unclipped(button, host)
         capture_ux(host, f"settings-experimental-section-{index}")
 
 
+@pytest.mark.parametrize(
+    "experimental_settings_page",
+    [(1000, 780), (1640, 900), (1768, 972), (2280, 1260)],
+    indirect=True,
+    ids=["supported-workspace", "1080p-logical", "1440p-at-125-percent-logical", "4k-at-150-percent-logical"],
+)
+def test_protocol_sections_fit_scaled_workspaces_with_marker_tables(experimental_settings_page, qtbot):
+    """Exercise available logical space; actual monitor DPI is a visible smoke check."""
+    page = experimental_settings_page
+    host = page.parentWidget()
+    page.tabs.setCurrentIndex(page._protocol_tab_index)
+    sections = page.protocol_tabs
+    assert sections.objectName() == "settings_protocol_sections"
+    assert [sections.tabText(index) for index in range(sections.count())] == [
+        "Timing", "Trigger markers",
+    ]
+    protocol_page = page.tabs.currentWidget()
+    assert not protocol_page.findChildren(QScrollArea)
+    table = page.protocol_condition_markers_table
+    assert table.rowCount() == 60
+    assert sections.widget(0).isAncestorOf(page.protocol_resolved_oddball_rate_edit)
+    assert sections.widget(0).isAncestorOf(page.protocol_derived_duration_edit)
+    assert sections.widget(1).isAncestorOf(table)
+    assert not sections.isAncestorOf(page.protocol_status)
+    footer = page.findChild(QWidget, "settings_footer")
+
+    def check_current_page():
+        QApplication.processEvents()
+        assert host.size() == host.minimumSize() == host.maximumSize()
+        for widget in protocol_page.findChildren(QWidget):
+            if widget.isVisibleTo(host) and not table.isAncestorOf(widget) and isinstance(
+                widget, (QLabel, QLineEdit, QComboBox, QAbstractButton)
+            ):
+                _assert_settings_widget_unclipped(widget, host)
+        _assert_settings_widget_unclipped(footer, host)
+        for button in footer.findChildren(QPushButton):
+            _assert_settings_widget_unclipped(button, host)
+
+    for mode in (settings_panel.ANALYSIS_WINDOW_MODE_DURATION, settings_panel.ANALYSIS_WINDOW_MODE_CYCLES):
+        sections.setCurrentIndex(0)
+        page.protocol_analysis_window_mode_combo.setCurrentIndex(
+            page.protocol_analysis_window_mode_combo.findData(mode)
+        )
+        qtbot.waitUntil(lambda: sections.currentWidget().isVisibleTo(host))
+        assert page.protocol_requested_duration_edit.isVisibleTo(host) is (mode == settings_panel.ANALYSIS_WINDOW_MODE_DURATION)
+        assert page.protocol_expected_cycles_edit.isVisibleTo(host) is (mode == settings_panel.ANALYSIS_WINDOW_MODE_CYCLES)
+        assert page.protocol_resolved_oddball_rate_edit.isVisibleTo(host)
+        assert page.protocol_derived_duration_edit.isVisibleTo(host)
+        check_current_page()
+
+    sections.setCurrentIndex(1)
+    for condition_markers, recording_markers in ((False, False), (True, False), (True, True), (False, True)):
+        page.protocol_condition_markers_check.setChecked(condition_markers)
+        page.protocol_recording_markers_check.setChecked(recording_markers)
+        check_current_page()
+        assert table.isVisibleTo(host) is condition_markers
+        assert page.protocol_recording_markers_row.isVisibleTo(host) is recording_markers
+        if not condition_markers:
+            continue
+        _assert_settings_widget_unclipped(table, host)
+        assert table.verticalScrollBar().maximum() > 0
+        assert table.horizontalScrollBar().maximum() == 0
+        for column in (1, 2):
+            assert table.horizontalHeader().sectionSize(column) >= table.horizontalHeader().sectionSizeHint(column)
+        table.scrollToBottom()
+        QApplication.processEvents()
+        assert table.visualItemRect(table.item(59, 2)).intersects(table.viewport().rect())
+        table_bounds = QRect(table.mapTo(protocol_page, QPoint()), table.size())
+        for control in (page.protocol_recording_markers_check, page.protocol_recording_markers_row):
+            if control.isVisibleTo(host):
+                control_bounds = QRect(control.mapTo(protocol_page, QPoint()), control.size())
+                assert not table_bounds.intersects(control_bounds), control.objectName()
+        capture_ux(host, f"settings-protocol-markers-{host.width()}x{host.height()}-{recording_markers}")
+
+
+@pytest.mark.parametrize("screen_enabled", [False, True])
 def test_invalid_experimental_threshold_reveals_its_section(
-    experimental_settings_page, qtbot, monkeypatch
+    experimental_settings_page, qtbot, monkeypatch, screen_enabled,
 ):
     page = experimental_settings_page
     page.experimental_tabs.setCurrentIndex(0)
     edit = page.summed_bca_threshold_edits["warning_summed_bca_uv"]
     edit.setText("not-a-number")
+    page.summed_bca_screening_enabled_check.setChecked(screen_enabled)
+    assert edit.isEnabled()
     warnings = []
     monkeypatch.setattr(
         QMessageBox,
@@ -1061,6 +1276,51 @@ def test_invalid_experimental_threshold_reveals_its_section(
     assert edit.isVisibleTo(page)
     qtbot.waitUntil(edit.hasFocus)
     assert edit.selectedText() == "not-a-number"
+    edit.setText("12")
+    corrected = page._validated_experimental_qc_settings()
+    assert corrected.summed_bca_screening.enabled is screen_enabled
+    assert corrected.summed_bca_screening.warning_summed_bca_uv == 12
+
+
+def test_experimental_dependencies_preserve_saved_choices_and_help_is_modal(
+    experimental_settings_page, monkeypatch,
+):
+    page = experimental_settings_page
+    page.kurtosis_auto_interpolate_all_check.setChecked(True)
+    page.condition_specific_interpolation_enabled_check.setChecked(True)
+    page.kurtosis_screening_enabled_check.setChecked(False)
+    page.summed_bca_screening_enabled_check.setChecked(False)
+
+    assert not page.kurtosis_auto_interpolate_all_check.isEnabled()
+    assert not page.kurtosis_review_auto_interpolate_extreme_check.isEnabled()
+    assert not page.condition_specific_interpolation_enabled_check.isEnabled()
+    assert page.kurtosis_auto_interpolate_all_check.isChecked()
+    assert page.condition_specific_interpolation_enabled_check.isChecked()
+    assert page.raw_spectral_screening_enabled_check.isEnabled()
+    assert page.raw_signal_screening_enabled_check.isEnabled()
+    assert page.interpolation_burden_review_enabled_check.isEnabled()
+
+    page.kurtosis_screening_enabled_check.setChecked(True)
+    page.summed_bca_screening_enabled_check.setChecked(True)
+    assert page.kurtosis_auto_interpolate_all_check.isEnabled()
+    assert page.condition_specific_interpolation_enabled_check.isEnabled()
+    messages = []
+    monkeypatch.setattr(QMessageBox, "information", lambda _parent, title, text: messages.append((title, text)))
+    info_names = (
+        "settings_experimental_qc_info", "settings_raw_signal_screening_info",
+        "settings_kurtosis_screening_info", "settings_manual_removed_electrodes_info",
+        "settings_raw_spectral_screening_info", "settings_summed_bca_screening_info",
+        "settings_condition_specific_interpolation_info",
+        "settings_interpolation_burden_review_enabled_info",
+        "settings_snr_spectral_screening_enabled_info", "settings_stats_dv_screening_enabled_info",
+    )
+    for name in info_names:
+        page.findChild(QAbstractButton, name).click()
+    assert len(messages) == len(info_names)
+    assert all(len(text.split()) < 70 for _title, text in messages)
+    kurtosis_help = dict(messages)["Kurtosis screening and repairs"]
+    assert '"Auto interpolate all" repairs every valid flag' in kurtosis_help
+    assert "you must still apply decisions" in kurtosis_help
 
 
 def test_harmonic_setting_change_after_processing_prompts_recalculation(

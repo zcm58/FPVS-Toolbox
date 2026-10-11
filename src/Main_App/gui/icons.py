@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from pathlib import Path
+import sys
 
 from PySide6.QtCore import QByteArray, QPointF, QRect, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QIcon, QIconEngine, QPainter, QPalette, QPixmap, QPen
@@ -8,6 +10,16 @@ from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import QApplication
 
 from Main_App.gui.style_tokens import ACCENT_COLOR
+
+
+def application_icon() -> QIcon:
+    """Load the Toolbox logo from the source checkout or PyInstaller bundle."""
+    root = Path(sys._MEIPASS) if getattr(sys, "frozen", False) else Path(__file__).resolve().parents[3]
+    path = root / "assets" / "ToolBox_Icon.ico"
+    icon = QIcon(str(path))
+    if icon.isNull():
+        raise RuntimeError(f"Cannot load the FPVS Toolbox application icon: {path}")
+    return icon
 
 
 def _icon_color() -> QColor:

@@ -924,6 +924,8 @@ def _preproc_cache_payload(
         "downsample_rate": settings.get("downsample_rate", settings.get("downsample")),
         "reject_thresh": settings.get("reject_thresh"),
         "kurtosis_auto_interpolate_all": settings.get("kurtosis_auto_interpolate_all", False),
+        "kurtosis_screening_enabled": settings.get("kurtosis_screening_enabled", True),
+        "raw_signal_screening_enabled": settings.get("raw_signal_screening_enabled", True),
         "ref_channel1": settings.get("ref_channel1", settings.get("ref_ch1")),
         "ref_channel2": settings.get("ref_channel2", settings.get("ref_ch2")),
         "stim_channel": settings.get("stim_channel"),
@@ -971,6 +973,9 @@ def _preproc_cache_payload(
             {},
         ),
     }
+    for key in ("raw_signal_screening_enabled", "kurtosis_screening_enabled"):
+        if relevant_settings.get(key) is True:
+            relevant_settings.pop(key)
     condition_requests = normalize_condition_interpolation_requests(
         settings.get("_fpvs_condition_interpolation_requests"),
         excluded_condition_labels=settings.get("_fpvs_excluded_condition_labels", ()),
@@ -1425,6 +1430,7 @@ def _store_preprocessed_cache(
             "raw_qc_warning_rules": _string_list(
                 settings.get("_fpvs_raw_qc_warning_rules")
             ),
+            "raw_signal_screening_enabled": settings.get("raw_signal_screening_enabled", True),
             "raw_qc_method_version": str(
                 settings.get("_fpvs_raw_qc_method_version") or ""
             ),
@@ -2721,6 +2727,7 @@ def _run_full_pipeline_for_file(
         audit_after["raw_qc_method_version"] = str(
             settings.get("_fpvs_raw_qc_method_version") or ""
         )
+        audit_after["raw_signal_screening_enabled"] = settings.get("raw_signal_screening_enabled", True)
         audit_after["raw_qc_review_rules"] = _string_list(
             settings.get("_fpvs_raw_qc_review_rules")
         )

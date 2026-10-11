@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -25,6 +26,7 @@ from Main_App.processing.preprocessing_outcome import (
     build_preprocessing_outcome,
 )
 from Main_App.projects import Project, load_project_dataset_index
+from Main_App.projects.experimental_qc_settings import ExperimentalQcSettings
 
 
 def _burden_payload(channel_count: int) -> dict[str, object]:
@@ -43,7 +45,9 @@ def _burden_payload(channel_count: int) -> dict[str, object]:
 
 def _ordinary_project(root: Path) -> Project:
     root.mkdir(parents=True)
-    return Project.load(root)
+    project = Project.load(root)
+    project.update_experimental_qc_settings(ExperimentalQcSettings())
+    return project
 
 
 def _ordinary_ledger(*, channel_count: int = 4) -> dict[str, object]:
@@ -122,6 +126,37 @@ def test_current_receipt_is_reused_and_changed_evidence_requires_review(
     assert stale.requires_review is True
     assert stale.stale_decision_count == 1
     assert stale.items[0].evidence_status == "stale"
+
+
+def test_disabled_burden_review_skips_evidence_and_preserves_accepted_exclusions(tmp_path, monkeypatch):
+    from Main_App.processing import interpolation_burden_review
+
+    project = _ordinary_project(tmp_path / "Project")
+    batch = collect_interpolation_burden_review(project, ledger=_ordinary_ledger())
+    apply_interpolation_burden_review(
+        project, batch, {"P01": _choice(INTERPOLATION_BURDEN_DECISION_EXCLUDE)},
+    )
+    saved_decisions = dict(project.preprocessing["interpolation_burden_review_decisions"])
+    project.update_experimental_qc_settings(replace(
+        project.experimental_qc_settings, interpolation_burden_review_enabled=False,
+    ))
+    project.save()
+
+    def unexpected_ledger_read(*_args):
+        raise AssertionError("Disabled review must not load its optional evidence")
+
+    monkeypatch.setattr(interpolation_burden_review, "load_ledger", unexpected_ledger_read)
+    assert not collect_interpolation_burden_review(project).requires_review
+    assert project.preprocessing["manual_excluded_participants"] == ["P01"]
+    assert project.preprocessing["interpolation_burden_review_decisions"] == saved_decisions
+    with pytest.raises(InterpolationBurdenReviewError, match="was disabled"):
+        apply_interpolation_burden_review(
+            project, batch, {"P01": _choice(INTERPOLATION_BURDEN_DECISION_RETAIN)},
+        )
+    project.update_experimental_qc_settings(replace(
+        project.experimental_qc_settings, interpolation_burden_review_enabled=True,
+    ))
+    assert not collect_interpolation_burden_review(project, ledger=_ordinary_ledger()).requires_review
 
 
 @pytest.mark.parametrize("decision", [INTERPOLATION_BURDEN_DECISION_RETAIN, INTERPOLATION_BURDEN_DECISION_EXCLUDE])

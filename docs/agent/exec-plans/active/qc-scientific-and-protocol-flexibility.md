@@ -2,6 +2,17 @@
 
 ## Status and Use
 
+2026-10-11 follow-up: `codex/experimental-qc-features` branches from the freshly
+fetched v3 release at `b4bf4447`. The user approved experimental toggles for all
+optional QC screens, preserving existing-project behavior and defaulting new
+projects off. Mandatory validity checks remain required. Settings now separates
+preprocessing and post-processing controls, with dependent kurtosis policies and
+condition repair actions grouped under their upstream screens. This supersedes
+earlier unconditional-screen/default-On wording in the action modules, without
+changing their enabled numerical methods or the mandatory validity contracts.
+The focused architecture contracts own migration, runtime gating and manual
+verification; final verification evidence is recorded in the v3 release ledger.
+
 The scientific review is complete, and all twenty-one approved QC actions were
 implemented on branch `codex/qc-scientific-protocol-v3`, created directly from
 v3 release commit `f586652e0bf9920eb42ce9e8a75b5b08f2717f31`. QC-15 was

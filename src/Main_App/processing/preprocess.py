@@ -124,6 +124,7 @@ def _build_preproc_fingerprint(params: Dict[str, Any]) -> str:
         f"fft_multinotch={line_noise_enabled},{line_noise_frequency},"
         f"{FFT_MULTINOTCH_METHOD_VERSION},{FFT_MULTINOTCH_HALF_WIDTH_HZ},"
         f"{FFT_MULTINOTCH_COMPONENT_COUNT}"
+        + ("|kurtosis_screening=False" if not params.get("kurtosis_screening_enabled", True) else "")
     )
 
 
@@ -680,7 +681,7 @@ def _finish_preprocessing_at_kurtosis(
     params.pop("_fpvs_condition_interpolation_provenance", None)
     condition_repairs = None
     bad_k_auto: List[str] = []
-    if reject_thresh:
+    if reject_thresh and params.get("kurtosis_screening_enabled", True):
         log_func(
             f"Kurtosis screening for {filename_for_log} "
             f"(Z > {reject_thresh})..."
@@ -848,8 +849,16 @@ def _finish_preprocessing_at_kurtosis(
             description="bads",
         )
     else:
+        disabled = not params.get("kurtosis_screening_enabled", True)
+        if disabled:
+            params["_fpvs_kurtosis_qc_evidence"] = {
+                "evaluation_status": "not_evaluated",
+                "reason": "disabled_in_project_settings",
+                "authority": "direct_bad_channels_only",
+            }
         log_func(
-            f"Skip Kurtosis for {filename_for_log} (no threshold)."
+            f"Skip Kurtosis for {filename_for_log} "
+            f"({'disabled in project settings' if disabled else 'no threshold'})."
         )
         if debug_enabled:
             logger.debug("kurtosis_skipped_no_threshold", extra={"file": filename_for_log})

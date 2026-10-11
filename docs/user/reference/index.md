@@ -53,8 +53,9 @@ FPVS Toolbox does not automatically apply independent component analysis (ICA)
 or an equivalent component-rejection stage. Describe any artifact procedures
 performed outside the toolbox separately in the study methods.
 
-The Experimental settings page also controls **Raw-spectral review**. This
-review-only screen is On by default and flags unusually large narrow-frequency
+**Settings > Experimental > Preprocessing QC** also controls **Raw-spectral review**. This
+review-only screen starts Off in new projects and preserves existing projects'
+choices. It flags unusually large narrow-frequency
 signals within each analyzed condition occurrence. Its Advanced panel shows
 locked provisional values. The displayed amplitude is a **Legacy Hann-spectrum
 score**, not a calibrated physical microvolt amplitude. Expected peaks are

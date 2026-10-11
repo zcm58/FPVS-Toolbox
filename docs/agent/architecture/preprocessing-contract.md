@@ -21,8 +21,29 @@ lowest-risk maintenance path is:
 
 ## Experimental condition-specific electrode repairs
 
+Experimental QC settings v1.3 separates optional screens from mandatory input
+validity. New projects explicitly persist all optional screens off; loading an
+older manifest preserves its previous defaults and saved choices.
+`raw_signal_screening_enabled` groups amplitude, transient and candidate-burden
+review. Removed-electrode detection remains an independent consumer of the
+shared measurements; raw-spectral review is independent of both.
+`kurtosis_screening_enabled` controls scoring, QC-derived repairs and review as
+one unit. Off skips these stages and checkpoint reuse but preserves manual
+electrode authority, reference/filter/downsample order and final reference.
+Disabled evidence must be reported as disabled, never clean or accepted.
+Runtime snapshots and reusable preprocessing identities bind the effective
+switches so a changed choice cannot reuse differently processed data.
+The processing ledger persists those switches per recording. Pre-review
+geometry, neutral FullFFT provenance and final release reject stale choices;
+Resume Postprocessing cannot relabel old outputs as newly processed. Legacy
+implicit-on identities remain reusable, and a historical raw-spectral-off run
+requires matching saved source/run evidence.
+Canonical event plans, trigger/protocol validation, geometry and output
+integrity remain mandatory, including when every optional screen is off.
+
 Frequency-domain QC may request one electrode repair in one recording-condition
-when the experimental option is enabled and the reviewer confirms an artifact.
+when both summed-BCA review and its repair option are enabled and the reviewer
+confirms an artifact.
 It cannot remove an electrode or a whole ROI from downstream calculations.
 Approvals are durable in `tools.condition_electrode_interpolation`; disabling the
 option prevents new requests and does not undo previous repairs.
@@ -894,7 +915,7 @@ Kurtosis review and interpolation:
   `gui_enabled_experimental_abs_z_gt_10_v1` receipt and
   `experimental_automatic` channel decision, not an individual manual approval
   or independent corroboration. Disabling it restores individual review.
-  Settings > Experimental > Electrodes saves the project preference
+  Settings > Experimental > Preprocessing QC > Signals saves the project preference
   `kurtosis_review_auto_interpolate_extreme` (default True) for the initial
   checkbox state of new review decisions. The review can override it and still
   requires Apply decisions; the preference does not change existing receipts,
@@ -902,7 +923,7 @@ Kurtosis review and interpolation:
   A separate per-project `kurtosis_auto_interpolate_all` preference (default
   False) authorizes every valid flag above the existing configured absolute
   normalized threshold, and takes precedence over the >10 rule. Settings >
-  Experimental > Electrodes and the review dialog expose this policy. Its versioned
+  Experimental > Preprocessing QC > Signals and the review dialog expose this policy. Its versioned
   `gui_enabled_experimental_all_flags_v1` authority is experimental; invalid
   statistics still need an explicit decision. Turning it off invalidates
   auto-all receipts even for scores above 10. The policy is included in the

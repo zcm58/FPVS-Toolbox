@@ -991,6 +991,8 @@ def scan_kurtosis_review(
     Both callbacks and the caller's cancellation callback run on this thread.
     """
 
+    if not settings.get("kurtosis_screening_enabled", True):
+        return KurtosisReviewScan(results=())
     canonical_event_map, protocol = _validate_review_request(
         raw_file_infos, settings, event_map, raw_channel_qc_by_recording,
     )
@@ -1390,7 +1392,7 @@ def _scan_kurtosis_review_serial(
                     } for span in restricted_plan["spans"]],
                     ref_channels=ref_pair, unusable_channels=direct_bad_channels,
                     should_cancel=should_cancel,
-                )
+                ) if settings.get("raw_signal_screening_enabled", True) else {}
             except InterruptedError:
                 return KurtosisReviewScan(tuple(results), cancelled=True)
             except Exception:  # Diagnostic-only: preparation/scientific evidence still proceeds.

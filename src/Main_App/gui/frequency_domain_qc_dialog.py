@@ -95,7 +95,8 @@ class FrequencyDomainQcReviewDialog(ReviewDialog):
         )
         self._report = report
         self._interpolation_enabled = (
-            report.get("condition_specific_interpolation_enabled") is True
+            bool(report.get("screening_enabled", True))
+            and report.get("condition_specific_interpolation_enabled") is True
         )
         self._identity_scope = str(
             report.get("identity_scope") or "participant"
@@ -193,7 +194,7 @@ class FrequencyDomainQcReviewDialog(ReviewDialog):
         outcome_label.setToolTip(
             "Condition-specific interpolation is "
             + ("enabled" if self._interpolation_enabled else "off")
-            + ". Change this in Settings > Experimental > Electrodes. "
+            + ". Change this in Settings > Experimental > Post-processing QC > Summed-BCA Screening. "
             "Confirmed repairs are applied to the signal before recalculating analysis."
         )
         layout.addWidget(outcome_label)

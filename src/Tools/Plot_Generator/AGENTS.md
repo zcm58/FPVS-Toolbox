@@ -54,6 +54,11 @@ Current ownership map:
   records without expanding the QObject shell.
 - `spectral_qc_alerts.py`: plain-language GUI alert summaries for SNR spectral
   QC findings and whole-participant spectral exclusion candidates.
+- Managed-project unexpected-peak screening is owned by Settings > Experimental
+  > Post-processing QC (`snr_spectral_screening_enabled`). The plot-page checkbox
+  reflects this setting; each worker uses the canonical dataset-index manifest.
+  Older per-tool choices migrate without changing their value. New projects
+  start off. Screen state never changes plotted values or validity checks.
 - `rendering.py`: line and overlay plot rendering plus Matplotlib `Agg`
   configuration; `render_naming.py` owns widget-free, collision-safe artifact
   stems.

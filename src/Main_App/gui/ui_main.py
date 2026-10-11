@@ -18,12 +18,12 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QStackedWidget,
     QTableWidget,
-    QToolBar,
     QVBoxLayout,
     QWidget,
 )
 
 from Main_App.gui.header_bar import HeaderBar
+from Main_App.gui.icons import application_icon
 from Main_App.gui.menu_bar import build_menu_bar
 from Main_App.gui.processing_log_dialog import ProcessingLogDialog
 from Main_App.gui.run_outcome import build_last_run_panel
@@ -48,19 +48,17 @@ from Main_App.gui.components import (
 
 
 def init_ui(self) -> None:
+    self.setWindowIcon(application_icon())
+
     # Menu bar
     menu = build_menu_bar(self)
     self.setMenuBar(menu)
 
-    # Top toolbar
-    toolbar = QToolBar(self)
-    toolbar.setMovable(False)
-    toolbar.setToolButtonStyle(Qt.ToolButtonTextOnly)
-    self.addToolBar(Qt.TopToolBarArea, toolbar)
-    self.lbl_debug = QLabel("DEBUG MODE ENABLED", self)
-    self.lbl_debug.setStyleSheet("color: red;")
+    # Keep the debug indicator in the menu row without reserving a toolbar row.
+    self.lbl_debug = QLabel("DEBUG MODE ENABLED", menu)
+    self.lbl_debug.setStyleSheet("color: red; background-color: transparent;")
+    menu.setCornerWidget(self.lbl_debug, Qt.TopRightCorner)
     self.lbl_debug.setVisible(self.settings.debug_enabled())
-    toolbar.addWidget(self.lbl_debug)
 
     # Central stack
     self.stacked = QStackedWidget(self)

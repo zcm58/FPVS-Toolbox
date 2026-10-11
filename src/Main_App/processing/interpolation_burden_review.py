@@ -23,6 +23,7 @@ from Main_App.processing.interpolation_burden import (
     normalize_interpolation_burden_review_decision,
 )
 from Main_App.processing.processing_ledger import load_ledger
+from Main_App.projects.experimental_qc_settings import normalize_experimental_qc_settings
 from Main_App.projects.preprocessing_settings import (
     INTERPOLATION_BURDEN_REVIEW_DECISIONS_KEY,
     normalize_manual_excluded_participants,
@@ -213,6 +214,14 @@ def _decision_matches_application_state(
     )
 
 
+def interpolation_burden_review_enabled(project: Any) -> bool:
+    """Resolve the optional review without changing stored repair outcomes."""
+
+    return normalize_experimental_qc_settings(
+        getattr(project, "experimental_qc_settings", None)
+    ).interpolation_burden_review_enabled
+
+
 def collect_interpolation_burden_review(
     project: Any,
     *,
@@ -220,6 +229,14 @@ def collect_interpolation_burden_review(
 ) -> InterpolationBurdenReviewBatch:
     """Collect current strict->5% findings that lack a current applied decision."""
 
+    if not interpolation_burden_review_enabled(project):
+        return InterpolationBurdenReviewBatch(
+            items=(),
+            flagged_recording_count=0,
+            current_decision_count=0,
+            stale_decision_count=0,
+            is_repeated_session=bool(getattr(project, "sessions", {})),
+        )
     project_root = Path(getattr(project, "project_root")).resolve(strict=False)
     ledger_payload = load_ledger(project_root) if ledger is None else ledger
     entries = ledger_payload.get("entries") if isinstance(ledger_payload, Mapping) else None
@@ -383,6 +400,10 @@ def apply_interpolation_burden_review(
 ) -> InterpolationBurdenReviewApplication:
     """Persist all pending receipts and update canonical downstream exclusions."""
 
+    if not interpolation_burden_review_enabled(project):
+        raise InterpolationBurdenReviewError(
+            "Interpolation-burden review was disabled. Reopen the review after enabling it."
+        )
     expected = {item.processing_id.casefold(): item for item in batch.items}
     supplied = {str(key).strip().casefold(): value for key, value in choices.items()}
     if set(supplied) != set(expected):
@@ -534,4 +555,5 @@ __all__ = [
     "InterpolationBurdenReviewItem",
     "apply_interpolation_burden_review",
     "collect_interpolation_burden_review",
+    "interpolation_burden_review_enabled",
 ]

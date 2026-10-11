@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import pytest
 
 from Tools.Stats.qc.stats_outlier_exclusion import (
     OUTLIER_REASON_LIMIT,
@@ -68,6 +69,26 @@ def test_outlier_summary_clarifies_flag_vs_exclusion() -> None:
 
     assert "Flagged for review does not automatically exclude participants." in text
     assert "Only non-finite DV values (NaN/Inf) are automatically excluded." in text
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_optional_dv_screen_never_disables_nonfinite_exclusions(enabled) -> None:
+    frame = pd.DataFrame({
+        "subject": ["large", "normal", "nan", "positive_inf", "negative_inf"],
+        "condition": ["A"] * 5,
+        "roi": ["R1"] * 5,
+        "value": [500.0, 1.0, np.nan, np.inf, -np.inf],
+    })
+    filtered, report = apply_hard_dv_exclusion(
+        frame, 50.0, flag_finite_extremes=enabled,
+    )
+    assert list(filtered["subject"]) == ["large", "normal"]
+    reasons = {item.participant_id: item.reasons for item in report.participants}
+    assert ("large" in reasons) is enabled
+    assert report.summary.finite_dv_screening_enabled is enabled
+    assert ("screening was disabled" in build_outlier_summary_text(report)) is not enabled
+    for participant in ("nan", "positive_inf", "negative_inf"):
+        assert reasons[participant] == [OUTLIER_REASON_NONFINITE]
 
 
 def test_merge_preserves_shared_qc17_audit_identity() -> None:

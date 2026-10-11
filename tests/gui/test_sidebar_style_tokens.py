@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import re
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 from PySide6.QtGui import QColor, QPalette
 
-from Main_App.gui import theme
+from Main_App.gui import icons, theme
 from Main_App.gui.sidebar import (
     BETA_TOOL_SPECS,
     CENTERED_TEXT_TRAILING_SPACER_PX,
@@ -19,6 +21,34 @@ from Main_App.gui.sidebar import (
 )
 from Main_App.gui.style_tokens import SIDEBAR_WIDTH, build_header_bar_stylesheet, build_sidebar_stylesheet
 from Main_App.gui.typography import css_font_size, css_font_weight
+
+
+@pytest.mark.parametrize("frozen", [False, True])
+def test_application_icon_loads_from_checkout_or_bundle_independent_of_cwd(tmp_path, monkeypatch, frozen) -> None:
+    asset = Path(__file__).resolve().parents[2] / "assets" / "ToolBox_Icon.ico"
+    runtime = SimpleNamespace(frozen=frozen)
+    if frozen:
+        runtime._MEIPASS = str(tmp_path / "bundle")
+        bundled_asset = Path(runtime._MEIPASS) / "assets" / asset.name
+        bundled_asset.parent.mkdir(parents=True)
+        bundled_asset.write_bytes(asset.read_bytes())
+        asset = bundled_asset
+
+    def file_icon(filename):
+        path = Path(filename)
+        return SimpleNamespace(path=path, isNull=lambda: not path.is_file())
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(icons, "sys", runtime)
+    monkeypatch.setattr(icons, "QIcon", file_icon)
+    assert icons.application_icon().path == asset
+
+
+def test_missing_bundled_application_icon_fails_explicitly(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(icons, "sys", SimpleNamespace(frozen=True, _MEIPASS=str(tmp_path)))
+    monkeypatch.setattr(icons, "QIcon", lambda _filename: SimpleNamespace(isNull=lambda: True))
+    with pytest.raises(RuntimeError, match="Cannot load the FPVS Toolbox application icon"):
+        icons.application_icon()
 
 
 def test_beta_tool_inventory_and_routes_match_supported_surfaces() -> None:
@@ -118,3 +148,32 @@ def test_native_menu_style_creation_failure_is_explicit(monkeypatch) -> None:
     with pytest.raises(RuntimeError, match="Cannot create the native menu style 'unavailable'"):
         theme._native_menu_appearance(app)
     assert not hasattr(app, "_fpvs_native_menu_appearance")
+
+
+@pytest.mark.parametrize("dark_native", [False, True])
+def test_native_menu_text_and_painted_background_stay_paired(dark_native) -> None:
+    # The app has switched to light colors, but the menu retained its original
+    # platform palette. Native Windows painting need not honor that palette.
+    palette = QPalette()
+    palette.setColor(QPalette.Window, QColor("#202124" if dark_native else "#ffffff"))
+    palette.setColor(QPalette.WindowText, QColor("#ffffff" if dark_native else "#202124"))
+    palette.setColor(QPalette.Highlight, QColor("#0f6cbd"))
+    palette.setColor(QPalette.HighlightedText, QColor("#ffffff"))
+    palette.setColor(QPalette.Disabled, QPalette.WindowText, QColor("#999999" if dark_native else "#666666"))
+    stylesheet = theme._native_menu_stylesheet(palette)
+
+    # Require the painter overrides themselves to carry both colors; palette
+    # equality alone passed while Windows could still paint white-on-white.
+    rules = {}
+    for selectors, body in re.findall(r"([^{}]+)\{([^{}]+)\}", stylesheet):
+        declarations = dict(re.findall(r"([\w-]+)\s*:\s*([^;]+);", body))
+        for selector in selectors.split(","):
+            rules[selector.strip()] = declarations
+    for selector in ("QMenu", "QMenuBar", "QMenu::item", "QMenuBar::item"):
+        assert rules[selector]["color"] == palette.color(QPalette.Active, QPalette.WindowText).name()
+        assert rules[selector]["background-color"] == palette.color(QPalette.Active, QPalette.Window).name()
+    for selector in ("QMenu::item:selected:enabled", "QMenuBar::item:selected:enabled", "QMenuBar::item:pressed:enabled"):
+        assert rules[selector]["color"] == palette.color(QPalette.Active, QPalette.HighlightedText).name()
+        assert rules[selector]["background-color"] == palette.color(QPalette.Active, QPalette.Highlight).name()
+    for selector in ("QMenu:disabled", "QMenuBar:disabled", "QMenu::item:disabled", "QMenuBar::item:disabled"):
+        assert rules[selector]["color"] == palette.color(QPalette.Disabled, QPalette.WindowText).name()

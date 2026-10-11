@@ -14,6 +14,7 @@ from typing import Callable, Mapping, Sequence
 
 import numpy as np
 import pandas as pd
+from Main_App.projects.project_metadata import read_project_experimental_qc_settings
 
 from Tools.Stats.analysis.anova_compatibility import (
     run_multigroup_anova_compatibility,
@@ -983,6 +984,10 @@ def _prepare_project_long_data(
         condition_col="condition",
         roi_col="roi",
         value_col="value",
+        flag_finite_extremes=(
+            read_project_experimental_qc_settings(Path(project_root)).stats_dv_screening_enabled
+            if project_root not in (None, "") else True
+        ),
     )
     _raise_if_preparation_cancelled(
         cancel_check,

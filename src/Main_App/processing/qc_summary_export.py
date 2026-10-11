@@ -880,7 +880,18 @@ def build_processing_qc_rows(
             or entry.get("raw_qc_baseline_warning")
             or cache_entry.get("raw_qc_baseline_warning")
         )
-        if baseline_excluded:
+        raw_signal_enabled = _raw_qc_scalar_from_result(
+            result, "raw_signal_screening_enabled", "raw_signal_screening_enabled",
+        )
+        if raw_signal_enabled is None:
+            raw_signal_enabled = entry.get(
+                "raw_signal_screening_enabled", cache_entry.get("raw_signal_screening_enabled", True),
+            )
+        if raw_signal_enabled is False:
+            baseline_status = "Not evaluated (disabled)"
+            baseline_median_std = None
+            baseline_median_p2p = None
+        elif baseline_excluded:
             baseline_status = "Excluded"
         elif baseline_warning:
             baseline_status = "Warning"

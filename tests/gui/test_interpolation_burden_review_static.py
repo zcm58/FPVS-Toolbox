@@ -2,6 +2,11 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
+from typing import Any, Callable
+from types import SimpleNamespace
+from unittest.mock import Mock
+
+import pytest
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -111,3 +116,33 @@ def test_workflow_cancel_and_invalid_evidence_return_a_blocking_result() -> None
         and node.value.value is False
         for node in ast.walk(review_gate)
     )
+
+
+@pytest.mark.parametrize("review_completed", [False, True])
+def test_resume_checks_enabled_burden_review_before_launching_outputs(review_completed):
+    resume = _function(_tree(WORKFLOW_PATH), "resume_post_processing")
+    events = []
+    namespace = {
+        "Any": Any, "Callable": Callable,
+        "_review_interpolation_burden_before_post_processing": lambda _host: events.append("review") or review_completed,
+        "_set_resume_post_processing_pending": Mock(),
+        "_start_post_processing_pipeline_after_processing": Mock(return_value=True),
+        "logger": Mock(),
+    }
+    exec(compile(ast.Module(body=[resume], type_ignores=[]), str(WORKFLOW_PATH), "exec"), namespace)
+    callback = Mock()
+    host = SimpleNamespace(
+        currentProject=object(),
+        _set_controls_enabled=Mock(side_effect=lambda _value: events.append("controls")),
+    )
+    namespace[resume.name](host, on_finished=callback)
+    if review_completed:
+        assert events == ["review", "controls"]
+        namespace["_start_post_processing_pipeline_after_processing"].assert_called_once()
+        callback.assert_not_called()
+    else:
+        assert events == ["review"]
+        namespace["_start_post_processing_pipeline_after_processing"].assert_not_called()
+        namespace["_set_resume_post_processing_pending"].assert_called_once_with(host, True)
+        assert "review was not completed" in host._post_processing_failure_reason
+        callback.assert_called_once_with()

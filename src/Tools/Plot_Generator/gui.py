@@ -17,6 +17,7 @@ from PySide6.QtWidgets import QColorDialog
 
 from Main_App import SettingsManager
 from Main_App.processing.roi_settings import ALL_ROIS_OPTION, load_rois_from_settings
+from Main_App.projects.project_metadata import read_project_experimental_qc_settings
 from Main_App.projects import (
     EXCEL_SUBFOLDER_NAME,
     Project,
@@ -162,12 +163,8 @@ class PlotGeneratorWindow(
                 extra_colors = project_settings.get("extra_colors", ())
                 if isinstance(extra_colors, (list, tuple)) and len(extra_colors) == 3:
                     self.extra_colors = [str(color) for color in extra_colors]
-                default_spectral_qc_enabled = bool(
-                    project_settings.get(
-                        "spectral_qc_enabled",
-                        default_spectral_qc_enabled,
-                    )
-                )
+            if self._project is not None:
+                default_spectral_qc_enabled = self._project.experimental_qc_settings.snr_spectral_screening_enabled
         else:
             main_default = mgr.get("paths", "output_folder", "")
             if not default_in:
@@ -244,6 +241,9 @@ class PlotGeneratorWindow(
     def refresh_rois(self, manager: object | None = None) -> None:
         """Reload committed ROI settings without mutating an active worker request."""
 
+        if self._project_root is not None:
+            qc_settings = read_project_experimental_qc_settings(self._project_root)
+            self.spectral_qc_check.setChecked(qc_settings.snr_spectral_screening_enabled)
         previous = self.roi_combo.currentText().strip()
         settings_manager = manager if manager is not None else SettingsManager()
         refreshed = load_rois_from_settings(settings_manager)
@@ -357,7 +357,11 @@ class PlotGeneratorWindow(
         self.ylabel_edit.setText(self._defaults["ylabel_snr"])
         self.ymin_spin.setValue(float(self._defaults["y_min_snr"]))
         self.ymax_spin.setValue(float(self._defaults["y_max_snr"]))
-        self.spectral_qc_check.setChecked(bool(self._defaults["spectral_qc_enabled"]))
+        self.spectral_qc_check.setChecked(
+            read_project_experimental_qc_settings(self._project_root).snr_spectral_screening_enabled
+            if self._project_root is not None
+            else bool(self._defaults["spectral_qc_enabled"])
+        )
         # Update the chart title field based on the current condition
         self._update_chart_title_state(self.condition_combo.currentText())
         QMessageBox.information(self, "Defaults", "Settings reset to defaults.")

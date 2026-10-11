@@ -69,6 +69,172 @@ def _settings() -> dict[str, object]:
     }
 
 
+@pytest.mark.parametrize("field", ["raw_signal_screening_enabled", "kurtosis_screening_enabled"])
+def test_legacy_enabled_screen_keeps_fingerprint_and_disabled_changes_it(tmp_path, field):
+    project, _info = _project_with_raw(tmp_path)
+    settings = _settings()
+    baseline = build_processing_fingerprint(project, settings, project.event_map)
+    assert build_processing_fingerprint(project, {**settings, field: True}, project.event_map) == baseline
+    assert build_processing_fingerprint(project, {**settings, field: False}, project.event_map) != baseline
+
+
+def test_processing_persists_per_recording_screen_settings_and_requires_rerun_after_change(tmp_path):
+    from dataclasses import replace
+
+    project, info = _project_with_raw(tmp_path)
+    settings = {
+        **_settings(), "raw_signal_screening_enabled": False,
+        "kurtosis_screening_enabled": False, "raw_spectral_screening": {"enabled": False},
+    }
+    plan = classify_processing_inputs(project, [info], settings, project.event_map)
+    plan = with_processing_choice(plan, "incremental")
+    _write_expected_outputs(plan)
+    record_processing_results(
+        project, plan, [{"status": "ok", "geometry": biosemi64_geometry_identity(), "file": str(info.path)}],
+        run_mode="Batch", user_choice="incremental", cancelled=False,
+    )
+    ledger = processing_ledger_module.load_ledger(project.project_root)
+    assert ledger["entries"]["P01"]["preprocessing_qc_settings"] == {
+        "raw_signal_screening_enabled": False, "kurtosis_screening_enabled": False,
+        "raw_spectral_screening_enabled": False,
+    }
+    processing_ledger_module.require_current_preprocessing_qc_settings(project.project_root)
+    project.experimental_qc_settings = replace(project.experimental_qc_settings, kurtosis_screening_enabled=True)
+    project.save()
+    with pytest.raises(processing_ledger_module.PreprocessingQcSettingsChangedError, match="Run Processing"):
+        processing_ledger_module.require_current_preprocessing_qc_settings(project.project_root)
+
+
+@pytest.mark.parametrize("status", ["completed", "excluded"])
+@pytest.mark.parametrize("field", ["raw_signal_screening_enabled", "kurtosis_screening_enabled", "raw_spectral_screening_enabled"])
+def test_preprocessing_guard_checks_every_recording_and_screen(tmp_path, status, field):
+    project, _info = _project_with_raw(tmp_path)
+    current = {"raw_signal_screening_enabled": False, "kurtosis_screening_enabled": False,
+               "raw_spectral_screening_enabled": False}
+    stale = {**current, field: True}
+    ledger = {"entries": {
+        "P01": {"status": "completed", "preprocessing_qc_settings": current},
+        "P02": {"status": status, "preprocessing_qc_settings": stale},
+    }}
+    with pytest.raises(processing_ledger_module.PreprocessingQcSettingsChangedError, match="P02"):
+        processing_ledger_module.require_current_preprocessing_qc_settings(project.project_root, ledger)
+
+
+@pytest.mark.parametrize("repeated_session", [False, True])
+@pytest.mark.parametrize("status", ["completed", "excluded"])
+def test_preprocessing_guard_ignores_removed_sources_but_checks_registered_sources(tmp_path, repeated_session, status):
+    root = tmp_path / "project"
+    root.mkdir()
+    manifest = {
+        "experimental_qc": {"raw_signal_screening_enabled": False},
+        "groups": {"control": {"label": "Control", "raw_input_folder": "raw"}},
+        "participants": {"P01": {"group_id": "control"}},
+    }
+    identity = "P01"
+    if repeated_session:
+        identity = "rec_p01"
+        manifest.update({
+            "sessions": {"visit1": {"label": "Visit 1", "visit_index": 1}},
+            "recording_sources": {"source1": {
+                "group_id": "control", "session_id": "visit1", "raw_input_folder": "raw",
+            }},
+            "recordings": {identity: {
+                "participant_id": "P01", "session_id": "visit1", "source_id": "source1", "raw_file": "raw/P01.bdf",
+            }},
+        })
+    (root / "project.json").write_text(json.dumps(manifest), encoding="utf-8")
+    current = {"raw_signal_screening_enabled": False, "kurtosis_screening_enabled": True,
+               "raw_spectral_screening_enabled": True}
+    ledger = {"entries": {
+        identity: {"status": status, "preprocessing_qc_settings": current},
+        "removed_source": {"status": "completed"},
+    }}
+    processing_ledger_module.require_current_preprocessing_qc_settings(root, ledger)
+    with pytest.raises(processing_ledger_module.PreprocessingQcSettingsChangedError, match="removed_source"):
+        processing_ledger_module.require_current_preprocessing_qc_settings(
+            root, ledger, required_processing_ids=("REMOVED_SOURCE",),
+        )
+    ledger["entries"]["removed_source"]["preprocessing_qc_settings"] = current
+    ledger["entries"][identity].pop("preprocessing_qc_settings")
+    with pytest.raises(processing_ledger_module.PreprocessingQcSettingsChangedError, match=identity):
+        processing_ledger_module.require_current_preprocessing_qc_settings(
+            root, ledger, required_processing_ids=("removed_source",),
+        )
+
+
+@pytest.mark.parametrize("exclusion", [
+    "manual_participant", "manual_recording", "participant_conditions", "recording_conditions",
+    "frequency_participant", "frequency_recording",
+    "manual_participant_exclusion", "manual_recording_exclusion", "recording_not_started",
+])
+def test_preprocessing_guard_does_not_require_processing_for_explicit_exclusions(tmp_path, exclusion):
+    project, _info = _project_with_raw(tmp_path)
+    manifest = json.loads((project.project_root / "project.json").read_text(encoding="utf-8"))
+    entry = {"status": "completed", "participant_id": "P01", "recording_id": "rec_p01"}
+    if exclusion in {"manual_participant", "manual_recording"}:
+        key, value = ("participants", "p01") if exclusion == "manual_participant" else ("recordings", "REC_P01")
+        manifest["preprocessing"][f"manual_excluded_{key}"] = [value]
+    elif exclusion in {"participant_conditions", "recording_conditions"}:
+        key, value = ("participant", "p01") if exclusion == "participant_conditions" else ("recording", "REC_P01")
+        manifest["preprocessing"][f"manual_excluded_{key}_conditions"] = {value: ["condition a"]}
+    elif exclusion.startswith("frequency_"):
+        key, value = ("participant", "p01") if exclusion == "frequency_participant" else ("recording", "REC_P01")
+        manifest.setdefault("tools", {})["frequency_domain_qc"] = {
+            f"manual_{key}_exclusions": [{f"{key}_id": value}],
+        }
+    else:
+        entry.update(status="excluded", exclusion_reason=exclusion)
+    (project.project_root / "project.json").write_text(json.dumps(manifest), encoding="utf-8")
+    processing_ledger_module.require_current_preprocessing_qc_settings(project.project_root, {"entries": {"P01": entry}})
+
+
+def test_preprocessing_guard_still_checks_sources_with_some_retained_conditions(tmp_path):
+    project, _info = _project_with_raw(tmp_path)
+    project.event_map = {"Condition A": 1, "Condition B": 2}
+    project.preprocessing["manual_excluded_participant_conditions"] = {"P01": ["Condition A"]}
+    project.save()
+    with pytest.raises(processing_ledger_module.PreprocessingQcSettingsChangedError, match="P01"):
+        processing_ledger_module.require_current_preprocessing_qc_settings(
+            project.project_root, {"entries": {"P01": {"status": "completed"}}},
+        )
+
+
+@pytest.mark.parametrize("manifest", [[], None])
+def test_preprocessing_guard_rejects_non_object_manifest(tmp_path, manifest):
+    (tmp_path / "project.json").write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(processing_ledger_module.PreprocessingQcSettingsChangedError, match="Project settings are invalid"):
+        processing_ledger_module.require_current_preprocessing_qc_settings(tmp_path)
+
+
+def test_legacy_screen_guard_accepts_enabled_defaults_and_bound_spectral_snapshot(tmp_path):
+    root = tmp_path / "project"
+    root.mkdir()
+    manifest = root / "project.json"
+    manifest.write_text("{}", encoding="utf-8")
+    entry = {"status": "completed", "processing_fingerprint": "legacy-fingerprint",
+             "raw_file": str(tmp_path / "P01.bdf"), "raw_size": 8, "raw_mtime_ns": 17}
+    ledger = {"entries": {"P01": entry}}
+    processing_ledger_module.require_current_preprocessing_qc_settings(root, ledger)
+    manifest.write_text(json.dumps({"experimental_qc": {"raw_spectral_screening": {"enabled": False}}}), encoding="utf-8")
+    with pytest.raises(processing_ledger_module.PreprocessingQcSettingsChangedError):
+        processing_ledger_module.require_current_preprocessing_qc_settings(root, ledger)
+    state = root / ".fpvs_processing"
+    state.mkdir()
+    snapshot = {
+        "version": "condition_interpolation_run_snapshot_v1", "project_root": str(root.resolve()),
+        "processing_fingerprint": "legacy-fingerprint",
+        "settings": {"raw_spectral_screening": {"enabled": False}},
+        "records": [{"processing_id": "P01", "raw_file_identity": {
+            key: entry[key] for key in ("raw_file", "raw_size", "raw_mtime_ns")
+        }}],
+    }
+    (state / "condition_interpolation_run.json").write_text(json.dumps(snapshot), encoding="utf-8")
+    processing_ledger_module.require_current_preprocessing_qc_settings(root, ledger)
+    entry["raw_size"] = 9
+    with pytest.raises(processing_ledger_module.PreprocessingQcSettingsChangedError):
+        processing_ledger_module.require_current_preprocessing_qc_settings(root, ledger)
+
+
 def test_save_ledger_retries_transient_permission_error(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

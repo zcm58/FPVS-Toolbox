@@ -26,7 +26,7 @@ def test_marker_review_precedes_every_signal_qc_decision() -> None:
         "scan = _run_scan_embedded(",
         condition_review,
     )
-    electrode_review = workflow.index("if active_infos and not _review_removed_electrodes(")
+    electrode_review = workflow.index("and not _review_removed_electrodes(")
 
     assert (
         initial_scan
