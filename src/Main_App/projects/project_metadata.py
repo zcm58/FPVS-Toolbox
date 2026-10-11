@@ -23,22 +23,20 @@ def read_project_metadata(project_root: Path) -> ProjectMetadata:
     data: dict[str, Any] = {}
     try:
         raw = manifest_path.read_text(encoding="utf-8")
-    except FileNotFoundError:
-        raise
-    except OSError:
-        raise
+    except UnicodeError:
+        raw = None
 
-    parse_error = False
-    try:
-        parsed = json.loads(raw)
-    except Exception:
-        parse_error = True
-        parsed = {}
-
-    if isinstance(parsed, dict):
-        data = parsed
-    else:
-        data = {}
+    parse_error = raw is None
+    if raw is not None:
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            parse_error = True
+        else:
+            if isinstance(parsed, dict):
+                data = parsed
+            else:
+                parse_error = True
 
     raw_name = data.get("name")
     name = str(raw_name) if raw_name else project_root.name

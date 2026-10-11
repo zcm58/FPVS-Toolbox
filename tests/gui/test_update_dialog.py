@@ -451,6 +451,74 @@ def test_cancel_wins_over_a_download_result_not_yet_delivered(
     assert not dialog.install_button.isEnabled()
 
 
+
+def test_fhc_registry_blocks_install_without_cancel_and_allows_retry_after_cleanup(
+    qtbot, monkeypatch, tmp_path, deferred_updates,
+) -> None:
+    from unittest.mock import Mock
+
+    from Main_App.gui import update_install_guard
+    from Tools.Free_Harmonic_Clustering.gui.operation_registry import (
+        cancel_all_active_operations,
+        register_active_operation,
+        release_active_operation,
+    )
+
+    lifecycle, jobs, _quit_calls = deferred_updates
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    parent.show()
+    events: list[str] = []
+    warnings: list[str] = []
+    monkeypatch.setattr(QMessageBox, "question", lambda *_args: QMessageBox.StandardButton.Yes)
+    monkeypatch.setattr(
+        update_install_guard, "show_warning", lambda _parent, title, _message: warnings.append(title)
+    )
+    dialog = UpdateDialog(
+        parent=parent,
+        auto_check=False,
+        initial_result=_available_update(),
+        lifecycle=lifecycle,
+        installer_launcher=lambda _downloaded, _cancel: events.append("launch"),
+        quit_app=lambda: events.append("quit"),
+    )
+    qtbot.addWidget(dialog)
+    dialog.show()
+    dialog._handle_download_result(_downloaded_fixture(tmp_path))
+    token = object()
+    worker = Mock()
+    # No page or QThread is attached to the host: retired-page work is still live.
+    register_active_operation(token, worker)
+    try:
+        dialog.install_button.click()
+        assert not jobs
+        assert not events
+        assert warnings == ["Update Blocked"]
+        worker.cancel.assert_not_called()
+        assert dialog.isVisible()
+        assert dialog.install_button.isEnabled()
+
+        assert cancel_all_active_operations() == 1
+        dialog.install_button.click()
+        assert not jobs
+        assert not events
+        assert warnings == ["Update Blocked", "Update Blocked"]
+        worker.cancel.assert_called_once_with()
+        release_active_operation(token)
+
+        dialog.install_button.click()
+        assert len(jobs) == 1
+        job = jobs[-1]
+        qtbot.waitUntil(lambda: job.is_running)
+        job.run_callback()
+        assert events == ["launch"]
+        job.finish()
+        qtbot.waitUntil(lambda: events == ["launch", "quit"])
+        assert not lifecycle.has_active_jobs
+    finally:
+        release_active_operation(token)
+
+
 def test_launch_success_survives_late_cancel_and_quits_only_after_finish(
     qtbot, monkeypatch, tmp_path, deferred_updates,
 ) -> None:

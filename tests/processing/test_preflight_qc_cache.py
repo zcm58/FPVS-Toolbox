@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+import errno
 import json
 from pathlib import Path
 
 import pytest
 
 import Main_App.processing.preflight_qc_cache as cache_module
+import Main_App.processing.preflight_qc_pruning as pruning
 from Main_App.processing.preflight_qc_cache import (
     PREFLIGHT_QC_CACHE_METHOD_DIRECTORY,
     PREFLIGHT_QC_CACHE_SCHEMA_VERSION,
@@ -261,3 +263,76 @@ def test_non_json_cache_input_fails_before_project_directory_creation(
         save_preflight_qc_cache(tmp_path, result={"status": "pass"}, **parts)
 
     assert not (tmp_path / ".fpvs_processing").exists()
+
+
+@pytest.mark.parametrize("existing", [False, True])
+def test_brief_payload_sharing_denial_publishes_exact_cache_bytes(
+    tmp_path, monkeypatch, existing,
+):
+    parts = _key_parts()
+    result = {"status": "pass", "samples": [0.0, -0.0, 1.25], "label": "Café"}
+    expected = save_preflight_qc_cache(tmp_path / "baseline", result=result, **parts).read_bytes()
+    destination = preflight_qc_cache_path(tmp_path, **parts)
+    if existing:
+        save_preflight_qc_cache(tmp_path, result={"status": "previous"}, **parts)
+    replace = cache_module.os.replace
+    attempts = []
+
+    def sharing_denial(temporary, target):
+        if target == destination:
+            attempts.append(target)
+            if len(attempts) <= 2:
+                error = PermissionError(errno.EACCES, "simulated brief payload sharing denial", str(target))
+                error.winerror = 5
+                raise error
+        replace(temporary, target)
+
+    monkeypatch.setattr(cache_module.os, "replace", sharing_denial)
+    published = save_preflight_qc_cache(tmp_path, result=result, **parts)
+
+    assert published == destination
+    assert published.read_bytes() == expected
+    assert load_preflight_qc_cache(tmp_path, **parts) == result
+    assert len(attempts) >= 3
+    assert not list(published.parent.glob("*.tmp"))
+
+
+@pytest.mark.parametrize("existing", [False, True])
+def test_persistent_payload_denial_is_bounded_and_preserves_previous_cache(
+    tmp_path, monkeypatch, existing,
+):
+    parts = _key_parts()
+    previous_result = {"status": "previous", "samples": [-0.0, 1.25]}
+    destination = preflight_qc_cache_path(tmp_path, **parts)
+    previous_bytes = None
+    if existing:
+        save_preflight_qc_cache(tmp_path, result=previous_result, **parts)
+        previous_bytes = destination.read_bytes()
+    replace = cache_module.os.replace
+    attempts = []
+    waits = []
+
+    def persistent_denial(temporary, target):
+        if target == destination:
+            attempts.append(target)
+            raise PermissionError(errno.EACCES, "simulated persistent payload sharing denial", str(target))
+        replace(temporary, target)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(cache_module.os, "replace", persistent_denial)
+        patch.setattr(pruning.time, "sleep", waits.append)
+        with pytest.raises(PermissionError, match="simulated persistent payload sharing denial"):
+            save_preflight_qc_cache(tmp_path, result={"status": "replacement"}, **parts)
+    assert len(attempts) == 6
+    assert waits == [0.01, 0.02, 0.05, 0.1, 0.1]
+    assert not list(destination.parent.glob("*.tmp"))
+    if existing:
+        assert destination.read_bytes() == previous_bytes
+        assert load_preflight_qc_cache(tmp_path, **parts) == previous_result
+    else:
+        assert not destination.exists()
+        assert load_preflight_qc_cache(tmp_path, **parts) is None
+
+    recovered = save_preflight_qc_cache(tmp_path, result={"status": "replacement"}, **parts)
+    assert recovered == destination
+    assert load_preflight_qc_cache(tmp_path, **parts) == {"status": "replacement"}

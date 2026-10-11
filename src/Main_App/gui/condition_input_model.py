@@ -5,7 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from collections.abc import Sequence
 
-from Main_App.projects import condition_output_folder_name
+from Main_App.projects import (
+    GroupConfigurationError,
+    condition_output_folder_name,
+    validate_group_folder_name,
+)
 
 
 @dataclass(frozen=True)
@@ -32,12 +36,20 @@ def validate_condition_rows(
             errors.append(ConditionInputError(index, "label", "Enter a condition name."))
         elif any(char in '<>:"/\\|?*' for char in label):
             errors.append(ConditionInputError(index, "label", "Remove file-name characters: < > : \" / \\ | ? *"))
-        elif output_key in seen:
-            errors.append(ConditionInputError(
-                index, "label",
-                f"Use a different condition name; output name {output_name!r} is "
-                f"already used by {seen[output_key]!r} (ignoring case and numeric prefixes).",
-            ))
+        else:
+            try:
+                validate_group_folder_name(output_name)
+            except GroupConfigurationError as exc:
+                errors.append(ConditionInputError(
+                    index, "label", str(exc).replace("Group folder name", "Condition output name"),
+                ))
+            else:
+                if output_key in seen:
+                    errors.append(ConditionInputError(
+                        index, "label",
+                        f"Use a different condition name; output name {output_name!r} is "
+                        f"already used by {seen[output_key]!r} (ignoring case and numeric prefixes).",
+                    ))
         seen.setdefault(output_key, label)
         if not ident.isascii() or not ident.isdecimal() or not 1 <= int(ident) <= 999999:
             errors.append(ConditionInputError(index, "id", "Enter a recorded marker ID from 1 to 999999."))

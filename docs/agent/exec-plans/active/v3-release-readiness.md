@@ -4,6 +4,65 @@
 
 Active. This is the release ledger for the first v3 release candidate.
 
+Bug-fix follow-up on 2026-10-10: failed project Settings saves now restore all
+live project/config/cache state without retrying disk writes; a later failed
+application-settings write restores application config while keeping the already
+committed Project/cache and explaining the partial save; duplicate project
+titles retain row identity; manual New names cannot escape the Projects Root;
+invalid manifests fail before defaults or current-project replacement; a valid
+project completes activation if app path/recent-project preferences cannot be
+persisted, with a warning and consistent project/condition/ready state; invalid
+sanitized condition folders fail in both draft and backend validation; and
+update installation waits for retained FHC operations, including cancelled work
+awaiting thread cleanup. Established valid workflows, naming/manifest formats,
+preprocessing order, harmonic profiles, numerical results, and export contracts
+remain unchanged. Details and visible smoke routes are in the Project I/O and
+updater architecture documents. No ownership or verification-route redesign
+was needed; focused routes include the new regressions. Existing local Plot
+Generator changes are preserved and excluded from this bug-fix commit.
+
+
+The full gate also exposed intermittent Windows access-denied errors during
+QC slot-index atomic replacement. An 800-publication synthetic stress run
+reproduced five replacement errors and one excess retained generation; a later
+focused concurrent-payload test reproduced the same transient denial at payload
+publication. Existing thread/process locks already serialize publication
+correctly. Index and payload replacement now use the manifest owner's bounded
+six-attempt PermissionError schedule. Persistent index failure preserves caches
+and skips pruning conservatively; persistent payload failure keeps its existing
+OSError contract, which QC callers handle while retaining calculated results.
+This corrects excess cache retention and repeated QC work only: scientific
+payloads, fingerprints, method identifiers, preprocessing kernels, statistical
+calculations, and exports remain unchanged. See the Cache Maintenance
+architecture document.
+
+Final verification: `python .agents/scripts/verify.py --scope repo --tier
+precommit` passed the complete agent audit bundle, changed-file Ruff/compilation,
+and 5,786 non-Qt tests with 25 skips (73 existing synthetic-fixture/dependency
+warnings). Focused GUI verification passed 623 tests; the final project-manager
+bundle passed 80 tests with one Windows symlink-privilege skip; cache/reuse/
+maintenance coverage passed 69 with two privilege skips. Updates focused
+verification passed 437 with four skips. Verification config validation passed
+all 15 scopes, and the strict documentation build passed. Registered GUI
+regressions are in `test_gui_preproc_dialog.py`,
+`test_open_existing_project_dialog.py`, `test_main_window_event_map_enter.py`,
+and `test_update_dialog.py`; their visible smoke routes are documented in the
+Project I/O and updater architecture documents.
+
+Parity checks compared valid Project load/save and successful Settings saves to
+commit `5e8b2b47`: complete project state, project.json bytes, and settings.ini
+bytes matched on synthetic legacy/default/customized cases. Cache fault
+regressions compare publication bytes with no-fault publication. The final
+800-publication stress run recovered seven actual Windows sharing denials with
+zero invalid or excess-generation rounds. Numerical/scoring/statistical owners
+are unchanged; the only processing-source edits are cache-file replacement and
+best-effort diagnostic logging. Registered Qt regressions cover Settings failure
+drafts, picker identity/Cancel, condition validation, and retained FHC update
+guards. Local Qt remains unrun without Toolbox-specific visible-environment
+approval; hardware, real-data processing, and frozen-installer smoke remain
+unrun. Ad-hoc parity/stress fixtures and documentation builds are cleaned;
+verification logs are retained in the host temporary directory.
+
 Tool inventory follow-up on 2026-10-09: the sidebar and Tools menu now share
 exactly six beta surfaces through `Main_App.gui.sidebar.BETA_TOOL_SPECS`.
 Runtime, icon, test, verification, and documentation inventories agree.

@@ -626,15 +626,22 @@ class Project:
         data: Dict[str, Any] = {}
         if manifest is None:
             if resolved_manifest_path.exists():
-                data_raw = resolved_manifest_path.read_text(encoding="utf-8")
                 try:
-                    data = json.loads(data_raw)
-                except Exception:
-                    data = {}
+                    data = json.loads(resolved_manifest_path.read_text(encoding="utf-8"))
+                except (json.JSONDecodeError, UnicodeError) as exc:
+                    raise ValueError(
+                        f"Project manifest contains invalid JSON: {resolved_manifest_path}"
+                    ) from exc
+                if not isinstance(data, dict):
+                    raise ValueError(
+                        f"Project manifest must contain a JSON object: {resolved_manifest_path}"
+                    )
         else:
+            if not isinstance(manifest, Mapping):
+                raise ValueError(
+                    f"Project manifest must contain a JSON object: {resolved_manifest_path}"
+                )
             data = dict(manifest)
-        if not isinstance(data, dict):
-            data = {}
         raw_manifest: Dict[str, Any] = dict(data)
 
         # Normalize persisted event_map back into memory as {str: int}

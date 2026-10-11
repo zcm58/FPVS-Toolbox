@@ -206,3 +206,20 @@ Before a public release, use a disposable Windows installation to confirm:
 - Per-user and all-users upgrades preserve scope. Exercise genuine UAC
   cancellation and acceptance, app restart, user settings and project sentinels.
 - A clean machine can run both the packaged main application and helper.
+
+
+## Retained Free Harmonic Clustering operations
+
+The Main App install guard consults FHC's existing process-local operation
+registry in addition to QObject-child workers. Parentless operations from the
+current or a retired page block installation until thread cleanup releases every
+registry token. Requesting cooperative cancellation does not release that guard.
+An attempted Install starts neither the helper nor cancellation nor app close;
+the existing shutdown contract and scientific calculations remain unchanged.
+The independent updater remains separate from project/FHC imports.
+
+Visible smoke: start a synthetic FHC operation, attempt Install, and confirm
+that the operation continues without helper launch. Repeat with a retained old
+page operation and while cancellation awaits cleanup. Release all operations
+and retry; normal handoff should then proceed. The registered UpdateDialog Qt
+regression uses fake workers and helper responses for these transitions.

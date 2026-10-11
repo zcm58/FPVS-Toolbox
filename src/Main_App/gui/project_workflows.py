@@ -111,8 +111,8 @@ def import_fpvs_config_project(host: Any) -> None:
 def open_project_path(host: Any, folder: str) -> None:
     if not confirm_project_draft_exit(host):
         return
-    _open_project_path(host, folder)
-    notify_project_ready(host)
+    if _open_project_path(host, folder) is not None:
+        notify_project_ready(host)
 
 
 def edit_project_settings(host: Any) -> None:

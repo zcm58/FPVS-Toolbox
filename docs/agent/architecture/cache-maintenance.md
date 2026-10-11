@@ -19,6 +19,13 @@ or an ambiguous source identity must not authorize pruning. Source state is
 rechecked. Slot indexing handles existing valid entries once, without repeatedly
 scanning all JSON evidence for every condition. Cross-process publication locks
 are non-blocking and released by the OS after a crash; their files are retained.
+Slot-index and payload atomic replacements allow six bounded PermissionError
+attempts using the existing manifest retry schedule for brief Windows
+access-denied locks. Persistent index failures still skip pruning conservatively
+and preserve complete cache entries; persistent payload failures retain their
+existing OSError behavior, which QC callers handle while keeping calculated
+results. Publication locks, payload bytes, scientific fingerprints, and
+cache-read validation remain unchanged.
 
 ## Explicit Cache Clearing
 

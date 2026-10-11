@@ -26,6 +26,12 @@ def _host_has_active_work(host: QWidget) -> bool:
     # Do not start an install handoff while any child worker is still active.
     if any(_handle_is_active(thread) for thread in host.findChildren(QThread)):
         return True
+    # FHC threads have no widget parent; retired pages retain their operations
+    # until thread cleanup finishes. Match the app-close lifecycle boundary.
+    from Tools.Free_Harmonic_Clustering.gui import has_active_operations
+
+    if has_active_operations():
+        return True
     sequence_page = getattr(host, "_sequence_figure_page", None)
     has_active_generation = getattr(sequence_page, "has_active_generation", None)
     if callable(has_active_generation) and has_active_generation():

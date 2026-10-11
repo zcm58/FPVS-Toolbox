@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
+import errno
 import json
 from pathlib import Path
 import subprocess
@@ -281,3 +282,101 @@ def test_windows_reparse_candidate_is_preserved_without_following_it(tmp_path, m
         parts["settings"]["threshold"] = 10
         _save(tmp_path, parts)
     assert old.exists()
+
+
+@pytest.mark.parametrize("stage", ["started", "complete", "slot"])
+def test_transient_index_sharing_denial_retries_without_losing_generation(
+    tmp_path, monkeypatch, stage,
+):
+    parts = _parts(tmp_path, "occurrences")
+    expected_bytes = _save(tmp_path / "baseline", parts).read_bytes()
+    replace = pruning.os.replace
+    failures = []
+    waits = []
+
+    def sharing_denial(temporary, target):
+        is_stage = target.parent.name == ".slots" and (
+            target.name != "index-state.json" if stage == "slot" else
+            target.name == "index-state.json" and json.loads(temporary.read_text())["state"] == stage
+        )
+        if is_stage and not failures:
+            failures.append(target)
+            error = PermissionError(errno.EACCES, "simulated brief index sharing denial", str(target))
+            error.winerror = 5
+            raise error
+        replace(temporary, target)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(pruning.os, "replace", sharing_denial)
+        patch.setattr(pruning.time, "sleep", waits.append)
+        old = _save(tmp_path, parts)
+    assert len(failures) == 1
+    assert old.read_bytes() == expected_bytes
+    slots = old.parent / ".slots"
+    assert json.loads((slots / "index-state.json").read_text())["state"] == "complete"
+    indexes = [path for path in slots.glob("*.json") if path.name != "index-state.json"]
+    assert len(indexes) == 1
+    assert json.loads(indexes[0].read_text())["entries"][0]["name"] == old.name
+    assert not list(slots.glob("*.tmp"))
+    assert waits and waits[0] == 0.01
+
+    parts["settings"]["threshold"] = 10
+    latest = _save(tmp_path, parts)
+    assert latest.exists() and not old.exists()
+    assert cache.load_preflight_qc_cache(tmp_path, **parts) == {"complete": True}
+
+
+def test_persistent_index_denial_is_bounded_and_keeps_previous_evidence(
+    tmp_path, monkeypatch, caplog,
+):
+    parts = _parts(tmp_path, "occurrences")
+    with monkeypatch.context() as patch:
+        patch.setattr(cache, "prepare_pruning_candidates", lambda *_args, **_kwargs: None)
+        old = _save(tmp_path, parts)
+    old_bytes = old.read_bytes()
+    replace = pruning.os.replace
+    attempts = []
+    waits = []
+
+    def persistent_denial(temporary, target):
+        if target.parent.name == ".slots":
+            attempts.append(target)
+            raise PermissionError(errno.EACCES, "simulated persistent index sharing denial", str(target))
+        replace(temporary, target)
+
+    parts["settings"]["threshold"] = 10
+    with monkeypatch.context() as patch:
+        patch.setattr(pruning.os, "replace", persistent_denial)
+        patch.setattr(pruning.time, "sleep", waits.append)
+        latest = _save(tmp_path, parts)
+    assert len(attempts) == 6
+    assert waits == [0.01, 0.02, 0.05, 0.1, 0.1]
+    assert old.read_bytes() == old_bytes and latest.exists()
+    assert cache.load_preflight_qc_cache(tmp_path, **parts) == {"complete": True}
+    assert "preflight_cache_index_unavailable" in caplog.text
+    assert "simulated persistent index sharing denial" in caplog.text
+    assert not list((latest.parent / ".slots").glob("*.tmp"))
+
+    parts["settings"]["threshold"] = 11
+    recovered = _save(tmp_path, parts)
+    assert recovered.exists() and not old.exists() and not latest.exists()
+
+
+def test_nonpermission_index_failure_preserves_target_without_retry(tmp_path, monkeypatch):
+    path = tmp_path / "index.json"
+    previous = b'{"previous":true}'
+    path.write_bytes(previous)
+    attempts = []
+    waits = []
+
+    def disk_full(temporary, target):
+        attempts.append(target)
+        raise OSError(errno.ENOSPC, "simulated full disk", str(target))
+
+    monkeypatch.setattr(pruning.os, "replace", disk_full)
+    monkeypatch.setattr(pruning.time, "sleep", waits.append)
+    with pytest.raises(OSError, match="simulated full disk"):
+        pruning._atomic_json(path, {"replacement": True})
+    assert attempts == [path] and waits == []
+    assert path.read_bytes() == previous
+    assert list(tmp_path.iterdir()) == [path]
