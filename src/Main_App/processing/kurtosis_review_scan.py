@@ -982,6 +982,7 @@ def scan_kurtosis_review(
     should_cancel: CancelCallback | None = None,
     max_workers: int | None = None,
     source_prefetch: QcSourcePrefetch | None = None,
+    execution_backend: str = "thread",
 ) -> KurtosisReviewScan:
     """Classify current exclusions before allocating numerical review workers.
 
@@ -991,6 +992,8 @@ def scan_kurtosis_review(
     Both callbacks and the caller's cancellation callback run on this thread.
     """
 
+    if execution_backend not in {"thread", "process"}:
+        raise KurtosisReviewScanError("Unknown kurtosis review execution backend.")
     canonical_event_map, protocol = _validate_review_request(
         raw_file_infos, settings, event_map, raw_channel_qc_by_recording,
     )
@@ -1079,7 +1082,6 @@ def scan_kurtosis_review(
         return finished_scan(cancelled=True)
     if not eligible_infos:
         return finished_scan(cancelled=False)
-    worker_count = _review_worker_count(eligible_infos, 1 if prefetch_loading else max_workers)
     completed_before_work = len(indexed_results)
 
     def relay_progress(message: str, completed: int, _total: int) -> None:
@@ -1091,6 +1093,43 @@ def scan_kurtosis_review(
             indexed_results[eligible_indices[index]] = results[0]
             report_status()
 
+    if execution_backend == "process":
+        from Main_App.workers.kurtosis_review_process import (
+            review_process_worker_count,
+            run_process_review,
+        )
+
+        # Raw/memmap owners cannot cross a spawned-process boundary. Release
+        # speculative sources on this background scan thread before budgeting
+        # independent workers; the GUI's final prefetch cleanup is idempotent.
+        if source_prefetch is not None:
+            if progress:
+                progress(
+                    "Finishing background source loading before parallel review...",
+                    completed_before_work,
+                    total,
+                )
+            source_prefetch.close()
+        if should_cancel and should_cancel():
+            return finished_scan(cancelled=True)
+        requested_workers = max_workers
+        if requested_workers is None:
+            requested_workers = settings.get("max_parallel_workers_override")
+        worker_count = review_process_worker_count(eligible_infos, requested_workers)
+        scan = run_process_review(
+            eligible_infos,
+            settings,
+            event_map=canonical_event_map,
+            reviewed_event_plans_by_file=reviewed_event_plans_by_file,
+            raw_channel_qc_by_recording=raw_channel_qc_by_recording,
+            progress=relay_progress,
+            should_cancel=should_cancel,
+            max_workers=worker_count,
+            result_progress=accept_results,
+        )
+        return finished_scan(cancelled=scan.cancelled)
+
+    worker_count = _review_worker_count(eligible_infos, 1 if prefetch_loading else max_workers)
     if worker_count > 1:
         scan = _scan_review_parallel(
             eligible_infos, settings, event_map=canonical_event_map,

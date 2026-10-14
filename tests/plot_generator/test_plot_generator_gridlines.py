@@ -14,7 +14,7 @@ def _import_module():
     return module
 
 
-def test_gridlines_added(tmp_path, monkeypatch):
+def test_publication_spectrum_has_open_axes_without_gridlines(tmp_path, monkeypatch):
     module = _import_module()
 
     captured = {}
@@ -64,5 +64,12 @@ def test_gridlines_added(tmp_path, monkeypatch):
         for segment in segments
         if segment[0][1] == segment[1][1]
     }
-    assert v_lines == {1.0, 2.0, 3.0}
-    assert h_lines == {0.0, 1.0, 2.0, 3.0}
+    assert v_lines == set()
+    assert h_lines == set()
+    assert not ax.spines["top"].get_visible()
+    assert not ax.spines["right"].get_visible()
+    assert ax.spines["bottom"].get_visible()
+    assert ax.spines["left"].get_visible()
+    assert not any(line.get_visible() for line in (*ax.get_xgridlines(), *ax.get_ygridlines()))
+    assert list(ax.lines[0].get_xdata()) == [1.0, 2.0]
+    assert list(ax.lines[0].get_ydata()) == [1.5, 2.5]

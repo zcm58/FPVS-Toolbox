@@ -3,6 +3,7 @@ import logging
 from pathlib import Path
 
 from Main_App.Shared.settings_paths import app_plot_settings_file, legacy_plot_settings_file
+from Tools.Plot_Generator.spectrum_style import SNR_TRACE_COLOR, SNR_SECOND_TRACE_COLOR
 
 logger = logging.getLogger(__name__)
 
@@ -35,9 +36,9 @@ class PlotSettingsManager:
         self.config = configparser.ConfigParser()
         self.load()
         if not self.config.has_option("plot", "stem_color"):
-            self.set("plot", "stem_color", "red")
+            self.set("plot", "stem_color", SNR_TRACE_COLOR)
         if not self.config.has_option("plot", "stem_color_b"):
-            self.set("plot", "stem_color_b", "blue")
+            self.set("plot", "stem_color_b", SNR_SECOND_TRACE_COLOR)
 
     def load(self) -> None:
         if self.ini_path.exists():
@@ -58,11 +59,11 @@ class PlotSettingsManager:
 
     def get_stem_color(self) -> str:
         """Return the stored stem plot line color."""
-        return self.get("plot", "stem_color", "red")
+        return self.get("plot", "stem_color", SNR_TRACE_COLOR)
 
     def get_second_color(self) -> str:
         """Return the stored second stem plot color."""
-        return self.get("plot", "stem_color_b", "blue")
+        return self.get("plot", "stem_color_b", SNR_SECOND_TRACE_COLOR)
 
     def set(self, section: str, option: str, value: str) -> None:
         if not self.config.has_section(section):

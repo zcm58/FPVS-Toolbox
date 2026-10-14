@@ -25,6 +25,7 @@ from Tools.Plot_Generator.session_rendering import SessionPlotRenderingMixin
 from Tools.Plot_Generator.session_workflow import SessionPlotWorkflowMixin
 from Tools.Plot_Generator.worker_config import PlotWorkerConfig
 from Tools.Plot_Generator.export_plan import FigureExport
+from Tools.Plot_Generator.spectrum_style import SNR_TRACE_COLOR, SNR_SECOND_TRACE_COLOR
 
 logger = logging.getLogger(__name__)
 _DEFAULT_ODDBALL_FREQ = 1.2
@@ -65,10 +66,10 @@ class _Worker(
         y_min: float,
         y_max: float,
         out_dir: str,
-        stem_color: str = "red",
+        stem_color: str = SNR_TRACE_COLOR,
         *,
         condition_b: str | None = None,
-        stem_color_b: str = "blue",
+        stem_color_b: str = SNR_SECOND_TRACE_COLOR,
         oddballs: Sequence[float] | None = None,
         use_matlab_style: bool = False,
         overlay: bool = False,

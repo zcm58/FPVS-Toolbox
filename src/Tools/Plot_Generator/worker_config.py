@@ -7,6 +7,7 @@ from typing import Dict, List, Sequence
 
 from Main_App.projects import ProjectDatasetIndex
 from .export_plan import FigureExport
+from .spectrum_style import SNR_TRACE_COLOR, SNR_SECOND_TRACE_COLOR
 
 
 @dataclass(frozen=True)
@@ -25,9 +26,9 @@ class PlotWorkerConfig:
     y_min: float
     y_max: float
     out_dir: str
-    stem_color: str = "red"
+    stem_color: str = SNR_TRACE_COLOR
     condition_b: str | None = None
-    stem_color_b: str = "blue"
+    stem_color_b: str = SNR_SECOND_TRACE_COLOR
     oddballs: Sequence[float] | None = None
     use_matlab_style: bool = False
     overlay: bool = False

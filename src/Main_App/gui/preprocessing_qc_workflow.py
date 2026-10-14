@@ -239,11 +239,13 @@ class _KurtosisReviewWorker(QObject):
         reviewed_event_plans_by_file: Mapping[str, Any],
         raw_channel_qc_by_recording: Mapping[str, Mapping[str, object]],
         source_prefetch: QcSourcePrefetch | None = None,
+        max_workers: int | None = None,
     ) -> None:
         super().__init__()
         self._raw_file_infos = list(raw_file_infos)
         self._settings = dict(settings)
         self._source_prefetch = source_prefetch
+        self._max_workers = max_workers
         self._event_map = dict(event_map)
         self._reviewed_event_plans_by_file = dict(reviewed_event_plans_by_file)
         self._raw_channel_qc_by_recording = {
@@ -268,6 +270,8 @@ class _KurtosisReviewWorker(QObject):
                 status_progress=self.status_progress.emit,
                 should_cancel=lambda: self._cancelled,
                 source_prefetch=self._source_prefetch,
+                execution_backend="process",
+                max_workers=self._max_workers,
             )
         except Exception as exc:  # pragma: no cover - defensive signal bridge
             logger.exception("Kurtosis review scan failed.")
@@ -1475,8 +1479,14 @@ class _QcSourcePrefetchBridge(QObject):
 
 def _start_qc_source_prefetch(
     host: Any, raw_file_infos: Sequence[Any], params: Mapping[str, Any],
+    *, execution_backend: str = "thread",
 ) -> _QcSourcePrefetchBridge | None:
     """Start source-only work as step 2 opens; choices remain on the GUI thread."""
+    # Spawned review workers load under their own bounded resource budget.
+    # Parent-owned Raw arrays cannot be handed to them, so avoid staging data
+    # that the parallel review would immediately need to discard.
+    if execution_backend == "process":
+        return None
     project = getattr(host, "currentProject", None)
     project_root = getattr(project, "project_root", None)
     if not project_root or not raw_file_infos or not params.get("reject_thresh"):
@@ -1586,6 +1596,9 @@ def _run_kurtosis_review_scan_embedded(
         reviewed_event_plans_by_file=reviewed_event_plans_by_file,
         raw_channel_qc_by_recording=raw_channel_qc_by_recording,
         source_prefetch=source_prefetch,
+        max_workers=getattr(host, "max_workers", None) or int(
+            getattr(host.currentProject, "preprocessing", {}).get("max_parallel_workers_override", 0)
+        ) or None,
     )
     worker.moveToThread(thread)
     result_holder: dict[str, Any] = {}
@@ -4726,7 +4739,7 @@ def run_preprocessing_qc_workflow(
     if scan is None or scan.cancelled:
         return False
 
-    prefetch = _start_qc_source_prefetch(host, active_infos, params)
+    prefetch = _start_qc_source_prefetch(host, active_infos, params, execution_backend="process")
     try:
         scan = _review_marker_occurrences(
             host,

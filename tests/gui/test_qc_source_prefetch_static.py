@@ -36,7 +36,8 @@ def test_prefetch_starts_with_step_two_and_finishes_on_every_review_exit(tmp_pat
         trace.append("scan")
         return scan
 
-    def start(*_args):
+    def start(*_args, **kwargs):
+        assert kwargs == {"execution_backend": "process"}
         trace.append("prefetch")
         return prefetch
 
@@ -134,6 +135,8 @@ def test_gui_worker_and_embedded_scan_forward_run_owned_prefetch():
                      and isinstance(node.func, ast.Name) and node.func.id == "scan_kurtosis_review")
     status_callback = next(keyword.value for keyword in scan_call.keywords if keyword.arg == "status_progress")
     assert ast.unparse(status_callback) == "self.status_progress.emit"
+    backend = next(keyword.value for keyword in scan_call.keywords if keyword.arg == "execution_backend")
+    assert isinstance(backend, ast.Constant) and backend.value == "process"
     embedded = next(node for node in tree.body if getattr(node, "name", None) == "_run_kurtosis_review_scan_embedded")
     assert any(
         isinstance(node, ast.Call)
@@ -141,6 +144,67 @@ def test_gui_worker_and_embedded_scan_forward_run_owned_prefetch():
         and [ast.unparse(argument) for argument in node.args] == ["bridge.on_status_progress"]
         for node in ast.walk(embedded)
     )
+
+
+@pytest.mark.parametrize("worker_limit", [None, 1, 3])
+def test_review_worker_preserves_explicit_pool_limit_and_signal_callbacks(worker_limit):
+    tree = ast.parse(WORKFLOW.read_text(encoding="utf-8"))
+    worker_node = next(node for node in tree.body if getattr(node, "name", None) == "_KurtosisReviewWorker")
+    module = ast.Module(body=[ast.ImportFrom(module="__future__", names=[ast.alias(name="annotations")], level=0), worker_node], type_ignores=[])
+    captured = {}
+    result = object()
+
+    class SignalDouble:
+        def __init__(self):
+            self.emissions = []
+
+        def emit(self, *values):
+            self.emissions.append(values)
+
+    def scan(infos, settings, **kwargs):
+        captured.update(infos=infos, settings=settings, **kwargs)
+        kwargs["progress"]("Preparing", 0, 1)
+        kwargs["status_progress"]("Current coverage")
+        return result
+
+    namespace = {
+        "QObject": object, "Signal": lambda *_args: SignalDouble(),
+        "Slot": lambda *_args: lambda method: method, "scan_kurtosis_review": scan,
+        "logger": SimpleNamespace(exception=lambda *_args: pytest.fail("Worker failed")),
+    }
+    exec(compile(ast.fix_missing_locations(module), str(WORKFLOW), "exec"), namespace)
+    worker = namespace["_KurtosisReviewWorker"](
+        ["source"], {"experimental_ram_preload": True}, event_map={"Faces": 1},
+        reviewed_event_plans_by_file={}, raw_channel_qc_by_recording={},
+        max_workers=worker_limit,
+    )
+    worker.run()
+    assert captured["max_workers"] == worker_limit
+    assert captured["execution_backend"] == "process"
+    assert captured["settings"]["experimental_ram_preload"] is True
+    assert not captured["should_cancel"]()
+    assert worker.progress.emissions == [("Preparing", 0, 1)]
+    assert worker.status_progress.emissions == [("Current coverage",)]
+    assert worker.finished.emissions == [(result,)]
+    worker.cancel()
+    assert captured["should_cancel"]()
+
+
+@pytest.mark.parametrize("resolved_limit,preprocessing_override,expected", [
+    (1, 6, 1), (2, 0, 2), (None, 3, 3), (None, 0, None),
+])
+def test_embedded_review_uses_normal_resolved_worker_cap(resolved_limit, preprocessing_override, expected):
+    tree = ast.parse(WORKFLOW.read_text(encoding="utf-8"))
+    embedded = next(node for node in tree.body if getattr(node, "name", None) == "_run_kurtosis_review_scan_embedded")
+    call = next(node for node in ast.walk(embedded) if isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name) and node.func.id == "_KurtosisReviewWorker")
+    value = next(keyword.value for keyword in call.keywords if keyword.arg == "max_workers")
+    host = SimpleNamespace(
+        max_workers=resolved_limit,
+        currentProject=SimpleNamespace(preprocessing={"max_parallel_workers_override": preprocessing_override}),
+    )
+    limit = eval(compile(ast.Expression(value), str(WORKFLOW), "eval"), {"host": host})
+    assert limit == expected
 
 
 def test_optional_prefetch_setup_failure_falls_back_without_starting_thread(tmp_path):
@@ -167,6 +231,24 @@ def test_optional_prefetch_setup_failure_falls_back_without_starting_thread(tmp_
     assert warnings == [True]
     assert constructor_arguments == [(tmp_path, infos, params)]
     assert constructor_arguments[0][2] is params
+
+
+@pytest.mark.parametrize("ram_preload", [False, True])
+def test_process_review_does_not_stage_unusable_parent_raw_arrays(tmp_path, ram_preload):
+    tree = ast.parse(WORKFLOW.read_text(encoding="utf-8"))
+    helper = next(node for node in tree.body if getattr(node, "name", None) == "_start_qc_source_prefetch")
+    module = ast.Module(body=[ast.ImportFrom(module="__future__", names=[ast.alias(name="annotations")], level=0), helper], type_ignores=[])
+
+    def forbidden(*_args):
+        pytest.fail("Process review must not load or allocate parent-owned sources")
+
+    namespace = {"QcSourcePrefetch": forbidden, "QThread": forbidden}
+    exec(compile(ast.fix_missing_locations(module), str(WORKFLOW), "exec"), namespace)
+    host = SimpleNamespace(currentProject=SimpleNamespace(project_root=tmp_path))
+    assert namespace["_start_qc_source_prefetch"](
+        host, [object()], {"reject_thresh": 5, "experimental_ram_preload": ram_preload},
+        execution_backend="process",
+    ) is None
 
 
 def test_exclusion_refresh_is_optional_and_forwards_cleared_settings():

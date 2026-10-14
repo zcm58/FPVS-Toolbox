@@ -44,6 +44,35 @@ def _identity(raw, params):
     return cache.checkpoint_identity(raw, params, preprocess._build_preproc_fingerprint(params))
 
 
+@pytest.mark.parametrize("changed_field,changed_value", [
+    ("num_threads", 2),
+    ("version", "changed-library-version"),
+    ("filepath", "/other/library"),
+])
+def test_checkpoint_identity_distinguishes_native_reduction_policy(
+    recording, monkeypatch, changed_field, changed_value,
+):
+    raw, params, _source = recording
+    pool = {
+        "user_api": "blas", "internal_api": "openblas", "prefix": "numpy_blas",
+        "version": "1", "filepath": "/library", "architecture": "cpu",
+        "threading_layer": "pthreads", "num_threads": 1,
+    }
+    monkeypatch.setattr(cache, "threadpool_info", lambda: [dict(pool)])
+    before = _identity(raw, params)
+    assert before is not None
+    pool[changed_field] = changed_value
+    after = _identity(raw, params)
+    assert after is not None and after.key != before.key
+
+
+@pytest.mark.parametrize("pools", [[], [{"user_api": "blas", "num_threads": 0}]])
+def test_checkpoint_unknown_native_policy_disables_exact_reuse(recording, monkeypatch, pools):
+    raw, params, _source = recording
+    monkeypatch.setattr(cache, "threadpool_info", lambda: pools)
+    assert _identity(raw, params) is None
+
+
 def test_checkpoint_exposes_existing_source_digest_without_extra_hash_or_raw_state(recording, monkeypatch):
     raw, params, source = recording
     before = set(vars(raw))

@@ -18,6 +18,7 @@ import re
 import mne
 import numpy as np
 import scipy
+from threadpoolctl import threadpool_info
 
 from Main_App.io.eeg_geometry import read_raw_biosemi64_geometry
 from Main_App.processing.kurtosis_qc import (
@@ -27,7 +28,7 @@ from Main_App.processing.kurtosis_qc import (
 from Main_App.processing.prepared_raw_codec import decode_state, encode_state, raw_state, restore_raw
 
 logger = logging.getLogger(__name__)
-CHECKPOINT_VERSION = "prepared_kurtosis_float64_v1"
+CHECKPOINT_VERSION = "prepared_kurtosis_float64_v2_native_threads"
 _PREFIX_STATE_KEYS = (
     "_fpvs_initial_ref_ok", "_fpvs_initial_ref_pair",
     "_fpvs_fft_multinotch_requested_centers_hz", "_fpvs_fft_multinotch_applied_centers_hz",
@@ -84,6 +85,34 @@ def _contained(identity: CheckpointIdentity) -> bool:
     return identity.folder.resolve().is_relative_to(identity.project_root)
 
 
+def _native_execution_identity() -> tuple | None:
+    """Bind exact prepared samples to the loaded BLAS reduction policy.
+
+    The library thread count can change FIR coefficient bytes even when all
+    scientific parameters agree. Inspect it without changing the caller's
+    process-wide numerical configuration; unknown policies disable reuse.
+    """
+    try:
+        pools = []
+        for pool in threadpool_info():
+            if pool.get("user_api") != "blas":
+                continue
+            threads = pool.get("num_threads")
+            if type(threads) is not int or threads < 1:
+                return None
+            required = tuple(pool.get(key) for key in (
+                "filepath", "prefix", "internal_api", "version",
+            ))
+            if not all(isinstance(value, str) and value for value in required):
+                return None
+            pools.append((*required, pool.get("threading_layer"),
+                          pool.get("architecture"), threads))
+        return tuple(sorted(pools, key=repr)) if pools else None
+    except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
+        logger.debug("prepared_kurtosis_native_identity_unavailable", exc_info=True)
+        return None
+
+
 def checkpoint_identity(raw, params: dict, preprocessing_fingerprint: str) -> CheckpointIdentity | None:
     if params.get("enable_kurtosis_checkpoint_cache", True) is not True:
         return None
@@ -92,6 +121,9 @@ def checkpoint_identity(raw, params: dict, preprocessing_fingerprint: str) -> Ch
     if not project_root or not source_path or not params.get("reject_thresh"):
         return None
     try:
+        native_identity = _native_execution_identity()
+        if native_identity is None:
+            return None
         root, source = Path(project_root).resolve(), Path(source_path).resolve()
         before = _stat(source)
         with source.open("rb") as stream:
@@ -120,6 +152,7 @@ def checkpoint_identity(raw, params: dict, preprocessing_fingerprint: str) -> Ch
             "version": CHECKPOINT_VERSION, "source_path": str(source), "source_stat": before,
             "source_sha256": digest, "mne_version": mne.__version__,
             "numpy_version": np.__version__, "scipy_version": scipy.__version__,
+            "native_execution_identity": native_identity,
             "method_version": KURTOSIS_QC_METHOD_VERSION,
             "authority_version": KURTOSIS_AUTHORITY_POLICY_VERSION,
             "registry_fingerprint": CURRENT_KURTOSIS_CORROBORATOR_REGISTRY.fingerprint,

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 import time
 from typing import Sequence
 
@@ -10,7 +9,6 @@ import numpy as np
 
 from Main_App.exports.figure_style import (
     FIGURE_STANDARD_LANDSCAPE_SIZE_IN,
-    apply_axis_text_style,
     figure_legend_kwargs,
     figure_text_kwargs,
 )
@@ -19,12 +17,12 @@ from Tools.Plot_Generator.render_naming import (
     claim_figure_stem,
 )
 from Tools.Plot_Generator.rendering import (
-    _add_reference_lines,
     _closest_frequency_indices,
     plt,
 )
 from Tools.Plot_Generator.session_aggregation import SessionSNRAggregation
 from Tools.Plot_Generator.export_plan import save_worker_figure_pair
+from Tools.Plot_Generator.spectrum_style import add_stimulation_schematic, style_spectrum_axis
 
 FIXED_ORDER_CAVEAT = (
     "Phase is confounded with visit order and elapsed time because every participant "
@@ -69,8 +67,6 @@ class SessionPlotRenderingMixin:
                 squeeze=False,
                 figsize=(standard_width, standard_height * row_count),
             )
-            tick_start = math.ceil(self.x_min)
-            tick_end = math.floor(self.x_max) + 1
             for row, group_id in enumerate(aggregation.group_ids):
                 ax = axes[row, 0]
                 ax.set_title(
@@ -85,7 +81,7 @@ class SessionPlotRenderingMixin:
                         f"n={cell.participant_n_roi})"
                     )
                     color = colors[session_index % len(colors)]
-                    ax.plot(frequency_array, values, color=color, label=label)
+                    ax.plot(frequency_array, values, color=color, label=label, linewidth=0.8)
                     if oddball_indices.size:
                         ax.scatter(
                             frequency_array[oddball_indices],
@@ -96,31 +92,10 @@ class SessionPlotRenderingMixin:
                             s=22,
                             zorder=4,
                         )
-                ax.set_xlim(self.x_min, self.x_max)
-                ax.set_ylim(self.y_min, self.y_max)
-                ax.set_xticks(range(tick_start, tick_end))
-                _add_reference_lines(
-                    ax,
-                    x_min=self.x_min,
-                    x_max=self.x_max,
-                    y_min=self.y_min,
-                    y_max=self.y_max,
-                    tick_start=tick_start,
-                    tick_end=tick_end,
-                )
-                if not self.use_matlab_style:
-                    ax.axhline(1.0, color="gray", linestyle="--", linewidth=1)
-                ax.set_ylabel(self.ylabel, **figure_text_kwargs("axis_label"))
-                ax.set_xlabel(self.xlabel, **figure_text_kwargs("axis_label"))
-                ax.legend(loc="upper right", frameon=True, **figure_legend_kwargs())
-                ax.grid(axis="y", linestyle=":", linewidth=0.8, color="gray")
-                apply_axis_text_style(ax)
+                style_spectrum_axis(ax, self, self._visible_oddball_frequencies(frequencies))
+                ax.legend(loc="upper right", frameon=False, **figure_legend_kwargs())
 
             figure_title = self.title or aggregation.condition
-            fig.suptitle(
-                f"{figure_title} — {roi}",
-                **figure_text_kwargs("panel_label"),
-            )
             fig.text(
                 0.5,
                 0.012,
@@ -130,7 +105,8 @@ class SessionPlotRenderingMixin:
                 wrap=True,
                 **figure_text_kwargs("small"),
             )
-            fig.tight_layout(rect=(0.0, 0.055, 1.0, 0.95))
+            fig.tight_layout(rect=(0.0, 0.055, 1.0, 1.0))
+            add_stimulation_schematic(fig, self)
             if self._cancellation_checkpoint():
                 plt.close(fig)
                 return

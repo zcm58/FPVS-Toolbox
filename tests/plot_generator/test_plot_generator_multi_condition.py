@@ -216,13 +216,16 @@ def test_large_legend_is_below_axes_and_fits_full_size_text(tmp_path, monkeypatc
     assert figure.get_size_inches()[1] > FIGURE_STANDARD_LANDSCAPE_SIZE_IN[1]
     # A legend must not shrink the publication data area to make room for text.
     from Tools.Plot_Generator.rendering import plt
+    from Tools.Plot_Generator.spectrum_style import style_spectrum_axis
     reference, reference_ax = plt.subplots(figsize=FIGURE_STANDARD_LANDSCAPE_SIZE_IN)
-    reference_ax.set(xlim=(1, 2.4), ylim=(0, 10), xlabel="Frequency (Hz)", ylabel="SNR")
-    reference_ax.set_xticks([1, 2])
+    style_spectrum_axis(reference_ax, worker, worker._visible_oddball_frequencies(FREQUENCIES))
     reference.tight_layout()
     assert ax.get_window_extent(renderer).height / figure.dpi == pytest.approx(
         reference_ax.get_window_extent().height / reference.dpi, abs=0.01
     )
+    key = figure.axes[-1]
+    assert key.get_label() == "stimulation_schematic"
+    assert key.get_tightbbox(renderer).y1 < bbox.y0
     plt.close(reference)
 
 

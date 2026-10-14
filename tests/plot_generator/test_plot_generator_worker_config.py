@@ -28,9 +28,9 @@ def _config_kwargs(tmp_path):
 def test_worker_config_defaults_match_worker_constructor(tmp_path) -> None:
     config = PlotWorkerConfig(**_config_kwargs(tmp_path))
 
-    assert config.stem_color == "red"
+    assert config.stem_color == "#3210e8"
     assert config.condition_b is None
-    assert config.stem_color_b == "blue"
+    assert config.stem_color_b == "#d62728"
     assert config.oddballs is None
     assert config.use_matlab_style is False
     assert config.overlay is False

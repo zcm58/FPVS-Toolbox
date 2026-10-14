@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 import time
 from typing import Dict, List
 
@@ -11,10 +10,7 @@ import numpy as np
 
 from Main_App.exports.figure_style import (
     FIGURE_STANDARD_LANDSCAPE_SIZE_IN,
-    apply_axis_text_style,
     apply_matplotlib_figure_style,
-    figure_legend_kwargs,
-    figure_text_kwargs,
 )
 from Tools.Plot_Generator.render_naming import (
     GROUP_OVERLAY_SUFFIX,
@@ -24,6 +20,11 @@ from Tools.Plot_Generator.render_naming import (
 )
 from Tools.Plot_Generator.export_plan import save_worker_figure_pair
 from Tools.Plot_Generator.overlay_legend import add_condition_overlay_legend
+from Tools.Plot_Generator.spectrum_style import (
+    add_stimulation_schematic,
+    highlight_base_responses,
+    style_spectrum_axis,
+)
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -93,42 +94,6 @@ def _closest_frequency_indices(
         [int(np.abs(frequencies - target).argmin()) for target in targets],
         dtype=int,
     )
-
-
-def _add_reference_lines(
-    ax,
-    *,
-    x_min: float,
-    x_max: float,
-    y_min: float,
-    y_max: float,
-    tick_start: int,
-    tick_end: int,
-) -> None:
-    """Draw the existing integer reference grid with two collections."""
-
-    vertical = list(range(max(1, tick_start), tick_end))
-    if vertical:
-        ax.vlines(
-            vertical,
-            y_min,
-            y_max,
-            color="lightgray",
-            linestyle="--",
-            linewidth=0.5,
-            zorder=0,
-        )
-    horizontal = list(range(math.ceil(y_min), math.floor(y_max) + 1))
-    if horizontal:
-        ax.hlines(
-            horizontal,
-            x_min,
-            x_max,
-            color="lightgray",
-            linestyle="--",
-            linewidth=0.5,
-            zorder=0,
-        )
 
 
 class PlotRenderingMixin:
@@ -204,7 +169,7 @@ class PlotRenderingMixin:
                             sample_size,
                         ),
                         color=color,
-                        linewidth=2.0,
+                        linewidth=0.8,
                     )
                     plotted = True
                 if not plotted:
@@ -222,6 +187,7 @@ class PlotRenderingMixin:
                     freqs,
                     amps,
                     color=self.stem_color,
+                    linewidth=0.8,
                     label=_label_with_sample_size(
                         self._resolve_legend_label(
                             self.legend_condition_a,
@@ -233,6 +199,7 @@ class PlotRenderingMixin:
                 self._emit(
                     f"Plotted {len(amps)} SNR values for ROI {roi}", 0, 0
                 )
+                highlight_base_responses(ax, freq_array, amps, self)
 
             if oddball_indices.size:
                 marker_frequencies = freq_array[oddball_indices]
@@ -268,9 +235,10 @@ class PlotRenderingMixin:
                     ax.scatter(
                         marker_frequencies,
                         np.asarray(amps, dtype=float)[oddball_indices],
-                        marker="o",
-                        facecolor=self.stem_color,
-                        edgecolor="black",
+                        marker="|",
+                        color=self.stem_color,
+                        s=12,
+                        linewidths=0.7,
                         zorder=4,
                         label=self._resolve_legend_label(
                             self.legend_a_peaks,
@@ -292,33 +260,9 @@ class PlotRenderingMixin:
                     0,
                 )
 
-            tick_start = math.ceil(self.x_min)
-            tick_end = math.floor(self.x_max) + 1
-            ax.set_xticks(range(tick_start, tick_end))
-            ax.set_xlim(self.x_min, self.x_max)
-            ax.set_ylim(self.y_min, self.y_max)
-            _add_reference_lines(
-                ax,
-                x_min=self.x_min,
-                x_max=self.x_max,
-                y_min=self.y_min,
-                y_max=self.y_max,
-                tick_start=tick_start,
-                tick_end=tick_end,
-            )
-            if not self.use_matlab_style:
-                ax.axhline(1.0, color="gray", linestyle="--", linewidth=1)
-
-            handles, _labels = ax.get_legend_handles_labels()
-            if handles:
-                ax.legend(loc="upper right", frameon=True, **figure_legend_kwargs())
-
-            ax.set_xlabel(self.xlabel, **figure_text_kwargs("axis_label"))
-            ax.set_ylabel(self.ylabel, **figure_text_kwargs("axis_label"))
-            apply_axis_text_style(ax)
-            ax.grid(axis="y", linestyle=":", linewidth=0.8, color="gray")
-
-            fig.tight_layout()
+            style_spectrum_axis(ax, self, odd_freqs)
+            add_condition_overlay_legend(fig, ax)
+            add_stimulation_schematic(fig, self)
             if self._cancellation_checkpoint():
                 plt.close(fig)
                 return
@@ -383,7 +327,7 @@ class PlotRenderingMixin:
 
             for index, (condition, data) in enumerate(zip(conditions, datasets)):
                 ax.plot(
-                    freqs, data[roi], color=colors[index],
+                    freqs, data[roi], color=colors[index], linewidth=0.8,
                     label=_label_with_sample_size(
                         self._resolve_legend_label(labels[index], condition),
                         self.overlay_roi_sample_sizes.get(condition, {}).get(roi),
@@ -402,39 +346,10 @@ class PlotRenderingMixin:
                         ),
                     )
 
-            tick_start = math.ceil(self.x_min)
-            tick_end = math.floor(self.x_max) + 1
-            ax.set_xticks(range(tick_start, tick_end))
-            ax.set_xlim(self.x_min, self.x_max)
-            ax.set_ylim(self.y_min, self.y_max)
-
-            _add_reference_lines(
-                ax,
-                x_min=self.x_min,
-                x_max=self.x_max,
-                y_min=self.y_min,
-                y_max=self.y_max,
-                tick_start=tick_start,
-                tick_end=tick_end,
-            )
-
-            if not self.use_matlab_style:
-                ax.axhline(1.0, color="gray", linestyle="--", linewidth=1)
-
-            handles, _labels = ax.get_legend_handles_labels()
-            if handles and len(conditions) == 2:
-                ax.legend(loc="upper right", frameon=True, **figure_legend_kwargs())
-
-            ax.set_xlabel(self.xlabel, **figure_text_kwargs("axis_label"))
-            ax.set_ylabel(self.ylabel, **figure_text_kwargs("axis_label"))
-            apply_axis_text_style(ax)
+            style_spectrum_axis(ax, self, odd_freqs)
             base = self.title or condition_overlay_title(conditions)
-            ax.grid(axis="y", linestyle=":", linewidth=0.8, color="gray")
-
-            if len(conditions) > 2:
-                add_condition_overlay_legend(fig, ax)
-            else:
-                fig.tight_layout()
+            add_condition_overlay_legend(fig, ax)
+            add_stimulation_schematic(fig, self)
             if self._cancellation_checkpoint():
                 plt.close(fig)
                 return

@@ -2,6 +2,50 @@
 
 ## Status
 
+### Adaptive QC-16 process preparation (2026-10-13)
+
+The user authorized replacing the GUI's serial kurtosis preparation with a
+modular multicore implementation that scales across CPU designs. A live Birth
+Control 2 scan selected one recording job from a transient prefetch snapshot
+and retained it after loading finished. Its first six complete recordings had
+median raw diagnostics of 11.61 s and preparation/evidence of 29.12 s, while
+the kurtosis calculation itself took about 0.30 s. The scan was cancelled safely;
+these partial observations are not a RAM-preload comparison.
+
+- [x] Add a review-only spawned pool reusing the normal worker initialization,
+  native thread policy, private memmaps, FIR cache and shared preparation.
+- [x] Size concurrency from CPU capacity, main RAM tiers/override, and half
+  available RAM using conservative recording-size estimates; retain a one-job
+  fallback for constrained hosts and preserve excluded/error accounting.
+- [x] Keep GUI review, interpolation authority and exports outside review jobs;
+  avoid unusable parent source staging, preserve cancellation and input order.
+- [x] Bind prepared checkpoints to native library/thread identity. Characterization
+  found a maximum 2.1684e-19 V sample difference between native 1/24-thread
+  preparation; cross-policy float/evidence bytes are not an equivalence claim.
+  Serial and concurrent processes under the same one-thread policy, and FIR
+  cache miss/hit preparation, match exact scientific bytes in synthetic tests.
+- [x] Complete local verification: processing focused 2,158 passed/6 skipped;
+  GUI static checks passed; broad precommit audits, Ruff and compilation passed,
+  with 5,441 pytest cases passed/24 skipped and one Windows `WinError 5` during
+  an unrelated temporary-file replacement. The complete affected test module
+  passed on immediate rerun (4 passed); the broad command itself remains failed.
+- [x] Visible Birth Control 2 preparation smoke: spawned two review workers,
+  remained responsive before Windows locked, and completed 58/58 jobs without
+  cancellation. OFF preparation took 1,099.684 s; sampled peak process-tree RSS
+  was 6.542 GiB, maximum active workers 2, and mean per-worker CPU 93.54% of one
+  core. This is one preparation phase, not a completed OFF/ON comparison.
+- [ ] Run comparable RAM-preload OFF/ON GUI trials on this same implementation,
+  recording compute time separately from review waits, peak RAM and worker use;
+  then run primary normalized-SNR FHC and the authorized exploratory raw-BCA
+  companion using identical domain/cohort/comparison recipes.
+
+The new pool owner is `src/Main_App/workers/kurtosis_review_process.py`;
+`processing/kurtosis_review_scan.py` owns classification and legacy thread
+compatibility, and `gui/preprocessing_qc_workflow.py` selects process execution.
+No preprocessing order, statistical profile, raw recording, condition, trigger,
+or output format is changed. Architecture docs record the scheduling ownership
+and exact-checkpoint guard; the user-method contracts do not change.
+
 The 2026-09-08 follow-up starts from `164e6dce` on a new branch,
 `codex/bitwise-performance-followup`, created from `codex/preprocessing-qc-v3`.
 The user authorized implementation of the investigation's fingerprint hoist,

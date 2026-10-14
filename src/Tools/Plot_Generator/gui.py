@@ -180,7 +180,7 @@ class PlotGeneratorWindow(
         self._defaults = {
             "title_snr": "SNR Plot",
             "xlabel": "Frequency (Hz)",
-            "ylabel_snr": "SNR",
+            "ylabel_snr": "Signal to Noise Ratio",
             "x_min": "0.0",
             "x_max": plot_x_max_default,
             "y_min_snr": "0.5",

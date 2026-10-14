@@ -30,6 +30,8 @@ Current ownership map:
   orchestration, finished payload emission, and compatibility re-exports for
   older imports.
 - `worker_config.py`: `_Worker` constructor payload dataclass.
+- `plot_settings.py`: persisted plot colors, with publication defaults applied
+  only when a preference is absent.
 - `excel_inputs.py`: thin shared participant-identity adapter plus
   frequency-column helpers.
 - `full_snr_reader.py`: companion-aware shared workbook session, with the
@@ -61,6 +63,8 @@ Current ownership map:
   shared-grid validation, aggregation, and source-curve bookkeeping.
 - `overlay_legend.py`: measured wrapping and figure-height allocation for
   condition legends outside the data axes.
+- `spectrum_style.py`: open spectrum axes, rate-derived harmonic ticks in Hz,
+  original-value base-peak highlighting, and the illustrative timing key.
 - `session_controls.py`: pure canonical session-selector state;
   `session_selection.py` owns its GUI binding and request validation, while
   `session_rendering.py` owns the figure-only fixed-order interpretation caveat.
@@ -83,6 +87,18 @@ v2.1 project contract:
   figure width and height allocation. Show participant `n`, visit indices, and
   the fixed-order phase/order/time confounding caveat in the figure only; omit
   the caveat from the compact GUI controls.
+- Spectrum output uses open left/bottom axes without a reference grid, thin
+  traces, and numeric harmonic ticks in Hz derived from frozen processing rates and the
+  existing technical oddball domain. A single spectrum overdraws its original
+  base-frequency segments in black; overlays retain their per-curve colors
+  and distinct peak markers. Legends wrap outside ordinary data axes. Append
+  one illustrative stimulus/response key below each figure, preserving the
+  physical size of its data panels and legends. Only depict every-Nth-stimulus
+  timing when F/f is an integer from 2 to 12; otherwise show the numeric rates.
+  Manuscript titles and captions stay outside the artwork, including session
+  figures; titles still determine filenames. Canonical group panel labels,
+  participant counts, and the session interpretation caveat remain annotations.
+  New color defaults are blue/purple for A and red for B; preserve saved colors.
 
 - `Main_App.projects.dataset_index` is the sole owner of processed-workbook
   discovery and participant/group identity. Plot Generator may keep thin
@@ -147,7 +163,7 @@ v2.1 project contract:
 - Never draw a condition overlay unless every accepted condition grid matches.
   Report the mismatch and write no overlay rather than plotting any condition's
   values against another condition's physical frequencies.
-- Three-to-five-condition legends belong below the axes. Wrap long labels and
+- All ordinary spectrum legends belong below the axes. Wrap long labels and
   grow the figure vertically to retain the data area's physical height and
   shared publication typography; do not shrink text or cover findings.
 - Resolve the selected input folder through the shared dataset index before
@@ -256,6 +272,17 @@ focus the conflicting selector, and disappear after correction. Change the
 condition count and verify hidden rows do not enter the request. Generate a
 five-condition plot with long legend labels and check all curves, distinct
 markers, participant counts, and complete labels below the axes in both files.
+
+Visible smoke for publication styling: generate one condition/ROI, a condition
+overlay, a group overlay, and a session comparison. In both PNG and PDF, verify
+open axes, readable harmonic frequencies in Hz and numeric rates, unchanged axis ranges, a clear
+timing key below all data/legend content, and no manuscript title or caption.
+Check a non-integer F/f ratio shows rates without a pulse sequence. Verify
+session group labels, participant n, visit indices, and the interpretation
+caveat remain visible. Inspect the PNG's 600-DPI metadata, compare PNG/PDF
+physical dimensions, and verify filenames and the selected output folder are
+unchanged. Existing saved colors should remain; missing preferences use the
+blue/red defaults. Leave local Qt execution to CI unless explicitly approved.
 
 Future feature/fix plans:
 

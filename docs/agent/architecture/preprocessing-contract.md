@@ -110,6 +110,19 @@ from scientific processing fingerprints and cache identity. Switching it does
 not change preprocessing order, rates, numerical methods, or exports. A cache
 hit skips BDF loading, so speed comparisons must use comparable cache misses.
 
+GUI kurtosis-review preparation uses the same numerical stages in a spawned,
+CPU/RAM-budgeted review-only process pool. It stops before interpolation and
+final reference, saves exact prepared state, and returns evidence for review;
+the ordinary process runner continues from that state after approval. Both
+pools use the same single-thread native numerical policy and per-worker bounded
+FIR cache. The prepared checkpoint version is
+`prepared_kurtosis_float64_v2_native_threads`: native BLAS library/thread identity
+is part of its cache key. Changing that policy requires fresh preparation because
+FIR coefficient reductions can differ in the last floating-point bits. Unknown
+native policy disables checkpoint reuse. Filtering, resampling, analysis-span,
+evidence, approval and export contracts remain unchanged; no GUI-global native
+thread policy is changed by the background review.
+
 The loader and preprocessed-Raw cache must supply a validated canonical
 BioSemi64 runtime identity before raw QC or preprocessing continues. Cache
 identity includes the montage, mapping profile, geometry/coordinate

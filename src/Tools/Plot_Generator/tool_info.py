@@ -11,6 +11,12 @@ SNR Plots reads the FullSNR sheets created during processing and generates
 participant-averaged spectra for the selected regions of interest. You can edit
 legend labels, colors, axis labels, and axis ranges. Every figure is exported
 directly to the selected plot folder as a matching 600-DPI PNG and PDF pair.
+Titles are used in filenames only; figures contain no manuscript title or
+caption. Open spectrum axes label oddball and base harmonics with their actual
+frequencies in Hz, using each plot's processing rates. An illustrative
+stimulus/response key below the spectrum shows the
+processing rates in Hz. It depicts two cycles when F/f is an integer from 2
+to 12; other ratios show the rates without inventing a stimulus sequence.
 </p>
 
 <h3>Typical Workflow</h3>
@@ -34,7 +40,7 @@ Detailed run messages and workbook warnings are available through
 Single-group projects can overlay two to five different conditions. Enable
 <b>Overlay Comparison</b> and choose the number of conditions, then select each
 condition and its color. Optional legend labels can shorten displayed names.
-For three or more conditions, the legend wraps below the axes and the figure
+The legend wraps below the axes and the figure
 grows vertically to keep the data area clear. <b>All Conditions</b> creates
 separate figures instead of an overlay. Multi-group projects use a
 one-condition group overlay based on participant assignments in project.json;

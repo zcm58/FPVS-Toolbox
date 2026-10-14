@@ -1226,3 +1226,74 @@ def test_reconciliation_reprompts_changed_evidence_as_stale(
     assert reconciled.pending_status_by_recording == {
         changed_item.recording_id: {changed_item.channel: KURTOSIS_REVIEW_PENDING_STALE}
     }
+
+
+def test_process_review_releases_prefetch_before_budgeting_only_eligible_inputs(tmp_path, monkeypatch):
+    from Main_App.workers import kurtosis_review_process as pool
+
+    path = (tmp_path / "P01.bdf").resolve()
+    path.touch()
+    excluded_path = tmp_path / "missing_excluded.bdf"
+    _configure_active_scan(monkeypatch, loaded_raws=[])
+    closed = []
+    source = SimpleNamespace(begin_consumption=lambda: True, close=lambda: closed.append(True))
+    infos = [_info(path, "P01"), _info(excluded_path, "excluded")]
+    updates = []
+    calling_thread = get_ident()
+
+    def budget(eligible, requested):
+        assert closed == [True]
+        assert [item.path for item in eligible] == [path]
+        assert requested == 4
+        return 1
+
+    def run(eligible, settings, *, result_progress, progress, max_workers, **kwargs):
+        assert get_ident() == calling_thread and max_workers == 1
+        scan = scan_module._scan_kurtosis_review_serial(
+            eligible, settings, event_map=kwargs["event_map"],
+            reviewed_event_plans_by_file=kwargs["reviewed_event_plans_by_file"],
+        )
+        result_progress(0, scan.results)
+        progress("Finished parallel review", 1, 1)
+        return scan
+
+    monkeypatch.setattr(pool, "review_process_worker_count", budget)
+    monkeypatch.setattr(pool, "run_process_review", run)
+    scan = scan_kurtosis_review(
+        infos, _settings(manual_excluded_participants=["excluded"], max_parallel_workers_override=4),
+        event_map={"Faces": 1, "Objects": 2},
+        reviewed_event_plans_by_file={str(path): {}}, source_prefetch=source,
+        execution_backend="process", status_progress=updates.append,
+    )
+    assert not scan.cancelled and not scan.errors
+    assert [result.path for result in scan.results] == [path, excluded_path]
+    _assert_progress_partition(updates, 2)
+    assert updates[-1].excluded_count == 1 and updates[-1].completed_eligible == 1
+
+
+def test_process_review_cancel_during_prefetch_release_never_starts_a_pool(tmp_path, monkeypatch):
+    from Main_App.workers import kurtosis_review_process as pool
+
+    path = (tmp_path / "P01.bdf").resolve()
+    path.touch()
+    _configure_active_scan(monkeypatch, loaded_raws=[])
+    cancelled = []
+    source = SimpleNamespace(begin_consumption=lambda: True, close=lambda: cancelled.append(True))
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("Cancelled review must not allocate or budget a pool")
+
+    monkeypatch.setattr(pool, "review_process_worker_count", forbidden)
+    monkeypatch.setattr(pool, "run_process_review", forbidden)
+    scan = scan_kurtosis_review(
+        [_info(path, "P01")], _settings(), event_map={"Faces": 1, "Objects": 2},
+        reviewed_event_plans_by_file={str(path): {}}, source_prefetch=source,
+        execution_backend="process", should_cancel=lambda: bool(cancelled),
+    )
+    assert scan.cancelled and scan.results == ()
+
+
+def test_unknown_review_backend_is_rejected_before_source_work(monkeypatch):
+    monkeypatch.setattr(scan_module, "_validate_review_request", lambda *_args: pytest.fail("Unexpected I/O"))
+    with pytest.raises(scan_module.KurtosisReviewScanError, match="execution backend"):
+        scan_kurtosis_review([], {}, event_map={}, execution_backend="unknown")

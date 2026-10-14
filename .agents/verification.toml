@@ -135,6 +135,8 @@ tests = [
   "tests/gui/test_frequency_domain_qc_dialog_static.py",
   "tests/processing/test_kurtosis_qc.py",
   "tests/processing/test_kurtosis_review_scan.py",
+    "tests/processing/test_kurtosis_review_process.py",
+    "tests/processing/test_kurtosis_review_process_parity.py",
   "tests/processing/test_kurtosis_audit_provenance.py",
   "tests/processing/test_preprocess_kurtosis_gate.py",
   "tests/processing/test_preprocessing_settings.py",
@@ -222,7 +224,7 @@ include = [
   "src/Tools/Individual_Detectability/**",
   "tests/workers/test_post_processing_pipeline_worker.py",
 ]
-manual_smoke = ["Start preprocessing at 1280x900. Leave step 2 open and confirm logs show background source preloads while Continue remains responsive. Continue through no-action marker/condition/exclusion summaries and the editable electrode review, then verify step 6 reports use of preloaded recordings and completes current decisions. Repeat by advancing immediately, changing review choices, and cancelling step 6. Verify temporary qc-source-* directories disappear when QC exits, and window Close is blocked while the prefetch bridge is active. Qt lifecycle tests are CI-only locally."]
+manual_smoke = ["Start preprocessing at 1280x900. Complete marker, condition and electrode review, then verify step 6 reports the resource-bounded process-worker count and several recordings advance concurrently when CPU/RAM permits. Confirm no parent source prefetch is staged, the GUI stays responsive, and Close is guarded while preparation is active. Cancel and restart to verify child Raw cleanup and exact prepared-checkpoint reuse, then apply decisions and confirm ordinary processing resumes before final reference and exports. Repeat with a project worker override of 1 and with RAM preload off/on; the override must remain an upper bound. Cross-CPU/RAM limits have non-Qt tests; Qt execution is CI-only unless a safe visible session is explicitly approved."]
 
 [scopes.plot-generator]
 audits = ["gui", "paths"]

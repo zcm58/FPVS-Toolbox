@@ -19,7 +19,7 @@ Common long-running work:
 - Plot generation and export.
 - Statistics pipeline runs.
 - File scanning over project folders.
-- Interactive preprocessing QC starts `QcSourcePrefetchWorker` when step 2
+- The optional thread-backend preprocessing-QC adapter starts `QcSourcePrefetchWorker` when step 2
   opens. Its QThread preloads sources sequentially, retains them through review,
   and closes them after the scanner releases its exclusive consumers. The
   worker's direct `request_finish()` uses thread-safe cancellation/events;
@@ -42,6 +42,24 @@ Common long-running work:
   table and Save / Next. These controls have no timed delay or preload-completion
   requirement. CI coverage is `tests/gui/test_qc_source_prefetch_qt.py`; local
   verification uses source-cache, scanner, orchestration, and worker doubles.
+- The standard GUI's QC-16 preparation uses the spawned review-only pool in
+  `Main_App.workers.kurtosis_review_process`. The background scan classifies
+  canonical exclusions and validates approved timing before scheduling eligible
+  recordings. Its worker count applies the main CPU/RAM-tier/override policy,
+  then reserves half currently available RAM using the largest concurrent BDF
+  estimates (at least 1 GiB or 24 times source bytes per recording). It has no
+  fixed two-job cap. Each process uses the existing main worker initializer,
+  single-thread numerical policy, private memmaps and bounded prepared-FIR cache.
+  Jobs call the shared serial evidence preparation and stop before interpolation,
+  final reference and exports. Only evidence/progress returns to the parent;
+  ordered results and all GUI callbacks remain on the background calling thread.
+  Cancellation stops submissions and cooperatively waits for active Raw owners
+  to close. The GUI skips parent source prefetch because Raw arrays cannot cross
+  the spawn boundary. An explicit thread-backend caller can retain the existing
+  prefetch adapter; a supplied prefetch is safely closed on the background scan
+  thread before a process pool is budgeted. Prepared checkpoints bind native
+  BLAS library/thread identity so earlier GUI-thread preparation cannot be reused
+  as exact single-thread worker preparation. Unknown native policy is a cache miss.
 - Main App processing runs now receive a precomputed incremental plan from
   `Main_App.processing.processing_ledger` before `MpRunnerBridge.start()`.
   Workers receive only the files selected by that plan. Multi-group runs also

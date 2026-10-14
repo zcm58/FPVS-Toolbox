@@ -50,7 +50,7 @@ def add_condition_overlay_legend(fig, ax) -> None:
     maximum_width = ((width - 0.4) / 2 - 0.65) * fig.dpi
     wrapped = [_wrap_legend_label(label, renderer, font, maximum_width) for label in labels]
     legend = fig.legend(
-        handles, wrapped, ncol=2, loc="lower center", frameon=True,
+        handles, wrapped, ncol=2, loc="lower center", frameon=False,
         borderaxespad=0, columnspacing=1.5, **figure_legend_kwargs(),
     )
     legend_height = legend.get_window_extent(renderer).height / fig.dpi
