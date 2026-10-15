@@ -12,7 +12,7 @@ import argparse
 import hashlib
 import logging
 import ssl
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Sequence
 from urllib.error import URLError
@@ -80,6 +80,7 @@ class MneFsaverageSourcePsdModel:
     forward_model: L2MNECorticalForwardModel
     info: Any
     inverse_operator: Any
+    native_leadfield: np.ndarray | None = field(default=None, repr=False, compare=False)
 
     @property
     def metadata(self) -> dict[str, Any]:
@@ -270,6 +271,7 @@ def build_mne_fsaverage_source_psd_model(
         forward_model=forward_model,
         info=resources.info,
         inverse_operator=resources.inverse_operator,
+        native_leadfield=resources.leadfield,
     )
 
 

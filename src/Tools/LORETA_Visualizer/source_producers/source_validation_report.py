@@ -16,6 +16,7 @@ from Main_App.io.atomic_write import atomic_write
 from typing import Any, Sequence
 
 from Tools.LORETA_Visualizer.source_producers.contracts import ProducedPayload
+from Tools.LORETA_Visualizer.source_producers.model_diagnostics import summarize_time_domain_inputs
 
 SOURCE_VALIDATION_REPORT_FORMAT = "fpvs-loreta-source-validation-report-v1"
 DEFAULT_SOURCE_VALIDATION_REPORT_JSON_NAME = "source_validation_report.json"
@@ -41,6 +42,8 @@ def write_project_source_validation_report(
     lateralization_summary_path: str | Path | None = None,
     lateralization_summary_csv_path: str | Path | None = None,
     forward_model_metadata: dict[str, Any] | None = None,
+    inverse_model_diagnostics: dict[str, Any] | None = None,
+    time_domain_records: Sequence[Any] = (),
     json_name: str = DEFAULT_SOURCE_VALIDATION_REPORT_JSON_NAME,
     markdown_name: str = DEFAULT_SOURCE_VALIDATION_REPORT_MARKDOWN_NAME,
 ) -> SourceValidationReportResult:
@@ -84,6 +87,8 @@ def write_project_source_validation_report(
         "participant_sidecar_summary": participant_summary,
         "lateralization_summary": lateralization_summary,
         "forward_model_summary": _forward_model_summary(forward_model_metadata or {}),
+        "inverse_model_diagnostics": dict(inverse_model_diagnostics or {}),
+        "input_model_provenance": summarize_time_domain_inputs(time_domain_records),
         "intended_scope": _intended_scope(),
         "validation_checks": _validation_checks(
             payloads=payloads,
@@ -127,6 +132,7 @@ def _payload_summary(payload: ProducedPayload) -> dict[str, Any]:
         "positive_value_count": sum(1 for value in values if value > 0.0),
         "cluster_mask": str(metadata.get("cluster_mask", "none")),
         "cluster_mask_status": str(metadata.get("cluster_mask_status", "")),
+        **_cluster_inference_summary(metadata),
         "cluster_mask_vertex_count": cluster_vertex_count,
         "cluster_mask_source_count": cluster_source_count,
         "cluster_mask_primary_display": bool(metadata.get("cluster_mask_primary_display", False)),
@@ -153,6 +159,7 @@ def _participant_sidecar_summary(path: Path | None) -> dict[str, Any]:
                 "participant_count": _int_or_none(condition.get("participant_count")),
                 "cluster_mask": str(cluster_mask.get("cluster_mask", "none")),
                 "cluster_mask_status": str(cluster_mask.get("cluster_mask_status", "")),
+                **_cluster_inference_summary(cluster_mask),
                 "cluster_mask_vertex_count": _int_or_none(cluster_mask.get("cluster_mask_vertex_count")),
                 "cluster_mask_source_count": _first_int(
                     cluster_mask.get("cluster_mask_source_index_count"),
@@ -354,6 +361,14 @@ def _forward_model_summary(metadata: dict[str, Any]) -> dict[str, Any]:
         "fixed_orientation",
         "depth_weighting",
         "noise_normalization",
+        "noise_covariance",
+        "average_reference_projection",
+        "regularization",
+        "source_psd_lambda2",
+        "source_psd_method_params",
+        "mne_inverse_method",
+        "mne_version",
+        "model_sfreq_hz",
         "fsaverage_subject",
         "fsaverage_spacing",
         "source_spacing",
@@ -364,6 +379,19 @@ def _forward_model_summary(metadata: dict[str, Any]) -> dict[str, Any]:
         "subject_mri",
     )
     return {key: metadata[key] for key in interesting_keys if key in metadata}
+
+
+def _cluster_inference_summary(metadata: dict[str, Any]) -> dict[str, Any]:
+    keys = (
+        "cluster_mask_algorithm_version", "cluster_mask_participant_count",
+        "cluster_permutation_count_requested", "cluster_permutation_count",
+        "cluster_permutation_mode", "cluster_p_value_estimator",
+        "cluster_minimum_attainable_p", "cluster_forming_p_value", "cluster_alpha",
+        "cluster_forming_statistic", "cluster_forming_tail", "cluster_forming_threshold",
+        "cluster_permutation_seed", "cluster_candidate_count",
+        "cluster_significant_cluster_count", "cluster_significant_clusters",
+    )
+    return {key: metadata[key] for key in keys if key in metadata}
 
 
 def _validation_checks(
@@ -487,6 +515,7 @@ def _markdown_report(report: dict[str, Any]) -> str:
         lines.append("")
     if not source_ineligible and not source_condition_omissions:
         lines.extend(("- No source-only participant omissions were recorded.", ""))
+    lines.extend(_model_diagnostic_markdown(report))
     lines.extend(
         (
             "## Intended Scope",
@@ -538,12 +567,74 @@ def _markdown_report(report: dict[str, Any]) -> str:
             f"{_format_number(payload['participant_count'])} | {value_range} | "
             f"{_format_number(payload['cluster_mask_source_count'])} |"
         )
+    inferential = [item for item in report["payload_summaries"] if "cluster_p_value_estimator" in item]
+    if inferential:
+        lines.extend((
+            "", "## Cluster Inference", "",
+            "| Payload | N | Sign flips | P-value estimator | Minimum attainable p |",
+            "| --- | ---: | ---: | --- | ---: |",
+        ))
+        for item in inferential:
+            lines.append(
+                f"| {_markdown_cell(item['file'])} | {item.get('cluster_mask_participant_count', '')} | "
+                f"{item.get('cluster_permutation_count', '')} | {item['cluster_p_value_estimator']} | "
+                f"{_format_number(item.get('cluster_minimum_attainable_p'))} |"
+            )
+        lines.extend((
+            "", "Cluster significance applies to retained clusters, not individual source locations. "
+            "The same one-sample mean-t mask can accompany different descriptive summaries.",
+        ))
     lines.extend(("", "## Limitations", ""))
     lines.extend(f"- {item}" for item in report["limitations"])
     lines.extend(("", "## Recommended Manual Checks", ""))
     lines.extend(f"- {item}" for item in report["recommended_manual_checks"])
     lines.append("")
     return "\n".join(lines)
+
+
+def _model_diagnostic_markdown(report: dict[str, Any]) -> list[str]:
+    lines = ["## Model Provenance", ""]
+    summary = report["forward_model_summary"]
+    for key, value in summary.items():
+        lines.append(f"- {key}: {_markdown_cell(value)}")
+    diagnostics = report["inverse_model_diagnostics"]
+    if diagnostics:
+        lines.extend((
+            f"- Model channels: {diagnostics['channel_count']}",
+            f"- Electrode geometry: {diagnostics['electrode_geometry']}",
+            f"- Participant coregistration: {diagnostics['participant_coregistration']}",
+            "- Participant data rank: not measured",
+        ))
+        covariance = diagnostics.get("model_noise_covariance", {})
+        if covariance:
+            lines.append(
+                "- Model noise covariance diagonal variance (V²): "
+                f"{covariance['variance_min']:.6g} to {covariance['variance_max']:.6g}"
+            )
+        for projection in diagnostics["projections"]:
+            lines.append(
+                f"- Model projector: {_markdown_cell(projection['description'])}; "
+                f"active in model Info: {_yes_no(projection['active'])}"
+            )
+    rows = report["input_model_provenance"]
+    if rows:
+        lines.extend((
+            "", "## Input Reference And Interpolation Provenance", "",
+            "| Participant | Condition | Channels | Remaining bad channels | Interpolation provenance |",
+            "| --- | --- | ---: | --- | --- |",
+        ))
+        for row in rows:
+            lines.append(
+                f"| {_markdown_cell(row['participant_id'])} | {_markdown_cell(row['condition_label'])} | "
+                f"{row['channel_count']} | {_markdown_cell(_join_values(row['bad_channels']))} | "
+                f"{row['interpolation_provenance_status']} |"
+            )
+        lines.extend((
+            "", "Committed reference, geometry, and available condition-interpolation details are retained in the JSON report.",
+            "An empty remaining-bad-channel list does not establish that no channels were interpolated.",
+        ))
+    lines.append("")
+    return lines
 
 
 def _read_json(path: Path) -> dict[str, Any]:

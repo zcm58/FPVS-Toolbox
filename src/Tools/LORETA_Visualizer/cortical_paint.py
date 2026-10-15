@@ -94,8 +94,7 @@ def payload_cluster_mask_is_underpowered(payload: SourcePayload) -> bool:
     """Return whether cluster inference is unavailable or resolution-limited.
 
     A single participant cannot support the one-sample permutation stage.
-    Larger small samples use exact sign flips; with the producer's plus-one
-    p-value correction, some exact tests cannot reach the selected alpha even
+    Some finite sign-flip distributions cannot reach the selected alpha even
     when the source z-score field is large. In either case, display should use
     the exploratory threshold instead of implying a group-level null result.
     """
@@ -108,14 +107,19 @@ def payload_cluster_mask_is_underpowered(payload: SourcePayload) -> bool:
     if _cluster_mask_retained_count(payload) != 0:
         return False
     alpha = _optional_float(metadata.get("cluster_alpha"))
-    permutation_count = _optional_int(metadata.get("cluster_permutation_count"))
-    if alpha is None or permutation_count is None or permutation_count < 1:
+    if alpha is None:
         return False
     return payload_cluster_mask_minimum_p(payload) > alpha
 
 
 def payload_cluster_mask_minimum_p(payload: SourcePayload) -> float:
     """Return the smallest possible cluster p-value from payload metadata."""
+    # New producers save the inference resolution. Display code reads it and
+    # never reconstructs a permutation distribution or changes a saved mask.
+    minimum_p = _optional_float(payload.metadata.get("cluster_minimum_attainable_p"))
+    if minimum_p is not None and 0.0 < minimum_p <= 1.0:
+        return minimum_p
+    # Preserve the historical display fallback for older, unversioned payloads.
     permutation_count = _optional_int(payload.metadata.get("cluster_permutation_count"))
     if permutation_count is None or permutation_count < 1:
         return float("nan")

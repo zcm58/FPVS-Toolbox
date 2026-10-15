@@ -149,6 +149,11 @@ preprocessing, project I/O, diagnostics, or unrelated tool packages.
   with only one eligible participant still writes its descriptive source-map
   summaries, but the producer must skip permutation inference, log the reason,
   and mark the cluster mask as unavailable due to insufficient participants.
+- New masks use `cluster_mask_algorithm_version=2`: exhaustive sign flips use
+  the exact tail proportion, sampled flips use the plus-one estimator. Record
+  actual/requested flips, exact/sampled mode, and minimum attainable p in
+  payloads and reports. Keep inverse method IDs/cache keys unchanged. Historical
+  unversioned masks retain their saved values and historical display fallback.
 - Source lateralization remains a descriptive producer-side companion derived
   from already-computed participant/group maps. It writes CSV/JSON right-minus-
   left and lateralization-index rows, including whole-hemisphere summaries and
@@ -245,6 +250,15 @@ preprocessing, project I/O, diagnostics, or unrelated tool packages.
 
 - `gui.py` owns the embedded PySide6 page, controls, worker wiring, and status.
   `method_info.py` owns explanatory copy and links only.
+- `slice_viewer.py` owns image hit-testing, linked crosshairs, and navigation
+  requests. MRI preview rendering/anatomy loading runs in a worker, coalesces
+  pending requests, and discards obsolete results. Plane orientation comes from
+  the MRI affine; voxel-axis numbers must not be treated as anatomical axes.
+- `source_producers/model_diagnostics.py` copies computable inverse/input facts
+  into existing reports; absence of interpolation provenance is not evidence of
+  no interpolation, and inverse covariance must not be called participant data
+  rank. `source_recovery_benchmark.py` is an opt-in, synthetic matched-model
+  inverse diagnostic, not real-data accuracy or full FPVS validation.
 - `renderer.py` owns actors, camera, opacity, mesh/paint/volume/split display,
   and explicitly disabled depth peeling. It owns no source math.
 - `fsaverage_mesh.py` locates, reads, decimates, and transforms anatomical
@@ -317,6 +331,14 @@ preprocessing, project I/O, diagnostics, or unrelated tool packages.
   not touch widgets.
 - Keep source rebuild/import controls in Source Map Options. Keep figure actions
   in the Export Figures modal, with one side-panel entry point.
+- Use one current/all-conditions/fixed color-scale selector. All-conditions
+  limits apply only to the selected method and exact summary; never substitute
+  a different summary. Preview and comparison export use the same limits.
+  Use Matplotlib viridis for the current positive source displays.
+- Source-build cancellation checks run before participant calculations and
+  before publication. Finish an already-started method publication intact;
+  retain completed sibling methods. Never terminate a running worker thread.
+  Defer page close until active workers finish.
 - Do not run local offscreen Qt workflows. Qt tests are CI-only by default;
   document a visible/manual smoke path for changed interactions.
 - Publication exports follow

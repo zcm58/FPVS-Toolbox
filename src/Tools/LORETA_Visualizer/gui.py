@@ -10,7 +10,6 @@ from pathlib import Path
 
 import numpy as np
 from PySide6.QtCore import QObject, QThread, Qt, Signal, Slot
-from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -49,6 +48,7 @@ from Tools.LORETA_Visualizer.cortical_paint import (
 )
 from Tools.LORETA_Visualizer.fsaverage_mesh import FsaverageMeshError, FsaverageMeshResult, load_fsaverage_brain_mesh
 from Tools.LORETA_Visualizer.method_info import LORETA_METHOD_INFO
+from Tools.LORETA_Visualizer.slice_viewer import MriSliceImageLabel
 from Tools.LORETA_Visualizer.prepared_payload_importer import (
     PreparedSourceManifestEntry,
     PreparedSourcePayloadImportError,
@@ -74,6 +74,10 @@ from Tools.LORETA_Visualizer.scalar_fields import (
 from Tools.LORETA_Visualizer.source_producers.hauk_source_psd import (
     SOURCE_ORIENTATION_MODE_CORTICAL_NORMAL,
     SOURCE_ORIENTATION_MODE_LEGACY_MNE_PSD_POWER_NORM,
+)
+from Tools.LORETA_Visualizer.source_producers.cancellation import (
+    SourceBuildCancellation,
+    SourceBuildCancelled,
 )
 from Tools.LORETA_Visualizer.source_payloads import (
     SOURCE_KIND_VOLUME_POINTS,
@@ -118,34 +122,35 @@ PROJECT_SOURCE_EXPORT_DEFAULT_MODES = (
 LORETA_SUMMARY_REPORT_STATUS = "FPVS Toolbox is preparing the LORETA summary report."
 LORETA_SOURCE_MAP_BUILD_STATUS = "Generating source-space maps for 3D visualization of oddball responses."
 CLUSTER_MASK_SIGNIFICANT_STATUS_TEMPLATE = (
-    "The {source_points} displayed here were significant across the group after "
-    "the cluster-based permutation test."
+    "Showing {source_points} in clusters retained by the group-level permutation test."
 )
 CLUSTER_MASK_EMPTY_WARNING_TEMPLATE = (
     "Warning: no {source_points} survived the group-level permutation mask. "
     "The current view is uncorrected."
 )
 CLUSTER_MASK_DISABLED_WARNING_TEMPLATE = (
-    "Warning: disabling the cluster-based permutation mask will likely show "
-    "{source_points} that were not significant at the group level."
+    "Cluster mask disabled. Displayed {source_points} are exploratory."
 )
 PROJECT_ZSCORE_MODEL_PARTICIPANT_FIRST = "participant_first"
 PROJECT_ZSCORE_MODEL_DEPRECATED_GROUP_FIRST = "deprecated_group_first"
 SOURCE_OPTIONS_ACTION_LOAD_PAYLOAD = "load_payload"
 SOURCE_OPTIONS_ACTION_LOAD_MANIFEST = "load_manifest"
 SOURCE_OPTIONS_ACTION_REBUILD_ZSCORE = "rebuild_zscore"
+SOURCE_OPTIONS_ACTION_CANCEL_BUILD = "cancel_build"
 EXPORT_FIGURES_ACTION_SPLIT_FIGURES = "split_figures"
 EXPORT_FIGURES_ACTION_STACKED_SPLIT_FIGURES = "stacked_split_figures"
 EXPORT_FIGURES_ACTION_MRI_SLICES = "mri_slices"
 ZSCORE_DISPLAY_THRESHOLD_CUSTOM_ID = "custom"
 ZSCORE_DISPLAY_THRESHOLD_PRESETS: tuple[tuple[str, float], ...] = (
-    ("z >= 1.64 (~one-tailed p < .05)", 1.64),
-    ("z >= 1.96 (~two-tailed p < .05)", 1.96),
-    ("z >= 2.58 (~two-tailed p < .01)", 2.58),
-    ("z >= 3.29 (~two-tailed p < .001)", 3.29),
-    ("z >= 3.89 (~two-tailed p < .0001)", 3.89),
+    ("z >= 1.64", 1.64),
+    ("z >= 1.96", 1.96),
+    ("z >= 2.58", 2.58),
+    ("z >= 3.29", 3.29),
+    ("z >= 3.89", 3.89),
 )
-DEFAULT_STACKED_CORTICAL_ZSCORE_SCALAR_RANGE = (0.0, 3.5)
+SCALE_CURRENT = "current"
+SCALE_SHARED = "shared"
+SCALE_FIXED = "fixed"
 DISPLAY_MODE_OPTIONS: tuple[tuple[str, str], ...] = (
     ("Cortical surface — split hemispheres", DISPLAY_MODE_SPLIT_HEMISPHERE),
     ("Cortical surface — combined", DISPLAY_MODE_CORTICAL_SURFACE),
@@ -197,60 +202,6 @@ class _ManifestMethodGroup:
     method_id: str
     label: str
     condition_groups: dict[str, _ManifestConditionGroup]
-
-
-class MriSliceImageLabel(QLabel):
-    """Aspect-preserving image panel for orthogonal MRI slice renders."""
-
-    def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self.setObjectName("loreta_mri_slice_view")
-        self.setAlignment(Qt.AlignCenter)
-        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.setMinimumSize(320, 240)
-        self.setWordWrap(True)
-        self._source_pixmap: QPixmap | None = None
-        self.clear_slice_image("MRI slices will appear after an eLORETA volume source map is loaded.")
-
-    def set_slice_image(self, image_rgb: np.ndarray) -> None:
-        image = np.ascontiguousarray(image_rgb, dtype=np.uint8)
-        if image.ndim != 3 or image.shape[2] != 3:
-            raise ValueError("MRI slice image must be an RGB array.")
-        height, width, _channels = image.shape
-        qimage = QImage(
-            image.data,
-            width,
-            height,
-            3 * width,
-            QImage.Format.Format_RGB888,
-        ).copy()
-        self._source_pixmap = QPixmap.fromImage(qimage)
-        self.setText("")
-        self._sync_scaled_pixmap()
-
-    def clear_slice_image(self, message: str = "") -> None:
-        self._source_pixmap = None
-        self.clear()
-        if message:
-            self.setText(message)
-
-    def resizeEvent(self, event) -> None:  # noqa: N802 - Qt override name
-        super().resizeEvent(event)
-        self._sync_scaled_pixmap()
-
-    def _sync_scaled_pixmap(self) -> None:
-        if self._source_pixmap is None or self._source_pixmap.isNull():
-            return
-        size = self.contentsRect().size()
-        if not size.isValid():
-            return
-        self.setPixmap(
-            self._source_pixmap.scaled(
-                size,
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
-            )
-        )
 
 
 @dataclass(frozen=True)
@@ -326,12 +277,65 @@ class FsaverageLoadWorker(QObject):
         return ""
 
 
+class MriSliceRenderWorker(QObject):
+    """Load anatomy and render a single immutable preview request off the UI thread."""
+
+    rendered = Signal(object)
+    failed = Signal(int, str)
+    finished = Signal()
+
+    def __init__(self, request: dict[str, object]) -> None:
+        super().__init__()
+        self.request = request
+
+    @Slot()
+    def run(self) -> None:
+        request = self.request
+        try:
+            kwargs = dict(request["render_kwargs"])
+            anatomy = kwargs.get("anatomy")
+            if anatomy is None:
+                anatomy = load_fsaverage_mri_volume(kwargs["fsaverage_dir"])
+                kwargs["anatomy"] = anatomy
+            if kwargs.get("slice_indices") is None:
+                points, values = [], []
+                for path in request["reference_paths"]:
+                    payload = load_prepared_source_payload_json(
+                        path, display_transform=kwargs["display_transform"]
+                    )
+                    if payload.kind != SOURCE_KIND_VOLUME_POINTS:
+                        continue
+                    payload = _activation_display_payload(
+                        payload, transparent_mesh_display=True, use_cluster_mask=request["use_cluster_mask"]
+                    )
+                    if len(payload.points):
+                        points.append(payload.points)
+                        values.append(payload.values)
+                reference = kwargs["payload"]
+                if points:
+                    reference = make_source_payload(
+                        points=np.vstack(points), values=np.concatenate(values),
+                        kind=SOURCE_KIND_VOLUME_POINTS, label="MRI plane reference",
+                        normalize_values=False,
+                    )
+                kwargs["slice_indices"] = mri_slice_indices_for_payload(
+                    reference, display_transform=kwargs["display_transform"], anatomy=anatomy
+                )
+            result = render_mri_orthogonal_slice_image(**kwargs)
+            self.rendered.emit((request, result, anatomy))
+        except (OSError, RuntimeError, TypeError, ValueError, PreparedSourcePayloadImportError) as exc:
+            self.failed.emit(int(request["id"]), str(exc))
+        finally:
+            self.finished.emit()
+
+
 class ProjectSourceMapExportWorker(QObject):
     """Write project beta source maps without touching widgets."""
 
     progress = Signal(str)
     exported = Signal(object)
     failed = Signal(str)
+    cancelled = Signal()
     finished = Signal()
 
     def __init__(
@@ -351,18 +355,26 @@ class ProjectSourceMapExportWorker(QObject):
         self._zscore_model = zscore_model
         self._l2_source_orientation_mode = l2_source_orientation_mode
         self._project = project
+        self.cancellation = SourceBuildCancellation()
 
     @Slot()
     def run(self) -> None:
         results: list[object] = []
         failures: list[ProjectSourceMapExportFailure] = []
+        was_cancelled = False
         try:
             for index, export_mode in enumerate(self._export_modes, start=1):
+                if self.cancellation.requested:
+                    was_cancelled = True
+                    break
                 self.progress.emit(
                     f"Building {_source_export_mode_label(export_mode)} ({index}/{len(self._export_modes)})..."
                 )
                 try:
                     results.append(self._run_export_mode(export_mode))
+                except SourceBuildCancelled:
+                    was_cancelled = True
+                    break
                 except (OSError, RuntimeError, ValueError, ImportError, ModuleNotFoundError) as exc:
                     failures.append(ProjectSourceMapExportFailure(export_mode=export_mode, message=str(exc)))
                     self.progress.emit(f"{_source_export_mode_label(export_mode)} failed: {exc}")
@@ -374,11 +386,13 @@ class ProjectSourceMapExportWorker(QObject):
                         failures=tuple(failures),
                     )
                 )
-            else:
+            elif not was_cancelled:
                 failure_text = "; ".join(
                     f"{_source_export_mode_label(item.export_mode)}: {item.message}" for item in failures
                 )
                 self.failed.emit(failure_text or "No project source-map exporters ran.")
+            if was_cancelled:
+                self.cancelled.emit()
         finally:
             self.finished.emit()
 
@@ -402,6 +416,7 @@ class ProjectSourceMapExportWorker(QObject):
                 source_orientation_mode=self._l2_source_orientation_mode,
                 allow_fetch_fsaverage=True,
                 progress_callback=self.progress.emit,
+                cancellation_callback=self.cancellation.check,
             )
         if export_mode == PROJECT_SOURCE_EXPORT_ELORETA_SOURCE_PSD:
             from Tools.LORETA_Visualizer.source_producers.project_eloreta_volume_hauk_source_psd_export import (
@@ -421,6 +436,7 @@ class ProjectSourceMapExportWorker(QObject):
                 include_flagged_subjects=self._include_flagged_subjects,
                 allow_fetch_fsaverage=True,
                 progress_callback=self.progress.emit,
+                cancellation_callback=self.cancellation.check,
             )
         if export_mode == PROJECT_SOURCE_EXPORT_HAUK_ZSCORE:
             from Tools.LORETA_Visualizer.source_producers.project_l2_mne_hauk_zscore_export import (
@@ -1144,6 +1160,7 @@ class SourceMapOptionsDialog(AppDialog):
         source_orientation_mode: str,
         project_available: bool,
         export_busy: bool,
+        cancel_available: bool = False,
     ) -> None:
         super().__init__("Options", parent, size=SurfaceSize(width=480, height=440, min_width=430))
         self.selected_action: str | None = None
@@ -1298,12 +1315,20 @@ class SourceMapOptionsDialog(AppDialog):
         availability_label.setWordWrap(True)
         data_layout.addWidget(availability_label)
 
-        self.rebuild_zscore_btn = make_action_button("Rebuild source maps", compact=True, parent=self)
+        self.rebuild_zscore_btn = make_action_button(
+            "Cancel rebuild" if cancel_available else "Rebuild source maps", compact=True, parent=self
+        )
         self.rebuild_zscore_btn.setObjectName("loreta_options_rebuild_zscore_btn")
         self.rebuild_zscore_btn.setToolTip(
-            "Build EEG-only fsaverage L2-MNE source-PSD z-score maps from signed time-domain derivatives."
+            "Cancel at the next safe step; an output publication already in progress will finish."
+            if cancel_available else
+            "Build EEG-only fsaverage L2-MNE and eLORETA maps from signed time-domain derivatives."
         )
-        self.rebuild_zscore_btn.clicked.connect(lambda: self._select_action(SOURCE_OPTIONS_ACTION_REBUILD_ZSCORE))
+        self.rebuild_zscore_btn.clicked.connect(
+            lambda: self._select_action(
+                SOURCE_OPTIONS_ACTION_CANCEL_BUILD if cancel_available else SOURCE_OPTIONS_ACTION_REBUILD_ZSCORE
+            )
+        )
         data_layout.addWidget(self.rebuild_zscore_btn)
 
         self.load_source_payload_btn = make_action_button("Load source JSON", compact=True, parent=self)
@@ -1319,7 +1344,7 @@ class SourceMapOptionsDialog(AppDialog):
         data_layout.addWidget(self.load_source_manifest_btn)
         data_layout.addStretch(1)
 
-        rebuild_enabled = project_available and not export_busy
+        rebuild_enabled = cancel_available or (project_available and not export_busy)
         self.rebuild_zscore_btn.setEnabled(rebuild_enabled)
         self._set_threshold_controls_value(zscore_display_threshold)
 
@@ -1529,6 +1554,11 @@ class LoretaVisualizerWindow(QWidget):
         self._mri_anatomy_error: str | None = None
         self._mri_slice_indices_cache: tuple[int, int, int] | None = None
         self._mri_slice_indices_cache_key: tuple[object, ...] | None = None
+        self._mri_render_thread: QThread | None = None
+        self._mri_render_worker: MriSliceRenderWorker | None = None
+        self._mri_render_pending: dict[str, object] | None = None
+        self._mri_render_request_id = 0
+        self._closing_requested = False
         self.status_banner: StatusBanner | None = None
         self._mesh_thread: QThread | None = None
         self._mesh_worker: FsaverageLoadWorker | None = None
@@ -1711,15 +1741,14 @@ class LoretaVisualizerWindow(QWidget):
 
         color_section, color_layout = add_control_section()
 
-        self.activation_auto_scale_check = QCheckBox("Auto color scale", color_section)
-        self.activation_auto_scale_check.setObjectName("loreta_activation_auto_scale_check")
-        self.activation_auto_scale_check.setChecked(True)
-        self.activation_auto_scale_check.toggled.connect(self._on_activation_auto_scale_changed)
-        color_layout.addWidget(self.activation_auto_scale_check)
-
-        self.activation_scale_mode_label = make_field_label("Auto color scale", color_section)
-        self.activation_scale_mode_label.setObjectName("loreta_activation_scale_mode_label")
-        color_layout.addWidget(self.activation_scale_mode_label)
+        self.activation_scale_combo = QComboBox(color_section)
+        self.activation_scale_combo.setObjectName("loreta_activation_scale_combo")
+        self.activation_scale_combo.addItem("Scale: current map", SCALE_CURRENT)
+        self.activation_scale_combo.addItem("Scale: all conditions", SCALE_SHARED)
+        self.activation_scale_combo.addItem("Scale: fixed limits", SCALE_FIXED)
+        self.activation_scale_combo.setToolTip("Color limits for this method and summary; exports use the same scale.")
+        self.activation_scale_combo.currentIndexChanged.connect(self._on_activation_scale_changed)
+        color_layout.addWidget(self.activation_scale_combo)
 
         scale_row = QHBoxLayout()
         scale_row.setContentsMargins(0, 0, 0, 0)
@@ -1906,6 +1935,8 @@ class LoretaVisualizerWindow(QWidget):
 
         self.viewport_layout.addWidget(self.renderer, 1)
         self.mri_slice_view = MriSliceImageLabel(self.viewport)
+        self.mri_slice_view.slice_indices_requested.connect(self._on_mri_slice_indices_requested)
+        self.mri_slice_view.reset_requested.connect(self._reset_mri_slice_navigation)
         self.mri_slice_view.setVisible(False)
         self.viewport_layout.addWidget(self.mri_slice_view, 1)
         self.renderer.set_display_mode(self._display_mode)
@@ -1928,7 +1959,7 @@ class LoretaVisualizerWindow(QWidget):
         opacity_enabled = enabled and not self._activation_uses_opaque_cortical_mode()
         self.transparency_slider.setEnabled(opacity_enabled)
         self.activation_opacity_slider.setEnabled(opacity_enabled)
-        self.activation_auto_scale_check.setEnabled(enabled)
+        self.activation_scale_combo.setEnabled(enabled)
         self._sync_activation_range_enabled()
         self._sync_source_map_selectors_enabled()
         self.display_mode_combo.setEnabled(enabled)
@@ -1986,7 +2017,7 @@ class LoretaVisualizerWindow(QWidget):
     def _update_activation_opacity_label(self, value: int) -> None:
         self.activation_opacity_value_label.setText(f"{value}%")
 
-    def _on_activation_auto_scale_changed(self, _checked: bool) -> None:
+    def _on_activation_scale_changed(self, _index: int) -> None:
         self._sync_activation_range_enabled()
         self._apply_activation_scalar_range()
 
@@ -1995,13 +2026,9 @@ class LoretaVisualizerWindow(QWidget):
 
     def _sync_activation_range_enabled(self) -> None:
         renderer_available = self.renderer is not None
-        manual_enabled = renderer_available and not self.activation_auto_scale_check.isChecked()
+        manual_enabled = renderer_available and self.activation_scale_combo.currentData() == SCALE_FIXED
         self.activation_min_spin.setEnabled(manual_enabled)
         self.activation_max_spin.setEnabled(manual_enabled)
-        if hasattr(self, "activation_scale_mode_label"):
-            self.activation_scale_mode_label.setText(
-                "Auto color scale" if self.activation_auto_scale_check.isChecked() else "Manual color scale"
-            )
 
     def _activation_uses_cortical_paint(self) -> bool:
         payload = self._current_activation_payload
@@ -2099,6 +2126,8 @@ class LoretaVisualizerWindow(QWidget):
             self.display_mode_combo.setToolTip("Choose a display compatible with the loaded source payload.")
 
     def _on_display_mode_changed(self, _index: int) -> None:
+        self._mri_render_request_id += 1
+        self._mri_render_pending = None
         mode = self.display_mode_combo.currentData()
         if not isinstance(mode, str):
             return
@@ -2165,6 +2194,9 @@ class LoretaVisualizerWindow(QWidget):
         self._refresh_current_activation()
 
     def _reset_camera(self) -> None:
+        if self._display_mode == DISPLAY_MODE_MRI_SLICES:
+            self._reset_mri_slice_navigation()
+            return
         if self.renderer is not None:
             self.renderer.reset_camera()
 
@@ -2521,9 +2553,10 @@ class LoretaVisualizerWindow(QWidget):
         display_transform = renderer.mesh_display_transform()
         if display_transform is None:
             raise RuntimeError("No mesh transform is available.")
-        manifest_entry = self._manifest_entry_for(condition_id, self._selected_summary_id)
+        group = self._manifest_condition_groups.get(condition_id)
+        manifest_entry = group.entries_by_summary.get(self._selected_summary_id) if group is not None else None
         if manifest_entry is None:
-            raise RuntimeError("No prepared source-map payload is available for the selected condition.")
+            raise RuntimeError("The selected condition has no source map for the selected summary.")
         payload = load_prepared_source_payload_json(
             manifest_entry.payload_path,
             display_transform=display_transform,
@@ -2538,54 +2571,7 @@ class LoretaVisualizerWindow(QWidget):
         return _activation_display_payload(payload, use_cluster_mask=self._use_cluster_mask)
 
     def _stacked_split_scalar_range(self, payloads: tuple[SourcePayload, SourcePayload]) -> tuple[float, float]:
-        scale_chunks = [
-            _activation_scale_values(
-                payload,
-                zscore_display_threshold=self._zscore_display_threshold,
-                cortical_threshold_display=uses_cortical_surface_paint(payload),
-                use_cluster_mask=self._use_cluster_mask,
-            )
-            for payload in payloads
-        ]
-        scale_arrays = [chunk.reshape(-1) for chunk in scale_chunks if len(chunk)]
-        scale_values = np.concatenate(scale_arrays) if scale_arrays else np.empty(0, dtype=float)
-        all_cortical_zscore = all(
-            uses_cortical_surface_paint(payload) and _source_payload_uses_zscores(payload)
-            for payload in payloads
-        )
-        if all_cortical_zscore:
-            if self.activation_auto_scale_check.isChecked():
-                return DEFAULT_STACKED_CORTICAL_ZSCORE_SCALAR_RANGE
-            has_cluster_mask = self._use_cluster_mask and any(payload_has_cluster_mask(payload) for payload in payloads)
-            if has_cluster_mask:
-                return resolve_scalar_limits(
-                    scale_values,
-                    auto_scale=self.activation_auto_scale_check.isChecked(),
-                    manual_min=self.activation_min_spin.value(),
-                    manual_max=self.activation_max_spin.value(),
-                )
-            lower_bound = self._zscore_display_threshold
-            if self.activation_auto_scale_check.isChecked():
-                finite = scale_values[np.isfinite(scale_values)]
-                vmax = float(np.nanmax(finite)) if len(finite) else lower_bound + 1.0
-                return resolve_scalar_limits(
-                    np.asarray([lower_bound, vmax], dtype=float),
-                    auto_scale=False,
-                    manual_min=lower_bound,
-                    manual_max=vmax,
-                )
-            return resolve_scalar_limits(
-                scale_values,
-                auto_scale=False,
-                manual_min=max(lower_bound, self.activation_min_spin.value()),
-                manual_max=self.activation_max_spin.value(),
-            )
-        return resolve_scalar_limits(
-            scale_values,
-            auto_scale=self.activation_auto_scale_check.isChecked(),
-            manual_min=self.activation_min_spin.value(),
-            manual_max=self.activation_max_spin.value(),
-        )
+        return self._scalar_range_for_payloads(payloads)
 
     def _open_source_map_options(self) -> None:
         if self.renderer is None:
@@ -2601,6 +2587,7 @@ class LoretaVisualizerWindow(QWidget):
             source_orientation_mode=self._l2_source_orientation_mode,
             project_available=project_root is not None and self._project is not None,
             export_busy=self._source_export_thread is not None or self._stats_ready_export_thread is not None,
+            cancel_available=self._source_export_worker is not None,
         )
         dialog.exec()
         self._include_flagged_subjects = dialog.include_flagged_check.isChecked()
@@ -2611,6 +2598,8 @@ class LoretaVisualizerWindow(QWidget):
         self._set_transparent_spin_enabled(dialog.transparent_spin_check.isChecked())
         if dialog.selected_action == SOURCE_OPTIONS_ACTION_REBUILD_ZSCORE:
             self._build_project_zscore_source_maps()
+        elif dialog.selected_action == SOURCE_OPTIONS_ACTION_CANCEL_BUILD:
+            self._cancel_source_map_build()
         elif dialog.selected_action == SOURCE_OPTIONS_ACTION_LOAD_PAYLOAD:
             self._load_prepared_source_payload()
         elif dialog.selected_action == SOURCE_OPTIONS_ACTION_LOAD_MANIFEST:
@@ -2773,6 +2762,8 @@ class LoretaVisualizerWindow(QWidget):
         automatic: bool = False,
         skip_stats_ready_check: bool = False,
     ) -> None:
+        if getattr(self, "_closing_requested", False):
+            return
         project_root = self._refresh_project_root()
         if project_root is None:
             self._set_source_export_status("Open a project before building beta source JSON.", variant="warning")
@@ -2862,6 +2853,7 @@ class LoretaVisualizerWindow(QWidget):
         worker.progress.connect(self._on_project_source_maps_progress)
         worker.exported.connect(self._on_project_source_maps_exported)
         worker.failed.connect(self._on_project_source_maps_failed)
+        worker.cancelled.connect(self._on_project_source_maps_cancelled)
         worker.finished.connect(thread.quit)
         worker.finished.connect(worker.deleteLater)
         thread.finished.connect(thread.deleteLater)
@@ -2931,6 +2923,9 @@ class LoretaVisualizerWindow(QWidget):
 
     @Slot(object)
     def _on_stats_ready_workbook_exported(self, result: object) -> None:
+        if self._closing_requested:
+            self._pending_source_map_rebuild = None
+            return
         workbook_path = getattr(result, "workbook_path", None)
         row_count = getattr(result, "row_count", None)
         logger.info(
@@ -2973,10 +2968,20 @@ class LoretaVisualizerWindow(QWidget):
         self._stats_ready_export_thread = None
         self._stats_ready_export_worker = None
         self._sync_project_source_button()
+        self._finish_deferred_close()
 
     @Slot(str)
-    def _on_project_source_maps_progress(self, _message: str) -> None:
-        self._set_source_export_status(LORETA_SOURCE_MAP_BUILD_STATUS, variant="info")
+    def _on_project_source_maps_progress(self, message: str) -> None:
+        self._set_source_export_status(message, variant="info")
+
+    def _cancel_source_map_build(self) -> None:
+        if self._source_export_worker is not None:
+            self._source_export_worker.cancellation.request()
+            self._set_source_export_status("Cancelling after the current source-build step...", variant="info")
+
+    @Slot()
+    def _on_project_source_maps_cancelled(self) -> None:
+        self._set_source_export_status("Source-map rebuild cancelled.", variant="info")
 
     @Slot(object)
     def _on_project_source_maps_exported(self, result: object) -> None:
@@ -3166,6 +3171,7 @@ class LoretaVisualizerWindow(QWidget):
         self._source_export_thread = None
         self._source_export_worker = None
         self._sync_project_source_button()
+        self._finish_deferred_close()
 
     def _set_source_export_status(self, message: str, *, variant: str) -> None:
         self.mesh_status.set_variant(variant)
@@ -3388,6 +3394,8 @@ class LoretaVisualizerWindow(QWidget):
 
     @Slot(object)
     def _on_fsaverage_loaded(self, result: object) -> None:
+        if self._closing_requested:
+            return
         renderer = self.renderer
         if renderer is None or not isinstance(result, FsaverageMeshResult):
             return
@@ -3422,6 +3430,8 @@ class LoretaVisualizerWindow(QWidget):
 
     @Slot(str)
     def _on_fsaverage_failed(self, message: str) -> None:
+        self._mri_render_request_id += 1
+        self._mri_render_pending = None
         self._fsaverage_dir = None
         self._mri_anatomy_cache = None
         self._mri_anatomy_cache_dir = None
@@ -3433,6 +3443,8 @@ class LoretaVisualizerWindow(QWidget):
 
     @Slot(str)
     def _on_mri_template_failed(self, message: str) -> None:
+        self._mri_render_request_id += 1
+        self._mri_render_pending = None
         self._mri_anatomy_cache = None
         self._mri_anatomy_cache_dir = None
         self._mri_anatomy_error = message
@@ -3447,6 +3459,7 @@ class LoretaVisualizerWindow(QWidget):
     def _mesh_load_finished(self) -> None:
         self._mesh_thread = None
         self._mesh_worker = None
+        self._finish_deferred_close()
         self._sync_project_source_button()
 
     def _refresh_current_activation(self) -> None:
@@ -3493,6 +3506,9 @@ class LoretaVisualizerWindow(QWidget):
         self._set_payload_display_status(payload)
 
     def _set_payload_display_status(self, payload: SourcePayload) -> None:
+        if getattr(self, "_scale_error", None):
+            self._set_source_export_status(self._scale_error, variant="warning")
+            return
         underpowered_text = _underpowered_cluster_mask_status_text(payload)
         if underpowered_text is not None:
             self._set_source_export_status(underpowered_text, variant="warning")
@@ -3526,6 +3542,8 @@ class LoretaVisualizerWindow(QWidget):
         self._set_source_export_status(message, variant="success")
 
     def _clear_activation_payload(self) -> None:
+        self._mri_render_request_id += 1
+        self._mri_render_pending = None
         renderer = self.renderer
         if renderer is None:
             return
@@ -3541,6 +3559,8 @@ class LoretaVisualizerWindow(QWidget):
         self.activation_scale_max_label.setText("")
 
     def _set_activation_payload(self, payload: SourcePayload) -> None:
+        self._mri_render_request_id += 1
+        self._mri_render_pending = None
         renderer = self.renderer
         if renderer is None:
             return
@@ -3583,42 +3603,114 @@ class LoretaVisualizerWindow(QWidget):
     ) -> None:
         renderer = self.renderer
         mri_view = self.mri_slice_view
-        if renderer is None or mri_view is None:
+        if renderer is None or mri_view is None or self._closing_requested:
             return
         if payload.kind != SOURCE_KIND_VOLUME_POINTS:
-            mri_view.clear_slice_image("MRI slices are available for eLORETA volume source maps.")
+            mri_view.clear_slice_image("MRI slices require a volume source map.")
             return
         display_transform = renderer.mesh_display_transform()
-        if display_transform is None:
-            mri_view.clear_slice_image("MRI slices require a loaded fsaverage display transform.")
+        if display_transform is None or self._fsaverage_dir is None:
+            mri_view.clear_slice_image("MRI slices require cached fsaverage anatomy.")
             return
-        if self._fsaverage_dir is None:
-            mri_view.clear_slice_image("MRI slices require cached fsaverage MRI anatomy.")
+        if self._mri_anatomy_error:
+            mri_view.clear_slice_image(f"MRI anatomy unavailable: {self._mri_anatomy_error}")
             return
-        try:
-            anatomy = self._load_cached_mri_anatomy()
-            slice_indices = self._mri_slice_indices_for_current_method(
-                anatomy=anatomy,
+        reference_key = self._mri_slice_reference_cache_key()
+        indices = self._mri_slice_indices_cache if reference_key == self._mri_slice_indices_cache_key else None
+        preview_figsize, preview_dpi = self._mri_slice_preview_figure_settings()
+        reference_paths = tuple(
+            group.entries_by_summary[self._selected_summary_id].payload_path
+            for group in self._manifest_condition_groups.values()
+            if self._selected_summary_id in group.entries_by_summary
+        )
+        self._mri_render_request_id += 1
+        self._mri_render_pending = {
+            "id": self._mri_render_request_id,
+            "reference_key": reference_key,
+            "reference_paths": reference_paths,
+            "use_cluster_mask": self._use_cluster_mask,
+            "render_kwargs": {
+                "payload": payload,
+                "inspection_payload": self._source_activation_payload,
+                "display_transform": display_transform,
+                "fsaverage_dir": self._fsaverage_dir,
+                "scalar_range": scalar_range,
+                "label": self._selected_condition_label(),
+                "activation_visible": self._activation_visible,
+                "anatomy": self._mri_anatomy_cache if self._mri_anatomy_cache_dir == self._fsaverage_dir else None,
+                "slice_indices": indices,
+                "figsize": preview_figsize,
+                "dpi": preview_dpi,
+            },
+        }
+        self._start_pending_mri_render()
+
+    def _start_pending_mri_render(self) -> None:
+        if self._mri_render_thread is not None or self._mri_render_pending is None or self._closing_requested:
+            return
+        request, self._mri_render_pending = self._mri_render_pending, None
+        thread = QThread(self)
+        worker = MriSliceRenderWorker(request)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.rendered.connect(self._on_mri_slice_rendered)
+        worker.failed.connect(self._on_mri_slice_render_failed)
+        worker.finished.connect(thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(self._mri_slice_render_finished)
+        self._mri_render_thread, self._mri_render_worker = thread, worker
+        self.export_figures_btn.setEnabled(False)
+        thread.start()
+
+    @Slot(object)
+    def _on_mri_slice_rendered(self, completed: object) -> None:
+        request, result, anatomy = completed
+        if request["id"] != self._mri_render_request_id or self._closing_requested:
+            return
+        self._mri_anatomy_cache = anatomy
+        self._mri_anatomy_cache_dir = request["render_kwargs"]["fsaverage_dir"]
+        self._mri_slice_indices_cache = result.peak_voxel
+        self._mri_slice_indices_cache_key = request["reference_key"]
+        if self._display_mode == DISPLAY_MODE_MRI_SLICES and self.mri_slice_view is not None:
+            self.mri_slice_view.set_render_result(result)
+
+    @Slot(int, str)
+    def _on_mri_slice_render_failed(self, request_id: int, message: str) -> None:
+        if request_id != self._mri_render_request_id or self._closing_requested:
+            return
+        logger.warning("loreta_mri_slice_render_failed", extra={"error": message})
+        if self.mri_slice_view is not None:
+            self.mri_slice_view.clear_slice_image(f"MRI slice render failed: {message}")
+        self._set_source_export_status(f"MRI slice render failed: {message}", variant="warning")
+
+    @Slot()
+    def _mri_slice_render_finished(self) -> None:
+        self._mri_render_thread = None
+        self._mri_render_worker = None
+        self.export_figures_btn.setEnabled(self.renderer is not None)
+        self._start_pending_mri_render()
+        self._finish_deferred_close()
+
+    @Slot(object)
+    def _on_mri_slice_indices_requested(self, indices: object) -> None:
+        self._mri_slice_indices_cache = tuple(int(value) for value in indices)
+        self._mri_slice_indices_cache_key = self._mri_slice_reference_cache_key()
+        if self._current_activation_payload is not None:
+            self._render_mri_slice_payload(
+                self._current_activation_payload,
+                scalar_range=self._resolve_activation_scalar_range(self._current_activation_payload),
             )
-            preview_figsize, preview_dpi = self._mri_slice_preview_figure_settings()
-            result = render_mri_orthogonal_slice_image(
-                payload,
-                display_transform=display_transform,
-                fsaverage_dir=self._fsaverage_dir,
-                scalar_range=scalar_range,
-                label=self._selected_condition_label(),
-                activation_visible=self._activation_visible,
-                anatomy=anatomy,
-                slice_indices=slice_indices,
-                figsize=preview_figsize,
-                dpi=preview_dpi,
+
+    @Slot()
+    def _reset_mri_slice_navigation(self) -> None:
+        self._mri_slice_indices_cache = None
+        self._mri_slice_indices_cache_key = None
+        if self._current_activation_payload is not None and self._display_mode == DISPLAY_MODE_MRI_SLICES:
+            self._render_mri_slice_payload(
+                self._current_activation_payload,
+                scalar_range=self._resolve_activation_scalar_range(self._current_activation_payload),
             )
-        except (OSError, RuntimeError, TypeError, ValueError, PreparedSourcePayloadImportError) as exc:
-            logger.warning("loreta_mri_slice_render_failed", extra={"error": str(exc)})
-            mri_view.clear_slice_image(f"MRI slice render failed: {exc}")
-            self._set_source_export_status(f"MRI slice render failed: {exc}", variant="warning")
-            return
-        mri_view.set_slice_image(result.image_rgb)
 
     def _mri_slice_preview_figure_settings(self) -> tuple[tuple[float, float], int]:
         mri_view = self.mri_slice_view
@@ -3634,46 +3726,46 @@ class LoretaVisualizerWindow(QWidget):
         return (width / MRI_SLICE_PREVIEW_DPI, height / MRI_SLICE_PREVIEW_DPI), MRI_SLICE_PREVIEW_DPI
 
     def _resolve_activation_scalar_range(self, payload: SourcePayload) -> tuple[float, float]:
-        scale_values = _activation_scale_values(
-            payload,
-            zscore_display_threshold=self._zscore_display_threshold,
-            cortical_threshold_display=self._activation_uses_opaque_cortical_mode(),
-            use_cluster_mask=self._use_cluster_mask,
-        )
-        if self._activation_uses_opaque_cortical_mode() and _source_payload_uses_zscores(payload):
-            if self._use_cluster_mask and payload_has_cluster_mask(payload):
-                vmin, vmax = resolve_scalar_limits(
-                    scale_values,
-                    auto_scale=self.activation_auto_scale_check.isChecked(),
-                    manual_min=self.activation_min_spin.value(),
-                    manual_max=self.activation_max_spin.value(),
-                )
-                return vmin, vmax
-            lower_bound = self._zscore_display_threshold
-            if self.activation_auto_scale_check.isChecked():
-                finite = scale_values[np.isfinite(scale_values)]
-                vmax = float(np.nanmax(finite)) if len(finite) else lower_bound + 1.0
-                vmin, vmax = resolve_scalar_limits(
-                    np.asarray([lower_bound, vmax], dtype=float),
-                    auto_scale=False,
-                    manual_min=lower_bound,
-                    manual_max=vmax,
-                )
-            else:
-                vmin, vmax = resolve_scalar_limits(
-                    scale_values,
-                    auto_scale=False,
-                    manual_min=max(lower_bound, self.activation_min_spin.value()),
-                    manual_max=self.activation_max_spin.value(),
-                )
-        else:
-            vmin, vmax = resolve_scalar_limits(
-                scale_values,
-                auto_scale=self.activation_auto_scale_check.isChecked(),
+        self._scale_error = None
+        try:
+            return self._scalar_range_for_payloads((payload,))
+        except (OSError, RuntimeError, ValueError, PreparedSourcePayloadImportError) as exc:
+            if self.activation_scale_combo.currentData() != SCALE_SHARED:
+                raise
+            self._scale_error = f"Shared scale unavailable: {exc}. Using current-map limits."
+            logger.warning("loreta_shared_scale_failed", extra={"error": str(exc)})
+            previous = self.activation_scale_combo.blockSignals(True)
+            self.activation_scale_combo.setCurrentIndex(self.activation_scale_combo.findData(SCALE_CURRENT))
+            self.activation_scale_combo.blockSignals(previous)
+            return self._scalar_range_for_payloads((payload,))
+
+    def _scalar_range_for_payloads(self, payloads: tuple[SourcePayload, ...]) -> tuple[float, float]:
+        mode = self.activation_scale_combo.currentData()
+        if mode == SCALE_FIXED:
+            return resolve_scalar_limits(
+                np.empty(0), auto_scale=False,
                 manual_min=self.activation_min_spin.value(),
                 manual_max=self.activation_max_spin.value(),
             )
-        return vmin, vmax
+        if mode == SCALE_SHARED and self._manifest_condition_groups:
+            # Never silently compare a median with a fallback mean.
+            selected = []
+            for condition_id, group in self._manifest_condition_groups.items():
+                if self._selected_summary_id in group.entries_by_summary:
+                    selected.append(self._condition_payload_for_export(condition_id))
+            if selected:
+                payloads = tuple(selected)
+        chunks = [
+            _activation_scale_values(
+                payload,
+                zscore_display_threshold=self._zscore_display_threshold,
+                cortical_threshold_display=uses_cortical_surface_paint(payload),
+                use_cluster_mask=self._use_cluster_mask,
+            ).reshape(-1)
+            for payload in payloads
+        ]
+        values = np.concatenate(chunks) if chunks else np.empty(0)
+        return resolve_scalar_limits(values, auto_scale=True)
 
     def _apply_activation_scalar_range(self) -> None:
         renderer = self.renderer
@@ -3681,6 +3773,8 @@ class LoretaVisualizerWindow(QWidget):
         if renderer is None or payload is None:
             return
         vmin, vmax = self._resolve_activation_scalar_range(payload)
+        if self._scale_error:
+            self._set_source_export_status(self._scale_error, variant="warning")
         if self._display_mode == DISPLAY_MODE_MRI_SLICES:
             self._update_activation_scale_readout(vmin, vmax)
             self._render_mri_slice_payload(payload, scalar_range=(vmin, vmax))
@@ -3692,15 +3786,22 @@ class LoretaVisualizerWindow(QWidget):
         self.activation_scale_min_label.setText(format_scalar_value(vmin))
         self.activation_scale_max_label.setText(format_scalar_value(vmax))
 
+    def _finish_deferred_close(self) -> None:
+        if self._closing_requested and not any((
+            self._mesh_thread, self._source_export_thread,
+            self._stats_ready_export_thread, self._mri_render_thread,
+        )):
+            self.close()
+
     def closeEvent(self, event) -> None:  # noqa: N802, ANN001
-        renderer = self.renderer
-        self.renderer = None
+        if any((self._mesh_thread, self._source_export_thread, self._stats_ready_export_thread, self._mri_render_thread)):
+            self._closing_requested = True
+            self._mri_render_pending = None
+            self._pending_source_map_rebuild = None
+            self._cancel_source_map_build()
+            event.ignore()
+            return
+        renderer, self.renderer = self.renderer, None
         if renderer is not None:
             renderer.shutdown()
-        if self._mesh_thread is not None:
-            self._mesh_thread.quit()
-            self._mesh_thread.wait(1000)
-        if self._source_export_thread is not None:
-            self._source_export_thread.quit()
-            self._source_export_thread.wait(1000)
         super().closeEvent(event)

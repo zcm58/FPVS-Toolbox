@@ -10,15 +10,17 @@ from __future__ import annotations
 import hashlib
 import logging
 from dataclasses import dataclass
+from functools import wraps
 from pathlib import Path
+from threading import RLock
 from typing import Literal
 
 import numpy as np
 from Main_App.io.atomic_write import atomic_write
 from Main_App.exports.figure_style import (
     FIGURE_EXPORT_DPI,
-    apply_matplotlib_figure_style,
     figure_text_kwargs,
+    matplotlib_figure_rcparams,
 )
 
 from Tools.LORETA_Visualizer.fsaverage_cache import fpvs_toolbox_root
@@ -33,6 +35,21 @@ from Tools.LORETA_Visualizer.transforms import (
 from Tools.LORETA_Visualizer.volume_overlay import DEFAULT_VOLUME_GAUSSIAN_NEIGHBORS
 
 logger = logging.getLogger(__name__)
+_MRI_FIGURE_LOCK = RLock()
+
+
+def _serialized_mri_figure(function):
+    """Keep Matplotlib's shared rendering state out of concurrent MRI jobs."""
+
+    @wraps(function)
+    def locked(*args, **kwargs):
+        with _MRI_FIGURE_LOCK:
+            import matplotlib
+
+            with matplotlib.rc_context(matplotlib_figure_rcparams()):
+                return function(*args, **kwargs)
+
+    return locked
 
 MM_PER_INCH = 25.4
 ELSEVIER_ONE_AND_HALF_COLUMN_WIDTH_MM = 140.0
@@ -74,6 +91,41 @@ class MriSlicePanel:
     anatomy: np.ndarray
     overlay: np.ndarray
     slice_index: int
+    pixel_to_voxel: np.ndarray
+    fixed_voxel_axis: int
+    fixed_voxel_step: int
+    ras_coordinate_mm: float
+    orientation_labels: tuple[str, str, str, str]
+
+
+@dataclass(frozen=True)
+class MriSliceHitRegion:
+    """Image-pixel bounds and geometry of one rendered anatomical plane."""
+
+    plane: PlaneName
+    image_bounds: tuple[float, float, float, float]
+    panel_shape: tuple[int, int]
+    pixel_to_voxel: np.ndarray
+    fixed_voxel_axis: int
+    fixed_voxel_step: int = 1
+
+    def voxel_at(self, x: float, y: float) -> np.ndarray:
+        """Map an image position to MRI voxel coordinates, without interpolation."""
+
+        left, top, width, height = self.image_bounds
+        rows, columns = self.panel_shape
+        column = (float(x) - left) * columns / width - 0.5
+        row = (float(y) - top) * rows / height - 0.5
+        return self.pixel_to_voxel @ np.asarray([column, row, 1.0])
+
+    def image_position(self, voxel: tuple[int, int, int]) -> tuple[float, float]:
+        """Map an MRI voxel to this panel's image position."""
+
+        basis = self.pixel_to_voxel[:, :2]
+        column, row = np.linalg.lstsq(basis, np.asarray(voxel) - self.pixel_to_voxel[:, 2], rcond=None)[0]
+        left, top, width, height = self.image_bounds
+        rows, columns = self.panel_shape
+        return left + (column + 0.5) * width / columns, top + (row + 0.5) * height / rows
 
 
 @dataclass(frozen=True)
@@ -85,6 +137,13 @@ class MriSliceRenderResult:
     scalar_range: tuple[float, float]
     source_point_count: int
     rendered_point_count: int
+    hit_regions: tuple[MriSliceHitRegion, ...] = ()
+    anatomy_shape: tuple[int, int, int] = (0, 0, 0)
+    cursor_ras_mm: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    nearest_source_value: float | None = None
+    nearest_source_distance_mm: float | None = None
+    value_label: str = ""
+    inspection_uses_unfiltered_payload: bool = False
 
 
 def find_fsaverage_mri_path(fsaverage_dir: str | Path) -> Path | None:
@@ -173,6 +232,7 @@ def render_mri_orthogonal_slice_image(
     activation_visible: bool = True,
     anatomy: MriAnatomyVolume | None = None,
     slice_indices: tuple[int, int, int] | None = None,
+    inspection_payload: SourcePayload | None = None,
     figsize: tuple[float, float] = (DEFAULT_MRI_SLICE_FIGURE_WIDTH_IN, DEFAULT_MRI_SLICE_FIGURE_HEIGHT_IN),
     dpi: int = DEFAULT_MRI_SLICE_RENDER_DPI,
 ) -> MriSliceRenderResult:
@@ -195,7 +255,7 @@ def render_mri_orthogonal_slice_image(
         scalar_range=scalar_range,
         slice_indices=slice_indices,
     )
-    image_rgb = draw_mri_slice_figure_to_rgb(
+    image_rgb, hit_regions = _draw_mri_slice_figure(
         panels,
         scalar_range=scalar_range,
         label=label,
@@ -203,15 +263,28 @@ def render_mri_orthogonal_slice_image(
         figsize=figsize,
         dpi=dpi,
     )
+    cursor_ras = voxel_to_ras(peak_voxel, anatomy)
+    inspected_payload = inspection_payload if inspection_payload is not None else payload
+    nearest_value, nearest_distance = nearest_prepared_source_value(
+        inspected_payload, cursor_ras, display_transform=display_transform,
+    )
     return MriSliceRenderResult(
         image_rgb=image_rgb,
         peak_voxel=peak_voxel,
         scalar_range=(float(scalar_range[0]), float(scalar_range[1])),
         source_point_count=int(len(payload.points)),
         rendered_point_count=int(len(source_voxels)),
+        hit_regions=hit_regions,
+        anatomy_shape=tuple(int(value) for value in anatomy.data.shape),
+        cursor_ras_mm=cursor_ras,
+        nearest_source_value=nearest_value,
+        nearest_source_distance_mm=nearest_distance,
+        value_label=inspected_payload.value_label,
+        inspection_uses_unfiltered_payload=inspection_payload is not None,
     )
 
 
+@_serialized_mri_figure
 def write_mri_orthogonal_slice_figures(
     output_path: str | Path,
     *,
@@ -255,12 +328,13 @@ def write_mri_orthogonal_slice_figures(
     )
     pdf_path, png_path = _paired_export_paths(output_path)
     try:
-        figure.savefig(pdf_path, format="pdf", dpi=dpi, facecolor=figure.get_facecolor(), transparent=False)
-        figure.savefig(png_path, format="png", dpi=dpi, facecolor=figure.get_facecolor(), transparent=False)
+        coordinate_description = "Slice coordinates: fsaverage MRI RAS, millimetres."
+        figure.savefig(pdf_path, format="pdf", dpi=dpi, facecolor=figure.get_facecolor(), transparent=False,
+                       metadata={"Subject": coordinate_description})
+        figure.savefig(png_path, format="png", dpi=dpi, facecolor=figure.get_facecolor(), transparent=False,
+                       metadata={"Description": coordinate_description})
     finally:
-        import matplotlib.pyplot as plt
-
-        plt.close(figure)
+        figure.clear()
     return pdf_path, png_path
 
 
@@ -301,6 +375,31 @@ def ras_points_to_voxels(points: np.ndarray, anatomy: MriAnatomyVolume) -> np.nd
         raise ValueError("RAS points must be an N x 3 array.")
     homogenous = np.column_stack((source_points, np.ones(len(source_points), dtype=float)))
     return (anatomy.ras_to_vox @ homogenous.T).T[:, :3].astype(float)
+
+
+def voxel_to_ras(voxel: tuple[int, int, int], anatomy: MriAnatomyVolume) -> tuple[float, float, float]:
+    """Return fsaverage MRI RAS millimetres for an original MRI voxel."""
+
+    ras = anatomy.vox_to_ras @ np.asarray([*voxel, 1.0], dtype=float)
+    return float(ras[0]), float(ras[1]), float(ras[2])
+
+
+def nearest_prepared_source_value(
+    payload: SourcePayload,
+    ras_mm: tuple[float, float, float],
+    *,
+    display_transform: MeshDisplayTransform,
+) -> tuple[float | None, float | None]:
+    """Inspect an original prepared grid value; never sample the smoothed overlay."""
+
+    native_points = payload_points_in_native_space(payload, display_transform)
+    values = np.asarray(payload.values, dtype=float).reshape(-1)
+    finite = np.isfinite(values) & np.all(np.isfinite(native_points), axis=1)
+    if not np.any(finite):
+        return None, None
+    distances = np.linalg.norm(native_points[finite] - np.asarray(ras_mm), axis=1)
+    nearest = int(np.argmin(distances))
+    return float(values[finite][nearest]), float(distances[nearest])
 
 
 def mri_slice_indices_for_payload(
@@ -345,34 +444,17 @@ def build_mri_slice_panels(
         else _clip_slice_indices(slice_indices, shape=anatomy.data.shape)
     )
     sigma = _source_voxel_sigma(source_voxels)
-    panels = (
+    panels = tuple(
         _slice_panel(
-            anatomy.data,
+            anatomy,
             source_voxels,
             source_values,
-            plane="axial",
-            fixed_index=peak_voxel[2],
+            plane=plane,
+            selected_voxel=peak_voxel,
             scalar_range=scalar_range,
             sigma=sigma,
-        ),
-        _slice_panel(
-            anatomy.data,
-            source_voxels,
-            source_values,
-            plane="coronal",
-            fixed_index=peak_voxel[1],
-            scalar_range=scalar_range,
-            sigma=sigma,
-        ),
-        _slice_panel(
-            anatomy.data,
-            source_voxels,
-            source_values,
-            plane="sagittal",
-            fixed_index=peak_voxel[0],
-            scalar_range=scalar_range,
-            sigma=sigma,
-        ),
+        )
+        for plane in ("axial", "coronal", "sagittal")
     )
     return panels, peak_voxel
 
@@ -388,6 +470,24 @@ def draw_mri_slice_figure_to_rgb(
 ) -> np.ndarray:
     """Draw panels to an RGB image array."""
 
+    image_rgb, _hit_regions = _draw_mri_slice_figure(
+        panels, scalar_range=scalar_range, label=label,
+        activation_visible=activation_visible, figsize=figsize, dpi=dpi,
+    )
+    return image_rgb
+
+
+@_serialized_mri_figure
+def _draw_mri_slice_figure(
+    panels: tuple[MriSlicePanel, MriSlicePanel, MriSlicePanel],
+    *,
+    scalar_range: tuple[float, float],
+    label: str,
+    activation_visible: bool,
+    figsize: tuple[float, float],
+    dpi: int,
+) -> tuple[np.ndarray, tuple[MriSliceHitRegion, ...]]:
+
     figure = build_mri_slice_figure(
         panels,
         scalar_range=scalar_range,
@@ -399,13 +499,25 @@ def draw_mri_slice_figure_to_rgb(
     try:
         figure.canvas.draw()
         rgba = np.asarray(figure.canvas.buffer_rgba())
-        return np.asarray(rgba[..., :3], dtype=np.uint8).copy()
+        image_rgb = np.asarray(rgba[..., :3], dtype=np.uint8).copy()
+        height = image_rgb.shape[0]
+        hit_regions = []
+        for axis, panel in zip(figure.axes[:3], panels):
+            bounds = axis.get_window_extent()
+            hit_regions.append(MriSliceHitRegion(
+                plane=panel.plane,
+                image_bounds=(float(bounds.x0), float(height - bounds.y1), float(bounds.width), float(bounds.height)),
+                panel_shape=panel.anatomy.shape,
+                pixel_to_voxel=panel.pixel_to_voxel,
+                fixed_voxel_axis=panel.fixed_voxel_axis,
+                fixed_voxel_step=panel.fixed_voxel_step,
+            ))
+        return image_rgb, tuple(hit_regions)
     finally:
-        import matplotlib.pyplot as plt
-
-        plt.close(figure)
+        figure.clear()
 
 
+@_serialized_mri_figure
 def build_mri_slice_figure(
     panels: tuple[MriSlicePanel, MriSlicePanel, MriSlicePanel],
     *,
@@ -417,24 +529,22 @@ def build_mri_slice_figure(
 ):
     """Build a Matplotlib orthogonal MRI slice figure."""
 
-    import matplotlib
-
-    matplotlib.use("Agg", force=True)
-    import matplotlib.pyplot as plt
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+    from matplotlib.figure import Figure
     from matplotlib.colors import LinearSegmentedColormap, Normalize
     from matplotlib.cm import ScalarMappable
 
-    apply_matplotlib_figure_style()
     cmap = LinearSegmentedColormap.from_list("fpvs_loreta_activation", list(LORETA_SMOOTH_SCALAR_COLORS))
     vmin, vmax = _valid_scalar_range(scalar_range)
 
-    figure = plt.figure(figsize=figsize, dpi=dpi, facecolor="black")
+    figure = Figure(figsize=figsize, dpi=dpi, facecolor="black")
+    FigureCanvasAgg(figure)
     grid = figure.add_gridspec(
         1,
         4,
         width_ratios=(1.0, 1.0, 1.0, 0.055),
         left=0.03,
-        right=0.965,
+        right=0.91,
         top=0.84 if label else 0.91,
         bottom=0.12,
         wspace=0.08,
@@ -451,7 +561,7 @@ def build_mri_slice_figure(
     for index, panel in enumerate(panels):
         axis = figure.add_subplot(grid[0, index])
         axis.set_facecolor("black")
-        axis.imshow(_normalize_anatomy(panel.anatomy), cmap="gray", interpolation="lanczos")
+        axis.imshow(_normalize_anatomy(panel.anatomy), cmap="gray", interpolation="lanczos", origin="upper")
         if activation_visible:
             masked_overlay = np.ma.masked_where(~np.isfinite(panel.overlay) | (panel.overlay <= vmin), panel.overlay)
             overlay_alpha = np.ma.masked_array(
@@ -467,9 +577,11 @@ def build_mri_slice_figure(
             norm=Normalize(vmin=vmin, vmax=vmax),
             interpolation="bilinear",
             alpha=overlay_alpha,
+            origin="upper",
         )
+        coordinate_axis = {"axial": "z", "coronal": "y", "sagittal": "x"}[panel.plane]
         axis.set_title(
-            panel.label,
+            f"{panel.label} {coordinate_axis}={panel.ras_coordinate_mm:+g} mm",
             color="#0B66FF",
             pad=8,
             bbox={
@@ -478,8 +590,19 @@ def build_mri_slice_figure(
                 "edgecolor": "white",
                 "linewidth": 0.0,
             },
-            **figure_text_kwargs("panel_label"),
+            **figure_text_kwargs("axis_label"),
         )
+        for text, position, alignment in zip(
+            panel.orientation_labels,
+            ((0.02, 0.5), (0.98, 0.5), (0.5, 0.98), (0.5, 0.02)),
+            (("left", "center"), ("right", "center"), ("center", "top"), ("center", "bottom")),
+        ):
+            axis.text(
+                *position, text, transform=axis.transAxes, color="white",
+                ha=alignment[0], va=alignment[1],
+                bbox={"facecolor": "black", "alpha": 0.55, "edgecolor": "none", "pad": 1},
+                **figure_text_kwargs("small"),
+            )
         axis.set_xticks([])
         axis.set_yticks([])
         for spine in axis.spines.values():
@@ -630,91 +753,94 @@ def _clip_slice_indices(slice_indices: tuple[int, int, int], *, shape: tuple[int
 
 
 def _slice_panel(
-    anatomy_data: np.ndarray,
+    anatomy: MriAnatomyVolume,
     source_voxels: np.ndarray,
     values: np.ndarray,
     *,
     plane: PlaneName,
-    fixed_index: int,
+    selected_voxel: tuple[int, int, int],
     scalar_range: tuple[float, float],
     sigma: float,
 ) -> MriSlicePanel:
-    raw_anatomy = _raw_anatomy_plane(anatomy_data, plane=plane, fixed_index=fixed_index)
-    raw_overlay = _raw_overlay_plane(
-        anatomy_data.shape,
-        source_voxels,
-        values,
-        plane=plane,
-        fixed_index=fixed_index,
-        scalar_range=scalar_range,
-        sigma=sigma,
+    # fsaverage's native voxel axes are L/I/A, not R/A/S. Derive the
+    # anatomical plane and orientation from its affine instead of axis numbers.
+    ras_axes, ras_signs = _ras_voxel_axes(anatomy.vox_to_ras)
+    horizontal_ras, vertical_ras, fixed_ras = {
+        "axial": (0, 1, 2), "coronal": (0, 2, 1), "sagittal": (1, 2, 0),
+    }[plane]
+    column_axis, row_axis, fixed_axis = (ras_axes[axis] for axis in (horizontal_ras, vertical_ras, fixed_ras))
+    fixed_index = selected_voxel[fixed_axis]
+    selection = [slice(None)] * 3
+    selection[fixed_axis] = fixed_index
+    remaining_axes = [axis for axis in range(3) if axis != fixed_axis]
+    anatomy_plane = np.asarray(anatomy.data[tuple(selection)], dtype=float).transpose(
+        remaining_axes.index(row_axis), remaining_axes.index(column_axis),
     )
-    anatomy_plane, overlay_plane = _crop_panel_to_anatomy(
-        _orient_plane(raw_anatomy),
-        _orient_plane(raw_overlay),
-    )
+    column_step = int(ras_signs[horizontal_ras])
+    row_step = -int(ras_signs[vertical_ras])
+    if row_step < 0:
+        anatomy_plane = anatomy_plane[::-1, :]
+    if column_step < 0:
+        anatomy_plane = anatomy_plane[:, ::-1]
+
+    pixel_to_voxel = np.zeros((3, 3), dtype=float)
+    pixel_to_voxel[column_axis, 0] = column_step
+    pixel_to_voxel[row_axis, 1] = row_step
+    pixel_to_voxel[fixed_axis, 2] = fixed_index
+    if column_step < 0:
+        pixel_to_voxel[column_axis, 2] = anatomy.data.shape[column_axis] - 1
+    if row_step < 0:
+        pixel_to_voxel[row_axis, 2] = anatomy.data.shape[row_axis] - 1
+
+    mask = _anatomy_content_mask(anatomy_plane)
+    if mask is not None:
+        (row_start, row_stop), (column_start, column_stop) = _square_crop_bounds(mask)
+        anatomy_plane = anatomy_plane[row_start:row_stop, column_start:column_stop]
+        pixel_to_voxel[:, 2] += pixel_to_voxel[:, 0] * column_start + pixel_to_voxel[:, 1] * row_start
+
+    rows, columns = np.indices(anatomy_plane.shape, dtype=float)
+    pixels = np.column_stack((columns.ravel(), rows.ravel(), np.ones(rows.size)))
+    coordinate_grid = pixels @ pixel_to_voxel.T
+    overlay_plane = _gaussian_interpolated_values(
+        coordinate_grid, source_voxels, values, sigma=sigma, scalar_range=scalar_range,
+    ).reshape(anatomy_plane.shape)
+    ras_coordinate = voxel_to_ras(selected_voxel, anatomy)[fixed_ras]
     return MriSlicePanel(
         label=_plane_label(plane),
         plane=plane,
         anatomy=anatomy_plane,
         overlay=overlay_plane,
         slice_index=int(fixed_index),
+        pixel_to_voxel=pixel_to_voxel,
+        fixed_voxel_axis=fixed_axis,
+        fixed_voxel_step=int(ras_signs[fixed_ras]),
+        ras_coordinate_mm=ras_coordinate,
+        orientation_labels={
+            "axial": ("L", "R", "A", "P"),
+            "coronal": ("L", "R", "S", "I"),
+            "sagittal": ("P", "A", "S", "I"),
+        }[plane],
     )
 
 
-def _raw_anatomy_plane(anatomy_data: np.ndarray, *, plane: PlaneName, fixed_index: int) -> np.ndarray:
-    if plane == "axial":
-        return anatomy_data[:, :, fixed_index]
-    if plane == "coronal":
-        return anatomy_data[:, fixed_index, :]
-    return anatomy_data[fixed_index, :, :]
+def _ras_voxel_axes(vox_to_ras: np.ndarray) -> tuple[tuple[int, int, int], tuple[int, int, int]]:
+    """Identify each RAS axis in an axis-aligned affine, rejecting oblique data."""
 
-
-def _raw_overlay_plane(
-    shape: tuple[int, int, int],
-    source_voxels: np.ndarray,
-    values: np.ndarray,
-    *,
-    plane: PlaneName,
-    fixed_index: int,
-    scalar_range: tuple[float, float],
-    sigma: float,
-) -> np.ndarray:
-    coordinate_grid, raw_shape = _plane_coordinate_grid(shape, plane=plane, fixed_index=fixed_index)
-    interpolated = _gaussian_interpolated_values(
-        coordinate_grid,
-        source_voxels,
-        values,
-        sigma=sigma,
-        scalar_range=scalar_range,
-    )
-    return interpolated.reshape(raw_shape)
-
-
-def _plane_coordinate_grid(
-    shape: tuple[int, int, int],
-    *,
-    plane: PlaneName,
-    fixed_index: int,
-) -> tuple[np.ndarray, tuple[int, int]]:
-    nx, ny, nz = (int(value) for value in shape)
-    if plane == "axial":
-        x_axis = np.arange(nx, dtype=float)
-        y_axis = np.arange(ny, dtype=float)
-        x, y = np.meshgrid(x_axis, y_axis, indexing="ij")
-        coords = np.column_stack((x.ravel(), y.ravel(), np.full(x.size, float(fixed_index))))
-        return coords, (nx, ny)
-    if plane == "coronal":
-        x_axis = np.arange(nx, dtype=float)
-        z_axis = np.arange(nz, dtype=float)
-        x, z = np.meshgrid(x_axis, z_axis, indexing="ij")
-        coords = np.column_stack((x.ravel(), np.full(x.size, float(fixed_index)), z.ravel()))
-        return coords, (nx, nz)
-    y_axis = np.arange(ny, dtype=float)
-    z_axis = np.arange(nz, dtype=float)
-    y, z = np.meshgrid(y_axis, z_axis, indexing="ij")
-    coords = np.column_stack((np.full(y.size, float(fixed_index)), y.ravel(), z.ravel()))
-    return coords, (ny, nz)
+    transform = np.asarray(vox_to_ras, dtype=float)
+    if transform.shape != (4, 4) or not np.all(np.isfinite(transform)):
+        raise ValueError("MRI voxel-to-RAS transform must be a finite 4 x 4 matrix.")
+    rotation_scale = transform[:3, :3]
+    lengths = np.linalg.norm(rotation_scale, axis=0)
+    if np.any(lengths <= 0.0):
+        raise ValueError("MRI voxel-to-RAS transform is singular.")
+    directions = rotation_scale / lengths
+    axes = tuple(int(axis) for axis in np.argmax(np.abs(directions), axis=1))
+    ideal_directions = np.zeros((3, 3), dtype=float)
+    ideal_directions[np.arange(3), axes] = np.sign(directions[np.arange(3), axes])
+    if len(set(axes)) != 3 or not np.allclose(directions, ideal_directions, rtol=0.0, atol=1e-6):
+        raise ValueError("MRI slice navigation requires axis-aligned fsaverage MRI anatomy.")
+    signs = tuple(int(np.sign(directions[ras_axis, voxel_axis])) for ras_axis, voxel_axis in enumerate(axes))
+    return axes, signs
 
 
 def _gaussian_interpolated_values(
@@ -767,25 +893,6 @@ def _nearest_values(
     output = values[nearest]
     vmin, vmax = _valid_scalar_range(scalar_range)
     return np.clip(output, vmin, vmax)
-
-
-def _orient_plane(plane: np.ndarray) -> np.ndarray:
-    return np.flipud(np.asarray(plane, dtype=float).T)
-
-
-def _crop_panel_to_anatomy(anatomy: np.ndarray, overlay: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    anatomy_values = np.asarray(anatomy, dtype=float)
-    overlay_values = np.asarray(overlay, dtype=float)
-    mask = _anatomy_content_mask(anatomy_values)
-    if mask is None:
-        return anatomy_values, overlay_values
-    row_bounds, col_bounds = _square_crop_bounds(mask)
-    row_start, row_stop = row_bounds
-    col_start, col_stop = col_bounds
-    return (
-        anatomy_values[row_start:row_stop, col_start:col_stop],
-        overlay_values[row_start:row_stop, col_start:col_stop],
-    )
 
 
 def _anatomy_content_mask(anatomy: np.ndarray) -> np.ndarray | None:

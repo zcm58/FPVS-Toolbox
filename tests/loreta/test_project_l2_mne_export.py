@@ -11,7 +11,6 @@ from PySide6.QtWidgets import QFileDialog
 
 from config import DEFAULT_ELECTRODE_NAMES_64
 from Tools.LORETA_Visualizer.gui import (
-    DEFAULT_STACKED_CORTICAL_ZSCORE_SCALAR_RANGE,
     PROJECT_SOURCE_EXPORT_ALL_ZSCORE,
     PROJECT_SOURCE_EXPORT_DEFAULT_MODES,
     PROJECT_SOURCE_EXPORT_ELORETA_SOURCE_PSD,
@@ -377,7 +376,6 @@ def test_loreta_split_figure_display_labels_write_out_color_and_semantic_respons
     assert split_figure_condition_display_label("Color Response 2") == "Color Response"
     assert split_figure_condition_display_label("Semantic Response Raw mean z-score") == "Semantic Response"
     assert split_figure_condition_display_label("Oddball Baseline") == "Oddball Baseline"
-    assert DEFAULT_STACKED_CORTICAL_ZSCORE_SCALAR_RANGE == (0.0, 3.5)
 
 
 def test_loreta_display_modes_keep_mri_slices_volume_only() -> None:

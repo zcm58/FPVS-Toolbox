@@ -78,6 +78,7 @@ from Tools.LORETA_Visualizer.source_producers.source_psd_cache import (
 from Tools.LORETA_Visualizer.source_producers.source_validation_report import (
     write_project_source_validation_report,
 )
+from Tools.LORETA_Visualizer.source_producers.model_diagnostics import summarize_inverse_model
 
 from Tools.LORETA_Visualizer.source_producers.project_source_psd_inputs import (
     ProjectHaukSourcePsdInputError as ProjectL2MNEHaukSourcePsdExportError,
@@ -215,6 +216,7 @@ def write_project_l2_mne_hauk_source_psd_payloads(
     cluster_permutation_count: int = DEFAULT_CLUSTER_PERMUTATION_COUNT,
     cluster_permutation_seed: int = DEFAULT_CLUSTER_PERMUTATION_SEED,
     progress_callback: ProgressCallback | None = None,
+    cancellation_callback: Callable[[], None] | None = None,
 ) -> ProjectL2MNEHaukSourcePsdExportResult:
     """Write time-domain-first participant and group source-PSD payloads.
 
@@ -225,6 +227,8 @@ def write_project_l2_mne_hauk_source_psd_payloads(
     selection and build the fsaverage BioSemi64 model.
     """
 
+    if cancellation_callback is not None:
+        cancellation_callback()
     root = _active_project_root(project, project_root=project_root)
     resolved_output = _project_output_dir(root, output_dir)
     _emit_progress(progress_callback, "Reading completed processing-ledger participants...")
@@ -273,6 +277,8 @@ def write_project_l2_mne_hauk_source_psd_payloads(
         expected_processing_fingerprint=input_plan.processing_fingerprint,
         expected_processing_fingerprint_version=input_plan.processing_fingerprint_version,
     )
+    if cancellation_callback is not None:
+        cancellation_callback()
     sampling_omission_count = len(project_inputs.sampling_contract_omissions)
     input_plan = reconcile_project_hauk_source_psd_sampling_contract(
         input_plan,
@@ -339,6 +345,8 @@ def write_project_l2_mne_hauk_source_psd_payloads(
         _emit_progress(progress_callback, "Using supplied fsaverage source-PSD model.")
         model = source_psd_model
     _validate_source_psd_model(model, project_inputs=project_inputs)
+    if cancellation_callback is not None:
+        cancellation_callback()
     _emit_progress(progress_callback, "Source-PSD inverse model is ready.")
 
     rows_by_condition: dict[str, list[L2MNEHaukParticipantZScoreValues]] = {
@@ -351,6 +359,8 @@ def write_project_l2_mne_hauk_source_psd_payloads(
     cache_miss_count = 0
 
     for index, record in enumerate(project_inputs.records, start=1):
+        if cancellation_callback is not None:
+            cancellation_callback()
         _emit_progress(
             progress_callback,
             (
@@ -455,6 +465,8 @@ def write_project_l2_mne_hauk_source_psd_payloads(
     )
 
     _emit_progress(progress_callback, "Writing participant and group source-PSD payloads...")
+    if cancellation_callback is not None:
+        cancellation_callback()
     participant_result = write_l2_mne_hauk_precomputed_participant_zscore_surface_payloads(
         forward_model=model.forward_model,
         conditions=prepared_conditions,
@@ -542,6 +554,8 @@ def write_project_l2_mne_hauk_source_psd_payloads(
         lateralization_summary_path=participant_result.lateralization_summary_path,
         lateralization_summary_csv_path=participant_result.lateralization_summary_csv_path,
         forward_model_metadata=dict(model.forward_model.metadata),
+        inverse_model_diagnostics=summarize_inverse_model(model.info, model.inverse_operator),
+        time_domain_records=project_inputs.records,
     )
     result = ProjectL2MNEHaukSourcePsdExportResult(
         project_inputs=project_inputs,

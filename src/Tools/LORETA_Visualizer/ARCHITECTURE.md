@@ -780,6 +780,41 @@ adds cross-field checks that the schema intentionally does not own.
 
 ## Verification
 
+The October 2026 validated-improvements slice preserves the numerical inverse
+methods while versioning cluster inference separately. Both cortical and volume
+producers use `source_space_statistics.py`: exhaustive sign patterns use their
+exact tail proportion; sampled patterns use `(b+1)/(B+1)`. Version 2, sampling
+mode, requested/actual counts, and minimum attainable p travel with saved masks
+and validation reports. Existing masks are read without reinterpretation.
+
+The compact color-scale selector replaces the previous automatic checkbox and
+redundant mode label. Current-map and fixed limits are shared by preview/export;
+comparison exports use a joint range for their displayed panels. All-conditions
+mode uses the selected method and exact summary, never a fallback mean for a
+missing median. A missing sibling payload reports a failure and visibly returns
+the preview to current-map scaling rather than silently presenting an incomplete
+shared scale. The positive-value palette is Matplotlib viridis.
+
+`slice_viewer.py` handles only linked cursor drawing and image hit geometry.
+MRI plane axes and orientation derive from the voxel-to-RAS affine, including
+fsaverage's tkregister axis permutation. A single preview worker loads anatomy,
+selects shared default planes, and renders with an Agg canvas. Pending navigation
+requests coalesce to the newest request; obsolete images/errors cannot replace
+the current view. Manual cursor planes persist across conditions with the same
+method/summary/mask reference; Home or Reset restores shared default planes.
+Coordinate titles/edge letters appear in the existing figure layout. Tooltips
+inspect nearest original prepared grid values and explicitly identify unmasked
+inspection; they never report a smoothed pixel as a tested value.
+
+Current source exporters accept a cooperative cancellation callback at
+prepublication checkpoints. Publication itself completes without cancellation;
+the GUI retains completed sibling methods and stops pending methods. Active
+threads defer page closure. Model/input diagnostics extend existing project-local
+reports only, without changing source cache signatures or project metadata.
+
+See [validation and smoke notes](../../../docs/agent/quality/loreta-validation.md)
+for the synthetic inverse benchmark and its explicit scope.
+
 Use the focused tool gate; it selects `.venv1` or `.venv`, applies the Qt guard,
 and runs the tool tests, static checks, and legacy/source-localization audits:
 
