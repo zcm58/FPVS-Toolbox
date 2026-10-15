@@ -1,7 +1,10 @@
 # Quality Score
 
-Reviewed 2026-10-15. V3 is in release qualification; it is not yet cleared for
-stable publication.
+Reviewed 2026-10-15. [V3.0.0 is published](https://github.com/zcm58/FPVS-Toolbox/releases/tag/v3.0.0)
+as the latest stable, immutable release at the user's explicit direction.
+The release uses the exact qualified `9f7480b4` installer; anonymous downloads
+of all four release assets matched their verified checksums. Outstanding manual
+checks remain unclaimed, and optional full-cohort investigations are stopped.
 
 - The [v3 release ledger](../exec-plans/active/v3-release-readiness.md) owns
   current blockers, accepted scope, evidence, and explicit post-v3 deferrals.
@@ -31,10 +34,10 @@ stable publication.
   prepared FHC replay also matched its scientific arrays and result, with
   cancellation/non-overwrite checks passing. These bounded receipts do not
   qualify fresh project preparation or the current full cohort.
-- Open qualification includes representative-project/manual installed-app
-  acceptance, private fresh-project/full-cohort and FHC preparation checks,
-  and final release identity/publication. Later changes remain subject to
-  final-commit CI.
+- Outstanding qualification includes representative-project/manual installed-app
+  acceptance. Additional private fresh-project/full-cohort and FHC preparation
+  checks remain incomplete optional evidence, not newly imposed release blockers.
+  Release identity and publication are complete. Later changes remain subject to CI.
 - Public restoration is complete at `zcm58/FPVS-Toolbox`, with cleaned source
   history, verified historical installers, and deployed documentation. The
   original repository remains private with its retained PR/cached objects;
@@ -43,5 +46,5 @@ stable publication.
   the [debt tracker](../exec-plans/tech-debt-tracker.md) for bounded maintenance.
 
 No local Qt execution or manual installed-app/project acceptance is claimed here.
-The completed hosted Windows lifecycle is automated qualification of the exact
-retained artifact, not stable release publication.
+The completed hosted Windows lifecycle qualifies the exact published artifact
+through automated checks; it does not establish human installed-app acceptance.

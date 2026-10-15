@@ -2,7 +2,24 @@
 
 ## Status
 
-Active. This is the release ledger for the first v3 release candidate.
+Published. This ledger retains the qualification evidence and outstanding
+manual checks for v3.0.0.
+
+## Publication — 2026-10-15
+
+At the user's explicit direction, [v3.0.0](https://github.com/zcm58/FPVS-Toolbox/releases/tag/v3.0.0)
+was published as the latest stable, immutable release. Its annotated tag points
+to `9f7480b48fbdb2549148262206fde77bdb309e22`, the exact qualified installer build.
+The full installer, update JSON, and both SHA-256 sidecars were published together;
+all four anonymous downloads matched their verified local bytes. The installer
+digest is recorded below and on the release page.
+
+The user prioritized publication over further optional full-cohort comparisons.
+Those investigations are stopped with their evidence preserved; they did not
+establish a production defect. Human installed-app acceptance remains unclaimed.
+Publication does not retrospectively complete the unchecked qualification items.
+The pre-publication record below describes the evidence available before release;
+its statements about publication being pending are historical.
 
 ## Release closeout and open-source restoration — 2026-10-15
 
