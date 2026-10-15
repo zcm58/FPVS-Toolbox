@@ -1,6 +1,6 @@
 # LORETA validated improvements
 
-Status: implementation complete; broad and CI verification in progress
+Status: implementation complete; verification records below
 Branch: `codex/loreta-validated-improvements`
 Base: `codex/v3-release` at `503341ba`
 
@@ -70,4 +70,11 @@ this slice makes existing assumptions and numerical correctness inspectable.
   figure-contract tests passed. Audits, Ruff, compilation, and strict MkDocs
   documentation build passed. Final review also locked image origin explicitly
   so custom Matplotlib settings cannot invert anatomical orientation labels.
-- Broad precommit and remote CI checks are pending.
+- Broad precommit: 7,417 passed, 25 skipped. The final focused LORETA run also
+  covers seven regressions added after broad-run collection.
+- The agent audit passes with the actual v3 release base `503341ba`. The initial
+  new-branch CI audit used `origin/main` and reported 12 inherited issues outside
+  LORETA; those unrelated release-history changes are outside this diff.
+- Qt interaction and Windows CI results are recorded in this branch's
+  [GitHub Actions runs](https://github.com/zcm58/FPVS-Toolbox-Repo/actions?query=branch%3Acodex%2Floreta-validated-improvements).
+  Visible/manual smoke remains unexecuted locally under the repository policy.

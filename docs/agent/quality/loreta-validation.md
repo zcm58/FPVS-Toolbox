@@ -45,8 +45,21 @@ in a participant.
 
 ## Verification
 
-Use the repo verification driver with the `loreta`, `figures`, and `gui` focused
-scopes, followed by `repo --tier precommit`. Local execution excludes Qt tests.
+Use the repo environment with the verification driver. Local execution excludes
+Qt tests:
+
+```console
+python .agents/scripts/verify.py --scope loreta --tier focused
+python .agents/scripts/verify.py --scope figures --tier focused
+python .agents/scripts/verify.py --scope gui --tier focused
+python .agents/scripts/verify.py --scope repo --tier precommit
+```
+
+On 2026-10-15, the final focused run passed 432 LORETA tests; GUI and figure gates
+passed 656 and 4 tests respectively. The broad local run passed 7,417 tests with
+25 skips. Seven additional regressions added after broad collection are covered
+by the final focused run. Audits, Ruff, compilation and strict MkDocs build pass.
+
 CI-only coverage is registered in:
 
 - `tests/gui/test_loreta_source_options_qt.py`
