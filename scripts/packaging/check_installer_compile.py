@@ -60,6 +60,7 @@ def main() -> int:
                 str(arguments.inno_compiler.resolve()),
                 "/Qp",
                 "/DAppVersion=0.0.2",
+                "/DWindowsVersion=0.0.2.0",
                 f"/DBundleRoot={bundle}",
                 f"/DOwnedInventoryRoot={inventories}",
                 f"/O{fixture / 'compiled'}",

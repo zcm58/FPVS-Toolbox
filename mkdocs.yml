@@ -48,6 +48,7 @@ markdown_extensions:
 
 nav:
   - Home: index.md
+  - Installing and Updating: installing-and-updating.md
   - Tools:
       - Overview: tools/index.md
       - Standard FPVS Screening: tools/statistics.md

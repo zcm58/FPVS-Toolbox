@@ -34,6 +34,17 @@ def _configure_linux_qpa_platform(
 
 _configure_linux_qpa_platform()
 
+# Frozen diagnostics must dispatch before GUI imports or user-settings startup.
+if __name__ == "__main__" and len(sys.argv) > 1 and sys.argv[1] in {
+    "--packaging-check", "--packaged-smoke-output",
+}:
+    import multiprocessing
+
+    multiprocessing.freeze_support()
+    from Main_App.diagnostics.packaged_smoke import main as packaged_smoke_main
+
+    sys.exit(packaged_smoke_main(sys.argv[1:]))
+
 from Main_App.workers.mp_env import set_blas_threads_single_process
 
 set_blas_threads_single_process()

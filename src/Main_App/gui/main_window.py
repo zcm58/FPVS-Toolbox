@@ -153,7 +153,11 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         # Local, relative import avoids circulars and path issues
-        from Main_App.gui.update_manager import cleanup_old_executable, check_for_updates_on_launch
+        from Main_App.gui.update_manager import (
+            cleanup_old_executable,
+            check_for_updates_on_launch,
+            prepare_startup_update_check,
+        )
         cleanup_old_executable()
 
         self.settings = SettingsManager()
@@ -302,6 +306,7 @@ class MainWindow(QMainWindow):
         self._run_excel_snapshot_before: dict[str, tuple[int, int]] = {}
 
         # Auto update check on launch: prompt only if update exists
+        prepare_startup_update_check(self)
         QTimer.singleShot(1000, lambda: check_for_updates_on_launch(self))
 
     def showEvent(self, event: QShowEvent) -> None:
@@ -1170,7 +1175,10 @@ class MainWindow(QMainWindow):
             )
             event.ignore()
             return
-        if not project_drafts.confirm_project_draft_exit(self):
+        if (
+            not getattr(self, "_update_exit_confirmed", False)
+            and not project_drafts.confirm_project_draft_exit(self)
+        ):
             event.ignore()
             return
         free_harmonic_page = getattr(
