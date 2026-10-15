@@ -413,7 +413,7 @@ def validate_condition_output_names(labels: Iterable[str]) -> None:
     """Reject condition aliases that would share a Windows result destination."""
     seen: dict[str, str] = {}
     for label in labels:
-        output_name = condition_output_folder_name(label)
+        output_name = validate_group_folder_name(condition_output_folder_name(label))
         key = output_name.casefold()
         if key in seen:
             raise GroupConfigurationError(

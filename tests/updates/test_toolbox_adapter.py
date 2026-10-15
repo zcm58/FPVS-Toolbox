@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import ast
 import hashlib
+import importlib.util
 import json
 import subprocess
 import sys
 from contextlib import nullcontext
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
@@ -19,9 +20,19 @@ from Main_App.updates.application import APP_VERSION, source_version
 from Main_App.updates.models import DownloadedInstaller, InstallerAsset, UpdateError
 
 
-@pytest.mark.parametrize("active", [False, True])
-def test_install_guard_tracks_parentless_sequence_export(active):
-    path = Path(__file__).resolve().parents[2] / "src/Main_App/gui/update_install_guard.py"
+@pytest.fixture
+def install_guard(monkeypatch):
+    root = Path(__file__).resolve().parents[2]
+    registry_path = root / "src/Tools/Free_Harmonic_Clustering/gui/operation_registry.py"
+    spec = importlib.util.spec_from_file_location("fhc_install_guard_registry", registry_path)
+    assert spec is not None and spec.loader is not None
+    registry = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(registry)
+    # Load the actual GUI-neutral registry without importing tool backends or Qt.
+    public_gui = ModuleType("Tools.Free_Harmonic_Clustering.gui")
+    public_gui.has_active_operations = registry.has_active_operations
+    monkeypatch.setitem(sys.modules, public_gui.__name__, public_gui)
+    path = root / "src/Main_App/gui/update_install_guard.py"
     tree = ast.parse(path.read_text(encoding="utf-8"))
     body = [
         ast.ImportFrom(module="__future__", names=[ast.alias(name="annotations")], level=0),
@@ -30,13 +41,51 @@ def test_install_guard_tracks_parentless_sequence_export(active):
     messages = Mock()
     namespace = {"QThread": object, "show_warning": messages}
     exec(compile(ast.fix_missing_locations(ast.Module(body=body, type_ignores=[])), str(path), "exec"), namespace)
+    return namespace["default_install_guard"], messages, registry
+
+
+@pytest.mark.parametrize("active", [False, True])
+def test_install_guard_tracks_parentless_sequence_export(install_guard, active):
+    guard, messages, _registry = install_guard
     host = SimpleNamespace(
         findChildren=lambda _kind: [],
         _sequence_figure_page=SimpleNamespace(has_active_generation=lambda: active),
     )
 
-    assert namespace["default_install_guard"](host) is not active
+    assert guard(host) is not active
     assert messages.call_count == int(active)
+
+
+
+def test_install_guard_retains_detached_fhc_work_until_every_operation_finishes(install_guard):
+    guard, messages, registry = install_guard
+    host = SimpleNamespace(findChildren=lambda _kind: [])
+    tokens = [object(), object()]
+    workers = [Mock(), Mock()]
+    assert guard(host)
+    for token, worker in zip(tokens, workers, strict=True):
+        registry.register_active_operation(token, worker)
+    assert not guard(host)
+    for worker in workers:
+        worker.cancel.assert_not_called()
+
+    # Cooperative cancellation does not release the thread-cleanup obligation.
+    assert registry.cancel_all_active_operations() == 2
+    assert not guard(host)
+    registry.release_active_operation(tokens[0])
+    assert not guard(host)
+    registry.release_active_operation(tokens[1])
+    assert guard(host)
+    assert messages.call_count == 3
+    for worker in workers:
+        worker.cancel.assert_called_once_with()
+
+
+def test_standalone_install_guard_remains_independent_of_fhc_work(install_guard):
+    guard, messages, registry = install_guard
+    registry.register_active_operation(object(), Mock())
+    assert guard(None)
+    messages.assert_not_called()
 
 
 def test_source_helper_starts_from_unrelated_working_directory(tmp_path):

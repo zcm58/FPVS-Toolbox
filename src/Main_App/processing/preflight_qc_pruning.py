@@ -16,6 +16,7 @@ from pathlib import Path
 import re
 import stat
 import tempfile
+import time
 from typing import Any, Iterator, Mapping
 
 logger = logging.getLogger(__name__)
@@ -190,6 +191,19 @@ def _read_entry(path: Path, namespace: str, schema_version: int, method_director
         return None
 
 
+def replace_cache_file(temporary: Path, target: Path) -> None:
+    """Allow brief scanner locks without masking a persistent publication failure."""
+    for attempt, delay in enumerate((0.0, 0.01, 0.02, 0.05, 0.1, 0.1)):
+        if delay:
+            time.sleep(delay)
+        try:
+            os.replace(temporary, target)
+            return
+        except PermissionError:
+            if attempt == 5:
+                raise
+
+
 def _atomic_json(path: Path, value: Any) -> None:
     descriptor, temporary_name = tempfile.mkstemp(prefix=".index-", suffix=".tmp", dir=path.parent)
     temporary = Path(temporary_name)
@@ -198,7 +212,7 @@ def _atomic_json(path: Path, value: Any) -> None:
             stream.write(_json(value))
             stream.flush()
             os.fsync(stream.fileno())
-        os.replace(temporary, path)
+        replace_cache_file(temporary, path)
     finally:
         temporary.unlink(missing_ok=True)
 
@@ -255,8 +269,8 @@ def prepare_pruning_candidates(
         if not isinstance(indexed, dict) or indexed.get("schema_version") != _INDEX_VERSION or indexed.get("slot") != slot or not isinstance(indexed.get("entries"), list):
             return None
         return index_path, slot, indexed["entries"]
-    except (OSError, TypeError, ValueError, RecursionError):
-        logger.warning("preflight_cache_index_unavailable path=%s", slots)
+    except (OSError, TypeError, ValueError, RecursionError) as exc:
+        logger.warning("preflight_cache_index_unavailable path=%s error=%s", slots, exc)
         return None
 
 
@@ -313,5 +327,5 @@ def prune_after_publication(
                 survivors.append(candidate)
                 logger.warning("preflight_cache_predecessor_locked path=%s", old_path)
         _atomic_json(index_path, _index_payload(slot, [current_entry, *survivors]))
-    except (OSError, TypeError, ValueError, KeyError, RecursionError):
-        logger.warning("preflight_cache_prune_skipped path=%s", destination)
+    except (OSError, TypeError, ValueError, KeyError, RecursionError) as exc:
+        logger.warning("preflight_cache_prune_skipped path=%s error=%s", destination, exc)

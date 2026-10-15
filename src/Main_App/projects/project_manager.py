@@ -1,6 +1,7 @@
 """Project management utilities extracted from main_window.py."""
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Mapping
 from copy import deepcopy
 import logging
@@ -14,6 +15,7 @@ from types import SimpleNamespace
 from PySide6.QtCore import QObject, QRunnable, Qt, QThread, QThreadPool, QTimer, Signal
 from PySide6.QtWidgets import (
     QApplication,
+    QComboBox,
     QFileDialog,
     QMessageBox,
     QInputDialog,
@@ -833,6 +835,47 @@ def _start_repeated_session_preflight(
     return True
 
 
+def _new_project_directory(projects_root: Path, project_name: str) -> Path:
+    """Require one safe project folder directly beneath the selected root."""
+    try:
+        validate_group_folder_name(project_name)
+    except GroupConfigurationError as exc:
+        raise ValueError(str(exc).replace("Group folder name", "Project name", 1)) from exc
+    project_dir = Path(projects_root) / project_name
+    if project_dir.resolve().parent != Path(projects_root).resolve():
+        raise ValueError("Project folder must stay directly inside the Projects Root.")
+    return project_dir
+
+
+def _select_project_metadata(
+    parent: QWidget | None,
+    metadata: list[ProjectMetadata],
+) -> ProjectMetadata | None:
+    """Keep project identity on chooser rows, independent of displayed names."""
+    name_counts = Counter(entry.name for entry in metadata)
+    labels = [
+        f"{entry.name} — {entry.project_root.name}"
+        if name_counts[entry.name] > 1 else entry.name
+        for entry in metadata
+    ]
+    dialog = QInputDialog(parent)
+    try:
+        dialog.setWindowTitle("Open Existing Project")
+        dialog.setLabelText("Select a project:")
+        dialog.setComboBoxEditable(False)
+        dialog.setComboBoxItems(labels)
+        combo = dialog.findChild(QComboBox)
+        assert combo is not None
+        for index, entry in enumerate(metadata):
+            combo.setItemData(index, entry)
+            combo.setItemData(index, str(entry.project_root), Qt.ToolTipRole)
+        if dialog.exec() != QInputDialog.Accepted:
+            return None
+        return combo.currentData()
+    finally:
+        dialog.deleteLater()
+
+
 def new_project(self) -> None:
     if getattr(self, "_active_repeated_preflight_job", None) is not None:
         QMessageBox.information(
@@ -847,7 +890,16 @@ def new_project(self) -> None:
     if not ok or not name.strip():
         return
     project_name = name.strip()
-    project_dir = self.projectsRoot / project_name
+    try:
+        project_dir = _new_project_directory(self.projectsRoot, project_name)
+    except (ValueError, OSError, RuntimeError) as exc:
+        QMessageBox.warning(
+            self,
+            "Invalid Project Name",
+            "Project names must be one safe Windows folder name inside the "
+            f"Projects Root.\n\n{exc}",
+        )
+        return
     use_existing_project_folder = False
     if project_dir.exists():
         if (project_dir / "project.json").exists():
@@ -1236,31 +1288,8 @@ def open_existing_project(self, parent: QWidget | None = None) -> None:
             finalize_guard()
             return
 
-        labels: list[str] = []
-        label_to_metadata: dict[str, ProjectMetadata] = {}
-        for entry in metadata:
-            label = entry.name
-            labels.append(label)
-            label_to_metadata[label] = entry
-
-        if not labels:
-            QMessageBox.warning(
-                parent,
-                "Projects Unavailable",
-                "No valid projects could be loaded.",
-            )
-            finalize_guard()
-            return
-
-        choice, ok = QInputDialog.getItem(
-            parent,
-            "Open Existing Project",
-            "Select a project:",
-            labels,
-            0,
-            editable=False,
-        )
-        if not ok or choice not in label_to_metadata:
+        selected = _select_project_metadata(parent, metadata)
+        if selected is None:
             logger.debug(
                 "Project selection cancelled.",
                 extra={"op": "open_existing_project", "path": str(root)},
@@ -1268,7 +1297,6 @@ def open_existing_project(self, parent: QWidget | None = None) -> None:
             finalize_guard()
             return
 
-        selected = label_to_metadata[choice]
         finalize_guard()
 
         _set_open_existing_action_enabled(self, False)
@@ -1331,6 +1359,10 @@ def _open_selected_project(
         extra={"op": "open_existing_project", "path": str(root)},
     )
     try:
+        if selected.parse_error:
+            raise ValueError(
+                f"Project manifest must contain a valid JSON object: {selected.manifest_path}"
+            )
         project = Project.load(
             selected.project_root,
             manifest=selected.manifest,
@@ -1353,33 +1385,64 @@ def _open_selected_project(
             exc_info=exc,
             extra={"op": "open_existing_project", "path": str(root)},
         )
+        if isinstance(exc, (ValueError, OSError)):
+            QMessageBox.critical(parent, "Project Open Failed", str(exc))
+            return
         raise
     finally:
         _open_selected_project_guard.end()
         _set_open_existing_action_enabled(self, True)
 
 
-def openProjectPath(self, folder: str) -> None:
-    project = Project.load(folder)
+def openProjectPath(self, folder: str) -> Project | None:
+    try:
+        project = Project.load(folder)
+    except (ValueError, OSError) as exc:
+        logger.exception(
+            "Failed to open project at %s.", folder,
+            extra={"op": "open_project_path", "path": folder},
+        )
+        QMessageBox.critical(self, "Project Open Failed", str(exc))
+        return None
     self.currentProject = project
     self.loadProject(project)
 
-    settings = SettingsManager()
-    recent = settings.get_recent_projects()
-    if folder in recent:
-        recent.remove(folder)
-    recent.insert(0, folder)
-    settings.set_recent_projects(recent)
-    settings.save()
+    try:
+        settings = SettingsManager()
+        recent = settings.get_recent_projects()
+        if folder in recent:
+            recent.remove(folder)
+        recent.insert(0, folder)
+        settings.set_recent_projects(recent)
+        settings.save()
+    except OSError as exc:
+        logger.exception(
+            "project_recent_preferences_save_failed root=%s", project.project_root,
+        )
+        QMessageBox.warning(
+            self,
+            "Application Preferences Not Saved",
+            "The project is open, but Toolbox could not save the recent-project "
+            "list. Check write access and free space in the application settings "
+            f"folder.\n\n{exc}",
+        )
+    return project
 
 
 def loadProject(self, project: Project) -> None:
     self.currentProject = project
     self.lbl_currentProject.setText(f"Current Project: {project.name}")
 
+    preference_error = None
     if not project_group_context(project).has_group_metadata:
         self.settings.set("paths", "data_folder", str(project.input_folder))
-        self.settings.save()
+        try:
+            self.settings.save()
+        except OSError as exc:
+            preference_error = exc
+            logger.exception(
+                "project_data_folder_preference_save_failed root=%s", project.project_root,
+            )
 
     mode = project.options.get("mode", "batch").lower()
     self.rb_single.setChecked(mode == "single")
@@ -1396,6 +1459,14 @@ def loadProject(self, project: Project) -> None:
         self.add_event_row()
 
     self.log(f"Loaded project: {project.name}")
+    if preference_error is not None:
+        QMessageBox.warning(
+            self,
+            "Application Preferences Not Saved",
+            "The project is open, but Toolbox could not save the last raw-data "
+            "folder preference. Check write access and free space in the application "
+            f"settings folder.\n\n{preference_error}",
+        )
 
 
 def edit_project_settings(self) -> None:

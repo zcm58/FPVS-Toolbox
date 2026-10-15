@@ -22,6 +22,7 @@ from Main_App.processing.preflight_qc_pruning import (
     namespace_cache_publication_lock,
     prepare_pruning_candidates,
     prune_after_publication,
+    replace_cache_file,
     safe_cache_directory,
 )
 
@@ -260,7 +261,7 @@ def _publish_cache_file(
             stream.write(serialized)
             stream.flush()
             os.fsync(stream.fileno())
-        os.replace(temporary_path, destination)
+        replace_cache_file(temporary_path, destination)
     finally:
         try:
             temporary_path.unlink(missing_ok=True)

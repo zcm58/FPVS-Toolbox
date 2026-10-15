@@ -47,3 +47,32 @@ def test_condition_output_collisions_identify_the_later_name(labels):
     assert errors[0].field == "label"
     assert "output name" in errors[0].message
     assert rows == [(labels[0], "1"), (labels[1], "2")]
+
+
+@pytest.mark.parametrize("label", ["CON", "1 - CON.txt", "COM1", "LPT²", "Faces.", "1 -", ".", "..", "Faces\x00"])
+def test_unsafe_sanitized_condition_outputs_identify_the_label(label):
+    from Main_App.projects import GroupConfigurationError, validate_condition_output_names
+
+    mapping, errors = validate_condition_rows([(label, "1"), ("Objects", "2")])
+
+    assert mapping == {"Objects": 2}
+    assert len(errors) == 1
+    assert errors[0].row == 0 and errors[0].field == "label"
+    assert "Condition output name" in errors[0].message
+    with pytest.raises(GroupConfigurationError):
+        validate_condition_output_names([label])
+
+
+@pytest.mark.parametrize("label,output", [
+    ("1 - Faces", "Faces"), ("2-Faces", "Faces"), ("CONDITION", "CONDITION"),
+    ("1 - COM10", "COM10"), ("Café", "Café"), (".Faces", ".Faces"),
+])
+def test_valid_condition_outputs_preserve_existing_names_and_marker_ids(label, output):
+    from Main_App.projects import condition_output_folder_name, validate_condition_output_names
+
+    mapping, errors = validate_condition_rows([(label, "7")])
+
+    assert not errors
+    assert mapping == {label: 7}
+    assert condition_output_folder_name(label) == output
+    validate_condition_output_names(mapping)

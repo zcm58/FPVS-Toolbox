@@ -15,7 +15,7 @@ def _module_available(name: str) -> bool:
 if not _module_available("PySide6") or not _module_available("pytestqt"):
     pytest.skip("PySide6 or pytest-qt not available", allow_module_level=True)
 
-from PySide6.QtWidgets import QApplication  # noqa: E402
+from PySide6.QtWidgets import QApplication, QComboBox, QInputDialog  # noqa: E402
 
 import Main_App.projects.project_manager as project_manager  # noqa: E402
 import Main_App.projects.projects_root as projects_root  # noqa: E402
@@ -138,11 +138,12 @@ def test_open_existing_project_cancel_from_dialog(tmp_path, main_window, monkeyp
 
     seen = {}
 
-    def _fake_get_item(parent, title, label, items, current, editable):  # noqa: ARG001
-        seen["items"] = list(items)
-        return "", False
+    def cancel_selection(dialog):
+        combo = dialog.findChild(QComboBox)
+        seen["items"] = [combo.itemText(index) for index in range(combo.count())]
+        return QInputDialog.Rejected
 
-    monkeypatch.setattr(project_manager.QInputDialog, "getItem", _fake_get_item)
+    monkeypatch.setattr(project_manager.QInputDialog, "exec", cancel_selection)
 
     main_window.open_existing_project()
 
@@ -204,3 +205,135 @@ def test_import_fpvs_config_project_from_file_menu(tmp_path, main_window, monkey
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert manifest["input_folder"] == str(input_dir)
     assert message_spy["info"]
+
+
+@pytest.mark.parametrize("selected_index", [0, 1])
+def test_open_duplicate_project_names_selects_exact_row(
+    tmp_path, main_window, monkeypatch, message_spy, qtbot, selected_index,
+):
+    roots = [tmp_path / "Study", tmp_path / "Study 2"]
+    for index, root in enumerate(roots):
+        root.mkdir()
+        (root / "project.json").write_text(
+            json.dumps({"name": "Study", "event_map": {f"Condition {index}": index + 1}}),
+            encoding="utf-8",
+        )
+    monkeypatch.setattr(project_manager, "ensure_projects_root", lambda parent: tmp_path)
+    seen = {}
+
+    def select_row(dialog):
+        combo = dialog.findChild(QComboBox)
+        seen["labels"] = [combo.itemText(index) for index in range(combo.count())]
+        seen["roots"] = [combo.itemData(index).project_root for index in range(combo.count())]
+        combo.setCurrentIndex(selected_index)
+        seen["selected"] = combo.currentData()
+        return QInputDialog.Accepted
+
+    monkeypatch.setattr(project_manager.QInputDialog, "exec", select_row)
+    main_window.open_existing_project()
+
+    qtbot.waitUntil(lambda: main_window.currentProject is not None, timeout=5000)
+    assert seen["labels"] == [f"Study — {root.name}" for root in seen["roots"]]
+    assert main_window.currentProject.project_root == seen["selected"].project_root
+    assert main_window.currentProject.event_map == seen["selected"].manifest["event_map"]
+    assert not message_spy["critical"]
+
+
+@pytest.mark.parametrize("name", ["../Outside", "CON.txt", "nested/Study"])
+def test_new_project_invalid_name_shows_warning_before_setup(
+    tmp_path, main_window, monkeypatch, message_spy, name,
+):
+    monkeypatch.setattr(
+        project_workflows, "_choose_new_project_source",
+        lambda host: project_workflows.NEW_PROJECT_MANUAL,
+    )
+    monkeypatch.setattr(project_manager.QInputDialog, "getText", lambda *args: (name, True))
+    monkeypatch.setattr(
+        project_manager.QInputDialog, "getInt",
+        lambda *args: pytest.fail("Invalid name reached project setup"),
+    )
+
+    main_window.actionCreateNewProject.trigger()
+
+    assert main_window.currentProject is None
+    assert message_spy["warning"][0][0] == "Invalid Project Name"
+    assert not (tmp_path.parent / "Outside").exists()
+    assert not (tmp_path / "nested").exists()
+
+
+def test_project_picker_unique_title_keeps_label_and_cancel(
+    tmp_path, qtbot, monkeypatch,
+):
+    root = tmp_path / "Study"
+    root.mkdir()
+    (root / "project.json").write_text(json.dumps({"name": "Descriptive study title"}))
+    metadata = [project_manager.read_project_metadata(root)]
+    seen = {}
+
+    def cancel_selection(dialog):
+        qtbot.addWidget(dialog)
+        combo = dialog.findChild(QComboBox)
+        seen["label"] = combo.itemText(0)
+        seen["entry"] = combo.itemData(0)
+        assert not combo.isEditable()
+        return QInputDialog.Rejected
+
+    monkeypatch.setattr(project_manager.QInputDialog, "exec", cancel_selection)
+
+    assert project_manager._select_project_metadata(None, metadata) is None
+    assert seen["label"] == "Descriptive study title"
+    assert seen["entry"] is metadata[0]
+
+
+@pytest.mark.parametrize("entry", ["picker", "path"])
+def test_project_open_finishes_when_application_preferences_cannot_save(
+    tmp_path, main_window, monkeypatch, message_spy, qtbot, entry,
+):
+    root = tmp_path / "Valid Project"
+    raw = tmp_path / "Raw"
+    root.mkdir()
+    raw.mkdir()
+    mapping = {"Condition A": 10, "Condition B": 20}
+    path = root / "project.json"
+    path.write_text(json.dumps({
+        "name": "Valid Project", "input_folder": str(raw), "event_map": mapping,
+        "options": {"mode": "single"},
+    }), encoding="utf-8")
+    before = path.read_bytes()
+    ready = []
+    original_ready = main_window._on_project_ready
+
+    def on_ready():
+        ready.append(True)
+        original_ready()
+
+    def failed_preferences_save(*args, **kwargs):
+        raise PermissionError("synthetic application preferences failure")
+
+    monkeypatch.setattr(main_window, "_on_project_ready", on_ready)
+    monkeypatch.setattr(SettingsManager, "save", failed_preferences_save)
+    if entry == "picker":
+        monkeypatch.setattr(project_manager, "ensure_projects_root", lambda parent: tmp_path)
+
+        def select_project(dialog):
+            combo = dialog.findChild(QComboBox)
+            index = next(index for index in range(combo.count())
+                         if combo.itemData(index).project_root == root)
+            combo.setCurrentIndex(index)
+            return QInputDialog.Accepted
+
+        monkeypatch.setattr(project_manager.QInputDialog, "exec", select_project)
+        main_window.open_existing_project()
+    else:
+        main_window.openProjectPath(str(root))
+
+    qtbot.waitUntil(lambda: len(ready) == 1, timeout=5000)
+    assert main_window.currentProject.project_root == root
+    assert main_window.currentProject.event_map == mapping
+    assert project_workflows.validated_event_map(main_window, focus_error=False) == mapping
+    assert main_window.settings.get("paths", "data_folder") == str(raw)
+    assert path.read_bytes() == before
+    assert not message_spy["critical"]
+    assert len(message_spy["warning"]) == (1 if entry == "picker" else 2)
+    assert all(title == "Application Preferences Not Saved"
+               for title, _ in message_spy["warning"])

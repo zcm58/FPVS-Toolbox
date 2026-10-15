@@ -4391,6 +4391,16 @@ class SettingsDialog(QDialog):
         super().reject()
 
     # ------------------------------------------------------------------
+    def _restore_failed_project_settings_save(self, snapshot: tuple) -> None:
+        """Restore live state after a failed write without retrying disk I/O."""
+
+        project_state, manager_config, project_cache = snapshot
+        self.project.__dict__.clear()
+        self.project.__dict__.update(project_state)
+        self.manager.config = manager_config
+        self._project_cache = project_cache
+        self._clear_harmonic_settings_rollback()
+
     def _save(self) -> None:
         if self._full_fft_grid_review_is_running():
             QMessageBox.information(
@@ -4450,6 +4460,16 @@ class SettingsDialog(QDialog):
             recalculate_harmonics_after_save = (
                 self._ask_recalculate_harmonics_after_settings_change()
             )
+        application_config_snapshot = copy.deepcopy(self.manager.config)
+        project_save_snapshot = (
+            (
+                copy.deepcopy(vars(self.project)),
+                application_config_snapshot,
+                copy.deepcopy(self._project_cache),
+            )
+            if using_project
+            else None
+        )
         if recalculate_harmonics_after_save:
             self._capture_harmonic_settings_rollback()
 
@@ -4522,15 +4542,15 @@ class SettingsDialog(QDialog):
                 )
                 self._project_cache = normalized
                 self.project.save()
-                self._sync_electrode_geometry_controls(saved=True)
             except ValueError as exc:
-                self._restore_harmonic_settings_after_cancel()
+                self._restore_failed_project_settings_save(project_save_snapshot)
                 QMessageBox.warning(self, "Invalid Settings", str(exc))
                 return
             except Exception as exc:  # pragma: no cover - disk I/O error path
-                self._restore_harmonic_settings_after_cancel()
+                self._restore_failed_project_settings_save(project_save_snapshot)
                 QMessageBox.critical(self, "Save Error", str(exc))
                 return
+            self._sync_electrode_geometry_controls(saved=True)
             if harmonic_settings_changed and not recalculate_harmonics_after_save:
                 try:
                     self._mark_harmonic_derivatives_stale()
@@ -4548,7 +4568,23 @@ class SettingsDialog(QDialog):
         prev_beta_tools = self.manager.beta_tools_enabled()
         self.manager.set("debug", "enabled", str(self.debug_check.isChecked()))
         self.manager.set_beta_tools_enabled(self.beta_tools_check.isChecked())
-        self.manager.save()
+        try:
+            self.manager.save()
+        except Exception as exc:  # Application settings may fail after the project saved.
+            self.manager.config = application_config_snapshot
+            self._clear_harmonic_settings_rollback()
+            if using_project and recalculate_harmonics_after_save:
+                try:
+                    self._mark_harmonic_derivatives_stale()
+                except (OSError, RuntimeError, ValueError):
+                    logger.exception("harmonic_freshness_update_after_settings_save_failure")
+            message = (
+                "The project settings were saved, but the application settings "
+                "could not be saved.\n\n"
+                if using_project else ""
+            )
+            QMessageBox.critical(self, "Save Error", message + str(exc))
+            return
         self._refresh_roi_consumers()
 
         if using_project and frequency_analysis_changed:

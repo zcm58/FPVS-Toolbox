@@ -403,3 +403,41 @@ def test_last_run_summary_and_actions_fit_supported_workspace(tmp_path, qtbot, m
         assert widget.isVisible()
         assert win.homeWidget.rect().contains(widget.mapTo(win.homeWidget, widget.rect().bottomRight()))
     _capture(win, "main-run-outcome")
+
+
+@pytest.mark.parametrize("invalid_label", ["CON", "Faces.", "1 -", "."])
+def test_unsafe_condition_name_blocks_start_and_save_with_inline_label_error(
+    tmp_path, qtbot, monkeypatch, invalid_label,
+):
+    from Main_App.gui import event_map, project_workflows
+
+    win = _build_window(tmp_path, qtbot, monkeypatch)
+    win.show_home_page()
+    win.resize(1280, 900)
+    row = _live_rows(win)[0]
+    label, ident = _row_fields(win, row)
+    label.setText("Faces")
+    ident.setText("1")
+    project = SimpleNamespace(event_map={"Faces": 1}, options={"mode": "batch"}, save=Mock())
+    win.currentProject = project
+    try:
+        assert win.btn_start.isEnabled()
+        label.setText(invalid_label)
+        error = row.findChild(QLabel, "condition_row_error")
+        assert not win.btn_start.isEnabled()
+        assert error.isVisible()
+        assert "Condition output name" in error.text()
+        assert project_workflows.save_project_settings(win) is False
+        qtbot.waitUntil(label.hasFocus)
+        assert win.rect().contains(error.mapTo(win, error.rect().bottomRight()))
+        project.save.assert_not_called()
+        assert project.event_map == {"Faces": 1}
+
+        label.setText("1 - Faces")
+        assert win.btn_start.isEnabled()
+        assert error.isHidden()
+        assert event_map.validated_event_map(win) == {"1 - Faces": 1}
+        assert project_workflows.save_project_settings(win)
+        assert project.event_map == {"1 - Faces": 1}
+    finally:
+        win.currentProject = None

@@ -2,6 +2,17 @@
 
 Project-aware workflows should resolve paths from the active project root, not from the process current directory or a developer-machine path.
 
+The Unicorn acquisition foundation adds a read-only
+`Main_App.io.studio_acquisition_evidence` adapter for Studio's candidate handoff:
+top-level schema string `1.0`, nested RecordingSnapshot schema integer `1`, and
+`candidate_receiver_validation_pending` status. It preserves ordered send attempts
+and errors, participant/session evidence, raw unknowns and run-relative clocks.
+Code-order comparison requires a caller-reviewed recording ID/hash association;
+it does not infer participant membership, import a project, produce EEG samples,
+estimate a timing offset, or approve scientific processing. Canonical project
+registration and persistence remain owned by the existing APIs below. Production
+project schemas and legacy preprocessing dictionaries are unchanged in this slice.
+
 Processed condition discovery supports native `.fpvs` manifest anchors and
 historical `.xlsx` workbooks through `Main_App.projects.dataset_index`.
 `Main_App.projects.list_result_files` owns flat/recursive file eligibility and
@@ -662,3 +673,49 @@ The driver includes the project-path audit and safe project I/O contracts. File
 dialog pytest-qt coverage is CI-only by default; document a visible/manual smoke
 path when dialog behavior changes. Run the skill-local audit directly only as
 an initial diagnostic before manually searching for hard-coded paths.
+
+
+## Project-open and Settings failure boundaries
+
+`Project.load` rejects unreadable JSON, invalid UTF-8, and non-object manifests
+before creating default input/result directories. A missing manifest still
+supports explicit new-project creation; valid legacy/default manifests retain
+their existing normalization. Metadata scanning marks invalid documents, and
+both picker and recent-project open paths report the manifest error without
+replacing the current project or refreshing its cached GUI pages.
+A valid project's activation is separate from app-level preference persistence:
+failed data-folder mirror or recent-project writes report a preference warning
+while completing that project's condition widgets and ready notification. Live
+paths remain aligned with the opened Project; persistence failures cannot leave
+a new project paired with the previous project's condition controls.
+
+The existing project picker retains its dialog and row order. Rows own their
+`ProjectMetadata` identity; duplicate titles gain folder suffixes and every row
+has a full-root tooltip. Manual New validates one canonical Windows folder
+component and resolved containment directly inside the configured Projects Root
+before source selection or writes. Valid names keep their existing layout.
+
+Settings captures the complete live Project state, application configuration,
+and preprocessing page cache before a project settings save. A failed project
+write restores those in memory, retains the editable draft, and reports the
+existing error without retrying failed disk I/O. Successful saves and the
+separate cancellation/recalculation rollback contract remain unchanged. If an
+application-settings write fails after a successful project save, the saved
+Project/cache stays committed, application config restores without retry, and
+the editable dialog explains that partial save. A requested harmonic rebuild
+remains stale until a later successful rebuild.
+Condition input and backend planning validate the same sanitized output folder
+through `projects.grouping.validate_group_folder_name`; valid names and marker
+IDs retain their existing output naming and scientific behavior.
+
+Visible smoke with disposable projects: select each of two projects sharing a
+title, cancel the picker, reject an invalid/traversing New name, open a truncated
+or non-object manifest while another project is active, and verify the previous
+workspace remains intact. Inject a project-save failure, verify the draft stays
+editable and processing settings retain their saved values, then retry normally.
+Inject a preference write failure during a valid project open; verify the new
+project's label, conditions, paths, and ready notification all agree, with a
+preference warning instead of a failed-open message or uncaught exception.
+Enter a reserved or empty sanitized condition name and verify inline feedback
+and disabled Start; correct it and verify the normal path. Registered Qt tests
+cover these transitions; local execution requires approved visible Qt.

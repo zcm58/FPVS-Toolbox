@@ -2650,3 +2650,60 @@ def test_experimental_ram_preload_toggle_is_saved_per_project(tmp_path, qtbot, m
     qtbot.addWidget(projectless)
     assert projectless.experimental_ram_preload_check.isEnabled() is False
     assert projectless.experimental_ram_preload_check.isChecked() is False
+
+
+@pytest.mark.parametrize("failed_write", ["project", "application"])
+@pytest.mark.parametrize("recalculate", [False, True])
+def test_failed_project_save_keeps_settings_draft_and_processing_state(
+    tmp_path, qtbot, monkeypatch, recalculate, failed_write,
+):
+    import copy
+    from Main_App.projects import project as project_module
+
+    monkeypatch.setenv("FPVS_CONFIG_HOME", str(tmp_path / "config"))
+    project = _prep_project(tmp_path)
+    manager = SettingsManager(str(tmp_path / "settings.ini"))
+    manager.save()
+    dlg = SettingsDialog(manager, project=project)
+    qtbot.addWidget(dlg)
+    dlg.show()
+    qtbot.waitExposed(dlg)
+    previous_project = copy.deepcopy(vars(project))
+    previous_config = copy.deepcopy(manager.config)
+    previous_cache = copy.deepcopy(dlg._project_cache)
+    manifest_bytes = (project.project_root / "project.json").read_bytes()
+    dlg.preproc_edits[0].setText("40")
+    monkeypatch.setattr(dlg, "_harmonic_settings_changed_after_processing",
+                        lambda _payload: recalculate)
+    monkeypatch.setattr(dlg, "_project_protocol_changed_after_processing", lambda: False)
+    monkeypatch.setattr(dlg, "_ask_recalculate_harmonics_after_settings_change", lambda: True)
+    monkeypatch.setattr(dlg, "_mark_harmonic_derivatives_stale", lambda: None)
+    errors = []
+    monkeypatch.setattr(QMessageBox, "critical", lambda *args: errors.append(args[1]))
+    writes = []
+
+    def fail_write(*_args):
+        writes.append(True)
+        raise OSError("Synthetic write failure")
+
+    if failed_write == "project":
+        monkeypatch.setattr(project_module, "_write_manifest_if_changed", fail_write)
+    else:
+        monkeypatch.setattr(manager, "save", fail_write)
+    dlg.findChild(QPushButton, "settings_footer_save").click()
+
+    assert dlg.isVisible()
+    assert dlg.preproc_edits[0].text() == "40"
+    assert manager.config == previous_config
+    if failed_write == "project":
+        assert vars(project) == previous_project
+        assert dlg._project_cache == previous_cache
+        assert (project.project_root / "project.json").read_bytes() == manifest_bytes
+    else:
+        committed = Project.load(project.project_root)
+        assert project.preprocessing == committed.preprocessing
+        assert dlg._project_cache == committed.preprocessing
+        assert project.preprocessing["low_pass"] == 40.0
+    assert writes == [True]
+    assert errors == ["Save Error"]
+    assert not hasattr(dlg, "_harmonic_settings_rollback")

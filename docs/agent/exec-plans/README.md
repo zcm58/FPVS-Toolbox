@@ -11,13 +11,16 @@ Use this directory for durable plans that need to survive across agent runs.
 
 Keep plans compact and current. Record phase status, decisions, touched areas, required doc updates, and verification commands. Small one-off changes do not need an execution plan.
 
-## Planned Work
+## Active Acquisition Support
 
-- [Unicorn Hybrid Black support](future/unicorn-hybrid-black-support.md): planned
-  modular format/acquisition/montage/event loading with raw BDF and continuous
-  BDF+ annotation support, explicit discontinuity gates, native 250 Hz, no Unicorn
-  interpolation, and unchanged BioSemi processing. Future montages extend the
-  registry through contract tests. No Toolbox implementation has started.
+- [Unicorn Hybrid Black support](active/unicorn-hybrid-black-support.md): active
+  Phase 0 / early Phase 1 read-only format/acquisition/event inspection with
+  raw BDF and continuous BDF+ fixtures and explicit discontinuity gates.
+  The registered Unicorn policy requires native 250 Hz, eight-channel average
+  reference and no interpolation; production preprocessing integration is not
+  yet enabled. Existing BioSemi processing is unchanged. Implementation branch:
+  `codex/unicorn-headset-support`; scientific qualification remains gated by
+  source evidence and the plan's acceptance criteria.
 
 ## Active QC Implementation
 

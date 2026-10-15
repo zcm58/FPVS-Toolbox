@@ -1,7 +1,8 @@
 """Compatibility-free import surface for active EEG loading.
 
-The implementation remains in ``Main_App.Shared.load_utils`` during this layout
-slice so the BDF loader contract and path behavior stay unchanged.
+Production BioSemi loading remains in ``Main_App.Shared.load_utils`` during
+this layout slice. Explicit Unicorn inspection and context-owned Raw reading
+are additive entry points; neither releases Unicorn for scientific processing.
 """
 
 from Main_App.Shared.load_utils import (
@@ -25,6 +26,8 @@ from Main_App.Shared.load_utils import (
     load_eeg_file,
     open_preflight_eeg_file,
 )
+from Main_App.io.recording_inspection import inspect_eeg_recording
+from Main_App.io.unicorn_raw import open_unicorn_recording_raw
 
 __all__ = [
     "BDF_RECORDING_NOT_STARTED_REASON",
@@ -35,6 +38,7 @@ __all__ = [
     "_emit_reader_warnings",
     "format_bdf_recording_not_started_message",
     "inspect_bdf_header",
+    "inspect_eeg_recording",
     "read_bdf_sampling_rate_hz",
     "is_bdf_recording_not_started",
     "_map_present_case_insensitive",
@@ -46,4 +50,5 @@ __all__ = [
     "_try_warning_log",
     "load_eeg_file",
     "open_preflight_eeg_file",
+    "open_unicorn_recording_raw",
 ]
