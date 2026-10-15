@@ -148,7 +148,9 @@ def _slot(key: Mapping[str, Any], namespace: str, method_directory: str) -> dict
         elif namespace == "events":
             if method.get("event_extractor") != "mne_shortest_1_annotation_fallback_v1":
                 return None
-        elif namespace == "":
+        elif namespace in {"", "raw_diagnostics"}:
+            if namespace == "raw_diagnostics" and method.get("evidence_codec") != "typed_float64_v1":
+                return None
             scope = key["settings"]["recording_scope"]
             if set(scope) != {"participant_id", "recording_id"} or not isinstance(scope["participant_id"], str):
                 return None
@@ -284,6 +286,11 @@ def prune_after_publication(
         # Preserve pending generations before unlinking: a crash or locked file
         # must not discard the authority needed to retry on a later replacement.
         _atomic_json(index_path, _index_payload(slot, [current_entry, *pending]))
+        if not pending:
+            # The fully validated slot already contains its final index. Cold
+            # publication has no predecessors to unlink or retain, so another
+            # fsync/replace would write these identical bytes a second time.
+            return
         survivors = []
         for candidate in candidates:
             if not isinstance(candidate, dict) or not isinstance(candidate.get("name"), str) or not _CACHE_NAME.fullmatch(candidate["name"]):

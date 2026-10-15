@@ -644,6 +644,7 @@ def reconcile_recording_condition_outputs(
     export_receipts: Sequence[Mapping[str, Any]],
     *,
     validate_artifacts: bool = True,
+    validation_workers: int = 1,
 ) -> RecordingConditionOutcomeLedger:
     """Account for every expected cell from current receipts and explicit plans.
 
@@ -664,22 +665,45 @@ def reconcile_recording_condition_outputs(
 
     cells: list[RecordingConditionCellOutcome] = []
     expected_keys: set[tuple[str, str]] = set()
-    for recording in expected_plan.recordings:
-        for cell in recording.cells:
+    if type(validation_workers) is int and validation_workers > 1 and validate_artifacts:
+        from Main_App.workers.cell_validation_pool import cell_validation_credit, ordered_cell_validation
+
+        items = [(recording, cell) for recording in expected_plan.recordings for cell in recording.cells]
+
+        def validate(item):
+            recording, cell = item
             key = (
                 recording.processing_id.casefold(),
                 cell.condition_label.casefold(),
             )
-            expected_keys.add(key)
-            cells.append(
-                _reconcile_cell(
-                    plan=expected_plan,
-                    recording=recording,
-                    cell=cell,
-                    receipts=by_cell.get(key, ()),
-                    validate_artifacts=validate_artifacts,
-                )
+            return key, _reconcile_cell(
+                plan=expected_plan, recording=recording, cell=cell,
+                receipts=by_cell.get(key, ()), validate_artifacts=validate_artifacts,
             )
+
+        def credit(item):
+            return cell_validation_credit(item[1].expected_workbook)
+
+        for key, outcome in ordered_cell_validation(items, validate, credit, max_workers=validation_workers):
+            expected_keys.add(key)
+            cells.append(outcome)
+    else:
+        for recording in expected_plan.recordings:
+            for cell in recording.cells:
+                key = (
+                    recording.processing_id.casefold(),
+                    cell.condition_label.casefold(),
+                )
+                expected_keys.add(key)
+                cells.append(
+                    _reconcile_cell(
+                        plan=expected_plan,
+                        recording=recording,
+                        cell=cell,
+                        receipts=by_cell.get(key, ()),
+                        validate_artifacts=validate_artifacts,
+                    )
+                )
 
     unexpected = sorted(set(by_cell).difference(expected_keys))
     if unexpected:

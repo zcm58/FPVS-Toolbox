@@ -20,6 +20,12 @@ failed or cancelled inspections clear stale design choices and expose retry
 only after worker exit. Neutral FullFFT provenance validation remains a separate
 processing-owned gate.
 
+The Main App opens the FHC page directly after checking that a managed project
+is selected. Its background inspection validates neutral FullFFT provenance and
+requests the shared post-processing remedy when needed. The general downstream
+derivative stale flag does not gate entry: an empty or failed Standard harmonic
+selection can coexist with current, accepted FullFFT sources.
+
 ## Data Flow
 
 ```text

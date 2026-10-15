@@ -16,6 +16,24 @@ the QObject signal shell.
 Common long-running work:
 
 - EEG preprocessing and post-processing.
+- `Main_App.workers.cell_validation_pool` optionally dispatches independent
+  recording-condition artifact validation in ordered read-only threads. The
+  default `reconcile_recording_condition_outputs` call and metadata-only mode
+  retain the native serial loop. Each opted-in task uses a fresh context rather
+  than inheriting mutable XLSX/validation caches; every native checksum, schema,
+  source/protocol identity and receipt check still runs. Canonical plan order
+  determines returned rows and the first exception, regardless of completion
+  order. All readers close before the caller publishes a ledger or completion.
+  CPU affinity and the project CPU/RAM-tier ceiling bound the population. Before
+  every submission, live available physical RAM and Windows commit headroom
+  account for background use; no owned-memory add-back or Raw-worker floor is
+  applied. A 32 MiB scratch allowance plus bounded uncompressed NPY metadata and
+  declaration workspace reserves small header/checksum allocations, without
+  loading dense FFT/metric arrays. Unknown, legacy, changed or oversized budget
+  inputs run alone through the native validator. Reduced headroom drains current
+  reads; an empty queue falls back to native serial work rather than waiting
+  permanently or inventing a capacity failure. This is conservative admission,
+  not protection against arbitrary concurrent external allocations.
 - Plot generation and export.
 - Statistics pipeline runs.
 - File scanning over project folders.
@@ -45,10 +63,52 @@ Common long-running work:
 - The standard GUI's QC-16 preparation uses the spawned review-only pool in
   `Main_App.workers.kurtosis_review_process`. The background scan classifies
   canonical exclusions and validates approved timing before scheduling eligible
-  recordings. Its worker count applies the main CPU/RAM-tier/override policy,
-  then reserves half currently available RAM using the largest concurrent BDF
-  estimates (at least 1 GiB or 24 times source bytes per recording). It has no
-  fixed two-job cap. Each process uses the existing main worker initializer,
+  recordings. The main CPU/RAM-tier/override policy is the pool ceiling;
+  initial memory pressure no longer permanently shrinks that ceiling. A drained
+  executor may be replaced with a smaller population, or grow toward the same
+  ceiling after headroom recovers; live executors always retain all their floors. The
+  GUI-neutral `review_resource_budget` module obtains source-bound ordinary
+  BDF geometry using the existing validated lazy loader and bounds loading,
+  referencing, drops, filtering, resampling, raw AUTO QC, checkpoint restoration
+  and target-rate kurtosis allocations. Raw removed-electrode AUTO and
+  automatic kurtosis interpolation are distinct settings. Unknown/annotation/
+  unpinned routes retain the exclusive legacy source-size fallback. No signal
+  arrays or cross-run geometry cache are retained by the scheduler.
+  Before admissions, the first-fit queue refreshes OS physical availability
+  and Windows CommitLimit-minus-CommitTotal. Only matching-process unique
+  resident pages offset physical reservations; private committed bytes offset
+  the commit reservation separately. Shared RSS and pagefile-free bytes cannot
+  be substituted. Missing ownership probes earn no memory credit. Worker floors
+  cover every pool slot, including idle or not-yet-identified processes, with a
+  separate host margin. Thus background
+  RAM pressure pauses admissions with explicit waiting/resumed progress; recovery
+  may reuse or replace the drained pool toward its full ceiling. These conservative estimates are scheduling credits, not a guarantee
+  against arbitrary concurrent external allocations.
+  One emergency reserve over active/prospective jobs covers a full-rate scoring
+  fallback; unrelated pending recordings cannot prevent a smaller job starting. A
+  runtime callback before every scoring copy, including warm checkpoints,
+  passes immutable dimensions only; callbacks never enter persisted settings.
+  Unexpected larger scoring requests use non-droppable control messages and
+  per-job grants. Only one emergency borrower proceeds, prioritized over new
+  jobs, and its reservation is released after its future/Raw cleanup completes.
+  The unused part of that active/prospective reserve remains reserved during the loan and
+  during prospective grant checks, including admission of additional files.
+  Requests beyond the covered geometry fail before the scoring allocation.
+  When no ordinary population fits current physical/commit headroom, a known
+  healthy singleton may run with one pool floor and without reserving an
+  unrequested hypothetical full-rate allocation. It stays alone through future
+  cleanup. Its actual scoring request can use a smaller realized span, waits
+  explicitly under temporary pressure, and fails before allocation if its exact
+  bytes plus one worker/host reserve exceed physical capacity. A hypothetical
+  full-rate bound alone does not reject otherwise successful healthy processing.
+  A healthy preparation bound that cannot fit total physical capacity reports an
+  actionable per-recording failure instead of waiting indefinitely. These
+  failures are admission policy; they do not claim equivalence to successful
+  native paging beyond physical capacity.
+  Cancellation and parent failure release blocked requests cooperatively;
+  numerical/statistical bodies and preprocessing order remain unchanged.
+  Returned evidence keeps input order. Each
+  process uses the existing main worker initializer,
   single-thread numerical policy, private memmaps and bounded prepared-FIR cache.
   Jobs call the shared serial evidence preparation and stop before interpolation,
   final reference and exports. Only evidence/progress returns to the parent;
@@ -60,6 +120,27 @@ Common long-running work:
   thread before a process pool is budgeted. Prepared checkpoints bind native
   BLAS library/thread identity so earlier GUI-thread preparation cannot be reused
   as exact single-thread worker preparation. Unknown native policy is a cache miss.
+- `Main_App.processing.qc_review_diagnostics` has a guarded exact integer-span
+  path for the characterized MNE 1.9.0 finite float64, bounded, dyadic sample-rate
+  domain. It retains the same consecutive-difference thresholds and onset/stop
+  arithmetic; unknown inputs or changed detector/helper code use MNE. No
+  preprocessing, interpolation, exclusion or receipt authority changes.
+  `qc_review_diagnostics_cache` can reuse only the display-only report after
+  binding source bytes/stat, current converted sample bytes, ordered occurrence
+  scope, channels/references/bads, geometry/config, diagnostic implementation,
+  packages and native numerical policy. The scanner still loads Raw, prepares
+  evidence, verifies unchanged source content again, and closes its owner.
+  Corrupt/unknown/memory-limited cache operations fall back to computation;
+  cancellation propagates. Publication follows the scanner's second source
+  proof. The `raw_diagnostics` namespace lives within the existing project
+  preflight cache and clears through its existing cache-management workflow.
+- `Main_App.io.buffered_fif` changes only the ordinary file I/O buffer to 1 MiB
+  in an isolated, fingerprint-guarded copy of the characterized MNE save chain.
+  Source-ready export and preprocessed-cache owners retain their paths, FIF
+  block geometry, split handling, numerical formats, close/fsync and publication
+  guards. No shared MNE global is patched. Unknown runtimes, changed writers or
+  overridden Raw methods use public `Raw.save`; buffer allocation failure falls
+  back to its original small-buffer open before header/data writing.
 - Main App processing runs now receive a precomputed incremental plan from
   `Main_App.processing.processing_ledger` before `MpRunnerBridge.start()`.
   Workers receive only the files selected by that plan. Multi-group runs also

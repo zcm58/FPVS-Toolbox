@@ -66,6 +66,37 @@ def test_tool_guard_displays_persisted_cause_instead_of_guessing(tmp_path, reaso
     host.request_post_processing_rebuild.assert_not_called()
 
 
+@pytest.mark.parametrize("managed_project", [False, True])
+def test_fhc_opens_its_neutral_input_inspection_without_standard_selection_guard(
+    tmp_path, managed_project,
+):
+    warning = Mock()
+    opener = _load_function(
+        "src/Main_App/gui/main_window.py", "open_free_harmonic_clustering",
+        {"QMessageBox": SimpleNamespace(warning=warning)}, class_name="MainWindow",
+    )
+    page = object()
+    host = SimpleNamespace(
+        currentProject=SimpleNamespace(project_root=tmp_path) if managed_project else None,
+        _frequency_domain_outputs_ready_for_tool=Mock(
+            side_effect=AssertionError("Standard derivative readiness is independent of FHC"),
+        ),
+        _ensure_free_harmonic_clustering_page=Mock(return_value=page),
+        stacked=SimpleNamespace(setCurrentIndex=Mock()),
+        workspace_stack=SimpleNamespace(setCurrentWidget=Mock()),
+        _set_sidebar_selection=Mock(),
+    )
+    opener(host)
+    host._frequency_domain_outputs_ready_for_tool.assert_not_called()
+    if managed_project:
+        warning.assert_not_called()
+        host._ensure_free_harmonic_clustering_page.assert_called_once_with()
+        host.workspace_stack.setCurrentWidget.assert_called_once_with(page)
+    else:
+        warning.assert_called_once()
+        host._ensure_free_harmonic_clustering_page.assert_not_called()
+
+
 @pytest.mark.parametrize("choice", ["cancel", "skip", None])
 def test_missing_condition_cannot_bypass_preflight_decision(choice):
     audit = SimpleNamespace(review_candidates=[SimpleNamespace(repetition_count=0)])

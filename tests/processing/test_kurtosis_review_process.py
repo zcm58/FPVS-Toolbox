@@ -7,7 +7,7 @@ import logging
 import os
 from pathlib import Path
 from queue import Queue
-from threading import Event, get_ident
+from threading import Event, Lock, get_ident
 import time
 from types import SimpleNamespace
 
@@ -67,10 +67,11 @@ def test_worker_count_shares_main_cpu_ram_and_override_policy(monkeypatch, cpu, 
     assert process_module.review_process_worker_count(infos, override) == expected
 
 
-def test_worker_count_uses_largest_sources_and_available_memory(monkeypatch):
+def test_worker_count_can_combine_small_and_large_sources_within_available_memory(monkeypatch):
     infos = _resource_model(monkeypatch, cpu=24, total=128 * GIB, available=80 * GIB, sizes=[1, GIB, GIB])
-    # Two 24 GiB estimates cannot share the 40 GiB budget, regardless of order.
-    assert process_module.review_process_worker_count(infos) == 1
+    # A 1 GiB job can share the 40 GiB budget with either 24 GiB job;
+    # the scheduler must never admit both large jobs together.
+    assert process_module.review_process_worker_count(infos) == 2
     infos = _resource_model(monkeypatch, cpu=24, total=128 * GIB, available=8 * GIB, sizes=[1] * 10)
     assert process_module.review_process_worker_count(infos) == 4
 
@@ -95,6 +96,38 @@ def test_same_stems_are_safe_in_distinct_worker_processes(monkeypatch, tmp_path)
         infos.append(SimpleNamespace(path=path))
     assert process_module.review_process_worker_count(infos) == 4
     assert process_module.review_process_worker_count([SimpleNamespace(path=tmp_path / "missing.bdf")]) == 1
+
+
+def test_unknown_source_size_reserves_an_exclusive_serial_fallback(monkeypatch):
+    infos = _resource_model(monkeypatch, cpu=24, total=128 * GIB, available=8 * GIB, sizes=[1, 1, 1])
+
+    def missing_stat():
+        raise FileNotFoundError("injected missing source")
+
+    infos[0].path.stat = missing_stat
+    plan = process_module._review_resource_plan(infos)
+    assert plan.max_workers == 2
+    assert plan.budget_bytes == 4 * GIB
+    assert plan.credits == (4 * GIB + 1, GIB, GIB)
+
+
+def test_unavailable_memory_information_retains_one_job_fallback(monkeypatch):
+    def unavailable():
+        raise OSError("injected memory probe failure")
+
+    monkeypatch.setattr(process_module.psutil, "virtual_memory", unavailable)
+    plan = process_module._review_resource_plan([SimpleNamespace(), SimpleNamespace()], 8)
+    assert plan.max_workers == 1 and plan.budget_bytes == 0
+    assert plan.credits == (GIB, GIB)
+
+
+def test_resource_plan_preserves_large_file_estimates_and_half_ram_budget(monkeypatch):
+    infos = _resource_model(monkeypatch, cpu=24, total=128 * GIB, available=100 * GIB, sizes=[832 * 1024**2, 798 * 1024**2, *([470 * 1024**2] * 8)])
+    plan = process_module._review_resource_plan(infos)
+    assert plan.max_workers == 4
+    assert plan.budget_bytes == 50 * GIB
+    assert plan.credits[:2] == (832 * 1024**2 * 24, 798 * 1024**2 * 24)
+    assert plan.credits[2:] == (470 * 1024**2 * 24,) * 8
 
 
 class _Messages(Queue):
@@ -133,7 +166,7 @@ def _thread_runner(monkeypatch, worker, *, workers=2):
     context = _ThreadContext()
     monkeypatch.setattr(process_module, "get_context", lambda method: context if method == "spawn" else None)
     monkeypatch.setattr(process_module, "ProcessPoolExecutor", _ThreadExecutor)
-    monkeypatch.setattr(process_module, "review_process_worker_count", lambda _infos, _maximum: workers)
+    monkeypatch.setattr(process_module, "_review_resource_plan", lambda infos, _maximum, **_kwargs: process_module._ReviewResourcePlan(workers, workers * GIB, (GIB,) * len(infos)))
     monkeypatch.setattr(process_module, "_run_one_review", worker)
     return context
 
@@ -248,7 +281,11 @@ def test_startup_failure_closes_transport(monkeypatch, tmp_path):
 def test_project_worker_override_is_used_unless_explicit_argument_wins(monkeypatch, tmp_path):
     context = _thread_runner(monkeypatch, lambda info, *_args: KurtosisReviewScan((_result(info),)))
     seen = []
-    monkeypatch.setattr(process_module, "review_process_worker_count", lambda _infos, maximum: seen.append(maximum) or 1)
+    def record_plan(infos, maximum, **_kwargs):
+        seen.append(maximum)
+        return process_module._ReviewResourcePlan(1, GIB, (GIB,) * len(infos))
+
+    monkeypatch.setattr(process_module, "_review_resource_plan", record_plan)
     process_module.run_process_review([_info(0, tmp_path)], {"max_parallel_workers_override": 3}, event_map={})
     assert seen == [3]
     # A fresh transport is needed after the preceding runner closed its queue.
@@ -256,6 +293,69 @@ def test_project_worker_override_is_used_unless_explicit_argument_wins(monkeypat
     process_module.run_process_review([_info(0, tmp_path)], {"max_parallel_workers_override": 3}, event_map={}, max_workers=2)
     assert seen == [3, 2]
     assert context.messages.closed
+
+
+def test_first_fit_submissions_reserve_each_file_and_return_input_order(monkeypatch, tmp_path, caplog):
+    fourth_started = Event()
+    lock = Lock()
+    credits = (3 * GIB, 4 * GIB, GIB, GIB)
+    active = {}
+    observations = []
+    started = []
+
+    def worker(info, *_args):
+        index = int(info.subject_id[1:])
+        with lock:
+            started.append(index)
+            active[index] = credits[index]
+            observations.append(sum(active.values()))
+        try:
+            if index == 0:
+                assert fourth_started.wait(2)
+            if index == 3:
+                fourth_started.set()
+            return KurtosisReviewScan((_result(info),))
+        finally:
+            with lock:
+                active.pop(index)
+
+    _thread_runner(monkeypatch, worker, workers=3)
+    monkeypatch.setattr(process_module, "_review_resource_plan", lambda _infos, _maximum, **_kwargs: process_module._ReviewResourcePlan(3, 4 * GIB, credits))
+    caplog.set_level(logging.INFO)
+    scan = process_module.run_process_review([_info(index, tmp_path) for index in range(4)], {}, event_map={})
+    assert started == [0, 2, 3, 1]
+    assert [result.participant_id for result in scan.results] == ["P0", "P1", "P2", "P3"]
+    assert max(observations) <= 4 * GIB
+    assert "peak_reserved_bytes=4294967296" in caplog.text
+    assert "oversize_fallbacks=0" in caplog.text
+
+
+def test_oversized_jobs_run_alone_after_affordable_pending_jobs(monkeypatch, tmp_path, caplog):
+    lock = Lock()
+    credits = (5 * GIB, GIB, GIB, 6 * GIB)
+    active = {}
+    observations = []
+
+    def worker(info, *_args):
+        index = int(info.subject_id[1:])
+        with lock:
+            active[index] = credits[index]
+            observations.append((tuple(active), sum(active.values())))
+        try:
+            time.sleep(0.01)
+            return KurtosisReviewScan((_result(info),))
+        finally:
+            with lock:
+                active.pop(index)
+
+    _thread_runner(monkeypatch, worker)
+    monkeypatch.setattr(process_module, "_review_resource_plan", lambda _infos, _maximum, **_kwargs: process_module._ReviewResourcePlan(2, 2 * GIB, credits))
+    caplog.set_level(logging.INFO)
+    scan = process_module.run_process_review([_info(index, tmp_path) for index in range(4)], {}, event_map={})
+    assert len(scan.results) == 4 and not scan.cancelled
+    assert all(len(indices) == 1 if reserved > 2 * GIB else reserved <= 2 * GIB for indices, reserved in observations)
+    assert "peak_reserved_bytes=6442450944" in caplog.text
+    assert "oversize_fallbacks=2" in caplog.text
 
 
 def _spawn_probe(info, settings, *_args):
@@ -276,7 +376,7 @@ def test_real_spawn_applies_existing_initializer_without_qt_or_eeg(monkeypatch, 
 
     parent_pools = threadpool_info()
     monkeypatch.setattr(process_module, "_run_one_review", _spawn_probe)
-    monkeypatch.setattr(process_module, "review_process_worker_count", lambda _infos, _maximum: 2)
+    monkeypatch.setattr(process_module, "_review_resource_plan", lambda infos, _maximum, **_kwargs: process_module._ReviewResourcePlan(2, 2 * GIB, (GIB,) * len(infos)))
     scan = process_module.run_process_review(
         [_info(index, tmp_path) for index in range(3)], {"scientific_setting": 19}, event_map={},
     )

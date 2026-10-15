@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, List, Mapping, Optional, 
 import Main_App.processing.preprocess as backend_preprocess
 from Main_App.diagnostics import log_router
 from Main_App.io.atomic_write import atomic_write
+from Main_App.io.buffered_fif import save_raw_fif
 from Main_App.io.safe_file import regular_file_info
 from Main_App.processing.preflight_qc_pruning import safe_cache_directory
 from Main_App.exports.source_time_domain_export import (
@@ -1358,7 +1359,7 @@ def _store_preprocessed_cache(
         regular_file_info(raw_path)
         for split_path in raw_path.parent.glob(f"{raw_path.stem}-*.fif"):
             regular_file_info(split_path)
-        raw.save(str(raw_path), overwrite=True, verbose=False,
+        save_raw_fif(raw, str(raw_path), overwrite=True, verbose=False,
                  **({"fmt": "double"} if condition_proof is not None else {}))
         metadata = {
             "cache_key": cache_key,

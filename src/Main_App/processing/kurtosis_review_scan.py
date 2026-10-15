@@ -1094,10 +1094,7 @@ def scan_kurtosis_review(
             report_status()
 
     if execution_backend == "process":
-        from Main_App.workers.kurtosis_review_process import (
-            review_process_worker_count,
-            run_process_review,
-        )
+        from Main_App.workers.kurtosis_review_process import run_process_review
 
         # Raw/memmap owners cannot cross a spawned-process boundary. Release
         # speculative sources on this background scan thread before budgeting
@@ -1115,7 +1112,6 @@ def scan_kurtosis_review(
         requested_workers = max_workers
         if requested_workers is None:
             requested_workers = settings.get("max_parallel_workers_override")
-        worker_count = review_process_worker_count(eligible_infos, requested_workers)
         scan = run_process_review(
             eligible_infos,
             settings,
@@ -1124,7 +1120,7 @@ def scan_kurtosis_review(
             raw_channel_qc_by_recording=raw_channel_qc_by_recording,
             progress=relay_progress,
             should_cancel=should_cancel,
-            max_workers=worker_count,
+            max_workers=requested_workers,
             result_progress=accept_results,
         )
         return finished_scan(cancelled=scan.cancelled)
@@ -1167,6 +1163,7 @@ def _scan_kurtosis_review_serial(
     progress: ProgressCallback | None = None,
     should_cancel: CancelCallback | None = None,
     source_prefetch: QcSourcePrefetch | None = None,
+    before_kurtosis_scoring: Callable[[int, int, int, int, bool, int], None] | None = None,
 ) -> KurtosisReviewScan:
     """Keep the serial numerical path independent of batch scheduling."""
 
@@ -1414,22 +1411,39 @@ def _scan_kurtosis_review_serial(
             if progress:
                 progress(f"Preprocessing {path.name} for kurtosis review", index - 1, total)
             review_diagnostics = {}
+            diagnostic_cache_key = None
+            diagnostic_cache_hit = False
             diagnostics_started = perf_counter()
             try:
                 from Main_App.processing.qc_review_diagnostics import build_raw_qc_review_diagnostics
+                from Main_App.processing.qc_review_diagnostics_cache import (
+                    build_raw_diagnostics_cache_key, load_raw_diagnostics, save_raw_diagnostics,
+                )
 
-                review_diagnostics = build_raw_qc_review_diagnostics(
-                    raw,
-                    occurrences=[{
+                diagnostic_occurrences = [{
                         "start_sample": span["source_coordinates"]["start_relative_sample"],
                         "stop_sample": span["source_coordinates"]["stop_relative_sample"],
                         "condition_label": span["condition_label"],
                         "occurrence": span["repetition_index"],
                         "occurrence_key": span["occurrence_key"],
-                    } for span in restricted_plan["spans"]],
-                    ref_channels=ref_pair, unusable_channels=direct_bad_channels,
-                    should_cancel=should_cancel,
+                    } for span in restricted_plan["spans"]]
+                lookup_started = perf_counter()
+                diagnostic_cache_key = build_raw_diagnostics_cache_key(
+                    raw, project_root=settings.get("project_root"), source_identity=review_source_identity,
+                    participant_id=participant, recording_id=recording, occurrences=diagnostic_occurrences,
+                    ref_channels=ref_pair, unusable_channels=direct_bad_channels, should_cancel=should_cancel,
                 )
+                review_diagnostics = load_raw_diagnostics(diagnostic_cache_key, should_cancel=should_cancel)
+                diagnostic_cache_hit = review_diagnostics is not None
+                _log_scan_timing(path, "raw_review_diagnostics_cache_lookup", lookup_started)
+                logger.info("raw_review_diagnostics_cache file=%s status=%s", path.name,
+                            "hit" if diagnostic_cache_hit else "miss")
+                if not diagnostic_cache_hit:
+                    review_diagnostics = build_raw_qc_review_diagnostics(
+                        raw, occurrences=diagnostic_occurrences,
+                        ref_channels=ref_pair, unusable_channels=direct_bad_channels,
+                        should_cancel=should_cancel,
+                    )
             except InterruptedError:
                 return KurtosisReviewScan(tuple(results), cancelled=True)
             except Exception:  # Diagnostic-only: preparation/scientific evidence still proceeds.
@@ -1455,6 +1469,8 @@ def _scan_kurtosis_review_serial(
                 path.name,
                 direct_bad_channels=direct_bad_channels,
                 copy_raw=False,
+                **({"before_kurtosis_scoring": before_kurtosis_scoring}
+                   if before_kurtosis_scoring is not None else {}),
             )
             _log_scan_timing(path, "preprocessing_and_evidence", prepare_started)
             preview = dict(prepared.get("signal_preview") or {})
@@ -1463,6 +1479,8 @@ def _scan_kurtosis_review_serial(
                 post_load_identity = source_content_identity(path, should_cancel=should_cancel)
             if post_load_identity != review_source_identity:
                 raise KurtosisReviewScanError("Recording changed while QC evidence was prepared. Run QC again.")
+            if diagnostic_cache_key is not None and not diagnostic_cache_hit:
+                save_raw_diagnostics(diagnostic_cache_key, review_diagnostics, should_cancel=should_cancel)
             review_diagnostics = {**review_diagnostics, "source_identity": review_source_identity} if review_diagnostics else {}
             prepared = {**prepared, "review_diagnostics": review_diagnostics}
             preview["signal_view"] = {**dict(preview.get("signal_view") or {}), "source_identity": review_source_identity}

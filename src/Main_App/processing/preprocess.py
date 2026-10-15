@@ -47,6 +47,7 @@ from Main_App.processing.fft_multinotch import (
     FFT_MULTINOTCH_METHOD_VERSION,
     apply_fft_multinotch,
 )
+from Main_App.processing.guarded_stim_resample import resample_raw
 from Main_App.processing.analysis_spans import (
     ANALYSIS_SPAN_PLAN_VERSION,
     AnalysisSpanPlanError,
@@ -605,6 +606,7 @@ def prepare_kurtosis_review_evidence(
     *,
     direct_bad_channels: Sequence[str] = (),
     copy_raw: bool = True,
+    before_kurtosis_scoring: Callable[[int, int, int, int, bool, int], None] | None = None,
 ) -> dict[str, object]:
     """Run the shared preprocessing stages to the QC-16 review boundary.
 
@@ -633,6 +635,8 @@ def prepare_kurtosis_review_evidence(
             scan_params,
             log_func,
             filename_for_log,
+            **({"before_kurtosis_scoring": before_kurtosis_scoring}
+               if before_kurtosis_scoring is not None else {}),
         )
         evidence = scan_params.get("_fpvs_kurtosis_qc_evidence")
         decision_plan = scan_params.get("_fpvs_kurtosis_decision_plan")
@@ -661,6 +665,7 @@ def prepare_kurtosis_review_evidence(
 def _finish_preprocessing_at_kurtosis(
     raw, params, log_func, filename_for_log, *, orig_sfreq, geometry_identity,
     debug_enabled, checkpoint=None, cached_evidence=None,
+    before_kurtosis_scoring=None, original_input_live_bytes=0,
 ):
     """Resume the same calculation/decision/repair stages after preparation."""
 
@@ -710,6 +715,15 @@ def _finish_preprocessing_at_kurtosis(
                 "approved analyzed intervals were unavailable."
             )
         elif len(eeg_picks) >= 1:
+            if before_kurtosis_scoring is not None:
+                # Resource admission precedes every scoring copy, including a
+                # restored checkpoint. Only immutable dimensions cross the IPC
+                # boundary; this runtime callback is never stored in params.
+                union_samples = sum(stop - start for start, stop in relative_spans_from_plan(realized_plan))
+                before_kurtosis_scoring(
+                    len(raw.ch_names), int(raw.n_times), len(eeg_picks), union_samples,
+                    cached_evidence is not None, original_input_live_bytes,
+                )
             scoring_started = perf_counter()
             data = _kurtosis_scoring_data(
                 raw,
@@ -971,6 +985,8 @@ def perform_preprocessing(
     params: Dict[str, Any],
     log_func: Callable[[str], None],
     filename_for_log: str = "UnknownFile",
+    *,
+    before_kurtosis_scoring: Callable[[int, int, int, int, bool, int], None] | None = None,
 ) -> Tuple[Optional[mne.io.BaseRaw], int]:
     """
     Apply the full preprocessing pipeline to an MNE Raw object.
@@ -1096,6 +1112,8 @@ def perform_preprocessing(
                 cached.raw, params, log_func, filename_for_log,
                 orig_sfreq=cached.original_sfreq, geometry_identity=cached.params["_fpvs_geometry"],
                 debug_enabled=debug_enabled, checkpoint=checkpoint, cached_evidence=cached.evidence,
+                before_kurtosis_scoring=before_kurtosis_scoring,
+                original_input_live_bytes=8 * len(raw.ch_names) * int(raw.n_times) if raw.preload else 0,
             )
         params["_fpvs_kurtosis_checkpoint_status"] = "miss" if checkpoint is not None else "disabled"
         orig_ch_names = list(raw.info["ch_names"])
@@ -1539,7 +1557,8 @@ def perform_preprocessing(
             )
             if sf > downsample_rate:
                 try:
-                    raw.resample(
+                    resample_raw(
+                        raw,
                         downsample_rate,
                         npad="auto",
                         window="hann",
@@ -1617,6 +1636,7 @@ def perform_preprocessing(
             raw, params, log_func, filename_for_log, orig_sfreq=orig_sfreq,
             geometry_identity=geometry_identity, debug_enabled=debug_enabled,
             checkpoint=checkpoint,
+            before_kurtosis_scoring=before_kurtosis_scoring,
         )
 
     except Exception as e:

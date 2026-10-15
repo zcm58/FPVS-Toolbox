@@ -354,6 +354,17 @@ Rules:
   preflight happens in the Stats worker before QC screening, grand-average
   amplitude row loading, and `BCA (uV)` aggregation, so an off-grid FullFFT
   workbook should not trigger expensive downstream sheet reads.
+- `analysis/dv_policy_group_significant.py` may reuse pure frequency-column
+  parsing for eight ordered headers, each limited to 32,768 built-in string
+  labels of at most 128 characters. Keys include every ordered label; reuse
+  requires the original parser/code/defaults and built-in conversions/sorter.
+  Cached tuples are immutable; callers receive detached lists. Nonfinite
+  frequencies retain fresh original rows, preserving NaN equality behavior.
+  Custom inputs, replaced helpers and larger headers use the original parser,
+  and allocation failure falls back to direct parsing. This
+  memo holds no scientific arrays or file identities, bypasses no source
+  validation, and changes no harmonic profile, base exclusion, grid check,
+  neighboring-noise calculation or canonical selected list.
 - Managed project participant-condition exclusions are applied by the shared
   dataset index before that header preflight, so an explicitly excluded
   workbook cannot block harmonic selection while its file remains on disk for

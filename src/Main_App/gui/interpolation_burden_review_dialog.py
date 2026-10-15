@@ -211,6 +211,15 @@ class InterpolationBurdenReviewDialog(ReviewDialog):
         self.support_button.setObjectName("interpolation_burden_repair_support")
         self.support_button.clicked.connect(self._inspect_repair_support)
         self.table.setCurrentCell(0, 0)
+        self.retain_all_button = actions.add_button(
+            make_action_button("Retain all", variant="secondary", parent=actions)
+        )
+        self.retain_all_button.setObjectName("interpolation_burden_review_retain_all")
+        self.retain_all_button.setToolTip(
+            "Set every recording to Retain, including existing Exclude choices. "
+            "Reasons are preserved. Review and apply the decisions afterward."
+        )
+        self.retain_all_button.clicked.connect(self._retain_all)
         self.next_button = actions.add_button(
             make_action_button("Next needs attention", variant="secondary", parent=actions)
         )
@@ -227,6 +236,12 @@ class InterpolationBurdenReviewDialog(ReviewDialog):
         self.cancel_button.clicked.connect(self.reject)
         self.apply_button.clicked.connect(self._validate_and_accept)
         self.root_layout.addWidget(actions)
+        self._update_attention()
+
+    def _retain_all(self) -> None:
+        for control in self._decision_controls.values():
+            control.setCurrentIndex(control.findData(INTERPOLATION_BURDEN_DECISION_RETAIN))
+        self.error_banner.hide()
         self._update_attention()
 
     def _pending_rows(self) -> list[int]:

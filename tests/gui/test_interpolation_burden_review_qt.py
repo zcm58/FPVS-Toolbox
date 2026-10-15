@@ -74,6 +74,30 @@ def test_next_attention_wraps_and_completed_choices_still_require_apply(dialog, 
                for choice in dialog.choices().values())
 
 
+def test_retain_all_includes_offscreen_rows_preserves_context_and_requires_apply(qtbot, dialog):
+    first = dialog._batch.items[0].processing_id
+    last = dialog._batch.items[-1].processing_id
+    dialog._decision_controls[first].setCurrentIndex(2)
+    dialog._scope_controls[first].setCurrentIndex(1)
+    dialog._reason_controls[first].setText("Reviewed signal evidence")
+    dialog.apply_button.click()
+    assert dialog.error_banner.isVisible()
+    dialog.table.setCurrentCell(0, 0)
+    qtbot.mouseClick(dialog.retain_all_button, Qt.MouseButton.LeftButton)
+    assert dialog.isVisible() and dialog.result() == QDialog.DialogCode.Rejected
+    assert not dialog.error_banner.isVisible()
+    assert not dialog.next_button.isEnabled()
+    assert dialog.progress_label.text() == "60 of 60 recordings ready to submit"
+    choices = dialog.choices()
+    assert all(choice.decision == "retain" for choice in choices.values())
+    assert choices[first].reason == "Reviewed signal evidence"
+    assert choices[first].exclusion_scope == "participant"
+    assert choices[last].exclusion_scope == "recording"
+    assert dialog._review_state() != dialog._initial_review_state
+    dialog.apply_button.click()
+    assert dialog.result() == QDialog.DialogCode.Accepted
+
+
 def _respond_to_discard(qtbot, response, prompts):
     def respond():
         box = QApplication.activeModalWidget()
@@ -135,7 +159,8 @@ def test_unchanged_or_reverted_choices_close_without_prompt(dialog, monkeypatch)
 def test_attention_controls_fit_dialog(qtbot, dialog, size):
     dialog.resize(*size)
     qtbot.wait(1)
-    for control in (dialog.progress_label, dialog.next_button, dialog.apply_button, dialog.cancel_button):
+    for control in (dialog.progress_label, dialog.retain_all_button, dialog.next_button,
+                    dialog.apply_button, dialog.cancel_button):
         bounds = QRect(control.mapTo(dialog, QPoint(0, 0)), control.size())
         assert dialog.rect().contains(bounds)
         assert control.isVisibleTo(dialog)

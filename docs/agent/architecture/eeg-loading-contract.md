@@ -117,6 +117,36 @@ original recordings, exports, or the repository's MNE/fsaverage cache.
   exclusion warning and returns `None`, while the process runner reports the
   file as `status="excluded"` instead of a processing error.
 - BDF files load through `mne.io.read_raw_bdf(...)`.
+  `Main_App.io.bdf_preload` provides a guarded full-preload adapter for the
+  characterized CPython 3.13/MNE 1.9.0/NumPy 2.3.1 little-endian implementation.
+  It changes only large packed-24 decoding during the unchanged native RawEDF
+  full-preload constructor or one scoped native preflight read. Header reads and
+  lazy constructors remain native. Bound kwargs, ordinary finite
+  uniform-rate headers and native code/default/dependency identities govern
+  admission. The temporary instance dispatch is removed on success or failure;
+  returned Raw class, metadata and subsequent methods remain native. Unsupported
+  inputs select the native reader directly. Allocation retry first releases
+  speculative decoder arrays and restores the stream cursor. This adapter is
+  invoked in the existing full-load warning-capture context; the local
+  import preserves the public I/O/Shared-loader initialization boundary.
+  Preflight uses `owned_bdf_lazy_read` only around its existing `find_events`
+  and condition `get_data` calls, inside the existing I/O semaphore. It accepts
+  one exclusively owned native lazy Raw, rejects local method overrides, and
+  pins the native read/event entries and dependencies. The context suspends
+  during the unchanged native call and restores the binding in `finally`,
+  before annotation fallback or return; no persistent reader or owner remains.
+  Small reads and unsupported state keep the native decoder. Copying or sharing
+  Raw objects inside this internal read context is outside its ownership contract.
+  Preflight event extraction alone requests `status_only=True`. With one native
+  Status slice, a common sample grid, no annotation channel and no projection or
+  compensation, it unpacks only that channel's integers in a temporary full-shape
+  buffer. Every physical byte is still read with the native count and grouping;
+  downstream calibration, masking and native file-reader bodies are unchanged.
+  A short received count populates every received integer before native reshape,
+  preserving truncation errors and cursor behavior. Other selections use the
+  direct native class reader. This dispatch uses no additional NumPy selection
+  helpers, and private function copies release before the owned Raw escapes.
+  Whole-pipeline exact proof remains required before performance acceptance.
 - Raw BDF loading remains disk-preloaded by default. A project-only,
   default-off Settings > Experimental > Performance switch uses MNE
   `preload=True` for preflight QC, interactive QC prefetch or its scanner

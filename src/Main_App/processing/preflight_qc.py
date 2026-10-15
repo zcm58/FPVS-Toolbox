@@ -855,13 +855,16 @@ def _configured_stim_channel(settings: Mapping[str, Any]) -> str:
 
 
 def _find_preflight_events(raw: Any, *, stim_channel: str) -> tuple[np.ndarray, str]:
+    from Main_App.io.bdf_preload import owned_bdf_lazy_read
+
     try:
-        events = mne.find_events(
-            raw,
-            stim_channel=stim_channel,
-            shortest_event=1,
-            verbose=False,
-        )
+        with owned_bdf_lazy_read(raw, stim_channel=stim_channel, status_only=True):
+            events = mne.find_events(
+                raw,
+                stim_channel=stim_channel,
+                shortest_event=1,
+                verbose=False,
+            )
         source = "stim"
     except (RuntimeError, ValueError):
         events, _event_ids = mne.events_from_annotations(raw, verbose=False)
@@ -929,20 +932,23 @@ def _read_condition_data(
     stop: int,
     io_semaphore: threading.BoundedSemaphore,
 ) -> np.ndarray:
+    from Main_App.io.bdf_preload import owned_bdf_lazy_read
+
     with io_semaphore:
-        try:
-            data = raw.get_data(
-                picks=list(picks),
-                start=int(start),
-                stop=int(stop),
-                verbose=False,
-            )
-        except TypeError:
-            data = raw.get_data(
-                picks=list(picks),
-                start=int(start),
-                stop=int(stop),
-            )
+        with owned_bdf_lazy_read(raw):
+            try:
+                data = raw.get_data(
+                    picks=list(picks),
+                    start=int(start),
+                    stop=int(stop),
+                    verbose=False,
+                )
+            except TypeError:
+                data = raw.get_data(
+                    picks=list(picks),
+                    start=int(start),
+                    stop=int(stop),
+                )
     result = np.asarray(data, dtype=np.float64)
     expected_samples = int(stop) - int(start)
     if result.ndim != 2 or result.shape != (len(picks), expected_samples):

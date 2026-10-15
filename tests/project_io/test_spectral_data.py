@@ -237,6 +237,62 @@ def test_verified_headers_survive_dense_eviction_without_reloading_arrays(tmp_pa
         )
 
 
+def test_evicted_numeric_read_rehashes_valid_inplace_archive_with_identical_signature(tmp_path, monkeypatch):
+    """Windows creation-time stats cannot certify new body reads after eviction."""
+    from Main_App.io import xlsx_selected_reader as xlsx
+
+    paths = [tmp_path / f"recording{index}.xlsx" for index in range(6)]
+    descriptors = [_write(path) for path in paths]
+    companion = tmp_path / descriptors[0]["path"]
+    before = companion.stat()
+    frozen_signature = xlsx._workbook_signature_or_none(companion)
+    original_signature = xlsx._workbook_signature_or_none
+    digest_calls = []
+    original_digest = hashlib.file_digest
+
+    def counted_digest(stream, *args, **kwargs):
+        digest_calls.append(Path(stream.name))
+        return original_digest(stream, *args, **kwargs)
+
+    monkeypatch.setattr(hashlib, "file_digest", counted_digest)
+    with xlsx_read_cache_scope():
+        for path in paths:
+            spectral_companion_identity(path)
+        cache = xlsx._ACTIVE_XLSX_READ_CACHE.get()
+        assert len(cache.spectral_payloads) == 4
+        assert len(cache.spectral_verified_headers) == 6
+        assert len(digest_calls) == 6
+
+        with np.load(companion, allow_pickle=False) as archive:
+            arrays = {key: archive[key] for key in archive.files}
+        arrays["sheet0_values"].view(np.uint64)[0, 0] ^= np.uint64(1)
+        replacement = tmp_path / "changed.npz"
+        np.savez(replacement, **arrays)
+        changed_bytes = replacement.read_bytes()
+        assert len(changed_bytes) == before.st_size
+        with companion.open("r+b") as stream:
+            stream.write(changed_bytes)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.utime(companion, ns=(before.st_atime_ns, before.st_mtime_ns))
+        with zipfile.ZipFile(companion) as archive:
+            assert archive.testzip() is None  # Valid CRC/schema cannot replace SHA validation.
+
+        # Model Windows st_ctime-as-creation-time on every test platform. The
+        # real NTFS signature also stayed identical in local characterization.
+        monkeypatch.setattr(
+            xlsx, "_workbook_signature_or_none",
+            lambda path: frozen_signature if Path(path).resolve() == companion.resolve()
+            else original_signature(path),
+        )
+        assert spectral_companion_identity(paths[0]) == descriptors[0]
+        with pytest.raises(SpectralDataError, match="checksum"):
+            read_xlsx_sheet_selected_columns(
+                paths[0], sheet_name=FFT, required_columns=["Electrode", "0.0000_Hz"],
+            )
+        assert digest_calls.count(companion) == 2
+
+
 def test_evicted_spectral_verification_rejects_changed_companion_and_is_bounded(tmp_path, monkeypatch):
     from Main_App.io import spectral_data, xlsx_selected_reader as xlsx
 

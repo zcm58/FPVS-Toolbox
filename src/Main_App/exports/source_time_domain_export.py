@@ -22,6 +22,7 @@ import mne
 import numpy as np
 
 from Main_App.io.eeg_geometry import biosemi64_geometry_identity
+from Main_App.io.buffered_fif import save_raw_fif
 
 
 logger = logging.getLogger(__name__)
@@ -598,7 +599,7 @@ def _atomic_write_raw_fif(destination: Path, raw: Any) -> None:
     temporary_path = Path(temporary_name)
     temporary_path.unlink(missing_ok=True)
     try:
-        raw.save(
+        save_raw_fif(raw,
             str(temporary_path),
             overwrite=True,
             proj=False,

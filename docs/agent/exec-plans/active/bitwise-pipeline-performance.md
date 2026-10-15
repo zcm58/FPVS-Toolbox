@@ -34,10 +34,12 @@ these partial observations are not a RAM-preload comparison.
   cancellation. OFF preparation took 1,099.684 s; sampled peak process-tree RSS
   was 6.542 GiB, maximum active workers 2, and mean per-worker CPU 93.54% of one
   core. This is one preparation phase, not a completed OFF/ON comparison.
-- [ ] Run comparable RAM-preload OFF/ON GUI trials on this same implementation,
-  recording compute time separately from review waits, peak RAM and worker use;
-  then run primary normalized-SNR FHC and the authorized exploratory raw-BCA
-  companion using identical domain/cohort/comparison recipes.
+- [x] Complete the superseding native comparison at a requested 12-worker ceiling:
+  starting versus final code with RAM OFF, and final code with RAM OFF versus ON,
+  with compute time, peak RAM, worker use and exact full/checkpoint proofs recorded.
+  Primary L2-normalized SNR FHC and the exploratory raw-BCA companion also completed
+  on the approved common cohort/domain. See the
+  [final performance and analysis report](../../reviews/pipeline-bitwise-performance-report-2026-10-15.md).
 
 The new pool owner is `src/Main_App/workers/kurtosis_review_process.py`;
 `processing/kurtosis_review_scan.py` owns classification and legacy thread

@@ -42,6 +42,15 @@ other condition NumPy/native outputs and source FIF/JSON derivatives remain inta
 The merged recording-condition ledger and completed repair provenance must validate
 before release. Failed repairs stay pending for retry. A missing/stale run snapshot
 routes the user back to normal Processing; trigger timing is never guessed.
+Whole-cohort artifact validation may use ordered read-only threads through
+`Main_App.workers.cell_validation_pool`, including the normal-run adoption check.
+Its CPU ceiling comes from the current project configuration only after the
+reviewed run snapshot still binds that project and expected-plan fingerprint;
+missing/stale inputs retain serial validation and the existing Processing block.
+Live available RAM and Windows commit headroom account for background use.
+Every checksum and receipt check remains native. Per-record EEG repair still
+uses one normal process worker and completes shutdown before its plan/ledger/
+completion publication; validation threads cannot publish later recordings.
 Normal runs save their snapshot in the background and can supply completed repair
 receipts directly, avoiding a second processing run.
 
@@ -855,6 +864,24 @@ Downsampling:
 - It runs only when `downsample_rate` is truthy and the current sampling
   frequency is greater than the requested target.
 - It uses MNE `raw.resample(..., npad="auto", window="hann", verbose=False)`.
+- `processing/guarded_stim_resample.py` may replace only MNE's private Status
+  window helper through isolated copies of the characterized `Raw.resample`
+  wrapper/body. On CPython 3.13 / MNE 1.9.0 / NumPy 2.3.1, finite native
+  contiguous float64 data with exact factors of 2, 4, 8 or 16 select the
+  same first nonzero value in each verified integer-width window, preserving an all-zero
+  window's first zero sign. The complete original conversion, NumPy
+  dispatcher, allocation and window-setup prefix is retained; only the
+  verified Python window loop uses native boolean ndarray argmax and indexed
+  copying. All optional indices and selected rows finish allocating before
+  the first output write. The 2048-to-256 Hz production path uses width 8.
+  Runtime, code, typed defaults, forwarding, NumPy
+  dependencies, builtin bindings, closure state and the current bound method
+  are checked before mutation, including globals absent at construction.
+  Unsupported windows and optional mask-allocation failure retain the
+  original loop with its existing prefix arrays. Overrides and changed
+  implementations use the original public method. EEG resampling, original
+  and resampled event checks/warnings, annotations, Info and sample-offset
+  updates remain in the unchanged MNE bodies; no shared module is patched.
 
 Kurtosis review and interpolation:
 

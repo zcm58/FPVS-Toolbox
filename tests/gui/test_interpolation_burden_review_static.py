@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -91,6 +93,41 @@ def test_workflow_review_gate_runs_after_report_and_before_post_processing() -> 
     )
 
     assert report_line < review_line < post_processing_line
+
+
+def test_retain_all_changes_every_decision_without_submitting_or_editing_context() -> None:
+    tree = _tree(DIALOG_PATH)
+    build_ui = ast.unparse(_method(tree, "InterpolationBurdenReviewDialog", "_build_ui"))
+    assert "self.retain_all_button.clicked.connect(self._retain_all)" in build_ui
+    assert "interpolation_burden_review_retain_all" in build_ui
+    method = _method(tree, "InterpolationBurdenReviewDialog", "_retain_all")
+    namespace = {"INTERPOLATION_BURDEN_DECISION_RETAIN": "retain"}
+    exec(compile(ast.Module(body=[method], type_ignores=[]), str(DIALOG_PATH), "exec"), namespace)
+    controls = {str(row): Mock() for row in range(60)}
+    for row, control in enumerate(controls.values()):
+        # Find by item data, independently of the combo's item ordering.
+        control.findData.return_value = row + 1
+    reasons = {"first": "Review evidence"}
+    scopes = {"first": "participant"}
+    host = SimpleNamespace(
+        _decision_controls=controls,
+        _reason_controls=reasons,
+        _scope_controls=scopes,
+        error_banner=Mock(),
+        _update_attention=Mock(),
+        accept=Mock(),
+        choices=Mock(),
+    )
+    namespace["_retain_all"](host)
+    for row, control in enumerate(controls.values()):
+        control.findData.assert_called_once_with("retain")
+        control.setCurrentIndex.assert_called_once_with(row + 1)
+    assert host._reason_controls == reasons
+    assert host._scope_controls == scopes
+    host.error_banner.hide.assert_called_once_with()
+    host._update_attention.assert_called_once_with()
+    host.accept.assert_not_called()
+    host.choices.assert_not_called()
 
 
 def test_workflow_cancel_and_invalid_evidence_return_a_blocking_result() -> None:

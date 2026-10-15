@@ -639,10 +639,8 @@ class MainWindow(QMainWindow):
                 "Open a managed FPVS project before using Free Harmonic Clustering Analysis.",
             )
             return
-        if not self._frequency_domain_outputs_ready_for_tool(
-            "Free Harmonic Clustering Analysis"
-        ):
-            return
+        # The page validates neutral FullFFT provenance on its inspection
+        # worker. A failed sibling Summed-BCA selection must not block FHC.
         if hasattr(self, "stacked"):
             self.stacked.setCurrentIndex(1)
         self.workspace_stack.setCurrentWidget(

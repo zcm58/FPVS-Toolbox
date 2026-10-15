@@ -43,7 +43,7 @@ def preflight_qc_cache_directory(project_root: Path, *, namespace: str = "") -> 
     root = Path(project_root)
     if not root.is_absolute():
         raise ValueError("project_root must be an explicit absolute path")
-    if namespace not in {"", "events", "occurrences"}:
+    if namespace not in {"", "events", "occurrences", "raw_diagnostics"}:
         raise ValueError("Unknown preflight cache namespace")
     directory = root / PREFLIGHT_QC_CACHE_RELATIVE_DIRECTORY
     return directory / namespace if namespace else directory

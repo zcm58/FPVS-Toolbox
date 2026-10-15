@@ -790,13 +790,17 @@ def load_eeg_file(
                         len(include_channels) if include_channels else "all",
                         memmap_path,
                     )
-                    raw = mne.io.read_raw_bdf(
+                    # Resolve here to preserve direct Shared-loader imports while
+                    # the public I/O package delegates to this implementation.
+                    from Main_App.io.bdf_preload import select_bdf_preload_reader
+
+                    raw = select_bdf_preload_reader(
                         filepath,
                         preload=True if preload_in_memory else memmap_path,
                         stim_channel=stim_name if stim_name else "Status",
                         include=include_channels,
                         verbose=False,
-                    )
+                    )()
                     logger.debug(
                         "[LOADER STAGE] file=%s stage=read_raw_bdf_done channels=%d",
                         base,

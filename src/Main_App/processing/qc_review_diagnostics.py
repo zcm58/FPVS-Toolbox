@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, replace
 import hashlib
+import inspect
 import json
 import math
 from typing import Any
@@ -24,6 +25,76 @@ from Main_App.io.eeg_geometry import (
 
 QC_REVIEW_DIAGNOSTICS_VERSION = "mne_amplitude_review_shadow_v1"
 _AUTHORITY = "review_only"
+_AMPLITUDE_DETECTOR = mne.preprocessing.annotate_amplitude
+_MNE_AMPLITUDE_SOURCE_HASHES = {
+    "annotate_amplitude": "b6effb66864c130f8f5d937ceccddfdaa11aa32a62f349e5c8224b0f60647838",
+    "_reject_short_segments": "67312e77bfbc9e54891d71ffbf65d598b689e21ae198b6bc2de45ba49a3b5137",
+    "_create_annotations": "6cb05b6524aa640e89beb66db946a51b1382634f1916499dcabc5e9d91ef37d8",
+    "_mark_inner": "1694156d6b6860fda0b40ff50e38a1d64dbd285080edaf44f35476c3e0cbf8d4",
+    "_mask_to_onsets_offsets": "61dc1fe1ddf2414d48d01aee346213e7e2306e9c8d2c96632e8bbe8b0d728a64",
+    "_check_ptp": "96553bd6506bae1b64de519045899664ae83501ef39b2386a7b144801a386941",
+    "_check_bad_percent": "c6d2a8b209c9bb996796e7f32bb5205b9a42c087c2f894ab3603c56deeb378c3",
+    "_check_min_duration": "e443b39b8054eade8ffd38cf9541a41fde9d669c381f637c6225eaf3df0c38a3",
+    "_annotations_starts_stops": "0f2e536f14eb7cd2ea380afc326fba6c1946df2d2e357d03e68221c4ce92c6d3",
+    "_picks_to_idx": "117cb96a87ddd2ac401779b8910d1e4d1f2a8beba88a017eb78bc128c20ad638",
+    "_picks_by_type": "a2bca6e904e6e1f0324b717c93a1913641cd0e3240503508c62cfe80a1d6be1f",
+    "_adjust_onset_meas_date": "0b273e6d913c07870a4945cceae9cf1568dd5221ce911c9b091ac8781c5cb73e",
+}
+
+
+def _callable_code(function):
+    codes = []
+    seen = set()
+    while function is not None:
+        if id(function) in seen:
+            raise ValueError("Callable wrapper cycle")
+        seen.add(id(function))
+        codes.extend((getattr(function, "__code__", None),
+                      getattr(getattr(function, "py_func", None), "__code__", None)))
+        function = getattr(function, "__wrapped__", None)
+    return tuple(codes)
+
+
+def _same_callable_code(current, captured):
+    return len(current) == len(captured) and all(a is b for a, b in zip(current, captured))
+
+
+_AMPLITUDE_DETECTOR_CODE = _callable_code(_AMPLITUDE_DETECTOR)
+
+
+def _characterized_mne_runtime():
+    """Enable shortcuts only for the exact installed detector/helper source."""
+    if mne.__version__ != "1.9.0":
+        return None
+    try:
+        from mne.preprocessing import _annotate_amplitude as module
+
+        bindings = [(mne.preprocessing, "annotate_amplitude", _AMPLITUDE_DETECTOR)]
+        bindings.extend((module, name, getattr(module, name)) for name in _MNE_AMPLITUDE_SOURCE_HASHES
+                        if name != "annotate_amplitude")
+        for _owner, name, function in bindings:
+            source = inspect.getsource(function).replace("\r\n", "\n")
+            if hashlib.sha256(source.encode("utf-8")).hexdigest() != _MNE_AMPLITUDE_SOURCE_HASHES[name]:
+                return None
+        bindings.extend(((mne, "create_info", mne.create_info), (mne.io, "RawArray", mne.io.RawArray),
+                         (mne.io.RawArray, "__init__", mne.io.RawArray.__init__)))
+        return tuple((owner, name, function, _callable_code(function)) for owner, name, function in bindings)
+    except (AttributeError, OSError, TypeError, ValueError, MemoryError):
+        return None
+
+
+_MNE_DIAGNOSTIC_RUNTIME = _characterized_mne_runtime()
+
+
+def _mne_runtime_unchanged(*, include_detector=True):
+    if _MNE_DIAGNOSTIC_RUNTIME is None or mne.__version__ != "1.9.0":
+        return False
+    try:
+        return all(getattr(owner, name, None) is function and _same_callable_code(_callable_code(function), code)
+                   for owner, name, function, code in _MNE_DIAGNOSTIC_RUNTIME
+                   if include_detector or name != "annotate_amplitude")
+    except ValueError:
+        return False
 
 
 class QCReviewDiagnosticsCancelled(InterruptedError):
@@ -157,13 +228,47 @@ def review_repair_topology(
     }
 
 
+def _can_combine_amplitude_detectors(values, scratch, peak):
+    """Restrict read sharing to the characterized public-MNE input case."""
+    try:
+        return (_mne_runtime_unchanged(include_detector=False)
+                and mne.preprocessing.annotate_amplitude is _AMPLITUDE_DETECTOR
+                and _same_callable_code(_callable_code(_AMPLITUDE_DETECTOR), _AMPLITUDE_DETECTOR_CODE)
+                and type(values) is np.ndarray and values.dtype == np.dtype(np.float64)
+                and values.ndim == 1 and values.flags.c_contiguous and values.flags.aligned
+                and len(values) >= 2 and type(peak) is float and 0.0 < peak <= 1e100
+                and np.isfinite(scratch).all()
+                and float(scratch.min()) >= -1e100 and float(scratch.max()) <= 1e100)
+    except (MemoryError, ValueError):
+        return False
+
+
 def _mne_segments(values, sfreq, peak):
     """Return untrimmed MNE consecutive-difference spans for one bounded row."""
     # Always a bounded plain ndarray: Raw.__del__ must not unlink a source mmap.
     scratch = np.array(values, dtype=np.float64, copy=True, subok=False)[None, :]
+    # At bounded power-of-two sample rates, the detector's onset/duration
+    # arithmetic converts back to the exact same integer support. Avoid its
+    # repeated Raw/time/annotation allocation only in that proven domain.
+    if _can_use_direct_segments(values, scratch, sfreq, peak):
+        try:
+            return _direct_mne_segments(scratch, sfreq, peak)
+        except MemoryError:
+            pass
     raw = mne.io.RawArray(scratch, mne.create_info(["signal"], sfreq, "eeg"), copy="info", verbose=False)
     result = {"flat": [], "peak": []}
     try:
+        # In the characterized MNE implementation, both independent masks use
+        # one identical consecutive-difference array. Share that read without
+        # changing threshold arithmetic, annotation conversion or event order.
+        # Unsupported inputs/runtimes keep the original separate calls below.
+        if _can_combine_amplitude_detectors(values, scratch, peak):
+            try:
+                return _combined_mne_segments(raw, values, sfreq, peak)
+            except MemoryError:
+                # The public detector does not mutate Raw. A failed optional
+                # combined allocation can retry the unchanged separate path.
+                pass
         for kind, threshold in (("flat", 0.0), ("peak", peak)):
             if threshold is None:
                 continue
@@ -186,6 +291,62 @@ def _mne_segments(values, sfreq, peak):
                     result[kind] = [(0, len(values))]
     finally:
         raw.close()
+    return result
+
+
+def _can_use_direct_segments(values, scratch, sfreq, peak):
+    try:
+        return (type(sfreq) is float and math.isfinite(sfreq) and 1.0 <= sfreq <= 16384.0
+                and math.frexp(sfreq)[0] == 0.5 and len(values) <= 2 ** 24
+                and _mne_runtime_unchanged() and _can_combine_amplitude_detectors(values, scratch, peak))
+    except MemoryError:
+        return False
+
+
+def _direct_mne_segments(scratch, sfreq, peak):
+    """Use the characterized MNE masks and identical onset/stop arithmetic."""
+    # For one plain channel, no annotations, min_duration=0 and bad_percent=100:
+    # MNE's type grouping/data concatenation does not change these diff bytes;
+    # its short-segment helper removes nothing. All matching differences are
+    # the sole bad-channel case and use the original full-support recovery.
+    differences = np.abs(np.diff(scratch, axis=1))[0]
+    result = {}
+    mask_to_spans = next(function for _owner, name, function, _code in _MNE_DIAGNOSTIC_RUNTIME
+                         if name == "_mask_to_onsets_offsets")
+    for kind, mask in (("flat", differences <= 0.0), ("peak", differences >= peak)):
+        if bool(np.all(mask)):
+            result[kind] = [(0, scratch.shape[1])]
+            continue
+        starts, stops = mask_to_spans(mask)
+        onsets = starts / sfreq
+        durations = (stops - starts) / sfreq
+        result[kind] = [(int(round(onset * sfreq)), int(round((onset + duration) * sfreq)) + 1)
+                        for onset, duration in zip(onsets, durations)]
+    return result
+
+
+def _combined_mne_segments(raw, values, sfreq, peak):
+    """Split public-MNE annotations without changing within-kind order."""
+    annotations, bads = mne.preprocessing.annotate_amplitude(
+        raw, flat=0.0, peak=peak, bad_percent=100, min_duration=0,
+        picks=[0], verbose=False,
+    )
+    result = {"flat": [], "peak": []}
+    for kind, threshold in (("flat", 0.0), ("peak", peak)):
+        result[kind] = [
+            (int(round(onset * sfreq)), int(round((onset + duration) * sfreq)) + 1)
+            for onset, duration, description in zip(
+                annotations.onset, annotations.duration, annotations.description,
+            )
+            if description == f"BAD_{kind}"
+        ]
+    if bads:
+        differences = np.abs(np.diff(raw._data[0]))
+        for kind, threshold in (("flat", 0.0), ("peak", peak)):
+            all_match = (np.isfinite(differences).all()
+                         and bool(np.all(differences <= threshold if kind == "flat" else differences >= threshold)))
+            if all_match:
+                result[kind] = [(0, len(values))]
     return result
 
 

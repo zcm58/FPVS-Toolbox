@@ -10,6 +10,8 @@ import json
 from pathlib import Path
 from queue import SimpleQueue
 
+import psutil
+
 from Main_App.processing.condition_interpolation_state import (
     ConditionInterpolationPendingError, artifact_identity, atomic_json,
     completion_is_current, load_condition_interpolation_state, request_fingerprint,
@@ -93,6 +95,40 @@ def _load_snapshot(root: Path) -> dict:
         ) from exc
 
 
+def _validation_workers(root: Path, snapshot: dict | None, expected) -> int:
+    """Use only a reviewed snapshot's still-bound project worker ceiling."""
+    if snapshot is None or snapshot.get("processing_fingerprint") != expected.processing_fingerprint:
+        return 1
+    try:
+        path = root / "project.json"
+        before = path.read_bytes()
+        if snapshot.get("project_processing_identity") != project_processing_identity(root):
+            return 1
+        if path.read_bytes() != before:
+            return 1
+        manifest = json.loads(before)
+        from Main_App.projects.preprocessing_settings import normalize_preprocessing_settings
+        from Main_App.workers.cell_validation_pool import _usable_cpus
+        from Main_App.workers.mp_env import compute_effective_max_workers
+        from Main_App.workers.review_resource_budget import probe_memory_snapshot
+
+        preprocessing = normalize_preprocessing_settings(manifest.get("preprocessing") or {})
+        desired = preprocessing.get("max_parallel_workers_override", 0)
+        bypass = desired > 0
+        if not bypass:
+            desired = (manifest.get("options") or {}).get("max_workers")
+            if desired is not None:
+                if isinstance(desired, bool) or int(desired) != float(desired) or int(desired) <= 0:
+                    return 1
+                desired = int(desired)
+        return compute_effective_max_workers(
+            probe_memory_snapshot().total_bytes, _usable_cpus(), desired,
+            allow_ram_cap_bypass=bypass,
+        )
+    except (AttributeError, MemoryError, OSError, OverflowError, RuntimeError, TypeError, ValueError, psutil.Error):
+        return 1
+
+
 def _run_recording(root, snapshot, record, requests, *, log_func):
     from Main_App.workers.process_runner import RunParams, run_project_parallel
 
@@ -172,11 +208,19 @@ def execute_pending_condition_interpolations(project_root, *, log_func=None) -> 
     # A full normal Processing run may already have applied these requests.
     # Accept its current reconciled receipts instead of processing it twice.
     if expected is not None:
+        try:
+            adoption_snapshot = _load_snapshot(root)
+        except ConditionInterpolationProcessingRequired:
+            adoption_snapshot = None
+        adoption_workers = _validation_workers(root, adoption_snapshot, expected)
         ledger = load_ledger(root)
         payload = ledger.get(RECORDING_CONDITION_OUTCOME_LEDGER_KEY, {})
         try:
             all_receipts = [cell["export_receipt"] for cell in payload.get("cells", []) if cell.get("export_receipt")]
-            require_pre_review_readiness(reconcile_recording_condition_outputs(expected, all_receipts))
+            require_pre_review_readiness(reconcile_recording_condition_outputs(
+                expected, all_receipts,
+                **({"validation_workers": adoption_workers} if adoption_workers > 1 else {}),
+            ))
             adoption_ready = payload.get("reconciliation_status") == "complete"
         except RecordingConditionOutcomeError:
             adoption_ready = False
@@ -258,7 +302,11 @@ def execute_pending_condition_interpolations(project_root, *, log_func=None) -> 
                       str(cell.get("processing_id") or "").casefold() == identity.casefold()
                       and cell.get("condition_label") in conditions)]
         merged.extend(receipts)
-        outcomes = reconcile_recording_condition_outputs(expected, merged)
+        validation_workers = _validation_workers(root, snapshot, expected)
+        outcomes = reconcile_recording_condition_outputs(
+            expected, merged,
+            **({"validation_workers": validation_workers} if validation_workers > 1 else {}),
+        )
         require_pre_review_readiness(outcomes)
         entry = ledger["entries"][recording.processing_id]
         entry["export_receipts"] = [row for row in merged if str(

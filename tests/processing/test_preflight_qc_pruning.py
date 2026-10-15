@@ -35,7 +35,29 @@ def _save(tmp_path, parts):
     return cache.save_preflight_qc_cache(tmp_path, result={"complete": True}, **parts)
 
 
-@pytest.mark.parametrize("namespace", ["", "events", "occurrences"])
+@pytest.mark.parametrize("namespace", ["", "events", "occurrences", "raw_diagnostics"])
+def test_cold_publication_writes_one_complete_index(tmp_path, monkeypatch, namespace):
+    writes = []
+    atomic_json = pruning._atomic_json
+
+    def capture(path, value):
+        if "slot" in value:
+            writes.append((path, deepcopy(value)))
+        atomic_json(path, value)
+
+    monkeypatch.setattr(pruning, "_atomic_json", capture)
+    parts = _parts(tmp_path, namespace)
+    destination = _save(tmp_path, parts)
+    assert len(writes) == 1
+    index_path, index_payload = writes[0]
+    assert json.loads(index_path.read_text()) == index_payload
+    assert index_payload["entries"] == [
+        {"name": destination.name, "stat": pruning._stat_identity(destination)}
+    ]
+    assert cache.load_preflight_qc_cache(tmp_path, **parts) == {"complete": True}
+
+
+@pytest.mark.parametrize("namespace", ["", "events", "occurrences", "raw_diagnostics"])
 def test_replacement_prunes_previous_settings_only_after_success(tmp_path, namespace):
     parts = _parts(tmp_path, namespace)
     old = _save(tmp_path, parts)

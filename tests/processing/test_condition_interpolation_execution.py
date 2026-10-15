@@ -160,8 +160,10 @@ def test_failed_repair_retries_without_rewriting_other_condition_and_adopts_norm
             }
         return row
 
-    def reconcile(_plan, receipts):
+    def reconcile(_plan, receipts, **_kwargs):
         assert {row["condition_label"] for row in receipts} == {"Faces", "Objects"}
+        if _kwargs:
+            assert _kwargs == {"validation_workers": 12}
         return SimpleNamespace(to_payload=lambda: {"cells": [
             {"processing_id": "p01_visit2", "condition_label": row["condition_label"], "export_receipt": row}
             for row in receipts]})
@@ -180,6 +182,15 @@ def test_failed_repair_retries_without_rewriting_other_condition_and_adopts_norm
         "processing_fingerprint": plan.processing_fingerprint,
         "records": [{"processing_id": "p01_visit2", "info": {"path": source["raw_file"]}}],
     })
+    validation_scopes = []
+
+    def validated_workers(_root, snapshot, expected):
+        assert snapshot is not None and snapshot["settings"]["reviewed_marker_samples"] == [101, 1807]
+        assert expected.processing_fingerprint == "processing-1"
+        validation_scopes.append("validated")
+        return 12
+
+    monkeypatch.setattr(executor, "_validation_workers", validated_workers)
     calls = []
 
     def accept_new_review():
@@ -244,6 +255,7 @@ def test_failed_repair_retries_without_rewriting_other_condition_and_adopts_norm
     assert executor.execute_pending_condition_interpolations(tmp_path) is True
     assert executor.execute_pending_condition_interpolations(tmp_path) is False
     assert len(calls) == 2
+    assert len(validation_scopes) >= 4  # Adoption and per-record/retry validation.
     state_api.require_no_pending_condition_interpolation(tmp_path)
     faces.write_bytes(b"tampered derivative")
     with pytest.raises(state_api.ConditionInterpolationPendingError):
@@ -338,6 +350,8 @@ def test_recording_repair_respects_terminal_cleanup_after_successful_file(
     result = {"status": "ok", "file": str(tmp_path / "P01.bdf"), "export_receipts": []}
 
     def run(_params, *, progress_queue):
+        assert _params.max_workers == 1
+        assert _params.settings["_fpvs_export_only_conditions"] == ["Faces"]
         progress_queue.put({"type": "progress", "result": result})
         return {
             "status": "error" if cleanup_failed else "success",
@@ -358,3 +372,51 @@ def test_recording_repair_respects_terminal_cleanup_after_successful_file(
             tmp_path, snapshot, record, {"P01": {"Faces": ["O2"]}}, log_func=logs.append,
         ) is result
         assert logs == ["Condition-electrode repair processed P01."]
+
+
+@pytest.mark.parametrize("override,option,expected", [(12, 2, 12), (0, 2, 2), (1, 12, 1)])
+def test_validation_ceiling_comes_only_from_still_bound_native_snapshot(
+    tmp_path, monkeypatch, override, option, expected,
+):
+    from Main_App.workers import cell_validation_pool, review_resource_budget
+    from Main_App.workers.review_resource_budget import ReviewMemorySnapshot
+
+    _raw, source, _decision, _report = _project(tmp_path)
+    manifest_path = tmp_path / "project.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["preprocessing"] = {"max_parallel_workers_override": override}
+    manifest["options"] = {"max_workers": option}
+    manifest_path.write_text(json.dumps(manifest))
+    executor.persist_condition_interpolation_run_snapshot(tmp_path, {
+        "version": executor.SNAPSHOT_VERSION, "settings": {}, "event_map": {"Faces": 1},
+        "save_folder": str(tmp_path / "outputs"), "processing_fingerprint": "processing-1",
+        "records": [{"processing_id": "P01", "info": {"path": source["raw_file"]}}],
+    })
+    monkeypatch.setattr(cell_validation_pool, "_usable_cpus", lambda: 24)
+    monkeypatch.setattr(review_resource_budget, "probe_memory_snapshot", lambda: ReviewMemorySnapshot(
+        128 * 1024**3, 112 * 1024**3, 112 * 1024**3, True,
+    ))
+    plan = SimpleNamespace(processing_fingerprint="processing-1")
+    snapshot = executor._load_snapshot(tmp_path)
+    assert executor._validation_workers(tmp_path, snapshot, plan) == expected
+    assert executor._validation_workers(tmp_path, None, plan) == 1
+    assert executor._validation_workers(tmp_path, snapshot, SimpleNamespace(processing_fingerprint="different")) == 1
+    manifest["preprocessing"]["high_pass"] = 0.2
+    manifest_path.write_text(json.dumps(manifest))
+    assert executor._validation_workers(tmp_path, snapshot, plan) == 1
+    with pytest.raises(executor.ConditionInterpolationProcessingRequired, match="Run Processing"):
+        executor._load_snapshot(tmp_path)
+
+
+def test_resource_probe_failure_keeps_validated_repair_validation_serial(tmp_path, monkeypatch):
+    from Main_App.workers import review_resource_budget
+
+    _raw, source, _decision, _report = _project(tmp_path)
+    executor.persist_condition_interpolation_run_snapshot(tmp_path, {
+        "version": executor.SNAPSHOT_VERSION, "settings": {}, "event_map": {"Faces": 1},
+        "save_folder": str(tmp_path / "outputs"), "processing_fingerprint": "processing-1",
+        "records": [{"processing_id": "P01", "info": {"path": source["raw_file"]}}],
+    })
+    snapshot = executor._load_snapshot(tmp_path)
+    monkeypatch.setattr(review_resource_budget, "probe_memory_snapshot", lambda: (_ for _ in ()).throw(OSError("Unavailable")))
+    assert executor._validation_workers(tmp_path, snapshot, SimpleNamespace(processing_fingerprint="processing-1")) == 1

@@ -6,8 +6,11 @@ import logging
 import threading
 from dataclasses import dataclass, field, replace
 from decimal import Decimal
+from functools import lru_cache
+from math import isfinite as _frequency_isfinite
 from pathlib import Path
 from time import perf_counter
+from types import BuiltinFunctionType
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence
 
 import numpy as np
@@ -4006,6 +4009,46 @@ def _wanted_electrodes_for_scope(
 
 
 def _parse_frequency_columns(columns: Sequence[object]) -> list[tuple[float, str, int]]:
+    # Cache only bounded ordinary immutable labels. Custom inputs retain the
+    # original parser and its observable conversion/iteration behavior.
+    if (type(columns) in (list, tuple) and len(columns) <= 32_768
+            and _parse_frequency_columns_uncached is _NATIVE_FREQUENCY_PARSER
+            and _parse_frequency_columns_uncached.__code__ is _NATIVE_FREQUENCY_PARSER_CODE
+            and _parse_frequency_columns_uncached.__defaults__ is None
+            and _parse_frequency_columns_uncached.__kwdefaults__ is None
+            and float is type(0.0) and str is type("")
+            and sorted is _NATIVE_FREQUENCY_SORTED
+            and isinstance(sorted, BuiltinFunctionType)
+            and sorted.__module__ == "builtins" and sorted.__name__ == "sorted"
+            and _frequency_isfinite is _NATIVE_FREQUENCY_ISFINITE):
+        try:
+            labels = tuple(columns)
+            if all(type(label) is str and len(label) <= 128 for label in labels):
+                return list(_cached_frequency_columns(labels))
+        except _UncacheableFrequencyColumns as uncached:
+            # Fresh NaN objects preserve Python tuple/set equality behavior.
+            return uncached.rows
+        except MemoryError:
+            # A cache allocation failure must not replace the established
+            # parsing path or its error behavior.
+            pass
+    return _parse_frequency_columns_uncached(columns)
+
+
+@lru_cache(maxsize=8)
+def _cached_frequency_columns(labels):
+    rows = _parse_frequency_columns_uncached(labels)
+    if any(not _frequency_isfinite(frequency) for frequency, _label, _index in rows):
+        raise _UncacheableFrequencyColumns(rows)
+    return tuple(rows)
+
+
+class _UncacheableFrequencyColumns(Exception):
+    def __init__(self, rows):
+        self.rows = rows
+
+
+def _parse_frequency_columns_uncached(columns: Sequence[object]) -> list[tuple[float, str, int]]:
     out: list[tuple[float, str, int]] = []
     freq_idx = 0
     for col_name in columns:
@@ -4017,6 +4060,12 @@ def _parse_frequency_columns(columns: Sequence[object]) -> list[tuple[float, str
         except ValueError:
             continue
     return sorted(out, key=lambda item: item[0])
+
+
+_NATIVE_FREQUENCY_PARSER = _parse_frequency_columns_uncached
+_NATIVE_FREQUENCY_PARSER_CODE = _parse_frequency_columns_uncached.__code__
+_NATIVE_FREQUENCY_SORTED = sorted
+_NATIVE_FREQUENCY_ISFINITE = _frequency_isfinite
 
 
 def _locked_full_fft_grid_identity(

@@ -1089,6 +1089,58 @@ def test_clear_kurtosis_result_retains_review_only_diagnostics_without_scientifi
     assert result.decision_plan["ready_for_interpolation"] is True
 
 
+@pytest.mark.parametrize("source_changed", [False, True])
+@pytest.mark.parametrize("cache_hit", [False, True])
+def test_raw_diagnostic_cache_never_skips_preparation_or_source_guard_and_defers_publication(
+    tmp_path, monkeypatch, source_changed, cache_hit,
+):
+    from Main_App.processing import qc_review_diagnostics, qc_review_diagnostics_cache, qc_signal_view
+
+    path = tmp_path / "P01.bdf"
+    path.write_bytes(b"current source bytes")
+    identity = qc_signal_view.source_content_identity(path)
+    prepared = _prepared(ready=True)
+    prepared["signal_preview"]["signal_view"] = {
+        "checkpoint_source_identity": {**identity, "sha256": "changed"} if source_changed else identity,
+    }
+    loaded = []
+    captured = _configure_active_scan(monkeypatch, loaded_raws=loaded, prepared=prepared)
+    plan = _source_plan("Objects")
+    plan["spans"][0].update(repetition_index=0, source_coordinates={"start_relative_sample": 100, "stop_relative_sample": 900})
+    monkeypatch.setattr(scan_module, "validate_source_analysis_span_plan", lambda **_kwargs: plan)
+    report = {"authority": "review_only", "localized_events": [{"channel": "Fp1", "kind": "abrupt_jump", "value": -0.0}]}
+    key = object()
+    calls = []
+    monkeypatch.setattr(qc_review_diagnostics_cache, "build_raw_diagnostics_cache_key", lambda *_a, **_k: key)
+    monkeypatch.setattr(qc_review_diagnostics_cache, "load_raw_diagnostics", lambda *_a, **_k: deepcopy(report) if cache_hit else None)
+
+    def calculate(*_args, **_kwargs):
+        calls.append("calculate")
+        assert not cache_hit
+        return deepcopy(report)
+
+    def publish(observed_key, observed_report, **_kwargs):
+        calls.append("publish")
+        assert observed_key is key
+        assert not loaded[0].closed
+        assert "prepare" in captured and not source_changed
+        assert observed_report == report
+
+    monkeypatch.setattr(qc_review_diagnostics, "build_raw_qc_review_diagnostics", calculate)
+    monkeypatch.setattr(qc_review_diagnostics_cache, "save_raw_diagnostics", publish)
+    scan = scan_kurtosis_review([_info(path, "P01")], _settings(), event_map={"Objects": 2},
+                               reviewed_event_plans_by_file={str(path): {"reviewed": True}})
+    assert "prepare" in captured
+    assert loaded and all(raw.closed for raw in loaded)
+    assert ("calculate" in calls) is not cache_hit
+    assert ("publish" in calls) is (not cache_hit and not source_changed)
+    if source_changed:
+        assert scan.errors and "Recording changed" in scan.results[0].error
+    else:
+        assert not scan.errors
+        assert scan.results[0].review_diagnostics == {**report, "source_identity": identity}
+
+
 def test_unavailable_unreviewable_evidence_is_a_file_error(
     tmp_path,
     monkeypatch,
@@ -1228,7 +1280,7 @@ def test_reconciliation_reprompts_changed_evidence_as_stale(
     }
 
 
-def test_process_review_releases_prefetch_before_budgeting_only_eligible_inputs(tmp_path, monkeypatch):
+def test_process_review_passes_eligible_inputs_and_requested_limit_after_prefetch_release(tmp_path, monkeypatch):
     from Main_App.workers import kurtosis_review_process as pool
 
     path = (tmp_path / "P01.bdf").resolve()
@@ -1241,14 +1293,13 @@ def test_process_review_releases_prefetch_before_budgeting_only_eligible_inputs(
     updates = []
     calling_thread = get_ident()
 
-    def budget(eligible, requested):
-        assert closed == [True]
-        assert [item.path for item in eligible] == [path]
-        assert requested == 4
-        return 1
+    def forbidden_budget(*_args):
+        pytest.fail("The scanner must not freeze the pool's per-file credit plan")
 
     def run(eligible, settings, *, result_progress, progress, max_workers, **kwargs):
-        assert get_ident() == calling_thread and max_workers == 1
+        assert get_ident() == calling_thread and max_workers == 4
+        assert closed == [True]
+        assert [item.path for item in eligible] == [path]
         scan = scan_module._scan_kurtosis_review_serial(
             eligible, settings, event_map=kwargs["event_map"],
             reviewed_event_plans_by_file=kwargs["reviewed_event_plans_by_file"],
@@ -1257,7 +1308,7 @@ def test_process_review_releases_prefetch_before_budgeting_only_eligible_inputs(
         progress("Finished parallel review", 1, 1)
         return scan
 
-    monkeypatch.setattr(pool, "review_process_worker_count", budget)
+    monkeypatch.setattr(pool, "review_process_worker_count", forbidden_budget)
     monkeypatch.setattr(pool, "run_process_review", run)
     scan = scan_kurtosis_review(
         infos, _settings(manual_excluded_participants=["excluded"], max_parallel_workers_override=4),
