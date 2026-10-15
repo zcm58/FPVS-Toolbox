@@ -4,7 +4,6 @@ from __future__ import annotations
 # ruff: noqa: E402
 
 import logging
-import os
 import queue
 import sys
 from pathlib import Path
@@ -14,8 +13,6 @@ from Main_App.gui.components import show_post_processing_required
 from typing import Callable
 from types import MethodType, SimpleNamespace
 from collections import deque
-
-import psutil
 
 # Qt / PySide6
 from PySide6.QtCore import QObject, QEvent, QThread, QTimer, Signal, Slot
@@ -45,7 +42,7 @@ from Main_App.processing.processing_controller import (
 )
 from Main_App.projects.project_manager import select_projects_root
 from Main_App.workers.mp_env import (
-    compute_effective_max_workers,
+    compute_dynamic_worker_ceiling,
 )
 from Tools.Individual_Detectability.main_window import IndividualDetectabilityWindow
 from Tools.Plot_Generator.plot_generator import PlotGeneratorWindow
@@ -210,9 +207,7 @@ class MainWindow(QMainWindow):
 
         # Parallel processing configuration
         self.parallel_mode = "process"
-        default_cpu = os.cpu_count() or 1
-        default_ram = psutil.virtual_memory().total
-        self.max_workers = compute_effective_max_workers(default_ram, default_cpu, None)
+        self.max_workers = compute_dynamic_worker_ceiling()
         self._n_jobs_ignored_logged = False
         self._mp = None
 

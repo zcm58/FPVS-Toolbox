@@ -374,7 +374,9 @@ def test_recording_repair_respects_terminal_cleanup_after_successful_file(
         assert logs == ["Condition-electrode repair processed P01."]
 
 
-@pytest.mark.parametrize("override,option,expected", [(12, 2, 12), (0, 2, 2), (1, 12, 1)])
+@pytest.mark.parametrize("override,option,expected", [
+    (12, 2, 12), (0, 2, 2), (1, 12, 1), (0, 20, 20), (0, None, 23),
+])
 def test_validation_ceiling_comes_only_from_still_bound_native_snapshot(
     tmp_path, monkeypatch, override, option, expected,
 ):
@@ -408,8 +410,8 @@ def test_validation_ceiling_comes_only_from_still_bound_native_snapshot(
         executor._load_snapshot(tmp_path)
 
 
-def test_resource_probe_failure_keeps_validated_repair_validation_serial(tmp_path, monkeypatch):
-    from Main_App.workers import review_resource_budget
+def test_cpu_probe_failure_keeps_validated_repair_validation_serial(tmp_path, monkeypatch):
+    from Main_App.workers import cell_validation_pool
 
     _raw, source, _decision, _report = _project(tmp_path)
     executor.persist_condition_interpolation_run_snapshot(tmp_path, {
@@ -418,5 +420,5 @@ def test_resource_probe_failure_keeps_validated_repair_validation_serial(tmp_pat
         "records": [{"processing_id": "P01", "info": {"path": source["raw_file"]}}],
     })
     snapshot = executor._load_snapshot(tmp_path)
-    monkeypatch.setattr(review_resource_budget, "probe_memory_snapshot", lambda: (_ for _ in ()).throw(OSError("Unavailable")))
+    monkeypatch.setattr(cell_validation_pool, "_usable_cpus", lambda: (_ for _ in ()).throw(OSError("Unavailable")))
     assert executor._validation_workers(tmp_path, snapshot, SimpleNamespace(processing_fingerprint="processing-1")) == 1

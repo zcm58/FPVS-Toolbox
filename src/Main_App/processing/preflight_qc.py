@@ -9,7 +9,7 @@ from dataclasses import asdict, dataclass, replace
 import hashlib
 import json
 import logging
-import os
+import math
 from pathlib import Path
 import tempfile
 import threading
@@ -18,7 +18,6 @@ from typing import Any, Callable, Iterator, Mapping, Sequence
 
 import mne
 import numpy as np
-import psutil
 
 from Main_App.io import load_utils
 from Main_App.io.eeg_geometry import (
@@ -36,7 +35,6 @@ from Main_App.processing.preflight_qc_plan import (
     PREFLIGHT_QC_MAX_IN_MEMORY_CONDITION_BYTES,
     PREFLIGHT_QC_MAX_IO_READERS,
     PREFLIGHT_QC_MAX_SPECTRAL_WORKERS,
-    PREFLIGHT_QC_MAX_WORKERS,
     PREFLIGHT_QC_METHOD_NAME,
     PREFLIGHT_QC_METHOD_VERSION,
     PREFLIGHT_QC_TRANSIENT_TAIL_POLICY,
@@ -70,7 +68,15 @@ from Main_App.projects.experimental_qc_settings import (
     RawSpectralScreeningSettings,
     normalize_raw_spectral_screening_settings,
 )
-from Main_App.workers.mp_env import compute_effective_max_workers
+from Main_App.workers.mp_env import compute_dynamic_worker_ceiling
+from Main_App.workers.processing_resource_budget import plain_metadata_bytes
+from Main_App.workers.review_resource_budget import (
+    ReviewMemoryProbeError,
+    estimate_review_memory,
+    memory_admission_fits,
+    probe_memory_snapshot,
+    read_review_geometry,
+)
 from Main_App.projects.preprocessing_settings import (
     is_participant_condition_excluded,
     is_recording_condition_excluded,
@@ -1603,31 +1609,74 @@ def _aggregate_condition_spectral_qc(
 
 
 def preflight_worker_count(total: int, max_workers: int | None) -> int:
-    """Share bounded preflight concurrency between scheduling and its display.
-
-    Preserve requests within the former four-worker ceiling. Additional
-    concurrency follows the existing CPU/total-RAM policy without overrides;
-    unavailable resource information retains the former ceiling.
-    """
+    """Share the CPU/request ceiling; live memory admission sizes actual work."""
     if total <= 1:
         return 1
     try:
-        requested = int(max_workers or 1)
+        requested = None if max_workers is None or max_workers == 0 else int(max_workers)
     except (TypeError, ValueError, OverflowError):
         requested = 1
-    bounded = max(1, min(total, requested, PREFLIGHT_QC_MAX_WORKERS))
-    if bounded <= 4:
-        return bounded
+    return min(total, compute_dynamic_worker_ceiling(requested))
+
+
+_PREFLIGHT_THREAD_BYTES = 64 * 1024**2
+
+
+def _preflight_memory_credit(
+    info: RawFileInfo, settings: Mapping[str, Any], *, signal_context: bool,
+    event_map: Mapping[str, int] | None = None,
+) -> int | None:
+    """Reserve a complete file, including retained evidence, without EEG reads.
+
+    The 256-MiB condition buffer is not a whole-file bound: aggregate channel
+    metrics can touch a full disk-backed condition and spectral peak evidence
+    can grow with every eligible bin. Use the full recording as the interval
+    upper bound, the existing native array/decoder bound, plus conservative
+    event/marker and per-bin Python/evidence allowances. This intentionally
+    over-reserves; an unsupported or over-host estimate runs alone instead of
+    declaring the native chunked calculation impossible.
+    """
     try:
-        resource_cap = compute_effective_max_workers(
-            total_ram_bytes=int(psutil.virtual_memory().total),
-            cpu_count=os.cpu_count() or 1,
-            project_max_workers=bounded,
-            allow_ram_cap_bypass=False,
-        )
-    except (OSError, RuntimeError, TypeError, ValueError, OverflowError, AttributeError, psutil.Error):
-        return min(bounded, 4)
-    return max(1, min(bounded, resource_cap))
+        metadata = 16 * plain_metadata_bytes((settings, event_map))
+        if not signal_context:
+            return _PREFLIGHT_THREAD_BYTES + metadata
+        geometry = read_review_geometry(Path(info.path), settings)
+        if geometry is None:
+            return None
+        if event_map is not None and (len(event_map) > 256 or any(
+            len(str(label).encode("utf-8")) > 256 for label in event_map
+        )):
+            return None
+        protocol = normalize_frequency_protocol(settings.get("frequency_protocol"))
+        interval = protocol.expected_analyzed_samples(geometry.source_rate_hz)
+        if interval <= 0:
+            return None
+        # Preflight scores source-rate data, regardless of downstream resampling.
+        geometry = replace(geometry, target_rate_hz=geometry.source_rate_hz)
+        arrays = estimate_review_memory(
+            geometry, filter_enabled=False, notch_enabled=False, raw_qc_enabled=True,
+        ).healthy_bytes
+        samples, channels = geometry.source_n_times, geometry.scored_channels
+        # Every sample may be an event/marker. Retain array, plan, and serialized
+        # evidence allowance, rather than assuming a typical sparse trigger train.
+        evidence = 2048 * samples
+        # Native marker blocks end at the next onset; approved spans remain in
+        # that block and have the exact declared analyzed length. They cannot
+        # overlap. Retain per-occurrence/per-window evidence, not just one FFT.
+        occurrences = samples // interval
+        hop = max(1, int(round(PREFLIGHT_QC_TRANSIENT_WINDOW_HOP_S * geometry.source_rate_hz)))
+        windows = 2 * samples // hop + 2 * occurrences
+        evidence += 4096 * channels * windows
+        if normalize_raw_spectral_screening_settings(settings.get("raw_spectral_screening")).enabled:
+            _lower, upper = resolve_preflight_spectral_bounds(settings, source_sfreq=geometry.source_rate_hz)
+            bins = occurrences * min(interval // 2 + 1,
+                                     math.ceil(interval * upper / geometry.source_rate_hz) + 32)
+            # All eligible bins may retain per-channel peak tuples and their
+            # serialized evidence. This is independent of observed EEG values.
+            evidence += 2048 * channels * bins
+        return _PREFLIGHT_THREAD_BYTES + metadata + arrays + evidence
+    except (AttributeError, ImportError, OSError, OverflowError, RuntimeError, TypeError, ValueError):
+        return None
 
 
 # Compatibility for existing internal callers; new consumers share the public API.
@@ -2403,16 +2452,51 @@ def _scan_preprocessing_qc_parallel(
     submitted = 0
     completed = 0
     indexed_results: dict[int, PreflightQcFileResult | None] = {}
-    futures: dict[Future[PreflightQcFileResult | None], tuple[int, RawFileInfo]] = {}
+    futures: dict[Future[PreflightQcFileResult | None], tuple[int, RawFileInfo, int, bool]] = {}
+    credits: dict[int, int | None] = {}
+    waiting = False
 
     def _submit_next(executor: ThreadPoolExecutor) -> None:
-        nonlocal submitted
+        nonlocal submitted, waiting
         while submitted < total and len(futures) < max_workers:
             if should_cancel and should_cancel():
                 return
             index = submitted + 1
             info = pending_infos[submitted]
-            submitted += 1
+            if index not in credits:
+                credits[index] = _preflight_memory_credit(
+                    info, qc_settings, signal_context=bool(project_root is not None and event_map),
+                    event_map=event_map,
+                )
+            try:
+                snapshot = probe_memory_snapshot()
+            except (AttributeError, OSError, OverflowError, RuntimeError, TypeError, ValueError) as exc:
+                raise ReviewMemoryProbeError("Preflight could not read current host memory; retry after checking system resources.") from exc
+            if snapshot.total_bytes <= 0 or snapshot.physical_available_bytes < 0:
+                raise ReviewMemoryProbeError("Preflight received invalid current physical-memory information.")
+            if snapshot.commit_required and snapshot.commit_available_bytes is None:
+                raise ReviewMemoryProbeError("Preflight could not read current Windows commit headroom; retry after checking system resources.")
+            margin = max(1024**3, snapshot.total_bytes // 16)
+            credit = credits[index]
+            exclusive = credit is None or credit + margin > snapshot.total_bytes
+            if exclusive:
+                credit = _PREFLIGHT_THREAD_BYTES
+            if credit + margin > snapshot.total_bytes:
+                raise ReviewMemoryProbeError("Preflight cannot fit its minimum scheduling reserve within host physical memory.")
+            active = {item[0]: item[2] for item in futures.values()}
+            fits = not ((exclusive and futures) or any(item[3] for item in futures.values()))
+            # Threads share the parent. Its USS includes unrelated allocations,
+            # so retain full active credits and never add back parent memory.
+            fits = fits and memory_admission_fits(
+                snapshot, active_credits=active, active_owned={}, idle_owned=(),
+                worker_count=len(futures), candidate_credit=credit, worker_floor_bytes=0,
+            )
+            if not fits:
+                if not waiting and progress:
+                    progress("Waiting for preflight memory headroom", completed, total)
+                waiting = True
+                return
+            waiting = False
             file_path = Path(info.path)
             if progress:
                 progress(f"Planning {file_path.name}", completed, total)
@@ -2435,14 +2519,17 @@ def _scan_preprocessing_qc_parallel(
             ] = (
                 index,
                 info,
+                credit,
+                exclusive,
             )
+            submitted += 1
 
     with ThreadPoolExecutor(
         max_workers=max_workers,
         thread_name_prefix="fpvs_preflight_qc",
     ) as executor:
         _submit_next(executor)
-        while futures:
+        while futures or submitted < total:
             if should_cancel and should_cancel():
                 for future in futures:
                     future.cancel()
@@ -2451,16 +2538,22 @@ def _scan_preprocessing_qc_parallel(
                     cancelled=True,
                 )
 
+            if not futures:
+                time.sleep(0.1)
+                _submit_next(executor)
+                continue
+
             done, _pending = wait(
                 futures,
                 timeout=0.1,
                 return_when=FIRST_COMPLETED,
             )
             if not done:
+                _submit_next(executor)
                 continue
 
             for future in done:
-                index, info = futures.pop(future)
+                index, info, _credit, _exclusive = futures.pop(future)
                 file_path = Path(info.path)
                 if not future.cancelled():
                     try:
@@ -2533,7 +2626,7 @@ def scan_preprocessing_qc(
         PREFLIGHT_QC_MAX_SPECTRAL_WORKERS
     )
     worker_count = preflight_worker_count(total, max_workers)
-    if worker_count <= 1:
+    if worker_count <= 1 and not (resolved_project_root is not None and resolved_event_map):
         scan = _scan_preprocessing_qc_serial(
             pending_infos,
             qc_settings,

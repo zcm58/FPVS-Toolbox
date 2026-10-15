@@ -42,6 +42,7 @@ manual_smoke = []
 [scopes.gui]
 audits = ["gui"]
 tests = [
+  "tests/gui/test_dynamic_eeg_worker_settings_static.py",
   "tests/gui/test_sidebar_style_tokens.py",
   "tests/gui/test_project_protocol.py",
   "tests/gui/test_protocol_condition_markers_static.py",
@@ -119,6 +120,13 @@ manual_smoke = []
 [scopes.processing]
 audits = ["protected", "source-localization"]
 tests = [
+  "tests/processing/test_dynamic_worker_ceiling.py",
+  "tests/processing/test_processing_admission.py",
+  "tests/processing/test_processing_admission_lifecycle.py",
+  "tests/processing/test_processing_resource_budget.py",
+  "tests/processing/test_processing_finish_barrier_exact.py",
+  "tests/processing/test_preflight_resource_admission.py",
+  "tests/gui/test_dynamic_eeg_worker_settings_static.py",
   "tests/processing/test_process_runner_lifecycle.py",
   "tests/processing/test_worker_thread_limits.py",
   "tests/processing/test_project_frequency_protocol_inputs.py",

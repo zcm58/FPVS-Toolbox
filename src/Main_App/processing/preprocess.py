@@ -666,9 +666,12 @@ def _finish_preprocessing_at_kurtosis(
     raw, params, log_func, filename_for_log, *, orig_sfreq, geometry_identity,
     debug_enabled, checkpoint=None, cached_evidence=None,
     before_kurtosis_scoring=None, original_input_live_bytes=0,
+    before_processing_finish=None,
 ):
     """Resume the same calculation/decision/repair stages after preparation."""
 
+    if before_processing_finish is not None:
+        before_processing_finish(raw)
     reject_thresh = params.get("reject_thresh")
     stim_ch = params.get("stim_channel", config.DEFAULT_STIM_CHANNEL)
     num_kurtosis_bads_identified = 0
@@ -987,6 +990,7 @@ def perform_preprocessing(
     filename_for_log: str = "UnknownFile",
     *,
     before_kurtosis_scoring: Callable[[int, int, int, int, bool, int], None] | None = None,
+    before_processing_finish: Callable[[mne.io.BaseRaw], None] | None = None,
 ) -> Tuple[Optional[mne.io.BaseRaw], int]:
     """
     Apply the full preprocessing pipeline to an MNE Raw object.
@@ -1114,6 +1118,7 @@ def perform_preprocessing(
                 debug_enabled=debug_enabled, checkpoint=checkpoint, cached_evidence=cached.evidence,
                 before_kurtosis_scoring=before_kurtosis_scoring,
                 original_input_live_bytes=8 * len(raw.ch_names) * int(raw.n_times) if raw.preload else 0,
+                before_processing_finish=before_processing_finish,
             )
         params["_fpvs_kurtosis_checkpoint_status"] = "miss" if checkpoint is not None else "disabled"
         orig_ch_names = list(raw.info["ch_names"])
@@ -1637,6 +1642,7 @@ def perform_preprocessing(
             geometry_identity=geometry_identity, debug_enabled=debug_enabled,
             checkpoint=checkpoint,
             before_kurtosis_scoring=before_kurtosis_scoring,
+            before_processing_finish=before_processing_finish,
         )
 
     except Exception as e:

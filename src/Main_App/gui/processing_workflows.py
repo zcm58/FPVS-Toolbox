@@ -8,7 +8,6 @@ import queue
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
-import psutil
 from PySide6.QtCore import QObject, QThread, QTimer, Slot
 from PySide6.QtWidgets import QDialog, QMessageBox
 from Main_App.gui.run_outcome_model import summarize_run
@@ -47,8 +46,7 @@ from Main_App.projects.preprocessing_settings import (
 )
 from Main_App.processing.raw_channel_qc import RAW_CHANNEL_QC_EXCLUSION_REASON
 from Main_App.workers.mp_env import (
-    compute_effective_max_workers,
-    get_ram_tier_recommendation,
+    compute_dynamic_worker_ceiling,
 )
 
 logger = logging.getLogger(__name__)
@@ -1354,7 +1352,6 @@ def start_processing(host: Any, *, log: logging.Logger = logger) -> None:
             host._n_jobs_ignored_logged = True
 
         project_max_workers: int | None = None
-        allow_ram_cap_bypass = False
         override_source = "none"
         if getattr(host, "currentProject", None):
             opts = getattr(host.currentProject, "options", {})
@@ -1377,10 +1374,7 @@ def start_processing(host: Any, *, log: logging.Logger = logger) -> None:
                 else:
                     if override_value > 0:
                         project_max_workers = override_value
-                        allow_ram_cap_bypass = True
                         override_source = "preprocessing.max_parallel_workers_override"
-                    else:
-                        allow_ram_cap_bypass = False
 
             if project_max_workers is None:
                 raw_override = opts.get("max_workers")
@@ -1402,40 +1396,23 @@ def start_processing(host: Any, *, log: logging.Logger = logger) -> None:
                                 raw_override,
                             )
 
-        total_ram_bytes = psutil.virtual_memory().total
-        cpu_count = os.cpu_count() or 1
-        ram_tier, ram_cap, total_ram_gib = get_ram_tier_recommendation(total_ram_bytes)
-
-        effective_max_workers = compute_effective_max_workers(
-            total_ram_bytes=total_ram_bytes,
-            cpu_count=cpu_count,
-            project_max_workers=project_max_workers,
-            allow_ram_cap_bypass=allow_ram_cap_bypass,
-        )
+        effective_max_workers = compute_dynamic_worker_ceiling(project_max_workers)
         if (
             project_max_workers is not None
             and effective_max_workers != project_max_workers
         ):
             log.warning(
-                "Clamped project max_workers from %s to %s (cpu_count=%s, ram_tier=%s, ram_cap=%s, ram_cap_bypass=%s)",
+                "Clamped EEG worker ceiling from %s to %s using available CPUs",
                 project_max_workers,
                 effective_max_workers,
-                cpu_count,
-                ram_tier,
-                ram_cap if ram_cap is not None else "none",
-                allow_ram_cap_bypass,
             )
 
         log.debug(
-            "Resolved max_workers=%s (cpu_count=%s, ram_gib=%.1f, ram_tier=%s, ram_cap=%s, project_override=%s, override_source=%s, ram_cap_bypass=%s)",
+            "Resolved EEG worker ceiling=%s (project_override=%s, override_source=%s); "
+            "live memory admission limits active jobs",
             effective_max_workers,
-            cpu_count,
-            total_ram_gib,
-            ram_tier,
-            ram_cap if ram_cap is not None else "none",
             project_max_workers,
             override_source,
-            allow_ram_cap_bypass,
         )
         host.max_workers = effective_max_workers
 

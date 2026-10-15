@@ -109,22 +109,17 @@ def _validation_workers(root: Path, snapshot: dict | None, expected) -> int:
         manifest = json.loads(before)
         from Main_App.projects.preprocessing_settings import normalize_preprocessing_settings
         from Main_App.workers.cell_validation_pool import _usable_cpus
-        from Main_App.workers.mp_env import compute_effective_max_workers
-        from Main_App.workers.review_resource_budget import probe_memory_snapshot
+        from Main_App.workers.mp_env import compute_dynamic_worker_ceiling
 
         preprocessing = normalize_preprocessing_settings(manifest.get("preprocessing") or {})
         desired = preprocessing.get("max_parallel_workers_override", 0)
-        bypass = desired > 0
-        if not bypass:
+        if desired <= 0:
             desired = (manifest.get("options") or {}).get("max_workers")
             if desired is not None:
                 if isinstance(desired, bool) or int(desired) != float(desired) or int(desired) <= 0:
                     return 1
                 desired = int(desired)
-        return compute_effective_max_workers(
-            probe_memory_snapshot().total_bytes, _usable_cpus(), desired,
-            allow_ram_cap_bypass=bypass,
-        )
+        return compute_dynamic_worker_ceiling(desired, cpu_count=_usable_cpus())
     except (AttributeError, MemoryError, OSError, OverflowError, RuntimeError, TypeError, ValueError, psutil.Error):
         return 1
 

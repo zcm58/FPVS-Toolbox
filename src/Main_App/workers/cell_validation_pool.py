@@ -21,7 +21,7 @@ import numpy as np
 import psutil
 
 from Main_App.io.result_manifest import RESULT_MANIFEST_VERSION, _validate_manifest
-from Main_App.workers.mp_env import compute_effective_max_workers
+from Main_App.workers.mp_env import compute_dynamic_worker_ceiling
 from Main_App.workers.review_resource_budget import probe_memory_snapshot
 
 _MIB = 1024**2
@@ -147,9 +147,7 @@ def ordered_cell_validation(
         return [validator(item) for item in items]
     try:
         snapshot = probe_memory_snapshot()
-        ceiling = min(len(items), compute_effective_max_workers(
-            snapshot.total_bytes, _usable_cpus(), max_workers,
-        ))
+        ceiling = min(len(items), compute_dynamic_worker_ceiling(max_workers, cpu_count=_usable_cpus()))
         if _headroom(snapshot) is None:
             ceiling = 1
     except (AttributeError, MemoryError, OSError, OverflowError, RuntimeError, TypeError, ValueError, psutil.Error):

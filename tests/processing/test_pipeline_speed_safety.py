@@ -1,8 +1,21 @@
 from __future__ import annotations
 
 import numpy as np
+from types import SimpleNamespace
 
 from Main_App.workers import process_runner
+from Main_App.workers import processing_admission
+from Main_App.workers.review_resource_budget import OwnedMemory, ReviewMemorySnapshot
+
+
+def _known_small_files(monkeypatch):
+    """Refill controls need characterized files; missing files run exclusively."""
+    gib = 1024**3
+    monkeypatch.setattr(processing_admission, "build_processing_estimate", lambda *_:
+                        SimpleNamespace(healthy_bytes=gib // 8, emergency_extra_bytes=0))
+    monkeypatch.setattr(processing_admission, "probe_memory_snapshot", lambda:
+                        ReviewMemorySnapshot(32 * gib, 24 * gib, 24 * gib, True))
+    monkeypatch.setattr(processing_admission, "probe_owned_memory", lambda *_: OwnedMemory())
 
 
 class _FakeFuture:
@@ -78,6 +91,7 @@ class _FakeQueue:
 
 
 def test_memory_throttle_does_not_block_harvest(monkeypatch, tmp_path):
+    _known_small_files(monkeypatch)
     files = [tmp_path / "a.bdf", tmp_path / "b.bdf"]
     params = process_runner.RunParams(
         project_root=tmp_path,
@@ -122,6 +136,7 @@ def test_memory_throttle_does_not_block_harvest(monkeypatch, tmp_path):
 
 
 def test_completion_batch_refills_all_available_worker_slots(monkeypatch, tmp_path):
+    _known_small_files(monkeypatch)
     files = [tmp_path / f"p{index}.bdf" for index in range(6)]
     params = process_runner.RunParams(
         project_root=tmp_path,

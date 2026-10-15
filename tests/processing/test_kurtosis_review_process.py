@@ -67,6 +67,101 @@ def test_worker_count_shares_main_cpu_ram_and_override_policy(monkeypatch, cpu, 
     assert process_module.review_process_worker_count(infos, override) == expected
 
 
+@pytest.mark.parametrize("total_gib", [16, 32])
+@pytest.mark.parametrize("requested,expected", [(None, 23), (12, 12), (2, 2)])
+def test_validated_dynamic_prep_ceiling_is_independent_of_static_ram_tier(
+    monkeypatch, total_gib, requested, expected,
+):
+    from Main_App.workers import mp_env
+    from Main_App.workers.review_resource_budget import ReviewGeometry
+
+    infos = _resource_model(monkeypatch, cpu=24, total=total_gib * GIB,
+                            available=12 * GIB, sizes=[20] * 30)
+    monkeypatch.setattr(mp_env.os, "process_cpu_count", lambda: 24, raising=False)
+    monkeypatch.setattr(mp_env.psutil, "Process", lambda: SimpleNamespace(cpu_affinity=lambda: list(range(24))))
+    geometry = ReviewGeometry(67, 65, 64, 2_097_152, 2048.0, 256.0, 454_656, 2048)
+    monkeypatch.setattr(process_module, "read_review_geometry", lambda *_args: geometry)
+    plan = process_module._review_resource_plan(infos, requested, settings={})
+    assert plan.dynamic and plan.max_workers == expected
+    assert plan.budget_bytes == 12 * GIB - max(GIB, total_gib * GIB // 16)
+    assert not any(plan.exclusive)
+
+
+@pytest.mark.parametrize("recovered_gib,expected_population", [(28, 12), (7, 4)])
+def test_partial_completions_drain_small_pool_before_full_or_intermediate_growth(
+    monkeypatch, tmp_path, recovered_gib, expected_population,
+):
+    from concurrent.futures import Future
+
+    from Main_App.workers.review_resource_budget import ReviewMemoryEstimate, ReviewMemorySnapshot
+
+    credit = 128 * 1024**2
+    infos = [_info(index, tmp_path) for index in range(14)]
+    estimate = ReviewMemoryEstimate(credit, credit, credit, credit, 0, ())
+    plan = process_module._ReviewResourcePlan(
+        12, 28 * GIB, (credit,) * len(infos), estimates=(estimate,) * len(infos),
+        exclusive=(False,) * len(infos), dynamic=True,
+    )
+
+    class Context(_ThreadContext):
+        def Event(self):
+            return Event()
+
+        def Array(self, _type, values):
+            return list(values)
+
+    context = Context()
+    pools, submitted, waits = [], [], []
+
+    class Executor:
+        def __init__(self, *, max_workers, **_kwargs):
+            assert all(pool.closed for pool in pools), "Old workers must shut down before replacement."
+            self.population = max_workers
+            self.jobs = []
+            self.closed = False
+            pools.append(self)
+
+        def submit(self, _function, info, *_args, job_index):
+            future = Future()
+            self.jobs.append(future)
+            submitted.append(job_index)
+            future.test_info = info
+            return future
+
+        def shutdown(self, **_kwargs):
+            assert all(future.done() for future in self.jobs), "A live pool must never be resized."
+            self.closed = True
+
+    def staggered_wait(futures, **_kwargs):
+        # Complete exactly one owner. The other initial future stays pending,
+        # so an eager refill would keep the two-worker pool alive indefinitely.
+        pending = list(futures)
+        assert pending and not any(future.done() for future in pending)
+        if len(pools) == 1:
+            assert submitted == [0, 1], "Recovery must pause refills until both original owners finish."
+        waits.append((pools[-1].population, len(pending)))
+        finished = pending[0]
+        finished.set_result(KurtosisReviewScan((_result(finished.test_info),)))
+        return {finished}, set(pending[1:])
+
+    def snapshot():
+        available = int(4.5 * GIB) if len(submitted) < 2 else recovered_gib * GIB
+        return ReviewMemorySnapshot(32 * GIB, available, available, True)
+
+    monkeypatch.setattr(process_module, "_review_resource_plan", lambda *_a, **_k: plan)
+    monkeypatch.setattr(process_module, "get_context", lambda _method: context)
+    monkeypatch.setattr(process_module, "ProcessPoolExecutor", Executor)
+    monkeypatch.setattr(process_module, "probe_memory_snapshot", snapshot)
+    monkeypatch.setattr(process_module, "wait", staggered_wait)
+    scan = process_module.run_process_review(infos, {}, event_map={}, max_workers=12)
+    assert not scan.cancelled and not scan.errors
+    assert submitted == list(range(14))
+    assert [result.participant_id for result in scan.results] == [f"P{index}" for index in range(14)]
+    assert waits[:2] == [(2, 2), (2, 1)]
+    assert [pool.population for pool in pools] == [2, expected_population]
+    assert all(pool.closed for pool in pools)
+
+
 def test_worker_count_can_combine_small_and_large_sources_within_available_memory(monkeypatch):
     infos = _resource_model(monkeypatch, cpu=24, total=128 * GIB, available=80 * GIB, sizes=[1, GIB, GIB])
     # A 1 GiB job can share the 40 GiB budget with either 24 GiB job;

@@ -7,10 +7,55 @@ import os
 import sys
 from typing import Optional
 
-# Hard cap of 20 parallel workers on 128GB + workstations
+import psutil
+
+# Legacy ceiling for callers without live memory admission.
 
 GLOBAL_MAX_WORKERS = 20
+_WINDOWS_PROCESS_POOL_MAX_WORKERS = 61
 _worker_threadpool_limit = None
+
+
+def compute_dynamic_worker_ceiling(
+    project_max_workers: int | None = None, *, cpu_count: int | None = None,
+) -> int:
+    """Bound memory-admitted EEG stages by usable CPUs and a user ceiling.
+
+    This is a population ceiling, not permission to start that many jobs. Each
+    caller must separately admit work against fresh RAM and commit headroom.
+    """
+    if cpu_count is None:
+        usable = []
+        try:
+            count = getattr(os, "process_cpu_count", os.cpu_count)()
+            if type(count) is int and count > 0:
+                usable.append(count)
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
+            pass
+        try:
+            affinity = psutil.Process().cpu_affinity()
+            if affinity:
+                usable.append(len(affinity))
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError, psutil.Error):
+            pass
+        if usable:
+            cpu_count = min(usable)
+        else:
+            try:
+                cpu_count = os.cpu_count()
+            except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
+                cpu_count = 1
+    available = cpu_count if type(cpu_count) is int and cpu_count > 0 else 1
+    ceiling = max(1, available - 1)
+    # ProcessPoolExecutor's documented Windows limit also bounds shared EEG
+    # ceilings used by threads, so a later process stage can use the same value.
+    if sys.platform == "win32":
+        ceiling = min(ceiling, _WINDOWS_PROCESS_POOL_MAX_WORKERS)
+    if project_max_workers is None or type(project_max_workers) is int and project_max_workers == 0:
+        return ceiling
+    if type(project_max_workers) is not int or project_max_workers < 1:
+        return 1
+    return min(ceiling, project_max_workers)
 
 
 def get_ram_tier_recommendation(total_ram_bytes: int) -> tuple[str, Optional[int], float]:

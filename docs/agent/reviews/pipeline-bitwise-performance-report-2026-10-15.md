@@ -4,6 +4,16 @@ Status: measurements, exact-output proofs and study analyses complete.
 The final non-Qt repository check completed with five updater-environment failures,
 detailed below.
 
+**Benchmark version boundary:** the nine native captures and twelve accepted
+exact-output proofs in this report apply specifically to commit
+`38cc8ec18ede2506d49851ab59ef3cefa39f06c4`. The subsequent EEG-only dynamic-admission
+follow-up replaces installed-RAM tier limits with CPU/affinity/user ceilings and
+live memory admission in additional stages. That follow-up is outside these
+timings and proofs. No native benchmark or study-processing rerun was performed
+for it; the historical speedups below must not be attributed to those later changes.
+See the [dynamic EEG follow-up review](dynamic-eeg-worker-admission-2026-10-15.md)
+for its behavior, checks and remaining verification limits.
+
 Work is isolated on `codex/pipeline-bitwise-performance`, compared with starting
 snapshot `6aab9fa69b926d79097991f30dd84af4b2a579fd`. The workstation has an
 Intel i9-12900, 16 physical cores / 24 logical CPUs and 127.73 GiB RAM.
@@ -114,10 +124,11 @@ optimizations; this investigation does not claim their introduction.
    component benefit is outside the main gain because the benchmark fixture
    already contains completed repairs.
 
-The new proactive admission policy applies to preparation and repair-cell
-validation. Normal processing retains its existing CPU/installed-RAM tiers,
+At the measured commit, proactive admission applies to preparation and repair-cell
+validation. Normal processing retains its then-existing CPU/installed-RAM tiers,
 requested ceiling and reactive 85%-physical-used submission guard; it does not
-have the new prospective per-file Windows-commit admission policy.
+have the prospective per-file Windows-commit admission policy introduced by the
+subsequent EEG-only follow-up described in the version boundary above.
 
 Separate workflow changes add **Retain all** to interpolation-burden review
 (Apply decisions still saves), and let independent FHC enter neutral FullFFT

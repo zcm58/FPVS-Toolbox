@@ -91,6 +91,7 @@ from Main_App.processing.removed_electrode_detection import (
 )
 from Main_App.projects.grouping import project_group_context
 from Main_App.workers.qc_source_prefetch_worker import QcSourcePrefetchWorker
+from Main_App.workers.mp_env import compute_dynamic_worker_ceiling
 from Main_App.projects.preprocessing_settings import (
     KURTOSIS_REVIEW_DECISIONS_BY_RECORDING_KEY,
     MANUAL_REMOVED_ELECTRODES_ENABLED_KEY,
@@ -1325,10 +1326,7 @@ def _run_scan_embedded(
         ),
     )
     host._preflight_qc_file_rows = {}
-    try:
-        max_workers = max(1, int(getattr(host, "max_workers", 1) or 1))
-    except (TypeError, ValueError):
-        max_workers = 1
+    max_workers = _review_worker_ceiling(host, params)
     worker_count = preflight_worker_count(len(remaining), max_workers)
     project = getattr(host, "currentProject", None)
     project_root_value = getattr(project, "project_root", None)
@@ -1540,6 +1538,21 @@ def _finish_qc_source_prefetch(host: Any, bridge: _QcSourcePrefetchBridge | None
     bridge.deleteLater()
 
 
+def _review_worker_ceiling(host: Any, params: Mapping[str, Any]) -> int:
+    """Resolve current project settings instead of a previous GUI run's cap."""
+    try:
+        requested = int(params.get("max_parallel_workers_override", 0) or 0)
+    except (TypeError, ValueError, OverflowError):
+        requested = 0
+    if requested <= 0:
+        options = getattr(getattr(host, "currentProject", None), "options", {}) or {}
+        try:
+            requested = int(options.get("max_workers", 0) or 0)
+        except (TypeError, ValueError, OverflowError):
+            requested = 0
+    return compute_dynamic_worker_ceiling(requested if requested > 0 else None)
+
+
 def _run_kurtosis_review_scan_embedded(
     host: Any,
     raw_file_infos: Sequence[Any],
@@ -1596,9 +1609,7 @@ def _run_kurtosis_review_scan_embedded(
         reviewed_event_plans_by_file=reviewed_event_plans_by_file,
         raw_channel_qc_by_recording=raw_channel_qc_by_recording,
         source_prefetch=source_prefetch,
-        max_workers=getattr(host, "max_workers", None) or int(
-            getattr(host.currentProject, "preprocessing", {}).get("max_parallel_workers_override", 0)
-        ) or None,
+        max_workers=_review_worker_ceiling(host, params),
     )
     worker.moveToThread(thread)
     result_holder: dict[str, Any] = {}

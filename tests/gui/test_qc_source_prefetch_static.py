@@ -190,20 +190,34 @@ def test_review_worker_preserves_explicit_pool_limit_and_signal_callbacks(worker
     assert captured["should_cancel"]()
 
 
-@pytest.mark.parametrize("resolved_limit,preprocessing_override,expected", [
-    (1, 6, 1), (2, 0, 2), (None, 3, 3), (None, 0, None),
+@pytest.mark.parametrize("stale_limit,preprocessing_override,legacy_limit,expected", [
+    (1, 6, None, 6), (2, 0, None, 23), (None, 3, None, 3),
+    (12, 0, 4, 4), (24, 3, 12, 3),
 ])
-def test_embedded_review_uses_normal_resolved_worker_cap(resolved_limit, preprocessing_override, expected):
+def test_embedded_review_uses_current_project_ceiling(stale_limit, preprocessing_override, legacy_limit, expected):
+    from Main_App.workers.mp_env import compute_dynamic_worker_ceiling
+
     tree = ast.parse(WORKFLOW.read_text(encoding="utf-8"))
+    resolver = next(node for node in tree.body if getattr(node, "name", None) == "_review_worker_ceiling")
     embedded = next(node for node in tree.body if getattr(node, "name", None) == "_run_kurtosis_review_scan_embedded")
     call = next(node for node in ast.walk(embedded) if isinstance(node, ast.Call)
                 and isinstance(node.func, ast.Name) and node.func.id == "_KurtosisReviewWorker")
     value = next(keyword.value for keyword in call.keywords if keyword.arg == "max_workers")
     host = SimpleNamespace(
-        max_workers=resolved_limit,
-        currentProject=SimpleNamespace(preprocessing={"max_parallel_workers_override": preprocessing_override}),
+        max_workers=stale_limit,
+        currentProject=SimpleNamespace(options={"max_workers": legacy_limit}),
     )
-    limit = eval(compile(ast.Expression(value), str(WORKFLOW), "eval"), {"host": host})
+    namespace = {
+        "host": host, "params": {"max_parallel_workers_override": preprocessing_override},
+        "compute_dynamic_worker_ceiling": lambda requested: compute_dynamic_worker_ceiling(
+            requested, cpu_count=24,
+        ),
+    }
+    module = ast.Module(body=[ast.ImportFrom(
+        module="__future__", names=[ast.alias(name="annotations")], level=0,
+    ), resolver], type_ignores=[])
+    exec(compile(ast.fix_missing_locations(module), str(WORKFLOW), "exec"), namespace)
+    limit = eval(compile(ast.Expression(value), str(WORKFLOW), "eval"), namespace)
     assert limit == expected
 
 

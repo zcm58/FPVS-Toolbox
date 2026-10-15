@@ -2295,7 +2295,7 @@ def test_preproc_validation_allows_navigation_but_blocks_invalid_save(tmp_path, 
     assert dlg.tabs.currentIndex() == application_tab_index
 
 
-def test_parallel_worker_override_warning_blocks_save_on_no(tmp_path, qtbot, monkeypatch):
+def test_parallel_worker_ceiling_saves_without_ram_tier_confirmation(tmp_path, qtbot, monkeypatch):
     os.environ["XDG_CONFIG_HOME"] = str(tmp_path)
     project = _prep_project(tmp_path)
 
@@ -2304,11 +2304,6 @@ def test_parallel_worker_override_warning_blocks_save_on_no(tmp_path, qtbot, mon
     qtbot.addWidget(win)
     win.loadProject(project)
 
-    monkeypatch.setattr(
-        settings_panel.psutil,
-        "virtual_memory",
-        lambda: SimpleNamespace(total=int(16 * (1024 ** 3))),
-    )
     monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: None)
     prompts: list[str] = []
     monkeypatch.setattr(
@@ -2326,12 +2321,12 @@ def test_parallel_worker_override_warning_blocks_save_on_no(tmp_path, qtbot, mon
     dlg._save()
 
     reloaded = Project.load(project.project_root)
-    assert reloaded.preprocessing["max_parallel_workers_override"] == 0
-    assert prompts
-    assert "[4]" in prompts[0]
+    assert reloaded.preprocessing["max_parallel_workers_override"] == 6
+    assert prompts == []
+    assert "live RAM" in dlg.preproc_edits[8].toolTip()
 
 
-def test_parallel_worker_override_warning_allows_save_on_yes(tmp_path, qtbot, monkeypatch):
+def test_parallel_worker_zero_retains_automatic_setting(tmp_path, qtbot, monkeypatch):
     os.environ["XDG_CONFIG_HOME"] = str(tmp_path)
     project = _prep_project(tmp_path)
 
@@ -2340,21 +2335,16 @@ def test_parallel_worker_override_warning_allows_save_on_yes(tmp_path, qtbot, mo
     qtbot.addWidget(win)
     win.loadProject(project)
 
-    monkeypatch.setattr(
-        settings_panel.psutil,
-        "virtual_memory",
-        lambda: SimpleNamespace(total=int(16 * (1024 ** 3))),
-    )
     monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: None)
     monkeypatch.setattr(QMessageBox, "question", lambda *args, **kwargs: QMessageBox.Yes)
 
     dlg = SettingsDialog(win.settings, win, project)
     qtbot.addWidget(dlg)
-    dlg.preproc_edits[8].setText("6")
+    dlg.preproc_edits[8].setText("0")
     dlg._save()
 
     reloaded = Project.load(project.project_root)
-    assert reloaded.preprocessing["max_parallel_workers_override"] == 6
+    assert reloaded.preprocessing["max_parallel_workers_override"] == 0
 
 
 def test_experimental_ram_preload_toggle_is_saved_per_project(tmp_path, qtbot, monkeypatch):

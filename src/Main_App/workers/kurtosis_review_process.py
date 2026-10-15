@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, Any
 
 import psutil
 
-from Main_App.workers.mp_env import compute_effective_max_workers
+from Main_App.workers.mp_env import compute_dynamic_worker_ceiling, compute_effective_max_workers
 from Main_App.workers.review_resource_budget import (
     ReviewMemoryEstimate, ReviewMemoryProbeError, actual_scoring_bytes, estimate_review_memory,
     memory_admission_fits, probe_memory_snapshot, probe_owned_memory, read_review_geometry,
@@ -123,8 +123,7 @@ def _review_resource_plan(
         fitted += 1
     if settings is None:
         return _ReviewResourcePlan(max(1, fitted), budget, tuple(credits))
-    usable_count = getattr(os, "process_cpu_count", os.cpu_count)() or 1
-    cap = min(len(raw_file_infos), compute_effective_max_workers(int(memory.total), usable_count, max_workers))
+    cap = min(len(raw_file_infos), compute_dynamic_worker_ceiling(max_workers))
     emergency = max((estimate.emergency_extra_bytes for estimate in estimates if estimate is not None), default=0)
     budget = max(0, int(memory.available) - max(_GIB, int(memory.total) // 16))
     return _ReviewResourcePlan(cap, budget, tuple(credits), tuple(estimates), tuple(exclusive), emergency, True)
@@ -310,6 +309,7 @@ def run_process_review(
     resource_requests: dict[int, dict] = {}
     emergency_owner: int | None = None
     solo_owner: int | None = None
+    growth_drain = False
     memory_paused = False
     peak_pool_workers = 0
     pool_starts = 0
@@ -484,9 +484,10 @@ def run_process_review(
 
     def prepare_idle_pool() -> None:
         """Resize only a drained executor; all live populations keep their floors."""
-        nonlocal solo_owner
+        nonlocal solo_owner, growth_drain
         if futures or not pending_indices or not geometry_admission:
             return
+        growth_drain = False
         solo_owner = None
         snapshot = memory_snapshot()
         for index in tuple(pending_indices):
@@ -506,8 +507,8 @@ def run_process_review(
                                   population=population, snapshot=snapshot))
 
         if pool is not None:
-            if (worker_count < worker_ceiling
-                    and any(ordinary_fits(index, worker_ceiling) for index in pending_indices)):
+            if (worker_count < min(worker_ceiling, len(pending_indices))
+                    and any(ordinary_fits(index, worker_count + 1) for index in pending_indices)):
                 close_idle_pool()
                 snapshot = memory_snapshot()
             elif any(ordinary_fits(index, worker_count) for index in pending_indices):
@@ -548,10 +549,24 @@ def run_process_review(
                 memory_wait("Waiting for preparation memory; free background RAM/commit or cancel.")
 
     def submit_available() -> None:
-        nonlocal reserved_credits, peak_reserved_credits, peak_in_flight, oversize_fallbacks
+        nonlocal reserved_credits, peak_reserved_credits, peak_in_flight, oversize_fallbacks, growth_drain
         if check_cancel():
             return
         prepare_idle_pool()
+        if geometry_admission:
+            grant_waiting_requests()
+        if (not growth_drain and geometry_admission and futures and pool is not None
+                and len(futures) < worker_count and not resource_requests
+                and worker_count < min(worker_ceiling, len(pending_indices))
+                and any(not resource_plan.exclusive[index]
+                        and live_fits(resource_plan.credits[index], candidate_index=index,
+                                      population=worker_count + 1)
+                        for index in pending_indices)):
+            growth_drain = True
+            logger.info("kurtosis_review_pool_draining_for_growth current_workers=%d worker_ceiling=%d",
+                        worker_count, worker_ceiling)
+        if growth_drain:
+            return
         while pending_indices and pool is not None and len(futures) < worker_count and not check_cancel():
             if resource_plan.dynamic:
                 grant_waiting_requests()

@@ -158,7 +158,9 @@ def test_speculative_metadata_allocation_failure_keeps_native_serial_authority(t
     assert actual == serial and set(observed) == {main_thread()}
 
 
-@pytest.mark.parametrize("cpu,requested,expected", [(1, 12, 1), (2, 12, 1), (24, 12, 12), (24, 2, 2)])
+@pytest.mark.parametrize("cpu,requested,expected", [
+    (1, 12, 1), (2, 12, 1), (24, 12, 12), (24, 2, 2), (24, 23, 23),
+])
 def test_cpu_affinity_and_project_ceiling_bound_population(monkeypatch, cpu, requested, expected):
     _host(monkeypatch, cpu=cpu)
     native = pool.ThreadPoolExecutor
@@ -169,9 +171,25 @@ def test_cpu_affinity_and_project_ceiling_bound_population(monkeypatch, cpu, req
         return native(**arguments)
 
     monkeypatch.setattr(pool, "ThreadPoolExecutor", executor)
-    assert pool.ordered_cell_validation(list(range(20)), lambda item: item, lambda _item: 32 * MIB,
-                                        max_workers=requested) == list(range(20))
+    assert pool.ordered_cell_validation(list(range(32)), lambda item: item, lambda _item: 32 * MIB,
+                                        max_workers=requested) == list(range(32))
     assert populations == ([] if expected == 1 else [expected])
+
+
+@pytest.mark.parametrize("total", [16, 32])
+def test_small_ram_hosts_use_live_validation_headroom_instead_of_tier(monkeypatch, total):
+    _host(monkeypatch, total=total, available=12, commit=12)
+    native = pool.ThreadPoolExecutor
+    populations = []
+
+    def executor(**arguments):
+        populations.append(arguments["max_workers"])
+        return native(**arguments)
+
+    monkeypatch.setattr(pool, "ThreadPoolExecutor", executor)
+    assert pool.ordered_cell_validation(list(range(12)), lambda item: item, lambda _item: 32 * MIB,
+                                        max_workers=12) == list(range(12))
+    assert populations == [12]
 
 
 @pytest.mark.parametrize("failure", ["commit_missing", "commit_pressure", "physical_pressure", "probe_failure"])

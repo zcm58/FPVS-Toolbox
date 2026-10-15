@@ -44,10 +44,11 @@ before release. Failed repairs stay pending for retry. A missing/stale run snaps
 routes the user back to normal Processing; trigger timing is never guessed.
 Whole-cohort artifact validation may use ordered read-only threads through
 `Main_App.workers.cell_validation_pool`, including the normal-run adoption check.
-Its CPU ceiling comes from the current project configuration only after the
-reviewed run snapshot still binds that project and expected-plan fingerprint;
+Its CPU/affinity and user ceiling comes from the current project configuration
+only after the reviewed run snapshot still binds that project and expected-plan fingerprint;
 missing/stale inputs retain serial validation and the existing Processing block.
-Live available RAM and Windows commit headroom account for background use.
+Live available RAM and Windows commit headroom account for background use;
+installed-RAM tiers do not impose a separate validation-thread cap.
 Every checksum and receipt check remains native. Per-record EEG repair still
 uses one normal process worker and completes shutdown before its plan/ledger/
 completion publication; validation threads cannot publish later recordings.
@@ -118,6 +119,19 @@ manifest through the GUI's validated parameters to the workers and is excluded
 from scientific processing fingerprints and cache identity. Switching it does
 not change preprocessing order, rates, numerical methods, or exports. A cache
 hit skips BDF loading, so speed comparisons must use comparable cache misses.
+
+EEG scheduling uses `compute_dynamic_worker_ceiling` for usable CPU/affinity and
+the current project maximum: `0` is automatic and a positive value is an upper
+limit. This removes fixed installed-RAM tiers from memory-admitted EEG stages,
+without changing the legacy tier helper used by unrelated simulations. The GUI
+resolves the current saved setting before each preflight, preparation and normal
+run; an earlier run's worker count is not a new project limit. Actual concurrent
+jobs depend on fresh physical RAM and Windows commit headroom, with background
+use and stage-specific reserves included. Normal processing must budget the
+complete file lifetime through epochs, FFTs, exports and cleanup, rather than
+reuse a preparation-only bound. These scheduling credits are conservative
+estimates and cannot prevent arbitrary later external allocations. RAM preload
+stays explicitly enabled or disabled; memory admission does not silently toggle it.
 
 GUI kurtosis-review preparation uses the same numerical stages in a spawned,
 CPU/RAM-budgeted review-only process pool. It stops before interpolation and
@@ -439,12 +453,15 @@ recording/participant decision review; continuing does not promote their
 channels to interpolation targets. Technical integrity failures and saved
 manual exclusions remain independent. Each review row begins unselected and
 must be explicitly kept or excluded; an exclusion can use recording or
-participant scope. Participant concurrency is capped at eight; requests above
-the previous four-worker ceiling must also satisfy the shared CPU/total-RAM
-tier policy without a RAM-cap bypass. Resource-query failure retains the
-four-worker ceiling. Requests already bounded to four or fewer retain their
-existing behavior. The GUI and backend share `preflight_worker_count` so the
-reported count matches the scheduling policy. Simultaneous BDF reads remain
+participant scope. Participant concurrency has a CPU/affinity and user ceiling,
+with fresh physical/Windows-commit admission before each file is submitted.
+Whole-file credits include condition buffers, event/marker work and retained
+evidence, rather than treating the bounded condition buffer as a full-file bound.
+Active thread reservations are not offset by the shared parent process's memory.
+Unknown or over-host estimates run alone through the native chunked route;
+missing required host information reports a resource error. The GUI and backend
+share `preflight_worker_count` for the ceiling; actual admitted work can be lower.
+Simultaneous BDF reads remain
 capped at two, and simultaneous spectral evaluators at two. A
 condition buffer larger than 256 MiB is filled in 10-second chunks into a
 temporary condition-only float64 memmap; no full-recording preflight memmap is
@@ -964,8 +981,8 @@ Kurtosis review and interpolation:
   removed-electrode detector is enabled; cached display findings cannot grant
   this authority. The two stages must agree on selection metadata and donor
   exclusions for unchanged inputs; genuinely changed evidence still requires review.
-- The scan may run at most two independent recordings concurrently, guarded by
-  available CPU/RAM and distinct loader memmap names. Verified whole-participant,
+- The legacy thread-backend scan may run at most two independent recordings
+  concurrently, guarded by available CPU/RAM and distinct loader memmap names. Verified whole-participant,
   recording, and all-analyzed-condition exclusions are resolved before resource
   estimates or scheduling. Excluded file sizes and duplicate stems cannot
   reduce the worker pool for retained recordings. Missing or invalid source

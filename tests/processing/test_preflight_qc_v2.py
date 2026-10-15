@@ -953,12 +953,12 @@ def test_v2_settings_change_invalidates_cache(monkeypatch, tmp_path: Path) -> No
 @pytest.mark.parametrize(
     ("ram_gib", "cpu_count", "total", "requested", "expected"),
     [
-        (128, 32, 20, 99, 8),
-        (256, 32, 20, 99, 8),
-        (64, 32, 20, 99, 7),
-        (32, 32, 20, 99, 4),
-        (16, 32, 20, 99, 4),
-        (8, 32, 20, 99, 2),
+        (128, 32, 20, 99, 20),
+        (256, 32, 20, 99, 20),
+        (64, 32, 20, 99, 20),
+        (32, 32, 20, 99, 20),
+        (16, 32, 20, 99, 20),
+        (8, 32, 20, 99, 20),
         (128, 8, 20, 99, 7),
         (128, 4, 20, 99, 3),
         (128, 1, 20, 99, 1),
@@ -970,11 +970,10 @@ def test_v2_settings_change_invalidates_cache(monkeypatch, tmp_path: Path) -> No
 def test_preflight_worker_count_respects_resource_and_request_limits(
     monkeypatch, ram_gib, cpu_count, total, requested, expected,
 ):
-    monkeypatch.setattr(
-        preflight_qc.psutil, "virtual_memory",
-        lambda: SimpleNamespace(total=ram_gib * 1024 ** 3),
-    )
-    monkeypatch.setattr(preflight_qc.os, "cpu_count", lambda: cpu_count)
+    from Main_App.workers.mp_env import compute_dynamic_worker_ceiling
+
+    monkeypatch.setattr(preflight_qc, "compute_dynamic_worker_ceiling", lambda requested:
+                        compute_dynamic_worker_ceiling(requested, cpu_count=cpu_count or 0))
 
     assert preflight_qc.preflight_worker_count(total, requested) == expected
 
@@ -983,57 +982,34 @@ def test_preflight_worker_count_respects_resource_and_request_limits(
     ("total", "requested", "expected"),
     [
         (0, 99, 1), (1, 99, 1), (3, 99, 3), (4, 99, 4),
-        (20, 4, 4), (20, 3, 3), (20, 1, 1), (20, None, 1),
-        (20, 0, 1), (20, -5, 1), (20, "invalid", 1),
+        (20, 4, 4), (20, 3, 3), (20, 1, 1), (20, None, 7),
+        (20, 0, 7), (20, -5, 1), (20, "invalid", 1),
     ],
 )
-def test_existing_small_preflight_pool_never_probes_resources(
+def test_preflight_cpu_ceiling_does_not_probe_memory(
     monkeypatch, total, requested, expected,
 ):
-    def unexpected():
-        raise AssertionError("An existing pool of four or fewer needs no resource probe.")
+    from Main_App.workers.mp_env import compute_dynamic_worker_ceiling
 
-    monkeypatch.setattr(preflight_qc.psutil, "virtual_memory", unexpected)
-    monkeypatch.setattr(preflight_qc.os, "cpu_count", unexpected)
+    monkeypatch.setattr(preflight_qc, "probe_memory_snapshot", lambda: pytest.fail("Admission alone probes memory."))
+    monkeypatch.setattr(preflight_qc, "compute_dynamic_worker_ceiling", lambda requested:
+                        compute_dynamic_worker_ceiling(requested, cpu_count=8))
 
     assert preflight_qc.preflight_worker_count(total, requested) == expected
 
 
-@pytest.mark.parametrize(
-    "error", [OSError, RuntimeError, ValueError, TypeError, AttributeError],
-)
-def test_resource_probe_failure_retains_previous_four_worker_cap(monkeypatch, error):
-    def unavailable():
-        raise error("Resource information is unavailable.")
-
-    monkeypatch.setattr(preflight_qc.psutil, "virtual_memory", unavailable)
-
-    assert preflight_qc.preflight_worker_count(20, 99) == 4
-    assert preflight_qc.preflight_worker_count(5, 5) == 4
-
-
-def test_extra_preflight_workers_never_bypass_ram_safety(monkeypatch):
-    monkeypatch.setattr(
-        preflight_qc.psutil, "virtual_memory",
-        lambda: SimpleNamespace(total=64 * 1024 ** 3),
-    )
-    monkeypatch.setattr(preflight_qc.os, "cpu_count", lambda: 32)
-    original = preflight_qc.compute_effective_max_workers
+def test_preflight_delegates_cpu_request_and_auto_without_a_ram_tier(monkeypatch):
     calls = []
 
-    def recorded(**kwargs):
-        calls.append(kwargs)
-        return original(**kwargs)
+    def recorded(requested):
+        calls.append(requested)
+        return 23 if requested is None else min(23, requested)
 
-    monkeypatch.setattr(preflight_qc, "compute_effective_max_workers", recorded)
+    monkeypatch.setattr(preflight_qc, "compute_dynamic_worker_ceiling", recorded)
 
-    assert preflight_qc.preflight_worker_count(20, 99) == 7
-    assert calls == [{
-        "total_ram_bytes": 64 * 1024 ** 3,
-        "cpu_count": 32,
-        "project_max_workers": 8,
-        "allow_ram_cap_bypass": False,
-    }]
+    assert preflight_qc.preflight_worker_count(30, 99) == 23
+    assert preflight_qc.preflight_worker_count(30, None) == 23
+    assert calls == [99, None]
 
 
 def test_v2_caps_worker_and_bdf_read_concurrency(monkeypatch, tmp_path: Path) -> None:
@@ -1051,11 +1027,12 @@ def test_v2_caps_worker_and_bdf_read_concurrency(monkeypatch, tmp_path: Path) ->
     original_spectral_qc = preflight_qc.evaluate_condition_spectral_qc_v2
     original_executor = preflight_qc.ThreadPoolExecutor
     executor_sizes = []
-    monkeypatch.setattr(
-        preflight_qc.psutil, "virtual_memory",
-        lambda: SimpleNamespace(total=128 * 1024 ** 3),
-    )
-    monkeypatch.setattr(preflight_qc.os, "cpu_count", lambda: 32)
+    from Main_App.workers.review_resource_budget import ReviewMemorySnapshot
+
+    monkeypatch.setattr(preflight_qc, "compute_dynamic_worker_ceiling", lambda requested: min(31, requested))
+    monkeypatch.setattr(preflight_qc, "_preflight_memory_credit", lambda *_args, **_kwargs: 64 * 1024**2)
+    monkeypatch.setattr(preflight_qc, "probe_memory_snapshot", lambda:
+                        ReviewMemorySnapshot(128 * 1024**3, 112 * 1024**3, 112 * 1024**3, True))
 
     def _executor(*args, **kwargs):
         executor_sizes.append(kwargs["max_workers"])
@@ -1118,8 +1095,8 @@ def test_v2_caps_worker_and_bdf_read_concurrency(monkeypatch, tmp_path: Path) ->
     )
 
     assert scan.cancelled is False
-    assert executor_sizes == [8]
-    assert preflight_qc.preflight_worker_count(20, 99) == 8
+    assert executor_sizes == [10]
+    assert preflight_qc.preflight_worker_count(20, 99) == 20
     assert 1 < maximum_reads <= 2
     assert 1 < maximum_spectra <= 2
     assert [result.participant_id for result in scan.results] == [

@@ -13,6 +13,29 @@ contract. Plot Generator keeps `_Worker` importable from
 own data collection, aggregation, and rendering logic while `worker.py` remains
 the QObject signal shell.
 
+Memory-admitted EEG preflight, QC preparation, normal processing and condition-cell
+validation use `Main_App.workers.mp_env.compute_dynamic_worker_ceiling`. The ceiling
+respects usable process CPUs and affinity, leaves one logical CPU available where
+possible, and applies a positive project worker setting as an upper limit. Zero
+means automatic. It has no installed-RAM tier or fixed twenty-worker cap. Windows
+additionally respects `ProcessPoolExecutor`'s supported 61-worker maximum, including
+shared ceilings supplied to EEG thread stages; this is a runtime limit rather than
+a RAM recommendation. Other platforms retain their CPU/user ceiling. The
+ceiling does not grant permission to allocate or run that many jobs. Each stage
+separately checks fresh physical availability and, on Windows, actual commit
+headroom, including background use. Estimates, host reserves and process floors
+determine admitted concurrency. Unsupported routes retain exclusive native work.
+These checks cannot prevent another application allocating after a snapshot.
+
+The older `compute_effective_max_workers` and `get_ram_tier_recommendation` APIs
+retain their tier behavior for Sensitivity Analysis and historical callers without
+live admission. This EEG migration does not change their simulation policy.
+The GUI resolves current project ceilings for preflight, preparation and normal
+runs rather than reusing a previous run's worker count. Saved canonical and legacy
+worker settings remain compatible; a positive value is a ceiling, not a guaranteed
+number of active workers. RAM preload remains an explicit setting and is not
+silently changed to disk loading when headroom falls.
+
 Common long-running work:
 
 - EEG preprocessing and post-processing.
@@ -24,7 +47,7 @@ Common long-running work:
   source/protocol identity and receipt check still runs. Canonical plan order
   determines returned rows and the first exception, regardless of completion
   order. All readers close before the caller publishes a ledger or completion.
-  CPU affinity and the project CPU/RAM-tier ceiling bound the population. Before
+  CPU affinity and the project worker ceiling bound the population. Before
   every submission, live available physical RAM and Windows commit headroom
   account for background use; no owned-memory add-back or Raw-worker floor is
   applied. A 32 MiB scratch allowance plus bounded uncompressed NPY metadata and
@@ -63,7 +86,7 @@ Common long-running work:
 - The standard GUI's QC-16 preparation uses the spawned review-only pool in
   `Main_App.workers.kurtosis_review_process`. The background scan classifies
   canonical exclusions and validates approved timing before scheduling eligible
-  recordings. The main CPU/RAM-tier/override policy is the pool ceiling;
+  recordings. The CPU/affinity and current project ceiling bound the pool;
   initial memory pressure no longer permanently shrinks that ceiling. A drained
   executor may be replaced with a smaller population, or grow toward the same
   ceiling after headroom recovers; live executors always retain all their floors. The
@@ -146,6 +169,37 @@ Common long-running work:
   Workers receive only the files selected by that plan. Multi-group runs also
   receive a per-file output group-folder map so post-export writes into the
   condition-first/group-second Excel tree.
+- Normal EEG processing uses live physical/Windows-commit admission for the
+  complete file lifetime, including loading, preprocessing, condition epochs,
+  FFT/export work and cleanup. Pool floors and host reserves remain part of the
+  budget, and owned-memory offsets require matching process identity. Active
+  jobs are accounted for until they finish; executors resize only after draining.
+  A reduced pool deliberately stops refilling when recovered headroom supports
+  a larger useful population, including partial recovery below the CPU ceiling.
+  Current jobs, phase grants and cancellation continue through that drain; the
+  population is chosen again from fresh headroom after all owners finish.
+  Scheduling changes must preserve source order, cancellation and the existing
+  per-file numerical route. A preparation-only estimate must not be presented as
+  a bound for the later epochs and export stages.
+  `processing_resource_budget` characterizes the native common-grid BDF route
+  on CPython 3.13 with MNE 1.9.0, NumPy 2.3.1, SciPy 1.16.0 and pandas 2.3.0.
+  Other runtime versions, custom metadata or unsupported geometries use one
+  exclusive native worker until their allocation behavior is characterized.
+  A conservative upper estimate larger than installed RAM also selects that
+  fallback; it does not prove that the native operation is impossible. Supported
+  files validate actual shape at an unconditional finish barrier, including
+  disabled kurtosis and warm preparation checkpoints. Source-rate fallback must
+  obtain its complete credit before repairs and cache publication; the later
+  tail barrier also protects epochs and exports. Only control metadata crosses
+  the admission queue, and these callbacks do not enter scientific settings.
+- EEG preflight uses its CPU/user ceiling with fresh whole-file memory credits
+  before submissions. Active thread credits are retained in full because the
+  parent also owns unrelated allocations; parent RSS/USS is not reclaimed as
+  per-job credit. Unknown or over-host estimates run exclusively through the
+  native chunked route, and unavailable required host information reports an
+  actionable resource error. The existing two-reader and two-spectral-evaluator
+  semaphores remain independent limits. Results and errors retain canonical
+  order even when files complete out of order.
 - Each persistent processing pool worker owns one bounded prepared-FIR cache
   for that batch. The initializer creates it after configuring numerical thread
   limits. A per-file context is always reset on return or exception; only
@@ -364,3 +418,11 @@ the completed files remain recorded and interrupted files are identified, then
 start it again. Exercise an unavailable output location or injected controller
 failure; verify one failure completion, restored controls, and no downstream
 continuation before successfully restarting. Local Qt execution remains disabled.
+
+Worker-setting visible/manual smoke: save `0` and a positive maximum in Settings;
+neither should show the obsolete RAM-tier override prompt. Verify the field explains
+that live memory can reduce active concurrency. Change the saved maximum between
+runs and confirm preflight, preparation and normal-run logs use the current
+CPU-bounded ceiling rather than the preceding run's value. Do not infer actual
+concurrency from the ceiling alone. This path is not executed locally by the
+non-Qt checks.

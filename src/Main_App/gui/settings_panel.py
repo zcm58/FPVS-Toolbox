@@ -7,7 +7,6 @@ from typing import Any, Callable, Dict
 from pathlib import Path
 
 import config
-import psutil
 
 from PySide6.QtCore import QObject, Qt, QThread, Signal, Slot
 from PySide6.QtWidgets import (
@@ -36,7 +35,6 @@ from Main_App.Shared.roi_presets import (
     supported_roi_montages,
     validate_roi_montage,
 )
-from Main_App.workers.mp_env import get_ram_tier_recommendation
 from Main_App.gui.components import (
     ActionRow,
     SectionCard,
@@ -415,7 +413,7 @@ class SettingsDialog(QDialog):
             "Initial reference channel 2:",
             "Last channel index to keep:",
             "Bad-channel count warning:",
-            "Parallel workers (0 = automatic):",
+            "Maximum parallel workers (0 = automatic):",
         ]
         self.preproc_edits: list[QLineEdit] = []
         self.preproc_error_labels: list[QLabel] = []
@@ -424,6 +422,12 @@ class SettingsDialog(QDialog):
             lbl = QLabel(label_text, self.group_preproc)
             lbl.setWordWrap(True)
             edit = QLineEdit(self.group_preproc)
+            if i == 8:
+                edit.setToolTip(
+                    "An upper limit for EEG processing. Automatic uses available CPUs; "
+                    "live RAM and Windows commit headroom determine how many jobs run. "
+                    "A positive value can lower the limit."
+                )
             edit.setAccessibleName(label_text.rstrip(":"))
             lbl.setBuddy(edit)
             self.preproc_edits.append(edit)
@@ -3960,37 +3964,7 @@ class SettingsDialog(QDialog):
         refresh_preprocessing_feedback(self)
 
     def _confirm_parallel_worker_override(self, normalized: Dict[str, Any]) -> bool:
-        override = int(normalized.get("max_parallel_workers_override", 0))
-        if override <= 0:
-            return True
-
-        try:
-            total_ram_bytes = int(psutil.virtual_memory().total)
-        except Exception:
-            return True
-
-        _tier, recommended_cap, _ram_gib = get_ram_tier_recommendation(total_ram_bytes)
-        if recommended_cap is None or override <= recommended_cap:
-            return True
-
-        message = (
-            f"The maximum amount of workers recommended for your RAM tier is [{recommended_cap}]. "
-            "Selecting a value higher than this could cause your system to become slow or "
-            "completely unresponsive for a time. Do you wish to continue?"
-        )
-        choice = QMessageBox.question(
-            self,
-            "High Worker Count Warning",
-            message,
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No,
-        )
-        if choice != QMessageBox.Yes:
-            if len(self.preproc_edits) > 8:
-                field = self.preproc_edits[8]
-                field.setFocus()
-                field.selectAll()
-            return False
+        """Retain the save hook; validated ceilings need no RAM-tier override."""
         return True
 
     def _full_fft_grid_review_is_running(self) -> bool:
