@@ -32,13 +32,13 @@ def _release(
         "tag_name": tag,
         "draft": draft,
         "prerelease": prerelease,
-        "html_url": f"https://github.com/zcm58/FPVS-Toolbox-Repo/releases/tag/{tag}",
+        "html_url": f"https://github.com/zcm58/FPVS-Toolbox/releases/tag/{tag}",
         "body": body,
         "assets": [
             {
                 "name": asset,
                 "browser_download_url": (
-                    f"https://github.com/zcm58/FPVS-Toolbox-Repo/releases/download/{tag}/{asset}"
+                    f"https://github.com/zcm58/FPVS-Toolbox/releases/download/{tag}/{asset}"
                 ),
                 "size": 123,
                 "digest": "sha256:" + "a" * 64,
@@ -235,7 +235,7 @@ def test_metadata_fetch_remains_metadata_only_with_finite_timeout(
     calls: list[dict[str, object]] = []
 
     def urlopen(_request: object, **kwargs: object) -> _MetadataResponse:
-        assert _request.full_url == "https://api.github.com/repos/zcm58/FPVS-Toolbox-Repo/releases"
+        assert _request.full_url == "https://api.github.com/repos/zcm58/FPVS-Toolbox/releases"
         assert not _request.has_header("Authorization")
         calls.append(kwargs)
         return response
@@ -250,7 +250,8 @@ def test_metadata_fetch_remains_metadata_only_with_finite_timeout(
 @pytest.mark.parametrize(
     "url",
     [
-        "http://api.github.com/repos/zcm58/FPVS-Toolbox-Repo/releases",
+        "http://api.github.com/repos/zcm58/FPVS-Toolbox/releases",
+        "https://api.github.com/repos/zcm58/FPVS-Toolbox-Repo/releases",
         "https://api.github.com/repos/zcm58/FPVS-Toolbox-Releases/releases",
         "https://example.com/releases",
         "https://api.github.com/repos/someone/else/releases",

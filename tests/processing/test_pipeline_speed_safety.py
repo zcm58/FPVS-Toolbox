@@ -11,6 +11,8 @@ from Main_App.workers.review_resource_budget import OwnedMemory, ReviewMemorySna
 def _known_small_files(monkeypatch):
     """Refill controls need characterized files; missing files run exclusively."""
     gib = 1024**3
+    # Exercise refill behavior independently of the host's CPU/affinity ceiling.
+    monkeypatch.setattr(process_runner, "compute_dynamic_worker_ceiling", lambda requested: requested or 4)
     monkeypatch.setattr(processing_admission, "build_processing_estimate", lambda *_:
                         SimpleNamespace(healthy_bytes=gib // 8, emergency_extra_bytes=0))
     monkeypatch.setattr(processing_admission, "probe_memory_snapshot", lambda:

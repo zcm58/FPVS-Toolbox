@@ -61,7 +61,7 @@ def _cached(cache: Path, version: str, payload: bytes = b"installer") -> Path:
     name = f"FPVSToolbox-{version}-setup.exe"
     asset = InstallerAsset(
         name,
-        f"https://github.com/zcm58/FPVS-Toolbox-Repo/releases/download/v{version}/{name}",
+        f"https://github.com/zcm58/FPVS-Toolbox/releases/download/v{version}/{name}",
         len(payload),
         hashlib.sha256(payload).hexdigest(),
         version,

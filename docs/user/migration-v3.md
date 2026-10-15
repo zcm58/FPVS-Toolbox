@@ -10,18 +10,17 @@ reprocess it or turn its old numerical outputs into v3 results.
 2. Keep a backup of each project folder, including `project.json`, QC decisions,
    outputs and any spectral companions, plus raw recordings stored elsewhere.
    Preserve the v2.1.2 environment and outputs if you must reproduce that analysis.
-3. Use v2.1.2's update check after the stable v3 release is published, or download
-   the full `FPVSToolbox-<version>-setup.exe` from the
-   [public releases page](https://github.com/zcm58/FPVS-Toolbox-Repo/releases).
-   For a direct download, check the matching SHA-256 before running the installer.
+3. After the stable v3 release is published, download the full
+   `FPVSToolbox-<version>-setup.exe` from the
+   [public releases page](https://github.com/zcm58/FPVS-Toolbox/releases).
+   Check the matching SHA-256 before running the installer.
    Retain the existing installation scope.
 4. Open Toolbox and check the version in **File > About…**. Open an existing
    project using **File > Open Existing Project…** and review its settings before
    starting work.
 
-Both versions use the FPVS-Toolbox-Repo release address; the source repository's
-return to public visibility removes the address-related manual-upgrade
-requirement. The full installer establishes the new updater and application
+Version 2.1.2 checks the previous repository and cannot discover the new public
+release address automatically. The full installer establishes the new updater and application
 inventory. A patch is not a migration path from v2.1.2. Later checks use **File > Check for
 Updates**; repair is available through **FPVS Toolbox Update & Repair** in the
 Windows Start menu. See [installation instructions](installing-and-updating.md).

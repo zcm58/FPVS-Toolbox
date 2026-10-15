@@ -32,7 +32,7 @@ def _available_update(_cancel_event: Event | None = None) -> UpdateCheckResult:
     asset = InstallerAsset(
         name="FPVSToolbox-0.9.0b2-setup.exe",
         download_url=(
-            "https://github.com/zcm58/FPVS-Toolbox-Repo/releases/download/v0.9.0b2/"
+            "https://github.com/zcm58/FPVS-Toolbox/releases/download/v0.9.0b2/"
             "FPVSToolbox-0.9.0b2-setup.exe"
         ),
         size_bytes=10,
@@ -44,7 +44,7 @@ def _available_update(_cancel_event: Event | None = None) -> UpdateCheckResult:
         current_version="0.9.0b1",
         latest_version="0.9.0b2",
         update_available=True,
-        release_url="https://github.com/zcm58/FPVS-Toolbox-Repo/releases/tag/v0.9.0b2",
+        release_url="https://github.com/zcm58/FPVS-Toolbox/releases/tag/v0.9.0b2",
         release_notes_summary="Improved update flow",
         installer_asset=asset,
         is_prerelease=True,

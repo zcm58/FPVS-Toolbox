@@ -12,17 +12,28 @@ and watchdog evidence; a stale startup-order assertion is repaired. Native Windo
 packaging acceptance is being added for the exact installer, with isolated
 fresh-install, v2.1.2 upgrade, relaunch, and uninstall/data-preservation checks.
 
-The user subsequently authorized restoring `zcm58/FPVS-Toolbox-Repo` as the public
-MIT-licensed source and release repository. Runtime update URLs and release
-documentation are moving back to that identity. Existing release-only repository
-assets remain available. Public visibility must wait for the authorized removal
-of committed research outputs from all history and verification of the cleaned
-history; the original repository is being privately backed up. No v3 release is
-published by this closeout work.
+The user authorized restoring the MIT-licensed project to public access. The
+approved history cleanup was pushed atomically to all 42 affected branches and
+tags and verified against the complete remote reference inventory. Private
+backups preserve the originals; all three local worktrees and local branch/tag
+references have been resynchronized. The cleaned history passed its content
+and secret scans, verification configuration, and strict documentation build.
 
-Current GUI CI, packaged acceptance, fresh-project qualification, and history
-cleanup are still in progress; bounded comparisons below must not be treated as
-completion of those final gates.
+The user then chose a new public repository, `zcm58/FPVS-Toolbox`, to avoid
+waiting for GitHub's purge of the original repository's old PR references and
+cached objects. The new repository was seeded with only the 47 verified clean
+branches/tags; old PR references and private local refs were not copied. The
+original `zcm58/FPVS-Toolbox-Repo` stays private, and the prepared Support request
+was not submitted. Runtime update URLs, installer identity links, and current
+release documentation now use the new repository. Historical releases are
+being copied with byte verification; the transitional release archive remains
+available. Published v2.1.2 binaries still query the old private repository, so
+their first v3 upgrade requires a manual full-installer download. No new v3
+release is published by this closeout work.
+
+Current GUI CI, packaged acceptance, and fresh-project qualification remain in
+progress; bounded comparisons below must not be treated as completion of those
+final gates.
 
 The latest local repository gate passed all audits, Ruff, compilation, and
 7,457 non-Qt tests (25 skipped). All four isolated Qt diagnostic shards passed
@@ -54,10 +65,35 @@ executable. The architecture and user installation guide describe this boundary.
 Local compilation of the inert Inno fixture passed; native upgrade, relaunch,
 and uninstall checks remain pending on the repaired artifact. The CI fixture
 now runs before the expensive application build.
+The next Windows run at pre-rewrite `8f0b1482` passed these native fixtures and
+the source/frozen build checks. All 2,788 published baseline payload files
+matched their authenticated catalog, but the acceptance harness started the
+baseline installation while the preceding uninstaller was still finishing.
+The harness now resolves the registered numbered uninstaller and waits, with a
+deadline, for its application, registration, and numbered bookkeeping to disappear.
+Catalog verification still rejects unexpected files and altered payload bytes.
+The full installer also always offers destination selection so the documented
+empty-folder route remains available for unrecognized legacy installations.
+These harness and presentation changes preserve installer ownership boundaries;
+no architecture change is needed.
+The integrated Ubuntu run at pre-rewrite `8f0b1482` completed 8,099 tests
+successfully with 24 skips and nine failures. Three scheduling fixtures now
+control their resource assumptions, two Windows-helper mocks stay local to
+their module, and two PowerShell guard assertions compare the captured
+exception rather than terminal formatting. These are test-only portability
+repairs. The remaining two failures exposed clipped Scalp Maps repeated-session
+labels under a fallback font. Rendering now reserves header and row-label space
+from actual font measurements, preserving text, figure dimensions, Arial
+defaults, and scientific values. Normal/fallback cases with and without paired
+differences pass; the publication-map focused gate passed 138 tests and the
+figure-style gate passed four. Updater checks after migration of the release
+address passed 527 tests with four skips. The visible follow-up is to export a
+repeated-session map with long group/session names and inspect matching PNG/PDF
+labels at the supported display sizes; native GUI execution remains CI-only.
 These checks do not replace final source/Qt CI, native installed-app acceptance,
 or fresh-project preparation and full-cohort qualification. Public
-visibility additionally requires the authorized history rewrite and GitHub's
-PR/cached-object purge; a successful branch/tag force-push alone is insufficient.
+visibility of the original repository would additionally require GitHub's
+PR/cached-object purge. The new public home uses only the verified clean history.
 
 Bounded private-data qualification on 2026-10-15 compared two recordings at
 baseline `38cc8ec1` and release commit `99e2316e`. Eight native outputs, 16 NPZ

@@ -77,4 +77,4 @@ not visible in the schematic.
 ## References
 
 - Rossion, B., Retter, T. L., & Liu-Shuang, J. (2020). [Understanding human individuation of unfamiliar faces with oddball fast periodic visual stimulation and electroencephalography](https://doi.org/10.1111/ejn.14865). *European Journal of Neuroscience, 52*(10), 4283–4344.
-- [Sequence Figure implementation](https://github.com/zcm58/FPVS-Toolbox-Repo/tree/main/src/Tools/Sequence_Figure).
+- [Sequence Figure implementation](https://github.com/zcm58/FPVS-Toolbox/tree/codex/v3-release/src/Tools/Sequence_Figure).

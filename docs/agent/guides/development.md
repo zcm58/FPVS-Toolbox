@@ -94,7 +94,7 @@ FPVSToolbox-<version>-setup.exe
 
 ### Publishing open-source releases
 
-Keep `origin` pointed at `zcm58/FPVS-Toolbox-Repo`, the canonical public source
+Keep `origin` pointed at `zcm58/FPVS-Toolbox`, the canonical public source
 and release repository. Publish new releases there explicitly rather than
 relying on an inferred repository in a release command. Preserve historical
 tags and assets in `zcm58/FPVS-Toolbox-Releases`; that repository is an archive,
@@ -109,7 +109,7 @@ that the current clean checkout is the tested build commit and a full installer
 without patches; set the actual release version and reviewed notes file:
 
 Verify that GitHub immutable releases are enabled on
-`zcm58/FPVS-Toolbox-Repo` before publication. The previous setting on the
+`zcm58/FPVS-Toolbox` before publication. The previous setting on the
 release-only repository does not configure this repository. Attach every asset
 to the draft before publishing; an immutable published release cannot receive
 replacement or additional assets. The setting applies to future releases and
@@ -118,7 +118,7 @@ does not lock historical installers retrospectively. See GitHub's
 
 ```powershell
 $releaseVersion = '3.0.0'
-$releaseRepo = 'zcm58/FPVS-Toolbox-Repo'
+$releaseRepo = 'zcm58/FPVS-Toolbox'
 $releaseCommit = (git rev-parse HEAD).Trim()
 gh release create "v$releaseVersion" --repo $releaseRepo --target $releaseCommit --draft `
   --title "FPVS Toolbox $releaseVersion" --notes-file build/release-notes.md `
@@ -151,12 +151,11 @@ GitHub's immutable-release attestation binds the public tag and exact assets.
 The local packaging scripts build artifacts and do not publish them. See
 [GitHub release verification](https://docs.github.com/en/code-security/how-tos/secure-your-supply-chain/secure-your-dependencies/verify-release-integrity).
 
-The published `v2.1.2` source already checks the canonical repository and
-recognizes the full installer filename. Restoring public access and publishing
-a stable v3 release there restores that discovery path; a manual download is
-not required solely because of the temporary repository migration. The actual
-packaged upgrade remains an acceptance check. The first v3 upgrade uses the
-full installer to establish the independent updater and owned-file inventory;
+The published `v2.1.2` binary checks the previous private repository, so it cannot
+discover the new public release address. Its first v3 upgrade requires a manual
+download from the canonical release page. The actual packaged upgrade remains
+an acceptance check. The first v3 upgrade uses the full installer to establish
+the independent updater and owned-file inventory;
 future authenticated baselines can support direct patches. Users of builds
 that checked the temporary release-only address can install the full package
 from the canonical release page.

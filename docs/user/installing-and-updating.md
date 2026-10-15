@@ -6,7 +6,7 @@ Repair**. Source execution on Linux does not use the Windows installer.
 ## First installation or an older Toolbox build
 
 Download the full `FPVSToolbox-<version>-setup.exe` installer from the
-[FPVS Toolbox releases page](https://github.com/zcm58/FPVS-Toolbox-Repo/releases).
+[FPVS Toolbox releases page](https://github.com/zcm58/FPVS-Toolbox/releases).
 Close Toolbox, run the installer, and retain the existing installation scope
 when upgrading. All-users installations may require administrator approval.
 
@@ -14,11 +14,11 @@ Older builds without Update & Repair need this full installation once. It
 installs the separate updater and establishes the application-file inventory
 needed for future patch updates. A first installation cannot use a patch.
 
-**Version 2.1.2 already checks this release repository.** Once a stable v3
-release is published there, its update check can discover the release. The
-upgrade still uses the full installer because v2.1.2 has no independent Update
-& Repair inventory. If an older updater is unavailable, download the full
-installer directly; a GitHub account is not required. See the
+**Version 2.1.2 cannot discover releases in the new repository.** Its published
+updater still checks the previous repository, which remains private. Once the
+stable v3 release is available, download its full installer from the new public
+release page; a GitHub account is not required. The full installation also
+establishes the independent Update & Repair inventory. See the
 [v2.1.2 migration guide](migration-v3.md) before opening an existing project.
 
 The full v3 installer recognizes the published v2.1.2 application files for an
@@ -30,7 +30,7 @@ qualified.
 
 Earlier assets in the transitional
 [FPVS-Toolbox-Releases repository](https://github.com/zcm58/FPVS-Toolbox-Releases/releases)
-remain available. New releases use FPVS-Toolbox-Repo.
+remain available. New releases use FPVS-Toolbox.
 
 The release page lists the available version and its checksum files. To check a
 download in PowerShell, run `Get-FileHash -Algorithm SHA256` with the installer

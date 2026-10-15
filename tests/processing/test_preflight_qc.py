@@ -22,6 +22,7 @@ from Main_App.processing.preflight_qc import (
     scan_recording_not_started_files,
 )
 from Main_App.projects import FrequencyProtocol
+from Main_App.workers.review_resource_budget import ReviewMemorySnapshot
 
 
 def _raw_with_removed_channel(channel: str) -> mne.io.RawArray:
@@ -259,6 +260,14 @@ def test_scan_preprocessing_qc_uses_parallel_workers(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
+    # This checks concurrent scheduling, not the runner's available resources.
+    gib = 1024**3
+    monkeypatch.setattr(preflight_qc, "compute_dynamic_worker_ceiling", lambda requested: requested or 3)
+    monkeypatch.setattr(
+        preflight_qc,
+        "probe_memory_snapshot",
+        lambda: ReviewMemorySnapshot(32 * gib, 24 * gib, 24 * gib, True),
+    )
     paths = []
     for index in range(6):
         raw_path = tmp_path / f"P{index + 1:02d}.bdf"

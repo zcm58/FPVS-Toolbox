@@ -1,20 +1,21 @@
-name: Validate user documentation
+name: Build and publish user documentation
 
 on:
   push:
-    branches: [main]
+    branches: [main, codex/v3-release]
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: docs-validation
-  cancel-in-progress: true
+  group: github-pages
+  cancel-in-progress: false
 
 jobs:
   validate:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -32,5 +33,35 @@ jobs:
       - name: Build documentation strictly
         run: mkdocs build --strict
 
-      # The source repository is private. Public documentation hosting is
-      # intentionally paused; retain validation without publishing any files.
+      - name: Upload GitHub Pages artifact
+        if: >-
+          github.repository == 'zcm58/FPVS-Toolbox' &&
+          github.event.repository.private == false &&
+          (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/codex/v3-release')
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: site
+
+  deploy:
+    if: >-
+      github.repository == 'zcm58/FPVS-Toolbox' &&
+      github.event.repository.private == false &&
+      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/codex/v3-release')
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Check GitHub Pages configuration
+        uses: actions/configure-pages@v5
+        with:
+          enablement: false
+
+      - name: Deploy documentation
+        id: deployment
+        uses: actions/deploy-pages@v4

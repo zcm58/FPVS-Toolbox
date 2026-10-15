@@ -66,7 +66,7 @@ version owner; the build extracts it without importing config and embeds
 
 ## Toolbox identity and installation
 
-- Public source and release repository: `zcm58/FPVS-Toolbox-Repo`.
+- Public source and release repository: `zcm58/FPVS-Toolbox`.
 - Historical release-only repository: `zcm58/FPVS-Toolbox-Releases`; preserve
   its existing tags and assets, but publish new releases in the source repository.
 - `Main_App.updates.application` owns the public repository identity and API/page
@@ -130,25 +130,25 @@ errors rather than silent browser/download fallbacks.
 
 ## Packaging and migration
 
-The open-source restoration makes the original `zcm58/FPVS-Toolbox-Repo`
-repository the public home for source and future releases again. Release tags
+The open-source restoration uses a new `zcm58/FPVS-Toolbox` repository populated
+from the verified sanitized branches and tags. The original
+`zcm58/FPVS-Toolbox-Repo` stays private. Release tags
 must identify the exact reviewed source commit used to build their assets.
-Preserve historical installers and tags in both repositories. Do not relabel
+Preserve historical installers and tags in the migration and release archive. Do not relabel
 an old installer, embed GitHub credentials, or weaken the repository, version,
 filename and digest checks to accommodate migration. The updater requests only
 the canonical repository; it does not silently fall back to the archive.
 
-The published `v2.1.2` source already queries the original repository's Releases
-API and recognizes `FPVSToolbox-<version>-setup.exe`. Once the repository is
-public and a stable v3 release is published there, that discovery contract is
-compatible with offering the full v3 installer through the existing updater.
-This is a source-level compatibility check, not evidence that a packaged
-upgrade has passed. The packaged acceptance gate must exercise the actual
-2.1.2-to-v3 installation and data-preservation path.
+The published `v2.1.2` binary queries the original repository's Releases API.
+It cannot discover releases in the new public repository while the original
+remains private. Its first v3 upgrade therefore requires a manual full-installer
+download. The packaged acceptance gate must still exercise the actual
+2.1.2-to-v3 installation and data-preservation path; changing the repository
+identity does not establish that the installed upgrade has passed.
 
 Older Toolbox builds do not bundle the independent helper or an authenticated
 ownership inventory. Their first v3 upgrade therefore requires the full
-installer, whether downloaded in-app or manually. It establishes the baseline
+installer, downloaded manually from the canonical release page. It establishes the baseline
 for future patches. Do not create historical ownership by scanning a user's
 installation. Builds that used the temporary release-only address can obtain
 the full installer from the canonical release page. See the explicit public
@@ -156,7 +156,7 @@ publishing commands in `docs/agent/guides/development.md`.
 
 The full release build includes `scripts/packaging/legacy-owned-files-v2.1.2.json`,
 an inventory of the published v2.1.2 installer payload. Its provenance identifies
-canonical repository asset `450622129` (141503904 bytes, SHA-256
+original FPVS-Toolbox-Repo asset `450622129` (141503904 bytes, SHA-256
 `192d43972e8b2031566d3b1bcbc9ae2b46305f39a544d3e12a7e46e6730178a6`).
 The 2788 paths and file hashes were obtained without running the installer,
 using the [innoextract Windows 670 release](https://github.com/UserUnknownFactor/innoextract_win/releases/tag/670)

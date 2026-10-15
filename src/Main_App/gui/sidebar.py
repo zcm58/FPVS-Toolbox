@@ -36,7 +36,7 @@ CENTERED_TEXT_TRAILING_SPACER_PX = (
 )
 # ---------------------------------------------------------------------------
 
-DOCS_URL = "https://zcm58.github.io/FPVS-Toolbox-Repo/"  # MkDocs site for documentation
+DOCS_URL = "https://zcm58.github.io/FPVS-Toolbox/"  # MkDocs site for documentation
 
 DEFAULT_TOOL_SPECS = (
     (

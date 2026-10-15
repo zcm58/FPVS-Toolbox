@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 
 # Public source and release repository; installed clients require no credentials.
-RELEASE_REPOSITORY = "zcm58/FPVS-Toolbox-Repo"
+RELEASE_REPOSITORY = "zcm58/FPVS-Toolbox"
 RELEASES_API_URL = f"https://api.github.com/repos/{RELEASE_REPOSITORY}/releases"
 RELEASES_PAGE_URL = f"https://github.com/{RELEASE_REPOSITORY}/releases"
 APP_NAME = "FPVS Toolbox"

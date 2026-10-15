@@ -15,9 +15,10 @@ It is under active development and is used and tested daily.
 FPVS Toolbox is open-source software under the MIT License. This repository
 contains its application source and development history, with Windows
 installers and release notes on its
-[Releases page](https://github.com/zcm58/FPVS-Toolbox-Repo/releases).
-Version 3 and v2.1.2 update checks use this public repository without requiring
-a GitHub account. The first upgrade to v3 uses the full installer to establish
+[Releases page](https://github.com/zcm58/FPVS-Toolbox/releases).
+Version 3 update checks use this public repository without requiring a GitHub
+account. Version 2.1.2 still checks the previous repository, so the first upgrade
+to v3 requires a manual full-installer download. That installation establishes
 the separate Update & Repair application and its file inventory.
 Previously published assets in
 [FPVS-Toolbox-Releases](https://github.com/zcm58/FPVS-Toolbox-Releases/releases)
@@ -40,7 +41,7 @@ remain available as historical downloads.
 A standalone .exe Windows installer is provided with each release.
 
 1. Download the installer from the
-   [Releases page](https://github.com/zcm58/FPVS-Toolbox-Repo/releases).
+   [Releases page](https://github.com/zcm58/FPVS-Toolbox/releases).
 2. Double-click the `.exe` file. Because the installer is unsigned, anti-virus software may warn you that the app is 
 from an unverified developer.
 3. Choose **More info** and then **Run anyway** to continue.

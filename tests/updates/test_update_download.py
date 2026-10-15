@@ -33,7 +33,7 @@ def _asset(version: str = "2.0.0", payload: bytes = b"installer") -> InstallerAs
     name = f"FPVSToolbox-{version}-setup.exe"
     return InstallerAsset(
         name,
-        f"https://github.com/zcm58/FPVS-Toolbox-Repo/releases/download/v{version}/{name}",
+        f"https://github.com/zcm58/FPVS-Toolbox/releases/download/v{version}/{name}",
         len(payload),
         hashlib.sha256(payload).hexdigest(),
         version,
@@ -165,12 +165,13 @@ def test_missing_or_invalid_trusted_digest_never_downloads(
 @pytest.mark.parametrize(
     "url",
     [
-        "http://github.com/zcm58/FPVS-Toolbox-Repo/releases/download/v2.0.0/FPVSToolbox-2.0.0-setup.exe",
+        "http://github.com/zcm58/FPVS-Toolbox/releases/download/v2.0.0/FPVSToolbox-2.0.0-setup.exe",
+        "https://github.com/zcm58/FPVS-Toolbox-Repo/releases/download/v2.0.0/FPVSToolbox-2.0.0-setup.exe",
         "https://github.com/zcm58/FPVS-Toolbox-Releases/releases/download/v2.0.0/FPVSToolbox-2.0.0-setup.exe",
         "https://example.com/FPVSToolbox-2.0.0-setup.exe",
         "https://github.com/another/repo/releases/download/v2.0.0/FPVSToolbox-2.0.0-setup.exe",
-        "https://github.com/zcm58/FPVS-Toolbox-Repo/releases/download/v20.0.0/FPVSToolbox-2.0.0-setup.exe",
-        "https://user:password@github.com/zcm58/FPVS-Toolbox-Repo/releases/download/v2.0.0/x.exe",
+        "https://github.com/zcm58/FPVS-Toolbox/releases/download/v20.0.0/FPVSToolbox-2.0.0-setup.exe",
+        "https://user:password@github.com/zcm58/FPVS-Toolbox/releases/download/v2.0.0/x.exe",
     ],
 )
 def test_asset_source_and_version_are_exact(tmp_path: Path, url: str) -> None:

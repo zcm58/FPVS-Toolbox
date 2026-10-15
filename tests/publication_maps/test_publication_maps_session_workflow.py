@@ -786,12 +786,21 @@ def test_session_renderer_queues_each_selected_condition_output_pair(
     ("include_difference", "expected_height_in"),
     ((False, 4.2), (True, 5.9)),
 )
+@pytest.mark.parametrize("font_family", (None, "DejaVu Sans"))
 def test_session_renderer_repeated_layout_artifact_contract(
     tmp_path: Path,
     monkeypatch,
     include_difference: bool,
     expected_height_in: float,
+    font_family: str | None,
 ) -> None:
+    if font_family is not None:
+        original_text_kwargs = session_rendering.figure_text_kwargs
+
+        def fallback_text_kwargs(role):
+            return {**original_text_kwargs(role), "fontfamily": font_family}
+
+        monkeypatch.setattr(session_rendering, "figure_text_kwargs", fallback_text_kwargs)
     test_dpi = 50
     requests = tuple(
         replace(

@@ -13,6 +13,7 @@ import configparser
 import ctypes
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -37,6 +38,7 @@ APP_ID = "77E578C2-2B30-4015-AE3F-9CE6191423F4"
 BASELINE_SHA256 = "192d43972e8b2031566d3b1bcbc9ae2b46305f39a544d3e12a7e46e6730178a6"
 QT_PLATFORM_ENV = "QT_QPA_PLATFORM"
 HEADLESS_QT_PLATFORMS = frozenset({"offscreen", "minimal"})
+INNO_BOOKKEEPING = re.compile(r"unins[0-9]+\.(exe|dat|msg)", re.IGNORECASE)
 
 
 def require_disposable_runner(environ: dict[str, str], platform: str) -> Path:
@@ -159,12 +161,41 @@ def assert_baseline_catalog(destination: Path, catalog: Path) -> dict[str, objec
     # Inno generates its own uninstaller bookkeeping, which is never app-owned.
     installed_paths = {path.relative_to(destination).as_posix().casefold()
                        for path in destination.rglob("*") if path.is_file()
-                       and not (path.parent == destination and path.name.casefold() in {
-                           "unins000.exe", "unins000.dat", "unins000.msg"})}
-    if installed_paths != {path.casefold() for path in legacy.files}:
-        raise RuntimeError("Published baseline contains files absent from its ownership catalog.")
+                       and not (path.parent == destination
+                                and INNO_BOOKKEEPING.fullmatch(path.name))}
+    expected_paths = {path.casefold() for path in legacy.files}
+    if installed_paths != expected_paths:
+        raise RuntimeError("Published baseline ownership catalog differs; "
+                           f"unexpected paths: {sorted(installed_paths - expected_paths)}; "
+                           f"missing paths: {sorted(expected_paths - installed_paths)}.")
     return {"catalog_sha256": sha256_file(catalog), "owned_files_verified": len(actual),
             "release_provenance": releases}
+
+
+def registered_uninstaller(destination: Path, records: list[dict[str, object]]) -> Path:
+    """Use the registered numbered uninstaller, confined to this fixture only."""
+    executables = set()
+    for record in records:
+        executable = Path(str(record.get("UninstallString", "")).strip('"'))
+        if (Path(str(record.get("InstallLocation", ""))).resolve() != destination.resolve()
+                or not executable.is_absolute()
+                or executable.resolve().parent != destination.resolve()
+                or re.fullmatch(r"unins[0-9]+\.exe", executable.name, re.IGNORECASE) is None):
+            raise RuntimeError("Uninstall registration escaped the disposable installation.")
+        executables.add(executable.resolve())
+    if len(executables) != 1:
+        raise RuntimeError("Uninstall registration does not identify one disposable uninstaller.")
+    return executables.pop()
+
+
+def wait_for_uninstall(destination: Path, executable: Path, *, timeout: float = 30.0) -> None:
+    """Inno's launcher can return before its second-phase uninstaller finishes."""
+    deadline = time.monotonic() + timeout
+    while (registrations() or (destination / "FPVS_Toolbox.exe").exists() or executable.exists()
+           or any(INNO_BOOKKEEPING.fullmatch(path.name) for path in destination.glob("*"))):
+        if time.monotonic() >= deadline:
+            raise RuntimeError("Uninstall did not remove its bookkeeping, application and registration in time.")
+        time.sleep(0.1)
 
 
 class NativeWindows:
@@ -373,13 +404,10 @@ def main() -> int:
         assert_sentinels(sentinels)
 
     def uninstall(label: str) -> None:
-        records = registrations()
-        if not records or any(Path(str(record["InstallLocation"])).resolve() != destination for record in records):
-            raise RuntimeError("Uninstall registration escaped the disposable installation.")
-        run([str(destination / "unins000.exe"), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART",
+        executable = registered_uninstaller(destination, registrations())
+        run([str(executable), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART",
              f"/LOG={evidence / (label + '-inno.log')}"], evidence / f"{label}-process.log", env=env)
-        if registrations() or (destination / "FPVS_Toolbox.exe").exists():
-            raise RuntimeError("Uninstall left the application executable or registration behind.")
+        wait_for_uninstall(destination, executable)
         assert_sentinels(sentinels)
 
     try:

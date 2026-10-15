@@ -248,8 +248,13 @@ def test_ci_graphics_setup_refuses_developer_execution(arguments):
         pytest.skip("PowerShell packaging gate requires PowerShell")
     environment = {key: value for key, value in os.environ.items()
                    if key not in {"CI", "GITHUB_ACTIONS", "RUNNER_ENVIRONMENT"}}
+    script = str(SCRIPTS / "setup_ci_opengl.ps1").replace("'", "''")
+    # Capture the exception message directly. PowerShell's rich error renderer
+    # wraps and colorizes it differently across terminal widths/platforms.
+    command = (f"try {{ & '{script}' {' '.join(arguments)} }} "
+               "catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }")
     completed = subprocess.run(
-        [shell, "-NoProfile", "-NonInteractive", "-File", str(SCRIPTS / "setup_ci_opengl.ps1"), *arguments],
+        [shell, "-NoProfile", "-NonInteractive", "-Command", command],
         env=environment, capture_output=True, text=True, timeout=20, check=False,
     )
     assert completed.returncode != 0

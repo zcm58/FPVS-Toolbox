@@ -120,4 +120,4 @@ without a prespecified analysis plan.
 - Hauk, O., et al. (2025). [Word-selective EEG/MEG responses in the English language obtained with fast periodic visual stimulation (FPVS)](https://doi.org/10.1162/imag_a_00414). *Imaging Neuroscience, 3*. [Authors' analysis code](https://github.com/olafhauk/FPVS_WORDS).
 - Lochy, A., et al. (2024). [Linguistic and attentional factors - Not statistical regularities - Contribute to word-selective neural responses with FPVS-oddball paradigms](https://doi.org/10.1016/j.cortex.2024.01.007). *Cortex, 173*, 339–354.
 - Additional FPVS context: Vandenheever, D., et al. (2025). [Exploring facial expression processing with fast periodic visual stimulation and diverse stimuli](https://doi.org/10.1016/j.bandc.2025.106338). *Brain and Cognition, 189*, 106338.
-- [Individual Detectability implementation](https://github.com/zcm58/FPVS-Toolbox-Repo/tree/main/src/Tools/Individual_Detectability).
+- [Individual Detectability implementation](https://github.com/zcm58/FPVS-Toolbox/tree/codex/v3-release/src/Tools/Individual_Detectability).

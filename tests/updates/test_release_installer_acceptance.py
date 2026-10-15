@@ -129,6 +129,8 @@ def test_baseline_catalog_is_independently_checked_against_installed_bytes(accep
     destination.mkdir()
     (destination / "FPVS_Toolbox.exe").write_bytes(b"inert baseline")
     (destination / "unins000.exe").write_bytes(b"inert uninstaller")
+    (destination / "unins001.exe").write_bytes(b"inert second numbered uninstaller")
+    (destination / "unins001.dat").write_bytes(b"inert uninstall log")
     catalog = tmp_path / "catalog.json"
     catalog.write_text(json.dumps({"schema_version": 1, "application": "fpvs-toolbox",
         "releases": [{"tag": "v2.1.2", "asset_name": "FPVSToolbox-2.1.2-setup.exe",
@@ -136,12 +138,66 @@ def test_baseline_catalog_is_independently_checked_against_installed_bytes(accep
         "files": [{"path": "FPVS_Toolbox.exe", "sha256": [hashlib.sha256(b"inert baseline").hexdigest()]}]}))
     assert acceptance.assert_baseline_catalog(destination, catalog)["owned_files_verified"] == 1
     (destination / "unknown.pyd").write_bytes(b"extra legacy extension")
-    with pytest.raises(RuntimeError, match="files absent"):
+    with pytest.raises(RuntimeError, match=r"unexpected paths: \['unknown.pyd'\]"):
         acceptance.assert_baseline_catalog(destination, catalog)
     (destination / "unknown.pyd").unlink()
+    # Only numbered root bookkeeping is exempt; nested lookalikes stay visible.
+    (destination / "nested").mkdir()
+    (destination / "nested/unins001.dat").write_bytes(b"unrelated nested content")
+    with pytest.raises(RuntimeError, match="nested/unins001.dat"):
+        acceptance.assert_baseline_catalog(destination, catalog)
+    (destination / "nested/unins001.dat").unlink()
+    (destination / "unins-notes.txt").write_bytes(b"unrelated root content")
+    with pytest.raises(RuntimeError, match="unins-notes.txt"):
+        acceptance.assert_baseline_catalog(destination, catalog)
+    (destination / "unins-notes.txt").unlink()
     (destination / "FPVS_Toolbox.exe").write_bytes(b"changed bytes")
     with pytest.raises(RuntimeError, match="differs from its ownership catalog"):
         acceptance.assert_baseline_catalog(destination, catalog)
+
+
+def test_uninstaller_uses_the_registered_number_and_rejects_escaped_commands(acceptance, tmp_path):
+    executable = tmp_path / "unins001.exe"
+    record = {"InstallLocation": str(tmp_path), "UninstallString": f'"{executable}"'}
+    assert acceptance.registered_uninstaller(tmp_path, [record, dict(record)]) == executable
+    for command in (str(tmp_path.parent / "unins001.exe"), str(tmp_path / "other.exe"),
+                    f'"{executable}" /extra', "unins001.exe"):
+        with pytest.raises(RuntimeError, match="escaped"):
+            acceptance.registered_uninstaller(tmp_path, [{**record, "UninstallString": command}])
+    with pytest.raises(RuntimeError, match="one disposable"):
+        acceptance.registered_uninstaller(tmp_path, [])
+    with pytest.raises(RuntimeError, match="one disposable"):
+        acceptance.registered_uninstaller(tmp_path, [record, {**record, "UninstallString": str(tmp_path / "unins000.exe")}])
+
+
+def test_uninstall_waits_for_the_second_phase_and_has_a_deadline(acceptance, tmp_path, monkeypatch):
+    executable = tmp_path / "unins001.exe"
+    executable.write_bytes(b"inert uninstaller still finishing")
+    data = tmp_path / "unins001.dat"
+    data.write_bytes(b"uninstall log still being removed")
+    message = tmp_path / "unins001.msg"
+    message.write_bytes(b"uninstall language data still being removed")
+    notes = tmp_path / "unins-notes.txt"
+    notes.write_bytes(b"unrelated user file")
+    records = [{}]
+    sleeps = []
+    monkeypatch.setattr(acceptance, "registrations", lambda: records)
+    def finish(_seconds):
+        sleeps.append(_seconds)
+        if len(sleeps) == 1:
+            records.clear()
+            executable.unlink()
+        else:
+            data.unlink()
+            message.unlink()
+    monkeypatch.setattr(acceptance.time, "sleep", finish)
+    acceptance.wait_for_uninstall(tmp_path, executable)
+    assert sleeps == [0.1, 0.1]
+    assert notes.read_bytes() == b"unrelated user file"
+    executable.write_bytes(b"uninstaller did not finish")
+    with pytest.raises(RuntimeError, match="in time"):
+        acceptance.wait_for_uninstall(tmp_path, executable, timeout=0)
+    assert executable.read_bytes() == b"uninstaller did not finish"
 
 
 def test_exact_release_metadata_rejects_changed_artifact_bytes(acceptance, tmp_path):

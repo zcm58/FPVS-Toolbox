@@ -131,4 +131,4 @@ anatomical source locations.
 
 - Hauk, O., et al. (2021). [Face-selective responses in combined EEG/MEG recordings with fast periodic visual stimulation (FPVS)](https://doi.org/10.1016/j.neuroimage.2021.118460). *NeuroImage, 242*, 118460.
 - Volfart, A., et al. (2021). [Implicit, automatic semantic word categorisation in the left occipito-temporal cortex as revealed by fast periodic visual stimulation](https://doi.org/10.1016/j.neuroimage.2021.118228). *NeuroImage, 238*, 118228.
-- [Scalp Maps implementation](https://github.com/zcm58/FPVS-Toolbox-Repo/tree/main/src/Tools/Publication_Maps).
+- [Scalp Maps implementation](https://github.com/zcm58/FPVS-Toolbox/tree/codex/v3-release/src/Tools/Publication_Maps).

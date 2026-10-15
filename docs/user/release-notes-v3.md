@@ -2,7 +2,7 @@
 
 These notes describe the v3 changes relative to v2.1.2. Available installers and
 their checksums are listed on the public
-[FPVS Toolbox releases page](https://github.com/zcm58/FPVS-Toolbox-Repo/releases).
+[FPVS Toolbox releases page](https://github.com/zcm58/FPVS-Toolbox/releases).
 The first upgrade from v2.1.2 uses the full installer; follow the
 [migration guide](migration-v3.md) before opening an existing project.
 
@@ -80,8 +80,10 @@ between-condition contrast. See the [LORETA guide](tools/loreta-visualizer.md).
 
 ## Installation and compatibility
 
-The application source and releases share the public **FPVS-Toolbox-Repo**
-repository. V3 and v2.1.2 update checks use that address. V3 adds the separate
+The application source and releases share the public **FPVS-Toolbox**
+repository. V3 update checks use that address; published v2.1.2 binaries still
+check the previous repository and require a manual download for their first v3
+upgrade. V3 adds the separate
 **FPVS Toolbox Update & Repair** application. The first upgrade from v2.1.2
 uses the full installer; later releases may offer compatible patches.
 Historical assets in **FPVS-Toolbox-Releases** remain available.

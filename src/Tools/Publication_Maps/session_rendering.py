@@ -190,11 +190,103 @@ def _column_text_width_pixels(fig, axes, column: int) -> float:
     )
 
 
+def _repeated_session_row_labels(panel_set, row_count: int) -> list[str]:
+    labels = [
+        panel_set.panel(panel_set.group_ids[0], session_id).session_label
+        for session_id in panel_set.session_ids
+    ]
+    if row_count > len(labels):
+        difference = panel_set.paired_difference(panel_set.group_ids[0])
+        labels.append(
+            f"{difference.comparison_session_label} − "
+            f"{difference.reference_session_label}"
+        )
+    return labels
+
+
+def _reserve_repeated_session_label_space(
+    fig, grid, axes, row_label_axes, panel_set,
+) -> float:
+    """Fit header and row-label bands using the actual rendered font metrics."""
+
+    text_kwargs = figure_text_kwargs("panel_label")
+    row_kwargs = figure_text_kwargs("condition_label")
+    row_kwargs["fontweight"] = "bold"
+    row_labels = _repeated_session_row_labels(panel_set, len(row_label_axes))
+    padding_pixels = 3.0 * fig.dpi / 72.0
+    probe = fig.text(0.0, 0.0, "", **text_kwargs)
+    row_probe = fig.text(0.0, 0.0, "", rotation=90, **row_kwargs)
+    try:
+        # Reserving either band can wrap another word in equal-aspect map
+        # columns or rotated row labels. Re-measure both after each adjustment.
+        for _ in range(24):
+            height_pixels = 0.0
+            for column, group_id in enumerate(panel_set.group_ids):
+                label = panel_set.panel(group_id, panel_set.session_ids[0]).group_label
+                probe.set_text(_wrap_text_to_width(
+                    fig,
+                    f"({chr(ord('A') + column)}) {label}",
+                    max_width_pixels=_column_text_width_pixels(fig, axes, column),
+                    text_kwargs=text_kwargs,
+                ))
+                height_pixels = max(
+                    height_pixels,
+                    probe.get_window_extent(fig.canvas.get_renderer()).height,
+                )
+            top = min(
+                REPEATED_SESSION_LAYOUT.top,
+                1.0 - (height_pixels + 2.0 * padding_pixels) / fig.bbox.height,
+            )
+            if top <= REPEATED_SESSION_LAYOUT.bottom:
+                break
+            if top < grid.top - 1e-9:
+                grid.update(top=top)
+                continue
+
+            width_pixels = 0.0
+            for label_ax, label in zip(row_label_axes, row_labels, strict=True):
+                row_probe.set_text(_wrap_text_to_width(
+                    fig,
+                    label,
+                    max_width_pixels=label_ax.get_position().height * fig.bbox.height,
+                    text_kwargs=row_kwargs,
+                ))
+                width_pixels = max(
+                    width_pixels,
+                    row_probe.get_window_extent(fig.canvas.get_renderer()).width,
+                )
+            frame_left = min(ax.get_position().x0 for ax in axes.flat)
+            needed_left = (width_pixels + 2.0 * padding_pixels) / fig.bbox.width
+            if frame_left >= needed_left - 1e-9:
+                return (1.0 + grid.top) / 2.0
+
+            # The first map's slot center moves by this fraction of a left-
+            # margin change. Its left edge moves at least as far, whether the
+            # equal-aspect map is limited by the row height or column width.
+            slot = axes[0, 0].get_subplotspec().get_position(fig)
+            center_fraction = ((slot.x0 + slot.x1) / 2.0 - grid.left) / (
+                grid.right - grid.left
+            )
+            left = grid.left + (needed_left - frame_left) / (1.0 - center_fraction)
+            if left >= grid.right:
+                break
+            grid.update(left=left)
+        raise PublicationMapInputError(
+            "Labels are too long to fit the session figure. Use shorter group or session labels."
+        )
+    finally:
+        probe.remove()
+        row_probe.remove()
+
+
 def _apply_repeated_session_labels(
     fig,
     axes,
     row_label_axes,
     panel_set: SessionMapPanelSet,
+    *,
+    column_header_y: float,
+    frame_left: float,
 ) -> None:
     """Apply agnostic group headers and one external label per matrix row."""
 
@@ -208,7 +300,7 @@ def _apply_repeated_session_labels(
         group_label = panel_set.panel(group_id, panel_set.session_ids[0]).group_label
         header = fig.text(
             column_center,
-            REPEATED_SESSION_LAYOUT.column_header_y,
+            column_header_y,
             _wrap_text_to_width(
                 fig,
                 f"({chr(ord('A') + column)}) {group_label}",
@@ -223,19 +315,11 @@ def _apply_repeated_session_labels(
             f"{REPEATED_SESSION_LAYOUT.column_header_gid_prefix}-{column}"
         )
 
-    row_labels = [
-        panel_set.panel(panel_set.group_ids[0], session_id).session_label
-        for session_id in panel_set.session_ids
-    ]
-    if len(row_label_axes) > len(row_labels):
-        difference = panel_set.paired_difference(panel_set.group_ids[0])
-        row_labels.append(
-            f"{difference.comparison_session_label} − "
-            f"{difference.reference_session_label}"
-        )
+    row_labels = _repeated_session_row_labels(panel_set, len(row_label_axes))
 
     label_kwargs = figure_text_kwargs("condition_label")
     label_kwargs["fontweight"] = "bold"
+    row_texts = []
     for row, (label_ax, label) in enumerate(zip(row_label_axes, row_labels, strict=True)):
         max_height_pixels = label_ax.get_position().height * fig.bbox.height
         text = label_ax.text(
@@ -255,6 +339,26 @@ def _apply_repeated_session_labels(
         text.set_gid(
             f"{REPEATED_SESSION_LAYOUT.row_label_gid_prefix}-{row}"
         )
+        row_texts.append(text)
+
+    # Taller headers shorten rows, so rotated session labels may wrap again.
+    # Keep their shared column inside the available gutter without clipping.
+    renderer = fig.canvas.get_renderer()
+    boxes = [text.get_window_extent(renderer) for text in row_texts]
+    padding_pixels = 3.0 * fig.dpi / 72.0
+    lower_shift = padding_pixels - min(box.x0 for box in boxes)
+    upper_shift = frame_left * fig.bbox.width - padding_pixels - max(
+        box.x1 for box in boxes
+    )
+    if lower_shift > upper_shift + 1e-6:
+        raise PublicationMapInputError(
+            "Session labels are too long to fit the figure. Use shorter session labels."
+        )
+    shift = max(lower_shift, min(0.0, upper_shift))
+    for text in row_texts:
+        transform = text.get_transform()
+        position = transform.transform(text.get_position())
+        text.set_position(transform.inverted().transform(position + (shift, 0.0)))
 
 
 def _center_topomap_vertical_view(ax) -> None:
@@ -508,6 +612,11 @@ def _render_session_panel_set(
                 **difference_label_kwargs,
             )
             apply_axis_text_style(difference_cbar.ax)
+
+        column_header_y = _reserve_repeated_session_label_space(
+            fig, grid, axes, row_label_axes, panel_set,
+        )
+        if include_difference:
             main_position = main_cbar_ax.get_position()
             difference_position = difference_cbar_ax.get_position()
             half_gap = REPEATED_SESSION_LAYOUT.paired_colorbar_gap / 2.0
@@ -534,6 +643,8 @@ def _render_session_panel_set(
             axes,
             row_label_axes,
             panel_set,
+            column_header_y=column_header_y,
+            frame_left=grid_geometry.left,
         )
         _add_map_grid_frame(fig, grid_geometry)
         for output_path in output_paths:

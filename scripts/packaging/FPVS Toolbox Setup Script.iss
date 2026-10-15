@@ -32,12 +32,14 @@ VersionInfoVersion={#WindowsVersion}
 VersionInfoTextVersion={#AppVersion}
 AppVerName={#AppName} {#AppVersion}
 AppPublisher={#AppPublisher}
-AppPublisherURL=https://github.com/zcm58/FPVS-Toolbox-Repo
+AppPublisherURL=https://github.com/zcm58/FPVS-Toolbox
 AppMutex=FPVS_Toolbox_Install_Mutex
 UsePreviousAppDir=yes
 DefaultDirName={localappdata}\Programs\{#AppName}
 #ifdef PatchFromVersion
 DisableDirPage=yes
+#else
+DisableDirPage=no
 #endif
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
