@@ -81,7 +81,14 @@ jobs:
         tests/gui/test_loreta_slice_viewer_qt.py
         tests/gui/test_loreta_preview_worker_qt.py -q --maxfail=1
     - name: Test with pytest
-      run: python -m pytest --allow-qt-tests --ignore=tests/standalone_scripts -q
+      run: python -m pytest --allow-qt-tests --ignore=tests/standalone_scripts -x -vv --capture=tee-sys --junitxml=build/ci-pytest.xml
+    - name: Retain pytest diagnostics
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: pytest-diagnostics
+        path: build/ci-pytest.xml
+        if-no-files-found: ignore
     - name: Verify settings, harmonic help, and menus at fractional and high display scaling
       run: |
         for scale in 1.25 1.5 2; do
