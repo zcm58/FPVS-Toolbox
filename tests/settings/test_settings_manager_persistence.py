@@ -190,19 +190,30 @@ def test_atomic_save_retries_transient_permission_error(tmp_path: Path, monkeypa
     replace = module.os.replace
     attempts = []
     delays = []
+    native_locks = []
+    sleep = module.time.sleep
 
     def transient_lock(source, target) -> None:
         attempts.append((source, target))
         if len(attempts) < 3:
             raise PermissionError("scanner lock")
-        replace(source, target)
+        try:
+            replace(source, target)
+        except PermissionError as exc:
+            native_locks.append(exc)
+            raise
+
+    def record_delay(delay) -> None:
+        delays.append(delay)
+        sleep(delay)
 
     monkeypatch.setattr(module.os, "replace", transient_lock)
-    monkeypatch.setattr(module.time, "sleep", delays.append)
+    monkeypatch.setattr(module.time, "sleep", record_delay)
     manager.save()
 
-    assert len(attempts) == 3
-    assert delays == [0.01, 0.02]
+    # Windows can add a genuine scanner lock to the two injected failures.
+    assert len(attempts) == 3 + len(native_locks)
+    assert delays == [0.01, 0.02, 0.05, 0.1, 0.1][:2 + len(native_locks)]
     assert SettingsManager(str(path)).get_roi_pairs() == [("Central", ["CZ"])]
 
 

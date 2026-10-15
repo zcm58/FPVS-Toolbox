@@ -1238,7 +1238,7 @@ def test_sidebar_scalp_maps_embeds_in_main_workspace(
     assert page.conditions_list.sizePolicy().verticalPolicy() == QSizePolicy.Expanding
     assert page.conditions_list.height() >= 140
     conditions_card = page.findChild(SectionCard, "publication_maps_conditions")
-    settings_card = page.findChild(SectionCard, "publication_maps_settings")
+    settings_section = page.findChild(QWidget, "publication_maps_settings")
     output_card = page.findChild(SectionCard, "publication_maps_output")
     figure_layout_card = page.findChild(
         SectionCard,
@@ -1246,13 +1246,14 @@ def test_sidebar_scalp_maps_embeds_in_main_workspace(
     )
     run_card = page.findChild(SectionCard, "publication_maps_run")
     assert conditions_card is not None
-    assert settings_card is not None
+    assert settings_section is not None
+    assert not isinstance(settings_section, SectionCard)
     assert output_card is not None
     assert figure_layout_card is not None
     assert run_card is not None
     assert conditions_card.geometry().top() == run_card.geometry().top()
     assert conditions_card.minimumHeight() == SCALP_MAPS_TOP_ROW_MIN_HEIGHT
-    assert settings_card.minimumHeight() == SCALP_MAPS_TOP_ROW_MIN_HEIGHT
+    assert run_card.isAncestorOf(settings_section)
     assert figure_layout_card.minimumHeight() == SCALP_MAPS_BOTTOM_ROW_MIN_HEIGHT
     assert run_card.minimumHeight() == SCALP_MAPS_TOP_ROW_MIN_HEIGHT
     assert abs(conditions_card.geometry().bottom() - run_card.geometry().bottom()) <= 1
@@ -1265,7 +1266,7 @@ def test_sidebar_scalp_maps_embeds_in_main_workspace(
     assert page.workflow_tabs.widget(0).isAncestorOf(conditions_card)
     assert page.workflow_tabs.widget(0).isAncestorOf(run_card)
     assert page.workflow_tabs.widget(0).isAncestorOf(page.metric_bca_check)
-    assert page.workflow_tabs.widget(1).isAncestorOf(settings_card)
+    assert page.workflow_tabs.widget(0).isAncestorOf(settings_section)
     assert page.workflow_tabs.widget(1).isAncestorOf(output_card)
     assert page.workflow_tabs.widget(1).isAncestorOf(figure_layout_card)
     assert page.workflow_tabs.widget(1).isAncestorOf(page.output_root_row)
@@ -1308,18 +1309,21 @@ def test_sidebar_scalp_maps_embeds_in_main_workspace(
     assert page.metric_bca_check.isChecked()
     assert page.metric_snr_check.isChecked()
     assert page.metric_z_check.isChecked()
-    assert page.fixed_bca_range_check.isChecked()
+    assert not page.fixed_bca_range_check.isChecked()
+    assert not page.bca_vmin_spin.isEnabled()
+    assert not page.bca_vmax_spin.isEnabled()
+    page.fixed_bca_range_check.setChecked(True)
     assert page.bca_vmin_spin.value() == pytest.approx(0.0)
     assert page.bca_vmax_spin.value() == pytest.approx(0.4)
-    assert page.bca_vmin_spin.minimumWidth() >= 132
-    assert page.bca_vmax_spin.minimumWidth() >= 132
+    assert page.bca_vmin_spin.minimumWidth() >= 104
+    assert page.bca_vmax_spin.minimumWidth() >= 104
     assert page.bca_vmin_spin.isEnabled()
     assert page.bca_vmax_spin.isEnabled()
     assert page.fixed_snr_range_check.isChecked()
     assert page.snr_vmin_spin.value() == pytest.approx(1.0)
     assert page.snr_vmax_spin.value() == pytest.approx(1.5)
-    assert page.snr_vmin_spin.minimumWidth() >= 132
-    assert page.snr_vmax_spin.minimumWidth() >= 132
+    assert page.snr_vmin_spin.minimumWidth() >= 104
+    assert page.snr_vmax_spin.minimumWidth() >= 104
     assert page.fixed_snr_range_check.isEnabled()
     assert page.snr_vmin_spin.isEnabled()
     assert page.snr_vmax_spin.isEnabled()
@@ -1347,10 +1351,10 @@ def test_sidebar_scalp_maps_embeds_in_main_workspace(
     page.metric_snr_check.setChecked(True)
     page.workflow_tabs.setCurrentIndex(1)
     qtbot.wait(20)
-    assert settings_card.header.isVisible()
-    assert output_card.geometry().top() < settings_card.geometry().top()
-    assert settings_card.geometry().top() == figure_layout_card.geometry().top()
-    assert abs(output_card.geometry().left() - settings_card.geometry().left()) <= 1
+    assert not settings_section.isVisible()
+    assert page.input_group.geometry().bottom() < output_card.geometry().top()
+    assert output_card.geometry().bottom() < figure_layout_card.geometry().top()
+    assert abs(output_card.geometry().left() - figure_layout_card.geometry().left()) <= 1
     assert (
         abs(output_card.geometry().right() - figure_layout_card.geometry().right())
         <= 1
@@ -1386,9 +1390,9 @@ def test_sidebar_scalp_maps_embeds_in_main_workspace(
         page.output_root_edit,
         page.open_output_btn,
         page.view_generation_log_btn,
-        page.color_low_btn,
-        page.bca_vmax_spin,
+        page.input_root_edit,
         page.paired_condition_a_combo,
+        page.paired_condition_b_combo,
     ):
         assert widget.visibleRegion().contains(widget.rect())
     page._set_busy_state(True)
