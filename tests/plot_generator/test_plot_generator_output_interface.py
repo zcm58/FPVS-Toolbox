@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from Tools.Plot_Generator.analysis_context import SNRAnalysisContext
 from Tools.Plot_Generator import output_interface
 
@@ -72,3 +74,27 @@ def test_managed_explicit_stems_are_intersected_with_technical_eligibility(
     )
 
     assert host.oddballs == [2.0, 8.0]
+
+
+@pytest.mark.parametrize("snr_enabled", [False, True])
+@pytest.mark.parametrize("other_screens_enabled", [False, True])
+def test_project_snr_screen_is_independent_of_other_qc(
+    monkeypatch, snr_enabled, other_screens_enabled,
+) -> None:
+    monkeypatch.setattr(
+        output_interface, "resolve_snr_analysis_context",
+        lambda *_args, **_kwargs: _context(),
+    )
+    host = _Host(explicit=False, oddballs=[1.2])
+    host.spectral_qc_enabled = not snr_enabled  # A cached page cannot override the project.
+    host._configure_analysis_context(SimpleNamespace(
+        project_root=Path("."),
+        manifest={"experimental_qc": {
+            "snr_spectral_screening_enabled": snr_enabled,
+            "stats_dv_screening_enabled": other_screens_enabled,
+            "raw_signal_screening_enabled": other_screens_enabled,
+            "summed_bca_screening": {"enabled": other_screens_enabled},
+        }},
+    ))
+    assert host.spectral_qc_enabled is snr_enabled
+    assert host.oddballs == [2.0, 4.0, 8.0]

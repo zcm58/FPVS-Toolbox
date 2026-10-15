@@ -49,6 +49,18 @@ row ordering, duplicate handling, exceptions, workbook validation or arithmetic.
 
 ## Entry Contract
 
+Experimental QC settings v1.3 independently gates completed interpolation-burden
+review, summed-BCA review, SNR unexpected-peak screening and Stats finite-DV
+flagging. New projects explicitly disable these screens; older projects retain
+prior behavior, including a saved SNR plot-screen choice. Disabled summed-BCA
+review still validates exact selected columns and finite inputs and publishes
+the required release/provenance state. It cannot request new condition repairs;
+accepted explicit exclusions and previously completed repairs remain intact.
+Re-enabling or changing screen limits invalidates previous review evidence.
+Output completeness, geometry, common grids, fixed ROI coverage and nonfinite
+value handling remain mandatory. Tool-specific screen switches do not change
+plot values, harmonic selection or statistical estimates.
+
 Active post-export adapter imports should use `Main_App.exports.post_export_adapter`.
 
 `post_process(app, condition_labels_present)` expects an app-like object with:

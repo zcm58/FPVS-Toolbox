@@ -74,3 +74,13 @@ def enumerate_project_metadata(root: Path) -> list[ProjectMetadata]:
             continue
         results.append(read_project_metadata(entry))
     return results
+
+
+def read_project_experimental_qc_settings(project_root: Path):
+    """Read committed QC choices without loading widgets or changing a project."""
+    from .experimental_qc_settings import normalize_project_experimental_qc_settings
+
+    manifest = json.loads((Path(project_root) / "project.json").read_text(encoding="utf-8"))
+    if not isinstance(manifest, dict):
+        raise ValueError("Project QC settings require a valid project.json object.")
+    return normalize_project_experimental_qc_settings(manifest)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 
 import pandas as pd
 import pytest
@@ -24,6 +25,7 @@ from Main_App.processing.frequency_domain_qc import (
 )
 from Main_App.processing.spectral_eligibility import resolve_spectral_eligibility
 from Main_App.projects.project import Project
+from Main_App.projects.experimental_qc_settings import ExperimentalQcSettings
 from Main_App.projects.frequency_protocol import (
     EXPECTED_CYCLES_SOURCE_MANUAL,
     FrequencyProtocol,
@@ -328,7 +330,8 @@ def test_condition_electrode_decision_does_not_widen_to_other_condition(tmp_path
         run_frequency_domain_qc_review(project)
 
 
-def test_repair_rechecks_saved_toggle_before_persisting(tmp_path):
+@pytest.mark.parametrize("disabled_feature", ["condition_specific_interpolation_enabled", "summed_bca_screening"])
+def test_repair_rechecks_saved_toggle_before_persisting(tmp_path, disabled_feature):
     project = _make_project(tmp_path)
     project.update_experimental_qc_settings(
         project.experimental_qc_settings.with_condition_specific_interpolation_enabled(True)
@@ -338,14 +341,67 @@ def test_repair_rechecks_saved_toggle_before_persisting(tmp_path):
     choices = _decisions(report, DECISION_INTERPOLATE_CONDITION_ELECTRODE)
     for choice in choices.values():
         choice["artifact_confirmed"] = True
+    settings = project.experimental_qc_settings
     project.update_experimental_qc_settings(
-        project.experimental_qc_settings.with_condition_specific_interpolation_enabled(False)
+        settings.with_summed_bca_screening(replace(settings.summed_bca_screening, enabled=False))
+        if disabled_feature == "summed_bca_screening" else
+        settings.with_condition_specific_interpolation_enabled(False)
     )
     project.save()
     before = (project.project_root / "project.json").read_bytes()
     with pytest.raises(ValueError, match="was disabled"):
         apply_frequency_domain_qc_decision(project.project_root, report, review_decisions=choices)
     assert (project.project_root / "project.json").read_bytes() == before
+
+
+@pytest.mark.parametrize("other_screens_enabled", [False, True])
+def test_disabled_screen_preserves_explicit_exclusions_and_reenable_reviews_again(
+    tmp_path, monkeypatch, other_screens_enabled,
+):
+    project = _make_project(tmp_path)
+    report = run_frequency_domain_qc_review(project)
+    apply_frequency_domain_qc_decision(
+        project.project_root, report,
+        review_decisions=_decisions(report, DECISION_EXCLUDE_CONDITION),
+    )
+    settings = project.experimental_qc_settings
+    project.update_experimental_qc_settings(replace(
+        settings,
+        summed_bca_screening=replace(settings.summed_bca_screening, enabled=False),
+        raw_spectral_screening=replace(settings.raw_spectral_screening, enabled=other_screens_enabled),
+        raw_signal_screening_enabled=other_screens_enabled,
+        kurtosis_screening_enabled=other_screens_enabled,
+        interpolation_burden_review_enabled=other_screens_enabled,
+        condition_specific_interpolation_enabled=True,
+    ))
+    project.save()
+    assert not resolve_frequency_qc_coverage_decisions(project.project_root).review_complete
+
+    with monkeypatch.context() as disabled_context:
+        def unexpected_reconfirmation(*_args, **_kwargs):
+            raise AssertionError("Disabled screening must not build optional review findings")
+
+        disabled_context.setattr(frequency_qc, "_review_exclusion_reconfirmation_findings", unexpected_reconfirmation)
+        disabled = run_frequency_domain_qc_review(project)
+    assert disabled["screening_status"] == "not_performed"
+    assert disabled["condition_specific_interpolation_enabled"] is False
+    assert disabled["review_findings"] == []
+    assert disabled["review_required"] is False
+    assert disabled["qc_complete"] is True
+    sync_frequency_domain_qc_automatic_state(project.project_root, disabled)
+    decisions = resolve_frequency_qc_coverage_decisions(project.project_root)
+    assert decisions.review_complete
+    assert decisions.excluded_participant_conditions == frozenset({("P1", "CondA")})
+
+    project = Project.load(project.project_root)
+    project.update_experimental_qc_settings(project.experimental_qc_settings.with_summed_bca_screening(
+        replace(project.experimental_qc_settings.summed_bca_screening, enabled=True)
+    ))
+    project.save()
+    assert not resolve_frequency_qc_coverage_decisions(project.project_root).review_complete
+    enabled = run_frequency_domain_qc_review(project)
+    assert enabled["review_required"] is True
+    assert enabled["reconfirmation_findings"]
 
 
 def test_review_evidence_is_versioned_complete_and_current(tmp_path) -> None:
@@ -883,6 +939,7 @@ def test_saved_roi_evidence_is_not_current_without_roi_decisions(tmp_path, legac
 def _make_project(tmp_path):
     root = tmp_path / "Project"
     project = Project.load(root)
+    project.update_experimental_qc_settings(ExperimentalQcSettings())
     project.event_map = {"CondA": 1, "CondB": 2}
     payload = dict(project.preprocessing)
     payload.update(

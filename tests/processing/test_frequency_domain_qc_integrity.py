@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from dataclasses import replace
 
 import pandas as pd
 import pytest
@@ -24,6 +25,7 @@ from Main_App.projects.preprocessing_settings import (
     HARMONIC_SELECTION_PROFILE_VERSION,
 )
 from Main_App.projects.project import Project
+from Main_App.projects.experimental_qc_settings import ExperimentalQcSettings
 from Tools.Stats.analysis.dv_policy_settings import FIXED_PREDEFINED_POLICY_NAME
 
 
@@ -41,13 +43,18 @@ def _current_workbook_geometry(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
+@pytest.mark.parametrize("screening_enabled", [False, True])
 def test_invalid_selected_cell_blocks_partial_sum_exclusions_and_finalization(
-    tmp_path,
+    tmp_path, screening_enabled,
 ) -> None:
     project, workbook_path = _make_project(
         tmp_path,
         {"O2": (300.0, "damaged"), "PZ": (1.0, 1.0)},
     )
+    project.update_experimental_qc_settings(project.experimental_qc_settings.with_summed_bca_screening(
+        replace(project.experimental_qc_settings.summed_bca_screening, enabled=screening_enabled)
+    ))
+    project.save()
 
     report = run_frequency_domain_qc_review(project)
 
@@ -90,7 +97,10 @@ def test_invalid_selected_cell_blocks_partial_sum_exclusions_and_finalization(
     assert regenerated["technical_integrity_failed"] is False
     assert regenerated["qc_complete"] is True
     assert regenerated["technical_integrity_failures"] == []
-    assert regenerated["flags"][0]["summed_bca_uv"] == 300.0
+    if screening_enabled:
+        assert regenerated["flags"][0]["summed_bca_uv"] == 300.0
+    else:
+        assert regenerated["flags"] == []
 
 
 @pytest.mark.parametrize(
@@ -273,6 +283,7 @@ def _make_project(
 ) -> tuple[Project, object]:
     root = tmp_path / "Project"
     project = Project.load(root)
+    project.update_experimental_qc_settings(ExperimentalQcSettings())
     project.event_map = {"CondA": 1}
     preprocessing = dict(project.preprocessing)
     preprocessing.update(

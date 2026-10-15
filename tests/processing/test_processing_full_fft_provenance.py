@@ -22,6 +22,7 @@ from Main_App.processing.full_fft_provenance import (
     FullFftProvenanceError,
     FullFftProvenanceStaleError,
     require_current_project_workbook_geometry,
+    require_current_project_pre_review_geometry,
     require_current_project_full_fft_provenance,
     validate_project_full_fft_provenance,
     write_project_full_fft_provenance,
@@ -153,6 +154,52 @@ def test_full_fft_provenance_rebases_when_managed_project_is_copied(
         "geometry_identity_fingerprint"
     ]
     assert all(not Path(value).is_absolute() for value in validated.source_paths)
+
+
+@pytest.mark.parametrize("screen", ["raw_signal_screening_enabled", "kurtosis_screening_enabled", "raw_spectral_screening"])
+def test_preprocessing_screen_change_requires_processing_before_reuse(tmp_path: Path, screen: str) -> None:
+    root = _managed_full_fft_project(tmp_path)
+    write_project_full_fft_provenance(root, base_frequency_hz=6.0, oddball_frequency_hz=1.2)
+    manifest_path = root / "project.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["experimental_qc"] = {screen: {"enabled": False} if screen == "raw_spectral_screening" else False}
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    for check in (require_current_project_pre_review_geometry, require_current_project_full_fft_provenance):
+        with pytest.raises(FullFftProvenanceStaleError, match="Run Processing again"):
+            check(root)
+
+
+def test_preprocessing_guard_checks_unregistered_workbook_but_ignores_unused_history(tmp_path: Path) -> None:
+    root = _managed_full_fft_project(tmp_path)
+    write_project_full_fft_provenance(root, base_frequency_hz=6.0, oddball_frequency_hz=1.2)
+    manifest_path = root / "project.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["participants"].pop("P2")
+    manifest["experimental_qc"] = {"raw_signal_screening_enabled": False}
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    ledger_path = root / ".fpvs_processing" / "processing_ledger.json"
+    ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
+    ledger["entries"]["P1"]["preprocessing_qc_settings"] = {
+        "raw_signal_screening_enabled": False,
+        "kurtosis_screening_enabled": True,
+        "raw_spectral_screening_enabled": True,
+    }
+    ledger_path.write_text(json.dumps(ledger), encoding="utf-8")
+
+    for check in (require_current_project_pre_review_geometry, require_current_project_full_fft_provenance):
+        with pytest.raises(FullFftProvenanceStaleError, match="P2"):
+            check(root)
+    with pytest.raises(FullFftProvenanceStaleError, match="P2"):
+        write_project_full_fft_provenance(root, base_frequency_hz=6.0, oddball_frequency_hz=1.2)
+
+    # Once the old source is no longer consumed, its retained ledger history
+    # must not demand reprocessing a recording outside the current project.
+    (root / "1 - Excel Data Files" / "Faces" / "P2_Faces_Results.xlsx").unlink()
+    require_current_project_pre_review_geometry(root)
+    rebuilt = write_project_full_fft_provenance(root, base_frequency_hz=6.0, oddball_frequency_hz=1.2)
+    assert len(rebuilt.source_paths) == 1
+    assert "P1_Faces_Results.xlsx" in rebuilt.source_paths[0]
 
 
 def test_failed_manifest_replace_preserves_project_and_cleans_staging(

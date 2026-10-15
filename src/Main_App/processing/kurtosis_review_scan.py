@@ -994,6 +994,8 @@ def scan_kurtosis_review(
 
     if execution_backend not in {"thread", "process"}:
         raise KurtosisReviewScanError("Unknown kurtosis review execution backend.")
+    if not settings.get("kurtosis_screening_enabled", True):
+        return KurtosisReviewScan(results=())
     canonical_event_map, protocol = _validate_review_request(
         raw_file_infos, settings, event_map, raw_channel_qc_by_recording,
     )
@@ -1413,49 +1415,50 @@ def _scan_kurtosis_review_serial(
             review_diagnostics = {}
             diagnostic_cache_key = None
             diagnostic_cache_hit = False
-            diagnostics_started = perf_counter()
-            try:
-                from Main_App.processing.qc_review_diagnostics import build_raw_qc_review_diagnostics
-                from Main_App.processing.qc_review_diagnostics_cache import (
-                    build_raw_diagnostics_cache_key, load_raw_diagnostics, save_raw_diagnostics,
-                )
-
-                diagnostic_occurrences = [{
-                        "start_sample": span["source_coordinates"]["start_relative_sample"],
-                        "stop_sample": span["source_coordinates"]["stop_relative_sample"],
-                        "condition_label": span["condition_label"],
-                        "occurrence": span["repetition_index"],
-                        "occurrence_key": span["occurrence_key"],
-                    } for span in restricted_plan["spans"]]
-                lookup_started = perf_counter()
-                diagnostic_cache_key = build_raw_diagnostics_cache_key(
-                    raw, project_root=settings.get("project_root"), source_identity=review_source_identity,
-                    participant_id=participant, recording_id=recording, occurrences=diagnostic_occurrences,
-                    ref_channels=ref_pair, unusable_channels=direct_bad_channels, should_cancel=should_cancel,
-                )
-                review_diagnostics = load_raw_diagnostics(diagnostic_cache_key, should_cancel=should_cancel)
-                diagnostic_cache_hit = review_diagnostics is not None
-                _log_scan_timing(path, "raw_review_diagnostics_cache_lookup", lookup_started)
-                logger.info("raw_review_diagnostics_cache file=%s status=%s", path.name,
-                            "hit" if diagnostic_cache_hit else "miss")
-                if not diagnostic_cache_hit:
-                    review_diagnostics = build_raw_qc_review_diagnostics(
-                        raw, occurrences=diagnostic_occurrences,
-                        ref_channels=ref_pair, unusable_channels=direct_bad_channels,
-                        should_cancel=should_cancel,
+            if settings.get("raw_signal_screening_enabled", True):
+                diagnostics_started = perf_counter()
+                try:
+                    from Main_App.processing.qc_review_diagnostics import build_raw_qc_review_diagnostics
+                    from Main_App.processing.qc_review_diagnostics_cache import (
+                        build_raw_diagnostics_cache_key, load_raw_diagnostics, save_raw_diagnostics,
                     )
-            except InterruptedError:
-                return KurtosisReviewScan(tuple(results), cancelled=True)
-            except Exception:  # Diagnostic-only: preparation/scientific evidence still proceeds.
-                if should_cancel and should_cancel():
+
+                    diagnostic_occurrences = [{
+                            "start_sample": span["source_coordinates"]["start_relative_sample"],
+                            "stop_sample": span["source_coordinates"]["stop_relative_sample"],
+                            "condition_label": span["condition_label"],
+                            "occurrence": span["repetition_index"],
+                            "occurrence_key": span["occurrence_key"],
+                        } for span in restricted_plan["spans"]]
+                    lookup_started = perf_counter()
+                    diagnostic_cache_key = build_raw_diagnostics_cache_key(
+                        raw, project_root=settings.get("project_root"), source_identity=review_source_identity,
+                        participant_id=participant, recording_id=recording, occurrences=diagnostic_occurrences,
+                        ref_channels=ref_pair, unusable_channels=direct_bad_channels, should_cancel=should_cancel,
+                    )
+                    review_diagnostics = load_raw_diagnostics(diagnostic_cache_key, should_cancel=should_cancel)
+                    diagnostic_cache_hit = review_diagnostics is not None
+                    _log_scan_timing(path, "raw_review_diagnostics_cache_lookup", lookup_started)
+                    logger.info("raw_review_diagnostics_cache file=%s status=%s", path.name,
+                                "hit" if diagnostic_cache_hit else "miss")
+                    if not diagnostic_cache_hit:
+                        review_diagnostics = build_raw_qc_review_diagnostics(
+                            raw, occurrences=diagnostic_occurrences,
+                            ref_channels=ref_pair, unusable_channels=direct_bad_channels,
+                            should_cancel=should_cancel,
+                        )
+                except InterruptedError:
                     return KurtosisReviewScan(tuple(results), cancelled=True)
-                logger.debug("qc_review_diagnostics_unavailable file=%s", path, exc_info=True)
-                review_diagnostics = {
-                    "authority": "review_only", "status": "unavailable",
-                    "reason": "Additional raw signal diagnostics could not be computed for this recording. Inspect the signal directly.",
-                    "evaluation_scope": "all_analyzed_occurrences", "localized_events": [],
-                }
-            _log_scan_timing(path, "raw_review_diagnostics", diagnostics_started)
+                except Exception:  # Diagnostic-only: preparation/scientific evidence still proceeds.
+                    if should_cancel and should_cancel():
+                        return KurtosisReviewScan(tuple(results), cancelled=True)
+                    logger.debug("qc_review_diagnostics_unavailable file=%s", path, exc_info=True)
+                    review_diagnostics = {
+                        "authority": "review_only", "status": "unavailable",
+                        "reason": "Additional raw signal diagnostics could not be computed for this recording. Inspect the signal directly.",
+                        "evaluation_scope": "all_analyzed_occurrences", "localized_events": [],
+                    }
+                _log_scan_timing(path, "raw_review_diagnostics", diagnostics_started)
             prepare_started = perf_counter()
             prepared = prepare_kurtosis_review_evidence(
                 raw,

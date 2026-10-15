@@ -4,9 +4,28 @@ The seven preprocessing QC steps retain their existing order. Background
 source loading begins with step 2. A clean summary still waits for Continue;
 there is no timed delay or requirement to wait for preloading to finish.
 
+Choose optional checks in **Settings > Experimental > Preprocessing QC**.
+Raw-signal review, the removed-electrode detector, kurtosis screening and
+raw-spectral review work independently. The raw-signal switch groups large
+signals, brief disturbances and related electrode-burden findings because they
+share the same evidence. Turning kurtosis screening off also skips its automatic
+repairs and review; manually marked electrodes still apply. Timing and trigger
+checks remain required. New projects start with optional checks off; existing
+projects retain their previous choices.
+
+After changing a preprocessing check, run **Processing** again before resuming
+post-processing or analysis. Each recording keeps the choices used to process
+it, so processing one recording does not refresh the others.
+
+**Post-processing QC** contains interpolation-burden review, summed-BCA review,
+unexpected SNR peaks and unusually large Stats values. Condition-specific repair
+requests require summed-BCA review; disabling review prevents new requests while
+preserving completed repairs and explicit exclusions. None of these switches
+disables checks for invalid or incomplete analysis inputs.
+
 ## Marker timing review
 
-If oddball triggers differ by condition, open **Settings > Protocol**, enable
+If oddball triggers differ by condition, open **Settings > Protocol > Trigger markers**, enable
 **Use a different oddball marker for each condition**, and enter every
 condition's oddball code in the table. For example, condition onset codes 1–5
 can use oddball codes 51–55 respectively. These are distinct from the onset
@@ -21,7 +40,7 @@ cannot describe every file. For example, some recordings may use codes 51–55
 for conditions 1–5, while later recordings use 55 in every condition. Configure
 the assignments explicitly:
 
-1. In **Settings > Protocol**, enter the project condition markers to use as a
+1. In **Settings > Protocol > Trigger markers**, enter the project condition markers to use as a
    template, such as `1 → 51` through `5 → 55`.
 2. Enable **Recording-specific trigger schemas** and open **Configure recording
    schemas…**.
@@ -77,7 +96,8 @@ decision. A marker gap alone does not show that visual stimulation stopped.
 
 ## Kurtosis review
 
-In **Settings > Experimental > Electrodes**, choose whether the experimental
+In **Settings > Experimental > Preprocessing QC > Signals**, enable kurtosis
+screening and choose whether the experimental
 **absolute normalized score > 10.0** option starts enabled for new review
 decisions. The project default is On. Save Settings to keep the preference;
 you can still override the checkbox within an individual review. Changing

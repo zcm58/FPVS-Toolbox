@@ -136,7 +136,7 @@ testing, or another specialized estimand.
   repairs, experimental automatic repairs, and unresolved or stale evidence.
   Report use of the optional experimental `|normalized score| > 10.0` rule
   (`gui_enabled_experimental_abs_z_gt_10_v1`); its cutoff is experimental, not
-  a validated artifact classifier. **Settings > Experimental > Electrodes**
+  a validated artifact classifier. **Settings > Experimental > Preprocessing QC > Signals**
   stores its starting checkbox state for new review decisions
   (`kurtosis_review_auto_interpolate_extreme`, default On). Report the policy
   actually applied in the review; this preference alone does not replace the
@@ -149,6 +149,13 @@ testing, or another specialized estimand.
   Reasons are optional; omitted comments are saved as `No reason provided`.
   The corroborator registry
   remains empty. Raw kurtosis is not the automatic cutoff variable.
+- Report which experimental screens were enabled. New projects start with raw
+  signal, kurtosis, raw-spectral, interpolation-burden, summed-BCA, SNR peak and
+  Stats finite-extreme screening off; existing projects preserve earlier choices.
+  Disabling kurtosis screening skips its scores and kurtosis-based repairs;
+  manually marked electrodes still apply. Trigger, geometry, finite-input,
+  FFT-grid and complete-output/ROI checks remain mandatory. Turning off a screen
+  does not revoke explicit exclusions or completed condition repairs.
 - State that kurtosis is scored only from included analyzed intervals, while an
   approved interpolation is applied once to the continuous processed recording
   and therefore affects every retained condition in that recording. Report the
@@ -236,6 +243,58 @@ testing, or another specialized estimand.
 - State that the standard response question is prespecified as one-sided:
   `H1: mean Summed BCA > 0`. A negative response cannot satisfy that
   directional hypothesis.
+
+### Harmonic method references
+
+In **Settings > Harmonics**, select a method and use the information button
+beside **Method profile** for its explanation and publication links. The
+selector uses descriptive names; saved method IDs and calculations are unchanged.
+
+References below were checked on 2026-10-11, focusing on 2020 onward plus
+foundational papers. Primary methods sections, publisher full text and author
+manuscripts were reviewed; titles or mentions of “significant harmonics” alone
+were not enough to classify a study. This is a verified reference collection,
+not an exhaustive systematic review. Each link also appears in the matching
+method's information dialog. Papers support the stated selection rule, not
+every detail of the Toolbox's implementation.
+
+| Method | Publication | Evidence and differences |
+| --- | --- | --- |
+| Two consecutive failures | [Bourgaux et al. (2026), context and face pareidolia](https://doi.org/10.1162/jocn.a.94) | Methods, p. 216: two consecutive nonsignificant harmonics at 1.64 after pooling channels, contexts and participants. Primary HAL indexed manuscript text was available; direct PDF access was blocked. |
+| Two consecutive failures | [Van den Broeck et al. (2025), social orienting in preterm preschoolers](https://doi.org/10.1186/s13229-025-00672-2) | Frequency-domain analyses: two failures at 1.64, selected ROIs and simultaneous streams. Equal-group weighting is described for ROI definition, not established for harmonic selection. |
+| Two consecutive failures | [Calce et al. (2024), infant voice categorization](https://doi.org/10.1016/j.cub.2023.11.042) | STAR Methods, frequency-domain analysis: same stopping concept at 1.64; auditory stimulation, 24 noise bins and the largest cutoff across conditions. |
+| Two consecutive failures | [Qiao et al. (2022), oxytocin and competing visual streams](https://doi.org/10.3390/brainsci12091224) | Section 2.4.1: stop after two failures at 1.64 on participant/ROI averages; simultaneous visual streams rather than oddball/base stimulation. |
+| Two consecutive failures, variant | [Poncet et al. (2022), infant facial-expression discrimination](https://doi.org/10.3389/fnins.2022.901013) | Frequency-domain analysis: channel-level stopping after two failures, threshold 1.96, scalp-power normalization and separate age groups. |
+| Two consecutive failures, foundation | [Poncet et al. (2019), rapid expression discrimination](https://doi.org/10.1016/j.neuropsychologia.2019.03.006) | Section 2.6: two failures at 1.64 after pooling electrodes and conditions before Z. |
+| Two consecutive failures, foundation | [Dzhelyova et al. (2017), brief expression changes](https://doi.org/10.1093/cercor/bhw223) | Frequency-domain analysis, PDF p. 5: participant averages and pooled electrodes per condition, then average condition Z-scores; stop after two failures at 1.64. Closest precedent for conditionwise Z; balanced participant-group weighting is a Toolbox extension. |
+| Fixed domain | [Hauk et al. (2025), word-selective EEG/MEG responses](https://doi.org/10.1162/imag_a_00414) | Section 2.5.2 explicitly chooses ten harmonics instead of selecting them by individual Z-scores; base overlaps are excluded. |
+| Fixed domain | [Pescuma et al. (2022), morpheme identification](https://doi.org/10.3389/fpsyg.2022.932952) | Frequency analyses average SNR at 1.2, 2.4, 3.6 and 4.8 Hz. No per-harmonic significance selection. |
+| Fixed domain | [De Rosa et al. (2022), frequency-based neural discrimination](https://doi.org/10.1016/j.cortex.2022.01.005) | Section 2.5 defines summed BCA at 1.2, 2.4, 3.6 and 4.8 Hz; response significance is assessed after that choice. |
+| Fixed domain | [Hauk et al. (2021), face-selective EEG/MEG responses](https://doi.org/10.1016/j.neuroimage.2021.118460) | Section 2.5.2 uses ten eligible face-response harmonics through 14.4 Hz, excluding 6 and 12 Hz; tests the summed response rather than individual harmonics for inclusion. |
+| Fixed domain, earlier precedent | [Retter et al. (2018), presentation timing and face categorization](https://doi.org/10.1016/j.visres.2018.02.009) | Frequency analysis sets the face-response range through 19 Hz from prior work, retaining it even though current-data selection would end at 14 Hz. |
+| Fixed domain, earlier precedent | [Leleu et al. (2018), tuning to expression changes](https://doi.org/10.1016/j.neuroimage.2018.06.048) | Group frequency analysis fixes the oddball range through harmonic 14 from earlier research. The two-failure rule applies to its separate base-response analysis. |
+| Significant harmonics only, variant | [Huang et al. (2025), emotion understanding across development](https://doi.org/10.1038/s41467-025-62210-1) | Study 1 explicitly retains only harmonics significant in every age group (3.6 and 4.8 Hz, threshold 1.64); analyzes SNR. This intersection rule differs from the Toolbox's balanced common selector and summed BCA. |
+| Significant harmonics only, maximum-intensity task | [Naumann et al. (2025), preschool facial-expression responses](https://doi.org/10.1111/psyp.14725) | Section 2.4.1 selects significant harmonics at 1.64 on participant/condition averages per electrode for the maximum-intensity task. Its graded-intensity task reuses that list without the significance criterion. No explicit contiguity rule is stated. |
+| Significant harmonics only, variant | [Lochy et al. (2024), linguistic and attentional contributions to word responses](https://doi.org/10.1016/j.cortex.2024.01.007) | Frequency-domain analysis selects significant harmonics at 3.1 using separate condition averages and sums their BCA. No contiguity rule is stated; the observed selected range happens to be consecutive. It does not establish the Toolbox's 1.64 balanced common selector. |
+
+Fixed-domain examples demonstrate a fixed choice, not necessarily formal
+preregistration. A Toolbox fixed profile is confirmatory only when the choice
+was made independently of the analyzed responses. The adaptive profiles retain
+the Toolbox's own versioned threshold, pooling and common-list contracts.
+Published descriptions of removing base overlaps do not always establish
+whether those overlaps were skipped before counting failures.
+
+No publication was verified for the exact **Legacy Toolbox selection**,
+including its one-pass greater-than-ten isolated-peak guard. Its information
+page therefore explains compatibility use without attributing that rule to a
+paper. Studies that fill through a highest detection without this guard are
+not evidence for the complete Legacy method.
+
+Related studies were not automatically assigned to these profiles. Yildirim-Keles et al.
+(2025, DOI `10.1523/ENEURO.0317-24.2024`) describes two consecutive significant
+harmonics at 2.32, not explicitly two failures. Moerkerke et al. (2023, DOI
+`10.1111/jcpp.13850`) was not added because
+the final publication's supplementary methods could not be checked.
 
 ### External full-audit dataset
 

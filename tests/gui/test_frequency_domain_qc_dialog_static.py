@@ -55,6 +55,11 @@ def test_experimental_editor_roundtrips_interpolation_capability_without_changin
         raw_spectral_screening_enabled_check=SimpleNamespace(isChecked=lambda: False),
         condition_specific_interpolation_enabled_check=SimpleNamespace(isChecked=lambda: enabled),
         kurtosis_review_auto_interpolate_extreme_check=SimpleNamespace(isChecked=lambda: extreme_default),
+        **{f"{name}_check": SimpleNamespace(isChecked=lambda: True) for name in (
+            "raw_signal_screening_enabled", "kurtosis_screening_enabled",
+            "interpolation_burden_review_enabled", "snr_spectral_screening_enabled",
+            "stats_dv_screening_enabled",
+        )},
     )
     result = namespace[method.name](controls)
     assert result == (

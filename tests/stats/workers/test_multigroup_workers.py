@@ -1570,10 +1570,17 @@ def test_complete_core_excludes_incomplete_condition_not_participants(
     assert set(payload.primary_data["subject"]) == {"P1", "P2"}
 
 
+@pytest.mark.parametrize("dv_screen_enabled", [False, True])
 def test_managed_multigroup_cache_miss_does_not_rebuild_harmonic_domain(
     monkeypatch,
     tmp_path,
+    dv_screen_enabled,
 ) -> None:
+    import json
+
+    (tmp_path / "project.json").write_text(json.dumps({
+        "experimental_qc": {"stats_dv_screening_enabled": dv_screen_enabled},
+    }), encoding="utf-8")
     class _CacheMiss:
         hit = None
 
@@ -1602,7 +1609,7 @@ def test_managed_multigroup_cache_miss_does_not_rebuild_harmonic_domain(
     def _summed(**kwargs):
         summed_calls.append(kwargs)
         return {
-            "P1": {"A": {"R1": 1.0}},
+            "P1": {"A": {"R1": 500.0}},
             "P2": {"A": {"R1": 2.0}},
         }
 
@@ -1634,6 +1641,7 @@ def test_managed_multigroup_cache_miss_does_not_rebuild_harmonic_domain(
 
     assert frozen == ["P1", "P2"]
     assert not frame.empty
+    assert bool(_metadata["outlier_report"].participants) is dv_screen_enabled
     assert cache_requests[0]["max_freq_hz"] is None
     assert summed_calls[0]["max_freq"] is None
     assert any("no independent FullFFT target list" in message for message in messages)

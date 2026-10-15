@@ -1487,7 +1487,8 @@ def _start_qc_source_prefetch(
         return None
     project = getattr(host, "currentProject", None)
     project_root = getattr(project, "project_root", None)
-    if not project_root or not raw_file_infos or not params.get("reject_thresh"):
+    if (not project_root or not raw_file_infos or not params.get("reject_thresh")
+            or not params.get("kurtosis_screening_enabled", True)):
         return None
     try:
         source_prefetch = QcSourcePrefetch(project_root, raw_file_infos, params)
@@ -1564,7 +1565,7 @@ def _run_kurtosis_review_scan_embedded(
 ) -> KurtosisReviewScan | None:
     """Run the shared QC-16 evidence preparation without blocking the GUI."""
 
-    if not raw_file_infos:
+    if not raw_file_infos or not params.get("kurtosis_screening_enabled", True):
         return KurtosisReviewScan(results=())
     raw_event_map = params.get("event_id_map")
     event_map = (
@@ -1789,6 +1790,8 @@ def _review_kurtosis_findings(
 ) -> bool:
     """Use the selected experimental policy or current explicit review decisions."""
 
+    if not params.get("kurtosis_screening_enabled", True):
+        return True
     if scan.cancelled:
         return False
     if scan.errors:
@@ -4177,7 +4180,8 @@ def _remaining_review_rows(
             )
 
         for scope_row in result.occurrence_evaluation_scope:
-            if scope_row.get("evaluation_status") != "not_evaluated":
+            if (scope_row.get("evaluation_status") != "not_evaluated"
+                    or scope_row.get("reason") == "disabled_in_project_settings"):
                 continue
             reason = str(scope_row.get("reason") or "unavailable").replace("_", " ")
             append_row(
@@ -4697,10 +4701,9 @@ def run_preprocessing_qc_workflow(
     _show_data_quality_notice(
         host,
         "FPVS Toolbox will check your data before processing.",
-        "This guided check looks for empty recording files, electrodes that may "
-        "have been physically removed before recording, and participant-level "
-        "signal problems. You will be asked to confirm anything that could "
-        "change what gets processed.",
+        "Recording and timing checks run before processing. Any experimental "
+        "checks you enabled in Settings run alongside them. You will confirm "
+        "changes to what gets processed.",
     )
     _begin_preflight_page(
         host,
@@ -4789,7 +4792,10 @@ def run_preprocessing_qc_workflow(
             if scan is None or scan.cancelled:
                 return False
 
-        if active_infos and not _review_removed_electrodes(
+        if (active_infos and (
+            params.get("raw_signal_screening_enabled", True)
+            or params.get("auto_detect_removed_electrodes", False)
+        )) and not _review_removed_electrodes(
             host,
             active_infos,
             params,

@@ -236,6 +236,36 @@ def test_unscoped_compatibility_call_cannot_auto_interpolate_kurtosis() -> None:
     )
 
 
+@pytest.mark.parametrize("manual_repair", [False, True])
+def test_disabled_kurtosis_skips_scoring_and_preserves_manual_repairs(tmp_path, monkeypatch, manual_repair):
+    from Main_App.processing import preprocess as module
+    from Main_App.processing.prepared_kurtosis_cache import checkpoint_identity
+
+    raw = _raw()
+    channel = BIOSEMI64_CHANNELS[1]
+    if manual_repair:
+        raw.info["bads"] = [channel]
+    params = {
+        **_params(tmp_path / "P001.bdf"),
+        "kurtosis_screening_enabled": False,
+        "kurtosis_auto_interpolate_all": True,
+        "_fpvs_kurtosis_review_decisions": {"stale": {"invalid": True}},
+    }
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Disabled kurtosis must not score or authorize repairs")
+
+    monkeypatch.setattr(module, "evaluate_kurtosis_qc", forbidden)
+    monkeypatch.setattr(module, "build_kurtosis_decision_plan", forbidden)
+    assert checkpoint_identity(raw, params, "unused") is None
+    processed, rejected = perform_preprocessing(raw, params, lambda message: None, "P001.bdf")
+    assert processed is not None
+    assert rejected == 0
+    assert params["reject_thresh"] == 5.0
+    assert params["_fpvs_interpolated_channels"] == ([channel] if manual_repair else [])
+    assert params["_fpvs_kurtosis_qc_evidence"]["reason"] == "disabled_in_project_settings"
+
+
 def test_project_auto_all_scan_stops_before_repair_and_final_run_interpolates(tmp_path, monkeypatch) -> None:
     from Main_App.processing import preprocess as preprocessing_module
 

@@ -164,10 +164,11 @@ class StatsWindowUiMixin:
         outlier_layout.setContentsMargins(0, 0, 0, 0)
         outlier_layout.setSpacing(6)
 
-        self.outlier_enable_checkbox = QCheckBox("Enable DV flagging (always on)")
-        self.outlier_enable_checkbox.setChecked(True)
+        self.outlier_enable_checkbox = QCheckBox("Experimental: flag unusually large analysis values")
+        self.outlier_enable_checkbox.setChecked(self._dv_screening_enabled())
         self.outlier_enable_checkbox.setToolTip(
-            "Hard DV limit checks are always run to flag potential outliers."
+            "Choose this check in Settings > Experimental > Post-processing QC. "
+            "Non-finite values are always checked."
         )
         self.outlier_enable_checkbox.stateChanged.connect(self._on_outlier_exclusion_toggled)
         self.outlier_enable_checkbox.setEnabled(False)
@@ -184,7 +185,7 @@ class StatsWindowUiMixin:
             "Participants are flagged if any DV exceeds this absolute cutoff."
         )
         self.outlier_abs_limit_spin.valueChanged.connect(self._on_outlier_abs_limit_changed)
-        self.outlier_abs_limit_spin.setEnabled(True)
+        self.outlier_abs_limit_spin.setEnabled(self._dv_screening_enabled())
         outlier_form.addRow("Hard DV limit (abs):", self.outlier_abs_limit_spin)
 
         outlier_layout.addLayout(outlier_form)

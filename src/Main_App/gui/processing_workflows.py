@@ -961,6 +961,17 @@ def resume_post_processing(
         QMessageBox.warning(host, "No Project", "Load a project before resuming post-processing.")
         return
     host._post_processing_failure_reason = ""
+    if not _review_interpolation_burden_before_post_processing(host):
+        host._post_processing_failure_reason = (
+            "Interpolation-burden review was not completed. Post-processing did not run."
+        )
+        _set_resume_post_processing_pending(host, True)
+        if on_finished is not None:
+            try:
+                on_finished()
+            except Exception:  # noqa: BLE001 - report arbitrary caller callback failures after cancellation
+                logger.exception("post_processing_resume_callback_failed")
+        return
     _set_resume_post_processing_pending(host, False)
     host._set_controls_enabled(False)
     host._run_active = True
@@ -1659,6 +1670,7 @@ def _review_interpolation_burden_before_post_processing(host: Any) -> bool:
         InterpolationBurdenReviewError,
         apply_interpolation_burden_review,
         collect_interpolation_burden_review,
+        interpolation_burden_review_enabled,
     )
 
     project = getattr(host, "currentProject", None)
@@ -1668,6 +1680,9 @@ def _review_interpolation_burden_before_post_processing(host: Any) -> bool:
             level=logging.WARNING,
         )
         return False
+    if not interpolation_burden_review_enabled(project):
+        host.log("Interpolation-burden review is disabled in Experimental settings.")
+        return True
     try:
         batch = collect_interpolation_burden_review(project)
     except (InterpolationBurdenReviewError, OSError, TypeError, ValueError) as exc:

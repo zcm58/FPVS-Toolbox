@@ -305,10 +305,12 @@ def test_resume_action_is_locked_before_start_and_finalizer_restores_start(start
     namespace.update(
         _set_resume_post_processing_pending=pending,
         _start_post_processing_pipeline_after_processing=start,
+        _review_interpolation_burden_before_post_processing=Mock(return_value=True),
     )
     resume = _load_function("src/Main_App/gui/processing_workflows.py", "resume_post_processing", namespace)
     finished = Mock()
     resume(host, on_finished=finished)
+    namespace["_review_interpolation_burden_before_post_processing"].assert_called_once_with(host)
     if started:
         finished.assert_not_called()
         assert button.enabled is False

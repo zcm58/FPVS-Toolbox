@@ -565,6 +565,38 @@ def test_release_scope_reuses_validated_sources_and_detaches_returned_coverage(t
     assert read_ledger.call_count == read_artifact.call_count == 2
 
 
+@pytest.mark.parametrize("still_registered", [False, True])
+def test_release_scope_rejects_preprocessing_screen_change(tmp_path: Path, still_registered: bool) -> None:
+    source = tmp_path / "Faces.xlsx"
+    _write_source(source)
+    outcomes = _outcomes(_cell(source, recording="P01"))
+    ledger = _processing_ledger("P01")
+    ledger["entries"]["P01"].update(status="completed", participant_id="P01")
+    ledger["recording_condition_outcomes"] = outcomes.to_payload()
+    save_ledger(tmp_path, ledger)
+    manifest_path = tmp_path / "project.json"
+    manifest = {"participants": {"P01": {}}, "preprocessing": {}}
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    pre = build_pre_review_roi_coverage(
+        tmp_path, outcome_ledger=outcomes, processing_ledger=ledger, roi_snapshot=_snapshot(),
+    )
+    final = build_final_roi_coverage(
+        tmp_path, outcome_ledger=outcomes,
+        frequency_decisions=_real_decisions(), pre_review_coverage=pre,
+    )
+    record_final_release_readiness(
+        tmp_path, outcomes, final, expected_decision_fingerprint="review-fingerprint",
+    )
+    with post_processing_validation_scope():
+        require_current_final_release(tmp_path, expected_decision_fingerprint="review-fingerprint")
+        manifest["experimental_qc"] = {"kurtosis_screening_enabled": False}
+        if not still_registered:
+            manifest["participants"] = {"P02": {}}
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+        with pytest.raises(RoiCoverageGateError, match="Run Processing again"):
+            require_current_final_release(tmp_path, expected_decision_fingerprint="review-fingerprint")
+
+
 @post_processing_validation_scope()
 def test_project_final_release_rejects_changed_decision_payload_with_same_fingerprint(
     tmp_path: Path,

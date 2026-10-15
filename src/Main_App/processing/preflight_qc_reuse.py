@@ -117,16 +117,26 @@ def load_occurrence_evidence(
             return None
         layout = key["event_plan"]
         span = layout["span"]
-        if channel.channel_names != tuple(layout["channel_names"]) or len(channel.conditions) != 1:
+        channel_disabled = (
+            not channel.thresholds.get("raw_signal_screening_enabled", True)
+            and not channel.thresholds.get("auto_detect_removed_electrodes")
+        )
+        if channel.channel_names != tuple(layout["channel_names"]):
             return None
-        condition = channel.conditions[0]
-        if (
-            condition.condition_id != span["condition_label"]
-            or condition.occurrence != span["repetition_index"]
-            or condition.start_sample != span["time_start_sample"]
-            or condition.stop_sample != span["time_stop_sample"]
-        ):
-            return None
+        if channel_disabled:
+            if channel.conditions:
+                return None
+        else:
+            if len(channel.conditions) != 1:
+                return None
+            condition = channel.conditions[0]
+            if (
+                condition.condition_id != span["condition_label"]
+                or condition.occurrence != span["repetition_index"]
+                or condition.start_sample != span["time_start_sample"]
+                or condition.stop_sample != span["time_stop_sample"]
+            ):
+                return None
         spectral_expected = span["spectral_start_sample"] is not None and span["spectral_stop_sample"] is not None
         if spectral_expected != (spectral is not None):
             return None

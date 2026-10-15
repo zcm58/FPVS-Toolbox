@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
+from itertools import product
 
 import pytest
 
@@ -26,6 +28,7 @@ from Main_App.projects import (
     RawSpectralScreeningSettings,
     SummedBcaScreeningSettings,
     normalize_experimental_qc_settings,
+    normalize_project_experimental_qc_settings,
     normalize_preprocessing_settings,
     require_removed_electrode_detection_choice_ready,
 )
@@ -528,7 +531,7 @@ def test_corrupt_detector_metadata_recovers_without_losing_other_settings(
     )
 
 
-def test_new_project_has_explicit_off_choice_and_qc17_defaults(tmp_path) -> None:
+def test_new_project_has_explicit_off_choices_for_optional_qc(tmp_path) -> None:
     project_root = tmp_path / "New Project"
 
     project = Project.load(project_root)
@@ -544,7 +547,8 @@ def test_new_project_has_explicit_off_choice_and_qc17_defaults(tmp_path) -> None
     assert saved["preprocessing"]["removed_electrode_detection_choice_source"] == (
         REMOVED_ELECTRODE_DETECTION_CHOICE_SOURCE_NEW_PROJECT_DEFAULT_OFF
     )
-    assert saved["experimental_qc"] == ExperimentalQcSettings().to_manifest()
+    assert saved["experimental_qc"] == ExperimentalQcSettings.for_new_project().to_manifest()
+    assert Project.load(project_root).experimental_qc_settings == ExperimentalQcSettings.for_new_project()
 
 
 def test_confirming_legacy_detector_choice_preserves_manual_maps(tmp_path) -> None:
@@ -625,3 +629,73 @@ def test_settings_editor_exposes_only_retained_electrode_thresholds():
     assert {"warning_summed_bca_uv", "strong_warning_summed_bca_uv",
             "extreme_review_summed_bca_uv", "concentrated_review_flagged_cells",
             "broad_extreme_review_unique_electrodes"} <= strings
+
+
+_REVIEW_FEATURE_FIELDS = (
+    "raw_signal_screening_enabled", "kurtosis_screening_enabled",
+    "interpolation_burden_review_enabled", "snr_spectral_screening_enabled",
+    "stats_dv_screening_enabled",
+)
+
+
+@pytest.mark.parametrize("switches", product((False, True), repeat=7))
+def test_every_optional_qc_combination_roundtrips_without_changing_dependencies(switches):
+    settings = ExperimentalQcSettings().with_review_features(
+        **dict(zip(_REVIEW_FEATURE_FIELDS, switches[:5], strict=True))
+    ).with_raw_spectral_screening({"enabled": switches[5]}).with_summed_bca_screening(
+        {"enabled": switches[6]}
+    ).with_condition_specific_interpolation_enabled(True)
+    loaded = normalize_experimental_qc_settings(settings.to_manifest())
+
+    assert loaded == settings
+    assert tuple(getattr(loaded, name) for name in _REVIEW_FEATURE_FIELDS) == switches[:5]
+    assert loaded.raw_spectral_screening.enabled is switches[5]
+    assert loaded.summed_bca_screening.enabled is switches[6]
+    assert loaded.condition_specific_interpolation_enabled is True
+    assert loaded.kurtosis_review_auto_interpolate_extreme is True
+
+
+@pytest.mark.parametrize("version", [None, "1.0.0", "1.1.0", "1.2.0"])
+def test_legacy_optional_qc_migration_preserves_previous_behavior(version):
+    manifest = {} if version is None else {"experimental_qc": {
+        "schema_version": version, "raw_spectral_screening": {"enabled": False},
+        "summed_bca_screening": {"enabled": False},
+    }}
+    settings = normalize_project_experimental_qc_settings(manifest)
+    assert all(getattr(settings, name) for name in _REVIEW_FEATURE_FIELDS)
+    assert settings.raw_spectral_screening.enabled is (version is None)
+    assert settings.summed_bca_screening.enabled is (version is None)
+
+
+@pytest.mark.parametrize("field", _REVIEW_FEATURE_FIELDS)
+@pytest.mark.parametrize("invalid", [None, "maybe", 2, [], {}])
+def test_invalid_optional_qc_switch_fails_explicitly(field, invalid):
+    with pytest.raises(ExperimentalQcSettingsError, match=field):
+        replace(ExperimentalQcSettings(), **{field: invalid})
+
+
+@pytest.mark.parametrize("legacy_enabled", [False, True])
+def test_saved_snr_preference_migrates_and_new_qc_choice_takes_precedence(tmp_path, legacy_enabled):
+    manifest = {"tools": {"snr_plot": {"plot_settings": {"spectral_qc_enabled": legacy_enabled}}}}
+    project = Project(tmp_path, manifest)
+    assert project.experimental_qc_settings.snr_spectral_screening_enabled is legacy_enabled
+    manifest["experimental_qc"] = {"snr_spectral_screening_enabled": not legacy_enabled}
+    assert normalize_project_experimental_qc_settings(manifest).snr_spectral_screening_enabled is not legacy_enabled
+
+
+def test_invalid_saved_snr_preference_is_not_silently_enabled():
+    with pytest.raises(ExperimentalQcSettingsError, match="spectral_qc_enabled"):
+        normalize_project_experimental_qc_settings({"tools": {
+            "snr_plot": {"plot_settings": {"spectral_qc_enabled": "perhaps"}},
+        }})
+
+
+def test_new_project_with_supplied_manifest_seeds_optional_qc_off(tmp_path):
+    project = Project.load(tmp_path, manifest={"name": "New imported setup"})
+    assert project.experimental_qc_settings == ExperimentalQcSettings.for_new_project()
+
+
+def test_new_project_preserves_explicit_imported_qc_choices(tmp_path):
+    settings = ExperimentalQcSettings().with_raw_spectral_screening({"enabled": False})
+    project = Project.load(tmp_path, manifest={"experimental_qc": settings.to_manifest()})
+    assert project.experimental_qc_settings == settings

@@ -232,6 +232,7 @@ def active_condition_requests(expected, identity: str, requests: Mapping) -> dic
 def project_processing_identity(project_root: str | Path) -> str:
     """Track processing-affecting project settings separately from review metadata."""
     from Main_App.processing.processing_ledger import _DOWNSTREAM_ONLY_PREPROCESSING_KEYS
+    from Main_App.projects.experimental_qc_settings import normalize_experimental_qc_settings
 
     manifest = json.loads((Path(project_root) / "project.json").read_text(encoding="utf-8"))
     preprocessing = manifest.get("preprocessing") or {}
@@ -240,6 +241,15 @@ def project_processing_identity(project_root: str | Path) -> str:
     )}
     payload["preprocessing"] = {key: value for key, value in preprocessing.items()
                                 if key not in _DOWNSTREAM_ONLY_PREPROCESSING_KEYS}
+    experimental = normalize_experimental_qc_settings(manifest.get("experimental_qc"))
+    disabled_processing_screens = {
+        key: False for key in ("raw_signal_screening_enabled", "kurtosis_screening_enabled")
+        if not getattr(experimental, key)
+    }
+    # Keep historical identities when the old always-on behavior is unchanged.
+    # New review permissions do not invalidate already accepted repairs.
+    if disabled_processing_screens:
+        payload["experimental_processing_screens"] = disabled_processing_screens
     return request_fingerprint(payload)
 
 

@@ -10,16 +10,23 @@ if importlib.util.find_spec("PySide6") is None or importlib.util.find_spec("pyte
     pytest.skip("PySide6 or pytest-qt not available", allow_module_level=True)
 
 from PySide6.QtCore import Signal, Qt
+from PySide6.QtGui import QColor, QIcon, QPalette
 from PySide6.QtWidgets import (
+    QApplication,
     QFrame,
     QLabel,
     QLineEdit,
+    QMainWindow,
     QMenu,
     QMessageBox,
+    QProxyStyle,
     QPushButton,
     QSizePolicy,
     QStackedWidget,
+    QStyle,
+    QStyleFactory,
     QStatusBar,
+    QToolBar,
     QWidget,
 )
 
@@ -28,9 +35,11 @@ from Main_App.gui import main_window as main_window_module
 from Main_App.gui.components import ActionRow
 from Main_App.gui.components import SectionCard
 from Main_App.gui.components import SubsectionHeaderLabel
+from Main_App.gui.menu_bar import build_menu_bar
 from Main_App.gui.processing_log_dialog import ProcessingLogDialog
 from Main_App.gui.sidebar import SidebarButton
 from Main_App.gui.settings_panel import EmbeddedSettingsPage
+from Main_App.gui.theme import apply_fpvs_theme
 from Main_App.processing.preflight_qc_cache import preflight_qc_cache_directory
 from Main_App.processing.project_processing_cache import ProjectProcessingCacheUsage
 import Main_App.gui.update_manager as update_manager
@@ -86,6 +95,7 @@ def _build_window(
     monkeypatch,
     *,
     enable_beta_tools: bool = False,
+    debug_enabled: bool = False,
 ) -> main_window_module.MainWindow:
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     monkeypatch.setenv("FPVS_CONFIG_HOME", str(tmp_path / "config"))
@@ -98,6 +108,7 @@ def _build_window(
     )
     settings = SettingsManager()
     settings.set_beta_tools_enabled(enable_beta_tools)
+    settings.set("debug", "enabled", str(debug_enabled))
     settings.save()
 
     win = main_window_module.MainWindow()
@@ -432,15 +443,141 @@ def test_main_window_layout_smoke(tmp_path: Path, qtbot, monkeypatch) -> None:
     assert [action.text() for action in _menu(win, "viewMenu").actions()] == ["Home"]
 
 
+@pytest.mark.parametrize("debug_enabled", [False, True])
+def test_main_window_has_toolbox_logo_and_no_toolbar_gap(tmp_path: Path, qtbot, monkeypatch, debug_enabled) -> None:
+    win = _build_window(tmp_path, qtbot, monkeypatch, debug_enabled=debug_enabled)
+    assert not win.findChildren(QToolBar)
+    assert not win.windowIcon().isNull()
+    actual_logo = win.windowIcon().pixmap(16, 16)
+    expected_logo = QIcon(str(Path(__file__).resolve().parents[2] / "assets" / "ToolBox_Icon.ico")).pixmap(16, 16)
+    assert not actual_logo.isNull()
+    assert actual_logo.toImage() == expected_logo.toImage()
+
+    win.stacked.setCurrentIndex(1)
+    qtbot.waitUntil(lambda: win.stacked.y() == win.menuBar().geometry().bottom() + 1)
+    assert win.menuBar().cornerWidget(Qt.TopRightCorner) is win.lbl_debug
+    assert win.lbl_debug.isVisibleTo(win.menuBar()) is debug_enabled
+    header = win.stacked.currentWidget().findChild(QWidget, "HeaderBar")
+    assert header is not None
+    assert header.mapTo(win, header.rect().topLeft()).y() == win.stacked.y()
+
+
 def test_view_menu_returns_to_home(tmp_path: Path, qtbot, monkeypatch) -> None:
     win = _build_window(tmp_path, qtbot, monkeypatch)
+    assert win.menuBar().isHidden()
     win.open_settings_window()
     assert win.workspace_stack.currentWidget() is win._settings_page
+    assert win.menuBar().isVisibleTo(win)
+    assert win.menuBar().isEnabled()
+    assert [action.text() for action in win.menuBar().actions()] == ["File", "View", "Tools"]
 
     _menu(win, "viewMenu").actions()[0].trigger()
 
     assert win.workspace_stack.currentWidget() is win.homeWidget
     assert _sidebar_button(win, "btn_home").property("selected") is True
+    assert win.menuBar().isVisibleTo(win)
+    win.stacked.setCurrentWidget(win.landing_page)
+    assert win.menuBar().isHidden()
+
+
+def test_menu_labels_render_with_dark_cached_palette_and_light_native_background(qtbot, monkeypatch) -> None:
+    class LightNativeMenuStyle(QProxyStyle):
+        def drawControl(self, element, option, painter, widget=None):
+            if element in (QStyle.CE_MenuBarItem, QStyle.CE_MenuBarEmptyArea):
+                # Model platform chrome following the current light app while
+                # a color-only stylesheet still supplies cached white text.
+                painter.fillRect(option.rect, QColor("white"))
+                if element == QStyle.CE_MenuBarItem:
+                    self.drawItemText(
+                        painter, option.rect, Qt.AlignCenter | Qt.TextShowMnemonic,
+                        option.palette, bool(option.state & QStyle.State_Enabled),
+                        option.text, QPalette.ButtonText,
+                    )
+                return
+            super().drawControl(element, option, painter, widget)
+
+    app = QApplication.instance()
+    previous_style = None
+    previous_palette = app.palette()
+    previous_font = app.font()
+    previous_stylesheet = app.styleSheet()
+    native_style = LightNativeMenuStyle("Fusion")
+    native_style.setParent(app)
+    native_palette = QPalette(app.palette())
+    for group in (QPalette.Active, QPalette.Inactive, QPalette.Disabled):
+        for role in (QPalette.Window, QPalette.Button, QPalette.Base):
+            native_palette.setColor(group, role, QColor("#202124"))
+        for role in (QPalette.WindowText, QPalette.ButtonText, QPalette.Text):
+            native_palette.setColor(
+                group, role, QColor("#aaaaaa" if group == QPalette.Disabled else "white"),
+            )
+        native_palette.setColor(group, QPalette.Highlight, QColor("#175ea8"))
+        native_palette.setColor(group, QPalette.HighlightedText, QColor("white"))
+    monkeypatch.setattr(app, "_fpvs_native_menu_appearance", (native_style, native_palette), raising=False)
+
+    host = QMainWindow()
+    qtbot.addWidget(host)
+    host.settings = SimpleNamespace(beta_tools_enabled=lambda: False)
+    host.show_home_page = lambda: None
+    host.open_free_harmonic_clustering = lambda: None
+    host.open_plot_generator = lambda: None
+
+    def assert_painted_label(widget, action):
+        bounds = widget.actionGeometry(action)
+        assert not bounds.isEmpty(), action.text()
+        assert widget.rect().contains(bounds), action.text()
+        # Ignore outer borders: contrast must come from the label itself.
+        image = widget.grab(bounds.adjusted(2, 2, -2, -2)).toImage()
+        levels = [
+            image.pixelColor(x, y).lightness()
+            for y in range(image.height()) for x in range(image.width())
+        ]
+        assert levels and max(levels) - min(levels) > 60, action.text()
+
+    try:
+        app.setStyleSheet("")
+        base_style_name = app.style().objectName()
+        assert base_style_name.casefold() in {name.casefold() for name in QStyleFactory.keys()}
+        previous_style = base_style_name
+        apply_fpvs_theme(app)
+        assert app.palette().color(QPalette.Window) == QColor("white")
+        bar = build_menu_bar(host)
+        bar.setNativeMenuBar(False)
+        host.setMenuBar(bar)
+        _menu(host, "fileMenu").addAction("New Project…")
+        host.resize(640, 240)
+        host.show()
+        qtbot.waitExposed(host)
+        QApplication.processEvents()
+
+        assert [action.text() for action in bar.actions()] == ["File", "View", "Tools"]
+        for action in bar.actions():
+            assert action.isVisible() and action.isEnabled()
+            assert_painted_label(bar, action)
+            qtbot.mouseClick(bar, Qt.LeftButton, pos=bar.actionGeometry(action).center())
+            popup = action.menu()
+            qtbot.waitUntil(popup.isVisible)
+            assert_painted_label(bar, action)
+            for child_action in popup.actions():
+                assert_painted_label(popup, child_action)
+            popup.hide()
+            bar.setActiveAction(None)
+        bar.setEnabled(False)
+        QApplication.processEvents()
+        for action in bar.actions():
+            assert_painted_label(bar, action)
+        bar.setEnabled(True)
+        assert bar.isEnabled()
+    finally:
+        host.close()
+        app.setStyleSheet("")
+        try:
+            if previous_style is not None:
+                assert app.setStyle(previous_style) is not None
+        finally:
+            app.setFont(previous_font)
+            app.setPalette(previous_palette)
+            app.setStyleSheet(previous_stylesheet)
 
 
 def test_processing_log_opens_in_focused_modal(

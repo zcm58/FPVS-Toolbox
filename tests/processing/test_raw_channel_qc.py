@@ -202,6 +202,48 @@ def _raw_with_left_failure() -> mne.io.RawArray:
     )
 
 
+def test_disabled_raw_screen_and_detector_do_not_read_samples_or_drop_manual_repairs(monkeypatch):
+    raw = _raw_with_left_failure()
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Disabled raw screens must not read EEG samples")
+
+    monkeypatch.setattr(raw, "get_data", forbidden)
+    result = evaluate_raw_channel_qc(raw, {
+        "raw_signal_screening_enabled": False,
+        "auto_detect_removed_electrodes": False,
+        "removed_electrode_detection_mode": "off",
+        "manual_removed_electrodes_enabled": True,
+        "_fpvs_manual_removed_electrodes": ["P9"],
+    }, filename="P001.bdf")
+    assert result.channels_to_interpolate == ("P9",)
+    assert result.manual_removed_channels == ("P9",)
+    assert not result.review_rules
+    assert result.scoring_scope == "disabled_in_project_settings"
+
+
+def test_detector_still_runs_with_raw_signal_screen_disabled():
+    raw = _raw_with_left_failure()
+    result = evaluate_raw_channel_qc(raw, {
+        "raw_signal_screening_enabled": False,
+        "auto_detect_removed_electrodes": True,
+    }, filename="P001.bdf")
+    assert result.low_variance_channels
+    assert result.channels_to_interpolate
+    assert not result.raw_baseline_warning
+    assert not result.review_rules
+    assert not result.burden_findings
+
+
+def test_disabled_raw_screens_do_not_bypass_missing_sample_validity():
+    result = evaluate_raw_channel_qc(_raw_with_left_failure(), {
+        "raw_signal_screening_enabled": False,
+        "auto_detect_removed_electrodes": False,
+    }, filename="P001.bdf", analysis_spans=[])
+    assert result.excluded
+    assert result.triggered_rules == ("no_samples",)
+
+
 def _raw_with_clustered_removed_channels(removed: list[str]) -> mne.io.RawArray:
     names = list(mne.channels.make_standard_montage("biosemi64").ch_names)
     rng = np.random.default_rng(64)

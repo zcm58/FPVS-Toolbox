@@ -735,6 +735,12 @@ def build_validated_params(host: Any) -> dict | None:
             normalized.get(KURTOSIS_REVIEW_DECISIONS_BY_RECORDING_KEY) or {}
         ),
         "kurtosis_auto_interpolate_all": bool(normalized.get("kurtosis_auto_interpolate_all", False)),
+        "raw_signal_screening_enabled": (
+            host.currentProject.experimental_qc_settings.raw_signal_screening_enabled
+        ),
+        "kurtosis_screening_enabled": (
+            host.currentProject.experimental_qc_settings.kurtosis_screening_enabled
+        ),
         "stim_channel": stim_channel,
         "save_preprocessed_fif": False,
         "experimental_ram_preload": bool(normalized["experimental_ram_preload"]),

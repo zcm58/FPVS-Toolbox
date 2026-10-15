@@ -13,7 +13,7 @@ import sys
 sys.path.insert(0, str(Path(SPECPATH)))
 from updater_metadata import version_data
 metadata, _version = version_data(REPO_ROOT)
-datas = [(str(metadata), ".")]
+datas = [(str(metadata), "."), (str(APP_ICON), "assets")]
 binaries = []
 hiddenimports = ['mne.io.bdf', 'scipy', 'scipy._cyutility', 'pandas', 'numpy', 'statsmodels', 'pyvista', 'statsmodels', 'patsy']
 datas += collect_data_files('mne')

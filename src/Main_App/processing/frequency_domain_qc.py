@@ -306,7 +306,7 @@ def run_frequency_domain_qc_review(
 
     require_no_pending_condition_interpolation(project_root)
     screening_settings = _experimental_summed_bca_settings(project, project_root)
-    interpolation_enabled = normalize_experimental_qc_settings(
+    interpolation_enabled = screening_settings.enabled and normalize_experimental_qc_settings(
         _read_manifest(project_root / "project.json").get("experimental_qc")
     ).condition_specific_interpolation_enabled
     thresholds = FrequencyDomainQcThresholds.from_settings(screening_settings)
@@ -494,8 +494,8 @@ def run_frequency_domain_qc_review(
         source_fingerprint=source_fingerprint,
         previous_review_evidence=previous_review_evidence,
     )
-    reconfirmation_findings, stable_exclusion_decisions = (
-        _review_exclusion_reconfirmation_findings(
+    if screening_settings.enabled:
+        reconfirmation_findings, stable_exclusion_decisions = _review_exclusion_reconfirmation_findings(
             state,
             evidence_context_fingerprint=evidence_context_fingerprint,
             selected_harmonics=selected_harmonics,
@@ -503,7 +503,14 @@ def run_frequency_domain_qc_review(
             protocol_metadata=protocol_metadata,
             independent_qc_context=independent_qc_context,
         )
-    )
+    else:
+        # Disabling a screen stops new findings, not the explicit exclusions
+        # the user has already accepted. Re-enabling reviews changed evidence.
+        reconfirmation_findings = []
+        stable_exclusion_decisions = [
+            decision for decision in _review_decisions_from_state(state)
+            if decision.get("decision") in _BROAD_EXCLUSION_DECISIONS
+        ]
     review_findings = [*machine_findings, *reconfirmation_findings]
     if repeated_session:
         summaries, machine_electrodes, machine_subjects = _summarize_recording_flags(
@@ -1014,9 +1021,13 @@ def apply_frequency_domain_qc_decision(
                 raise ValueError("The electrode-repair review belongs to a different project. Reopen QC.")
             if not _source_workbooks_are_current(root, report.get("source_workbooks")):
                 raise ValueError("The reviewed condition outputs changed. Regenerate QC before requesting a repair.")
-            if not normalize_experimental_qc_settings(
+            experimental_settings = normalize_experimental_qc_settings(
                 manifest.get("experimental_qc")
-            ).condition_specific_interpolation_enabled:
+            )
+            if not (
+                experimental_settings.summed_bca_screening.enabled
+                and experimental_settings.condition_specific_interpolation_enabled
+            ):
                 raise ValueError("Condition-specific interpolation was disabled. Reopen the QC review.")
             from Main_App.processing.condition_interpolation_state import (
                 queue_condition_interpolation_decisions,
@@ -4035,6 +4046,11 @@ def _validated_review_evidence_from_state(
         or not recorded
         or _hash_payload(payload) != recorded
     ):
+        return None
+    current_screening = normalize_experimental_qc_settings(
+        _read_manifest(project_root / "project.json").get("experimental_qc")
+    ).summed_bca_screening
+    if payload.get("screening_settings") != current_screening.to_manifest():
         return None
     if payload.get("roi_definition_fingerprint") or payload.get("cohort_fingerprint"):
         return None

@@ -40,8 +40,10 @@ from Main_App.gui.components import (
     SectionCard,
     StatusBanner,
     SubsectionHeaderLabel,
+    ToolInfoContent,
     make_action_button,
     make_form_layout,
+    show_tool_info,
 )
 from Main_App.gui.components import make_info_button
 from Main_App.gui.manual_removed_electrodes_dialog import ManualRemovedElectrodesDialog
@@ -108,7 +110,6 @@ from Main_App.projects.preprocessing_settings import (
     normalize_preprocessing_settings,
 )
 from Main_App.processing.removed_electrode_detection import (
-    REMOVED_ELECTRODE_DETECTION_INFO_TEXT,
     REMOVED_ELECTRODE_DETECTION_MODE_AUTO,
     REMOVED_ELECTRODE_DETECTION_MODE_OFF,
     normalize_manual_removed_electrodes_map,
@@ -139,6 +140,152 @@ from Tools.Stats.data.group_harmonic_cache import clear_cached_group_harmonic_se
 
 
 logger = logging.getLogger(__name__)
+
+
+# Primary-source method checks and search scope are recorded under
+# "Harmonic method references" in docs/user/reference/methods-reporting-checklist.md.
+# This presentation-only catalog must not change the versioned profile registry.
+HARMONIC_METHOD_INFO = {
+    HARMONIC_PROFILE_TWO_CONSECUTIVE_FAILURES_ID: ToolInfoContent(
+        key="harmonic_method_two_failures",
+        title="Stop after two consecutive failures",
+        html="""
+        <p>Checks harmonics in order and stops when two eligible harmonics in a
+        row are not detected above noise (z &le; 1.64). It sums the eligible
+        range before that pair, including any earlier single gaps. Frequencies
+        overlapping the base rate are skipped.</p>
+        <p>The Toolbox gives groups and conditions equal weight and uses one
+        list for everyone. Its group balancing extends the published rule.
+        Selection uses the analyzed data, so findings remain exploratory.</p>
+        <p><b>Recent uses of the stopping rule</b><br>
+        These papers use the same stopping idea; their averaging, thresholds
+        and experimental designs can differ.</p>
+        <ul>
+        <li><a href="https://doi.org/10.1162/jocn.a.94">Bourgaux et al. (2026)
+        — Context matters: human faces hinder face pareidolia</a>.
+        Pools channels, contexts and participants before testing.</li>
+        <li><a href="https://doi.org/10.1186/s13229-025-00672-2">Van den Broeck
+        et al. (2025) — Social orienting in prematurely born preschoolers</a>.
+        Uses selected scalp electrodes and competing stimulation streams.</li>
+        <li><a href="https://doi.org/10.1016/j.cub.2023.11.042">Calce et al.
+        (2024) — Voice categorization in the four-month-old human brain</a>.
+        Auditory frequency tagging; uses the largest cutoff across conditions.</li>
+        <li><a href="https://doi.org/10.3390/brainsci12091224">Qiao et al.
+        (2022) — Oxytocin and competing social and non-social visual streams</a>.
+        Applies the rule to responses from superimposed visual streams.</li>
+        <li><a href="https://doi.org/10.3389/fnins.2022.901013">Poncet et al.
+        (2022) — Facial-expression discrimination in young infants</a>.
+        Uses z &gt; 1.96 within channels and age groups.</li>
+        </ul>
+        <p><b>Foundational papers</b></p>
+        <ul>
+        <li><a href="https://doi.org/10.1016/j.neuropsychologia.2019.03.006">Poncet
+        et al. (2019) — Rapid and automatic discrimination between facial
+        expressions in the human brain</a>. Pools conditions before testing.</li>
+        <li><a href="https://doi.org/10.1093/cercor/bhw223">Dzhelyova et al.
+        (2017) — Brief changes of facial expression</a>. Averages condition
+        Z-scores to choose the stopping point.</li>
+        </ul>
+        <p>References checked October 2026, focusing on 2020 onward plus
+        foundational papers.</p>
+        """,
+    ),
+    HARMONIC_PROFILE_FIXED_ID: ToolInfoContent(
+        key="harmonic_method_fixed",
+        title="Fixed / preregistered harmonic domain",
+        html="""
+        <p>Uses the frequencies you specify, without selecting them from this
+        dataset's responses. Enter an exact list, a highest harmonic number,
+        or an upper frequency. Frequencies overlapping the base rate are
+        always removed.</p>
+        <p>Choose the list from prior work or an analysis plan before inspecting
+        these data. Selecting this option does not itself make a study
+        preregistered.</p>
+        <p><b>Publications using a fixed domain</b><br>
+        These examples use fixed selections; they do not all claim
+        preregistration, and their response measures differ.</p>
+        <ul>
+        <li><a href="https://doi.org/10.1162/imag_a_00414">Hauk et al. (2025)
+        — Word-selective EEG/MEG responses in English</a>.
+        Uses ten word-response harmonics instead of testing each one for
+        inclusion.</li>
+        <li><a href="https://doi.org/10.3389/fpsyg.2022.932952">Pescuma et al.
+        (2022) — Automatic morpheme identification across development</a>.
+        Averages SNR at 1.2, 2.4, 3.6 and 4.8 Hz.</li>
+        <li><a href="https://doi.org/10.1016/j.cortex.2022.01.005">De Rosa et al.
+        (2022) — Frequency-based neural discrimination</a>.
+        Sums baseline-corrected responses at 1.2, 2.4, 3.6 and 4.8 Hz.</li>
+        <li><a href="https://doi.org/10.1016/j.neuroimage.2021.118460">Hauk
+        et al. (2021) — Face-selective responses in combined EEG/MEG</a>.
+        Uses a fixed face-response range through 14.4 Hz, excluding base
+        overlaps.</li>
+        </ul>
+        <p><b>Earlier precedent</b></p>
+        <ul>
+        <li><a href="https://doi.org/10.1016/j.visres.2018.02.009">Retter et al.
+        (2018) — Presentation timing and rapid face categorization</a>.
+        Sets the face-response range from prior work, rather than the current
+        sample's significance cutoff.</li>
+        <li><a href="https://doi.org/10.1016/j.neuroimage.2018.06.048">Leleu
+        et al. (2018) — Tuning to brief changes of facial expression</a>.
+        Uses an oddball range through harmonic 14 from prior research; its
+        separate base-response analysis uses the two-failure rule.</li>
+        </ul>
+        <p>References checked October 2026, focusing on 2020 onward plus
+        foundational papers.</p>
+        """,
+    ),
+    HARMONIC_PROFILE_SIGNIFICANT_ONLY_ID: ToolInfoContent(
+        key="harmonic_method_significant_only",
+        title="Significant harmonics only",
+        html="""
+        <p>Includes only harmonics detected above nearby noise (z &gt; 1.64).
+        Gaps are left out, and frequencies overlapping the base rate are
+        excluded. The resulting list is used for everyone.</p>
+        <p>Groups and conditions receive equal weight when choosing the list.
+        Because the same data select and test the response, treat findings as
+        exploratory; this threshold does not correct for searching many
+        harmonics.</p>
+        <p><b>Publications using significance-based selection</b><br>
+        These studies select individual significant harmonics; the differences
+        below matter when comparing results.</p>
+        <ul>
+        <li><a href="https://doi.org/10.1038/s41467-025-62210-1">Huang et al.
+        (2025) — Conceptual knowledge increasingly supports emotion understanding
+        as perceptual contribution declines with age</a>.<br>
+        Required significance in every age group (3.6 and 4.8 Hz); analyzed SNR.
+        This differs from the Toolbox's balanced selection and summed BCA.</li>
+        <li><a href="https://doi.org/10.1111/psyp.14725">Naumann et al. (2025)
+        — Preschoolers' responses to happy and angry expressions</a>.<br>
+        Selects significant harmonics at z &gt; 1.64 in the maximum-intensity
+        task. The graded-intensity task instead reuses that selected list.</li>
+        <li><a href="https://doi.org/10.1016/j.cortex.2024.01.007">Lochy et al.
+        (2024) — Linguistic and attentional contributions to word-selective
+        responses</a>.<br>
+        Sums significant harmonics using z &gt; 3.1 and separate condition
+        averages, rather than the Toolbox's z &gt; 1.64 common selector.</li>
+        </ul>
+        <p>References checked October 2026, focusing on 2020 onward.</p>
+        """,
+    ),
+    HARMONIC_PROFILE_LEGACY_ID: ToolInfoContent(
+        key="harmonic_method_legacy",
+        title="Legacy Toolbox selection",
+        html="""
+        <p>Reproduces the selection used by older Toolbox projects. It includes
+        eligible harmonics through the highest detected response, with a rule
+        that drops an isolated highest peak when more than ten eligible
+        harmonics separate it from the next detection.</p>
+        <p>Available workbooks receive equal weight, and the saved electrode
+        selection is retained. Base-rate overlaps are excluded. Keep this
+        option when reproducing earlier results.</p>
+        <p><b>Publications</b><br>
+        No publication was verified for this exact Toolbox rule, including its
+        isolated-peak guard. It should be reported as a Toolbox compatibility
+        method.</p>
+        """,
+    ),
+}
 
 
 class _SettingsWorkerUiBridge(QObject):
@@ -310,6 +457,7 @@ class SettingsDialog(QDialog):
         self.tabs.tabBar().setDrawBase(False)
         self.tabs.setStyleSheet(
             "QTabWidget#settings_tabs::pane, "
+            "QTabWidget#settings_protocol_sections::pane, "
             "QTabWidget#settings_experimental_sections::pane {"
             " border: none; background: transparent; }"
         )
@@ -630,12 +778,37 @@ class SettingsDialog(QDialog):
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(10)
 
+        # Keep the expandable trigger editor out of the timing form: its table
+        # must receive real layout space even in a small logical viewport.
+        self.protocol_tabs = QTabWidget(tab)
+        self.protocol_tabs.setObjectName("settings_protocol_sections")
+        self.protocol_tabs.setDocumentMode(True)
+        self.protocol_tabs.tabBar().setDrawBase(False)
+        layout.addWidget(self.protocol_tabs, 1)
+        timing_page = QWidget()
+        timing_page.setObjectName("settings_protocol_timing_page")
+        timing_layout = QVBoxLayout(timing_page)
+        timing_layout.setContentsMargins(0, 12, 0, 0)
+        self.protocol_tabs.addTab(timing_page, "Timing")
+        markers_page = QWidget()
+        markers_page.setObjectName("settings_protocol_markers_page")
+        markers_layout = QVBoxLayout(markers_page)
+        markers_layout.setContentsMargins(0, 12, 0, 0)
+        self.protocol_tabs.addTab(markers_page, "Trigger markers")
+
         protocol_card = SectionCard(
             "Project FPVS Protocol",
-            tab,
+            timing_page,
             object_name="settings_project_protocol_card",
         )
         protocol_form = make_form_layout()
+        markers_card = SectionCard(
+            "Trigger markers", markers_page,
+            object_name="settings_protocol_markers_card",
+        )
+        markers_form = make_form_layout()
+        markers_card.content_layout.addLayout(markers_form)
+        markers_layout.addWidget(markers_card, 1)
 
         if self.project is None:
             values = None
@@ -731,7 +904,7 @@ class SettingsDialog(QDialog):
         protocol_form.addRow(cycles_label, self.protocol_expected_cycles_edit)
         self._protocol_form = protocol_form
 
-        self.protocol_oddball_marker_code_edit = QLineEdit(protocol_card)
+        self.protocol_oddball_marker_code_edit = QLineEdit(markers_card)
         self.protocol_oddball_marker_code_edit.setObjectName(
             "settings_protocol_oddball_marker_code"
         )
@@ -740,13 +913,13 @@ class SettingsDialog(QDialog):
             "The project-wide event code emitted for each oddball. It must differ "
             "from every condition-onset code."
         )
-        protocol_form.addRow(
-            QLabel("Oddball marker code:", protocol_card),
+        markers_form.addRow(
+            QLabel("Oddball marker code:", markers_card),
             self.protocol_oddball_marker_code_edit,
         )
         self.protocol_condition_markers_check = QCheckBox(
             "Use a different oddball marker for each condition",
-            protocol_card,
+            markers_card,
         )
         self.protocol_condition_markers_check.setObjectName(
             "settings_protocol_condition_markers_enabled"
@@ -754,8 +927,8 @@ class SettingsDialog(QDialog):
         self.protocol_condition_markers_check.setToolTip(
             "Applies only to this project. Turn off to use the shared oddball marker code for every condition."
         )
-        protocol_form.addRow(self.protocol_condition_markers_check)
-        self.protocol_condition_markers_table = QTableWidget(0, 3, protocol_card)
+        markers_card.content_layout.addWidget(self.protocol_condition_markers_check)
+        self.protocol_condition_markers_table = QTableWidget(0, 3, markers_card)
         self.protocol_condition_markers_table.setObjectName(
             "settings_protocol_condition_marker_codes"
         )
@@ -768,27 +941,27 @@ class SettingsDialog(QDialog):
         self.protocol_condition_markers_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
         self.protocol_condition_markers_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
         self.protocol_condition_markers_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
-        self.protocol_condition_markers_table.setFixedHeight(168)
-        protocol_form.addRow(self.protocol_condition_markers_table)
-        self.protocol_recording_markers_check = QCheckBox("Recording-specific trigger schemas", protocol_card)
+        self.protocol_condition_markers_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        markers_card.content_layout.addWidget(self.protocol_condition_markers_table, 1)
+        self.protocol_recording_markers_check = QCheckBox("Recording-specific trigger schemas", markers_card)
         self.protocol_recording_markers_check.setObjectName("settings_protocol_recording_markers_enabled")
-        protocol_form.addRow(self.protocol_recording_markers_check)
-        self.protocol_recording_markers_button = make_action_button("Configure recording schemas…", compact=True, parent=protocol_card)
+        markers_card.content_layout.addWidget(self.protocol_recording_markers_check)
+        self.protocol_recording_markers_button = make_action_button("Configure recording schemas…", compact=True, parent=markers_card)
         self.protocol_recording_markers_button.setObjectName("settings_protocol_recording_markers_configure")
-        self.protocol_recording_markers_summary = QLabel("No recording schemas configured.", protocol_card)
+        self.protocol_recording_markers_summary = QLabel("No recording schemas configured.", markers_card)
         self.protocol_recording_markers_summary.setWordWrap(True)
-        self.protocol_recording_markers_row = QWidget(protocol_card)
+        self.protocol_recording_markers_row = QWidget(markers_card)
         recording_marker_layout = QHBoxLayout(self.protocol_recording_markers_row)
         recording_marker_layout.setContentsMargins(0, 0, 0, 0)
         recording_marker_layout.addWidget(self.protocol_recording_markers_button)
         recording_marker_layout.addWidget(self.protocol_recording_markers_summary, 1)
-        protocol_form.addRow(self.protocol_recording_markers_row)
+        markers_card.content_layout.addWidget(self.protocol_recording_markers_row)
         self._recording_marker_codes = values.recording_oddball_marker_codes if values is not None else ()
         self.protocol_recording_markers_check.setChecked(bool(self._recording_marker_codes))
         self.protocol_marker_code_help = QLabel(
             "Oddball marker code: Event code emitted for each oddball in every "
             "condition. Default: 55.",
-            protocol_card,
+            markers_card,
         )
         self.protocol_marker_code_help.setObjectName(
             "settings_protocol_oddball_marker_code_help"
@@ -815,12 +988,13 @@ class SettingsDialog(QDialog):
             self.protocol_derived_duration_edit,
         )
         protocol_card.content_layout.addLayout(protocol_form)
-        protocol_card.content_layout.addWidget(self.protocol_marker_code_help)
+        markers_card.content_layout.addWidget(self.protocol_marker_code_help)
+        timing_layout.addWidget(protocol_card)
+        timing_layout.addStretch(1)
 
-        self.protocol_status = StatusBanner("", protocol_card, variant="info")
+        self.protocol_status = StatusBanner("", tab, variant="info")
         self.protocol_status.setObjectName("settings_protocol_status")
-        protocol_card.content_layout.addWidget(self.protocol_status)
-        layout.addWidget(protocol_card)
+        layout.addWidget(self.protocol_status)
 
         if values is not None:
             self.protocol_presentation_rate_edit.setText(values.presentation_rate_hz)
@@ -908,7 +1082,6 @@ class SettingsDialog(QDialog):
         self.base_freq_edit = self.protocol_presentation_rate_edit
         self.oddball_freq_edit = self.protocol_resolved_oddball_rate_edit
 
-        layout.addStretch(1)
         tabs.addTab(tab, "Protocol")
         return tab
 
@@ -1041,7 +1214,7 @@ class SettingsDialog(QDialog):
             "settings_harmonic_summation_method"
         )
         self.harmonic_summation_method_combo.addItem(
-            "Dzhelyova/Poncet — stop after two consecutive failures (recommended)",
+            "Stop after two consecutive failures (recommended)",
             HARMONIC_PROFILE_TWO_CONSECUTIVE_FAILURES_ID,
         )
         self.harmonic_summation_method_combo.addItem(
@@ -1049,11 +1222,11 @@ class SettingsDialog(QDialog):
             HARMONIC_PROFILE_FIXED_ID,
         )
         self.harmonic_summation_method_combo.addItem(
-            "Significant-only (exploratory)",
+            "Significant harmonics only (exploratory)",
             HARMONIC_PROFILE_SIGNIFICANT_ONLY_ID,
         )
         self.harmonic_summation_method_combo.addItem(
-            "Legacy FPVS Toolbox — through highest with isolated-peak guard",
+            "Legacy Toolbox selection",
             HARMONIC_PROFILE_LEGACY_ID,
         )
         method_index = self.harmonic_summation_method_combo.findData(
@@ -1064,10 +1237,20 @@ class SettingsDialog(QDialog):
             "Choose the versioned rule that defines the common oddball harmonics "
             "summed into BCA for every downstream analysis."
         )
-        harmonic_form.addRow(
-            QLabel("Method profile:", harmonic_group),
-            self.harmonic_summation_method_combo,
+        method_row = QWidget(harmonic_group)
+        method_layout = QHBoxLayout(method_row)
+        method_layout.setContentsMargins(0, 0, 0, 0)
+        method_layout.setSpacing(8)
+        method_layout.addWidget(self.harmonic_summation_method_combo, 1)
+        self.harmonic_method_info_button = make_info_button(
+            parent=method_row,
+            object_name="settings_harmonic_method_info",
+            tooltip="About the selected harmonic method and its publications",
+            size=16,
         )
+        self.harmonic_method_info_button.clicked.connect(self._show_harmonic_method_info)
+        method_layout.addWidget(self.harmonic_method_info_button)
+        harmonic_form.addRow(QLabel("Method profile:", harmonic_group), method_row)
 
         self.harmonic_electrode_scope_combo = QComboBox(harmonic_group)
         self.harmonic_electrode_scope_combo.setObjectName(
@@ -1316,36 +1499,71 @@ class SettingsDialog(QDialog):
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(10)
 
-        # Give each review stage its own page so threshold grids and expanded
-        # details do not compete for the embedded workspace's vertical space.
+        self._add_experimental_info_row(
+            layout, tab,
+            "Optional checks for this project. New projects start with QC off.",
+            "About experimental QC",
+            "Turn each check on or off independently. Related repair options stay "
+            "with the check they need. Turning a check off keeps saved choices and "
+            "accepted repairs. Basic checks for valid data, stimulus timing, complete "
+            "outputs, and required electrodes still run so results remain usable.",
+            "settings_experimental_qc_info",
+        )
+
+        # Keep preprocessing and post-processing checks in separate flat pages.
         self.experimental_tabs = QTabWidget(tab)
         self.experimental_tabs.setObjectName("settings_experimental_sections")
         self.experimental_tabs.setDocumentMode(True)
         self.experimental_tabs.tabBar().setDrawBase(False)
         layout.addWidget(self.experimental_tabs, 1)
 
+        self.preprocessing_qc_tabs = QTabWidget(tab)
+        self.preprocessing_qc_tabs.setObjectName("settings_preprocessing_qc_sections")
+        self.preprocessing_qc_tabs.setDocumentMode(True)
+        self.preprocessing_qc_tabs.tabBar().setDrawBase(False)
+        self.experimental_tabs.addTab(self.preprocessing_qc_tabs, "Preprocessing QC")
+
+        signals_page = QWidget()
+        signals_page.setObjectName("settings_experimental_signals_page")
+        signals_layout = QVBoxLayout(signals_page)
+        signals_layout.setContentsMargins(0, 12, 0, 0)
+        signals_layout.setSpacing(10)
+        self.preprocessing_qc_tabs.addTab(signals_page, "Signals")
+
         electrodes_page = QWidget()
         electrodes_page.setObjectName("settings_experimental_electrodes_page")
         electrodes_layout = QVBoxLayout(electrodes_page)
         electrodes_layout.setContentsMargins(0, 12, 0, 0)
         electrodes_layout.setSpacing(10)
-        self.experimental_tabs.addTab(electrodes_page, "Electrodes")
+        self.preprocessing_qc_tabs.addTab(electrodes_page, "Electrodes")
 
         raw_spectral_page = QWidget()
         raw_spectral_page.setObjectName("settings_experimental_raw_spectral_page")
         raw_spectral_layout = QVBoxLayout(raw_spectral_page)
         raw_spectral_layout.setContentsMargins(0, 12, 0, 0)
         raw_spectral_layout.setSpacing(10)
-        self.experimental_tabs.addTab(raw_spectral_page, "Raw-Spectral Review")
+        self.preprocessing_qc_tabs.addTab(raw_spectral_page, "Raw-Spectral Review")
+
+        self.postprocessing_qc_tabs = QTabWidget(tab)
+        self.postprocessing_qc_tabs.setObjectName("settings_postprocessing_qc_sections")
+        self.postprocessing_qc_tabs.setDocumentMode(True)
+        self.postprocessing_qc_tabs.tabBar().setDrawBase(False)
+        self._experimental_summed_bca_tab_index = self.experimental_tabs.addTab(
+            self.postprocessing_qc_tabs, "Post-processing QC"
+        )
+        results_page = QWidget()
+        results_page.setObjectName("settings_experimental_results_page")
+        results_layout = QVBoxLayout(results_page)
+        results_layout.setContentsMargins(0, 12, 0, 0)
+        results_layout.setSpacing(10)
+        self.postprocessing_qc_tabs.addTab(results_page, "Results")
 
         summed_bca_page = QWidget()
         summed_bca_page.setObjectName("settings_experimental_summed_bca_page")
         summed_bca_layout = QVBoxLayout(summed_bca_page)
         summed_bca_layout.setContentsMargins(0, 12, 0, 0)
         summed_bca_layout.setSpacing(10)
-        self._experimental_summed_bca_tab_index = self.experimental_tabs.addTab(
-            summed_bca_page, "Summed-BCA Screening"
-        )
+        self.postprocessing_qc_tabs.addTab(summed_bca_page, "Summed-BCA Screening")
 
         if self.project is not None:
             qc_preproc = self._project_preprocessing()
@@ -1361,7 +1579,7 @@ class SettingsDialog(QDialog):
                     ),
                 }
             )
-            experimental_settings = ExperimentalQcSettings()
+            experimental_settings = ExperimentalQcSettings.for_new_project()
 
         performance_page = QWidget()
         performance_page.setObjectName("settings_experimental_performance_page")
@@ -1397,14 +1615,42 @@ class SettingsDialog(QDialog):
         self._init_beta_tools_page(self.experimental_tabs)
 
         interpolation_card = SectionCard(
-            "Experimental Interpolation",
-            electrodes_page,
+            "Experimental Signal Review",
+            signals_page,
             object_name="settings_experimental_interpolation_card",
         )
         self._add_settings_scope(
             interpolation_card.content_layout,
             "Current project only. Review defaults do not change previously accepted repairs."
             if self.project is not None else "Open a project to edit experimental QC settings.",
+        )
+        self.raw_signal_screening_enabled_check = QCheckBox(
+            "Review large signals and brief disturbances", interpolation_card,
+        )
+        self.raw_signal_screening_enabled_check.setObjectName("settings_raw_signal_screening_enabled")
+        self.raw_signal_screening_enabled_check.setChecked(experimental_settings.raw_signal_screening_enabled)
+        self._add_experimental_info_row(
+            interpolation_card.content_layout, interpolation_card,
+            self.raw_signal_screening_enabled_check, "Raw signal review",
+            "Checks the analyzed parts of each recording for unusually large signals "
+            "and brief disturbances. Findings are suggestions for review. Removed-electrode "
+            "detection and raw-spectral review can run separately.",
+            "settings_raw_signal_screening_info",
+        )
+        self.kurtosis_screening_enabled_check = QCheckBox(
+            "Screen electrodes with kurtosis", interpolation_card,
+        )
+        self.kurtosis_screening_enabled_check.setObjectName("settings_kurtosis_screening_enabled")
+        self.kurtosis_screening_enabled_check.setChecked(experimental_settings.kurtosis_screening_enabled)
+        self._add_experimental_info_row(
+            interpolation_card.content_layout, interpolation_card,
+            self.kurtosis_screening_enabled_check, "Kurtosis screening and repairs",
+            "Looks for electrodes with unusually uneven signals after filtering. "
+            '"Auto interpolate all" repairs every valid flag. The review default '
+            "preselects repairs only above a score magnitude of 10; you must still "
+            "apply decisions. Turning screening off stops both options. Saved manual "
+            "electrode lists work separately.",
+            "settings_kurtosis_screening_info",
         )
         self.kurtosis_auto_interpolate_all_check = QCheckBox(
             "Auto interpolate all kurtosis flags", interpolation_card,
@@ -1423,7 +1669,7 @@ class SettingsDialog(QDialog):
         interpolation_card.content_layout.addWidget(self.kurtosis_auto_interpolate_all_check)
 
         self.kurtosis_review_auto_interpolate_extreme_check = QCheckBox(
-            "Default to automatic interpolation for kurtosis |score| > 10 in review",
+            "Preselect extreme-score repairs in review",
             interpolation_card,
         )
         self.kurtosis_review_auto_interpolate_extreme_check.setObjectName(
@@ -1441,24 +1687,8 @@ class SettingsDialog(QDialog):
             self.kurtosis_review_auto_interpolate_extreme_check
         )
 
-        self.condition_specific_interpolation_enabled_check = QCheckBox(
-            "Allow condition-specific interpolation in frequency QC",
-            interpolation_card,
-        )
-        self.condition_specific_interpolation_enabled_check.setObjectName(
-            "settings_condition_specific_interpolation_enabled"
-        )
-        self.condition_specific_interpolation_enabled_check.setChecked(
-            experimental_settings.condition_specific_interpolation_enabled
-        )
-        self.condition_specific_interpolation_enabled_check.setToolTip(
-            "After you confirm an artifact, repair the electrode only in the "
-            "flagged condition and recalculate its analysis. A large response "
-            "alone is not evidence of an artifact. Off by default; switching "
-            "off prevents new repairs and keeps previously accepted repairs."
-        )
-        interpolation_card.content_layout.addWidget(self.condition_specific_interpolation_enabled_check)
-        electrodes_layout.addWidget(interpolation_card)
+        signals_layout.addWidget(interpolation_card)
+        signals_layout.addStretch(1)
 
         removed_detection_mode = normalize_removed_electrode_detection_mode(
             qc_preproc.get("removed_electrode_detection_mode"),
@@ -1610,6 +1840,16 @@ class SettingsDialog(QDialog):
             1,
         )
         manual_layout.addWidget(self.manual_removed_electrodes_button)
+        manual_info = make_info_button(
+            parent=manual_row, object_name="settings_manual_removed_electrodes_info",
+            tooltip="About saved manual electrode lists", size=16,
+        )
+        manual_info.clicked.connect(lambda: QMessageBox.information(
+            self, "Saved manual electrode lists",
+            "Applies electrodes you have marked for repair. Lists are independent "
+            "of automatic detection and remain saved when this option is off.",
+        ))
+        manual_layout.addWidget(manual_info)
         detector_form.addRow(
             QLabel("Manual removed electrodes:", detector_card),
             manual_row,
@@ -1679,8 +1919,13 @@ class SettingsDialog(QDialog):
             "associated with the configured line-noise filter, or unexpected. "
             "Turning this off records the check as not performed."
         )
-        raw_spectral_card.content_layout.addWidget(
-            self.raw_spectral_screening_enabled_check
+        self._add_experimental_info_row(
+            raw_spectral_card.content_layout, raw_spectral_card,
+            self.raw_spectral_screening_enabled_check, "Raw-spectral review",
+            "Looks for unusually strong narrow-frequency signals before preprocessing. "
+            "Expected stimulus responses and mains noise are identified separately. "
+            "Findings need review and do not remove data automatically.",
+            "settings_raw_spectral_screening_info",
         )
 
         self.raw_spectral_advanced_toggle = QToolButton(raw_spectral_card)
@@ -1757,6 +2002,42 @@ class SettingsDialog(QDialog):
         raw_spectral_layout.addWidget(raw_spectral_card)
         raw_spectral_layout.addStretch(1)
 
+        post_review_card = SectionCard(
+            "Experimental Result Review", results_page,
+            object_name="settings_experimental_result_review_card",
+        )
+        for field_name, label, title, description in (
+            (
+                "interpolation_burden_review_enabled", "Review the number of repaired electrodes",
+                "Interpolation burden review",
+                "Flags recordings where more than 5% of scalp electrodes were repaired. "
+                "This is a prompt to inspect the recording; it does not undo repairs.",
+            ),
+            (
+                "snr_spectral_screening_enabled", "Flag unexpected peaks in SNR Plots",
+                "SNR peak screening",
+                "Marks unexpected frequency peaks in SNR plots for closer inspection. "
+                "It does not change the plotted data or exclude participants.",
+            ),
+            (
+                "stats_dv_screening_enabled", "Flag unusual values in Stats",
+                "Stats value screening",
+                "Flags unusually large analysis values using the limit set in Stats. "
+                "It does not exclude finite values automatically; unusable values "
+                "are always checked.",
+            ),
+        ):
+            control = QCheckBox(label, post_review_card)
+            control.setObjectName(f"settings_{field_name}")
+            control.setChecked(getattr(experimental_settings, field_name))
+            setattr(self, f"{field_name}_check", control)
+            self._add_experimental_info_row(
+                post_review_card.content_layout, post_review_card, control,
+                title, description, f"settings_{field_name}_info",
+            )
+        results_layout.addWidget(post_review_card)
+        results_layout.addStretch(1)
+
         screening = experimental_settings.summed_bca_screening
         summed_bca_card = SectionCard(
             "Experimental Summed-BCA Screening",
@@ -1783,12 +2064,17 @@ class SettingsDialog(QDialog):
             "settings_summed_bca_screening_enabled"
         )
         self.summed_bca_screening_enabled_check.setChecked(screening.enabled)
-        summed_bca_card.content_layout.addWidget(
-            self.summed_bca_screening_enabled_check
+        self._add_experimental_info_row(
+            summed_bca_card.content_layout, summed_bca_card,
+            self.summed_bca_screening_enabled_check, "Summed-BCA screening",
+            "Flags unusually large frequency responses after processing. You can "
+            "retain or exclude affected data after review. The limits are experimental "
+            "and may not suit every study. Condition-specific repairs below require this check.",
+            "settings_summed_bca_screening_info",
         )
 
         absolute_header = SubsectionHeaderLabel(
-            "Absolute summed-BCA review limits",
+            "Saved limits — used when screening is on",
             summed_bca_card,
         )
         summed_bca_card.content_layout.addWidget(absolute_header)
@@ -1828,11 +2114,35 @@ class SettingsDialog(QDialog):
         )
         summed_bca_card.content_layout.addLayout(absolute_grid)
 
+        self.condition_specific_interpolation_enabled_check = QCheckBox(
+            "Allow repairs in the reviewed condition only", summed_bca_card,
+        )
+        self.condition_specific_interpolation_enabled_check.setObjectName(
+            "settings_condition_specific_interpolation_enabled"
+        )
+        self.condition_specific_interpolation_enabled_check.setChecked(
+            experimental_settings.condition_specific_interpolation_enabled
+        )
+        self._add_experimental_info_row(
+            summed_bca_card.content_layout, summed_bca_card,
+            self.condition_specific_interpolation_enabled_check,
+            "Condition-specific electrode repairs",
+            "After you confirm an artifact during summed-BCA review, repair the "
+            "electrode in that condition and recalculate its results. A large response "
+            "alone is not evidence of an artifact. Turning this off keeps accepted repairs.",
+            "settings_condition_specific_interpolation_info",
+        )
+
         summed_bca_layout.addWidget(summed_bca_card)
         summed_bca_layout.addStretch(1)
 
         project_controls_enabled = self.project is not None
         for control in (
+            self.raw_signal_screening_enabled_check,
+            self.kurtosis_screening_enabled_check,
+            self.interpolation_burden_review_enabled_check,
+            self.snr_spectral_screening_enabled_check,
+            self.stats_dv_screening_enabled_check,
             self.kurtosis_auto_interpolate_all_check,
             self.kurtosis_review_auto_interpolate_extreme_check,
             self.condition_specific_interpolation_enabled_check,
@@ -1845,6 +2155,9 @@ class SettingsDialog(QDialog):
             *self.summed_bca_threshold_edits.values(),
         ):
             control.setEnabled(project_controls_enabled)
+        self.kurtosis_screening_enabled_check.toggled.connect(self._refresh_experimental_qc_dependencies)
+        self.summed_bca_screening_enabled_check.toggled.connect(self._refresh_experimental_qc_dependencies)
+        self._refresh_experimental_qc_dependencies()
         if not project_controls_enabled:
             self.removed_electrode_detection_status.set_variant("info")
             self.removed_electrode_detection_status.set_text(
@@ -1854,6 +2167,35 @@ class SettingsDialog(QDialog):
 
         tabs.addTab(tab, "Experimental")
         return tab
+
+    def _add_experimental_info_row(
+        self, layout: QVBoxLayout, parent: QWidget, content: QWidget | str,
+        title: str, description: str, object_name: str,
+    ) -> None:
+        row = QWidget(parent)
+        row_layout = QHBoxLayout(row)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+        row_layout.setSpacing(8)
+        if isinstance(content, str):
+            content = QLabel(content, row)
+            content.setWordWrap(True)
+        row_layout.addWidget(content, 1)
+        info = make_info_button(
+            parent=row, object_name=object_name, tooltip=f"About {title.lower()}", size=16,
+        )
+        info.clicked.connect(lambda: QMessageBox.information(self, title, description))
+        row_layout.addWidget(info)
+        layout.addWidget(row)
+
+    def _refresh_experimental_qc_dependencies(self) -> None:
+        project_enabled = self.project is not None
+        kurtosis_enabled = project_enabled and self.kurtosis_screening_enabled_check.isChecked()
+        self.kurtosis_auto_interpolate_all_check.setEnabled(kurtosis_enabled)
+        self.kurtosis_review_auto_interpolate_extreme_check.setEnabled(kurtosis_enabled)
+        summed_bca_enabled = project_enabled and self.summed_bca_screening_enabled_check.isChecked()
+        self.condition_specific_interpolation_enabled_check.setEnabled(summed_bca_enabled)
+        for edit in self.summed_bca_threshold_edits.values():
+            edit.setEnabled(project_enabled)
 
     def _init_beta_tools_page(self, tabs: QTabWidget) -> None:
         page = QWidget()
@@ -2316,6 +2658,9 @@ class SettingsDialog(QDialog):
                 if self._protocol_input_mode() == ODDBALL_INPUT_MODE_DIRECT_HZ
                 else self.protocol_oddball_every_n_edit,
             )
+            self.protocol_tabs.setCurrentIndex(
+                1 if field is self.protocol_oddball_marker_code_edit else 0
+            )
             mark_invalid(field, str(exc))
             field.setFocus()
             field.selectAll()
@@ -2458,6 +2803,23 @@ class SettingsDialog(QDialog):
             and self._project_protocol_signature() != initial[0]
         )
 
+    def _experimental_qc_changes_after_processing(
+        self, settings: ExperimentalQcSettings | None,
+    ) -> tuple[bool, bool]:
+        if self.project is None or settings is None or not self._project_has_processed_outputs():
+            return False, False
+        previous = self.project.experimental_qc_settings
+        preprocessing_changed = (
+            previous.raw_signal_screening_enabled != settings.raw_signal_screening_enabled
+            or previous.kurtosis_screening_enabled != settings.kurtosis_screening_enabled
+            or previous.raw_spectral_screening != settings.raw_spectral_screening
+        )
+        postprocessing_changed = (
+            previous.summed_bca_screening != settings.summed_bca_screening
+            or previous.interpolation_burden_review_enabled != settings.interpolation_burden_review_enabled
+        )
+        return preprocessing_changed, postprocessing_changed
+
     def _ask_recalculate_harmonics_after_settings_change(self) -> bool:
         choice = QMessageBox.question(
             self,
@@ -2480,6 +2842,10 @@ class SettingsDialog(QDialog):
         banner.set_variant(variant)
         banner.set_text(text)
         banner.setVisible(bool(text))
+
+    def _show_harmonic_method_info(self) -> None:
+        profile_id = self.harmonic_summation_method_combo.currentData()
+        show_tool_info(self, HARMONIC_METHOD_INFO[profile_id])
 
     def _fixed_harmonic_list_selected(self) -> bool:
         return (
@@ -2523,30 +2889,26 @@ class SettingsDialog(QDialog):
         self.fixed_harmonic_exclude_base_check.setEnabled(False)
         if profile_id == HARMONIC_PROFILE_TWO_CONSECUTIVE_FAILURES_ID:
             note = (
-                "Publication-aligned profile: participants are averaged within each "
-                "group × condition cell, groups receive equal weight within condition, "
-                "and conditions receive equal weight. The search stops only after two "
-                "consecutive eligible nonsignificant harmonics."
+                "Include harmonics up to the cutoff before two consecutive "
+                "nonsignificant results."
             )
             variant = "success"
         elif profile_id == HARMONIC_PROFILE_FIXED_ID:
             note = (
-                "Confirmatory option: choose the harmonic domain independently of this "
-                "dataset and report that choice. Base-rate overlaps are always "
-                "removed from the oddball composite."
+                "Choose the harmonic selection independently of this dataset. "
+                "Frequencies overlapping the base rate are excluded."
             )
             variant = "info"
         elif profile_id == HARMONIC_PROFILE_SIGNIFICANT_ONLY_ID:
             note = (
-                "Exploratory option: only individually detected z > 1.64 harmonics are "
-                "summed. Selection and inference use the same sample."
+                "Include only harmonics detected above noise. Treat findings from "
+                "this selection as exploratory."
             )
             variant = "warning"
         else:
             note = (
-                "Reproducibility option for existing projects: available workbooks are "
-                "pooled equally, eligible harmonics are filled through the highest "
-                "detection, and the isolated-peak gap guard is retained."
+                "Preserve the selection used by older Toolbox projects, including "
+                "its isolated-peak rule."
             )
             variant = "warning"
         self.fixed_harmonic_warning.set_variant(variant)
@@ -2739,8 +3101,8 @@ class SettingsDialog(QDialog):
         mark_frequency_domain_outputs_stale(
             self.project.project_root,
             reason=(
-                "The project FPVS protocol or ROI definitions changed; rerun frequency-domain "
-                "post-processing and QC."
+                "The project protocol, QC settings, or ROI definitions changed; "
+                "refresh processing and QC before using dependent outputs."
             ),
         )
 
@@ -3778,8 +4140,11 @@ class SettingsDialog(QDialog):
     def _show_removed_electrode_detection_info(self) -> None:
         QMessageBox.information(
             self,
-            "Conservative Removed-Electrode Detection",
-            REMOVED_ELECTRODE_DETECTION_INFO_TEXT,
+            "Removed-electrode detection",
+            "Suggests electrodes that may have been unplugged during recording. "
+            "Developed with one lab's BioSemi ActiveTwo 64 data, it still needs "
+            "independent validation. Review its suggestions before accepting repairs. "
+            "Saved manual electrode lists work separately.",
         )
 
     def _current_roi_montage(self) -> str:
@@ -3855,7 +4220,7 @@ class SettingsDialog(QDialog):
 
     def _experimental_qc_settings_from_editor(self) -> ExperimentalQcSettings:
         if self.project is None:
-            return ExperimentalQcSettings()
+            return ExperimentalQcSettings.for_new_project()
         values = {
             field_name: edit.text()
             for field_name, edit in self.summed_bca_threshold_edits.items()
@@ -3892,6 +4257,13 @@ class SettingsDialog(QDialog):
             .with_kurtosis_review_auto_interpolate_extreme(
                 self.kurtosis_review_auto_interpolate_extreme_check.isChecked()
             )
+            .with_review_features(
+                raw_signal_screening_enabled=self.raw_signal_screening_enabled_check.isChecked(),
+                kurtosis_screening_enabled=self.kurtosis_screening_enabled_check.isChecked(),
+                interpolation_burden_review_enabled=self.interpolation_burden_review_enabled_check.isChecked(),
+                snr_spectral_screening_enabled=self.snr_spectral_screening_enabled_check.isChecked(),
+                stats_dv_screening_enabled=self.stats_dv_screening_enabled_check.isChecked(),
+            )
         )
 
     def _validated_experimental_qc_settings(
@@ -3905,6 +4277,7 @@ class SettingsDialog(QDialog):
             self.experimental_tabs.setCurrentIndex(
                 self._experimental_summed_bca_tab_index
             )
+            self.postprocessing_qc_tabs.setCurrentIndex(1)
             message = str(exc).casefold()
             for field_name, edit in self.summed_bca_threshold_edits.items():
                 if field_name.casefold() in message:
@@ -4066,8 +4439,14 @@ class SettingsDialog(QDialog):
         protocol_changed_after_processing = (
             self._project_protocol_changed_after_processing()
         )
+        preprocessing_qc_changed, postprocessing_qc_changed = (
+            self._experimental_qc_changes_after_processing(validated_experimental_qc)
+        )
+        frequency_analysis_changed = (
+            frequency_analysis_changed or preprocessing_qc_changed or postprocessing_qc_changed
+        )
         recalculate_harmonics_after_save = False
-        if harmonic_settings_changed and not protocol_changed_after_processing:
+        if harmonic_settings_changed and not (protocol_changed_after_processing or preprocessing_qc_changed):
             recalculate_harmonics_after_save = (
                 self._ask_recalculate_harmonics_after_settings_change()
             )
@@ -4192,6 +4571,18 @@ class SettingsDialog(QDialog):
                 "The project FPVS protocol was saved. Reprocess this project before "
                 "using its FFT, QC, harmonic-selection, or statistical outputs.",
             )
+        elif preprocessing_qc_changed:
+            QMessageBox.warning(
+                self, "Project Reprocessing Required",
+                "Preprocessing QC settings were saved. Run Processing again to apply "
+                "the new checks and repair choices before using the project's results.",
+            )
+        elif postprocessing_qc_changed and not recalculate_harmonics_after_save:
+            QMessageBox.information(
+                self, "Post-processing QC Updated",
+                "Use Resume Post-processing to apply these QC choices and refresh "
+                "dependent results. Accepted repairs remain in place.",
+            )
 
         if not prev_debug and self.manager.debug_enabled():
             QMessageBox.information(
@@ -4218,7 +4609,7 @@ class SettingsDialog(QDialog):
                 return
             self._restore_harmonic_settings_after_cancel()
             return
-        if harmonic_settings_changed and not protocol_changed_after_processing:
+        if harmonic_settings_changed and not (protocol_changed_after_processing or preprocessing_qc_changed):
             remedy = (
                 "Use Resume Post-processing to rebuild frequency-domain QC and "
                 "dependent outputs before running downstream analyses."

@@ -153,6 +153,57 @@ def test_v3_accepts_canonical_project_reference_keys() -> None:
     assert "condition_minimum_completion_s" not in method
 
 
+def test_preflight_legacy_enabled_signal_screen_preserves_cache_identity():
+    settings = _settings()
+    fingerprint = preflight_qc.preflight_file_settings_identity(settings, participant_id="P01")
+    assert preflight_qc.preflight_file_settings_identity(
+        {**settings, "raw_signal_screening_enabled": True}, participant_id="P01",
+    ) == fingerprint
+    assert preflight_qc.preflight_file_settings_identity(
+        {**settings, "raw_signal_screening_enabled": False}, participant_id="P01",
+    ) != fingerprint
+
+
+@pytest.mark.parametrize("signal_enabled", [False, True])
+@pytest.mark.parametrize("detector_enabled", [False, True])
+@pytest.mark.parametrize("spectral_enabled", [False, True])
+def test_preflight_screen_combinations_keep_event_planning_independent(
+    monkeypatch, tmp_path, signal_enabled, detector_enabled, spectral_enabled,
+):
+    path = tmp_path / "P001.bdf"
+    path.write_bytes(b"synthetic source")
+    data, names = _raw_data()
+    raw = _LazyRaw(data, names)
+    _install_lazy_fakes(monkeypatch, [raw], _event_rows())
+    settings = {
+        **_settings(),
+        "raw_signal_screening_enabled": signal_enabled,
+        "auto_detect_removed_electrodes": detector_enabled,
+        "removed_electrode_detection_mode": "auto" if detector_enabled else "off",
+        "raw_spectral_screening": RawSpectralScreeningSettings(enabled=spectral_enabled).to_manifest(),
+    }
+    scan = preflight_qc.scan_preprocessing_qc(
+        [RawFileInfo(path, "P001", "control")], settings,
+        project_root=tmp_path, event_map={"Faces": 1},
+    )
+    result = scan.results[0]
+    assert result.load_error is None
+    assert result.condition_qc["event_plan"]["spans"]
+    assert result.experimental_detector_evaluated is detector_enabled
+    assert bool(raw.reads) is (signal_enabled or detector_enabled or spectral_enabled)
+    assert result.raw_spectral_qc["enabled"] is spectral_enabled
+    if detector_enabled:
+        assert result.auto_removed_electrodes
+    if not signal_enabled:
+        assert not result.candidate_burden_findings
+        assert not result.raw_amplitude_review_findings
+        assert not result.occurrence_review_findings
+        assert not result.transient_review_findings
+    if not (signal_enabled or detector_enabled or spectral_enabled):
+        assert not scan.suspicious_results
+        assert result.raw_channel_qc["reason"] == "disabled_in_project_settings"
+
+
 @pytest.mark.parametrize(
     ("sample_count", "sfreq", "expected"),
     (
@@ -578,7 +629,7 @@ def test_raw_spectral_history_never_has_hard_exclusion_authority(
     scan = preflight_qc.PreflightQcScan(results=(legacy_widespread, disabled))
 
     assert scan.hard_exclusion_candidates == ()
-    assert scan.suspicious_results == (legacy_widespread, disabled)
+    assert scan.suspicious_results == (legacy_widespread,)
 
 
 def test_preflight_cache_settings_own_the_exact_project_frequency_protocol() -> None:

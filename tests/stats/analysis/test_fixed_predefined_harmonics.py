@@ -1080,10 +1080,15 @@ def test_group_significant_stats_worker_preflights_exact_columns_before_qc(
     group_policy.clear_group_significant_selection_cache()
 
 
+@pytest.mark.parametrize("dv_screen_enabled", [False, True])
 def test_managed_stats_worker_cache_miss_does_not_rebuild_harmonic_domain(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    dv_screen_enabled: bool,
 ) -> None:
+    (tmp_path / "project.json").write_text(json.dumps({
+        "experimental_qc": {"stats_dv_screening_enabled": dv_screen_enabled},
+    }), encoding="utf-8")
     messages: list[str] = []
     summed_calls: list[dict[str, object]] = []
     monkeypatch.setattr(
@@ -1110,7 +1115,7 @@ def test_managed_stats_worker_cache_miss_does_not_rebuild_harmonic_domain(
 
     def _summed(**kwargs):
         summed_calls.append(kwargs)
-        return {"S1": {"C1": {"Posterior": 1.0}}}
+        return {"S1": {"C1": {"Posterior": 500.0}}}
 
     monkeypatch.setattr(stats_workers, "prepare_summed_bca_data", _summed)
 
@@ -1134,6 +1139,7 @@ def test_managed_stats_worker_cache_miss_does_not_rebuild_harmonic_domain(
     )
 
     assert result[0] == ["S1"]
+    assert bool(result[6].participants) is dv_screen_enabled
     assert summed_calls[0]["max_freq"] is None
     assert any("no independent FullFFT target list" in message for message in messages)
 

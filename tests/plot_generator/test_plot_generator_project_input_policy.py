@@ -179,7 +179,6 @@ def test_plot_settings_survive_successive_project_disk_roundtrips(
         "stem_color": "#111111",
         "stem_color_b": "#222222",
         "extra_colors": ["#009E73", "#CC79A7", "#D5A000"],
-        "spectral_qc_enabled": True,
         "input_folder": str(project_root / "1 - Excel Data Files"),
         "output_folder": str(project_root / "2 - SNR Plots"),
     }

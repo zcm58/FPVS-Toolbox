@@ -107,6 +107,36 @@ def test_snapshot_preserves_exact_review_inputs_and_rejects_changed_filter(tmp_p
         executor._load_snapshot(tmp_path)
 
 
+@pytest.mark.parametrize("feature", ["raw_signal_screening_enabled", "kurtosis_screening_enabled"])
+def test_snapshot_rejects_changed_processing_screen_but_preserves_accepted_repair_permissions(tmp_path, feature):
+    from Main_App.projects.experimental_qc_settings import ExperimentalQcSettings
+
+    _raw, source, _decision, _report = _project(tmp_path)
+    manifest_path = tmp_path / "project.json"
+    manifest = json.loads(manifest_path.read_text())
+    legacy_identity = state_api.project_processing_identity(tmp_path)
+    manifest["experimental_qc"] = ExperimentalQcSettings(
+        condition_specific_interpolation_enabled=True,
+    ).to_manifest()
+    state_api.atomic_json(manifest_path, manifest)
+    assert state_api.project_processing_identity(tmp_path) == legacy_identity
+    executor.persist_condition_interpolation_run_snapshot(tmp_path, {
+        "version": executor.SNAPSHOT_VERSION, "settings": {feature: True},
+        "event_map": {"Faces": 1}, "save_folder": str(tmp_path / "outputs"),
+        "processing_fingerprint": "processing-1",
+        "records": [{"processing_id": "P01", "info": {"path": source["raw_file"]}}],
+    })
+    manifest["experimental_qc"]["condition_specific_interpolation_enabled"] = False
+    manifest["experimental_qc"]["summed_bca_screening"]["enabled"] = False
+    state_api.atomic_json(manifest_path, manifest)
+    assert executor._load_snapshot(tmp_path)["settings"][feature] is True
+    manifest["experimental_qc"][feature] = False
+    state_api.atomic_json(manifest_path, manifest)
+    with pytest.raises(executor.ConditionInterpolationProcessingRequired, match="Run Processing"):
+        executor._load_snapshot(tmp_path)
+    assert state_api.load_condition_interpolation_state(tmp_path)["requests"] == {"P01": {"Faces": ["O2"]}}
+
+
 @dataclass(frozen=True)
 class _Cell:
     condition_label: str

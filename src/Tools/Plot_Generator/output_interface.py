@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from Main_App.projects import ProjectDatasetIndex
+from Main_App.projects.experimental_qc_settings import normalize_project_experimental_qc_settings
 from Tools.Plot_Generator.analysis_context import (
     SNRAnalysisContext,
     revalidate_snr_analysis_context,
@@ -39,6 +40,9 @@ class PlotOutputInterfaceMixin(PlotSourceDataMixin):
         if dataset_index.manifest is not None:
             self._analysis_source_kind = "managed_full_fft_provenance"
             self._analysis_project_root = dataset_index.project_root
+            self.spectral_qc_enabled = normalize_project_experimental_qc_settings(
+                dataset_index.manifest
+            ).snr_spectral_screening_enabled
         context = resolve_snr_analysis_context(
             dataset_index,
             legacy_base_frequency_hz=self._analysis_base_freq,

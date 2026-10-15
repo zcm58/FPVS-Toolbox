@@ -5,6 +5,9 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import Mock
+
+import pytest
 
 from Main_App.gui.project_protocol import (
     ProtocolEditorValues,
@@ -139,3 +142,38 @@ def test_recording_schema_drafts_survive_unrelated_save_and_require_explicit_opt
     assert template.recording_oddball_marker_codes == ()
     panel.recording_enabled = False
     assert panel._protocol_from_editor(require_ready=True).recording_oddball_marker_codes == ()
+
+
+@pytest.mark.parametrize("message, field_name, section", [
+    ("Presentation rate must be positive", "protocol_presentation_rate_edit", 0),
+    ("Oddball marker code is invalid", "protocol_oddball_marker_code_edit", 1),
+])
+def test_invalid_protocol_reveals_the_section_containing_the_field(message, field_name, section):
+    owner = next(node for node in ast.parse(SOURCE.read_text(encoding="utf-8")).body
+                 if isinstance(node, ast.ClassDef) and node.name == "SettingsDialog")
+    method = next(node for node in owner.body if isinstance(node, ast.FunctionDef)
+                  and node.name == "_validated_project_protocol")
+    namespace = {
+        "FrequencyProtocol": FrequencyProtocol, "FrequencyProtocolError": FrequencyProtocolError,
+        "ODDBALL_INPUT_MODE_DIRECT_HZ": "oddball_rate_hz", "mark_invalid": Mock(),
+    }
+    exec(compile(ast.fix_missing_locations(ast.Module(body=[method], type_ignores=[])), str(SOURCE), "exec"), namespace)
+    panel = SimpleNamespace(
+        project=object(), tabs=Mock(), protocol_tabs=Mock(), _protocol_tab_index=1,
+        _show_settings_validation=Mock(),
+        _protocol_from_editor=Mock(side_effect=FrequencyProtocolError(message)),
+        _protocol_input_mode=lambda: ODDBALL_INPUT_MODE_RECURRENCE,
+        **{name: Mock() for name in (
+            "protocol_presentation_rate_edit", "protocol_requested_duration_edit",
+            "protocol_expected_cycles_edit", "protocol_oddball_marker_code_edit",
+            "protocol_direct_oddball_rate_edit", "protocol_oddball_every_n_edit",
+        )},
+    )
+
+    assert namespace[method.name](panel) is None
+    panel.tabs.setCurrentIndex.assert_called_once_with(panel._protocol_tab_index)
+    panel.protocol_tabs.setCurrentIndex.assert_called_once_with(section)
+    field = getattr(panel, field_name)
+    field.setFocus.assert_called_once_with()
+    field.selectAll.assert_called_once_with()
+    namespace["mark_invalid"].assert_called_once_with(field, message)

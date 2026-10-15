@@ -3,8 +3,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from Main_App.projects.project import Project
-from Main_App.projects.project_metadata import enumerate_project_metadata
+from Main_App.projects.project_metadata import (
+    enumerate_project_metadata, read_project_experimental_qc_settings,
+)
 
 
 def _write_project(root: Path, name: str) -> Path:
@@ -30,6 +34,23 @@ def test_enumeration_does_not_load_projects(monkeypatch, tmp_path: Path) -> None
 
     metadata = enumerate_project_metadata(tmp_path)
     assert len(metadata) == 3
+
+
+def test_worker_qc_read_preserves_legacy_choices_without_loading_project(monkeypatch, tmp_path):
+    manifest = {"tools": {"snr_plot": {"plot_settings": {"spectral_qc_enabled": False}}}}
+    (tmp_path / "project.json").write_text(json.dumps(manifest), encoding="utf-8")
+    monkeypatch.setattr(Project, "load", lambda *_a, **_k: pytest.fail("QC read loaded GUI project"))
+    settings = read_project_experimental_qc_settings(tmp_path)
+    assert settings.snr_spectral_screening_enabled is False
+    assert settings.stats_dv_screening_enabled is True
+    assert json.loads((tmp_path / "project.json").read_text()) == manifest
+
+
+@pytest.mark.parametrize("payload", ["not json", "[]", "null"])
+def test_worker_qc_read_rejects_invalid_manifest(tmp_path, payload):
+    (tmp_path / "project.json").write_text(payload, encoding="utf-8")
+    with pytest.raises(ValueError):
+        read_project_experimental_qc_settings(tmp_path)
 
 
 def test_selection_uses_single_load_and_manifest_cache(monkeypatch, tmp_path: Path) -> None:

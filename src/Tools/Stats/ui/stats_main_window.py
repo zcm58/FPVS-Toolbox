@@ -161,6 +161,7 @@ class StatsWindow(
         """Refresh processing-owned harmonic state when the tool is revisited."""
 
         super().showEvent(event)
+        self._refresh_dv_screening_controls()
         self._refresh_canonical_harmonic_summary()
 
     def _load_project_context_from_root(self, project_root: Path) -> None:

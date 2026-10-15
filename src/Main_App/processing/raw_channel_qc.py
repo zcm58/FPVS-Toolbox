@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from collections.abc import Callable, Iterable
 from typing import Any, Mapping, Sequence
 
@@ -122,6 +122,7 @@ class RawChannelQCConfig:
     edge_padding_s: float = _CALIBRATION.edge_padding_s
     removed_electrode_detection_mode: str = REMOVED_ELECTRODE_DETECTION_MODE_AUTO
     manual_removed_electrodes: tuple[str, ...] = ()
+    raw_signal_screening_enabled: bool = True
 
 
 @dataclass(frozen=True)
@@ -166,6 +167,7 @@ class RawChannelQCResult:
     def to_payload(self) -> dict[str, object]:
         payload = {
             "method_version": RAW_CHANNEL_QC_METHOD_VERSION,
+            "raw_signal_screening_enabled": self.thresholds.get("raw_signal_screening_enabled", True),
             "n_channels": self.n_channels,
             "n_bad_channels": self.n_bad_channels,
             "bad_fraction": self.bad_fraction,
@@ -648,6 +650,8 @@ class ConditionRawChannelQCResult:
 
     @property
     def message(self) -> str:
+        if not self.thresholds.get("raw_signal_screening_enabled", True) and not self.thresholds.get("auto_detect_removed_electrodes"):
+            return f"Raw signal screening disabled for {self.filename}; manual electrode choices still apply."
         if not self.conditions:
             return f"Condition-aware raw channel QC skipped for {self.filename}: no condition samples were supplied."
         if self.bad_channels or self.raw_baseline_warning or self.review_rules:
@@ -672,6 +676,7 @@ class ConditionRawChannelQCResult:
         midline = sum(channel in MIDLINE_CHANNELS for channel in self.bad_channels)
         payload = {
             "method_version": self.method_version,
+            "raw_signal_screening_enabled": self.thresholds.get("raw_signal_screening_enabled", True),
             "review_only": self.review_only,
             "excluded": self.excluded,
             "reason": self.reason,
@@ -823,6 +828,9 @@ def _config_from_settings(settings: Mapping[str, Any]) -> RawChannelQCConfig:
         else ()
     )
     return RawChannelQCConfig(
+        raw_signal_screening_enabled=_coerce_bool(
+            settings.get("raw_signal_screening_enabled"), True,
+        ),
         max_bad_channels=max(0, max_bad),
         auto_detect_removed_electrodes=(
             mode == REMOVED_ELECTRODE_DETECTION_MODE_AUTO
@@ -1446,6 +1454,7 @@ def evaluate_raw_channel_qc(
     picks = _scalp_picks(raw, stim_channel=stim_channel, ref_channels=ref_channels)
     n_channels = len(picks)
     thresholds = {
+        "raw_signal_screening_enabled": config.raw_signal_screening_enabled,
         "max_bad_channels": config.max_bad_channels,
         "max_bad_fraction": config.max_bad_fraction,
         "max_hemisphere_bad_fraction": config.max_hemisphere_bad_fraction,
@@ -1477,6 +1486,24 @@ def evaluate_raw_channel_qc(
     else:
         scoring_scope = "approved_analyzed_interval_union"
         spans = merge_relative_spans(analysis_spans, n_times=n_times)
+
+    if not config.raw_signal_screening_enabled and not config.auto_detect_removed_electrodes and spans:
+        # Physical/manual repairs retain their authority without reading samples
+        # or running an optional signal screen.
+        scalp_names = {str(raw.ch_names[index]) for index in picks}
+        manual = tuple(
+            channel for channel in config.manual_removed_electrodes if channel in scalp_names
+        )
+        return replace(
+            _empty_result(
+                message=f"Raw signal screening disabled for {filename}; manual electrode choices still apply.",
+                thresholds=thresholds,
+                n_channels=n_channels,
+                scoring_scope="disabled_in_project_settings",
+            ),
+            channels_to_interpolate=manual,
+            manual_removed_channels=manual,
+        )
 
     if n_channels == 0:
         return _empty_result(
@@ -1594,13 +1621,17 @@ def evaluate_raw_channel_qc(
     median_std_uv = _robust_median([row.std_uv for row in channel_stats])
     median_p2p_99_uv = _robust_median([row.p2p_99_uv for row in channel_stats])
     raw_baseline_excluded = (
-        median_std_uv >= config.baseline_exclusion_median_std_uv
+        config.raw_signal_screening_enabled
+        and median_std_uv >= config.baseline_exclusion_median_std_uv
         and median_p2p_99_uv >= config.baseline_exclusion_median_p2p_99_uv
     )
     raw_baseline_warning = (
-        raw_baseline_excluded
-        or median_std_uv >= config.baseline_warning_median_std_uv
-        or median_p2p_99_uv >= config.baseline_warning_median_p2p_99_uv
+        config.raw_signal_screening_enabled
+        and (
+            raw_baseline_excluded
+            or median_std_uv >= config.baseline_warning_median_std_uv
+            or median_p2p_99_uv >= config.baseline_warning_median_p2p_99_uv
+        )
     )
     raw_channel_names = {row.channel for row in channel_stats}
     manual_removed_channels = [
@@ -1737,7 +1768,7 @@ def evaluate_raw_channel_qc(
     right_bad = len(burden["right_channels"])
     midline_bad = len(burden["midline_channels"])
     largest_cluster = tuple(burden["largest_cluster"])
-    burden_findings = tuple(burden["findings"])
+    burden_findings = tuple(burden["findings"]) if config.raw_signal_screening_enabled else ()
 
     review_rules = [str(finding["rule"]) for finding in burden_findings]
     if raw_baseline_excluded:
@@ -1851,6 +1882,7 @@ def _ordered_channel_union(
 
 def _v2_thresholds(config: RawChannelQCConfig) -> dict[str, float | int | bool]:
     return {
+        "raw_signal_screening_enabled": config.raw_signal_screening_enabled,
         "max_bad_channels": config.max_bad_channels,
         "max_bad_fraction": config.max_bad_fraction,
         "max_hemisphere_bad_fraction": config.max_hemisphere_bad_fraction,
@@ -1943,13 +1975,17 @@ def _classify_v2_metrics(
     median_std_uv = _robust_median([row.std_uv for row in rows])
     median_p2p_99_uv = _robust_median([row.p2p_99_uv for row in rows])
     baseline_failure_review = (
-        median_std_uv >= config.baseline_exclusion_median_std_uv
+        config.raw_signal_screening_enabled
+        and median_std_uv >= config.baseline_exclusion_median_std_uv
         and median_p2p_99_uv >= config.baseline_exclusion_median_p2p_99_uv
     )
     baseline_warning = (
-        baseline_failure_review
-        or median_std_uv >= config.baseline_warning_median_std_uv
-        or median_p2p_99_uv >= config.baseline_warning_median_p2p_99_uv
+        config.raw_signal_screening_enabled
+        and (
+            baseline_failure_review
+            or median_std_uv >= config.baseline_warning_median_std_uv
+            or median_p2p_99_uv >= config.baseline_warning_median_p2p_99_uv
+        )
     )
 
     low_variance: list[str] = []
@@ -2374,7 +2410,7 @@ def _condition_result(
         config=config,
         cluster_rules_enabled=cluster_rules_enabled,
     )
-    burden_findings = tuple(burden["findings"])
+    burden_findings = tuple(burden["findings"]) if config.raw_signal_screening_enabled else ()
     review_rules = list(_review_rules(ordered_conditions))
     review_rules.extend(str(finding["rule"]) for finding in burden_findings)
     if any(
@@ -2389,6 +2425,10 @@ def _condition_result(
         if inherited_transient_findings is not None
         else _transient_review_findings(block_rows)
     )
+    if not config.raw_signal_screening_enabled:
+        review_rules = []
+        transient_findings = ()
+        transient_amplitude_findings = ()
     return ConditionRawChannelQCResult(
         filename=filename,
         channel_names=channel_names,
@@ -2403,7 +2443,7 @@ def _condition_result(
         occurrence_review_findings=_occurrence_review_findings(
             ordered_conditions,
             channel_names,
-        ),
+        ) if config.raw_signal_screening_enabled else (),
         transient_review_findings=transient_findings,
         transient_amplitude_review_findings=tuple(transient_amplitude_findings),
         transient_windowing=dict(transient_windowing or {}),
@@ -2527,6 +2567,12 @@ def evaluate_condition_raw_channel_qc_v2(
         for channel in config.manual_removed_electrodes
         if channel in scalp_names
     )
+    if not config.raw_signal_screening_enabled and not config.auto_detect_removed_electrodes:
+        return _condition_result(
+            filename=filename, channel_names=scalp_names, conditions=(),
+            block_rows=(), manual_removed_channels=manual_removed,
+            thresholds=_v2_thresholds(config), config=config,
+        )
     conditions: list[RawChannelConditionAggregate] = []
     all_block_rows: list[RawChannelBlockMetrics] = []
     seen_occurrences: set[tuple[str, int]] = set()
@@ -2833,6 +2879,7 @@ def combine_condition_raw_channel_qc_v2(
             )
 
     config = RawChannelQCConfig(
+        raw_signal_screening_enabled=bool(thresholds.get("raw_signal_screening_enabled", True)),
         max_bad_channels=_coerce_int(
             thresholds.get("max_bad_channels"),
             RawChannelQCConfig.max_bad_channels,

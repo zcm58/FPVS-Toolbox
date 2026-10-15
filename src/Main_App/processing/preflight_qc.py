@@ -349,13 +349,13 @@ class PreflightQcScan:
             or result.transient_review_findings
             or any(
                 row.get("evaluation_status") == "not_evaluated"
+                and row.get("reason") != "disabled_in_project_settings"
                 for row in result.occurrence_evaluation_scope
             )
-            or not result.experimental_detector_evaluated
             or result.raw_spectral_flagged_channels
             or bool(result.raw_spectral_review_rows)
             or result.raw_spectral_evaluation_status
-            in {"not_performed_disabled", "not_evaluated"}
+            == "not_evaluated"
         )
 
 
@@ -1237,6 +1237,7 @@ def _preflight_cache_settings(
         "electrode_montage",
         "electrode_mapping_profile",
         "raw_spectral_screening",
+        "raw_signal_screening_enabled",
     )
     payload: dict[str, object] = {
         key: settings.get(key)
@@ -1278,6 +1279,9 @@ def _preflight_cache_settings(
         **settings,
         "_fpvs_manual_removed_electrodes": payload.get("_fpvs_manual_removed_electrodes", ()),
     }))
+    if payload.get("raw_signal_screening_enabled", True) is True:
+        payload.pop("raw_signal_screening_enabled", None)
+        payload["raw_channel_config"].pop("raw_signal_screening_enabled", None)
     return payload
 
 
@@ -1973,9 +1977,15 @@ def _scan_one_preflight_file_v2(
             stage_totals[stage] += (time.perf_counter() - started) * 1_000.0
 
         qc_started = time.perf_counter()
+        signal_evaluation_enabled = bool(
+            file_qc_settings.get("raw_signal_screening_enabled", True)
+            or _raw_channel_config_from_settings(file_qc_settings).auto_detect_removed_electrodes
+        )
         for condition_index, span in enumerate(scored_spans, start=1):
             if _cancelled():
                 raise _PreflightQcCancelled()
+            if not signal_evaluation_enabled and not raw_spectral_screening.enabled:
+                continue
             detail_prefix = (
                 f"Scanning {file_path.name} · {span.condition_label} "
                 f"{condition_index}/{conditions_total}"
@@ -2177,6 +2187,15 @@ def _scan_one_preflight_file_v2(
                 "conditions": [],
             }
         raw_channel_payload["scoring_scope"] = "approved_analyzed_occurrences"
+        raw_channel_payload["raw_signal_screening_enabled"] = bool(
+            file_qc_settings.get("raw_signal_screening_enabled", True)
+        )
+        if not signal_evaluation_enabled:
+            raw_channel_payload["evaluation_status"] = "not_evaluated"
+            raw_channel_payload["reason"] = "disabled_in_project_settings"
+            raw_channel_payload["message"] = (
+                f"Raw signal screening was disabled for {file_path.name}."
+            )
         raw_channel_payload["occurrence_evaluation_scope"] = (
             _occurrence_evaluation_scope(
                 event_plan,
@@ -2184,6 +2203,11 @@ def _scan_one_preflight_file_v2(
                 excluded_condition_labels=excluded_condition_labels,
             )
         )
+        if not signal_evaluation_enabled:
+            for scope_row in raw_channel_payload["occurrence_evaluation_scope"]:
+                if scope_row.get("evaluation_status") == "evaluated":
+                    scope_row["evaluation_status"] = "not_evaluated"
+                    scope_row["reason"] = "disabled_in_project_settings"
         raw_channel_payload["analysis_span_plan_fingerprint"] = str(
             scored_source_plan["fingerprint"]
         )

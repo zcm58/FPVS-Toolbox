@@ -188,6 +188,8 @@ def test_processing_params_preserve_project_geometry_in_run_plan(mapping):
         preprocessing=settings,
         experimental_qc_settings=SimpleNamespace(
             raw_spectral_screening=SimpleNamespace(to_manifest=lambda: {}),
+            raw_signal_screening_enabled=True,
+            kurtosis_screening_enabled=True,
         ),
     )
     params, messages = _build_params_for_project(project)

@@ -206,7 +206,7 @@ class PostProcessingPipelineWorker(QObject):
                     cache_stack,
                 )
                 return
-            qc_message = "FPVS Toolbox is checking summed BCA values before final harmonic selection."
+            qc_message = "FPVS Toolbox is checking completed outputs before final harmonic selection."
             self._emit_phase_progress(
                 _PHASE_FREQUENCY_DOMAIN_QC,
                 0,
@@ -250,6 +250,8 @@ class PostProcessingPipelineWorker(QObject):
                     PostProcessingStepResult(
                         "frequency_domain_qc",
                         True,
+                        "Summed-BCA screening is disabled; required output checks completed."
+                        if qc_report.get("screening_enabled") is False else
                         "Frequency-domain QC found no review-blocking flags.",
                     )
                 )

@@ -279,7 +279,7 @@ class KurtosisReviewDialog(ReviewDialog):
         self.auto_checkbox.setToolTip(
             "For pending findings in this review. Uses the absolute normalized score, "
             "not raw kurtosis. Turn off to review every finding manually. "
-            "The starting choice comes from Settings > Experimental > Electrodes. "
+            "The starting choice comes from Settings > Experimental > Preprocessing QC > Signals. "
             "Changes here apply to this review only. Applied automatic decisions "
             "are saved with their experimental policy."
         )

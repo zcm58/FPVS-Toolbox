@@ -7,9 +7,11 @@ import os
 import threading
 import time
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Callable, Dict
 
 import pandas as pd
+from Main_App.projects.project_metadata import read_project_experimental_qc_settings
 from PySide6.QtCore import QObject, QRunnable, Signal, Slot
 
 from Tools.Stats.analysis.baseline_vs_zero import run_baseline_vs_zero_tests
@@ -213,6 +215,7 @@ def _apply_outlier_exclusion(
     enabled: bool,
     abs_limit: float,
     message_cb,
+    flag_finite_extremes: bool = True,
 ) -> tuple[pd.DataFrame, OutlierExclusionReport]:
     _ = enabled
     filtered_df, report = apply_hard_dv_exclusion(
@@ -222,6 +225,7 @@ def _apply_outlier_exclusion(
         condition_col="condition",
         roi_col="roi",
         value_col="value",
+        flag_finite_extremes=flag_finite_extremes,
     )
     excluded_ids = sorted({p.participant_id for p in report.participants if p.required_exclusion})
     if message_cb:
@@ -486,6 +490,10 @@ def _prepare_single_group_data(
         enabled=outlier_exclusion_enabled,
         abs_limit=outlier_abs_limit,
         message_cb=message_cb,
+        flag_finite_extremes=(
+            read_project_experimental_qc_settings(Path(project_root)).stats_dv_screening_enabled
+            if managed_project else True
+        ),
     )
     exclusion_report = merge_exclusion_reports(exclusion_report, qc_report)
     required_exclusions = _extract_required_exclusions(exclusion_report)

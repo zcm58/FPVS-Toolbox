@@ -52,6 +52,7 @@ _EXPERIMENTAL_QC_SETTINGS_NAMES = {
     "RawSpectralScreeningSettings",
     "SummedBcaScreeningSettings",
     "normalize_experimental_qc_settings",
+    "normalize_project_experimental_qc_settings",
     "normalize_raw_spectral_screening_settings",
     "normalize_summed_bca_screening_settings",
 }

@@ -59,6 +59,13 @@ complete-core inference, or max-|t| resampling.
 
 ## Locked Harmonic And QC Contract
 
+Optional finite-DV extreme flags follow the project's experimental
+`stats_dv_screening_enabled` switch in Settings > Experimental > Post-processing
+QC. New projects start off; legacy defaults remain on. Single- and multi-group
+preparation read the committed setting. Nonfinite-value handling, manual
+exclusions, the frozen cohort and inference methods remain mandatory and
+unchanged. The tool displays the setting but does not maintain a competing toggle.
+
 The default Summed BCA policy uses the processing-time, group-level
 significant-harmonic list calculated over the union of predefined-ROI
 electrodes. It detects non-base oddball harmonics with strict `z > 1.64` and

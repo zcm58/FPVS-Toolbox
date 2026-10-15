@@ -114,6 +114,8 @@ def _native_execution_identity() -> tuple | None:
 
 
 def checkpoint_identity(raw, params: dict, preprocessing_fingerprint: str) -> CheckpointIdentity | None:
+    if not params.get("kurtosis_screening_enabled", True):
+        return None
     if params.get("enable_kurtosis_checkpoint_cache", True) is not True:
         return None
     project_root = params.get("project_root")

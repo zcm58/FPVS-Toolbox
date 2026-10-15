@@ -94,6 +94,35 @@ def test_processing_params_use_one_frozen_project_protocol_snapshot(tmp_path, co
     )
 
 
+@pytest.mark.parametrize("field", ["raw_signal_screening_enabled", "kurtosis_screening_enabled"])
+def test_experimental_preprocessing_switch_reaches_runtime_and_invalidates_cache(
+    tmp_path, condition_validation, field,
+):
+    from dataclasses import replace
+    from Main_App.Performance import process_runner as runner
+
+    project = _ready_project(tmp_path / "project")
+    host = SimpleNamespace(currentProject=project, event_rows=[("Condition A", "11")])
+    project.experimental_qc_settings = replace(project.experimental_qc_settings, **{field: True})
+    enabled = processing_inputs.build_validated_params(host)
+    project.experimental_qc_settings = replace(project.experimental_qc_settings, **{field: False})
+    disabled = processing_inputs.build_validated_params(host)
+    assert enabled[field] is True
+    assert disabled[field] is False
+    assert build_processing_fingerprint(project, enabled, enabled["event_id_map"]) != build_processing_fingerprint(
+        project, disabled, disabled["event_id_map"],
+    )
+    source = tmp_path / "P001.bdf"
+    source.write_bytes(b"raw identity")
+    first = runner._preproc_cache_payload(source, enabled, mne_version=mne.__version__)
+    second = runner._preproc_cache_payload(source, disabled, mne_version=mne.__version__)
+    assert runner._preproc_cache_key(first) != runner._preproc_cache_key(second)
+    legacy = dict(enabled)
+    legacy.pop(field)
+    legacy_payload = runner._preproc_cache_payload(source, legacy, mne_version=mne.__version__)
+    assert runner._preproc_cache_key(first) == runner._preproc_cache_key(legacy_payload)
+
+
 @pytest.mark.parametrize("stale_root", [False, True])
 def test_kurtosis_worker_uses_current_project_without_changing_planning_settings(
     tmp_path, condition_validation, stale_root,
@@ -126,7 +155,12 @@ def test_kurtosis_worker_uses_current_project_without_changing_planning_settings
 def test_gui_params_allow_kurtosis_scan_to_resume_in_processing(
     tmp_path, monkeypatch, condition_validation,
 ) -> None:
+    from dataclasses import replace
+
     project = _ready_project(tmp_path / "project")
+    project.experimental_qc_settings = replace(
+        project.experimental_qc_settings, kurtosis_screening_enabled=True,
+    )
     project.update_frequency_protocol(FrequencyProtocol.from_recurrence(
         10, 5, expected_analyzed_oddball_cycles=10,
         expected_analyzed_oddball_cycles_source="manual",
