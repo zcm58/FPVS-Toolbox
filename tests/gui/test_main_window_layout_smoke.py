@@ -702,7 +702,7 @@ def test_reset_project_processing_cache_action_requires_confirmation_and_is_scop
     win = _build_window(tmp_path, qtbot, monkeypatch)
     project_root = tmp_path / "project"
     project_root.mkdir()
-    win.currentProject = SimpleNamespace(project_root=project_root)
+    win.currentProject = SimpleNamespace(project_root=project_root, event_map={}, options={})
 
     preprocessed_cache = project_root / ".fpvs_cache" / "preprocessed"
     preprocessed_cache.mkdir(parents=True)
@@ -790,7 +790,7 @@ def test_reset_project_processing_cache_refuses_without_project_or_while_busy(
 
     project_root = tmp_path / "project"
     project_root.mkdir()
-    win.currentProject = SimpleNamespace(project_root=project_root)
+    win.currentProject = SimpleNamespace(project_root=project_root, event_map={}, options={})
     win._settings_harmonic_recalc_thread = SimpleNamespace(isRunning=lambda: True)
     win.actionResetProjectProcessingCache.trigger()
     win._settings_harmonic_recalc_thread = None
@@ -815,7 +815,7 @@ def test_reset_project_processing_cache_disables_start_until_worker_finishes(
     win = _build_window(tmp_path, qtbot, monkeypatch)
     project_root = tmp_path / "project"
     project_root.mkdir()
-    win.currentProject = SimpleNamespace(project_root=project_root)
+    win.currentProject = SimpleNamespace(project_root=project_root, event_map={}, options={})
     event_edits = win.event_rows[0].findChildren(QLineEdit)
     event_edits[0].setText("Condition")
     event_edits[1].setText("1")
@@ -997,6 +997,8 @@ def test_sidebar_stats_embeds_in_main_workspace(
         project_root=project_root,
         input_folder=project_root,
         subfolders={},
+        event_map={},
+        options={},
     )
     win.stacked.setCurrentIndex(1)
     qtbot.wait(20)
@@ -1042,7 +1044,7 @@ def test_sidebar_free_harmonic_clustering_is_available_without_beta_tools(
     )
     project_root = tmp_path / "project"
     project_root.mkdir()
-    win.currentProject = SimpleNamespace(project_root=project_root)
+    win.currentProject = SimpleNamespace(project_root=project_root, event_map={}, options={})
     page = QWidget(win.workspace_stack)
     page.setObjectName("embedded_free_harmonic_clustering_page")
     win.workspace_stack.addWidget(page)
@@ -1148,6 +1150,8 @@ def test_sidebar_snr_plot_generator_embeds_in_main_workspace(
         project_root=project_root,
         input_folder=project_root,
         subfolders={"excel": "1 - Excel Data Files", "snr": "2 - SNR Plots"},
+        event_map={},
+        options={},
     )
     win.stacked.setCurrentIndex(1)
     qtbot.wait(20)
@@ -1212,6 +1216,8 @@ def test_sidebar_scalp_maps_embeds_in_main_workspace(
         project_root=project_root,
         input_folder=project_root,
         subfolders={"excel": "1 - Excel Data Files"},
+        event_map={},
+        options={},
     )
     win.stacked.setCurrentIndex(1)
     qtbot.wait(20)
@@ -1531,7 +1537,7 @@ def test_shared_post_processing_remedy_launches_for_active_project(
     win = _build_window(tmp_path, qtbot, monkeypatch)
     project_root = tmp_path / "project"
     project_root.mkdir()
-    win.currentProject = SimpleNamespace(project_root=project_root)
+    win.currentProject = SimpleNamespace(project_root=project_root, event_map={}, options={})
     prompts: list[tuple[str, str]] = []
     launches: list[object] = []
     monkeypatch.setattr(
@@ -1568,7 +1574,7 @@ def test_shared_post_processing_remedy_rejects_different_project(
     other_root = tmp_path / "other-project"
     active_root.mkdir()
     other_root.mkdir()
-    win.currentProject = SimpleNamespace(project_root=active_root)
+    win.currentProject = SimpleNamespace(project_root=active_root, event_map={}, options={})
     warnings: list[tuple[str, str]] = []
     prompts: list[object] = []
     launches: list[object] = []
@@ -1616,7 +1622,7 @@ def test_fhc_post_processing_remedy_refreshes_current_page(
     win = _build_window(tmp_path, qtbot, monkeypatch)
     project_root = tmp_path / "project"
     project_root.mkdir()
-    win.currentProject = SimpleNamespace(project_root=project_root)
+    win.currentProject = SimpleNamespace(project_root=project_root, event_map={}, options={})
     refreshes: list[dict[str, object]] = []
     win._free_harmonic_clustering_page = SimpleNamespace(
         project_root=project_root,
@@ -1729,7 +1735,7 @@ def test_fhc_page_routes_post_processing_request_to_main_window(
     win = _build_window(tmp_path, qtbot, monkeypatch)
     project_root = tmp_path / "project"
     project_root.mkdir()
-    win.currentProject = SimpleNamespace(project_root=project_root)
+    win.currentProject = SimpleNamespace(project_root=project_root, event_map={}, options={})
     requests: list[tuple[str, str, str]] = []
     monkeypatch.setattr(
         free_harmonic_gui,
@@ -1811,6 +1817,8 @@ def test_sidebar_individual_detectability_embeds_in_main_workspace(
         project_root=project_root,
         input_folder=project_root,
         subfolders={"excel": "1 - Excel Data Files"},
+        event_map={},
+        options={},
     )
     win.stacked.setCurrentIndex(1)
     qtbot.wait(20)

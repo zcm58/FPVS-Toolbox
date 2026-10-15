@@ -37,7 +37,7 @@ def main() -> int:
             try:
                 result = subprocess.run(
                     [sys.executable, "-m", "pytest", "--allow-qt-tests", entry,
-                     "--maxfail=1", "-vv", "--capture=tee-sys",
+                     "-vv", "--capture=tee-sys",
                      f"--junitxml={prefix.with_suffix('.xml')}"],
                     cwd=root, env=environment, stdout=log, stderr=subprocess.STDOUT,
                     timeout=240,

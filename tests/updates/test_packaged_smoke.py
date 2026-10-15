@@ -122,6 +122,28 @@ def test_failed_dependency_reports_actionable_failure(
     assert "missing scientific dependency" in result["error"]
 
 
+def test_checkpoint_survives_a_fatal_process_exit_without_qt(tmp_path: Path) -> None:
+    report = tmp_path / "crashed.json"
+    command = (
+        "import os\n"
+        "from pathlib import Path\n"
+        "from Main_App.diagnostics import packaged_smoke\n"
+        "def crash():\n"
+        "    os._exit(7)\n"
+        "packaged_smoke.dependency_report = crash\n"
+        f"packaged_smoke.run_check(Path({str(report)!r}))\n"
+    )
+    completed = subprocess.run(
+        [sys.executable, "-c", command],
+        env=dict(os.environ, PYTHONPATH=str(REPO / "src")),
+        capture_output=True, text=True, timeout=30, check=False,
+    )
+    assert completed.returncode == 7
+    result = json.loads(report.read_text())
+    assert result["passed"] is False
+    assert result["stage"] == "Start packaged diagnostics"
+
+
 def test_mismatched_main_and_updater_versions_fail(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

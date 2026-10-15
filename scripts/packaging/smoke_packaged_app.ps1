@@ -50,7 +50,7 @@ function Invoke-PackagedProbe {
         }
         $report = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json
         if ($process.ExitCode -ne 0 -or $report.passed -ne $true) {
-            throw "Packaged $mode smoke failed: $($report.error). Report: $reportPath"
+            throw "Packaged $mode smoke failed (exit $($process.ExitCode), stage '$($report.stage)'): $($report.error). Report: $reportPath"
         }
     } finally { $process.Dispose() }
     if ($report.schema_version -ne 1 -or $report.mode -ne $mode -or

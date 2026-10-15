@@ -2,7 +2,7 @@
 
 from types import SimpleNamespace
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPoint, Qt
 from PySide6.QtWidgets import QDialog, QLineEdit, QScrollArea, QTabWidget, QVBoxLayout
 
 from Main_App.gui.settings_panel import SettingsDialog
@@ -50,13 +50,21 @@ def _ready_protocol():
     )
 
 
+def _toggle_condition_markers(qtbot, dialog):
+    checkbox = dialog.protocol_condition_markers_check
+    assert checkbox.isVisible() and checkbox.isEnabled()
+    # The checkbox expands across its card; its empty trailing area is not a
+    # native click target. Click the indicator as a user would.
+    qtbot.mouseClick(checkbox, Qt.LeftButton, pos=QPoint(10, checkbox.height() // 2))
+
+
 def test_condition_mapping_is_opt_in_and_disabling_restores_shared_code(qtbot):
     dialog = _dialog(qtbot, _ready_protocol())
     assert not dialog.protocol_condition_markers_check.isChecked()
     assert not dialog.protocol_condition_markers_table.isVisible()
     assert dialog.protocol_oddball_marker_code_edit.isEnabled()
     assert dialog._protocol_from_editor(require_ready=True).condition_oddball_marker_codes == ()
-    qtbot.mouseClick(dialog.protocol_condition_markers_check, Qt.LeftButton)
+    _toggle_condition_markers(qtbot, dialog)
     table = dialog.protocol_condition_markers_table
     assert table.isVisible()
     assert table.height() >= 168
@@ -69,11 +77,11 @@ def test_condition_mapping_is_opt_in_and_disabling_restores_shared_code(qtbot):
         table.item(row, 2).setText(str(51 + row))
     assert dialog._protocol_from_editor(require_ready=True).condition_oddball_marker_codes == tuple((code, code + 50) for code in range(1, 6))
     assert "5 condition-specific" in dialog.protocol_status.text()
-    qtbot.mouseClick(dialog.protocol_condition_markers_check, Qt.LeftButton)
+    _toggle_condition_markers(qtbot, dialog)
     assert not table.isVisible()
     assert dialog.protocol_oddball_marker_code_edit.isEnabled()
     assert dialog._protocol_from_editor(require_ready=True).condition_oddball_marker_codes == ()
-    qtbot.mouseClick(dialog.protocol_condition_markers_check, Qt.LeftButton)
+    _toggle_condition_markers(qtbot, dialog)
     assert table.item(0, 2).text() == "51"
 
 

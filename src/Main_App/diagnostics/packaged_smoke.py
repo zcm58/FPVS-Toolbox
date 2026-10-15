@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import configparser
+import faulthandler
 import importlib
 import json
 import os
@@ -16,7 +17,7 @@ import tempfile
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator
+from typing import Callable, Iterator
 
 
 DEPENDENCY_IMPORTS = (
@@ -102,9 +103,10 @@ def require_visible_opt_in() -> None:
         raise RuntimeError("Visible packaged smoke requires the native Qt platform.")
 
 
-def visible_probe(projects: Path) -> dict[str, object]:
+def visible_probe(projects: Path, checkpoint: Callable[[str], None]) -> dict[str, object]:
     """Show the actual shell, process native events and exit after a short delay."""
     require_visible_opt_in()
+    checkpoint("Import native GUI modules")
     from PySide6.QtCore import QCoreApplication, QThread, QTimer
     from PySide6.QtWidgets import QApplication
 
@@ -134,8 +136,10 @@ def visible_probe(projects: Path) -> dict[str, object]:
         QCoreApplication.setOrganizationDomain("msstate.edu")
         QCoreApplication.setApplicationName("FPVS Toolbox")
         QCoreApplication.setApplicationVersion(FPVS_TOOLBOX_VERSION)
+        checkpoint("Create QApplication")
         app = QApplication([])
         apply_light_palette(app)
+        checkpoint("Construct Main Window")
         window = MainWindow()
         if window.projectsRoot.resolve() != projects.resolve() or window.currentProject is not None:
             raise RuntimeError("Packaged smoke did not retain its isolated empty project root.")
@@ -157,6 +161,7 @@ def visible_probe(projects: Path) -> dict[str, object]:
                 for page in pages:
                     shutdown = getattr(page, "shutdown", None)
                     if callable(shutdown):
+                        checkpoint(f"Stop tool workers: {type(page).__name__}")
                         shutdown()
             if has_active_operations() or any(thread.isRunning() for thread in window.findChildren(QThread)):
                 if time.monotonic() - shutdown_started < 15:
@@ -166,6 +171,7 @@ def visible_probe(projects: Path) -> dict[str, object]:
                 app.exit(1)
                 return
             for page in pages:
+                checkpoint(f"Close tool: {type(page).__name__}")
                 if not page.close():
                     result["error"] = "Packaged tool refused to close after worker cleanup."
                     app.exit(1)
@@ -174,6 +180,7 @@ def visible_probe(projects: Path) -> dict[str, object]:
             result["window_title"] = window.windowTitle()
             result["application_version"] = app.applicationVersion()
             window.currentProject = None
+            checkpoint("Close Main Window")
             result["main_window_closed"] = window.close()
             app.quit()
 
@@ -186,8 +193,10 @@ def visible_probe(projects: Path) -> dict[str, object]:
                     finish()
                     return
                 label, factory = TOOL_PAGE_FACTORIES[next_page]
+                checkpoint(f"Construct and show tool: {label}")
                 pages.append(show_tool_page(window, factory))
                 result["tool_pages"].append(label)
+                checkpoint(f"Process native events: {label}")
                 next_page += 1
                 QTimer.singleShot(250, advance)
             except Exception as error:
@@ -195,9 +204,12 @@ def visible_probe(projects: Path) -> dict[str, object]:
                 result["error"] = f"{label}: {type(error).__name__}: {error}"
                 finish()
 
+        checkpoint("Show Main Window")
         window.show()
         QTimer.singleShot(500, advance)
+        checkpoint("Run native event loop")
         exit_code = app.exec()
+        checkpoint("Native event loop stopped")
         if result.get("error"):
             raise RuntimeError(str(result["error"]))
         if exit_code != 0 or not result["main_window_visible"] or not result.get("main_window_closed"):
@@ -211,7 +223,22 @@ def visible_probe(projects: Path) -> dict[str, object]:
         LoretaVisualizerWindow._start_fsaverage_load = original_template_load
 
 
+@contextmanager
+def native_crash_trace(report_path: Path) -> Iterator[None]:
+    """Retain a Python stack when a frozen window hits a fatal native exception."""
+    with report_path.with_suffix(".fault.log").open("w", encoding="utf-8") as stream:
+        already_enabled = faulthandler.is_enabled()
+        if not already_enabled:
+            faulthandler.enable(file=stream, all_threads=True)
+        try:
+            yield
+        finally:
+            if not already_enabled:
+                faulthandler.disable()
+
+
 def run_check(report_path: Path, *, visible: bool = False, workflows: bool = False) -> int:
+    report_path.parent.mkdir(parents=True, exist_ok=True)
     report: dict[str, object] = {
         "schema_version": 1,
         "mode": "visible" if visible else "workflows" if workflows else "dependencies",
@@ -222,6 +249,15 @@ def run_check(report_path: Path, *, visible: bool = False, workflows: bool = Fal
         "network": False,
         "installer": False,
     }
+
+    def checkpoint(stage: str) -> None:
+        report["stage"] = stage
+        report.setdefault("checkpoints", []).append(stage)
+        # Close after each write so fatal native crashes still leave the most
+        # recent operation and a failed result in the retained CI evidence.
+        report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
+
+    checkpoint("Start packaged diagnostics")
     try:
         if visible:
             require_visible_opt_in()
@@ -238,7 +274,8 @@ def run_check(report_path: Path, *, visible: bool = False, workflows: bool = Fal
             if "PySide6.QtWidgets" in sys.modules:
                 raise RuntimeError("Dependency-only smoke unexpectedly imported QtWidgets.")
             if visible:
-                report.update(visible_probe(projects))
+                with native_crash_trace(report_path):
+                    report.update(visible_probe(projects, checkpoint))
                 report["gui_exercised"] = True
             if workflows:
                 from Main_App.diagnostics.packaged_workflows import run_workflows
@@ -248,7 +285,6 @@ def run_check(report_path: Path, *, visible: bool = False, workflows: bool = Fal
     except Exception as exc:
         report["error"] = f"{type(exc).__name__}: {exc}"
     report["qt_widgets_loaded"] = "PySide6.QtWidgets" in sys.modules
-    report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
     return 0 if report["passed"] else 1
 

@@ -1936,7 +1936,8 @@ def test_embedded_settings_harmonic_save_uses_post_processing_activity_page(
     assert win.menuBar().isEnabled() is True
     assert win.btn_start.text() == "Start Processing"
     assert win.busy is False
-    assert win.lbl_debug.isHidden()
+    assert win.settings.debug_enabled()
+    assert not win.lbl_debug.isHidden()
 
 
 @pytest.mark.parametrize("finish_inside_message", [False, True])

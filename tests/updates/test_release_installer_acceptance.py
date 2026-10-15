@@ -93,3 +93,16 @@ def test_installed_evidence_checks_bytes_and_registration(acceptance, tmp_path, 
     (bundle / "FPVS_Toolbox.exe").write_bytes(b"changed bytes")
     with pytest.raises(RuntimeError, match="release bytes differ"):
         acceptance.assert_installed(bundle, manifest, "3.0.0")
+
+
+def test_exact_release_metadata_rejects_changed_artifact_bytes(acceptance, tmp_path):
+    from build_patch import build_release_manifest
+
+    installer = tmp_path / "FPVSToolbox-3.0.0-setup.exe"
+    installer.write_bytes(b"inert acceptance installer")
+    metadata = build_release_manifest(target_version="3.0.0", installer_dir=tmp_path, patch_builds=[])
+    digests = acceptance.verify_release_metadata(installer, "3.0.0")
+    assert set(digests) == {installer.name, metadata.name}
+    installer.write_bytes(b"changed after checksum publication")
+    with pytest.raises(RuntimeError, match="checksum sidecar differs"):
+        acceptance.verify_release_metadata(installer, "3.0.0")

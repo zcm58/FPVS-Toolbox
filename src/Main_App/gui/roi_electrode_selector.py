@@ -10,6 +10,7 @@ from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QSizePolicy, QToolButton, QWidget
 
 from Main_App.gui.components import font_for_role
+from Main_App.gui.typography import css_font_declaration
 from Main_App.gui.roi_electrode_selector_state import (
     BIOSEMI64_LABELS,
     BIOSEMI64_POLAR_COORDINATES,
@@ -210,6 +211,7 @@ class ElectrodeMapWidget(QWidget):
         button.setStyleSheet(
             f"""
             QToolButton {{
+                {css_font_declaration("caption")}
                 background: {background};
                 color: {foreground};
                 border: {border_width}px {border_style} {self._active_color if checked else BORDER_COLOR};
