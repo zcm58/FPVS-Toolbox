@@ -1,0 +1,89 @@
+name: Windows release acceptance
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["codex/v3-release"]
+    paths:
+      - "src/**"
+      - "scripts/packaging/**"
+      - "requirements.txt"
+      - "assets/**"
+      - ".github/workflows/windows-packaging.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  packaged-release:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    env:
+      MPLBACKEND: Agg
+      PYTHONNOUSERSITE: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Install pinned build dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Locate native installer compiler
+        shell: pwsh
+        run: |
+          $compiler = "${env:ProgramFiles(x86)}/Inno Setup 6/ISCC.exe"
+          if (-not (Test-Path -LiteralPath $compiler)) { throw 'Inno Setup 6 is missing from the hosted image.' }
+          "ISCC_EXE=$compiler" >> $env:GITHUB_ENV
+      - name: Build main application, updater, and release installer
+        shell: pwsh
+        run: ./scripts/packaging/build_release.ps1 -SkipInstall -AllowVisibleGui
+      - name: Verify native patch ownership and rollback fixtures
+        run: python scripts/packaging/check_patch_installer_lifecycle.py --inno-compiler "$env:ISCC_EXE" --execute
+      - name: Fetch the authenticated v2.1.2 upgrade baseline
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          New-Item -ItemType Directory -Force build/release-baseline | Out-Null
+          gh release download v2.1.2 --repo zcm58/FPVS-Toolbox-Releases --pattern FPVSToolbox-2.1.2-setup.exe --dir build/release-baseline
+          if ($LASTEXITCODE -ne 0) { throw 'Could not download the published upgrade baseline.' }
+          $digest = (Get-FileHash build/release-baseline/FPVSToolbox-2.1.2-setup.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($digest -cne '192d43972e8b2031566d3b1bcbc9ae2b46305f39a544d3e12a7e46e6730178a6') { throw 'Published v2.1.2 installer digest differs from the reviewed baseline.' }
+      - name: Qualify the exact installer on the disposable native Windows runner
+        run: python scripts/packaging/check_release_installer.py --execute --baseline build/release-baseline/FPVSToolbox-2.1.2-setup.exe
+      - name: Record build provenance
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force build/release-acceptance | Out-Null
+          @{ commit = $env:GITHUB_SHA; run = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"; runner = $env:RUNNER_OS; image = $env:ImageVersion } | ConvertTo-Json | Set-Content build/release-acceptance/build-provenance.json
+      - name: Retain acceptance diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-release-evidence-${{ github.sha }}
+          path: |
+            build/packaged-smoke/
+            build/pyinstaller-updater/packaging-check.json
+            build/pyinstaller-updater/gui-smoke.json
+            build/patch-installer-lifecycle/**/report.json
+            build/patch-installer-lifecycle/**/*.log
+            build/release-acceptance/
+            build/installer-inventory/
+            build/pyinstaller/**/warn-*.txt
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Retain qualified installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-release-installer-${{ github.sha }}
+          path: installers/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
