@@ -34,6 +34,11 @@ jobs:
           cache-dependency-path: requirements.txt
       - name: Install pinned build dependencies
         run: python -m pip install -r requirements.txt
+      - name: Check native source tool startup before building
+        timeout-minutes: 3
+        env:
+          FPVS_ALLOW_QT_TESTS: "1"
+        run: python src/main.py --packaged-smoke-output build/packaged-smoke/source-visible.json
       - name: Locate native installer compiler
         shell: pwsh
         run: |
