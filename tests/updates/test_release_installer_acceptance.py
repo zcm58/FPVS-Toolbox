@@ -258,7 +258,9 @@ def test_control_message_signature_preserves_pointer_width(acceptance, monkeypat
     ]
 
 
-def test_setup_button_selection_retains_foreign_control_diagnostics(acceptance):
+# Inno 6.7.1 modern caption captured in run 38786752342; also retain classic spelling.
+@pytest.mark.parametrize("next_caption", ["&Next", "&Next >"])
+def test_setup_button_selection_retains_foreign_control_diagnostics(acceptance, next_caption):
     import ctypes
     from types import SimpleNamespace
 
@@ -267,7 +269,7 @@ def test_setup_button_selection_retains_foreign_control_diagnostics(acceptance):
         1: ("&Cancel", True, True),
         2: ("&Install", True, False),
         3: ("&Finish", False, True),
-        4: ("&Next >", True, True),
+        4: (next_caption, True, True),
     }
     clicks = []
 
@@ -297,12 +299,12 @@ def test_setup_button_selection_retains_foreign_control_diagnostics(acceptance):
         IsWindowEnabled=lambda handle: controls[handle][2],
         PostMessageW=lambda *args: clicks.append(args) or 1,
     )
-    assert native.advance_setup(100) == "Next >"
+    assert native.advance_setup(100) == next_caption.replace("&", "")
     assert clicks == [(4, 0x00F5, 0, 0)]
     assert native.last_setup_controls[100][2] == {
         "class": "TNewButton", "caption": "&Install", "visible": True, "enabled": False,
     }
-    assert native.last_setup_controls[100][4]["caption"] == "&Next >"
+    assert native.last_setup_controls[100][4]["caption"] == next_caption
 
 
 def test_relaunch_timeout_retains_control_evidence_and_terminates_fixture_process(acceptance, tmp_path, monkeypatch):

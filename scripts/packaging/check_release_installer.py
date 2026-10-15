@@ -303,7 +303,7 @@ class NativeWindows:
                              "visible": visible, "enabled": enabled})
             text = caption.replace("&", "").strip()
             if (class_name in {"TNewButton", "Button"}
-                    and text in {"Next >", "Install", "Finish"} and visible and enabled):
+                    and text in {"Next", "Next >", "Install", "Finish"} and visible and enabled):
                 buttons.append((child, text))
             return True
 

@@ -11,12 +11,16 @@ stable publication.
   with pending manual review remain marked as pending. Completed implementation
   plans are removed only after their contracts and remaining release checks
   have a durable owner.
-- At `0442e882`, source CI passed 8,114 tests with 24 skips, including Qt
+- At `33977048`, source CI passed 8,119 tests with 24 skips, including Qt
   coverage; lint, Windows backend, documentation deployment, and agent audits
-  also passed. The local repository gate passed 7,487 non-Qt tests with 25 skips.
+  also passed. The local repository gate passed 7,487 non-Qt tests with 25 skips
+  at `0442e882`, before the subsequent bounded native-driver changes.
   Native frozen checks, fresh installation, and the v2.1.2 upgrade passed;
-  interactive installer relaunch timed out, so complete lifecycle acceptance
-  remains open. The release ledger links the exact runs and their limits.
+  interactive installer relaunch timed out because the driver expected
+  `Next >` while the modern installer displayed `Next`. The exact-caption
+  correction preserves the existing control guards; complete lifecycle
+  acceptance remains open pending its rerun. The release ledger links the
+  exact runs and their limits.
 - Two private recordings passed baseline/current scientific-output comparison;
   prepared-cache results matched and warm resume repeated no work. A historical
   prepared FHC replay also matched its scientific arrays and result, with

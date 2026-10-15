@@ -34,30 +34,34 @@ query the old private repository, so
 their first v3 upgrade requires a manual full-installer download. No new v3
 release is published by this closeout work.
 
-At `0442e882`, [source CI](https://github.com/zcm58/FPVS-Toolbox/actions/runs/38783022106)
-passed its Ubuntu suite with 8,114 tests and 24 skips, including registered Qt
-coverage; the Windows backend job also passed. The [agent harness](https://github.com/zcm58/FPVS-Toolbox/actions/runs/38783033348)
-and [strict documentation build/deployment](https://github.com/zcm58/FPVS-Toolbox/actions/runs/38783072852)
+At `33977048`, [source CI](https://github.com/zcm58/FPVS-Toolbox/actions/runs/38786752274)
+passed its Ubuntu suite with 8,119 tests and 24 skips, including registered Qt
+coverage; lint and the Windows backend job also passed. The [agent harness](https://github.com/zcm58/FPVS-Toolbox/actions/runs/38786752477)
+and [strict documentation build/deployment](https://github.com/zcm58/FPVS-Toolbox/actions/runs/38786752884)
 also passed. The local repository gate passed all audits, Ruff, compilation,
-and 7,487 non-Qt tests with 25 skips.
+and 7,487 non-Qt tests with 25 skips at `0442e882`, before the bounded native-driver
+changes. Focused updates checks after the exact-caption correction passed 533
+tests with four skips; audits, Ruff, compilation, and strict documentation
+validation also passed.
 
-The [native Windows run](https://github.com/zcm58/FPVS-Toolbox/actions/runs/38783027614)
+The [native Windows run](https://github.com/zcm58/FPVS-Toolbox/actions/runs/38786752342)
 at the same commit passed source/frozen startup, dependency and synthetic
 scientific probes, ownership/rollback fixtures, installer build, fresh install,
 launch/second launch, fresh uninstall with user-data preservation, and the
 v2.1.2 upgrade with authenticated obsolete-file cleanup. Upgraded dependency,
 synthetic-workflow, and visible startup probes also passed. The run failed at
 the bounded interactive installer-relaunch step; the final upgraded uninstall
-was not reached and the qualified-installer upload was skipped. The driver
-selected no eligible child controls; the old diagnostics cannot distinguish
-unreadable captions from disabled controls. It now reads foreign control text
-with bounded `WM_GETTEXT` messages, as described by
-[Microsoft](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getwindowtextw),
-and retains child classes, captions, and enabled/visible states. Only verified
-Inno/standard button classes with the existing exact caption whitelist can be
-clicked. Non-GUI coverage checks pointer widths, timeout behavior, button
-selection, and retained evidence/cleanup. A complete native rerun remains
-necessary; the adapter change is not yet proof of the timeout's sole cause.
+was not reached and the qualified-installer upload was skipped. Retained
+`release-acceptance/relaunch-controls.json` identifies the exact mismatch on
+Select Destination Location: a visible, enabled `TNewButton` has caption
+`&Next`, while the driver accepted only `Next >`. The driver now accepts the
+observed `Next` caption and the classic `Next >` spelling, retaining exact
+caption matching and button-class, visibility, and enabled-state guards.
+The regression fixture fails for the observed caption against the prior driver
+and passes for both spellings after the repair. Bounded foreign-control text
+reads, timeout diagnostics, and cleanup remain covered. Installer-triggered
+relaunch, final upgraded uninstall, and qualification of the resulting artifact
+remain pending a complete native rerun.
 
 Broader representative-project/drive comparisons and fresh preparation remain
 in progress. Existing bounded receipts below do not complete those checks or
