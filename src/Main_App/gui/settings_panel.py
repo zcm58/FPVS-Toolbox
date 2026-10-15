@@ -4573,6 +4573,15 @@ class SettingsDialog(QDialog):
         except Exception as exc:  # Application settings may fail after the project saved.
             self.manager.config = application_config_snapshot
             self._clear_harmonic_settings_rollback()
+            # ROI edits were rolled back with application settings. Invalidate
+            # only frequency inputs that already committed to the project.
+            if using_project and (
+                protocol_changed_after_processing or preprocessing_qc_changed or postprocessing_qc_changed
+            ):
+                try:
+                    self._mark_frequency_analysis_outputs_stale()
+                except (OSError, RuntimeError, ValueError):
+                    logger.exception("frequency_freshness_update_after_settings_save_failure")
             if using_project and recalculate_harmonics_after_save:
                 try:
                     self._mark_harmonic_derivatives_stale()

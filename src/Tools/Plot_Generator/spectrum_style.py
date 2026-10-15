@@ -22,7 +22,13 @@ def _rates(owner) -> tuple[float, float]:
 def _harmonics(rate: float, lower: float, upper: float) -> list[float]:
     if not math.isfinite(rate) or rate <= 0:
         return []
-    return [index * rate for index in range(max(1, math.ceil(lower / rate)), math.floor(upper / rate) + 1)]
+    lower_ratio, upper_ratio = lower / rate, upper / rate
+    # Decimal rates can put exact boundary harmonics just across an integer.
+    if math.isclose(lower_ratio, round(lower_ratio), rel_tol=1e-12, abs_tol=1e-12):
+        lower_ratio = round(lower_ratio)
+    if math.isclose(upper_ratio, round(upper_ratio), rel_tol=1e-12, abs_tol=1e-12):
+        upper_ratio = round(upper_ratio)
+    return [index * rate for index in range(max(1, math.ceil(lower_ratio)), math.floor(upper_ratio) + 1)]
 
 
 def style_spectrum_axis(ax, owner, oddball_frequencies) -> None:

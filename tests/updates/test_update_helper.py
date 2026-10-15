@@ -72,6 +72,22 @@ def _forbid_external_effects(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(helper_service, "registered_installation", forbidden)
 
 
+@pytest.fixture
+def _private_python_command():
+    """Keep real subprocess tests compatible with hardlinked venv launchers."""
+    # The base interpreter avoids hardlinked virtualenv launchers while keeping
+    # its DLLs in place. Production still verifies the executable normally.
+    executable = Path(getattr(sys, "_base_executable", sys.executable)).resolve()
+
+    def command(script: str, *arguments: str) -> list[str]:
+        # The base interpreter has a different site-packages directory. Preserve
+        # the test environment's import paths, including this checkout's source.
+        bootstrap = f"import sys\nsys.path[:] = {sys.path!r}\n"
+        return [str(executable), "-c", bootstrap + script, *arguments]
+
+    return command
+
+
 def test_protocol_round_trip(tmp_path: Path) -> None:
     assert helper_protocol.result_from_dict(helper_protocol.result_to_dict(_result())) == _result()
     downloaded = _downloaded(tmp_path)
@@ -471,7 +487,9 @@ def test_apply_acceptance_timeout_never_runs_setup(
 
 
 @pytest.mark.parametrize("windowed_stdio", [False, True])
-def test_client_round_trip_through_real_private_subprocess(windowed_stdio: bool) -> None:
+def test_client_round_trip_through_real_private_subprocess(
+    windowed_stdio: bool, _private_python_command,
+) -> None:
     if windowed_stdio and sys.platform != "win32":
         pytest.skip("Windowed standard-handle recovery is Windows-specific")
     script = """
@@ -490,14 +508,14 @@ raise SystemExit(helper_service.serve_stdio())
             "helper_service.check_update = check",
             "sys.stdin = None\nsys.stdout = None\nhelper_service.check_update = check",
         )
-    client = helper_client.HelperClient(lambda *args: [sys.executable, "-c", script])
+    client = helper_client.HelperClient(lambda *args: _private_python_command(script))
     phases = []
     result = client.check("1.2.3", phase_callback=phases.append)
     assert result.current_version == result.latest_version == "1.2.3"
     assert [phase.text for phase in phases] == ["Checking metadata"]
 
 
-def test_client_cancellation_reaches_real_subprocess() -> None:
+def test_client_cancellation_reaches_real_subprocess(_private_python_command) -> None:
     script = """
 from Main_App.updates import helper_service
 from Main_App.updates.models import UpdatePhase, UpdateCancelled
@@ -509,13 +527,15 @@ def check(current_version, **kwargs):
 helper_service.check_update = check
 raise SystemExit(helper_service.serve_stdio())
 """
-    client = helper_client.HelperClient(lambda *args: [sys.executable, "-c", script])
+    client = helper_client.HelperClient(lambda *args: _private_python_command(script))
     cancel = Event()
     with pytest.raises(UpdateCancelled, match="Canceled by Toolbox"):
         client.check("1.2.3", cancel_event=cancel, phase_callback=lambda _: cancel.set())
 
 
-def test_client_apply_sends_accept_and_preserves_explicit_no_parent(tmp_path: Path) -> None:
+def test_client_apply_sends_accept_and_preserves_explicit_no_parent(
+    tmp_path: Path, _private_python_command,
+) -> None:
     marker = tmp_path / "accepted.txt"
     script = """
 import sys
@@ -530,7 +550,7 @@ accept = read_message(source)
 assert accept['kind'] == 'accept' and accept['nonce'] == '1' * 32
 Path(sys.argv[1]).write_text('accepted synthetic handoff; no installer executed')
 """
-    client = helper_client.HelperClient(lambda *args: [sys.executable, "-c", script, str(marker)])
+    client = helper_client.HelperClient(lambda *args: _private_python_command(script, str(marker)))
     process = client.launch_install(_downloaded(tmp_path), parent_pid=None)
     assert process.wait(timeout=5) == 0
     assert marker.read_text().startswith("accepted synthetic handoff")
@@ -650,7 +670,7 @@ def test_acceptance_disarms_cancel_watchdog_before_installer_ownership() -> None
     assert not exits
 
 
-def test_stalled_real_worker_cancels_before_client_force_stop() -> None:
+def test_stalled_real_worker_cancels_before_client_force_stop(_private_python_command) -> None:
     script = """
 from threading import Event
 from Main_App.updates import helper_service
@@ -663,7 +683,7 @@ def check(current_version, **kwargs):
 helper_service.check_update = check
 raise SystemExit(helper_service.serve_stdio())
 """
-    client = helper_client.HelperClient(lambda *args: [sys.executable, "-c", script])
+    client = helper_client.HelperClient(lambda *args: _private_python_command(script))
     cancel = Event()
     started = time.monotonic()
     with pytest.raises(UpdateCancelled):

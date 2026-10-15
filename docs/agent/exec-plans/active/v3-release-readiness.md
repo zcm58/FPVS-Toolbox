@@ -4,6 +4,53 @@
 
 Active. This is the release ledger for the first v3 release candidate.
 
+Release-branch integration on 2026-10-15: merged pipeline performance
+(`51720c12`), experimental QC (`1bfc1318`), updater workflow (`4f51dfd0`),
+Unicorn inspection/persistence fixes (`2daf454f`), and the remaining main README
+updates (`f63692a1`) into `codex/v3-release`. The initially uncommitted QC and
+Plot Generator files exactly matched the performance branch's `6aab9fa6`
+snapshot and are preserved in that history. Documentation deployment branches
+remain separate. Merge resolutions retain independent QC switches alongside
+cached process preparation, and retain both active-thread close protection and
+the updater's already-confirmed exit path.
+
+The bug sweep fixes decimal-boundary harmonics disappearing from plot ticks
+and peak highlighting, and marks frequency/QC outputs stale when project
+settings save but the subsequent application-settings write fails. Regression
+coverage checks both plot boundaries, genuinely out-of-range harmonics,
+preprocessing and post-processing QC partial saves, and disabled raw/kurtosis
+screens through both scanner backends. Rolled-back application-only ROI edits
+leave output freshness intact. These repairs preserve existing
+ownership and workflow contracts, so no additional architecture change is
+needed. Project paths still originate from the active project; no hard-coded
+runtime paths or retired application packages were introduced. Scientific
+processing order and harmonic-selection rules remain unchanged.
+
+Focused verification passed: processing 3,360 tests (six skipped), project I/O
+890 (13 skipped), Plot Generator 195, updates 490 (four skipped), and the final
+GUI/static gate 656. Ruff and compilation passed for every Python file changed
+by the merges and for the sweep fixes. The strict documentation build passed.
+The first updater gate exposed a hardlinked virtualenv launcher that the
+production executable-integrity guard correctly rejected. Its five real
+subprocess tests now launch the resolved base interpreter with the test
+environment's import paths; the production guards and shared environment are
+unchanged, and the complete updater gate passes.
+
+The repository precommit gate passed all audits, Ruff, compilation, and 7,378
+non-Qt tests (25 skipped; 85 warnings) using `C:/fv3all1015a`. The final ROI-only
+save-failure refinement, added after that run collected tests, separately
+passed all 12 Settings regressions and the complete 656-test GUI/static gate.
+
+Visible/manual follow-up: at 1280x900, toggle the optional QC screens, scan,
+cancel and resume; confirm cached diagnostics do not return for disabled
+screens. Plot a 1.6 Hz base through 4.8 Hz and a 6.1 Hz base starting at 18.3 Hz,
+checking boundary labels/highlights in matching PNG/PDF outputs. On a disposable
+project, simulate an application-preferences write failure after changing
+project QC: Settings should stay open, saved project choices should persist,
+and dependent outputs should be stale. Exercise updater exit with active work
+and a previously confirmed project save. Qt execution and packaged-installer
+acceptance remain CI/manual checks; neither ran locally for this integration.
+
 Menu-visibility follow-up on 2026-10-11: the retained platform menu palette now
 sets matching painted backgrounds and text on menu bars, popup menus and their
 items, with matching selected/pressed and disabled colors. This addresses the

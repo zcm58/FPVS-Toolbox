@@ -20,7 +20,7 @@ from Tools.Plot_Generator.session_aggregation import (
     SessionSNRCell,
 )
 from Tools.Plot_Generator.session_rendering import SessionPlotRenderingMixin
-from Tools.Plot_Generator.spectrum_style import SCHEMATIC_HEIGHT_IN
+from Tools.Plot_Generator.spectrum_style import SCHEMATIC_HEIGHT_IN, _harmonics
 
 
 class _RenderHarness(PlotRenderingMixin):
@@ -396,6 +396,21 @@ def test_long_figure_stems_are_bounded_with_a_deterministic_hash() -> None:
         base_title="Faces",
         roi="Occipital",
     ) == "Faces - Occipital"
+
+
+@pytest.mark.parametrize(
+    ("rate", "lower", "upper", "expected"),
+    [
+        (1.6, 0.0, 4.8, [1.6, 3.2, 4.8]),
+        (6.1, 18.3, 24.4, [18.3, 24.4]),
+        (1.6, 0.0, 4.8 - 1e-6, [1.6, 3.2]),
+        (6.1, 18.3 + 1e-6, 24.4, [24.4]),
+    ],
+)
+def test_harmonics_include_decimal_boundaries_without_expanding_the_domain(
+    rate, lower, upper, expected,
+):
+    assert _harmonics(rate, lower, upper) == pytest.approx(expected)
 
 
 @pytest.mark.parametrize("oddball_rate", [0.6, 1.2, 1.5])

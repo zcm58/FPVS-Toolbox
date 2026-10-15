@@ -1141,6 +1141,58 @@ def test_raw_diagnostic_cache_never_skips_preparation_or_source_guard_and_defers
         assert scan.results[0].review_diagnostics == {**report, "source_identity": identity}
 
 
+@pytest.mark.parametrize("execution_backend", ["thread", "process"])
+def test_disabled_kurtosis_screening_skips_validation_and_worker_allocation(monkeypatch, execution_backend):
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("Disabled kurtosis screening must not validate inputs or allocate workers")
+
+    monkeypatch.setattr(scan_module, "_validate_review_request", forbidden)
+    scan = scan_kurtosis_review(
+        [_info(Path("missing.bdf"), "P01")], {"kurtosis_screening_enabled": False},
+        event_map={}, execution_backend=execution_backend,
+    )
+    assert scan.results == () and not scan.cancelled
+
+
+@pytest.mark.parametrize("execution_backend", ["thread", "process"])
+def test_disabled_raw_screening_bypasses_diagnostic_cache_but_preserves_kurtosis(
+    tmp_path, monkeypatch, execution_backend,
+):
+    from Main_App.processing import qc_review_diagnostics, qc_review_diagnostics_cache
+    from Main_App.workers import kurtosis_review_process
+
+    path = tmp_path / "P01.bdf"
+    path.touch()
+    loaded = []
+    captured = _configure_active_scan(monkeypatch, loaded_raws=loaded)
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("Disabled raw screening must not read, build, or publish diagnostics")
+
+    for name in ("build_raw_diagnostics_cache_key", "load_raw_diagnostics", "save_raw_diagnostics"):
+        monkeypatch.setattr(qc_review_diagnostics_cache, name, forbidden)
+    monkeypatch.setattr(qc_review_diagnostics, "build_raw_qc_review_diagnostics", forbidden)
+
+    def process_runner(infos, settings, *, result_progress, **kwargs):
+        scan = scan_module._scan_kurtosis_review_serial(
+            infos, settings, event_map=kwargs["event_map"],
+            reviewed_event_plans_by_file=kwargs["reviewed_event_plans_by_file"],
+        )
+        result_progress(0, scan.results)
+        return scan
+
+    monkeypatch.setattr(kurtosis_review_process, "run_process_review", process_runner)
+    scan = scan_kurtosis_review(
+        [_info(path, "P01")], _settings(raw_signal_screening_enabled=False),
+        event_map={"Faces": 1, "Objects": 2}, execution_backend=execution_backend,
+        reviewed_event_plans_by_file={str(path): {"reviewed": True}},
+    )
+    assert not scan.cancelled and not scan.errors
+    assert "prepare" in captured and loaded and all(raw.closed for raw in loaded)
+    assert scan.results[0].status == KURTOSIS_REVIEW_FILE_STATUS_REVIEW_REQUIRED
+    assert scan.results[0].review_items and scan.results[0].review_diagnostics == {}
+
+
 def test_unavailable_unreviewable_evidence_is_a_file_error(
     tmp_path,
     monkeypatch,

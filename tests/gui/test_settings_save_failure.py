@@ -5,6 +5,8 @@ from __future__ import annotations
 import ast
 import copy
 import json
+import logging
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -12,6 +14,7 @@ from unittest.mock import Mock
 import pytest
 
 from Main_App.Shared.settings_manager import SettingsManager
+from Main_App.processing.frequency_domain_qc import is_frequency_domain_output_stale
 from Main_App.projects import FrequencyProtocol
 from Main_App.projects import project as project_module
 from Main_App.projects.project import Project
@@ -33,11 +36,13 @@ def _panel(tmp_path):
     methods = {
         "_save", "_restore_failed_project_settings_save",
         "_capture_harmonic_settings_rollback", "_clear_harmonic_settings_rollback",
+        "_experimental_qc_changes_after_processing", "_mark_frequency_analysis_outputs_stale",
     }
     tree = ast.parse(SOURCE.read_text(encoding="utf-8"))
     owner = next(node for node in tree.body
                  if isinstance(node, ast.ClassDef) and node.name == "SettingsDialog")
-    namespace = {"copy": copy, "json": json, "config": SimpleNamespace(DEFAULT_STIM_CHANNEL="Status"),
+    namespace = {"copy": copy, "json": json, "logger": logging.getLogger(__name__),
+                 "config": SimpleNamespace(DEFAULT_STIM_CHANNEL="Status"),
                  "PREPROCESSING_DEFAULTS": PREPROCESSING_DEFAULTS,
                  "QMessageBox": SimpleNamespace(
         warning=Mock(), critical=Mock(), information=Mock(),
@@ -71,6 +76,7 @@ def _panel(tmp_path):
         _harmonic_settings_changed_after_processing=lambda _payload: False,
         _frequency_analysis_settings_changed_after_processing=lambda: False,
         _project_protocol_changed_after_processing=lambda: False,
+        _project_has_processed_outputs=lambda: True,
         _ask_recalculate_harmonics_after_settings_change=lambda: True,
         _current_roi_montage=lambda: "biosemi64",
         _removed_electrode_choice_should_be_confirmed=lambda: True,
@@ -125,6 +131,61 @@ def test_failed_project_save_restores_live_state_without_retry(
     assert project.frequency_protocol.is_ready
     assert panel.manager.get("analysis", "alpha") == "0.025"
     panel.accept.assert_called_once()
+
+
+@pytest.mark.parametrize("changed_setting", [
+    "raw_signal_screening_enabled", "interpolation_burden_review_enabled",
+])
+def test_failed_application_save_marks_committed_qc_changes_stale(
+    tmp_path, monkeypatch, changed_setting,
+):
+    panel, messages = _panel(tmp_path)
+    previous_config = copy.deepcopy(panel.manager.config)
+    settings = panel.project.experimental_qc_settings
+    changed = replace(settings, **{changed_setting: not getattr(settings, changed_setting)})
+    panel._validated_experimental_qc_settings = lambda: changed
+    monkeypatch.setattr(
+        panel.manager, "save", Mock(side_effect=OSError("Synthetic application write failure")),
+    )
+    assert not is_frequency_domain_output_stale(panel.project.project_root)
+
+    panel._save()
+
+    committed = Project.load(panel.project.project_root)
+    assert committed.experimental_qc_settings == changed
+    assert panel.manager.config == previous_config
+    assert is_frequency_domain_output_stale(panel.project.project_root)
+    assert "Synthetic application write failure" in messages.critical.call_args.args[2]
+    panel.accept.assert_not_called()
+
+
+@pytest.mark.parametrize("protocol_changed", [False, True])
+def test_failed_application_save_invalidates_only_committed_frequency_inputs(
+    tmp_path, monkeypatch, protocol_changed,
+):
+    panel, messages = _panel(tmp_path)
+    previous_config = copy.deepcopy(panel.manager.config)
+    previous_protocol = panel.project.frequency_protocol
+    panel._validated_preproc_payload = lambda: dict(panel.project.preprocessing)
+    panel._protocol_save_requested = lambda: protocol_changed
+    panel._project_protocol_changed_after_processing = lambda: protocol_changed
+    # The ROI draft changes the frequency signature, but remains application
+    # state and must be rolled back when its settings file cannot be written.
+    assert panel.roi_editor.get_pairs() != panel.manager.get_roi_pairs()
+    panel._frequency_analysis_settings_changed_after_processing = lambda: True
+    monkeypatch.setattr(
+        panel.manager, "save", Mock(side_effect=OSError("Synthetic application write failure")),
+    )
+    assert not is_frequency_domain_output_stale(panel.project.project_root)
+
+    panel._save()
+
+    assert panel.manager.config == previous_config
+    committed = Project.load(panel.project.project_root)
+    assert (committed.frequency_protocol != previous_protocol) is protocol_changed
+    assert is_frequency_domain_output_stale(panel.project.project_root) is protocol_changed
+    assert "Synthetic application write failure" in messages.critical.call_args.args[2]
+    panel.accept.assert_not_called()
 
 
 @pytest.mark.parametrize("using_project", [False, True])
