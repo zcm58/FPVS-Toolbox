@@ -34,39 +34,47 @@ query the old private repository, so
 their first v3 upgrade requires a manual full-installer download. No new v3
 release is published by this closeout work.
 
-At `33977048`, [source CI](https://github.com/zcm58/FPVS-Toolbox/actions/runs/38786752274)
-passed its Ubuntu suite with 8,119 tests and 24 skips, including registered Qt
-coverage; lint and the Windows backend job also passed. The [agent harness](https://github.com/zcm58/FPVS-Toolbox/actions/runs/38786752477)
-and [strict documentation build/deployment](https://github.com/zcm58/FPVS-Toolbox/actions/runs/38786752884)
+At `9f7480b4`, [source CI](https://github.com/zcm58/FPVS-Toolbox/actions/runs/38789774709)
+passed its Ubuntu suite with 8,120 tests and 24 skips, including registered Qt
+coverage; lint and the Windows backend job also passed. The [agent harness](https://github.com/zcm58/FPVS-Toolbox/actions/runs/38789774698)
+and [strict documentation build/deployment](https://github.com/zcm58/FPVS-Toolbox/actions/runs/38789774785)
 also passed. The local repository gate passed all audits, Ruff, compilation,
 and 7,487 non-Qt tests with 25 skips at `0442e882`, before the bounded native-driver
 changes. Focused updates checks after the exact-caption correction passed 533
 tests with four skips; audits, Ruff, compilation, and strict documentation
 validation also passed.
 
-The [native Windows run](https://github.com/zcm58/FPVS-Toolbox/actions/runs/38786752342)
-at the same commit passed source/frozen startup, dependency and synthetic
-scientific probes, ownership/rollback fixtures, installer build, fresh install,
-launch/second launch, fresh uninstall with user-data preservation, and the
-v2.1.2 upgrade with authenticated obsolete-file cleanup. Upgraded dependency,
-synthetic-workflow, and visible startup probes also passed. The run failed at
-the bounded interactive installer-relaunch step; the final upgraded uninstall
-was not reached and the qualified-installer upload was skipped. Retained
-`release-acceptance/relaunch-controls.json` identifies the exact mismatch on
-Select Destination Location: a visible, enabled `TNewButton` has caption
-`&Next`, while the driver accepted only `Next >`. The driver now accepts the
-observed `Next` caption and the classic `Next >` spelling, retaining exact
-caption matching and button-class, visibility, and enabled-state guards.
-The regression fixture fails for the observed caption against the prior driver
-and passes for both spellings after the repair. Bounded foreign-control text
-reads, timeout diagnostics, and cleanup remain covered. Installer-triggered
-relaunch, final upgraded uninstall, and qualification of the resulting artifact
-remain pending a complete native rerun.
+The [native Windows run](https://github.com/zcm58/FPVS-Toolbox/actions/runs/38789774834)
+at `9f7480b4` passed the complete automated installer lifecycle. Its retained
+`release-acceptance/installed-acceptance.json` records fresh installation,
+launch/close/second launch, fresh uninstall, the authenticated v2.1.2 upgrade,
+obsolete-file cleanup, interactive `/RELAUNCH=1`, and final upgraded uninstall.
+The actual relaunched Main Window opened and closed, and its retained process
+exited with code 0. Project, output, settings, log, and template-cache sentinels
+survived both uninstall paths. All 2,818 current payload files matched the
+owned-file inventory; the baseline's 2,788 files matched its authenticated catalog.
+
+The same run passed source/frozen startup of all eight default/beta tool pages,
+dependency probes, synthetic processing/FHC/SNR/scalp workflows, and native
+ownership/rollback fixtures. This is automated hosted Windows evidence, not
+human visual review or representative-project scientific qualification.
+The qualified installer is retained in artifact `12000572096` and its diagnostics
+in artifact `11999393539`. Independent downloads matched both artifact archive
+digests, the installer/update-metadata checksum sidecars, and the acceptance
+receipt. `FPVSToolbox-3.0.0-setup.exe` is 213,653,545 bytes with SHA-256
+`d5af4da2f1fed4f2612d9ecf2ec97e3aab8cf8429b6f7ca2c0ea18b129752399`.
+These exact bytes are qualified by that run; no v3 release has been published.
+
+The prior relaunch timeout was traced to the modern installer's exact `Next`
+caption, which the driver now accepts alongside `Next >` while retaining all
+button-class, visibility, and enabled-state guards. The complete native pass
+confirms the repair. Bounded foreign-control text reads, timeout diagnostics,
+and cleanup remain covered.
 
 Broader representative-project/drive comparisons and fresh preparation remain
 in progress. Existing bounded receipts below do not complete those checks or
-replace genuine data-review decisions. Final artifact identity, remaining
-visible acceptance, and stable publication also remain open.
+replace genuine data-review decisions. Remaining representative-project/manual
+visible acceptance and final release identity/publication also remain open.
 
 An earlier local repository gate passed all audits, Ruff, compilation, and
 7,457 non-Qt tests (25 skipped). All four isolated Qt diagnostic shards passed
@@ -95,8 +103,9 @@ package directories through verified handles. Unknown older installations
 without ownership evidence are refused before replacement, with an empty-folder
 installation route. Valid-inventory full repair still accepts a corrupt
 executable. The architecture and user installation guide describe this boundary.
-Local compilation of the inert Inno fixture passed; native upgrade, relaunch,
-and uninstall checks remain pending on the repaired artifact. The CI fixture
+Local compilation of the inert Inno fixture passed; at that point native
+upgrade, relaunch, and uninstall checks remained pending. The `9f7480b4`
+automated lifecycle receipt above now covers those checks. The CI fixture
 now runs before the expensive application build.
 The next Windows run at pre-rewrite `8f0b1482` passed these native fixtures and
 the source/frozen build checks. All 2,788 published baseline payload files
@@ -998,8 +1007,10 @@ threshold/p-value rules, or relevant numerical dependencies change.
 - [ ] Verify create, open, process, cancel, resume/rebuild, cache invalidation,
       participant-condition exclusion, and multi-group output routing on the
       RC commit.
-- [ ] Verify that project files, settings, logs, outputs, and the root
-      `.fpvs_cache` remain outside installer replacement/deletion scope.
+- [x] Verify project, settings, log, output, and template-cache preservation
+      with disposable CI sentinels through installation, v2.1.2 upgrade, and
+      both uninstall paths at `9f7480b4`. Representative-project/manual checks
+      remain separate; these sentinels do not substitute for private data review.
 
 ### 4. Make the Windows artifact testable
 
@@ -1014,24 +1025,24 @@ threshold/p-value rules, or relevant numerical dependencies change.
 - [x] Have the packaged smoke launch the frozen executable, verify the reported
       version, import lazy runtime dependencies, reach the Main Window, and
       exit deterministically without an offscreen Qt workaround. Native frozen
-      startup passed at `0442e882`; complete installer lifecycle remains open.
+      startup and the complete automated installer lifecycle passed at `9f7480b4`.
 - [ ] Qualify the release in the supported Windows 11 environment. The clean
-      hosted Windows build with Inno Setup 6 passed at `0442e882`; it does not
-      establish the pending visible Windows 11 acceptance.
+      hosted Windows build/lifecycle with Inno Setup 6 passed at `9f7480b4`;
+      it does not establish the pending visible Windows 11 acceptance.
 - [x] Produce `FPVSToolbox-<version>-setup.exe` and record its SHA-256. The
-      `0442e882` acceptance receipt identifies the candidate bytes; the failed
-      lifecycle run did not publish or qualify that installer.
+      `9f7480b4` acceptance receipt and independent artifact download identify
+      the qualified bytes and SHA-256 above; no v3 release is published.
 - [x] Add `.github/workflows/windows-packaging.yml` and installer-acceptance
-      coverage. Execution and artifact qualification remain open; Ubuntu source
-      CI alone does not qualify the installer.
+      coverage. The complete native run at `9f7480b4` qualifies the exact retained
+      installer bytes; Ubuntu source CI alone does not qualify an installer.
 
 ### 5. Perform one compact installed-app acceptance pass
 
 - [x] Fresh-install the candidate on the disposable native Windows runner;
       launch, close, and launch it again. These installed-binary checks passed
-      at `0442e882`; installer-triggered relaunch remains open below.
+      at `9f7480b4`, including installer-triggered relaunch with process exit 0.
 - [x] Upgrade in place from v2.1.2 and verify user-data preservation sentinels
-      plus the complete installed-file inventory at `0442e882`. Representative
+      plus the complete installed-file inventory at `9f7480b4`. Representative
       project acceptance remains separate below.
 - [ ] Create/open a project, process a small representative dataset, inspect QC,
       and generate FHC and SNR Plots outputs.
@@ -1040,8 +1051,9 @@ threshold/p-value rules, or relevant numerical dependencies change.
       the shared beta notice appears once per tool per session.
 - [ ] Verify About, title bar, update dialog, installer metadata, and artifact
       name all report the intended version.
-- [ ] Exercise installer `/RELAUNCH=1`, then uninstall and verify user data is
-      not removed unexpectedly.
+- [x] Exercise installer `/RELAUNCH=1`, then uninstall and verify disposable
+      user-data sentinels survive. The automated `9f7480b4` run passed with
+      actions `Next`, `Next`, `Install`, `Finish` and application exit code 0.
 
 ## P1 — Consolidation Decisions
 
