@@ -87,6 +87,10 @@ site/
 
 # Local tool output folders
 3 - Statistical Analysis Results/
+# Private study outputs and the archived study-specific ACR workflow.
+/outputs/
+/src/Standalone_Scripts/ACR/
+/tests/standalone_scripts/test_acr_*.py
 
 # Retired fsaverage template/data caches must stay local if recreated.
 src/fsaverage/
