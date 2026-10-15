@@ -42,6 +42,8 @@ def _build_editor(
     editor.resize(1100, 750)
     editor.show()
     qtbot.waitExposed(editor)
+    editor.activateWindow()
+    qtbot.waitUntil(editor.isActiveWindow)
     return editor
 
 

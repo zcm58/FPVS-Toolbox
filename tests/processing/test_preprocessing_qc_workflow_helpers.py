@@ -614,7 +614,7 @@ def test_remaining_review_rows_make_occurrence_and_transient_scope_prominent() -
     )
 
 
-def test_detector_off_review_row_says_not_evaluated_without_inferred_findings() -> None:
+def test_detector_off_alone_does_not_create_signal_findings() -> None:
     result = _review_candidate(
         raw_payload={
             "experimental_removed_electrode_detector": {
@@ -630,11 +630,8 @@ def test_detector_off_review_row_says_not_evaluated_without_inferred_findings() 
         {"patient": "Patient"},
     )
 
-    assert len(rows) == 1
-    assert rows[0][-1] == (
-        "Experimental removed-electrode assessment: Not evaluated (disabled in "
-        "project settings). No detector finding is inferred."
-    )
+    assert not result.experimental_detector_evaluated
+    assert rows == []
 
 
 def test_review_episode_adapter_preserves_source_clock_and_original_evidence() -> None:
@@ -652,7 +649,7 @@ def test_review_episode_adapter_preserves_source_clock_and_original_evidence() -
     }), condition_qc={"event_plan": {"sfreq": 100.0, "first_samp": 1000, "n_times": 1000}})
     items = []
     rows = workflow._remaining_review_rows(
-        workflow.PreflightQcScan(results=(result,)), set(), review_items=items,
+        workflow.PreflightQcScan(results=(result,)), set(), {"patient": "Patient"}, review_items=items,
     )
     item = next(item for item in items if item.kind == "Transient signals")
     assert item.source_path == str(result.path)
@@ -675,7 +672,7 @@ def test_review_adapter_does_not_invent_a_source_clock() -> None:
     })
     items = []
     workflow._remaining_review_rows(
-        workflow.PreflightQcScan(results=(result,)), set(), review_items=items,
+        workflow.PreflightQcScan(results=(result,)), set(), {"patient": "Patient"}, review_items=items,
     )
     item = next(item for item in items if item.kind == "Transient signals")
     assert item.time_spans_s == ()
@@ -768,7 +765,7 @@ def test_review_adapter_never_replaces_invalid_explicit_timing_with_occurrence_b
     }), condition_qc={"event_plan": event_plan})
     items = []
     workflow._remaining_review_rows(
-        workflow.PreflightQcScan(results=(result,)), set(), review_items=items,
+        workflow.PreflightQcScan(results=(result,)), set(), {"patient": "Patient"}, review_items=items,
     )
     item = next(item for item in items if item.kind == "Transient signals")
     assert item.time_spans_s == ()

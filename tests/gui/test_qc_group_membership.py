@@ -149,6 +149,10 @@ def test_repeated_session_preflight_tables_remain_compact_and_reachable(
     )
 
     assert stale_scope.isHidden()
+    scrollbar = table.horizontalScrollBar()
+    assert scrollbar.value() == scrollbar.minimum()
+    first_item = table.item(0, 0)
+    assert table.visualItemRect(first_item).intersects(table.viewport().rect())
     scope = QComboBox(table)
     scope.setObjectName("repeated_session_scope")
     scope.addItem("This recording", "recording")
@@ -161,10 +165,8 @@ def test_repeated_session_preflight_tables_remain_compact_and_reachable(
     )
     qtbot.wait(1)
 
-    scrollbar = table.horizontalScrollBar()
-    assert scrollbar.value() == scrollbar.minimum()
-    first_item = table.item(0, 0)
-    assert table.visualItemRect(first_item).intersects(table.viewport().rect())
+    # A newly installed editor can receive focus and scroll itself into view.
+    # The reset assertion above belongs to table population, before that focus.
     assert table.horizontalHeader().sectionResizeMode(reason_column) == (
         QHeaderView.Interactive
     )

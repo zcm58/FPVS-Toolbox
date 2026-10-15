@@ -22,8 +22,10 @@ Primary paths:
   animation, and inline status widgets.
 - `src/Main_App/gui/theme.py`: shared FPVS light palette and stylesheet helpers
   used by the main app and tool windows. `apply_native_menu_appearance` retains
-  the platform menu style and palette before the Toolbox theme is applied;
-  menu bars and popup menus use that retained appearance separately from the
+  the platform menu style name and palette before the Toolbox theme is applied.
+  Each menu bar and popup menu owns a separate style instance so destroying one
+  window cannot invalidate another window's native menu style. Menus use that
+  retained appearance separately from the
   application's light palette and widget stylesheet. Local menu rules pair
   foreground and background colors on both surfaces and items, including
   selected/pressed states; native Windows painting can ignore the retained

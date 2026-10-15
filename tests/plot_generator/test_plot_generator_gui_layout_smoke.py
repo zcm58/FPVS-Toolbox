@@ -59,7 +59,9 @@ def test_plot_generator_gui_layout_smoke(qtbot):
     assert window.findChild(QLabel, "snr_plots_eyebrow") is None
     assert window.findChild(QLabel, "snr_plots_subtitle") is None
     assert window.findChild(StatusBanner, "snr_plot_workflow_status") is window.workflow_status
-    assert window.workflow_status.isHidden()
+    assert window.workflow_status.isVisible()
+    assert "Choose the processed Excel folder" in window.workflow_status.text()
+    assert not window.gen_btn.isEnabled()
     assert window.progress_bar.isHidden()
     assert window.progress_bar.height() >= 18
     assert window.progress_bar.isTextVisible()

@@ -189,6 +189,13 @@ def test_five_conditions_fit_validate_and_freeze_at_supported_size(qtbot, tmp_pa
     excel = tmp_path / "excel"
     for condition in conditions:
         (excel / condition).mkdir(parents=True)
+    original_iterdir = Path.iterdir
+    monkeypatch.setattr(
+        Path,
+        "iterdir",
+        lambda path: iter(excel / condition for condition in reversed(conditions))
+        if path == excel else original_iterdir(path),
+    )
     window = PlotGeneratorWindow()
     qtbot.addWidget(window)
     window.folder_edit.setText(str(excel))

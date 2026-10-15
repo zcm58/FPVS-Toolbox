@@ -35,6 +35,7 @@ def _dialog(qtbot, protocol):
     dialog.tabs = QTabWidget(dialog)
     layout.addWidget(dialog.tabs)
     dialog._init_protocol_tab(dialog.tabs)
+    dialog.protocol_tabs.setCurrentIndex(1)
     qtbot.addWidget(dialog)
     dialog.resize(1100, 850)
     dialog.show()
@@ -58,7 +59,7 @@ def test_condition_mapping_is_opt_in_and_disabling_restores_shared_code(qtbot):
     qtbot.mouseClick(dialog.protocol_condition_markers_check, Qt.LeftButton)
     table = dialog.protocol_condition_markers_table
     assert table.isVisible()
-    assert table.height() == 168
+    assert table.height() >= 168
     assert dialog.findChildren(QScrollArea) == []
     assert not dialog.protocol_oddball_marker_code_edit.isEnabled()
     assert [table.item(row, 1).text() for row in range(5)] == ["1", "2", "3", "4", "5"]

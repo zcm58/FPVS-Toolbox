@@ -58,7 +58,7 @@ def save_handoff(qtbot, monkeypatch, tmp_path):
         returned=Event(), timed_out=False, worker_thread=None,
         result={"success": True, "tools": {"frequency_domain_qc": {"accepted": True}}},
         timeline=[], starts=[], finishes=[], resume=[], errors=[], arguments=[],
-        start_result=True, provisional_cache=object(),
+        start_result=True, provisional_cache={"synthetic": True},
     )
 
     class TrackedManifest(dict):
@@ -235,6 +235,7 @@ def test_save_failure_releases_controls_and_retains_resume(qtbot, save_handoff, 
 
     assert fixture.state.starts == []
     assert fixture.state.finishes == [True]
+    assert fixture.state.provisional_cache == {}
     assert fixture.state.resume == [(fixture.host, True)]
     assert [item[0] for item in fixture.state.timeline] == ["finish", "resume"]
     assert all(thread is fixture.host.thread() for _event, thread in fixture.state.timeline)

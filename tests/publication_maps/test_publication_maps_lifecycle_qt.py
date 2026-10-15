@@ -159,6 +159,7 @@ def _build_page(qtbot, monkeypatch, tmp_path, *, dataset_index=None):
     host.setCentralWidget(page)
     qtbot.addWidget(host)
     host.show()
+    qtbot.waitExposed(host)
     return host, page
 
 
@@ -224,6 +225,7 @@ def test_single_condition_two_group_comparison_builds_explicit_batch_requests(
     page.conditions_list.item(0).setCheckState(Qt.Checked)
 
     assert page.group_comparison_check.isEnabled() is True
+    page.workflow_tabs.setCurrentIndex(1)
     page.group_comparison_check.setChecked(True)
 
     assert page.paired_figures_check.isChecked() is False

@@ -211,11 +211,14 @@ class PlotGeneratorSelectionMixin:
                 subfolders = list(indexed.conditions)
             else:
                 try:
-                    subfolders = [
-                        f.name
-                        for f in Path(folder).iterdir()
-                        if f.is_dir() and ".fif" not in f.name.lower()
-                    ]
+                    subfolders = sorted(
+                        (
+                            f.name
+                            for f in Path(folder).iterdir()
+                            if f.is_dir() and ".fif" not in f.name.lower()
+                        ),
+                        key=lambda name: (name.casefold(), name),
+                    )
                 except OSError:
                     subfolders = []
 
