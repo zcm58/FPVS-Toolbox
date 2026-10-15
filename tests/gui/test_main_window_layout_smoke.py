@@ -9,7 +9,7 @@ import pytest
 if importlib.util.find_spec("PySide6") is None or importlib.util.find_spec("pytestqt") is None:
     pytest.skip("PySide6 or pytest-qt not available", allow_module_level=True)
 
-from PySide6.QtCore import Signal, Qt
+from PySide6.QtCore import QCoreApplication, QEvent, Signal, Qt
 from PySide6.QtGui import QColor, QIcon, QPalette
 from PySide6.QtWidgets import (
     QApplication,
@@ -40,6 +40,7 @@ from Main_App.gui.processing_log_dialog import ProcessingLogDialog
 from Main_App.gui.sidebar import SidebarButton
 from Main_App.gui.settings_panel import EmbeddedSettingsPage
 from Main_App.gui.theme import apply_fpvs_theme
+from Main_App.gui import theme as theme_module
 from Main_App.processing.preflight_qc_cache import preflight_qc_cache_directory
 from Main_App.processing.project_processing_cache import ProjectProcessingCacheUsage
 import Main_App.gui.update_manager as update_manager
@@ -480,6 +481,44 @@ def test_view_menu_returns_to_home(tmp_path: Path, qtbot, monkeypatch) -> None:
     assert win.menuBar().isHidden()
 
 
+def test_native_menu_style_creation_failure_is_explicit(qtbot, monkeypatch) -> None:
+    app = QApplication.instance()
+    monkeypatch.setattr(app, "_fpvs_native_menu_appearance", ("unavailable", QPalette()), raising=False)
+    monkeypatch.setattr(theme_module.QStyleFactory, "create", lambda _name: None)
+    menu = QMenu()
+    qtbot.addWidget(menu)
+    with pytest.raises(RuntimeError, match="Cannot create the native menu style 'unavailable'"):
+        theme_module.apply_native_menu_appearance(menu)
+
+
+def test_menu_styles_survive_other_window_teardown(qtbot) -> None:
+    from shiboken6 import isValid
+
+    def build_host():
+        host = QMainWindow()
+        qtbot.addWidget(host)
+        host.settings = SimpleNamespace(beta_tools_enabled=lambda: False)
+        host.show_home_page = lambda: None
+        host.open_free_harmonic_clustering = lambda: None
+        host.open_plot_generator = lambda: None
+        host.setMenuBar(build_menu_bar(host))
+        return host
+
+    first, second = build_host(), build_host()
+    first_style = first.menuBar()._fpvs_native_menu_style
+    second_style = second.menuBar()._fpvs_native_menu_style
+    assert first_style is not second_style
+    assert first_style.parent() is first.menuBar()
+    assert second_style.parent() is second.menuBar()
+    first.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    assert not isValid(first_style)
+    assert isValid(second_style)
+    third = build_host()
+    assert isValid(third.menuBar()._fpvs_native_menu_style)
+    assert second.menuBar()._fpvs_native_menu_style is second_style
+
+
 def test_menu_labels_render_with_dark_cached_palette_and_light_native_background(qtbot, monkeypatch) -> None:
     class LightNativeMenuStyle(QProxyStyle):
         def drawControl(self, element, option, painter, widget=None):
@@ -501,8 +540,12 @@ def test_menu_labels_render_with_dark_cached_palette_and_light_native_background
     previous_palette = app.palette()
     previous_font = app.font()
     previous_stylesheet = app.styleSheet()
-    native_style = LightNativeMenuStyle("Fusion")
-    native_style.setParent(app)
+    create_style = QStyleFactory.create
+    monkeypatch.setattr(
+        theme_module.QStyleFactory,
+        "create",
+        lambda name: LightNativeMenuStyle("Fusion") if name == "test-native-menu" else create_style(name),
+    )
     native_palette = QPalette(app.palette())
     for group in (QPalette.Active, QPalette.Inactive, QPalette.Disabled):
         for role in (QPalette.Window, QPalette.Button, QPalette.Base):
@@ -513,7 +556,7 @@ def test_menu_labels_render_with_dark_cached_palette_and_light_native_background
             )
         native_palette.setColor(group, QPalette.Highlight, QColor("#175ea8"))
         native_palette.setColor(group, QPalette.HighlightedText, QColor("white"))
-    monkeypatch.setattr(app, "_fpvs_native_menu_appearance", (native_style, native_palette), raising=False)
+    monkeypatch.setattr(app, "_fpvs_native_menu_appearance", ("test-native-menu", native_palette), raising=False)
 
     host = QMainWindow()
     qtbot.addWidget(host)

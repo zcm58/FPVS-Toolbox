@@ -6,7 +6,7 @@ import logging
 from typing import Literal, Optional
 
 from PySide6.QtGui import QColor, QPalette
-from PySide6.QtWidgets import QApplication, QStyle, QStyleFactory, QWidget
+from PySide6.QtWidgets import QApplication, QStyleFactory, QWidget
 
 from Main_App.gui.style_tokens import (
     ACCENT_COLOR,
@@ -50,17 +50,11 @@ LIGHT_THEME_MATERIAL: LightThemeName = "material"
 DEFAULT_LIGHT_THEME: LightThemeName = LIGHT_THEME_FUSION
 
 
-def _native_menu_appearance(app: QApplication) -> tuple[QStyle, QPalette]:
+def _native_menu_appearance(app: QApplication) -> tuple[str, QPalette]:
     """Retain platform menu chrome before the application applies its light theme."""
     appearance = getattr(app, "_fpvs_native_menu_appearance", None)
     if appearance is None:
         style_name = app.style().objectName()
-        style = QStyleFactory.create(style_name)
-        if style is None:
-            raise RuntimeError(f"Cannot create the native menu style {style_name!r}.")
-        # QApplication owns this separate style; replacing its main style must
-        # not delete the style still used by menu bars and popup menus.
-        style.setParent(app)
         palette = QPalette(app.palette())
         # Freeze inherited brushes too: unset roles would otherwise resolve
         # against the application's later Fusion/light palette.
@@ -68,7 +62,9 @@ def _native_menu_appearance(app: QApplication) -> tuple[QStyle, QPalette]:
             for role in QPalette.ColorRole:
                 if role not in (QPalette.NoRole, QPalette.NColorRoles):
                     palette.setBrush(group, role, palette.brush(group, role))
-        appearance = (style, palette)
+        # Cache values, not a C++ style shared between independently destroyed
+        # menus. Each widget owns its own native style below.
+        appearance = (style_name, palette)
         app._fpvs_native_menu_appearance = appearance
     return appearance
 
@@ -105,8 +101,17 @@ def apply_native_menu_appearance(widget: QWidget) -> None:
     app = QApplication.instance()
     if app is None:
         raise RuntimeError("Native menus require an active QApplication.")
-    style, palette = _native_menu_appearance(app)
-    widget.setStyle(style)
+    style_name, palette = _native_menu_appearance(app)
+    style = getattr(widget, "_fpvs_native_menu_style", None)
+    if style is None:
+        style = QStyleFactory.create(style_name)
+        if style is None:
+            raise RuntimeError(f"Cannot create the native menu style {style_name!r}.")
+        # QWidget.setStyle does not transfer ownership. Retain both the Qt
+        # parent and Python wrapper for this menu's lifetime.
+        style.setParent(widget)
+        widget._fpvs_native_menu_style = style
+        widget.setStyle(style)
     widget.setPalette(palette)
     widget.setStyleSheet(_native_menu_stylesheet(palette))
 

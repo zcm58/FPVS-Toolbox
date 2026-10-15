@@ -104,32 +104,22 @@ def test_native_menu_chrome_survives_application_theme_changes(monkeypatch) -> N
     app.style = lambda: SimpleNamespace(objectName=lambda: app.style_name)
     app.palette = lambda: app.colors
     app.setStyleSheet = lambda stylesheet: setattr(app, "stylesheet", stylesheet)
-    styles = []
-
-    def create_style(name):
-        style = SimpleNamespace(name=name, setParent=lambda owner: setattr(style, "owner", owner))
-        styles.append(style)
-        return style
-
     def apply_light_palette(current):
         current.style_name = "Fusion"
         current.colors = QPalette()
         current.colors.setColor(QPalette.Window, QColor("white"))
         current.colors.setColor(QPalette.WindowText, QColor("black"))
 
-    monkeypatch.setattr(theme, "QStyleFactory", SimpleNamespace(create=create_style))
     monkeypatch.setattr(theme, "apply_fusion_light_palette", apply_light_palette)
     monkeypatch.setattr(theme, "apply_app_font", lambda _app: None)
     monkeypatch.setattr(theme, "build_fpvs_app_stylesheet", lambda: "light stylesheet")
 
     theme.apply_fpvs_theme(app)
-    style, palette = theme._native_menu_appearance(app)
+    style_name, palette = theme._native_menu_appearance(app)
     theme.apply_fpvs_theme(app)
 
-    assert len(styles) == 1
-    assert styles[0].name == "platform"
-    assert styles[0].owner is app
-    assert theme._native_menu_appearance(app) == (style, palette)
+    assert style_name == "platform"
+    assert theme._native_menu_appearance(app) == (style_name, palette)
     resolved = palette.resolve(app.colors)
     for group in (QPalette.Active, QPalette.Inactive, QPalette.Disabled):
         for role in QPalette.ColorRole:
@@ -139,15 +129,6 @@ def test_native_menu_chrome_survives_application_theme_changes(monkeypatch) -> N
     assert app.colors.color(QPalette.Window) == QColor("white")
     assert app.colors.color(QPalette.WindowText) == QColor("black")
     assert app.stylesheet == "light stylesheet"
-
-
-def test_native_menu_style_creation_failure_is_explicit(monkeypatch) -> None:
-    app = SimpleNamespace(style=lambda: SimpleNamespace(objectName=lambda: "unavailable"))
-    monkeypatch.setattr(theme, "QStyleFactory", SimpleNamespace(create=lambda _name: None))
-
-    with pytest.raises(RuntimeError, match="Cannot create the native menu style 'unavailable'"):
-        theme._native_menu_appearance(app)
-    assert not hasattr(app, "_fpvs_native_menu_appearance")
 
 
 @pytest.mark.parametrize("dark_native", [False, True])
