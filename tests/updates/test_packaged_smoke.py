@@ -120,6 +120,8 @@ def test_failed_dependency_reports_actionable_failure(
     result = json.loads(report.read_text())
     assert result["passed"] is False
     assert "missing scientific dependency" in result["error"]
+    assert "ModuleNotFoundError: missing scientific dependency" in result["traceback"]
+    assert "dependency_report()" in result["traceback"]
 
 
 def test_checkpoint_survives_a_fatal_process_exit_without_qt(tmp_path: Path) -> None:

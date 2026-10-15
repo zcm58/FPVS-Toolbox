@@ -154,6 +154,30 @@ installation. Builds that used the temporary release-only address can obtain
 the full installer from the canonical release page. See the explicit public
 publishing commands in `docs/agent/guides/development.md`.
 
+The full release build includes `scripts/packaging/legacy-owned-files-v2.1.2.json`,
+an inventory of the published v2.1.2 installer payload. Its provenance identifies
+canonical repository asset `450622129` (141503904 bytes, SHA-256
+`192d43972e8b2031566d3b1bcbc9ae2b46305f39a544d3e12a7e46e6730178a6`).
+The 2788 paths and file hashes were obtained without running the installer,
+using the [innoextract Windows 670 release](https://github.com/UserUnknownFactor/innoextract_win/releases/tag/670)
+whose archive SHA-256 is
+`79b69b9b1fcd98f42ccd4b245efdf6a03bcfb674ba6af482f5a46891c9ed4d14`.
+The acceptance gate independently compares this inventory with the files written
+by that actual installer and checks obsolete owned paths after upgrade. This
+prevents stale v2 compiled modules from shadowing the new bundle. Cleanup still
+requires matching content hashes and the existing link/path safety checks.
+Empty obsolete package directories are removed through verified directory handles;
+this operation is nonrecursive, preserves nonempty directories and current-owned
+parents, and retains failed cleanup in the retry journal. Empty directories must
+also disappear because Python can discover them as namespace packages.
+
+An existing executable without a valid ownership manifest must match an
+authenticated published executable in this catalog before an in-place upgrade.
+Otherwise setup refuses before replacing files and directs the user to an empty,
+dedicated application folder. Versions earlier than v2.1.2 are not qualified for
+an in-place upgrade by this catalog. A full repair of an installation with a valid
+ownership manifest remains possible even when its executable is corrupt.
+
 The normal release wrapper builds the main bundle, independently builds and
 checks the helper, generates inventories from the final bundle, and compiles
 the full installer. Optional authenticated baseline inventories produce direct

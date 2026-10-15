@@ -684,14 +684,17 @@ begin
       OwnedHashFile(Path, OwnedPriorManifestHash);
       OwnedAddObsolete(Previous);
     end
-    else if OwnedHashFile(OwnedTarget(Root, '{#AppExeName}'), Hash) then begin
-      if Legacy.IndexOf('{#AppExeName}|' + Hash) >= 0 then begin
+    else if OwnedGetAttributes(OwnedTarget(Root, '{#AppExeName}')) <> OwnedInvalidAttributes then begin
+      if OwnedHashFile(OwnedTarget(Root, '{#AppExeName}'), Hash) and
+        (Legacy.IndexOf('{#AppExeName}|' + Hash) >= 0) then begin
         // Include every published ancestor, not just the version currently displayed.
         OwnedAddObsolete(Legacy);
         Log('Ownership: authenticated published-release ancestry selected.');
       end
-      else
-        Log('Ownership: unrecognized existing executable; unknown files will be preserved.');
+      else begin
+        Result := 'This installation has no verified upgrade inventory. Choose an empty, dedicated application folder to install safely. No files were replaced.';
+        Exit;
+      end;
     end;
     Path := OwnedTarget(Root, OwnedPendingName);
     if OwnedGetAttributes(Path) <> OwnedInvalidAttributes then begin
@@ -836,6 +839,77 @@ begin
   end;
 end;
 
+function OwnedRemoveEmptyDirectory(const Directory: String): Boolean;
+var
+  Guards: TOwnedHandles;
+  Handle: THandle;
+  Info: TOwnedFileInfo;
+  Missing: Boolean;
+  ErrorCode: Cardinal;
+  DeleteFlag: Byte;
+begin
+  Result := False;
+  // Pin the ancestors, then verify and remove this SAME directory handle.
+  // FileDispositionInfo never recursively removes directory contents.
+  if not OwnedGuardDirectoryChain(ExtractFileDir(Directory), True, Guards, Missing) then
+    Exit;
+  try
+    if Missing then begin
+      Result := True;
+      Exit;
+    end;
+    Handle := OwnedCreateFile(Directory, OwnedDeleteAccess or OwnedReadAttributes,
+      OwnedShareRead or OwnedShareWrite, 0, OwnedOpenExisting,
+      OwnedOpenReparsePoint or OwnedBackupSemantics, 0);
+    if Handle = OwnedInvalidHandle then begin
+      ErrorCode := OwnedLastError;
+      Result := (ErrorCode = 2) or (ErrorCode = 3);
+      Exit;
+    end;
+    try
+      if (not OwnedGetFileInfo(Handle, Info)) or
+        ((Info.Attributes and OwnedDirectoryAttribute) = 0) or
+        ((Info.Attributes and OwnedReparseAttribute) <> 0) then
+        Exit;
+      DeleteFlag := 1;
+      Result := OwnedSetDisposition(Handle, 4, DeleteFlag, 1);
+      if Result then
+        Log('Ownership: removed empty obsolete package directory: ' + Directory);
+    finally
+      OwnedCloseHandle(Handle);
+    end;
+  finally
+    OwnedReleaseGuards(Guards);
+  end;
+end;
+
+function OwnedPruneObsoleteParents(const Root, Relative: String): Boolean;
+var
+  Directory, Prefix: String;
+  Index: Integer;
+begin
+  Result := False;
+  if not OwnedSafeRelativePath(Relative) then
+    Exit;
+  Directory := ExtractFileDir(OwnedTarget(Root, Relative));
+  while (Length(Directory) > Length(Root)) and
+    (Pos(Lowercase(AddBackslash(Root)), Lowercase(Directory)) = 1) do begin
+    Prefix := Copy(Directory, Length(Root) + 2, Length(Directory));
+    StringChangeEx(Prefix, '\', '/', True);
+    Prefix := Prefix + '/';
+    OwnedCurrentPaths.Find(Prefix, Index);
+    if Index < OwnedCurrentPaths.Count then
+      if SameText(Copy(OwnedCurrentPaths[Index], 1, Length(Prefix)), Prefix) then begin
+        Result := True;
+        Exit;
+      end;
+    if not OwnedRemoveEmptyDirectory(Directory) then
+      Exit;
+    Directory := ExtractFileDir(Directory);
+  end;
+  Result := SameText(Directory, Root);
+end;
+
 procedure OwnedReconcileAfterSuccess;
 var
   Paths, Remaining: TStringList;
@@ -865,6 +939,19 @@ begin
           OwnedKeepPathRecords(Path, OwnedPreviousRecords, Remaining);
       except
         Log('Ownership: cleanup error retained for retry: ' + Path + ': ' + GetExceptionMessage);
+        OwnedKeepPathRecords(Path, OwnedPreviousRecords, Remaining);
+      end;
+    end;
+    // Empty directories can still shadow Python packages as namespace packages.
+    // Prune only parents of authenticated obsolete records, after file cleanup.
+    // Failed/nonempty directory cleanup retains its records for a later retry.
+    for I := 0 to Paths.Count - 1 do begin
+      Path := Paths[I];
+      try
+        if not OwnedPruneObsoleteParents(OwnedPreparedRoot, Path) then
+          OwnedKeepPathRecords(Path, OwnedPreviousRecords, Remaining);
+      except
+        Log('Ownership: empty-directory cleanup retained for retry: ' + Path);
         OwnedKeepPathRecords(Path, OwnedPreviousRecords, Remaining);
       end;
     end;

@@ -15,6 +15,7 @@ import os
 import sys
 import tempfile
 import time
+import traceback
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Callable, Iterator
@@ -284,6 +285,7 @@ def run_check(report_path: Path, *, visible: bool = False, workflows: bool = Fal
             report["passed"] = True
     except Exception as exc:
         report["error"] = f"{type(exc).__name__}: {exc}"
+        report["traceback"] = traceback.format_exc()
     report["qt_widgets_loaded"] = "PySide6.QtWidgets" in sys.modules
     report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
     return 0 if report["passed"] else 1

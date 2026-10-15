@@ -48,11 +48,11 @@ jobs:
           $compiler = "${env:ProgramFiles(x86)}/Inno Setup 6/ISCC.exe"
           if (-not (Test-Path -LiteralPath $compiler)) { throw 'Inno Setup 6 is missing from the hosted image.' }
           "ISCC_EXE=$compiler" >> $env:GITHUB_ENV
+      - name: Verify native patch ownership and rollback fixtures
+        run: python scripts/packaging/check_patch_installer_lifecycle.py --inno-compiler "$env:ISCC_EXE" --execute
       - name: Build main application, updater, and release installer
         shell: pwsh
         run: ./scripts/packaging/build_release.ps1 -SkipInstall -AllowVisibleGui
-      - name: Verify native patch ownership and rollback fixtures
-        run: python scripts/packaging/check_patch_installer_lifecycle.py --inno-compiler "$env:ISCC_EXE" --execute
       - name: Fetch the authenticated v2.1.2 upgrade baseline
         shell: pwsh
         env:

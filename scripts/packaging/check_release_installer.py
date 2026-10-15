@@ -23,7 +23,14 @@ from pathlib import Path
 
 import psutil
 
-from build_installer_inventory import read_manifest_file, sha256_file
+from build_installer_inventory import (
+    DEFAULT_LEGACY_INVENTORY,
+    inspect_obsolete_inventory,
+    load_legacy_inventory,
+    read_manifest_file,
+    sha256_file,
+)
+from check_installer_tree import check_tree
 from updater_metadata import version_data
 
 APP_ID = "77E578C2-2B30-4015-AE3F-9CE6191423F4"
@@ -33,7 +40,8 @@ HEADLESS_QT_PLATFORMS = frozenset({"offscreen", "minimal"})
 
 
 def require_disposable_runner(environ: dict[str, str], platform: str) -> Path:
-    if platform != "win32" or environ.get("GITHUB_ACTIONS") != "true" or environ.get("CI") != "true":
+    if (platform != "win32" or environ.get("GITHUB_ACTIONS") != "true" or environ.get("CI") != "true"
+            or environ.get("RUNNER_ENVIRONMENT") != "github-hosted"):
         raise RuntimeError("Real installer acceptance is restricted to a disposable GitHub Windows runner.")
     root = Path(environ.get("RUNNER_TEMP", ""))
     if not root.is_absolute() or not root.is_dir():
@@ -137,6 +145,26 @@ def assert_installed(destination: Path, manifest_path: Path, version: str) -> di
                           or record.get("DisplayVersion") != version for record in records):
         raise RuntimeError("Installed registration does not identify the release and its isolated path.")
     return {"version": version, "owned_files_verified": len(manifest.files), "registration": records}
+
+
+def assert_baseline_catalog(destination: Path, catalog: Path) -> dict[str, object]:
+    """Cross-check extracted ownership against the actual published setup output."""
+    legacy, releases = load_legacy_inventory(catalog)
+    if len(releases) != 1 or releases[0]["tag"] != "v2.1.2" or releases[0]["sha256"] != BASELINE_SHA256:
+        raise RuntimeError("Legacy catalog does not identify the authenticated v2.1.2 baseline.")
+    actual = inspect_obsolete_inventory(destination, legacy)
+    invalid = {path: state for path, state in actual.items() if state != "owned"}
+    if invalid:
+        raise RuntimeError(f"Published baseline differs from its ownership catalog: {invalid}")
+    # Inno generates its own uninstaller bookkeeping, which is never app-owned.
+    installed_paths = {path.relative_to(destination).as_posix().casefold()
+                       for path in destination.rglob("*") if path.is_file()
+                       and not (path.parent == destination and path.name.casefold() in {
+                           "unins000.exe", "unins000.dat", "unins000.msg"})}
+    if installed_paths != {path.casefold() for path in legacy.files}:
+        raise RuntimeError("Published baseline contains files absent from its ownership catalog.")
+    return {"catalog_sha256": sha256_file(catalog), "owned_files_verified": len(actual),
+            "release_provenance": releases}
 
 
 class NativeWindows:
@@ -367,9 +395,17 @@ def main() -> int:
         baseline_records = registrations()
         if not baseline_records or any(record.get("DisplayVersion") != "2.1.2" for record in baseline_records):
             raise RuntimeError("Published baseline did not register v2.1.2.")
-        steps.append({"name": "published-v2.1.2-installed", "registration": baseline_records})
+        steps.append({"name": "published-v2.1.2-installed", "registration": baseline_records,
+                      **assert_baseline_catalog(destination, DEFAULT_LEGACY_INVENTORY)})
         install(installer, "v3-upgrade")
         steps.append({"name": "upgrade-v2.1.2", **assert_installed(destination, manifest, version)})
+        tree = check_tree(install_root=destination, expected_manifest=manifest,
+                          legacy_inventory=DEFAULT_LEGACY_INVENTORY)
+        steps.append({"name": "upgrade-removes-authenticated-obsolete-files", **tree})
+        if not tree["ok"]:
+            raise RuntimeError("Upgrade retained obsolete published files or changed the current bundle.")
+        if (destination / "_internal/mypy").exists():
+            raise RuntimeError("Upgrade retained the obsolete mypy namespace package directory.")
         probe("upgraded")
         steps.append({"name": "installer-relaunch", **visible_relaunch(installer, destination, evidence, env)})
         assert_sentinels(sentinels)

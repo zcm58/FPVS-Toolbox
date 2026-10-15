@@ -123,6 +123,7 @@ try {
     Invoke-Native -File $Python -Arguments @(
         (Join-Path $PSScriptRoot 'build_installer_inventory.py'),
         '--bundle-root', (Join-Path $RepoRoot 'dist/FPVS_Toolbox'),
+        '--legacy-inventory', (Join-Path $PSScriptRoot 'legacy-owned-files-v2.1.2.json'),
         '--app-version', $appVersion, '--output-dir', $inventoryRoot
     )
     $isccPath = Resolve-InnoCompiler -ConfiguredPath $InnoCompiler

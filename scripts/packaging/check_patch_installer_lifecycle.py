@@ -98,6 +98,8 @@ def make_bundle(root: Path, version: str, *, removed: str, added: str) -> Path:
     }
     if removed:
         payloads[f"_internal/{removed}"] = "known obsolete fixture bytes\n"
+        payloads["_internal/obsolete_package/nested/module.pyd"] = "inert obsolete compiled module\n"
+        payloads["_internal/retained_package/old.pyd"] = "inert module beside user content\n"
     for relative, content in payloads.items():
         path = bundle / relative
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -275,19 +277,28 @@ def main() -> int:
         full_setup = compile_setup("0.0.3", chain_id, "full-upgrade")
         repair_setup = compile_setup("0.0.2", chain_id, "full-repair")
         fresh_setup = compile_setup("0.0.2", fresh_id, "fresh-target")
-        # First Toolbox migration has no authenticated historical inventory.
-        # Setup must establish ownership without claiming unknown legacy files.
+        # Unknown older builds can leave importable compiled dependencies behind.
+        # Refuse to overlay one without authenticated ownership, before writes.
+        unknown = fixture / "unrecognized-installation"
+        unknown.mkdir()
+        (unknown / "FPVS_Toolbox.exe").write_bytes(b"inert unrecorded legacy executable")
+        (unknown / "old-library.pyd").write_bytes(b"unknown legacy bytes must survive")
+        before = tree_hashes(unknown)
+        install(base_setup, unknown, "unrecognized-legacy", success=False)
+        if tree_hashes(unknown) != before or registration(chain_id) is not None:
+            raise RuntimeError("Refused legacy upgrade changed files or registration.")
+        steps.append("unrecognized legacy installation refused before writes")
         installed.mkdir(parents=True)
-        (installed / "FPVS_Toolbox.exe").write_bytes(b"inert unrecorded legacy executable")
         legacy_file = installed / "unrecorded-legacy.dll"
         legacy_file.write_bytes(b"unknown legacy bytes must survive")
         install(base_setup, installed, "base")
         assert_installed(installed, bundles["0.0.1"], manifests["0.0.1"])
         if legacy_file.read_bytes() != b"unknown legacy bytes must survive":
             raise RuntimeError("Migration modified a file without ownership evidence.")
-        steps.append("full migration without historical ownership inventory")
+        steps.append("fresh installation preserves unrelated files")
         sentinels = [
             legacy_file,
+            installed / "_internal/retained_package/user-notes.txt",
             installed / "lab-notes.txt",
             fixture / "user-data/project.json",
             fixture / "user-data/settings.ini",
@@ -372,7 +383,11 @@ def main() -> int:
         for old in inventory_bundle(bundles["0.0.1"]).files:
             if old not in inventory_bundle(bundles["0.0.2"]).files and (installed / old).exists():
                 raise RuntimeError(f"Patch retained an obsolete owned file: {old}")
-        steps.append("patched payload equals fresh target; obsolete owned files removed")
+        if (installed / "_internal/obsolete_package").exists():
+            raise RuntimeError("Patch retained an empty obsolete namespace package directory.")
+        if not (installed / "_internal/retained_package/user-notes.txt").is_file():
+            raise RuntimeError("Obsolete directory cleanup removed nonempty user content.")
+        steps.append("patched payload equals fresh target; obsolete owned files and empty packages removed")
         install(full_setup, installed, "full-upgrade")
         assert_installed(installed, bundles["0.0.3"], manifests["0.0.3"])
         steps.append("subsequent full upgrade")
@@ -420,6 +435,7 @@ def main() -> int:
         if not (installed / "_internal/obsolete.txt").exists():
             raise RuntimeError("A hashing exception incorrectly removed obsolete source files.")
         steps.append("hashing exception reports repair and preserves recovery state")
+        (installed / "FPVS_Toolbox.exe").write_bytes(b"corrupt executable with a valid ownership inventory")
         install(repair_setup, installed, "repair-matched-marker")
         assert_installed(installed, bundles["0.0.2"], manifests["0.0.2"])
         steps.append("full target repair clears an authenticated failed-patch marker")

@@ -24,13 +24,36 @@ Current GUI CI, packaged acceptance, fresh-project qualification, and history
 cleanup are still in progress; bounded comparisons below must not be treated as
 completion of those final gates.
 
-Current scoped checks on the repaired dependency pins: LORETA 440 passed,
-including eight graphics-guard tests;
-updates 511 passed with four skips; GUI 655 non-Qt tests passed. Frozen
+The latest local repository gate passed all audits, Ruff, compilation, and
+7,457 non-Qt tests (25 skipped). All four isolated Qt diagnostic shards passed
+at `94ce9630`. The integrated Ubuntu suite then exposed overlapping MRI-slice
+titles when Arial falls back to DejaVu Sans. Existing plane and coordinate text
+now occupies two lines with reserved header space; Arial publication defaults,
+coordinate values, data, and output dimensions are unchanged. Geometry checks
+cover both fonts at 96/600 dpi, square/tall anatomy, and optional figure labels.
+The full CI suite now retains all failures in a run instead of stopping after
+the first one; existing hang watchdogs remain active.
+
+Current scoped checks on the repaired dependency pins: LORETA 455 passed,
+including eight graphics-guard tests and the expanded figure-layout checks;
+updates 523 passed with four skips; GUI 655 non-Qt tests passed. Frozen
 synthetic workflow, dependency, and updater/packaging checks also passed.
-The native Windows source startup smoke at `31b0a1f2` passed all eight real
-tool windows, including LORETA. The frozen build and installer acceptance remain
-in progress; source-window startup does not qualify the packaged artifact.
+The installer acceptance helper additionally rejects self-hosted runners.
+These layout and runner-guard repairs change no
+runtime ownership or scientific contract, so no architecture update is needed.
+The native Windows run at `fa9da6c7` passed the source and frozen startup
+checks for all eight tool windows, frozen scientific probes, installer build,
+patch rollback fixtures, fresh installation, and second launch. Its upgrade
+from v2.1.2 failed because old compiled `mypy` files survived and shadowed the
+new dependency set. Full builds now include the hash-authenticated v2.1.2
+ownership catalog; cleanup removes matching obsolete files and their empty
+package directories through verified handles. Unknown older installations
+without ownership evidence are refused before replacement, with an empty-folder
+installation route. Valid-inventory full repair still accepts a corrupt
+executable. The architecture and user installation guide describe this boundary.
+Local compilation of the inert Inno fixture passed; native upgrade, relaunch,
+and uninstall checks remain pending on the repaired artifact. The CI fixture
+now runs before the expensive application build.
 These checks do not replace final source/Qt CI, native installed-app acceptance,
 or fresh-project preparation and full-cohort qualification. Public
 visibility additionally requires the authorized history rewrite and GitHub's

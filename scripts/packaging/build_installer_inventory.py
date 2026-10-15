@@ -22,6 +22,7 @@ from typing import Any
 from packaging.version import InvalidVersion, Version
 
 APPLICATION = "fpvs-toolbox"
+DEFAULT_LEGACY_INVENTORY = Path(__file__).with_name("legacy-owned-files-v2.1.2.json")
 MANIFEST_HEADER = "FPVS-TOOLBOX-OWNED-FILES-1"
 CURRENT_MANIFEST_NAME = "fpvs-owned-files-v1.txt"
 PENDING_MANIFEST_NAME = "fpvs-pending-owned-files-v1.txt"
@@ -415,7 +416,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--bundle-root", type=Path, required=True)
     parser.add_argument("--app-version", required=True)
-    parser.add_argument("--legacy-inventory", type=Path)
+    parser.add_argument("--legacy-inventory", type=Path, default=DEFAULT_LEGACY_INVENTORY)
     parser.add_argument("--output-dir", type=Path, required=True)
     arguments = parser.parse_args(argv)
     try:

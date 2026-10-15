@@ -412,21 +412,36 @@ def test_render_inspection_reads_unmasked_grid_without_changing_display_values()
     assert np.array_equal(raw_payload.values, [8.0, -3.0])
 
 
-def test_coordinate_titles_and_colorbar_fit_publication_width() -> None:
+@pytest.mark.parametrize("font_family", ["Arial", "DejaVu Sans"])
+@pytest.mark.parametrize("dpi", [96, 600])
+@pytest.mark.parametrize("shape", [(8, 8, 8), (8, 32, 8)])
+@pytest.mark.parametrize("label", ["", "Synthetic source map"])
+def test_coordinate_titles_and_colorbar_fit_publication_width(monkeypatch, font_family, dpi, shape, label) -> None:
+    from Main_App.exports import figure_style
+
+    # Exercise Linux's wider fallback even on a machine with Arial installed.
+    # This changes test rendering only; publication defaults remain Arial.
+    monkeypatch.setattr(figure_style, "FIGURE_FONT_FAMILY", font_family)
     affine = np.eye(4)
     affine[:3, 3] = 120.5
-    anatomy = MriAnatomyVolume(np.ones((8, 8, 8)), affine, np.linalg.inv(affine), Path("synthetic.nii"))
+    anatomy = MriAnatomyVolume(np.ones(shape), affine, np.linalg.inv(affine), Path("synthetic.nii"))
     panels, _ = build_mri_slice_panels(
         anatomy, np.asarray([[4.0, 4.0, 4.0]]), np.asarray([2.0]), scalar_range=(0.0, 3.5),
     )
-    figure = build_mri_slice_figure(panels, scalar_range=(0.0, 3.5), dpi=96)
+    figure = build_mri_slice_figure(panels, scalar_range=(0.0, 3.5), dpi=dpi, label=label)
     try:
+        for tick in figure.axes[3].get_yticklabels():
+            tick.set_fontfamily(font_family)
         figure.canvas.draw()
         renderer = figure.canvas.get_renderer()
         titles = [axis.title.get_bbox_patch().get_window_extent(renderer) for axis in figure.axes[:3]]
         assert titles[0].x1 < titles[1].x0
         assert titles[1].x1 < titles[2].x0
-        assert titles[0].x0 >= 0
+        for title in titles:
+            assert 0 <= title.x0 < title.x1 <= figure.bbox.x1
+            assert 0 <= title.y0 < title.y1 <= figure.bbox.y1
+        if label:
+            assert max(title.y1 for title in titles) < figure._suptitle.get_window_extent(renderer).y0
         for tick in figure.axes[3].get_yticklabels():
             assert tick.get_window_extent(renderer).x1 <= figure.bbox.x1
     finally:

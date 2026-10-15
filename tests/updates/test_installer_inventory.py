@@ -75,6 +75,42 @@ def test_first_inventory_does_not_invent_legacy_ownership(tmp_path):
     assert "FPVS_Toolbox.exe" not in legacy
 
 
+def test_release_inventory_cli_includes_authenticated_v2_ownership_by_default(tmp_path):
+    output = tmp_path / "inventories"
+    completed = subprocess.run(
+        [sys.executable, str(SCRIPT), "--bundle-root", str(_bundle(tmp_path)),
+         "--app-version", "3.0.0", "--output-dir", str(output)],
+        capture_output=True, text=True, check=False, timeout=10,
+    )
+    assert completed.returncode == 0, completed.stderr
+    summary = json.loads(completed.stdout)
+    assert summary["legacy_paths"] == 2788
+    assert summary["legacy_releases"] == 1
+    legacy, releases = inventory.load_legacy_inventory(inventory.DEFAULT_LEGACY_INVENTORY)
+    assert releases == [{"tag": "v2.1.2", "asset_name": "FPVSToolbox-2.1.2-setup.exe",
+                         "asset_id": 450622129, "size_bytes": 141503904,
+                         "sha256": "192d43972e8b2031566d3b1bcbc9ae2b46305f39a544d3e12a7e46e6730178a6"}]
+    wire = inventory.parse_manifest((output / "legacy-owned-files.txt").read_bytes(), expected_kind="legacy")
+    assert wire == legacy
+    # This stale extension shadowed the frozen Python package during a real
+    # v2.1.2 -> v3 upgrade and imported a no-longer-bundled mypyc runtime.
+    assert wire.files["_internal/mypy/__init__.cp313-win_amd64.pyd"] == (
+        "70df8fe1005894646892d7c21f6f259988c3d05365c0f4731e8b1be84d60569a",)
+    assert wire.files["FPVS_Toolbox.exe"] == (
+        "346fd491510c198f23ef8115d06120eb2f920fd19176da3b7e297e13ee560810",)
+
+
+def test_missing_legacy_catalog_cannot_silently_build_an_unqualified_installer(tmp_path):
+    completed = subprocess.run(
+        [sys.executable, str(SCRIPT), "--bundle-root", str(_bundle(tmp_path)),
+         "--app-version", "3.0.0", "--output-dir", str(tmp_path / "inventories"),
+         "--legacy-inventory", str(tmp_path / "missing.json")],
+        capture_output=True, text=True, check=False, timeout=10,
+    )
+    assert completed.returncode != 0
+    assert not (tmp_path / "inventories/current-owned-files.txt").exists()
+
+
 @pytest.mark.parametrize(
     "relative",
     [

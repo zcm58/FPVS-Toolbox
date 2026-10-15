@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import importlib.util
+import hashlib
+import json
 import sys
 from pathlib import Path
 
@@ -22,14 +24,17 @@ def acceptance(monkeypatch: pytest.MonkeyPatch):
 
 
 @pytest.mark.parametrize("environment,platform", [({}, "win32"), ({"CI": "true"}, "win32"),
-                         ({"CI": "true", "GITHUB_ACTIONS": "true"}, "linux")])
+                         ({"CI": "true", "GITHUB_ACTIONS": "true"}, "linux"),
+                         ({"CI": "true", "GITHUB_ACTIONS": "true"}, "win32"),
+                         ({"CI": "true", "GITHUB_ACTIONS": "true", "RUNNER_ENVIRONMENT": "self-hosted"}, "win32")])
 def test_real_installer_refuses_local_or_non_windows_execution(acceptance, environment, platform):
     with pytest.raises(RuntimeError, match="disposable GitHub Windows runner"):
         acceptance.require_disposable_runner(environment, platform)
 
 
 def test_disposable_runner_requires_existing_absolute_root_and_native_qt(acceptance, tmp_path):
-    env = {"CI": "true", "GITHUB_ACTIONS": "true", "RUNNER_TEMP": str(tmp_path)}
+    env = {"CI": "true", "GITHUB_ACTIONS": "true", "RUNNER_ENVIRONMENT": "github-hosted",
+           "RUNNER_TEMP": str(tmp_path)}
     assert acceptance.require_disposable_runner(env, "win32") == tmp_path.resolve()
     for platform in (*acceptance.HEADLESS_QT_PLATFORMS,
                      *(f"{name}:unused" for name in acceptance.HEADLESS_QT_PLATFORMS)):
@@ -117,6 +122,26 @@ def test_installed_evidence_checks_bytes_and_registration(acceptance, tmp_path, 
     (bundle / "FPVS_Toolbox.exe").write_bytes(b"changed bytes")
     with pytest.raises(RuntimeError, match="release bytes differ"):
         acceptance.assert_installed(bundle, manifest, "3.0.0")
+
+
+def test_baseline_catalog_is_independently_checked_against_installed_bytes(acceptance, tmp_path):
+    destination = tmp_path / "installed"
+    destination.mkdir()
+    (destination / "FPVS_Toolbox.exe").write_bytes(b"inert baseline")
+    (destination / "unins000.exe").write_bytes(b"inert uninstaller")
+    catalog = tmp_path / "catalog.json"
+    catalog.write_text(json.dumps({"schema_version": 1, "application": "fpvs-toolbox",
+        "releases": [{"tag": "v2.1.2", "asset_name": "FPVSToolbox-2.1.2-setup.exe",
+                      "asset_id": 450622129, "size_bytes": 141503904, "sha256": acceptance.BASELINE_SHA256}],
+        "files": [{"path": "FPVS_Toolbox.exe", "sha256": [hashlib.sha256(b"inert baseline").hexdigest()]}]}))
+    assert acceptance.assert_baseline_catalog(destination, catalog)["owned_files_verified"] == 1
+    (destination / "unknown.pyd").write_bytes(b"extra legacy extension")
+    with pytest.raises(RuntimeError, match="files absent"):
+        acceptance.assert_baseline_catalog(destination, catalog)
+    (destination / "unknown.pyd").unlink()
+    (destination / "FPVS_Toolbox.exe").write_bytes(b"changed bytes")
+    with pytest.raises(RuntimeError, match="differs from its ownership catalog"):
+        acceptance.assert_baseline_catalog(destination, catalog)
 
 
 def test_exact_release_metadata_rejects_changed_artifact_bytes(acceptance, tmp_path):

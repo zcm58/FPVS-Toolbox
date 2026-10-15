@@ -21,6 +21,13 @@ upgrade still uses the full installer because v2.1.2 has no independent Update
 installer directly; a GitHub account is not required. See the
 [v2.1.2 migration guide](migration-v3.md) before opening an existing project.
 
+The full v3 installer recognizes the published v2.1.2 application files for an
+in-place upgrade. If setup reports that an older installation has no verified
+upgrade inventory, choose a new, empty application folder. Keep your existing
+project folders and data; do not copy the old application's libraries into the
+new folder. In-place upgrades from versions earlier than v2.1.2 have not been
+qualified.
+
 Earlier assets in the transitional
 [FPVS-Toolbox-Releases repository](https://github.com/zcm58/FPVS-Toolbox-Releases/releases)
 remain available. New releases use FPVS-Toolbox-Repo.

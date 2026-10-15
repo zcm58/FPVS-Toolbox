@@ -545,7 +545,7 @@ def build_mri_slice_figure(
         width_ratios=(1.0, 1.0, 1.0, 0.055),
         left=0.03,
         right=0.91,
-        top=0.84 if label else 0.91,
+        top=0.77 if label else 0.84,
         bottom=0.12,
         wspace=0.08,
     )
@@ -581,7 +581,7 @@ def build_mri_slice_figure(
         )
         coordinate_axis = {"axial": "z", "coronal": "y", "sagittal": "x"}[panel.plane]
         axis.set_title(
-            f"{panel.label} {coordinate_axis}={panel.ras_coordinate_mm:+g} mm",
+            f"{panel.label}\n{coordinate_axis}={panel.ras_coordinate_mm:+g} mm",
             color="#0B66FF",
             pad=8,
             bbox={
