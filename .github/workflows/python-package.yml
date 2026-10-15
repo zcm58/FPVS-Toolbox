@@ -52,6 +52,7 @@ jobs:
       MPLBACKEND: Agg
       QT_QPA_PLATFORM: offscreen
       FPVS_ALLOW_QT_TESTS: "1"
+      FPVS_TEST_WATCHDOG_DIR: build/pytest-watchdogs
     steps:
     - name: Check out repository
       uses: actions/checkout@v4
@@ -87,7 +88,9 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: pytest-diagnostics
-        path: build/ci-pytest.xml
+        path: |
+          build/ci-pytest.xml
+          build/pytest-watchdogs/
         if-no-files-found: ignore
     - name: Verify settings, harmonic help, and menus at fractional and high display scaling
       run: |

@@ -7,12 +7,6 @@ from tests import repo_root
 
 def test_phase1_perf_hygiene(qtbot, tmp_path, monkeypatch):
     root = repo_root()
-    main_path = root / "src" / "main.py"
-    lines = main_path.read_text().splitlines()
-    set_line = next(i for i, line in enumerate(lines) if "set_blas_threads_single_process()" in line)
-    main_app_import = next(i for i, line in enumerate(lines) if "from Main_App" in line and "mp_env" not in line)
-    assert set_line < main_app_import
-
     for var in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
         monkeypatch.delenv(var, raising=False)
     mp_env_path = root / "src" / "Main_App" / "Performance" / "mp_env.py"

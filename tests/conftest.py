@@ -85,6 +85,22 @@ _WATCHDOG_TIMEOUT_SECONDS = int(os.environ.get("FPVS_TEST_WATCHDOG_SECONDS", "20
 _SLOW_WATCHDOG_TIMEOUT_SECONDS = int(os.environ.get("FPVS_SLOW_TEST_WATCHDOG_SECONDS", "120"))
 
 
+def _write_watchdog_diagnostic(nodeid: str, timeout: int) -> Path | None:
+    """Preserve the timed-out test and all thread stacks before the hard exit."""
+    directory = os.environ.get("FPVS_TEST_WATCHDOG_DIR", "").strip()
+    if not directory:
+        return None
+    destination = Path(directory) / f"{hashlib.sha256(nodeid.encode('utf-8')).hexdigest()[:16]}.txt"
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with destination.open("w", encoding="utf-8") as stream:
+        stream.write(f"Test watchdog timed out after {timeout}s: {nodeid}\n")
+        stream.flush()
+        faulthandler.dump_traceback(file=stream, all_threads=True)
+        stream.flush()
+        os.fsync(stream.fileno())
+    return destination
+
+
 def pytest_addoption(parser) -> None:
     group = parser.getgroup("fpvs")
     group.addoption(
@@ -185,6 +201,10 @@ def _bounded_gui_and_plot_tests(request):
     )
 
     def _timeout() -> None:
+        try:
+            _write_watchdog_diagnostic(request.node.nodeid, timeout)
+        except OSError as exc:
+            sys.__stderr__.write(f"Could not preserve watchdog diagnostic: {exc}\n")
         sys.stderr.write(
             f"\nTest watchdog timed out after {timeout}s: {request.node.nodeid}\n"
         )
