@@ -9,7 +9,7 @@ Active. This is the release ledger for the first v3 release candidate.
 The user authorized fixing all release blockers and merging into `codex/v3-release`.
 The validated LORETA branch is merged. Release CI now preserves its first failure
 and watchdog evidence; a stale startup-order assertion is repaired. Native Windows
-packaging acceptance is being added for the exact installer, with isolated
+packaging acceptance now exercises the exact installer with isolated
 fresh-install, v2.1.2 upgrade, relaunch, and uninstall/data-preservation checks.
 
 The user authorized restoring the MIT-licensed project to public access. The
@@ -25,17 +25,46 @@ cached objects. The new repository was seeded with only the 47 verified clean
 branches/tags; old PR references and private local refs were not copied. The
 original `zcm58/FPVS-Toolbox-Repo` stays private, and the prepared Support request
 was not submitted. Runtime update URLs, installer identity links, and current
-release documentation now use the new repository. Historical releases are
-being copied with byte verification; the transitional release archive remains
-available. Published v2.1.2 binaries still query the old private repository, so
+release documentation now use the new repository. The MIT-licensed source, all
+28 historical releases with byte-verified installers, all 37 historical tags,
+and the [deployed documentation](https://zcm58.github.io/FPVS-Toolbox/) are publicly
+accessible. Release names, bodies, and prerelease flags were preserved; the
+transitional release archive remains available. Published v2.1.2 binaries still
+query the old private repository, so
 their first v3 upgrade requires a manual full-installer download. No new v3
 release is published by this closeout work.
 
-Current GUI CI, packaged acceptance, and fresh-project qualification remain in
-progress; bounded comparisons below must not be treated as completion of those
-final gates.
+At `0442e882`, [source CI](https://github.com/zcm58/FPVS-Toolbox/actions/runs/38783022106)
+passed its Ubuntu suite with 8,114 tests and 24 skips, including registered Qt
+coverage; the Windows backend job also passed. The [agent harness](https://github.com/zcm58/FPVS-Toolbox/actions/runs/38783033348)
+and [strict documentation build/deployment](https://github.com/zcm58/FPVS-Toolbox/actions/runs/38783072852)
+also passed. The local repository gate passed all audits, Ruff, compilation,
+and 7,487 non-Qt tests with 25 skips.
 
-The latest local repository gate passed all audits, Ruff, compilation, and
+The [native Windows run](https://github.com/zcm58/FPVS-Toolbox/actions/runs/38783027614)
+at the same commit passed source/frozen startup, dependency and synthetic
+scientific probes, ownership/rollback fixtures, installer build, fresh install,
+launch/second launch, fresh uninstall with user-data preservation, and the
+v2.1.2 upgrade with authenticated obsolete-file cleanup. Upgraded dependency,
+synthetic-workflow, and visible startup probes also passed. The run failed at
+the bounded interactive installer-relaunch step; the final upgraded uninstall
+was not reached and the qualified-installer upload was skipped. The driver
+selected no eligible child controls; the old diagnostics cannot distinguish
+unreadable captions from disabled controls. It now reads foreign control text
+with bounded `WM_GETTEXT` messages, as described by
+[Microsoft](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getwindowtextw),
+and retains child classes, captions, and enabled/visible states. Only verified
+Inno/standard button classes with the existing exact caption whitelist can be
+clicked. Non-GUI coverage checks pointer widths, timeout behavior, button
+selection, and retained evidence/cleanup. A complete native rerun remains
+necessary; the adapter change is not yet proof of the timeout's sole cause.
+
+Broader representative-project/drive comparisons and fresh preparation remain
+in progress. Existing bounded receipts below do not complete those checks or
+replace genuine data-review decisions. Final artifact identity, remaining
+visible acceptance, and stable publication also remain open.
+
+An earlier local repository gate passed all audits, Ruff, compilation, and
 7,457 non-Qt tests (25 skipped). All four isolated Qt diagnostic shards passed
 at `94ce9630`. The integrated Ubuntu suite then exposed overlapping MRI-slice
 titles when Arial falls back to DejaVu Sans. Existing plane and coordinate text
@@ -45,7 +74,7 @@ cover both fonts at 96/600 dpi, square/tall anatomy, and optional figure labels.
 The full CI suite now retains all failures in a run instead of stopping after
 the first one; existing hang watchdogs remain active.
 
-Current scoped checks on the repaired dependency pins: LORETA 455 passed,
+Earlier scoped checks on the repaired dependency pins: LORETA 455 passed,
 including eight graphics-guard tests and the expanded figure-layout checks;
 updates 523 passed with four skips; GUI 655 non-Qt tests passed. Frozen
 synthetic workflow, dependency, and updater/packaging checks also passed.
@@ -90,8 +119,9 @@ figure-style gate passed four. Updater checks after migration of the release
 address passed 527 tests with four skips. The visible follow-up is to export a
 repeated-session map with long group/session names and inspect matching PNG/PDF
 labels at the supported display sizes; native GUI execution remains CI-only.
-These checks do not replace final source/Qt CI, native installed-app acceptance,
-or fresh-project preparation and full-cohort qualification. Public
+The latest source/Qt CI result is recorded above. It does not replace complete
+native installed-app acceptance or fresh-project preparation and full-cohort
+qualification. Public
 visibility of the original repository would additionally require GitHub's
 PR/cached-object purge. The new public home uses only the verified clean history.
 
@@ -880,8 +910,9 @@ threshold/p-value rules, or relevant numerical dependencies change.
       imports from the FHC preparation path.
 - [x] Run the routine deterministic regression and focused backend/export suite
       after the reader relocation.
-- [ ] Run the registered CI-only embedded-page smoke at the final closeout/RC
-      commit.
+- [x] Run the registered CI-only embedded-page smoke: the FHC page and map-view
+      tests passed in source CI at `0442e882`. Later code changes remain subject
+      to the final-commit CI gate below.
 - [ ] From the exact packaged RC, visibly reproduce the canonical ACR Neutral
       Happy comparison: n=18 versus n=16, retained H1/H2, positive H1 cluster
       at C1/Cz/CPz, and raw sign-specific p approximately `.0043`.
@@ -968,30 +999,36 @@ threshold/p-value rules, or relevant numerical dependencies change.
 
 ### 4. Make the Windows artifact testable
 
-- [ ] Change `FPVS_TOOLBOX_VERSION` only when the RC branch is frozen; use an
-      RC such as `3.0.0rc1`, then `3.0.0` for the stable rebuild.
+- [ ] Confirm final version identity against the accepted artifact. The current
+      candidate is configured as `3.0.0`; no v3 release has been published.
 - [x] Separate display/package version from Inno's numeric Windows file version
       so prerelease labels do not enter `VersionInfoVersion`.
 - [x] Remove the Inno script's fallback version and test
       version drift as a packaging error.
 - [x] Add `scripts/packaging/smoke_packaged_app.ps1`. A release build must fail
       when the smoke is missing or fails; it must not silently skip it.
-- [ ] Have the packaged smoke launch the frozen executable, verify the reported
+- [x] Have the packaged smoke launch the frozen executable, verify the reported
       version, import lazy runtime dependencies, reach the Main Window, and
-      exit deterministically without an offscreen Qt workaround.
-- [ ] Install Inno Setup 6 in the release environment and build from a clean
-      Windows 11 checkout/environment.
-- [ ] Produce `FPVSToolbox-<version>-setup.exe` and record its SHA-256.
+      exit deterministically without an offscreen Qt workaround. Native frozen
+      startup passed at `0442e882`; complete installer lifecycle remains open.
+- [ ] Qualify the release in the supported Windows 11 environment. The clean
+      hosted Windows build with Inno Setup 6 passed at `0442e882`; it does not
+      establish the pending visible Windows 11 acceptance.
+- [x] Produce `FPVSToolbox-<version>-setup.exe` and record its SHA-256. The
+      `0442e882` acceptance receipt identifies the candidate bytes; the failed
+      lifecycle run did not publish or qualify that installer.
 - [x] Add `.github/workflows/windows-packaging.yml` and installer-acceptance
       coverage. Execution and artifact qualification remain open; Ubuntu source
       CI alone does not qualify the installer.
 
 ### 5. Perform one compact installed-app acceptance pass
 
-- [ ] Fresh-install the RC in a clean Windows account/VM; launch, close, and
-      relaunch it.
-- [ ] Upgrade in place from v2.1.2 and confirm projects, settings, logs, and
-      generated outputs are preserved.
+- [x] Fresh-install the candidate on the disposable native Windows runner;
+      launch, close, and launch it again. These installed-binary checks passed
+      at `0442e882`; installer-triggered relaunch remains open below.
+- [x] Upgrade in place from v2.1.2 and verify user-data preservation sentinels
+      plus the complete installed-file inventory at `0442e882`. Representative
+      project acceptance remains separate below.
 - [ ] Create/open a project, process a small representative dataset, inspect QC,
       and generate FHC and SNR Plots outputs.
 - [ ] Enable Beta Tools and open each beta surface far enough to catch missing
@@ -1048,7 +1085,8 @@ deferred by this table.
       screenshots only when they no longer represent that artifact.
 - [ ] Verify every release-note claim against the final `v2.1.2..v3.0.0` range
       and publish it with the stable installer and checksum. The draft does not
-      imply that v3 is already available or that public-history purge is complete.
+      imply that v3 is already available. The clean public repository is live;
+      the original repository and its retained PR history remain private.
 
 ### Major feature inventory over v2.1.2
 

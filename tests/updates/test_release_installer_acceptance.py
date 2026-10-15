@@ -211,3 +211,124 @@ def test_exact_release_metadata_rejects_changed_artifact_bytes(acceptance, tmp_p
     installer.write_bytes(b"changed after checksum publication")
     with pytest.raises(RuntimeError, match="checksum sidecar differs"):
         acceptance.verify_release_metadata(installer, "3.0.0")
+
+
+@pytest.mark.parametrize("message_succeeds", [True, False])
+def test_foreign_control_caption_read_is_bounded_and_ignores_failed_buffer(acceptance, message_succeeds):
+    import ctypes
+    from types import SimpleNamespace
+
+    calls = []
+
+    def send(hwnd, message, count, address, flags, timeout, result):
+        calls.append((hwnd, message, flags, timeout))
+        assert isinstance(address, int)
+        buffer = (ctypes.c_wchar * count).from_address(address)
+        buffer.value = "&Next >"
+        ctypes.cast(result, ctypes.POINTER(ctypes.c_size_t)).contents.value = len(buffer.value)
+        return int(message_succeeds)
+
+    native = acceptance.NativeWindows.__new__(acceptance.NativeWindows)
+    native.user32 = SimpleNamespace(SendMessageTimeoutW=send)
+    assert native.control_text(123) == ("&Next >" if message_succeeds else "")
+    assert calls == [(123, 0x000D, 0x0022, 100)]
+
+
+def test_control_message_signature_preserves_pointer_width(acceptance, monkeypatch):
+    import ctypes
+    from ctypes import wintypes
+    from types import SimpleNamespace
+
+    class FakeDLL:
+        def __init__(self):
+            self.functions = {}
+
+        def __getattr__(self, name):
+            return self.functions.setdefault(name, SimpleNamespace())
+
+    user32 = FakeDLL()
+    kernel32 = FakeDLL()
+    monkeypatch.setattr(ctypes, "WinDLL", lambda name, **_kwargs: user32 if name == "user32" else kernel32, raising=False)
+    monkeypatch.setattr(ctypes, "WINFUNCTYPE", lambda *_args: object(), raising=False)
+    acceptance.NativeWindows()
+    assert user32.SendMessageTimeoutW.restype is ctypes.c_ssize_t
+    assert user32.SendMessageTimeoutW.argtypes == [
+        wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM,
+        wintypes.UINT, wintypes.UINT, ctypes.POINTER(ctypes.c_size_t),
+    ]
+
+
+def test_setup_button_selection_retains_foreign_control_diagnostics(acceptance):
+    import ctypes
+    from types import SimpleNamespace
+
+    controls = {
+        0: ("&Install", True, True),
+        1: ("&Cancel", True, True),
+        2: ("&Install", True, False),
+        3: ("&Finish", False, True),
+        4: ("&Next >", True, True),
+    }
+    clicks = []
+
+    def enumerate_children(_hwnd, callback, data):
+        for handle in controls:
+            assert callback(handle, data)
+
+    def send(hwnd, _message, count, address, _flags, _timeout, _result):
+        (ctypes.c_wchar * count).from_address(address).value = controls[hwnd][0]
+        return 1
+
+    def caption(_hwnd, buffer, _count):
+        # Simulate an unreadable foreign control caption.
+        buffer.value = ""
+        return 0
+
+    def class_name(hwnd, buffer, _count):
+        buffer.value = "TNewStaticText" if hwnd == 0 else "TNewButton"
+        return len(buffer.value)
+
+    native = acceptance.NativeWindows.__new__(acceptance.NativeWindows)
+    native.callback_type = lambda callback: callback
+    native.last_setup_controls = {}
+    native.user32 = SimpleNamespace(
+        EnumChildWindows=enumerate_children, SendMessageTimeoutW=send, GetWindowTextW=caption,
+        GetClassNameW=class_name, IsWindowVisible=lambda handle: controls[handle][1],
+        IsWindowEnabled=lambda handle: controls[handle][2],
+        PostMessageW=lambda *args: clicks.append(args) or 1,
+    )
+    assert native.advance_setup(100) == "Next >"
+    assert clicks == [(4, 0x00F5, 0, 0)]
+    assert native.last_setup_controls[100][2] == {
+        "class": "TNewButton", "caption": "&Install", "visible": True, "enabled": False,
+    }
+    assert native.last_setup_controls[100][4]["caption"] == "&Next >"
+
+
+def test_relaunch_timeout_retains_control_evidence_and_terminates_fixture_process(acceptance, tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    controls = {100: [{"class": "TNewButton", "caption": "&Next >", "visible": True, "enabled": False}]}
+    process = SimpleNamespace(pid=123, returncode=None)
+    process.poll = lambda: process.returncode
+    process.kill = lambda: setattr(process, "returncode", 1)
+    waits = []
+    process.wait = lambda **kwargs: waits.append(kwargs)
+    native = SimpleNamespace(last_setup_controls=controls, windows=lambda _pids: [(100, "Setup - FPVS Toolbox 3.0.0")],
+                             advance_setup=lambda _hwnd: None)
+    monkeypatch.setattr(acceptance, "NativeWindows", lambda: native)
+    monkeypatch.setattr(acceptance.subprocess, "Popen", lambda *_args, **_kwargs: process)
+    monkeypatch.setattr(acceptance.psutil, "Process", lambda _pid: SimpleNamespace(children=lambda **_kwargs: []))
+    monkeypatch.setattr(acceptance, "app_processes", lambda _path: [])
+    ticks = iter((0, 0, 301))
+    monkeypatch.setattr(acceptance.time, "monotonic", lambda: next(ticks))
+    monkeypatch.setattr(acceptance.time, "sleep", lambda _seconds: None)
+    # No application windows exist; setup windows belong only to the fixture PID.
+    native.windows = lambda pids: [(100, "Setup - FPVS Toolbox 3.0.0")] if pids else []
+    with pytest.raises(RuntimeError, match="controls=.*TNewButton"):
+        acceptance.visible_relaunch(tmp_path / "setup.exe", tmp_path / "installed", tmp_path, {})
+    evidence = json.loads((tmp_path / "relaunch-controls.json").read_text(encoding="utf-8"))
+    assert evidence["last_setup_controls"]["100"] == controls[100]
+    assert evidence["actions"] == []
+    assert process.returncode == 1
+    assert waits == [{"timeout": 30}]

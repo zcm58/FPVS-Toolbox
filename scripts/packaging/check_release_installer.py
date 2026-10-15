@@ -208,6 +208,12 @@ class NativeWindows:
         self.kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
         self.callback_type = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
         self.user32.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+        self.user32.GetClassNameW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+        self.user32.SendMessageTimeoutW.argtypes = [
+            wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM,
+            wintypes.UINT, wintypes.UINT, ctypes.POINTER(ctypes.c_size_t),
+        ]
+        self.user32.SendMessageTimeoutW.restype = ctypes.c_ssize_t
         self.user32.IsWindowVisible.argtypes = [wintypes.HWND]
         self.user32.IsWindowEnabled.argtypes = [wintypes.HWND]
         self.user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
@@ -222,6 +228,7 @@ class NativeWindows:
         self.kernel32.WaitForSingleObject.restype = wintypes.DWORD
         self.kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
         self.kernel32.CloseHandle.restype = wintypes.BOOL
+        self.last_setup_controls: dict[int, list[dict[str, object]]] = {}
 
     def watch_process(self, pid: int) -> int:
         # Retain a handle while the process is alive; opening by PID after exit
@@ -251,6 +258,23 @@ class NativeWindows:
         self.user32.GetWindowTextW(hwnd, buffer, len(buffer))
         return buffer.value
 
+    def control_text(self, hwnd: int) -> str:
+        # GetWindowTextW does not reliably read another process's controls.
+        # WM_GETTEXT is marshalled by Windows; never wait on a hung installer.
+        buffer = ctypes.create_unicode_buffer(2048)
+        result = ctypes.c_size_t()
+        if not self.user32.SendMessageTimeoutW(
+            hwnd, 0x000D, len(buffer), ctypes.addressof(buffer),
+            0x0002 | 0x0020, 100, ctypes.byref(result),
+        ):  # WM_GETTEXT, SMTO_ABORTIFHUNG | SMTO_ERRORONEXIT
+            return ""
+        return buffer.value
+
+    def class_name(self, hwnd: int) -> str:
+        buffer = ctypes.create_unicode_buffer(256)
+        self.user32.GetClassNameW(hwnd, buffer, len(buffer))
+        return buffer.value
+
     def windows(self, pids: set[int]) -> list[tuple[int, str]]:
         found = []
 
@@ -267,17 +291,27 @@ class NativeWindows:
 
     def advance_setup(self, hwnd: int) -> str | None:
         buttons = []
+        controls = []
 
         @self.callback_type
         def visit(child: int, _data: int) -> bool:
-            text = self.text(child).replace("&", "").strip()
-            if text in {"Next >", "Install", "Finish"} and self.user32.IsWindowVisible(child) and self.user32.IsWindowEnabled(child):
+            visible = bool(self.user32.IsWindowVisible(child))
+            enabled = bool(self.user32.IsWindowEnabled(child))
+            caption = self.control_text(child) if visible else self.text(child)
+            class_name = self.class_name(child)
+            controls.append({"class": class_name, "caption": caption,
+                             "visible": visible, "enabled": enabled})
+            text = caption.replace("&", "").strip()
+            if (class_name in {"TNewButton", "Button"}
+                    and text in {"Next >", "Install", "Finish"} and visible and enabled):
                 buttons.append((child, text))
             return True
 
         self.user32.EnumChildWindows(hwnd, visit, 0)
+        self.last_setup_controls[hwnd] = controls
         if buttons:
-            self.user32.PostMessageW(buttons[0][0], 0x00F5, 0, 0)  # BM_CLICK
+            if not self.user32.PostMessageW(buttons[0][0], 0x00F5, 0, 0):  # BM_CLICK
+                raise ctypes.WinError(ctypes.get_last_error())
             return buttons[0][1]
         return None
 
@@ -348,15 +382,22 @@ def visible_relaunch(installer: Path, destination: Path, evidence: Path, env: di
                         "installer_window_titles": sorted(titles),
                         "application_exit_codes": require_clean_app_exits(native, watched)}
             time.sleep(0.5)
-        raise RuntimeError(f"Installer relaunch timed out; actions={actions}, windows={sorted(titles)}.")
+        raise RuntimeError(f"Installer relaunch timed out; actions={actions}, windows={sorted(titles)}, "
+                           f"controls={native.last_setup_controls}.")
     finally:
-        if process.poll() is None:
-            process.kill()
-            process.wait(timeout=30)
-        for remaining in app_processes(executable):
-            remaining.kill()
-        for handle in watched.values():
-            native.release_process(handle)
+        try:
+            (evidence / "relaunch-controls.json").write_text(
+                json.dumps({"actions": actions, "window_titles": sorted(titles),
+                            "last_setup_controls": native.last_setup_controls}, indent=2), encoding="utf-8",
+            )
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait(timeout=30)
+            for remaining in app_processes(executable):
+                remaining.kill()
+            for handle in watched.values():
+                native.release_process(handle)
 
 
 def main() -> int:
