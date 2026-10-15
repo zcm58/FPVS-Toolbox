@@ -15,7 +15,6 @@ EXPECTED_SIDEBAR_ICONS = {
     "scalp",
     "loreta",
     "sequence",
-    "ratio",
     "detectability",
     "settings",
     "info",

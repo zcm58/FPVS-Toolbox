@@ -1,6 +1,5 @@
 import importlib.util
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -14,9 +13,9 @@ from Main_App.projects import FrequencyProtocol
 from Main_App.projects.project import Project
 import Main_App.gui.processing_inputs as processing_inputs
 import Main_App.gui.processing_workflows as processing_workflows
-import Main_App.gui.main_window as main_window_module
 from Main_App.gui.main_window import MainWindow
 from Main_App.workers.mp_runner_bridge import MpRunnerBridge
+from Main_App.workers.mp_env import compute_dynamic_worker_ceiling
 
 
 def _build_worker_project(root: Path) -> Project:
@@ -115,11 +114,10 @@ def test_worker_uses_parallel_override_from_preprocessing(tmp_path, qtbot, monke
     win.loadProject(project)
 
     monkeypatch.setattr(
-        main_window_module.psutil,
-        "virtual_memory",
-        lambda: SimpleNamespace(total=int(16 * (1024 ** 3))),
+        processing_workflows,
+        "compute_dynamic_worker_ceiling",
+        lambda requested: compute_dynamic_worker_ceiling(requested, cpu_count=8),
     )
-    monkeypatch.setattr(main_window_module.os, "cpu_count", lambda: 8)
 
     captured: dict = {}
 

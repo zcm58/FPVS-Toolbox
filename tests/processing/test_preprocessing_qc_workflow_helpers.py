@@ -481,7 +481,7 @@ def test_severe_transient_amplitude_detail_does_not_misstate_aggregate() -> None
         }
     )
 
-    details = workflow._hard_candidate_detail_text(result)
+    details = workflow._hard_candidate_detail_text(result, {"control": "Control"})
 
     assert "Full-occurrence aggregate metrics" in details
     assert "Median STD: 1200.0 uV" in details

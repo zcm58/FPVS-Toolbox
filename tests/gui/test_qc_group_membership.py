@@ -4,7 +4,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from PySide6.QtWidgets import QComboBox, QHeaderView, QTableWidget
+from PySide6.QtWidgets import QAbstractItemView, QComboBox, QHeaderView, QTableWidget
 
 from Main_App.gui import preprocessing_qc_workflow as preflight_workflow
 from Main_App.gui.frequency_domain_qc_dialog import FrequencyDomainQcReviewDialog
@@ -127,12 +127,14 @@ def test_repeated_session_preflight_tables_remain_compact_and_reachable(
     table = QTableWidget(1, 1)
     qtbot.addWidget(table)
     table.resize(1000, 400)
+    # One oversized column only scrolls within its contents in pixel mode.
+    table.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
     table.setColumnWidth(0, 2000)
     stale_scope = QComboBox(table)
     stale_scope.addItem("This recording")
     table.setCellWidget(0, 0, stale_scope)
     table.show()
-    qtbot.wait(1)
+    qtbot.waitUntil(lambda: table.horizontalScrollBar().maximum() > 0)
     table.horizontalScrollBar().setValue(table.horizontalScrollBar().maximum())
     assert table.horizontalScrollBar().value() > table.horizontalScrollBar().minimum()
 

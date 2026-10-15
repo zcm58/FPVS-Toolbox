@@ -58,7 +58,7 @@ def save_handoff(qtbot, monkeypatch, tmp_path):
         returned=Event(), timed_out=False, worker_thread=None,
         result={"success": True, "tools": {"frequency_domain_qc": {"accepted": True}}},
         timeline=[], starts=[], finishes=[], resume=[], errors=[], arguments=[],
-        start_result=True,
+        start_result=True, provisional_cache=object(),
     )
 
     class TrackedManifest(dict):
@@ -92,7 +92,7 @@ def save_handoff(qtbot, monkeypatch, tmp_path):
                 state.timed_out = True
             state.returned.set()
 
-    def start_pipeline(owner, *, on_finished, completed_phase_floor):
+    def start_pipeline(owner, *, on_finished, completed_phase_floor, provisional_cache):
         assert owner.btn_start.isEnabled()
         assert owner.btn_start.text() == "Stop Processing"
         assert owner.btn_start.toolTip() == "Original stop action"
@@ -101,6 +101,7 @@ def save_handoff(qtbot, monkeypatch, tmp_path):
             "owner": owner,
             "on_finished": on_finished,
             "phase": completed_phase_floor,
+            "provisional_cache": provisional_cache,
             "tools": dict(project.manifest["tools"]),
             "worker_returned": state.returned.is_set(),
             "thread_running": state.worker_thread.isRunning(),
@@ -138,6 +139,7 @@ def save_handoff(qtbot, monkeypatch, tmp_path):
             review_decisions=[{"decision": "keep", "reason": ""}],
             manual_participant_reasons={}, manual_recording_reasons={},
             on_finished=finish,
+            provisional_cache=state.provisional_cache,
         )
 
     try:
@@ -206,6 +208,7 @@ def test_metadata_and_pipeline_handoff_wait_for_thread_exit(qtbot, save_handoff)
     assert start["owner"] is fixture.host
     assert start["on_finished"] is fixture.finish
     assert start["phase"] == 1
+    assert start["provisional_cache"] is fixture.state.provisional_cache
     assert start["tools"] == fixture.state.result["tools"]
     assert start["worker_returned"]
     assert not start["thread_running"]

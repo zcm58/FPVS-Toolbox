@@ -3,9 +3,10 @@
 from types import SimpleNamespace
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QDialog, QScrollArea, QTabWidget, QVBoxLayout
+from PySide6.QtWidgets import QDialog, QLineEdit, QScrollArea, QTabWidget, QVBoxLayout
 
 from Main_App.gui.settings_panel import SettingsDialog
+from Main_App.gui.settings_feedback import PREPROCESSING_FIELDS
 from Main_App.projects import FrequencyProtocol
 
 
@@ -24,6 +25,8 @@ class _ProtocolDialog(QDialog):
 
 def _dialog(qtbot, protocol):
     dialog = _ProtocolDialog()
+    dialog.preproc_edits = [QLineEdit(dialog) for _ in PREPROCESSING_FIELDS]
+    dialog.preproc_edits[PREPROCESSING_FIELDS.index("downsample")].setText("256")
     dialog.project = SimpleNamespace(
         frequency_protocol=protocol,
         event_map={"Mixed Response 2": 5, "Semantic Response": 3, "Color Response 1": 1, "Mixed Response 1": 4, "Color Response 2": 2},
