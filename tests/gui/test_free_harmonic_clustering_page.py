@@ -232,6 +232,17 @@ def _page(
     return page
 
 
+def _click_visible_result_action(qtbot, button) -> None:
+    # Completion and filter callbacks mutate a previously hidden tab. Let Qt
+    # lay out its actions before choosing the mouse position, just as it does
+    # between the worker callback and the next real user input event.
+    QtWidgets.QApplication.processEvents()
+    assert button.isVisible()
+    assert button.isEnabled()
+    assert not button.rect().isEmpty()
+    qtbot.mouseClick(button, QtCore.Qt.LeftButton, pos=button.rect().center())
+
+
 def test_missing_protocol_metadata_explains_blocker_and_opens_settings(qtbot, tmp_path):
     reason = "Semantic Categories has no oddball frequency in its protocol metadata."
     page = FreeHarmonicClusteringPage(
@@ -625,7 +636,8 @@ def test_exploratory_filter_uses_stored_boundaries_and_original_map_indices(
     assert "0.199996" in page.batch_table.item(1, 2).toolTip()
     assert page._batch_report_rows is snapshot
     page.batch_table.selectRow(1)
-    qtbot.mouseClick(page.view_maps_button, QtCore.Qt.LeftButton)
+    assert page._selected_report_row().run_index == 4
+    _click_visible_result_action(qtbot, page.view_maps_button)
     assert page.map_view.selected_run == 4
     assert page.result_tabs.currentIndex() == 2
     page.result_tabs.setCurrentIndex(1)
@@ -636,7 +648,7 @@ def test_exploratory_filter_uses_stored_boundaries_and_original_map_indices(
         return QtWidgets.QDialog.Accepted
 
     monkeypatch.setattr(ResultDetailsDialog, "exec", open_selected_maps)
-    qtbot.mouseClick(page.view_details_button, QtCore.Qt.LeftButton)
+    _click_visible_result_action(qtbot, page.view_details_button)
     assert page.result_tabs.currentIndex() == 2
     assert page.map_view.selected_run == 4
     page.result_tabs.setCurrentIndex(1)
@@ -724,10 +736,10 @@ def test_result_details_without_maps_and_page_fit(qtbot, tmp_path: Path, monkeyp
         return QtWidgets.QDialog.Rejected
 
     monkeypatch.setattr(ResultDetailsDialog, "exec", inspect_dialog)
-    qtbot.mouseClick(page.view_details_button, QtCore.Qt.LeftButton)
+    _click_visible_result_action(qtbot, page.view_details_button)
     assert len(observed) == 1
     assert "Neutral Angry" in observed[0]
-    assert page.result_tabs.currentIndex() == 0
+    assert page.result_tabs.currentIndex() == 1
 
 
 def test_provenance_failure_requests_shared_post_processing_without_error_banner(
@@ -1180,7 +1192,7 @@ def test_results_appear_in_compact_single_screen_without_run_metadata(
     assert page.result_tabs.isTabEnabled(2)
     assert page.map_view.maps == (map_snapshot,)
     page.significant_table.selectRow(0)
-    qtbot.mouseClick(page.view_maps_button, QtCore.Qt.LeftButton)
+    _click_visible_result_action(qtbot, page.view_maps_button)
     assert page.result_tabs.currentIndex() == 2
     assert page.map_view.selected_cluster == significant.cluster_id
     page.result_tabs.setCurrentIndex(1)
@@ -1231,7 +1243,7 @@ def test_results_appear_in_compact_single_screen_without_run_metadata(
     assert not page.result_tabs.isTabEnabled(1)
     assert page.map_view.maps == ()
     assert not page.run_analysis_button.isEnabled()
-    assert "Project Settings" in page.workflow_status.text()
+    assert "Settings > Protocol" in page.workflow_status.text()
 
 
 def test_worker_reports_success_when_cancel_arrives_after_return() -> None:
