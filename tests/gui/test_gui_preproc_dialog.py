@@ -949,6 +949,8 @@ def experimental_settings_page(tmp_path, qtbot, request):
     project = Project.load(project.project_root)
 
     app = QApplication.instance() or QApplication([])
+    # pytest-qt queues widget deletion; flush it before restyling the application.
+    QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
     previous_stylesheet = app.styleSheet()
     previous_font = app.font()
     previous_palette = app.palette()
@@ -972,6 +974,8 @@ def experimental_settings_page(tmp_path, qtbot, request):
         yield page
     finally:
         host.close()
+        host.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
         app.setStyle(previous_style)
         app.setFont(previous_font)
         app.setPalette(previous_palette)

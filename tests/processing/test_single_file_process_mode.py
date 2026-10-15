@@ -1,6 +1,5 @@
 import importlib.util
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -12,9 +11,39 @@ from PySide6.QtWidgets import QApplication
 
 from Main_App.Shared.processing_mixin import ProcessingMixin
 from Main_App.gui.main_window import MainWindow
-from Main_App.projects import FrequencyProtocol
+from Main_App.projects import FrequencyProtocol, Project
 import Main_App.gui.processing_inputs as processing_inputs
+import Main_App.gui.processing_workflows as processing_workflows
 import Main_App.workers.mp_runner_bridge as mp_runner_bridge
+
+
+def _build_project(project_root, input_folder, preprocessing, *, mode):
+    project = Project.load(project_root)
+    project.input_folder = input_folder
+    project.update_preprocessing(preprocessing)
+    project.confirm_removed_electrode_detection_choice("off")
+    project.event_map = {"CondA": 1}
+    project.options["mode"] = mode
+    project.update_frequency_protocol(
+        FrequencyProtocol.from_recurrence(
+            "6",
+            5,
+            expected_analyzed_oddball_cycles=144,
+            expected_analyzed_oddball_cycles_source="manual",
+        )
+    )
+    project.save()
+    return project
+
+
+@pytest.fixture(autouse=True)
+def _skip_qc_manifest_commit(monkeypatch):
+    # These routing tests replace QC with a stub and do not create marker plans.
+    monkeypatch.setattr(
+        processing_workflows,
+        "_freeze_expected_processing_matrix",
+        lambda *_args, **_kwargs: None,
+    )
 
 
 def test_single_file_process_mode_routes_through_mp_runner(qtbot, tmp_path, monkeypatch):
@@ -44,22 +73,9 @@ def test_single_file_process_mode_routes_through_mp_runner(qtbot, tmp_path, monk
     win = MainWindow()
     assert ProcessingMixin not in MainWindow.__mro__
     qtbot.addWidget(win)
-    win.currentProject = SimpleNamespace(
-        project_root=project_root,
-        input_folder=input_folder,
-        subfolders={"excel": excel_subfolder},
-        preprocessing=preprocessing,
-        frequency_protocol=FrequencyProtocol.from_recurrence(
-            "6",
-            5,
-            expected_analyzed_oddball_cycles=144,
-            expected_analyzed_oddball_cycles_source="manual",
-        ),
-        options={},
-    )
+    win.loadProject(_build_project(project_root, input_folder, preprocessing, mode="single"))
 
     win._on_mode_changed("single")
-    win.add_event_row("CondA", "1")
 
     dummy_path = input_folder / "sample.bdf"
     dummy_path.touch()
@@ -139,23 +155,10 @@ def test_batch_non_process_mode_routes_through_mp_runner(qtbot, tmp_path, monkey
 
     win = MainWindow()
     qtbot.addWidget(win)
-    win.currentProject = SimpleNamespace(
-        project_root=project_root,
-        input_folder=input_folder,
-        subfolders={"excel": excel_subfolder},
-        preprocessing=preprocessing,
-        frequency_protocol=FrequencyProtocol.from_recurrence(
-            "6",
-            5,
-            expected_analyzed_oddball_cycles=144,
-            expected_analyzed_oddball_cycles_source="manual",
-        ),
-        options={},
-    )
+    win.loadProject(_build_project(project_root, input_folder, preprocessing, mode="batch"))
 
     win._on_mode_changed("batch")
     win.parallel_mode = "thread"
-    win.add_event_row("CondA", "1")
 
     def _no_processing_notice():
         return None

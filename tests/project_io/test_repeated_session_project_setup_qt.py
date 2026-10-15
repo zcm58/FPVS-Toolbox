@@ -14,8 +14,8 @@ if (
 ):
     pytest.skip("PySide6 or pytest-qt not available", allow_module_level=True)
 
-from PySide6.QtCore import QThread  # noqa: E402
-from PySide6.QtWidgets import QApplication, QWidget  # noqa: E402
+from PySide6.QtCore import QThread, Qt  # noqa: E402
+from PySide6.QtWidgets import QApplication, QPushButton, QWidget  # noqa: E402
 
 from Main_App.projects import project_manager  # noqa: E402
 from Main_App.projects.recording_preflight import (  # noqa: E402
@@ -176,13 +176,27 @@ def test_repeated_project_preflight_cancel_stops_before_project_creation(
         manifest=manifest,
         use_existing_project_folder=False,
     )
-    qtbot.waitUntil(entered_worker.is_set, timeout=5_000)
-    host._active_repeated_preflight_progress.cancel()
-
-    qtbot.waitUntil(
-        lambda: host._active_repeated_preflight_job is None,
-        timeout=5_000,
-    )
+    job = host._active_repeated_preflight_job
+    try:
+        qtbot.waitUntil(entered_worker.is_set, timeout=5_000)
+        progress = host._active_repeated_preflight_progress
+        qtbot.waitExposed(progress)
+        cancel_button = progress.findChild(QPushButton)
+        assert cancel_button is not None and cancel_button.text() == "Cancel"
+        # cancel() only resets the dialog; the user's button emits canceled().
+        with qtbot.waitSignal(progress.canceled, timeout=1_000):
+            qtbot.mouseClick(cancel_button, Qt.LeftButton)
+        qtbot.waitUntil(
+            lambda: host._active_repeated_preflight_job is None,
+            timeout=5_000,
+        )
+    finally:
+        # A failed assertion must not leave the pool waiting for an endless job.
+        job.request_cancel()
+        qtbot.waitUntil(
+            lambda: host._active_repeated_preflight_job is None,
+            timeout=5_000,
+        )
     assert not project_dir.exists()
     assert host.loaded == []
     assert any("No project was created" in text for _title, text in information_messages)

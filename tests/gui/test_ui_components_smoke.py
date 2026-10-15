@@ -45,6 +45,7 @@ EXPECTED_COMPONENT_EXPORTS = (
     "BrainPulseWidget",
     "BusySpinner",
     "CardHeader",
+    "ColumnFilterMenu",
     "PathPickerRow",
     "PostProcessingRequiredDialog",
     "SectionCard",
@@ -86,6 +87,7 @@ def test_component_consumer_import_style_remains_available() -> None:
     from Main_App.gui.components import BrainPulseWidget as ImportedBrainPulseWidget
     from Main_App.gui.components import BusySpinner as ImportedBusySpinner
     from Main_App.gui.components import CardHeader as ImportedCardHeader
+    from Main_App.gui.components import ColumnFilterMenu as ImportedColumnFilterMenu
     from Main_App.gui.components import PathPickerRow as ImportedPathPickerRow
     from Main_App.gui.components import (
         PostProcessingRequiredDialog as ImportedPostProcessingRequiredDialog,
@@ -123,6 +125,7 @@ def test_component_consumer_import_style_remains_available() -> None:
         "BrainPulseWidget": ImportedBrainPulseWidget,
         "BusySpinner": ImportedBusySpinner,
         "CardHeader": ImportedCardHeader,
+        "ColumnFilterMenu": ImportedColumnFilterMenu,
         "PathPickerRow": ImportedPathPickerRow,
         "PostProcessingRequiredDialog": ImportedPostProcessingRequiredDialog,
         "SectionCard": ImportedSectionCard,
