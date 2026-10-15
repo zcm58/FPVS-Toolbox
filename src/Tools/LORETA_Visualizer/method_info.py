@@ -88,23 +88,21 @@ pial surface, and a grid location does not by itself establish a tissue label.
 
 <h3>Cluster-Based Permutation Mask</h3>
 <p>
-Cluster based permutation tests are widely used in statistical analysis, and these were employed in 
-Hauk et al., 2021 across the group level to ensure that the group level heatmaps only display 
-vertices that were significant across the entire group. Cluster based permutation tests are very conservative and 
-can therefore significantly reduce the amount of painted vertices that appear on the surface or in the 
-eLORETA 3D view. 
-
-In short, FPVS Toolbox checks each source point across participants. Source
-points that pass the cluster-forming threshold and touch each other are grouped
-into clusters. Then the toolbox repeats the analysis with random sign flips to
-ask a question: how large could the biggest cluster be if there were no
-consistent group response?
+The producer computes a one-sample t statistic across participant maps, groups
+adjacent locations that pass the cluster-forming threshold, and compares each
+cluster's mass with the maximum cluster mass under sign flips. New builds with small cohorts
+use every sign pattern when the configured permutation count allows it; larger
+runs sample patterns. For these new builds, exact tests use the null tail
+proportion, while sampled tests use the plus-one correction. Their saved metadata
+identifies the calculation version and the minimum attainable p-value.
+Older saved masks retain their original calculation until rebuilt.
 </p>
 <p>
-Only clusters that are larger than expected under that permutation test remain
-visible in the masked display. You can disable this mask if you'd like, but just be aware that 
-the source map you see without the mask could be influenced by an outlier or small number of participants
-across your dataset, so use caution when interpreting data without the mask. 
+The evidence applies to a cluster, not to each vertex or its exact boundary.
+The same participant-level mean-t test supplies the mask for mean, median, and
+trimmed-mean displays. Separate condition masks do not test a condition
+contrast. Display cutoffs are exploratory neighboring-noise z-score thresholds,
+not calibrated Gaussian p-values. Disabling the mask changes display only.
 </p>
 
 <h3>eLORETA Volume View</h3>
@@ -155,6 +153,9 @@ of the Hauk study rather than an exact reproduction.
 
 <h3>References And Background</h3>
 <ul>
+  <li><a href="https://doi.org/10.1111/psyp.13335">Sassenhagen and Draschkow (2019)</a>: limits of cluster-level localization claims.</li>
+  <li><a href="https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.permutation_test.html">SciPy permutation-test documentation</a>: exact and sampled p-values.</li>
+  <li><a href="https://doi.org/10.1038/s41467-020-19160-7">Crameri et al. (2020)</a>: scientific colour communication; the viewer uses Matplotlib viridis.</li>
   <li><a href="https://doi.org/10.1016/j.neuroimage.2021.118460">Hauk et al. (2021)</a>: combined EEG/MEG FPVS source estimation for face-selective responses.</li>
   <li><a href="https://github.com/olafhauk/FPVS_sweep">Hauk FPVS_sweep repository</a>: public analysis scripts that informed the time-domain source-PSD sequence.</li>
   <li><a href="https://doi.org/10.1016/j.neuroimage.2022.119177">Hauk, Stenroos, and Treder (2022)</a>: practical guidance on what EEG/MEG source estimates can and cannot localize.</li>

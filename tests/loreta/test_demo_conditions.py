@@ -127,7 +127,7 @@ def test_source_payload_normalizes_and_filters_values() -> None:
 
 
 def test_scalar_gradient_limits_follow_scalp_map_style_bounds() -> None:
-    assert LORETA_SCALAR_COLORS[-1] == "#b2182b"
+    assert LORETA_SCALAR_COLORS[-1] == "#fde725"
     assert resolve_scalar_limits(np.asarray([0.2, 0.8]), auto_scale=True) == (0.0, 0.8)
     assert resolve_scalar_limits(np.asarray([-0.4, 0.8]), auto_scale=True) == (-0.4, 0.8)
     assert resolve_scalar_limits(np.asarray([0.2]), auto_scale=False, manual_min=1.0, manual_max=1.0) == (1.0, 2.0)
@@ -483,8 +483,7 @@ def test_hauk_cluster_mask_load_status_messages() -> None:
     assert status.variant == "info"
     assert status.text == (
         "Map cohort: 24 participants. "
-        "The vertices displayed here were significant across the group after "
-        "the cluster-based permutation test."
+        "Showing vertices in clusters retained by the group-level permutation test."
     )
 
     window._set_payload_display_status(empty_payload)
@@ -501,8 +500,7 @@ def test_hauk_cluster_mask_load_status_messages() -> None:
     assert status.variant == "warning"
     assert status.text == (
         "Map cohort: 24 participants. "
-        "Warning: disabling the cluster-based permutation mask will likely show "
-        "vertices that were not significant at the group level."
+        "Cluster mask disabled. Displayed vertices are exploratory."
     )
 
     descriptive_payload = make_source_payload(

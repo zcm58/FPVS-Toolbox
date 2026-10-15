@@ -179,6 +179,29 @@ def test_empty_cluster_mask_falls_back_to_threshold_display() -> None:
     assert projection.values.tolist() == [2.4, 4.0]
 
 
+def test_cluster_resolution_reads_producer_value_even_without_candidates() -> None:
+    payload = make_source_payload(
+        points=np.asarray([[0.0, 0.0, 0.0], [2.0, 0.0, 0.0]], dtype=float),
+        values=np.asarray([0.8, 4.0], dtype=float),
+        label="exact small sample",
+        kind=SOURCE_KIND_SURFACE_MESH,
+        source_model="l2_mne_fsaverage_participant_zscore_mean",
+        faces=np.asarray([[0, 1, 1]], dtype=np.int64),
+        metadata={
+            "cluster_mask": "source_space_cluster_permutation",
+            "cluster_mask_vertex_indices": [],
+            "cluster_mask_algorithm_version": 2,
+            "cluster_permutation_count": 0,
+            "cluster_minimum_attainable_p": 1 / 16,
+            "cluster_alpha": 0.05,
+        },
+        normalize_values=False,
+    )
+
+    assert payload_cluster_mask_minimum_p(payload) == 1 / 16
+    assert payload_cluster_mask_is_underpowered(payload)
+
+
 def test_cortical_paint_cluster_mask_keeps_negative_two_tailed_values() -> None:
     payload = make_source_payload(
         points=np.asarray([[0.0, 0.0, 0.0], [2.0, 0.0, 0.0]], dtype=float),

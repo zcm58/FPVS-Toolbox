@@ -121,6 +121,9 @@ def test_project_eloreta_source_psd_uses_signed_fif_exact_method_and_cache(
     assert validation["input_summary"]["required_candidate_noise_bin_count"] == 18
     assert validation["input_summary"]["retained_noise_bin_count_after_extreme_drop"] == 16
     assert validation["input_summary"]["min_noise_bins"] == 18
+    assert validation["inverse_model_diagnostics"]["channel_count"] == 64
+    assert validation["input_model_provenance"][0]["participant_id"] == "P01"
+    assert validation["input_model_provenance"][0]["reference"]["projections"][0]["active"] is True
     assert "legacy_fullfft_fallback=forbidden" in validation["input_summary"]["diagnostics"]
 
     cold_values = payload["values"]
@@ -507,6 +510,30 @@ def _write_time_domain_derivative(
             "geometry": biosemi64_geometry_identity(),
         },
     )
+
+
+def test_eloreta_cancellation_before_publication_preserves_existing_outputs(tmp_path: Path) -> None:
+    from Tools.LORETA_Visualizer.source_producers.cancellation import SourceBuildCancellation, SourceBuildCancelled
+
+    project = _project_with_ledger(tmp_path, participants=("P01",))
+    _write_time_domain_derivative(project.project_root, participant_id="P01")
+    output_dir = default_project_eloreta_volume_hauk_source_psd_output_dir(project.project_root)
+    output_dir.mkdir(parents=True)
+    existing = output_dir / DEFAULT_PROJECT_ELORETA_VOLUME_HAUK_SOURCE_PSD_MANIFEST_NAME
+    existing.write_text("previous completed output", encoding="utf-8")
+    token = SourceBuildCancellation()
+
+    def progress(message: str) -> None:
+        if message.startswith("Writing participant and group"):
+            token.request()
+
+    with pytest.raises(SourceBuildCancelled):
+        write_project_eloreta_volume_hauk_source_psd_payloads(
+            project=project, source_psd_model=_source_psd_model(), selected_harmonics_hz=(20.0,),
+            apply_inverse_func=_apply_inverse_callable([]), aggregations=("mean",),
+            cluster_mask_enabled=False, progress_callback=progress, cancellation_callback=token.check,
+        )
+    assert existing.read_text(encoding="utf-8") == "previous completed output"
 
 
 def _source_psd_model(

@@ -91,6 +91,7 @@ from Tools.LORETA_Visualizer.source_producers.source_psd_cache import (
 from Tools.LORETA_Visualizer.source_producers.source_validation_report import (
     write_project_source_validation_report,
 )
+from Tools.LORETA_Visualizer.source_producers.model_diagnostics import summarize_inverse_model
 
 logger = logging.getLogger(__name__)
 
@@ -208,9 +209,12 @@ def write_project_eloreta_volume_hauk_source_psd_payloads(
     cluster_permutation_count: int = DEFAULT_CLUSTER_PERMUTATION_COUNT,
     cluster_permutation_seed: int = DEFAULT_CLUSTER_PERMUTATION_SEED,
     progress_callback: ProgressCallback | None = None,
+    cancellation_callback: Callable[[], None] | None = None,
 ) -> ProjectELORETAVolumeHaukSourcePsdExportResult:
     """Build time-domain eLORETA participant and group volume maps."""
 
+    if cancellation_callback is not None:
+        cancellation_callback()
     root = active_project_hauk_source_psd_root(
         project,
         project_root=project_root,
@@ -233,6 +237,8 @@ def write_project_eloreta_volume_hauk_source_psd_payloads(
         expected_processing_fingerprint=input_plan.processing_fingerprint,
         expected_processing_fingerprint_version=(input_plan.processing_fingerprint_version),
     )
+    if cancellation_callback is not None:
+        cancellation_callback()
     sampling_omission_count = len(project_inputs.sampling_contract_omissions)
     input_plan = reconcile_project_hauk_source_psd_sampling_contract(
         input_plan,
@@ -298,6 +304,8 @@ def write_project_eloreta_volume_hauk_source_psd_payloads(
         method_params=resolved_method_params,
     )
     _emit_progress(progress_callback, "eLORETA source-PSD inverse model is ready.")
+    if cancellation_callback is not None:
+        cancellation_callback()
 
     source_psd_config = HaukSourcePsdConfig(
         selected_harmonics_hz=harmonics,
@@ -334,6 +342,8 @@ def write_project_eloreta_volume_hauk_source_psd_payloads(
     source_count = len(model.forward_model.source_points)
 
     for index, record in enumerate(project_inputs.records, start=1):
+        if cancellation_callback is not None:
+            cancellation_callback()
         _emit_progress(
             progress_callback,
             (
@@ -434,6 +444,8 @@ def write_project_eloreta_volume_hauk_source_psd_payloads(
         progress_callback,
         "Writing participant and group eLORETA volume source-PSD payloads...",
     )
+    if cancellation_callback is not None:
+        cancellation_callback()
     participant_result = write_eloreta_volume_precomputed_participant_zscore_payloads(
         forward_model=model.forward_model,
         conditions=prepared_conditions,
@@ -522,6 +534,8 @@ def write_project_eloreta_volume_hauk_source_psd_payloads(
         lateralization_summary_path=None,
         lateralization_summary_csv_path=None,
         forward_model_metadata=dict(model.forward_model.metadata),
+        inverse_model_diagnostics=summarize_inverse_model(model.info, model.inverse_operator),
+        time_domain_records=project_inputs.records,
     )
     result = ProjectELORETAVolumeHaukSourcePsdExportResult(
         project_inputs=project_inputs,

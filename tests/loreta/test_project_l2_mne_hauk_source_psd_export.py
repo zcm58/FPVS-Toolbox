@@ -158,6 +158,12 @@ def test_project_source_psd_export_streams_inputs_writes_payloads_and_reuses_cac
     assert validation_report["input_summary"]["required_candidate_noise_bin_count"] == 18
     assert validation_report["input_summary"]["retained_noise_bin_count_after_extreme_drop"] == 16
     assert validation_report["input_summary"]["min_noise_bins"] == 18
+    assert validation_report["inverse_model_diagnostics"]["channel_count"] == 64
+    assert validation_report["inverse_model_diagnostics"]["participant_data_rank_status"] == "not_measured"
+    input_provenance = validation_report["input_model_provenance"][0]
+    assert input_provenance["participant_id"] == "P01"
+    assert input_provenance["reference"]["projections"][0]["active"] is True
+    assert input_provenance["interpolation_provenance_status"] == "not_recorded"
 
     cold_values = payload["values"]
     assert reads == [(False, False), (True, True)]
@@ -275,6 +281,30 @@ def test_project_source_psd_export_omits_noncanonical_sample_count_only(
         validation["input_summary"]["source_condition_omissions"][0]["sampling_contract"]
         == omission["sampling_contract"]
     )
+
+
+def test_source_psd_cancellation_before_publication_preserves_existing_outputs(tmp_path: Path) -> None:
+    from Tools.LORETA_Visualizer.source_producers.cancellation import SourceBuildCancellation, SourceBuildCancelled
+
+    project = _project_with_ledger(tmp_path, participants=("P01",))
+    _write_time_domain_derivative(project.project_root, participant_id="P01")
+    output_dir = default_project_l2_mne_hauk_source_psd_output_dir(project.project_root)
+    output_dir.mkdir(parents=True)
+    existing = output_dir / DEFAULT_PROJECT_HAUK_SOURCE_PSD_MANIFEST_NAME
+    existing.write_text("previous completed output", encoding="utf-8")
+    token = SourceBuildCancellation()
+
+    def progress(message: str) -> None:
+        if message.startswith("Writing participant and group"):
+            token.request()
+
+    with pytest.raises(SourceBuildCancelled):
+        write_project_l2_mne_hauk_source_psd_payloads(
+            project=project, source_psd_model=_source_psd_model(), selected_harmonics_hz=(20.0,),
+            compute_source_psd_func=_source_psd_callable([]), aggregations=("mean",),
+            cluster_mask_enabled=False, progress_callback=progress, cancellation_callback=token.check,
+        )
+    assert existing.read_text(encoding="utf-8") == "previous completed output"
 
 
 def test_project_source_psd_orientation_modes_have_distinct_methods_and_caches(

@@ -64,6 +64,8 @@ from Tools.LORETA_Visualizer.source_producers.l2_mne_hauk_zscore import (
     PARTICIPANT_ZSCORE_AGGREGATION_TRIMMED_MEAN,
 )
 from Tools.LORETA_Visualizer.source_producers.source_space_statistics import (
+    CLUSTER_MASK_ALGORITHM_VERSION,
+    cluster_inference_metadata,
     CLUSTER_TAIL_POSITIVE,
     SourceSpaceClusterPermutationResult,
     compute_source_space_cluster_permutation_mask,
@@ -676,6 +678,7 @@ def write_eloreta_volume_participant_zscore_payloads(
             "cluster_mask": (
                 "source_space_cluster_permutation" if config.cluster_mask_enabled else CLUSTER_MASK_STATUS_DISABLED
             ),
+            "cluster_mask_algorithm_version": CLUSTER_MASK_ALGORITHM_VERSION,
             "cluster_mask_method": (
                 _cluster_mask_method_label(config.cluster_tail) if config.cluster_mask_enabled else "none"
             ),
@@ -1049,6 +1052,7 @@ def _cluster_payload_metadata(
     return {
         "cluster_mask": "source_space_cluster_permutation",
         "cluster_mask_status": cluster_result.status,
+        **cluster_inference_metadata(cluster_result),
         "cluster_mask_primary_display": True,
         "cluster_mask_method": _cluster_mask_method_label(cluster_result.tail),
         "cluster_mask_source_space_kind": "volume",
@@ -1115,6 +1119,7 @@ def _cluster_manifest_entry_metadata(
     return {
         "cluster_mask": "source_space_cluster_permutation",
         "cluster_mask_status": cluster_result.status,
+        **cluster_inference_metadata(cluster_result),
         "cluster_mask_source_index_count": int(np.count_nonzero(cluster_result.mask)),
         "cluster_mask_source_count": int(len(cluster_result.mask)),
         "cluster_significant_cluster_count": int(len(cluster_result.significant_clusters)),
@@ -1308,6 +1313,7 @@ def _participant_zscore_sidecar_payload(
             "cluster_mask": (
                 "source_space_cluster_permutation" if config.cluster_mask_enabled else CLUSTER_MASK_STATUS_DISABLED
             ),
+            "cluster_mask_algorithm_version": CLUSTER_MASK_ALGORITHM_VERSION,
             "cluster_mask_method": (
                 _cluster_mask_method_label(config.cluster_tail) if config.cluster_mask_enabled else "none"
             ),

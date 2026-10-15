@@ -197,10 +197,12 @@ def test_cluster_permutation_mask_keeps_significant_connected_positive_cluster()
     assert result.tail == "positive"
     assert result.cluster_forming_threshold > 10.0
     assert result.permutation_count == 64
+    assert result.permutation_mode == "exact"
+    assert result.minimum_attainable_p == 1 / 64
     assert result.mask.tolist() == [True, True, True, False, False]
     assert len(result.significant_clusters) == 1
     assert result.significant_clusters[0].tail == "positive"
-    assert result.significant_clusters[0].p_value <= 0.05
+    assert result.significant_clusters[0].p_value == pytest.approx(1 / 64)
 
 
 def test_hauk_cluster_permutation_ignores_negative_clusters_by_default() -> None:
@@ -268,9 +270,14 @@ def test_participant_first_writer_emits_group_summaries_and_sidecar(tmp_path) ->
     assert payload["metadata"]["cluster_forming_tail"] == "positive"
     assert payload["metadata"]["cluster_forming_p_value"] == pytest.approx(0.00001)
     assert payload["metadata"]["cluster_mask_vertex_count"] == 0
+    assert payload["metadata"]["cluster_mask_algorithm_version"] == 2
+    assert payload["metadata"]["cluster_permutation_mode"] == "exact"
+    assert payload["metadata"]["cluster_minimum_attainable_p"] == 0.25
+    assert manifest["conditions"][0]["metadata"]["cluster_mask_algorithm_version"] == 2
     sidecar = json.loads(result.participant_sidecar_path.read_text(encoding="utf-8"))
     assert sidecar["format"] == PARTICIPANT_SOURCE_MAP_SIDECAR_FORMAT
     assert sidecar["conditions"][0]["participant_count"] == 2
+    assert sidecar["conditions"][0]["cluster_mask"]["cluster_mask_algorithm_version"] == 2
     lateralization = json.loads(result.lateralization_summary_path.read_text(encoding="utf-8"))
     assert lateralization["format"] == "fpvs_loreta_source_lateralization_summary_v1"
     assert lateralization["metadata"]["positive_lateralization_index"] == "right_lateralized"

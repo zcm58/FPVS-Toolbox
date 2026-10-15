@@ -16,6 +16,7 @@ CLUSTER_TAIL_NEGATIVE = "negative"
 CLUSTER_TAIL_TWO_SIDED = "two-sided"
 CLUSTER_MASK_STATUS_COMPUTED = "computed"
 CLUSTER_MASK_STATUS_NO_CANDIDATES = "no_candidate_clusters"
+CLUSTER_MASK_ALGORITHM_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -44,6 +45,10 @@ class SourceSpaceClusterPermutationResult:
     permutation_seed: int
     tail: str
     clusters: tuple[SourceSpaceCluster, ...]
+    participant_count: int
+    permutation_count_requested: int
+    permutation_mode: str
+    minimum_attainable_p: float
 
     @property
     def significant_clusters(self) -> tuple[SourceSpaceCluster, ...]:
@@ -76,6 +81,11 @@ def compute_source_space_cluster_permutation_mask(
 ) -> SourceSpaceClusterPermutationResult:
     """Compute a source-space sign-flip max-cluster-mass mask."""
     matrix = participant_zscore_matrix(participant_values)
+    requested_count = int(permutation_count)
+    if requested_count < 1:
+        raise ValueError("Cluster permutation count must be at least 1.")
+    if not 0.0 < float(cluster_alpha) < 1.0:
+        raise ValueError("Cluster alpha must be > 0 and < 1.")
     source_count = matrix.shape[1]
     normalized_adjacency = validate_adjacency(adjacency, source_count=source_count)
     observed_t = one_sample_t_values(matrix)
@@ -85,6 +95,18 @@ def compute_source_space_cluster_permutation_mask(
         tail=tail,
     )
     cluster_tail = validate_cluster_tail(tail)
+    exact = uses_exact_sign_flips(matrix.shape[0], permutation_count=requested_count)
+    planned_count = 2 ** matrix.shape[0] if exact else requested_count
+    minimum_p = (
+        (2.0 if cluster_tail == CLUSTER_TAIL_TWO_SIDED else 1.0) / planned_count
+        if exact else 1.0 / (planned_count + 1)
+    )
+    sampling = {
+        "participant_count": int(matrix.shape[0]),
+        "permutation_count_requested": requested_count,
+        "permutation_mode": "exact" if exact else "sampled",
+        "minimum_attainable_p": float(minimum_p),
+    }
     observed_clusters = signed_cluster_components(
         observed_t,
         threshold=threshold,
@@ -104,6 +126,7 @@ def compute_source_space_cluster_permutation_mask(
             permutation_seed=int(permutation_seed),
             tail=cluster_tail,
             clusters=(),
+            **sampling,
         )
 
     null_max_masses = permutation_max_cluster_masses(
@@ -116,10 +139,9 @@ def compute_source_space_cluster_permutation_mask(
     )
     clusters: list[SourceSpaceCluster] = []
     mask = empty_mask.copy()
-    denominator = float(len(null_max_masses) + 1)
     for cluster_index, (candidate_tail, source_indices) in enumerate(observed_clusters, start=1):
         cluster_mass = cluster_mass_value(observed_t, source_indices, tail=candidate_tail)
-        p_value = float((1 + np.count_nonzero(null_max_masses >= cluster_mass - 1e-12)) / denominator)
+        p_value = cluster_permutation_p_value(cluster_mass, null_max_masses, exact=exact)
         significant = p_value <= float(cluster_alpha)
         if significant:
             mask[np.asarray(source_indices, dtype=np.int64)] = True
@@ -145,7 +167,36 @@ def compute_source_space_cluster_permutation_mask(
         permutation_seed=int(permutation_seed),
         tail=cluster_tail,
         clusters=tuple(clusters),
+        **sampling,
     )
+
+
+def cluster_permutation_p_value(observed_mass: float, null_max_masses: np.ndarray, *, exact: bool) -> float:
+    """Use the exact tail proportion or the randomized-test plus-one estimate.
+
+    Exhaustive enumeration already includes the observed all-positive signs.
+    See scipy.stats.permutation_test for the distinction between estimators.
+    """
+    null = np.asarray(null_max_masses, dtype=float).reshape(-1)
+    if not len(null):
+        raise ValueError("Cluster p-value requires a nonempty null distribution.")
+    exceedances = int(np.count_nonzero(null >= float(observed_mass) - 1e-12))
+    correction = 0 if exact else 1
+    return float((exceedances + correction) / (len(null) + correction))
+
+
+def cluster_inference_metadata(result: Any) -> dict[str, Any]:
+    """Serialize shared inferential provenance without changing source identity."""
+    return {
+        "cluster_mask_algorithm_version": CLUSTER_MASK_ALGORITHM_VERSION,
+        "cluster_mask_participant_count": int(result.participant_count),
+        "cluster_permutation_count_requested": int(result.permutation_count_requested),
+        "cluster_permutation_mode": str(result.permutation_mode),
+        "cluster_p_value_estimator": (
+            "exact_tail_proportion" if result.permutation_mode == "exact" else "monte_carlo_plus_one"
+        ),
+        "cluster_minimum_attainable_p": float(result.minimum_attainable_p),
+    }
 
 
 def adjacency_from_triangular_faces(faces: np.ndarray, *, source_count: int) -> tuple[set[int], ...]:
@@ -226,6 +277,8 @@ def cluster_forming_t_threshold(*, participant_count: int, p_value: float, tail:
     """Return the t threshold for cluster candidate formation."""
     if participant_count < 2:
         raise ValueError("Cluster-forming threshold requires at least two participants.")
+    if not 0.0 < float(p_value) < 1.0:
+        raise ValueError("Cluster-forming p-value must be > 0 and < 1.")
     cluster_tail = validate_cluster_tail(tail)
     tail_probability = float(p_value) / 2.0 if cluster_tail == CLUSTER_TAIL_TWO_SIDED else float(p_value)
     try:
@@ -275,11 +328,16 @@ def sign_flip_vectors(
 ) -> Sequence[np.ndarray]:
     """Return exact or sampled sign-flip vectors."""
     exact_count = 2**participant_count
-    if participant_count <= 12 and exact_count <= int(permutation_count):
+    if uses_exact_sign_flips(participant_count, permutation_count=permutation_count):
         return tuple(exact_sign_vector(index, participant_count) for index in range(exact_count))
     rng = np.random.default_rng(int(seed))
     draws = rng.choice(np.asarray([-1.0, 1.0], dtype=float), size=(int(permutation_count), participant_count))
     return tuple(np.asarray(row, dtype=float) for row in draws)
+
+
+def uses_exact_sign_flips(participant_count: int, *, permutation_count: int) -> bool:
+    """Return whether the bounded sign-flip generator enumerates every sign."""
+    return participant_count <= 12 and 2 ** participant_count <= int(permutation_count)
 
 
 def exact_sign_vector(index: int, participant_count: int) -> np.ndarray:
@@ -352,6 +410,8 @@ def signed_cluster_components(
     negative_clusters = tuple(
         (CLUSTER_TAIL_NEGATIVE, cluster) for cluster in cluster_components(values <= -float(threshold), adjacency)
     )
+    if cluster_tail == CLUSTER_TAIL_NEGATIVE:
+        return negative_clusters
     return (*positive_clusters, *negative_clusters)
 
 

@@ -3,14 +3,11 @@
 from __future__ import annotations
 
 import numpy as np
+from matplotlib import colormaps
+from matplotlib.colors import to_hex
 
-LORETA_SCALAR_COLORS: tuple[str, ...] = (
-    "#2166ac",
-    "#67a9cf",
-    "#1a9850",
-    "#fee08b",
-    "#fdae61",
-    "#b2182b",
+LORETA_SCALAR_COLORS: tuple[str, ...] = tuple(
+    to_hex(color) for color in colormaps["viridis"](np.linspace(0.0, 1.0, 6))
 )
 LORETA_SMOOTH_SCALAR_COLOR_COUNT = 256
 CORTICAL_PAINT_BASE_COLOR = "#c9cdd2"
@@ -95,4 +92,7 @@ def _rgb_to_hex(rgb: np.ndarray) -> str:
     return f"#{clipped[0]:02x}{clipped[1]:02x}{clipped[2]:02x}"
 
 
-LORETA_SMOOTH_SCALAR_COLORS: tuple[str, ...] = interpolate_scalar_colors()
+LORETA_SMOOTH_SCALAR_COLORS: tuple[str, ...] = tuple(
+    to_hex(color)
+    for color in colormaps["viridis"](np.linspace(0.0, 1.0, LORETA_SMOOTH_SCALAR_COLOR_COUNT))
+)

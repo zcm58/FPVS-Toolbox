@@ -81,6 +81,10 @@ def test_eloreta_volume_writer_emits_volume_payloads_and_source_index_cluster_me
     assert metadata["source_method"] == "eloreta_volume"
     assert metadata["base_producer_method"] == "eloreta_volume_participant_zscore"
     assert metadata["cluster_mask"] == "source_space_cluster_permutation"
+    assert metadata["cluster_mask_algorithm_version"] == 2
+    assert metadata["cluster_permutation_mode"] == "exact"
+    assert metadata["cluster_p_value_estimator"] == "exact_tail_proportion"
+    assert manifest["conditions"][0]["metadata"]["cluster_mask_algorithm_version"] == 2
     assert "cluster_mask_source_index_count" in metadata
     assert "cluster_mask_vertex_count" not in metadata
 

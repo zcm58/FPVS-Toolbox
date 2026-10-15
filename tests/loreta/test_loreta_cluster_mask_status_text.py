@@ -59,11 +59,11 @@ def _volume_payload(*, mask_indices: list[int]):
     )
 
 
-def test_cluster_mask_status_describes_group_significant_vertices() -> None:
+def test_cluster_mask_status_describes_cluster_level_evidence() -> None:
     status = _cluster_mask_display_status_text(_surface_payload(mask_indices=[1]), use_cluster_mask=True)
 
     assert status == (
-        "The vertices displayed here were significant across the group after the cluster-based permutation test.",
+        "Showing vertices in clusters retained by the group-level permutation test.",
         "info",
     )
 
@@ -98,8 +98,7 @@ def test_cluster_mask_status_warns_when_significant_mask_is_disabled() -> None:
     status = _cluster_mask_display_status_text(_surface_payload(mask_indices=[1]), use_cluster_mask=False)
 
     assert status == (
-        "Warning: disabling the cluster-based permutation mask will likely show vertices "
-        "that were not significant at the group level.",
+        "Cluster mask disabled. Displayed vertices are exploratory.",
         "warning",
     )
 
