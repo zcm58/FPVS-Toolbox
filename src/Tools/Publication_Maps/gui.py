@@ -1591,13 +1591,16 @@ class PublicationMapsWindow(QWidget):
             return
         self._sync_group_comparison_labels()
         available = self._group_comparison_available()
-        self.group_comparison_check.setToolTip(
+        comparison_tooltip = (
             "Exports a side-by-side figure for the two available groups. "
             "Values are never pooled, and no statistical test or difference map is performed."
-            if available else
-            "In condition mode, select All groups and one condition with active workbooks in both groups. "
-            "Turn off paired-condition figures to compare the groups."
         )
+        if not available:
+            comparison_tooltip += (
+                " In condition mode, select All groups and one condition with active workbooks in both groups. "
+                "Turn off paired-condition figures to compare the groups."
+            )
+        self.group_comparison_check.setToolTip(comparison_tooltip)
         if self.group_comparison_check.isChecked() and not available:
             self.group_comparison_check.setChecked(False)
         checked = self.group_comparison_check.isChecked()

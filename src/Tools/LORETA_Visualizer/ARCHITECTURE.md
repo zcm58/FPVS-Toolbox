@@ -40,6 +40,19 @@ The first durable goal is rendering:
 - a payload contract that future real source-localization producers can feed
   without changing renderer internals.
 
+`graphics_support.py` checks that Qt can create a valid desktop OpenGL 3.2+
+context before entering VTK. Failed creation, an older negotiated version, or
+OpenGL ES returns through the existing renderer-unavailable banner; no source
+worker starts. This preflight rejects unsupported contexts but does not certify
+every graphics driver. The requirement follows
+[VTK's OpenGL backend documentation](https://docs.vtk.org/en/latest/advanced/runtime_settings.html#opengl)
+and uses [Qt's actual context format](https://doc.qt.io/qt-6/qopenglcontext.html#create),
+which may differ from the requested version. CI checks the failure path without
+entering VTK and separately opens the real renderer on native Windows with a
+recorded software OpenGL driver. Manual smoke: with unsupported graphics, opening
+LORETA must show the actionable error and leave the application usable; with
+supported graphics, open the 3D view, rotate, close, and reopen it.
+
 The first implemented source-ready method is a beta L2-MNE cortical surface
 producer for FPVS oddball-response maps. It is one method that emits the same
 prepared payload/manifest format expected from any later LORETA/eLORETA volume

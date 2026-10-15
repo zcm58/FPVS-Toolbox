@@ -171,11 +171,13 @@ def test_electrode_hit_targets_are_contained_disjoint_and_text_fits(qtbot):
             first.geometry().intersected(second.geometry()).isEmpty()
             for first, second in combinations(buttons, 2)
         )
-        assert all(
-            QFontMetrics(button.font()).horizontalAdvance(button.text())
-            <= button.width() - 8
+        clipped_labels = [
+            (button.text(), button.font().toString(), button.width(),
+             QFontMetrics(button.font()).horizontalAdvance(button.text()))
             for button in buttons
-        )
+            if QFontMetrics(button.font()).horizontalAdvance(button.text()) > button.width() - 8
+        ]
+        assert not clipped_labels, clipped_labels
         for label in ("Fpz", "P9", "P10", "T7", "T8", "Iz"):
             assert electrode_map.rect().contains(
                 electrode_map.electrode_buttons[label].geometry()

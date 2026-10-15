@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+import sys
 
 import numpy as np
 from PySide6.QtWidgets import QComboBox, QLabel, QWidget
@@ -22,6 +23,32 @@ from Tools.LORETA_Visualizer.source_payloads import (
     SOURCE_KIND_VOLUME_POINTS,
     make_source_payload,
 )
+
+
+def test_unsupported_graphics_show_recoverable_error_before_vtk(qtbot, monkeypatch):
+    from Tools.LORETA_Visualizer import graphics_support
+
+    native_calls = []
+
+    def unsupported(_parent):
+        raise RuntimeError("LORETA 3D rendering requires desktop OpenGL 3.2 or later.")
+
+    def unexpected_interactor(*_args, **_kwargs):
+        native_calls.append(True)
+        raise AssertionError("Unsupported graphics reached VTK")
+
+    monkeypatch.setattr(graphics_support, "require_desktop_opengl", unsupported)
+    monkeypatch.setitem(sys.modules, "pyvista", SimpleNamespace())
+    monkeypatch.setitem(sys.modules, "pyvistaqt", SimpleNamespace(QtInteractor=unexpected_interactor))
+    window = LoretaVisualizerWindow()
+    qtbot.addWidget(window)
+    window.show()
+    assert window.renderer is None
+    assert window._mesh_thread is None
+    assert window.status_banner.isVisible()
+    assert any("desktop OpenGL 3.2" in label.text() for label in window.status_banner.findChildren(QLabel))
+    assert native_calls == []
+    assert window.close()
 
 
 def test_loreta_source_options_exposes_l2_orientation_modes(qtbot) -> None:

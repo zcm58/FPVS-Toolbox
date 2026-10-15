@@ -6,11 +6,11 @@ from collections.abc import Mapping, Sequence
 from html import escape
 
 from PySide6.QtCore import QPointF, QRectF, QSignalBlocker, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
+from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QSizePolicy, QToolButton, QWidget
 
 from Main_App.gui.components import font_for_role
-from Main_App.gui.typography import css_font_declaration
+from Main_App.gui.typography import FONT_ROLES, css_font_weight
 from Main_App.gui.roi_electrode_selector_state import (
     BIOSEMI64_LABELS,
     BIOSEMI64_POLAR_COORDINATES,
@@ -89,6 +89,7 @@ class ElectrodeMapWidget(QWidget):
         self._memberships: dict[str, tuple[ROIMembership, ...]] = {}
         self._active_color = ACCENT_COLOR
         self._active_roi_label = "active ROI"
+        self._label_size_px = FONT_ROLES["caption"].css_size_px
         self.electrode_buttons: dict[str, QToolButton] = {}
         self.setObjectName("roi_electrode_map")
         self.setMinimumSize(600, 550)
@@ -118,6 +119,16 @@ class ElectrodeMapWidget(QWidget):
         super().resizeEvent(event)
         scale, left, top = self._transform()
         diameter = max(36, round(36 * scale))
+        # Font fallbacks differ across platforms. Keep one consistent caption
+        # size that fits every label inside the fixed, disjoint hit targets.
+        font = font_for_role("caption", self.font())
+        font.setPixelSize(FONT_ROLES["caption"].css_size_px)
+        while font.pixelSize() > 1:
+            metrics = QFontMetrics(font)
+            if max(metrics.horizontalAdvance(label) for label in BIOSEMI64_LABELS) <= diameter - 8:
+                break
+            font.setPixelSize(font.pixelSize() - 1)
+        self._label_size_px = font.pixelSize()
         for label, button in self.electrode_buttons.items():
             x, y = self._positions[label]
             button.setGeometry(
@@ -211,7 +222,8 @@ class ElectrodeMapWidget(QWidget):
         button.setStyleSheet(
             f"""
             QToolButton {{
-                {css_font_declaration("caption")}
+                font-size: {self._label_size_px}px;
+                font-weight: {css_font_weight("caption")};
                 background: {background};
                 color: {foreground};
                 border: {border_width}px {border_style} {self._active_color if checked else BORDER_COLOR};

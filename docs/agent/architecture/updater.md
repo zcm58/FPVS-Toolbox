@@ -217,6 +217,20 @@ runner. It retains the installer, checksums, ownership inventory, source commit,
 dependency reports, visible Main Window reports, and native installer logs as
 workflow artifacts. It does not publish a GitHub Release.
 
+A bounded native source probe runs before compilation to identify runtime
+startup failures quickly; the frozen executable must still pass its own probe.
+Visible diagnostics persist a failed report before each native construction,
+event-processing, and shutdown stage and retain a sibling `.fault.log` Python
+stack if a native exception terminates the process. A partially written probe
+never counts as acceptance.
+
+Hosted Windows runners use the checksum-pinned Mesa3D 26.2.4 desktop OpenGL
+driver for native onscreen VTK rendering. `setup_ci_opengl.ps1` requires explicit
+execution on a GitHub-hosted Windows runner and records the download and installed
+driver digests. This follows the [PyVista CI setup](https://github.com/pyvista/setup-headless-display-action)
+desktop-driver approach; [VTK requires a supported OpenGL context](https://docs.vtk.org/en/v9.5.1/release_details/9.4/support-runtime-opengl-window-selection.html).
+The driver is a runner dependency and is excluded from application artifacts.
+
 The visible probe constructs and displays all eight default/beta tool pages
 through the Main Window's own factories. It requires the actual LORETA VTK/Qt
 renderer to initialize, while suppressing only the automatic external MRI

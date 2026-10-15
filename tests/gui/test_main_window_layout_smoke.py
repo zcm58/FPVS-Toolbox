@@ -1235,7 +1235,8 @@ def test_sidebar_scalp_maps_embeds_in_main_workspace(
     )
     page = win._publication_maps_page
     assert page.conditions_list.minimumHeight() == 140
-    assert page.conditions_list.maximumHeight() == 220
+    assert page.conditions_list.sizePolicy().verticalPolicy() == QSizePolicy.Expanding
+    assert page.conditions_list.height() >= 140
     conditions_card = page.findChild(SectionCard, "publication_maps_conditions")
     settings_card = page.findChild(SectionCard, "publication_maps_settings")
     output_card = page.findChild(SectionCard, "publication_maps_output")

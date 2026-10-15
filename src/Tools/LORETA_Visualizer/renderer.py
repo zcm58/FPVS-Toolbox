@@ -179,6 +179,9 @@ class BrainRendererWidget(QWidget):
             raise RenderBackendError(str(exc)) from exc
 
     def _initialize_backend(self, layout: QVBoxLayout, *, initial_opacity: float) -> None:
+        from Tools.LORETA_Visualizer.graphics_support import require_desktop_opengl
+
+        require_desktop_opengl(self)
         import pyvista as pv
         from pyvistaqt import QtInteractor
 
