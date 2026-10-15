@@ -170,6 +170,15 @@ def test_frozen_inventory_includes_public_lazy_modules_without_importing_them(tm
     assert "Tools.LORETA_Visualizer.gui" in actual
 
 
+def test_pinned_pyinstaller_and_dependency_graph_import_together():
+    completed = subprocess.run(
+        [sys.executable, "-m", "PyInstaller", "--version"],
+        capture_output=True, text=True, timeout=30, check=False,
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert completed.stdout.strip()
+
+
 @pytest.mark.parametrize(
     ("display", "numeric"),
     [("3.0.0", "3.0.0.0"), ("3.0.0rc1", "3.0.0.0"), ("3.1.dev2", "3.1.0.0"),
