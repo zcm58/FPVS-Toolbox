@@ -12,10 +12,19 @@ APP_ICON = REPO_ROOT / 'assets' / 'ToolBox_Icon.ico'
 import sys
 sys.path.insert(0, str(Path(SPECPATH)))
 from updater_metadata import version_data
+from runtime_imports import active_runtime_imports
 metadata, _version = version_data(REPO_ROOT)
 datas = [(str(metadata), "."), (str(APP_ICON), "assets")]
 binaries = []
-hiddenimports = ['mne.io.edf', 'scipy', 'scipy._cyutility', 'pandas', 'numpy', 'statsmodels', 'pyvista', 'patsy']
+hiddenimports = [
+    'mne.io.edf', 'scipy', 'scipy._cyutility', 'pandas', 'numpy', 'statsmodels', 'pyvista', 'patsy',
+    # savefig resolves vector backends lazily even when the interactive/Agg
+    # backend is already loaded. Publication exports require these modules.
+    'matplotlib.backends.backend_pdf', 'matplotlib.backends.backend_svg',
+]
+# Public lazy adapters import their owning modules by string; the normal import
+# graph cannot discover those names from package __getattr__ implementations.
+hiddenimports += active_runtime_imports(SRC_ROOT)
 datas += collect_data_files('mne')
 tmp_ret = collect_all('mne')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]

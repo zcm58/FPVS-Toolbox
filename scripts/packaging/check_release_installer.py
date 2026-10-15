@@ -77,6 +77,22 @@ def require_within(path: Path, root: Path) -> Path:
     return resolved
 
 
+def verify_release_metadata(installer: Path, version: str) -> dict[str, str]:
+    metadata = installer.parent / f"FPVSToolbox-Update-{version}.json"
+    document = json.loads(metadata.read_text(encoding="utf-8"))
+    if (document.get("schema_version") != 1 or document.get("target_version") != version
+            or document.get("platform") != "windows-x64"):
+        raise RuntimeError("Release update metadata does not identify the target Windows version.")
+    digests = {}
+    for artifact in (installer, metadata):
+        digest = sha256_file(artifact)
+        sidecar = artifact.with_suffix(artifact.suffix + ".sha256")
+        if sidecar.read_text(encoding="ascii").strip() != f"{digest}  {artifact.name}":
+            raise RuntimeError(f"Release checksum sidecar differs from final artifact bytes: {artifact.name}")
+        digests[artifact.name] = digest
+    return digests
+
+
 def seed_user_data(root: Path) -> dict[Path, bytes]:
     projects = root / "projects"
     settings = root / "config/settings"
@@ -265,9 +281,11 @@ def main() -> int:
         assert_sentinels(sentinels)
 
     def probe(label: str) -> None:
-        run(["pwsh", "-NoProfile", "-File", str(repo / "scripts/packaging/smoke_packaged_app.ps1"),
-             "-ExePath", str(destination / "FPVS_Toolbox.exe"), "-ExpectedVersion", version, "-AllowVisibleGui"],
-            evidence / f"{label}-smoke.log", env=env, timeout=420)
+        command = ["pwsh", "-NoProfile", "-File", str(repo / "scripts/packaging/smoke_packaged_app.ps1"),
+                   "-ExePath", str(destination / "FPVS_Toolbox.exe"), "-ExpectedVersion", version, "-AllowVisibleGui"]
+        if label in {"fresh", "upgraded"}:
+            command.append("-RunScientificWorkflows")
+        run(command, evidence / f"{label}-smoke.log", env=env, timeout=600)
         assert_sentinels(sentinels)
 
     def uninstall(label: str) -> None:
@@ -281,6 +299,7 @@ def main() -> int:
         assert_sentinels(sentinels)
 
     try:
+        report["release_artifact_sha256"] = verify_release_metadata(installer, version)
         install(installer, "fresh")
         steps.append({"name": "fresh-install", **assert_installed(destination, manifest, version)})
         probe("fresh")

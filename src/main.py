@@ -36,7 +36,7 @@ _configure_linux_qpa_platform()
 
 # Frozen diagnostics must dispatch before GUI imports or user-settings startup.
 if __name__ == "__main__" and len(sys.argv) > 1 and sys.argv[1] in {
-    "--packaging-check", "--packaged-smoke-output",
+    "--packaging-check", "--packaged-smoke-output", "--packaged-workflow-output",
 }:
     import multiprocessing
 

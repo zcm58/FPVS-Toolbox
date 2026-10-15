@@ -217,6 +217,29 @@ runner. It retains the installer, checksums, ownership inventory, source commit,
 dependency reports, visible Main Window reports, and native installer logs as
 workflow artifacts. It does not publish a GitHub Release.
 
+The visible probe constructs and displays all eight default/beta tool pages
+through the Main Window's own factories. It requires the actual LORETA VTK/Qt
+renderer to initialize, while suppressing only the automatic external MRI
+template download in the diagnostic process. It shuts down tool operations and
+closes the pages before exiting. No local development GUI is launched by these
+CI checks.
+
+The main PyInstaller spec inventories Python modules only under `Main_App` and
+`Tools` to retain the public lazy-import adapters' runtime targets. It explicitly
+includes Matplotlib's PDF and SVG backends, which `savefig` loads by name. A
+successful source import is insufficient evidence that those modules reached the
+frozen bundle; the visible and scientific probes exercise both paths.
+
+The installed fresh and upgraded executables also run
+`--packaged-workflow-output <report.json>`. This separate, window-free diagnostic
+uses synthetic BioSemi64 data to exercise the locked reference/filter/downsample/
+final-reference stages and a double-precision FIF round trip. It runs real FHC
+preparation functions, 127 permutations on a declared fixed two-harmonic domain,
+and complete run-bundle exports; it also exports real SNR and scalp-map PNG/PDF
+pairs. Reports record the limited fixture scope and hashes for every retained
+artifact. The scientific diagnostic does not create a Qt application, although
+the SNR worker's package imports Qt modules.
+
 `scripts/packaging/check_release_installer.py --execute --baseline <installer>`
 is restricted to that disposable runner and refuses an existing Toolbox
 registration. The runner verifies the historical v2.1.2 installer against its
@@ -228,11 +251,14 @@ Window, and uninstalls again. Project, settings, log, output, and local-template
 sentinels under its disposable user-data root must survive every transition.
 Ordinary developer machines cannot execute this acceptance helper.
 
-These automated checks qualify bundle imports, visible shell startup, installer
-replacement, relaunch, and preservation of the sentinel files. They do not claim
-representative EEG-processing equivalence, real-project migration, external-drive
-performance, or completion of every beta-tool workflow. Those checks retain their
-separate evidence and visible/manual acceptance requirements below.
+These automated checks qualify bundle imports, native tool construction, the
+synthetic component/export paths above, installer replacement, relaunch, and
+preservation of the sentinel files. They do not claim representative EEG-processing
+equivalence, real-project migration, external-drive performance, or completion of
+every beta-tool workflow. The synthetic raw fixture excludes kurtosis screening
+and FFT multi-notch; the FHC fixture starts at the prepared-tensor boundary and
+does not certify managed-project provenance. Those checks retain their separate
+evidence and visible/manual acceptance requirements below.
 
 Scroll regression: in Dataset Exclusions with more than one screen of entries,
 scroll the table both ways after editing a scope. Confirm choices and selection

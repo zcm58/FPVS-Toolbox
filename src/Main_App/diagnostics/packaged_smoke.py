@@ -13,6 +13,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
@@ -23,6 +24,27 @@ DEPENDENCY_IMPORTS = (
     "statsmodels.stats.multitest", "patsy", "openpyxl", "xlsxwriter",
     "nibabel", "pyvista", "PIL.Image", "requests",
 )
+
+TOOL_PAGE_FACTORIES = (
+    ("Free Harmonic Clustering", "_ensure_free_harmonic_clustering_page"),
+    ("SNR Plots", "_ensure_plot_generator_page"),
+    ("Scalp Maps", "_ensure_publication_maps_page"),
+    ("Standard FPVS Screening", "_ensure_stats_page"),
+    ("Sensitivity Analysis", "_ensure_sensitivity_analysis_page"),
+    ("LORETA Visualizer", "_ensure_loreta_visualizer_page"),
+    ("Sequence Figure", "_ensure_sequence_figure_page"),
+    ("Individual Detectability", "_ensure_individual_detectability_page"),
+)
+
+
+def show_tool_page(window: object, factory_name: str) -> object:
+    """Use the real Main Window factories and reject an unavailable renderer."""
+    page = getattr(window, factory_name)()
+    window.stacked.setCurrentIndex(1)
+    window.workspace_stack.setCurrentWidget(page)
+    if factory_name == "_ensure_loreta_visualizer_page" and page.renderer is None:
+        raise RuntimeError("Packaged LORETA 3D renderer could not initialize.")
+    return page
 
 
 @contextmanager
@@ -83,20 +105,28 @@ def require_visible_opt_in() -> None:
 def visible_probe(projects: Path) -> dict[str, object]:
     """Show the actual shell, process native events and exit after a short delay."""
     require_visible_opt_in()
-    from PySide6.QtCore import QCoreApplication, QTimer
+    from PySide6.QtCore import QCoreApplication, QThread, QTimer
     from PySide6.QtWidgets import QApplication
 
     from config import FPVS_TOOLBOX_VERSION
     from Main_App.gui import update_manager
     from Main_App.gui.theme import apply_light_palette
+    from Main_App.projects import Project
+    from Tools.Free_Harmonic_Clustering.gui import has_active_operations
+    from Tools.LORETA_Visualizer.gui import LoretaVisualizerWindow
 
     # These are startup side effects, not part of the shell/rendering check.
     # Replace them only in this short-lived diagnostic process, before the
     # constructor takes its local references. Do not touch application settings.
     original_check = update_manager.check_for_updates_on_launch
     original_cleanup = update_manager.cleanup_old_executable
+    original_template_load = LoretaVisualizerWindow._start_fsaverage_load
     update_manager.check_for_updates_on_launch = lambda _window: None
     update_manager.cleanup_old_executable = lambda: None
+    # Exercise the real VTK/Qt renderer, but never fetch a large external MRI
+    # template during bundle qualification. Scientific template use has its own
+    # validation; this probe qualifies native tool construction and cleanup.
+    LoretaVisualizerWindow._start_fsaverage_load = lambda _self, *, allow_fetch: None
     try:
         from Main_App.gui.main_window import MainWindow
 
@@ -109,18 +139,67 @@ def visible_probe(projects: Path) -> dict[str, object]:
         window = MainWindow()
         if window.projectsRoot.resolve() != projects.resolve() or window.currentProject is not None:
             raise RuntimeError("Packaged smoke did not retain its isolated empty project root.")
-        result: dict[str, object] = {"main_window_visible": False}
+        project_root = projects / "packaged-fixture"
+        project_root.mkdir()
+        project = Project(project_root, {"name": "Packaged acceptance fixture"})
+        project.save()
+        window.currentProject = project
+        result: dict[str, object] = {"main_window_visible": False, "tool_pages": [],
+                                    "external_template_fetch_skipped": True}
+        pages = []
+        next_page = 0
+        shutdown_started: float | None = None
 
         def finish() -> None:
+            nonlocal shutdown_started
+            if shutdown_started is None:
+                shutdown_started = time.monotonic()
+                for page in pages:
+                    shutdown = getattr(page, "shutdown", None)
+                    if callable(shutdown):
+                        shutdown()
+            if has_active_operations() or any(thread.isRunning() for thread in window.findChildren(QThread)):
+                if time.monotonic() - shutdown_started < 15:
+                    QTimer.singleShot(100, finish)
+                    return
+                result["error"] = "Packaged tool background work did not stop within 15 seconds."
+                app.exit(1)
+                return
+            for page in pages:
+                if not page.close():
+                    result["error"] = "Packaged tool refused to close after worker cleanup."
+                    app.exit(1)
+                    return
             result["main_window_visible"] = window.isVisible()
             result["window_title"] = window.windowTitle()
             result["application_version"] = app.applicationVersion()
+            window.currentProject = None
             result["main_window_closed"] = window.close()
             app.quit()
 
+        def advance() -> None:
+            nonlocal next_page
+            try:
+                if pages and not pages[-1].isVisible():
+                    raise RuntimeError(f"Packaged tool page is not visible: {TOOL_PAGE_FACTORIES[next_page - 1][0]}")
+                if next_page == len(TOOL_PAGE_FACTORIES):
+                    finish()
+                    return
+                label, factory = TOOL_PAGE_FACTORIES[next_page]
+                pages.append(show_tool_page(window, factory))
+                result["tool_pages"].append(label)
+                next_page += 1
+                QTimer.singleShot(250, advance)
+            except Exception as error:
+                label = TOOL_PAGE_FACTORIES[min(next_page, len(TOOL_PAGE_FACTORIES) - 1)][0]
+                result["error"] = f"{label}: {type(error).__name__}: {error}"
+                finish()
+
         window.show()
-        QTimer.singleShot(1500, finish)
+        QTimer.singleShot(500, advance)
         exit_code = app.exec()
+        if result.get("error"):
+            raise RuntimeError(str(result["error"]))
         if exit_code != 0 or not result["main_window_visible"] or not result.get("main_window_closed"):
             raise RuntimeError("Packaged Main Window did not complete its visible smoke.")
         if result["application_version"] != FPVS_TOOLBOX_VERSION:
@@ -129,12 +208,13 @@ def visible_probe(projects: Path) -> dict[str, object]:
     finally:
         update_manager.check_for_updates_on_launch = original_check
         update_manager.cleanup_old_executable = original_cleanup
+        LoretaVisualizerWindow._start_fsaverage_load = original_template_load
 
 
-def run_check(report_path: Path, *, visible: bool = False) -> int:
+def run_check(report_path: Path, *, visible: bool = False, workflows: bool = False) -> int:
     report: dict[str, object] = {
         "schema_version": 1,
-        "mode": "visible" if visible else "dependencies",
+        "mode": "visible" if visible else "workflows" if workflows else "dependencies",
         "frozen": bool(getattr(sys, "frozen", False)),
         "executable": str(Path(sys.executable).resolve()),
         "passed": False,
@@ -160,6 +240,10 @@ def run_check(report_path: Path, *, visible: bool = False) -> int:
             if visible:
                 report.update(visible_probe(projects))
                 report["gui_exercised"] = True
+            if workflows:
+                from Main_App.diagnostics.packaged_workflows import run_workflows
+
+                report["workflows"] = run_workflows(report_path.with_suffix(".artifacts"))
             report["passed"] = True
     except Exception as exc:
         report["error"] = f"{type(exc).__name__}: {exc}"
@@ -174,10 +258,12 @@ def main(arguments: list[str] | None = None) -> int:
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--packaging-check", type=Path)
     mode.add_argument("--packaged-smoke-output", type=Path)
+    mode.add_argument("--packaged-workflow-output", type=Path)
     parsed = parser.parse_args(arguments)
     return run_check(
-        parsed.packaged_smoke_output or parsed.packaging_check,
+        parsed.packaged_smoke_output or parsed.packaged_workflow_output or parsed.packaging_check,
         visible=parsed.packaged_smoke_output is not None,
+        workflows=parsed.packaged_workflow_output is not None,
     )
 
 

@@ -2,6 +2,7 @@ param(
     [string]$ExePath,
     [string]$ExpectedVersion,
     [switch]$AllowVisibleGui,
+    [switch]$RunScientificWorkflows,
     [ValidateRange(1, 900)][int]$TimeoutSeconds = 180
 )
 
@@ -27,11 +28,11 @@ $reportDir = Join-Path $RepoRoot 'build/packaged-smoke'
 New-Item -ItemType Directory -Force -Path $reportDir | Out-Null
 
 function Invoke-PackagedProbe {
-    param([Parameter(Mandatory = $true)][bool]$Visible)
+    param([Parameter(Mandatory = $true)][bool]$Visible, [bool]$Workflows = $false)
 
-    $mode = if ($Visible) { 'visible' } else { 'dependencies' }
+    $mode = if ($Visible) { 'visible' } elseif ($Workflows) { 'workflows' } else { 'dependencies' }
     $reportPath = Join-Path $reportDir ("$mode-" + [guid]::NewGuid().ToString('N') + '.json')
-    $argument = if ($Visible) { '--packaged-smoke-output' } else { '--packaging-check' }
+    $argument = if ($Visible) { '--packaged-smoke-output' } elseif ($Workflows) { '--packaged-workflow-output' } else { '--packaging-check' }
     $windowStyle = if ($Visible) { 'Normal' } else { 'Hidden' }
     $previousQtOptIn = $env:FPVS_ALLOW_QT_TESTS
     try {
@@ -61,16 +62,28 @@ function Invoke-PackagedProbe {
     }
     if ($Visible) {
         if ($report.main_window_visible -ne $true -or $report.main_window_closed -ne $true -or
-            $report.application_version -cne $ExpectedVersion) {
+            $report.application_version -cne $ExpectedVersion -or $report.tool_pages.Count -ne 8 -or
+            $report.external_template_fetch_skipped -ne $true) {
             throw "Packaged Main Window smoke did not confirm its visible version. Report: $reportPath"
         }
-    } elseif ($report.qt_widgets_loaded -ne $false) {
+    } elseif (-not $Workflows -and $report.qt_widgets_loaded -ne $false) {
         throw "Dependency-only smoke unexpectedly loaded QtWidgets. Report: $reportPath"
+    }
+    if ($Workflows -and ($report.workflows.synthetic_only -ne $true -or
+        $report.workflows.qt_application_created -ne $false -or
+        $report.workflows.preprocessing.fif_roundtrip_exact -ne $true -or
+        $report.workflows.free_harmonic_clustering.permutations -ne 127 -or
+        $report.workflows.figures.snr_png_pdf -ne $true -or
+        $report.workflows.figures.scalp_png_pdf -ne $true)) {
+        throw "Packaged scientific workflow acceptance is incomplete. Report: $reportPath"
     }
     Write-Output "Packaged $mode smoke passed: $reportPath"
 }
 
 Invoke-PackagedProbe -Visible $false
+if ($RunScientificWorkflows) {
+    Invoke-PackagedProbe -Visible $false -Workflows $true
+}
 if ($AllowVisibleGui) {
     Invoke-PackagedProbe -Visible $true
 } else {

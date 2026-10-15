@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -17,6 +18,32 @@ from Main_App.diagnostics import packaged_smoke
 
 REPO = Path(__file__).resolve().parents[2]
 SCRIPTS = REPO / "scripts" / "packaging"
+
+
+@pytest.mark.parametrize("_label,factory", packaged_smoke.TOOL_PAGE_FACTORIES)
+def test_tool_probe_uses_real_factory_and_selects_returned_page(_label, factory):
+    selected = []
+    stack_indices = []
+    page = SimpleNamespace(renderer=object())
+    window = SimpleNamespace(
+        stacked=SimpleNamespace(setCurrentIndex=stack_indices.append),
+        workspace_stack=SimpleNamespace(setCurrentWidget=selected.append),
+        **{factory: lambda: page},
+    )
+    assert packaged_smoke.show_tool_page(window, factory) is page
+    assert selected == [page]
+    assert stack_indices == [1]
+
+
+def test_tool_probe_rejects_loreta_renderer_failure():
+    page = SimpleNamespace(renderer=None)
+    window = SimpleNamespace(
+        _ensure_loreta_visualizer_page=lambda: page,
+        stacked=SimpleNamespace(setCurrentIndex=lambda _index: None),
+        workspace_stack=SimpleNamespace(setCurrentWidget=lambda _page: None),
+    )
+    with pytest.raises(RuntimeError, match="renderer could not initialize"):
+        packaged_smoke.show_tool_page(window, "_ensure_loreta_visualizer_page")
 
 
 def test_dependency_entrypoint_is_gui_free_and_isolates_user_settings(tmp_path: Path) -> None:
@@ -39,6 +66,32 @@ def test_dependency_entrypoint_is_gui_free_and_isolates_user_settings(tmp_path: 
     assert actual["version"] == actual["metadata_version"]
     assert set(actual["dependencies"]) == set(packaged_smoke.DEPENDENCY_IMPORTS)
     assert sentinel.read_bytes() == b"user settings must remain untouched"
+
+
+def test_scientific_workflow_entrypoint_runs_real_components_and_retains_artifacts(tmp_path: Path) -> None:
+    report = tmp_path / "workflow.json"
+    completed = subprocess.run(
+        [sys.executable, str(REPO / "src/main.py"), "--packaged-workflow-output", str(report)],
+        capture_output=True, text=True, timeout=120, check=False,
+    )
+    result = json.loads(report.read_text())
+    assert completed.returncode == 0, (result, completed.stderr)
+    assert result["mode"] == "workflows"
+    assert result["gui_exercised"] is False
+    workflows = result["workflows"]
+    assert workflows["synthetic_only"] is True
+    assert workflows["qt_application_created"] is False
+    assert workflows["preprocessing"]["event_codes"] == [1, 2]
+    assert workflows["preprocessing"]["fif_roundtrip_exact"] is True
+    assert workflows["free_harmonic_clustering"]["permutations"] == 127
+    assert workflows["free_harmonic_clustering"]["artifact_count"] >= 10
+    assert workflows["figures"]["snr_png_pdf"] is True
+    assert workflows["figures"]["scalp_png_pdf"] is True
+    artifacts = report.with_suffix(".artifacts")
+    assert len(workflows["artifacts"]) == len([path for path in artifacts.rglob("*") if path.is_file()])
+    assert any(row["path"].endswith(".pdf") for row in workflows["artifacts"])
+    assert any(row["path"].endswith(".png") for row in workflows["artifacts"])
+    assert all(row["size_bytes"] > 0 and len(row["sha256"]) == 64 for row in workflows["artifacts"])
 
 
 def test_isolated_settings_seed_all_legacy_migration_keys(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -97,6 +150,24 @@ def _windows_version(version: str) -> str:
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module.windows_version(version)
+
+
+def test_frozen_inventory_includes_public_lazy_modules_without_importing_them(tmp_path, monkeypatch):
+    monkeypatch.syspath_prepend(str(SCRIPTS))
+    from runtime_imports import active_runtime_imports
+
+    for relative in ("Main_App/__init__.py", "Main_App/projects/__init__.py",
+                     "Main_App/projects/session_compatibility.py", "Tools/Example/__init__.py",
+                     "Tools/Example/runtime.py", "Unrelated/manual.py"):
+        path = tmp_path / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("raise AssertionError('Inventory must never import source modules')", encoding="utf-8")
+    assert active_runtime_imports(tmp_path) == ["Main_App", "Main_App.projects",
+                                              "Main_App.projects.session_compatibility",
+                                              "Tools.Example", "Tools.Example.runtime"]
+    actual = active_runtime_imports(REPO / "src")
+    assert "Main_App.projects.session_compatibility" in actual
+    assert "Tools.LORETA_Visualizer.gui" in actual
 
 
 @pytest.mark.parametrize(
