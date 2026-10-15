@@ -1,0 +1,46 @@
+name: Isolated Qt diagnostics
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["codex/v3-release"]
+    paths:
+      - ".github/workflows/qt-diagnostics.yml"
+      - ".agents/scripts/ci_qt_diagnostics.py"
+
+permissions:
+  contents: read
+
+jobs:
+  qt-files:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
+    env:
+      MPLBACKEND: Agg
+      QT_QPA_PLATFORM: offscreen
+      FPVS_ALLOW_QT_TESTS: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Install Qt runtime and Python dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends libegl1
+          python -m pip install -r requirements.txt
+      - name: Run each registered Qt file in a bounded process
+        run: python .agents/scripts/ci_qt_diagnostics.py --shard ${{ matrix.shard }} --shards 4
+      - name: Retain individual failures and watchdogs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qt-diagnostics-${{ matrix.shard }}
+          path: build/qt-diagnostics/
+          if-no-files-found: error
