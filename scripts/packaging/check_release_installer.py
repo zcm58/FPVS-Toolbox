@@ -63,7 +63,12 @@ def registrations() -> list[dict[str, object]]:
 
 
 def run(command: list[str], log: Path, *, env: dict[str, str], timeout: int = 300) -> None:
-    completed = subprocess.run(command, env=env, capture_output=True, timeout=timeout, check=False)
+    try:
+        completed = subprocess.run(command, env=env, capture_output=True, timeout=timeout, check=False)
+    except subprocess.TimeoutExpired as error:
+        log.write_bytes((error.stdout or b"") + (error.stderr or b"")
+                        + f"\nCommand timed out after {timeout} seconds.\n".encode())
+        raise RuntimeError(f"Command timed out after {timeout} seconds; see {log.name}.") from error
     log.write_bytes(completed.stdout + completed.stderr)
     if completed.returncode:
         raise RuntimeError(f"Command failed ({completed.returncode}); see {log.name}.")
@@ -141,6 +146,7 @@ class NativeWindows:
         from ctypes import wintypes
 
         self.user32 = ctypes.WinDLL("user32", use_last_error=True)
+        self.kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
         self.callback_type = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
         self.user32.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
         self.user32.IsWindowVisible.argtypes = [wintypes.HWND]
@@ -149,6 +155,37 @@ class NativeWindows:
         self.user32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
         self.user32.EnumWindows.argtypes = [self.callback_type, wintypes.LPARAM]
         self.user32.EnumChildWindows.argtypes = [wintypes.HWND, self.callback_type, wintypes.LPARAM]
+        self.kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        self.kernel32.OpenProcess.restype = wintypes.HANDLE
+        self.kernel32.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+        self.kernel32.GetExitCodeProcess.restype = wintypes.BOOL
+        self.kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+        self.kernel32.WaitForSingleObject.restype = wintypes.DWORD
+        self.kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        self.kernel32.CloseHandle.restype = wintypes.BOOL
+
+    def watch_process(self, pid: int) -> int:
+        # Retain a handle while the process is alive; opening by PID after exit
+        # cannot reliably recover its exit code, even when the window was seen.
+        handle = self.kernel32.OpenProcess(0x00101000, False, pid)
+        if not handle:
+            raise ctypes.WinError(ctypes.get_last_error())
+        return handle
+
+    def exit_code(self, handle: int) -> int | None:
+        state = self.kernel32.WaitForSingleObject(handle, 0)
+        if state == 0x102:  # WAIT_TIMEOUT: still running
+            return None
+        if state != 0:  # WAIT_OBJECT_0: process exited
+            raise ctypes.WinError(ctypes.get_last_error())
+        code = ctypes.c_ulong()
+        if not self.kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        return code.value
+
+    def release_process(self, handle: int) -> None:
+        if not self.kernel32.CloseHandle(handle):
+            raise ctypes.WinError(ctypes.get_last_error())
 
     def text(self, hwnd: int) -> str:
         buffer = ctypes.create_unicode_buffer(2048)
@@ -200,6 +237,18 @@ def app_processes(executable: Path) -> list[psutil.Process]:
     return result
 
 
+def require_clean_app_exits(native: NativeWindows, watched: dict[int, int]) -> dict[int, int]:
+    if not watched:
+        raise RuntimeError("Installer relaunch did not retain application process evidence.")
+    codes: dict[int, int] = {}
+    for pid, handle in watched.items():
+        code = native.exit_code(handle)
+        if code is None or code != 0:
+            raise RuntimeError(f"Relaunched application did not exit normally: PID {pid}, code {code}.")
+        codes[pid] = code
+    return codes
+
+
 def visible_relaunch(installer: Path, destination: Path, evidence: Path, env: dict[str, str]) -> dict[str, object]:
     """Exercise the real non-silent /RELAUNCH=1 branch and close its Main Window."""
     native = NativeWindows()
@@ -209,6 +258,7 @@ def visible_relaunch(installer: Path, destination: Path, evidence: Path, env: di
     actions = []
     titles = set()
     launched = False
+    watched: dict[int, int] = {}
     process = subprocess.Popen(command, env=env)
     deadline = time.monotonic() + 300
     try:
@@ -224,6 +274,9 @@ def visible_relaunch(installer: Path, destination: Path, evidence: Path, env: di
                 if action:
                     actions.append(action)
             running = app_processes(executable)
+            for app in running:
+                if app.pid not in watched:
+                    watched[app.pid] = native.watch_process(app.pid)
             windows = native.windows({app.pid for app in running})
             for hwnd, title in windows:
                 if "FPVS Toolbox" in title:
@@ -233,7 +286,8 @@ def visible_relaunch(installer: Path, destination: Path, evidence: Path, env: di
                 if process.returncode:
                     raise RuntimeError(f"Interactive relaunch installer exited {process.returncode}.")
                 return {"main_window_opened_and_closed": True, "installer_actions": actions,
-                        "installer_window_titles": sorted(titles)}
+                        "installer_window_titles": sorted(titles),
+                        "application_exit_codes": require_clean_app_exits(native, watched)}
             time.sleep(0.5)
         raise RuntimeError(f"Installer relaunch timed out; actions={actions}, windows={sorted(titles)}.")
     finally:
@@ -242,6 +296,8 @@ def visible_relaunch(installer: Path, destination: Path, evidence: Path, env: di
             process.wait(timeout=30)
         for remaining in app_processes(executable):
             remaining.kill()
+        for handle in watched.values():
+            native.release_process(handle)
 
 
 def main() -> int:

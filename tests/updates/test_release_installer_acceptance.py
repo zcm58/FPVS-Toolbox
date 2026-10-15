@@ -73,6 +73,30 @@ def test_failed_native_command_retains_failure_log(acceptance, tmp_path):
     assert log.read_bytes() == b"fixture failure"
 
 
+def test_timed_out_native_command_retains_partial_failure_log(acceptance, tmp_path):
+    import os
+
+    log = tmp_path / "timeout.log"
+    with pytest.raises(RuntimeError, match="timed out"):
+        acceptance.run([sys.executable, "-c", "import time; print('failure evidence', flush=True); time.sleep(10)"],
+                       log, env=dict(os.environ), timeout=1)
+    assert b"failure evidence" in log.read_bytes()
+    assert b"timed out after 1 seconds" in log.read_bytes()
+
+
+@pytest.mark.parametrize("code", [0xC0000005, 1, None])
+def test_observed_window_cannot_hide_an_application_crash_or_running_process(acceptance, code):
+    from types import SimpleNamespace
+
+    native = SimpleNamespace(exit_code=lambda _handle: code)
+    with pytest.raises(RuntimeError, match="did not exit normally"):
+        acceptance.require_clean_app_exits(native, {123: 456})
+    native.exit_code = lambda _handle: 0
+    assert acceptance.require_clean_app_exits(native, {123: 456}) == {123: 0}
+    with pytest.raises(RuntimeError, match="process evidence"):
+        acceptance.require_clean_app_exits(native, {})
+
+
 def test_installed_evidence_checks_bytes_and_registration(acceptance, tmp_path, monkeypatch):
     import build_installer_inventory as inventory
 
