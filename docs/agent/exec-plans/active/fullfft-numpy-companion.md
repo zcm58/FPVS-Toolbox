@@ -1,5 +1,8 @@
 # FullFFT NumPy Companion Migration
 
+Status: implemented; visible companion/recovery checks below remain pending
+under the [v3 release ledger](v3-release-readiness.md#3-qualify-processing-and-project-compatibility).
+
 User-approved on 2026-09-05. Replace dense FullFFT Excel storage with an
 uncompressed NumPy companion alongside each condition workbook. Include the
 already-calculated FullSNR arrays so plotting avoids wide Excel reads too.

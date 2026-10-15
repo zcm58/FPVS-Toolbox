@@ -115,12 +115,11 @@ channel, or reject a participant because of these transient findings.
 - Relevant raw-channel/preflight tests under `tests/processing/`; GUI review
   and QC summary consumers only if needed to convey window provenance.
 
-The existing
-[condition-aware preflight speedup plan](../../active/condition-aware-preflight-qc-speedup.md)
-specified 10-second scoring windows. QC-01 superseded that scoring-window
-decision only. Its exact-span, full-condition, review-only, buffering, and
-concurrency constraints continue; the active documentation now distinguishes
-5-second scoring windows from 10-second disk-read chunks.
+QC-01 superseded the original 10-second scoring-window decision only. The
+[preprocessing contract](../../../architecture/preprocessing-contract.md)
+retains the exact-span, full-condition, review-only, buffering, and concurrency
+constraints and distinguishes 5-second scoring windows from 10-second disk-read
+chunks. The completed implementation plan has been retired.
 
 The processing runner separately samples six 10-second windows across the raw
 file. QC-01 alone does not change that detector. The later accepted QC-06

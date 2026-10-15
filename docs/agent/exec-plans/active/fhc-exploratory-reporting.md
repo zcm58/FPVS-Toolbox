@@ -1,5 +1,8 @@
 # FHC exploratory reporting
 
+Status: implemented; CI Qt and the visible reporting smoke below remain pending
+at the final release commit. See the [v3 release ledger](v3-release-readiness.md#free-harmonic-clustering).
+
 ## Scope and decisions
 
 Implement the requested reporting mode for repeated-batch comparisons with

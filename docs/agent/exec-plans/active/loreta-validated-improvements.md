@@ -1,6 +1,8 @@
 # LORETA validated improvements
 
-Status: implementation complete; verification records below
+Status: implementation complete; visible packaged-app acceptance pending in the
+[v3 release ledger](v3-release-readiness.md#5-perform-one-compact-installed-app-acceptance-pass).
+Verification records below describe the implementation branch, not final RC acceptance.
 Branch: `codex/loreta-validated-improvements`
 Base: `codex/v3-release` at `503341ba`
 
@@ -48,6 +50,9 @@ this slice makes existing assumptions and numerical correctness inspectable.
 
 ## Verification and progress
 
+- Release closeout on 2026-10-15: 440 focused tests passed, including eight
+  graphics-guard tests. Packaged visible acceptance remains pending in the
+  release ledger; this scoped run does not qualify native rendering by itself.
 - Initial GUI, path, protected-boundary and source-localization audits passed.
 - Root owns GUI/scale/progress integration, documentation and final review.
 - Parallel owners cover inference, MRI slice interaction, and model reports.

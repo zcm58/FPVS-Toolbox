@@ -2,7 +2,10 @@
 
 ## Status
 
-Active on `codex/repeated-session-projects`.
+Implementation is integrated, including repeated-session FHC. The current
+release's visible import, processing, and export acceptance remains pending in
+the [v3 ledger](v3-release-readiness.md#3-qualify-processing-and-project-compatibility).
+Retain this plan while those checks and its registration workflow need review.
 
 ## Confirmed Recording Additions (2026-09-08)
 
@@ -345,6 +348,7 @@ implicated.
 - [x] Focused non-Qt verification and documented CI-only visible/pytest-qt
   smoke. The repo-wide path stage retains the unrelated `outputs/rcads-*`
   findings described above.
-- [ ] Repeated-session Free Harmonic Clustering extension and Birth Control
-  acceptance run (tracked in
-  `repeated-session-free-harmonic-clustering.md`).
+- [x] Repeated-session Free Harmonic Clustering extension implemented. Its
+  durable contract is in the
+  [FHC architecture](../../../../src/Tools/Free_Harmonic_Clustering/ARCHITECTURE.md).
+  Current packaged acceptance is tracked separately in the v3 ledger.

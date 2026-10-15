@@ -20,9 +20,37 @@ of committed research outputs from all history and verification of the cleaned
 history; the original repository is being privately backed up. No v3 release is
 published by this closeout work.
 
-Current GUI CI, packaged acceptance, representative-project checks, and history
-cleanup are still in progress; earlier evidence below must not be treated as
+Current GUI CI, packaged acceptance, fresh-project qualification, and history
+cleanup are still in progress; bounded comparisons below must not be treated as
 completion of those final gates.
+
+Current scoped checks on the repaired dependency pins: LORETA 440 passed,
+including eight graphics-guard tests;
+updates 511 passed with four skips; GUI 655 non-Qt tests passed. Frozen
+synthetic workflow, dependency, and updater/packaging checks also passed.
+The native Windows source startup smoke at `31b0a1f2` passed all eight real
+tool windows, including LORETA. The frozen build and installer acceptance remain
+in progress; source-window startup does not qualify the packaged artifact.
+These checks do not replace final source/Qt CI, native installed-app acceptance,
+or fresh-project preparation and full-cohort qualification. Public
+visibility additionally requires the authorized history rewrite and GitHub's
+PR/cached-object purge; a successful branch/tag force-push alone is insufficient.
+
+Bounded private-data qualification on 2026-10-15 compared two recordings at
+baseline `38cc8ec1` and release commit `99e2316e`. Eight native outputs, 16 NPZ
+comparisons, 2,656 numeric workbook cells, and the other scientific workbook
+cells matched exactly. Four identity cells differed and were verified as the
+intended identity corrections. Prepared-cache results matched exactly; warm
+resume performed no repeated work. This qualifies the compared recordings and
+settings, not the full supported project/drive matrix.
+
+A historical prepared FHC artifact was replayed at `31b0a1f2`: t values, cluster
+labels, and null arrays matched byte-for-byte, with the same p-value
+(`0.00429957`) and cohort counts (18/16). Cancellation and non-overwriting export
+checks passed. The current user project retains its newer exclusions; its old
+FullFFT contract requires reprocessing. This archived replay does not qualify
+fresh project preparation, a current full-cohort run, or the packaged GUI.
+Participant identities and detailed receipts remain in the private archive.
 
 Release-branch integration on 2026-10-15: merged pipeline performance
 (`51720c12`), experimental QC (`1bfc1318`), updater workflow (`4f51dfd0`),
@@ -757,17 +785,28 @@ threshold/p-value rules, or relevant numerical dependencies change.
 
 ### 1. Freeze the v3 product boundary
 
-- [ ] Confirm the default and beta tool lists above in runtime, user docs, and
-      release notes.
-- [ ] Reconcile the execution-plan directory: remove completed plans, move
-      implemented future plans out of the backlog, and make the quality-status
-      page agree with the remaining active plans.
-- [ ] Freeze v3-compatible processing defaults and document every intentional
-      difference between a new v3 project and an existing v2.1.2 project.
-- [ ] Prove that an existing project with no versioned harmonic profile retains
-      the legacy profile and does not silently acquire new numerical results.
-- [ ] Keep `PROJECT_SCHEMA_VERSION` independent from the app-version bump;
-      change it only if the manifest schema actually changes.
+- [x] Default/beta tool lists agree in the runtime sidebar, the
+      [tool overview](../../../user/tools/index.md), and
+      [release notes](../../../user/release-notes-v3.md). The support tier does
+      not imply validation of every beta method.
+- [x] Reconcile execution plans and the [quality status](../../quality/QUALITY_SCORE.md).
+      Completed preflight, standard-screening LMM, repeated-session FHC, and
+      SNR-overlay implementation plans are retired. Durable contracts remain in
+      preprocessing/loading/worker architecture, statistics architecture, the
+      FHC architecture, and the Plot Generator contract. Their final packaged
+      and visible checks remain open below. FullFFT, LORETA, maps/reporting,
+      ROI, QC/performance and acquisition plans retain genuine pending work;
+      the implemented SNR-overlay plan is no longer in the future backlog.
+- [x] Preserve processing defaults and document new-versus-existing-project
+      behavior in the [migration guide](../../../user/migration-v3.md#review-scientific-settings).
+      Locked numerical contracts are unchanged by release branding.
+- [x] Missing/unversioned harmonic profiles retain Legacy. The missing-profile
+      normalization, explicit new-project default, and unchanged legacy cache
+      identity regressions passed together on 2026-10-15 (three tests).
+- [x] Keep manifest versions independent of app branding: ordinary projects
+      remain schema `2.1.0`, repeated-session projects `2.2.0`. The schema
+      constants remain separate from the app version; the legacy-save shape
+      regression passed separately on 2026-10-15.
 
 ### 2. Correct the two default tools and stabilize Scalp Maps beta
 
@@ -791,6 +830,12 @@ threshold/p-value rules, or relevant numerical dependencies change.
       verify cancellation, non-overwriting run output, manifest/provenance, and
       result-folder actions. This can share the same installed-app session as
       the canonical ACR reproduction and is not another powered calibration.
+- [ ] In the same acceptance session, check a synthetic repeated-session batch,
+      All comparisons/Exploratory findings, details/maps, and exported reporting.
+      The implementation contract is in the
+      [FHC architecture](../../../../src/Tools/Free_Harmonic_Clustering/ARCHITECTURE.md);
+      the [reporting](fhc-exploratory-reporting.md) and
+      [map](fhc-harmonic-cluster-maps.md) plans retain their visible checklists.
 
 #### SNR Plots
 
@@ -809,6 +854,10 @@ threshold/p-value rules, or relevant numerical dependencies change.
 - [x] Add focused regression coverage for mismatched grids, cancellation,
       direct figure output, spectral-QC behavior, PDF/PNG figure dimensions, and
       participant counts.
+- [ ] From the installed RC, export a single-condition multi-group overlay;
+      verify selected group order, per-ROI counts, empty-group handling, legend,
+      matching PNG/PDF outputs, and cancellation. Use the retained manual path
+      in `src/Tools/Plot_Generator/AGENTS.md`.
 - [x] Streamline the default-tool surface with a compact SNR header, corrected
       figures-only About copy, specific folder and generation actions, inline
       running/completion feedback, a focused on-demand generation log, and
@@ -842,9 +891,13 @@ threshold/p-value rules, or relevant numerical dependencies change.
 
 ### 3. Qualify processing and project compatibility
 
-- [ ] Run the representative-project bitwise/performance smoke that remains
-      open in `bitwise-pipeline-performance.md`, including scientific workbook
-      sheets, QC output, and harmonic output comparison.
+- [x] Complete the bounded two-recording baseline/current comparison and the
+      archived prepared-FHC replay described above; retain detailed receipts
+      privately and preserve current user exclusions.
+- [ ] Complete fresh project preparation and the broader representative-project
+      smoke in `bitwise-pipeline-performance.md`, including current full-cohort
+      scientific workbook sheets, QC output, and harmonic output comparison.
+      Archived prepared inputs do not close this gate.
 - [ ] Exercise both a normal internal-drive project and one slow/external-drive
       project, or explicitly accept and document the unmeasured external-drive
       risk for v3.0.0.
@@ -870,9 +923,9 @@ threshold/p-value rules, or relevant numerical dependencies change.
 - [ ] Install Inno Setup 6 in the release environment and build from a clean
       Windows 11 checkout/environment.
 - [ ] Produce `FPVSToolbox-<version>-setup.exe` and record its SHA-256.
-- [ ] Add a Windows packaging workflow or preserve equivalent signed-off manual
-      evidence for every RC. Existing Ubuntu source CI does not qualify the
-      installer.
+- [x] Add `.github/workflows/windows-packaging.yml` and installer-acceptance
+      coverage. Execution and artifact qualification remain open; Ubuntu source
+      CI alone does not qualify the installer.
 
 ### 5. Perform one compact installed-app acceptance pass
 
@@ -890,69 +943,53 @@ threshold/p-value rules, or relevant numerical dependencies change.
 - [ ] Exercise installer `/RELAUNCH=1`, then uninstall and verify user data is
       not removed unexpectedly.
 
-## P1 — Consolidation Before the RC Freeze
+## P1 — Consolidation Decisions
 
-### Stable-tool boundaries and redundant code
+Completed: neutral exact-XLSX ingestion for FHC; canonical Scalp Maps dataset
+identity; specific stable-tool action labels; the existing shared PySide6
+component/theme architecture; and the visual BioSemi64 ROI editor with its
+existing schema and refresh behavior. The ROI editor's
+[visible checklist](sssep-style-visual-roi-selector.md) remains pending with the
+installed-app acceptance pass. These completion statements do not claim final
+Qt/native acceptance.
 
-- [ ] Default tools must not depend on beta-tool GUI or private implementation
-      modules. Move neutral exact-XLSX reading, ROI settings/constants, and
-      processing-owned harmonic metadata behind appropriate `Main_App.io`,
-      `Main_App.projects`, or `Main_App.processing` public APIs; retain thin
-      compatibility adapters where needed.
-- [ ] Consolidate the three selected-column XLSX readers only after exact-value,
-      column-order, missing-column, and performance characterization tests are
-      in place.
-- [x] Remove Scalp Maps' dependency on Plot Generator's private participant-ID
-      parser by using canonical dataset records.
-- [ ] Share run/cancel/completion and output-folder behavior through existing
-      PySide6 components where behavior is genuinely identical.
-- [ ] Split maintenance hotspots only behind characterization tests. Start with
-      GUI orchestration and export sheet builders; do not refactor FHC numerical
-      kernels merely to reduce line counts before release.
-- [ ] Tighten broad exception handling only along the two default-tool paths,
-      preserving intentional best-effort boundaries and adding path/operation
-      context to logs.
+The following work is explicitly deferred beyond v3.0.0. Owner means the
+maintainer responsible for accepting a bounded follow-up, not an active task.
 
-### User-facing UX and v3 identity
+| Deferred item | Owner | Reason | Post-v3 destination |
+| --- | --- | --- | --- |
+| Remaining neutral ROI/harmonic adapters outside default-tool packages | Main App maintainer | No demonstrated release defect; preserve covered import behavior during stabilization | [TD-005](../tech-debt-tracker.md#td-005-default-tool-adapter-consolidation) |
+| Unify the remaining selected-column XLSX readers | I/O maintainer | Requires exact-value/order/error and performance characterization before replacement | [TD-005](../tech-debt-tracker.md#td-005-default-tool-adapter-consolidation) |
+| Share identical run/cancel/completion/output-folder helpers | GUI maintainer | Existing cancellation fixes are covered; extraction is maintenance work | [GUI follow-up](../future/gui-design-polish-accessibility.md) |
+| Split orchestration and export-builder hotspots | Main App maintainer | Broad refactoring adds release risk without an identified defect | [TD-001](../tech-debt-tracker.md#td-001-high-context-production-modules) |
+| Further broad-exception tightening in default tools | Tool maintainers | Needs one bounded failure-path review; do not remove intentional recovery | [TD-002](../tech-debt-tracker.md#td-002-broad-exception-boundaries) |
+| Rename Quick Tools | GUI maintainer | Current label is usable; no unsupported validation label will be introduced | [GUI follow-up](../future/gui-design-polish-accessibility.md) |
+| Further header/help/status layout unification | GUI maintainer | Preserve the compact working layouts at RC freeze | [GUI follow-up](../future/gui-design-polish-accessibility.md) |
+| Move additional correctable errors inline | GUI maintainer | Existing recovery remains available; each dialog needs behavior review | [GUI follow-up](../future/gui-design-polish-accessibility.md) |
+| Expand shared accessibility metadata and focus treatment | GUI maintainer | Existing SNR/ROI coverage is retained; broader work needs a dedicated audit | [GUI follow-up](../future/gui-design-polish-accessibility.md) |
+| Decorative v3 badge/motif or new icon | GUI maintainer | Optional branding adds no release correctness evidence | [GUI follow-up](../future/gui-design-polish-accessibility.md) |
 
-- [ ] Keep the existing PySide6 component/theme architecture. Do not perform a
-      full reskin, workflow rearrangement, or per-tool stylesheet rewrite.
-- [ ] Consider renaming `Quick Tools` to `Core Tools` or `Supported Tools`.
-      Avoid the scientifically broad label `Validated Tools` unless the scope
-      of validation is stated for every entry.
-- [ ] Give both default tools the same header, About/help affordance,
-      status/progress placement, Run/Cancel behavior, completion summary, and
-      output-location action.
-- [x] Replace generic stable-tool labels such as `Browse...`, `Open...`,
-      `Generate`, and `Reset to Default settings` with specific action verbs.
-- [ ] Move locally correctable input errors to inline `StatusBanner` feedback;
-      retain modal dialogs for destructive decisions and hard failures.
-- [ ] Add accessible names/descriptions through shared button/path/status
-      factories, visible keyboard focus for shared controls, and a documented
-      1280 x 900 keyboard/layout smoke.
-- [ ] Add the visual BioSemi64 selector to **Settings > ROIs**, retaining the
-      existing app-level ROI schema, FPVS preset definitions, text fallback,
-      and same-session refresh for cached consumers.
-- [ ] Add a restrained version-3 identity cue to the landing/header area, such
-      as a config-derived `FPVS Toolbox 3` badge plus one subtle harmonic or
-      waveform motif. Preserve the quiet scientific-desktop palette.
-- [ ] Update About/What's New and documentation screenshots after workflows and
-      copy are frozen. A new icon is optional, not a release blocker.
+The supported 1280x900 keyboard/layout review, correct About/version identity,
+and accurate user documentation remain release acceptance checks; they are not
+deferred by this table.
 
 ## P1 — Documentation and Release Notes
 
-- [ ] Add a v3 release-notes page, v2.1.2-to-v3 migration guide, concise
-      processing quick-start, and Windows install/update instructions to the
-      user documentation navigation.
-- [ ] State the exact default/beta support boundary and the export-first policy
-      for study-specific statistics.
-- [ ] Document new-project versus legacy-project harmonic-profile behavior,
-      multi-group layout, exclusions, cache/freshness behavior, and any output
-      schema changes.
-- [ ] Verify every user-visible name, screenshot, path, method identifier, and
-      reporting example against the RC build.
-- [ ] Draft release notes from the inventory below, then verify every claim
-      against `v2.1.2..v3.0.0` before publication.
+- [x] Add the [v3 release notes](../../../user/release-notes-v3.md),
+      [migration guide](../../../user/migration-v3.md),
+      [quick start](../../../user/processing-quick-start.md), and
+      [Windows instructions](../../../user/installing-and-updating.md) to MkDocs navigation.
+- [x] State the two default tools, six beta tools, and export-first policy for
+      study-specific statistics in the overview and release/migration pages.
+- [x] Document harmonic-profile compatibility, multi-group/repeated-session
+      identity, exclusions, freshness, and workbook/NPZ companion preservation.
+- [x] Draft release notes against the implemented feature inventory below.
+- [ ] Verify About/What's New copy, user-visible names, screenshots, paths,
+      method identifiers, and examples against the exact RC artifact; update
+      screenshots only when they no longer represent that artifact.
+- [ ] Verify every release-note claim against the final `v2.1.2..v3.0.0` range
+      and publish it with the stable installer and checksum. The draft does not
+      imply that v3 is already available or that public-history purge is complete.
 
 ### Major feature inventory over v2.1.2
 

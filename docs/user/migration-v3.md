@@ -51,6 +51,10 @@ describe what to record when a processing or analysis definition changes.
 - Changed preprocessing, sensor geometry or preprocessing QC choices require
   **Start Processing**. The app checks each recording's saved processing choices;
   processing one recording does not refresh every recording.
+- If a tool reports that saved FullFFT provenance predates the current BioSemi64
+  and project-frequency-protocol contract, reprocess the EEG with **Start
+  Processing**. An older workbook can remain readable while failing this
+  analysis check; **Resume Post-processing** alone does not repair it.
 - Changed post-processing QC or analysis exclusions require regenerated
   downstream outputs. Use **Resume Post-processing** when it is offered.
 - Changed harmonic definitions require **Settings > Harmonics > Recalculate

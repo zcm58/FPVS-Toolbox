@@ -289,10 +289,10 @@ physical dimensions, and verify filenames and the selected output folder are
 unchanged. Existing saved colors should remain; missing preferences use the
 blue/red defaults. Leave local Qt execution to CI unless explicitly approved.
 
-Future feature/fix plans:
-
-- `docs/agent/exec-plans/future/plot-generator-multigroup-snr-overlays.md`
-  covers first-class multi-group SNR overlays.
+Multi-group SNR overlays are implemented; this contract and
+`docs/user/tools/snr-plot-generator.md` own their supported behavior. Final
+packaged/visible acceptance is tracked in
+`docs/agent/exec-plans/active/v3-release-readiness.md`.
 
 This tool will be used to generate publication quality figures within the FPVS Toolbox. Users should have the ability
 to edit the plot title, x and y labels, and the scale of the x and y axes.

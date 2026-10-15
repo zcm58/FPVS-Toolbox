@@ -1,6 +1,8 @@
 # Hauk-Informed Source PSD Workflow
 
-Status: implemented
+Status: implemented; source-method contract retained here. Final visible
+packaged-app acceptance remains pending in the
+[v3 release ledger](v3-release-readiness.md#5-perform-one-compact-installed-app-acceptance-pass).
 Owner: FPVS Toolbox
 Feature branch: `codex/hauk-source-psd`
 

@@ -1,5 +1,10 @@
 # QC Performance: Exact Numerical Reuse
 
+Status: implementation is integrated. The final v3 representative-recording,
+CI, and visible acceptance gates remain pending in
+[release readiness](v3-release-readiness.md#3-qualify-processing-and-project-compatibility).
+Retain the detailed contracts below while those checks are open.
+
 ## Postprocessing Review Readiness And Audit Parsing (2026-09-08)
 
 Baseline: `c44665827da158de0643758b4bbb999b26d8b6b2`. The approved first batch
@@ -265,7 +270,7 @@ Changed files:
 - `tests/processing/test_preflight_qc_v2.py`: bounded worker policy and scheduling checks.
 - `.agents/verification.toml`: register the spatial parity test.
 - `docs/agent/architecture/preprocessing-contract.md`: reductions and worker contract.
-- `docs/agent/exec-plans/active/condition-aware-preflight-qc-speedup.md`: current worker ceiling.
+- `docs/agent/architecture/workers-threading.md`: current worker admission and ceilings.
 - `docs/agent/exec-plans/active/qc-performance.md`: scope, measurements and verification.
 
 No project paths, exported formats or processing order changed.

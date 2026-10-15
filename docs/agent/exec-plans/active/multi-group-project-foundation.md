@@ -32,9 +32,9 @@ of tool-specific special cases:
 - Do not change preprocessing order, harmonic-selection policy, workbook sheet
   names, result filenames, or scientific calculations.
 - Do not infer canonical group membership from generated output folder names.
-- Do not change the separately retained SNR group-overlay policy or its future
-  design decisions in
-  `docs/agent/exec-plans/future/plot-generator-multigroup-snr-overlays.md`.
+- Preserve the implemented single-condition SNR group-overlay policy in
+  `src/Tools/Plot_Generator/AGENTS.md` and the SNR user guide. Final packaged
+  overlay acceptance belongs to `v3-release-readiness.md`.
 - Do not couple tools to one another merely to reuse a scanner or participant-ID
   parser.
 

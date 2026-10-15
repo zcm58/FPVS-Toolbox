@@ -2,6 +2,14 @@
 
 ## Status
 
+Implementation is integrated. A bounded two-recording baseline/current
+comparison and archived prepared-FHC replay passed on 2026-10-15; the
+[v3 release ledger](v3-release-readiness.md#release-closeout-and-open-source-restoration--2026-10-15)
+records the exact scope and private-receipt limits. Fresh-project/full-cohort
+qualification, release CI, and packaged/visible acceptance are tracked in the
+[v3 release ledger](v3-release-readiness.md#3-qualify-processing-and-project-compatibility)
+and remain open; archived prepared inputs do not close those gates.
+
 ### Adaptive QC-16 process preparation (2026-10-13)
 
 The user authorized replacing the GUI's serial kurtosis preparation with a

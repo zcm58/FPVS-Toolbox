@@ -55,6 +55,18 @@ remeasure an item before promoting it to an active plan.
 - **Done when:** each migrated responsibility has one documented owner and no
   active caller depends directly on the transitional path.
 
+### TD-005: Default-tool adapter consolidation
+
+- **Owner:** Main App and I/O maintainers; explicitly deferred beyond v3.0.0.
+- **Evidence:** FHC now uses neutral exact-XLSX ingestion, but the v3 ledger
+  retains follow-up work for shared ROI/harmonic adapters and the remaining
+  selected-column readers. This is consolidation, not an identified release bug.
+- **Next slice:** inventory active callers, characterize exact values, column
+  order, missing-column/error behavior and performance, then migrate one owner
+  behind a public API with a thin compatibility adapter where required.
+- **Done when:** the migrated owner has one implementation, no new tool-to-tool
+  private dependency, and unchanged numerical/export behavior under those checks.
+
 ## Tracking Rules
 
 - Give every new item a stable `TD-###` identifier, evidence, a bounded next
