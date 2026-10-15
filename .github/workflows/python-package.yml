@@ -74,6 +74,12 @@ jobs:
       run: python -c "from PySide6 import QtCore, QtGui, QtTest, QtWidgets"
     - name: Verify processing bridge failure recovery and restart
       run: python -m pytest --allow-qt-tests tests/processing/test_mp_runner_bridge_full_pipeline_smoke.py -q
+    - name: Verify LORETA slice navigation and preview lifecycle
+      run: >-
+        python -m pytest --allow-qt-tests
+        tests/gui/test_loreta_source_options_qt.py
+        tests/gui/test_loreta_slice_viewer_qt.py
+        tests/gui/test_loreta_preview_worker_qt.py -q --maxfail=1
     - name: Test with pytest
       run: python -m pytest --allow-qt-tests --ignore=tests/standalone_scripts -q
     - name: Verify settings, harmonic help, and menus at fractional and high display scaling

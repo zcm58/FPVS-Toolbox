@@ -70,6 +70,12 @@ The worker tests use bounded fake rendering and exercise latest-request
 coalescing, stale results/errors, and deferred close. They are not a graphics-
 driver or real-project usability test.
 
+The Python package workflow runs these LORETA Qt files in a dedicated step before
+the complete suite. The v3 base's [full Qt CI run](https://github.com/zcm58/FPVS-Toolbox-Repo/actions/runs/38747197337)
+already reports multiple failures and exits through the test watchdog. The
+dedicated step keeps LORETA interaction results inspectable independently of
+that broader baseline failure.
+
 ## Visible manual smoke path
 
 Run only in an approved visible environment on Windows 11 or CachyOS:
