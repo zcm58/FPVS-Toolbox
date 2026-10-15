@@ -36,6 +36,7 @@ from Main_App.gui.update_lifecycle import (
     UpdateTaskResult,
     update_lifecycle,
 )
+from Main_App.updates.application import RELEASES_PAGE_URL
 from Main_App.updates.helper_client import HelperClient
 from Main_App.updates.helper_service import (
     binary_stdio,
@@ -333,7 +334,7 @@ def run_visible_smoke(app: QApplication, report: Path) -> int:
     asset = InstallerAsset(
         name="FPVSToolbox-99.0.0-setup.exe",
         download_url=(
-            "https://github.com/zcm58/FPVS-Toolbox-Releases/releases/download/v99.0.0/"
+            f"{RELEASES_PAGE_URL}/download/v99.0.0/"
             "FPVSToolbox-99.0.0-setup.exe"
         ),
         version="99.0.0",

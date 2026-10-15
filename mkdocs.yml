@@ -1,8 +1,8 @@
 site_name: FPVS Toolbox
 site_description: User documentation, tool guides, and method references for FPVS Toolbox.
 site_url: https://zcm58.github.io/FPVS-Toolbox-Repo/
-repo_url: https://github.com/zcm58/FPVS-Toolbox-Releases
-repo_name: zcm58/FPVS-Toolbox-Releases
+repo_url: https://github.com/zcm58/FPVS-Toolbox-Repo
+repo_name: zcm58/FPVS-Toolbox-Repo
 edit_uri: ""
 docs_dir: docs/user
 site_dir: site
@@ -49,6 +49,10 @@ markdown_extensions:
 nav:
   - Home: index.md
   - Installing and Updating: installing-and-updating.md
+  - Getting Started:
+      - Processing Quick Start: processing-quick-start.md
+      - Upgrading from v2.1.2: migration-v3.md
+      - Version 3 Release Notes: release-notes-v3.md
   - Tools:
       - Overview: tools/index.md
       - Standard FPVS Screening: tools/statistics.md
@@ -64,4 +68,4 @@ nav:
       - Preprocessing QC Review: reference/preprocessing-qc-review.md
       - Missing Condition Outputs: reference/missing-condition-outputs.md
       - Spectral Data Files: reference/spectral-data-files.md
-      - Source-PSD Reporting: reference/methods-reporting-checklist.md
+      - Methods Reporting Checklists: reference/methods-reporting-checklist.md

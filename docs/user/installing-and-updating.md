@@ -14,6 +14,21 @@ Older builds without Update & Repair need this full installation once. It
 installs the separate updater and establishes the application-file inventory
 needed for future patch updates. A first installation cannot use a patch.
 
+**Version 2.1.2 already checks this release repository.** Once a stable v3
+release is published there, its update check can discover the release. The
+upgrade still uses the full installer because v2.1.2 has no independent Update
+& Repair inventory. If an older updater is unavailable, download the full
+installer directly; a GitHub account is not required. See the
+[v2.1.2 migration guide](migration-v3.md) before opening an existing project.
+
+Earlier assets in the transitional
+[FPVS-Toolbox-Releases repository](https://github.com/zcm58/FPVS-Toolbox-Releases/releases)
+remain available. New releases use FPVS-Toolbox-Repo.
+
+The release page lists the available version and its checksum files. To check a
+download in PowerShell, run `Get-FileHash -Algorithm SHA256` with the installer
+path and compare the hash with the matching `.sha256` release asset.
+
 ## Update from Toolbox
 
 Toolbox checks for updates shortly after launch when its last successful check

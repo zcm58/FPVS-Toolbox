@@ -4,6 +4,26 @@
 
 Active. This is the release ledger for the first v3 release candidate.
 
+## Release closeout and open-source restoration — 2026-10-15
+
+The user authorized fixing all release blockers and merging into `codex/v3-release`.
+The validated LORETA branch is merged. Release CI now preserves its first failure
+and watchdog evidence; a stale startup-order assertion is repaired. Native Windows
+packaging acceptance is being added for the exact installer, with isolated
+fresh-install, v2.1.2 upgrade, relaunch, and uninstall/data-preservation checks.
+
+The user subsequently authorized restoring `zcm58/FPVS-Toolbox-Repo` as the public
+MIT-licensed source and release repository. Runtime update URLs and release
+documentation are moving back to that identity. Existing release-only repository
+assets remain available. Public visibility must wait for the authorized removal
+of committed research outputs from all history and verification of the cleaned
+history; the original repository is being privately backed up. No v3 release is
+published by this closeout work.
+
+Current GUI CI, packaged acceptance, representative-project checks, and history
+cleanup are still in progress; earlier evidence below must not be treated as
+completion of those final gates.
+
 Release-branch integration on 2026-10-15: merged pipeline performance
 (`51720c12`), experimental QC (`1bfc1318`), updater workflow (`4f51dfd0`),
 Unicorn inspection/persistence fixes (`2daf454f`), and the remaining main README

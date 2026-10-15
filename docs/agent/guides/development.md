@@ -92,30 +92,35 @@ The updater expects the GitHub Release asset name:
 FPVSToolbox-<version>-setup.exe
 ```
 
-### Publishing from private source
+### Publishing open-source releases
 
-Keep `origin` pointed at private `zcm58/FPVS-Toolbox-Repo`. Publish built assets
-to public `zcm58/FPVS-Toolbox-Releases` explicitly; never push source refs to the
-public repository or rely on an inferred repository in a release command.
-Build-time GitHub authentication belongs on the maintainer's machine or in
-private CI secrets only. The installed main application and updater do not
-need credentials.
+Keep `origin` pointed at `zcm58/FPVS-Toolbox-Repo`, the canonical public source
+and release repository. Publish new releases there explicitly rather than
+relying on an inferred repository in a release command. Preserve historical
+tags and assets in `zcm58/FPVS-Toolbox-Releases`; that repository is an archive,
+not the destination for new releases. Build-time GitHub authentication belongs
+on the maintainer's machine or in CI secrets only. The installed main
+application and updater do not need credentials.
 
 After the required release checks, use an authenticated GitHub CLI (`gh`) to
-create a draft in the public repository. This example assumes a full installer
+create a draft whose tag identifies the exact source commit used for the build.
+Push that reviewed commit to the release branch first. This example assumes
+that the current clean checkout is the tested build commit and a full installer
 without patches; set the actual release version and reviewed notes file:
 
-Enable GitHub immutable releases on `zcm58/FPVS-Toolbox-Releases` before future
-publication. Attach every asset to the draft before publishing; an immutable
-published release cannot receive replacement or additional assets. This setting
-applies to future releases and does not lock historical installers retrospectively.
-The maintainer enabled it on October 8, 2026 and verified `enabled: true`; no
-existing release, tag or asset changed during that setting update.
+Verify that GitHub immutable releases are enabled on
+`zcm58/FPVS-Toolbox-Repo` before publication. The previous setting on the
+release-only repository does not configure this repository. Attach every asset
+to the draft before publishing; an immutable published release cannot receive
+replacement or additional assets. The setting applies to future releases and
+does not lock historical installers retrospectively. See GitHub's
+[immutable release workflow](https://docs.github.com/en/code-security/concepts/supply-chain-security/immutable-releases).
 
 ```powershell
 $releaseVersion = '3.0.0'
-$releaseRepo = 'zcm58/FPVS-Toolbox-Releases'
-gh release create "v$releaseVersion" --repo $releaseRepo --target main --draft `
+$releaseRepo = 'zcm58/FPVS-Toolbox-Repo'
+$releaseCommit = (git rev-parse HEAD).Trim()
+gh release create "v$releaseVersion" --repo $releaseRepo --target $releaseCommit --draft `
   --title "FPVS Toolbox $releaseVersion" --notes-file build/release-notes.md `
   "installers/FPVSToolbox-$releaseVersion-setup.exe" `
   "installers/FPVSToolbox-$releaseVersion-setup.exe.sha256" `
@@ -136,25 +141,29 @@ gh release verify-asset "v$releaseVersion" `
   "installers/FPVSToolbox-$releaseVersion-setup.exe" --repo $releaseRepo
 ```
 
-The public tag is created on the public repository's `main` branch. Preserve
-the private source commit and authenticated ownership inventories in private
-release records. Do not upload source ZIPs, raw `.py` files, internal logs or
-inventories, and do not mirror private tags into the public repository.
+GitHub's automatic source archives now represent the source commit named by
+the release tag. Retain authenticated ownership inventories and build receipts
+with that exact commit and the installer hashes in the release record. Do not
+upload local logs, participant data, internal inventories or debug artifacts
+as release assets.
 
-GitHub's immutable-release attestation binds the public tag and exact assets;
-the release-only tag does not identify the private source build. Retain the
-exact private source commit/build association in the release record. The local
-packaging scripts build artifacts and do not publish them. See
+GitHub's immutable-release attestation binds the public tag and exact assets.
+The local packaging scripts build artifacts and do not publish them. See
 [GitHub release verification](https://docs.github.com/en/code-security/how-tos/secure-your-supply-chain/secure-your-dependencies/verify-release-integrity).
 
-The 2026-10-07 repository migration does not publish 3.0.0. Historical installers
-remain unchanged; users of 2.1.2 and earlier need to manually install 3.0.0
-when available before automatic updates work at the new address.
+The published `v2.1.2` source already checks the canonical repository and
+recognizes the full installer filename. Restoring public access and publishing
+a stable v3 release there restores that discovery path; a manual download is
+not required solely because of the temporary repository migration. The actual
+packaged upgrade remains an acceptance check. The first v3 upgrade uses the
+full installer to establish the independent updater and owned-file inventory;
+future authenticated baselines can support direct patches. Users of builds
+that checked the temporary release-only address can install the full package
+from the canonical release page.
 
-GitHub unpublished the documentation site when the source became private. The
-user chose to leave it unpublished for now. `.github/workflows/docs.yml` keeps
-strict documentation validation with read-only permissions and does not deploy.
-Restore public documentation hosting only when explicitly requested.
+GitHub Pages publication is separate from repository visibility. The
+documentation workflow validates the site; do not describe it as deployed
+without checking its deployment and Pages configuration.
 
 After uploading a release, manually smoke the installer update path on Windows:
 

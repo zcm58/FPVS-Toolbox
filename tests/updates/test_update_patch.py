@@ -43,7 +43,7 @@ def _github_asset(name: str, payload: bytes) -> dict[str, object]:
         "size": len(payload),
         "id": 123,
         "digest": f"sha256:{_hash(payload)}",
-        "browser_download_url": f"https://github.com/zcm58/FPVS-Toolbox-Releases/releases/download/v{TARGET}/{name}",
+        "browser_download_url": f"https://github.com/zcm58/FPVS-Toolbox-Repo/releases/download/v{TARGET}/{name}",
     }
 
 
@@ -83,7 +83,7 @@ def fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     (root / patches.INVENTORY_NAME).write_bytes(raw)
     asset = InstallerAsset(
         name=f"FPVSToolbox-Patch-{BASE}-to-{TARGET}.exe",
-        download_url=f"https://github.com/zcm58/FPVS-Toolbox-Releases/releases/download/v{TARGET}/FPVSToolbox-Patch-{BASE}-to-{TARGET}.exe",
+        download_url=f"https://github.com/zcm58/FPVS-Toolbox-Repo/releases/download/v{TARGET}/FPVSToolbox-Patch-{BASE}-to-{TARGET}.exe",
         size_bytes=len(PATCH_BYTES),
         sha256=_hash(PATCH_BYTES),
         version=TARGET,

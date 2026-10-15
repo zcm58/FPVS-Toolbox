@@ -156,6 +156,25 @@ Depending on the loaded source-map method, you can use options such as:
 
 The available options may differ depending on whether you are viewing an L2-MNE cortical map or an eLORETA volume map.
 
+Choose **Scale: current map** for limits from the displayed map,
+**Scale: all conditions** for shared limits within the selected method and
+summary, or **Scale: fixed limits** to enter a range. Exports use the selected
+scale. Use shared or fixed limits when comparing colors across conditions;
+independently scaled maps can assign the same color to different values.
+
+In the MRI slice view, click to position the linked crosshair. Arrow keys move
+it within the active plane; the mouse wheel or Page Up/Down changes that slice.
+Home resets the location. Slice titles show fsaverage MRI RAS coordinates in
+millimetres and edge labels identify orientation. The hover tooltip reports the
+nearest original source-grid value and its distance from the cursor, including
+when that value is hidden by display masking. It is not an interpolated
+measurement at the cursor or a participant-specific anatomical coordinate.
+
+MRI previews render in the background. **Source Map Options > Rebuild source
+maps** reports the current build stage; **Cancel rebuild** requests cancellation
+at the next supported checkpoint. Existing source-map files are not silently
+recalculated when the tool opens.
+
 Display choices never change the source calculation. Surface painting, volume
 smoothing, masks, camera position, and MRI slices operate on already-prepared
 values; the L2 orientation choice affects only the next source-map rebuild.
@@ -175,6 +194,16 @@ each displayed condition/group. With only one eligible participant, FPVS
 Toolbox still writes and displays the descriptive source map, but labels the
 mask as unavailable and treats the unmasked display as exploratory rather than
 as an inferential group result.
+
+New builds use the exact tail proportion when all sign flips are enumerated
+and retain the plus-one correction for sampled permutations. Rebuild maps
+created before this correction to update their saved masks; loading them alone
+preserves their saved results. The group-level mask is derived from the mean
+one-sample statistic even when a median or another descriptive summary is
+displayed. It does not test a difference between conditions or establish a
+separate significant effect at every retained point. Cluster-level evidence
+does not identify an exact effect boundary; see
+[Sassenhagen and Draschkow (2019)](https://doi.org/10.1111/psyp.13335).
 
 ## Outputs
 

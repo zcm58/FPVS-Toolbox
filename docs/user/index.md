@@ -3,6 +3,10 @@
 This site explains the active FPVS Toolbox workflow, its built-in tools, and the
 published methods that inform the application.
 
+Start with the [processing quick start](processing-quick-start.md). For an
+existing installation, read [upgrading from v2.1.2](migration-v3.md) and the
+[version 3 release notes](release-notes-v3.md).
+
 ## Key Features and Assumptions
 
 ### FPVS Toolbox Project Root

@@ -137,7 +137,7 @@ def test_all_users_install_uses_elevation_only_after_integrity_check(tmp_path, m
     digest = hashlib.sha256(payload).hexdigest()
     asset = InstallerAsset(
         name,
-        f"https://github.com/zcm58/FPVS-Toolbox-Releases/releases/download/v3.1.0/{name}",
+        f"https://github.com/zcm58/FPVS-Toolbox-Repo/releases/download/v3.1.0/{name}",
         len(payload),
         digest,
         "3.1.0",
@@ -168,7 +168,7 @@ def test_main_app_and_independent_helper_share_public_release_identity():
     from Main_App.updates.application import RELEASE_REPOSITORY
     from Main_App.updates.github_releases import DEFAULT_RELEASES_API_URL
 
-    assert RELEASE_REPOSITORY == "zcm58/FPVS-Toolbox-Releases"
+    assert RELEASE_REPOSITORY == "zcm58/FPVS-Toolbox-Repo"
     assert FPVS_TOOLBOX_UPDATE_API == DEFAULT_RELEASES_API_URL
     assert FPVS_TOOLBOX_REPO_PAGE == f"https://github.com/{RELEASE_REPOSITORY}/releases"
 

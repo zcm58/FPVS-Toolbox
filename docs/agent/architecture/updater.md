@@ -66,9 +66,9 @@ version owner; the build extracts it without importing config and embeds
 
 ## Toolbox identity and installation
 
-- Public release repository: `zcm58/FPVS-Toolbox-Releases`.
-- Private source repository: `zcm58/FPVS-Toolbox-Repo`; never use it for
-  installed-client requests or public release assets.
+- Public source and release repository: `zcm58/FPVS-Toolbox-Repo`.
+- Historical release-only repository: `zcm58/FPVS-Toolbox-Releases`; preserve
+  its existing tags and assets, but publish new releases in the source repository.
 - `Main_App.updates.application` owns the public repository identity and API/page
   URLs. Both the main application configuration and independent helper consume
   these values. Exact repository, version, filename and SHA-256 checks remain
@@ -130,31 +130,29 @@ errors rather than silent browser/download fallbacks.
 
 ## Packaging and migration
 
-The 2026-10-07 private-source migration changes the public release address for
-the upcoming 3.0.0 build. Existing 2.1.2 and earlier installers remain unchanged
-and still request the old address; their automatic checks stop working when
-the source repository becomes private. The user explicitly accepted a manual
-upgrade to the first installer using the new address. Do not add a private-repo
-fallback, embed credentials, relabel an old installer, or publish unreleased
-3.0.0 development builds as part of this repository migration.
+The open-source restoration makes the original `zcm58/FPVS-Toolbox-Repo`
+repository the public home for source and future releases again. Release tags
+must identify the exact reviewed source commit used to build their assets.
+Preserve historical installers and tags in both repositories. Do not relabel
+an old installer, embed GitHub credentials, or weaken the repository, version,
+filename and digest checks to accommodate migration. The updater requests only
+the canonical repository; it does not silently fall back to the archive.
 
-The public repository has independent documentation-only Git history. Its
-release tags must reference its own `main` branch, never private source commits.
-Only installers, update JSON, checksum sidecars and brief release notes cross
-the boundary. Do not push source branches/tags or upload source archives, build
-logs, internal inventories or debug artifacts. GitHub's automatic source
-archives then contain only the public repository's files. Existing release
-licenses are unchanged. See the explicit public publishing commands in
-`docs/agent/guides/development.md`.
+The published `v2.1.2` source already queries the original repository's Releases
+API and recognizes `FPVSToolbox-<version>-setup.exe`. Once the repository is
+public and a stable v3 release is published there, that discovery contract is
+compatible with offering the full v3 installer through the existing updater.
+This is a source-level compatibility check, not evidence that a packaged
+upgrade has passed. The packaged acceptance gate must exercise the actual
+2.1.2-to-v3 installation and data-preservation path.
 
-The documentation site is intentionally unpublished after this migration;
-the user deferred its restoration. The documentation workflow validates only.
-
-Older Toolbox builds do not bundle this helper or an authenticated ownership
-inventory. They need the first full installer containing this implementation.
-That installer establishes a baseline for future patches. Do not create
-historical ownership by scanning a user's installation or relabeling an old
-release. No version bump or public release is part of this implementation.
+Older Toolbox builds do not bundle the independent helper or an authenticated
+ownership inventory. Their first v3 upgrade therefore requires the full
+installer, whether downloaded in-app or manually. It establishes the baseline
+for future patches. Do not create historical ownership by scanning a user's
+installation. Builds that used the temporary release-only address can obtain
+the full installer from the canonical release page. See the explicit public
+publishing commands in `docs/agent/guides/development.md`.
 
 The normal release wrapper builds the main bundle, independently builds and
 checks the helper, generates inventories from the final bundle, and compiles
@@ -212,6 +210,29 @@ Keep public GitHub release notes to brief, nontechnical changes. Do not include
 validation details; for example, "Improved app updates and patch installation."
 
 ## Verification and manual acceptance
+
+The `Windows release acceptance` workflow builds the main executable, independent
+updater, and installer from its exact commit on a disposable GitHub Windows
+runner. It retains the installer, checksums, ownership inventory, source commit,
+dependency reports, visible Main Window reports, and native installer logs as
+workflow artifacts. It does not publish a GitHub Release.
+
+`scripts/packaging/check_release_installer.py --execute --baseline <installer>`
+is restricted to that disposable runner and refuses an existing Toolbox
+registration. The runner verifies the historical v2.1.2 installer against its
+reviewed published SHA-256, fresh-installs the new artifact, opens and closes it
+twice, uninstalls it, installs v2.1.2, and upgrades that same installation. Every
+installed owned file must match the release inventory. The check also drives the
+actual native installer wizard through `/RELAUNCH=1`, closes the resulting Main
+Window, and uninstalls again. Project, settings, log, output, and local-template
+sentinels under its disposable user-data root must survive every transition.
+Ordinary developer machines cannot execute this acceptance helper.
+
+These automated checks qualify bundle imports, visible shell startup, installer
+replacement, relaunch, and preservation of the sentinel files. They do not claim
+representative EEG-processing equivalence, real-project migration, external-drive
+performance, or completion of every beta-tool workflow. Those checks retain their
+separate evidence and visible/manual acceptance requirements below.
 
 Scroll regression: in Dataset Exclusions with more than one screen of entries,
 scroll the table both ways after editing a scope. Confirm choices and selection
