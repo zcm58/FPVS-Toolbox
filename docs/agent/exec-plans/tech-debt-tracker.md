@@ -2,23 +2,26 @@
 
 This page tracks unresolved, implementation-ready debt. It is not a list of
 permanent guardrails, completed migrations, product ideas, or past verification
-runs. Measurements below were refreshed against the repository on 2026-07-10;
-remeasure an item before promoting it to an active plan.
+runs. Measurements below were refreshed against `main` at `712de154` on
+2026-10-18; remeasure an item before promoting it to an active plan. The census
+uses tracked `src/**/*.py` files, excluding `src/Standalone_Scripts/**` before
+reading files, UTF-8-SIG decoding, physical `splitlines()` counts, and Python AST
+exception handlers. Module counts include `__init__.py`.
 
 ## Open Debt
 
 ### TD-001: High-context production modules
 
-- **Evidence:** 38 production Python modules exceed 600 lines (excluding
-  `src/Standalone_Scripts/**`). The largest current hotspots are:
-  - `Tools/LORETA_Visualizer/gui.py` - 3,220 lines
-  - `Tools/Stats/analysis/dv_policy_group_significant.py` - 2,256 lines
-  - `Main_App/Performance/process_runner.py` - 1,975 lines
-  - `Tools/LORETA_Visualizer/renderer.py` - 1,833 lines
-  - `Tools/LORETA_Visualizer/source_producers/l2_mne_hauk_zscore.py` - 1,648 lines
-  - `Main_App/gui/settings_panel.py` - 1,623 lines
-  - `Main_App/gui/preprocessing_qc_workflow.py` - 1,612 lines
-  - `Main_App/gui/processing_workflows.py` - 1,433 lines
+- **Evidence:** 107 of 504 production Python modules exceed 600 lines. The
+  largest current hotspots are:
+  - `Main_App/gui/settings_panel.py` - 4,862 lines
+  - `Main_App/processing/frequency_domain_qc.py` - 4,862 lines
+  - `Main_App/gui/preprocessing_qc_workflow.py` - 4,860 lines
+  - `Tools/Stats/analysis/dv_policy_group_significant.py` - 4,308 lines
+  - `Tools/LORETA_Visualizer/gui.py` - 3,807 lines
+  - `Main_App/Performance/process_runner.py` - 3,522 lines
+  - `Tools/Free_Harmonic_Clustering/exports.py` - 3,393 lines
+  - `Main_App/processing/raw_channel_qc.py` - 2,970 lines
 - **Cost:** agents must load broad files to make narrow changes, increasing
   context use and the chance of crossing ownership boundaries.
 - **Next slice:** choose one behavior-covered owner and extract named helpers
@@ -30,9 +33,12 @@ remeasure an item before promoting it to an active plan.
 
 ### TD-002: Broad exception boundaries
 
-- **Evidence:** 362 `except Exception` handlers remain across 88 production
-  Python files (excluding `src/Standalone_Scripts/**`). They are concentrated
-  in GUI, processing, source-production, and export orchestration.
+- **Evidence:** 435 `except Exception` handlers remain across 118 production
+  Python files. This counts exact AST `Exception` names, including handlers
+  that bind an exception variable; it excludes the separate 16 `BaseException`
+  handlers across 11 files. No tuple/qualified `Exception` or bare handlers
+  were found in this snapshot. They are concentrated in GUI, processing,
+  source-production, and export orchestration.
 - **Cost:** unrelated failures are hard to attribute, while silent recovery can
   hide bad state from both users and verification agents.
 - **Next slice:** tighten handlers only inside one covered workflow. Preserve
@@ -44,7 +50,7 @@ remeasure an item before promoting it to an active plan.
 
 ### TD-004: Current Main App ownership still uses transitional package names
 
-- **Evidence:** active implementations remain under `Main_App/Shared` (11
+- **Evidence:** active implementations remain under `Main_App/Shared` (12
   Python modules) and `Main_App/Performance` (3 Python modules), while newer
   purpose-based packages expose the intended public import surfaces.
 - **Cost:** agents must distinguish current owners, adapters, and historical

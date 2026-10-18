@@ -46,10 +46,6 @@ def _xlsx_member_path(source_member: str, target: str) -> str:
     return posixpath.normpath(posixpath.join(source_dir, target))
 
 
-def _full_snr_sheet_member(archive: zipfile.ZipFile) -> str:
-    return _worksheet_member(archive, _FULLSNR_SHEET)
-
-
 def _worksheet_members(archive: zipfile.ZipFile) -> dict[str, str]:
     workbook_root = ElementTree.fromstring(archive.read("xl/workbook.xml"))
     rels_root = ElementTree.fromstring(archive.read("xl/_rels/workbook.xml.rels"))
@@ -65,13 +61,6 @@ def _worksheet_members(archive: zipfile.ZipFile) -> dict[str, str]:
         if name and target:
             members[name] = _xlsx_member_path("xl/workbook.xml", target)
     return members
-
-
-def _worksheet_member(archive: zipfile.ZipFile, sheet_name: str) -> str:
-    try:
-        return _worksheet_members(archive)[sheet_name]
-    except KeyError as exc:
-        raise ValueError(f"Worksheet named '{sheet_name}' not found") from exc
 
 
 class XlsxWorkbookReadSession:

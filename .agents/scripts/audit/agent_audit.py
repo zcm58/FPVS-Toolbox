@@ -277,10 +277,6 @@ def _is_python(path: str) -> bool:
     return path.endswith(".py")
 
 
-def _is_current_code(path: str) -> bool:
-    return path.startswith("src/") and _is_python(path) and not path.startswith(CURRENT_CODE_EXCLUDES)
-
-
 def _is_production_code(path: str) -> bool:
     return path.startswith("src/") and _is_python(path) and not path.startswith(PRODUCTION_EXCLUDES)
 

@@ -37,7 +37,8 @@ Primary areas:
   FPVS Studio; Toolbox adapters and packaging are documented in
   [docs/agent/architecture/updater.md](docs/agent/architecture/updater.md).
   Public source history, release tags, client updates and downloads use
-  `zcm58/FPVS-Toolbox-Repo`. Historical release-only assets remain preserved.
+  `zcm58/FPVS-Toolbox`. The original repository stays private; historical
+  release-only assets remain preserved.
 - `src/Main_App/gui/`: canonical Main App GUI package. It owns the main-window shell/coordinator, focused GUI workflow helpers, reusable widgets, theme helpers, menu/sidebar/header helpers, icon/style-token/update-manager helpers, and GUI operation guards. `main_window.py` has been appropriately downsized; do not target it for further refactor unless the user explicitly scopes that work.
 - `src/Main_App/gui/components/`: canonical shared component layer for new and migrated GUI surfaces. Prefer this import surface for shared cards, buttons, forms, status banners, window/dialog shells, action rows, and message helpers.
 - `src/Main_App/exports/`: canonical Main App export adapter import surface. It owns post-export adapter behavior used by workers and the process runner while shared post-processing/workbook generation remains behavior-preserving. It also owns GUI-neutral publication figure and publication-table style contracts used by export tooling. The lightweight style surface must not eagerly import Stats-owned workbook builders; heavy processing exports remain lazy compatibility attributes.
@@ -102,7 +103,8 @@ Primary areas:
   documentation route.
 - `tests/`: unit, integration, and pytest-qt smoke coverage.
 - `.agents/scripts/audit/`: repo-level agent invariant checks such as `agent_audit.py`.
-- `scripts/docs/`: documentation publishing and maintenance helpers.
+- `.github/workflows/docs.yml`: strict user-documentation build and GitHub Pages
+  artifact deployment from `main`; no generated documentation branch is needed.
 - `.agents/scripts/smoke/`, when present: optional agent-facing probes that are
   not default gates. Its absence is valid.
 - `scripts/migration/`: one-off or repeatable local data migration helpers.
