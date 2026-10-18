@@ -1,0 +1,257 @@
+from __future__ import annotations
+
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+from fractions import Fraction
+from math import gcd
+from typing import Dict, Iterable, Optional, Tuple
+
+import numpy as np
+
+
+@dataclass
+class CropResult:
+    crop_start_sample: int
+    n_samples: int
+    n55_raw: int
+    n55_dedup: int
+    cycles: int
+    block_start_sample: int
+    block_end_sample: int
+    first55_sample: Optional[int] = None
+    last55_sample: Optional[int] = None
+    available_samples: int = 0
+    dedup_dropped: int = 0
+    early_extra_count: int = 0
+    missing_gap_count: int = 0
+    fallback: bool = False
+    fallback_reason: Optional[str] = None
+    warnings: list[str] = field(default_factory=list)
+    oddball_id: Optional[int] = None
+
+
+@dataclass(frozen=True)
+class ConditionFFTSpanPlan:
+    """Shared-length FFT spans for every repetition of one condition."""
+
+    condition_id: int
+    repetition_keys: tuple[Tuple[int, int], ...]
+    n_step: Optional[int]
+    n_common: Optional[int]
+    repetition_spans: tuple[Tuple[int, int], ...]
+    fallback_repetition_reasons: tuple[str, ...]
+
+
+ODDBALL_FREQ = Fraction(6, 5)
+
+
+def compute_onbin_step(fs: float, f_oddball: Fraction = ODDBALL_FREQ) -> Tuple[Optional[int], Optional[int], Optional[str]]:
+    fs_i = int(round(fs))
+    if abs(fs - fs_i) >= 1e-6:
+        return None, None, f"non_integer_fs:{fs}"
+    den_fs = f_oddball.denominator * fs_i
+    n_step = den_fs // gcd(f_oddball.numerator, den_fs)
+    return fs_i, n_step, None
+
+
+def compute_onbin_N(available_samples: int, N_step: int) -> int:
+    if available_samples <= 0 or N_step <= 0:
+        return 0
+    return (available_samples // N_step) * N_step
+
+
+def plan_condition_fft_spans(
+    crop_results: Mapping[Tuple[int, int], CropResult],
+    condition_id: int,
+    n_step: Optional[int],
+) -> ConditionFFTSpanPlan:
+    """Plan ordered, equal-length FFT spans for one condition.
+
+    The common length is the largest ``n_step`` multiple that fits every
+    non-fallback repetition, matching the locked normal-processing behavior.
+    Fallback diagnostics are returned for the caller to present in its own
+    context; spans are only emitted when a positive common length exists.
+    """
+    condition_id = int(condition_id)
+    repetition_keys = tuple(
+        sorted(
+            (key for key in crop_results if int(key[0]) == condition_id),
+            key=lambda key: key[1],
+        )
+    )
+    fallback_repetition_reasons = tuple(
+        f"rep={int(rep_key[1])}:{crop_results[rep_key].fallback_reason or 'unknown'}"
+        for rep_key in repetition_keys
+        if crop_results[rep_key].fallback
+    )
+
+    n_common: Optional[int] = None
+    if n_step:
+        repetition_lengths = [
+            int(crop_results[key].n_samples)
+            for key in repetition_keys
+            if not crop_results[key].fallback
+            and int(crop_results[key].n_samples) > 0
+        ]
+        if repetition_lengths:
+            n_common = (min(repetition_lengths) // int(n_step)) * int(n_step)
+            if n_common <= 0:
+                n_common = None
+
+    repetition_spans: tuple[Tuple[int, int], ...] = ()
+    if n_common is not None and not fallback_repetition_reasons:
+        repetition_spans = tuple(
+            (
+                int(crop_results[key].crop_start_sample),
+                int(crop_results[key].crop_start_sample) + int(n_common),
+            )
+            for key in repetition_keys
+        )
+
+    return ConditionFFTSpanPlan(
+        condition_id=condition_id,
+        repetition_keys=repetition_keys,
+        n_step=n_step,
+        n_common=n_common,
+        repetition_spans=repetition_spans,
+        fallback_repetition_reasons=fallback_repetition_reasons,
+    )
+
+
+def resolve_oddball_ids_by_condition(
+    events: np.ndarray,
+    onset_ids: Iterable[int],
+    *,
+    default_oddball_id: int = 55,
+    stream_end_sample: Optional[int] = None,
+) -> dict[int, int]:
+    """Compatibility helper returning one explicit project-wide marker code.
+
+    Marker identity is never inferred from observed events. Active processing
+    consumes the reviewed marker-integrity plan instead of this adapter.
+    """
+    _ = events, stream_end_sample
+    onset_set = {int(v) for v in onset_ids}
+    return {condition_id: int(default_oddball_id) for condition_id in onset_set}
+
+
+def _resolve_oddball_id_for_condition(
+    oddball_id: int | Mapping[int, int],
+    condition_id: int,
+) -> int:
+    if isinstance(oddball_id, Mapping):
+        return int(oddball_id.get(int(condition_id), 55))
+    return int(oddball_id)
+
+
+def compute_fft_crop_from_events(
+    events: np.ndarray,
+    fs: float,
+    onset_ids: Iterable[int],
+    oddball_id: int | Mapping[int, int] = 55,
+    stream_end_sample: Optional[int] = None,
+    f_oddball: Fraction = ODDBALL_FREQ,
+) -> tuple[Dict[Tuple[int, int], CropResult], Optional[int], list[str]]:
+    onset_set = {int(v) for v in onset_ids}
+    results: Dict[Tuple[int, int], CropResult] = {}
+    run_warnings: list[str] = []
+
+    if events.size == 0:
+        run_warnings.append("empty_events")
+        return results, None, run_warnings
+
+    _, n_step, step_err = compute_onbin_step(fs=fs, f_oddball=f_oddball)
+    if step_err:
+        run_warnings.append(step_err)
+
+    expected_interval_samples = float(Fraction(str(fs)) / f_oddball)
+    onset_events = [row for row in events if int(row[2]) in onset_set]
+    if not onset_events:
+        run_warnings.append("no_onsets")
+        return results, n_step, run_warnings
+
+    rep_counter: Dict[int, int] = {}
+    for idx, onset_event in enumerate(onset_events):
+        onset_sample = int(onset_event[0])
+        cond_id = int(onset_event[2])
+        rep_counter[cond_id] = rep_counter.get(cond_id, 0) + 1
+        rep_index = rep_counter[cond_id] - 1
+        next_block_start = int(onset_events[idx + 1][0]) if idx + 1 < len(onset_events) else int(stream_end_sample or events[-1][0] + 1)
+
+        block_oddball_id = _resolve_oddball_id_for_condition(oddball_id, cond_id)
+        block_rows = [
+            row
+            for row in events
+            if onset_sample < int(row[0]) < next_block_start
+            and int(row[2]) == block_oddball_id
+        ]
+        raw_55 = [int(row[0]) for row in block_rows]
+        dedup_55: list[int] = []
+        dropped = 0
+        early_extra = 0
+        missing_gaps = 0
+        for sample in raw_55:
+            if not dedup_55:
+                dedup_55.append(sample)
+                continue
+            delta = sample - dedup_55[-1]
+            if delta == 0:
+                dropped += 1
+                continue
+            if delta < 0.5 * expected_interval_samples:
+                early_extra += 1
+            if delta > 1.5 * expected_interval_samples:
+                missing_gaps += 1
+            dedup_55.append(sample)
+
+        fallback_reason: Optional[str] = None
+        fallback = False
+        first55 = dedup_55[0] if dedup_55 else None
+        last55 = dedup_55[-1] if dedup_55 else None
+        available = (last55 - first55) if first55 is not None and last55 is not None else 0
+
+        if n_step is None:
+            fallback = True
+            fallback_reason = step_err
+            n_samples = 0
+            crop_start = onset_sample
+        elif len(dedup_55) < 2:
+            fallback = True
+            fallback_reason = f"insufficient_{block_oddball_id}"
+            n_samples = 0
+            crop_start = onset_sample
+        else:
+            n_samples = compute_onbin_N(available_samples=available, N_step=n_step)
+            crop_start = first55
+            if n_samples <= 0:
+                fallback = True
+                fallback_reason = "nonpositive_N"
+
+        warnings: list[str] = []
+        if missing_gaps:
+            warnings.append(f"missing_55_gaps:{missing_gaps}")
+        if dropped:
+            warnings.append(f"dedup_dropped:{dropped}")
+        if early_extra:
+            warnings.append(f"early_extra_markers:{early_extra}")
+
+        results[(cond_id, rep_index)] = CropResult(
+            crop_start_sample=crop_start,
+            n_samples=n_samples,
+            n55_raw=len(raw_55),
+            n55_dedup=len(dedup_55),
+            cycles=max(0, len(dedup_55) - 1),
+            block_start_sample=onset_sample,
+            block_end_sample=next_block_start,
+            first55_sample=first55,
+            last55_sample=last55,
+            available_samples=available,
+            dedup_dropped=dropped,
+            early_extra_count=early_extra,
+            missing_gap_count=missing_gaps,
+            fallback=fallback,
+            fallback_reason=fallback_reason,
+            warnings=warnings,
+            oddball_id=block_oddball_id,
+        )
+    return results, n_step, run_warnings

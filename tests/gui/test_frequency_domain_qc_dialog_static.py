@@ -66,7 +66,8 @@ def test_experimental_editor_roundtrips_interpolation_capability_without_changin
         original.with_condition_specific_interpolation_enabled(enabled)
         .with_kurtosis_review_auto_interpolate_extreme(extreme_default)
     )
-    assert "experimental_settings.condition_specific_interpolation_enabled" in source
+    page_source = (REPO_ROOT / "src/Main_App/gui/settings_experimental_page.py").read_text(encoding="utf-8")
+    assert "experimental_settings.condition_specific_interpolation_enabled" in page_source
 
 
 def test_frequency_review_exposes_recording_scoped_evidence_without_a_default() -> None:

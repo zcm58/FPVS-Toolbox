@@ -21,7 +21,7 @@ from .project_coverage import (
     load_managed_project_coverage,
     select_managed_conditions,
 )
-from Tools.Stats.analysis.canonical_harmonics import (
+from Main_App.processing.canonical_harmonics import (
     CANONICAL_HARMONIC_SOURCE,
     CUSTOM_HARMONIC_SOURCE,
     CanonicalHarmonicSelectionError,

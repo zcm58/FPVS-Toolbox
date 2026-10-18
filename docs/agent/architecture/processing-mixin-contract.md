@@ -1,7 +1,7 @@
 # Processing Mixin Contract
 
 This page documents the compatibility processing path now owned by
-`src/Main_App/Shared/processing_mixin.py`. Active GUI processing routes through
+`src/Main_App/workers/processing_mixin.py`. Active GUI processing routes through
 the PySide6 process runner and no longer inherits this mixin; the public mixin
 remains for compatibility callers and must preserve the processing pipeline,
 event handling, progress behavior, output formats, and post-processing exports
@@ -53,6 +53,6 @@ Finalization preserves the existing success/error/cancel behavior, resets proces
 - Do not change generated files, sheet names, output paths, quality review file format, or FFT crop log format.
 - The compatibility worker and active process runner both fail before export
   when locked marker-derived FFT crop behavior is unavailable.
-- Do not reintroduce Tkinter, CustomTkinter, or CTkMessagebox; user messages must use `Main_App.Shared.user_messages`.
-- `src/Main_App/Legacy_App/processing_utils.py` has been deleted; active callers should import `Main_App.Shared.processing_mixin`.
+- Do not reintroduce Tkinter, CustomTkinter, or CTkMessagebox; user messages must use `Main_App.gui.user_messages`.
+- `src/Main_App/Legacy_App/processing_utils.py` has been deleted; active callers should import `Main_App.workers.processing_mixin`.
 - Active runtime code must not import `Main_App.Legacy_App.eeg_preprocessing`; see `docs/agent/architecture/preprocessing-contract.md`.

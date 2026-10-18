@@ -14,6 +14,10 @@ from tests import repo_root
     "Tools.Stats.analysis.dv_policy_settings",
     "Tools.Stats.analysis.canonical_harmonics",
     "Main_App.processing.harmonic_selection_qc",
+    "Main_App.io.spectral_workbook",
+    "Main_App.io.xlsx_xml",
+    "Main_App.processing.roi_settings",
+    "Main_App.processing.canonical_harmonics",
     "Tools.LORETA_Visualizer.source_producers.project_source_psd_inputs",
     "Tools.LORETA_Visualizer.source_producers.source_model_cache",
 ])

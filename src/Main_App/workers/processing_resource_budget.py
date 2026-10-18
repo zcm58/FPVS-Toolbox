@@ -227,7 +227,7 @@ def build_processing_estimate(
     a capacity error based on a loose estimate. Host availability is not cached.
     """
     try:
-        from Main_App.Performance.process_runner import (
+        from Main_App.workers.process_runner import (
             _preflight_event_plan_for_file,
             _project_frequency_protocol,
             _recording_id_for_file,

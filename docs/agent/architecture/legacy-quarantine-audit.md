@@ -1,5 +1,10 @@
 # Legacy Quarantine Audit (2026-03-05)
 
+Ownership note (2026-10-18): historical migration paths below describe earlier
+steps. Current implementation owners are the purpose-based packages listed in
+[Main App target layout](main-app-target-layout.md); `Shared` and `Performance`
+now contain same-object compatibility aliases only.
+
 This audit is based on static AST import analysis of `src/` and `tests/`.
 
 Legend:

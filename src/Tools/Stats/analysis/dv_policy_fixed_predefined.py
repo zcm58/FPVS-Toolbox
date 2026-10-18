@@ -19,7 +19,7 @@ from Tools.Stats.analysis.dv_policy_settings import (
     LOCKED_ODDBALL_FREQUENCY_HZ,
 )
 from Tools.Stats.analysis.stats_analysis import _current_rois_map
-from Tools.Stats.io.xlsx_selected_reader import (
+from Main_App.io.xlsx_selected_reader import (
     MissingXlsxColumnsError,
     read_xlsx_sheet_header,
     read_xlsx_sheet_selected_columns,
@@ -135,7 +135,7 @@ class FixedHarmonicSelection:
             "methods_summary": _methods_summary(self),
             "source_workbook_fingerprints": list(self.source_workbook_fingerprints),
         }
-        from Tools.Stats.analysis.canonical_harmonics import (
+        from Main_App.processing.canonical_harmonics import (
             compute_selection_fingerprint,
         )
 

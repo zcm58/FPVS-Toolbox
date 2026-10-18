@@ -1,6 +1,6 @@
 # FFT Crop Method
 
-This page documents the current FFT crop method now owned by `Main_App.Shared.fft_crop_utils`. Refactors must preserve these decisions, warning strings, result fields, and caller behavior unless a future task explicitly changes the processing method.
+This page documents the current FFT crop method now owned by `Main_App.processing.fft_crop_utils`. Refactors must preserve these decisions, warning strings, result fields, and caller behavior unless a future task explicitly changes the processing method.
 
 ## Purpose
 
@@ -44,8 +44,8 @@ these sampling rates. A crop "around 146 cycles" must use an on-bin neighbor
 such as 144 or 147 cycles, because 146 cycles places 1.2 Hz between FFT bins
 for 256/512/1024/2048 Hz data.
 
-This behavior is owned by `Main_App.Shared.fft_crop_utils` and the active
-normal processing route through `Main_App.Performance.process_runner`. Do not
+This behavior is owned by `Main_App.processing.fft_crop_utils` and the active
+normal processing route through `Main_App.workers.process_runner`. Do not
 try to repair normal processing FFT leakage by changing unrelated workbook
 readers unless the user explicitly scopes that separate workflow.
 
@@ -143,7 +143,7 @@ The helper still records fallback diagnostics for invalid repetition blocks:
   `insufficient_<marker>`, for example `insufficient_55` or `insufficient_51`.
 - computed `n_samples <= 0`: fallback, reason `nonpositive_N`.
 
-These fallback flags are diagnostic only. `Main_App.Performance.process_runner`
+These fallback flags are diagnostic only. `Main_App.workers.process_runner`
 must hard-fail when any selected condition repetition falls back, when
 `n_step` is unavailable, or when no common on-bin `N` can be computed. Do not
 convert these diagnostics into `fixed_epoch_fallback` epochs, skip

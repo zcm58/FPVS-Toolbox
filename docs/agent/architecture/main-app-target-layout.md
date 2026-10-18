@@ -12,10 +12,10 @@ src/Main_App/
   processing/     # EEG preprocessing and pipeline orchestration import surface
   io/             # BDF loading, project paths, manifests, export path helpers
   projects/       # Project model/settings, manifests, dataset identity/indexing
-  workers/        # Qt workers, multiprocessing bridge, process runner adapters
+  workers/        # Qt workers, multiprocessing bridge, process runner
   diagnostics/    # Audits, event-time lock reports, debug/reporting helpers
-  exports/        # Post-processing/export adapters and export-facing helpers
-  shared/         # Small cross-cutting helpers that do not fit a domain yet
+  exports/        # Post-processing, workbook generation and publication styles
+  settings/       # Lightweight application settings and settings paths
 ```
 
 ## Migration Rules
@@ -42,12 +42,15 @@ fingerprinted group layout after the first current-run grouped workbook.
 `src/Main_App/io/` is now the canonical Main App I/O import surface. It owns the
 shared exact-column/header XLSX reader used by processing and downstream tools,
 while `Tools.Stats.io.xlsx_selected_reader` remains a compatibility adapter. It
-also delegates to the existing shared BDF loader implementation while the BDF
-loading contract and tests protect behavior.
+also owns BDF loading, EEG geometry, file filters and resource paths.
+`spectral_workbook.py` owns shared archive sessions and frequency-window reads;
+`xlsx_xml.py` owns common XML decoding, while each reader retains its exact
+selection, ordering, cache and error policy.
 
 `src/Main_App/workers/` is now the canonical Main App worker import surface. It
-owns the Qt worker and multiprocessing bridge implementations while
-worker/threading tests protect behavior.
+owns the Qt worker, process runner, multiprocessing environment and compatibility
+processing mixin implementations. Old `Performance` paths alias these same
+module objects, preserving patching and historical pickle lookup.
 
 `src/Main_App/projects/` is now the canonical Main App project import surface.
 It owns the project model, project manager workflows, project metadata scanning,
@@ -75,6 +78,16 @@ owner. It contains preprocessing audit helpers and event-time lock reporting
 while repo-evaluation scripts remain in `scripts/` and `.agents/skills/`.
 
 `src/Main_App/exports/` is now the canonical Main App post-export adapter import
-surface. It owns the adapter that turns process/worker payloads into shared
-post-processing exports while workbook generation remains protected by the
-post-processing export contract.
+surface. It owns post-processing and workbook generation plus the adapter
+that turns process/worker payloads into exports. The post-processing export
+contract protects values, formats and publication behavior.
+
+`src/Main_App/settings/` owns lightweight application settings and path
+resolution. Its package initializer stays independent of project, scientific
+and GUI imports so the standalone updater remains isolated.
+
+`Shared` and `Performance` now contain compatibility aliases only. Active source
+imports canonical owners. Compatibility preserves module identity, logger
+names, historical pickle globals and source/frozen resource roots; it is not
+a second implementation. FFT crop helpers and ROI presets live in `processing`,
+and user-message helpers live in `gui`.

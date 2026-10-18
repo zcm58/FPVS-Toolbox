@@ -41,7 +41,7 @@ Primary areas:
   release-only assets remain preserved.
 - `src/Main_App/gui/`: canonical Main App GUI package. It owns the main-window shell/coordinator, focused GUI workflow helpers, reusable widgets, theme helpers, menu/sidebar/header helpers, icon/style-token/update-manager helpers, and GUI operation guards. `main_window.py` has been appropriately downsized; do not target it for further refactor unless the user explicitly scopes that work.
 - `src/Main_App/gui/components/`: canonical shared component layer for new and migrated GUI surfaces. Prefer this import surface for shared cards, buttons, forms, status banners, window/dialog shells, action rows, and message helpers.
-- `src/Main_App/exports/`: canonical Main App export adapter import surface. It owns post-export adapter behavior used by workers and the process runner while shared post-processing/workbook generation remains behavior-preserving. It also owns GUI-neutral publication figure and publication-table style contracts used by export tooling. The lightweight style surface must not eagerly import Stats-owned workbook builders; heavy processing exports remain lazy compatibility attributes.
+- `src/Main_App/exports/`: canonical Main App export package. It owns post-processing/workbook generation and the post-export adapter used by workers and the process runner. It also owns GUI-neutral publication figure and publication-table style contracts used by export tooling. The lightweight style surface must not eagerly import Stats-owned workbook builders; heavy processing exports remain lazy compatibility attributes.
 - `src/Main_App/processing/`: canonical Main App processing package. It owns
   active EEG preprocessing, the stable `process_data` entry point,
   processing-controller helpers, neutral ROI settings, project-local neutral FullFFT provenance, and
@@ -50,9 +50,11 @@ Primary areas:
   exclusive atomic writer (`atomic_write.py`), guarded in-place lock/log opens
   (`safe_file.py`), private process memory-map paths (`memmap_paths.py`),
   exact-column/header reader, separate uncompressed dense-spectral and compact
-  condition-table NumPy companions, and legacy XLSX compatibility. It delegates BDF loading to the
-  existing shared implementation while the repo moves toward purpose-based
-  Main App folders.
+  condition-table NumPy companions, BDF loading, EEG geometry, file filters,
+  resource paths, and legacy XLSX compatibility. `spectral_workbook.py` owns
+  reusable workbook sessions and FullSNR window reads; `xlsx_xml.py` owns the
+  shared XML cell primitives. Reader-specific ordering and error policies stay
+  with their readers.
 - `src/Main_App/projects/`: canonical Main App project import surface. It owns
   the project model, project manager workflows, project metadata scanning,
   projects-root helpers, preprocessing-settings normalization, canonical
@@ -60,10 +62,10 @@ Primary areas:
   index used by downstream tools. Generated group folders are validation
   provenance only; canonical participant-group membership comes from
   `project.json`.
-- `src/Main_App/workers/`: canonical Main App worker package for Qt workers, process-runner wrappers, and multiprocessing environment helpers.
+- `src/Main_App/workers/`: canonical Main App worker package for Qt workers, the process runner, multiprocessing environment helpers, and the compatibility processing mixin.
 - `src/Main_App/diagnostics/`: canonical Main App runtime diagnostics package for preprocessing audit helpers, event-time lock reporting, and runtime log routing. Repo-evaluation scripts stay in `scripts/` and `.agents/skills/`.
-- `src/Main_App/Shared/`: current shared owners for cross-path behavior such as the canonical BDF loader, processing mixin, settings helpers, FFT crop helpers, and post-processing export behavior.
-- `src/Main_App/Performance/`: process-runner and multiprocessing support for heavy processing.
+- `src/Main_App/settings/`: application settings and settings-path ownership. The package initializer and `settings_paths` remain importable by the standalone updater without project, EEG, or GUI dependencies; `settings_manager` remains excluded from that bundle.
+- `src/Main_App/Shared/` and `src/Main_App/Performance/`: same-object compatibility aliases only. Runtime implementations and active imports use purpose-based packages; aliases preserve historical imports, monkeypatches and pickle lookups.
 - `src/Main_App/Legacy_App/`: retired historical package. Do not recreate it; active code belongs in purpose-based `Main_App` packages.
 - `src/Main_App/PySide6_App/`: retired historical package designation. Do not recreate it; PySide6 runtime code now lives under purpose-based `Main_App` packages.
 - `src/Tools/`: embedded GUI tools for preprocessing, plotting,

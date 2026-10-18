@@ -50,7 +50,7 @@ from Tools.Stats.data.group_harmonic_cache import (
     lookup_cached_group_harmonic_selection,
     save_cached_group_harmonic_selection,
 )
-from Tools.Stats.io.xlsx_selected_reader import (
+from Main_App.io.xlsx_selected_reader import (
     MissingXlsxColumnsError,
     read_xlsx_sheet_header,
     read_xlsx_sheet_selected_columns,
@@ -387,7 +387,7 @@ class GroupSignificantHarmonicSelection:
                     "applied_uniformly_across_sessions": True,
                 }
             )
-        from Tools.Stats.analysis.canonical_harmonics import (
+        from Main_App.processing.canonical_harmonics import (
             compute_selection_fingerprint,
         )
 

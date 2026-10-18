@@ -5,7 +5,7 @@ from __future__ import annotations
 import gc
 from datetime import datetime
 
-from Main_App.Shared import user_messages
+from Main_App.gui import user_messages
 from Main_App.gui.run_outcome import present_last_run
 
 

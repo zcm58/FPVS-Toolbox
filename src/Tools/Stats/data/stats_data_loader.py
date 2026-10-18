@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Tuple
 
-from Main_App.Shared.file_filters import is_excel_workbook_file
+from Main_App.io.file_filters import is_excel_workbook_file
 from Main_App.projects import (
     DatasetDiagnostic,
     DatasetIndexError,

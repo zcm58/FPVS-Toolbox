@@ -61,15 +61,17 @@ def test_embedded_repeated_qc_tables_use_compact_reachable_layout() -> None:
 
 def test_settings_exposes_project_owned_experimental_qc_without_legacy_mode() -> None:
     settings_source = _source("src/Main_App/gui/settings_panel.py")
+    page_source = _source("src/Main_App/gui/settings_experimental_page.py")
+    preprocessing_page_source = _source("src/Main_App/gui/settings_experimental_preprocessing_page.py")
     schema_source = _source("src/Main_App/projects/experimental_qc_settings.py")
 
-    assert 'tabs.addTab(tab, "Experimental")' in settings_source
-    assert '"Off (recommended)"' in settings_source
-    assert '"On"' in settings_source
-    assert '"Manual list"' not in settings_source
+    assert 'tabs.addTab(tab, "Experimental")' in page_source
+    assert '"Off (recommended)"' in preprocessing_page_source
+    assert '"On"' in preprocessing_page_source
+    assert '"Manual list"' not in page_source + preprocessing_page_source
     assert "MANUAL_REMOVED_ELECTRODES_ENABLED_KEY" in settings_source
     assert "update_experimental_qc_settings" in settings_source
-    assert "SUMMED_BCA_SCREENING_BRIEF_TEXT" in settings_source
+    assert "SUMMED_BCA_SCREENING_BRIEF_TEXT" in page_source
     assert "development experience and are not validated for every protocol" in (
         schema_source
     )

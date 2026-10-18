@@ -14,7 +14,7 @@ from typing import Any
 from PySide6.QtCore import QObject, QRunnable, Signal
 from PySide6.QtWidgets import QWidget
 
-from Main_App.Shared.settings_manager import SettingsManager
+from Main_App.settings.settings_manager import SettingsManager
 from Main_App.gui.update_dialog import UpdateDialog
 from Main_App.gui.update_lifecycle import (
     UpdateJob,

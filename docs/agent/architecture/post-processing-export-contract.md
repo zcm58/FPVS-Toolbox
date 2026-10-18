@@ -4,6 +4,12 @@ This page documents current post-processing, Excel reports, and NumPy spectral
 companion exports. Refactors must preserve scientific values and processing
 order unless a task explicitly changes the corresponding method contract.
 
+`Main_App.exports.post_process` and `Main_App.exports.post_process_excel` own
+the implementations; `post_export_adapter` translates worker/process payloads.
+Historical `Main_App.Shared` modules are same-object compatibility aliases.
+Publication-style imports remain lightweight and do not eagerly import workbook
+generation or Stats dependencies.
+
 ## Native Condition Results
 
 New standard participant/recording-condition outputs use

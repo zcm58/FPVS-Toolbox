@@ -10,7 +10,7 @@ once-per-session beta acknowledgement apply automatically.
 Rules:
 
 - Included harmonics must come from the cache-only
-  `Tools.Stats.analysis.canonical_harmonics.load_project_processing_harmonics`
+  `Main_App.processing.canonical_harmonics.load_project_processing_harmonics`
   API. Scalp Maps must never calculate, substitute, or silently refresh the
   processing-time list. Missing or stale metadata is a hard, user-actionable
   reprocess/recalculate error.

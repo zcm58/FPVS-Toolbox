@@ -61,7 +61,7 @@ Primary paths:
 - `src/Main_App/projects/` is the canonical active import surface for project
   model, metadata, manager, projects-root, and preprocessing-settings behavior.
   It owns those implementations.
-- `src/Main_App/Shared/settings_paths.py`
+- `src/Main_App/settings/settings_paths.py`
 - tool modules that import, export, or generate files under `src/Tools/`
 
 ## Manifest transactions
@@ -182,7 +182,7 @@ FPVS Toolbox uses a strict hybrid settings model:
   use an absolute override to keep its location stable across launch folders.
   Windows override expansion, relative-path handling, `%LOCALAPPDATA%` lookup,
   and missing-variable errors remain unchanged.
-- `Main_App.Shared.settings_manager.SettingsManager` is the single active writer for app-level settings.
+- `Main_App.settings.settings_manager.SettingsManager` is the single active writer for app-level settings.
   Ordinary saves merge keys changed since that instance last loaded or saved
   into the latest INI, then publish atomically under an in-process lock. An
   unrelated save from an older settings instance cannot resurrect a deleted

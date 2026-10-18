@@ -37,7 +37,7 @@ from Tools.Publication_Maps.session_workflow import (
     validate_session_grid_project,
     validate_session_grid_requests,
 )
-from Tools.Stats.analysis.canonical_harmonics import (
+from Main_App.processing.canonical_harmonics import (
     CanonicalHarmonicSelectionError,
 )
 

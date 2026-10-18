@@ -63,6 +63,15 @@ Primary paths:
   `project_drafts.py` tracks condition/mode and cached Settings changes at project
   replacement and exit. Save must finish before leaving; an asynchronous save
   keeps the current project active. Ordinary sidebar navigation preserves drafts.
+- `settings_panel.py` retains Settings state, validation, persistence and worker
+  lifetimes. `settings_preprocessing_page.py`, `settings_protocol_page.py`,
+  `settings_harmonic_page.py`, `settings_experimental_page.py` and
+  `settings_preferences_pages.py` construct their named pages through the existing
+  panel methods. `settings_experimental_preprocessing_page.py` owns the signal,
+  removed-electrode and raw-spectral subsection builders called by the Experimental
+  coordinator in their original construction order. Builders attach controls and signals to the same panel; they
+  neither save settings nor own a competing state model. Existing patchable
+  callbacks remain on the panel, including application projects-root actions.
 - `settings_feedback.py` owns Settings value snapshots and inline preprocessing
   feedback. Selection-only ROI navigation is not an edit; incomplete ROI entries
   are drafts. Full saves rebase the snapshot; partial harmonic recalculation
@@ -755,7 +764,7 @@ The main app shell is the visual source of truth. Shared component defaults shou
 
 Shell-specific implementations live under `src/Main_App/gui/`, including the main window assembly, event-map row behavior, header bar, sidebar, menus, navigation icons, style tokens, and update manager. Project workflow orchestration is split into `Main_App.gui.project_workflows`, processing input orchestration is split into `Main_App.gui.processing_inputs`, processing run orchestration is split into `Main_App.gui.processing_workflows`, post-export completion handling is split into `Main_App.gui.post_export_workflows`, tool/menu action orchestration is split into `Main_App.gui.tool_workflows`, and shell feedback is split into `Main_App.gui.shell_status`, while `MainWindow` keeps public wrapper methods for actions and tests.
 
-General GUI utilities should live under `Main_App.gui` when they coordinate UI-facing behavior. Non-GUI resource/path helpers should live under `Main_App.Shared`.
+General GUI utilities should live under `Main_App.gui` when they coordinate UI-facing behavior. Non-GUI resource/path helpers should live under `Main_App.io`; lightweight application-settings paths belong in `Main_App.settings`.
 
 Updater boundary:
 

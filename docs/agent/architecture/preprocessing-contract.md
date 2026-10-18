@@ -101,7 +101,7 @@ from Main_App.processing.preprocess import perform_preprocessing
 ```
 
 Compatibility paths such as `Main_App.perform_preprocessing` and
-`Main_App.Shared.processing_mixin` may delegate to this import surface, but
+`Main_App.workers.processing_mixin` may delegate to this import surface, but
 active runtime code must not import retired `Main_App.Legacy_App` preprocessing
 paths.
 
@@ -116,7 +116,7 @@ Callers should not depend on private helpers or split-stage internals.
 ## Processing Route
 
 The canonical file-level process runner is
-`src/Main_App/Performance/process_runner.py`. Its single-file worker route is:
+`src/Main_App/workers/process_runner.py`. Its single-file worker route is:
 
 1. Exclude header-only BioSemi recordings before load.
 2. Check the strict project-root preprocessed Raw cache.

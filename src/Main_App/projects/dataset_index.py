@@ -13,7 +13,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Iterable, Mapping
 
-from Main_App.Shared.file_filters import is_excel_workbook_file
+from Main_App.io.file_filters import is_excel_workbook_file
 from Main_App.io.result_manifest import RESULT_MANIFEST_SUFFIX, resolve_result_path
 
 from .dataset_identity import (

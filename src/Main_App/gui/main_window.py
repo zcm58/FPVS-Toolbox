@@ -7,7 +7,7 @@ import logging
 import queue
 import sys
 from pathlib import Path
-from Main_App.Shared.post_process import post_process as _shared_post_process
+from Main_App.exports.post_process import post_process as _shared_post_process
 from Main_App.gui.theme import apply_fpvs_theme
 from Main_App.gui.components import show_post_processing_required
 from typing import Callable
@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 # Keep this module quiet unless the app configures handlers; avoids accidental console output.
 logger.addHandler(logging.NullHandler())
 
-from Main_App.Shared.settings_manager import SettingsManager
+from Main_App.settings.settings_manager import SettingsManager
 from Main_App.io.load_utils import load_eeg_file as _load_eeg_file
 from Main_App.projects import Project
 from Main_App.processing.processing_controller import (

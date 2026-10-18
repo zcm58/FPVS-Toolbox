@@ -39,13 +39,18 @@ logger = logging.getLogger(__name__)
 
 def _map_snapshots_after_publish(
     build: Callable[[], tuple[ClusterMapData, ...]],
+    *,
+    worker_type: str,
 ) -> tuple[tuple[ClusterMapData, ...], str]:
     """A preview failure cannot undo a successfully published analysis bundle."""
 
     try:
         return build(), ""
     except Exception:
-        logger.exception("free_harmonic_map_preview_failed_after_publication")
+        logger.exception(
+            "free_harmonic_map_preview_failed_after_publication",
+            extra={"worker": worker_type},
+        )
         return (), (
             "Analysis results and figures were saved, but the interactive map "
             "preview could not be loaded. Use Open Results Folder to view the figures."
@@ -107,6 +112,8 @@ class _CancellableWorker(QObject):
         try:
             result = self._execute()
         except Exception as exc:
+            # This is the thread's terminal boundary: even unexpected backend
+            # errors must emit failure and release the GUI through finished.
             if self._should_cancel() or exc.__class__.__name__ in {
                 "FreeHarmonicCancelledError",
                 "AnalysisCancelled",
@@ -221,6 +228,7 @@ class AnalysisWorker(_CancellableWorker):
         # has committed its additive export and must remain visible as success.
         maps, map_warning = _map_snapshots_after_publish(
             lambda: (build_cluster_map_data(prepared, run_outcome.result),),
+            worker_type=type(self).__name__,
         )
         return AnalysisWorkerOutcome(
             prepared=prepared,
@@ -268,6 +276,7 @@ class RepeatedSessionBatchWorker(_CancellableWorker):
                 build_repeated_cluster_map_data(outcome)
                 for outcome in run.result.outcomes
             ),
+            worker_type=type(self).__name__,
         )
         return RepeatedBatchWorkerOutcome(run=run, maps=maps, map_warning=map_warning)
 
@@ -293,6 +302,7 @@ class PlannedAnalysisWorker(_CancellableWorker):
         )
         maps, warning = _map_snapshots_after_publish(
             lambda: tuple(build_planned_cluster_map_data(outcome) for outcome in run.result.outcomes),
+            worker_type=type(self).__name__,
         )
         return PlannedAnalysisWorkerOutcome(run=run, maps=maps, map_warning=warning)
 

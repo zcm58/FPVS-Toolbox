@@ -95,6 +95,64 @@ def test_settings_successful_save_clears_dirty_state(panel):
     assert panel.project.preprocessing["low_pass"] == 40.0
 
 
+def test_extracted_pages_keep_one_dialog_owner_and_initial_draft(tmp_path, qtbot, monkeypatch):
+    from Main_App.gui import settings_panel
+    from Main_App.gui import settings_experimental_preprocessing_page
+
+    calls = []
+    section_calls = []
+    for module_name, builder_name in (
+        ("settings_preprocessing_page", "build_preprocessing_page"),
+        ("settings_protocol_page", "build_protocol_page"),
+        ("settings_harmonic_page", "build_harmonic_page"),
+        ("settings_preferences_pages", "build_quality_control_page"),
+        ("settings_experimental_page", "build_experimental_page"),
+        ("settings_preferences_pages", "build_application_page"),
+    ):
+        module = getattr(settings_panel, module_name)
+        original = getattr(module, builder_name)
+
+        def build(owner, tabs, *, _original=original, _name=builder_name, **kwargs):
+            calls.append((_name, owner, tabs))
+            return _original(owner, tabs, **kwargs)
+
+        monkeypatch.setattr(module, builder_name, build)
+
+    for builder_name in (
+        "build_signal_review", "build_removed_electrode_review", "build_raw_spectral_review",
+    ):
+        original = getattr(settings_experimental_preprocessing_page, builder_name)
+
+        def build_section(owner, page, *args, _original=original):
+            section_calls.append((owner, page))
+            return _original(owner, page, *args)
+
+        monkeypatch.setattr(settings_experimental_preprocessing_page, builder_name, build_section)
+
+    monkeypatch.setenv("FPVS_CONFIG_HOME", str(tmp_path / "config"))
+    project = _prep_project(tmp_path)
+    manager = SettingsManager(str(tmp_path / "settings.ini"))
+    widget = SettingsDialog(manager, project=project)
+    qtbot.addWidget(widget)
+
+    assert len(calls) == 6
+    assert all(owner is widget and tabs is widget.tabs for _, owner, tabs in calls)
+    assert section_calls == [
+        (widget, widget.preprocessing_qc_tabs.widget(index)) for index in range(3)
+    ]
+    assert [widget.tabs.tabText(index) for index in range(widget.tabs.count())] == [
+        "Preprocessing", "Protocol", "Harmonics", "ROIs", "Quality Control",
+        "Experimental", "Application",
+    ]
+    assert not widget.has_unsaved_changes()
+
+    opened = []
+    monkeypatch.setattr(settings_panel, "changeProjectsRoot", opened.append)
+    widget.btn_changeRoot.click()
+    assert opened == [widget]
+    assert not widget.has_unsaved_changes()
+
+
 def test_settings_enter_on_shared_save_persists_draft(panel, qtbot):
     panel.preproc_edits[0].setText("40")
     save_button = panel.findChild(QPushButton, "settings_footer_save")

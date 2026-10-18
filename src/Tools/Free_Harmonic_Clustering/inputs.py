@@ -29,6 +29,7 @@ from Main_App.processing.full_fft_provenance import (
 )
 from Main_App.processing.processing_ledger import load_ledger
 from Main_App.projects import (
+    DatasetIndexError,
     ProjectDatasetIndex,
     WorkbookRecord,
     load_project_dataset_index,
@@ -339,7 +340,7 @@ def _select_cohort(
             )
         try:
             index.require_group_assignments()
-        except Exception as exc:
+        except DatasetIndexError as exc:
             raise FreeHarmonicInputError(str(exc)) from exc
     elif request.group_ids and not index.has_group_metadata:
         raise FreeHarmonicInputError("A paired-condition group filter requires canonical project group metadata.")
@@ -369,7 +370,7 @@ def _select_cohort(
                 group_ids=(group_a_id, group_b_id),
                 require_nonempty_groups=True,
             )
-        except Exception as exc:
+        except DatasetIndexError as exc:
             raise FreeHarmonicInputError(str(exc)) from exc
     else:
         group_a_label = request.condition_a
@@ -384,7 +385,7 @@ def _select_cohort(
                 group_ids=group_filter,
                 require_nonempty_groups=bool(group_filter),
             )
-        except Exception as exc:
+        except DatasetIndexError as exc:
             raise FreeHarmonicInputError(str(exc)) from exc
 
     if not relevant:
@@ -594,7 +595,7 @@ def _select_repeated_batch_cohort(
         index.require_group_assignments()
         index.require_recording_assignments()
         index.require_session_assignments()
-    except Exception as exc:
+    except DatasetIndexError as exc:
         raise FreeHarmonicInputError(str(exc)) from exc
 
     groups = tuple(

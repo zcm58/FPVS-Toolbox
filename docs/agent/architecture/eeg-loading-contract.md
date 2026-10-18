@@ -193,13 +193,11 @@ Unchanged condition review skips a redundant rescan; changed sources, marker
 decisions, or condition choices still rebuild the project-wide result. Timings separate
 condition reads, channel metrics, spectral calculation, and spectral-worker wait.
 
-The implementation still lives in `Main_App.Shared.load_utils` during this
-layout migration slice. Do not change that implementation as part of
-import-surface moves.
-
+The implementation lives in `Main_App.io.load_utils`, alongside canonical
+`Main_App.io.eeg_geometry`. `Main_App.Shared.load_utils` is a same-object
+compatibility alias, preserving historical imports and monkeypatches.
 `src/Main_App/Legacy_App/load_utils.py` and the old PySide6 backend loader path
-have been deleted. `src/Main_App/Shared/load_utils.py` is kept as the temporary
-implementation module and must not duplicate logic elsewhere.
+remain deleted. Do not duplicate loader logic.
 
 ## Interactive QC Source Prefetch
 
@@ -257,7 +255,7 @@ original recordings, exports, or the repository's MNE/fsaverage cache.
   inputs select the native reader directly. Allocation retry first releases
   speculative decoder arrays and restores the stream cursor. This adapter is
   invoked in the existing full-load warning-capture context; the local
-  import preserves the public I/O/Shared-loader initialization boundary.
+  import preserves the public I/O initialization boundary.
   Preflight uses `owned_bdf_lazy_read` only around its existing `find_events`
   and condition `get_data` calls, inside the existing I/O semaphore. It accepts
   one exclusively owned native lazy Raw, rejects local method overrides, and
@@ -379,7 +377,7 @@ original recordings, exports, or the repository's MNE/fsaverage cache.
   change.
 - Do not restore `.set` support unless it is a new explicitly scoped feature.
 - Do not introduce Tkinter, CustomTkinter, or CTkMessagebox; user warnings and
-  errors must use `Main_App.Shared.user_messages`.
+  errors must use `Main_App.gui.user_messages`.
 - Keep all active runtime callers loading through `Main_App.io.load_utils`
   unless the loader contract is intentionally replaced and covered by focused
   tests.

@@ -213,7 +213,7 @@ def build_roi_definition_snapshot(raw_pairs: object) -> RoiDefinitionSnapshot:
 def _settings_manager(manager: Any = None) -> Any:
     if manager is not None:
         return manager
-    from Main_App.Shared.settings_manager import SettingsManager
+    from Main_App.settings.settings_manager import SettingsManager
 
     return SettingsManager()
 

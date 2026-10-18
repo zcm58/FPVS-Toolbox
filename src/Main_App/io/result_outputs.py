@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from Main_App.Shared.file_filters import EXCEL_OUTPUT_SUFFIXES, is_excel_workbook_file
+from Main_App.io.file_filters import EXCEL_OUTPUT_SUFFIXES, is_excel_workbook_file
 from Main_App.io.result_manifest import RESULT_MANIFEST_SUFFIX
 
 

@@ -9,7 +9,7 @@ def test_phase1_perf_hygiene(qtbot, tmp_path, monkeypatch):
     root = repo_root()
     for var in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
         monkeypatch.delenv(var, raising=False)
-    mp_env_path = root / "src" / "Main_App" / "Performance" / "mp_env.py"
+    mp_env_path = root / "src" / "Main_App" / "workers" / "mp_env.py"
     spec = types.ModuleType("mp_env")
     exec(mp_env_path.read_text(), spec.__dict__)
     spec.set_blas_threads_single_process()

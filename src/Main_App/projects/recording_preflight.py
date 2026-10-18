@@ -8,7 +8,7 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from Main_App.Shared.file_filters import is_bdf_file
+from Main_App.io.file_filters import is_bdf_file
 
 from .raw_identity import infer_raw_participant_id
 from .recordings import ProjectRecordingContext

@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Mapping, Sequence
 
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 
-from Main_App.Shared.file_filters import is_bdf_file
+from Main_App.io.file_filters import is_bdf_file
 from Main_App.projects.grouping import project_group_context
 from Main_App.projects.recordings import (
     ProjectRecordingContext,
@@ -35,7 +35,7 @@ from Main_App.processing.preprocess import (
     finalize_preproc_audit,
 )
 from Main_App.processing.processing import process_data
-from Main_App.Shared.post_process import post_process
+from Main_App.exports.post_process import post_process
 
 if TYPE_CHECKING:
     from Main_App.projects.project import Project

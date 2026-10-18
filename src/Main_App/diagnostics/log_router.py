@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path, PureWindowsPath
 from typing import Any
 
-from Main_App.Shared.settings_paths import app_logs_dir
+from Main_App.settings.settings_paths import app_logs_dir
 
 
 _STANDARD_LOG_RECORD_KEYS = set(

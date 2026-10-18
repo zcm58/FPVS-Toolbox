@@ -8,7 +8,7 @@ _SPEC = importlib.util.spec_from_file_location(
     repo_root()
     / "src"
     / "Main_App"
-    / "Performance"
+    / "workers"
     / "mp_env.py",
 )
 if _SPEC is None or _SPEC.loader is None:  # pragma: no cover - defensive

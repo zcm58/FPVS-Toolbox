@@ -18,7 +18,7 @@ def _source(relative: str) -> str:
 
 
 def test_experimental_settings_exposes_project_raw_spectral_switch_and_help() -> None:
-    source = _source("src/Main_App/gui/settings_panel.py")
+    source = _source("src/Main_App/gui/settings_experimental_preprocessing_page.py")
 
     assert "Experimental Raw-Spectral Review" in source
     assert "settings_raw_spectral_screening_enabled" in source
@@ -30,7 +30,7 @@ def test_experimental_settings_exposes_project_raw_spectral_switch_and_help() ->
 
 
 def test_raw_spectral_advanced_values_are_locked_display_text() -> None:
-    source = _source("src/Main_App/gui/settings_panel.py")
+    source = _source("src/Main_App/gui/settings_experimental_preprocessing_page.py")
 
     assert "settings_raw_spectral_advanced_toggle" in source
     assert "settings_raw_spectral_advanced_values" in source
@@ -50,7 +50,7 @@ def test_processing_inputs_passes_project_owned_raw_spectral_record() -> None:
 
 
 def test_settings_do_not_suggest_the_legacy_16_point_8_hz_limit() -> None:
-    source = _source("src/Main_App/gui/settings_panel.py")
+    source = _source("src/Main_App/gui/settings_harmonic_page.py")
 
     assert 'setPlaceholderText("16.8")' not in source
     assert "Optional within project range" in source

@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import logging
 import math
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
@@ -65,6 +66,8 @@ from Tools.Stats.io.harmonic_selection_export import (
     HARMONIC_SELECTION_QC_WORKBOOK_NAME,
     write_harmonic_selection_workbook,
 )
+
+logger = logging.getLogger(__name__)
 
 QUALITY_CHECK_FOLDER = "Quality Check"
 PROCESSING_HARMONIC_SELECTION_SCHEMA_VERSION = 2
@@ -1256,7 +1259,12 @@ def _filter_to_completed_subjects(
 ) -> tuple[list[str], dict[str, dict[str, str]]]:
     try:
         ledger = load_ledger(project_root)
-    except Exception:
+    except (OSError, UnicodeError):
+        logger.warning(
+            "harmonic_selection_processing_ledger_unreadable",
+            exc_info=True,
+            extra={"project_root": str(project_root)},
+        )
         return subjects, subject_data
     entries = ledger.get("entries") if isinstance(ledger, Mapping) else None
     if not isinstance(entries, Mapping):

@@ -35,7 +35,7 @@ Stimulation experiments. Releases currently ship through a Windows installer.
 
 - `src/Main_App/Legacy_App/**` and `src/Main_App/PySide6_App/**` have been retired. Do not recreate them; use purpose-based `Main_App` packages instead.
 - Active EEG preprocessing imports should use `src/Main_App/processing/preprocess.py`; this is the current implementation owner.
-- Active BDF loading imports should use `src/Main_App/io/load_utils.py`; it delegates to the current shared implementation while the Main App layout is migrated.
+- Active BDF loading imports should use `src/Main_App/io/load_utils.py`; it owns the implementation and `Main_App.Shared.load_utils` remains a compatibility alias.
 - Active Main App GUI imports should use `src/Main_App/gui/`; the main window shell, focused workflow helpers, reusable widgets, style tokens, update manager, and GUI presentation helpers live there.
 - New or migrated GUI surfaces should start from `src/Main_App/gui/components/` for shared cards, buttons, forms, status banners, window/dialog shells, action rows, and message helpers before adding local UI primitives.
 - Subsection headers should use `Main_App.gui.components.SubsectionHeaderLabel`; edit shared subsection-header font, weight, color, and padding in `src/Main_App/gui/widgets/labels.py`, not per-surface QSS.
@@ -43,6 +43,10 @@ Stimulation experiments. Releases currently ship through a Windows installer.
 - New or substantially revised embedded tool pages must fit the supported 1280x900 workspace without a page-level scroll area. When coherent controls cannot fit, divide the workflow into purpose-based tabs or progressive pages instead of adding whole-page scrolling. Content-native scrolling inside tables, text viewers, and focused dialogs remains allowed.
 - Publication-oriented figure generation must follow [docs/agent/quality/figure-generation.md](docs/agent/quality/figure-generation.md): matching `.pdf`/`.png` outputs, 600 dpi, Arial figure typography, and figure typography separated from GUI typography.
 - Active worker/process-runner imports should use `src/Main_App/workers/`.
+- Active application-settings imports should use `src/Main_App/settings/`.
+  Keep its initializer and `settings_paths` lightweight for the independent
+  updater; `settings_manager` remains application-only. `Shared` and
+  `Performance` contain compatibility aliases only; do not add implementations there.
 - Active project model, project manager, project metadata, projects-root, and preprocessing-settings imports should use `src/Main_App/projects/`.
 - Processed-workbook discovery and downstream group identity must use
   `Main_App.projects.dataset_index` through the public `Main_App.projects`

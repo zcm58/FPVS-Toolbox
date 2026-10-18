@@ -34,9 +34,11 @@ Current ownership map:
   only when a preference is absent.
 - `excel_inputs.py`: thin shared participant-identity adapter plus
   frequency-column helpers.
-- `full_snr_reader.py`: companion-aware shared workbook session, with the
-  direct `.xlsx` XML reader retained for legacy FullSNR/FullFFT inputs,
-  selected-frequency parsing, ROI electrode filtering, and load subtimings.
+- `Main_App.io.spectral_workbook`: canonical companion-aware workbook session
+  and FullSNR frequency-window reader. `full_snr_reader.py` is a same-object
+  compatibility alias. Shared XML cell decoding lives in `Main_App.io.xlsx_xml`;
+  exact-column and frequency-window selection policies remain distinct.
+  Plot spectral-QC assembly consumes these readers and preserves its own math.
 - `data_collection.py`: shared dataset-index consumption, source-data
   collection, and required-sheet failure handling.
 - `aggregation.py`: selected ROI resolution, ROI averaging, group curves, and

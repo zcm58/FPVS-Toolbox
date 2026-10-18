@@ -69,7 +69,8 @@ def test_settings_save_does_not_prompt_for_obsolete_ram_tier_override():
     ), function], type_ignores=[])
     exec(compile(ast.fix_missing_locations(module), str(path), "exec"), namespace)
     assert namespace[function.name](object(), {"max_parallel_workers_override": 100}) is True
-    literals = [node.value for node in ast.walk(tree) if isinstance(node, ast.Constant)
+    page = ast.parse((ROOT / "src/Main_App/gui/settings_preprocessing_page.py").read_text(encoding="utf-8"))
+    literals = [node.value for node in ast.walk(page) if isinstance(node, ast.Constant)
                 and isinstance(node.value, str)]
     assert "Maximum parallel workers (0 = automatic):" in literals
     assert not any("recommended for your RAM tier" in value for value in literals)

@@ -25,7 +25,7 @@ from Main_App.exports.figure_style import (
     apply_matplotlib_figure_style,
     figure_text_kwargs,
 )
-from Tools.Stats.analysis.canonical_harmonics import (
+from Main_App.processing.canonical_harmonics import (
     CANONICAL_HARMONIC_SOURCE,
 )
 from Tools.Individual_Detectability.project_coverage import (

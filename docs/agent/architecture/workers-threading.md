@@ -4,8 +4,10 @@ Long-running work must not block the UI thread.
 
 The canonical active import surface for Main App workers is
 `src/Main_App/workers/`. It owns the Qt worker and multiprocessing bridge
-implementations used by the main GUI, plus wrappers for Performance
-process-runner helpers.
+implementations used by the main GUI, the process runner, multiprocessing
+environment helpers, and the compatibility processing mixin. Historical
+`Main_App.Performance` modules alias these same implementations. Logger names
+and historical pickle lookup paths remain compatible.
 
 Standalone tools may keep tool-local workers when that is their public import
 contract. Plot Generator keeps `_Worker` importable from
