@@ -13,6 +13,7 @@ processing composition, project import, or Studio interoperability.
 | Production acquisition | BDF loading and preprocessing use the validated BioSemi64 geometry contract. Canonical and explicitly mapped A/B channel labels are supported. | Integrate and qualify other hardware/montage combinations throughout the application. |
 | Acquisition definitions | `Main_App.io.acquisition_profiles` separates versioned format, device acquisition, montage, event decoding, and capabilities in an immutable registry. | Make the resolved contract drive production loading, processing, QC, GUI availability, and downstream tools consistently. |
 | Unicorn | Read-only BDF/BDF+ inspection, explicit channel/unit/event policies, and a context-owned lazy/RAM/memmap MNE reader exist. Results retain `scientific_processing_allowed=False`. | Complete the [Unicorn plan](../exec-plans/active/unicorn-hybrid-black-support.md), including unresolved acquisition evidence and production integration. A readable recording is not scientific qualification. |
+| Brain Products | No production Brain Products acquisition profile or processing route is implemented. | Required hardware-family target, confirmed by the maintainer on 2026-10-18: broad format/amplifier/montage support rather than one assumed device. Inventory and qualify combinations before advertising support. |
 | Processing | `Main_App.processing.preprocess` owns the locked BioSemi pipeline. Optional screens and approved repair policies already have versioned settings/provenance. Workers and prepared checkpoints preserve that contract. | A shared composition mechanism that selects, replaces, or omits steps from an explicit acquisition/montage policy; existing switches are not a general pipeline system. |
 | Studio project import | `Main_App.projects.fpvs_config_import` accepts `.fpvsconfig` schemas 1.0.0–1.8.0 for FPVS Oddball and Cognitive Load FPVS, importing the Toolbox-owned project/protocol/marker and optional removed-electrode subset. | Verify complete field and workflow coverage against explicitly identified Studio versions and real, sanitized exports. Current import is not complete Studio compatibility. |
 | Studio acquisition evidence | `Main_App.io.studio_acquisition_evidence` validates a candidate handoff and compares ordered trigger codes only after reviewed recording association. | Qualify receiver integration, recording identity, acquisition facts, and timing semantics. Code agreement alone does not prove sample timing or recording completeness. |
@@ -45,6 +46,32 @@ thresholds need their own evidence. A generic channel list must not silently
 enable a BioSemi64-only spatial method on another montage. Mixed acquisitions
 within one project require explicit compatibility rules and recording-level
 identity; their scientific comparability must not be assumed.
+
+### Required Brain Products support
+
+The maintainer wants broad Brain Products support and has not specified an
+amplifier, cap, channel count, reference, or Recorder version. Do not select one
+by assumption or require the user to know the model before planning the shared
+architecture. Detect documented format/acquisition metadata where available;
+request explicit montage/reference information only where it cannot be established.
+
+The format inventory must cover BrainVision Core/Data Exchange recordings
+(`.vhdr`, `.vmrk`, `.eeg`) and BrainVision Recording Format (BVRF: `.bvrh`,
+`.bvrm`, `.bvrd`, optional `.bvri`), then assess documented legacy variants.
+The vendor's [Core Data Format specification](https://www.brainproducts.com/download/specification-of-brainvision-core-data-format-1-0/)
+and [BVRF documentation](https://www.brainproducts.com/support-resources/brainvision-recording-format/)
+are the initial format references, checked 2026-10-18. BVRF conversion can omit
+impedance and other metadata; conversion is not automatically a lossless
+substitute for native support.
+
+Keep companion-file identity, units/calibration, channel roles, acquisition and
+analysis references, geometry, sampling, event types/sample positions and
+discontinuities explicit. Reuse the shared pipeline and capability gates rather
+than the BioSemi EXG-pair policy. Validate full/lazy reads, reviewed marker maps,
+cache/resume, exports and eligible downstream tools with representative fixtures
+for every claimed combination. Record direct support, validated conversion,
+unqualified and unsupported cases separately. Broad family coverage is the
+goal; it is not a promise that every unknown or historical file already works.
 
 ## Target: a composable processing pipeline
 
@@ -119,8 +146,10 @@ into source control to demonstrate interoperability.
    gaps and unresolved evidence before claiming support.
 2. Characterize the existing BioSemi behavior, then extract reusable step
    contracts and deterministic plan resolution while preserving that baseline.
-3. Integrate the already-defined Unicorn path as the next concrete alternate
-   acquisition, completing its evidence gates and all shared execution routes.
+3. Integrate alternate acquisitions through the shared contracts: finish the
+   already-defined Unicorn path and add the required Brain Products format and
+   hardware-family coverage. Complete each profile's evidence gates and shared
+   execution routes before enabling production support.
 4. Generalize downstream capability checks, geometry/ROI/adjacency ownership,
    persistence, provenance, and cache identity; qualify each additional montage.
    Prove the extension boundary with a third synthetic profile/montage that
