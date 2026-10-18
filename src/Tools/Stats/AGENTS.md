@@ -66,22 +66,31 @@ preparation read the committed setting. Nonfinite-value handling, manual
 exclusions, the frozen cohort and inference methods remain mandatory and
 unchanged. The tool displays the setting but does not maintain a competing toggle.
 
-The default Summed BCA policy uses the processing-time, group-level
-significant-harmonic list calculated over the union of predefined-ROI
-electrodes. It detects non-base oddball harmonics with strict `z > 1.64` and
-sums eligible non-base harmonics through the highest significant harmonic.
-When more than 10 eligible non-base harmonics lie strictly between the two
-highest significant peaks, the one-pass gap guard omits the isolated highest
-peak and stops summation at the next-highest peak. Base-rate overlaps do not
-count; exactly 10 remains allowed. Fixed/predefined harmonic summation remains
-an alternate DV policy.
+The processing-owned harmonic selection is versioned. New projects explicitly
+default to `dzhelyova_poncet_two_consecutive_failures` v1 using all retained
+scalp electrodes. Existing projects without a versioned profile retain
+`legacy_fpvs_toolbox` v1. The other supported profiles are
+`fixed_preregistered_domain` and `significant_only_exploratory`.
+
+Only Legacy uses mutable ROI-union selection, equal-available-workbook pooling,
+fill-through-highest summation, and the one-pass greater-than-10 isolated-peak
+gap guard. Adaptive non-legacy profiles use complete declared group x condition
+cells, equal group and condition weighting, and all retained scalp electrodes
+or one frozen a-priori mask. The literature profile stops after two consecutive
+eligible non-base harmonics with `z <= 1.64`; the significant-only profile
+retains strict `z > 1.64` detections only. Fixed mode uses its exact declared
+domain. Every profile excludes base overlaps and preserves the locked local
+noise calculation. See the root `AGENTS.md` and
+`docs/agent/architecture/statistics-tools.md` for the complete contract.
 
 Preserve the exact-column, common-harmonic-list, project-protocol oddball
 spacing, neighboring-noise, population-SD, gap-guard, protocol/eligibility and
 cache fingerprints, persistence, frequency-domain QC, and participant-condition
 exclusion rules documented in `docs/agent/architecture/statistics-tools.md`.
-Stats consumes the durable processing-time selection; it must not calculate a
-replacement.
+Stats consumes the exact durable included list and selection fingerprint through
+`Main_App.processing.canonical_harmonics`; it must not reselect, refill, or
+truncate that list. Shared settings live in `Main_App.processing.harmonic_settings`;
+the former Stats modules are compatibility exports.
 
 FullFFT inputs use the shared `Main_App.io` companion-aware readers. A declared
 NumPy companion owns the complete spectrum; a missing or invalid companion
@@ -112,6 +121,15 @@ metrics from FullFFT. Long/wide statistical workbooks remain Excel exports.
   through signals.
 - Preserve the public `Tools.Stats.StatsWindow` import and functional package
   boundaries.
+
+## Hardware And Studio Boundary
+
+Hardware and Studio integration follow the
+[shared roadmap](../../../docs/agent/architecture/hardware-pipeline-studio-roadmap.md).
+New montage support must supply qualified electrode/ROI coverage and canonical
+identities through shared owners; it must not silently shrink ROIs, change the
+locked selection profiles, or expand the supported statistical design. A
+successful Studio project import alone does not qualify these analyses.
 
 ## Non-Expert Reporting Contract
 

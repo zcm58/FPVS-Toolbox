@@ -10,6 +10,12 @@ release work. The retired development branches were removed on 2026-10-18;
 release tags remain available. Start future changes from `main`. Documentation,
 Windows packaging, and isolated Qt workflow branch filters now target `main`.
 
+The published v3.0.0 installer is bound to its release tag. Later cleanup or
+feature branches are source changes until separately merged, built, qualified,
+and released. Hardware/montage expansion and complete FPVS Studio compatibility
+follow the [shared roadmap](../architecture/hardware-pipeline-studio-roadmap.md);
+they are not already shipped capabilities.
+
 ## Local Environment
 
 Development and source execution may occur on Windows 11 or CachyOS (Arch
@@ -81,6 +87,11 @@ Use `-SkipInstall` only when the available repo environment already has
 `-InnoCompiler "C:\Path\To\ISCC.exe"` when `ISCC.exe` is not on PATH or in a
 standard Inno Setup 6 location.
 
+The example's `-SkipSmoke` produces development artifacts only. Release
+qualification requires the native packaged-app and installer acceptance workflow;
+do not treat a skipped smoke as a releasable build or launch local GUI smoke
+without the approved visible-environment scope.
+
 The release entrypoint calls:
 
 - `scripts/packaging/build_exe.ps1`: builds `dist\FPVS_Toolbox\FPVS_Toolbox.exe`
@@ -124,7 +135,7 @@ does not lock historical installers retrospectively. See GitHub's
 [immutable release workflow](https://docs.github.com/en/code-security/concepts/supply-chain-security/immutable-releases).
 
 ```powershell
-$releaseVersion = '3.0.0'
+$releaseVersion = '<next-approved-version>'
 $releaseRepo = 'zcm58/FPVS-Toolbox'
 $releaseCommit = (git rev-parse HEAD).Trim()
 gh release create "v$releaseVersion" --repo $releaseRepo --target $releaseCommit --draft `
@@ -160,8 +171,9 @@ The local packaging scripts build artifacts and do not publish them. See
 
 The published `v2.1.2` binary checks the previous private repository, so it cannot
 discover the new public release address. Its first v3 upgrade requires a manual
-download from the canonical release page. The actual packaged upgrade remains
-an acceptance check. The first v3 upgrade uses the full installer to establish
+download from the canonical release page. The v3.0.0 native installer lifecycle
+qualified that upgrade at its recorded release revision; repeat the relevant
+acceptance checks for future artifacts. The first v3 upgrade uses the full installer to establish
 the independent updater and owned-file inventory;
 future authenticated baselines can support direct patches. Users of builds
 that checked the temporary release-only address can install the full package

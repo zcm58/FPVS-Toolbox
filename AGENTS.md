@@ -8,6 +8,14 @@ Stimulation experiments. Releases currently ship through a Windows installer.
 
 ## Working Rules
 
+- The product direction is modular acquisition hardware and montages, a shared
+  processing pipeline whose steps can be selected/replaced by the resolved
+  hardware/montage policy, and complete FPVS Studio interoperability. Read
+  [the current-state and future-direction contract](docs/agent/architecture/hardware-pipeline-studio-roadmap.md)
+  for related work. These are goals, not claims of completed support: production
+  preprocessing remains BioSemi64, Unicorn is gated, and Studio import is partial.
+  Preserve the locked scientific contracts while extending these boundaries.
+
 - Think before coding: state assumptions, surface ambiguity, and ask when the safe interpretation is unclear.
 - Prefer the smallest behavior-preserving change that solves the task.
 - Touch only files required by the task; do not refactor adjacent code opportunistically.
@@ -54,8 +62,8 @@ Stimulation experiments. Releases currently ship through a Windows installer.
   `project.json`; tool packages must not infer membership from output folders
   or maintain independent participant/group detection logic.
 - Active runtime diagnostics imports should use `src/Main_App/diagnostics/`; repo-evaluation checks belong in `scripts/` or `.agents/skills/`, and manual project probes belong in `scripts/manual_diagnostics/`.
-- Source Localization/eLORETA has been removed from active runtime. Do not add GUI, settings, tests, imports, quarantine-tree dependencies, or bundled `fsaverage` MRI template data unless the user explicitly scopes a restoration feature.
-- The new LORETA Visualizer work is a separate source-localization visualization branch under `src/Tools/LORETA_Visualizer/`, not a revival of `src/Tools/SourceLocalization/**`. Keep visualizer rendering, mesh helpers, payload adapters, demo data, and tool-local docs in that directory; preserve the boundary where future source-localization calculations produce prepared values and visualizer helpers bridge them into renderer payloads.
+- The historical `src/Tools/SourceLocalization/**` implementation is retired. Do not restore its GUI, settings, tests, imports, or quarantine-tree dependencies unless the user explicitly scopes restoration. Do not bundle `fsaverage` MRI template data.
+- The separate LORETA Visualizer lives under `src/Tools/LORETA_Visualizer/`. Keep its rendering, mesh helpers, payload adapters, demo data, and tool-local docs there. Existing source calculations belong in its isolated `source_producers/` package; renderer and payload helpers consume prepared values and must not compute inverse solutions. This does not reopen the retired implementation.
 - Preserve the ignored root `.fpvs_cache/` when it contains MNE/fsaverage template data for the LORETA Visualizer. It is a local dependency cache, not a deletion target for routine cleanup.
 - The active preprocessing order is locked to match the Volfart et al. (2021) FPVS implementation decision: initial reference, drop reference channels, optional channel limit preserving stim, FIR filter, downsample, kurtosis/interpolation, final average reference. Do not reorder filtering and downsampling, change FIR duration scaling, or remove the order/version fingerprint guards unless the user explicitly requests a statistical-method change and updates `docs/agent/architecture/preprocessing-contract.md`, `docs/user/reference/methods-reporting-checklist.md`, and the focused processing-order tests.
 - The versioned Stats harmonic-selection profiles are locked statistical
@@ -116,6 +124,8 @@ Stimulation experiments. Releases currently ship through a Windows installer.
 - Use `python .agents/scripts/verify.py --scope <scope> --tier focused` first;
   use `python .agents/scripts/verify.py --scope repo --tier precommit` for the
   broad local handoff gate. The driver selects `.venv1` or `.venv`.
+- For documentation-only changes, use the audit, strict documentation build,
+  and link/owner checks in [verification gates](docs/agent/quality/verification-gates.md#documentation-only-changes).
 - For GUI changes, leave Qt execution to CI and document the visible/manual
   smoke path. If a gate cannot run, report the command, failure reason, and
   residual risk.

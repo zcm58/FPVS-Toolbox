@@ -12,6 +12,15 @@ condition companions, including `.fpvs` anchors, through shared selected-column
 I/O. Its exact harmonic columns, electrode order, and finite-value checks remain
 unchanged; Stats-ready and participant-list reports remain Excel inputs.
 
+Future hardware and FPVS Studio integration are defined in the
+[shared roadmap](../../../docs/agent/architecture/hardware-pipeline-studio-roadmap.md).
+This architecture describes the implemented Visualizer and isolated source
+producers, not universal montage or Studio support. Their current
+fsaverage/BioSemi64 model assumptions and repeated-recording restrictions
+remain enforced until a separately scoped, versioned extension is qualified.
+Changing a processing profile cannot silently authorize a different forward
+model, inverse estimator, or cohort aggregation policy.
+
 ## Purpose
 
 The LORETA Visualizer is an embedded PySide6 tool for interactive 3D display of
@@ -27,7 +36,7 @@ It is a new source-localization visualization branch. It is not a revival,
 refactor, or design continuation of the removed `Tools.SourceLocalization`
 implementation.
 
-The first durable goal is rendering:
+The renderer's responsibilities are:
 
 - real-time orbit, zoom, reset, and opacity controls where opacity is relevant;
 - driver-tolerant transparent mesh rendering using plain alpha blending rather
@@ -37,7 +46,7 @@ The first durable goal is rendering:
 - an external fsaverage-derived anatomical mesh when available;
 - a synthetic fallback mesh when fsaverage is unavailable;
 - synthetic scalar source maps for tests/developer rendering validation;
-- a payload contract that future real source-localization producers can feed
+- a payload contract that current and future source-localization producers feed
   without changing renderer internals.
 
 `graphics_support.py` checks that Qt can create a valid desktop OpenGL 3.2+
@@ -53,12 +62,12 @@ recorded software OpenGL driver. Manual smoke: with unsupported graphics, openin
 LORETA must show the actionable error and leave the application usable; with
 supported graphics, open the 3D view, rotate, close, and reopen it.
 
-The first implemented source-ready method is a beta L2-MNE cortical surface
-producer for FPVS oddball-response maps. It is one method that emits the same
-prepared payload/manifest format expected from any later LORETA/eLORETA volume
-or mixed source-space producer.
+The source-ready beta L2-MNE cortical-surface producer was the first implemented
+method. Current L2-MNE cortical and eLORETA volume producers emit the same
+prepared payload/manifest format; additional qualified methods should preserve
+that boundary.
 
-Phase 6C adds the first project-connected beta export path. It uses real
+The retained amplitude-workbook export path introduced in Phase 6C uses real
 project condition topographies, an external MNE/fsaverage BioSemi64 template
 EEG forward model, and the existing prepared payload/manifest bridge so real
 project data can be viewed without changing renderer internals.
@@ -159,7 +168,7 @@ prepared and validated before they reach `renderer.py`.
 
 ```text
 Swappable source calculation producer
-L2-MNE cortical surface beta, future LORETA volume, etc.
+L2-MNE cortical surface or eLORETA volume
         |
         | prepared payload JSON / manifest JSON
         v
@@ -220,7 +229,7 @@ Phase 6A added the first method as a beta L2-MNE cortical-surface producer:
 
 - target BioSemi ActiveTwo 64-channel / 10-10 montage assumptions first;
 - target group-level condition maps first, with individual maps later;
-- use the Stats-locked group significant oddball harmonic list exactly;
+- consume the accepted processing-time oddball harmonic list exactly;
 - emit fsaverage-aligned cortical surface payloads with method metadata such as
   `l2_mne_cortical_surface_beta`;
 - document that this method is cortical-surface source estimation and does not
@@ -438,8 +447,8 @@ compact rebuild summaries, but source-estimation math still belongs only to
 - `conditions.py`: synthetic demo condition metadata retained for validation.
 - `dummy_activation.py`: deterministic demo-only scalar source maps retained for
   tests/developer validation, not normal live selector options.
-- `prepared_source_fixture.py`: in-memory fixture that is shaped like a
-  prepared source-map handoff from a future real calculation path. It validates
+- `prepared_source_fixture.py`: in-memory fixture shaped like the
+  prepared source-map handoff used by source producers. It validates
   and adapts coordinates/scalars but does not calculate source estimates.
 - `prepared_payload_importer.py`: controlled JSON importer for prepared source
   payloads and source-payload manifests. Payload files include coordinates,
@@ -559,7 +568,7 @@ real source payloads should use, while keeping the values synthetic.
 
 ## Bridge Contract
 
-The bridge helpers are the only place where future calculation outputs should be
+The bridge helpers are the only place where calculation outputs should be
 normalized for rendering.
 
 Allowed bridge behavior:
@@ -572,20 +581,20 @@ Allowed bridge behavior:
   FreeSurfer/fsaverage millimeter spaces for display normalization while
   preserving their distinct payload labels;
 - normalize or bound values for visual color mapping;
-- adapt future real data into `SourcePayload`.
+- adapt prepared real or synthetic values into `SourcePayload`.
 
 Disallowed bridge behavior:
 
 - compute inverse solutions or LORETA values;
 - choose source-localization methods;
 - compute FFT, SNR, BCA, harmonic significance, or condition effects;
-- discover or write project source-localization outputs unless a future plan
-  explicitly scopes project integration;
+- discover or write project source-localization outputs; project orchestration
+  and producers own those responsibilities;
 - copy design or code from removed Source Localization/eLORETA modules.
 
 ## Source Payload Contract
 
-Future real source-localization producers should hand this tool a prepared
+Current and future source-localization producers hand this tool a prepared
 payload with:
 
 - `format`: `fpvs-loreta-source-payload-v1`;
@@ -611,11 +620,11 @@ payload contract.
 
 For the beta L2-MNE cortical-surface method, expected payloads should identify
 the method in `source_model`/metadata, use a cortical surface payload kind, and
-describe the source metric clearly. A later volume LORETA method should use the
+describe the source metric clearly. The eLORETA volume methods use the
 same outer payload shape but a volume or ROI payload kind and method-specific
 metadata.
 
-The current beta L2-MNE producer accepts source-ready arrays: channel names,
+The retained amplitude-topography beta L2-MNE producer accepts source-ready arrays: channel names,
 selected harmonic topographies, cortical source coordinates/faces, and a
 channel-by-source leadfield. It writes payloads and manifests after validation.
 `project_inputs.py` can assemble the selected harmonic topographies from

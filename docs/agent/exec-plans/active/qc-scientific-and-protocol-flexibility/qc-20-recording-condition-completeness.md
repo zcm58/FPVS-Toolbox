@@ -153,15 +153,19 @@ Visible/manual smoke: exclude one condition, apply/continue, complete any normal
 re-review, and confirm post-processing proceeds with that condition recorded as
 unavailable and the participant's other conditions present. Qt remains CI-only.
 
-Primary owners are `processing/processing_ledger.py` for the expected matrix
-and states; `Performance/process_runner.py` for occurrence outcomes;
-`Shared/post_process.py`, `exports/post_export_adapter.py`, and
-`Shared/post_process_excel.py` for structured atomic export receipts;
-`projects.dataset_index` for ledger-backed discovery; post-processing
-workers/workflows and freshness helpers for current-run gating;
-`processing/frequency_domain_qc.py` and harmonic-selection owners for blocking
-incomplete inputs; Stats input/design audit for explicit missingness; and
-QC/full-audit reporting for visible counts and reasons.
+Current owners (reviewed 2026-10-18) are
+`processing/expected_processing_ledger.py` for the frozen expected matrix;
+`processing/processing_ledger.py` for run accounting and persisted reconciliation;
+`processing/recording_condition_outcomes.py` for receipt-backed cell outcomes
+and the pre-review readiness gate; and `workers/process_runner.py` for occurrence
+outcomes. `exports/post_process.py`, `exports/post_export_adapter.py`, and
+`exports/post_process_excel.py` produce structured atomic export receipts.
+`workers/post_processing_pipeline_worker.py` invokes the pre-review gate and
+records the final release through `processing/roi_coverage.py` after reviewed
+QC-03/QC-17 decisions and QC-21 coverage. Dataset discovery, harmonic-selection,
+Stats inputs and QC reporting consume these authorities; a legacy
+`condition_completeness=partial` flag never substitutes for current receipts or
+final-release readiness.
 
 Cover a fully successful matrix; an excluded or acknowledged-unavailable cell
 without a workbook; partial occurrence retention with correct output/counts;

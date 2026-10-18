@@ -3,6 +3,12 @@
 Inherit the root and `src/AGENTS.md` rules. Keep the existing summed-harmonic
 Z, one-tailed BH-FDR, figure formats, and projectless behavior unchanged.
 
+The [shared hardware and Studio roadmap](../../../docs/agent/architecture/hardware-pipeline-studio-roadmap.md)
+governs future montage support. Consume shared acquisition/montage identities
+and qualified ROI coverage rather than adding local hardware detection or
+silently intersecting electrode sets. Import compatibility alone does not
+qualify the existing detectability method for a new recording context.
+
 Managed input selection belongs to `project_coverage.py`; `worker.py` binds
 the request before source prevalidation or output writes. Use the public
 project dataset index for participant/recording/condition identity and the

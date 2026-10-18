@@ -11,10 +11,10 @@ Primary references:
 
 Do not add Tkinter, CustomTkinter, or CTkMessagebox imports.
 
-For explicit visual polish or UX critique requests, the available repo-listed
-`frontend-design`, `emil-design-eng`, and `web-design-guidelines` skills may be
-used as input, but their output must be translated into this desktop app's
-PySide6 contracts:
+Use the repo-local PySide6 skill for desktop visual polish and UX work.
+`frontend-design`, `emil-design-eng`, and `web-design-guidelines` are web-only
+and do not apply unless the task explicitly introduces a browser surface.
+Desktop changes follow these contracts:
 
 - Start with `Main_App.gui.components`, `theme.py`, `typography.py`, and the
   existing tool workflow before adding local widgets or style rules.
@@ -25,3 +25,8 @@ PySide6 contracts:
   from those skills unless the repo gains that scoped surface.
 - Verify GUI edits with `py_compile`, focused `ruff`, GUI import audits, agent
   audits, and a documented visible/manual smoke path. Do not run offscreen Qt.
+- For future hardware/montage controls, show the capabilities of the resolved
+  profile and keep unsupported scientific operations unavailable. Follow the
+  [shared roadmap](../architecture/hardware-pipeline-studio-roadmap.md); do not
+  expose an arbitrary processing-order editor or assume registration enables
+  production support.

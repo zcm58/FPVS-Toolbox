@@ -5,6 +5,11 @@ paths. Refactors must preserve supported file type, memmap paths, channel
 typing, montage behavior, logging, and return semantics unless a future task
 explicitly changes the processing pipeline.
 
+For new devices or montages, also read the
+[hardware, pipeline, and Studio roadmap](hardware-pipeline-studio-roadmap.md).
+The registry and Unicorn reader below are extension foundations; production
+BioSemi64 support and inspection-only alternate acquisition remain distinct.
+
 ## Entry Contract
 
 ### Acquisition Inspection Foundation

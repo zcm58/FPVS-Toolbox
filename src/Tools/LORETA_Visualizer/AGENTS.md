@@ -22,6 +22,14 @@ and post-processing-worker integration. Source estimation must still remain in
 this tool's `source_producers/`; do not spread it into Main App, Stats,
 preprocessing, project I/O, diagnostics, or unrelated tool packages.
 
+The [shared hardware, pipeline, and Studio roadmap](../../../docs/agent/architecture/hardware-pipeline-studio-roadmap.md)
+governs future integration. Current source producers retain their EEG-only
+fsaverage/BioSemi64 and recording-identity restrictions. A new registered
+montage, successful file import, or Studio project handoff does not establish
+a valid forward/inverse model. Qualify new geometry, reference, channel order,
+source inputs, and provenance in a separately scoped producer extension;
+renderers continue to consume prepared payloads only.
+
 ## Hard Boundary
 
 - This is a new visualization branch, not a continuation of retired Source

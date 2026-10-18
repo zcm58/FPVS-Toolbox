@@ -46,7 +46,7 @@ environment.
 | `sequence-figure` | Renderer behavior and high-DPI outputs | Embedded Sequence Figure wiring |
 | `sensitivity-analysis` | Paired-test/RM-ANOVA power math plus mixed-model simulation, search, cancellation, uncertainty, and validation | Embedded page wiring, background worker, controls, results, reset, information tabs, and clipping smoke |
 | `stats` | Data/project context, pipeline, DV/harmonic rules, FullSNR, exports and reporting | Stats layout, focus, and window workflow smoke |
-| `free-harmonic-clustering` | FullFFT selected reads, spectral preparation, adjacency, paired/independent permutation inference, Excel/run-bundle exports, and static embedded-GUI contracts | Open the tool visibly from the default Quick Tools list, exercise prepare/run/cancel/results/folder actions, and complete the documented Neutral Happy release-gate reproduction; pytest-qt remains CI-only locally |
+| `free-harmonic-clustering` | FullFFT selected reads, spectral preparation, adjacency, paired/independent permutation inference, Excel/run-bundle exports, and static embedded-GUI contracts | Open the tool visibly from the default Quick Tools list, exercise prepare/run/cancel/results/folder actions, and preserve the documented optional human acceptance path; pytest-qt remains CI-only locally |
 | `loreta` | Payloads, source producers, project exports, rendering helpers and legacy boundaries | Embedded visualizer interaction and Qt worker smoke |
 | `figures` | Shared figure-style contract and focused output/rendering checks | Figure-export dialog interaction where applicable |
 | `legacy-boundary` | Retired package/source-localization audits and focused compatibility checks | None by default |
@@ -68,9 +68,25 @@ environment.
 - When a GUI behavior cannot be exercised locally, report the CI target and a
   concrete visible/manual smoke path instead of substituting an offscreen run.
 
-## Removed Source Localization
+## Hardware and Studio extension coverage
 
-Source Localization/eLORETA remains removed from active runtime. Do not add
-tests that import `Tools.SourceLocalization`, restore availability shims, or
-require bundled fsaverage MRI/template data. The separate LORETA Visualizer
-uses the `loreta` scope and its local boundary contract.
+The [roadmap](../architecture/hardware-pipeline-studio-roadmap.md) owns future
+acceptance criteria. Existing acquisition-profile and BDF/Studio inspection
+fixtures live under project I/O; production stage selection also requires
+processing, provenance/cache and affected downstream-consumer coverage.
+An inspection fixture passing for a third profile does not establish an
+extensible production pipeline. Keep hardware/timing validation separate from
+synthetic tests and do not promote unqualified support through documentation.
+
+## Retired Source Localization package
+
+The retired `Tools.SourceLocalization` package and its old eLORETA runtime
+remain removed. Do not add tests that import that package, restore its
+availability shims, or require bundled fsaverage MRI/template data.
+
+The separate, current `Tools.LORETA_Visualizer` owns its visualization workflow
+and isolated source producers under its scoped architecture contract. Its
+existing L2-MNE/eLORETA producers are supported by the `loreta` verification
+scope; this boundary does not prohibit their current tests or imply that those
+producers must be removed. Keep numerical producer code separate from rendering
+and GUI code, and preserve the ignored root `.fpvs_cache` dependency cache.

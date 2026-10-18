@@ -1,5 +1,13 @@
 # Postprocessing QC: performance and review investigation
 
+Historical evidence note (2026-10-18): this review records its named baseline,
+measurements and original verification limits. Old branch names, source paths
+and pending checks below describe that point in time. For current ownership use
+the [module map](../architecture/module-map.md); for published-artifact and
+post-release source evidence use the
+[release ledger](../exec-plans/active/v3-release-readiness.md). Do not treat this
+report as an instruction to repeat completed implementation or private-data work.
+
 Implementation follow-up (2026-09-08): the user approved the final recommended
 first batch. Its implementation and final validation are tracked in
 [QC Performance](../exec-plans/active/qc-performance.md#postprocessing-review-readiness-and-audit-parsing-2026-09-08).

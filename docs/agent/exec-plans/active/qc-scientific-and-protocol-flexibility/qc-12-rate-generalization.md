@@ -178,7 +178,7 @@ project's applied preprocessing settings as follows:
 
 ## Owners and Acceptance
 
-Owners span `config.py`, `Main_App/Shared/fft_crop_utils.py`, the active process
+Owners span `config.py`, `Main_App/processing/fft_crop_utils.py`, the active process
 runner, `Main_App/processing/fft_multinotch.py`, post-processing and Excel
 exports, FullFFT/frequency QC, QC-11
 provenance and fingerprints, and Stats harmonic-policy consumers. Update the

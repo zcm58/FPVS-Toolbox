@@ -2,6 +2,12 @@
 
 Project-aware workflows should resolve paths from the active project root, not from the process current directory or a developer-machine path.
 
+Full FPVS Studio interoperability and multi-hardware/montage project support are
+future goals in the [shared roadmap](hardware-pipeline-studio-roadmap.md).
+The importer and acquisition-evidence adapter described here implement separate,
+bounded subsets. Neither establishes full compatibility with every Studio
+version, and external identities must still pass canonical project validation.
+
 The Unicorn acquisition foundation adds a read-only
 `Main_App.io.studio_acquisition_evidence` adapter for Studio's candidate handoff:
 top-level schema string `1.0`, nested RecordingSnapshot schema integer `1`, and

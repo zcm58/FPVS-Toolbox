@@ -11,3 +11,9 @@ Use when fixing a specific defect.
 7. Report files changed, verification, skipped checks, residual risk, and why architecture docs did or did not need updates.
 
 Preserve existing processing order, data formats, exports, project paths, and user workflows unless the bug explicitly requires changing them.
+
+For acquisition, montage, pipeline-stage, or FPVS Studio defects, read the
+[shared roadmap](../architecture/hardware-pipeline-studio-roadmap.md). Distinguish
+implemented support from the compatibility goal; do not fix an unsupported
+case by guessing metadata, changing the scientific profile, or bypassing a
+capability check.

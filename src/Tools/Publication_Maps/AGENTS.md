@@ -1,7 +1,15 @@
 The Publication_Maps directory owns the embedded **Scalp Maps** tool. The
 current implementation renders condition-level grand-average BCA, SNR, and
-z-score scalp maps using the significant-harmonic list saved at processing
+z-score scalp maps using the exact versioned harmonic selection saved at processing
 completion.
+
+The current numerical/geometry path uses BioSemi64 (`scalp_io.py` and
+`metrics.py`). Future montage support follows the
+[shared hardware/pipeline roadmap](../../../docs/agent/architecture/hardware-pipeline-studio-roadmap.md):
+consume qualified montage geometry and canonical electrode identities through
+shared owners. Successful loading or Studio import does not establish scalp-map
+support. Do not silently intersect an unknown montage with BioSemi64, invent
+positions, zero-fill missing sensors, or enable unqualified interpolation.
 
 Scalp Maps is an embedded beta tool. Expose it only through the Main App's
 central `BETA_TOOL_SPECS` registry so the shared visibility gate and

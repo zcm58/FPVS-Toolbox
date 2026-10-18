@@ -4,6 +4,11 @@ Use this as a quick orientation map before opening files. Run the relevant
 audit from `docs/agent/agent-index.md` first, then use this page to choose the
 next narrow file or focused document.
 
+For acquisition expansion and processing composition, use the
+[hardware, pipeline, and Studio roadmap](hardware-pipeline-studio-roadmap.md).
+Current modules below are not a claim of general multi-montage production or
+complete Studio interoperability.
+
 ## Main App
 
 - `src/Main_App/gui/`: canonical GUI package for the main-window shell, settings panel, event map, menu/sidebar/header/icon helpers, style tokens, theme, reusable widgets, operation guard, and update manager. `ui_main.py` owns landing/main page assembly; `event_map.py` owns event-map row construction, binding, Enter-key handling, and entry adapters; `icons.py`, `header_bar.py`, `file_menu.py`, and `menu_bar.py` own shell/menu presentation helpers; `sidebar.py` owns sidebar construction and sidebar button presentation; `widgets/` owns reusable PySide6 presentation primitives, `theme.py` owns the shared FPVS palette/stylesheet helpers, `op_guard.py` owns the non-blocking GUI operation guard, `project_workflows.py` owns project open/create/load/save GUI orchestration, `processing_inputs.py` owns processing input validation, file/mode UI state, and parameter assembly, `processing_workflows.py` owns processing run start/stop/queue/finalization GUI orchestration, `post_export_workflows.py` owns GUI-side post-processing worker launch/error routing and export completion handling, `tool_workflows.py` owns settings/update/tool/help/about action orchestration, and `shell_status.py` owns launch reveal, GUI log routing, and embedded processing activity-page helpers; `main_window.py` is appropriately downsized and should not be targeted for further refactor unless the user explicitly scopes that work.
@@ -26,10 +31,17 @@ next narrow file or focused document.
   exact-column/header XLSX reader, BDF loader, EEG geometry and file filters.
   `spectral_workbook.py` owns reusable archive sessions and FullSNR window reads;
   `xlsx_xml.py` owns common XML decoding without merging reader selection policy.
+  `acquisition_profiles.py` owns explicit format/device/montage/event definitions;
+  `recording_inspection.py`, `unicorn_units.py`, and `unicorn_raw.py` provide the
+  gated alternate-acquisition foundation. `studio_acquisition_evidence.py`
+  validates read-only candidate handoff evidence, not scientific eligibility.
 - `src/Main_App/projects/`: canonical owner for project model, project manager
   workflows, project metadata scanning, projects-root helpers, preprocessing
   settings normalization, canonical group/participant metadata, and the
   GUI-neutral processed-workbook dataset index consumed by downstream tools.
+  `fpvs_config_import.py` imports the supported Studio config subset;
+  `frequency_protocol.py` and `analysis_window.py` own the resulting protocol
+  and planned-window validation.
 - `src/Main_App/updates/`: canonical non-GUI updater backend for typed release
   contracts, GitHub Releases selection, installer downloads, and installer
   launch. GUI scheduling and presentation remain in `src/Main_App/gui/update_manager.py`
@@ -108,7 +120,7 @@ Current `Legacy_App` runtime couplings:
 
 ## Dead Or Quarantined
 
-- Source Localization/eLORETA: removed from active runtime; `src/Tools/SourceLocalization/**` must remain empty of source files unless restoration is explicitly scoped. The separate `src/Tools/LORETA_Visualizer/**` tool is allowed only as the new visualization branch described in its local `AGENTS.md` and `ARCHITECTURE.md`.
+- Historical Source Localization/eLORETA: `src/Tools/SourceLocalization/**` is retired and must remain empty of source files unless restoration is explicitly scoped. The separate `src/Tools/LORETA_Visualizer/**` tool and its existing isolated source producers follow their local `AGENTS.md` and `ARCHITECTURE.md`.
 - `src/quarantine/**`, when present: ignored historical quarantine outside
   active runtime. Its absence is valid and agents must not create it merely to
   satisfy documentation.

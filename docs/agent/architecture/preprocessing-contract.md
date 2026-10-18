@@ -4,6 +4,14 @@ This page records the active preprocessing owner and the behavior that must stay
 stable during Main App refactors. Treat it as the regression lock for the EEG
 preprocessing path.
 
+The [hardware, pipeline, and Studio roadmap](hardware-pipeline-studio-roadmap.md)
+sets the future direction: a shared pipeline whose steps are resolved from
+explicit acquisition/montage capabilities and versioned scientific policies.
+The current BioSemi order and numerical guards below remain the regression
+baseline. Optional QC switches do not yet constitute a general composable
+pipeline; alternate profiles must not bypass these contracts or reuse
+incompatible prepared state.
+
 ## Current Decision
 
 `src/Main_App/processing/preprocess.py` is large because it preserves a
@@ -726,10 +734,17 @@ matrix is written only after any destructive reprocess confirmation and before
 the first generated output is removed. A reprocess scope that adds previously
 skipped files runs current pre-processing QC for those files and merges their
 reviewed marker plans before the matrix is frozen.
-Those planning states never claim a final processing outcome. In particular,
-the historical `condition_completeness=partial` compatibility flag is not
-migrated to QC-20's future `partially_retained` outcome. Atomic workbook
-receipts and readiness/release gates remain later QC-20 stages.
+Those planning states never claim a final processing outcome.
+`processing_ledger.py` reconciles the current export receipts against the expected
+matrix through `recording_condition_outcomes.py`, recording validated outputs
+or explicit no-output states. The historical `condition_completeness=partial`
+compatibility flag alone does not establish a current `partially_retained`
+outcome or authorize downstream release; available files retain their existing
+handling while current receipts and reviewed decisions determine eligibility.
+`post_processing_pipeline_worker.py` requires pre-review output readiness,
+then uses `roi_coverage.py` for the final reviewed coverage and QC-20 release
+receipt. Missing/stale receipts, unresolved expected cells, or changed review
+fingerprints block release rather than silently accepting partial processing.
 
 ## Pipeline Order
 

@@ -1,5 +1,13 @@
 # FPVS pipeline performance and Birth Control 2 analysis
 
+Historical evidence note (2026-10-18): this review records its named baseline,
+measurements and original verification limits. Old branch names, source paths
+and pending checks below describe that point in time. For current ownership use
+the [module map](../architecture/module-map.md); for published-artifact and
+post-release source evidence use the
+[release ledger](../exec-plans/active/v3-release-readiness.md). Do not treat this
+report as an instruction to repeat completed implementation or private-data work.
+
 Status: measurements, exact-output proofs and study analyses complete.
 The final non-Qt repository check completed with five updater-environment failures,
 detailed below.

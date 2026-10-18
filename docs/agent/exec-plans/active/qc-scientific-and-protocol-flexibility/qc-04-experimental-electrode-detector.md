@@ -132,7 +132,7 @@ Primary owners are `src/Main_App/projects/preprocessing_settings.py`,
 `src/Main_App/processing/preflight_qc.py`,
 `src/Main_App/processing/raw_channel_qc.py`, and
 `src/Main_App/processing/removed_electrode_detection.py`. Follow the effective
-settings through `src/Main_App/Performance/process_runner.py` and existing
+settings through `src/Main_App/workers/process_runner.py` and existing
 cache/ledger owners only where required by the accepted control map.
 
 Validate a new project with default Off, explicit opt-in, Off retained after

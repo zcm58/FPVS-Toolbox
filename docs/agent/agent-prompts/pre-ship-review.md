@@ -8,5 +8,9 @@ Use before handing off a non-trivial change.
 4. Run the focused tests from `docs/agent/quality/test-selection.md`.
 5. Run broader gates if shared behavior changed.
 6. Confirm retired `src/Main_App/Legacy_App/**` and `src/Main_App/PySide6_App/**` paths were not recreated.
-7. Confirm Source Localization/eLORETA remains removed from active runtime unless explicitly restored.
+7. Confirm the retired `Tools.SourceLocalization` package remains removed and the current `Tools.LORETA_Visualizer` keeps estimation isolated in `source_producers/`.
 8. Report failures with command, reason, residual risk, and whether architecture docs or scoped `AGENTS.md` needed updates.
+9. For hardware, montage, pipeline, or Studio changes, review the
+   [shared roadmap](../architecture/hardware-pipeline-studio-roadmap.md). Report
+   the exact qualified capability/version and remaining gaps; do not claim
+   complete Studio compatibility from a parser test or synthetic fixture alone.

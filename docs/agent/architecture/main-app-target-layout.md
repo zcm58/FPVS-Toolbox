@@ -1,8 +1,10 @@
 # Main App Target Layout
 
-This page records the long-term Main App organization target. The goal is to
-replace historical `Legacy_App` and `PySide6_App` naming with purpose-based
-packages under `src/Main_App/`.
+The purpose-based Main App package layout is implemented. Historical
+`Legacy_App` and `PySide6_App` packages are retired; `Shared` and `Performance`
+retain compatibility aliases. The next architectural direction is
+[modular hardware/montages, processing composition, and complete Studio interoperability](hardware-pipeline-studio-roadmap.md),
+built within these canonical owners.
 
 ## Target Shape
 
@@ -10,12 +12,13 @@ packages under `src/Main_App/`.
 src/Main_App/
   gui/            # Cross-platform PySide6 interface, widgets, menus, dialogs
   processing/     # EEG preprocessing and pipeline orchestration import surface
-  io/             # BDF loading, project paths, manifests, export path helpers
+  io/             # Recording/format/montage adapters, shared numerical readers
   projects/       # Project model/settings, manifests, dataset identity/indexing
   workers/        # Qt workers, multiprocessing bridge, process runner
   diagnostics/    # Audits, event-time lock reports, debug/reporting helpers
   exports/        # Post-processing, workbook generation and publication styles
-  settings/       # Lightweight application settings and settings paths
+  settings/       # Application settings; initializer/path helpers are lightweight
+  updates/        # GUI-neutral update protocol, downloads and installer handoff
 ```
 
 ## Migration Rules
@@ -82,9 +85,10 @@ surface. It owns post-processing and workbook generation plus the adapter
 that turns process/worker payloads into exports. The post-processing export
 contract protects values, formats and publication behavior.
 
-`src/Main_App/settings/` owns lightweight application settings and path
-resolution. Its package initializer stays independent of project, scientific
-and GUI imports so the standalone updater remains isolated.
+`src/Main_App/settings/` owns application settings and path resolution. Its
+initializer and `settings_paths` stay independent of project, scientific and
+GUI imports so the standalone updater remains isolated; `settings_manager`
+is application-only and excluded from that bundle.
 
 `Shared` and `Performance` now contain compatibility aliases only. Active source
 imports canonical owners. Compatibility preserves module identity, logger

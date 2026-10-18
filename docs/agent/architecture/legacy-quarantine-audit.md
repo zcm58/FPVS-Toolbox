@@ -4,6 +4,10 @@ Ownership note (2026-10-18): historical migration paths below describe earlier
 steps. Current implementation owners are the purpose-based packages listed in
 [Main App target layout](main-app-target-layout.md); `Shared` and `Performance`
 now contain same-object compatibility aliases only.
+The historical Source Localization removal below refers to
+`Tools.SourceLocalization`; the separate, current LORETA Visualizer includes
+isolated source producers as documented in its own architecture. These audit
+entries are a dated migration record, not a list of present-day removal targets.
 
 This audit is based on static AST import analysis of `src/` and `tests/`.
 

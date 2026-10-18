@@ -71,10 +71,11 @@ coalescing, stale results/errors, and deferred close. They are not a graphics-
 driver or real-project usability test.
 
 The Python package workflow runs these LORETA Qt files in a dedicated step before
-the complete suite. The v3 base's [full Qt CI run](https://github.com/zcm58/FPVS-Toolbox-Repo/actions/runs/38747197337)
-already reports multiple failures and exits through the test watchdog. The
-dedicated step keeps LORETA interaction results inspectable independently of
-that broader baseline failure.
+the complete suite. The [published release source run](https://github.com/zcm58/FPVS-Toolbox/actions/runs/38789774709)
+and [post-cleanup source run](https://github.com/zcm58/FPVS-Toolbox/actions/runs/39133936133)
+passed, including registered LORETA Qt coverage. Earlier baseline failures are
+resolved; the dedicated step retains focused navigation/preview diagnostics.
+These source regressions do not replace the human visible path below.
 
 ## Visible manual smoke path
 

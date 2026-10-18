@@ -23,6 +23,14 @@ The docs tree is split into [docs/agent](docs/agent/) for agent-facing guidance 
 
 ## Application Shape
 
+Current source ownership and supported behavior are described below. The
+[hardware, pipeline, and Studio roadmap](docs/agent/architecture/hardware-pipeline-studio-roadmap.md)
+records the intended next architecture: modular acquisition/montages, shared
+processing steps resolved from their capabilities, and complete FPVS Studio
+compatibility. The current acquisition registry, gated Unicorn reader, and
+partial Studio import are foundations, not completed production support.
+Published installer behavior is bound to its release tag, not later source work.
+
 FPVS Toolbox is a PySide6 desktop application built around GUI entry points,
 processing backends, and analysis tools under `src/`. Windows 11 is the current
 release platform; source development and execution may also occur on CachyOS
@@ -130,6 +138,7 @@ Focused architecture pages:
 - [Post-Processing Export Contract](docs/agent/architecture/post-processing-export-contract.md)
 - [Processing Mixin Contract](docs/agent/architecture/processing-mixin-contract.md)
 - [BDF Loading Contract](docs/agent/architecture/eeg-loading-contract.md)
+- [Hardware, Processing, and Studio Direction](docs/agent/architecture/hardware-pipeline-studio-roadmap.md)
 - [Module Map](docs/agent/architecture/module-map.md)
 - [Protected Paths](docs/agent/architecture/protected-paths.txt)
 - [LORETA Visualizer Tool Architecture](src/Tools/LORETA_Visualizer/ARCHITECTURE.md)
@@ -149,7 +158,7 @@ Focused architecture pages:
 - Long-running EEG, plotting, export, and statistics work must run outside the UI thread.
 - Historical legacy behavior should be consumed through existing current-app APIs or thin adapters in purpose-based packages. Do not add new `Legacy_App` or `PySide6_App` modules.
 - Project-aware workflows should resolve files through the active project root and preserve existing generated formats.
-- Source Localization/eLORETA has been removed from active runtime. Keep `src/Tools/SourceLocalization/**` empty of source files and do not add GUI, settings, tests, or quarantine-tree imports for it unless restoration is explicitly scoped as a new feature. The new `src/Tools/LORETA_Visualizer/` branch is a separate visualization tool, not a design continuation of the removed implementation; it must keep renderer logic separate from future calculation logic and must not bundle `fsaverage` MRI template data in active source or quarantine.
+- The historical Source Localization/eLORETA package has been removed from active runtime. Keep `src/Tools/SourceLocalization/**` empty of source files and do not add GUI, settings, tests, or quarantine-tree imports for it unless restoration is explicitly scoped as a new feature. The separate `src/Tools/LORETA_Visualizer/` tool keeps renderer logic separate from its existing `source_producers/` calculations and must not bundle `fsaverage` MRI template data in active source or quarantine.
 - The ignored repository-root `.fpvs_cache/` is the local MNE/fsaverage cache used by the LORETA Visualizer. Preserve it during routine cleanup unless the user explicitly requests cache removal.
 
 ## Verification Strategy

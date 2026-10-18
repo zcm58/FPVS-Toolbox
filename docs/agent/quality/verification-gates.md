@@ -64,15 +64,38 @@ normal change loop; the precommit tier is the broad local handoff gate.
 - Legacy-boundary changes: run `python .agents/scripts/verify.py --scope
   legacy-boundary --tier focused`; retired `Legacy_App` paths must not be
   recreated and historical cleanup must preserve the processing pipeline.
-- Source Localization/eLORETA or LORETA Visualizer changes: run `python
-  .agents/scripts/verify.py --scope loreta --tier focused`. Source Localization
-  remains removed; rendering changes must not move source calculation into
+- LORETA Visualizer changes: run `python
+  .agents/scripts/verify.py --scope loreta --tier focused`. The historical
+  `Tools.SourceLocalization` package remains retired; rendering changes must not move source calculation into
   `renderer.py`, `fsaverage_mesh.py`, or GUI code.
 - Processing pipeline changes: run `python .agents/scripts/verify.py --scope
   processing --tier focused`; verify processing order, output filenames,
   sheets, and formats remain compatible.
 - Garbage collection and repo-wide invariants are part of `python
   .agents/scripts/verify.py --scope repo --tier precommit`.
+
+## Documentation-only changes
+
+For local verification of instructions, ownership maps and roadmap updates without runtime changes,
+run the repository audit and strict documentation build. Inspect referenced
+owners and plan status, check relative links/anchors and run `git diff --check`.
+Do not run the scientific suite or private-data diagnostics merely to verify
+prose; run affected tests only if the change also modifies executable behavior.
+Use the selected repository interpreter for `python -m mkdocs build --strict`.
+Existing CI workflows may still run the full source suite on documentation
+commits; this local guidance does not change workflow triggers or required checks.
+
+## Future acquisition and Studio qualification
+
+Follow the [roadmap](../architecture/hardware-pipeline-studio-roadmap.md) before
+claiming new support. Use generated format/montage fixtures and paired Studio
+producer/Toolbox consumer fixtures to prove supported versions, units, event
+semantics, identities and round-trip preservation where a round trip is defined.
+The target includes a third montage without common-orchestrator rewrites;
+current inspection-only extension tests do not satisfy processing acceptance.
+Preserve the BioSemi golden baseline and distinguish software checks from
+physical acquisition/timing calibration. These future gates do not authorize
+an unrequested method change or live hardware run.
 
 ## CI Change Detection
 

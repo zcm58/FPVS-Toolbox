@@ -117,7 +117,7 @@ inspect the file information needed to locate the analysis spans.
 
 Primary owners are `preflight_qc_plan.py`, `preflight_qc.py`,
 `raw_channel_qc.py`, `raw_spectral_qc.py`, and `preprocess.py` under
-`src/Main_App/processing/`, plus `src/Main_App/Performance/process_runner.py`
+`src/Main_App/processing/`, plus `src/Main_App/workers/process_runner.py`
 and the existing cache/ledger/provenance owners. Reuse the public preprocessing
 surface and shared crop helpers; avoid an alternate processing pipeline.
 

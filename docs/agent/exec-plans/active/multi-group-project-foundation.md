@@ -2,13 +2,13 @@
 
 ## Status
 
-Active. The processing foundation and shared processed-workbook index are
-implemented and covered by focused tests. Publication Maps now uses the shared
-index and explicit group selection. Individual Detectability remains to be
-migrated without changes to its scientific
-calculations or existing exports.
-
-Last reviewed against the repository on 2026-08-16.
+Reviewed 2026-10-18. The processing foundation and shared processed-workbook
+index are implemented. Publication Maps uses the index and explicit group
+selection. Individual Detectability already uses the index for managed-project
+provenance and coverage validation (`worker._require_current_project_inputs`),
+but its condition discovery and UI still lack explicit per-group selection and
+output controls. That narrower integration remains open; do not treat it as
+wholly unaware of the shared index. Preserve scientific calculations and exports.
 
 ## Goal
 
@@ -237,8 +237,9 @@ the manifest assignment.
    while preserving its canonical-Excel-root and manifest-membership policies.
 6. [x] Add group-aware selection to Publication Maps without changing map
    calculations.
-7. [ ] Migrate Individual Detectability from flat-folder
-   globbing to indexed records before offering per-group output controls.
+7. [ ] Finish Individual Detectability's group-aware discovery and explicit
+   per-group output controls. Managed-run provenance/coverage already uses the
+   shared index; retain that validation rather than introducing another scanner.
 
 Every migrated figure/summary tool must follow the same group behavior unless
 an existing, explicitly retained overlay contract says otherwise:

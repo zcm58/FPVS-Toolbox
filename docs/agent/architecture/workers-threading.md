@@ -2,6 +2,12 @@
 
 Long-running work must not block the UI thread.
 
+Future montage-aware processing composition must use these same worker,
+cancellation, and lifecycle boundaries. The
+[hardware/pipeline roadmap](hardware-pipeline-studio-roadmap.md) requires one
+resolved scientific plan across preparation, normal processing, resume, and
+condition repair; adding a device must not create a separate GUI execution path.
+
 The canonical active import surface for Main App workers is
 `src/Main_App/workers/`. It owns the Qt worker and multiprocessing bridge
 implementations used by the main GUI, the process runner, multiprocessing

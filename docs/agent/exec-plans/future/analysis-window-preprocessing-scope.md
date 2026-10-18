@@ -12,7 +12,7 @@ focuses on temporal filtering/resampling and analysis boundaries; it does not
 authorize a new processing method, settings change, or source edit.
 
 This plan reopens item 15 of the
-[QC scientific review](qc-scientific-and-protocol-flexibility.md). QC-06's
+[QC scientific review](../active/qc-scientific-and-protocol-flexibility.md). QC-06's
 accepted direction to restrict direct signal-based QC scoring to analyzed
 intervals remains recorded. Continuous-Raw interpolation application is now
 closed with no action. QC item 16 subsequently closed with no additional
@@ -113,7 +113,7 @@ execution. Most processing owners below are under `src/Main_App/processing/`.
 | Kurtosis-based bad-channel selection | All retained continuous EEG samples after filtering/downsampling (`preprocess.py:860`) | Break/setup samples can determine interpolation. QC-06 restricts scoring; pooling and calibration need explicit justification. |
 | Spherical interpolation | Continuous Raw, one current bad-channel set (`preprocess.py:947`, `:996`) | User accepted no change to application. Restrict upstream bad-channel scoring under QC-06; no interval-only writes or occurrence-specific maps. |
 | Final average reference | Continuous Raw after interpolation (`preprocess.py:1037`) | Spatial, pointwise in time. Changing successful repair or contributing-channel state can alter every retained EEG channel. |
-| Final epoch extraction and repetition averaging | Shared locked retained spans, then signed samplewise averaging (`process_runner.py:1572`, `:1724`; `Shared/post_process.py:575`) | Preserve exact grids and repetition identities; determine which configured or excluded conditions actually reach each earlier step. |
+| Final epoch extraction and repetition averaging | Shared locked retained spans, then signed samplewise averaging (`process_runner.py:1572`, `:1724`; `exports/post_process.py`) | Preserve exact grids and repetition identities; determine which configured or excluded conditions actually reach each earlier step. |
 | FFT/BCA, harmonics, and frequency-domain QC | Cropped/averaged exports | Direct inputs are interval-based; effects of earlier filtering, interpolation, and sample selection remain in those inputs. No harmonic-method change is authorized. |
 
 Known participant-condition and recording-condition exclusions currently remain

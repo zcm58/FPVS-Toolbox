@@ -2,14 +2,14 @@
 
 ## Status
 
-Implementation and local non-GUI validation complete. CI Qt execution and the
-visible manual acceptance path below remain pending under the repository's
-local Qt policy.
+Reviewed 2026-10-18: implementation, non-GUI validation and registered source
+CI Qt coverage are complete. The visible manual acceptance path below remains
+unclaimed under the repository's local Qt policy.
 
 ## Scope
 
-Implement the user-requested descriptive FHC maps on
-`codex/fhc-harmonic-cluster-maps`. Presentation follows Hermann, Ching and
+The descriptive FHC maps were implemented on the historical
+`codex/fhc-harmonic-cluster-maps` branch and are integrated. Presentation follows Hermann, Ching and
 Stothart (2026), Figures 7 and 10, DOI `10.1111/psyp.70361`: harmonic-specific
 mean response differences with discrete signed significant-cluster markers.
 The Toolbox's attributed ROI-selector BioSemi64 geometry is reused. No author

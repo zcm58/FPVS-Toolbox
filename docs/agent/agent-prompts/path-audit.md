@@ -17,3 +17,8 @@ Requirements:
 - Handle `QFileDialog` Cancel and repeated operations without stale UI state.
 - Use PySide6-safe message helpers for user-facing warnings/errors; worker/background callers should log rather than block on popups.
 - Use `tmp_path` for tests instead of hard-coded local paths.
+- Studio and hardware adapters follow the
+  [shared roadmap](../architecture/hardware-pipeline-studio-roadmap.md): verify
+  the source schema/version, preserve canonical identity and provenance, and
+  test supported handoffs explicitly. `.fpvs` or `.bdf` alone is not a semantic
+  compatibility contract.

@@ -73,8 +73,8 @@ state is routine in current project outputs.
 
 ### Owners and Acceptance
 
-Implement source finite checks in `Main_App/Shared/post_process.py` and preserve
-the atomic workbook behavior in `Main_App/Shared/post_process_excel.py`.
+Implement source finite checks in `Main_App/exports/post_process.py` and preserve
+the atomic workbook behavior in `Main_App/exports/post_process_excel.py`.
 Implement consumer validation and structured diagnostic results in
 `Main_App/processing/frequency_domain_qc.py`; make the worker/GUI present a short
 actionable message directing the user to reprocess the affected condition. Keep

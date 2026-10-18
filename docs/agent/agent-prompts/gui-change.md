@@ -17,6 +17,10 @@ ruff check <changed Python files>
 Requirements:
 
 - Preserve existing user flows, processing order, project paths, and export formats.
+- For hardware/montage or Studio controls, read the
+  [shared roadmap](../architecture/hardware-pipeline-studio-roadmap.md). Use
+  backend-resolved capabilities and preserve qualified scientific policies;
+  do not add arbitrary stage-order controls or imply unsupported compatibility.
 - Avoid card-within-card layouts unless the user explicitly asks for them.
   `SectionCard` should frame a top-level subsection; parent tab pages,
   splitters, and setup containers should stay visually flat when they contain

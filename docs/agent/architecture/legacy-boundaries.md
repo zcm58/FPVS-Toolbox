@@ -10,17 +10,19 @@ directories; active Main App behavior belongs in purpose-based packages such as
 `Main_App.processing`, `Main_App.io`, `Main_App.projects`, `Main_App.exports`,
 `Main_App.workers`, `Main_App.diagnostics`, and `Main_App.gui`.
 
-Source Localization/eLORETA is removed from active runtime, not a protected black box:
+The historical `Tools.SourceLocalization` package is removed from active runtime,
+not a protected black box:
 
 - `src/Tools/SourceLocalization/**` must stay empty of source files.
 - The app must not add GUI actions, settings, tests, imports, or quarantine-tree dependencies for this removed feature.
 - The new `src/Tools/LORETA_Visualizer/**` tool is a separately scoped
   source-visualization branch. It must not consult, copy, import, or inherit
   design decisions from the removed Source Localization/eLORETA code.
-- In that new tool, renderer code displays prepared payloads only. Tool-local
-  helpers may validate, transform, normalize, and adapt future calculation
-  outputs into renderer payloads, but they must not compute inverse solutions,
-  source statistics, or LORETA values.
+- In that separate tool, renderer and payload helpers display or adapt prepared
+  values only. Existing calculations belong in its isolated `source_producers/`
+  package, including the normal Hauk-informed L2-MNE source-PSD path and
+  legacy/exploratory workbook producers. Do not move inverse solutions or source
+  statistics into renderer, mesh, payload, or GUI helpers.
 - The new visualizer may fetch external fsaverage data through MNE, but durable
   automatic installs belong in the ignored repository-root `.fpvs_cache`
   directory, never in active source, docs, package data, or quarantine paths.

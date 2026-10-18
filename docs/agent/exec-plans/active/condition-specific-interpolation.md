@@ -36,7 +36,7 @@ Runtime owners: project `experimental_qc_settings.py`; GUI `settings_panel.py`,
 `processing_workflows.py`; processing `frequency_domain_qc.py`,
 `condition_electrode_interpolation.py`, `condition_interpolation_state.py`,
 `condition_interpolation_executor.py`, `preprocess.py`, `processing_ledger.py`,
-and `roi_coverage.py`; `Performance/process_runner.py`; `Shared/post_process.py`;
+and `roi_coverage.py`; `workers/process_runner.py`; `exports/post_process.py`;
 `exports/source_time_domain_export.py`; and `workers/post_processing_pipeline_worker.py`.
 All new artifacts use the active project root. Existing processing/export formats
 remain intact; the additional project-local snapshot preserves reviewed timing.

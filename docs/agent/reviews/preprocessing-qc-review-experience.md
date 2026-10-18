@@ -1,5 +1,13 @@
 # Preprocessing QC review experience: implementation review
 
+Historical evidence note (2026-10-18): this review records its named baseline,
+measurements and original verification limits. Old branch names, source paths
+and pending checks below describe that point in time. For current ownership use
+the [module map](../architecture/module-map.md); for published-artifact and
+post-release source evidence use the
+[release ledger](../exec-plans/active/v3-release-readiness.md). Do not treat this
+report as an instruction to repeat completed implementation or private-data work.
+
 Branch: `codex/preprocessing-qc-v3`. Implements the five preprocessing review
 recommendations approved on 2026-09-07. Post-processing frequency QC is outside
 scope; the shared interpolation-burden review can display confirmed repair

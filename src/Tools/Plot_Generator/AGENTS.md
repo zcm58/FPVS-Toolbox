@@ -1,10 +1,18 @@
 The Plot_Generator directory contains the embedded PySide6 tool that builds SNR
-line plots from Excel files created by the FPVS Toolbox. The Main App GUI is its
+line plots from processed data created by the FPVS Toolbox, including validated
+NumPy companions and native `.fpvs` declarations through shared readers. The Main App GUI is its
 only user-facing entry point. GUI adjustments
 and minor bug fixes are allowed. Keep processing code modular and under 500 lines
 per file. ROI definitions should be loaded from the existing settings using the
 neutral utilities in `Main_App.processing.roi_settings`. Plots should be averaged across participants within
 each condition and saved to a user-selected output folder.
+
+Hardware and FPVS Studio integration follow the
+[shared roadmap](../../../docs/agent/architecture/hardware-pipeline-studio-roadmap.md).
+Plotting consumes canonical processed sources, frozen rates, and explicit ROI
+definitions. New acquisition or montage support must not introduce a plot-local
+loader, guess geometry from channel count, silently shrink an ROI, or recalculate
+SNR. Current storage support does not establish complete Studio compatibility.
 
 Current ownership map:
 

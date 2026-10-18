@@ -2,6 +2,14 @@
 
 ## Status and Use
 
+Reviewed 2026-10-18: all 21 actions and the later experimental controls are
+integrated. Source CI and published-installer automated acceptance passed;
+empirical calibration and human review remain separate as recorded below.
+Branch names, earlier gate failures and implementation priorities in dated
+entries are historical. They do not instruct a new agent to repeat completed
+QC-15 work or recreate retired branches. Current source owners are in the
+[module map](../../architecture/module-map.md).
+
 2026-10-11 follow-up: `codex/experimental-qc-features` branches from the freshly
 fetched v3 release at `b4bf4447`. The user approved experimental toggles for all
 optional QC screens, preserving existing-project behavior and defaulting new

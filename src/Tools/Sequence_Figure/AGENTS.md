@@ -2,6 +2,13 @@ The Sequence_Figure directory owns the embedded FPVS Sequence Figure tool. It
 builds publication-oriented illustrations of the stimulus sequence from
 manually selected stimulus images.
 
+Complete FPVS Studio compatibility is a project goal described in the
+[shared roadmap](../../../docs/agent/architecture/hardware-pipeline-studio-roadmap.md).
+This tool currently illustrates manually supplied images and timing; it does
+not import or verify Studio presentation logs or establish physical stimulus
+timing. Any future Studio adapter must use a verified versioned contract and
+remain separate from figure rendering.
+
 Current ownership map:
 
 - `renderer.py`: widget-free validation, image normalization, one-to-four

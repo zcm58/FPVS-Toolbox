@@ -2,9 +2,11 @@
 
 Status: implementation complete; visible packaged-app acceptance pending in the
 [v3 release ledger](v3-release-readiness.md#5-perform-one-compact-installed-app-acceptance-pass).
-Verification records below describe the implementation branch, not final RC acceptance.
-Branch: `codex/loreta-validated-improvements`
-Base: `codex/v3-release` at `503341ba`
+Reviewed 2026-10-18: changes are integrated. Registered source CI passed; the
+published v3 installer passed automated startup/lifecycle checks. Human visible
+acceptance remains separate. Records below describe the historical implementation
+branch `codex/loreta-validated-improvements`, based on `503341ba`; that branch
+and the former v3 release branch are retired.
 
 ## Scope
 

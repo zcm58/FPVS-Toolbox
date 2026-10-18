@@ -1,5 +1,13 @@
 # QC Scientific Review Record
 
+Historical decision record: the code findings and line references below describe
+the reviewed baseline, before the accepted QC actions and later ownership moves.
+All 21 action implementations are integrated; use the
+[parent plan](../qc-scientific-and-protocol-flexibility.md) for current status and
+[preprocessing contract](../../../architecture/preprocessing-contract.md) for
+active behavior. This record preserves decision rationale, not current defect
+claims or instructions to restore retired branches/owners.
+
 [Parent compact plan](../qc-scientific-and-protocol-flexibility.md) · [shared execution contracts](00-shared-contracts.md)
 
 This file preserves the extended audit evidence, calculations, accepted-decision explanations, and the pre-modularization checklist as of 2026-09-03. It is a reference record, not the default execution entry point. Read only the relevant subsection when an action or decision needs its original evidence.

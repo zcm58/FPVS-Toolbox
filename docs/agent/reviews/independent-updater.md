@@ -1,5 +1,13 @@
 # Independent Toolbox updater handoff
 
+Historical evidence note (2026-10-18): this review records its named baseline,
+measurements and original verification limits. Old branch names, source paths
+and pending checks below describe that point in time. For current ownership use
+the [module map](../architecture/module-map.md); for published-artifact and
+post-release source evidence use the
+[release ledger](../exec-plans/active/v3-release-readiness.md). Do not treat this
+report as an instruction to repeat completed implementation or private-data work.
+
 Implemented on `codex/standalone-updater`, based on Toolbox `56392587`, in an
 isolated worktree. The existing Toolbox checkout and its unrelated uncommitted
 work were preserved. Version remains 3.0.0; no release or production installation

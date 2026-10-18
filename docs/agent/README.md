@@ -34,6 +34,14 @@ active. Windows 11 and CachyOS setup commands live only in
 
 - `README.md`: this directory map.
 - `agent-index.md`: fast command, skill, doc, and focused-test index.
+- `architecture/hardware-pipeline-studio-roadmap.md`: implemented acquisition
+  and Studio boundaries, modular hardware/montage and processing goals, and
+  acceptance requirements for complete Studio interoperability.
+
+Current contracts describe the checked-out source. Future goals and gated
+foundations must be identified explicitly; they are not shipped capabilities.
+Use the release ledger for installer evidence and the execution-plan index for
+remaining work. Historical review receipts apply only to their named revision.
 
 ## Moved Knowledge Files
 

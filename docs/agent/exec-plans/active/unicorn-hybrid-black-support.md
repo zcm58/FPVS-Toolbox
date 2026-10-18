@@ -1,9 +1,13 @@
 # Unicorn Hybrid Black Support
 
-Status: Active implementation
+Status reviewed 2026-10-18: inspection/Raw-adapter/project-profile foundation
+is integrated; production preprocessing and hardware qualification are incomplete.
+The application must not advertise qualified Unicorn processing.
 
-Created: 2026-09-25. Implementation authorized and started: 2026-09-29 on
-`codex/unicorn-headset-support`, based on `codex/v3-release` at `4aac39c8`.
+Created 2026-09-25; implementation started 2026-09-29. The former
+`codex/unicorn-headset-support` and `codex/v3-release` branch names are historical
+provenance (baseline `4aac39c8`), not required current branches. New work follows
+the [hardware/pipeline/Studio roadmap](../../architecture/hardware-pipeline-studio-roadmap.md).
 The 2026-09-28 revision requires explicit BDF+ support and a modular loader
 that can accept future electrode montages. Checkboxes below track demonstrated
 capabilities; source inspection alone does not qualify scientific processing.
@@ -104,17 +108,17 @@ are the format references; a vendor logger caption is not format evidence.
 
 | Current owner | Verified behavior and planned implication |
 | --- | --- |
-| `src/Main_App/io/load_utils.py`; `src/Main_App/Shared/load_utils.py:609` | Public loading API delegates to the shared owner. Full and lazy preflight paths currently validate the complete BioSemi header before returning Raw. Resolve registered format/acquisition/montage/event contracts before device validation; retain one canonical loading surface and strict BioSemi rules. |
-| `src/Main_App/io/eeg_geometry.py`; `src/Main_App/Shared/eeg_geometry.py:361` | BioSemi validates exactly 64 scalp signals, two recorded EXG references, stimulus, and supported auxiliaries. Keep this validator strict and separate from Unicorn validation. |
+| `src/Main_App/io/load_utils.py` | Public loading API owns the implementation; `Main_App.Shared.load_utils` is a compatibility alias. Full and lazy preflight paths currently validate the complete BioSemi header before returning Raw. Resolve registered format/acquisition/montage/event contracts before device validation; retain one canonical loading surface and strict BioSemi rules. |
+| `src/Main_App/io/eeg_geometry.py` | BioSemi validates exactly 64 scalp signals, two recorded EXG references, stimulus, and supported auxiliaries. Keep this validator strict and separate from Unicorn validation. |
 | `src/Main_App/projects/preprocessing_settings.py:142` | Current montage, references, and default downsampling settings are BioSemi-oriented. Persist explicit Unicorn acquisition, reference, native-rate, and repair-disabled policy without changing legacy defaults. |
 | `src/Main_App/processing/preprocess.py:1129` | Initial EXG-pair reference, channel removal, and final average reference are existing BioSemi behavior. Do not route Unicorn through a missing-reference warning or synthesize EXG signals. |
 | `src/Main_App/processing/preprocess.py:432`, `:1373`, `:1540` | FIR duration scaling, zero-double Hamming FIR, and filter-before-downsample order are locked. Current code only resamples when source rate exceeds target. Unicorn must explicitly disable all sample-rate changes rather than rely on 250 being below 256. |
-| `src/Main_App/Performance/process_runner.py:213`, `:1896`, `:2256` | Source and processed events are compared with reviewed analysis spans. Replace duplicated discovery with one profile-selected canonical event contract, supporting tested Unicorn Status and explicit BDF+ annotation mappings without guessed numbering. |
-| `src/Main_App/projects/frequency_protocol.py:769`; `src/Main_App/Shared/fft_crop_utils.py:48` | Exact protocol cycles must produce integral samples and an on-bin FFT span. Reuse these rules at 250 Hz. |
-| `src/Main_App/Shared/post_process.py:1040`; `src/Tools/Stats/analysis/noise_utils.py:84` | Common EEG values are converted from volts to microvolts before FFT. Preserve scaling and all existing metric formulas; prevent double conversion of vendor units. |
+| `src/Main_App/workers/process_runner.py` | Source and processed events are compared with reviewed analysis spans. Replace duplicated discovery with one profile-selected canonical event contract, supporting tested Unicorn Status and explicit BDF+ annotation mappings without guessed numbering. |
+| `src/Main_App/projects/frequency_protocol.py:769`; `src/Main_App/processing/fft_crop_utils.py` | Exact protocol cycles must produce integral samples and an on-bin FFT span. Reuse these rules at 250 Hz. |
+| `src/Main_App/exports/post_process.py`; `src/Tools/Stats/analysis/noise_utils.py:84` | Common EEG values are converted from volts to microvolts before FFT. Preserve scaling and all existing metric formulas; prevent double conversion of vendor units. |
 | `src/Main_App/processing/kurtosis_qc.py:46`, `:692` | Normalized-kurtosis reference requires 16 finite channels. It is unavailable for eight-channel Unicorn; do not lower its threshold or report an unavailable result as a pass. |
-| `src/Main_App/Shared/roi_presets.py:21`; `src/Main_App/processing/roi_settings.py:122`; `src/Main_App/processing/roi_coverage.py` | LOT/ROT presets and frozen ROI identities are BioSemi-specific. Add explicit Unicorn definitions and geometry identities, not intersections with existing presets. |
-| `src/Main_App/Performance/process_runner.py:993`; `src/Main_App/processing/full_fft_provenance.py:414`; `src/Main_App/processing/processing_ledger.py` | Cache, ledger, and FullFFT provenance encode BioSemi geometry. Profile identity must propagate through all affected validation and reuse boundaries. |
+| `src/Main_App/processing/roi_presets.py`; `src/Main_App/processing/roi_settings.py:122`; `src/Main_App/processing/roi_coverage.py` | LOT/ROT presets and frozen ROI identities are BioSemi-specific. Add explicit Unicorn definitions and geometry identities, not intersections with existing presets. |
+| `src/Main_App/workers/process_runner.py`; `src/Main_App/processing/full_fft_provenance.py:414`; `src/Main_App/processing/processing_ledger.py` | Cache, ledger, and FullFFT provenance encode BioSemi geometry. Profile identity must propagate through all affected validation and reuse boundaries. |
 | `src/Main_App/gui/processing_inputs.py:866`; `src/Main_App/projects/grouping.py:260`; `src/Main_App/projects/raw_identity.py:19` | Registered-source selection and identity already accept `.bdf`; retain project boundaries and canonical participant/recording registration. Update BioSemi-only captions where necessary. |
 | `src/Main_App/projects/dataset_index.py`; `src/Main_App/projects/fpvs_config_import.py` | Reuse canonical dataset identities and the existing Studio project-shell import. Do not infer new associations from file prefixes or create parallel group/participant logic. |
 
@@ -147,8 +151,10 @@ internally resolved profile now has a name. Explicitly version actual changes.
 
 Keep `Main_App.io.load_utils` as the public loading surface and
 `Main_App.io.eeg_geometry` as the geometry surface. Introduce small GUI-neutral
-contracts behind these APIs; migrate the shared implementation only as needed,
-without creating a second loader or device-specific processing pipelines.
+contracts behind these APIs. Canonical implementation ownership has already
+moved from `Shared`/`Performance` into `io`, `processing`, `settings`, `exports`
+and `workers`; preserve compatibility aliases. Finish profile-aware production
+integration without creating a second loader or device-specific pipelines.
 
 | Component | Responsibility and extension boundary |
 | --- | --- |

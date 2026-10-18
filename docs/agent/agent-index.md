@@ -35,6 +35,7 @@ shell-specific setup is needed.
 | Removed-electrode auto-detection thresholds, QC calibration, or accuracy testing | `legacy-boundary-review` | `docs/agent/quality/removed-electrode-detection-calibration.md`; `docs/agent/architecture/preprocessing-contract.md` |
 | Kurtosis screening, QC-16 decisions, or corroborator calibration | `legacy-boundary-review` | `docs/agent/quality/kurtosis-screening-calibration.md`; `docs/agent/architecture/preprocessing-contract.md` |
 | BDF loading, memmap paths, EXG typing | `legacy-boundary-review` + `project-path-audit` | `docs/agent/architecture/eeg-loading-contract.md` |
+| Hardware profiles, montages, composable processing, FPVS Studio interoperability | `project-path-audit` plus processing/GUI skills for changed boundaries | `docs/agent/architecture/hardware-pipeline-studio-roadmap.md`; `docs/agent/architecture/eeg-loading-contract.md`; `docs/agent/architecture/preprocessing-contract.md`; `docs/agent/architecture/project-io.md` |
 | Post-processing, FFT crop, or Excel export behavior | `legacy-boundary-review` | `docs/agent/architecture/post-processing-export-contract.md`; `docs/agent/architecture/fft-crop-method.md` |
 | Project manifests, project roots, file dialogs, exports, imports | `project-path-audit` | `docs/agent/architecture/project-io.md` |
 | Publication figure generation, `.png`/`.pdf` outputs, 600 dpi, figure typography | `project-path-audit` | `docs/agent/quality/figure-generation.md` |
@@ -71,9 +72,12 @@ fallback), or the no-offscreen-Qt rule.
 
 ## Execution Plans
 
-- For v3 stabilization, default-tool cleanup, UX identity, packaging, or
-  release work, read
-  `docs/agent/exec-plans/active/v3-release-readiness.md` first.
+- For release work, use
+  `docs/agent/exec-plans/active/v3-release-readiness.md` for the published v3.0.0
+  evidence and pending human acceptance, not as an instruction to republish v3.
+- For acquisition/montage, pipeline composition, or Studio integration, start
+  with `docs/agent/architecture/hardware-pipeline-studio-roadmap.md`, then the
+  matching active plan. Current support and future targets must stay distinct.
 - Active plans live in `docs/agent/exec-plans/active/`; read them before
   changing the covered area.
 - Future plans live in `docs/agent/exec-plans/future/`; read them only when

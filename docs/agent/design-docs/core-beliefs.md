@@ -14,5 +14,12 @@
   belong only at unavoidable packaging or system-integration boundaries.
 - Processing pipeline changes require contract documentation and targeted tests
   before implementation.
+- Separate hardware, montage, format, and event interpretation from shared
+  processing. Extend explicit profiles and capability contracts rather than
+  copying the pipeline for each device.
+- Future modular processing and full Studio compatibility are acceptance goals,
+  not evidence of current support. Follow the
+  [shared roadmap](../architecture/hardware-pipeline-studio-roadmap.md) and keep
+  unresolved acquisition, method, and interoperability gaps visible.
 - GUI changes should improve usability without making processing behavior less
   inspectable or harder to test.
