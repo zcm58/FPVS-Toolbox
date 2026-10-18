@@ -3,7 +3,7 @@ name: Windows release acceptance
 on:
   workflow_dispatch:
   push:
-    branches: ["codex/v3-release"]
+    branches: ["main"]
     paths:
       - "src/**"
       - "scripts/packaging/**"

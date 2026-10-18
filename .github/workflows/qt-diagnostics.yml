@@ -3,7 +3,7 @@ name: Isolated Qt diagnostics
 on:
   workflow_dispatch:
   push:
-    branches: ["codex/v3-release"]
+    branches: ["main"]
     paths:
       - ".github/workflows/qt-diagnostics.yml"
       - ".agents/scripts/ci_qt_diagnostics.py"

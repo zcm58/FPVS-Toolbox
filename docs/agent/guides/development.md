@@ -3,6 +3,13 @@
 Use this page for local setup, release notes, and validation commands that are
 not part of the end-user documentation.
 
+## Main branch
+
+`main` is the default development branch and contains the consolidated v3
+release work. The retired development branches were removed on 2026-10-18;
+release tags remain available. Start future changes from `main`. Documentation,
+Windows packaging, and isolated Qt workflow branch filters now target `main`.
+
 ## Local Environment
 
 Development and source execution may occur on Windows 11 or CachyOS (Arch

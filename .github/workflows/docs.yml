@@ -2,7 +2,7 @@ name: Build and publish user documentation
 
 on:
   push:
-    branches: [main, codex/v3-release]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -37,7 +37,7 @@ jobs:
         if: >-
           github.repository == 'zcm58/FPVS-Toolbox' &&
           github.event.repository.private == false &&
-          (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/codex/v3-release')
+          github.ref == 'refs/heads/main'
         uses: actions/upload-pages-artifact@v4
         with:
           path: site
@@ -46,7 +46,7 @@ jobs:
     if: >-
       github.repository == 'zcm58/FPVS-Toolbox' &&
       github.event.repository.private == false &&
-      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/codex/v3-release')
+      github.ref == 'refs/heads/main'
     needs: validate
     runs-on: ubuntu-latest
     timeout-minutes: 10
