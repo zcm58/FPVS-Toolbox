@@ -118,6 +118,81 @@ def test_atomic_write_failure_keeps_prior_destination_and_cleans_staging(tmp_pat
     assert list(tmp_path.iterdir()) == [target]
 
 
+def _publish_retrying_json(target: Path, value: dict, writer: str) -> None:
+    if writer == "manifest":
+        from Main_App.projects.manifest_store import project_manifest_transaction
+
+        with project_manifest_transaction(target) as transaction:
+            transaction.write(value)
+    else:
+        from Main_App.processing.condition_interpolation_state import atomic_json
+
+        atomic_json(target, value)
+
+
+@pytest.mark.parametrize("writer", ["manifest", "condition_interpolation"])
+@pytest.mark.parametrize("failed_attempts", [1, 5])
+def test_json_publication_recovers_from_brief_permission_locks(tmp_path, monkeypatch, writer, failed_attempts):
+    from Main_App.io import atomic_write as module
+
+    target = tmp_path / "state.json"
+    before = b'{"preserved": true}'
+    published = {"complete": [1, 2, 3]}
+    target.write_bytes(before)
+    original_replace = module.os.replace
+    attempts = []
+    delays = []
+
+    def locked_then_available(source, destination):
+        attempts.append(source)
+        assert destination == target
+        assert source.parent == target.parent
+        assert json.loads(source.read_bytes()) == published
+        assert target.read_bytes() == before
+        if len(attempts) <= failed_attempts:
+            raise PermissionError("temporary scanner lock")
+        original_replace(source, destination)
+
+    monkeypatch.setattr(module.os, "replace", locked_then_available)
+    monkeypatch.setattr(module.time, "sleep", delays.append)
+    _publish_retrying_json(target, published, writer)
+    assert len(attempts) == failed_attempts + 1
+    assert len(set(attempts)) == 1
+    assert delays == [0.01, 0.02, 0.05, 0.1, 0.1][:failed_attempts]
+    assert json.loads(target.read_bytes()) == published
+    assert not list(tmp_path.glob("*.tmp"))
+
+
+@pytest.mark.parametrize("writer", ["manifest", "condition_interpolation"])
+@pytest.mark.parametrize("failure", [PermissionError("persistent lock"), OSError("disk publication failed")])
+def test_json_publication_failure_is_bounded_preserves_target_and_cleans_staging(tmp_path, monkeypatch, writer, failure):
+    from Main_App.io import atomic_write as module
+
+    target = tmp_path / "state.json"
+    before = b'{"preserved": true}'
+    target.write_bytes(before)
+    attempts = []
+    delays = []
+
+    def denied(source, destination):
+        attempts.append(source)
+        assert destination == target
+        assert source.is_file()
+        assert target.read_bytes() == before
+        raise failure
+
+    monkeypatch.setattr(module.os, "replace", denied)
+    monkeypatch.setattr(module.time, "sleep", delays.append)
+    with pytest.raises(type(failure)) as error:
+        _publish_retrying_json(target, {"must_not_publish": True}, writer)
+    assert error.value is failure
+    permission_failure = isinstance(failure, PermissionError)
+    assert len(attempts) == (6 if permission_failure else 1)
+    assert delays == ([0.01, 0.02, 0.05, 0.1, 0.1] if permission_failure else [])
+    assert target.read_bytes() == before
+    assert not list(tmp_path.glob("*.tmp"))
+
+
 @pytest.mark.parametrize("kind", ["hardlink", "symlink"])
 def test_run_log_rejects_linked_outside_file(tmp_path, kind):
     from Main_App.processing.processing_ledger import append_run_log, runs_path

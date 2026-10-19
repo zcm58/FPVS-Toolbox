@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import tempfile
 
+from Main_App.io.atomic_write import replace_with_retry
 from Main_App.projects import project_manifest_transaction
 
 STATE_KEY = "condition_electrode_interpolation"
@@ -199,7 +200,7 @@ def atomic_json(path: Path, value: object) -> None:
             json.dump(value, stream, ensure_ascii=False, indent=2, allow_nan=False)
             stream.flush()
             os.fsync(stream.fileno())
-        os.replace(temporary, path)
+        replace_with_retry(temporary, path)
         temporary = None
     finally:
         if temporary is not None:

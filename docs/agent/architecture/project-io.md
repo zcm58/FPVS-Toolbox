@@ -116,6 +116,13 @@ the manifest. Failed writes/replacements preserve the preceding manifest and
 remove the temporary file. Windows replacement retries cover brief scanner
 locks and propagate persistent failure.
 
+`Main_App.io.atomic_write.replace_with_retry` owns the opt-in replacement retry
+policy shared by manifests and condition-interpolation JSON artifacts. It retries
+only permission failures, with six attempts and 0.28 seconds of total scheduled
+delay; other I/O errors propagate immediately. Each caller still owns its
+same-directory staging, cleanup, and synchronization. Other atomic writers do
+not acquire this retry policy implicitly.
+
 `Project.save` reconciles newer disk geometry and worker-authored tool metadata
 inside this transaction. Its existing explicit tool-namespace update policy
 is unchanged. Dataset exclusion revisions still reject stale edits instead of

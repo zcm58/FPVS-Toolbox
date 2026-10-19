@@ -17,6 +17,7 @@ from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 
+from Main_App.io.atomic_write import replace_with_retry
 from Main_App.io.safe_file import open_regular_file, regular_file_info
 
 _locks: dict[Path, threading.RLock] = {}
@@ -147,13 +148,4 @@ class ManifestTransaction:
 
 def _replace_manifest(temporary: Path, target: Path) -> None:
     """Allow brief Windows scanner locks; propagate a persistent failure."""
-
-    for attempt, delay in enumerate((0.0, 0.01, 0.02, 0.05, 0.1, 0.1)):
-        if delay:
-            time.sleep(delay)
-        try:
-            os.replace(temporary, target)
-            return
-        except PermissionError:
-            if attempt == 5:
-                raise
+    replace_with_retry(temporary, target)

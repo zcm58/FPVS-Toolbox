@@ -7,7 +7,26 @@ from contextlib import contextmanager
 import os
 from pathlib import Path
 import tempfile
+import time
 from typing import IO, Any
+
+
+def replace_with_retry(temporary: Path, target: Path) -> None:
+    """Retry brief file-lock permission failures, then propagate the last error.
+
+    Opt-in callers retain their own staging cleanup and synchronization. Six
+    attempts wait at most 0.28 seconds in total, matching manifest publication.
+    Other I/O failures propagate immediately.
+    """
+    for attempt, delay in enumerate((0.0, 0.01, 0.02, 0.05, 0.1, 0.1)):
+        if delay:
+            time.sleep(delay)
+        try:
+            os.replace(temporary, target)
+            return
+        except PermissionError:
+            if attempt == 5:
+                raise
 
 
 @contextmanager
