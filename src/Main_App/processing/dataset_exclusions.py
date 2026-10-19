@@ -8,6 +8,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+
+from Main_App.io.file_filters import is_eeg_recording_file
 from typing import Any
 
 from Main_App.projects import (
@@ -128,7 +130,7 @@ def _snapshot_from_manifest(root: Path, content: bytes, manifest: dict, index):
             if not folder.is_dir():
                 continue
             for path in sorted(folder.iterdir()):
-                if not path.is_file() or path.suffix.casefold() != ".bdf":
+                if not path.is_file() or not is_eeg_recording_file(path):
                     continue
                 pid = infer_raw_participant_id(path)
                 key = pid.casefold()

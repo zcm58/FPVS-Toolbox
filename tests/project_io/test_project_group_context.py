@@ -148,7 +148,7 @@ def test_group_context_rejects_case_insensitive_participant_duplicates(
     ("raw_file", "message"),
     [
         pytest.param("Raw/Other/P01.bdf", "outside its assigned group", id="outside"),
-        pytest.param("Raw/Control/P01.txt", "must be a .bdf", id="not-bdf"),
+        pytest.param("Raw/Control/P01.txt", "must be a supported EEG recording", id="not-bdf"),
     ],
 )
 def test_group_context_rejects_invalid_registered_raw_source(

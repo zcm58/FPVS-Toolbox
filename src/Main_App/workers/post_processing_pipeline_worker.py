@@ -861,6 +861,22 @@ class PostProcessingPipelineWorker(QObject):
         )
 
     def _run_source_maps(self, project_root: Path) -> list[PostProcessingStepResult]:
+        from Main_App.processing.hardware_capabilities import spatial_tool_unavailable_reason
+
+        unavailable_reason = spatial_tool_unavailable_reason(self._project, "LORETA Visualizer")
+        if unavailable_reason:
+            self._emit_progress(unavailable_reason)
+            completed_before = POST_PROCESSING_PHASE_COUNT - len(SOURCE_OUTPUT_MODES)
+            steps = []
+            for index, mode in enumerate(SOURCE_OUTPUT_MODES, start=1):
+                self._artifact_targets.pop(mode, None)
+                self._artifact_archives.pop(mode, None)
+                self._emit_phase_progress(
+                    _SOURCE_PHASE_BY_MODE[mode], completed_before + index, unavailable_reason,
+                )
+                steps.append(PostProcessingStepResult(mode, True, unavailable_reason))
+            return steps
+
         if self._is_repeated_session_project():
             self._emit_progress(_REPEATED_SESSION_SOURCE_SKIP_MESSAGE)
             steps: list[PostProcessingStepResult] = []
@@ -923,6 +939,12 @@ class PostProcessingPipelineWorker(QObject):
         project_root: Path,
         mode: str,
     ) -> PostProcessingStepResult:
+        from Main_App.processing.hardware_capabilities import spatial_tool_unavailable_reason
+
+        unavailable_reason = spatial_tool_unavailable_reason(self._project, "LORETA Visualizer")
+        if unavailable_reason:
+            return PostProcessingStepResult(mode, True, unavailable_reason)
+
         if mode == "l2_mne_source_psd":
             label = "Hauk-informed time-domain L2-MNE source maps"
             artifact_id = mode

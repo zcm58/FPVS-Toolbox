@@ -7,6 +7,8 @@ import math
 import re
 from dataclasses import dataclass
 from pathlib import Path
+
+from Main_App.io.file_filters import is_eeg_recording_file
 from typing import Any, Mapping
 
 from .grouping import (
@@ -358,8 +360,8 @@ def normalize_project_recordings(
         if raw_file_value is None or not str(raw_file_value).strip():
             raise RecordingConfigurationError(f"Recording '{recording_id}' requires a nonblank raw_file.")
         raw_file = _resolve_project_path(root, raw_file_value)
-        if raw_file.suffix.casefold() != ".bdf":
-            raise RecordingConfigurationError(f"Recording '{recording_id}' raw_file must be a .bdf file: {raw_file}")
+        if not is_eeg_recording_file(raw_file):
+            raise RecordingConfigurationError(f"Recording '{recording_id}' raw_file must be a supported EEG recording (.bdf, .vhdr, .bvrh): {raw_file}")
         source_root = Path(source["raw_input_folder"]).resolve(strict=False)
         if raw_file.parent != source_root:
             raise RecordingConfigurationError(

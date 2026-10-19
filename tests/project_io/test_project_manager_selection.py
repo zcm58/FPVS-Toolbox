@@ -13,6 +13,8 @@ from Main_App.gui.op_guard import OpGuard
 from Main_App.projects.grouping import (
     GroupConfigurationError, project_group_context, validate_group_folder_name,
 )
+from Main_App.projects.fpvs_config_import import CONFIG_SUFFIX, FPVSConfigImportError
+from Main_App.projects.hardware import confirm_hardware_selection
 from Main_App.projects.preprocessing_settings import new_project_preprocessing_settings
 from Main_App.projects.project import Project
 from Main_App.projects.project_metadata import ProjectMetadata, read_project_metadata
@@ -25,7 +27,7 @@ def workflow() -> dict:
     source = ast.parse(path.read_text(encoding="utf-8"))
     names = {
         "_new_project_directory", "new_project", "_select_project_metadata",
-        "_open_selected_project", "openProjectPath", "loadProject",
+        "_open_selected_project", "openProjectPath", "loadProject", "new_project_from_fpvs_config",
     }
     methods = [node for node in source.body
                if isinstance(node, ast.FunctionDef) and node.name in names]
@@ -37,6 +39,9 @@ def workflow() -> dict:
         "GroupConfigurationError": GroupConfigurationError,
         "project_group_context": project_group_context,
         "new_project_preprocessing_settings": new_project_preprocessing_settings,
+        "confirm_hardware_selection": confirm_hardware_selection,
+        "CONFIG_SUFFIX": CONFIG_SUFFIX, "FPVSConfigImportError": FPVSConfigImportError,
+        "choose_new_project_hardware": lambda _host, settings: settings,
         "logger": logging.getLogger("project_manager_test"),
         "FLAT_PROJECT_STRUCTURE": "flat", "REPEATED_SESSION_PROJECT_STRUCTURE": "repeated",
         "QMessageBox": SimpleNamespace(
@@ -73,6 +78,28 @@ def test_new_project_rejects_unsafe_name_before_followup(workflow, tmp_path, nam
     assert list(root.iterdir()) == []
     assert workflow["messages"][0][0] == "Invalid Project Name"
     assert not (tmp_path / "Outside").exists()
+
+
+@pytest.mark.parametrize("failure", [OSError("Cannot save project"), ValueError("Invalid hardware policy")])
+def test_studio_import_hardware_save_error_keeps_current_project(workflow, tmp_path, failure):
+    current_project = object()
+    loaded = []
+    host = SimpleNamespace(currentProject=current_project, loadProject=loaded.append)
+    workflow["ensure_projects_root"] = lambda _parent: tmp_path
+    workflow["QFileDialog"] = SimpleNamespace(getOpenFileName=lambda *_: (str(tmp_path / "study.fpvsconfig"), ""))
+    workflow["choose_new_project_hardware"] = lambda _host, settings: confirm_hardware_selection(
+        settings, "brain_products", confirmed_change=True,
+    )
+
+    def fail_save():
+        raise failure
+
+    imported_project = SimpleNamespace(preprocessing={}, update_preprocessing=lambda _settings: None, save=fail_save)
+    workflow["create_project_from_fpvs_config"] = lambda *_: imported_project
+    assert workflow["new_project_from_fpvs_config"](host) is None
+    assert host.currentProject is current_project
+    assert loaded == []
+    assert workflow["messages"] == [("Import Failed", str(failure))]
 
 
 def test_new_project_safe_name_preserves_settings_and_input(workflow, tmp_path):

@@ -49,6 +49,12 @@ FULL_FFT_PROVENANCE_METHOD_VERSION = (
 REPEATED_FULL_FFT_PROVENANCE_METHOD_VERSION = (
     "project_full_fft_provenance_recording_session_v3_biosemi64_frequency_protocol"
 )
+RECORDED_FULL_FFT_PROVENANCE_METHOD_VERSION = (
+    "project_full_fft_provenance_v3_recorded_spectral_cohort_v1"
+)
+REPEATED_RECORDED_FULL_FFT_PROVENANCE_METHOD_VERSION = (
+    "project_full_fft_provenance_recording_session_v3_recorded_spectral_cohort_v1"
+)
 FULL_FFT_PROVENANCE_MANIFEST_PATH = (
     "tools",
     "processing",
@@ -362,9 +368,15 @@ def _completed_ledger_state(
 def _validated_geometry_identity(value: object) -> dict[str, object]:
     if not isinstance(value, Mapping):
         raise FullFftProvenanceError(
-            "Active processed workbooks have no BioSemi64 geometry identity. "
+            "Active processed workbooks have no EEG geometry identity. "
             "Reprocess the EEG before post-processing or analysis."
         )
+    if value.get("hardware_platform") == "brain_products":
+        from Main_App.processing.recorded_cohort_geometry import validate_recorded_spectral_geometry_identity
+        try:
+            return validate_recorded_spectral_geometry_identity(value)
+        except (TypeError, ValueError) as exc:
+            raise FullFftProvenanceError(f"Invalid recorded EEG geometry: {exc}") from exc
     retained = value.get("retained_scalp_channels")
     if not isinstance(retained, Sequence) or isinstance(retained, (str, bytes)):
         raise FullFftProvenanceError(
@@ -395,7 +407,7 @@ def _active_geometry_identity(
     *,
     ledger_filter_applied: bool,
 ) -> dict[str, object]:
-    """Require one current geometry across every active workbook owner."""
+    """Require compatible scalp/policy identity while preserving digitization."""
 
     if not ledger_filter_applied:
         raise FullFftProvenanceError(
@@ -410,18 +422,20 @@ def _active_geometry_identity(
             raw_preprocessing if isinstance(raw_preprocessing, Mapping) else {}
         )
         montage_id = str(preprocessing.get("electrode_montage") or "")
-        mapping_profile = preprocessing.get("electrode_mapping_profile")
-        expected_limit = int(preprocessing.get("max_chan_idx_keep") or 64)
-        expected_count = expected_limit if 0 < expected_limit < 64 else 64
-        project_geometry = biosemi64_geometry_identity(
-            electrode_mapping_profile=mapping_profile,
-            retained_channels=BIOSEMI64_CHANNELS[:expected_count],
-        )
+        brain_products = preprocessing.get("hardware_platform") == "brain_products"
+        if not brain_products:
+            mapping_profile = preprocessing.get("electrode_mapping_profile")
+            expected_limit = int(preprocessing.get("max_chan_idx_keep") or 64)
+            expected_count = expected_limit if 0 < expected_limit < 64 else 64
+            project_geometry = biosemi64_geometry_identity(
+                electrode_mapping_profile=mapping_profile,
+                retained_channels=BIOSEMI64_CHANNELS[:expected_count],
+            )
     except (TypeError, ValueError) as exc:
         raise FullFftProvenanceError(
             f"Project electrode geometry settings are invalid: {exc}"
         ) from exc
-    if montage_id != BIOSEMI64_MONTAGE_ID:
+    if not brain_products and montage_id != BIOSEMI64_MONTAGE_ID:
         raise FullFftProvenanceError(
             f"Unsupported project electrode montage {montage_id!r}; only "
             f"{BIOSEMI64_MONTAGE_ID!r} is valid for current processing."
@@ -452,6 +466,38 @@ def _active_geometry_identity(
         )
         validated.append((processing_id, geometry))
 
+    if not validated:
+        raise FullFftProvenanceError(
+            "No active processing geometry could be matched to FullFFT workbooks."
+        )
+    if brain_products:
+        from Main_App.processing.recorded_cohort_geometry import recorded_cohort_geometry_identity
+
+        if any(geometry.get("hardware_platform") != "brain_products" or geometry["montage_id"] != montage_id
+               for _processing_id, geometry in validated):
+            raise FullFftProvenanceError("Processed geometry differs from the project's hardware or montage. Reprocess the EEG.")
+        policies = {
+            (rows_by_id[processing_id].get("processing_fingerprint_version"),
+             rows_by_id[processing_id].get("processing_fingerprint"))
+            for processing_id, _geometry in validated
+        }
+        if len(policies) != 1:
+            raise FullFftProvenanceError(
+                "Active recorded EEG workbooks use different processing policies. "
+                "Reprocess them with the same project settings before spectral analysis."
+            )
+        policy_version, policy_fingerprint = next(iter(policies))
+        try:
+            return recorded_cohort_geometry_identity(
+                dict(validated), source_identity_kind=identity_key,
+                processing_identity={
+                    "processing_fingerprint_version": policy_version,
+                    "processing_fingerprint": policy_fingerprint,
+                },
+            )
+        except (TypeError, ValueError) as exc:
+            raise FullFftProvenanceError(f"Incompatible recorded EEG cohort: {exc}") from exc
+
     geometry_fingerprints = {
         str(value["geometry_identity_fingerprint"])
         for _processing_id, value in validated
@@ -460,10 +506,6 @@ def _active_geometry_identity(
         raise FullFftProvenanceError(
             "Active FullFFT workbooks contain mixed electrode geometries or retained "
             "scalp sets. Reprocess them under one project geometry before analysis."
-        )
-    if not validated:
-        raise FullFftProvenanceError(
-            "No active processing geometry could be matched to FullFFT workbooks."
         )
     for processing_id, geometry in validated:
         if geometry["electrode_mapping_profile"] != project_geometry["electrode_mapping_profile"]:
@@ -903,7 +945,7 @@ def require_current_project_workbook_geometry(
     *,
     dataset_index: ProjectDatasetIndex | None = None,
 ) -> dict[str, object]:
-    """Require one current BioSemi64 geometry for active processed workbooks.
+    """Require current compatible geometry for active processed workbooks.
 
     This check deliberately does not require a saved neutral FullFFT provenance
     record.  It is the processing-time gate for consumers, such as final
@@ -1048,6 +1090,8 @@ def _record_from_metadata(
     if method_version not in {
         FULL_FFT_PROVENANCE_METHOD_VERSION,
         REPEATED_FULL_FFT_PROVENANCE_METHOD_VERSION,
+        RECORDED_FULL_FFT_PROVENANCE_METHOD_VERSION,
+        REPEATED_RECORDED_FULL_FFT_PROVENANCE_METHOD_VERSION,
     }:
         raise FullFftProvenanceStaleError(
             "The saved neutral FullFFT provenance uses an unsupported geometry "
@@ -1072,6 +1116,20 @@ def _record_from_metadata(
         sources = metadata["source_workbooks"]
         fingerprints = metadata["fingerprints"]
         geometry = _validated_geometry_identity(metadata.get("geometry"))
+        recorded_method = method_version in {
+            RECORDED_FULL_FFT_PROVENANCE_METHOD_VERSION,
+            REPEATED_RECORDED_FULL_FFT_PROVENANCE_METHOD_VERSION,
+        }
+        from Main_App.processing.recorded_cohort_geometry import RECORDED_COHORT_GEOMETRY_VERSION
+        if recorded_method != (geometry.get("geometry_version") == RECORDED_COHORT_GEOMETRY_VERSION):
+            raise ValueError("FullFFT method and geometry schema disagree")
+        if geometry.get("hardware_platform") == "brain_products" and not recorded_method:
+            raise ValueError("Recorded EEG FullFFT requires per-source cohort geometry")
+        if recorded_method and (
+            (method_version == REPEATED_RECORDED_FULL_FFT_PROVENANCE_METHOD_VERSION)
+            != (geometry["source_identity_kind"] == "recording_id")
+        ):
+            raise ValueError("FullFFT method and recorded-cohort source identity kind disagree")
         if not isinstance(grid, Mapping):
             raise TypeError("grid")
         if not isinstance(sources, Sequence) or isinstance(sources, (str, bytes)):
@@ -1200,13 +1258,19 @@ def write_project_full_fft_provenance(
             "A FullFFT workbook changed while provenance was being built. "
             "Rerun post-processing after workbook writes have finished."
         )
+    if snapshot.geometry_identity.get("hardware_platform") == "brain_products":
+        method_version = (
+            REPEATED_RECORDED_FULL_FFT_PROVENANCE_METHOD_VERSION if index.is_repeated_session
+            else RECORDED_FULL_FFT_PROVENANCE_METHOD_VERSION
+        )
+    else:
+        method_version = (
+            REPEATED_FULL_FFT_PROVENANCE_METHOD_VERSION if index.is_repeated_session
+            else FULL_FFT_PROVENANCE_METHOD_VERSION
+        )
     metadata: dict[str, object] = {
         "schema_version": FULL_FFT_PROVENANCE_SCHEMA_VERSION,
-        "method_version": (
-            REPEATED_FULL_FFT_PROVENANCE_METHOD_VERSION
-            if index.is_repeated_session
-            else FULL_FFT_PROVENANCE_METHOD_VERSION
-        ),
+        "method_version": method_version,
         "status": "current",
         "saved_at": datetime.now(UTC).isoformat(),
         "source_sheet": FULL_FFT_SHEET_NAME,

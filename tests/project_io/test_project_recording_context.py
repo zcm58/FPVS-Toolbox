@@ -607,7 +607,7 @@ def test_interpolation_burden_review_decision_survives_project_reload(
             lambda manifest: manifest["recordings"]["P01__luteal"].update(
                 raw_file="Raw/Birth Control/Luteal/P01_BC_L.txt"
             ),
-            "must be a .bdf",
+            "must be a supported EEG recording",
             id="raw-file-not-bdf",
         ),
         pytest.param(

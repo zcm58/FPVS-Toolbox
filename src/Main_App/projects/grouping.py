@@ -6,6 +6,8 @@ import json
 import re
 from dataclasses import dataclass
 from pathlib import Path, PureWindowsPath
+
+from Main_App.io.file_filters import is_eeg_recording_file
 from typing import Any, Iterable, Mapping
 
 _INVALID_WINDOWS_FOLDER_CHARS = frozenset('<>:"/\\|?*')
@@ -257,9 +259,9 @@ def normalize_project_participants(
                 raise GroupConfigurationError(
                     f"Participant '{participant_id}' has an invalid raw_file."
                 ) from exc
-            if raw_path.suffix.casefold() != ".bdf":
+            if not is_eeg_recording_file(raw_path):
                 raise GroupConfigurationError(
-                    f"Participant '{participant_id}' raw_file must be a .bdf file: "
+                    f"Participant '{participant_id}' raw_file must be a supported EEG recording (.bdf, .vhdr, .bvrh): "
                     f"{raw_path}"
                 )
             if groups:

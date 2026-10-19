@@ -24,6 +24,8 @@ from Main_App.io.eeg_geometry import (
     BIOSEMI64_CHANNELS,
     biosemi64_geometry_identity,
 )
+from Main_App.io.recorded_eeg_geometry import read_raw_eeg_geometry, validate_raw_recorded_geometry
+from Main_App.processing.acquisition_policy import brain_products_policy, is_brain_products
 from Main_App.io.load_utils import BDF_RECORDING_NOT_STARTED_REASON, BdfPreflightInfo
 from Main_App.processing.processing_controller import RawFileInfo
 from Main_App.processing.preflight_qc_cache import (
@@ -831,6 +833,7 @@ def _load_raw_for_preflight(
         stim_channel=_configured_stim_channel(settings),
         electrode_mapping_profile=settings.get("electrode_mapping_profile"),
         electrode_montage=settings.get("electrode_montage"),
+        **({"acquisition_settings": settings} if is_brain_products(settings) else {}),
         **({"preload_in_memory": True} if settings.get("experimental_ram_preload") is True else {}),
     )
 
@@ -840,6 +843,8 @@ class _PreflightQcCancelled(RuntimeError):
 
 
 def _configured_ref_pair(settings: Mapping[str, Any]) -> tuple[str, str]:
+    if is_brain_products(settings):
+        return ("", "")
     return (
         str(
             settings.get("ref_channel1")
@@ -862,6 +867,7 @@ def _configured_stim_channel(settings: Mapping[str, Any]) -> str:
 
 def _find_preflight_events(raw: Any, *, stim_channel: str) -> tuple[np.ndarray, str]:
     from Main_App.io.bdf_preload import owned_bdf_lazy_read
+    brain_products = (read_raw_eeg_geometry(raw) or {}).get("hardware_platform") == "brain_products"
 
     try:
         with owned_bdf_lazy_read(raw, stim_channel=stim_channel, status_only=True):
@@ -870,9 +876,12 @@ def _find_preflight_events(raw: Any, *, stim_channel: str) -> tuple[np.ndarray, 
                 stim_channel=stim_channel,
                 shortest_event=1,
                 verbose=False,
+                **({"initial_event": True, "consecutive": True} if brain_products else {}),
             )
         source = "stim"
     except (RuntimeError, ValueError):
+        if brain_products:
+            raise
         events, _event_ids = mne.events_from_annotations(raw, verbose=False)
         source = "annotations"
     events_array = np.asarray(events, dtype=np.int64)
@@ -883,9 +892,11 @@ def _find_preflight_events(raw: Any, *, stim_channel: str) -> tuple[np.ndarray, 
     return events_array, source
 
 
-def _configured_biosemi64_channel_limit(settings: Mapping[str, Any]) -> int:
+def _configured_biosemi64_channel_limit(settings: Mapping[str, Any]) -> int | None:
     """Resolve the project-owned canonical first-N scalp limit."""
 
+    if is_brain_products(settings):
+        return brain_products_policy(settings)["max_idx_keep"]
     raw_limit = settings.get("max_idx_keep")
     if raw_limit is None:
         raw_limit = settings.get("max_chan_idx_keep")
@@ -912,6 +923,13 @@ def _preflight_scalp_picks(
     settings: Mapping[str, Any],
 ) -> tuple[tuple[int, ...], tuple[str, ...]]:
     stim_channel = _configured_stim_channel(settings)
+    if is_brain_products(settings):
+        geometry = validate_raw_recorded_geometry(raw)
+        retained = geometry["retained_scalp_channels"]
+        limit = _configured_biosemi64_channel_limit(settings)
+        retained = retained[:limit] if limit is not None else retained
+        picks = tuple(raw.ch_names.index(name) for name in retained)
+        return picks, tuple(retained)
     ref_channels = set(_configured_ref_pair(settings))
     retained_scalp = set(
         BIOSEMI64_CHANNELS[:_configured_biosemi64_channel_limit(settings)]
@@ -1250,6 +1268,8 @@ def _preflight_cache_settings(
             raw_protocol
         ).to_manifest()
     payload["analysis"] = analysis_payload
+    if is_brain_products(settings):
+        payload["acquisition_policy"] = brain_products_policy(settings)
     payload["channel_subset_first_n"] = _configured_biosemi64_channel_limit(
         settings
     )
@@ -1352,7 +1372,7 @@ def _preflight_cache_method(
         "transient_tail_policy": PREFLIGHT_QC_TRANSIENT_TAIL_POLICY,
         "transient_overlap_counting": "union_coverage_not_independent_events",
         "condition_completion_policy": "locked_fft_span_v1",
-        "geometry": biosemi64_geometry_identity(
+        "geometry": brain_products_policy(settings) if is_brain_products(settings) else biosemi64_geometry_identity(
             electrode_mapping_profile=settings.get("electrode_mapping_profile"),
             retained_channels=BIOSEMI64_CHANNELS[:channel_limit],
         ),
@@ -1373,6 +1393,8 @@ def _preflight_file_identity(
         "mtime_ns": int(stat.st_mtime_ns),
         "ctime_ns": int(stat.st_ctime_ns),
     }
+    from Main_App.io.recording_sources import companion_identity
+    payload.update(companion_identity(file_path))
     if recording_id:
         payload["recording_id"] = recording_id
     return payload
@@ -1707,6 +1729,10 @@ def _scan_one_preflight_file_v2(
     visit_index = info.visit_index
     timings_ms: dict[str, float] = {}
     file_qc_settings = dict(qc_settings)
+    if is_brain_products(qc_settings):
+        raw_config = _raw_channel_config_from_settings(qc_settings)
+        if raw_config.raw_signal_screening_enabled or raw_config.auto_detect_removed_electrodes:
+            raise ValueError("BioSemi raw-signal/removed-electrode screening is not qualified for Brain Products montages.")
     raw_spectral_screening = normalize_raw_spectral_screening_settings(
         qc_settings.get("raw_spectral_screening")
     )
@@ -1767,6 +1793,7 @@ def _scan_one_preflight_file_v2(
         stim_channel=_configured_stim_channel(qc_settings),
         electrode_mapping_profile=qc_settings.get("electrode_mapping_profile"),
         electrode_montage=qc_settings.get("electrode_montage"),
+        **({"acquisition_settings": qc_settings} if is_brain_products(qc_settings) else {}),
     )
     raw = None
     context_entered = False
@@ -2247,7 +2274,7 @@ def _scan_one_preflight_file_v2(
             "spectral_lower_frequency_hz": lower_hz,
             "spectral_upper_frequency_hz": upper_hz,
             "timings_ms": dict(timings_ms),
-            "geometry": biosemi64_geometry_identity(
+            "geometry": validate_raw_recorded_geometry(raw) if is_brain_products(qc_settings) else biosemi64_geometry_identity(
                 electrode_mapping_profile=qc_settings.get(
                     "electrode_mapping_profile"
                 ),

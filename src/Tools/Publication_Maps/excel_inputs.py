@@ -8,6 +8,7 @@ from typing import Iterable
 
 import pandas as pd
 
+from Main_App.processing.hardware_capabilities import spatial_tool_unavailable_reason
 from Main_App.projects import (
     DatasetIndexError,
     GroupInfo,
@@ -59,6 +60,9 @@ def load_publication_dataset_index(
     """Load the shared index and bind managed input to the active project."""
 
     index = load_project_dataset_index(input_root)
+    unavailable_reason = spatial_tool_unavailable_reason(index.manifest or {}, "Scalp Maps")
+    if unavailable_reason:
+        raise DatasetIndexError(unavailable_reason)
     if project_root in (None, ""):
         return index
     expected_root = Path(project_root).expanduser().resolve(strict=False)

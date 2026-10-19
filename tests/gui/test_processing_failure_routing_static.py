@@ -17,6 +17,7 @@ import pytest
 
 from Main_App.gui.condition_input_model import validate_condition_rows
 from Main_App.gui.run_outcome_model import summarize_run
+from Main_App.io.file_filters import EEG_RECORDING_FILTER, is_eeg_recording_file
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -1011,6 +1012,9 @@ def _registration_validation_harness(tmp_path, *, mode="Batch", additions=True):
     )
     namespace = {
         "_ensure_removed_electrode_detection_choice_ready": lambda _: True,
+        "ensure_project_hardware_ready": lambda _host, _paths: True,
+        "is_eeg_recording_file": is_eeg_recording_file,
+        "HARDWARE_SETTINGS_KEYS": (),
         "Path": Path, "SimpleNamespace": SimpleNamespace, "logging": logging,
         "logger": logging.getLogger(__name__), "QMessageBox": messages,
         "prepare_raw_registration_review": Mock(return_value=proposal),
@@ -1108,12 +1112,33 @@ def test_no_new_recordings_continues_without_a_redundant_confirmation(tmp_path):
     assert timeline == ["preflight", "params", "commit", "plan"]
 
 
+@pytest.mark.parametrize("mode", ["Single", "Batch"])
+def test_hardware_confirmation_rebuilds_registration_against_saved_manifest(tmp_path, mode):
+    validate, host, initial, namespace, timeline, manifest = _registration_validation_harness(tmp_path, mode=mode)
+    refreshed = SimpleNamespace(**{**vars(initial), "manifest_sha256": "new-hardware-revision"})
+    namespace["prepare_raw_registration_review"].side_effect = [initial, refreshed]
+
+    def confirm_hardware(current_host, _paths):
+        current_host.currentProject.preprocessing.update(hardware_platform="brain_products", hardware_confirmed=True)
+        manifest.write_text(json.dumps({"preprocessing": current_host.currentProject.preprocessing}), encoding="utf-8")
+        return True
+
+    namespace["ensure_project_hardware_ready"] = confirm_hardware
+    assert validate(host)
+    assert namespace["prepare_raw_registration_review"].call_count == 2
+    namespace["commit_raw_registration_review"].assert_called_once_with(host.currentProject, refreshed)
+    assert namespace["validate_repeated_recording_sources_for_processing"].call_count == 2
+    assert timeline.index("commit") > timeline.index("confirm")
+
+
 def test_single_file_picker_stages_extra_file_without_confirming_or_saving(tmp_path):
     chosen = tmp_path / "P2.bdf"
     project = SimpleNamespace(groups_locked=True)
     stage = Mock(return_value=SimpleNamespace(files=(SimpleNamespace(path=chosen),)))
     namespace = {
         "Path": Path, "raw_selection_start_folder": lambda _: tmp_path,
+        "EEG_RECORDING_FILTER": EEG_RECORDING_FILTER,
+        "is_eeg_recording_file": is_eeg_recording_file,
         "QFileDialog": SimpleNamespace(getOpenFileName=lambda *_: (str(chosen), "")),
         "QMessageBox": Mock(), "prepare_raw_registration_review": stage,
         "raw_file_info_for_path": Mock(side_effect=AssertionError("Do not require registration just to select")),

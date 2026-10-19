@@ -11,6 +11,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 import hashlib
+import json
 import logging
 import os
 from pathlib import Path
@@ -40,8 +41,11 @@ def _path_key(path: Path | str) -> str:
 def _source_identity(path: Path) -> tuple:
     resolved = path.resolve(strict=True)
     stat = resolved.stat()
-    return (str(resolved), stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns,
-            stat.st_dev, stat.st_ino)
+    identity = (str(resolved), stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns,
+                stat.st_dev, stat.st_ino)
+    from Main_App.io.recording_sources import companion_identity
+    companions = companion_identity(path)
+    return (*identity, json.dumps(companions, sort_keys=True)) if companions else identity
 
 
 def _source_sha256(path: Path, should_cancel: Callable[[], bool]) -> str | None:
@@ -49,17 +53,34 @@ def _source_sha256(path: Path, should_cancel: Callable[[], bool]) -> str | None:
     if should_cancel():
         return None
     digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        while not should_cancel():
-            block = stream.read(_HASH_CHUNK_BYTES)
-            if not block:
-                return digest.hexdigest() if not should_cancel() else None
-            digest.update(block)
-    return None
+    from Main_App.io.recording_sources import recording_source_files
+    sources = recording_source_files(path)
+    for source in sources:
+        if len(sources) > 1:
+            digest.update(str(source.resolve()).encode())
+            digest.update(b"\0")
+            digest.update(str(source.stat().st_size).encode())
+            digest.update(b"\0")
+        with source.open("rb") as stream:
+            while True:
+                if should_cancel():
+                    return None
+                block = stream.read(_HASH_CHUNK_BYTES)
+                if not block:
+                    break
+                digest.update(block)
+    return digest.hexdigest() if not should_cancel() else None
 
 
 def _loader_settings(settings: Mapping[str, Any]) -> dict[str, Any]:
     """Match the kurtosis scanner's effective source-loading arguments."""
+    if settings.get("hardware_platform") == "brain_products":
+        return {
+            "first_n_channels": settings.get("max_idx_keep", settings.get("max_chan_idx_keep")),
+            "stim_channel": str(settings.get("stim_channel") or "Status"),
+            "electrode_montage": settings.get("electrode_montage", "recorded"),
+            "acquisition_settings": dict(settings),
+        }
     limit = settings.get("max_idx_keep")
     if limit is None:
         limit = settings.get("max_chan_idx_keep")
@@ -210,7 +231,9 @@ class QcSourcePrefetch:
             identity = _source_identity(entry.path)
             # BDF's packed 24-bit samples expand to float64. Four times the
             # complete source size conservatively covers the selected channels.
-            estimate = int(identity[1]) * 4
+            from Main_App.io.recording_sources import recording_source_files
+            estimate = (sum(item.stat().st_size for item in recording_source_files(entry.path)) * 8
+                        if entry.path.suffix.lower() in {".vhdr", ".bvrh"} else int(identity[1]) * 4)
             with self._condition:
                 available_budget = self._max_bytes - self._retained_bytes
             if self._ram_preload:

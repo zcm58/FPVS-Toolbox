@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 
 from Main_App.processing.roi_settings import build_roi_definition_snapshot
+from Main_App.processing.roi_coverage import recorded_montage_unavailable_roi_reasons
 from Tools.Stats.analysis.dv_policy_settings import (
     DVPolicySettings,
     FIXED_HARMONIC_INPUT_FREQUENCY_LIST,
@@ -742,6 +743,7 @@ def _prepare_fixed_predefined_bca_data(
                     provenance_enabled=provenance_map is not None,
                     excluded_electrodes_upper=cell_exclusions,
                     strict_source=final_coverage is not None,
+                    coverage_cell=coverage_cell if final_coverage is not None else None,
                 )
             elif final_coverage is None:
                 log_func(f"Missing file for {pid} {cond_name}: {file_path}")
@@ -927,6 +929,7 @@ def _aggregate_bca_sum_harmonics_for_all_rois(
     provenance_enabled: bool,
     excluded_electrodes_upper: Iterable[str] = (),
     strict_source: bool = False,
+    coverage_cell: Any = None,
 ) -> tuple[dict[str, float], dict[str, dict[str, object]]]:
     values = {roi_name: np.nan for roi_name in rois.keys()}
     provenance: dict[str, dict[str, object]] = {}
@@ -991,6 +994,7 @@ def _aggregate_bca_sum_harmonics_for_all_rois(
         .replace([np.inf, -np.inf], np.nan)
     )
     excluded = {str(electrode).strip().upper() for electrode in excluded_electrodes_upper}
+    unavailable_rois = recorded_montage_unavailable_roi_reasons(coverage_cell, rois)
     for roi_name, roi_channels in rois.items():
         roi_channel_names = [
             str(ch).strip().upper()
@@ -1003,6 +1007,16 @@ def _aggregate_bca_sum_harmonics_for_all_rois(
             raise RuntimeError(
                 f"ROI {roi_name!r} repeats an electrode and cannot be averaged."
             )
+        if roi_name in unavailable_rois:
+            log_func(f"ROI {roi_name} is unavailable for {file_path}: required electrodes were not recorded.")
+            if provenance_enabled:
+                provenance[roi_name] = _empty_fixed_provenance(file_path, row_label=roi_channel_names, col_label=cols_to_sum)
+                provenance[roi_name].update(
+                    roi_coverage_status="unavailable", expected_electrodes=roi_channel_names,
+                    excluded_electrodes=[], used_electrodes=[],
+                    decision_reason_codes=list(unavailable_rois[roi_name]),
+                )
+            continue
         missing_members = [
             channel for channel in roi_channel_names if channel not in numeric_bca.index
         ]

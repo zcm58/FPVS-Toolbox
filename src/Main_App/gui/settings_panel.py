@@ -222,6 +222,8 @@ class SettingsPanel(QWidget):
         super().__init__(parent)
         self.controller = controller
         self._build_ui()
+        from Main_App.gui.settings_hardware_controls import refresh_hardware_qc_controls
+        refresh_hardware_qc_controls(self)
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -542,6 +544,10 @@ class SettingsDialog(QDialog):
         self.condition_specific_interpolation_enabled_check.setEnabled(summed_bca_enabled)
         for edit in self.summed_bca_threshold_edits.values():
             edit.setEnabled(project_enabled)
+        if (hasattr(self, "hardware_platform_combo")
+                and self.hardware_platform_combo.currentData() == "brain_products"):
+            from Main_App.gui.settings_hardware_controls import refresh_hardware_qc_controls
+            refresh_hardware_qc_controls(self)
 
     def _init_beta_tools_page(self, tabs: QTabWidget) -> None:
         return settings_experimental_page.build_beta_tools_page(self, tabs)
@@ -2940,6 +2946,8 @@ class SettingsDialog(QDialog):
         )
         values["fixed_harmonic_auto_exclude_base"] = True
         values["stim_channel"] = config.DEFAULT_STIM_CHANNEL
+        from Main_App.gui.settings_hardware_controls import collect_hardware_controls
+        values.update(collect_hardware_controls(self))
         return values
 
     def _sync_electrode_geometry_controls(self, *, saved: bool = False) -> Dict[str, Any]:
@@ -2947,6 +2955,10 @@ class SettingsDialog(QDialog):
 
         if self.project is not None and not saved:
             self.project.refresh_electrode_geometry_settings()
+        if self.project is not None and saved and hasattr(self, "_hardware_draft"):
+            from Main_App.projects.hardware import normalize_hardware_settings
+            self._hardware_draft = dict(self.project.preprocessing)
+            self._hardware_control_baseline = normalize_hardware_settings(self.project.preprocessing)
         values: Dict[str, Any] = {}
         for key, combo, default in (
             ("electrode_montage", self.electrode_montage_combo, ELECTRODE_MONTAGE_BIOSEMI64),

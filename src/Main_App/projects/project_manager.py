@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
 
 from Main_App.settings.settings_manager import SettingsManager
 from Main_App.gui.op_guard import OpGuard
+from Main_App.gui.hardware_selection import choose_new_project_hardware
 from Main_App.projects.fpvs_config_import import (
     CONFIG_SUFFIX,
     FPVSConfigImportError,
@@ -38,6 +39,7 @@ from Main_App.projects.grouping import (
     validate_group_folder_name,
 )
 from Main_App.projects.project import Project
+from Main_App.projects.hardware import confirm_hardware_selection
 from Main_App.projects.recordings import (
     ProjectRecordingContext,
     RecordingConfigurationError,
@@ -927,6 +929,9 @@ def new_project(self) -> None:
             return
         use_existing_project_folder = True
 
+    project_preprocessing = choose_new_project_hardware(self, new_project_preprocessing_settings())
+    if project_preprocessing is None:
+        return
     group_count, ok = QInputDialog.getInt(
         self,
         "Experimental Groups",
@@ -967,6 +972,7 @@ def new_project(self) -> None:
         )
         if repeated_manifest is None:
             return
+        repeated_manifest["preprocessing"] = project_preprocessing
         _start_repeated_session_preflight(
             self,
             project_dir=project_dir,
@@ -1079,7 +1085,7 @@ def new_project(self) -> None:
                 "name": project_name,
                 "input_folder": group_folders["Input Folder"],
                 "options": {"mode": "batch"},
-                "preprocessing": new_project_preprocessing_settings(),
+                "preprocessing": project_preprocessing,
             },
         )
     else:
@@ -1098,7 +1104,7 @@ def new_project(self) -> None:
                 "name": project_name,
                 "options": {"mode": "batch"},
                 "groups": groups_payload,
-                "preprocessing": new_project_preprocessing_settings(),
+                "preprocessing": project_preprocessing,
             },
         )
     project.name = project_name
@@ -1131,9 +1137,24 @@ def new_project_from_fpvs_config(self, parent: QWidget | None = None) -> Project
     if not path:
         return None
 
+    hardware_settings = choose_new_project_hardware(parent, new_project_preprocessing_settings())
+    if hardware_settings is None:
+        return None
     try:
         project = create_project_from_fpvs_config(root, Path(path))
-    except FPVSConfigImportError as exc:
+        project.update_preprocessing(confirm_hardware_selection(
+            project.preprocessing, hardware_settings["hardware_platform"], confirmed_change=True,
+        ))
+        project.save()
+        input_folder = QFileDialog.getExistingDirectory(
+            parent,
+            "Select Folder Containing EEG Recordings",
+            str(root),
+        )
+        if input_folder:
+            project.input_folder = Path(input_folder)
+            project.save()
+    except (FPVSConfigImportError, OSError, ValueError) as exc:
         QMessageBox.critical(parent, "Import Failed", str(exc))
         logger.error(
             "Failed to import FPVS config %s: %s",
@@ -1143,15 +1164,6 @@ def new_project_from_fpvs_config(self, parent: QWidget | None = None) -> Project
             extra={"op": "new_project_from_fpvs_config", "path": path},
         )
         return None
-
-    input_folder = QFileDialog.getExistingDirectory(
-        parent,
-        "Select Folder Containing BDF Files",
-        str(root),
-    )
-    if input_folder:
-        project.input_folder = Path(input_folder)
-        project.save()
 
     self.currentProject = project
     self.loadProject(project)

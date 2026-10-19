@@ -16,7 +16,7 @@ from typing import Any
 import mne
 import numpy as np
 
-from Main_App.io.eeg_geometry import validate_raw_biosemi64_geometry
+from Main_App.io.recorded_eeg_geometry import validate_raw_eeg_geometry
 from Main_App.processing.analysis_spans import validate_realized_target_analysis_span_plan
 
 
@@ -72,7 +72,7 @@ def prepare_condition_repairs(raw: Any, params: Mapping[str, Any]) -> PreparedCo
         plan, source_plan=source_plan, target_sfreq_hz=raw.info["sfreq"],
         target_n_times=raw.n_times, target_first_samp=raw.first_samp,
     )
-    geometry = validate_raw_biosemi64_geometry(raw)
+    geometry = validate_raw_eeg_geometry(raw, require_coordinates=True)
     retained = set(geometry["retained_scalp_channels"])
     global_bads = list(dict.fromkeys(raw.info["bads"]))
     if not set(global_bads).issubset(retained):

@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Mapping, Sequence
 
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 
-from Main_App.io.file_filters import is_bdf_file
+from Main_App.io.file_filters import is_eeg_recording_file
 from Main_App.projects.grouping import project_group_context
 from Main_App.projects.recordings import (
     ProjectRecordingContext,
@@ -454,7 +454,7 @@ def _validate_known_raw_files(
             )
         )
         raise FileNotFoundError(
-            "Registered participant has a missing raw .bdf file. "
+            "Registered participant has a missing raw EEG recording. "
             f"Restore or correct the registered path(s): {details}"
         )
     if undiscovered_files:
@@ -511,7 +511,7 @@ def _validate_known_recordings(
             )
         )
         raise FileNotFoundError(
-            "Registered recording has a missing raw .bdf file. Restore or "
+            "Registered recording has a missing raw EEG recording. Restore or "
             f"correct the registered path(s): {details}"
         )
     if undiscovered_files:
@@ -546,15 +546,15 @@ def _validate_locked_assignment(project: "Project", info: RawFileInfo) -> None:
 
 def raw_file_info_for_path(project: "Project", file_path: Path) -> RawFileInfo:
     selected_path = Path(file_path).resolve()
-    if selected_path.suffix.lower() != ".bdf":
-        raise ValueError(f"Selected file is not a .bdf file: {selected_path}")
+    if not is_eeg_recording_file(selected_path):
+        raise ValueError(f"Selected file is not a supported EEG recording: {selected_path}")
 
     recording_context = _recording_context(project)
     if recording_context.is_repeated_session:
         source = _recording_source_for_path(recording_context, selected_path)
         if source is None:
             raise ValueError(
-                "Selected .bdf file is outside the registered recording-source "
+                "Selected EEG recording is outside the registered recording-source "
                 "folders for this repeated-session project."
             )
         info = _recording_info_for_source_path(
@@ -579,14 +579,14 @@ def raw_file_info_for_path(project: "Project", file_path: Path) -> RawFileInfo:
         group_id = _group_for_path(project, selected_path)
         if not group_id:
             raise ValueError(
-                "Selected .bdf file is outside the registered raw folders for "
+                "Selected EEG recording is outside the registered raw folders for "
                 "this multi-group project."
             )
     else:
         input_folder = Path(project.input_folder)
         if not _is_within_path(input_folder, selected_path):
             raise ValueError(
-                "Selected .bdf file is outside this project's registered input folder."
+                "Selected EEG recording is outside this project's registered input folder."
             )
 
     registered_subject_id = _registered_participant_ids_by_path(project).get(
@@ -607,7 +607,7 @@ def raw_file_info_for_path(project: "Project", file_path: Path) -> RawFileInfo:
 
 def discover_raw_files(project: "Project") -> List[RawFileInfo]:
     """
-    Discover all .bdf files across the project's configured input folders.
+    Discover all EEG recordings across the project's configured input folders.
 
     For multi-group projects, this walks every group-specific folder. For
     legacy projects, this is equivalent to scanning project.input_folder.
@@ -626,8 +626,8 @@ def discover_raw_files(project: "Project") -> List[RawFileInfo]:
                 "Registered raw input folder is missing or is not a directory: "
                 f"{folder_path}. Restore the folder or update the project definition."
             )
-        for candidate in sorted(folder_path.glob("*.bdf")):
-            if not is_bdf_file(candidate):
+        for candidate in sorted(folder_path.iterdir()):
+            if not candidate.is_file() or not is_eeg_recording_file(candidate):
                 continue
             file_path = candidate.resolve()
             registered_subject_id = registered_participant_ids.get(file_path)
@@ -694,8 +694,8 @@ def _discover_recording_files(
                 "Registered recording-source folder is missing or is not a "
                 f"directory: {folder_path}. Restore it or update the project."
             )
-        for candidate in sorted(folder_path.glob("*.bdf")):
-            if not is_bdf_file(candidate):
+        for candidate in sorted(folder_path.iterdir()):
+            if not candidate.is_file() or not is_eeg_recording_file(candidate):
                 continue
             info = _recording_info_for_source_path(context, source, candidate)
             if (
@@ -1125,7 +1125,7 @@ def prepare_batch_file_infos(project: "Project") -> List[RawFileInfo]:
 
     - For multi-group projects (project.groups non-empty), this uses
       discover_raw_files(project) so that all configured group folders
-      contribute their .bdf files.
+      contribute their EEG recordings.
 
     - For single-group projects, this scans
       project.input_folder directly, preserving the original behavior.
@@ -1156,7 +1156,7 @@ def prepare_batch_file_infos(project: "Project") -> List[RawFileInfo]:
 
 
 def prepare_batch_files(project: "Project") -> List[Path]:
-    """Build the list of .bdf files for batch processing."""
+    """Build the list of EEG recordings for batch processing."""
     return [info.path for info in prepare_batch_file_infos(project)]
 
 
@@ -1204,7 +1204,7 @@ def _promote_refs_to_eeg(self, raw, ref1: str, ref2: str, filename: str) -> None
 
 def start_processing(self) -> None:
     """
-    Run the pipeline on one or more .bdf files using the active preprocessing owner.
+    Run the pipeline on one or more EEG recordings using the active preprocessing owner.
     Preserves the rest of the pipeline and adds structured audit logging.
     """
     try:
@@ -1233,14 +1233,14 @@ def start_processing(self) -> None:
             raw_file_infos = discover_raw_files(project)
             if not raw_file_infos:
                 raise FileNotFoundError(
-                    "No .bdf files found in the configured input folders for this project."
+                    "No EEG recordings found in the configured input folders for this project."
                 )
         else:
             file_path, _ = QFileDialog.getOpenFileName(
                 self,
                 "Select .BDF File",
                 str(input_dir),
-                "BDF Files (*.bdf)",
+                "EEG recordings (*.bdf *.BDF *.vhdr *.VHDR *.bvrh *.BVRH)",
             )
             if not file_path:
                 self.log("No file selected, aborting.")

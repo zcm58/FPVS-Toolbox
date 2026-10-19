@@ -561,6 +561,26 @@ def test_required_output_failure_preserves_progress_and_upstream_independence(tm
     assert manifest["tools"]["processing"]["full_fft_provenance"]["status"] == "current"
 
 
+def test_brain_products_source_maps_skip_before_models_and_leave_no_fresh_artifact(tmp_path):
+    worker = _pipeline_without_qt(tmp_path)
+    worker._pipeline_steps = []
+    namespace = worker.run.__func__.__globals__
+    methods = [_class_method(_worker_tree(), name) for name in ("_run_source_maps", "_run_source_map_mode")]
+    exec(compile(ast.fix_missing_locations(ast.Module(body=methods, type_ignores=[])), str(WORKER_PATH), "exec"), namespace)
+    worker._project.preprocessing = {"hardware_platform": "brain_products", "hardware_confirmed": True}
+    worker._artifact_targets = {mode: tmp_path / mode for mode in namespace["SOURCE_OUTPUT_MODES"]}
+    worker._artifact_archives = dict(worker._artifact_targets)
+    worker._run_source_map_mode = Mock(side_effect=AssertionError("Unqualified source model must not run"))
+    steps = MethodType(namespace["_run_source_maps"], worker)(tmp_path)
+    assert len(steps) == len(namespace["SOURCE_OUTPUT_MODES"])
+    assert all(step.ok and "BioSemi64" in step.message and not step.path for step in steps)
+    worker._run_source_map_mode.assert_not_called()
+    assert not worker._artifact_targets
+    assert not worker._artifact_archives
+    direct = MethodType(namespace["_run_source_map_mode"], worker)(tmp_path, "l2_mne_source_psd")
+    assert direct.ok and "Brain Products" in direct.message and not direct.path
+
+
 @pytest.mark.parametrize("failed_step", ["full_fft_provenance", "harmonic_selection"])
 def test_failed_prerequisite_stops_consumers_and_emits_one_root_failure(tmp_path, failed_step):
     worker = _pipeline_without_qt(tmp_path, failed_step=failed_step)

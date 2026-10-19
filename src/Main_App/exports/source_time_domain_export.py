@@ -464,6 +464,9 @@ def _validated_processing_geometry(processing: Any) -> dict[str, Any]:
         raise ValueError(
             "processing_provenance must include the canonical BioSemi64 geometry"
         )
+    if candidate.get("hardware_platform") == "brain_products":
+        from Main_App.io.recorded_eeg_geometry import validate_recorded_geometry_identity
+        return validate_recorded_geometry_identity(candidate)
     retained = candidate.get("retained_scalp_channels")
     if not isinstance(retained, Sequence) or isinstance(retained, (str, bytes)):
         raise ValueError(

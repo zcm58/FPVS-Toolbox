@@ -200,3 +200,71 @@ def test_legacy_manifest_without_geometry_uses_current_defaults_on_stale_save(tm
     saved = _saved_manifest(project)["preprocessing"]
     assert saved["electrode_mapping_profile"] == ANATOMICAL
     assert saved["electrode_montage"] == "biosemi64"
+
+
+@pytest.mark.parametrize("limit_key", ["max_chan_idx_keep", "max_idx_keep", "max_chan_idx"])
+@pytest.mark.parametrize("reference_keys", [("ref_chan1", "ref_chan2"), ("ref_channel1", "ref_channel2")])
+def test_legacy_policy_aliases_and_types_do_not_create_false_save_conflicts(tmp_path, limit_key, reference_keys):
+    path = tmp_path / "project.json"
+    path.write_text(json.dumps({"preprocessing": {
+        limit_key: "32", reference_keys[0]: " Cz ", reference_keys[1]: " Pz ",
+    }}), encoding="utf-8")
+    project = Project.load(tmp_path)
+    project.refresh_electrode_geometry_settings()
+    assert project.preprocessing["max_chan_idx_keep"] == 32
+    assert project.preprocessing["ref_chan1"] == "Cz"
+    assert project.preprocessing["ref_chan2"] == "Pz"
+    project.preprocessing.update(max_chan_idx_keep=48, ref_chan1="EXG1", ref_chan2="EXG2")
+    project.save()
+    reopened = Project.load(tmp_path)
+    assert reopened.preprocessing["max_chan_idx_keep"] == 48
+    assert reopened.preprocessing["ref_chan1"] == "EXG1"
+    assert reopened.preprocessing["ref_chan2"] == "EXG2"
+
+
+def test_geometry_save_preserves_fallback_for_unrelated_invalid_legacy_settings(tmp_path):
+    path = tmp_path / "project.json"
+    path.write_text(json.dumps({"preprocessing": {"low_pass": "invalid"}}), encoding="utf-8")
+    project = Project.load(tmp_path)
+    default_low_pass = project.preprocessing["low_pass"]
+    project.preprocessing["electrode_mapping_profile"] = AB
+    project.save()
+    reopened = Project.load(tmp_path)
+    assert reopened.preprocessing["low_pass"] == default_low_pass
+    assert reopened.preprocessing["electrode_mapping_profile"] == AB
+
+
+@pytest.mark.parametrize("invalid_settings", [
+    {"max_chan_idx_keep": "invalid"}, {"max_idx_keep": "invalid"}, {"max_chan_idx": 128},
+    {"ref_chan1": []}, {"ref_chan2": {}}, {"ref_channel1": []}, {"ref_channel2": {}},
+])
+def test_legacy_invalid_reference_and_limit_settings_keep_default_roundtrip(tmp_path, invalid_settings):
+    path = tmp_path / "project.json"
+    path.write_text(json.dumps({"preprocessing": invalid_settings}), encoding="utf-8")
+    project = Project.load(tmp_path)
+    project.refresh_electrode_geometry_settings()
+    project.preprocessing["electrode_mapping_profile"] = AB
+    project.save()
+    reopened = Project.load(tmp_path)
+    assert reopened.preprocessing["max_chan_idx_keep"] == 64
+    assert reopened.preprocessing["ref_chan1"] == "EXG1"
+    assert reopened.preprocessing["ref_chan2"] == "EXG2"
+    assert reopened.preprocessing["electrode_mapping_profile"] == AB
+
+
+@pytest.mark.parametrize("platform", ["biosemi", "brain_products"])
+@pytest.mark.parametrize("operation", ["save", "refresh_electrode_geometry_settings"])
+def test_explicit_hardware_invalid_limit_is_never_replaced_by_legacy_fallback(tmp_path, platform, operation):
+    from Main_App.projects.hardware import confirm_hardware_selection
+
+    project = _project(tmp_path)
+    project.update_preprocessing(confirm_hardware_selection(project.preprocessing, platform, confirmed_change=True))
+    project.save()
+    path = project.project_root / "project.json"
+    disk = _saved_manifest(project)
+    disk["preprocessing"]["max_chan_idx_keep"] = "invalid"
+    path.write_text(json.dumps(disk), encoding="utf-8")
+    original = path.read_bytes()
+    with pytest.raises(ValueError, match="Invalid integer"):
+        getattr(project, operation)()
+    assert path.read_bytes() == original

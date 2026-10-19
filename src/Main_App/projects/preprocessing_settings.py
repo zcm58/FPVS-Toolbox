@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Iterable, Mapping
+from Main_App.projects.hardware import normalize_hardware_settings, resolve_hardware
 
 from Main_App.processing.removed_electrode_detection import (
     REMOVED_ELECTRODE_DETECTION_MODE_AUTO,
@@ -144,6 +145,11 @@ ELECTRODE_MAPPING_PROFILE_ANATOMICAL = "anatomical_labels"
 ELECTRODE_MAPPING_PROFILE_BIOSEMI64_1020_AB_V1 = "biosemi64_1020_ab_v1"
 SUPPORTED_ELECTRODE_MONTAGES: tuple[tuple[str, str], ...] = (
     (ELECTRODE_MONTAGE_BIOSEMI64, "BioSemi ActiveTwo 64"),
+    ("recorded", "Recorded electrode positions"),
+    ("standard_1020", "Standard 10-20"),
+    ("standard_1005", "Standard 10-05"),
+    ("easycap-M1", "EasyCap M1"),
+    ("easycap-M10", "EasyCap M10"),
 )
 SUPPORTED_ELECTRODE_MAPPING_PROFILES: tuple[tuple[str, str], ...] = (
     (ELECTRODE_MAPPING_PROFILE_ANATOMICAL, "Anatomical BDF labels (default)"),
@@ -765,7 +771,12 @@ def _coerce_supported_choice(
 
 
 def normalize_electrode_montage(value: Any) -> str:
-    """Return the sole supported project-owned EEG montage identifier."""
+    """Return a supported, explicitly selected electrode position source."""
+
+    if isinstance(value, str):
+        for montage_id, _label in SUPPORTED_ELECTRODE_MONTAGES:
+            if value.strip().casefold() == montage_id.casefold():
+                return montage_id
 
     return _coerce_supported_choice(
         value,
@@ -1045,10 +1056,20 @@ def normalize_preprocessing_settings(
     """Normalize preprocessing values into canonical keys and runtime aliases."""
 
     source: Mapping[str, Any] = raw or {}
+    hardware = normalize_hardware_settings(source)
+    brain_products = resolve_hardware(source).platform == "brain_products"
     normalized: Dict[str, Any] = {}
 
     for field in _FIELDS:
         raw_value = _first_value(source, field.aliases)
+        if brain_products and field.name in {"ref_chan1", "ref_chan2"}:
+            normalized[field.name] = ""
+            continue
+        if brain_products and field.name == "max_chan_idx_keep" and raw_value in (None, ""):
+            normalized[field.name] = None
+            continue
+        if brain_products and field.name == "electrode_montage" and raw_value in (None, ""):
+            raw_value = "recorded"
         if field.type == _FLOAT:
             normalized[field.name] = _coerce_float(raw_value, default=field.default, field=field.name)
         elif field.type == _INT:
@@ -1164,12 +1185,18 @@ def normalize_preprocessing_settings(
             "max_parallel_workers_override must be zero or a positive integer."
         )
 
-    channel_limit = int(normalized["max_chan_idx_keep"])
-    if not 1 <= channel_limit <= 64:
+    channel_limit = normalized["max_chan_idx_keep"]
+    if brain_products and channel_limit is not None and int(channel_limit) < 2:
+        raise ValueError("max_chan_idx_keep must be at least two for average reference, or blank to retain all channels.")
+    if not brain_products and not 1 <= int(channel_limit) <= 64:
         raise ValueError(
             "max_chan_idx_keep must be between 1 and 64 for the supported "
             "BioSemi ActiveTwo 64 montage."
         )
+
+    if not brain_products and normalized["electrode_montage"] != ELECTRODE_MONTAGE_BIOSEMI64:
+        raise ValueError("Unsupported electrode montage: BioSemi processing requires the BioSemi ActiveTwo 64 montage.")
+    normalized.update(hardware)
 
     # Surface runtime aliases expected by legacy helpers without duplicating storage
     for canonical, aliases in _ALIASES_FOR_OUTPUT.items():

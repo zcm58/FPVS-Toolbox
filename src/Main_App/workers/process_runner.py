@@ -230,10 +230,16 @@ def _find_raw_events(
             raw,
             stim_channel=stim_channel,
             shortest_event=1,
+            **({"initial_event": True, "consecutive": True} if (
+                hasattr(raw, "_fpvs_brain_products_events")
+                or (getattr(raw, "_fpvs_eeg_geometry", None) or {}).get("hardware_platform") == "brain_products"
+            ) else {}),
             verbose=False,
         )
         source = "stim"
     except (RuntimeError, ValueError):
+        if (getattr(raw, "_fpvs_eeg_geometry", None) or {}).get("hardware_platform") == "brain_products":
+            raise
         events, _event_ids = mne_module.events_from_annotations(
             raw,
             verbose=False,
@@ -823,9 +829,12 @@ def _preproc_cache_enabled(settings: Dict[str, object]) -> bool:
 
 def _configured_biosemi64_channel_limit(
     settings: Mapping[str, object],
-) -> int:
+) -> int | None:
     """Resolve the project-owned canonical first-N scalp limit."""
 
+    if settings.get("hardware_platform") == "brain_products":
+        value = settings.get("max_idx_keep", settings.get("max_chan_idx_keep"))
+        return int(value) if value is not None else None
     raw_limit = settings.get("max_idx_keep")
     if raw_limit is None:
         raw_limit = settings.get("max_chan_idx_keep")
@@ -852,6 +861,9 @@ def _geometry_identity_for_channels(
 ) -> Dict[str, object]:
     """Return canonical geometry with the retained scalp set made explicit."""
 
+    if settings.get("hardware_platform") == "brain_products":
+        from Main_App.io.hardware_identity import brain_products_settings_identity
+        return brain_products_settings_identity(settings)
     montage_id = normalize_electrode_montage(settings.get("electrode_montage"))
     if montage_id != ELECTRODE_MONTAGE_BIOSEMI64:
         raise ValueError(
@@ -874,6 +886,16 @@ def _attach_processed_geometry(
     raw: Any,
     settings: Mapping[str, object],
 ) -> Dict[str, object]:
+    if settings.get("hardware_platform") == "brain_products":
+        from Main_App.io.recorded_eeg_geometry import (
+            attach_raw_recorded_geometry, validate_raw_recorded_geometry,
+        )
+        existing = getattr(raw, "_fpvs_eeg_geometry", None)
+        if existing is not None:
+            return validate_raw_recorded_geometry(raw)
+        return attach_raw_recorded_geometry(
+            raw, montage_id=str(settings.get("electrode_montage") or "recorded"),
+        )
     montage_id = normalize_electrode_montage(settings.get("electrode_montage"))
     if montage_id != ELECTRODE_MONTAGE_BIOSEMI64:
         raise ValueError(
@@ -1002,7 +1024,12 @@ def _preproc_cache_payload(
             "version": CONDITION_INTERPOLATION_VERSION,
             "requests": condition_requests,
         }
+    from Main_App.io.recording_sources import companion_identity
+    if settings.get("hardware_platform") == "brain_products":
+        from Main_App.io.hardware_identity import brain_products_settings_identity
+        relevant_settings["acquisition"] = brain_products_settings_identity(settings)
     return {
+        **companion_identity(file_path),
         "version": PREPROC_CACHE_VERSION,
         "mne_version": mne_version,
         "source_path": str(file_path.resolve()),
@@ -1140,8 +1167,12 @@ def _load_preprocessed_cache(
         except (KeyError, TypeError, ValueError, OverflowError):
             raw.close()
             return None, None, 0, "miss_filter_metadata_mismatch"
-        observed_geometry = _attach_processed_geometry(raw, settings)
         cached_geometry = metadata.get("geometry")
+        if settings.get("hardware_platform") == "brain_products" and isinstance(cached_geometry, Mapping):
+            from Main_App.io.hardware_loader import restore_cached_recorded_geometry
+            observed_geometry = restore_cached_recorded_geometry(raw, cached_geometry)
+        else:
+            observed_geometry = _attach_processed_geometry(raw, settings)
         if (
             not isinstance(cached_geometry, Mapping)
             or dict(cached_geometry) != observed_geometry
@@ -1661,6 +1692,8 @@ def _run_full_pipeline_for_file(
     stage = "preflight"
     crop_logger = _build_fft_crop_file_logger(project_root=project_root, file_path=file_path)
     try:
+        from Main_App.projects.hardware import require_hardware_ready
+        require_hardware_ready(settings, paths=(file_path,))
         logger.debug(
             "[PIPELINE START] file=%s stage=%s",
             file_path.name,
@@ -1895,6 +1928,8 @@ def _run_full_pipeline_for_file(
                 ),
                 electrode_montage=settings.get("electrode_montage"),
                 **({"preload_in_memory": True} if ram_preload else {}),
+                **({"acquisition_settings": {**settings, "event_id_map": event_map}}
+                   if settings.get("hardware_platform") == "brain_products" else {}),
             )
             _record_timing("load", section_started)
             if raw is None:
@@ -2023,7 +2058,7 @@ def _run_full_pipeline_for_file(
                         raw_qc_result.to_payload(),
                         settings,
                     ),
-                    geometry=read_raw_biosemi64_geometry(raw),
+                    geometry=(getattr(raw, "_fpvs_eeg_geometry", None) or read_raw_biosemi64_geometry(raw)),
                 )
             logger.debug(
                 "raw_channel_qc_passed file=%s n_bad=%d n_channels=%d",
@@ -2623,7 +2658,7 @@ def _run_full_pipeline_for_file(
             source_epochs = _available_source_epoch_set(epochs_dict, event_map)
             if requested_exports is not None:
                 source_epochs = {label: epochs for label, epochs in source_epochs.items() if label in export_conditions}
-            source_stat = file_path.stat()
+            from Main_App.processing.processing_ledger import raw_file_metadata
             source_result = write_source_ready_time_domain_derivatives(
                 project_root=project_root,
                 participant_id=_participant_id_for_file(file_path, settings),
@@ -2652,11 +2687,7 @@ def _run_full_pipeline_for_file(
                     **({"condition_electrode_interpolation": settings["_fpvs_condition_interpolation_provenance"]}
                        if settings.get("_fpvs_condition_interpolation_provenance") else {}),
                 },
-                source_signature={
-                    "raw_file": str(file_path.resolve()),
-                    "raw_size": int(source_stat.st_size),
-                    "raw_mtime_ns": int(source_stat.st_mtime_ns),
-                },
+                source_signature=raw_file_metadata(file_path),
                 resolved_protocol_by_condition={
                     label: {
                         "presentation_rate_hz": float(

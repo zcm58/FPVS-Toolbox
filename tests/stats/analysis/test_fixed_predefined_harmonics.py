@@ -1452,6 +1452,78 @@ def _project_workbook_path(project_root: Path, subject: str, condition: str) -> 
     return project_root / "1 - Excel Data Files" / condition / f"{subject}_{condition}.xlsx"
 
 
+@pytest.mark.parametrize("policy", ["fixed", "group"])
+@pytest.mark.parametrize("with_recorded_roi", [False, True])
+def test_brain_products_stats_exports_only_qualified_roi_values(
+    tmp_path, monkeypatch, policy, with_recorded_roi,
+):
+    import mne
+    from Main_App.io.recorded_eeg_geometry import attach_raw_recorded_geometry
+    from Main_App.processing import frequency_domain_qc, roi_coverage
+    from Main_App.processing.recorded_scalp_identity import RecordedScalpIdentity
+    from Tools.Stats.io.stats_ready_export import build_stats_ready_frames, write_stats_ready_workbook
+
+    _write_stats_project_manifest(tmp_path)
+    channels = ["E1", "E2", "E3", "E4", *(["O1", "O2"] if with_recorded_roi else [])]
+    raw = mne.io.RawArray(np.zeros((len(channels), 10)), mne.create_info(channels, 100, "eeg"), verbose=False)
+    identity = RecordedScalpIdentity.from_geometry(attach_raw_recorded_geometry(raw))
+    frame = pd.DataFrame({"Electrode": channels, "1.2000_Hz": np.arange(1, len(channels) + 1, dtype=float)})
+    path = tmp_path / "S1_C1.xlsx"
+    frame.to_excel(path, sheet_name="BCA (uV)", index=False)
+    rois = {"Configured posterior": ["O1", "O2"], "Template lateral": ["P7", "P9"]}
+    snapshot = build_roi_definition_snapshot(rois)
+    evidence = roi_coverage.validate_roi_source_rows(
+        frame.to_dict(orient="records"), retained_scalp=identity, required_columns=["1.2000_Hz"],
+    )
+    coverage = _managed_coverage_fixture(path=path, rois=rois, excluded_channels=())
+    coverage.roi_snapshot = snapshot
+    cell = coverage.cell_for("S1", "C1")
+    cell.source_evidence = evidence
+    cell.roi_memberships = roi_coverage._roi_memberships(snapshot, evidence)
+    monkeypatch.setattr(frequency_domain_qc, "filter_frequency_domain_subjects", lambda _root, subjects, data: (subjects, data, ()))
+    monkeypatch.setattr(frequency_domain_qc, "active_frequency_domain_exclusions", lambda _: SimpleNamespace(auto_excluded_electrodes_by_participant={}))
+    monkeypatch.setattr(roi_coverage, "require_project_final_release", lambda _: (None, coverage, None))
+    monkeypatch.setattr(harmonic_selection_qc, "load_processing_harmonic_selection", lambda *_args, **_kwargs: SimpleNamespace(
+        detected_significant_harmonics_hz=[1.2], selected_harmonics_hz=[1.2],
+        selected_columns=["1.2000_Hz"], oddball_frequency_hz=1.2,
+        to_metadata=lambda: {"included_harmonics_hz": [1.2]},
+    ))
+    provenance = {}
+    subject_data = {"S1": {"C1": str(path)}}
+    kwargs = dict(subjects=["S1"], conditions=["C1", "C2"], subject_data=subject_data,
+                  base_freq=6.0, log_func=lambda _: None, rois=rois, provenance_map=provenance)
+    if policy == "fixed":
+        result = fixed_policy._prepare_fixed_predefined_bca_data(
+            **kwargs, settings=normalize_dv_policy({"name": FIXED_PREDEFINED_POLICY_NAME, "fixed_harmonic_frequencies_hz": "1.2"}),
+            oddball_frequency_hz=1.2, final_roi_coverage=coverage,
+        )
+    else:
+        result = group_policy._prepare_group_significant_bca_data(
+            **kwargs, settings=normalize_dv_policy({"name": GROUP_SIGNIFICANT_POLICY_NAME}), project_root=tmp_path,
+        )
+    assert np.isnan(result["S1"]["C1"]["Template lateral"])
+    assert provenance[("S1", "C1", "Template lateral")]["decision_reason_codes"] == ["required_electrodes_not_recorded"]
+    if with_recorded_roi:
+        assert result["S1"]["C1"]["Configured posterior"] == pytest.approx(5.5)
+    else:
+        assert np.isnan(result["S1"]["C1"]["Configured posterior"])
+    frames = build_stats_ready_frames(
+        subjects=["S1"], conditions=["C1", "C2"], subject_data=subject_data,
+        rois=rois, summed_bca=result, provenance_map=provenance, dv_metadata={},
+    )
+    assert set(frames["ROI_Availability"]["status"]) == {"unavailable"}
+    assert len(frames["ROI_Availability"]) == (1 if with_recorded_roi else 2)
+    assert frames["Long_Format"]["summed_bca_uv"].notna().sum() == int(with_recorded_roi)
+    assert write_stats_ready_workbook(tmp_path / "Stats_Ready.xlsx", frames).is_file()
+    if not with_recorded_roi:
+        assert "No finite ROI values" in frames["Selection_Summary"].iloc[-1]["Value"]
+        with pytest.raises(RuntimeError, match="no finite Summed BCA"):
+            build_stats_ready_frames(
+                subjects=["S1"], conditions=["C1", "C2"], subject_data=subject_data,
+                rois=rois, summed_bca=result, provenance_map={}, dv_metadata={},
+            )
+
+
 def _managed_coverage_fixture(
     *,
     path: Path,

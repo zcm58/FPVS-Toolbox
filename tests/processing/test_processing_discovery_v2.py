@@ -668,7 +668,7 @@ def test_discover_raw_files_rejects_missing_known_raw_file(
         "P01": {"group_id": "control", "raw_file": control_dir / "P01.bdf"}
     }
 
-    with pytest.raises(FileNotFoundError, match="missing raw .bdf file"):
+    with pytest.raises(FileNotFoundError, match="missing raw EEG recording"):
         discover_raw_files(project)
 
 
@@ -723,7 +723,7 @@ def test_discover_raw_files_rejects_registered_file_excluded_from_discovery(
         "P01": {"group_id": "control", "raw_file": sidecar}
     }
 
-    with pytest.raises(ValueError, match="not found by canonical group discovery"):
+    with pytest.raises(ValueError, match="raw_file must be a supported EEG recording"):
         discover_raw_files(project)
 
 

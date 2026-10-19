@@ -7,6 +7,8 @@ from typing import Iterable
 
 EXCEL_WORKBOOK_SUFFIXES = (".xlsx",)
 EXCEL_OUTPUT_SUFFIXES = (".xls", ".xlsx", ".xlsm", ".xlsb")
+EEG_RECORDING_SUFFIXES = (".bdf", ".vhdr", ".bvrh")
+EEG_RECORDING_FILTER = "EEG recordings (*.bdf *.BDF *.vhdr *.VHDR *.bvrh *.BVRH)"
 
 
 def _filename(value: str | Path) -> str:
@@ -52,11 +54,19 @@ def is_bdf_file(value: str | Path) -> bool:
     return _has_suffix(value, (".bdf",)) and not is_appledouble_sidecar(value)
 
 
+def is_eeg_recording_file(value: str | Path) -> bool:
+    """Identify entry-point files, never BrainVision binary/marker companions."""
+    return _has_suffix(value, EEG_RECORDING_SUFFIXES) and not is_appledouble_sidecar(value)
+
+
 __all__ = [
     "EXCEL_OUTPUT_SUFFIXES",
     "EXCEL_WORKBOOK_SUFFIXES",
     "is_appledouble_sidecar",
     "is_bdf_file",
+    "is_eeg_recording_file",
+    "EEG_RECORDING_SUFFIXES",
+    "EEG_RECORDING_FILTER",
     "is_excel_metadata_or_temp_file",
     "is_excel_output_file",
     "is_excel_workbook_file",

@@ -12,6 +12,10 @@ from pathlib import Path
 from typing import Any, Dict, Mapping
 
 from .manifest_store import manifest_file_path, project_manifest_transaction
+from .hardware import (
+    HARDWARE_SETTINGS_KEYS, brain_products_qc_defaults, normalize_hardware_settings,
+    resolve_hardware,
+)
 
 from .experimental_qc_settings import (
     ExperimentalQcSettings,
@@ -37,8 +41,6 @@ from .preprocessing_settings import (
     REPEATED_SESSION_PREPROCESSING_KEYS,
     confirm_removed_electrode_detection_choice,
     new_project_preprocessing_settings,
-    normalize_electrode_mapping_profile,
-    normalize_electrode_montage,
     normalize_preprocessing_settings,
     removed_electrode_detection_choice_was_saved,
 )
@@ -100,6 +102,7 @@ def _preprocessing_manifest_payload(
     payload = {
         key: normalized[key] for key in PREPROCESSING_CANONICAL_KEYS
     }
+    payload.update({key: normalized[key] for key in HARDWARE_SETTINGS_KEYS if key in normalized})
     if not include_removed_electrode_choice:
         for key in REMOVED_ELECTRODE_DETECTION_CHOICE_CANONICAL_KEYS:
             payload.pop(key, None)
@@ -283,14 +286,33 @@ def _raw_registration_fingerprint(manifest: Mapping[str, Any] | None) -> str | N
     return str(value).strip() if value else None
 
 
-def _electrode_geometry_settings(preprocessing: Mapping[str, Any]) -> dict[str, str]:
+def _electrode_geometry_settings(preprocessing: Mapping[str, Any]) -> dict[str, Any]:
+    # Compare semantic values even before a legacy manifest has been rewritten:
+    # reference aliases and string channel limits must match the loaded policy.
+    # Keep unrelated fields out of this normalizer so historical load fallback
+    # for malformed filter/QC settings does not become a geometry-save failure.
+    reference_and_limit_keys = {
+        "max_chan_idx_keep", "max_idx_keep", "max_chan_idx",
+        "ref_chan1", "ref_chan2", "ref_channel1", "ref_channel2",
+    }
+    keys = {*HARDWARE_SETTINGS_KEYS, *reference_and_limit_keys, "electrode_montage", "electrode_mapping_profile"}
+    source = {key: value for key, value in preprocessing.items() if key in keys}
+    try:
+        normalized = normalize_preprocessing_settings(source)
+    except ValueError:
+        if "hardware_platform" in preprocessing:
+            raise
+        # Old projects already fall back to the default preprocessing policy
+        # when these fields are malformed. Preserve that round-trip behavior;
+        # invalid geometry still fails when the remaining subset is normalized.
+        normalized = normalize_preprocessing_settings({
+            key: value for key, value in source.items() if key not in reference_and_limit_keys
+        })
     return {
-        "electrode_montage": normalize_electrode_montage(
-            preprocessing.get("electrode_montage")
-        ),
-        "electrode_mapping_profile": normalize_electrode_mapping_profile(
-            preprocessing.get("electrode_mapping_profile")
-        ),
+        **{key: normalized[key] for key in (
+            "electrode_montage", "electrode_mapping_profile", "max_chan_idx_keep", "ref_chan1", "ref_chan2",
+        )},
+        **normalize_hardware_settings(normalized),
     }
 
 
@@ -397,6 +419,9 @@ class Project:
         self._raw_registration_baseline = _raw_registration_fingerprint(manifest)
 
         self.experimental_qc_settings = normalize_project_experimental_qc_settings(manifest)
+        if (resolve_hardware(manifest.get("preprocessing", {})).platform == "brain_products"
+                and "experimental_qc" not in manifest):
+            self.experimental_qc_settings = brain_products_qc_defaults(self.experimental_qc_settings)
 
         self._frequency_protocol_was_persisted = "frequency_protocol" in manifest
         raw_frequency_protocol = manifest.get("frequency_protocol")
@@ -454,6 +479,8 @@ class Project:
                 ),
             )
         except ValueError as exc:
+            if "hardware_platform" in raw_pp:
+                raise ValueError(f"Invalid project hardware or preprocessing settings: {exc}") from exc
             logger.warning(
                 "Invalid preprocessing settings in manifest; using defaults: %s",
                 exc,
@@ -705,7 +732,7 @@ class Project:
 
     def _reconciled_electrode_geometry_settings(
         self, preprocessing: Mapping[str, Any]
-    ) -> tuple[dict[str, str], dict[str, str], Mapping[str, Any] | None]:
+    ) -> tuple[dict[str, Any], dict[str, Any], Mapping[str, Any] | None]:
         """Compare local geometry with the last observed and current disk values."""
 
         local = _electrode_geometry_settings(preprocessing)
@@ -722,10 +749,14 @@ class Project:
                 f"Project preprocessing settings must contain an object: {manifest_path}"
             )
         disk = _electrode_geometry_settings(disk_preprocessing)
-        merged = {
-            key: disk[key] if value == self._electrode_geometry_baseline[key] else value
-            for key, value in local.items()
-        }
+        # Treat the hardware policy and montage as one unit: mixing newer disk
+        # hardware with a stale editor's geometry could dispatch the wrong reader.
+        if local == self._electrode_geometry_baseline:
+            merged = disk
+        elif disk != self._electrode_geometry_baseline and disk != local:
+            raise ValueError("Project EEG hardware or montage changed in another window. Reload the project before saving.")
+        else:
+            merged = local
         return merged, disk, current
 
     def refresh_electrode_geometry_settings(self) -> None:
@@ -736,10 +767,16 @@ class Project:
         """
 
         preprocessing = dict(self.preprocessing)
-        merged, disk, _current = self._reconciled_electrode_geometry_settings(
+        merged, disk, current = self._reconciled_electrode_geometry_settings(
             preprocessing
         )
+        if (current is not None and merged == disk and resolve_hardware(preprocessing).platform
+                != resolve_hardware(merged).platform):
+            self.experimental_qc_settings = normalize_project_experimental_qc_settings(current)
+        for key in HARDWARE_SETTINGS_KEYS:
+            preprocessing.pop(key, None)
         preprocessing.update(merged)
+        preprocessing["max_idx_keep"] = preprocessing["max_chan_idx_keep"]
         self.preprocessing = preprocessing
         self._electrode_geometry_baseline = disk
 
@@ -1187,8 +1224,19 @@ class Project:
                     "New raw inputs were registered after this project was loaded. "
                     "Reload the project before saving so its registered recordings are preserved."
                 )
+            for key in HARDWARE_SETTINGS_KEYS:
+                normalized_pp.pop(key, None)
+                data["preprocessing"].pop(key, None)
             normalized_pp.update(geometry)
+            normalized_pp["max_idx_keep"] = normalized_pp["max_chan_idx_keep"]
             data["preprocessing"].update(geometry)
+            if (current is not None and resolve_hardware(self._electrode_geometry_baseline).platform
+                    != resolve_hardware(geometry).platform
+                    and geometry == _disk_geometry):
+                # A stale, unrelated save must also retain the new hardware's
+                # reviewed QC settings, rather than resurrect BioSemi defaults.
+                normalized_experimental_qc = normalize_project_experimental_qc_settings(current)
+                data["experimental_qc"] = normalized_experimental_qc.to_manifest()
             data = _preserve_disk_tools_metadata(
                 current,
                 data,
@@ -1201,6 +1249,7 @@ class Project:
             # must leave local geometry edits available for a later retry.
             self.manifest = data
             self.preprocessing = normalized_pp
+            self.experimental_qc_settings = normalized_experimental_qc
             self._electrode_geometry_baseline = geometry
 
     # ------------------------------------------------------------------
@@ -1225,6 +1274,10 @@ class Project:
             for key in REMOVED_ELECTRODE_DETECTION_CHOICE_CANONICAL_KEYS:
                 candidate_values[key] = current_settings[key]
         normalized = normalize_preprocessing_settings(candidate_values)
+        if (resolve_hardware(current_settings).platform != "brain_products"
+                and resolve_hardware(normalized).platform == "brain_products"):
+            self.experimental_qc_settings = brain_products_qc_defaults(self.experimental_qc_settings)
+            normalized = confirm_removed_electrode_detection_choice(normalized, "off")
         self.preprocessing = normalized
         detector_choice_unresolved = (
             normalized["removed_electrode_detection_choice_status"]

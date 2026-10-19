@@ -17,6 +17,7 @@ import pandas as pd
 
 from config import DEFAULT_ELECTRODE_NAMES_64
 from Main_App.projects import load_project_dataset_index
+from Main_App.processing.hardware_capabilities import spatial_tool_unavailable_reason
 from Main_App.io.xlsx_selected_reader import (
     MissingXlsxColumnsError,
     read_xlsx_sheet_header,
@@ -152,6 +153,9 @@ def build_l2_mne_hauk_zscore_conditions_from_project(
     if not root.is_dir():
         raise FileNotFoundError(f"Project root does not exist: {root}")
     dataset_index = load_project_dataset_index(root)
+    reason = spatial_tool_unavailable_reason(dataset_index.manifest or {}, "LORETA Visualizer")
+    if reason:
+        raise ValueError(reason)
     dataset_index.require_group_assignments()
     stats_ready = root / "3 - Statistical Analysis Results" / "Stats_Ready_Summed_BCA.xlsx"
     _require_current_stats_ready_workbook(root, stats_ready)
@@ -357,6 +361,9 @@ def build_l2_mne_hauk_participant_zscore_conditions_from_project(
     if not root.is_dir():
         raise FileNotFoundError(f"Project root does not exist: {root}")
     dataset_index = load_project_dataset_index(root)
+    reason = spatial_tool_unavailable_reason(dataset_index.manifest or {}, "LORETA Visualizer")
+    if reason:
+        raise ValueError(reason)
     dataset_index.require_group_assignments()
     stats_ready = root / "3 - Statistical Analysis Results" / "Stats_Ready_Summed_BCA.xlsx"
     _require_current_stats_ready_workbook(root, stats_ready)

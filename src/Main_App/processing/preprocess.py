@@ -39,7 +39,20 @@ from Main_App.io.eeg_geometry import (
     BIOSEMI64_GEOMETRY_VERSION,
     attach_raw_biosemi64_geometry,
     read_raw_biosemi64_geometry,
-    validate_raw_biosemi64_geometry,
+)
+from Main_App.io.recorded_eeg_geometry import (
+    RECORDED_GEOMETRY_VERSION,
+    attach_raw_recorded_geometry,
+    read_raw_eeg_geometry,
+    validate_raw_eeg_geometry,
+    validate_raw_recorded_geometry,
+)
+from Main_App.processing.acquisition_policy import (
+    apply_brain_products_reference,
+    brain_products_policy,
+    is_brain_products,
+    policy_fingerprint,
+    validate_brain_products_qc,
 )
 from Main_App.processing.fft_multinotch import (
     FFT_MULTINOTCH_COMPONENT_COUNT,
@@ -116,17 +129,26 @@ def _build_preproc_fingerprint(params: Dict[str, Any]) -> str:
         if isinstance(source_span_plan, dict)
         else ""
     )
-    return (
+    geometry_fingerprint = (
+        RECORDED_GEOMETRY_VERSION if is_brain_products(params)
+        else f"{BIOSEMI64_GEOMETRY_VERSION},{BIOSEMI64_COORDINATE_FINGERPRINT}"
+    )
+    fingerprint = (
         f"order={PREPROCESSING_ORDER_VERSION}|hp={hp}|lp={lp}|ds={ds}|"
         f"rz={rz}|ref={r1},{r2}|stim={stim}|"
         f"montage={electrode_montage}|mapping={electrode_mapping_profile}|"
-        f"geometry={BIOSEMI64_GEOMETRY_VERSION},{BIOSEMI64_COORDINATE_FINGERPRINT}|"
+        f"geometry={geometry_fingerprint}|"
         f"analysis_spans={ANALYSIS_SPAN_PLAN_VERSION},{source_span_fingerprint}|"
         f"fft_multinotch={line_noise_enabled},{line_noise_frequency},"
         f"{FFT_MULTINOTCH_METHOD_VERSION},{FFT_MULTINOTCH_HALF_WIDTH_HZ},"
         f"{FFT_MULTINOTCH_COMPONENT_COUNT}"
         + ("|kurtosis_screening=False" if not params.get("kurtosis_screening_enabled", True) else "")
     )
+    if is_brain_products(params):
+        # Keep every historical BioSemi byte stable; new acquisition policies
+        # additionally bind their reference, montage and channel-selection rules.
+        fingerprint += f"|acquisition={policy_fingerprint(params)}"
+    return fingerprint
 
 
 def _realize_analysis_spans_for_raw(
@@ -167,7 +189,8 @@ def _realize_analysis_spans_for_raw(
                 "recorded stimulus channel; annotation-only timing is unsupported."
             )
         events = mne.find_events(
-            raw, stim_channel=stim_channel, shortest_event=1, verbose=False
+            raw, stim_channel=stim_channel, shortest_event=1, verbose=False,
+            **({"initial_event": True, "consecutive": True} if is_brain_products(params) else {}),
         )
         validate_target_analysis_span_markers(realized, events)
     params["_fpvs_realized_analysis_span_plan"] = realized
@@ -343,6 +366,18 @@ def _freeze_retained_biosemi64_geometry(
 ) -> dict[str, Any]:
     """Validate and freeze the retained scalp set after intentional drops."""
 
+    if is_brain_products(params):
+        loaded_identity = read_raw_eeg_geometry(raw)
+        if not loaded_identity or loaded_identity.get("hardware_platform") != "brain_products":
+            raise RuntimeError("Brain Products processing requires validated recorded EEG geometry.")
+        identity = attach_raw_recorded_geometry(
+            raw, montage_id=loaded_identity["montage_id"],
+            mapping_profile=loaded_identity["electrode_mapping_profile"],
+        )
+        params["_fpvs_geometry"] = dict(identity)
+        params["_fpvs_retained_scalp_channels"] = list(identity["retained_scalp_channels"])
+        params["_fpvs_retained_scalp_set_fingerprint"] = identity["retained_scalp_set_fingerprint"]
+        return identity
     loaded_identity = read_raw_biosemi64_geometry(raw)
     if loaded_identity is None:
         raise RuntimeError(
@@ -387,12 +422,17 @@ def _interpolate_current_bads(
         log_func(f"No bads to interpolate in {filename_for_log}.")
         return
 
-    geometry = validate_raw_biosemi64_geometry(raw, require_runtime_identity=True)
+    try:
+        geometry = validate_raw_eeg_geometry(raw, require_runtime_identity=True, require_coordinates=True)
+    except ValueError as error:
+        params["_fpvs_interpolation_status"] = "failed"
+        params["_fpvs_interpolation_error"] = str(error)
+        raise
     retained = set(geometry["retained_scalp_channels"])
     invalid_targets = [name for name in targets if name not in retained]
     if invalid_targets:
         message = (
-            "Interpolation target(s) are outside the retained BioSemi64 scalp set: "
+            "Interpolation target(s) are outside the retained scalp set: "
             + ", ".join(invalid_targets)
         )
         params["_fpvs_interpolation_status"] = "failed"
@@ -689,7 +729,7 @@ def _finish_preprocessing_at_kurtosis(
     params.pop("_fpvs_condition_interpolation_provenance", None)
     condition_repairs = None
     bad_k_auto: List[str] = []
-    if reject_thresh and params.get("kurtosis_screening_enabled", True):
+    if reject_thresh and params.get("kurtosis_screening_enabled", not is_brain_products(params)):
         log_func(
             f"Kurtosis screening for {filename_for_log} "
             f"(Z > {reject_thresh})..."
@@ -866,7 +906,7 @@ def _finish_preprocessing_at_kurtosis(
             description="bads",
         )
     else:
-        disabled = not params.get("kurtosis_screening_enabled", True)
+        disabled = not params.get("kurtosis_screening_enabled", not is_brain_products(params))
         if disabled:
             params["_fpvs_kurtosis_qc_evidence"] = {
                 "evaluation_status": "not_evaluated",
@@ -925,10 +965,14 @@ def _finish_preprocessing_at_kurtosis(
                 f"No good EEG channels."
             )
     except Exception as e:
+        if is_brain_products(params):
+            raise RuntimeError(f"Brain Products final average reference failed: {e}") from e
         log_func(
             f"Warn: Average reference failed for {filename_for_log}: {e}"
         )
 
+    if is_brain_products(params) and not average_reference_applied:
+        raise RuntimeError("Brain Products processing requires a successful final average reference.")
     if condition_repairs is not None:
         if not average_reference_applied:
             raise RuntimeError("Condition-local interpolation requires successful final average reference.")
@@ -1032,11 +1076,14 @@ def perform_preprocessing(
         ValueError: If filter cutoffs are logically invalid (HPF >= LPF).
     """
     raw = raw_input
+    brain_products = is_brain_products(params)
 
     # Ensure per-run audit keys do not leak across files when params is reused
     params.pop("_fpvs_preprocessing_error", None)
     params.pop("_fpvs_initial_ref_ok", None)
     params.pop("_fpvs_initial_ref_pair", None)
+    params.pop("_fpvs_initial_reference_mode", None)
+    params.pop("_fpvs_pipeline_policy", None)
     params.pop("_fpvs_fft_multinotch_requested_centers_hz", None)
     params.pop("_fpvs_fft_multinotch_applied_centers_hz", None)
     params.pop("_fpvs_fft_multinotch_skipped_centers", None)
@@ -1086,11 +1133,18 @@ def perform_preprocessing(
     ref1 = params.get("ref_channel1") or "EXG1"
     ref2 = params.get("ref_channel2") or "EXG2"
     max_keep = params.get("max_idx_keep")
+    if brain_products:
+        policy = brain_products_policy(params)
+        ref1 = ref2 = None
+        max_keep = policy["max_idx_keep"]
     stim_ch = params.get("stim_channel", config.DEFAULT_STIM_CHANNEL)
 
     num_kurtosis_bads_identified = 0
 
     try:
+        if brain_products:
+            validate_raw_recorded_geometry(raw)
+            validate_brain_products_qc(params)
         # Module-level logger entry for high-level preprocessing start
         try:
             logger.debug(
@@ -1159,7 +1213,10 @@ def perform_preprocessing(
             )
 
         # 1) Initial reference (user-selected pair; e.g., EXG1/EXG2 or EXG3/EXG4)
-        if ref1 and ref2 and ref1 in orig_ch_names and ref2 in orig_ch_names:
+        if brain_products:
+            apply_brain_products_reference(raw, params)
+            log_func(f"Brain Products initial reference: {policy['initial_reference']}.")
+        elif ref1 and ref2 and ref1 in orig_ch_names and ref2 in orig_ch_names:
             try:
                 coerced = _coerce_refs_to_eeg_if_needed(raw, (ref1, ref2))
                 if coerced:
@@ -1236,14 +1293,15 @@ def perform_preprocessing(
                 f"DEBUG [preprocess for {filename_for_log}]: Channel names BEFORE drop logic "
                 f"({len(current_names_before_drop)}): {current_names_before_drop}"
             )
-        current_scalp_channels = [
-            channel
-            for channel in current_names_before_drop
-            if channel in BIOSEMI64_CHANNELS
-        ]
+        current_scalp_channels = (
+            [raw.ch_names[int(pick)] for pick in mne.pick_types(raw.info, eeg=True, exclude=[])]
+            if brain_products else [
+                channel for channel in current_names_before_drop if channel in BIOSEMI64_CHANNELS
+            ]
+        )
         if max_keep is not None and 0 < max_keep < len(current_scalp_channels):
             present_scalp = set(current_scalp_channels)
-            canonical_scalp_order = [
+            canonical_scalp_order = current_scalp_channels if brain_products else [
                 channel for channel in BIOSEMI64_CHANNELS if channel in present_scalp
             ]
             retained_scalp = set(canonical_scalp_order[:max_keep])
@@ -1461,6 +1519,8 @@ def perform_preprocessing(
                     )
                     log_func(mismatch_warning)
                     logger.warning(mismatch_warning)
+                    if brain_products:
+                        raise RuntimeError("Applied Brain Products filter cutoffs do not match the project settings.")
                 log_func(
                     f"DEBUG [raw.info cutoffs {filename_for_log}]: "
                     f"highpass={raw.info.get('highpass')} "
@@ -1469,6 +1529,8 @@ def perform_preprocessing(
                 log_func(f"Filter OK for {filename_for_log}.")
             except Exception as e:
                 checkpoint = None
+                if brain_products:
+                    raise RuntimeError(f"Brain Products filtering failed: {e}") from e
                 log_func(
                     f"Warn: Filter failed for {filename_for_log}: {e}"
                 )
@@ -1603,6 +1665,8 @@ def perform_preprocessing(
                         )
                 except Exception as resample_err:
                     checkpoint = None
+                    if brain_products:
+                        raise RuntimeError(f"Brain Products resampling failed: {resample_err}") from resample_err
                     log_func(
                         f"Warn: Resampling failed for {filename_for_log}: "
                         f"{resample_err}"

@@ -736,7 +736,17 @@ def _start_post_processing_pipeline_after_processing(
                 except Exception:
                     logger.debug("frequency_domain_qc_mark_current_failed", exc_info=True)
             if result.get("ok"):
-                if result.get("has_warnings"):
+                from Main_App.processing.hardware_capabilities import spatial_tool_unavailable_reason
+
+                source_limitation = spatial_tool_unavailable_reason(project, "LORETA Visualizer")
+                if source_limitation:
+                    host.log(
+                        "Post-processing finished: harmonics and compatible analysis-ready "
+                        "workbooks are prepared. Automatic source-map generation was skipped "
+                        "because this montage has no qualified source model.",
+                        level=logging.INFO,
+                    )
+                elif result.get("has_warnings"):
                     host.log(
                         "Post-processing completed with usable LORETA outputs and "
                         "source-cohort warnings. Review the logged participant omissions.",

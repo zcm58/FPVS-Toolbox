@@ -22,6 +22,8 @@ from typing import Any
 import numpy as np
 
 from config import DEFAULT_ELECTRODE_NAMES_64
+from Main_App.processing.hardware_capabilities import spatial_tool_unavailable_reason
+from Main_App.projects import load_project_manifest_for_dataset_path
 
 PROJECT_SOURCE_LOCALIZATION_FOLDER = "6 - Source Localization"
 PROJECT_TIME_DOMAIN_INPUT_FOLDER = "Source-Ready Time Domain v1"
@@ -179,6 +181,11 @@ def load_project_time_domain_inputs(
 
     root = _project_root(project_root)
     input_root = root / PROJECT_SOURCE_LOCALIZATION_FOLDER / PROJECT_TIME_DOMAIN_INPUT_FOLDER
+    reason = spatial_tool_unavailable_reason(
+        load_project_manifest_for_dataset_path(root) or {}, "LORETA Visualizer",
+    )
+    if reason:
+        raise ProjectTimeDomainInputError(reason)
     manifests_root = input_root / PROJECT_TIME_DOMAIN_MANIFESTS_FOLDER
     expected = tuple(expected_inputs)
     if not expected:

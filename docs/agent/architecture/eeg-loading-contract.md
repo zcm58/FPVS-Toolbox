@@ -1,5 +1,38 @@
 # BDF Loading Contract
 
+## Brain Products project route
+
+`Main_App.io.load_utils` dispatches `.vhdr` and `.bvrh` through `hardware_loader`
+only for a confirmed Brain Products project. BioSemi loader arguments and
+legacy behavior are preserved. `brain_products` adapts calibrated vendor data
+into MNE Raw and a canonical numeric stimulus channel; `brain_products_files`
+validates companion ownership and `brain_products_bvrf` owns streaming BVRF 1.0.
+The pinned MNE 1.9 reader owns BVCDF. No dependency upgrade is required.
+
+Header-based discovery never treats `.eeg`, `.vmrk`, `.bvrd`, `.bvrm`, or `.bvri`
+as independent participants. `recording_sources` includes companions in preflight,
+preprocessing-cache, and ledger freshness. Prefetch validates all source bytes
+and releases owned memory maps. Project channel-type overrides precede geometry
+resolution. Recorded coordinates or an explicitly chosen template establish
+spatial availability; absent coordinates remain absent.
+
+The raw/cache/source-derivative geometry remains recording-owned. Downstream
+spectral cohorts use the separate `processing.recorded_cohort_geometry` contract
+to retain each source's coordinates while comparing compatible channel/policy
+identities. Never replace a participant's digitization with another participant's
+geometry or interpret the cohort identity as a spatial montage.
+
+All numeric Stimulus/S markers are preserved, including oddball markers outside
+the condition map. Brain Products event detection uses `initial_event=True` and
+`consecutive=True` so sample-zero and adjacent descending codes survive.
+Response and segment annotations cannot silently become condition codes.
+Reviewed marker plans and existing resampling/crop guards still apply.
+
+See the [user hardware guide](../../user/reference/brain-products.md) for format
+limits and primary sources. These software contracts do not qualify physical
+amplifier gain or stimulus latency. The separate Unicorn inspector remains gated.
+
+
 This page documents the BDF loader contract for the active Main App processing
 paths. Refactors must preserve supported file type, memmap paths, channel
 typing, montage behavior, logging, and return semantics unless a future task

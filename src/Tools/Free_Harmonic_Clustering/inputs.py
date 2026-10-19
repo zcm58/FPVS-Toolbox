@@ -28,6 +28,7 @@ from Main_App.processing.full_fft_provenance import (
     validate_project_full_fft_provenance,
 )
 from Main_App.processing.processing_ledger import load_ledger
+from Main_App.processing.hardware_capabilities import spatial_tool_unavailable_reason
 from Main_App.projects import (
     DatasetIndexError,
     ProjectDatasetIndex,
@@ -331,6 +332,9 @@ def _select_cohort(
     request: ProjectContrastRequest,
     project_root: Path,
 ) -> _SelectedCohort:
+    reason = spatial_tool_unavailable_reason(index.manifest or {}, "Free Harmonic Clustering Analysis")
+    if reason:
+        raise FreeHarmonicInputError(reason)
     if index.manifest is None:
         raise FreeHarmonicInputError("Free Harmonic Clustering requires a managed project.json manifest.")
     if request.design is AnalysisDesign.INDEPENDENT_GROUPS:
@@ -589,6 +593,9 @@ def _select_repeated_batch_cohort(
 ) -> _RepeatedBatchCohort:
     """Freeze complete per-condition pairs and a recording-aware audit."""
 
+    reason = spatial_tool_unavailable_reason(index.manifest or {}, "Free Harmonic Clustering Analysis")
+    if reason:
+        raise FreeHarmonicInputError(reason)
     if index.manifest is None or not index.is_repeated_session:
         raise FreeHarmonicInputError("Repeated-session FHC requires a managed repeated-session project.")
     try:

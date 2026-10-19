@@ -159,6 +159,11 @@ def build_l2_mne_conditions_from_project(
     if not root.is_dir():
         raise FileNotFoundError(f"Project root does not exist: {root}")
     dataset_index = load_project_dataset_index(root)
+    from Main_App.processing.hardware_capabilities import spatial_tool_unavailable_reason
+
+    reason = spatial_tool_unavailable_reason(dataset_index.manifest or {}, "LORETA Visualizer")
+    if reason:
+        raise ValueError(reason)
     recording_ids_by_participant: dict[str, set[str]] = {}
     for record in (*dataset_index.workbooks, *dataset_index.excluded_workbooks):
         if record.recording_id:

@@ -27,6 +27,62 @@ lowest-risk maintenance path is:
 2. Add focused tests before any behavior-sensitive edit.
 3. Split code only when the extraction boundary is obvious and fully covered.
 
+## Brain Products acquisition policy
+
+`processing/acquisition_policy.py` owns `brain_products_recorded_eeg_v1`.
+It uses the shared filter, optional FFT multi-notch, downsampling and final
+average-reference stages, with these explicit acquisition-specific boundaries:
+
+- Project hardware must be confirmed as `brain_products`. The initial reference
+  defaults to the reference already represented in the recording. An explicitly
+  selected list of recorded EEG reference channels may be applied; those channels
+  are retained unless the project explicitly requests dropping them. No EXG pair
+  or 64-channel limit is inferred.
+- `io/recorded_eeg_geometry.py` owns the ordered EEG identity. Geometry comes from
+  recorded head coordinates or an explicitly selected MNE montage template.
+  Unknown coordinates remain unavailable and do not prevent ordinary spectral
+  processing. Interpolation requires complete finite head coordinates, sufficient
+  retained electrodes, and successful MNE interpolation. Missing template labels
+  fail instead of receiving fabricated positions.
+- BioSemi-calibrated raw-signal, removed-electrode and normalized-kurtosis screens
+  remain unavailable for this policy. An incompatible enabled setting fails
+  explicitly; unavailable evidence never claims that a recording passed screening.
+  Independently reviewed manual whole-recording bad channels may be interpolated
+  when their geometry supports it. Condition-local repairs and spatial burden
+  methods remain gated pending montage-specific qualification.
+- Channel order, coordinates, capability state and policy have versioned
+  fingerprints. A hardware/reference/montage change cannot reuse evidence under a
+  former identity. The historical BioSemi fingerprint and numerical path are
+  unchanged when the Brain Products policy is not selected.
+- `processing/recorded_cohort_geometry.py` owns
+  `recorded_eeg_spectral_cohort_v1` for nonspatial FullFFT and ROI coverage.
+  Participants and repeated recordings may have different measured coordinates
+  while sharing the same ordered original/retained scalp labels, montage,
+  mapping and processing fingerprint. The cohort preserves every source's full
+  validated geometry and fingerprint; changing a source's coordinates invalidates
+  saved provenance. It has no aggregate electrode coordinates and cannot supply
+  a spatial montage. FullFFT uses explicit recorded-cohort method versions while
+  preserving the existing BioSemi method versions and exact geometry checks.
+- `processing/hardware_capabilities.py` keeps fixed BioSemi spatial tools gated
+  at launch and at their public project-input boundaries. This covers Scalp
+  Maps, LORETA and Free Harmonic Clustering even when recorded channel labels
+  happen to match BioSemi64. Automatic source phases skip without producing a
+  fresh artifact; compatible spectral and statistical table exports continue.
+- Stats Summed BCA consumes frozen recorded-montage coverage. A template ROI
+  whose electrodes were not recorded remains unavailable, never a reduced ROI
+  or a substituted value. Stats-ready workbooks retain those cells as missing
+  with an `ROI_Availability` sheet and an explicit all-unavailable summary when
+  no ROI is computable. Available configured ROIs retain the exact selected
+  harmonic sum. Other missing electrodes still fail source validation.
+
+The reference and montage operations use the documented MNE APIs:
+[EEG referencing](https://mne.tools/1.9/auto_tutorials/preprocessing/55_setting_eeg_reference.html),
+[Raw montage and interpolation methods](https://mne.tools/1.9/generated/mne.io.Raw.html),
+and [BrainVision loading](https://mne.tools/1.9/generated/mne.io.read_raw_brainvision.html).
+These APIs support the implementation choices; they do not establish scientific
+equivalence of different caps or qualify the Toolbox's BioSemi-specific QC
+thresholds for other acquisition systems.
+
 ## Experimental condition-specific electrode repairs
 
 Experimental QC settings v1.3 separates optional screens from mandatory input

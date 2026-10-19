@@ -12,6 +12,7 @@ from unittest.mock import Mock
 import pytest
 
 from Main_App.processing import frequency_domain_qc
+from Main_App.processing.hardware_capabilities import spatial_tool_unavailable_reason
 from Main_App.projects.preprocessing_settings import normalize_manual_excluded_participant_conditions
 
 
@@ -20,6 +21,9 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 def _load_function(relative_path, name, namespace, *, class_name=None):
     namespace.setdefault("present_last_run", Mock())
+    namespace.setdefault("tool_workflows", SimpleNamespace(
+        spatial_tool_available=lambda _host, project, tool: not spatial_tool_unavailable_reason(project, tool),
+    ))
     path = REPO_ROOT / relative_path
     tree = ast.parse(path.read_text(encoding="utf-8"))
     owner = tree if class_name is None else next(

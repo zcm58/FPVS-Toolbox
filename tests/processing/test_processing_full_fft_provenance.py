@@ -125,6 +125,136 @@ def _managed_full_fft_project(
     return root
 
 
+def _recorded_geometry(*, offset: float = 0.0, names=("Fp1", "Fp2", "O1", "O2")):
+    import mne
+    from Main_App.io.recorded_eeg_geometry import attach_raw_recorded_geometry
+
+    raw = mne.io.RawArray(np.zeros((len(names), 1)), mne.create_info(list(names), 256, "eeg"), verbose=False)
+    coordinates = np.array([[-.04, .07, .06], [.04, .07, .06], [-.04, -.07, .06], [.04, -.07, .06]])
+    coordinates[0, 0] += offset
+    raw.set_montage(mne.channels.make_dig_montage(
+        ch_pos=dict(zip(names, coordinates, strict=True)), coord_frame="head",
+    ), verbose=False)
+    return attach_raw_recorded_geometry(raw)
+
+
+def _brain_products_full_fft_project(tmp_path: Path):
+    root = _managed_full_fft_project(tmp_path)
+    manifest_path = root / "project.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["preprocessing"] = {
+        "hardware_platform": "brain_products", "hardware_confirmed": True,
+        "electrode_montage": "recorded", "initial_reference": "recorded",
+    }
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    geometries = {"P1": _recorded_geometry(), "P2": _recorded_geometry(offset=.001)}
+    _write_geometry_ledger(root, geometries)
+    return root, geometries
+
+
+def test_recorded_full_fft_cohort_preserves_individual_digitization_and_roi_roundtrip(tmp_path):
+    from Main_App.processing.recorded_cohort_geometry import RECORDED_COHORT_GEOMETRY_VERSION
+    from Main_App.processing.roi_coverage import (
+        _source_evidence_from_payload, freeze_retained_scalp_identity, validate_roi_source_rows,
+    )
+
+    root, geometries = _brain_products_full_fft_project(tmp_path)
+    pre_review = require_current_project_pre_review_geometry(root)
+    assert pre_review["geometry_version"] == RECORDED_COHORT_GEOMETRY_VERSION
+    assert pre_review["source_geometries"] == {key.lower(): value for key, value in geometries.items()}
+    assert pre_review["source_identity_kind"] == "participant_id"
+    assert pre_review["coordinate_frame"] == "per_recording"
+    assert "channel_coordinates_m" not in pre_review
+    assert pre_review["interpolation_supported"] is False
+    assert geometries["P1"]["coordinate_fingerprint"] != geometries["P2"]["coordinate_fingerprint"]
+    written = write_project_full_fft_provenance(root, base_frequency_hz=6.0, oddball_frequency_hz=1.2)
+    assert written.method_version == full_fft_provenance.RECORDED_FULL_FFT_PROVENANCE_METHOD_VERSION
+    validated = validate_project_full_fft_provenance(root, base_frequency_hz=6.0, oddball_frequency_hz=1.2)
+    assert validated.geometry_identity == pre_review
+    assert validated.geometry_fingerprint == written.geometry_fingerprint
+    assert require_current_project_workbook_geometry(root) == pre_review
+
+    scalp = freeze_retained_scalp_identity(validated.geometry_identity)
+    assert scalp.channels == ("Fp1", "Fp2", "O1", "O2")
+    assert freeze_retained_scalp_identity(scalp.to_payload()) == scalp
+    evidence = validate_roi_source_rows(
+        [{"Electrode": name, "1.200000_Hz": 5.0} for name in scalp.channels],
+        retained_scalp=scalp, required_columns=["1.200000_Hz"],
+    )
+    assert _source_evidence_from_payload(evidence.to_payload()) == evidence
+
+
+def test_recorded_full_fft_coordinates_remain_freshness_bound(tmp_path):
+    root, geometries = _brain_products_full_fft_project(tmp_path)
+    original = write_project_full_fft_provenance(root, base_frequency_hz=6.0, oddball_frequency_hz=1.2)
+    geometries["P2"] = _recorded_geometry(offset=.002)
+    _write_geometry_ledger(root, geometries)
+    with pytest.raises(FullFftProvenanceStaleError, match="electrode geometry identity changed"):
+        validate_project_full_fft_provenance(root, base_frequency_hz=6.0, oddball_frequency_hz=1.2)
+    rebuilt = write_project_full_fft_provenance(root, base_frequency_hz=6.0, oddball_frequency_hz=1.2)
+    assert rebuilt.geometry_fingerprint != original.geometry_fingerprint
+
+
+@pytest.mark.parametrize("names", [("Fp2", "Fp1", "O1", "O2"), ("Fp1", "Fp2", "O1", "Oz")])
+def test_recorded_full_fft_rejects_mixed_channel_order_or_labels(tmp_path, names):
+    root, geometries = _brain_products_full_fft_project(tmp_path)
+    geometries["P2"] = _recorded_geometry(names=names)
+    _write_geometry_ledger(root, geometries)
+    with pytest.raises(FullFftProvenanceError, match="ordered scalp channels"):
+        require_current_project_workbook_geometry(root)
+
+
+def test_recorded_full_fft_rejects_mixed_processing_policy(tmp_path):
+    root, _ = _brain_products_full_fft_project(tmp_path)
+    path = root / ".fpvs_processing" / "processing_ledger.json"
+    ledger = json.loads(path.read_text(encoding="utf-8"))
+    ledger["entries"]["P2"]["processing_fingerprint"] = "different-reference-policy"
+    path.write_text(json.dumps(ledger), encoding="utf-8")
+    with pytest.raises(FullFftProvenanceError, match="different processing policies"):
+        require_current_project_workbook_geometry(root)
+
+
+@pytest.mark.parametrize("mutation", ["coordinate", "omit_source", "substitute_first", "method", "source_kind"])
+def test_recorded_full_fft_saved_cohort_rejects_tampering(tmp_path, mutation):
+    root, geometries = _brain_products_full_fft_project(tmp_path)
+    write_project_full_fft_provenance(root, base_frequency_hz=6.0, oddball_frequency_hz=1.2)
+    path = root / "project.json"
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    metadata = manifest["tools"]["processing"]["full_fft_provenance"]
+    if mutation == "coordinate":
+        metadata["geometry"]["source_geometries"]["p2"]["channel_coordinates_m"]["Fp1"][0] += .001
+    elif mutation == "omit_source":
+        metadata["geometry"]["source_geometries"].pop("p2")
+    elif mutation == "substitute_first":
+        metadata["geometry"] = geometries["P1"]
+    elif mutation == "method":
+        metadata["method_version"] = full_fft_provenance.FULL_FFT_PROVENANCE_METHOD_VERSION
+    else:
+        metadata["method_version"] = full_fft_provenance.REPEATED_RECORDED_FULL_FFT_PROVENANCE_METHOD_VERSION
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(FullFftProvenanceStaleError):
+        require_current_project_full_fft_provenance(root)
+
+
+def test_recorded_cohort_retains_separate_repeat_session_digitizations():
+    from types import SimpleNamespace
+
+    index = SimpleNamespace(is_repeated_session=True, manifest={"preprocessing": {
+        "hardware_platform": "brain_products", "hardware_confirmed": True,
+        "electrode_montage": "recorded",
+    }})
+    records = [SimpleNamespace(recording_id="P1__visit_1"), SimpleNamespace(recording_id="P1__visit_2")]
+    geometries = [_recorded_geometry(), _recorded_geometry(offset=.001)]
+    rows = [{
+        "participant_id": "P1", "recording_id": record.recording_id,
+        "processing_fingerprint_version": PROCESSING_FINGERPRINT_VERSION,
+        "processing_fingerprint": "same-policy", "geometry": geometry,
+    } for record, geometry in zip(records, geometries, strict=True)]
+    result = full_fft_provenance._active_geometry_identity(index, records, rows, ledger_filter_applied=True)
+    assert result["source_identity_kind"] == "recording_id"
+    assert result["source_geometries"] == {"p1__visit_1": geometries[0], "p1__visit_2": geometries[1]}
+
+
 def test_full_fft_provenance_rebases_when_managed_project_is_copied(
     tmp_path: Path,
 ) -> None:

@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 )
 from Main_App.gui.components import SectionCard
 from Main_App.gui.settings_feedback import refresh_preprocessing_feedback
+from Main_App.gui.settings_hardware_controls import build_hardware_controls
 from Main_App.projects.preprocessing_settings import (
     ELECTRODE_MAPPING_PROFILE_ANATOMICAL,
     ELECTRODE_MONTAGE_BIOSEMI64,
@@ -62,6 +63,8 @@ def build_preprocessing_page(self, tabs: QTabWidget) -> QWidget:
     ]
     self.preproc_edits: list[QLineEdit] = []
     self.preproc_error_labels: list[QLabel] = []
+    self._preproc_field_containers = []
+    self._preproc_field_labels = []
     for i, label_text in enumerate(params):
         row, col = divmod(i, 2)
         lbl = QLabel(label_text, self.group_preproc)
@@ -87,6 +90,8 @@ def build_preprocessing_page(self, tabs: QTabWidget) -> QWidget:
         error.setTextFormat(Qt.PlainText)
         error.hide()
         field_layout.addWidget(error)
+        self._preproc_field_containers.append(field)
+        self._preproc_field_labels.append(lbl)
         self.preproc_error_labels.append(error)
         grid.addWidget(lbl, row, col * 2)
         grid.addWidget(field, row, col * 2 + 1)
@@ -183,9 +188,8 @@ def build_preprocessing_page(self, tabs: QTabWidget) -> QWidget:
 
     montage_row = line_noise_row + 1
     montage_tooltip = (
-        "FPVS Toolbox currently supports only the BioSemi ActiveTwo "
-        "64-channel 10-20 cap. This project setting is reserved for "
-        "validated future montage support."
+        "Use recorded electrode positions or explicitly select the matching cap template. "
+        "Do not select a template merely because it has the same channel count."
     )
     montage_label = QLabel("Electrode montage:", self.group_preproc)
     montage_label.setToolTip(montage_tooltip)
@@ -244,6 +248,8 @@ def build_preprocessing_page(self, tabs: QTabWidget) -> QWidget:
     }
     grid.addWidget(mapping_label, montage_row, 2)
     grid.addWidget(self.electrode_mapping_profile_combo, montage_row, 3)
+
+    build_hardware_controls(self, grid, montage_row + 1, project_pp or {})
 
     layout.addWidget(self.group_preproc)
 

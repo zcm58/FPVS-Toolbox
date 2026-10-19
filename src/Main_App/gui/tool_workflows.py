@@ -7,6 +7,16 @@ from typing import Any, Callable
 from PySide6.QtWidgets import QMessageBox
 
 
+def spatial_tool_available(host: Any, project: Any, tool_name: str) -> bool:
+    from Main_App.processing.hardware_capabilities import spatial_tool_unavailable_reason
+
+    reason = spatial_tool_unavailable_reason(project, tool_name)
+    if not reason:
+        return True
+    QMessageBox.information(host, "Montage Not Supported by This Tool", reason)
+    return False
+
+
 def open_settings_window(host: Any, settings_dialog_cls: Callable[..., Any]) -> None:
     if host._settings_dialog and host._settings_dialog.isVisible():
         host._settings_dialog.raise_()

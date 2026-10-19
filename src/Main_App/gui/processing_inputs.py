@@ -18,6 +18,8 @@ from PySide6.QtWidgets import (
 )
 
 import config
+from Main_App.io.file_filters import EEG_RECORDING_FILTER, is_eeg_recording_file
+from Main_App.gui.hardware_selection import ensure_project_hardware_ready
 from Main_App.io.load_utils import inspect_bdf_header, read_bdf_sampling_rate_hz
 from Main_App.gui.manual_removed_electrodes_dialog import ManualRemovedElectrodesDialog
 from Main_App.gui.project_protocol import (
@@ -56,6 +58,7 @@ from Main_App.projects.preprocessing_settings import (
     removed_electrode_detection_choice_requires_confirmation,
     require_removed_electrode_detection_choice_ready,
 )
+from Main_App.projects.hardware import HARDWARE_SETTINGS_KEYS
 from Main_App.projects import FrequencyProtocolError, validate_protocol_condition_codes
 from Main_App.projects.recordings import project_recording_context
 from Main_App.processing.removed_electrode_detection import (
@@ -143,8 +146,6 @@ def validate_inputs(host: Any) -> bool:
     if not getattr(host, "currentProject", None):
         QMessageBox.warning(host, "No Project", "Please open or create a project first.")
         return False
-    if not _ensure_removed_electrode_detection_choice_ready(host):
-        return False
 
     # File selection rules differ in Single vs Batch
     mode_now = (host.file_mode.get() if hasattr(host, "file_mode") else "Batch")
@@ -159,11 +160,11 @@ def validate_inputs(host: Any) -> bool:
     registration_review = None
     registration_project = host.currentProject
     if mode_now == "Single":
-        # In single mode, require an explicit .bdf selection
+        # In single mode, require an explicit supported recording header.
         selected = selected_single_file(host)
-        if not selected or not Path(selected).is_file() or Path(selected).suffix.lower() != ".bdf":
+        if not selected or not Path(selected).is_file() or not is_eeg_recording_file(selected):
             host._update_start_enabled()
-            QMessageBox.warning(host, "No File Selected", "Please choose an available .bdf file first.")
+            QMessageBox.warning(host, "No File Selected", "Please choose an available EEG recording first.")
             return False
         host.data_paths = [selected]
         try:
@@ -199,7 +200,7 @@ def validate_inputs(host: Any) -> bool:
             QMessageBox.warning(
                 host,
                 "No Data",
-                "No .bdf files found in the configured input folder(s).",
+                "No EEG recordings found in the configured input folder(s).",
             )
             return False
         if registration_review is None:
@@ -232,6 +233,28 @@ def validate_inputs(host: Any) -> bool:
             logger.warning(
                 "Repeated-session source preflight found coverage warnings."
             )
+
+    before_hardware_confirmation = dict(host.currentProject.preprocessing)
+    if not ensure_project_hardware_ready(host, [info.path for info in preflight_file_infos]):
+        return False
+    if not _ensure_removed_electrode_detection_choice_ready(host):
+        return False
+    if (registration_review is not None
+            and host.currentProject.preprocessing != before_hardware_confirmation):
+        # Explicit hardware/detector confirmation saved project.json. Recreate
+        # the pending registration against that exact manifest revision before
+        # showing its participant review or committing any additions.
+        try:
+            registration_review = prepare_raw_registration_review(
+                host.currentProject,
+                **({"selected_path": Path(selected)} if mode_now == "Single" else {}),
+            )
+            raw_file_infos = list(registration_review.files)
+            preflight_file_infos = registration_review.source_files
+            validate_repeated_recording_sources_for_processing(host.currentProject, preflight_file_infos)
+        except (OSError, RuntimeError, ValueError) as exc:
+            QMessageBox.critical(host, "Project Data Error", str(exc))
+            return False
 
     # Save/output folder from project
     excel_sub = host.currentProject.subfolders.get("excel")
@@ -346,6 +369,7 @@ def validate_inputs(host: Any) -> bool:
     debug_enabled = bool(host.settings.debug_enabled()) if hasattr(host, "settings") else False
     project_preproc = getattr(host.currentProject, "preprocessing", {}) or {}
     project_snapshot = {key: project_preproc.get(key) for key in PREPROCESSING_CANONICAL_KEYS}
+    project_snapshot.update({key: project_preproc[key] for key in HARDWARE_SETTINGS_KEYS if key in project_preproc})
     settings_snapshot = None
     if hasattr(host, "settings") and hasattr(host.settings, "config"):
         settings_snapshot = {}
@@ -693,7 +717,8 @@ def build_validated_params(host: Any) -> dict | None:
         "reject_thresh": float(normalized.get("rejection_z")),
         "ref_channel1": (normalized.get("ref_chan1") or None),
         "ref_channel2": (normalized.get("ref_chan2") or None),
-        "max_idx_keep": int(normalized.get("max_chan_idx_keep")),
+        "max_idx_keep": (int(normalized["max_chan_idx_keep"])
+                         if normalized.get("max_chan_idx_keep") is not None else None),
         "max_bad_channels_alert_thresh": int(normalized.get("max_bad_chans")),
         "auto_detect_removed_electrodes": bool(
             normalized.get("auto_detect_removed_electrodes")
@@ -757,6 +782,15 @@ def build_validated_params(host: Any) -> dict | None:
         },
         "raw_spectral_screening": raw_spectral_screening.to_manifest(),
     }
+    if normalized.get("hardware_platform") == "brain_products":
+        params.update({key: normalized[key] for key in (
+            "hardware_platform", "hardware_confirmed", "hardware_selection_source",
+            "initial_reference", "initial_reference_channels", "drop_reference_channels", "channel_types",
+        ) if key in normalized})
+    elif "hardware_platform" in normalized:
+        params["hardware_platform"] = normalized["hardware_platform"]
+        params["hardware_confirmed"] = normalized.get("hardware_confirmed", False)
+
     logger.debug(
         "VALIDATED_PARAMS_SNAPSHOT high_pass=%r low_pass=%r downsample_rate=%r "
         "line_noise_filter_enabled=%r line_noise_frequency_hz=%r "
@@ -911,11 +945,11 @@ def update_start_enabled(host: Any) -> None:
         ok = (
             event_map_ready
             and bool(txt)
-            and Path(txt).suffix.lower() == ".bdf"
+            and is_eeg_recording_file(txt)
             and Path(txt).is_file()
         )
         btn.setEnabled(ok)
-        reason = "Select an available BDF file." if event_map_ready and not ok else ""
+        reason = "Select an available EEG recording." if event_map_ready and not ok else ""
     else:
         btn.setEnabled(event_map_ready)
         reason = ""
@@ -948,17 +982,17 @@ def select_single_file(host: Any) -> None:
         return
     fname, _ = QFileDialog.getOpenFileName(
         host,
-        "Select EEG File (.bdf)",
+        "Select EEG recording",
         start_dir,
-        "EEG BioSemi (*.bdf)",
+        EEG_RECORDING_FILTER,
     )
     if not fname:
         host.log("Single-file selection canceled.")
         host._update_start_enabled()
         return
     p = Path(fname)
-    if p.suffix.lower() != ".bdf":
-        QMessageBox.warning(host, "Invalid File", "Please select a .bdf file.")
+    if not is_eeg_recording_file(p):
+        QMessageBox.warning(host, "Invalid File", "Please select a .bdf, .vhdr, or .bvrh recording.")
         host._update_start_enabled()
         return
     try:

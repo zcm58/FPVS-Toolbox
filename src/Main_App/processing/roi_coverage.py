@@ -27,6 +27,9 @@ from Main_App.processing.preprocessing_outcome import (
     normalize_preprocessing_outcome,
 )
 from Main_App.processing.condition_electrode_interpolation import CONDITION_INTERPOLATION_VERSION
+from Main_App.processing.recorded_scalp_identity import RecordedScalpIdentity
+from Main_App.processing.recorded_cohort_geometry import RECORDED_COHORT_GEOMETRY_VERSION
+from Main_App.io.recorded_eeg_geometry import RECORDED_GEOMETRY_VERSION
 from Main_App.processing.recording_condition_outcomes import (
     CELL_BLOCKED,
     CELL_PARTIALLY_RETAINED,
@@ -55,17 +58,35 @@ ROI_VALUE_NOT_APPLICABLE = "not_applicable"
 
 _BCA_COLUMN_PATTERN = re.compile(r"^[+]?(\d+(?:\.\d+)?)_hz$", re.IGNORECASE)
 
-_CANONICAL_CHANNEL_BY_CASEFOLD = {
-    channel.casefold(): channel for channel in BIOSEMI64_CHANNELS
-}
-
-
 class RoiSourceCoverageError(ValueError):
     """Source rows cannot satisfy the frozen QC-21 electrode contract."""
 
 
 class RoiCoverageGateError(RuntimeError):
     """QC-20/QC-21 coverage cannot release downstream numerical work."""
+
+
+def recorded_montage_unavailable_roi_reasons(
+    coverage_cell: Any,
+    rois: Mapping[str, Sequence[str]],
+) -> dict[str, tuple[str, ...]]:
+    """Honor frozen absent-template ROI evidence without weakening source checks."""
+    evidence = getattr(coverage_cell, "source_evidence", None)
+    if not isinstance(getattr(evidence, "retained_scalp_identity", None), RecordedScalpIdentity):
+        return {}
+    memberships = {item.roi_name.casefold(): item for item in coverage_cell.roi_memberships}
+    unavailable = {}
+    for name, channels in rois.items():
+        membership = memberships.get(str(name).casefold())
+        if membership is None or "required_electrodes_not_recorded" not in membership.reason_codes:
+            continue
+        expected = tuple(str(channel).strip().casefold() for channel in channels)
+        if expected != tuple(channel.casefold() for channel in membership.expected_channels):
+            raise RoiCoverageGateError(f"ROI {name!r} no longer matches its frozen membership.")
+        if membership.status != ROI_VALUE_UNAVAILABLE or membership.used_channels:
+            raise RoiCoverageGateError(f"ROI {name!r} has inconsistent unrecorded-electrode coverage.")
+        unavailable[name] = tuple(membership.reason_codes)
+    return unavailable
 
 
 def _canonical_json(value: object) -> str:
@@ -96,6 +117,7 @@ def _normalize_scalp_channels(
     *,
     field_name: str,
     allow_empty: bool = False,
+    canonical_channels: Sequence[str] = BIOSEMI64_CHANNELS,
 ) -> tuple[str, ...]:
     if not isinstance(values, Iterable) or isinstance(
         values,
@@ -107,6 +129,8 @@ def _normalize_scalp_channels(
         raise RoiSourceCoverageError(f"{field_name} cannot be empty.")
 
     selected: set[str] = set()
+    canonical_by_casefold = {channel.casefold(): channel for channel in canonical_channels}
+    channel_kind = "BioSemi64" if canonical_channels == BIOSEMI64_CHANNELS else "recorded EEG"
     for index, raw_channel in enumerate(materialized, start=1):
         if not isinstance(raw_channel, str):
             raise RoiSourceCoverageError(
@@ -117,17 +141,17 @@ def _normalize_scalp_channels(
             raise RoiSourceCoverageError(
                 f"{field_name} contains a blank channel at position {index}."
             )
-        canonical = _CANONICAL_CHANNEL_BY_CASEFOLD.get(submitted.casefold())
+        canonical = canonical_by_casefold.get(submitted.casefold())
         if canonical is None:
             raise RoiSourceCoverageError(
-                f"{field_name} contains unknown BioSemi64 channel {submitted!r}."
+                f"{field_name} contains unknown {channel_kind} channel {submitted!r}."
             )
         if canonical in selected:
             raise RoiSourceCoverageError(
-                f"{field_name} repeats BioSemi64 channel {canonical!r}."
+                f"{field_name} repeats {channel_kind} channel {canonical!r}."
             )
         selected.add(canonical)
-    return tuple(channel for channel in BIOSEMI64_CHANNELS if channel in selected)
+    return tuple(channel for channel in canonical_channels if channel in selected)
 
 
 @dataclass(frozen=True, slots=True)
@@ -178,13 +202,21 @@ class RetainedScalpIdentity:
 
 
 def freeze_retained_scalp_identity(
-    value: RetainedScalpIdentity | Mapping[str, object] | Iterable[str],
-) -> RetainedScalpIdentity:
+    value: RetainedScalpIdentity | RecordedScalpIdentity | Mapping[str, object] | Iterable[str],
+) -> RetainedScalpIdentity | RecordedScalpIdentity:
     """Freeze a canonical channel sequence or validate a QC-15 identity."""
 
-    if isinstance(value, RetainedScalpIdentity):
+    if isinstance(value, (RetainedScalpIdentity, RecordedScalpIdentity)):
         return value
     if isinstance(value, Mapping):
+        if value.get("geometry_version") in {RECORDED_GEOMETRY_VERSION, RECORDED_COHORT_GEOMETRY_VERSION}:
+            try:
+                identity = RecordedScalpIdentity.from_geometry(value.get("recorded_geometry", value))
+            except (KeyError, TypeError, ValueError) as error:
+                raise RoiSourceCoverageError("Retained recorded EEG geometry is invalid.") from error
+            if "recorded_geometry" in value and dict(value) != identity.to_payload():
+                raise RoiSourceCoverageError("Retained recorded EEG coverage identity is stale.")
+            return identity
         raw_channels = value.get("retained_scalp_channels")
         identity = RetainedScalpIdentity(channels=raw_channels)  # type: ignore[arg-type]
         try:
@@ -240,10 +272,10 @@ def _normalize_columns(values: object, *, field_name: str) -> tuple[str, ...]:
     return tuple(normalized)
 
 
-def _normalize_auxiliary_rows(values: object) -> tuple[str, ...]:
+def _normalize_auxiliary_rows(values: object, *, scalp_channels: Sequence[str] = BIOSEMI64_CHANNELS) -> tuple[str, ...]:
     rows = _normalize_columns(values, field_name="Allowed auxiliary rows")
     for row in rows:
-        if row.casefold() in _CANONICAL_CHANNEL_BY_CASEFOLD:
+        if row.casefold() in {name.casefold() for name in scalp_channels}:
             raise RoiSourceCoverageError(
                 f"BioSemi64 scalp channel {row!r} cannot be declared auxiliary."
             )
@@ -306,7 +338,7 @@ def _is_finite_number(value: object) -> bool:
 class RoiSourceCoverageEvidence:
     """Immutable evidence that source rows passed pre-exclusion validation."""
 
-    retained_scalp_identity: RetainedScalpIdentity
+    retained_scalp_identity: RetainedScalpIdentity | RecordedScalpIdentity
     required_columns: tuple[str, ...]
     explicitly_unavailable_columns: tuple[str, ...]
     observed_scalp_channels: tuple[str, ...]
@@ -379,8 +411,10 @@ def _source_evidence_from_payload(
     raw_nonfinite = value.get("nonfinite_unavailable_values")
     if not isinstance(raw_retained, Mapping) or not isinstance(raw_nonfinite, Mapping):
         raise RoiCoverageGateError("Persisted ROI source evidence is malformed.")
-    retained = RetainedScalpIdentity(
-        channels=tuple(raw_retained.get("retained_scalp_channels") or ()),
+    retained = (
+        freeze_retained_scalp_identity(raw_retained)
+        if raw_retained.get("geometry_version") in {RECORDED_GEOMETRY_VERSION, RECORDED_COHORT_GEOMETRY_VERSION}
+        else RetainedScalpIdentity(channels=tuple(raw_retained.get("retained_scalp_channels") or ()))
     )
     if dict(raw_retained) != retained.to_payload():
         raise RoiCoverageGateError("Persisted retained-scalp identity is stale.")
@@ -410,6 +444,7 @@ def validate_roi_source_rows(
     rows: object,
     *,
     retained_scalp: RetainedScalpIdentity
+    | RecordedScalpIdentity
     | Mapping[str, object]
     | Iterable[str],
     required_columns: Sequence[str],
@@ -454,7 +489,9 @@ def validate_roi_source_rows(
             "The electrode identity column cannot also be a computable column."
         )
 
-    allowed_auxiliary = _normalize_auxiliary_rows(allowed_auxiliary_rows)
+    canonical_channels = retained.channels if isinstance(retained, RecordedScalpIdentity) else BIOSEMI64_CHANNELS
+    canonical_by_casefold = {name.casefold(): name for name in canonical_channels}
+    allowed_auxiliary = _normalize_auxiliary_rows(allowed_auxiliary_rows, scalp_channels=canonical_channels)
     allowed_auxiliary_by_casefold = {
         row.casefold(): row for row in allowed_auxiliary
     }
@@ -462,6 +499,7 @@ def validate_roi_source_rows(
         successfully_interpolated_channels,
         field_name="Successfully interpolated channels",
         allow_empty=True,
+        canonical_channels=canonical_channels,
     )
     outside_retained = [
         channel for channel in interpolated if channel not in retained.channels
@@ -492,7 +530,7 @@ def validate_roi_source_rows(
                 f"Source row {row_number} has a blank or non-text electrode identity."
             )
         submitted_electrode = raw_electrode.strip()
-        canonical = _CANONICAL_CHANNEL_BY_CASEFOLD.get(
+        canonical = canonical_by_casefold.get(
             submitted_electrode.casefold()
         )
         if canonical is not None:
@@ -1188,6 +1226,7 @@ def _processing_entry(
 def _successful_interpolation_provenance(
     processing_ledger: Mapping[str, Any],
     processing_id: str,
+    *, canonical_channels: Sequence[str] = BIOSEMI64_CHANNELS,
 ) -> tuple[tuple[str, ...], dict[str, object]]:
     entry = _processing_entry(processing_ledger, processing_id)
     try:
@@ -1205,6 +1244,7 @@ def _successful_interpolation_provenance(
             outcome.interpolation_successful_channels,
             field_name="Successfully interpolated channels",
             allow_empty=True,
+            canonical_channels=canonical_channels,
         )
         if outcome.interpolation_status == INTERPOLATION_STATUS_SUCCEEDED
         else ()
@@ -1313,7 +1353,7 @@ def _source_evidence_for_cell(
         for channel in roi.electrodes
         if channel not in retained_set
     ]
-    if outside:
+    if outside and not isinstance(retained, RecordedScalpIdentity):
         raise RoiCoverageGateError(
             "Configured ROI member(s) are outside the run's frozen retained scalp set: "
             + ", ".join(outside)
@@ -1321,6 +1361,7 @@ def _source_evidence_for_cell(
     interpolated, interpolation_outcome = _successful_interpolation_provenance(
         processing_ledger,
         cell.processing_id,
+        canonical_channels=retained.channels if isinstance(retained, RecordedScalpIdentity) else BIOSEMI64_CHANNELS,
     )
     local_repair = receipt.get("condition_electrode_interpolation")
     if local_repair is not None:
@@ -1337,8 +1378,9 @@ def _source_evidence_for_cell(
             local_repair.get("interpolated_channels") or (),
             field_name="Condition-local successfully interpolated channels",
             allow_empty=False,
+            canonical_channels=retained.channels,
         )
-        interpolated = tuple(channel for channel in BIOSEMI64_CHANNELS
+        interpolated = tuple(channel for channel in retained.channels
                              if channel in set(interpolated) | set(local_channels))
         interpolation_outcome = {**interpolation_outcome, "condition_electrode_interpolation": dict(local_repair)}
     bca_columns = _bca_columns_for_workbook(workbook_path)
@@ -1379,6 +1421,7 @@ def _roi_memberships(
             excluded_channels,
             field_name="Reviewed excluded channels",
             allow_empty=True,
+            canonical_channels=source.expected_scalp_channels if isinstance(source.retained_scalp_identity, RecordedScalpIdentity) else BIOSEMI64_CHANNELS,
         )
     )
     observed = set(source.observed_scalp_channels)
@@ -1391,12 +1434,15 @@ def _roi_memberships(
         interpolated_members = tuple(
             channel for channel in expected if channel in interpolated
         )
-        unavailable = downstream_cell_excluded or bool(excluded_members)
+        missing_members = observed_members != expected
+        unavailable = downstream_cell_excluded or bool(excluded_members) or missing_members
         reasons = (
             ("reviewed_recording_condition_exclusion",)
             if downstream_cell_excluded
             else ("reviewed_required_electrode_exclusion",)
             if excluded_members
+            else ("required_electrodes_not_recorded",)
+            if missing_members
             else ()
         )
         rows.append(
@@ -1429,6 +1475,7 @@ def _normalization_coverage(
             excluded_channels,
             field_name="Reviewed excluded channels",
             allow_empty=True,
+            canonical_channels=source.expected_scalp_channels if isinstance(source.retained_scalp_identity, RecordedScalpIdentity) else BIOSEMI64_CHANNELS,
         )
     )
     excluded = tuple(channel for channel in expected if channel in excluded_set)
@@ -1488,7 +1535,7 @@ def _decision_pairs(
 
 
 def _decision_channel_pairs(
-    value: object, *, identity_field: str,
+    value: object, *, identity_field: str, canonical_channels: Sequence[str] = BIOSEMI64_CHANNELS,
 ) -> dict[tuple[str, str], frozenset[str]]:
     pairs = _decision_pairs(value, identity_field=identity_field)
     return {
@@ -1497,6 +1544,7 @@ def _decision_channel_pairs(
                 channels,
                 field_name="Reviewed excluded channels",
                 allow_empty=True,
+                canonical_channels=canonical_channels,
             )
         )
         for key, channels in pairs.items()
@@ -1541,6 +1589,7 @@ def _cell_decisions(
     recording_id: str,
     participant_id: str,
     condition_label: str,
+    canonical_channels: Sequence[str] = BIOSEMI64_CHANNELS,
 ) -> tuple[bool, tuple[str, ...], tuple[str, ...]]:
     recording_key = recording_id.casefold()
     participant_key = participant_id.casefold()
@@ -1566,6 +1615,7 @@ def _cell_decisions(
             {},
         ),
         identity_field="recording_id",
+        canonical_channels=canonical_channels,
     )
     participant_electrodes = _decision_channel_pairs(
         _decision_attribute(
@@ -1574,6 +1624,7 @@ def _cell_decisions(
             {},
         ),
         identity_field="participant_id",
+        canonical_channels=canonical_channels,
     )
     reasons: list[str] = []
     if recording_key in excluded_recordings:
@@ -1594,7 +1645,7 @@ def _cell_decisions(
     return (
         downstream_cell_excluded,
         tuple(
-            channel for channel in BIOSEMI64_CHANNELS if channel in excluded_channels
+            channel for channel in canonical_channels if channel in excluded_channels
         ),
         tuple(reasons),
     )
@@ -1731,6 +1782,7 @@ def build_final_roi_coverage(
             recording_id=outcome_cell.processing_id,
             participant_id=outcome_cell.participant_id,
             condition_label=outcome_cell.condition_label,
+            canonical_channels=pre_cell.source_evidence.expected_scalp_channels if isinstance(pre_cell.source_evidence.retained_scalp_identity, RecordedScalpIdentity) else BIOSEMI64_CHANNELS,
         )
         final_cells.append(
             RecordingConditionRoiCoverage(
@@ -1885,6 +1937,7 @@ def require_final_release_readiness(
                 recording_id=cell.recording_id,
                 participant_id=cell.participant_id,
                 condition_label=cell.condition_label,
+                canonical_channels=cell.source_evidence.expected_scalp_channels if isinstance(cell.source_evidence.retained_scalp_identity, RecordedScalpIdentity) else BIOSEMI64_CHANNELS,
             )
             if cell.downstream_cell_excluded != excluded:
                 raise RoiCoverageGateError(

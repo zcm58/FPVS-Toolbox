@@ -641,6 +641,8 @@ class MainWindow(QMainWindow):
             return
         # The page validates neutral FullFFT provenance on its inspection
         # worker. A failed sibling Summed-BCA selection must not block FHC.
+        if not tool_workflows.spatial_tool_available(self, project, "Free Harmonic Clustering Analysis"):
+            return
         if hasattr(self, "stacked"):
             self.stacked.setCurrentIndex(1)
         self.workspace_stack.setCurrentWidget(
@@ -806,6 +808,8 @@ class MainWindow(QMainWindow):
         project = getattr(self, "currentProject", None)
         if project is None or not hasattr(project, "project_root"):
             return True
+        if not tool_workflows.spatial_tool_available(self, project, tool_name):
+            return False
         try:
             from Main_App.processing.frequency_domain_qc import (
                 load_frequency_domain_qc_state,

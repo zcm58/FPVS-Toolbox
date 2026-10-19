@@ -7,6 +7,14 @@ import pytest
 
 from Main_App.projects import project_manager
 from Main_App.projects.project import DEFAULTS, PROJECT_SCHEMA_VERSION, Project, make_group_id
+from Main_App.projects.hardware import confirm_hardware_selection
+
+
+@pytest.fixture(autouse=True)
+def choose_hardware_for_group_setup(monkeypatch):
+    """These tests cover grouping; the hardware dialog has separate coverage."""
+    monkeypatch.setattr(project_manager, "choose_new_project_hardware", lambda _parent, settings:
+                        confirm_hardware_selection(settings, "biosemi"))
 
 
 def test_make_group_id_uses_readable_collision_suffixes() -> None:

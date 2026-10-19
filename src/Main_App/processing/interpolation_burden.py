@@ -349,13 +349,15 @@ def build_interpolation_burden(
             outcome=outcome,
         )
     try:
-        canonical_geometry = biosemi64_geometry_identity(
-            electrode_mapping_profile=geometry_identity.get(
-                "electrode_mapping_profile"
-            ),
-            retained_channels=raw_retained,
-        )
-    except BioSemi64GeometryError:
+        if geometry_identity.get("hardware_platform") == "brain_products":
+            from Main_App.io.recorded_eeg_geometry import validate_recorded_geometry_identity
+            canonical_geometry = validate_recorded_geometry_identity(geometry_identity)
+        else:
+            canonical_geometry = biosemi64_geometry_identity(
+                electrode_mapping_profile=geometry_identity.get("electrode_mapping_profile"),
+                retained_channels=raw_retained,
+            )
+    except (BioSemi64GeometryError, ValueError):
         return _unavailable(
             "Eligible BioSemi64 scalp-channel provenance is invalid.",
             outcome=outcome,

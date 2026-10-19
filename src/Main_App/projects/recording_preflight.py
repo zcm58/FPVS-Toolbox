@@ -8,7 +8,7 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from Main_App.io.file_filters import is_bdf_file
+from Main_App.io.file_filters import is_eeg_recording_file
 
 from .raw_identity import infer_raw_participant_id
 from .recordings import ProjectRecordingContext
@@ -20,7 +20,7 @@ class RecordingPreflightCancelled(RuntimeError):
 
 @dataclass(frozen=True, slots=True)
 class RecordingPreflightRow:
-    """Canonical identity proposed for one directly owned BDF recording."""
+    """Canonical identity proposed for one directly owned EEG recording."""
 
     participant_id: str
     recording_id: str
@@ -239,7 +239,7 @@ def preflight_repeated_recording_sources(
     identity, cell-coverage, filename-token, and pairing checks run without a
     second directory walk. Nested-file detection remains the responsibility of
     the source-scanning route; direct-child processing discovery intentionally
-    ignores nested BDF files.
+    ignores nested EEG recordings.
     """
 
     if not context.is_repeated_session or not context.sessions or not context.sources:
@@ -292,7 +292,7 @@ def preflight_repeated_recording_sources(
             direct_candidates: list[Path] = []
             for candidate in folder.iterdir():
                 check_cancelled()
-                if candidate.is_file() and is_bdf_file(candidate):
+                if candidate.is_file() and is_eeg_recording_file(candidate):
                     direct_candidates.append(candidate.resolve(strict=False))
             direct_files = tuple(
                 sorted(direct_candidates, key=lambda path: path.name.casefold())
@@ -303,7 +303,7 @@ def preflight_repeated_recording_sources(
                 if (
                     candidate.is_file()
                     and candidate.parent != folder
-                    and is_bdf_file(candidate)
+                    and is_eeg_recording_file(candidate)
                 ):
                     nested_candidates.append(candidate.resolve(strict=False))
             nested_files = tuple(
@@ -314,7 +314,7 @@ def preflight_repeated_recording_sources(
                     RecordingPreflightIssue(
                         "error",
                         "nested_bdf_files",
-                        f"Source '{source.source_id}' contains nested BDF files; "
+                        f"Source '{source.source_id}' contains nested EEG recordings; "
                         "recordings must be direct children of the registered source folder.",
                         nested_files,
                     )
@@ -338,7 +338,7 @@ def preflight_repeated_recording_sources(
                     "error",
                     "empty_source_cell",
                     f"Group/session source '{source.group_id}/{source.session_id}' "
-                    "contains no direct BDF files.",
+                    "contains no direct EEG recordings.",
                     (folder,),
                 )
             )

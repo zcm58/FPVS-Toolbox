@@ -10,6 +10,11 @@ from Main_App.projects import project_manager
 from Main_App.projects.project import REPEATED_SESSION_PROJECT_SCHEMA_VERSION, Project
 
 
+@pytest.fixture(autouse=True)
+def choose_hardware_for_repeated_setup(monkeypatch):
+    monkeypatch.setattr(project_manager, "choose_new_project_hardware", lambda _parent, settings: settings)
+
+
 def _groups(tmp_path: Path) -> dict[str, dict[str, object]]:
     return {
         "birth_control": {

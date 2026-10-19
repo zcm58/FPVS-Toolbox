@@ -37,6 +37,7 @@ SELECTION_SUMMARY_COLUMNS = [
     "Value",
 ]
 HARMONIC_SELECTION_SHEET = "Harmonic_Selection"
+ROI_AVAILABILITY_SHEET = "ROI_Availability"
 HARMONIC_SELECTION_COLUMNS = [
     "requested_harmonic_hz",
     "z_score",
@@ -232,7 +233,7 @@ def _build_long_frame(
     group_map: Mapping[str, object] | None,
     group_label_map: Mapping[str, object] | None,
 ) -> pd.DataFrame:
-    _ = dv_metadata, dv_policy, provenance_map
+    _ = dv_metadata, dv_policy
     group_labels = _resolve_group_labels(subjects, group_map)
     display_labels = (
         _resolve_group_labels(subjects, group_label_map)
@@ -268,10 +269,20 @@ def _build_long_frame(
     if frame.empty:
         raise RuntimeError("Stats-ready export produced no subject x condition x ROI rows.")
     if not frame["summed_bca_uv"].notna().any():
-        raise RuntimeError(
-            "Stats-ready export produced no finite Summed BCA values. "
-            "Check source workbooks, selected ROIs, and harmonic policy settings."
+        evidence = [provenance_map.get((subject, condition, roi), {})
+                    for subject in subjects for condition in conditions for roi in rois]
+        unavailable_template = any(
+            "required_electrodes_not_recorded" in row.get("decision_reason_codes", ())
+            for row in evidence
         )
+        if not unavailable_template or not all(
+            row.get("roi_coverage_status") == "unavailable" and not row.get("used_electrodes")
+            for row in evidence
+        ):
+            raise RuntimeError(
+                "Stats-ready export produced no finite Summed BCA values. "
+                "Check source workbooks, selected ROIs, and harmonic policy settings."
+            )
     return frame
 
 
@@ -404,12 +415,35 @@ def build_stats_ready_frames(
         conditions=condition_list,
         rois=roi_names,
     )
-    return {
+    frames = {
         LONG_FORMAT_SHEET: long_df,
         WIDE_FORMAT_SHEET: jasp_wide_df,
         SELECTION_SUMMARY_SHEET: _build_selection_summary_frame(dv_metadata),
         HARMONIC_SELECTION_SHEET: _build_harmonic_selection_frame(dv_metadata),
     }
+    unrecorded_rows = [
+        {
+            "subject_id": subject, "condition": condition, "roi": roi,
+            "status": "unavailable",
+            "reason": "Required ROI electrodes were not recorded in this montage.",
+            "expected_electrodes": _sequence_cell(evidence.get("expected_electrodes", [])),
+            "reason_codes": _sequence_cell(evidence.get("decision_reason_codes", [])),
+        }
+        for (subject, condition, roi), evidence in provenance_map.items()
+        if "required_electrodes_not_recorded" in evidence.get("decision_reason_codes", ())
+    ]
+    if unrecorded_rows:
+        frames[ROI_AVAILABILITY_SHEET] = pd.DataFrame(unrecorded_rows)
+        status = (
+            "No finite ROI values; see ROI_Availability and final QC coverage."
+            if not long_df["summed_bca_uv"].notna().any()
+            else "Some configured ROI values are unavailable; see ROI_Availability."
+        )
+        frames[SELECTION_SUMMARY_SHEET] = pd.concat([
+            frames[SELECTION_SUMMARY_SHEET],
+            pd.DataFrame([_summary_row("ROI availability", status)], columns=SELECTION_SUMMARY_COLUMNS),
+        ], ignore_index=True)
+    return frames
 
 
 def _build_selection_summary_frame(dv_metadata: Mapping[str, object]) -> pd.DataFrame:

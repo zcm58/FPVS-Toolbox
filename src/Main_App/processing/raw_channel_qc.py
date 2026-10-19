@@ -228,6 +228,10 @@ class RawChannelQCResult:
             if self.raw_baseline_warning
             else []
         )
+        if self.scoring_scope == "unsupported_hardware_profile":
+            payload["evaluation_status"] = "not_evaluated"
+            payload["reason"] = "unsupported_hardware_profile"
+            payload["channel_selection"] = "recorded_eeg_channel_types"
         return payload
 
 
@@ -650,6 +654,8 @@ class ConditionRawChannelQCResult:
 
     @property
     def message(self) -> str:
+        if self.reason == "unsupported_hardware_profile":
+            return f"BioSemi-calibrated raw screening is unavailable for {self.filename}."
         if not self.thresholds.get("raw_signal_screening_enabled", True) and not self.thresholds.get("auto_detect_removed_electrodes"):
             return f"Raw signal screening disabled for {self.filename}; manual electrode choices still apply."
         if not self.conditions:
@@ -772,6 +778,8 @@ class ConditionRawChannelQCResult:
             for condition in self.conditions
             if condition.raw_baseline_warning
         ] + [dict(finding) for finding in self.transient_amplitude_review_findings]
+        if self.reason == "unsupported_hardware_profile":
+            payload["evaluation_status"] = "not_evaluated"
         return payload
 
 
@@ -1444,6 +1452,27 @@ def evaluate_raw_channel_qc(
     analysis_spans: Sequence[Sequence[int]] | None = None,
 ) -> RawChannelQCResult:
     """Detect flat/dead electrode channels before interpolation can hide them."""
+
+    from Main_App.processing.acquisition_policy import is_brain_products
+    if is_brain_products(settings):
+        from Main_App.io.recorded_eeg_geometry import validate_raw_recorded_geometry
+        geometry = validate_raw_recorded_geometry(raw)
+        config = _config_from_settings(settings)
+        if config.raw_signal_screening_enabled or config.auto_detect_removed_electrodes:
+            raise ValueError("BioSemi raw-signal/removed-electrode screening is not qualified for Brain Products montages.")
+        retained = geometry["retained_scalp_channels"]
+        manual = tuple(config.manual_removed_electrodes)
+        if not set(manual).issubset(retained):
+            raise ValueError("Manual bad electrodes must be present in the Brain Products recording.")
+        if analysis_spans is not None:
+            merge_relative_spans(analysis_spans, n_times=int(raw.n_times))
+        return replace(
+            _empty_result(
+                message=f"BioSemi-calibrated raw screening is unavailable for {filename}; manual electrode choices still apply.",
+                thresholds={"raw_signal_screening_enabled": False, "auto_detect_removed_electrodes": False},
+                n_channels=len(retained), scoring_scope="unsupported_hardware_profile",
+            ), channels_to_interpolate=manual, manual_removed_channels=manual,
+        )
 
     config = _config_from_settings(settings)
     stim_channel = str(settings.get("stim_channel") or "")
@@ -2547,6 +2576,24 @@ def evaluate_condition_raw_channel_qc_v2(
     source_channel_names = tuple(str(channel) for channel in channel_names)
     if len(set(source_channel_names)) != len(source_channel_names):
         raise ValueError("channel_names must be unique")
+    from Main_App.processing.acquisition_policy import is_brain_products
+    if is_brain_products(settings):
+        config = _config_from_settings(settings)
+        if config.raw_signal_screening_enabled or config.auto_detect_removed_electrodes:
+            raise ValueError("BioSemi raw-signal/removed-electrode screening is not qualified for Brain Products montages.")
+        if not source_channel_names:
+            raise ValueError("Raw screening requires recorded EEG channel names.")
+        manual = tuple(config.manual_removed_electrodes)
+        if not set(manual).issubset(source_channel_names):
+            raise ValueError("Manual bad electrodes must be present in the Brain Products recording.")
+        return ConditionRawChannelQCResult(
+            filename=filename, channel_names=source_channel_names, conditions=(), transient_extrema=(),
+            manual_removed_channels=manual,
+            thresholds={"raw_signal_screening_enabled": False, "auto_detect_removed_electrodes": False},
+            review_rules=(), candidate_sources={}, burden_findings=(), largest_bad_cluster_channels=(),
+            occurrence_review_findings=(), transient_review_findings=(), transient_amplitude_review_findings=(),
+            transient_windowing={}, reason="unsupported_hardware_profile",
+        )
     stim_channel = str(settings.get("stim_channel") or "")
     ref_channels = {
         str(settings.get("ref_channel1") or settings.get("ref_ch1") or ""),
@@ -2847,6 +2894,14 @@ def combine_condition_raw_channel_qc_v2(
     if not results:
         raise ValueError("at least one condition-aware raw channel QC result is required")
     first = results[0]
+    if first.reason == "unsupported_hardware_profile":
+        if any(
+            result.reason != first.reason or result.channel_names != first.channel_names
+            or result.manual_removed_channels != first.manual_removed_channels
+            for result in results
+        ):
+            raise ValueError("Cannot combine incompatible disabled raw-screening results.")
+        return replace(first, filename=str(filename or first.filename))
     channel_names = first.channel_names
     thresholds = dict(first.thresholds)
     transient_windowing = dict(first.transient_windowing)

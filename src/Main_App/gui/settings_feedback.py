@@ -43,6 +43,9 @@ def refresh_preprocessing_feedback(panel) -> None:
         key: edit.text() for key, edit in zip(PREPROCESSING_FIELDS, panel.preproc_edits)
     }
     try:
+        if hasattr(panel, "_hardware_draft"):
+            from Main_App.gui.settings_hardware_controls import collect_hardware_controls
+            values.update(collect_hardware_controls(panel))
         normalize_preprocessing_settings(values)
     except ValueError as exc:
         key = preprocessing_error_field(str(exc))
@@ -91,7 +94,8 @@ class SettingsDraftTracker:
             for entry in self.panel.roi_editor.entries
         ]
         manual = [getattr(self.panel, name) for name in _MANUAL_DRAFTS]
-        return copy.deepcopy((values, rois, manual))
+        hardware = getattr(self.panel, "_hardware_draft", None)
+        return copy.deepcopy((values, rois, manual, hardware))
 
     def is_dirty(self) -> bool:
         return self.snapshot() != self.baseline

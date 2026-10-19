@@ -401,7 +401,9 @@ def _validate_written_receipt(
     for key, expected in expected_identity.items():
         if str(receipt.get(key) or "") != str(expected):
             reasons.append(f"{key}_mismatch")
-    if receipt.get("geometry") != dict(plan.geometry_identity):
+    from Main_App.io.hardware_identity import geometry_matches_configuration
+
+    if not geometry_matches_configuration(receipt.get("geometry"), plan.geometry_identity):
         reasons.append("geometry_identity_mismatch")
 
     expected_path = Path(str(getattr(cell, "expected_workbook"))).resolve()

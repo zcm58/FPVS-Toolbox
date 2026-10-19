@@ -1,5 +1,26 @@
 # Project I/O Architecture
 
+## Project hardware selection
+
+`Main_App.projects.hardware` owns the confirmed platform and recording-format
+suggestion. Optional `preprocessing.hardware_platform`, `hardware_confirmed`,
+and `hardware_selection_source` persist in `project.json`. Missing fields retain
+the legacy BioSemi policy without adding fingerprint fields. Explicit unknown
+platforms cannot fall back to BioSemi. Hardware changes use a warning/confirmation
+flow, reset incompatible defaults, and invalidate processing through its policy
+fingerprint; outputs are not silently deleted. Concurrent project saves reconcile
+the hardware baseline atomically with other geometry settings.
+
+Brain Products stores initial-reference mode/channels, optional reference-channel
+drop, channel-type overrides, and a recording/explicit template montage. Its
+unavailable BioSemi QC policies are disabled in the project and GUI. Source
+registration accepts header entrypoints for BVCDF and BVRF; companion changes
+invalidate cached processing. Future verified Studio adapters can provide
+`hardware_evidence`, which remains unconfirmed until the user accepts it; no
+undocumented Studio schema field is assumed. See
+[Brain Products setup](../../user/reference/brain-products.md).
+
+
 Project-aware workflows should resolve paths from the active project root, not from the process current directory or a developer-machine path.
 
 Full FPVS Studio interoperability and multi-hardware/montage project support are

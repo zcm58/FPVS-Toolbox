@@ -1,5 +1,15 @@
 # ARCHITECTURE.md
 
+Brain Products processing uses the same canonical Main App pipeline: project-owned
+hardware confirmation in `projects/hardware.py`, BVCDF/BVRF readers and recording
+geometry in `io/`, and reference/QC applicability in
+`processing/acquisition_policy.py`. Header and companion identity reaches shared
+preflight, caches, and export provenance. BioSemi remains the locked regression
+baseline; unsupported spatial capabilities remain gated. See the
+[hardware roadmap](docs/agent/architecture/hardware-pipeline-studio-roadmap.md) and
+[format/setup guide](docs/user/reference/brain-products.md) for exact scope.
+
+
 ## Purpose
 
 This file is the top-level map for agents working in FPVS Toolbox. Keep durable architecture details here or in linked docs, not in long prompts.

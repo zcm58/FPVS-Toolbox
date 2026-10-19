@@ -12,8 +12,10 @@ Stimulation experiments. Releases currently ship through a Windows installer.
   processing pipeline whose steps can be selected/replaced by the resolved
   hardware/montage policy, and complete FPVS Studio interoperability. Read
   [the current-state and future-direction contract](docs/agent/architecture/hardware-pipeline-studio-roadmap.md)
-  for related work. These are goals, not claims of completed support: production
-  preprocessing remains BioSemi64, Unicorn is gated, and Studio import is partial.
+  for related work. Complete Studio interoperability remains a goal: BioSemi64 and confirmed
+  Brain Products projects have processing routes, Unicorn remains gated, and
+  Studio import is partial. Brain Products format/capability limits are in
+  [the hardware guide](docs/user/reference/brain-products.md).
   Preserve the locked scientific contracts while extending these boundaries.
 
 - Think before coding: state assumptions, surface ambiguity, and ask when the safe interpretation is unclear.

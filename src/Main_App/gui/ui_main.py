@@ -214,7 +214,7 @@ def init_ui(self) -> None:
 
     form.addRow(mode_field)
 
-    self.lbl_single_file = QLabel("EEG File (.bdf)", grp_proc)
+    self.lbl_single_file = QLabel("EEG recording", grp_proc)
     self.row_single_file = QWidget(grp_proc)
     self.row_single_file.setObjectName("single_file_row")
     single_hl = QHBoxLayout(self.row_single_file)
@@ -223,7 +223,7 @@ def init_ui(self) -> None:
 
     self.le_input_file = QLineEdit(self.row_single_file)
     self.le_input_file.setReadOnly(True)
-    self.le_input_file.setPlaceholderText("Select one .bdf file for single-file mode")
+    self.le_input_file.setPlaceholderText("Select one EEG recording for single-file mode")
 
     self.btn_select_input_file = make_action_button(
         "Select EEG File...",

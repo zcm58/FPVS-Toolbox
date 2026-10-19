@@ -42,13 +42,30 @@ def _mapping_payload(value: Any) -> dict[str, Any]:
     return {str(key): item for key, item in value.items()}
 
 
+def _reference_candidates(params: Mapping[str, Any]) -> list[str]:
+    if params.get("hardware_platform") == "brain_products":
+        if params.get("initial_reference", "recorded") == "recorded":
+            return []
+        return _string_list(params.get("initial_reference_channels"))
+    return [c for c in (params.get("ref_channel1"), params.get("ref_channel2")) if c]
+
+
+def _hardware_reference_payload(params: Mapping[str, Any]) -> dict[str, Any]:
+    if params.get("hardware_platform") != "brain_products":
+        return {}
+    return {
+        "hardware_platform": "brain_products",
+        "initial_reference_mode": params.get("initial_reference", "recorded"),
+        "initial_reference_channels": _reference_candidates(params),
+        "drop_reference_channels": bool(params.get("drop_reference_channels", False)),
+    }
+
+
 def start_preproc_audit(raw: Any, params: Mapping[str, Any]) -> Dict[str, Any]:
     """Capture the initial Raw metadata before preprocessing mutates it."""
     info = getattr(raw, "info", {})
     ch_names = list(getattr(raw, "ch_names", []))
-    ref_candidates = [
-        c for c in (params.get("ref_channel1"), params.get("ref_channel2")) if c
-    ]
+    ref_candidates = _reference_candidates(params)
     return {
         "sfreq": _to_float(info.get("sfreq")),
         "lowpass": _to_float(info.get("lowpass")),
@@ -60,6 +77,7 @@ def start_preproc_audit(raw: Any, params: Mapping[str, Any]) -> Dict[str, Any]:
         "ref_chans": ref_candidates or None,
         "reference_requested": bool(ref_candidates),
         "params_snapshot": dict(params),
+        **_hardware_reference_payload(params),
     }
 
 
@@ -114,12 +132,12 @@ def end_preproc_audit(
         or ""
     )
     n_events = int((events_info or {}).get("n_events", 0))
-    ref_candidates = [
-        c for c in (params.get("ref_channel1"), params.get("ref_channel2")) if c
-    ]
+    ref_candidates = _reference_candidates(params)
 
     # FPVS flag (our own marker) plus MNE's built-in custom_ref_applied for debugging.
     fpvs_flag = info.get("fpvs_initial_custom_ref", False)
+    if params.get("hardware_platform") == "brain_products":
+        fpvs_flag = bool(ref_candidates) and bool(params.get("_fpvs_initial_ref_ok"))
     mne_custom_ref = info.get("custom_ref_applied", None)
 
     raw_qc_bad_channels = _string_list(params.get("_fpvs_raw_qc_bad_channels"))
@@ -194,6 +212,7 @@ def end_preproc_audit(
     total_rejected = len(interpolated_channels) if interpolated_channels else int(n_rejected)
 
     audit = {
+        **_hardware_reference_payload(params),
         "file": filename,
         "sfreq": float(_to_float(info.get("sfreq")) or 0.0),
         "lowpass": _to_float(info.get("lowpass")),
@@ -287,9 +306,7 @@ def compare_preproc(
     #   in the original Raw channel list.
     # - We no longer treat "custom_ref_applied=False" by itself as a hard error,
     #   because the pipeline now handles initial and final references internally.
-    ref_expected = [
-        c for c in (params.get("ref_channel1"), params.get("ref_channel2")) if c
-    ]
+    ref_expected = _reference_candidates(params)
     if ref_expected:
         ch_names_before = set((before or {}).get("ch_names", []))
         if ch_names_before:

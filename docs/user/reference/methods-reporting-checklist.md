@@ -36,6 +36,19 @@ testing, or another specialized estimand.
 
 ### Sensor geometry and interpolation
 
+- Report the acquisition hardware, source file format, native sample rate and
+  units/calibration metadata, plus any channel-role overrides. For Brain Products,
+  report the recorded initial reference or explicitly selected reference channels,
+  whether those channels were dropped, and the final average EEG reference.
+- For Brain Products, report the actual retained channel list and recorded geometry
+  fingerprint. Identify coordinates as recorded, an explicitly chosen template,
+  or unavailable. Do not describe template coordinates as individual digitization.
+  Report that BioSemi-calibrated automatic raw-channel/kurtosis screens were
+  unavailable, rather than claiming those checks passed. Format-reader tests do
+  not establish physical gain or trigger latency. See [hardware scope](brain-products.md).
+
+The BioSemi-specific geometry statements below apply to BioSemi projects.
+
 - If experimental condition-specific interpolation was used, report the affected
   recording, condition, electrode, and reviewed artifact evidence. These decisions
   follow inspection of response amplitudes and are outcome-informed; a large

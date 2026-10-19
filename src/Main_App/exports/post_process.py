@@ -860,7 +860,10 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                 # ...
                 ordered_electrode_names_for_df = []
 
-                if num_channels == len(DEFAULT_ELECTRODE_NAMES_64) and set(
+                if (isinstance(getattr(app, "settings", None), dict)
+                        and app.settings.get("hardware_platform") == "brain_products"):
+                    ordered_electrode_names_for_df = current_ch_names_from_obj
+                elif num_channels == len(DEFAULT_ELECTRODE_NAMES_64) and set(
                     current_ch_names_from_obj
                 ) == set(DEFAULT_ELECTRODE_NAMES_64):
                     ordered_electrode_names_for_df = [

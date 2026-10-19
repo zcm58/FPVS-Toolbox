@@ -693,8 +693,11 @@ def _condition_labels_for_missing_outputs(
 
 
 def raw_file_metadata(file_path: Path) -> dict[str, Any]:
+    from Main_App.io.recording_sources import companion_identity
+
     stat = Path(file_path).stat()
     return {
+        **companion_identity(file_path),
         "raw_file": str(Path(file_path).resolve()),
         "raw_size": int(stat.st_size),
         "raw_mtime_ns": int(stat.st_mtime_ns),
@@ -723,6 +726,9 @@ def _recording_identity_payload(info: RawFileInfo) -> dict[str, Any]:
 def _configured_geometry_identity(settings: Mapping[str, Any]) -> dict[str, object]:
     """Return the geometry expected from the current project processing inputs."""
 
+    if settings.get("hardware_platform") == "brain_products":
+        from Main_App.io.hardware_identity import brain_products_settings_identity
+        return brain_products_settings_identity(settings)
     raw_limit = settings.get("max_idx_keep")
     if raw_limit is None:
         raw_limit = settings.get("max_chan_idx_keep")
@@ -770,6 +776,12 @@ def _result_geometry_identity(
                 "geometry identity."
             )
         return dict(fallback)
+    if candidate.get("hardware_platform") == "brain_products":
+        from Main_App.io.recorded_eeg_geometry import validate_recorded_geometry_identity
+        normalized = validate_recorded_geometry_identity(candidate)
+        if isinstance(audit_candidate, Mapping) and dict(audit_candidate) != normalized:
+            raise ValueError("Processing result and audit disagree about recorded geometry.")
+        return normalized
     retained = candidate.get("retained_scalp_channels")
     retained_channels = (
         [str(value) for value in retained]
@@ -797,8 +809,8 @@ def _ledger_geometry_matches(
     entry: Mapping[str, Any],
     expected: Mapping[str, object],
 ) -> bool:
-    candidate = entry.get("geometry")
-    return isinstance(candidate, Mapping) and dict(candidate) == dict(expected)
+    from Main_App.io.hardware_identity import geometry_matches_configuration
+    return geometry_matches_configuration(entry.get("geometry"), expected)
 
 
 def _canonical_frequency_protocol_identity(
@@ -1198,6 +1210,7 @@ def classify_processing_inputs(
                 entry.get("raw_file") != raw_meta["raw_file"]
                 or entry.get("raw_size") != raw_meta["raw_size"]
                 or entry.get("raw_mtime_ns") != raw_meta["raw_mtime_ns"]
+                or entry.get("recording_sources") != raw_meta.get("recording_sources")
             ):
                 states.append(
                     ProcessingInputState(
@@ -1362,6 +1375,7 @@ def classify_processing_inputs(
             entry.get("raw_file") != raw_meta["raw_file"]
             or entry.get("raw_size") != raw_meta["raw_size"]
             or entry.get("raw_mtime_ns") != raw_meta["raw_mtime_ns"]
+                or entry.get("recording_sources") != raw_meta.get("recording_sources")
         ):
             states.append(
                 ProcessingInputState(
@@ -1480,6 +1494,7 @@ def _state_still_matches_ledger(
         entry.get("raw_file") != raw_meta["raw_file"]
         or entry.get("raw_size") != raw_meta["raw_size"]
         or entry.get("raw_mtime_ns") != raw_meta["raw_mtime_ns"]
+                or entry.get("recording_sources") != raw_meta.get("recording_sources")
     ):
         return False
 

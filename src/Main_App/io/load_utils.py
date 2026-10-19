@@ -1,4 +1,4 @@
-"""Canonical BDF-only EEG loader for the processing paths.
+"""Canonical project-aware EEG loader for the processing paths.
 
 This module owns the loader behavior previously kept in legacy loaders. Keep load order, channel typing, memmap
 paths, montage behavior, and return semantics aligned with the BDF loader
@@ -87,6 +87,8 @@ def inspect_bdf_header(filepath: str | Path) -> Optional[BdfPreflightInfo]:
     with zero data records and no bytes after the declared header length.
     """
     path = Path(filepath)
+    if path.suffix.lower() != ".bdf":
+        return None
     try:
         file_size = path.stat().st_size
         with path.open("rb") as stream:
@@ -122,6 +124,10 @@ def read_bdf_sampling_rate_hz(
     grid. Mixed data/stim rates fail instead of relying on reader resampling.
     File access errors propagate; malformed headers raise ``ValueError``.
     """
+    if Path(filepath).suffix.lower() in {".vhdr", ".bvrh"}:
+        from Main_App.io.brain_products import read_sampling_rate
+
+        return Fraction(str(read_sampling_rate(filepath)))
     if not isinstance(stim_channel, str) or not stim_channel.strip():
         raise ValueError("A nonempty BDF stimulus channel is required.")
 
@@ -536,6 +542,7 @@ def open_preflight_eeg_file(
     stim_channel: Optional[str] = None,
     electrode_mapping_profile: Optional[str] = None,
     electrode_montage: Optional[str] = None,
+    acquisition_settings: dict[str, Any] | None = None,
 ) -> Iterator[Optional[mne.io.BaseRaw]]:
     """Open a BDF lazily for preflight QC and always close it on context exit.
 
@@ -547,6 +554,20 @@ def open_preflight_eeg_file(
     base = os.path.basename(filepath)
     app.log(f"[PREFLIGHT LAZY LOADER START] {base}: ext='{ext}'")
 
+    from Main_App.io.hardware_loader import open_brain_products_raw, project_acquisition_settings
+    settings = project_acquisition_settings(app, acquisition_settings)
+    from Main_App.projects.hardware import require_hardware_ready
+    require_hardware_ready(settings, paths=(Path(filepath),))
+    if ext in {".vhdr", ".bvrh"}:
+        raw = open_brain_products_raw(
+            app, filepath, settings=settings,
+            stim_channel=str(stim_channel or settings.get("stim_channel") or "Status"),
+        )
+        try:
+            yield raw
+        finally:
+            raw.close()
+        return
     if ext != ".bdf":
         user_messages.show_warning(
             "Unsupported File",
@@ -690,6 +711,7 @@ def load_eeg_file(
     *,
     preload_path: str | Path | None = None,
     preload_in_memory: bool = False,
+    acquisition_settings: dict[str, Any] | None = None,
 ) -> Optional[mne.io.BaseRaw]:
     """Load an EEG file and apply montage without resampling.
 
@@ -705,11 +727,18 @@ def load_eeg_file(
     app.log(f"[LOADER START] {base}: ext='{ext}'")
     raw: Optional[mne.io.BaseRaw] = None
     try:
+        from Main_App.io.hardware_loader import open_brain_products_raw, project_acquisition_settings
+        settings = project_acquisition_settings(app, acquisition_settings)
+        from Main_App.projects.hardware import require_hardware_ready
+        require_hardware_ready(settings, paths=(Path(filepath),))
         if preload_in_memory:
             memmap_path = None
         elif preload_path is None:
             memmap_dir = _memmap_dir_for_pid()
             memmap_path = str(memmap_dir / (Path(filepath).stem + "_raw.dat"))
+            if ext in {".vhdr", ".bvrh"}:
+                import uuid
+                memmap_path = str(memmap_dir / (uuid.uuid4().hex + "_raw.dat"))
         else:
             destination = Path(preload_path)
             if not destination.is_absolute():
@@ -717,10 +746,17 @@ def load_eeg_file(
             # Reserve the unique destination before MNE opens it for writing.
             # In particular, this cannot overwrite a source recording or a
             # different worker's live memory map.
-            with destination.open("xb"):
-                pass
+            if ext not in {".vhdr", ".bvrh"}:
+                with destination.open("xb"):
+                    pass
             memmap_path = str(destination)
 
+        if ext in {".vhdr", ".bvrh"}:
+            return open_brain_products_raw(
+                app, filepath, settings=settings,
+                preload=True if preload_in_memory else memmap_path,
+                stim_channel=str(stim_channel or settings.get("stim_channel") or "Status"),
+            )
         stim_name = str(stim_channel or "").strip() or _resolve_stim(app)
         if not ref_pair:
             ref_pair = _resolve_ref_pair(app)
