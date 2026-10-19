@@ -7,7 +7,8 @@ not part of the end-user documentation.
 
 `main` is the default development branch and contains the consolidated v3
 release work. The retired development branches were removed on 2026-10-18;
-release tags remain available. Start future changes from `main`. Documentation,
+release tags remain available. Start independent changes from `main` unless
+the user directs work on an existing feature/release branch. Documentation,
 Windows packaging, and isolated Qt workflow branch filters now target `main`.
 
 The published v3.0.0 installer is bound to its release tag. Later cleanup or

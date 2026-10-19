@@ -3,10 +3,13 @@
 Status: implemented; visible companion/recovery checks below remain pending
 under the [v3 release ledger](v3-release-readiness.md#3-qualify-processing-and-project-compatibility).
 
-User-approved on 2026-09-05. Replace dense FullFFT Excel storage with an
-uncompressed NumPy companion alongside each condition workbook. Include the
-already-calculated FullSNR arrays so plotting avoids wide Excel reads too.
-Keep preprocessing, timing, FFT, noise, averaging, harmonic, and ROI math intact.
+The original 2026-09-05 implementation replaced dense FullFFT Excel storage
+with uncompressed NumPy companions, including already-calculated FullSNR.
+Current processing publishes native `.fpvs` anchors with spectral and condition
+companions; explicit Excel reports and historical workbook reads remain supported.
+The dated benchmarks and gate failures below describe their original revisions,
+not the current output container or current blockers. Preprocessing, timing,
+FFT, noise, averaging, harmonic, and ROI math remain unchanged.
 
 ## Contract
 
@@ -15,11 +18,13 @@ Keep preprocessing, timing, FFT, noise, averaging, harmonic, and ROI math intact
 - Store every value, exact FFT grid, display labels, channel order, units and
   calculation metadata without truncation or further rounding. Preserve
   FullSNR values independently; never recompute them from averaged FullFFT.
-- New workbooks retain Excel reports and small spectral-sheet notices, plus
-  a `Spectral Data` manifest naming an immutable, content-addressed companion
-  in the same directory. Companion references cannot escape that directory.
-- Write/validate the companion first, then atomically publish the workbook.
-  Record both artifacts in completion receipts and downstream fingerprints.
+- New condition results use a native `.fpvs` manifest naming immutable numerical
+  companions in the same directory. Explicit Excel report destinations retain
+  their `Spectral Data`/`Condition Data` declarations and report behavior.
+  Companion references cannot escape that directory.
+- Write/validate companions first, then atomically publish the native or explicit
+  workbook anchor. Record all artifacts in completion receipts and downstream
+  fingerprints.
 - Missing, corrupt, mismatched or altered declared companions fail clearly.
   Only workbooks without a companion declaration use legacy Excel data.
 - Moving/copying a project or freezing plotting inputs must preserve companions.
@@ -45,7 +50,8 @@ The pre-existing eight path-audit findings under `outputs/` are outside scope.
 The active-reader review also found and migrated Individual Detectability.
 No application-owned project clone/archive or workbook-only copy workflow
 exists; project portability is covered by moved-folder tests, relative
-companion references and user instructions to preserve both files.
+companion references and user instructions to preserve each anchor and all its
+declared companions.
 
 Synthetic local comparison (64 channels, 120 seconds at 256 Hz, FullFFT and
 FullSNR, same input arrays, previous HEAD production writer versus new writer):
@@ -55,10 +61,11 @@ not flushed; this measures storage only, not overall application throughput.
 The production 512-Hz export test preserves FFT bytes and FullSNR values exactly.
 
 Visible smoke (pending local user/CI environment): process one condition,
-confirm the workbook and NPZ appear together, then run post-processing, SNR
-Plots, Scalp Maps and Individual Detectability. Check a legacy project too.
-Copy both artifacts to another project location and repeat; temporarily
-withhold the companion in a test copy and confirm a clear missing-data error.
+confirm the `.fpvs` anchor and its NPZ companions appear together, then run
+post-processing, SNR Plots, Scalp Maps and Individual Detectability. Check a
+legacy project too. Copy the anchor and all declared companions to another
+project location and repeat; temporarily withhold a companion in a test copy
+and confirm a clear missing-data error.
 Do not run offscreen Qt locally.
 
 Final non-GUI verification: processing focused gate 643 passed, 1 skipped;
@@ -74,11 +81,13 @@ claim of local Qt execution.
 
 ## Compact condition data extension (2026-09-05)
 
-User approved a separate uncompressed NumPy companion for already-calculated
-FFT amplitude, BCA, SNR, Z, and processing-owned eligibility/audit tables.
-Default per-condition XLSX files become small manifests/notices; preserve the
-automatic long/wide statistical workbooks. Keep legacy XLSX reads and provide
-an explicit report-writer option for compact Excel copies. Never recompute
+This dated extension added a separate uncompressed NumPy companion for
+already-calculated FFT amplitude, BCA, SNR, Z, and processing-owned
+eligibility/audit tables.
+At that revision, per-condition XLSX files became small manifests/notices;
+current processing uses the native `.fpvs` anchors described above. Automatic
+long/wide statistical workbooks, legacy XLSX reads, and the explicit report-writer
+option for compact Excel copies remain supported. Never recompute
 metrics from averaged FullFFT or change timing, noise, harmonic, or ROI math.
 
 - [x] Commit/push prior work before starting (`f356b035`).
@@ -101,7 +110,7 @@ unchanged FullFFT/FullSNR arrays. Workbook 235 KB -> 13 KB; total size +1.9%.
 Stored tables match exactly. These are storage timings, not whole-app forecasts.
 
 Visible smoke (pending): process a small condition and confirm both NPZ
-companions appear beside its small workbook. Open SNR Plots, Scalp Maps,
+companions appear beside its `.fpvs` anchor. Open SNR Plots, Scalp Maps,
 and Stats; complete frequency-domain QC and verify long/wide
 Excel outputs. Repeat with legacy Excel inputs. In a test copy, withhold one
 companion and confirm a clear error. No local Qt execution.

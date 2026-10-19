@@ -8,12 +8,10 @@ from typing import Any, Mapping, Sequence
 
 import numpy as np
 
-from Main_App.io.eeg_geometry import (
-    BIOSEMI64_CHANNELS,
-    BIOSEMI64_CHANNEL_SET,
-    BioSemi64GeometryError,
-    canonical_biosemi64_head_coordinates,
-    validate_raw_biosemi64_geometry,
+from Main_App.io.acquisition_metadata import (
+    CALIBRATED_SPATIAL_PROFILE,
+    resolve_recording_contract,
+    validate_loaded_geometry,
 )
 from Main_App.processing.analysis_spans import merge_relative_spans
 from Main_App.processing.removed_electrode_detection import (
@@ -31,15 +29,15 @@ from Main_App.processing.removed_electrode_detection import (
 
 RAW_CHANNEL_QC_EXCLUSION_REASON = "raw_channel_qc_failure"
 RAW_CHANNEL_QC_METHOD_VERSION = "analyzed_interval_review_flags_v4"
-BIOSEMI_SHARED_NOISE_HELP_URL = "https://www.biosemi.com/faq/cms%26drl.htm"
+SHARED_NOISE_HELP_URL = CALIBRATED_SPATIAL_PROFILE.shared_noise_help_url
 SEVERE_RAW_AMPLITUDE_HELP_TEXT = (
     "Large raw signals detected. Referencing may reduce shared electrical noise. "
     "Review before excluding this recording."
 )
 _CALIBRATION = DEFAULT_REMOVED_ELECTRODE_DETECTION_CALIBRATION
 
-SCALP_CHANNEL_ORDER: tuple[str, ...] = BIOSEMI64_CHANNELS
-SCALP_CHANNELS: frozenset[str] = BIOSEMI64_CHANNEL_SET
+SCALP_CHANNEL_ORDER: tuple[str, ...] = CALIBRATED_SPATIAL_PROFILE.channels
+SCALP_CHANNELS: frozenset[str] = CALIBRATED_SPATIAL_PROFILE.channel_set
 MIDLINE_CHANNELS: frozenset[str] = frozenset(
     channel for channel in SCALP_CHANNEL_ORDER if channel.endswith("z")
 )
@@ -59,7 +57,7 @@ if (
     | RIGHT_HEMISPHERE_CHANNELS
     | MIDLINE_CHANNELS
 ) != SCALP_CHANNELS:
-    raise RuntimeError("BioSemi64 hemisphere groups do not partition the scalp set.")
+    raise RuntimeError("Qualified hemisphere groups do not partition the scalp set.")
 
 
 @dataclass(frozen=True)
@@ -222,7 +220,7 @@ class RawChannelQCResult:
                     "scoring_sample_count": self.scoring_sample_count,
                     "authority": "review_only",
                     "help_text": SEVERE_RAW_AMPLITUDE_HELP_TEXT,
-                    "help_url": BIOSEMI_SHARED_NOISE_HELP_URL,
+                    "help_url": SHARED_NOISE_HELP_URL,
                 }
             ]
             if self.raw_baseline_warning
@@ -655,7 +653,7 @@ class ConditionRawChannelQCResult:
     @property
     def message(self) -> str:
         if self.reason == "unsupported_hardware_profile":
-            return f"BioSemi-calibrated raw screening is unavailable for {self.filename}."
+            return f"Calibrated raw screening is unavailable for {self.filename}."
         if not self.thresholds.get("raw_signal_screening_enabled", True) and not self.thresholds.get("auto_detect_removed_electrodes"):
             return f"Raw signal screening disabled for {self.filename}; manual electrode choices still apply."
         if not self.conditions:
@@ -773,7 +771,7 @@ class ConditionRawChannelQCResult:
                 ),
                 "authority": "review_only",
                 "help_text": SEVERE_RAW_AMPLITUDE_HELP_TEXT,
-                "help_url": BIOSEMI_SHARED_NOISE_HELP_URL,
+                "help_url": SHARED_NOISE_HELP_URL,
             }
             for condition in self.conditions
             if condition.raw_baseline_warning
@@ -916,26 +914,14 @@ def _configured_geometry_roles(
         str(channel).casefold(): str(channel)
         for channel in getattr(raw, "ch_names", ())
     }
-    references = (
-        str(
-            settings.get("ref_channel1")
-            or settings.get("ref_chan1")
-            or settings.get("ref_ch1")
-            or "EXG1"
-        ),
-        str(
-            settings.get("ref_channel2")
-            or settings.get("ref_chan2")
-            or settings.get("ref_ch2")
-            or "EXG2"
-        ),
-    )
+    contract = resolve_recording_contract(settings, raw=raw)
+    references = contract.load_reference_channels
     retained_references = tuple(
         raw_name_lookup[channel.casefold()]
         for channel in references
         if channel.casefold() in raw_name_lookup
     )
-    stim = str(settings.get("stim_channel") or settings.get("stim") or "Status")
+    stim = contract.stim_channel
     return retained_references, raw_name_lookup.get(stim.casefold())
 
 
@@ -944,11 +930,12 @@ def _validate_spatial_geometry(
     channels: Sequence[str],
     settings: Mapping[str, Any],
 ) -> None:
-    """Require the loader-attached BioSemi64 identity for spatial QC."""
+    """Require the loader-attached qualified geometry identity for spatial QC."""
 
     references, stim = _configured_geometry_roles(raw, settings)
-    validate_raw_biosemi64_geometry(
+    validate_loaded_geometry(
         raw,
+        resolve_recording_contract(settings, raw=raw),
         expected_retained_channels=channels,
         reference_channels=references,
         stim_channel=stim,
@@ -965,13 +952,13 @@ def _channel_positions(raw: Any, channels: Sequence[str]) -> dict[str, np.ndarra
     for channel in channels:
         index = index_by_name.get(str(channel))
         if index is None:
-            raise BioSemi64GeometryError(
+            raise CALIBRATED_SPATIAL_PROFILE.validation_error(
                 f"Spatial raw-channel QC cannot locate retained channel {channel!r}."
             )
         try:
             coordinate = np.asarray(raw.info["chs"][index]["loc"][:3], dtype=float)
         except (AttributeError, KeyError, IndexError, TypeError, ValueError) as error:
-            raise BioSemi64GeometryError(
+            raise CALIBRATED_SPATIAL_PROFILE.validation_error(
                 f"Spatial raw-channel QC cannot read the coordinate for {channel!r}."
             ) from error
         if (
@@ -979,8 +966,8 @@ def _channel_positions(raw: Any, channels: Sequence[str]) -> dict[str, np.ndarra
             or not np.isfinite(coordinate).all()
             or np.allclose(coordinate, 0.0)
         ):
-            raise BioSemi64GeometryError(
-                f"Spatial raw-channel QC requires a finite BioSemi64 coordinate for {channel!r}."
+            raise CALIBRATED_SPATIAL_PROFILE.validation_error(
+                f"Spatial raw-channel QC requires a finite qualified head coordinate for {channel!r}."
             )
         positions[str(channel)] = coordinate
     return positions
@@ -1453,22 +1440,21 @@ def evaluate_raw_channel_qc(
 ) -> RawChannelQCResult:
     """Detect flat/dead electrode channels before interpolation can hide them."""
 
-    from Main_App.processing.acquisition_policy import is_brain_products
-    if is_brain_products(settings):
-        from Main_App.io.recorded_eeg_geometry import validate_raw_recorded_geometry
-        geometry = validate_raw_recorded_geometry(raw)
+    contract = resolve_recording_contract(settings, raw=raw)
+    if not contract.spatial_qc_supported:
+        geometry = validate_loaded_geometry(raw, contract)
         config = _config_from_settings(settings)
         if config.raw_signal_screening_enabled or config.auto_detect_removed_electrodes:
-            raise ValueError("BioSemi raw-signal/removed-electrode screening is not qualified for Brain Products montages.")
+            raise ValueError("Raw-signal/removed-electrode screening is not qualified for this recording's spatial profile.")
         retained = geometry["retained_scalp_channels"]
         manual = tuple(config.manual_removed_electrodes)
         if not set(manual).issubset(retained):
-            raise ValueError("Manual bad electrodes must be present in the Brain Products recording.")
+            raise ValueError("Manual bad electrodes must be present in the recording.")
         if analysis_spans is not None:
             merge_relative_spans(analysis_spans, n_times=int(raw.n_times))
         return replace(
             _empty_result(
-                message=f"BioSemi-calibrated raw screening is unavailable for {filename}; manual electrode choices still apply.",
+                message=f"Calibrated raw screening is unavailable for {filename}; manual electrode choices still apply.",
                 thresholds={"raw_signal_screening_enabled": False, "auto_detect_removed_electrodes": False},
                 n_channels=len(retained), scoring_scope="unsupported_hardware_profile",
             ), channels_to_interpolate=manual, manual_removed_channels=manual,
@@ -1601,7 +1587,7 @@ def evaluate_raw_channel_qc(
     )
     if cluster_rules_enabled or spatial_predictability_enabled:
         # These geometry-dependent rules remain experimental pending
-        # revalidation on external BioSemi64 datasets. A canonical geometry
+        # revalidation on external datasets with the qualified spatial profile. A canonical geometry
         # gate prevents legacy or missing coordinates from changing their
         # neighborhoods silently.
         _validate_spatial_geometry(
@@ -2348,7 +2334,7 @@ def _transient_amplitude_review_findings(
                 "coverage_meaning": "flagged_window_coverage_not_artifact_duration",
                 "authority": "review_only",
                 "help_text": SEVERE_RAW_AMPLITUDE_HELP_TEXT,
-                "help_url": BIOSEMI_SHARED_NOISE_HELP_URL,
+                "help_url": SHARED_NOISE_HELP_URL,
             }
         )
     return tuple(findings)
@@ -2435,7 +2421,7 @@ def _condition_result(
     burden = _candidate_burden(
         channel_names,
         candidate_sources,
-        positions=canonical_biosemi64_head_coordinates(),
+        positions=CALIBRATED_SPATIAL_PROFILE.coordinates(),
         config=config,
         cluster_rules_enabled=cluster_rules_enabled,
     )
@@ -2576,16 +2562,15 @@ def evaluate_condition_raw_channel_qc_v2(
     source_channel_names = tuple(str(channel) for channel in channel_names)
     if len(set(source_channel_names)) != len(source_channel_names):
         raise ValueError("channel_names must be unique")
-    from Main_App.processing.acquisition_policy import is_brain_products
-    if is_brain_products(settings):
+    if not resolve_recording_contract(settings).spatial_qc_supported:
         config = _config_from_settings(settings)
         if config.raw_signal_screening_enabled or config.auto_detect_removed_electrodes:
-            raise ValueError("BioSemi raw-signal/removed-electrode screening is not qualified for Brain Products montages.")
+            raise ValueError("Raw-signal/removed-electrode screening is not qualified for this recording's spatial profile.")
         if not source_channel_names:
             raise ValueError("Raw screening requires recorded EEG channel names.")
         manual = tuple(config.manual_removed_electrodes)
         if not set(manual).issubset(source_channel_names):
-            raise ValueError("Manual bad electrodes must be present in the Brain Products recording.")
+            raise ValueError("Manual bad electrodes must be present in the recording.")
         return ConditionRawChannelQCResult(
             filename=filename, channel_names=source_channel_names, conditions=(), transient_extrema=(),
             manual_removed_channels=manual,
@@ -2663,7 +2648,7 @@ def evaluate_condition_raw_channel_qc_v2(
                 aggregate_classification.high_amplitude_channels,
                 aggregate_classification.rare_burst_channels,
             )
-            canonical_positions = canonical_biosemi64_head_coordinates()
+            canonical_positions = CALIBRATED_SPATIAL_PROFILE.coordinates()
             neighbor_map = _spatial_neighbor_map_from_positions(
                 canonical_positions,
                 scalp_names,

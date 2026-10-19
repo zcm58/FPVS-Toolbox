@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import pytest
 
-from Main_App.Shared.roi_presets import (
+from Main_App.processing.roi_presets import (
     ROI_MONTAGE_BIOSEMI64,
     default_roi_presets,
     supported_roi_montages,
 )
-from Main_App.Shared.settings_manager import SettingsManager
+from Main_App.settings.settings_manager import SettingsManager
 
 
 def test_custom_roi_presets_roundtrip_excludes_default_names(tmp_path) -> None:

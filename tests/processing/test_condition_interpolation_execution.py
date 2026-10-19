@@ -41,6 +41,40 @@ def test_queue_preserves_canonical_recording_identity_and_deduplicates(tmp_path)
     assert manifest["tools"]["other_tool"] == {"keep": True}
 
 
+def test_queue_uses_upstream_qualified_channel_order(tmp_path, monkeypatch):
+    from Main_App.io import geometry_metadata
+
+    _raw, _source, decision, report = _project(tmp_path)
+    manifest = json.loads((tmp_path / "project.json").read_text())
+    manifest["tools"].pop(state_api.STATE_KEY)
+    monkeypatch.setattr(geometry_metadata, "condition_repair_channel_order", lambda _: ("SensorB", "SensorA"))
+
+    state_api.queue_condition_interpolation_decisions(
+        manifest,
+        [{**decision, "electrode": "sensora"}, {**decision, "electrode": "sensorb"}],
+        report,
+    )
+
+    assert manifest["tools"][state_api.STATE_KEY]["requests"] == {
+        "P01": {"Faces": ["SensorB", "SensorA"]}
+    }
+
+
+def test_nonrepair_decision_does_not_require_repair_qualification(tmp_path):
+    _raw, _source, decision, report = _project(tmp_path)
+    manifest = json.loads((tmp_path / "project.json").read_text())
+    manifest["preprocessing"] = {"hardware_platform": "brain_products", "hardware_confirmed": True}
+    before = deepcopy(manifest)
+
+    state_api.queue_condition_interpolation_decisions(
+        manifest, [{**decision, "decision": "retain"}], report,
+    )
+
+    assert manifest == before
+    with pytest.raises(ValueError, match="not qualified"):
+        state_api.queue_condition_interpolation_decisions(manifest, [decision], report)
+
+
 def test_replaced_raw_retires_old_approval_without_losing_audit(tmp_path):
     raw, _source, _decision, _report = _project(tmp_path)
     raw.write_bytes(b"a different recording")

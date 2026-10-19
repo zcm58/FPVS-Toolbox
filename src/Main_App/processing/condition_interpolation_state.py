@@ -61,18 +61,22 @@ def queue_condition_interpolation_decisions(
     manifest: dict, decisions: Sequence[Mapping], report: Mapping,
 ) -> None:
     """Update the supplied manifest; its caller owns the single atomic save."""
-    from Main_App.io.eeg_geometry import BIOSEMI64_CHANNELS
+    from Main_App.io.geometry_metadata import condition_repair_channel_order
 
     state = _state_from_manifest(manifest)
     from Main_App.processing.processing_ledger import load_ledger
 
     root_text = str(report.get("project_root") or "")
     entries = load_ledger(Path(root_text)).get("entries", {}) if root_text else {}
-    canonical = {channel.casefold(): channel for channel in BIOSEMI64_CHANNELS}
+    channel_order = None
+    canonical = {}
     changed: set[str] = set()
     for decision in decisions:
         if decision.get("decision") != REPAIR_DECISION:
             continue
+        if channel_order is None:
+            channel_order = condition_repair_channel_order(manifest.get("preprocessing") or {})
+            canonical = {channel.casefold(): channel for channel in channel_order}
         identity = str(decision.get("recording_id") or decision.get("participant_id") or "").strip()
         condition = str(decision.get("condition") or "").strip()
         electrode = canonical.get(str(decision.get("electrode") or "").strip().casefold())
@@ -92,7 +96,7 @@ def queue_condition_interpolation_decisions(
         channels = conditions.setdefault(condition, [])
         if electrode not in channels:
             channels.append(electrode)
-            channels.sort(key=BIOSEMI64_CHANNELS.index)
+            channels.sort(key=channel_order.index)
             changed.add(existing_identity)
         state["review_decisions"].append({
             **deepcopy(dict(decision)),

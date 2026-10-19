@@ -23,6 +23,7 @@ from Tools.Stats.analysis.noise_utils import (
     compute_qc14_standard_metrics,
 )
 from Main_App.processing.fft_crop_utils import compute_onbin_N, compute_onbin_step
+from Main_App.io.acquisition_metadata import event_detection_kwargs, resolve_recording_contract
 from Main_App.processing.fft_multinotch import (
     FFT_MULTINOTCH_HALF_WIDTH_HZ,
     FFT_MULTINOTCH_METHOD_VERSION,
@@ -464,9 +465,23 @@ def _resolve_condition_id(event_id_map: Dict[str, Any], condition_label: str) ->
     return None
 
 
-def _load_events_for_file(raw_path: str, event_id_map: Dict[str, Any], stim_channel_name: str = "Status"):
-    raw = mne.io.read_raw(raw_path, preload=False, verbose=False)
-    try:
+def _load_events_for_file(
+    raw_path: str, event_id_map: Dict[str, Any], stim_channel_name: str = "Status", *, app: Any,
+):
+    from Main_App.io.load_utils import open_preflight_eeg_file
+
+    settings = getattr(app, "settings", None)
+    validated = getattr(app, "validated_params", None)
+    acquisition_settings = {
+        **(settings if isinstance(settings, dict) else {}),
+        **(validated if isinstance(validated, dict) else {}),
+    }
+    with open_preflight_eeg_file(
+        app, raw_path, stim_channel=stim_channel_name,
+        acquisition_settings=acquisition_settings,
+    ) as raw:
+        if raw is None:
+            raise RuntimeError("Could not load the normalized recording for event recovery.")
         events = np.array([])
         if len(raw.annotations) > 0 and event_id_map:
             mne_annots_event_id_map = {
@@ -477,10 +492,11 @@ def _load_events_for_file(raw_path: str, event_id_map: Dict[str, Any], stim_chan
             if mne_annots_event_id_map:
                 events, _ = mne.events_from_annotations(raw, event_id=mne_annots_event_id_map, verbose=False)
         if events.size == 0:
-            events = mne.find_events(raw, stim_channel=stim_channel_name, consecutive=True, verbose=False)
+            events = mne.find_events(
+                raw, stim_channel=stim_channel_name,
+                **{"consecutive": True, **event_detection_kwargs(raw=raw)}, verbose=False,
+            )
         return events, int(raw.n_times)
-    finally:
-        raw.close()
 
 
 def _attempt_legacy_55_onbin_crop(
@@ -860,8 +876,9 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                 # ...
                 ordered_electrode_names_for_df = []
 
-                if (isinstance(getattr(app, "settings", None), dict)
-                        and app.settings.get("hardware_platform") == "brain_products"):
+                if resolve_recording_contract(
+                    app.settings if isinstance(getattr(app, "settings", None), dict) else {}
+                ).recorded_channel_geometry:
                     ordered_electrode_names_for_df = current_ch_names_from_obj
                 elif num_channels == len(DEFAULT_ELECTRODE_NAMES_64) and set(
                     current_ch_names_from_obj
@@ -930,7 +947,9 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                         try:
                             source_path = app.data_paths[0]
                             if source_path not in event_cache:
-                                event_cache[source_path] = _load_events_for_file(raw_path=source_path, event_id_map=event_id_map)
+                                event_cache[source_path] = _load_events_for_file(
+                                    raw_path=source_path, event_id_map=event_id_map, app=app,
+                                )
                             global_events, stream_end_sample = event_cache[source_path]
 
                             avg_data, crop_mode, n55, first55_samp, last55_samp, n_step, fallback_reason = _attempt_legacy_55_onbin_crop(

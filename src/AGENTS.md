@@ -22,9 +22,22 @@ imports belong in those purpose-based packages.
 
 For hardware, montage, processing-stage, or FPVS Studio integration work, read
 the [hardware, pipeline, and Studio roadmap](../docs/agent/architecture/hardware-pipeline-studio-roadmap.md).
+The processing pipeline is the primary product; FHC, scalp maps and other
+analysis tools are optional downstream additions. Supported BioSemi and Brain
+Products inputs now pass through the project-local BIDS/lossless-derivative
+boundary in `Main_App.io.bids_import` and `bids_loader`, then shared MNE stages
+in `Main_App.processing.preprocess`. Preserve the documented BVRF exception;
+it is not standard raw EEG-BIDS.
+Hardware interpretation and calibrated-profile metadata belong in
+`Main_App.io.acquisition_metadata` / `geometry_metadata`. Pass the immutable
+`io.recording_contract.RecordingContract` into the numerical engine; reference,
+filtering and interpolation implementations stay in `processing` and consume
+generic channel roles, geometry and project methods. The old
+`processing.acquisition_policy` import surface is compatibility-only.
+
 The target is modular support for different acquisition systems and montages,
-a pipeline whose validated stages can be selected or replaced for that recording
-context, and complete FPVS Studio compatibility. These are development goals,
+with supported stages and parameters selected by the user and persisted per
+project, plus complete FPVS Studio compatibility. These are development goals,
 not a claim that every device, montage, or Studio workflow is supported today.
 Keep format, acquisition, montage, and event semantics distinct; a montage alone
 cannot establish reference, sample-rate, integrity, or trigger policy. Preserve

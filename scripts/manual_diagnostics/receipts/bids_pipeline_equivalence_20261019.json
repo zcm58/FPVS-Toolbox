@@ -1,0 +1,126 @@
+{
+  "schema": "fpvs-bids-pipeline-equivalence-v1",
+  "date": "2026-10-19",
+  "baseline_commit": "da14edaaa5c5710b026ea1e39acb363a4793ca8c",
+  "implementation_branch": "codex/bids-shared-pipeline",
+  "passed": true,
+  "synthetic_fixture": {
+    "participants": 5,
+    "hardware_style": "BioSemi ActiveTwo 64 scalp + EXG1 + EXG2 + Status",
+    "sampling_frequency_hz": 2048,
+    "duration_seconds_per_participant": 80,
+    "bytes_per_recording": 32949248,
+    "source_files": [
+      {
+        "name": "P01.bdf",
+        "seed": 20261020,
+        "sha256": "9522c6b760a467576d83cf97977f0802dfe41caef7a2d3af288ffa544dbf684a"
+      },
+      {
+        "name": "P02.bdf",
+        "seed": 20261021,
+        "sha256": "b991be9b18bf3caf6cf267d5c15e8ad136b87f4c3fd0d9133a643cd9fe18cb34"
+      },
+      {
+        "name": "P03.bdf",
+        "seed": 20261022,
+        "sha256": "c0e54c88be2a52c4cbc9c5c7e7ee4a4df1603448decadcf4319398ae581e91ce"
+      },
+      {
+        "name": "P04.bdf",
+        "seed": 20261023,
+        "sha256": "487071ecea534c0c53621365d680aed7ffec3820fb6a44d30ad210d0689d6fcc"
+      },
+      {
+        "name": "P05.bdf",
+        "seed": 20261024,
+        "sha256": "68ccfd7a495e9e4cb1181e1651b5af90c563bf1b4b5a4c394710b700960b2fd7"
+      }
+    ]
+  },
+  "processing": {
+    "initial_reference": [
+      "EXG1",
+      "EXG2"
+    ],
+    "drop_reference_channels": true,
+    "scalp_channels": 64,
+    "fir_high_pass_hz": 1.0,
+    "fir_low_pass_hz": 40.0,
+    "downsample_hz": 128,
+    "final_reference": "average",
+    "presentation_rate_hz": 8.0,
+    "oddball_rate_hz": 2.0,
+    "analyzed_oddball_cycles": 128,
+    "optional_qc": "disabled",
+    "preprocessed_cache": "disabled",
+    "preload": "RAM",
+    "threads_per_numerical_library": 1
+  },
+  "comparison": {
+    "files_compared": 35,
+    "arrays_compared": 415,
+    "numeric_values_compared": 5375645,
+    "max_absolute_difference": 0.0,
+    "byte_identical_files": 30
+  },
+  "scientific_output_counts": {
+    "fpvs_manifests": 5,
+    "spectral_and_metric_npz": 10,
+    "source_ready_fif": 5,
+    "source_sidecars_and_manifests": 10
+  },
+  "all_30_scientific_outputs_byte_identical": true,
+  "all_5_native_bdf_copies_byte_identical": true,
+  "imported_samples_events_channels_and_processing_audits_identical": true,
+  "diagnostic_logs": {
+    "count": 5,
+    "content_identical_after_normalization": true,
+    "normalized_fields": [
+      "wall-clock timestamp prefix",
+      "process ID in filename"
+    ]
+  },
+  "conversion_timings_seconds": [
+    {
+      "participant": "P01",
+      "conversion": 0.339759,
+      "full_prepare_wall": 0.496358
+    },
+    {
+      "participant": "P02",
+      "conversion": 0.154074,
+      "full_prepare_wall": 0.214661
+    },
+    {
+      "participant": "P03",
+      "conversion": 0.160363,
+      "full_prepare_wall": 0.223601
+    },
+    {
+      "participant": "P04",
+      "conversion": 0.156938,
+      "full_prepare_wall": 0.218625
+    },
+    {
+      "participant": "P05",
+      "conversion": 0.150017,
+      "full_prepare_wall": 0.210862
+    }
+  ],
+  "timing_totals_seconds": {
+    "conversion_seconds_total": 0.961151,
+    "conversion_wall_seconds_total": 1.364107,
+    "old_processing_seconds_total": 24.948459,
+    "new_processing_seconds_total": 25.561597
+  },
+  "timing_scope": "Fresh BIDS import cache. Conversion timer excludes source/output integrity hashing; full prepare wall includes integrity and initialization. OS disk cache was not flushed. Processing totals exclude explicitly timed import preparation. No performance superiority is inferred.",
+  "reproduce": ".venv/Scripts/python.exe scripts/manual_diagnostics/compare_bids_pipeline.py --baseline-ref da14edaa --work-dir .codex-tmp/bids-pipeline-comparison-NEW",
+  "full_local_receipt": ".codex-tmp/bids-pipeline-equivalence-20261019-final/comparison.json",
+  "limitations": [
+    "Synthetic BDF fixture, not a vendor-recorded hardware qualification.",
+    "All optional QC disabled; interpolation behavior is not exercised.",
+    "Only per-recording processing outputs; no group Stats or GUI workflows.",
+    "Import caches are new artifacts and inventoried separately from scientific outputs."
+  ]
+}

@@ -96,6 +96,45 @@ def test_occurrences_stay_separate_and_reference_math_remains_in_physical_units(
     assert result.traces[4].minimum_uv[0] == pytest.approx(6)
 
 
+@pytest.mark.parametrize("references", [[], ["R1"], ["R1", "R2", "R3"]])
+def test_recorded_reference_preview_uses_resolved_roles_without_name_assumptions(tmp_path, references):
+    settings = {
+        "hardware_platform": "brain_products", "hardware_confirmed": True,
+        "initial_reference": "channels" if references else "recorded",
+        "initial_reference_channels": references,
+        "channel_types": {"Aux": "misc"},
+    }
+    request = request_from_source(tmp_path / "recording.vhdr", tmp_path, settings, channel="EXG1")
+    assert request.params["initial_reference_channels"] == references
+    names = ["EXG1", "S2", "R1", "R2", "R3", "Aux", "Status"]
+    samples = np.tile(np.array([20, 30, 2, 4, 6, 1000, 0])[:, None] * 1e-6, (1, 100))
+    result = _read_view(
+        request, lambda picks, start, stop: samples[picks, start:stop], names, 100., 100,
+        {}, tuple(references), None, scalp_channels=names[:5],
+    )
+    assert result.channel == "EXG1"
+    assert "Aux" not in result.available_channels
+    assert "Status" not in result.available_channels
+    assert all(name not in result.available_channels for name in references)
+    reference_uv = np.mean([samples[names.index(name), 0] for name in references]) * 1e6 if references else 0
+    assert result.traces[0].minimum_uv[0] == pytest.approx(20 - reference_uv)
+
+
+def test_multi_electrode_reference_comparison_does_not_invent_pair_difference(tmp_path):
+    references = ["R1", "R2", "R3"]
+    request = request_from_source(tmp_path / "recording.vhdr", tmp_path, {
+        "hardware_platform": "brain_products", "hardware_confirmed": True,
+        "initial_reference": "channels", "initial_reference_channels": references,
+    }, channel="R2")
+    assert request.mode == "reference_comparison"
+    names = ["S1", *references]
+    samples = np.tile(np.array([20., 2., 4., 6.])[:, None] * 1e-6, (1, 100))
+    result = _read_view(request, lambda picks, start, stop: samples[picks, start:stop],
+                        names, 100., 100, {}, tuple(references), None, scalp_channels=names)
+    assert len(result.traces) == 5
+    assert result.traces[1].minimum_uv[0] == pytest.approx(16.)
+
+
 def test_panning_reuses_only_matching_overview_and_never_rereads_full_occurrence(tmp_path):
     request, view, reads = _source_view(tmp_path)
     first = view(request)

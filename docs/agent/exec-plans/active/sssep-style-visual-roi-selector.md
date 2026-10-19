@@ -455,7 +455,8 @@ Embedded visual-first follow-up:
 - [x] Partial drafts block Save instead of being silently omitted.
 - [x] Follow-up local safe gates completed and recorded.
 - [x] Follow-up registered CI Qt coverage authored and registered.
-- [ ] Follow-up registered CI Qt coverage executed.
+- [x] Follow-up registered CI Qt coverage executed in the source CI recorded by
+      the [v3 release ledger](v3-release-readiness.md#publication--2026-10-15).
 - [ ] Visible installed-application smoke completed.
 
 ## Historical Receipt — First Implementation (`8d84b216`)

@@ -830,7 +830,7 @@ def test_record_results_rejects_success_without_observed_geometry(tmp_path) -> N
     plan = classify_processing_inputs(project, [info], _settings(), project.event_map)
     _write_expected_outputs(plan)
 
-    with pytest.raises(ValueError, match="no worker-observed BioSemi64 geometry"):
+    with pytest.raises(ValueError, match="no worker-observed EEG geometry"):
         record_processing_results(
             project,
             plan,
@@ -1835,7 +1835,7 @@ def test_geometry_dependent_exclusion_requires_observed_geometry(tmp_path) -> No
     plan = classify_processing_inputs(project, [info], _settings(), project.event_map)
     _write_expected_outputs(plan)
 
-    with pytest.raises(ValueError, match="no worker-observed BioSemi64 geometry"):
+    with pytest.raises(ValueError, match="no worker-observed EEG geometry"):
         record_processing_results(
             project,
             plan,

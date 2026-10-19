@@ -534,6 +534,70 @@ def _apply_preflight_channel_and_montage_contract(
 
 
 @contextmanager
+def open_bdf_resource_header(
+    app: Any,
+    filepath: str,
+    *,
+    ref_pair: Tuple[str, str],
+    first_n_channels: Optional[int],
+    stim_channel: str,
+    electrode_mapping_profile: Any = None,
+    electrode_montage: str = BIOSEMI64_MONTAGE_ID,
+    acquisition_settings: dict[str, Any] | None = None,
+) -> Iterator[Optional[mne.io.BaseRaw]]:
+    """Inspect bounded native metadata before admitting an import worker.
+
+    This resource-planning exception never creates BIDS files or reads signal
+    samples. Annotation-bearing files are rejected before MNE can scan their
+    payload. Numerical preprocessing must use the normalized project loaders.
+    """
+    from Main_App.projects.hardware import require_hardware_ready
+
+    require_hardware_ready(acquisition_settings, paths=(Path(filepath),))
+    _normalize_electrode_montage(electrode_montage)
+    header = inspect_bdf_header(filepath)
+    if (Path(filepath).suffix.lower() != ".bdf" or header is None
+            or not header.channel_count or not 0 < header.channel_count <= 4096
+            or header.header_bytes != (header.channel_count + 1) * 256):
+        yield None
+        return
+    with Path(filepath).open("rb") as stream:
+        stream.seek(256)
+        labels = stream.read(header.channel_count * 16)
+    if len(labels) != header.channel_count * 16 or any(
+        labels[index * 16:(index + 1) * 16].strip().lower() in {b"bdf annotations", b"edf annotations"}
+        for index in range(header.channel_count)
+    ):
+        yield None
+        return
+    try:
+        geometry = _read_biosemi64_header_geometry(
+            filepath, stim_name=stim_channel, ref_pair=ref_pair,
+            electrode_mapping_profile=electrode_mapping_profile,
+        )
+    except ValueError:
+        yield None
+        return
+    raw = mne.io.read_raw_bdf(
+        filepath, preload=False, stim_channel=stim_channel,
+        include=geometry.included_source_names(first_n_channels), verbose=False,
+    )
+    try:
+        try:
+            _apply_preflight_channel_and_montage_contract(
+                app, raw, base=Path(filepath).name, ref_pair=ref_pair,
+                stim_name=stim_channel, acquisition_geometry=geometry,
+                retained_scalp_channels=geometry.retained_scalp_names(first_n_channels),
+            )
+        except ValueError:
+            yield None
+            return
+        yield raw
+    finally:
+        raw.close()
+
+
+@contextmanager
 def open_preflight_eeg_file(
     app: Any,
     filepath: str,
@@ -642,12 +706,13 @@ def open_preflight_eeg_file(
                         base,
                         len(include_channels) if include_channels else "all",
                     )
-                    raw = mne.io.read_raw_bdf(
-                        filepath,
+                    from Main_App.io.bids_loader import read_project_bids_raw
+
+                    raw = read_project_bids_raw(
+                        app, filepath, settings=settings,
                         preload=False,
                         stim_channel=stim_name if stim_name else "Status",
                         include=include_channels,
-                        verbose=False,
                     )
                     logger.debug(
                         "[PREFLIGHT LAZY LOADER STAGE] file=%s stage=read_raw_bdf_done "
@@ -672,6 +737,8 @@ def open_preflight_eeg_file(
                 acquisition_geometry=acquisition_geometry,
                 retained_scalp_channels=retained_scalp_channels,
             )
+            from Main_App.io.acquisition_metadata import attach_recording_contract
+            attach_recording_contract(raw, settings)
             app.log(f"[PREFLIGHT LAZY LOADER READY] {base}")
     except Exception as e:
         app.log(f"!!! Load Error {base}: {e}")
@@ -735,20 +802,14 @@ def load_eeg_file(
             memmap_path = None
         elif preload_path is None:
             memmap_dir = _memmap_dir_for_pid()
-            memmap_path = str(memmap_dir / (Path(filepath).stem + "_raw.dat"))
-            if ext in {".vhdr", ".bvrh"}:
-                import uuid
-                memmap_path = str(memmap_dir / (uuid.uuid4().hex + "_raw.dat"))
+            import uuid
+            memmap_path = str(memmap_dir / (uuid.uuid4().hex + "_raw.dat"))
         else:
             destination = Path(preload_path)
             if not destination.is_absolute():
                 raise ValueError("Run-owned EEG preload paths must be absolute.")
-            # Reserve the unique destination before MNE opens it for writing.
-            # In particular, this cannot overwrite a source recording or a
-            # different worker's live memory map.
-            if ext not in {".vhdr", ".bvrh"}:
-                with destination.open("xb"):
-                    pass
+            # The shared BIDS reader exclusively reserves this destination
+            # before preloading and owns cleanup if loading fails.
             memmap_path = str(destination)
 
         if ext in {".vhdr", ".bvrh"}:
@@ -826,17 +887,14 @@ def load_eeg_file(
                         len(include_channels) if include_channels else "all",
                         memmap_path,
                     )
-                    # Keep the optional preload optimization local to the read
-                    # boundary rather than loading it during I/O initialization.
-                    from Main_App.io.bdf_preload import select_bdf_preload_reader
+                    from Main_App.io.bids_loader import read_project_bids_raw
 
-                    raw = select_bdf_preload_reader(
-                        filepath,
+                    raw = read_project_bids_raw(
+                        app, filepath, settings=settings,
                         preload=True if preload_in_memory else memmap_path,
                         stim_channel=stim_name if stim_name else "Status",
                         include=include_channels,
-                        verbose=False,
-                    )()
+                    )
                     logger.debug(
                         "[LOADER STAGE] file=%s stage=read_raw_bdf_done channels=%d",
                         base,
@@ -869,6 +927,8 @@ def load_eeg_file(
             acquisition_geometry=acquisition_geometry,
             retained_scalp_channels=retained_scalp_channels,
         )
+        from Main_App.io.acquisition_metadata import attach_recording_contract
+        attach_recording_contract(raw, settings)
 
         app.log(f"[LOADER END] {base}")
         return raw
@@ -877,9 +937,12 @@ def load_eeg_file(
         app.log(f"!!! Load Error {base}: {e}")
         if raw is not None:
             try:
-                raw.close()
+                from Main_App.io.brain_products import close_brain_products_raw
+                close_brain_products_raw(raw)
+                if memmap_path is not None:
+                    Path(memmap_path).unlink(missing_ok=True)
             except (AttributeError, RuntimeError, OSError, ValueError):
-                pass
+                logger.warning("Failed to release EEG preload after loading error", exc_info=True)
         try:
             user_messages.show_error("Loading Error", f"Could not load: {base}\nError: {e}")
         except Exception:
@@ -891,7 +954,15 @@ def load_eeg_file(
 from Main_App.io.recording_inspection import inspect_eeg_recording  # noqa: E402
 from Main_App.io.unicorn_raw import open_unicorn_recording_raw  # noqa: E402
 
+# Generic admission names keep format interpretation at this upstream boundary.
+RecordingPreflightInfo = BdfPreflightInfo
+RECORDING_NOT_STARTED_REASON = BDF_RECORDING_NOT_STARTED_REASON
+inspect_recording_header = inspect_bdf_header
+
 __all__ = [
+    "RecordingPreflightInfo",
+    "RECORDING_NOT_STARTED_REASON",
+    "inspect_recording_header",
     "BDF_RECORDING_NOT_STARTED_REASON",
     "BdfPreflightInfo",
     "_cached_1010",
@@ -912,5 +983,6 @@ __all__ = [
     "_try_warning_log",
     "load_eeg_file",
     "open_preflight_eeg_file",
+    "open_bdf_resource_header",
     "open_unicorn_recording_raw",
 ]

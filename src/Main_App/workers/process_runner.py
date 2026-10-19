@@ -34,6 +34,16 @@ from Main_App.io.atomic_write import atomic_write
 from Main_App.io.buffered_fif import save_raw_fif
 from Main_App.io.safe_file import regular_file_info
 from Main_App.processing.preflight_qc_pruning import safe_cache_directory
+from Main_App.io.acquisition_metadata import (
+    attach_processed_geometry,
+    cache_acquisition_identity,
+    configured_channel_limit,
+    event_detection_kwargs,
+    geometry_identity_for_channels,
+    resolve_recording_contract,
+    restore_processed_geometry,
+    source_load_kwargs,
+)
 from Main_App.exports.source_time_domain_export import (
     source_ready_project_relative_path,
     write_source_ready_time_domain_derivatives,
@@ -44,12 +54,7 @@ from Main_App.io.load_utils import (
     inspect_bdf_header,
 )
 from Main_App.io.memmap_paths import memmap_process_id, memmap_root, process_memmap_directory
-from Main_App.io.eeg_geometry import (
-    BIOSEMI64_CHANNELS,
-    attach_raw_biosemi64_geometry,
-    biosemi64_geometry_identity,
-    read_raw_biosemi64_geometry,
-)
+from Main_App.io.recorded_eeg_geometry import read_raw_eeg_geometry
 from Main_App.processing.fft_multinotch import (
     FFT_MULTINOTCH_COMPONENT_COUNT,
     FFT_MULTINOTCH_HALF_WIDTH_HZ,
@@ -101,10 +106,8 @@ from Main_App.projects.frequency_protocol import (
 )
 from Main_App.projects.grouping import validate_group_folder_name
 from Main_App.projects.preprocessing_settings import (
-    ELECTRODE_MONTAGE_BIOSEMI64,
     is_participant_condition_excluded,
     is_recording_condition_excluded,
-    normalize_electrode_montage,
     normalize_manual_excluded_participants,
     normalize_manual_excluded_recordings,
 )
@@ -123,7 +126,6 @@ logger = logging.getLogger("Main_App.Performance.process_runner")
 _WORKER_FIR_CACHE: PreparedFirCache | None = None
 _WORKER_ADMISSION: ProcessingWorkerAdmission | None = None
 PREPROC_CACHE_VERSION = "preprocessed-raw-v13-v3-trigger-alignment"
-BDF_FIRST_N_CHANNELS = 64
 REMOVED_ELECTRODE_REVIEW_LIST_KEYS = (
     "removed_electrode_original_auto_flagged",
     "removed_electrode_accepted_auto_flagged",
@@ -225,20 +227,18 @@ def _find_raw_events(
 ) -> tuple[np.ndarray, str]:
     """Use the same event-discovery contract as condition-aware preflight."""
 
+    event_kwargs = event_detection_kwargs(raw=raw)
     try:
         events = mne_module.find_events(
             raw,
             stim_channel=stim_channel,
             shortest_event=1,
-            **({"initial_event": True, "consecutive": True} if (
-                hasattr(raw, "_fpvs_brain_products_events")
-                or (getattr(raw, "_fpvs_eeg_geometry", None) or {}).get("hardware_platform") == "brain_products"
-            ) else {}),
+            **event_kwargs,
             verbose=False,
         )
         source = "stim"
     except (RuntimeError, ValueError):
-        if (getattr(raw, "_fpvs_eeg_geometry", None) or {}).get("hardware_platform") == "brain_products":
+        if event_kwargs.get("initial_event"):
             raise
         events, _event_ids = mne_module.events_from_annotations(
             raw,
@@ -827,90 +827,19 @@ def _preproc_cache_enabled(settings: Dict[str, object]) -> bool:
     return bool(value)
 
 
-def _configured_biosemi64_channel_limit(
-    settings: Mapping[str, object],
-) -> int | None:
-    """Resolve the project-owned canonical first-N scalp limit."""
-
-    if settings.get("hardware_platform") == "brain_products":
-        value = settings.get("max_idx_keep", settings.get("max_chan_idx_keep"))
-        return int(value) if value is not None else None
-    raw_limit = settings.get("max_idx_keep")
-    if raw_limit is None:
-        raw_limit = settings.get("max_chan_idx_keep")
-    if raw_limit is None:
-        return BDF_FIRST_N_CHANNELS
-    if isinstance(raw_limit, bool):
-        raise ValueError("BioSemi64 channel limit must be an integer from 1 through 64.")
-    try:
-        channel_limit = int(raw_limit)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(
-            "BioSemi64 channel limit must be an integer from 1 through 64."
-        ) from exc
-    if isinstance(raw_limit, float) and not raw_limit.is_integer():
-        raise ValueError("BioSemi64 channel limit must be an integer from 1 through 64.")
-    if not 1 <= channel_limit <= BDF_FIRST_N_CHANNELS:
-        raise ValueError("BioSemi64 channel limit must be an integer from 1 through 64.")
-    return channel_limit
-
-
 def _geometry_identity_for_channels(
     settings: Mapping[str, object],
     channel_names: Optional[List[str]] = None,
 ) -> Dict[str, object]:
-    """Return canonical geometry with the retained scalp set made explicit."""
-
-    if settings.get("hardware_platform") == "brain_products":
-        from Main_App.io.hardware_identity import brain_products_settings_identity
-        return brain_products_settings_identity(settings)
-    montage_id = normalize_electrode_montage(settings.get("electrode_montage"))
-    if montage_id != ELECTRODE_MONTAGE_BIOSEMI64:
-        raise ValueError(
-            f"Unsupported electrode montage {montage_id!r}; only "
-            f"{ELECTRODE_MONTAGE_BIOSEMI64!r} is supported."
-        )
-    if channel_names is None:
-        channel_limit = _configured_biosemi64_channel_limit(settings)
-        retained = list(BIOSEMI64_CHANNELS[:channel_limit])
-    else:
-        present = {str(name) for name in channel_names}
-        retained = [name for name in BIOSEMI64_CHANNELS if name in present]
-    return biosemi64_geometry_identity(
-        electrode_mapping_profile=settings.get("electrode_mapping_profile"),
-        retained_channels=retained,
-    )
+    """Read the adapter-owned identity without interpreting acquisition hardware."""
+    return geometry_identity_for_channels(settings, channel_names)
 
 
 def _attach_processed_geometry(
     raw: Any,
     settings: Mapping[str, object],
 ) -> Dict[str, object]:
-    if settings.get("hardware_platform") == "brain_products":
-        from Main_App.io.recorded_eeg_geometry import (
-            attach_raw_recorded_geometry, validate_raw_recorded_geometry,
-        )
-        existing = getattr(raw, "_fpvs_eeg_geometry", None)
-        if existing is not None:
-            return validate_raw_recorded_geometry(raw)
-        return attach_raw_recorded_geometry(
-            raw, montage_id=str(settings.get("electrode_montage") or "recorded"),
-        )
-    montage_id = normalize_electrode_montage(settings.get("electrode_montage"))
-    if montage_id != ELECTRODE_MONTAGE_BIOSEMI64:
-        raise ValueError(
-            f"Unsupported electrode montage {montage_id!r}; only "
-            f"{ELECTRODE_MONTAGE_BIOSEMI64!r} is supported."
-        )
-    present = {str(name) for name in raw.ch_names}
-    retained = [name for name in BIOSEMI64_CHANNELS if name in present]
-    stim_name = str(settings.get("stim_channel") or "Status")
-    return attach_raw_biosemi64_geometry(
-        raw,
-        electrode_mapping_profile=settings.get("electrode_mapping_profile"),
-        retained_channels=retained,
-        stim_channel=stim_name if stim_name in present else None,
-    )
+    return attach_processed_geometry(raw, settings)
 
 
 def _preproc_cache_payload(
@@ -922,7 +851,7 @@ def _preproc_cache_payload(
     event_map: Mapping[str, int] | None = None,
 ) -> Dict[str, object]:
     stat = file_path.stat()
-    channel_limit = _configured_biosemi64_channel_limit(settings)
+    channel_limit = configured_channel_limit(settings)
     source_span_plan = settings.get("_fpvs_source_analysis_span_plan")
     if isinstance(source_span_plan, Mapping):
         analysis_span_identity: dict[str, object] | None = {
@@ -1025,9 +954,9 @@ def _preproc_cache_payload(
             "requests": condition_requests,
         }
     from Main_App.io.recording_sources import companion_identity
-    if settings.get("hardware_platform") == "brain_products":
-        from Main_App.io.hardware_identity import brain_products_settings_identity
-        relevant_settings["acquisition"] = brain_products_settings_identity(settings)
+    acquisition_identity = cache_acquisition_identity(settings)
+    if acquisition_identity is not None:
+        relevant_settings["acquisition"] = acquisition_identity
     return {
         **companion_identity(file_path),
         "version": PREPROC_CACHE_VERSION,
@@ -1168,11 +1097,7 @@ def _load_preprocessed_cache(
             raw.close()
             return None, None, 0, "miss_filter_metadata_mismatch"
         cached_geometry = metadata.get("geometry")
-        if settings.get("hardware_platform") == "brain_products" and isinstance(cached_geometry, Mapping):
-            from Main_App.io.hardware_loader import restore_cached_recorded_geometry
-            observed_geometry = restore_cached_recorded_geometry(raw, cached_geometry)
-        else:
-            observed_geometry = _attach_processed_geometry(raw, settings)
+        observed_geometry = restore_processed_geometry(raw, settings, cached_geometry)
         if (
             not isinstance(cached_geometry, Mapping)
             or dict(cached_geometry) != observed_geometry
@@ -1818,10 +1743,8 @@ def _run_full_pipeline_for_file(
             def log(self, msg: str) -> None:  # pragma: no cover - informational
                 _worker_log(msg)
 
-        # Resolve reference pair for loader so EXG policy keeps the right pair as EEG
-        ref_ch1 = settings.get("ref_channel1") or settings.get("ref_ch1") or "EXG1"
-        ref_ch2 = settings.get("ref_channel2") or settings.get("ref_ch2") or "EXG2"
-        ref_pair = (str(ref_ch1), str(ref_ch2))
+        # Resolve source-specific loading arguments at the acquisition boundary.
+        loader_kwargs = source_load_kwargs(settings)
 
         frequency_protocol = _project_frequency_protocol(settings)
         marker_recording_id = (
@@ -1885,7 +1808,7 @@ def _run_full_pipeline_for_file(
                 excluded_condition_labels=excluded_condition_labels,
             )
         settings["_fpvs_require_analysis_spans"] = True
-        stim = str(settings.get("stim_channel") or settings.get("stim") or "Status")
+        stim = resolve_recording_contract(settings).stim_channel
 
         # 1) Cache lookup, then load/preprocess only on misses.
         stage = "cache_lookup"
@@ -1912,7 +1835,7 @@ def _run_full_pipeline_for_file(
         )
 
         if raw_proc is None:
-            # 2) Load only the first 64 channels plus selected ref pair and stim.
+            # 2) Load the admitted scalp, reference, and stimulus channels.
             stage = "load"
             logger.debug("[PIPELINE STAGE] file=%s stage=load_start", file_path.name)
             section_started = time.perf_counter()
@@ -1920,16 +1843,9 @@ def _run_full_pipeline_for_file(
             raw = load_eeg_file(
                 _App(),
                 str(file_path),
-                ref_pair=ref_pair,
-                first_n_channels=_configured_biosemi64_channel_limit(settings),
-                stim_channel=str(settings.get("stim_channel") or "Status"),
-                electrode_mapping_profile=settings.get(
-                    "electrode_mapping_profile"
-                ),
-                electrode_montage=settings.get("electrode_montage"),
+                **loader_kwargs,
                 **({"preload_in_memory": True} if ram_preload else {}),
-                **({"acquisition_settings": {**settings, "event_id_map": event_map}}
-                   if settings.get("hardware_platform") == "brain_products" else {}),
+                acquisition_settings={**settings, "event_id_map": event_map},
             )
             _record_timing("load", section_started)
             if raw is None:
@@ -2058,7 +1974,7 @@ def _run_full_pipeline_for_file(
                         raw_qc_result.to_payload(),
                         settings,
                     ),
-                    geometry=(getattr(raw, "_fpvs_eeg_geometry", None) or read_raw_biosemi64_geometry(raw)),
+                    geometry=read_raw_eeg_geometry(raw),
                 )
             logger.debug(
                 "raw_channel_qc_passed file=%s n_bad=%d n_channels=%d",
@@ -2171,7 +2087,7 @@ def _run_full_pipeline_for_file(
             )
 
             # 4) Preprocessing via PySide6 backend (handles:
-            #    initial EXG ref -> drop EXGs -> channel limit keeping stim ->
+            #    initial reference -> drop reference channels -> channel limit keeping stim ->
             #    filter -> downsample -> kurtosis/interp -> final avg ref)
             logger.debug(
                 "RUNNER_SETTINGS_SNAPSHOT file=%s high_pass=%r low_pass=%r downsample_rate=%r "
@@ -2212,6 +2128,7 @@ def _run_full_pipeline_for_file(
                 params=settings,
                 log_func=_worker_log,
                 filename_for_log=file_path.name,
+                recording_contract=resolve_recording_contract(settings, raw=raw),
                 **({"before_kurtosis_scoring": _WORKER_ADMISSION.before_kurtosis,
                     "before_processing_finish": _WORKER_ADMISSION.before_finish}
                    if _WORKER_ADMISSION is not None else {}),
@@ -2307,7 +2224,7 @@ def _run_full_pipeline_for_file(
         )
         settings["_fpvs_realized_analysis_span_plan"] = target_analysis_span_plan
 
-        # 4) Events — prefer explicit stim channel (BioSemi 'Status')
+        # 4) Events — use the admitted trigger channel and event semantics
         stage = "events"
         section_started = time.perf_counter()
         events, events_source = _find_raw_events(

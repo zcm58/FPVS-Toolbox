@@ -12,12 +12,14 @@ import numpy as np
 from mne._fiff._digitization import DigPoint
 from mne.utils._bunch import NamedInt
 
+from Main_App.io.recording_contract import RecordingContract
 from Main_App.processing.kurtosis_qc import (
     KurtosisChannelEvidence, KurtosisOccurrenceScope, KurtosisQCEvidence,
     KurtosisReferenceDistribution, KurtosisScoringScope,
 )
 
 _RECORDS = {cls.__name__: cls for cls in (
+    RecordingContract,
     KurtosisChannelEvidence, KurtosisOccurrenceScope, KurtosisQCEvidence,
     KurtosisReferenceDistribution, KurtosisScoringScope,
 )}

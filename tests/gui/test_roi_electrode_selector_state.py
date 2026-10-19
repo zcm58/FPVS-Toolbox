@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from config import DEFAULT_ELECTRODE_NAMES_64
-from Main_App.Shared.roi_presets import ROI_MONTAGE_BIOSEMI64, default_roi_presets
+from Main_App.processing.roi_presets import ROI_MONTAGE_BIOSEMI64, default_roi_presets
 from Main_App.gui.roi_electrode_selector_state import (
     BIOSEMI64_LABELS,
     BIOSEMI64_POLAR_COORDINATES,

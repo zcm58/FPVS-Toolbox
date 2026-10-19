@@ -1,4 +1,64 @@
-# BDF Loading Contract
+# EEG Loading and BIDS Import Contract
+
+## Shared import boundary
+
+`Main_App.io.bids_import` owns preparation and verified reuse of one recording's
+BIDS dataset. `bids_loader` requires the active project's absolute root from
+explicit worker settings or `currentProject.project_root`; it never writes
+beside a source or chooses the current working directory. Full, lazy, prefetch,
+QC inspection, and export event-recovery reads enter through `load_utils`.
+Keep header-only format inspection inside I/O; downstream numerical code must
+consume normalized MNE Raw, generic recording metadata, and project settings.
+
+`io.recording_contract.RecordingContract` is the immutable input contract.
+`io.acquisition_metadata.resolve_recording_contract` resolves hardware defaults,
+channel roles/order, reference and marker semantics, geometry identity, and
+scientific capabilities before shared numerical work. Loaded recordings carry
+the resolved contract; cache restoration reattaches validated geometry and
+metadata. `io.geometry_metadata` resolves fixed versus per-recording geometry
+expectations and validates historical identity encodings for downstream ledgers
+and cohorts. Manufacturer names in those persisted encodings remain unchanged
+to preserve fingerprints; consumers must not dispatch on them.
+
+The upstream calibrated spatial profile supplies the existing QC method's
+channel domain and coordinate identity. Numerical algorithms remain under
+`processing`, including references, filtering, resampling and QC calculations.
+`processing.acquisition_policy` is a compatibility shim, not an implementation
+owner. Adding an adapter must resolve the contract and its actual capabilities;
+it does not automatically qualify another montage for calibrated QC or add-ons.
+
+`load_utils.open_bdf_resource_header` is the bounded, metadata-only exception
+used by resource planning before worker admission. It neither reads signal
+samples nor creates BIDS imports, and rejects annotation-bearing files before
+MNE could scan their payload. It cannot supply numerical preprocessing input.
+
+Imports live in `.fpvs_cache/bids-import/` beneath that project. Each immutable
+publication includes source/companion content hashes, metadata/settings identity,
+versioned import receipts, and hashes of generated files. Source changes or
+damaged imports require a new publication. Concurrent callers publish distinct
+complete directories and never replace another reader's open files. Original
+recordings are not modified. Conversion and identity-validation times are
+reported separately; reuse records zero conversion time.
+
+BDF data is copied byte-for-byte. BVCDF signal bytes are copied unchanged while
+header/marker companion links are relocated. MNE-BIDS 0.16 loads these datasets
+using the pinned MNE 1.9 readers. Metadata normalization preserves source events,
+annotations, channel/sample identity, acquisition metadata and original subject
+fields. Internal BIDS identifiers must not replace canonical project identity
+or leak into scientific outputs. Channel selection precedes RAM/memmap preload.
+
+BVRF arbitrary calibrated float64 values cannot generally be preserved by
+BrainVision float32 export. This route therefore preserves the original BVRF
+companions in `sourcedata` and publishes an explicitly labeled FIF64 derivative
+loaded by MNE. It is a precision-preserving import exception, **not standard
+raw EEG-BIDS compliance**. Template/recorded geometry and FPVS marker policies
+are applied at the shared admission boundary; import performs no filtering,
+resampling, rereferencing, or interpolation. Full BIDS study import/export,
+additional manufacturers, and physical hardware qualification remain separate
+features; a readable recording does not enable unqualified spatial methods.
+
+See the [conceptual map](hardware-pipeline-studio-roadmap.md#intended-conceptual-map-canonical-eeg-recording)
+and [implementation/verification plan](../exec-plans/active/bids-shared-pipeline.md).
 
 ## Brain Products project route
 
@@ -7,7 +67,7 @@ only for a confirmed Brain Products project. BioSemi loader arguments and
 legacy behavior are preserved. `brain_products` adapts calibrated vendor data
 into MNE Raw and a canonical numeric stimulus channel; `brain_products_files`
 validates companion ownership and `brain_products_bvrf` owns streaming BVRF 1.0.
-The pinned MNE 1.9 reader owns BVCDF. No dependency upgrade is required.
+The pinned MNE 1.9 reader owns BVCDF under the MNE-BIDS import boundary.
 
 Header-based discovery never treats `.eeg`, `.vmrk`, `.bvrd`, `.bvrm`, or `.bvri`
 as independent participants. `recording_sources` includes companions in preflight,
@@ -40,8 +100,9 @@ explicitly changes the processing pipeline.
 
 For new devices or montages, also read the
 [hardware, pipeline, and Studio roadmap](hardware-pipeline-studio-roadmap.md).
-The registry and Unicorn reader below are extension foundations; production
-BioSemi64 support and inspection-only alternate acquisition remain distinct.
+The registry and Unicorn reader below are extension foundations. Current
+BioSemi64/confirmed Brain Products processing and inspection-only Unicorn
+acquisition remain distinct.
 
 ## Entry Contract
 
@@ -169,8 +230,8 @@ Context exit closes Raw and explicitly releases an owned memmap before removing
 only `reader.bdf`, `samples.dat` and their uniquely owned directory. Error paths
 retain traceback locations while releasing incomplete MNE construction frames
 that can otherwise keep Windows mappings open. Redirected/replaced directories
-are never recursively removed. Existing BioSemi full/lazy APIs and the current
-BioSemi-only prefetch coordinator do not dispatch through this adapter.
+are never recursively removed. Production BioSemi/Brain Products full, lazy,
+and prefetch reads do not dispatch through this gated Unicorn adapter.
 
 ### Production BioSemi Entry
 
@@ -183,10 +244,13 @@ processing setup rejects nonterminating fractional rates that cannot retain
 their exact identity through the current runtime's decimal float grid.
 
 `load_eeg_file(app, filepath, ref_pair=None, first_n_channels=None,
-electrode_mapping_profile=None, electrode_montage=None)` expects the host
-object to provide:
+stim_channel=None, electrode_mapping_profile=None, electrode_montage=None, *,
+preload_path=None, preload_in_memory=False, acquisition_settings=None)` expects:
 
 - `log(message, ...)` for status and warning messages.
+- An existing absolute active project root in explicit
+  `acquisition_settings["project_root"]` or `app.currentProject.project_root`.
+  Native EEG reads cannot fall back to the current working directory.
 - Optional `currentProject.preprocessing` with `ref_channel1`,
   `ref_channel2`, `stim_channel`, `electrode_montage`, and
   `electrode_mapping_profile` values.
@@ -206,6 +270,7 @@ with Main_App.io.load_utils.open_preflight_eeg_file(
     stim_channel=stim,
     electrode_mapping_profile=mapping_profile,
     electrode_montage="biosemi64",
+    acquisition_settings={**project_settings, "project_root": str(project_root)},
 ) as raw:
     ...
 ```
@@ -249,13 +314,20 @@ score kurtosis, or apply any review decision before step 6.
 Each run owns a unique `qc-source-*` directory under the active project's
 `.fpvs_processing/`. The full loader's optional keyword-only `preload_path`
 reserves a new absolute destination exclusively; ordinary callers retain the
-existing per-process system-temp path. The coordinator keeps only disk-backed
-float64 Raw objects, caps staging at 16 GiB, and reserves 2 GiB of free disk
-space. Budget limits and failed preloads fall back to normal step-6 loading.
+existing per-process system-temp path. By default the coordinator keeps
+disk-backed float64 Raw objects, caps staging at 16 GiB, and reserves 2 GiB of
+free disk space. The explicit RAM-preload option instead retains arrays without
+disk staging and caps them at 25% of available RAM. Budget limits and failed
+preloads fall back to normal step-6 loading.
 
 Step 6 stops queued speculative loading and adopts completed sources once,
 checking the current source content hash, identity, and effective loader
-settings. Source content is bound before/after preloading, so replacing a file
+settings. Reuse compares normalized loader arguments and a frozen acquisition
+identity separately from the full project settings forwarded to BIDS admission.
+Hardware, channel roles, montage, reference, and qualification changes reject
+reuse; downstream filter or review settings and equivalent loader aliases do
+not invalidate unchanged raw samples. Participant exclusions still control
+whether a source may be staged or lent. Source content is bound before/after preloading, so replacing a file
 while retaining its size/timestamp cannot reuse old samples. An active
 source load may finish; unrelated pending sources use the normal loader without
 waiting behind that load. While a preload is active, at most one foreground
@@ -272,28 +344,21 @@ removed on normal completion, cancellation, or error. Cleanup rejects redirected
 paths and never targets the project's persistent prepared-kurtosis checkpoints,
 original recordings, exports, or the repository's MNE/fsaverage cache.
 
-## File And Path Behavior
+## BioSemi File And Path Behavior
 
-- Supported extension is `.bdf`.
+- The BioSemi route accepts `.bdf`; confirmed Brain Products routes use the
+  `.vhdr` and `.bvrh` entrypoints documented above.
 - Unsupported extensions show a user warning and return `None`.
 - Before MNE opens a BDF, the loader reads the fixed BDF header. A BioSemi
   file with `num_records == 0` whose file size is only the declared header
   length is treated as a recording-not-started placeholder: the loader logs an
   exclusion warning and returns `None`, while the process runner reports the
   file as `status="excluded"` instead of a processing error.
-- BDF files load through `mne.io.read_raw_bdf(...)`.
-  `Main_App.io.bdf_preload` provides a guarded full-preload adapter for the
-  characterized CPython 3.13/MNE 1.9.0/NumPy 2.3.1 little-endian implementation.
-  It changes only large packed-24 decoding during the unchanged native RawEDF
-  full-preload constructor or one scoped native preflight read. Header reads and
-  lazy constructors remain native. Bound kwargs, ordinary finite
-  uniform-rate headers and native code/default/dependency identities govern
-  admission. The temporary instance dispatch is removed on success or failure;
-  returned Raw class, metadata and subsequent methods remain native. Unsupported
-  inputs select the native reader directly. Allocation retry first releases
-  speculative decoder arrays and restores the stream cursor. This adapter is
-  invoked in the existing full-load warning-capture context; the local
-  import preserves the public I/O initialization boundary.
+- Production BDF reads use the project-local BIDS import and MNE-BIDS reader,
+  then select channels while lazy before optional RAM/memmap preload. The
+  native MNE BDF decoder still supplies calibrated samples. The older guarded
+  full-constructor `bdf_preload` optimization is no longer the production
+  full-load entry point; keep native-reader internals inside the I/O boundary.
   Preflight uses `owned_bdf_lazy_read` only around its existing `find_events`
   and condition `get_data` calls, inside the existing I/O semaphore. It accepts
   one exclusively owned native lazy Raw, rejects local method overrides, and
@@ -329,7 +394,7 @@ original recordings, exports, or the repository's MNE/fsaverage cache.
   or mapped by this path.
 - `.set`/EEGLAB loading is intentionally unsupported in the active toolbox.
 - Disk-backed preload files are created under
-  `tempfile.gettempdir()/fpvs_memmap/pid_<process-id>-<random>/<file-stem>_raw.dat`.
+  `tempfile.gettempdir()/fpvs_memmap/pid_<process-id>-<random>/<unique-id>_raw.dat`.
   `Main_App.io.memmap_paths` exclusively creates one private directory per
   process and validates its identity on reuse. Loader, worker initialization,
   and per-file cleanup use this same owner; an existing guessed PID directory

@@ -1,9 +1,22 @@
 # ARCHITECTURE.md
 
+Production recording admission is owned by `Main_App.io.bids_import` and
+`bids_loader`, reached from the common full/lazy loader. It publishes verified
+project-local BIDS imports and returns MNE Raw. Native BDF/BVCDF samples remain
+unchanged; BVRF retains exact calibrated values in a labeled FIF64 derivative.
+`io.acquisition_metadata` resolves reference, geometry, channel selection,
+event semantics, and qualification into an immutable `io.recording_contract.RecordingContract`
+before the shared numerical stages. `io.geometry_metadata` owns acquisition
+geometry identities used by provenance, and calibrated spatial-profile metadata
+stays upstream. The numerical engine accepts an explicit contract without
+resolving a manufacturer. `processing.acquisition_policy` only preserves old
+imports; numerical reference operations live in `processing.reference`. See the
+[loading contract](docs/agent/architecture/eeg-loading-contract.md) and
+[conceptual map](docs/agent/architecture/hardware-pipeline-studio-roadmap.md#intended-conceptual-map-canonical-eeg-recording).
+
 Brain Products processing uses the same canonical Main App pipeline: project-owned
 hardware confirmation in `projects/hardware.py`, BVCDF/BVRF readers and recording
-geometry in `io/`, and reference/QC applicability in
-`processing/acquisition_policy.py`. Header and companion identity reaches shared
+geometry and reference/QC applicability in `io/`. Header and companion identity reaches shared
 preflight, caches, and export provenance. BioSemi remains the locked regression
 baseline; unsupported spatial capabilities remain gated. See the
 [hardware roadmap](docs/agent/architecture/hardware-pipeline-studio-roadmap.md) and
@@ -33,10 +46,19 @@ The docs tree is split into [docs/agent](docs/agent/) for agent-facing guidance 
 
 ## Application Shape
 
+The processing pipeline is the primary product. The intended modular package
+lets users select supported processing methods and parameters per project,
+producing reproducible, stats-ready outputs across acquisition systems.
+FHC, scalp maps, and other analysis/visualization tools are secondary add-ons;
+their feature needs should not dictate the core processing architecture or
+make running those tools a prerequisite for processing. See the maintainer's
+[product direction and reference diagram](docs/agent/architecture/hardware-pipeline-studio-roadmap.md#product-priority-and-maintainer-reference).
+
 Current source ownership and supported behavior are described below. The
 [hardware, pipeline, and Studio roadmap](docs/agent/architecture/hardware-pipeline-studio-roadmap.md)
 records the intended next architecture: modular acquisition/montages, shared
-processing steps resolved from their capabilities, and complete FPVS Studio
+processing steps selected through persisted project settings and validated
+against acquisition capabilities, and complete FPVS Studio
 compatibility. The current acquisition registry, gated Unicorn reader, and
 partial Studio import are foundations, not completed production support.
 Published installer behavior is bound to its release tag, not later source work.

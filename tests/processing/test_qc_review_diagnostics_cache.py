@@ -1,4 +1,5 @@
 from copy import deepcopy
+from dataclasses import replace
 import hashlib
 import json
 import struct
@@ -24,7 +25,7 @@ def context(tmp_path, monkeypatch):
     names = ["Fp1", "Fp2", "EXG1", "EXG2"]
     raw = mne.io.RawArray(np.random.default_rng(0).normal(0, 1e-6, (4, 512)),
                          mne.create_info(names, 128.0, ["eeg"] * 4), verbose=False)
-    monkeypatch.setattr(cache, "read_raw_biosemi64_geometry", lambda _raw: {"retained": names, "identity": "synthetic"})
+    monkeypatch.setattr(cache, "read_raw_eeg_geometry", lambda _raw: {"retained": names, "identity": "synthetic"})
     monkeypatch.setattr(prepared_kurtosis_cache, "_native_execution_identity", lambda: (("fake_blas", "v1", 1),))
     kwargs = {
         "project_root": tmp_path, "source_identity": source_content_identity(source),
@@ -106,7 +107,7 @@ def test_relevant_current_inputs_invalidate_cache(context, monkeypatch, change):
     elif change == "bad_channel":
         kwargs["unusable_channels"] = ["Fp1"]
     elif change == "geometry":
-        monkeypatch.setattr(cache, "read_raw_biosemi64_geometry", lambda _raw: {"identity": "changed"})
+        monkeypatch.setattr(cache, "read_raw_eeg_geometry", lambda _raw: {"identity": "changed"})
     elif change == "native_threads":
         monkeypatch.setattr(prepared_kurtosis_cache, "_native_execution_identity", lambda: (("fake_blas", "v1", 2),))
     elif change == "settings":
@@ -129,7 +130,7 @@ def test_unknown_cache_identity_is_a_cold_math_miss(context, monkeypatch, change
     if change == "native_unknown":
         monkeypatch.setattr(prepared_kurtosis_cache, "_native_execution_identity", lambda: None)
     elif change == "geometry_unknown":
-        monkeypatch.setattr(cache, "read_raw_biosemi64_geometry", lambda _raw: None)
+        monkeypatch.setattr(cache, "read_raw_eeg_geometry", lambda _raw: None)
     elif change == "dtype_unknown":
         raw._data = raw._data.astype(np.float32)
     elif change == "sha_missing":
@@ -217,9 +218,9 @@ def test_changed_same_version_helpers_or_method_cannot_reuse_saved_evidence(cont
     elif change == "method_version":
         monkeypatch.setattr(diagnostics, "QC_REVIEW_DIAGNOSTICS_VERSION", "new-method-version")
     elif change == "geometry_function":
-        monkeypatch.setattr(diagnostics, "canonical_biosemi64_head_coordinates", changed_function)
+        monkeypatch.setattr(diagnostics, "CALIBRATED_SPATIAL_PROFILE", replace(diagnostics.CALIBRATED_SPATIAL_PROFILE, coordinates=changed_function))
     else:
-        monkeypatch.setattr(diagnostics, "BIOSEMI64_CHANNEL_SET", {"Fp1"})
+        monkeypatch.setattr(diagnostics, "CALIBRATED_SPATIAL_PROFILE", replace(diagnostics.CALIBRATED_SPATIAL_PROFILE, channel_set=frozenset({"Fp1"})))
     assert cache.load_raw_diagnostics(old) is None
     new = cache.build_raw_diagnostics_cache_key(raw, **kwargs)
     assert new is None or new != old

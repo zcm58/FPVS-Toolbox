@@ -1,6 +1,7 @@
 """Exact prepared checkpoints reuse computation, never review authority."""
 
 from copy import deepcopy
+from dataclasses import dataclass, FrozenInstanceError
 from datetime import datetime, timezone
 import json
 import hashlib
@@ -11,6 +12,7 @@ import mne
 import numpy as np
 import pytest
 
+from Main_App.io.acquisition_metadata import attach_recording_contract
 from Main_App.processing import prepared_kurtosis_cache as cache
 from Main_App.processing import preprocess
 from Main_App.processing.prepared_raw_codec import encode_state, decode_state, raw_state, restore_raw
@@ -30,6 +32,7 @@ def recording(tmp_path):
     raw.set_meas_date(datetime(2026, 9, 5, tzinfo=timezone.utc))
     raw.set_annotations(mne.Annotations([.125], [.017], ["note"]))
     raw._fpvs_original_events = np.array([[0, 0, 1], [100, 0, 55]], dtype=np.int64)
+    attach_recording_contract(raw, params)
     return raw, params, source
 
 
@@ -306,3 +309,34 @@ def test_codec_preserves_nan_bits_projection_geometry_and_nonzero_first_sample(r
     assert restored.first_samp == 123
     assert restored._data.tobytes() == raw._data.tobytes()
     _assert_exact_state(raw_state(raw), raw_state(restored))
+
+
+@pytest.mark.parametrize("settings", [
+    {},
+    {"hardware_platform": "brain_products", "hardware_confirmed": True,
+     "initial_reference": "channels", "initial_reference_channels": ["Fp1"],
+     "drop_reference_channels": False, "max_idx_keep": 8},
+])
+def test_codec_preserves_immutable_recording_contract(recording, settings):
+    raw, _params_value, _source = recording
+    expected = attach_recording_contract(raw, settings)
+    arrays = {}
+    encoded = encode_state(raw_state(raw), arrays)
+    restored = restore_raw(raw.get_data(), decode_state(json.loads(json.dumps(encoded)), arrays))
+    try:
+        assert restored._fpvs_recording_contract == expected
+        assert restored._fpvs_resolved_acquisition_policy == expected
+        assert restored._data.tobytes() == raw._data.tobytes()
+        with pytest.raises(FrozenInstanceError):
+            restored._fpvs_recording_contract.stim_channel = "changed"
+    finally:
+        restored.close()
+
+
+def test_codec_keeps_unknown_dataclasses_outside_checkpoint_allowlist():
+    @dataclass
+    class UnregisteredMetadata:
+        value: str = "unrecognized"
+
+    with pytest.raises(ValueError, match="Unsupported prepared-checkpoint metadata"):
+        encode_state(UnregisteredMetadata(), {})

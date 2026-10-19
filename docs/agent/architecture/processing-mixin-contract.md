@@ -15,7 +15,11 @@ unless a future task explicitly changes behavior.
 - GUI hooks: `_validate_inputs()`, `_set_controls_enabled(enabled)`, `_animate_progress_to(value)`, `after(delay_ms, callback)`, `log(message, ...)`, and `post_process(labels)`.
 - Progress state fields such as `_current_progress`, `_target_progress`, `_max_progress`, `_processed_count`, `_start_time`, `busy`, and optional `remaining_time_var`.
 
-The mixin prevents duplicate active processing threads, blocks processing while event detection is active, disables controls before starting, and schedules periodic queue polling with the host window's Qt-backed `after()` helper.
+The mixin prevents duplicate active processing threads, blocks processing while
+event detection is active, disables controls before starting, and schedules
+periodic queue polling with the compatibility host's `after()` hook. These
+legacy-shaped host APIs are not the active MainWindow interface and are not
+permission to restore a Tkinter GUI.
 
 ## Processing Order
 
@@ -23,7 +27,10 @@ For each selected data file, the worker thread preserves this order:
 
 1. Load the EEG file through `Main_App.io.load_utils.load_eeg_file(self, file_path)`.
 2. Preprocess a raw copy with `Main_App.processing.preprocess.perform_preprocessing(...)`.
-3. Extract events from annotations for `.set` files or `mne.find_events(...)` for other files.
+3. Extract events with `mne.find_events(...)` and resolved acquisition-policy
+   arguments for supported recording inputs. The retained `.set` annotation
+   branch is compatibility code only: the public loader rejects `.set`, so it
+   does not establish supported EEGLAB loading.
 4. Compute FFT crop diagnostics with `compute_fft_crop_from_events(...)` and
    the shared `plan_condition_fft_spans(...)` planner.
 5. Build per-condition `mne.EpochsArray` objects only from valid marker-derived

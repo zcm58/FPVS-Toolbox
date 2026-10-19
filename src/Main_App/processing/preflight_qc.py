@@ -20,14 +20,16 @@ import mne
 import numpy as np
 
 from Main_App.io import load_utils
-from Main_App.io.eeg_geometry import (
-    BIOSEMI64_CHANNELS,
-    biosemi64_geometry_identity,
+from Main_App.io.acquisition_metadata import (
+    configured_channel_limit,
+    event_detection_kwargs,
+    resolve_recording_contract,
+    review_geometry_identity,
+    source_load_kwargs,
 )
-from Main_App.io.recorded_eeg_geometry import read_raw_eeg_geometry, validate_raw_recorded_geometry
-from Main_App.processing.acquisition_policy import brain_products_policy, is_brain_products
-from Main_App.io.load_utils import BDF_RECORDING_NOT_STARTED_REASON, BdfPreflightInfo
+from Main_App.io.load_utils import RECORDING_NOT_STARTED_REASON, RecordingPreflightInfo
 from Main_App.processing.processing_controller import RawFileInfo
+
 from Main_App.processing.preflight_qc_cache import (
     load_preflight_qc_cache,
     save_preflight_qc_cache,
@@ -87,7 +89,6 @@ from Main_App.projects.preprocessing_settings import (
 )
 from Main_App.processing.raw_channel_qc import (
     CONDITION_RAW_CHANNEL_QC_METHOD_VERSION,
-    SCALP_CHANNELS,
     ConditionRawChannelQCBlock,
     ConditionRawChannelQCCancelled,
     RawChannelQCConfig,
@@ -106,6 +107,8 @@ from Main_App.processing.raw_spectral_qc import (
 from Main_App.processing.spectral_eligibility import (
     SPECTRAL_ELIGIBILITY_METHOD_VERSION,
 )
+# Existing GUI consumers still import the historical public constant name.
+BDF_RECORDING_NOT_STARTED_REASON = RECORDING_NOT_STARTED_REASON
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())
 
@@ -117,11 +120,11 @@ DetailProgressCallback = Callable[[str], None]
 
 @dataclass(frozen=True)
 class HeaderOnlyPreflight:
-    """A BDF file that appears to contain only the BioSemi header."""
+    """A recording whose source header reports no acquired samples."""
 
     path: Path
     participant_id: str
-    info: BdfPreflightInfo
+    info: RecordingPreflightInfo
     group_id: str | None = None
     recording_id: str | None = None
     session_id: str | None = None
@@ -790,11 +793,11 @@ def _path_key(path: Path) -> str:
 def scan_recording_not_started_files(
     raw_file_infos: Sequence[RawFileInfo],
 ) -> tuple[HeaderOnlyPreflight, ...]:
-    """Return files whose BDF header says no recording data were written."""
+    """Return files whose source header says no recording data were written."""
 
     flagged: list[HeaderOnlyPreflight] = []
     for info in raw_file_infos:
-        preflight = load_utils.inspect_bdf_header(info.path)
+        preflight = load_utils.inspect_recording_header(info.path)
         if not preflight or not preflight.recording_not_started:
             continue
         flagged.append(
@@ -824,16 +827,11 @@ def _load_raw_for_preflight(
     file_path: Path,
     settings: Mapping[str, Any],
 ) -> Any:
-    ref_ch1, ref_ch2 = _configured_ref_pair(settings)
     return load_utils.load_eeg_file(
         _LogShim(),
         str(file_path),
-        ref_pair=(str(ref_ch1), str(ref_ch2)),
-        first_n_channels=_configured_biosemi64_channel_limit(settings),
-        stim_channel=_configured_stim_channel(settings),
-        electrode_mapping_profile=settings.get("electrode_mapping_profile"),
-        electrode_montage=settings.get("electrode_montage"),
-        **({"acquisition_settings": settings} if is_brain_products(settings) else {}),
+        **source_load_kwargs(settings),
+        acquisition_settings=dict(settings),
         **({"preload_in_memory": True} if settings.get("experimental_ram_preload") is True else {}),
     )
 
@@ -843,44 +841,29 @@ class _PreflightQcCancelled(RuntimeError):
 
 
 def _configured_ref_pair(settings: Mapping[str, Any]) -> tuple[str, str]:
-    if is_brain_products(settings):
-        return ("", "")
-    return (
-        str(
-            settings.get("ref_channel1")
-            or settings.get("ref_chan1")
-            or settings.get("ref_ch1")
-            or "EXG1"
-        ),
-        str(
-            settings.get("ref_channel2")
-            or settings.get("ref_chan2")
-            or settings.get("ref_ch2")
-            or "EXG2"
-        ),
-    )
+    return resolve_recording_contract(settings).review_reference_pair
 
 
 def _configured_stim_channel(settings: Mapping[str, Any]) -> str:
-    return str(settings.get("stim_channel") or settings.get("stim") or "Status")
+    return resolve_recording_contract(settings).stim_channel
 
 
 def _find_preflight_events(raw: Any, *, stim_channel: str) -> tuple[np.ndarray, str]:
-    from Main_App.io.bdf_preload import owned_bdf_lazy_read
-    brain_products = (read_raw_eeg_geometry(raw) or {}).get("hardware_platform") == "brain_products"
+    from Main_App.io.recording_access import owned_recording_lazy_read
+    event_kwargs = event_detection_kwargs(raw=raw)
 
     try:
-        with owned_bdf_lazy_read(raw, stim_channel=stim_channel, status_only=True):
+        with owned_recording_lazy_read(raw, stim_channel=stim_channel, status_only=True):
             events = mne.find_events(
                 raw,
                 stim_channel=stim_channel,
                 shortest_event=1,
                 verbose=False,
-                **({"initial_event": True, "consecutive": True} if brain_products else {}),
+                **event_kwargs,
             )
         source = "stim"
     except (RuntimeError, ValueError):
-        if brain_products:
+        if event_kwargs.get("initial_event"):
             raise
         events, _event_ids = mne.events_from_annotations(raw, verbose=False)
         source = "annotations"
@@ -892,29 +875,9 @@ def _find_preflight_events(raw: Any, *, stim_channel: str) -> tuple[np.ndarray, 
     return events_array, source
 
 
-def _configured_biosemi64_channel_limit(settings: Mapping[str, Any]) -> int | None:
-    """Resolve the project-owned canonical first-N scalp limit."""
-
-    if is_brain_products(settings):
-        return brain_products_policy(settings)["max_idx_keep"]
-    raw_limit = settings.get("max_idx_keep")
-    if raw_limit is None:
-        raw_limit = settings.get("max_chan_idx_keep")
-    if raw_limit is None:
-        return len(BIOSEMI64_CHANNELS)
-    if isinstance(raw_limit, bool):
-        raise ValueError("BioSemi64 channel limit must be an integer from 1 through 64.")
-    try:
-        channel_limit = int(raw_limit)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(
-            "BioSemi64 channel limit must be an integer from 1 through 64."
-        ) from exc
-    if isinstance(raw_limit, float) and not raw_limit.is_integer():
-        raise ValueError("BioSemi64 channel limit must be an integer from 1 through 64.")
-    if not 1 <= channel_limit <= len(BIOSEMI64_CHANNELS):
-        raise ValueError("BioSemi64 channel limit must be an integer from 1 through 64.")
-    return channel_limit
+def _configured_channel_limit(settings: Mapping[str, Any]) -> int | None:
+    """Compatibility entry point for the upstream-resolved scalp limit."""
+    return configured_channel_limit(settings)
 
 
 def _preflight_scalp_picks(
@@ -922,24 +885,18 @@ def _preflight_scalp_picks(
     *,
     settings: Mapping[str, Any],
 ) -> tuple[tuple[int, ...], tuple[str, ...]]:
-    stim_channel = _configured_stim_channel(settings)
-    if is_brain_products(settings):
-        geometry = validate_raw_recorded_geometry(raw)
-        retained = geometry["retained_scalp_channels"]
-        limit = _configured_biosemi64_channel_limit(settings)
-        retained = retained[:limit] if limit is not None else retained
-        picks = tuple(raw.ch_names.index(name) for name in retained)
-        return picks, tuple(retained)
-    ref_channels = set(_configured_ref_pair(settings))
-    retained_scalp = set(
-        BIOSEMI64_CHANNELS[:_configured_biosemi64_channel_limit(settings)]
-    )
+    contract = resolve_recording_contract(settings, raw=raw)
+    retained = review_geometry_identity(settings, raw=raw)["retained_scalp_channels"]
+    if contract.canonical_scalp_order is None:
+        retained = retained[:contract.channel_limit]
+        return tuple(raw.ch_names.index(name) for name in retained), tuple(retained)
+    retained_scalp = set(retained[:contract.channel_limit])
+    ref_channels = set(contract.review_reference_pair)
     picks = tuple(
         index
         for index, channel in enumerate(getattr(raw, "ch_names", ()))
-        if str(channel) in SCALP_CHANNELS
-        and str(channel) in retained_scalp
-        and str(channel) != stim_channel
+        if str(channel) in retained_scalp
+        and str(channel) != contract.stim_channel
         and str(channel) not in ref_channels
     )
     names = tuple(str(raw.ch_names[index]) for index in picks)
@@ -956,10 +913,10 @@ def _read_condition_data(
     stop: int,
     io_semaphore: threading.BoundedSemaphore,
 ) -> np.ndarray:
-    from Main_App.io.bdf_preload import owned_bdf_lazy_read
+    from Main_App.io.recording_access import owned_recording_lazy_read
 
     with io_semaphore:
-        with owned_bdf_lazy_read(raw):
+        with owned_recording_lazy_read(raw):
             try:
                 data = raw.get_data(
                     picks=list(picks),
@@ -977,7 +934,7 @@ def _read_condition_data(
     expected_samples = int(stop) - int(start)
     if result.ndim != 2 or result.shape != (len(picks), expected_samples):
         raise RuntimeError(
-            "Lazy BDF condition read returned an unexpected shape: "
+            "Lazy EEG condition read returned an unexpected shape: "
             f"expected={(len(picks), expected_samples)}, actual={result.shape}."
         )
     return result
@@ -1268,9 +1225,10 @@ def _preflight_cache_settings(
             raw_protocol
         ).to_manifest()
     payload["analysis"] = analysis_payload
-    if is_brain_products(settings):
-        payload["acquisition_policy"] = brain_products_policy(settings)
-    payload["channel_subset_first_n"] = _configured_biosemi64_channel_limit(
+    contract = resolve_recording_contract(settings)
+    if contract.provenance:
+        payload["acquisition_policy"] = contract.provenance
+    payload["channel_subset_first_n"] = _configured_channel_limit(
         settings
     )
     payload["reference_pair"] = list(_configured_ref_pair(settings))
@@ -1356,7 +1314,6 @@ def _preflight_cache_method(
     settings: Mapping[str, Any] | None = None,
 ) -> dict[str, object]:
     settings = settings or {}
-    channel_limit = _configured_biosemi64_channel_limit(settings)
     return {
         "name": PREFLIGHT_QC_METHOD_NAME,
         "version": PREFLIGHT_QC_METHOD_VERSION,
@@ -1372,10 +1329,7 @@ def _preflight_cache_method(
         "transient_tail_policy": PREFLIGHT_QC_TRANSIENT_TAIL_POLICY,
         "transient_overlap_counting": "union_coverage_not_independent_events",
         "condition_completion_policy": "locked_fft_span_v1",
-        "geometry": brain_products_policy(settings) if is_brain_products(settings) else biosemi64_geometry_identity(
-            electrode_mapping_profile=settings.get("electrode_mapping_profile"),
-            retained_channels=BIOSEMI64_CHANNELS[:channel_limit],
-        ),
+        "geometry": review_geometry_identity(settings),
         "numpy_version": str(np.__version__),
         "mne_version": str(mne.__version__),
     }
@@ -1729,10 +1683,10 @@ def _scan_one_preflight_file_v2(
     visit_index = info.visit_index
     timings_ms: dict[str, float] = {}
     file_qc_settings = dict(qc_settings)
-    if is_brain_products(qc_settings):
+    if not resolve_recording_contract(qc_settings).spatial_qc_supported:
         raw_config = _raw_channel_config_from_settings(qc_settings)
         if raw_config.raw_signal_screening_enabled or raw_config.auto_detect_removed_electrodes:
-            raise ValueError("BioSemi raw-signal/removed-electrode screening is not qualified for Brain Products montages.")
+            raise ValueError("Raw-signal/removed-electrode screening is not qualified for this recording's spatial profile.")
     raw_spectral_screening = normalize_raw_spectral_screening_settings(
         qc_settings.get("raw_spectral_screening")
     )
@@ -1766,7 +1720,7 @@ def _scan_one_preflight_file_v2(
 
     header_started = time.perf_counter()
     with io_semaphore:
-        preflight = load_utils.inspect_bdf_header(file_path)
+        preflight = load_utils.inspect_recording_header(file_path)
     _record_timing("header", header_started)
     if preflight and preflight.recording_not_started:
         return None
@@ -1788,12 +1742,8 @@ def _scan_one_preflight_file_v2(
     raw_context = load_utils.open_preflight_eeg_file(
         _LogShim(),
         str(file_path),
-        ref_pair=_configured_ref_pair(qc_settings),
-        first_n_channels=_configured_biosemi64_channel_limit(qc_settings),
-        stim_channel=_configured_stim_channel(qc_settings),
-        electrode_mapping_profile=qc_settings.get("electrode_mapping_profile"),
-        electrode_montage=qc_settings.get("electrode_montage"),
-        **({"acquisition_settings": qc_settings} if is_brain_products(qc_settings) else {}),
+        **source_load_kwargs(qc_settings),
+        acquisition_settings={**qc_settings, "project_root": str(project_root), "event_id_map": event_map},
     )
     raw = None
     context_entered = False
@@ -1804,7 +1754,7 @@ def _scan_one_preflight_file_v2(
             context_entered = True
         _record_timing("lazy_open", open_started)
         if raw is None:
-            raise RuntimeError("BDF lazy loader returned no raw data.")
+            raise RuntimeError("EEG lazy loader returned no raw data.")
         if _cancelled():
             raise _PreflightQcCancelled()
 
@@ -2274,12 +2224,7 @@ def _scan_one_preflight_file_v2(
             "spectral_lower_frequency_hz": lower_hz,
             "spectral_upper_frequency_hz": upper_hz,
             "timings_ms": dict(timings_ms),
-            "geometry": validate_raw_recorded_geometry(raw) if is_brain_products(qc_settings) else biosemi64_geometry_identity(
-                electrode_mapping_profile=qc_settings.get(
-                    "electrode_mapping_profile"
-                ),
-                retained_channels=channel_names,
-            ),
+            "geometry": review_geometry_identity(qc_settings, raw=raw, retained_channels=channel_names),
             "hard_exclusion_policy": (
                 "signal_amplitude_and_candidate_burden_are_review_only; "
                 "technical_integrity_failures_remain_blocking"

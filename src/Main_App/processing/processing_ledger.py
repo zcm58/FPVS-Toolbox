@@ -13,9 +13,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Iterable, Mapping, Sequence
 
-from Main_App.io.eeg_geometry import (
-    BIOSEMI64_CHANNELS,
-    biosemi64_geometry_identity,
+from Main_App.io.geometry_metadata import (
+    configured_geometry_identity,
+    validate_source_geometry_identity,
 )
 from Main_App.io.atomic_write import atomic_write
 from Main_App.io.safe_file import open_regular_file
@@ -725,35 +725,7 @@ def _recording_identity_payload(info: RawFileInfo) -> dict[str, Any]:
 
 def _configured_geometry_identity(settings: Mapping[str, Any]) -> dict[str, object]:
     """Return the geometry expected from the current project processing inputs."""
-
-    if settings.get("hardware_platform") == "brain_products":
-        from Main_App.io.hardware_identity import brain_products_settings_identity
-        return brain_products_settings_identity(settings)
-    raw_limit = settings.get("max_idx_keep")
-    if raw_limit is None:
-        raw_limit = settings.get("max_chan_idx_keep")
-    if raw_limit is None:
-        channel_limit = len(BIOSEMI64_CHANNELS)
-    elif isinstance(raw_limit, bool):
-        raise ValueError("BioSemi64 channel limit must be an integer from 1 through 64.")
-    else:
-        try:
-            channel_limit = int(raw_limit)
-        except (TypeError, ValueError) as exc:
-            raise ValueError(
-                "BioSemi64 channel limit must be an integer from 1 through 64."
-            ) from exc
-        if isinstance(raw_limit, float) and not raw_limit.is_integer():
-            raise ValueError(
-                "BioSemi64 channel limit must be an integer from 1 through 64."
-            )
-    if not 1 <= channel_limit <= len(BIOSEMI64_CHANNELS):
-        raise ValueError("BioSemi64 channel limit must be an integer from 1 through 64.")
-    retained_channels = BIOSEMI64_CHANNELS[:channel_limit]
-    return biosemi64_geometry_identity(
-        electrode_mapping_profile=settings.get("electrode_mapping_profile"),
-        retained_channels=retained_channels,
-    )
+    return configured_geometry_identity(settings)
 
 
 def _result_geometry_identity(
@@ -772,34 +744,14 @@ def _result_geometry_identity(
     if not isinstance(candidate, Mapping):
         if require_observed:
             raise ValueError(
-                "Successful processing result has no worker-observed BioSemi64 "
+                "Successful processing result has no worker-observed EEG "
                 "geometry identity."
             )
         return dict(fallback)
-    if candidate.get("hardware_platform") == "brain_products":
-        from Main_App.io.recorded_eeg_geometry import validate_recorded_geometry_identity
-        normalized = validate_recorded_geometry_identity(candidate)
-        if isinstance(audit_candidate, Mapping) and dict(audit_candidate) != normalized:
-            raise ValueError("Processing result and audit disagree about recorded geometry.")
-        return normalized
-    retained = candidate.get("retained_scalp_channels")
-    retained_channels = (
-        [str(value) for value in retained]
-        if isinstance(retained, Sequence) and not isinstance(retained, (str, bytes))
-        else None
-    )
-    normalized = biosemi64_geometry_identity(
-        electrode_mapping_profile=candidate.get("electrode_mapping_profile"),
-        retained_channels=retained_channels,
-    )
-    if dict(candidate) != normalized:
-        raise ValueError(
-            "Processing worker returned a geometry identity that does not match "
-            "the canonical BioSemi64 definition."
-        )
+    normalized = validate_source_geometry_identity(candidate)
     if isinstance(audit_candidate, Mapping) and dict(audit_candidate) != normalized:
         raise ValueError(
-            "Processing worker result and audit disagree about the BioSemi64 "
+            "Processing worker result and audit disagree about the EEG "
             "geometry identity."
         )
     return normalized

@@ -73,6 +73,7 @@ def _recording(tmp_path: Path, extension: str, channels: list[str] | None = None
 
 def _settings(path: Path, *, preload_in_memory: bool) -> dict:
     return {
+        "project_root": str(path.parent),
         "hardware_platform": "brain_products", "hardware_confirmed": True,
         "electrode_montage": "recorded", "initial_reference": "recorded",
         "initial_reference_channels": [], "drop_reference_channels": False,

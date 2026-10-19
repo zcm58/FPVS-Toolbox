@@ -50,7 +50,7 @@ def test_scan_recording_not_started_files_uses_bdf_header(monkeypatch, tmp_path:
     raw_path.write_bytes(b"header")
 
     monkeypatch.setattr(
-        "Main_App.processing.preflight_qc.load_utils.inspect_bdf_header",
+        "Main_App.processing.preflight_qc.load_utils.inspect_recording_header",
         lambda _path: BdfPreflightInfo(
             file_size=19_000,
             header_bytes=19_000,
@@ -92,7 +92,7 @@ def test_unscoped_preflight_reports_not_evaluated_without_loading_signal(
     raw_path.write_bytes(b"not a real bdf for this unit test")
 
     monkeypatch.setattr(
-        "Main_App.processing.preflight_qc.load_utils.inspect_bdf_header",
+        "Main_App.processing.preflight_qc.load_utils.inspect_recording_header",
         lambda _path: None,
     )
     monkeypatch.setattr(
@@ -130,7 +130,7 @@ def test_unscoped_preflight_preserves_group_id_without_reporting_load_error(
 ) -> None:
     raw_path = tmp_path / "P04.bdf"
     raw_path.write_bytes(b"not a real bdf for this unit test")
-    monkeypatch.setattr(preflight_qc.load_utils, "inspect_bdf_header", lambda _path: None)
+    monkeypatch.setattr(preflight_qc.load_utils, "inspect_recording_header", lambda _path: None)
 
     monkeypatch.setattr(
         preflight_qc.load_utils,
@@ -177,6 +177,11 @@ def test_legacy_preflight_loader_forwards_project_geometry_and_stim(
     )
 
     assert loaded is not None
+    assert observed.pop("acquisition_settings") == {
+        "ref_channel1": "EXG3", "ref_channel2": "EXG4", "stim_channel": "Trigger",
+        "electrode_montage": "biosemi64", "electrode_mapping_profile": "biosemi64_1020_ab_v1",
+        "experimental_ram_preload": ram_preload,
+    }
     assert observed == {
         "path": str(raw_path),
         "ref_pair": ("EXG3", "EXG4"),

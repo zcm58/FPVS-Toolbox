@@ -27,8 +27,22 @@ complete Studio interoperability.
   `processing_ledger.py` also records source-derivative readiness and confines
   incremental cleanup to ledger-recorded files under the versioned derivative
   root.
+  Numerical stages consume generic recording metadata and project settings;
+  calibrated QC consumes an explicit qualified spatial profile.
+  `acquisition_policy.py` contains compatibility imports only.
 - `src/Main_App/io/`: canonical import surface for shared I/O. It owns the
-  exact-column/header XLSX reader, BDF loader, EEG geometry and file filters.
+  exact-column/header XLSX reader, project-aware EEG loader, EEG geometry and
+  file filters. `bids_import.py` prepares/verifies project-local recording
+  imports and `bids_loader.py` supplies project context for MNE loading.
+  `recording_contract.py` owns the immutable generic `RecordingContract`;
+  `acquisition_metadata.py` resolves hardware defaults, channel/reference/event
+  semantics, capabilities, calibrated profiles, and opaque legacy provenance
+  upstream of processing. `geometry_metadata.py` validates source identities
+  and resolves geometry expectations for generic ledger/cohort consumers.
+  `hardware_loader.py`, `brain_products.py`, and `brain_products_bvrf.py` own
+  Brain Products admission and format adaptation. BVRF's lossless FIF64
+  derivative is an explicit exception to standard raw EEG-BIDS; see the
+  [loading contract](eeg-loading-contract.md).
   `spectral_workbook.py` owns reusable archive sessions and FullSNR window reads;
   `xlsx_xml.py` owns common XML decoding without merging reader selection policy.
   `acquisition_profiles.py` owns explicit format/device/montage/event definitions;
@@ -52,9 +66,8 @@ complete Studio interoperability.
 - `src/Main_App/Legacy_App/`: retired historical package. Do not recreate it.
 - `src/Main_App/PySide6_App/`: retired historical package designation. Do not recreate it.
 
-Current `Legacy_App` runtime couplings:
-
-- No active runtime imports should point at `Main_App.Legacy_App`; no tracked files should remain under `src/Main_App/Legacy_App/`.
+Current retirement and compatibility rules live in
+[Legacy boundaries](legacy-boundaries.md); retired packages are not import owners.
 
 ## Tools
 

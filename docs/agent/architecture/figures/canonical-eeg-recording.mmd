@@ -1,0 +1,13 @@
+flowchart TD
+    A[Native EEG files] --> B[Project-local import and validation]
+    P[Confirmed hardware and montage settings] --> B
+    S[Verified Studio acquisition handoff - future] -.-> B
+    B --> C[BIDS recordings or lossless BVRF derivative]
+    C --> D[Upstream acquisition and geometry resolution]
+    P --> D
+    D --> E
+    E[MNE Raw and immutable generic RecordingContract]
+    E --> F[Shared MNE processing pipeline]
+    U[Project processing settings] --> F
+    Q[Upstream qualified spatial profiles] --> F
+    F --> G[FPVS results and exports]

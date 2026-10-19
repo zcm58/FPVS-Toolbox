@@ -17,10 +17,10 @@ import math
 from pathlib import Path
 import re
 
-from Main_App.io.eeg_geometry import (
-    BIOSEMI64_CHANNELS,
-    BIOSEMI64_MONTAGE_ID,
-    biosemi64_geometry_identity,
+from Main_App.io.geometry_metadata import (
+    is_recorded_source_geometry,
+    project_spectral_geometry,
+    validate_source_geometry_identity,
 )
 
 from Main_App.processing.frequency_domain_qc import (
@@ -43,6 +43,8 @@ from Main_App.projects import (
 
 
 FULL_FFT_PROVENANCE_SCHEMA_VERSION = 3
+# Persisted method identifiers retain their historical spelling so this
+# boundary refactor does not invalidate scientific outputs or fingerprints.
 FULL_FFT_PROVENANCE_METHOD_VERSION = (
     "project_full_fft_provenance_v3_biosemi64_frequency_protocol"
 )
@@ -371,33 +373,19 @@ def _validated_geometry_identity(value: object) -> dict[str, object]:
             "Active processed workbooks have no EEG geometry identity. "
             "Reprocess the EEG before post-processing or analysis."
         )
-    if value.get("hardware_platform") == "brain_products":
+    from Main_App.processing.recorded_cohort_geometry import RECORDED_COHORT_GEOMETRY_VERSION
+    if value.get("geometry_version") == RECORDED_COHORT_GEOMETRY_VERSION:
         from Main_App.processing.recorded_cohort_geometry import validate_recorded_spectral_geometry_identity
         try:
             return validate_recorded_spectral_geometry_identity(value)
         except (TypeError, ValueError) as exc:
             raise FullFftProvenanceError(f"Invalid recorded EEG geometry: {exc}") from exc
-    retained = value.get("retained_scalp_channels")
-    if not isinstance(retained, Sequence) or isinstance(retained, (str, bytes)):
-        raise FullFftProvenanceError(
-            "Active processed workbooks have incomplete BioSemi64 geometry "
-            "provenance. Reprocess the EEG before analysis."
-        )
     try:
-        expected = biosemi64_geometry_identity(
-            electrode_mapping_profile=value.get("electrode_mapping_profile"),
-            retained_channels=[str(channel) for channel in retained],
-        )
+        return validate_source_geometry_identity(value)
     except (TypeError, ValueError) as exc:
         raise FullFftProvenanceError(
-            f"Active processed workbooks have invalid BioSemi64 geometry: {exc}"
+            f"Active processed workbooks have invalid EEG geometry: {exc}"
         ) from exc
-    if dict(value) != expected:
-        raise FullFftProvenanceError(
-            "Active processed workbooks use an unknown or legacy electrode "
-            "geometry. Reprocess the EEG before analysis."
-        )
-    return expected
 
 
 def _active_geometry_identity(
@@ -421,25 +409,11 @@ def _active_geometry_identity(
         preprocessing = normalize_preprocessing_settings(
             raw_preprocessing if isinstance(raw_preprocessing, Mapping) else {}
         )
-        montage_id = str(preprocessing.get("electrode_montage") or "")
-        brain_products = preprocessing.get("hardware_platform") == "brain_products"
-        if not brain_products:
-            mapping_profile = preprocessing.get("electrode_mapping_profile")
-            expected_limit = int(preprocessing.get("max_chan_idx_keep") or 64)
-            expected_count = expected_limit if 0 < expected_limit < 64 else 64
-            project_geometry = biosemi64_geometry_identity(
-                electrode_mapping_profile=mapping_profile,
-                retained_channels=BIOSEMI64_CHANNELS[:expected_count],
-            )
+        geometry_metadata = project_spectral_geometry(preprocessing)
     except (TypeError, ValueError) as exc:
         raise FullFftProvenanceError(
             f"Project electrode geometry settings are invalid: {exc}"
         ) from exc
-    if not brain_products and montage_id != BIOSEMI64_MONTAGE_ID:
-        raise FullFftProvenanceError(
-            f"Unsupported project electrode montage {montage_id!r}; only "
-            f"{BIOSEMI64_MONTAGE_ID!r} is valid for current processing."
-        )
 
     identity_key = "recording_id" if index.is_repeated_session else "participant_id"
     active_ids = {
@@ -470,10 +444,10 @@ def _active_geometry_identity(
         raise FullFftProvenanceError(
             "No active processing geometry could be matched to FullFFT workbooks."
         )
-    if brain_products:
+    if geometry_metadata.per_recording:
         from Main_App.processing.recorded_cohort_geometry import recorded_cohort_geometry_identity
 
-        if any(geometry.get("hardware_platform") != "brain_products" or geometry["montage_id"] != montage_id
+        if any(not geometry_metadata.matches_source(geometry)
                for _processing_id, geometry in validated):
             raise FullFftProvenanceError("Processed geometry differs from the project's hardware or montage. Reprocess the EEG.")
         policies = {
@@ -498,6 +472,7 @@ def _active_geometry_identity(
         except (TypeError, ValueError) as exc:
             raise FullFftProvenanceError(f"Incompatible recorded EEG cohort: {exc}") from exc
 
+    project_geometry = geometry_metadata.fixed_geometry
     geometry_fingerprints = {
         str(value["geometry_identity_fingerprint"])
         for _processing_id, value in validated
@@ -1084,7 +1059,7 @@ def _record_from_metadata(
     if schema_version != FULL_FFT_PROVENANCE_SCHEMA_VERSION:
         raise FullFftProvenanceStaleError(
             "The saved neutral FullFFT provenance predates the current "
-            "BioSemi64 and project-frequency-protocol contract. Reprocess the "
+            "EEG geometry and project-frequency-protocol contract. Reprocess the "
             "EEG before analysis."
         )
     if method_version not in {
@@ -1123,7 +1098,7 @@ def _record_from_metadata(
         from Main_App.processing.recorded_cohort_geometry import RECORDED_COHORT_GEOMETRY_VERSION
         if recorded_method != (geometry.get("geometry_version") == RECORDED_COHORT_GEOMETRY_VERSION):
             raise ValueError("FullFFT method and geometry schema disagree")
-        if geometry.get("hardware_platform") == "brain_products" and not recorded_method:
+        if is_recorded_source_geometry(geometry) and not recorded_method:
             raise ValueError("Recorded EEG FullFFT requires per-source cohort geometry")
         if recorded_method and (
             (method_version == REPEATED_RECORDED_FULL_FFT_PROVENANCE_METHOD_VERSION)
@@ -1258,7 +1233,8 @@ def write_project_full_fft_provenance(
             "A FullFFT workbook changed while provenance was being built. "
             "Rerun post-processing after workbook writes have finished."
         )
-    if snapshot.geometry_identity.get("hardware_platform") == "brain_products":
+    from Main_App.processing.recorded_cohort_geometry import RECORDED_COHORT_GEOMETRY_VERSION
+    if snapshot.geometry_identity.get("geometry_version") == RECORDED_COHORT_GEOMETRY_VERSION:
         method_version = (
             REPEATED_RECORDED_FULL_FFT_PROVENANCE_METHOD_VERSION if index.is_repeated_session
             else RECORDED_FULL_FFT_PROVENANCE_METHOD_VERSION

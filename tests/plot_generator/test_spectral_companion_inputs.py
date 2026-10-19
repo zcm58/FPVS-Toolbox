@@ -222,7 +222,7 @@ def test_snapshot_rejects_companion_corruption_after_last_sheet_read(
 def test_native_result_snapshot_reads_captured_sheets_without_excel_archive(
     tmp_path, monkeypatch,
 ):
-    from Main_App.Shared.post_process_excel import write_results_workbook
+    from Main_App.exports.post_process_excel import write_results_workbook
 
     _descriptor, frames = _spectral_workbook(tmp_path / "legacy.xlsx")
     native = tmp_path / "P01.fpvs"

@@ -4,6 +4,31 @@ This page records the active preprocessing owner and the behavior that must stay
 stable during Main App refactors. Treat it as the regression lock for the EEG
 preprocessing path.
 
+## Shared MNE input and generic recording contract
+
+Supported native recordings now enter through the project-local BIDS import
+boundary described in the [loading contract](eeg-loading-contract.md). The
+numerical pipeline receives MNE Raw and the immutable
+`io.recording_contract.RecordingContract`. `io.acquisition_metadata` resolves
+reference methods, channel ordering/limits, geometry, event interpretation,
+historical provenance, and QC qualification upstream. `io.geometry_metadata`
+owns acquisition-specific geometry interpretation for ledgers, cohort identity,
+and repair eligibility. Shared processing uses these generic facts and project
+settings, without native-format readers, manufacturer dispatch, or manufacturer
+defaults. `processing.acquisition_policy` is a compatibility import shim only;
+do not add implementations or new production imports there.
+
+The existing numerical algorithms remain in `processing`; `reference.py` owns
+the generic recorded/selected-channel reference operation. Calibrated spatial
+QC consumes an explicit upstream `CALIBRATED_SPATIAL_PROFILE`, including its
+ordered channel domain, coordinate identity, and geometry validator. Generic
+metadata does not qualify that method for an arbitrary montage. Current
+BioSemi and Brain Products methods, fingerprint bytes, processing order, and
+reference behavior remain locked. Historical brand names in serialized method
+identifiers are opaque compatibility data, never runtime dispatch authority.
+Policy selection must never be inferred from a converted filename. Imported
+recordings do not acquire new scientific capabilities from BIDS conventions.
+
 The [hardware, pipeline, and Studio roadmap](hardware-pipeline-studio-roadmap.md)
 sets the future direction: a shared pipeline whose steps are resolved from
 explicit acquisition/montage capabilities and versioned scientific policies.
@@ -29,9 +54,11 @@ lowest-risk maintenance path is:
 
 ## Brain Products acquisition policy
 
-`processing/acquisition_policy.py` owns `brain_products_recorded_eeg_v1`.
-It uses the shared filter, optional FFT multi-notch, downsampling and final
-average-reference stages, with these explicit acquisition-specific boundaries:
+`io/acquisition_metadata.py` resolves the historical
+`brain_products_recorded_eeg_v1` policy into the generic recording contract.
+The numerical engine uses shared reference, filter, optional FFT multi-notch,
+downsampling and final average-reference stages. The upstream adapter preserves
+these acquisition-specific boundaries:
 
 - Project hardware must be confirmed as `brain_products`. The initial reference
   defaults to the reference already represented in the recording. An explicitly
@@ -63,8 +90,9 @@ average-reference stages, with these explicit acquisition-specific boundaries:
   saved provenance. It has no aggregate electrode coordinates and cannot supply
   a spatial montage. FullFFT uses explicit recorded-cohort method versions while
   preserving the existing BioSemi method versions and exact geometry checks.
-- `processing/hardware_capabilities.py` keeps fixed BioSemi spatial tools gated
-  at launch and at their public project-input boundaries. This covers Scalp
+- `processing/hardware_capabilities.py` consumes the upstream contract's
+  qualification flags to keep fixed BioSemi spatial tools gated at launch and
+  at their public project-input boundaries. This covers Scalp
   Maps, LORETA and Free Harmonic Clustering even when recorded channel labels
   happen to match BioSemi64. Automatic source phases skip without producing a
   fresh artifact; compatible spectral and statistical table exports continue.

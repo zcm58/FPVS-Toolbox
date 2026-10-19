@@ -10,8 +10,10 @@ comparisons were stopped at the user's direction and are not active blockers.
 
 This compact ledger retains the release evidence and remaining acceptance
 paths. It does not instruct agents to rebuild or republish the immutable v3.0.0
-artifact. Current development uses `main` and task branches from `main`;
-`codex/v3-release` and the former feature branches are historical names.
+artifact. `codex/v3-release` and the former feature branches are historical
+names. Inspect the current checkout and the selected release/feature base before
+work; later `v3.0.1` and BIDS feature development is not part of this release
+receipt.
 
 ## Publication — 2026-10-15
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from fractions import Fraction
 from io import BytesIO
+from pathlib import Path
 from types import SimpleNamespace
 
 import mne
@@ -11,6 +12,7 @@ import pytest
 
 import Main_App.Shared.load_utils as shared_load_utils
 import Main_App.io.load_utils as load_utils
+from Main_App.io import bids_loader
 import Main_App.io.recording_inspection as recording_inspection
 import Main_App.io.unicorn_raw as unicorn_raw
 import Main_App.io.unicorn_units as unicorn_units
@@ -51,9 +53,10 @@ def _raw(channel_names=None):
     return raw
 
 
-def _app(logs: list[str]):
+def _app(logs: list[str], project_root):
     return SimpleNamespace(
         currentProject=SimpleNamespace(
+            project_root=project_root,
             preprocessing={
                 "ref_chan1": "EXG1",
                 "ref_chan2": "EXG2",
@@ -65,8 +68,35 @@ def _app(logs: list[str]):
     )
 
 
+def _mock_recording_reads(monkeypatch, reader):
+    """Separate native header inspection from the production BIDS boundary.
+
+    The supplied reader records both calls so geometry, subset, and lifecycle
+    assertions remain local. Import bytes and exclusive preload ownership are
+    covered by the real-reader BIDS tests.
+    """
+    stages = []
+
+    def read_header(filepath, **kwargs):
+        assert not stages or stages[-1] == "bids_admission"
+        assert kwargs["preload"] is False
+        assert "include" not in kwargs
+        stages.append("native_header")
+        return reader(filepath, **kwargs)
+
+    def read_imported(app, filepath, *, settings, **kwargs):
+        assert stages and stages[-1] == "native_header"
+        bids_loader.project_import_root(app, settings)
+        stages.append("bids_admission")
+        return reader(filepath, **kwargs)
+
+    monkeypatch.setattr(load_utils.mne.io, "read_raw_bdf", read_header)
+    monkeypatch.setattr(bids_loader, "read_project_bids_raw", read_imported)
+    return stages
+
+
 @pytest.fixture(params=("legacy_default", "explicit_biosemi"))
-def biosemi_without_unicorn_units(monkeypatch, request):
+def biosemi_without_unicorn_units(monkeypatch, request, tmp_path):
     def _unexpected_unicorn_units(*_args, **_kwargs):
         pytest.fail("BioSemi production loading must never invoke Unicorn unit correction")
 
@@ -74,7 +104,7 @@ def biosemi_without_unicorn_units(monkeypatch, request):
         for name in ("resolve_unicorn_unit_policy", "unicorn_eeg_samples_in_volts", "open_unicorn_recording_raw"):
             if hasattr(owner, name):
                 monkeypatch.setattr(owner, name, _unexpected_unicorn_units)
-    app = _app([])
+    app = _app([], tmp_path)
     if request.param == "explicit_biosemi":
         app.currentProject.preprocessing.update({
             "electrode_montage": "biosemi64",
@@ -113,6 +143,8 @@ def _write_sampling_bdf(
     channels = len(labels)
     fixed = bytearray(b" " * 256)
     fixed[:8] = b"\xffBIOSEMI"
+    fixed[168:176] = b"01.01.24"
+    fixed[176:184] = b"00.00.00"
     fixed[184:192] = _field((channels + 1) * 256, 8)
     fixed[192:236] = _field("24BIT", 44)
     fixed[236:244] = _field(1, 8)
@@ -263,7 +295,7 @@ def test_shared_load_eeg_file_excludes_header_only_bdf_without_mne(monkeypatch, 
     monkeypatch.setattr(shared_load_utils.mne.io, "read_raw_bdf", _unexpected_read_raw_bdf)
 
     logs: list[str] = []
-    raw = load_utils.load_eeg_file(_app(logs), str(path))
+    raw = load_utils.load_eeg_file(_app(logs, tmp_path), str(path))
 
     assert raw is None
     assert any("did not click Record in BioSemi" in message for message in logs)
@@ -280,17 +312,18 @@ def test_shared_load_eeg_file_preserves_bdf_channel_and_montage_contract(monkeyp
         return header_raw if len(calls) == 1 else loaded_raw
 
     monkeypatch.setattr(shared_load_utils, "_memmap_dir_for_pid", lambda: tmp_path)
-    monkeypatch.setattr(shared_load_utils.mne.io, "read_raw_bdf", _fake_read_raw_bdf)
+    _mock_recording_reads(monkeypatch, _fake_read_raw_bdf)
 
     logs: list[str] = []
     path = tmp_path / "sample.bdf"
 
-    raw = load_utils.load_eeg_file(_app(logs), str(path))
+    raw = load_utils.load_eeg_file(_app(logs, tmp_path), str(path))
 
     assert raw is loaded_raw
     assert calls[0][0] == str(path)
     assert calls[0][1]["preload"] is False
-    assert calls[1][1]["preload"] == str(tmp_path / "sample_raw.dat")
+    assert Path(calls[1][1]["preload"]).parent == tmp_path
+    assert Path(calls[1][1]["preload"]).name.endswith("_raw.dat")
     assert calls[1][1]["stim_channel"] == "Status"
     assert loaded_raw.load_data_calls == 1
     types = dict(zip(loaded_raw.ch_names, loaded_raw.get_channel_types()))
@@ -316,7 +349,7 @@ def test_public_full_biosemi_loader_preserves_nonzero_volts_without_unicorn_corr
         calls.append(dict(kwargs))
         return header_raw if len(calls) == 1 else loaded_raw
 
-    monkeypatch.setattr(shared_load_utils.mne.io, "read_raw_bdf", _read)
+    stages = _mock_recording_reads(monkeypatch, _read)
     monkeypatch.setattr(shared_load_utils, "_memmap_dir_for_pid", lambda: tmp_path)
 
     raw = load_utils.load_eeg_file(biosemi_without_unicorn_units, str(tmp_path / "biosemi.bdf"))
@@ -324,8 +357,10 @@ def test_public_full_biosemi_loader_preserves_nonzero_volts_without_unicorn_corr
     assert raw is loaded_raw
     np.testing.assert_array_equal(raw.get_data(), expected)
     assert len(calls) == 2
+    assert stages == ["native_header", "bids_admission"]
     assert calls[0]["preload"] is False
-    assert calls[1]["preload"] == str(tmp_path / "biosemi_raw.dat")
+    assert Path(calls[1]["preload"]).parent == tmp_path
+    assert Path(calls[1]["preload"]).name.endswith("_raw.dat")
     assert all("units" not in call for call in calls)
     assert loaded_raw.load_data_calls == 1
     assert load_utils.load_eeg_file is shared_load_utils.load_eeg_file
@@ -343,7 +378,7 @@ def test_public_lazy_biosemi_loader_preserves_nonzero_volts_without_unicorn_corr
         calls.append(dict(kwargs))
         return header_raw if len(calls) == 1 else lazy_raw
 
-    monkeypatch.setattr(shared_load_utils.mne.io, "read_raw_bdf", _read)
+    stages = _mock_recording_reads(monkeypatch, _read)
     monkeypatch.setattr(shared_load_utils, "_memmap_dir_for_pid", lambda: pytest.fail("Lazy load created a memmap"))
 
     with load_utils.open_preflight_eeg_file(
@@ -355,6 +390,7 @@ def test_public_lazy_biosemi_loader_preserves_nonzero_volts_without_unicorn_corr
         assert lazy_raw.close_calls == 0
 
     assert len(calls) == 2
+    assert stages == ["native_header", "bids_admission"]
     assert all(call["preload"] is False and "units" not in call for call in calls)
     assert header_raw.close_calls == lazy_raw.close_calls == 1
     assert load_utils.open_preflight_eeg_file is shared_load_utils.open_preflight_eeg_file
@@ -368,7 +404,7 @@ def test_shared_load_eeg_file_ram_preload_uses_no_disk_map(monkeypatch, tmp_path
         calls.append(kwargs)
         return header_raw if len(calls) == 1 else loaded_raw
 
-    monkeypatch.setattr(shared_load_utils.mne.io, "read_raw_bdf", reader)
+    _mock_recording_reads(monkeypatch, reader)
     monkeypatch.setattr(
         shared_load_utils,
         "_memmap_dir_for_pid",
@@ -376,7 +412,7 @@ def test_shared_load_eeg_file_ram_preload_uses_no_disk_map(monkeypatch, tmp_path
     )
 
     raw = load_utils.load_eeg_file(
-        _app([]), str(tmp_path / "sample.bdf"), preload_in_memory=True
+        _app([], tmp_path), str(tmp_path / "sample.bdf"), preload_in_memory=True
     )
 
     assert raw is loaded_raw
@@ -390,7 +426,7 @@ def test_shared_load_eeg_file_ram_preload_uses_no_disk_map(monkeypatch, tmp_path
 def test_ram_preload_rejects_run_owned_disk_path(tmp_path):
     with pytest.raises(ValueError, match="cannot use a disk preload path"):
         load_utils.load_eeg_file(
-            _app([]),
+            _app([], tmp_path),
             str(tmp_path / "sample.bdf"),
             preload_path=tmp_path / "raw.dat",
             preload_in_memory=True,
@@ -405,29 +441,40 @@ def test_run_owned_preload_preserves_geometry_and_uses_its_unique_path(monkeypat
         calls.append(kwargs)
         return header_raw if len(calls) == 1 else loaded_raw
 
-    monkeypatch.setattr(shared_load_utils.mne.io, "read_raw_bdf", reader)
+    _mock_recording_reads(monkeypatch, reader)
     monkeypatch.setattr(shared_load_utils, "_memmap_dir_for_pid", lambda: pytest.fail("Used shared PID path"))
     destination = tmp_path / "unique-source.dat"
-    raw = load_utils.load_eeg_file(_app([]), str(tmp_path / "sample.bdf"), preload_path=destination)
+    raw = load_utils.load_eeg_file(_app([], tmp_path), str(tmp_path / "sample.bdf"), preload_path=destination)
 
     assert raw is loaded_raw
     assert calls[0]["preload"] is False
     assert calls[1]["preload"] == str(destination)
     assert read_raw_biosemi64_geometry(raw)["coordinate_fingerprint"] == BIOSEMI64_COORDINATE_FINGERPRINT
-    assert destination.is_file()
+    # Reserving/creating the path belongs to the BIDS reader, mocked here.
 
 
 @pytest.mark.parametrize("destination_kind", ["existing", "source", "relative"])
 def test_run_owned_preload_never_overwrites_existing_or_source_files(monkeypatch, tmp_path, destination_kind):
     source = tmp_path / "sample.bdf"
-    source.write_bytes(b"original EEG")
+    names = (*BIOSEMI64_CHANNELS, "EXG1", "EXG2", "Status")
+    _write_sampling_bdf(source, labels=names, samples=(16,) * len(names))
+    original = source.read_bytes()
     destination = tmp_path / "owned.dat"
     destination.write_bytes(b"another active worker")
     selected = {"existing": destination, "source": source, "relative": "relative.dat"}[destination_kind]
-    monkeypatch.setattr(shared_load_utils.mne.io, "read_raw_bdf", lambda *_a, **_k: pytest.fail("Unsafe destination opened"))
+    errors = []
+    logs = []
+    monkeypatch.setattr(load_utils.user_messages, "show_error", lambda _title, message: errors.append(message))
 
-    assert load_utils.load_eeg_file(_app([]), str(source), preload_path=selected) is None
-    assert source.read_bytes() == b"original EEG"
+    assert load_utils.load_eeg_file(_app(logs, tmp_path), str(source), preload_path=selected) is None
+    expected = (
+        "Run-owned EEG preload paths must be absolute."
+        if destination_kind == "relative"
+        else "BIDS preload must use a new, non-source memory-map file."
+    )
+    assert len(errors) == 1 and expected in errors[0]
+    assert any(expected in message for message in logs)
+    assert source.read_bytes() == original
     assert destination.read_bytes() == b"another active worker"
 
 
@@ -445,14 +492,14 @@ def test_shared_load_eeg_file_can_limit_bdf_to_first_channels_refs_and_stim(
         return header_raw if len(calls) == 1 else loaded_raw
 
     monkeypatch.setattr(shared_load_utils, "_memmap_dir_for_pid", lambda: tmp_path)
-    monkeypatch.setattr(shared_load_utils.mne.io, "read_raw_bdf", _fake_read_raw_bdf)
+    _mock_recording_reads(monkeypatch, _fake_read_raw_bdf)
 
     logs: list[str] = []
     path = tmp_path / "sample.bdf"
 
     with caplog.at_level(logging.DEBUG, logger=shared_load_utils.logger.name):
         raw = load_utils.load_eeg_file(
-            _app(logs),
+            _app(logs, tmp_path),
             str(path),
             ref_pair=("EXG1", "EXG2"),
             first_n_channels=1,
@@ -462,7 +509,8 @@ def test_shared_load_eeg_file_can_limit_bdf_to_first_channels_refs_and_stim(
     assert calls[0]["preload"] is False
     assert "include" not in calls[0]
     assert calls[1]["include"] == ["Fp1", "EXG1", "EXG2", "Status"]
-    assert calls[1]["preload"] == str(tmp_path / "sample_raw.dat")
+    assert Path(calls[1]["preload"]).parent == tmp_path
+    assert Path(calls[1]["preload"]).name.endswith("_raw.dat")
     assert any("[LOADER CHANNEL SUBSET]" in message for message in logs)
     assert "stage=header_geometry_validation_start" in caplog.text
     assert "stage=read_raw_bdf_start" in caplog.text
@@ -489,7 +537,7 @@ def test_open_preflight_eeg_file_is_lazy_subsetted_and_context_managed(
             AssertionError("explicit preflight stim channel must win")
         ),
     )
-    monkeypatch.setattr(shared_load_utils.mne.io, "read_raw_bdf", _fake_read_raw_bdf)
+    _mock_recording_reads(monkeypatch, _fake_read_raw_bdf)
     monkeypatch.setattr(
         shared_load_utils,
         "_memmap_dir_for_pid",
@@ -500,7 +548,7 @@ def test_open_preflight_eeg_file_is_lazy_subsetted_and_context_managed(
     path = tmp_path / "sample.bdf"
 
     with load_utils.open_preflight_eeg_file(
-        _app(logs),
+        _app(logs, tmp_path),
         str(path),
         ref_pair=("EXG1", "EXG2"),
         first_n_channels=1,
@@ -532,11 +580,11 @@ def test_open_preflight_eeg_file_closes_when_caller_raises(monkeypatch, tmp_path
         calls.append(dict(_kwargs))
         return header_raw if len(calls) == 1 else lazy_raw
 
-    monkeypatch.setattr(shared_load_utils.mne.io, "read_raw_bdf", _read)
+    _mock_recording_reads(monkeypatch, _read)
 
     with pytest.raises(RuntimeError, match="caller failed"):
         with load_utils.open_preflight_eeg_file(
-            _app([]),
+            _app([], tmp_path),
             str(tmp_path / "sample.bdf"),
         ) as raw:
             assert raw is lazy_raw
@@ -556,7 +604,7 @@ def test_shared_load_eeg_file_unsupported_extension_warns_and_returns_none(monke
 
     logs: list[str] = []
 
-    raw = load_utils.load_eeg_file(_app(logs), str(tmp_path / "sample.set"))
+    raw = load_utils.load_eeg_file(_app(logs, tmp_path), str(tmp_path / "sample.set"))
 
     assert raw is None
     assert warnings == [("Unsupported File", "Format '.set' not supported. Only '.bdf' is supported.")]
@@ -583,10 +631,10 @@ def test_shared_loader_applies_explicit_ab_1020_mapping_without_reordering_data(
         return header_raw if len(calls) == 1 else loaded_raw
 
     monkeypatch.setattr(shared_load_utils, "_memmap_dir_for_pid", lambda: tmp_path)
-    monkeypatch.setattr(shared_load_utils.mne.io, "read_raw_bdf", _read)
+    _mock_recording_reads(monkeypatch, _read)
 
     raw = load_utils.load_eeg_file(
-        _app([]),
+        _app([], tmp_path),
         str(tmp_path / "ab.bdf"),
         electrode_mapping_profile=ELECTRODE_MAPPING_PROFILE_BIOSEMI64_1020_AB_V1,
         electrode_montage="biosemi64",
@@ -610,14 +658,14 @@ def test_shared_loader_rejects_ab_header_without_explicit_profile(monkeypatch, t
         return header_raw
 
     monkeypatch.setattr(shared_load_utils, "_memmap_dir_for_pid", lambda: tmp_path)
-    monkeypatch.setattr(shared_load_utils.mne.io, "read_raw_bdf", _read)
+    _mock_recording_reads(monkeypatch, _read)
     monkeypatch.setattr(
         shared_load_utils.user_messages,
         "show_error",
         lambda title, message: errors.append((title, message)),
     )
 
-    raw = load_utils.load_eeg_file(_app([]), str(tmp_path / "ab.bdf"))
+    raw = load_utils.load_eeg_file(_app([], tmp_path), str(tmp_path / "ab.bdf"))
 
     assert raw is None
     assert len(calls) == 1
@@ -633,11 +681,11 @@ def test_channel_limit_never_hides_incomplete_full_acquisition(monkeypatch, tmp_
         return header_raw
 
     monkeypatch.setattr(shared_load_utils, "_memmap_dir_for_pid", lambda: tmp_path)
-    monkeypatch.setattr(shared_load_utils.mne.io, "read_raw_bdf", _read)
+    _mock_recording_reads(monkeypatch, _read)
     monkeypatch.setattr(shared_load_utils.user_messages, "show_error", lambda *_args: None)
 
     raw = load_utils.load_eeg_file(
-        _app([]),
+        _app([], tmp_path),
         str(tmp_path / "incomplete.bdf"),
         first_n_channels=1,
     )
@@ -663,7 +711,7 @@ def test_shared_loader_rejects_unsupported_project_montage_before_read(monkeypat
     )
 
     raw = load_utils.load_eeg_file(
-        _app([]),
+        _app([], tmp_path),
         str(tmp_path / "sample.bdf"),
         electrode_montage="standard_1005",
     )
@@ -679,8 +727,8 @@ def test_preflight_and_full_loader_attach_identical_geometry(monkeypatch, tmp_pa
         return queue.pop(0)
 
     monkeypatch.setattr(shared_load_utils, "_memmap_dir_for_pid", lambda: tmp_path)
-    monkeypatch.setattr(shared_load_utils.mne.io, "read_raw_bdf", _read)
-    app = _app([])
+    _mock_recording_reads(monkeypatch, _read)
+    app = _app([], tmp_path)
     path = str(tmp_path / "sample.bdf")
 
     full_raw = load_utils.load_eeg_file(app, path)

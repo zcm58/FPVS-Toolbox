@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from Main_App.Shared.settings_manager import SettingsManager
+from Main_App.settings.settings_manager import SettingsManager
 from Main_App.gui.settings_panel import SettingsDialog
 from Main_App.gui.theme import apply_fpvs_theme
 from Main_App.projects import Project

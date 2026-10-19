@@ -31,8 +31,8 @@ from PySide6.QtWidgets import (
 )
 
 from config import DEFAULT_ELECTRODE_NAMES_64
-from Main_App.Shared.roi_presets import ROI_MONTAGE_BIOSEMI64, default_roi_presets
-from Main_App.Shared.settings_manager import SettingsManager
+from Main_App.processing.roi_presets import ROI_MONTAGE_BIOSEMI64, default_roi_presets
+from Main_App.settings.settings_manager import SettingsManager
 from Main_App.projects import (
     MANUAL_REMOVED_ELECTRODES_ENABLED_KEY,
     REMOVED_ELECTRODE_DETECTION_CHOICE_CANONICAL_KEYS,
@@ -579,7 +579,7 @@ def test_dialog_loads_saves_app_line_noise_settings_without_project(tmp_path, qt
 def test_settings_dialog_beta_tools_save_prompts_for_restart(
     tmp_path, qtbot, monkeypatch, with_project,
 ):
-    from Main_App.Shared.settings_manager import SettingsManager
+    from Main_App.settings.settings_manager import SettingsManager
 
     monkeypatch.setenv("FPVS_CONFIG_HOME", str(tmp_path / "config"))
     manager = SettingsManager(str(tmp_path / "settings.ini"))

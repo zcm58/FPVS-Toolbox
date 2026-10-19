@@ -2,21 +2,43 @@
 
 ## Repo Purpose
 
-FPVS Toolbox is a PySide6 desktop application for preprocessing, cleaning,
-visualizing, and statistically analyzing EEG data from Fast Periodic Visual
-Stimulation experiments. Releases currently ship through a Windows installer.
+FPVS Toolbox's primary product is its EEG processing pipeline for Fast Periodic
+Visual Stimulation experiments. The product direction is a modular processing
+package supporting many acquisition systems and user-configurable pipelines
+saved per project. FHC, scalp maps, and other analysis/visualization tools are
+secondary add-ons that consume its outputs. Prioritize pipeline correctness,
+reproducibility, extensibility, and usability. The current application uses
+PySide6 and releases ship through a Windows installer.
 
 ## Working Rules
 
 - The product direction is modular acquisition hardware and montages, a shared
-  processing pipeline whose steps can be selected/replaced by the resolved
-  hardware/montage policy, and complete FPVS Studio interoperability. Read
+  processing pipeline whose methods and parameters users select per project
+  within the resolved hardware/montage capabilities, and complete FPVS Studio
+  interoperability. Save and restore project pipeline choices; method changes
+  must explicitly invalidate affected results and caches. The pipeline editor
+  is a future feature, not an already implemented capability. Read
   [the current-state and future-direction contract](docs/agent/architecture/hardware-pipeline-studio-roadmap.md)
   for related work. Complete Studio interoperability remains a goal: BioSemi64 and confirmed
   Brain Products projects have processing routes, Unicorn remains gated, and
   Studio import is partial. Brain Products format/capability limits are in
   [the hardware guide](docs/user/reference/brain-products.md).
   Preserve the locked scientific contracts while extending these boundaries.
+
+- Production EEG reads use the project-local BIDS import boundary in
+  `Main_App.io.bids_import` / `bids_loader`, reached through `io.load_utils`.
+  BDF and BVCDF signal bytes are preserved in raw EEG-BIDS datasets. BVRF uses
+  an explicitly labeled lossless FIF64 derivative; do not describe that route
+  as standard raw EEG-BIDS. Numerical preprocessing consumes MNE Raw and the
+  immutable `io.recording_contract.RecordingContract`, never native-format
+  reader logic or manufacturer dispatch. `io.acquisition_metadata` owns hardware
+  defaults, geometry admission and qualified capability/profile selection;
+  `processing.acquisition_policy` is a compatibility surface only. Keep numerical
+  reference/filter/interpolation operations in `processing`, driven by generic
+  metadata and project settings. Existing calibrated QC stays restricted to
+  its qualified geometry; this boundary does not qualify new hardware.
+  Preserve source metadata, event semantics, precision, and existing scientific
+  fingerprints. See [the loading contract](docs/agent/architecture/eeg-loading-contract.md).
 
 - Think before coding: state assumptions, surface ambiguity, and ask when the safe interpretation is unclear.
 - Prefer the smallest behavior-preserving change that solves the task.

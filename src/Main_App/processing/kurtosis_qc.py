@@ -22,14 +22,7 @@ import warnings
 import numpy as np
 from scipy.stats import kurtosis
 
-from Main_App.io.eeg_geometry import (
-    BIOSEMI64_CHANNELS,
-    BIOSEMI64_CHANNEL_SET,
-    BIOSEMI64_COORDINATE_FINGERPRINT,
-    BIOSEMI64_GEOMETRY_VERSION,
-    BIOSEMI64_MONTAGE_ID,
-    biosemi64_geometry_identity,
-)
+from Main_App.io.acquisition_metadata import CALIBRATED_SPATIAL_PROFILE as _SPATIAL_PROFILE
 from Main_App.processing.analysis_spans import (
     ANALYSIS_SPAN_PLAN_VERSION,
     TARGET_SPAN_ROUNDING_VERSION,
@@ -149,19 +142,19 @@ def _integer(value: object, *, field_name: str, minimum: int | None = None) -> i
 
 def _canonical_channels(values: Sequence[object], *, field_name: str) -> tuple[str, ...]:
     if isinstance(values, (str, bytes, bytearray)):
-        raise KurtosisQCError(f"{field_name} must be a sequence of BioSemi64 channels.")
+        raise KurtosisQCError(f"{field_name} must be a sequence of channels from the calibrated spatial profile.")
     names = tuple(str(value or "").strip() for value in values)
     if any(not name for name in names):
         raise KurtosisQCError(f"{field_name} contains a blank channel.")
     if len({name.casefold() for name in names}) != len(names):
         raise KurtosisQCError(f"{field_name} contains duplicate channels.")
-    unknown = sorted(set(names).difference(BIOSEMI64_CHANNEL_SET))
+    unknown = sorted(set(names).difference(_SPATIAL_PROFILE.channel_set))
     if unknown:
         raise KurtosisQCError(
-            f"{field_name} contains channels outside BioSemi64: {', '.join(unknown)}."
+            f"{field_name} contains channels outside the calibrated spatial profile: {', '.join(unknown)}."
         )
     selected = set(names)
-    return tuple(channel for channel in BIOSEMI64_CHANNELS if channel in selected)
+    return tuple(channel for channel in _SPATIAL_PROFILE.channels if channel in selected)
 
 
 @dataclass(frozen=True, slots=True)
@@ -582,18 +575,18 @@ def _validated_geometry_identity(
     )
     if not set(evaluated_channels).issubset(retained):
         raise KurtosisQCError("Kurtosis channels are not all present in retained geometry.")
-    expected = biosemi64_geometry_identity(
+    expected = _SPATIAL_PROFILE.geometry_identity(
         electrode_mapping_profile=supplied.get("electrode_mapping_profile"),
         retained_channels=retained,
     )
     for field_name, expected_value in expected.items():
         if supplied.get(field_name) != expected_value:
             raise KurtosisQCError(f"Kurtosis geometry {field_name} is missing or stale.")
-    if supplied.get("montage_id") != BIOSEMI64_MONTAGE_ID:
-        raise KurtosisQCError("Kurtosis evidence requires the BioSemi64 montage.")
-    if supplied.get("geometry_version") != BIOSEMI64_GEOMETRY_VERSION:
+    if supplied.get("montage_id") != _SPATIAL_PROFILE.montage_id:
+        raise KurtosisQCError("Kurtosis evidence requires the calibrated spatial profile montage.")
+    if supplied.get("geometry_version") != _SPATIAL_PROFILE.geometry_version:
         raise KurtosisQCError("Kurtosis evidence geometry version is stale.")
-    if supplied.get("coordinate_fingerprint") != BIOSEMI64_COORDINATE_FINGERPRINT:
+    if supplied.get("coordinate_fingerprint") != _SPATIAL_PROFILE.coordinate_fingerprint:
         raise KurtosisQCError("Kurtosis evidence coordinate fingerprint is stale.")
     return supplied
 
@@ -851,8 +844,8 @@ class KurtosisCorroboratorFinding:
     def validate(self) -> None:
         if not self.method_id or not self.method_version:
             raise KurtosisQCError("Corroborator method identity must not be empty.")
-        if self.channel not in BIOSEMI64_CHANNEL_SET:
-            raise KurtosisQCError("Corroborator finding channel is outside BioSemi64.")
+        if self.channel not in _SPATIAL_PROFILE.channel_set:
+            raise KurtosisQCError("Corroborator finding channel is outside the calibrated spatial profile.")
         if not self.scope:
             raise KurtosisQCError("Corroborator finding scope must not be empty.")
         if not _is_sha256(self.analysis_span_fingerprint):
@@ -1084,8 +1077,8 @@ def build_kurtosis_review_decision(
     if evidence_fingerprint != _fingerprint(evidence_core):
         raise KurtosisQCError("Kurtosis review evidence fingerprint is stale.")
     normalized_channel = str(channel or "").strip()
-    if normalized_channel not in BIOSEMI64_CHANNEL_SET:
-        raise KurtosisQCError("Kurtosis review channel is outside BioSemi64.")
+    if normalized_channel not in _SPATIAL_PROFILE.channel_set:
+        raise KurtosisQCError("Kurtosis review channel is outside the calibrated spatial profile.")
     normalized_decision = str(decision or "").strip()
     if normalized_decision not in {
         KURTOSIS_DECISION_APPROVE,
@@ -1514,9 +1507,9 @@ def normalize_kurtosis_review_decisions_by_recording(
                 raise KurtosisQCError(
                     "Kurtosis review recording key does not match its receipt."
                 )
-            if channel not in BIOSEMI64_CHANNEL_SET or channel.casefold() in seen_channels:
+            if channel not in _SPATIAL_PROFILE.channel_set or channel.casefold() in seen_channels:
                 raise KurtosisQCError(
-                    "Kurtosis review channels must be unique BioSemi64 labels."
+                    "Kurtosis review channels must be unique calibrated spatial-profile labels."
                 )
             seen_channels.add(channel.casefold())
             canonical_recording_id = receipt.recording_id
@@ -1651,8 +1644,8 @@ def _normalized_decisions(
     result: dict[str, KurtosisReviewDecision | Mapping[str, Any]] = {}
     for raw_channel, decision in values.items():
         channel = str(raw_channel or "").strip()
-        if channel not in BIOSEMI64_CHANNEL_SET:
-            raise KurtosisQCError("Kurtosis review decision channel is outside BioSemi64.")
+        if channel not in _SPATIAL_PROFILE.channel_set:
+            raise KurtosisQCError("Kurtosis review decision channel is outside the calibrated spatial profile.")
         if channel in result:
             raise KurtosisQCError("Kurtosis review decisions contain duplicate channels.")
         result[channel] = decision
@@ -1703,7 +1696,7 @@ def build_kurtosis_decision_plan(
         reason = str(raw_reason or "").strip()
         if channel not in retained or not reason:
             raise KurtosisQCError(
-                "Direct bad channels must be retained BioSemi64 channels with reasons."
+                "Direct bad channels must be retained calibrated spatial-profile channels with reasons."
             )
         direct[channel] = reason
 

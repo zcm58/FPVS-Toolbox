@@ -18,10 +18,7 @@ from typing import Any
 import mne
 import numpy as np
 
-from Main_App.io.eeg_geometry import (
-    BIOSEMI64_CHANNEL_SET,
-    canonical_biosemi64_head_coordinates,
-)
+from Main_App.io.acquisition_metadata import CALIBRATED_SPATIAL_PROFILE
 
 QC_REVIEW_DIAGNOSTICS_VERSION = "mne_amplitude_review_shadow_v1"
 _AUTHORITY = "review_only"
@@ -718,9 +715,9 @@ def build_raw_qc_review_diagnostics(
     if not getattr(raw, "preload", False):
         raise ValueError("Full-scope review diagnostics require an already-loaded source Raw.")
     channels = tuple(raw.ch_names)
-    scalp = [name for name in channels if name in BIOSEMI64_CHANNEL_SET]
+    scalp = [name for name in channels if name in CALIBRATED_SPATIAL_PROFILE.channel_set]
     selected = [name for name in channels if name in scalp or name in set(ref_channels)]
-    coordinates = canonical_biosemi64_head_coordinates()
+    coordinates = CALIBRATED_SPATIAL_PROFILE.coordinates()
     positions = {name: coordinates[name] for name in scalp}
     return build_qc_review_diagnostics(
         raw._data, sfreq=float(raw.info["sfreq"]), channels=channels,

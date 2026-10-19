@@ -158,7 +158,7 @@ def test_downsampled_annotation_only_recording_requires_recorded_stimulus() -> N
     params = _params(source_plan)
 
     with pytest.raises(AnalysisSpanPlanError, match="recorded stimulus channel"):
-        preprocess._realize_analysis_spans_for_raw(raw, params)
+        preprocess._realize_analysis_spans_for_raw(raw, params, preprocess.resolve_recording_contract(params, raw=raw))
 
     assert "_fpvs_realized_analysis_span_plan" not in params
 
@@ -170,6 +170,6 @@ def test_downsampled_concatenated_recording_requires_single_segment() -> None:
     params = _params(source_plan)
 
     with pytest.raises(AnalysisSpanPlanError, match="single recording segment"):
-        preprocess._realize_analysis_spans_for_raw(raw, params)
+        preprocess._realize_analysis_spans_for_raw(raw, params, preprocess.resolve_recording_contract(params, raw=raw))
 
     assert "_fpvs_realized_analysis_span_plan" not in params

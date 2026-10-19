@@ -9,6 +9,7 @@ The producer and final cleanup must run outside the GUI thread.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
+from copy import deepcopy
 from dataclasses import dataclass
 import hashlib
 import json
@@ -23,7 +24,8 @@ from typing import Any
 import psutil
 
 from Main_App.io import load_utils
-from Main_App.io.eeg_geometry import BIOSEMI64_MONTAGE_ID
+from Main_App.io.acquisition_metadata import source_identity, source_load_kwargs
+from Main_App.io.recording_resources import estimate_source_preload_bytes
 from Main_App.processing.toolbox_cache_paths import checked_path
 from Main_App.projects.preprocessing_settings import normalize_manual_excluded_participants
 
@@ -74,33 +76,17 @@ def _source_sha256(path: Path, should_cancel: Callable[[], bool]) -> str | None:
 
 def _loader_settings(settings: Mapping[str, Any]) -> dict[str, Any]:
     """Match the kurtosis scanner's effective source-loading arguments."""
-    if settings.get("hardware_platform") == "brain_products":
-        return {
-            "first_n_channels": settings.get("max_idx_keep", settings.get("max_chan_idx_keep")),
-            "stim_channel": str(settings.get("stim_channel") or "Status"),
-            "electrode_montage": settings.get("electrode_montage", "recorded"),
-            "acquisition_settings": dict(settings),
-        }
-    limit = settings.get("max_idx_keep")
-    if limit is None:
-        limit = settings.get("max_chan_idx_keep")
-    if limit is None:
-        limit = 64
-    if isinstance(limit, bool) or (isinstance(limit, float) and not limit.is_integer()):
-        raise ValueError("BioSemi64 channel limit must be an integer from 1 through 64.")
-    limit = int(limit)
-    if not 1 <= limit <= 64:
-        raise ValueError("BioSemi64 channel limit must be an integer from 1 through 64.")
-    return {
-        "ref_pair": (
-            str(settings.get("ref_channel1") or settings.get("ref_chan1") or settings.get("ref_ch1") or "EXG1"),
-            str(settings.get("ref_channel2") or settings.get("ref_chan2") or settings.get("ref_ch2") or "EXG2"),
-        ),
-        "first_n_channels": limit,
-        "stim_channel": str(settings.get("stim_channel") or settings.get("stim") or "Status"),
-        "electrode_mapping_profile": settings.get("electrode_mapping_profile"),
-        "electrode_montage": BIOSEMI64_MONTAGE_ID,
-    }
+    return source_load_kwargs(settings)
+
+
+def _acquisition_identity(settings: Mapping[str, Any]) -> dict[str, Any]:
+    """Snapshot only metadata that can change the loaded recording or policy.
+
+    Reference/stim/channel-limit aliases are normalized by ``_loader_settings``.
+    Filter, review, and exclusion choices act downstream and do not change raw
+    admission. Recorded coordinates remain guarded by source-companion hashes.
+    """
+    return source_identity(settings)
 
 
 @dataclass
@@ -146,6 +132,11 @@ class QcSourcePrefetch:
     ) -> None:
         self._project_root = Path(project_root)
         self._settings = _loader_settings(settings)
+        self._acquisition_identity = _acquisition_identity(settings)
+        # Forward project context independently of the normalized reuse key.
+        # Copy only small acquisition metadata; never copy scientific arrays or
+        # event plans while constructing this helper on the GUI thread.
+        self._acquisition_settings = {**settings, **deepcopy(self._acquisition_identity)}
         self._ram_preload = settings.get("experimental_ram_preload", False) is True
         self._excluded_participants = {
             value.casefold() for value in normalize_manual_excluded_participants(
@@ -229,11 +220,7 @@ class QcSourcePrefetch:
             entry.status = "loading"
         try:
             identity = _source_identity(entry.path)
-            # BDF's packed 24-bit samples expand to float64. Four times the
-            # complete source size conservatively covers the selected channels.
-            from Main_App.io.recording_sources import recording_source_files
-            estimate = (sum(item.stat().st_size for item in recording_source_files(entry.path)) * 8
-                        if entry.path.suffix.lower() in {".vhdr", ".bvrh"} else int(identity[1]) * 4)
+            estimate = estimate_source_preload_bytes(entry.path)
             with self._condition:
                 available_budget = self._max_bytes - self._retained_bytes
             if self._ram_preload:
@@ -251,7 +238,10 @@ class QcSourcePrefetch:
             if not self._ram_preload:
                 entry.preload_path = self._run_directory / f"{index:06d}_raw.dat"
             raw = load_utils.load_eeg_file(
-                _LoaderLog(), str(entry.path), **self._settings,
+                _LoaderLog(), str(entry.path),
+                **{**self._settings, "acquisition_settings": {
+                    **self._acquisition_settings, "project_root": str(self._project_root),
+                }},
                 **({"preload_in_memory": True} if self._ram_preload else {"preload_path": entry.preload_path}),
             )
             entry.raw = raw
@@ -361,6 +351,7 @@ class QcSourcePrefetch:
         """Wait cooperatively for this source and transfer it at most once."""
         try:
             if (_loader_settings(settings) != self._settings
+                    or _acquisition_identity(settings) != self._acquisition_identity
                     or (settings.get("experimental_ram_preload", False) is True) != self._ram_preload):
                 return None
         except (TypeError, ValueError, OverflowError):

@@ -12,7 +12,7 @@ import pytest
 QtCore = pytest.importorskip("PySide6.QtCore")
 QtWidgets = pytest.importorskip("PySide6.QtWidgets")
 
-from Main_App.Shared.settings_manager import SettingsManager  # noqa: E402
+from Main_App.settings.settings_manager import SettingsManager  # noqa: E402
 from Main_App.gui import main_window as main_window_module  # noqa: E402
 from Main_App.processing.full_fft_provenance import (  # noqa: E402
     FullFftProvenanceError,

@@ -19,6 +19,15 @@ def test_fixed_spatial_methods_require_qualified_hardware(tool):
     assert spatial_tool_unavailable_reason({}, tool) == ""
 
 
+@pytest.mark.parametrize("settings", [
+    {"hardware_platform": "brain_products"},
+    {"hardware_platform": "brain_products", "hardware_confirmed": True,
+     "initial_reference": "channels", "initial_reference_channels": []},
+])
+def test_spatial_tool_explanation_does_not_require_complete_processing_setup(settings):
+    assert "Brain Products" in spatial_tool_unavailable_reason(settings, "Scalp Maps")
+
+
 @pytest.mark.parametrize("tool", ["Standard FPVS Screening", "SNR", "Individual Detectability", "Stats"])
 def test_nonspatial_tools_remain_available(tool):
     assert spatial_tool_unavailable_reason(BP, tool) == ""

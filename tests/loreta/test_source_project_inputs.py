@@ -34,7 +34,7 @@ from Tools.LORETA_Visualizer.source_producers.project_inputs import (
 @pytest.mark.parametrize("suffix", [".xlsx", ".fpvs"])
 @pytest.mark.parametrize("sheet", ["BCA (uV)", "FFT Amplitude (uV)"])
 def test_metric_companion_preserves_selected_topography_bits(tmp_path, suffix, sheet):
-    from Main_App.Shared.post_process_excel import write_results_workbook
+    from Main_App.exports.post_process_excel import write_results_workbook
 
     path = tmp_path / f"P01{suffix}"
     values = np.asarray([-0.0, np.nextafter(1.0, 2.0)], dtype=np.float64)
@@ -60,7 +60,7 @@ def test_metric_companion_preserves_selected_topography_bits(tmp_path, suffix, s
     ("companion", "[Cc]ompanion"),
 ])
 def test_native_metric_reader_preserves_source_validation(tmp_path, damage, expected_error):
-    from Main_App.Shared.post_process_excel import write_results_workbook
+    from Main_App.exports.post_process_excel import write_results_workbook
     from Main_App.io.condition_data import condition_companion_identity
 
     path = tmp_path / "P01.fpvs"

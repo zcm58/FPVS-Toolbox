@@ -165,18 +165,21 @@ def test_worker_rejects_invalid_hardware_before_cache_lookup(tmp_path, monkeypat
     loader.assert_not_called()
 
 
-@pytest.mark.parametrize("invalid_settings", [
-    {"channel_types": {"not_recorded": "misc"}},
-    {"electrode_montage": "not_a_montage"},
+@pytest.mark.parametrize(("invalid_settings", "preloaded", "message"), [
+    ({"channel_types": {"not_recorded": "misc"}}, False, "Channel type overrides must name recorded channels"),
+    ({"electrode_montage": "not_a_montage"}, True, "montage"),
 ], ids=["channel-role", "montage"])
-def test_brainvision_validation_failure_closes_and_removes_owned_memmap(tmp_path, monkeypatch, invalid_settings):
-    from Main_App.io import brain_products, hardware_loader
+def test_brainvision_validation_failure_leaves_no_owned_memmap(
+    tmp_path, monkeypatch, invalid_settings, preloaded, message,
+):
+    from Main_App.io import bids_loader, hardware_loader
 
     source = _source(tmp_path)
     originals = {path: path.read_bytes() for path in (source, source.with_suffix(".eeg"), source.with_suffix(".vmrk"))}
     settings = confirm_hardware_selection({}, "brain_products", confirmed_change=True)
     settings.update(invalid_settings)
-    real_reader = brain_products.read_brain_products_raw
+    settings["project_root"] = str(tmp_path)
+    real_reader = bids_loader.read_project_bids_raw
     retained = {}
 
     def capture_real_raw(*args, **kwargs):
@@ -184,9 +187,9 @@ def test_brainvision_validation_failure_closes_and_removes_owned_memmap(tmp_path
         retained.update(raw=raw, mmap=raw._data._mmap)
         return raw
 
-    monkeypatch.setattr(brain_products, "read_brain_products_raw", capture_real_raw)
+    monkeypatch.setattr(bids_loader, "read_project_bids_raw", capture_real_raw)
     destination = tmp_path / "owned.dat"
-    with pytest.raises(ValueError) as error:
+    with pytest.raises(ValueError, match=message) as error:
         hardware_loader.open_brain_products_raw(
             SimpleNamespace(log=lambda _: None), source,
             settings=settings, preload=str(destination),
@@ -195,7 +198,12 @@ def test_brainvision_validation_failure_closes_and_removes_owned_memmap(tmp_path
     # Keep both Raw and traceback alive: garbage collection must not conceal a
     # leaked mapping, which would prevent file deletion on Windows.
     assert error.value is not None
-    assert retained["mmap"].closed
-    assert retained["raw"]._data is None
+    if preloaded:
+        assert retained["mmap"].closed
+        assert retained["raw"]._data is None
+    else:
+        # Invalid channel metadata is rejected during BIDS admission, before
+        # a preloaded Raw or its mapping is created.
+        assert retained == {}
     assert not destination.exists()
     assert {path: path.read_bytes() for path in originals} == originals

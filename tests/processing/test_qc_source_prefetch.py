@@ -397,7 +397,14 @@ def test_source_content_identity_is_only_available_after_validated_exclusive_tak
 @pytest.mark.parametrize("changed", [
     {"ref_channel1": "EXG3"}, {"ref_channel2": "EXG4"},
     {"stim_channel": "Trigger"}, {"max_idx_keep": 32},
-    {"electrode_mapping_profile": "biosemi_a1_b32"},
+    {"electrode_mapping_profile": "biosemi64_1020_ab_v1"},
+    {"electrode_montage": "standard_1020"},
+    {"hardware_platform": "brain_products", "hardware_confirmed": True},
+    {"hardware_platform": "biosemi", "hardware_confirmed": False},
+    {"channel_types": {"EXG3": "eog"}},
+    {"initial_reference": "channels", "initial_reference_channels": ["EXG3", "EXG4"]},
+    {"kurtosis_screening_enabled": True},
+    {"acquisition_profile": {"id": "changed", "version": "2"}},
 ])
 def test_changed_loader_settings_are_a_miss(recordings, changed):
     root, infos, created = recordings
@@ -418,6 +425,23 @@ def test_equivalent_loader_aliases_can_reuse_source(recordings):
         "ref_channel1": "EXG3", "ref_channel2": "EXG4", "stim_channel": "Trigger", "max_idx_keep": 32,
     })
     assert raw is not None
+    session.release(raw)
+    session.close()
+
+
+def test_acquisition_metadata_is_snapshotted_and_project_context_reaches_loader(recordings):
+    root, infos, created = recordings
+    settings = {"channel_types": {"EXG3": "eog"}, "high_pass": 1.0}
+    session = prefetch.QcSourcePrefetch(root, infos[:1], settings)
+    settings["channel_types"]["EXG3"] = "misc"
+    session.run()
+    forwarded = created[0][2]["acquisition_settings"]
+    assert forwarded["project_root"] == str(root)
+    assert forwarded["channel_types"] == {"EXG3": "eog"}
+    assert forwarded["high_pass"] == 1.0
+    assert session.take(infos[0].path, settings=settings) is None
+    raw = session.take(infos[0].path, settings={"channel_types": {"EXG3": "eog"}, "high_pass": 2.0})
+    assert raw is created[0][0]
     session.release(raw)
     session.close()
 

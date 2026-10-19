@@ -71,6 +71,29 @@ def _fingerprint(value: object) -> str:
     ).hexdigest()
 
 
+def test_channel_validation_uses_the_explicit_calibrated_profile(monkeypatch):
+    profile = replace(
+        qc_module._SPATIAL_PROFILE,
+        channels=("SensorB", "SensorA"),
+        channel_set=frozenset({"SensorA", "SensorB"}),
+    )
+    monkeypatch.setattr(qc_module, "_SPATIAL_PROFILE", profile)
+    assert qc_module._canonical_channels(
+        ("SensorA", "SensorB"), field_name="channels",
+    ) == ("SensorB", "SensorA")
+    with pytest.raises(KurtosisQCError, match="outside the calibrated spatial profile"):
+        qc_module._canonical_channels(("Fp1",), field_name="channels")
+
+
+def test_matching_labels_do_not_qualify_a_different_geometry_schema():
+    geometry = biosemi64_geometry_identity()
+    geometry.update(geometry_version="recorded_eeg_geometry_v1", montage_id="recorded")
+    with pytest.raises(KurtosisQCError, match="missing or stale"):
+        qc_module._validated_geometry_identity(
+            geometry, evaluated_channels=tuple(BIOSEMI64_CHANNELS),
+        )
+
+
 def _realized_plan(n_samples: int, *, occurrence_count: int = 2) -> dict[str, object]:
     boundaries = np.linspace(0, n_samples, occurrence_count + 1, dtype=int)
     spans: list[dict[str, object]] = []

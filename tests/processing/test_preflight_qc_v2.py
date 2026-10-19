@@ -106,7 +106,7 @@ def _install_lazy_fakes(
             first_n_arguments.append(int(first_n_channels))
         yield raws.pop(0)
 
-    monkeypatch.setattr(preflight_qc.load_utils, "inspect_bdf_header", lambda _path: None)
+    monkeypatch.setattr(preflight_qc.load_utils, "inspect_recording_header", lambda _path: None)
     monkeypatch.setattr(preflight_qc.load_utils, "open_preflight_eeg_file", _open)
     monkeypatch.setattr(
         preflight_qc.mne,

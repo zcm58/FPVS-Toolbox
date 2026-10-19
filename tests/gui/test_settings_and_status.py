@@ -5,8 +5,8 @@ from PySide6.QtCore import QThreadPool
 from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import QApplication, QWidget
 
-from Main_App.Shared.settings_manager import SettingsManager
-from Main_App.Shared.settings_paths import app_settings_file
+from Main_App.settings.settings_manager import SettingsManager
+from Main_App.settings.settings_paths import app_settings_file
 from Main_App.gui import update_manager
 from Main_App.gui.theme import apply_light_palette
 

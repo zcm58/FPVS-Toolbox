@@ -13,7 +13,7 @@ from Tools.Publication_Maps.xlsx_metric_reader import read_metric_sheet_selected
 def test_native_metric_values_and_source_companions_are_preserved_and_verified(
     tmp_path: Path, damage: str,
 ) -> None:
-    from Main_App.Shared.post_process_excel import write_results_workbook
+    from Main_App.exports.post_process_excel import write_results_workbook
     from Tools.Publication_Maps.metrics import (
         _capture_workbook_identity, verify_publication_workbooks_unchanged,
     )

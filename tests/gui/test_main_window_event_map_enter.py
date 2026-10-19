@@ -363,7 +363,7 @@ def test_settings_save_starting_work_blocks_exit_without_hiding_activity(
 def test_single_selection_survives_completion_and_missing_file_disables_start(tmp_path, qtbot, monkeypatch, extension):
     from Main_App.gui.processing_completion import finalize_processing_host_state
     from Main_App.gui.processing_inputs import selected_single_file
-    from Main_App.Shared import user_messages
+    from Main_App.gui import user_messages
 
     win = _build_window(tmp_path, qtbot, monkeypatch)
     monkeypatch.setattr(user_messages, "show_info", lambda *_: None)

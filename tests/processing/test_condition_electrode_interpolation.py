@@ -19,6 +19,7 @@ from Main_App.processing.condition_electrode_interpolation import (
 )
 from Main_App.processing.preflight_qc_plan import plan_preflight_qc_events
 from Main_App.processing.preprocess import _finish_preprocessing_at_kurtosis
+from Main_App.io.acquisition_metadata import resolve_recording_contract
 from Main_App.projects import EXPECTED_CYCLES_SOURCE_MANUAL, FrequencyProtocol
 
 
@@ -82,7 +83,7 @@ def test_only_exact_condition_samples_change_and_reference_uses_joint_bad_set(fi
 def test_finish_stage_records_completed_local_repair_separately_from_global():
     raw, params = _case()
     processed, rejected = _finish_preprocessing_at_kurtosis(
-        raw, params, lambda _: None, filename_for_log="synthetic.bdf", orig_sfreq=100,
+        raw, params, lambda _: None, filename_for_log="synthetic.bdf", orig_sfreq=100, recording_contract=resolve_recording_contract(params, raw=raw),
         debug_enabled=False, geometry_identity=read_raw_biosemi64_geometry(raw),
     )
     assert processed is raw and rejected == 0
@@ -98,7 +99,7 @@ def test_no_requests_leaves_existing_preprocessing_bit_identical():
     params.pop("_fpvs_condition_interpolation_requests")
     expected = _normal(raw.copy())
     processed, _ = _finish_preprocessing_at_kurtosis(raw, params, lambda _: None,
-        filename_for_log="synthetic.bdf", orig_sfreq=100, debug_enabled=False,
+        filename_for_log="synthetic.bdf", orig_sfreq=100, recording_contract=resolve_recording_contract(params, raw=raw), debug_enabled=False,
         geometry_identity=read_raw_biosemi64_geometry(raw))
     assert processed.get_data().tobytes() == expected.get_data().tobytes()
     assert "_fpvs_condition_interpolation_provenance" not in params
@@ -162,7 +163,7 @@ def test_explicitly_excluded_condition_does_not_apply_its_persisted_repair():
     original_requests = deepcopy(params["_fpvs_condition_interpolation_requests"])
     expected = _normal(raw.copy())
     processed, _ = _finish_preprocessing_at_kurtosis(raw, params, lambda _: None,
-        filename_for_log="synthetic.bdf", orig_sfreq=100, debug_enabled=False,
+        filename_for_log="synthetic.bdf", orig_sfreq=100, recording_contract=resolve_recording_contract(params, raw=raw), debug_enabled=False,
         geometry_identity=read_raw_biosemi64_geometry(raw))
     assert processed.get_data().tobytes() == expected.get_data().tobytes()
     assert params["_fpvs_condition_interpolation_requests"] == original_requests
@@ -196,7 +197,7 @@ def test_repaired_raw_cache_preserves_float64_samples_and_proof(tmp_path):
     with raw.info._unlock():
         raw.info["highpass"] = 0.1
     raw, _ = _finish_preprocessing_at_kurtosis(raw, params, lambda _: None,
-        filename_for_log=source.name, orig_sfreq=100, debug_enabled=False,
+        filename_for_log=source.name, orig_sfreq=100, recording_contract=resolve_recording_contract(params, raw=raw), debug_enabled=False,
         geometry_identity=read_raw_biosemi64_geometry(raw))
     original = raw.get_data().tobytes()
     kwargs = {"file_path": source, "settings": params, "project_root": tmp_path, "mne_module": mne}

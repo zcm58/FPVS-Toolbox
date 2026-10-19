@@ -29,6 +29,10 @@ datas += collect_data_files('mne')
 tmp_ret = collect_all('mne')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
+# BIDS readers resolve format adapters and bundled metadata lazily.
+tmp_ret = collect_all('mne_bids')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+
 
 a = Analysis(
     [str(MAIN_SCRIPT)],

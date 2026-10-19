@@ -17,8 +17,8 @@ of tool-specific special cases:
 
 - `project.json` is the only canonical source for groups and participant-group
   assignments;
-- Batch processing processes every registered `.bdf` file across all project
-  groups by default;
+- Batch processing processes every registered supported recording entrypoint
+  (`.bdf`, `.vhdr`, or `.bvrh`) across all project groups by default;
 - Processing refuses ambiguous or unsafe group states before work begins;
 - Generated workbooks use the locked condition-first/group-second layout;
 - Group definitions become immutable after the first successful grouped run;
@@ -62,8 +62,10 @@ of tool-specific special cases:
 - Participant IDs are unique across the whole project, not merely within a
   group, including case-insensitive collisions such as `P01` versus `p01`.
 - Group IDs, labels, and folder names cannot create ambiguous aliases.
-- A registered participant `raw_file` must be a `.bdf` directly inside that
-  participant's assigned group raw root and must be discoverable there.
+- A registered participant `raw_file` must be a supported `.bdf`, `.vhdr`, or
+  `.bvrh` recording entrypoint directly inside that participant's assigned group
+  raw root and must be discoverable there. Required companion files remain part
+  of that recording, not separate participants.
 
 ### Batch default and hard preflight
 
@@ -76,7 +78,8 @@ of tool-specific special cases:
   not the group layout has locked yet.
 - Any participant entry whose registered `raw_file` is missing hard-blocks
   processing rather than silently producing a partial project run.
-- A manually selected `.bdf` must be inside a registered group raw folder.
+- A manually selected recording entrypoint must be inside a registered group
+  raw folder and pass the project's hardware and companion-file validation.
 - A known participant discovered in a different group after lock hard-blocks
   processing.
 - New or changed participant/raw-file assignments are reviewed before they are

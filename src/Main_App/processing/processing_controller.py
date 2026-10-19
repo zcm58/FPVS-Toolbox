@@ -1360,6 +1360,7 @@ def start_processing(self) -> None:
 
             raw = load_eeg_file(
                 self, str(fp),
+                acquisition_settings={**params, "project_root": str(project.project_root)},
                 **({"preload_in_memory": True} if params.get("experimental_ram_preload") is True else {}),
             )
             if raw is None:

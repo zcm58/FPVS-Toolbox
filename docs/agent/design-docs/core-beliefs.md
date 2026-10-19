@@ -2,6 +2,9 @@
 
 - FPVS Toolbox should preserve scientific output behavior unless a behavior
   change is explicitly requested and documented.
+- Processing is the core product; analysis and visualization are optional
+  downstream consumers. Prioritize pipeline correctness, reproducibility,
+  extensibility, and usable project configuration.
 - The repo should be legible to future agents and humans through clear package
   ownership, compact maps, and focused architecture docs.
 - `AGENTS.md` is a table of contents, not an encyclopedia.
@@ -15,8 +18,9 @@
 - Processing pipeline changes require contract documentation and targeted tests
   before implementation.
 - Separate hardware, montage, format, and event interpretation from shared
-  processing. Extend explicit profiles and capability contracts rather than
-  copying the pipeline for each device.
+  processing. The project-local BIDS import boundary supplies MNE Raw; resolved
+  policies supply capabilities. Extend these boundaries rather than copying
+  the pipeline for each device.
 - Future modular processing and full Studio compatibility are acceptance goals,
   not evidence of current support. Follow the
   [shared roadmap](../architecture/hardware-pipeline-studio-roadmap.md) and keep

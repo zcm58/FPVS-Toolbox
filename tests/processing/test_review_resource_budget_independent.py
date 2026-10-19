@@ -253,6 +253,7 @@ def test_actual_bdf_geometry_probe_reads_no_signal_payload_and_normalizes_native
     tmp_path, monkeypatch, target, expected,
 ):
     from mne.io.edf.edf import RawEDF
+    from Main_App.io import bids_loader
     from Main_App.io.eeg_geometry import BIOSEMI64_CHANNELS
     from tests.processing.test_shared_load_utils import _write_sampling_bdf
 
@@ -261,6 +262,7 @@ def test_actual_bdf_geometry_probe_reads_no_signal_payload_and_normalizes_native
     _write_sampling_bdf(source, labels=labels, samples=(16,) * len(labels))
     before = source.read_bytes()
     monkeypatch.setattr(RawEDF, "_read_segment_file", lambda *_a, **_kw: pytest.fail("Geometry read EEG samples."))
+    monkeypatch.setattr(bids_loader, "read_project_bids_raw", lambda *_a, **_kw: pytest.fail("Resource planning started a BIDS import."))
     geometry = read_review_geometry(source, {
         "ref_channel1": "EXG1", "ref_channel2": "EXG2",
         "stim_channel": "Status", "max_idx_keep": 64,
@@ -281,7 +283,7 @@ def test_declared_annotation_header_is_rejected_before_mne_can_read_its_payload(
     source = tmp_path / "annotations.bdf"
     labels = ("EXG1", "EXG2", *BIOSEMI64_CHANNELS, "Status", "BDF Annotations")
     _write_sampling_bdf(source, labels=labels, samples=(16,) * len(labels))
-    monkeypatch.setattr(load_utils, "open_preflight_eeg_file", lambda *_a, **_kw: pytest.fail("MNE annotation constructor was opened."))
+    monkeypatch.setattr(load_utils, "open_bdf_resource_header", lambda *_a, **_kw: pytest.fail("MNE annotation constructor was opened."))
     assert read_review_geometry(source, {"max_idx_keep": 64}) is None
 
 
@@ -294,7 +296,7 @@ def test_source_change_during_header_probe_cannot_publish_old_geometry(tmp_path,
     source = tmp_path / "changed.bdf"
     labels = ("EXG1", "EXG2", *BIOSEMI64_CHANNELS, "Status")
     _write_sampling_bdf(source, labels=labels, samples=(16,) * len(labels))
-    original_open = load_utils.open_preflight_eeg_file
+    original_open = load_utils.open_bdf_resource_header
 
     @contextmanager
     def changed_after_close(*args, **kwargs):
@@ -303,7 +305,7 @@ def test_source_change_during_header_probe_cannot_publish_old_geometry(tmp_path,
         with source.open("ab") as stream:
             stream.write(b"changed")
 
-    monkeypatch.setattr(load_utils, "open_preflight_eeg_file", changed_after_close)
+    monkeypatch.setattr(load_utils, "open_bdf_resource_header", changed_after_close)
     assert read_review_geometry(source, {"max_idx_keep": 64}) is None
 
 
@@ -360,7 +362,7 @@ def test_mixed_sampling_header_fails_before_mne_can_infer_a_resampled_geometry(t
     source = tmp_path / "mixed-rates.bdf"
     labels = ("EXG1", "EXG2", *BIOSEMI64_CHANNELS, "Status")
     _write_sampling_bdf(source, labels=labels, samples=(8, *((16,) * (len(labels) - 1))))
-    monkeypatch.setattr(load_utils, "open_preflight_eeg_file", lambda *_a, **_kw: pytest.fail("Mixed-rate MNE constructor was opened."))
+    monkeypatch.setattr(load_utils, "open_bdf_resource_header", lambda *_a, **_kw: pytest.fail("Mixed-rate MNE constructor was opened."))
     with pytest.raises(ValueError, match="share one sampling rate"):
         read_review_geometry(source, {"max_idx_keep": 64})
 

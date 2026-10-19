@@ -13,7 +13,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from Main_App.Shared.settings_manager import SettingsManager
+from Main_App.settings.settings_manager import SettingsManager
 from Main_App.processing.frequency_domain_qc import is_frequency_domain_output_stale
 from Main_App.projects import FrequencyProtocol
 from Main_App.projects import project as project_module

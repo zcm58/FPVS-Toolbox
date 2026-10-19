@@ -29,10 +29,11 @@ if TYPE_CHECKING:
 
 from Main_App.workers.mp_env import compute_effective_max_workers
 from Main_App.io import load_utils
-from Main_App.io.eeg_geometry import (
-    BIOSEMI64_CHANNELS,
-    BIOSEMI64_MONTAGE_ID,
-    validate_raw_biosemi64_geometry,
+from Main_App.io.acquisition_metadata import (
+    configured_channel_limit,
+    resolve_recording_contract,
+    source_load_kwargs,
+    validate_loaded_geometry,
 )
 from Main_App.processing.analysis_spans import (
     relative_spans_from_plan,
@@ -313,7 +314,7 @@ def _review_worker_count(raw_file_infos: Sequence[Any], max_workers: int | None)
             return 1
         memory = psutil.virtual_memory()
         cap = compute_effective_max_workers(int(memory.total), os.cpu_count() or 1, min(2, max_workers or 2))
-        # Packed BDF samples expand into float64 arrays plus FIR/resampling
+        # Loaded samples expand into float64 arrays plus FIR/resampling
         # scratch arrays. Reserve 24x source bytes and at least 1 GiB per file;
         # leave half of currently available RAM for the GUI and other work.
         estimates = sorted(
@@ -423,33 +424,18 @@ def _identity(info: Any) -> tuple[Path, str, str, str | None, str | None, int | 
 
 
 def _configured_reference_pair(settings: Mapping[str, Any]) -> tuple[str, str]:
-    return (
-        str(settings.get("ref_channel1") or settings.get("ref_chan1") or settings.get("ref_ch1") or "EXG1"),
-        str(settings.get("ref_channel2") or settings.get("ref_chan2") or settings.get("ref_ch2") or "EXG2"),
-    )
+    return resolve_recording_contract(settings).review_reference_pair
 
 
 def _configured_stim_channel(settings: Mapping[str, Any]) -> str:
-    return str(settings.get("stim_channel") or settings.get("stim") or "Status")
+    return resolve_recording_contract(settings).stim_channel
 
 
-def _configured_channel_limit(settings: Mapping[str, Any]) -> int:
-    raw_limit = settings.get("max_idx_keep")
-    if raw_limit is None:
-        raw_limit = settings.get("max_chan_idx_keep")
-    if raw_limit is None:
-        return len(BIOSEMI64_CHANNELS)
-    if isinstance(raw_limit, bool):
-        raise KurtosisReviewScanError("BioSemi64 channel limit must be an integer from 1 through 64.")
+def _configured_channel_limit(settings: Mapping[str, Any]) -> int | None:
     try:
-        limit = int(raw_limit)
+        return configured_channel_limit(settings)
     except (TypeError, ValueError) as exc:
-        raise KurtosisReviewScanError("BioSemi64 channel limit must be an integer from 1 through 64.") from exc
-    if isinstance(raw_limit, float) and not raw_limit.is_integer():
-        raise KurtosisReviewScanError("BioSemi64 channel limit must be an integer from 1 through 64.")
-    if not 1 <= limit <= len(BIOSEMI64_CHANNELS):
-        raise KurtosisReviewScanError("BioSemi64 channel limit must be an integer from 1 through 64.")
-    return limit
+        raise KurtosisReviewScanError(str(exc)) from exc
 
 
 def _event_plan_for_path(
@@ -996,6 +982,7 @@ def scan_kurtosis_review(
         raise KurtosisReviewScanError("Unknown kurtosis review execution backend.")
     if not settings.get("kurtosis_screening_enabled", True):
         return KurtosisReviewScan(results=())
+    resolve_recording_contract(settings).validate_qc({**settings, "kurtosis_screening_enabled": True})
     canonical_event_map, protocol = _validate_review_request(
         raw_file_infos, settings, event_map, raw_channel_qc_by_recording,
     )
@@ -1285,15 +1272,12 @@ def _scan_kurtosis_review_serial(
             if raw is None:
                 review_source_identity = source_content_identity(path, should_cancel=should_cancel)
                 if progress:
-                    progress(f"Loading {path.name} with BioSemi64 geometry", index - 1, total)
+                    progress(f"Loading {path.name} with validated electrode geometry", index - 1, total)
                 raw = load_utils.load_eeg_file(
                     _LoaderLogAdapter(path),
                     str(path),
-                    ref_pair=ref_pair,
-                    first_n_channels=channel_limit,
-                    stim_channel=stim_channel,
-                    electrode_mapping_profile=settings.get("electrode_mapping_profile"),
-                    electrode_montage=BIOSEMI64_MONTAGE_ID,
+                    **source_load_kwargs(settings),
+                    acquisition_settings=dict(settings),
                     **({"preload_in_memory": True} if settings.get("experimental_ram_preload") is True else {}),
                 )
             elif progress:
@@ -1302,13 +1286,7 @@ def _scan_kurtosis_review_serial(
                 raise KurtosisReviewScanError("The EEG loader returned no Raw data.")
             if review_source_identity is None:
                 raise KurtosisReviewScanError("Source content identity is unavailable for diagnostic review.")
-            validate_raw_biosemi64_geometry(
-                raw,
-                expected_retained_channels=BIOSEMI64_CHANNELS[:channel_limit],
-                reference_channels=ref_pair,
-                stim_channel=stim_channel,
-                require_runtime_identity=True,
-            )
+            validate_loaded_geometry(raw, resolve_recording_contract(settings, raw=raw))
             _log_scan_timing(path, "load_and_geometry", load_started)
             if should_cancel and should_cancel():
                 if progress:
@@ -1359,7 +1337,7 @@ def _scan_kurtosis_review_serial(
             file_settings["_fpvs_kurtosis_checkpoint_should_cancel"] = should_cancel
             file_settings.update(
                 {
-                    "electrode_montage": BIOSEMI64_MONTAGE_ID,
+                    "electrode_montage": resolve_recording_contract(settings).montage_id,
                     "max_idx_keep": channel_limit,
                     "_fpvs_source_analysis_span_plan": restricted_plan,
                     "_fpvs_require_analysis_spans": True,

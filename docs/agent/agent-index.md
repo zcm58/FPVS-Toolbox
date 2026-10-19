@@ -78,6 +78,15 @@ fallback), or the no-offscreen-Qt rule.
 - For acquisition/montage, pipeline composition, or Studio integration, start
   with `docs/agent/architecture/hardware-pipeline-studio-roadmap.md`, then the
   matching active plan. Current support and future targets must stay distinct.
+- BIDS admission and shared processing are covered by
+  `docs/agent/exec-plans/active/bids-shared-pipeline.md` and the EEG loading
+  contract. Its quick synthetic comparison is
+  `scripts/manual_diagnostics/compare_bids_pipeline.py`; run it only for an
+  explicitly scoped old/new comparison, not as a routine repo gate.
+  `scripts/manual_diagnostics/compare_project_bids_pipeline.py` runs the same
+  comparison on registered project recordings with optional QC disabled,
+  preserving saved filters/reference settings. It requires a new diagnostic
+  output directory and does not edit the source project's manifest or results.
 - Active plans live in `docs/agent/exec-plans/active/`; read them before
   changing the covered area.
 - Future plans live in `docs/agent/exec-plans/future/`; read them only when
@@ -95,7 +104,7 @@ Route local verification through one command:
 python .agents/scripts/verify.py --scope <scope> --tier focused
 ```
 
-Supported scopes are `gui`, `updates`, `project-io`, `processing`,
+Supported scopes are `repo`, `backend-hardening`, `gui`, `updates`, `project-io`, `processing`,
 `plot-generator`, `publication-maps`, `sequence-figure`,
 `sensitivity-analysis`, `stats`, `free-harmonic-clustering`, `loreta`,
 `figures`, and `legacy-boundary`. Use `--scope repo --tier precommit` for the

@@ -20,7 +20,7 @@ import numpy as np
 import scipy
 from threadpoolctl import threadpool_info
 
-from Main_App.io.eeg_geometry import read_raw_biosemi64_geometry
+from Main_App.io.recorded_eeg_geometry import read_raw_eeg_geometry
 from Main_App.processing.kurtosis_qc import (
     CURRENT_KURTOSIS_CORROBORATOR_REGISTRY, KURTOSIS_AUTHORITY_POLICY_VERSION,
     KURTOSIS_QC_METHOD_VERSION, KurtosisQCEvidence,
@@ -136,7 +136,7 @@ def checkpoint_identity(raw, params: dict, preprocessing_fingerprint: str) -> Ch
         folder = root / ".fpvs_cache" / "prepared_kurtosis" / source_id
         if not folder.resolve().is_relative_to(root):
             return None
-        geometry = read_raw_biosemi64_geometry(raw)
+        geometry = read_raw_eeg_geometry(raw)
         metadata_arrays = {}
         metadata_state = encode_state({
             "raw": raw_state(raw),
@@ -207,7 +207,7 @@ def load_checkpoint(identity: CheckpointIdentity | None, *, should_cancel=None) 
         if _stat(identity.source) != identity.source_stat or (should_cancel and should_cancel()):
             raw.close()
             return None
-        if read_raw_biosemi64_geometry(raw) != state["params"]["_fpvs_geometry"]:
+        if read_raw_eeg_geometry(raw) != state["params"]["_fpvs_geometry"]:
             raw.close()
             return None
         if evidence.scoring_scope.analysis_span_fingerprint != state["params"]["_fpvs_realized_analysis_span_plan"]["fingerprint"]:

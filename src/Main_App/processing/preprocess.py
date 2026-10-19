@@ -1,14 +1,14 @@
 # -*- coding: utf-8 -*-
 """
-Qt-side preprocessing module for the FPVS Toolbox.
+Shared MNE preprocessing engine for the FPVS Toolbox.
 
 This module provides the core preprocessing pipeline for active Main App runs.
 It handles data auditing, referencing, filtering, and automated artifact
 rejection via kurtosis.
 
 Pipeline Order:
-    1. Initial reference (user-selected pair).
-    2. Drop the selected reference pair channels.
+    1. Initial reference (resolved recorded/selected-channel method).
+    2. Drop selected reference channels when required by that method.
     3. Optional channel limit (max_idx_keep; keeps stim if needed).
     4. FIR filter (legacy mapping and kernel).
     5. Optional smart FFT multi-notch line-noise filter.
@@ -33,27 +33,16 @@ from Main_App.diagnostics.audit import (
     end_preproc_audit,
     compare_preproc,
 )
-from Main_App.io.eeg_geometry import (
-    BIOSEMI64_CHANNELS,
-    BIOSEMI64_COORDINATE_FINGERPRINT,
-    BIOSEMI64_GEOMETRY_VERSION,
-    attach_raw_biosemi64_geometry,
-    read_raw_biosemi64_geometry,
-)
 from Main_App.io.recorded_eeg_geometry import (
-    RECORDED_GEOMETRY_VERSION,
-    attach_raw_recorded_geometry,
-    read_raw_eeg_geometry,
     validate_raw_eeg_geometry,
-    validate_raw_recorded_geometry,
 )
-from Main_App.processing.acquisition_policy import (
-    apply_brain_products_reference,
-    brain_products_policy,
-    is_brain_products,
-    policy_fingerprint,
-    validate_brain_products_qc,
+from Main_App.io.acquisition_metadata import (
+    attach_recording_contract,
+    freeze_retained_geometry,
+    resolve_recording_contract,
 )
+from Main_App.io.recording_contract import RecordingContract
+from Main_App.processing.reference import apply_recorded_reference
 from Main_App.processing.fft_multinotch import (
     FFT_MULTINOTCH_COMPONENT_COUNT,
     FFT_MULTINOTCH_HALF_WIDTH_HZ,
@@ -94,21 +83,10 @@ PREPROCESSING_ORDER_VERSION = (
     "filter_then_optional_fft_multinotch_then_downsample_v2"
 )
 
-# Import configuration with a graceful fallback when run standalone
-try:
-    import config  # type: ignore
-except Exception:  # pragma: no cover - fallback for isolated execution
-    class _DummyConfig:
-        DEFAULT_STIM_CHANNEL = "Status"
-
-    config = _DummyConfig()
-    logger.warning(
-        "Warning [preprocess.py]: Could not import config. Using '%s'.",
-        config.DEFAULT_STIM_CHANNEL,
-    )
-
-
-def _build_preproc_fingerprint(params: Dict[str, Any]) -> str:
+def _build_preproc_fingerprint(
+    params: Dict[str, Any], recording_contract: RecordingContract | None = None,
+) -> str:
+    policy = recording_contract or resolve_recording_contract(params)
     hp = params.get("high_pass")
     lp = params.get("low_pass")
     ds = params.get("downsample_rate", params.get("downsample"))
@@ -118,10 +96,10 @@ def _build_preproc_fingerprint(params: Dict[str, Any]) -> str:
     stim = params.get("stim_channel")
     line_noise_enabled = bool(params.get("line_noise_filter_enabled", True))
     line_noise_frequency = params.get("line_noise_frequency_hz", 60)
-    electrode_montage = params.get("electrode_montage", "biosemi64")
+    electrode_montage = params.get("electrode_montage", policy.fingerprint_montage)
     electrode_mapping_profile = params.get(
         "electrode_mapping_profile",
-        "anatomical_labels",
+        policy.fingerprint_mapping,
     )
     source_span_plan = params.get("_fpvs_source_analysis_span_plan")
     source_span_fingerprint = (
@@ -129,10 +107,7 @@ def _build_preproc_fingerprint(params: Dict[str, Any]) -> str:
         if isinstance(source_span_plan, dict)
         else ""
     )
-    geometry_fingerprint = (
-        RECORDED_GEOMETRY_VERSION if is_brain_products(params)
-        else f"{BIOSEMI64_GEOMETRY_VERSION},{BIOSEMI64_COORDINATE_FINGERPRINT}"
-    )
+    geometry_fingerprint = policy.geometry_fingerprint
     fingerprint = (
         f"order={PREPROCESSING_ORDER_VERSION}|hp={hp}|lp={lp}|ds={ds}|"
         f"rz={rz}|ref={r1},{r2}|stim={stim}|"
@@ -144,16 +119,17 @@ def _build_preproc_fingerprint(params: Dict[str, Any]) -> str:
         f"{FFT_MULTINOTCH_COMPONENT_COUNT}"
         + ("|kurtosis_screening=False" if not params.get("kurtosis_screening_enabled", True) else "")
     )
-    if is_brain_products(params):
-        # Keep every historical BioSemi byte stable; new acquisition policies
+    if policy.acquisition_fingerprint:
+        # Keep historical fingerprint bytes stable; additional acquisition policies
         # additionally bind their reference, montage and channel-selection rules.
-        fingerprint += f"|acquisition={policy_fingerprint(params)}"
+        fingerprint += f"|acquisition={policy.acquisition_fingerprint}"
     return fingerprint
 
 
 def _realize_analysis_spans_for_raw(
     raw: mne.io.BaseRaw,
     params: Dict[str, Any],
+    recording_contract: RecordingContract,
 ) -> dict[str, Any] | None:
     """Realize the validated source plan on the resident Raw sample grid."""
 
@@ -182,7 +158,7 @@ def _realize_analysis_spans_for_raw(
             raise AnalysisSpanPlanError(
                 "Exact v3 trigger alignment requires a single recording segment."
             )
-        stim_channel = str(params.get("stim_channel") or config.DEFAULT_STIM_CHANNEL)
+        stim_channel = str(params.get("stim_channel") or recording_contract.stim_channel)
         if stim_channel not in raw.ch_names:
             raise AnalysisSpanPlanError(
                 "Exact v3 trigger alignment after downsampling requires the "
@@ -190,7 +166,7 @@ def _realize_analysis_spans_for_raw(
             )
         events = mne.find_events(
             raw, stim_channel=stim_channel, shortest_event=1, verbose=False,
-            **({"initial_event": True, "consecutive": True} if is_brain_products(params) else {}),
+            **recording_contract.event_kwargs,
         )
         validate_target_analysis_span_markers(realized, events)
     params["_fpvs_realized_analysis_span_plan"] = realized
@@ -356,51 +332,6 @@ def _kurtosis_signal_preview(
         "signal_view": view,
         "preview_method": "temporal_bin_extrema_v1",
     }
-
-
-def _freeze_retained_biosemi64_geometry(
-    raw: mne.io.BaseRaw,
-    params: Dict[str, Any],
-    *,
-    stim_channel: str,
-) -> dict[str, Any]:
-    """Validate and freeze the retained scalp set after intentional drops."""
-
-    if is_brain_products(params):
-        loaded_identity = read_raw_eeg_geometry(raw)
-        if not loaded_identity or loaded_identity.get("hardware_platform") != "brain_products":
-            raise RuntimeError("Brain Products processing requires validated recorded EEG geometry.")
-        identity = attach_raw_recorded_geometry(
-            raw, montage_id=loaded_identity["montage_id"],
-            mapping_profile=loaded_identity["electrode_mapping_profile"],
-        )
-        params["_fpvs_geometry"] = dict(identity)
-        params["_fpvs_retained_scalp_channels"] = list(identity["retained_scalp_channels"])
-        params["_fpvs_retained_scalp_set_fingerprint"] = identity["retained_scalp_set_fingerprint"]
-        return identity
-    loaded_identity = read_raw_biosemi64_geometry(raw)
-    if loaded_identity is None:
-        raise RuntimeError(
-            "Preprocessing requires a Raw loaded through the validated BioSemi64 "
-            "geometry boundary."
-        )
-    retained = tuple(
-        channel for channel in BIOSEMI64_CHANNELS if channel in raw.ch_names
-    )
-    if not retained:
-        raise RuntimeError("No canonical BioSemi64 scalp channels remain for preprocessing.")
-    identity = attach_raw_biosemi64_geometry(
-        raw,
-        electrode_mapping_profile=loaded_identity.get("electrode_mapping_profile"),
-        retained_channels=retained,
-        stim_channel=stim_channel if stim_channel in raw.ch_names else None,
-    )
-    params["_fpvs_geometry"] = dict(identity)
-    params["_fpvs_retained_scalp_channels"] = list(retained)
-    params["_fpvs_retained_scalp_set_fingerprint"] = identity[
-        "retained_scalp_set_fingerprint"
-    ]
-    return identity
 
 
 def _interpolate_current_bads(
@@ -645,6 +576,7 @@ def prepare_kurtosis_review_evidence(
     log_func: Callable[[str], None],
     filename_for_log: str = "UnknownFile",
     *,
+    recording_contract: RecordingContract | None = None,
     direct_bad_channels: Sequence[str] = (),
     copy_raw: bool = True,
     before_kurtosis_scoring: Callable[[int, int, int, int, bool, int], None] | None = None,
@@ -676,6 +608,7 @@ def prepare_kurtosis_review_evidence(
             scan_params,
             log_func,
             filename_for_log,
+            **({"recording_contract": recording_contract} if recording_contract is not None else {}),
             **({"before_kurtosis_scoring": before_kurtosis_scoring}
                if before_kurtosis_scoring is not None else {}),
         )
@@ -707,14 +640,15 @@ def _finish_preprocessing_at_kurtosis(
     raw, params, log_func, filename_for_log, *, orig_sfreq, geometry_identity,
     debug_enabled, checkpoint=None, cached_evidence=None,
     before_kurtosis_scoring=None, original_input_live_bytes=0,
-    before_processing_finish=None,
+    before_processing_finish=None, recording_contract: RecordingContract,
 ):
     """Resume the same calculation/decision/repair stages after preparation."""
 
+    policy = recording_contract
     if before_processing_finish is not None:
         before_processing_finish(raw)
     reject_thresh = params.get("reject_thresh")
-    stim_ch = params.get("stim_channel", config.DEFAULT_STIM_CHANNEL)
+    stim_ch = params.get("stim_channel", policy.stim_channel)
     num_kurtosis_bads_identified = 0
     # 7) Kurtosis rejection & interpolation
     params["_fpvs_kurtosis_bad_channels"] = []
@@ -729,7 +663,7 @@ def _finish_preprocessing_at_kurtosis(
     params.pop("_fpvs_condition_interpolation_provenance", None)
     condition_repairs = None
     bad_k_auto: List[str] = []
-    if reject_thresh and params.get("kurtosis_screening_enabled", not is_brain_products(params)):
+    if reject_thresh and params.get("kurtosis_screening_enabled", policy.kurtosis_screening_supported):
         log_func(
             f"Kurtosis screening for {filename_for_log} "
             f"(Z > {reject_thresh})..."
@@ -906,7 +840,7 @@ def _finish_preprocessing_at_kurtosis(
             description="bads",
         )
     else:
-        disabled = not params.get("kurtosis_screening_enabled", not is_brain_products(params))
+        disabled = not params.get("kurtosis_screening_enabled", policy.kurtosis_screening_supported)
         if disabled:
             params["_fpvs_kurtosis_qc_evidence"] = {
                 "evaluation_status": "not_evaluated",
@@ -965,14 +899,14 @@ def _finish_preprocessing_at_kurtosis(
                 f"No good EEG channels."
             )
     except Exception as e:
-        if is_brain_products(params):
-            raise RuntimeError(f"Brain Products final average reference failed: {e}") from e
+        if policy.strict_processing_errors:
+            raise RuntimeError(f"{policy.acquisition_label} final average reference failed: {e}") from e
         log_func(
             f"Warn: Average reference failed for {filename_for_log}: {e}"
         )
 
-    if is_brain_products(params) and not average_reference_applied:
-        raise RuntimeError("Brain Products processing requires a successful final average reference.")
+    if policy.strict_processing_errors and not average_reference_applied:
+        raise RuntimeError(f"{policy.acquisition_label} processing requires a successful final average reference.")
     if condition_repairs is not None:
         if not average_reference_applied:
             raise RuntimeError("Condition-local interpolation requires successful final average reference.")
@@ -1042,6 +976,7 @@ def perform_preprocessing(
     log_func: Callable[[str], None],
     filename_for_log: str = "UnknownFile",
     *,
+    recording_contract: RecordingContract | None = None,
     before_kurtosis_scoring: Callable[[int, int, int, int, bool, int], None] | None = None,
     before_processing_finish: Callable[[mne.io.BaseRaw], None] | None = None,
 ) -> Tuple[Optional[mne.io.BaseRaw], int]:
@@ -1076,7 +1011,10 @@ def perform_preprocessing(
         ValueError: If filter cutoffs are logically invalid (HPF >= LPF).
     """
     raw = raw_input
-    brain_products = is_brain_products(params)
+    # Legacy direct callers resolve once at admission; production callers pass
+    # the immutable contract explicitly, so the engine never interprets hardware.
+    policy = recording_contract or resolve_recording_contract(params, raw=raw)
+    attach_recording_contract(raw, recording_contract=policy)
 
     # Ensure per-run audit keys do not leak across files when params is reused
     params.pop("_fpvs_preprocessing_error", None)
@@ -1092,7 +1030,7 @@ def perform_preprocessing(
 
     debug_enabled = bool(params.get("debug_preproc", False)) or logger.isEnabledFor(logging.DEBUG)
 
-    fingerprint_in = _build_preproc_fingerprint(params)
+    fingerprint_in = _build_preproc_fingerprint(params, policy)
     fingerprint_message = f"PREPROC_FINGERPRINT_PREPROCESS_IN {fingerprint_in}"
     log_func(fingerprint_message)
     logger.debug(fingerprint_message)
@@ -1130,21 +1068,15 @@ def perform_preprocessing(
             f"low_pass={lp}."
         )
     reject_thresh = params.get("reject_thresh")
-    ref1 = params.get("ref_channel1") or "EXG1"
-    ref2 = params.get("ref_channel2") or "EXG2"
-    max_keep = params.get("max_idx_keep")
-    if brain_products:
-        policy = brain_products_policy(params)
-        ref1 = ref2 = None
-        max_keep = policy["max_idx_keep"]
-    stim_ch = params.get("stim_channel", config.DEFAULT_STIM_CHANNEL)
+    legacy_pair = policy.initial_reference_mode == "legacy_pair"
+    ref1, ref2 = policy.initial_reference_channels if legacy_pair else (None, None)
+    max_keep = policy.max_idx_keep
+    stim_ch = params.get("stim_channel", policy.stim_channel)
 
     num_kurtosis_bads_identified = 0
 
     try:
-        if brain_products:
-            validate_raw_recorded_geometry(raw)
-            validate_brain_products_qc(params)
+        policy.validate(raw, params)
         # Module-level logger entry for high-level preprocessing start
         try:
             logger.debug(
@@ -1182,6 +1114,7 @@ def perform_preprocessing(
                 before_kurtosis_scoring=before_kurtosis_scoring,
                 original_input_live_bytes=8 * len(raw.ch_names) * int(raw.n_times) if raw.preload else 0,
                 before_processing_finish=before_processing_finish,
+                recording_contract=policy,
             )
         params["_fpvs_kurtosis_checkpoint_status"] = "miss" if checkpoint is not None else "disabled"
         orig_ch_names = list(raw.info["ch_names"])
@@ -1212,10 +1145,10 @@ def perform_preprocessing(
                 f"'{stim_ch}' is NOT in initial channel list."
             )
 
-        # 1) Initial reference (user-selected pair; e.g., EXG1/EXG2 or EXG3/EXG4)
-        if brain_products:
-            apply_brain_products_reference(raw, params)
-            log_func(f"Brain Products initial reference: {policy['initial_reference']}.")
+        # 1) Initial reference using the admitted method and channel roles.
+        if not legacy_pair:
+            apply_recorded_reference(raw, params, policy)
+            log_func(f"{policy.acquisition_label} initial reference: {policy.initial_reference_mode}.")
         elif ref1 and ref2 and ref1 in orig_ch_names and ref2 in orig_ch_names:
             try:
                 coerced = _coerce_refs_to_eeg_if_needed(raw, (ref1, ref2))
@@ -1293,17 +1226,9 @@ def perform_preprocessing(
                 f"DEBUG [preprocess for {filename_for_log}]: Channel names BEFORE drop logic "
                 f"({len(current_names_before_drop)}): {current_names_before_drop}"
             )
-        current_scalp_channels = (
-            [raw.ch_names[int(pick)] for pick in mne.pick_types(raw.info, eeg=True, exclude=[])]
-            if brain_products else [
-                channel for channel in current_names_before_drop if channel in BIOSEMI64_CHANNELS
-            ]
-        )
+        current_scalp_channels = policy.scalp_channels(raw)
         if max_keep is not None and 0 < max_keep < len(current_scalp_channels):
-            present_scalp = set(current_scalp_channels)
-            canonical_scalp_order = current_scalp_channels if brain_products else [
-                channel for channel in BIOSEMI64_CHANNELS if channel in present_scalp
-            ]
+            canonical_scalp_order = policy.ordered_scalp_channels(raw)
             retained_scalp = set(canonical_scalp_order[:max_keep])
             final_keep = [
                 channel
@@ -1372,10 +1297,11 @@ def perform_preprocessing(
                 extra={"file": filename_for_log},
             )
 
-        geometry_identity = _freeze_retained_biosemi64_geometry(
+        geometry_identity = freeze_retained_geometry(
             raw,
             params,
             stim_channel=str(stim_ch),
+            recording_contract=policy,
         )
         logger.debug(
             "preprocess_geometry_frozen",
@@ -1431,7 +1357,7 @@ def perform_preprocessing(
                     )
                     log_func(nyquist_warning)
                     logger.warning(nyquist_warning)
-                fingerprint_before_filter = _build_preproc_fingerprint(params)
+                fingerprint_before_filter = _build_preproc_fingerprint(params, policy)
                 if fingerprint_before_filter != fingerprint_in:
                     mutation_warning = (
                         "PREPROC_FINGERPRINT_MUTATION_WARNING "
@@ -1519,8 +1445,8 @@ def perform_preprocessing(
                     )
                     log_func(mismatch_warning)
                     logger.warning(mismatch_warning)
-                    if brain_products:
-                        raise RuntimeError("Applied Brain Products filter cutoffs do not match the project settings.")
+                    if policy.strict_processing_errors:
+                        raise RuntimeError(f"Applied {policy.acquisition_label} filter cutoffs do not match the project settings.")
                 log_func(
                     f"DEBUG [raw.info cutoffs {filename_for_log}]: "
                     f"highpass={raw.info.get('highpass')} "
@@ -1529,8 +1455,8 @@ def perform_preprocessing(
                 log_func(f"Filter OK for {filename_for_log}.")
             except Exception as e:
                 checkpoint = None
-                if brain_products:
-                    raise RuntimeError(f"Brain Products filtering failed: {e}") from e
+                if policy.strict_processing_errors:
+                    raise RuntimeError(f"{policy.acquisition_label} filtering failed: {e}") from e
                 log_func(
                     f"Warn: Filter failed for {filename_for_log}: {e}"
                 )
@@ -1665,8 +1591,8 @@ def perform_preprocessing(
                         )
                 except Exception as resample_err:
                     checkpoint = None
-                    if brain_products:
-                        raise RuntimeError(f"Brain Products resampling failed: {resample_err}") from resample_err
+                    if policy.strict_processing_errors:
+                        raise RuntimeError(f"{policy.acquisition_label} resampling failed: {resample_err}") from resample_err
                     log_func(
                         f"Warn: Resampling failed for {filename_for_log}: "
                         f"{resample_err}"
@@ -1708,12 +1634,13 @@ def perform_preprocessing(
                 extra={"file": filename_for_log},
             )
 
-        _realize_analysis_spans_for_raw(raw, params)
+        _realize_analysis_spans_for_raw(raw, params, policy)
 
         return _finish_preprocessing_at_kurtosis(
             raw, params, log_func, filename_for_log, orig_sfreq=orig_sfreq,
             geometry_identity=geometry_identity, debug_enabled=debug_enabled,
             checkpoint=checkpoint,
+            recording_contract=policy,
             before_kurtosis_scoring=before_kurtosis_scoring,
             before_processing_finish=before_processing_finish,
         )

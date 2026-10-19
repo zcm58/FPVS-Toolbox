@@ -16,17 +16,20 @@ import zipfile
 
 import numpy as np
 
+from Main_App.io.acquisition_metadata import (
+    resolve_recording_contract, source_identity, source_load_kwargs,
+)
+
 logger = logging.getLogger(__name__)
 _MODES = {"raw", "initial_reference", "prepared", "reference_comparison"}
 
 
 def _reference_pair(params):
-    return tuple(str(params.get(f"ref_channel{i}") or params.get(f"ref_chan{i}")
-                     or params.get(f"ref_ch{i}") or f"EXG{i}") for i in (1, 2))
+    return resolve_recording_contract(params).load_reference_channels
 
 
 def _stim_channel(params):
-    return str(params.get("stim_channel") or params.get("stim") or "Status")
+    return resolve_recording_contract(params).stim_channel
 
 
 @dataclass(frozen=True)
@@ -72,7 +75,7 @@ class QcSignalViewResult:
     detail_times: tuple[float, ...]
     traces: tuple[QcSignalTrace, ...]
     mode_label: str
-    reference_pair: tuple[str, str]
+    reference_pair: tuple[str, ...]
     diagnostics: Mapping[str, object] = field(default_factory=dict)
     verified_checkpoint: tuple[object, ...] = ()
     overview_cache: tuple[object, ...] = ()
@@ -84,7 +87,8 @@ def request_from_source(path, project_root, params, *, channel="", spans=(), spa
     keys = ("ref_channel1", "ref_channel2", "ref_chan1", "ref_chan2", "ref_ch1", "ref_ch2",
             "stim_channel", "stim", "electrode_mapping_profile", "electrode_montage",
             "first_n_channels", "max_idx_keep", "max_chan_idx_keep")
-    loader_params = {key: deepcopy(params[key]) for key in keys if key in params}
+    loader_params = {**source_identity(params),
+                     **{key: deepcopy(params[key]) for key in keys if key in params}}
     reference_requested = str(channel).casefold() in {ref.casefold() for ref in _reference_pair(loader_params)}
     return QcSignalViewRequest(
         Path(path), Path(project_root), loader_params, "" if reference_requested else str(channel),
@@ -282,7 +286,7 @@ def envelope_from_reader(reader: Callable, *, start: int, stop: int, sfreq: floa
     edges = np.linspace(start, stop, min(int(bins), stop - start) + 1, dtype=np.int64)
     lows = np.full((len(names), len(edges) - 1), np.nan)
     highs = lows.copy()
-    # One bounded sequential pass; never issue a BDF read per plotted pixel.
+    # One bounded sequential pass; never issue a source read per plotted pixel.
     for block_start in range(start, stop, 131072):
         _cancel(should_cancel)
         block_stop = min(stop, block_start + 131072)
@@ -308,7 +312,7 @@ def _nearby(channels, positions, channel, reference_pair):
     candidates = []
     if origin.shape == (3,) and np.all(np.isfinite(origin)) and np.linalg.norm(origin):
         for name in channels:
-            if name == channel or name in reference_pair or name.upper().startswith("EXG"):
+            if name == channel or name in reference_pair:
                 continue
             point = np.asarray(positions.get(name, ()), dtype=float)
             if point.shape == (3,) and np.all(np.isfinite(point)) and np.linalg.norm(point):
@@ -316,13 +320,13 @@ def _nearby(channels, positions, channel, reference_pair):
     return tuple([channel, *[name for _distance, name in sorted(candidates)[:3]]])
 
 
-def _spatial_support(request, reader, channels, positions, reference_pair, start, stop, sfreq, should_cancel):
+def _spatial_support(request, reader, channels, positions, reference_pair, start, stop, sfreq, should_cancel, *, scalp_channels):
     if not request.spatial_holdout:
         return {}
     from Main_App.processing.qc_review_diagnostics import estimate_qc_spatial_support
 
-    names = [name for name in channels if name in positions and name not in reference_pair
-             and not name.upper().startswith("EXG") and np.linalg.norm(positions[name]) > 0
+    names = [name for name in scalp_channels if name in positions and name not in reference_pair
+             and np.linalg.norm(positions[name]) > 0
              and np.all(np.isfinite(positions[name]))]
     required = list(dict.fromkeys([*names, *[ref for ref in reference_pair if ref in channels]]))
     picks = [channels.index(name) for name in required]
@@ -336,7 +340,7 @@ def _spatial_support(request, reader, channels, positions, reference_pair, start
             continue
         values = reader(picks, block_start, block_stop)[:, chosen - block_start]
         scalp = values[:len(names)]
-        if request.mode == "initial_reference":
+        if request.mode == "initial_reference" and reference_pair:
             refs = values[[required.index(name) for name in reference_pair]]
             scalp = scalp - refs.mean(axis=0)
         blocks.append(scalp)
@@ -350,10 +354,13 @@ def _spatial_support(request, reader, channels, positions, reference_pair, start
             "sampling": "Evenly sampled current window; spatial comparison only, not transient detection."}
 
 
-def _read_view(request, reader, channels, sfreq, n_times, positions, reference_pair, should_cancel, *, source_signature=()):
+def _read_view(request, reader, channels, sfreq, n_times, positions, reference_pair, should_cancel, *, source_signature=(), scalp_channels=None):
     reference_pair = tuple(next((name for name in channels if name.casefold() == ref.casefold()), ref)
                            for ref in reference_pair)
-    available = tuple(name for name in channels if name not in reference_pair and not name.upper().startswith("EXG")
+    if scalp_channels is None:
+        scalp_channels = resolve_recording_contract(request.params).canonical_scalp_order
+    scalp_set = set(channels if scalp_channels is None else scalp_channels)
+    available = tuple(name for name in channels if name in scalp_set and name not in reference_pair
                       and name.casefold() != _stim_channel(request.params).casefold())
     channel = next((name for name in available if name.casefold() == request.channel.casefold()), "") if request.channel else next(iter(available), "")
     if not channel:
@@ -373,8 +380,10 @@ def _read_view(request, reader, channels, sfreq, n_times, positions, reference_p
     selected = _nearby(available, positions, channel, reference_pair)
     names = selected
     if request.mode == "reference_comparison":
-        names = (f"{channel} · acquisition", f"{channel} · intended reference", *reference_pair,
-                 f"{reference_pair[0]} − {reference_pair[1]}")
+        if not reference_pair:
+            raise ValueError("Reference comparison requires selected reference electrodes.")
+        difference = (f"{reference_pair[0]} − {reference_pair[1]}",) if len(reference_pair) == 2 else ()
+        names = (f"{channel} · acquisition", f"{channel} · intended reference", *reference_pair, *difference)
     indices = [channels.index(name) for name in dict.fromkeys((*selected, *reference_pair)) if name in channels]
     loaded_names = [channels[i] for i in indices]
     if request.mode in {"initial_reference", "reference_comparison"} and any(ref not in loaded_names for ref in reference_pair):
@@ -383,12 +392,13 @@ def _read_view(request, reader, channels, sfreq, n_times, positions, reference_p
     def transformed(start, stop):
         values = reader(indices, start, stop)
         scalp = values[[loaded_names.index(name) for name in selected]]
-        if request.mode == "prepared" or request.mode == "raw":
+        if request.mode == "prepared" or request.mode == "raw" or not reference_pair:
             return scalp
         refs = values[[loaded_names.index(name) for name in reference_pair]]
         referenced = scalp - refs.mean(axis=0)
         if request.mode == "reference_comparison":
-            return np.vstack((scalp[0], referenced[0], refs, refs[0] - refs[1]))
+            difference = (refs[0] - refs[1],) if len(reference_pair) == 2 else ()
+            return np.vstack((scalp[0], referenced[0], refs, *difference))
         return referenced
 
     overview_key = (source_signature, request.mode, channel, left, right, sfreq)
@@ -408,14 +418,16 @@ def _read_view(request, reader, channels, sfreq, n_times, positions, reference_p
         transformed, start=start, stop=max(start + 1, stop), sfreq=sfreq,
         names=names, bins=1000, should_cancel=should_cancel,
     )
+    reference_label = (f"Intended initial reference ({' + '.join(reference_pair)}) / {len(reference_pair)} · unfiltered"
+                       if reference_pair else "Recorded reference · unfiltered")
     mode_label = {
         "raw": "Raw acquisition · no software reference or filtering",
-        "initial_reference": f"Intended initial reference ({reference_pair[0]} + {reference_pair[1]}) / 2 · unfiltered",
-        "reference_comparison": "Reference comparison · raw acquisition, intended reference, and recorded reference pair",
+        "initial_reference": reference_label,
+        "reference_comparison": "Reference comparison · raw acquisition, intended reference, and reference electrodes",
         "prepared": "Prepared signal · initial reference, filtering and downsampling; before interpolation/final average reference",
     }[request.mode]
     spatial_support = _spatial_support(request, reader, channels, positions, reference_pair,
-                                       start, max(start + 1, stop), sfreq, should_cancel)
+                                       start, max(start + 1, stop), sfreq, should_cancel, scalp_channels=available)
     return QcSignalViewResult(channel, available, labels, spans, index, start / sfreq, stop / sfreq,
                               overview_times, overview_trace, times, traces, mode_label, reference_pair,
                               overview_cache=(overview_key, overview_times, overview_trace), spatial_support=spatial_support)
@@ -450,33 +462,33 @@ def load_qc_signal_view(request: QcSignalViewRequest, *, should_cancel=None) -> 
     before = _signature(request.path)
     if request.prepared and tuple(request.prepared.get("source_stat", ())) != before:
         raise ValueError("Recording changed since the current kurtosis review. Run QC again before inspecting its evidence.")
-    limit = next((request.params[key] for key in ("first_n_channels", "max_idx_keep", "max_chan_idx_keep")
-                  if request.params.get(key) is not None), 64)
-    if isinstance(limit, bool) or (isinstance(limit, float) and not limit.is_integer()) or not 1 <= int(limit) <= 64:
-        raise ValueError("Signal inspection requires the configured scalp channel limit (1–64).")
+    load_settings = dict(request.params)
+    if load_settings.get("first_n_channels") is not None:
+        load_settings["max_idx_keep"] = load_settings["first_n_channels"]
     host = SimpleNamespace(
         currentProject=SimpleNamespace(preprocessing=dict(request.params)),
         log=lambda message, **_kwargs: logger.debug("qc_signal_view_load message=%s", message),
     )
     with open_preflight_eeg_file(
-        host, request.path, ref_pair=ref_pair, first_n_channels=int(limit),
-        stim_channel=_stim_channel(request.params),
-        electrode_mapping_profile=request.params.get("electrode_mapping_profile"),
-        electrode_montage=str(request.params.get("electrode_montage") or "biosemi64"),
+        host, request.path, **source_load_kwargs(load_settings),
+        acquisition_settings={**request.params, "project_root": str(request.project_root)},
     ) as raw:
         if raw is None:
             raise ValueError("The recording could not be opened for signal inspection.")
         positions = {name: raw.info["chs"][i]["loc"][:3] for i, name in enumerate(raw.ch_names)}
+        contract = resolve_recording_contract(load_settings, raw=raw)
+        scalp_channels = contract.scalp_channels(raw)
         result = _read_view(request, lambda picks, start, stop: raw.get_data(picks=picks, start=start, stop=stop),
                             raw.ch_names, float(raw.info["sfreq"]), int(raw.n_times), positions,
-                            ref_pair, should_cancel, source_signature=tuple(current_source.items()))
+                            ref_pair, should_cancel, source_signature=tuple(current_source.items()),
+                            scalp_channels=scalp_channels)
         if request.diagnostics:
             result = replace(result, diagnostics=request.diagnostics)
         else:
             try:
                 from Main_App.processing.qc_review_diagnostics import build_qc_review_diagnostics
 
-                names = tuple(dict.fromkeys((*_nearby(raw.ch_names, positions, result.channel, ref_pair), *ref_pair)))
+                names = tuple(dict.fromkeys((*_nearby(scalp_channels, positions, result.channel, ref_pair), *ref_pair)))
                 sfreq = float(raw.info["sfreq"])
                 start, stop = round(result.start_seconds * sfreq), round(result.stop_seconds * sfreq)
                 samples = raw.get_data(picks=list(names), start=start, stop=stop)

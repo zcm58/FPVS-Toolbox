@@ -43,7 +43,7 @@ foundations must be identified explicitly; they are not shipped capabilities.
 Use the release ledger for installer evidence and the execution-plan index for
 remaining work. Historical review receipts apply only to their named revision.
 
-## Moved Knowledge Files
+## Focused Knowledge Files
 
 - `design-docs/DESIGN.md`: design-system and UX guidance.
 - `design-docs/FRONTEND.md`: PySide6 frontend implementation guidance.
@@ -53,6 +53,6 @@ remaining work. Historical review receipts apply only to their named revision.
 - `quality/QUALITY_SCORE.md`: current quality posture and gaps.
 - `quality/RELIABILITY.md`: reliability and verification expectations.
 - `quality/SECURITY.md`: security and privacy boundaries.
-- `architecture/legacy-quarantine-audit.md`: legacy quarantine audit notes.
+- `architecture/legacy-boundaries.md`: current retirement and compatibility boundaries.
 
 Keep this page compact. Add details to focused docs, not here.

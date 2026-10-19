@@ -20,8 +20,8 @@ import Main_App.io.load_utils as load_utils
 import Main_App.gui.processing_inputs as processing_inputs
 import Main_App.gui.processing_workflows as processing_workflows
 import Main_App.processing.processing as processing
-import Main_App.Shared.post_process as post_process
-from Main_App.Shared import user_messages
+import Main_App.exports.post_process as post_process
+from Main_App.gui import user_messages
 import Main_App.Shared.processing_mixin as processing_mixin
 import threading
 
@@ -102,6 +102,25 @@ def _create_project(root: Path) -> Project:
 
 
 # ---------------------- tests ----------------------
+
+def test_processing_timer_uses_repeating_queue_poll(tmp_path, qtbot, monkeypatch):
+    monkeypatch.setenv("FPVS_CONFIG_HOME", str(tmp_path / "config"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-config"))
+    _stub_processing(monkeypatch, tmp_path)
+
+    from Main_App.gui.main_window import MainWindow
+
+    window = MainWindow()
+    qtbot.addWidget(window)
+    timer = window._processing_timer
+
+    assert not timer.isSingleShot()
+    assert callable(window._periodic_queue_check)
+    assert timer.receivers("2timeout()") > 0
+    timer.start(window._POLL_INTERVAL_MS)
+    assert timer.interval() >= 100
+    timer.stop()
+
 
 @pytest.mark.parametrize("debug", [False, True])
 def test_main_window_processing_runs(tmp_path, qtbot, monkeypatch, debug):

@@ -22,14 +22,15 @@ def open_brain_products_raw(
     stim_channel: str = "Status",
 ) -> Any:
     from Main_App.io.brain_products import (
-        close_brain_products_raw, read_brain_products_raw, validate_electrical_channel_units,
+        close_brain_products_raw, validate_electrical_channel_units,
     )
     from Main_App.io.recorded_eeg_geometry import attach_raw_recorded_geometry
     from Main_App.projects.hardware import require_hardware_ready
 
     require_hardware_ready(settings, paths=(Path(path),))
-    raw = read_brain_products_raw(
-        path, preload=preload, event_codes=None, status_channel=stim_channel,
+    from Main_App.io.bids_loader import read_project_bids_raw
+    raw = read_project_bids_raw(
+        app, path, settings=settings, preload=preload, stim_channel=stim_channel,
     )
     try:
         roles = settings.get("channel_types") or {}
@@ -47,6 +48,8 @@ def open_brain_products_raw(
             raw, montage_id=montage,
             template_montage=None if montage == "recorded" else montage,
         )
+        from Main_App.io.acquisition_metadata import attach_recording_contract
+        attach_recording_contract(raw, settings)
         app.log(
             f"Brain Products recording loaded: {len(raw.ch_names)} channels "
             f"at {raw.info['sfreq']:g} Hz."

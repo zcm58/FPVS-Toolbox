@@ -30,7 +30,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from Main_App.Shared.settings_manager import SettingsManager
+from Main_App.settings.settings_manager import SettingsManager
 from Main_App.gui import main_window as main_window_module
 from Main_App.gui.components import ActionRow
 from Main_App.gui.components import SectionCard

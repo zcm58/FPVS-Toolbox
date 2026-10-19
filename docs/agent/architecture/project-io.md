@@ -1,5 +1,15 @@
 # Project I/O Architecture
 
+## Project-local BIDS admission
+
+All production recording loads carry the active project root into
+`Main_App.io.bids_loader`. Imported datasets and their content-verified receipts
+live under that root's `.fpvs_cache/bids-import/`. They supplement original
+recordings and preserve canonical participant/recording identities in
+`project.json`; internal BIDS cache subject labels are not participant IDs for
+Stats, groups, exclusions, or exports. Full/lazy/prefetch routes share the same
+admission boundary. See [format, precision, and cache contracts](eeg-loading-contract.md#shared-import-boundary).
+
 ## Project hardware selection
 
 `Main_App.projects.hardware` owns the confirmed platform and recording-format
@@ -684,17 +694,21 @@ Rules:
 - Handle `QFileDialog` Cancel without exceptions or stale UI state.
 - Treat repeated operations and existing output files as normal user behavior.
 - File-selection dialogs must use PySide6 `QFileDialog`. Single-file mode
-  accepts only `.bdf` files inside the active project's registered raw source:
+  accepts `.bdf`, `.vhdr`, and `.bvrh` recording entrypoints inside the active
+  project's registered raw source:
   the input folder for single-group projects, or a registered group raw folder
   for multi-group projects. It updates `data_paths`, `_selected_bdf`, the input
   line edit, logs, and Start enabled state without changing project paths.
 - Loading a multi-group project must not silently recreate missing registered
   raw folders; missing registered raw folders hard-block processing regardless
   of lock state.
-- `Reprocess All` may delete generated Excel workbook files only under the
-  managed Excel output root. It must preserve condition/group directories and
-  non-workbook files, then recreate the root before processing. Incremental
-  stale reruns delete only the planned participant's expected Excel outputs.
+- Confirmed `Reprocess All` clears generated workbook/native `.fpvs` anchors
+  and managed numerical companions under the managed Excel output root, plus
+  the explicitly enumerated downstream output folders and processed-data QC
+  reports in `processing_ledger.py`. It preserves source recordings, settings,
+  logs, preflight review metadata, and unrelated files in the Excel root.
+  Incremental stale reruns remove only the selected participant's expected
+  anchors/companions and ledger-recorded source derivatives.
 - User-facing warnings/errors must use PySide6-safe message helpers, not Tk dialogs. Worker/background callers should log rather than block on a GUI popup.
 
 Focused local verification:

@@ -633,7 +633,7 @@ def test_saved_legacy_full_fft_schema_requires_eeg_reprocessing(
 
     with pytest.raises(
         FullFftProvenanceStaleError,
-        match="predates the current BioSemi64 and project-frequency-protocol contract",
+        match="predates the current EEG geometry and project-frequency-protocol contract",
     ):
         require_current_project_full_fft_provenance(root)
 

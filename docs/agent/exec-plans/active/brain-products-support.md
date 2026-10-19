@@ -1,6 +1,10 @@
 # Brain Products processing support
 
-Branch: `codex/brain-products-support`, based on `codex/v3.0.1-release`.
+Implementation branch: `codex/brain-products-support`, based on
+`codex/v3.0.1-release`. Status reviewed 2026-10-19: implementation is complete;
+representative laboratory and visible acceptance remain pending. The subsequent
+[BIDS/shared-pipeline work](bids-shared-pipeline.md) owns current loading changes.
+These branch names record provenance, not instructions to switch checkouts.
 
 ## Scope and acceptance
 
@@ -20,7 +24,8 @@ Branch: `codex/brain-products-support`, based on `codex/v3.0.1-release`.
   currently documented Studio interchange already supplies that field.
 - Add focused unit/integration coverage and CI-only GUI confirmation coverage;
   run local non-GUI gates and document visible acceptance steps.
-- Commit and push the feature branch; do not merge main or publish a release.
+- Release integration and publication require the separately scoped release
+  acceptance; this plan does not authorize publishing an update.
 
 ## Work areas
 

@@ -5,6 +5,8 @@ qt_registry = "tests/qt_test_files.txt"
 audits = ["paths", "protected", "stats-structure"]
 tests = [
   "tests/audit/test_backend_import_boundaries.py",
+  "tests/audit/test_blas_thread_defaults.py",
+  "tests/audit/test_permission_safe_settings.py",
   "tests/project_io/test_project_manifest_transactions.py",
   "tests/project_io/test_project_manifest_loading.py",
   "tests/project_io/test_atomic_write_security.py",
@@ -99,6 +101,7 @@ tests = [
   "tests/test_brain_products_reader.py",
   "tests/project_io/test_project_hardware.py",
   "tests/project_io/test_brain_products_sources.py",
+  "tests/project_io/test_bids_import.py",
   "tests/project_io/test_bdf_format.py",
   "tests/project_io/test_recording_inspection.py",
   "tests/project_io/test_unicorn_units.py",
@@ -251,6 +254,10 @@ tests = [
   "tests/processing/test_removed_electrode_detection.py",
   "tests/processing/test_roi_settings.py",
   "tests/processing/test_shared_load_utils.py",
+  "tests/processing/test_bids_loader_integration.py",
+  "tests/processing/test_acquisition_policy_contract.py",
+  "tests/processing/test_generic_recording_pipeline.py",
+  "tests/processing/test_generic_geometry_metadata.py",
   "tests/processing/test_brain_products_pipeline.py",
   "tests/processing/test_brain_products_integration.py",
   "tests/processing/test_hardware_capabilities.py",
@@ -436,6 +443,6 @@ manual_smoke = []
 
 [scopes.legacy-boundary]
 audits = ["protected", "source-localization", "source-localization-refs"]
-tests = ["tests/audit/test_fpvs_app_quarantine.py", "tests/audit/test_phase0_compat_symbols.py"]
+tests = ["tests/audit/test_fpvs_app_quarantine.py", "tests/audit/test_canonical_runtime_owners.py"]
 include = ["src/Main_App/**", "src/Tools/**", "tests/audit/**"]
 manual_smoke = []

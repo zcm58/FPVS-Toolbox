@@ -15,15 +15,15 @@ not a protected black box:
 
 - `src/Tools/SourceLocalization/**` must stay empty of source files.
 - The app must not add GUI actions, settings, tests, imports, or quarantine-tree dependencies for this removed feature.
-- The new `src/Tools/LORETA_Visualizer/**` tool is a separately scoped
-  source-visualization branch. It must not consult, copy, import, or inherit
+- The current `src/Tools/LORETA_Visualizer/**` is a separate active tool.
+  It must not consult, copy, import, or inherit
   design decisions from the removed Source Localization/eLORETA code.
 - In that separate tool, renderer and payload helpers display or adapt prepared
   values only. Existing calculations belong in its isolated `source_producers/`
   package, including the normal Hauk-informed L2-MNE source-PSD path and
   legacy/exploratory workbook producers. Do not move inverse solutions or source
   statistics into renderer, mesh, payload, or GUI helpers.
-- The new visualizer may fetch external fsaverage data through MNE, but durable
+- The visualizer may fetch external fsaverage data through MNE, but durable
   automatic installs belong in the ignored repository-root `.fpvs_cache`
   directory, never in active source, docs, package data, or quarantine paths.
 
@@ -33,7 +33,7 @@ Rules:
 - Prefer thin adapters or caller-side normalization in purpose-based Main App packages.
 - When old behavior already has a current-app replacement, use that replacement rather than adding compatibility paths.
 - Do not revive Source Localization/eLORETA imports, tests, settings, or UI behavior unless the user explicitly asks to restore that feature.
-- Do not treat the new LORETA Visualizer as permission to change preprocessing,
+- Do not treat LORETA Visualizer work as permission to change preprocessing,
   Stats methods, project manifests, BDF loading, diagnostics, or active
   project I/O.
 - Keep compatibility exports in `src/Main_App/__init__.py` stable unless the task is specifically about imports.

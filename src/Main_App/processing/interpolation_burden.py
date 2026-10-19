@@ -9,10 +9,7 @@ import hashlib
 import json
 from typing import Any
 
-from Main_App.io.eeg_geometry import (
-    BioSemi64GeometryError,
-    biosemi64_geometry_identity,
-)
+from Main_App.io.geometry_metadata import source_geometry_definition
 from Main_App.processing.preprocessing_outcome import (
     INTERPOLATION_STATUS_NOT_NEEDED,
     INTERPOLATION_STATUS_SUCCEEDED,
@@ -339,32 +336,25 @@ def build_interpolation_burden(
         )
     if not isinstance(geometry_identity, Mapping):
         return _unavailable(
-            "Eligible BioSemi64 scalp-channel provenance was not recorded.",
+            "Eligible EEG scalp-channel provenance was not recorded.",
             outcome=outcome,
         )
     raw_retained = geometry_identity.get("retained_scalp_channels")
     if not isinstance(raw_retained, list):
         return _unavailable(
-            "Eligible BioSemi64 scalp-channel provenance was not recorded.",
+            "Eligible EEG scalp-channel provenance was not recorded.",
             outcome=outcome,
         )
     try:
-        if geometry_identity.get("hardware_platform") == "brain_products":
-            from Main_App.io.recorded_eeg_geometry import validate_recorded_geometry_identity
-            canonical_geometry = validate_recorded_geometry_identity(geometry_identity)
-        else:
-            canonical_geometry = biosemi64_geometry_identity(
-                electrode_mapping_profile=geometry_identity.get("electrode_mapping_profile"),
-                retained_channels=raw_retained,
-            )
-    except (BioSemi64GeometryError, ValueError):
+        canonical_geometry = source_geometry_definition(geometry_identity)
+    except (TypeError, ValueError):
         return _unavailable(
-            "Eligible BioSemi64 scalp-channel provenance is invalid.",
+            "Eligible EEG scalp-channel provenance is invalid.",
             outcome=outcome,
         )
     if dict(geometry_identity) != canonical_geometry:
         return _unavailable(
-            "Eligible BioSemi64 scalp-channel provenance is stale.",
+            "Eligible EEG scalp-channel provenance is stale.",
             outcome=outcome,
         )
 

@@ -11,7 +11,9 @@ python .agents/scripts/verify.py --scope <scope> --tier focused
 
 Run `python .agents/scripts/verify.py --scope repo --tier precommit` for the
 broad local handoff gate. Do not duplicate its pytest lists in documentation;
-update the driver when executable coverage changes.
+update `.agents/verification.toml` when executable coverage changes and
+`tests/qt_test_files.txt` when Qt dependencies change. Check both with
+`python .agents/scripts/verify.py --check-config`.
 
 Application verification excludes `tests/standalone_scripts` from broad local
 precommit and CI runs because those tests import the opt-in
@@ -37,10 +39,11 @@ environment.
 
 | Scope | Local focused coverage | Qt coverage retained for CI |
 | --- | --- | --- |
+| `backend-hardening` | Canonical import boundaries, settings/persistence, transaction recovery, runner lifecycle, exact spectral reads and source-model caches | None in this local bundle |
 | `gui` | GUI import boundaries, syntax/static checks, non-window contracts | Main-window layout/wiring, stable/beta visibility, per-tool beta acknowledgement, dialogs, settings/status, embedded-page smoke |
 | `updates` | Release selection, download/install backend, packaging syntax, GUI-module compilation | Update dialog and manager interaction |
-| `project-io` | Project settings, enumeration/scanning, result paths, manifest contracts, shared exact XLSX reading | File dialogs and visible project workflows |
-| `processing` | Order/fingerprint, QC calibration, persistence, FFT crop, runner/export contracts | Processing-window wiring and Qt workers |
+| `project-io` | Project settings, acquisition profiles and source formats, BIDS import, enumeration/scanning, result paths, manifest contracts, shared exact XLSX reading | File dialogs and visible project workflows |
+| `processing` | Shared MNE admission, acquisition policy, order/fingerprint, QC calibration, persistence, FFT crop, runner/export contracts | Processing-window wiring and Qt workers |
 | `plot-generator` | Excel/config helpers, aggregation, FFT/SNR behavior, rendering and export contracts | Plot Generator page/layout/workflow smoke |
 | `publication-maps` | Processing-time harmonics, BCA/SNR rendering, figure-only paired/group outputs, colorbars | Embedded Scalp Maps page behavior |
 | `sequence-figure` | Renderer behavior and high-DPI outputs | Embedded Sequence Figure wiring |
@@ -67,6 +70,21 @@ environment.
   tool scope.
 - When a GUI behavior cannot be exercised locally, report the CI target and a
   concrete visible/manual smoke path instead of substituting an offscreen run.
+
+## Maintaining older tests
+
+Retirement names are not sufficient grounds for deletion. Keep scientific
+baselines, historical-project/schema behavior, compatibility-alias identity,
+and guards against reintroducing retired GUI packages. Ordinary tests should
+import current implementation owners; only explicit compatibility tests should
+exercise transitional aliases.
+
+Remove migration-only symbol checks when current behavioral tests cover the
+same contract. Refresh reader mocks at the current public boundary instead of
+weakening assertions to accommodate a new implementation. Do not catch every
+import error and skip: a supported import failing is a regression. Split
+backend and Qt-dependent tests when possible so the backend coverage runs
+locally. Keep the scope map and Qt registry aligned with file moves/removals.
 
 ## Hardware and Studio extension coverage
 

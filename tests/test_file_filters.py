@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from Main_App.Shared.file_filters import (
+from Main_App.io.file_filters import (
     is_appledouble_sidecar,
     is_bdf_file,
     is_excel_output_file,

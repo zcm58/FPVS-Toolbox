@@ -183,8 +183,8 @@ def _configure_active_scan(
     monkeypatch.setattr(scan_module.load_utils, "load_eeg_file", _load)
     monkeypatch.setattr(
         scan_module,
-        "validate_raw_biosemi64_geometry",
-        lambda raw, **kwargs: captured.setdefault("geometry", (raw, kwargs)),
+        "validate_loaded_geometry",
+        lambda raw, contract, **kwargs: captured.setdefault("geometry", (raw, contract)),
     )
     monkeypatch.setattr(
         scan_module,
@@ -305,9 +305,10 @@ def test_scan_validates_raw_and_limits_evidence_to_current_conditions(
     assert loader_kwargs["electrode_montage"] == BIOSEMI64_MONTAGE_ID
     assert loader_kwargs["first_n_channels"] == len(BIOSEMI64_CHANNELS)
     assert loader_kwargs.get("preload_in_memory", False) is ram_preload
-    geometry_kwargs = captured["geometry"][1]
-    assert geometry_kwargs["expected_retained_channels"] == BIOSEMI64_CHANNELS
-    assert geometry_kwargs["require_runtime_identity"] is True
+    geometry_contract = captured["geometry"][1]
+    assert geometry_contract.canonical_scalp_order == BIOSEMI64_CHANNELS
+    assert geometry_contract.channel_limit == len(BIOSEMI64_CHANNELS)
+    assert geometry_contract.load_reference_channels == ("EXG1", "EXG2")
     assert loaded[0].closed is True
     assert progress[-1] == (
         f"Finished kurtosis review scan for {path.name}",
@@ -393,7 +394,7 @@ def test_scan_releases_preloaded_source_on_every_interrupted_path(tmp_path, monk
         owned.close()
 
     if failure == "geometry":
-        monkeypatch.setattr(scan_module, "validate_raw_biosemi64_geometry", fail)
+        monkeypatch.setattr(scan_module, "validate_loaded_geometry", fail)
     if failure == "preprocessing":
         monkeypatch.setattr(scan_module, "prepare_kurtosis_review_evidence", fail)
     scan = scan_kurtosis_review(

@@ -64,7 +64,7 @@ def scan_fixture(monkeypatch, tmp_path):
         event_reads.append(raw.path.name)
         return events.copy()
 
-    monkeypatch.setattr(qc.load_utils, "inspect_bdf_header", lambda _path: None)
+    monkeypatch.setattr(qc.load_utils, "inspect_recording_header", lambda _path: None)
     monkeypatch.setattr(qc.load_utils, "open_preflight_eeg_file", open_raw)
     monkeypatch.setattr(qc.mne, "find_events", find_events)
     paths = [tmp_path / "P1.bdf", tmp_path / "P9.bdf"]

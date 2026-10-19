@@ -10,6 +10,7 @@ import numpy as np
 import Main_App.Shared.load_utils as shared_loader
 import Main_App.io.load_utils as loader
 from Main_App.io.eeg_geometry import BIOSEMI64_CHANNELS
+from tests.processing.test_shared_load_utils import _mock_recording_reads
 
 
 def _raw():
@@ -22,9 +23,10 @@ def _raw():
     )
 
 
-def _app(logs=None):
+def _app(project_root, logs=None):
     return SimpleNamespace(
         currentProject=SimpleNamespace(
+            project_root=project_root,
             preprocessing={"ref_chan1": "EXG1", "ref_chan2": "EXG2"}
         ),
         settings=SimpleNamespace(get=lambda *args, **kwargs: "Status"),
@@ -42,11 +44,11 @@ def test_load_eeg_file_suppresses_expected_channel_and_montage_warnings(monkeypa
         return header_raw if len(calls) == 1 else loaded_raw
 
     monkeypatch.setattr(shared_loader, "_memmap_dir_for_pid", lambda: tmp_path)
-    monkeypatch.setattr(shared_loader.mne.io, "read_raw_bdf", _read)
+    _mock_recording_reads(monkeypatch, _read)
 
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        raw = loader.load_eeg_file(_app(), str(tmp_path / "sample.bdf"))
+        raw = loader.load_eeg_file(_app(tmp_path), str(tmp_path / "sample.bdf"))
 
     assert raw is loaded_raw
     assert caught == []
@@ -67,7 +69,7 @@ def test_load_eeg_file_treats_montage_error_as_technical_failure(monkeypatch, tm
         raise RuntimeError("coordinate assignment failed")
 
     monkeypatch.setattr(shared_loader, "_memmap_dir_for_pid", lambda: tmp_path)
-    monkeypatch.setattr(shared_loader.mne.io, "read_raw_bdf", _read)
+    _mock_recording_reads(monkeypatch, _read)
     monkeypatch.setattr(loaded_raw, "set_montage", _fail_montage)
     monkeypatch.setattr(
         shared_loader.user_messages,
@@ -75,7 +77,7 @@ def test_load_eeg_file_treats_montage_error_as_technical_failure(monkeypatch, tm
         lambda title, message: errors.append((title, message)),
     )
 
-    raw = loader.load_eeg_file(_app(logs), str(tmp_path / "sample.bdf"))
+    raw = loader.load_eeg_file(_app(tmp_path, logs), str(tmp_path / "sample.bdf"))
 
     assert raw is None
     assert any("coordinate assignment failed" in message for message in logs)
@@ -101,8 +103,8 @@ def test_load_eeg_file_logs_header_mismatch_with_exact_file(monkeypatch, tmp_pat
         return header_raw if len(calls) == 1 else loaded_raw
 
     monkeypatch.setattr(shared_loader, "_memmap_dir_for_pid", lambda: tmp_path)
-    monkeypatch.setattr(shared_loader.mne.io, "read_raw_bdf", _fake_read_raw_bdf)
-    app = _app()
+    _mock_recording_reads(monkeypatch, _fake_read_raw_bdf)
+    app = _app(tmp_path)
     app.log = lambda message: None
 
     with warnings.catch_warnings(record=True) as caught:

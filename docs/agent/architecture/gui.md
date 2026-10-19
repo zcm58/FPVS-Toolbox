@@ -354,10 +354,17 @@ geometry. The former `10-10` ROI-preset
 setting is a read-compatibility alias only; named ROI electrodes and saved custom
 presets are preserved, and future saves use the `biosemi64` preset key. This does
 not relabel historical processing geometry or bypass its provenance validation.
-Visible smoke (Qt is CI-only locally): open Settings from an existing project,
-check Preprocessing and ROIs show only BioSemi64, confirm saved ROI memberships
-remain intact, and switch main/Experimental tabs to check the native gray
-line is absent. Save/reopen and confirm ROI lists are unchanged.
+Preprocessing uses project-owned hardware controls in
+`gui/settings_hardware_controls.py`: BioSemi64 keeps its locked geometry, while
+confirmed Brain Products projects expose recorded/selected reference,
+channel-type overrides, and supported montage choices. Hardware changes require
+confirmation; the existing ROI map is still specifically BioSemi64 and does not
+establish a general montage-aware ROI editor.
+Visible smoke (Qt is CI-only locally): open a BioSemi project and confirm its
+locked preprocessing geometry and ROI memberships. Open a confirmed Brain
+Products project and check reference/montage controls and unavailable BioSemi
+QC policies. Switch main/Experimental tabs to check the native gray line is
+absent. Save/reopen and confirm project settings and ROI lists are unchanged.
 Quality Control exposes the unified Dataset Exclusions manager, distinguishing
 skipping processing from excluding already-processed data from analysis, and
 retains read-only frequency-domain QC thresholds. Changing analysis exclusions

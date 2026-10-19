@@ -249,7 +249,7 @@ def memory_admission_fits(
 
 
 def read_review_geometry(path: Path, settings: Mapping) -> ReviewGeometry | None:
-    """Use existing validated lazy BDF loading; unknown routes remain exclusive."""
+    """Inspect bounded native metadata before import; unknown routes stay exclusive."""
     from Main_App.io import load_utils
     from Main_App.processing.kurtosis_review_scan import (
         _configured_channel_limit, _configured_reference_pair, _configured_stim_channel,
@@ -281,11 +281,12 @@ def read_review_geometry(path: Path, settings: Mapping) -> ReviewGeometry | None
         def log(self, message, **_kwargs):
             logger.debug("review_budget_header %s", message)
 
-    with load_utils.open_preflight_eeg_file(
+    with load_utils.open_bdf_resource_header(
         LoaderLog(), str(path), ref_pair=refs, first_n_channels=limit,
         stim_channel=_configured_stim_channel(settings),
         electrode_mapping_profile=settings.get("electrode_mapping_profile"),
         electrode_montage="biosemi64",
+        acquisition_settings=dict(settings),
     ) as raw:
         if raw is None or len(raw._raw_extras) != 1 or len(raw._raw_extras[0].get("tal_idx", [1])):
             return None

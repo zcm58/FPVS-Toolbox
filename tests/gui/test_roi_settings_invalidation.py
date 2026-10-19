@@ -9,8 +9,8 @@ from unittest.mock import Mock
 
 import pytest
 
-from Main_App.Shared.roi_presets import ROI_MONTAGE_BIOSEMI64, default_roi_presets
-from Main_App.Shared.settings_manager import SettingsManager
+from Main_App.processing.roi_presets import ROI_MONTAGE_BIOSEMI64, default_roi_presets
+from Main_App.settings.settings_manager import SettingsManager
 from Main_App.gui.roi_electrode_selector_state import BIOSEMI64_LABELS
 from Main_App.gui.roi_visual_editor_state import ROIEditorCollection
 from Tools.Stats.analysis.dv_policy_settings import normalize_dv_policy

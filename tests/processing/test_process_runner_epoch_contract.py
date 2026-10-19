@@ -940,7 +940,7 @@ def test_run_full_pipeline_passes_project_channel_limit_to_validating_loader(
     )
     assert payload["loader_profile"]["bdf_first_n_channels"] == 16
     assert payload["geometry"]["retained_scalp_channels"] == list(
-        process_runner.BIOSEMI64_CHANNELS[:16]
+        BIOSEMI64_CHANNELS[:16]
     )
 
 

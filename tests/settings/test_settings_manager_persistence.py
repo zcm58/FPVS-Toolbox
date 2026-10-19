@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from Main_App.Shared import settings_manager as module
-from Main_App.Shared.settings_manager import DEFAULTS, SettingsManager
+from Main_App.settings import settings_manager as module
+from Main_App.settings.settings_manager import DEFAULTS, SettingsManager
 
 
 def _seed(path: Path) -> SettingsManager:

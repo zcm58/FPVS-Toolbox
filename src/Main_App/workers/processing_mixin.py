@@ -23,6 +23,7 @@ from Main_App.gui import user_messages
 from Main_App.exports.post_process import post_process as _external_post_process
 from Main_App.gui.processing_completion import finalize_processing_host_state
 from Main_App.processing.preprocess import perform_preprocessing
+from Main_App.io.acquisition_metadata import event_detection_kwargs
 from Main_App.io.load_utils import load_eeg_file
 from Main_App.processing.fft_crop_utils import (
     compute_fft_crop_from_events,
@@ -411,8 +412,11 @@ class ProcessingMixin:
 
                     else:
                         try:
-                            events = mne.find_events(raw_proc, stim_channel=stim_channel_name, consecutive=True,
-                                                     verbose=False)
+                            events = mne.find_events(
+                                raw_proc, stim_channel=stim_channel_name,
+                                **{"consecutive": True, **event_detection_kwargs(raw=raw_proc)},
+                                verbose=False,
+                            )
                         except Exception as e_find:
                             gui_queue.put({'type': 'log',
                                            'message': f"ERROR [{f_name}]: Exception mne.find_events: {e_find}"})

@@ -1,7 +1,7 @@
 # Execution Plans
 
 Use this directory for durable plans that survive across agent runs. Review
-status was reconciled with the repository on 2026-10-18.
+status was reconciled with the repository on 2026-10-19.
 
 - `active/`: unfinished implementation, qualification, or visible acceptance.
   A retained plan may describe implemented code while preserving uncompleted
@@ -17,7 +17,9 @@ Keep plans compact. Date evidence, distinguish source tests from installer and
 human acceptance, and retain no completed check as an open blocker. Old branch
 names and baseline hashes in dated implementation records are historical
 provenance, not checkout instructions; inspect current Git state before work.
-The former v3 release branch has been retired in favor of `main`.
+The former `codex/v3-release` branch is historical. Current work may use an
+explicitly selected release base such as `codex/v3.0.1-release`; do not switch
+or merge branches merely because a historical plan names `main`.
 
 ## Current routing
 
@@ -25,6 +27,8 @@ The former v3 release branch has been retired in favor of `main`.
 | --- | --- |
 | v3.0.0 | [Published release ledger](active/v3-release-readiness.md): exact installer and automated lifecycle qualified; human installed-app acceptance deferred by the user. |
 | Modular hardware, montage-selected pipeline, FPVS Studio | [Durable roadmap](../architecture/hardware-pipeline-studio-roadmap.md): agreed future direction and evidence gates; full compatibility is a goal, not an implemented claim. |
+| Brain Products | [Processing support](active/brain-products-support.md): supported BrainVision routes and persistent project hardware are implemented; laboratory and visible acceptance remain pending. |
+| BIDS/shared MNE pipeline | [Import and comparison](active/bids-shared-pipeline.md): project-local import and shared processing implemented; requested synthetic equivalence passed. This is source-branch evidence, not a released installer or arbitrary pipeline editor. |
 | Unicorn Hybrid Black | [Acquisition plan](active/unicorn-hybrid-black-support.md): read-only inspection, unit-correct Raw adapter and project profile metadata exist; production preprocessing and hardware qualification remain gated. |
 | QC scientific/protocol work | [QC plan](active/qc-scientific-and-protocol-flexibility.md): all 21 action implementations integrated; empirical calibration and manual acceptance remain bounded by the associated modules. QC-15 is no longer an unstarted priority. |
 | QC/processing performance | [QC reuse](active/qc-performance.md) and [bitwise performance](active/bitwise-pipeline-performance.md): implemented, source CI passed; optional broader private-data qualification stopped, visible acceptance unclaimed. |

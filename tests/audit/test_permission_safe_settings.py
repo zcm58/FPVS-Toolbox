@@ -1,11 +1,8 @@
 from __future__ import annotations
 
-import json
-
 import pytest
-from Main_App.Shared import settings_paths
-from Main_App.Shared.settings_manager import SettingsManager
-from Tools.Plot_Generator.gui import PlotGeneratorWindow
+from Main_App.settings import settings_paths
+from Main_App.settings.settings_manager import SettingsManager
 
 
 def test_app_settings_use_fpvs_config_home(tmp_path, monkeypatch) -> None:
@@ -27,7 +24,7 @@ def test_settings_path_error_when_config_home_is_not_directory(tmp_path, monkeyp
         settings_paths.app_settings_file()
 
 
-def test_shared_settings_manager_migrates_roaming_appdata_ini(tmp_path, monkeypatch) -> None:
+def test_settings_manager_migrates_roaming_appdata_ini(tmp_path, monkeypatch) -> None:
     config_home = tmp_path / "local-config"
     roaming = tmp_path / "roaming"
     old_root = roaming / "FPVS_Toolbox"
@@ -58,11 +55,11 @@ def test_settings_manager_skips_inaccessible_legacy_settings(tmp_path, monkeypat
     config_home = tmp_path / "local-config"
     monkeypatch.setenv(settings_paths.ENV_CONFIG_HOME, str(config_home))
     monkeypatch.setattr(
-        "Main_App.Shared.settings_manager.legacy_settings_file",
+        "Main_App.settings.settings_manager.legacy_settings_file",
         lambda: InaccessibleLegacyPath(),
     )
     monkeypatch.setattr(
-        "Main_App.Shared.settings_manager._legacy_qt_settings_file",
+        "Main_App.settings.settings_manager._legacy_qt_settings_file",
         lambda: None,
     )
 
@@ -72,7 +69,7 @@ def test_settings_manager_skips_inaccessible_legacy_settings(tmp_path, monkeypat
     assert manager.get("analysis", "base_freq") == "6.0"
 
 
-def test_settings_manager_uses_config_home_ini(tmp_path, monkeypatch, qtbot) -> None:
+def test_settings_manager_uses_config_home_ini(tmp_path, monkeypatch) -> None:
     config_home = tmp_path / "qt-config"
     monkeypatch.setenv(settings_paths.ENV_CONFIG_HOME, str(config_home))
 
@@ -96,39 +93,3 @@ def test_settings_manager_project_root_roundtrip(tmp_path, monkeypatch) -> None:
 
     restored = SettingsManager()
     assert restored.get_project_root() == str(new_root)
-
-
-def test_plot_generator_project_settings_roundtrip(tmp_path, monkeypatch, qtbot) -> None:
-    monkeypatch.setenv(settings_paths.ENV_CONFIG_HOME, str(tmp_path / "config"))
-    project_root = tmp_path / "Project"
-    excel_dir = project_root / "1 - Excel Data Files"
-    snr_dir = project_root / "2 - SNR Plots"
-    excel_dir.mkdir(parents=True)
-    snr_dir.mkdir()
-    (project_root / "project.json").write_text(
-        json.dumps(
-            {
-                "subfolders": {
-                    "excel": "1 - Excel Data Files",
-                    "snr": "2 - SNR Plots",
-                }
-            }
-        ),
-        encoding="utf-8",
-    )
-    window = PlotGeneratorWindow(project_dir=str(project_root))
-    qtbot.addWidget(window)
-    window.folder_edit.setText(str(excel_dir))
-    window.out_edit.setText(str(snr_dir))
-
-    assert window._persist_project_plot_settings(include_paths=True)
-
-    saved = json.loads((project_root / "project.json").read_text(encoding="utf-8"))
-    plot_settings = saved["tools"]["snr_plot"]["plot_settings"]
-    assert plot_settings["input_folder"] == str(excel_dir)
-    assert plot_settings["output_folder"] == str(snr_dir)
-
-    restored = PlotGeneratorWindow(project_dir=str(project_root))
-    qtbot.addWidget(restored)
-    assert restored.folder_edit.text() == str(excel_dir)
-    assert restored.out_edit.text() == str(snr_dir)

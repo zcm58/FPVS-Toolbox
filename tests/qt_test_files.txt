@@ -1,5 +1,3 @@
-tests/audit/test_permission_safe_settings.py
-tests/audit/test_phase1_perf_hygiene.py
 tests/audit/test_stats_no_customtkinter_import.py
 tests/gui/test_busy_spinner.py
 tests/gui/test_dataset_exclusions_qt.py
@@ -47,6 +45,7 @@ tests/plot_generator/test_plot_generator_legend_labels.py
 tests/plot_generator/test_plot_generator_log_collapse.py
 tests/plot_generator/test_plot_generator_multigroup_smoke.py
 tests/plot_generator/test_plot_generator_project_defaults.py
+tests/plot_generator/test_plot_generator_settings_roundtrip_qt.py
 tests/processing/test_audit_json_toggle.py
 tests/processing/test_audit_surface.py
 tests/processing/test_event_time_lock_report.py

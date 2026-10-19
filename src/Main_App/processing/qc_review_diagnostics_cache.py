@@ -23,10 +23,8 @@ import mne
 import numpy as np
 import scipy
 
-from Main_App.io.eeg_geometry import (
-    BIOSEMI64_CHANNEL_SET, canonical_biosemi64_head_coordinates,
-    read_raw_biosemi64_geometry,
-)
+from Main_App.io.acquisition_metadata import CALIBRATED_SPATIAL_PROFILE
+from Main_App.io.recorded_eeg_geometry import read_raw_eeg_geometry
 from Main_App.processing.preflight_qc_cache import (
     PREFLIGHT_QC_CACHE_METHOD_DIRECTORY, load_preflight_qc_cache, save_preflight_qc_cache,
 )
@@ -133,11 +131,10 @@ def _implementation_identity() -> dict | None:
         # can alter output while exposing the original __wrapped__ code: miss.
         if any(getattr(diagnostics, name) is not inspect.unwrap(getattr(diagnostics, name)) for name in names):
             return None
-        if (diagnostics.canonical_biosemi64_head_coordinates is not canonical_biosemi64_head_coordinates
-                or set(diagnostics.BIOSEMI64_CHANNEL_SET) != set(BIOSEMI64_CHANNEL_SET)):
+        if diagnostics.CALIBRATED_SPATIAL_PROFILE != CALIBRATED_SPATIAL_PROFILE:
             return None
         functions = {name: _function_identity(getattr(diagnostics, name)) for name in names}
-        geometry = _function_identity(diagnostics.canonical_biosemi64_head_coordinates)
+        geometry = _function_identity(diagnostics.CALIBRATED_SPATIAL_PROFILE.coordinates)
         native = {name: _function_identity(function) for _owner, name, function, _code in diagnostics._MNE_DIAGNOSTIC_RUNTIME}
         if geometry is None or any(value is None for value in (*functions.values(), *native.values())):
             return None
@@ -148,7 +145,7 @@ def _implementation_identity() -> dict | None:
                     if isinstance(target, ast.Name) and target.id not in {"_AMPLITUDE_DETECTOR", "_MNE_DIAGNOSTIC_RUNTIME"}:
                         constants[target.id] = _code_constant(getattr(diagnostics, target.id))
         return {"source_sha256": hashlib.sha256(source).hexdigest(), "functions": functions, "native": native,
-                "constants": constants, "geometry_function": geometry, "scalp_channels": sorted(diagnostics.BIOSEMI64_CHANNEL_SET)}
+                "constants": constants, "geometry_function": geometry, "scalp_channels": sorted(diagnostics.CALIBRATED_SPATIAL_PROFILE.channel_set)}
     except (OSError, ImportError, AttributeError, TypeError, ValueError, SyntaxError, RuntimeError, RecursionError, MemoryError):
         return None
 
@@ -189,13 +186,13 @@ def build_raw_diagnostics_cache_key(
         implementation = _implementation_identity()
         if implementation is None:
             return None
-        geometry = read_raw_biosemi64_geometry(raw)
+        geometry = read_raw_eeg_geometry(raw)
         if not isinstance(geometry, Mapping) or not geometry:
             return None
         config = settings if isinstance(settings, QCReviewDiagnosticSettings) else QCReviewDiagnosticSettings(**dict(settings or {}))
         names = tuple(raw.ch_names)
-        scalp = [name for name in names if name in BIOSEMI64_CHANNEL_SET]
-        coordinates = canonical_biosemi64_head_coordinates()
+        scalp = [name for name in names if name in CALIBRATED_SPATIAL_PROFILE.channel_set]
+        coordinates = CALIBRATED_SPATIAL_PROFILE.coordinates()
         source_file = {
             "resolved_path": str(source), "size": before.st_size,
             "mtime_ns": before.st_mtime_ns, "ctime_ns": before.st_ctime_ns,
