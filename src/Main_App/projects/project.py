@@ -134,14 +134,6 @@ def _relativize(project_root: Path, p: Path) -> str:
     return os.fspath(p)
 
 
-def _stable_dump(data: Dict[str, Any]) -> str:
-    """
-    Deterministic JSON for change-detection comparisons.
-    Do not use for on-disk pretty writes.
-    """
-    return json.dumps(data, separators=(",", ":"), sort_keys=True, ensure_ascii=False)
-
-
 def _group_lock_fingerprint(groups: Mapping[str, Mapping[str, Any]]) -> str:
     """Return a stable fingerprint for the complete locked group definition."""
 

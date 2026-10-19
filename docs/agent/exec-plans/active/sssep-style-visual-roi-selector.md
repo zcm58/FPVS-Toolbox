@@ -2,7 +2,11 @@
 
 ## Status
 
-Active. The first implementation was committed on 2026-09-03 as
+Reviewed 2026-10-18: implemented and integrated; registered source CI Qt
+coverage passed, while human visible acceptance remains unclaimed. Branch names
+and dated validation entries below describe implementation history.
+
+The first implementation was committed on 2026-09-03 as
 `8d84b216` on `codex/sssep-roi-selector`, branched from FPVS
 `codex/v3-release` at `f586652e0bf9920eb42ce9e8a75b5b08f2717f31`.
 That commit delivered the reusable BioSemi64 map, ordered selection state,
@@ -16,9 +20,8 @@ and **Quick Add** card are no longer the user workflow. Commit `4f46b4bc`
 established that embedded surface. The current refinement removes its enclosing
 card, montage/preset toolbar, visible count/heading rows, and redundant project-
 root action; labels the fixed map **BioSemi 64**; enlarges its hit targets; and
-makes LOT, ROT, and Central protected built-in draft rows. Registered Qt
-execution and the visible installed-application smoke remain pending under
-repository policy.
+makes LOT, ROT, and Central protected built-in draft rows. The visible installed-application smoke remains unclaimed under repository
+policy; source CI does not substitute for that human check.
 
 Planning baselines:
 
@@ -72,7 +75,7 @@ workbook or plot-output contract.
 
 FPVS already has the required persistence and analysis backbone:
 
-- `src/Main_App/Shared/settings_manager.py` owns active ROI pairs, montage
+- `src/Main_App/settings/settings_manager.py` owns active ROI pairs, montage
   selection, and per-montage custom presets.
 - `src/Main_App/processing/roi_settings.py` is the neutral runtime read surface.
 - `src/Main_App/gui/settings_panel.py` owns the ROIs tab, Settings Save,
@@ -152,7 +155,7 @@ preserving `add_entry()`, `get_pairs()`, and `set_pairs()` for Settings callers.
   participant's removed electrodes, current QC exclusions, or workbook
   coverage.
 - Keep the FPVS LOT, ROT, and Central definitions exactly as stored in
-  `Main_App.Shared.roi_presets`. SSSEP's Central membership differs and must
+  `Main_App.processing.roi_presets`. SSSEP's Central membership differs and must
   not replace the FPVS definition.
 - Protect each built-in's name and row from editing/removal while allowing map
   membership edits. An emptied built-in is partial and blocks Save.

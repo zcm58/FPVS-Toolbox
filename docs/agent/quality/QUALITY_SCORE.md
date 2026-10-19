@@ -1,14 +1,29 @@
 # Quality Score
 
-Reviewed 2026-10-15. [V3.0.0 is published](https://github.com/zcm58/FPVS-Toolbox/releases/tag/v3.0.0)
+Reviewed 2026-10-18. [V3.0.0 is published](https://github.com/zcm58/FPVS-Toolbox/releases/tag/v3.0.0)
 as the latest stable, immutable release at the user's explicit direction.
 The release uses the exact qualified `9f7480b4` installer; anonymous downloads
 of all four release assets matched their verified checksums. Outstanding manual
 checks remain unclaimed, and optional full-cohort investigations are stopped.
 
 - The [v3 release ledger](../exec-plans/active/v3-release-readiness.md) owns
-  current blockers, accepted scope, evidence, and explicit post-v3 deferrals.
+  published-artifact evidence, remaining manual acceptance, and explicit deferrals.
   Historical passing runs do not qualify a newer release commit or installer.
+- Post-release source maintenance at `7b026c65` passed 7,614 local non-Qt
+  tests (25 skipped) and [source CI](https://github.com/zcm58/FPVS-Toolbox/actions/runs/39133936133)
+  passed 8,242 tests (24 skipped), including registered Qt coverage, plus Linux
+  lint and Windows backend checks. The
+  [agent harness](https://github.com/zcm58/FPVS-Toolbox/actions/runs/39133936110)
+  passed. This qualifies that source revision, not a rebuilt installer.
+- The bounded Settings/runtime ownership/workbook-adapter cleanup is complete.
+  Larger module and exception-handler counts remain review signals in the debt
+  tracker, not proof of defects or justification for arbitrary deletion.
+- Modular hardware/montage support, capability-selected processing stages and
+  full FPVS Studio interoperability are the agreed target in the
+  [roadmap](../architecture/hardware-pipeline-studio-roadmap.md). Current Unicorn
+  support is inspection/Raw-adapter/project-metadata groundwork; production
+  processing and hardware qualification remain gated. End-to-end compatibility
+  must be demonstrated per Studio schema/version, not inferred from import success.
 - Active plans remain for QC/performance, source visualization, project/tool
   integration, acquisition support, and visible acceptance. Implemented features
   with pending manual review remain marked as pending. Completed implementation

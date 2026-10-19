@@ -107,7 +107,7 @@ def test_load_eeg_file_logs_header_mismatch_with_exact_file(monkeypatch, tmp_pat
 
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        with caplog.at_level(logging.WARNING, logger=shared_loader.__name__):
+        with caplog.at_level(logging.WARNING, logger=shared_loader.logger.name):
             raw = loader.load_eeg_file(app, str(bdf_path))
 
     assert raw is loaded_raw

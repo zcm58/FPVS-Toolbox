@@ -350,7 +350,7 @@ def test_source_epoch_set_keeps_available_configured_conditions() -> None:
 
 
 def test_skipped_conditions_are_logged_once_per_file(caplog) -> None:
-    with caplog.at_level(logging.WARNING, logger=process_runner.__name__):
+    with caplog.at_level(logging.WARNING, logger=process_runner.logger.name):
         process_runner._log_skipped_condition_summary(
             Path("P07.bdf"),
             [
@@ -373,7 +373,7 @@ def test_skipped_conditions_are_logged_once_per_file(caplog) -> None:
 
 
 def test_expected_source_epoch_gap_logs_without_traceback(caplog) -> None:
-    with caplog.at_level(logging.DEBUG, logger=process_runner.__name__):
+    with caplog.at_level(logging.DEBUG, logger=process_runner.logger.name):
         try:
             process_runner._available_source_epoch_set(
                 {"A": [], "B": []},
@@ -394,7 +394,7 @@ def test_expected_source_epoch_gap_logs_without_traceback(caplog) -> None:
 
 
 def test_unexpected_source_derivative_issue_keeps_traceback(caplog) -> None:
-    with caplog.at_level(logging.ERROR, logger=process_runner.__name__):
+    with caplog.at_level(logging.ERROR, logger=process_runner.logger.name):
         try:
             raise OSError("disk unavailable")
         except OSError as exc:

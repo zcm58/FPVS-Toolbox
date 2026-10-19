@@ -77,7 +77,8 @@ from Tools.Stats.reporting.stats_export import (
     export_posthoc_results_to_excel,
     export_rm_anova_results_to_excel,
 )
-from Tools.Stats.data.shared_rois import apply_rois_to_modules, load_rois_from_settings
+from Tools.Stats.data.shared_rois import apply_rois_to_modules
+from Main_App.processing.roi_settings import load_rois_from_settings
 from Tools.Stats.controller.stats_controller import StatsController
 from Tools.Stats.common.stats_core import (
     ANOVA_XLS,

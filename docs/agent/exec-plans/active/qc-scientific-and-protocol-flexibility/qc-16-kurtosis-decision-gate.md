@@ -216,7 +216,7 @@ Files changed for this repair (relative to the repo root):
 
 - Runtime: `src/Main_App/processing/kurtosis_review_scan.py`,
   `src/Main_App/processing/preprocess.py`,
-  `src/Main_App/Performance/process_runner.py`,
+  `src/Main_App/workers/process_runner.py`,
   `src/Main_App/workers/mp_runner_bridge.py`,
   `src/Main_App/gui/processing_workflows.py`,
   `src/Main_App/gui/processing_completion.py`.

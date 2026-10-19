@@ -1,9 +1,3522 @@
-"""Import surface for process-based project runner code."""
+# -*- coding: utf-8 -*-
+"""
+Process-based per-file runner.
+
+- Spawns one subprocess per EEG file (Windows-safe via "spawn").
+- Caps BLAS to 1 thread per worker to avoid oversubscription.
+- Uses the shared loader and canonical Main App preprocessing surface.
+- Extracts events using the project's stim channel (e.g., "Status").
+- Suppresses any worker GUI popups.
+- Calls the existing post-export adapter (no Legacy edits).
+- Adds RAM-aware backpressure: staged submissions + system memory soft-cap.
+"""
 
 from __future__ import annotations
 
-import sys
+import logging
+import atexit
+import hashlib
+import json
+import shutil
+import os
+import time
+import traceback
+from concurrent.futures import ProcessPoolExecutor, FIRST_COMPLETED, wait
+from dataclasses import dataclass, replace
+from multiprocessing import Queue, get_context, Event
+from pathlib import Path
+from types import SimpleNamespace
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Mapping, Optional, Tuple
 
-from Main_App.Performance import process_runner as _impl
+import Main_App.processing.preprocess as backend_preprocess
+from Main_App.diagnostics import log_router
+from Main_App.io.atomic_write import atomic_write
+from Main_App.io.buffered_fif import save_raw_fif
+from Main_App.io.safe_file import regular_file_info
+from Main_App.processing.preflight_qc_pruning import safe_cache_directory
+from Main_App.exports.source_time_domain_export import (
+    source_ready_project_relative_path,
+    write_source_ready_time_domain_derivatives,
+)
+from Main_App.io.load_utils import (
+    BDF_RECORDING_NOT_STARTED_REASON,
+    format_bdf_recording_not_started_message,
+    inspect_bdf_header,
+)
+from Main_App.io.memmap_paths import memmap_process_id, memmap_root, process_memmap_directory
+from Main_App.io.eeg_geometry import (
+    BIOSEMI64_CHANNELS,
+    attach_raw_biosemi64_geometry,
+    biosemi64_geometry_identity,
+    read_raw_biosemi64_geometry,
+)
+from Main_App.processing.fft_multinotch import (
+    FFT_MULTINOTCH_COMPONENT_COUNT,
+    FFT_MULTINOTCH_HALF_WIDTH_HZ,
+    FFT_MULTINOTCH_METHOD_VERSION,
+)
+from Main_App.processing.kurtosis_qc import (
+    KURTOSIS_AUTHORITY_POLICY_VERSION,
+    KURTOSIS_CORROBORATOR_REGISTRY_VERSION,
+    KURTOSIS_QC_METHOD_VERSION,
+)
+from Main_App.processing.condition_electrode_interpolation import (
+    CONDITION_INTERPOLATION_VERSION,
+    normalize_condition_interpolation_requests,
+    validate_condition_interpolation_provenance,
+)
+from Main_App.processing.condition_interpolation_state import (
+    active_condition_interpolation_requests,
+    reconcile_condition_interpolation_sources,
+)
+from Main_App.processing.analysis_spans import (
+    ANALYSIS_SPAN_PLAN_VERSION,
+    AnalysisSpanPlanError,
+    canonical_condition_event_map,
+    relative_spans_from_plan,
+    restrict_source_analysis_span_plan_by_condition,
+    validate_realized_target_analysis_span_plan,
+    validate_target_analysis_span_markers,
+    validate_source_analysis_span_context,
+    validate_source_analysis_span_plan,
+)
+from Main_App.processing.removed_electrode_detection import (
+    REMOVED_ELECTRODE_DETECTION_MODE_AUTO,
+    manual_removed_electrodes_are_enabled,
+    manual_removed_electrodes_for_recording,
+    normalize_removed_electrode_detection_mode,
+)
+from Main_App.processing.raw_channel_qc import (
+    RAW_CHANNEL_QC_METHOD_VERSION,
+    evaluate_raw_channel_qc,
+)
+from Main_App.processing.preprocessed_cache_info import (
+    restore_preprocessed_filter_info,
+    snapshot_preprocessed_filter_info,
+)
+from Main_App.projects.frequency_protocol import (
+    FrequencyProtocol,
+    FrequencyProtocolError,
+    normalize_frequency_protocol,
+)
+from Main_App.projects.grouping import validate_group_folder_name
+from Main_App.projects.preprocessing_settings import (
+    ELECTRODE_MONTAGE_BIOSEMI64,
+    is_participant_condition_excluded,
+    is_recording_condition_excluded,
+    normalize_electrode_montage,
+    normalize_manual_excluded_participants,
+    normalize_manual_excluded_recordings,
+)
+from Main_App.processing.fft_crop_utils import compute_onbin_step
+from Main_App.workers.mp_env import compute_dynamic_worker_ceiling
+from Main_App.workers.processing_admission import ProcessingAdmission, ProcessingWorkerAdmission
 
-sys.modules[__name__] = _impl
+import numpy as np
+import psutil  # soft memory cap
+from .mp_env import set_worker_thread_limits
+
+if TYPE_CHECKING:
+    from Main_App.processing.prepared_fir import PreparedFirCache
+
+logger = logging.getLogger("Main_App.Performance.process_runner")
+_WORKER_FIR_CACHE: PreparedFirCache | None = None
+_WORKER_ADMISSION: ProcessingWorkerAdmission | None = None
+PREPROC_CACHE_VERSION = "preprocessed-raw-v13-v3-trigger-alignment"
+BDF_FIRST_N_CHANNELS = 64
+REMOVED_ELECTRODE_REVIEW_LIST_KEYS = (
+    "removed_electrode_original_auto_flagged",
+    "removed_electrode_accepted_auto_flagged",
+    "removed_electrode_rejected_auto_flagged",
+    "removed_electrode_manual_additions",
+    "removed_electrode_final_confirmed_removed",
+    "removed_electrode_manual_only_missed_by_auto",
+    "removed_electrode_auto_manual_overlap",
+)
+REMOVED_ELECTRODE_REVIEW_SCALAR_KEYS = ("removed_electrode_agreement_status",)
+REMOVED_ELECTRODE_REVIEW_KEYS = (
+    *REMOVED_ELECTRODE_REVIEW_LIST_KEYS,
+    *REMOVED_ELECTRODE_REVIEW_SCALAR_KEYS,
+)
+
+
+class _SourceEpochSetIncompleteError(RuntimeError):
+    """Expected source-export omission when no configured condition is available."""
+
+    def __init__(self, missing_conditions: list[str]) -> None:
+        self.missing_conditions = tuple(missing_conditions)
+        super().__init__(
+            "Source-ready time-domain derivatives require at least one configured "
+            "condition with epochs; unavailable: " + ", ".join(self.missing_conditions)
+        )
+
+
+def _string_list(value: Any) -> list[str]:
+    if isinstance(value, str):
+        text = value.strip()
+        return [text] if text else []
+    if isinstance(value, (list, tuple, set)):
+        return [str(item) for item in value if str(item).strip()]
+    return []
+
+
+def _mapping_list(value: Any) -> list[dict[str, object]]:
+    if not isinstance(value, (list, tuple)):
+        return []
+    return [dict(item) for item in value if isinstance(item, Mapping)]
+
+
+def _string_list_mapping(value: Any) -> dict[str, list[str]]:
+    if not isinstance(value, Mapping):
+        return {}
+    return {
+        str(key): _string_list(items)
+        for key, items in value.items()
+        if str(key).strip()
+    }
+
+
+def _project_frequency_protocol(settings: Mapping[str, object]) -> FrequencyProtocol:
+    raw_protocol = settings.get("frequency_protocol")
+    if raw_protocol is None:
+        raise RuntimeError(
+            "A confirmed project FPVS protocol is required for processing."
+        )
+    try:
+        protocol = normalize_frequency_protocol(raw_protocol)
+    except FrequencyProtocolError as exc:
+        raise RuntimeError(f"Invalid project FPVS protocol: {exc}") from exc
+    if not protocol.is_ready:
+        raise RuntimeError(
+            "The project FPVS protocol requires confirmation and an expected "
+            "analyzed oddball-cycle count before processing."
+        )
+    return protocol
+
+
+def _preflight_event_plan_for_file(
+    file_path: Path,
+    settings: Mapping[str, object],
+) -> Mapping[str, Any]:
+    plans = settings.get("_fpvs_preflight_event_plans_by_file")
+    if not isinstance(plans, Mapping):
+        raise RuntimeError(
+            "Processing requires the reviewed preflight marker plan for every file."
+        )
+    candidates = [str(file_path), file_path.name]
+    try:
+        candidates.insert(0, str(file_path.resolve()))
+    except (OSError, RuntimeError):
+        pass
+    for candidate in candidates:
+        value = plans.get(candidate)
+        if isinstance(value, Mapping):
+            return value
+    raise RuntimeError(
+        f"No reviewed preflight marker plan was supplied for {file_path.name}."
+    )
+
+
+def _find_raw_events(
+    raw: Any,
+    *,
+    mne_module: Any,
+    stim_channel: str,
+) -> tuple[np.ndarray, str]:
+    """Use the same event-discovery contract as condition-aware preflight."""
+
+    try:
+        events = mne_module.find_events(
+            raw,
+            stim_channel=stim_channel,
+            shortest_event=1,
+            verbose=False,
+        )
+        source = "stim"
+    except (RuntimeError, ValueError):
+        events, _event_ids = mne_module.events_from_annotations(
+            raw,
+            verbose=False,
+        )
+        source = "annotations"
+    result = np.asarray(events, dtype=np.int64)
+    if result.size == 0:
+        raise RuntimeError(
+            f"No events found (source={source!r}, stim={stim_channel!r})."
+        )
+    return result, source
+
+
+def _interpolation_provenance_from_settings(
+    settings: Mapping[str, object],
+) -> dict[str, object]:
+    """Return the truthful interpolation outcome accumulated by preprocessing."""
+
+    result = {
+        "interpolation_status": str(
+            settings.get("_fpvs_interpolation_status") or ""
+        ),
+        "interpolation_requested_channels": _string_list(
+            settings.get("_fpvs_interpolation_requested_channels")
+        ),
+        "interpolated_channels": _string_list(
+            settings.get("_fpvs_interpolated_channels")
+        ),
+        "interpolation_error": str(
+            settings.get("_fpvs_interpolation_error") or ""
+        ),
+    }
+    proof = settings.get("_fpvs_condition_interpolation_provenance")
+    if isinstance(proof, Mapping) and proof.get("status") == "completed":
+        result["condition_electrode_interpolation"] = dict(proof)
+    return result
+
+
+def _float_or_zero(value: Any) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _float_list(value: Any) -> list[float]:
+    if not isinstance(value, (list, tuple)):
+        return []
+    values: list[float] = []
+    for item in value:
+        try:
+            number = float(item)
+        except (TypeError, ValueError):
+            continue
+        if np.isfinite(number):
+            values.append(number)
+    return values
+
+
+def _fft_multinotch_skipped_list(value: Any) -> list[dict[str, object]]:
+    if not isinstance(value, (list, tuple)):
+        return []
+    skipped: list[dict[str, object]] = []
+    for item in value:
+        if not isinstance(item, Mapping):
+            continue
+        centers = _float_list([item.get("center_hz")])
+        reason = str(item.get("reason") or "").strip()
+        if centers and reason:
+            skipped.append({"center_hz": centers[0], "reason": reason})
+    return skipped
+
+
+def _participant_id_for_file(file_path: Path, settings: Dict[str, object]) -> str:
+    mapping = settings.get("_fpvs_participant_id_by_file")
+    if isinstance(mapping, dict):
+        direct = mapping.get(str(file_path.resolve()))
+        if direct:
+            return str(direct)
+        for raw_path, participant_id in mapping.items():
+            try:
+                if Path(str(raw_path)).resolve() == file_path.resolve():
+                    return str(participant_id)
+            except (OSError, RuntimeError, TypeError, ValueError):
+                continue
+    return file_path.stem
+
+
+def _mapped_text_for_file(
+    file_path: Path,
+    settings: Mapping[str, object],
+    setting_key: str,
+) -> str | None:
+    mapping = settings.get(setting_key)
+    if not isinstance(mapping, Mapping):
+        return None
+    file_key = str(file_path.resolve())
+    direct = mapping.get(file_key)
+    if direct is not None and str(direct).strip():
+        return str(direct).strip()
+    for raw_path, value in mapping.items():
+        try:
+            if Path(str(raw_path)).resolve() == file_path.resolve():
+                text = str(value).strip()
+                return text or None
+        except (OSError, RuntimeError, TypeError, ValueError):
+            continue
+    return None
+
+
+def _recording_id_for_file(
+    file_path: Path,
+    settings: Mapping[str, object],
+) -> str | None:
+    return _mapped_text_for_file(file_path, settings, "_fpvs_recording_id_by_file")
+
+
+def _excluded_condition_labels_for_file(
+    file_path: Path,
+    settings: Mapping[str, object],
+    event_map: Mapping[str, int],
+) -> tuple[str, ...]:
+    """Resolve the exact project conditions omitted from one recording."""
+
+    participant_id = _participant_id_for_file(file_path, dict(settings))
+    recording_id = _recording_id_for_file(file_path, settings)
+    participant_exclusions = settings.get("manual_excluded_participant_conditions")
+    recording_exclusions = settings.get("manual_excluded_recording_conditions")
+    excluded: list[str] = []
+    for label in event_map:
+        if is_participant_condition_excluded(
+            participant_exclusions if isinstance(participant_exclusions, Mapping) else None,
+            participant_id,
+            label,
+        ) or (
+            recording_id is not None
+            and is_recording_condition_excluded(
+                recording_exclusions if isinstance(recording_exclusions, Mapping) else None,
+                recording_id,
+                label,
+            )
+        ):
+            excluded.append(str(label))
+    return tuple(excluded)
+
+
+def _recording_mapping_payload(
+    value: object,
+    recording_id: str,
+) -> dict[str, object]:
+    """Return one case-insensitive recording payload from a persisted map."""
+
+    if not isinstance(value, Mapping):
+        return {}
+    lookup = recording_id.casefold()
+    for raw_id, raw_payload in value.items():
+        if str(raw_id).strip().casefold() != lookup:
+            continue
+        if isinstance(raw_payload, Mapping):
+            return {str(key): item for key, item in raw_payload.items()}
+        return {}
+    return {}
+
+
+def _session_id_for_file(
+    file_path: Path,
+    settings: Mapping[str, object],
+) -> str | None:
+    return _mapped_text_for_file(file_path, settings, "_fpvs_session_id_by_file")
+
+
+def _output_stem_for_file(
+    file_path: Path,
+    settings: Mapping[str, object],
+) -> str:
+    return (
+        _mapped_text_for_file(file_path, settings, "_fpvs_output_stem_by_file")
+        or _participant_id_for_file(file_path, dict(settings))
+    )
+
+
+def _group_id_for_file(
+    file_path: Path,
+    settings: Dict[str, object],
+) -> str | None:
+    mapping = settings.get("_fpvs_group_id_by_file")
+    if not isinstance(mapping, Mapping):
+        return None
+    file_key = str(file_path.resolve())
+    direct = mapping.get(file_key)
+    if direct is not None and str(direct).strip():
+        return str(direct)
+    for raw_path, group_id in mapping.items():
+        try:
+            if Path(str(raw_path)).resolve() == file_path.resolve():
+                text = str(group_id).strip()
+                return text or None
+        except (OSError, RuntimeError, TypeError, ValueError):
+            continue
+    return None
+
+
+def _available_source_epoch_set(
+    epochs_by_condition: Mapping[str, object],
+    event_map: Mapping[str, int],
+) -> dict[str, object]:
+    """Return available configured conditions without fabricating missing inputs."""
+
+    available = {
+        label: epochs_by_condition[label]
+        for label in event_map
+        if epochs_by_condition.get(label)
+    }
+    if available:
+        return available
+    raise _SourceEpochSetIncompleteError(list(event_map))
+
+
+def _log_skipped_condition_summary(
+    file_path: Path,
+    skipped_conditions: list[tuple[str, int, str]],
+) -> None:
+    """Emit one actionable warning for all unavailable conditions in a file."""
+
+    if not skipped_conditions:
+        return
+    details = "; ".join(
+        f"{label!r} (code={code}): {reason}"
+        for label, code, reason in skipped_conditions
+    )
+    logger.warning(
+        "[AUDIT WARNING] %s: skipped configured condition(s): %s.",
+        file_path.name,
+        details,
+    )
+
+
+def _log_source_derivative_issue(
+    file_path: Path,
+    exc: Exception,
+) -> None:
+    """Keep expected incompleteness quiet while retaining unexpected tracebacks."""
+
+    if isinstance(exc, _SourceEpochSetIncompleteError):
+        logger.debug(
+            "source_ready_time_domain_incomplete file=%s missing_conditions=%s",
+            file_path.name,
+            list(exc.missing_conditions),
+        )
+        return
+    logger.exception(
+        "source_ready_time_domain_failed file=%s error=%s",
+        file_path.name,
+        exc,
+    )
+
+
+def _manual_removed_electrodes_for_file(
+    file_path: Path,
+    settings: Dict[str, object],
+) -> list[str]:
+    return list(
+        manual_removed_electrodes_for_recording(
+            settings,
+            participant_id=_participant_id_for_file(file_path, settings),
+            recording_id=_recording_id_for_file(file_path, settings),
+        )
+    )
+
+
+def _manual_excluded_participants(settings: Dict[str, object]) -> set[str]:
+    return {
+        participant.casefold()
+        for participant in normalize_manual_excluded_participants(
+            settings.get("manual_excluded_participants")
+        )
+    }
+
+
+def _manual_excluded_recordings(settings: Dict[str, object]) -> set[str]:
+    return {
+        recording.casefold()
+        for recording in normalize_manual_excluded_recordings(
+            settings.get("manual_excluded_recordings")
+        )
+    }
+
+
+def _removed_electrode_review_for_file(
+    file_path: Path,
+    settings: Dict[str, object],
+) -> dict[str, object]:
+    recording_id = _recording_id_for_file(file_path, settings)
+    recording_source = settings.get("_fpvs_removed_electrode_review_by_recording")
+    if recording_id and isinstance(recording_source, dict):
+        direct = recording_source.get(recording_id)
+        if isinstance(direct, dict):
+            return dict(direct)
+        recording_key = recording_id.casefold()
+        for raw_id, payload in recording_source.items():
+            if str(raw_id).casefold() == recording_key and isinstance(payload, dict):
+                return dict(payload)
+
+    participant_id = _participant_id_for_file(file_path, settings)
+    source = settings.get("_fpvs_removed_electrode_review_by_pid")
+    if not isinstance(source, dict):
+        return {}
+    direct = source.get(participant_id)
+    if isinstance(direct, dict):
+        return dict(direct)
+    participant_key = participant_id.casefold()
+    for raw_pid, payload in source.items():
+        if str(raw_pid).casefold() == participant_key and isinstance(payload, dict):
+            return dict(payload)
+    return {}
+
+
+def _apply_removed_electrode_review_metadata(
+    file_path: Path,
+    settings: Dict[str, object],
+) -> None:
+    review = _removed_electrode_review_for_file(file_path, settings)
+    for key in REMOVED_ELECTRODE_REVIEW_LIST_KEYS:
+        short_key = key.removeprefix("removed_electrode_")
+        settings[f"_fpvs_{key}"] = _string_list(
+            review.get(key, review.get(short_key))
+        )
+    for key in REMOVED_ELECTRODE_REVIEW_SCALAR_KEYS:
+        short_key = key.removeprefix("removed_electrode_")
+        settings[f"_fpvs_{key}"] = str(review.get(key, review.get(short_key)) or "")
+
+
+def _review_metadata_from_settings(settings: Dict[str, object]) -> dict[str, object]:
+    payload: dict[str, object] = {}
+    for key in REMOVED_ELECTRODE_REVIEW_LIST_KEYS:
+        payload[key] = _string_list(settings.get(f"_fpvs_{key}"))
+    for key in REMOVED_ELECTRODE_REVIEW_SCALAR_KEYS:
+        payload[key] = str(settings.get(f"_fpvs_{key}") or "")
+    return payload
+
+
+def _raw_channel_qc_payload_with_review(
+    payload: Dict[str, object],
+    settings: Dict[str, object],
+) -> Dict[str, object]:
+    enriched = dict(payload)
+    enriched.update(_review_metadata_from_settings(settings))
+    return enriched
+
+
+def _participant_is_manually_excluded(
+    file_path: Path,
+    settings: Dict[str, object],
+) -> tuple[bool, str]:
+    participant_id = _participant_id_for_file(file_path, settings)
+    excluded = _manual_excluded_participants(settings)
+    return participant_id.casefold() in excluded, participant_id
+
+
+def _recording_is_manually_excluded(
+    file_path: Path,
+    settings: Dict[str, object],
+) -> tuple[bool, str | None]:
+    recording_id = _recording_id_for_file(file_path, settings)
+    if not recording_id:
+        return False, None
+    return recording_id.casefold() in _manual_excluded_recordings(settings), recording_id
+
+
+def _preflight_recording_exclusion_paths(settings: Dict[str, object]) -> set[str]:
+    paths = _string_list(settings.get("_fpvs_preflight_recording_not_started_files"))
+    resolved: set[str] = set()
+    for raw_path in paths:
+        try:
+            resolved.add(str(Path(raw_path).resolve()).casefold())
+        except (OSError, RuntimeError, TypeError, ValueError):
+            resolved.add(str(raw_path).casefold())
+    return resolved
+
+
+def _file_in_preflight_recording_exclusions(
+    file_path: Path,
+    settings: Dict[str, object],
+) -> bool:
+    exclusions = _preflight_recording_exclusion_paths(settings)
+    if not exclusions:
+        return False
+    try:
+        key = str(file_path.resolve()).casefold()
+    except (OSError, RuntimeError, ValueError):
+        key = str(file_path).casefold()
+    return key in exclusions
+
+
+def _worker_log(message: str) -> None:
+    """Keep worker chatter out of INFO while preserving actionable warnings."""
+    text = str(message)
+    normalized = text.lstrip().upper()
+    if normalized.startswith(("!!!", "ERROR", "[ERROR")):
+        logger.error(text)
+    elif normalized.startswith(
+        ("WARN", "WARNING", "[WARNING", "[LOADER WARNING", "[AUDIT WARNING")
+    ):
+        logger.warning(text)
+    else:
+        logger.debug(text)
+
+
+@dataclass(frozen=True)
+class RunParams:
+    project_root: Path
+    data_files: List[Path]
+    settings: Dict[str, object]
+    event_map: Dict[str, int]  # {label: code}
+    save_folder: Path
+    max_workers: Optional[int] = None
+    # Additional legacy ratio backstop. None disables only this backstop;
+    # dynamic physical/commit admission remains active.
+    memory_soft_limit_ratio: Optional[float] = 0.85
+    # How often to re-check memory when throttled
+    memory_check_interval_s: float = 0.25
+
+
+def _worker_init() -> None:
+    """Configure per-process environment."""
+    global _WORKER_FIR_CACHE
+    logger.debug("[MP STAGE] worker_init_start pid=%d", os.getpid())
+    set_worker_thread_limits()
+    from Main_App.processing.prepared_fir import PreparedFirCache
+
+    # Each pool belongs to one batch. Retain coefficients between its files,
+    # never EEG data or a cache attached to the caller's serialized settings.
+    if _WORKER_FIR_CACHE is not None:
+        _WORKER_FIR_CACHE.close()
+    _WORKER_FIR_CACHE = PreparedFirCache()
+    atexit.register(_WORKER_FIR_CACHE.close)
+
+    # The shared directory owner registers cleanup for every allocated namespace.
+    pid_dir = process_memmap_directory()
+    logger.debug("[MP STAGE] worker_init_done pid=%d memmap_dir=%s", os.getpid(), pid_dir)
+
+
+def _admitted_worker_init(native_initializer, *admission_args) -> None:
+    global _WORKER_ADMISSION
+    native_initializer()
+    _WORKER_ADMISSION = ProcessingWorkerAdmission(*admission_args)
+
+
+def _process_admitted_file(file_path, settings, event_map, save_folder, project_root, index):
+    if _WORKER_ADMISSION is not None:
+        _WORKER_ADMISSION.start(index)
+    return _process_one_file(file_path, settings, event_map, save_folder, project_root)
+
+
+def _memmap_path_for_file(file_path: Path) -> Path:
+    """Use the loader's private process directory for file cleanup."""
+    return process_memmap_directory() / (file_path.stem + "_raw.dat")
+
+
+def _make_error_result(
+    file_path: Path,
+    stage: str,
+    exc: Exception,
+    start_time: Optional[float] = None,
+) -> Dict[str, object]:
+    """
+    Build a structured error payload for a single-file run.
+    """
+    elapsed_ms: Optional[int] = None
+    if start_time is not None:
+        try:
+            elapsed_ms = int((time.perf_counter() - start_time) * 1000)
+        except Exception:
+            elapsed_ms = None
+
+    tb = traceback.format_exc()
+    tb_lines = tb.strip().splitlines()
+    traceback_head = "\n".join(tb_lines[:6])
+
+    # Make the textual log message itself informative instead of just "file_processing_error",
+    # so the IDE log shows file, stage, and error even if it ignores structured "extra".
+    logger.error(
+        "file_processing_error file=%s stage=%s error=%s elapsed_ms=%s",
+        str(file_path),
+        stage,
+        str(exc),
+        elapsed_ms,
+        extra={
+            "file": str(file_path),
+            "stage": stage,
+            "error": str(exc),
+            "elapsed_ms": elapsed_ms,
+        },
+    )
+
+    payload: Dict[str, object] = {
+        "status": "error",
+        "file": str(file_path),
+        "stage": stage,
+        "error": str(exc),
+        "trace": tb,
+        "traceback_head": traceback_head,
+    }
+    if elapsed_ms is not None:
+        payload["elapsed_ms"] = elapsed_ms
+    return payload
+
+
+def _make_excluded_result(
+    file_path: Path,
+    *,
+    reason: str,
+    message: str,
+    stage: str = "preflight",
+    start_time: Optional[float] = None,
+    preflight_info: Optional[Any] = None,
+    qc_info: Optional[Dict[str, object]] = None,
+    geometry: Optional[Mapping[str, object]] = None,
+) -> Dict[str, object]:
+    elapsed_ms: Optional[int] = None
+    if start_time is not None:
+        try:
+            elapsed_ms = int((time.perf_counter() - start_time) * 1000)
+        except (OverflowError, TypeError, ValueError):
+            elapsed_ms = None
+
+    payload: Dict[str, object] = {
+        "status": "excluded",
+        "file": str(file_path),
+        "stage": stage,
+        "reason": reason,
+        "message": message,
+        "post_export_ok": False,
+    }
+    if elapsed_ms is not None:
+        payload["elapsed_ms"] = elapsed_ms
+    if preflight_info is not None:
+        payload["bdf_preflight"] = {
+            "file_size": getattr(preflight_info, "file_size", None),
+            "header_bytes": getattr(preflight_info, "header_bytes", None),
+            "data_records": getattr(preflight_info, "data_records", None),
+            "record_duration": getattr(preflight_info, "record_duration", None),
+            "channel_count": getattr(preflight_info, "channel_count", None),
+            "data_bytes": getattr(preflight_info, "data_bytes", None),
+        }
+    if qc_info is not None:
+        payload["raw_channel_qc"] = qc_info
+    if geometry is not None:
+        payload["geometry"] = dict(geometry)
+    return payload
+
+
+def _build_fft_crop_file_logger(project_root: Path, file_path: Path) -> logging.Logger:
+    """Create a per-file crop logger so child-process diagnostics are always persisted."""
+    logs_dir = project_root / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    log_path = logs_dir / f"fft_crop_{file_path.stem}_{os.getpid()}.log"
+
+    logger_name = f"{logger.name}.fft_crop.{file_path.stem}.{os.getpid()}"
+    crop_logger = logging.getLogger(logger_name)
+    crop_logger.setLevel(logging.INFO)
+    crop_logger.propagate = False
+    for handler in list(crop_logger.handlers):
+        crop_logger.removeHandler(handler)
+
+    handler = logging.FileHandler(log_path, mode="w", encoding="utf-8")
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    crop_logger.addHandler(handler)
+    return crop_logger
+
+
+def _close_worker_logger(target_logger: logging.Logger) -> None:
+    for handler in list(target_logger.handlers):
+        try:
+            handler.flush()
+            handler.close()
+        finally:
+            target_logger.removeHandler(handler)
+
+
+def _preproc_cache_enabled(settings: Dict[str, object]) -> bool:
+    value = settings.get("enable_preprocessed_cache", True)
+    if isinstance(value, str):
+        return value.strip().lower() not in {"0", "false", "no", "off"}
+    return bool(value)
+
+
+def _configured_biosemi64_channel_limit(
+    settings: Mapping[str, object],
+) -> int:
+    """Resolve the project-owned canonical first-N scalp limit."""
+
+    raw_limit = settings.get("max_idx_keep")
+    if raw_limit is None:
+        raw_limit = settings.get("max_chan_idx_keep")
+    if raw_limit is None:
+        return BDF_FIRST_N_CHANNELS
+    if isinstance(raw_limit, bool):
+        raise ValueError("BioSemi64 channel limit must be an integer from 1 through 64.")
+    try:
+        channel_limit = int(raw_limit)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "BioSemi64 channel limit must be an integer from 1 through 64."
+        ) from exc
+    if isinstance(raw_limit, float) and not raw_limit.is_integer():
+        raise ValueError("BioSemi64 channel limit must be an integer from 1 through 64.")
+    if not 1 <= channel_limit <= BDF_FIRST_N_CHANNELS:
+        raise ValueError("BioSemi64 channel limit must be an integer from 1 through 64.")
+    return channel_limit
+
+
+def _geometry_identity_for_channels(
+    settings: Mapping[str, object],
+    channel_names: Optional[List[str]] = None,
+) -> Dict[str, object]:
+    """Return canonical geometry with the retained scalp set made explicit."""
+
+    montage_id = normalize_electrode_montage(settings.get("electrode_montage"))
+    if montage_id != ELECTRODE_MONTAGE_BIOSEMI64:
+        raise ValueError(
+            f"Unsupported electrode montage {montage_id!r}; only "
+            f"{ELECTRODE_MONTAGE_BIOSEMI64!r} is supported."
+        )
+    if channel_names is None:
+        channel_limit = _configured_biosemi64_channel_limit(settings)
+        retained = list(BIOSEMI64_CHANNELS[:channel_limit])
+    else:
+        present = {str(name) for name in channel_names}
+        retained = [name for name in BIOSEMI64_CHANNELS if name in present]
+    return biosemi64_geometry_identity(
+        electrode_mapping_profile=settings.get("electrode_mapping_profile"),
+        retained_channels=retained,
+    )
+
+
+def _attach_processed_geometry(
+    raw: Any,
+    settings: Mapping[str, object],
+) -> Dict[str, object]:
+    montage_id = normalize_electrode_montage(settings.get("electrode_montage"))
+    if montage_id != ELECTRODE_MONTAGE_BIOSEMI64:
+        raise ValueError(
+            f"Unsupported electrode montage {montage_id!r}; only "
+            f"{ELECTRODE_MONTAGE_BIOSEMI64!r} is supported."
+        )
+    present = {str(name) for name in raw.ch_names}
+    retained = [name for name in BIOSEMI64_CHANNELS if name in present]
+    stim_name = str(settings.get("stim_channel") or "Status")
+    return attach_raw_biosemi64_geometry(
+        raw,
+        electrode_mapping_profile=settings.get("electrode_mapping_profile"),
+        retained_channels=retained,
+        stim_channel=stim_name if stim_name in present else None,
+    )
+
+
+def _preproc_cache_payload(
+    file_path: Path,
+    settings: Dict[str, object],
+    *,
+    mne_version: str,
+    frequency_protocol: FrequencyProtocol | None = None,
+    event_map: Mapping[str, int] | None = None,
+) -> Dict[str, object]:
+    stat = file_path.stat()
+    channel_limit = _configured_biosemi64_channel_limit(settings)
+    source_span_plan = settings.get("_fpvs_source_analysis_span_plan")
+    if isinstance(source_span_plan, Mapping):
+        analysis_span_identity: dict[str, object] | None = {
+            "version": str(source_span_plan.get("version") or ""),
+            "fingerprint": str(source_span_plan.get("fingerprint") or ""),
+            "event_plan_fingerprint": str(
+                source_span_plan.get("event_plan_fingerprint") or ""
+            ),
+            "protocol_fingerprint": str(
+                source_span_plan.get("protocol_fingerprint") or ""
+            ),
+        }
+    else:
+        analysis_span_identity = None
+    protocol_identity = (
+        {
+            "canonical_payload": frequency_protocol.canonical_payload(),
+            "fingerprint": frequency_protocol.fingerprint,
+        }
+        if frequency_protocol is not None
+        else None
+    )
+    condition_event_map_identity = (
+        canonical_condition_event_map(event_map)
+        if event_map is not None
+        else None
+    )
+    effective_detector_mode = normalize_removed_electrode_detection_mode(
+        settings.get("removed_electrode_detection_mode"),
+        auto_detect_removed_electrodes=settings.get(
+            "auto_detect_removed_electrodes",
+            False,
+        ),
+    )
+    relevant_settings = {
+        "high_pass": settings.get("high_pass"),
+        "low_pass": settings.get("low_pass"),
+        "downsample_rate": settings.get("downsample_rate", settings.get("downsample")),
+        "reject_thresh": settings.get("reject_thresh"),
+        "kurtosis_auto_interpolate_all": settings.get("kurtosis_auto_interpolate_all", False),
+        "kurtosis_screening_enabled": settings.get("kurtosis_screening_enabled", True),
+        "raw_signal_screening_enabled": settings.get("raw_signal_screening_enabled", True),
+        "ref_channel1": settings.get("ref_channel1", settings.get("ref_ch1")),
+        "ref_channel2": settings.get("ref_channel2", settings.get("ref_ch2")),
+        "stim_channel": settings.get("stim_channel"),
+        "line_noise_filter_enabled": settings.get(
+            "line_noise_filter_enabled",
+            True,
+        ),
+        "line_noise_frequency_hz": settings.get("line_noise_frequency_hz", 60),
+        "line_noise_filter_method_version": FFT_MULTINOTCH_METHOD_VERSION,
+        "line_noise_filter_half_width_hz": FFT_MULTINOTCH_HALF_WIDTH_HZ,
+        "line_noise_filter_component_count": FFT_MULTINOTCH_COMPONENT_COUNT,
+        "max_idx_keep": channel_limit,
+        "max_bad_chans": settings.get(
+            "max_bad_chans",
+            settings.get("max_bad_channels_alert_thresh"),
+        ),
+        "raw_channel_qc_method_version": RAW_CHANNEL_QC_METHOD_VERSION,
+        "auto_detect_removed_electrodes": (
+            effective_detector_mode == REMOVED_ELECTRODE_DETECTION_MODE_AUTO
+        ),
+        "removed_electrode_detection_mode": effective_detector_mode,
+        "manual_removed_electrodes_enabled": (
+            manual_removed_electrodes_are_enabled(settings)
+        ),
+        "removed_electrode_detection_choice_schema_version": settings.get(
+            "removed_electrode_detection_choice_schema_version"
+        ),
+        "removed_electrode_detection_choice_status": settings.get(
+            "removed_electrode_detection_choice_status"
+        ),
+        "removed_electrode_detection_choice_source": settings.get(
+            "removed_electrode_detection_choice_source"
+        ),
+        "manual_removed_electrodes_for_file": _manual_removed_electrodes_for_file(
+            file_path,
+            settings,
+        ),
+        "kurtosis_qc_method_version": KURTOSIS_QC_METHOD_VERSION,
+        "kurtosis_authority_policy_version": KURTOSIS_AUTHORITY_POLICY_VERSION,
+        "kurtosis_corroborator_registry_version": (
+            KURTOSIS_CORROBORATOR_REGISTRY_VERSION
+        ),
+        "kurtosis_review_decisions_for_file": settings.get(
+            "_fpvs_kurtosis_review_decisions",
+            {},
+        ),
+    }
+    for key in ("raw_signal_screening_enabled", "kurtosis_screening_enabled"):
+        if relevant_settings.get(key) is True:
+            relevant_settings.pop(key)
+    condition_requests = normalize_condition_interpolation_requests(
+        settings.get("_fpvs_condition_interpolation_requests"),
+        excluded_condition_labels=settings.get("_fpvs_excluded_condition_labels", ()),
+    )
+    if condition_requests:
+        relevant_settings["condition_electrode_interpolation"] = {
+            "version": CONDITION_INTERPOLATION_VERSION,
+            "requests": condition_requests,
+        }
+    return {
+        "version": PREPROC_CACHE_VERSION,
+        "mne_version": mne_version,
+        "source_path": str(file_path.resolve()),
+        "source_size": int(stat.st_size),
+        "source_mtime_ns": int(stat.st_mtime_ns),
+        "loader_profile": {
+            "bdf_first_n_channels": channel_limit,
+            "ref_channels": [
+                relevant_settings["ref_channel1"],
+                relevant_settings["ref_channel2"],
+            ],
+            "stim_channel": relevant_settings["stim_channel"],
+        },
+        "geometry": _geometry_identity_for_channels(settings),
+        "frequency_protocol": protocol_identity,
+        "condition_event_map": condition_event_map_identity,
+        "analysis_span_plan": analysis_span_identity,
+        "preprocessing_settings": relevant_settings,
+    }
+
+
+def _preproc_cache_key(payload: Dict[str, object]) -> str:
+    encoded = json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _preproc_cache_safe_stem(file_path: Path) -> str:
+    return "".join(
+        ch if ch.isalnum() or ch in {"-", "_"} else "_"
+        for ch in file_path.stem
+    )
+
+
+def _preproc_cache_paths(
+    project_root: Path,
+    file_path: Path,
+    cache_key: str,
+) -> Tuple[Path, Path]:
+    safe_stem = _preproc_cache_safe_stem(file_path)
+    cache_dir = project_root / ".fpvs_cache" / "preprocessed"
+    raw_path = cache_dir / f"{safe_stem}_{cache_key[:16]}_raw.fif"
+    meta_path = cache_dir / f"{safe_stem}_{cache_key[:16]}.json"
+    return raw_path, meta_path
+
+
+def _raw_cache_path_for_meta(meta_path: Path) -> Path:
+    return meta_path.with_name(f"{meta_path.stem}_raw.fif")
+
+
+def _prune_stale_preprocessed_cache(
+    *,
+    cache_dir: Path,
+    source_path: str,
+    keep_meta_path: Path,
+) -> int:
+    if not cache_dir.exists():
+        return 0
+
+    pruned = 0
+    safe_stem = _preproc_cache_safe_stem(Path(source_path))
+    for meta_path in cache_dir.glob(f"{safe_stem}_*.json"):
+        if meta_path == keep_meta_path:
+            continue
+        try:
+            metadata = json.loads(meta_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            logger.warning(
+                "preproc_cache_prune_skip_unreadable_meta meta=%s error=%s",
+                meta_path,
+                exc,
+            )
+            continue
+
+        payload = metadata.get("payload")
+        if not isinstance(payload, dict) or payload.get("source_path") != source_path:
+            continue
+
+        raw_path = _raw_cache_path_for_meta(meta_path)
+        try:
+            if raw_path.exists():
+                raw_path.unlink()
+            meta_path.unlink()
+            pruned += 1
+        except OSError as exc:
+            logger.warning(
+                "preproc_cache_prune_failed meta=%s raw=%s error=%s",
+                meta_path,
+                raw_path,
+                exc,
+            )
+    return pruned
+
+
+def _load_preprocessed_cache(
+    *,
+    file_path: Path,
+    settings: Dict[str, object],
+    project_root: Path,
+    mne_module: Any,
+    frequency_protocol: FrequencyProtocol | None = None,
+    event_map: Mapping[str, int] | None = None,
+) -> Tuple[Optional[Any], Optional[Dict[str, Any]], int, str]:
+    if not _preproc_cache_enabled(settings):
+        return None, None, 0, "disabled"
+
+    payload = _preproc_cache_payload(
+        file_path,
+        settings,
+        mne_version=str(getattr(mne_module, "__version__", "unknown")),
+        frequency_protocol=frequency_protocol,
+        event_map=event_map,
+    )
+    cache_key = _preproc_cache_key(payload)
+    raw_path, meta_path = _preproc_cache_paths(project_root, file_path, cache_key)
+    if not raw_path.exists() or not meta_path.exists():
+        return None, None, 0, "miss"
+
+    try:
+        metadata = json.loads(meta_path.read_text(encoding="utf-8"))
+        if metadata.get("cache_key") != cache_key or metadata.get("payload") != payload:
+            return None, None, 0, "miss_metadata_mismatch"
+        exact_filter_info = metadata.get("exact_filter_info")
+        if not isinstance(exact_filter_info, Mapping):
+            return None, None, 0, "miss_missing_filter_metadata"
+        memmap_path = str(_memmap_path_for_file(raw_path))
+        raw = mne_module.io.read_raw_fif(
+            str(raw_path),
+            preload=memmap_path,
+            verbose=False,
+        )
+        try:
+            restore_preprocessed_filter_info(
+                raw, exact_filter_info, settings, cache_key=cache_key,
+            )
+        except (KeyError, TypeError, ValueError, OverflowError):
+            raw.close()
+            return None, None, 0, "miss_filter_metadata_mismatch"
+        observed_geometry = _attach_processed_geometry(raw, settings)
+        cached_geometry = metadata.get("geometry")
+        if (
+            not isinstance(cached_geometry, Mapping)
+            or dict(cached_geometry) != observed_geometry
+        ):
+            close = getattr(raw, "close", None)
+            if callable(close):
+                close()
+            return None, None, 0, "miss_geometry_mismatch"
+        source_span_plan = settings.get("_fpvs_source_analysis_span_plan")
+        cached_source_span_plan = metadata.get("source_analysis_span_plan")
+        cached_target_span_plan = metadata.get("realized_analysis_span_plan")
+        require_analysis_spans = bool(
+            settings.get("_fpvs_require_analysis_spans", False)
+            or settings.get("_fpvs_condition_interpolation_requests")
+        )
+        if require_analysis_spans:
+            if (
+                not isinstance(source_span_plan, Mapping)
+                or not isinstance(cached_source_span_plan, Mapping)
+                or dict(cached_source_span_plan) != dict(source_span_plan)
+                or not isinstance(
+                cached_target_span_plan,
+                Mapping,
+                )
+            ):
+                close = getattr(raw, "close", None)
+                if callable(close):
+                    close()
+                return None, None, 0, "miss_missing_analysis_spans"
+            try:
+                realized_span_plan = validate_realized_target_analysis_span_plan(
+                    cached_target_span_plan,
+                    source_plan=source_span_plan,
+                    target_sfreq_hz=float(raw.info["sfreq"]),
+                    target_n_times=int(raw.n_times),
+                    target_first_samp=int(raw.first_samp),
+                )
+            except AnalysisSpanPlanError:
+                close = getattr(raw, "close", None)
+                if callable(close):
+                    close()
+                return None, None, 0, "miss_analysis_span_mismatch"
+            settings["_fpvs_realized_analysis_span_plan"] = realized_span_plan
+            settings["_fpvs_analysis_scoring_sample_count"] = int(
+                realized_span_plan["unique_sample_count"]
+            )
+        audit_before = metadata.get("audit_before")
+        if not isinstance(audit_before, dict):
+            return None, None, 0, "miss_missing_audit"
+        settings["_fpvs_kurtosis_bad_channels"] = _string_list(
+            metadata.get("kurtosis_bad_channels")
+        )
+        settings["_fpvs_interpolated_channels"] = _string_list(
+            metadata.get("interpolated_channels")
+        )
+        settings["_fpvs_fft_multinotch_requested_centers_hz"] = _float_list(
+            metadata.get("fft_multinotch_requested_centers_hz")
+        )
+        settings["_fpvs_fft_multinotch_applied_centers_hz"] = _float_list(
+            metadata.get("fft_multinotch_applied_centers_hz")
+        )
+        settings["_fpvs_fft_multinotch_skipped_centers"] = (
+            _fft_multinotch_skipped_list(
+                metadata.get("fft_multinotch_skipped_centers")
+            )
+        )
+        settings["_fpvs_raw_qc_bad_channels"] = _string_list(
+            metadata.get("raw_qc_bad_channels")
+        )
+        settings["_fpvs_raw_qc_low_variance_channels"] = _string_list(
+            metadata.get("raw_qc_low_variance_channels")
+        )
+        settings["_fpvs_raw_qc_high_amplitude_channels"] = _string_list(
+            metadata.get("raw_qc_high_amplitude_channels")
+        )
+        settings["_fpvs_raw_qc_rare_burst_channels"] = _string_list(
+            metadata.get("raw_qc_rare_burst_channels")
+        )
+        settings["_fpvs_raw_qc_spatial_outlier_channels"] = _string_list(
+            metadata.get("raw_qc_spatial_outlier_channels")
+        )
+        settings["_fpvs_raw_qc_manual_removed_channels"] = _string_list(
+            metadata.get("raw_qc_manual_removed_channels")
+        )
+        settings["_fpvs_raw_qc_warning_rules"] = _string_list(
+            metadata.get("raw_qc_warning_rules")
+        )
+        settings["_fpvs_raw_qc_method_version"] = str(
+            metadata.get("raw_qc_method_version") or ""
+        )
+        settings["_fpvs_raw_qc_review_rules"] = _string_list(
+            metadata.get("raw_qc_review_rules")
+        )
+        settings["_fpvs_raw_qc_candidate_sources"] = _string_list_mapping(
+            metadata.get("raw_qc_candidate_sources")
+        )
+        settings["_fpvs_raw_qc_candidate_burden_findings"] = _mapping_list(
+            metadata.get("raw_qc_candidate_burden_findings")
+        )
+        settings["_fpvs_raw_qc_amplitude_review_findings"] = _mapping_list(
+            metadata.get("raw_qc_amplitude_review_findings")
+        )
+        settings["_fpvs_raw_qc_baseline_severe_review"] = bool(
+            metadata.get("raw_qc_baseline_severe_review")
+        )
+        settings["_fpvs_raw_qc_baseline_median_std_uv"] = _float_or_zero(
+            metadata.get("raw_qc_baseline_median_std_uv")
+        )
+        settings["_fpvs_raw_qc_baseline_median_p2p_99_uv"] = _float_or_zero(
+            metadata.get("raw_qc_baseline_median_p2p_99_uv")
+        )
+        settings["_fpvs_raw_qc_baseline_warning"] = bool(
+            metadata.get("raw_qc_baseline_warning")
+        )
+        settings["_fpvs_raw_qc_baseline_excluded"] = bool(
+            metadata.get("raw_qc_baseline_excluded")
+        )
+        settings["_fpvs_raw_qc_scoring_scope"] = str(
+            metadata.get("raw_qc_scoring_scope") or ""
+        )
+        settings["_fpvs_raw_qc_scoring_spans"] = [
+            list(span)
+            for span in metadata.get("raw_qc_scoring_spans", [])
+            if isinstance(span, list) and len(span) == 2
+        ]
+        settings["_fpvs_raw_qc_scoring_sample_count"] = int(
+            metadata.get("raw_qc_scoring_sample_count") or 0
+        )
+        settings["_fpvs_geometry"] = observed_geometry
+        settings["_fpvs_retained_scalp_channels"] = list(
+            observed_geometry["retained_scalp_channels"]
+        )
+        settings["_fpvs_retained_scalp_set_fingerprint"] = str(
+            observed_geometry["retained_scalp_set_fingerprint"]
+        )
+        settings["_fpvs_interpolation_status"] = str(
+            metadata.get("interpolation_status") or ""
+        )
+        settings["_fpvs_interpolation_requested_channels"] = _string_list(
+            metadata.get("interpolation_requested_channels")
+        )
+        settings["_fpvs_interpolation_error"] = str(
+            metadata.get("interpolation_error") or ""
+        )
+        condition_proof = validate_condition_interpolation_provenance(
+            metadata.get("condition_electrode_interpolation"),
+            requests=settings.get("_fpvs_condition_interpolation_requests"),
+            analysis_span_plan=settings.get("_fpvs_realized_analysis_span_plan"),
+            geometry=observed_geometry,
+        )
+        settings.pop("_fpvs_condition_interpolation_provenance", None)
+        if condition_proof is not None:
+            settings["_fpvs_condition_interpolation_provenance"] = condition_proof
+        for key in REMOVED_ELECTRODE_REVIEW_LIST_KEYS:
+            settings[f"_fpvs_{key}"] = _string_list(metadata.get(key))
+        for key in REMOVED_ELECTRODE_REVIEW_SCALAR_KEYS:
+            settings[f"_fpvs_{key}"] = str(metadata.get(key) or "")
+        return raw, audit_before, int(metadata.get("n_rejected", 0)), "hit"
+    except Exception as exc:
+        logger.warning(
+            "preproc_cache_read_failed file=%s cache=%s error=%s",
+            file_path.name,
+            raw_path,
+            exc,
+        )
+        if "raw" in locals() and raw is not None:
+            raw.close()
+        return None, None, 0, "read_error"
+
+
+def _store_preprocessed_cache(
+    *,
+    raw: Any,
+    file_path: Path,
+    settings: Dict[str, object],
+    project_root: Path,
+    mne_module: Any,
+    audit_before: Dict[str, Any],
+    n_rejected: int,
+    frequency_protocol: FrequencyProtocol | None = None,
+    event_map: Mapping[str, int] | None = None,
+) -> str:
+    if not _preproc_cache_enabled(settings):
+        return "disabled"
+
+    payload = _preproc_cache_payload(
+        file_path,
+        settings,
+        mne_version=str(getattr(mne_module, "__version__", "unknown")),
+        frequency_protocol=frequency_protocol,
+        event_map=event_map,
+    )
+    cache_key = _preproc_cache_key(payload)
+    raw_path, meta_path = _preproc_cache_paths(project_root, file_path, cache_key)
+
+    try:
+        if not safe_cache_directory(project_root.absolute(), raw_path.parent.absolute()):
+            raise OSError(f"Refusing a redirected preprocessed cache directory: {raw_path.parent}")
+        raw_path.parent.mkdir(parents=True, exist_ok=True)
+        if not safe_cache_directory(project_root.absolute(), raw_path.parent.absolute()):
+            raise OSError(f"Refusing a redirected preprocessed cache directory: {raw_path.parent}")
+        exact_filter_info = snapshot_preprocessed_filter_info(
+            raw.info, settings, cache_key=cache_key,
+        )
+        if settings.get("_fpvs_require_analysis_spans", False) or settings.get("_fpvs_condition_interpolation_requests"):
+            source_span_plan = settings.get("_fpvs_source_analysis_span_plan")
+            target_span_plan = settings.get("_fpvs_realized_analysis_span_plan")
+            if not isinstance(source_span_plan, Mapping) or not isinstance(
+                target_span_plan,
+                Mapping,
+            ):
+                raise AnalysisSpanPlanError(
+                    "Preprocessed cache requires current source and target span plans."
+                )
+            validate_realized_target_analysis_span_plan(
+                target_span_plan,
+                source_plan=source_span_plan,
+                target_sfreq_hz=float(raw.info["sfreq"]),
+                target_n_times=int(raw.n_times),
+                target_first_samp=int(raw.first_samp),
+            )
+        geometry_identity = _attach_processed_geometry(raw, settings)
+        settings["_fpvs_geometry"] = geometry_identity
+        settings["_fpvs_retained_scalp_channels"] = list(
+            geometry_identity["retained_scalp_channels"]
+        )
+        settings["_fpvs_retained_scalp_set_fingerprint"] = str(
+            geometry_identity["retained_scalp_set_fingerprint"]
+        )
+        condition_proof = validate_condition_interpolation_provenance(
+            settings.get("_fpvs_condition_interpolation_provenance"),
+            requests=settings.get("_fpvs_condition_interpolation_requests"),
+            analysis_span_plan=settings.get("_fpvs_realized_analysis_span_plan"),
+            geometry=geometry_identity,
+        )
+        regular_file_info(raw_path)
+        for split_path in raw_path.parent.glob(f"{raw_path.stem}-*.fif"):
+            regular_file_info(split_path)
+        save_raw_fif(raw, str(raw_path), overwrite=True, verbose=False,
+                 **({"fmt": "double"} if condition_proof is not None else {}))
+        metadata = {
+            "cache_key": cache_key,
+            "payload": payload,
+            "exact_filter_info": exact_filter_info,
+            "geometry": geometry_identity,
+            "retained_scalp_channels": list(
+                geometry_identity["retained_scalp_channels"]
+            ),
+            "retained_scalp_set_fingerprint": str(
+                geometry_identity["retained_scalp_set_fingerprint"]
+            ),
+            "source_analysis_span_plan": settings.get(
+                "_fpvs_source_analysis_span_plan"
+            ),
+            "realized_analysis_span_plan": settings.get(
+                "_fpvs_realized_analysis_span_plan"
+            ),
+            "audit_before": audit_before,
+            "n_rejected": int(n_rejected),
+            "kurtosis_bad_channels": _string_list(
+                settings.get("_fpvs_kurtosis_bad_channels")
+            ),
+            "interpolated_channels": _string_list(
+                settings.get("_fpvs_interpolated_channels")
+            ),
+            "interpolation_status": str(
+                settings.get("_fpvs_interpolation_status") or ""
+            ),
+            "interpolation_requested_channels": _string_list(
+                settings.get("_fpvs_interpolation_requested_channels")
+            ),
+            "interpolation_error": str(
+                settings.get("_fpvs_interpolation_error") or ""
+            ),
+            "condition_electrode_interpolation": condition_proof,
+            "fft_multinotch_requested_centers_hz": _float_list(
+                settings.get("_fpvs_fft_multinotch_requested_centers_hz")
+            ),
+            "fft_multinotch_applied_centers_hz": _float_list(
+                settings.get("_fpvs_fft_multinotch_applied_centers_hz")
+            ),
+            "fft_multinotch_skipped_centers": _fft_multinotch_skipped_list(
+                settings.get("_fpvs_fft_multinotch_skipped_centers")
+            ),
+            "raw_qc_bad_channels": _string_list(
+                settings.get("_fpvs_raw_qc_bad_channels")
+            ),
+            "raw_qc_low_variance_channels": _string_list(
+                settings.get("_fpvs_raw_qc_low_variance_channels")
+            ),
+            "raw_qc_high_amplitude_channels": _string_list(
+                settings.get("_fpvs_raw_qc_high_amplitude_channels")
+            ),
+            "raw_qc_rare_burst_channels": _string_list(
+                settings.get("_fpvs_raw_qc_rare_burst_channels")
+            ),
+            "raw_qc_spatial_outlier_channels": _string_list(
+                settings.get("_fpvs_raw_qc_spatial_outlier_channels")
+            ),
+            "raw_qc_manual_removed_channels": _string_list(
+                settings.get("_fpvs_raw_qc_manual_removed_channels")
+            ),
+            "raw_qc_warning_rules": _string_list(
+                settings.get("_fpvs_raw_qc_warning_rules")
+            ),
+            "raw_signal_screening_enabled": settings.get("raw_signal_screening_enabled", True),
+            "raw_qc_method_version": str(
+                settings.get("_fpvs_raw_qc_method_version") or ""
+            ),
+            "raw_qc_review_rules": _string_list(
+                settings.get("_fpvs_raw_qc_review_rules")
+            ),
+            "raw_qc_candidate_sources": _string_list_mapping(
+                settings.get("_fpvs_raw_qc_candidate_sources")
+            ),
+            "raw_qc_candidate_burden_findings": _mapping_list(
+                settings.get("_fpvs_raw_qc_candidate_burden_findings")
+            ),
+            "raw_qc_amplitude_review_findings": _mapping_list(
+                settings.get("_fpvs_raw_qc_amplitude_review_findings")
+            ),
+            "raw_qc_baseline_severe_review": bool(
+                settings.get("_fpvs_raw_qc_baseline_severe_review")
+            ),
+            "raw_qc_baseline_median_std_uv": _float_or_zero(
+                settings.get("_fpvs_raw_qc_baseline_median_std_uv")
+            ),
+            "raw_qc_baseline_median_p2p_99_uv": _float_or_zero(
+                settings.get("_fpvs_raw_qc_baseline_median_p2p_99_uv")
+            ),
+            "raw_qc_baseline_warning": bool(
+                settings.get("_fpvs_raw_qc_baseline_warning")
+            ),
+            "raw_qc_baseline_excluded": bool(
+                settings.get("_fpvs_raw_qc_baseline_excluded")
+            ),
+            "raw_qc_scoring_scope": str(
+                settings.get("_fpvs_raw_qc_scoring_scope") or ""
+            ),
+            "raw_qc_scoring_spans": settings.get(
+                "_fpvs_raw_qc_scoring_spans",
+                [],
+            ),
+            "raw_qc_scoring_sample_count": int(
+                settings.get("_fpvs_raw_qc_scoring_sample_count") or 0
+            ),
+            **_review_metadata_from_settings(settings),
+        }
+        with atomic_write(meta_path) as stream:
+            stream.write(json.dumps(metadata, sort_keys=True, default=str))
+        pruned = _prune_stale_preprocessed_cache(
+            cache_dir=raw_path.parent,
+            source_path=str(file_path.resolve()),
+            keep_meta_path=meta_path,
+        )
+        if pruned:
+            logger.debug(
+                "preproc_cache_pruned file=%s count=%d",
+                file_path.name,
+                pruned,
+            )
+        return "stored"
+    except Exception as exc:
+        logger.warning(
+            "preproc_cache_write_failed file=%s cache=%s error=%s",
+            file_path.name,
+            raw_path,
+            exc,
+        )
+        return "write_error"
+
+
+def _build_epoch_data_from_spans(
+    raw: Any,
+    spans: List[Tuple[int, int]],
+) -> Any:
+    first_start, first_stop = spans[0]
+    first_segment = raw.get_data(start=first_start, stop=first_stop)
+    data = np.empty((len(spans),) + first_segment.shape, dtype=first_segment.dtype)
+    data[0] = first_segment
+    for idx, (start_samp, stop_samp) in enumerate(spans[1:], start=1):
+        segment = raw.get_data(start=start_samp, stop=stop_samp)
+        if segment.shape != first_segment.shape:
+            raise ValueError(
+                "Epoch segment shape mismatch: "
+                f"expected {first_segment.shape}, got {segment.shape}"
+            )
+        data[idx] = segment
+    return data
+
+
+def _settings_for_file(
+    file_path: Path,
+    settings: Mapping[str, object],
+) -> Dict[str, object]:
+    """Return per-file settings with strict canonical group output routing."""
+
+    file_settings = dict(settings)
+    effective_detector_mode = normalize_removed_electrode_detection_mode(
+        file_settings.get("removed_electrode_detection_mode"),
+        auto_detect_removed_electrodes=file_settings.get(
+            "auto_detect_removed_electrodes",
+            False,
+        ),
+    )
+    file_settings["removed_electrode_detection_mode"] = effective_detector_mode
+    file_settings["auto_detect_removed_electrodes"] = (
+        effective_detector_mode == REMOVED_ELECTRODE_DETECTION_MODE_AUTO
+    )
+    participant_id = _participant_id_for_file(file_path, file_settings)
+    file_settings["_fpvs_source_file_path"] = str(file_path.resolve())
+    file_settings["_fpvs_participant_id"] = participant_id
+    file_settings["output_recording_stem"] = _output_stem_for_file(
+        file_path,
+        file_settings,
+    )
+    recording_id = _recording_id_for_file(file_path, file_settings)
+    session_id = _session_id_for_file(file_path, file_settings)
+    session_label = _mapped_text_for_file(
+        file_path,
+        file_settings,
+        "_fpvs_session_label_by_file",
+    )
+    visit_index = _mapped_text_for_file(
+        file_path,
+        file_settings,
+        "_fpvs_visit_index_by_file",
+    )
+    days_from_baseline = _mapped_text_for_file(
+        file_path,
+        file_settings,
+        "_fpvs_days_from_baseline_by_file",
+    )
+    if recording_id:
+        file_settings["_fpvs_recording_id"] = recording_id
+    processing_id = recording_id or participant_id
+    if "condition_electrode_interpolation_requests" in file_settings:
+        file_settings["_fpvs_condition_interpolation_requests"] = normalize_condition_interpolation_requests(
+            _recording_mapping_payload(
+                file_settings.get("condition_electrode_interpolation_requests"), processing_id,
+            )
+        )
+    if "kurtosis_review_decisions_by_recording" in file_settings:
+        file_settings["_fpvs_kurtosis_review_decisions"] = (
+            _recording_mapping_payload(
+                file_settings.get("kurtosis_review_decisions_by_recording"),
+                processing_id,
+            )
+        )
+    if session_id:
+        file_settings["_fpvs_session_id"] = session_id
+    if session_label:
+        file_settings["_fpvs_session_label"] = session_label
+    if visit_index:
+        file_settings["_fpvs_visit_index"] = int(visit_index)
+    if days_from_baseline:
+        file_settings["_fpvs_days_from_baseline"] = float(days_from_baseline)
+    grouped_project = bool(file_settings.get("_fpvs_grouped_project", False))
+    output_group_by_file = file_settings.get("_fpvs_output_group_by_file")
+    if output_group_by_file is None:
+        if grouped_project:
+            raise ValueError(
+                "Grouped processing requires a canonical per-file output-folder "
+                "mapping."
+            )
+        return file_settings
+    if not isinstance(output_group_by_file, Mapping):
+        raise ValueError("_fpvs_output_group_by_file must be a path-to-folder mapping.")
+
+    file_key = str(file_path.resolve())
+    if file_key not in output_group_by_file:
+        raise ValueError(
+            "Grouped processing has no output-folder assignment for raw file: "
+            f"{file_key}"
+        )
+    file_settings["output_group_folder"] = validate_group_folder_name(
+        output_group_by_file[file_key]
+    )
+    return file_settings
+
+
+def _run_full_pipeline_for_file(
+    file_path: Path,
+    settings: Dict[str, object],
+    event_map: Dict[str, int],
+    save_folder: Path,
+    project_root: Path,
+) -> Dict[str, object]:
+    """
+    Canonical single-file pipeline using the PySide6 backend.
+
+    Pipeline order (must not change):
+      load → preproc audit (before) → preprocessing → events → epochs →
+      post_export → source-ready time-domain derivative →
+      preproc audit (after) → cleanup.
+    """
+    from Main_App.projects import validate_condition_output_names
+
+    validate_condition_output_names(event_map)
+    t0 = time.perf_counter()
+    timings_ms: Dict[str, int] = {}
+    export_receipts: List[Dict[str, object]] = []
+    cache_status = "not_checked"
+    settings = _settings_for_file(file_path, settings)
+    settings["project_root"] = str(project_root)
+
+    def _record_timing(section: str, started_at: float) -> None:
+        elapsed_ms = int((time.perf_counter() - started_at) * 1000)
+        timings_ms[section] = elapsed_ms
+        logger.debug(
+            "[TIMING] file=%s section=%s elapsed_ms=%d",
+            file_path.name,
+            section,
+            elapsed_ms,
+        )
+
+    stage = "preflight"
+    crop_logger = _build_fft_crop_file_logger(project_root=project_root, file_path=file_path)
+    try:
+        logger.debug(
+            "[PIPELINE START] file=%s stage=%s",
+            file_path.name,
+            stage,
+        )
+        crop_logger.info("file=%s stage=start", file_path.name)
+
+        manually_excluded, participant_id = _participant_is_manually_excluded(
+            file_path,
+            settings,
+        )
+        if manually_excluded:
+            message = (
+                f"Participant {participant_id} was manually excluded from processing. "
+                "The raw BDF file was not altered."
+            )
+            logger.info(
+                "manual_participant_excluded file=%s participant_id=%s",
+                file_path.name,
+                participant_id,
+            )
+            crop_logger.warning(
+                "file=%s stage=preflight excluded=true reason=manual_participant_exclusion participant_id=%s",
+                file_path.name,
+                participant_id,
+            )
+            return _make_excluded_result(
+                file_path=file_path,
+                reason="manual_participant_exclusion",
+                message=message,
+                start_time=t0,
+            )
+
+        recording_excluded, recording_id = _recording_is_manually_excluded(
+            file_path,
+            settings,
+        )
+        if recording_excluded:
+            message = (
+                f"Recording {recording_id} was manually excluded from processing. "
+                "The raw BDF file was not altered."
+            )
+            logger.info(
+                "manual_recording_excluded file=%s recording_id=%s participant_id=%s",
+                file_path.name,
+                recording_id,
+                participant_id,
+            )
+            crop_logger.warning(
+                "file=%s stage=preflight excluded=true reason=manual_recording_exclusion "
+                "recording_id=%s participant_id=%s",
+                file_path.name,
+                recording_id,
+                participant_id,
+            )
+            return _make_excluded_result(
+                file_path=file_path,
+                reason="manual_recording_exclusion",
+                message=message,
+                start_time=t0,
+            )
+
+        # Lazy imports (inside worker only)
+        logger.debug("[PIPELINE STAGE] file=%s stage=worker_imports_start", file_path.name)
+        from Main_App.io.load_utils import (  # type: ignore
+            BDF_RECORDING_NOT_STARTED_REASON,
+            format_bdf_recording_not_started_message,
+            inspect_bdf_header,
+            load_eeg_file,
+        )
+        from Main_App.exports.post_export_adapter import (  # type: ignore
+            LegacyCtx,
+            run_post_export,
+        )
+        import gc
+        import mne  # type: ignore
+        logger.debug("[PIPELINE STAGE] file=%s stage=worker_imports_done", file_path.name)
+
+        # Quiet noisy MNE INFO logs in worker processes (e.g., repeated
+        # "Using data from preloaded Raw..." lines) while preserving
+        # WARNING/ERROR messages.
+        try:
+            set_level = getattr(mne, "set_log_level", None)
+            if callable(set_level):
+                set_level("WARNING")
+            else:
+                from mne.utils import set_log_level as _set_log_level  # type: ignore
+                _set_log_level("WARNING")
+        except Exception:
+            # If MNE changes its API, fail silently; core behavior is unaffected.
+            pass
+
+        preflight_info = inspect_bdf_header(file_path)
+        if preflight_info and preflight_info.recording_not_started:
+            message = format_bdf_recording_not_started_message([file_path.name])
+            logger.debug(
+                "bdf_recording_excluded file=%s reason=%s size=%s header_bytes=%s data_records=%s",
+                file_path,
+                BDF_RECORDING_NOT_STARTED_REASON,
+                preflight_info.file_size,
+                preflight_info.header_bytes,
+                preflight_info.data_records,
+            )
+            crop_logger.warning(
+                "file=%s stage=preflight excluded=true reason=%s size=%s header_bytes=%s data_records=%s",
+                file_path.name,
+                BDF_RECORDING_NOT_STARTED_REASON,
+                preflight_info.file_size,
+                preflight_info.header_bytes,
+                preflight_info.data_records,
+            )
+            return _make_excluded_result(
+                file_path=file_path,
+                reason=BDF_RECORDING_NOT_STARTED_REASON,
+                message=message,
+                start_time=t0,
+                preflight_info=preflight_info,
+            )
+
+        # Minimal logger-compatible stub for loader
+        class _App:
+            def log(self, msg: str) -> None:  # pragma: no cover - informational
+                _worker_log(msg)
+
+        # Resolve reference pair for loader so EXG policy keeps the right pair as EEG
+        ref_ch1 = settings.get("ref_channel1") or settings.get("ref_ch1") or "EXG1"
+        ref_ch2 = settings.get("ref_channel2") or settings.get("ref_ch2") or "EXG2"
+        ref_pair = (str(ref_ch1), str(ref_ch2))
+
+        frequency_protocol = _project_frequency_protocol(settings)
+        marker_recording_id = (
+            _recording_id_for_file(file_path, settings)
+            or _mapped_text_for_file(file_path, settings, "_fpvs_participant_id_by_file")
+        )
+        event_plan_payload = _preflight_event_plan_for_file(file_path, settings)
+        unresolved_occurrences = event_plan_payload.get("unresolved_occurrences")
+        if unresolved_occurrences not in (None, [], ()):
+            raise RuntimeError(
+                "Processing cannot continue while marker occurrences require review."
+            )
+        source_analysis_span_plan = validate_source_analysis_span_context(
+            event_plan_payload=event_plan_payload,
+            event_map=event_map,
+            protocol=frequency_protocol,
+            recording_id=marker_recording_id,
+        )
+        excluded_condition_labels = _excluded_condition_labels_for_file(
+            file_path,
+            settings,
+            event_map,
+        )
+        source_analysis_span_plan = (
+            restrict_source_analysis_span_plan_by_condition(
+                source_analysis_span_plan,
+                excluded_condition_labels=excluded_condition_labels,
+                exclusion_scope={
+                    "participant_id": participant_id,
+                    "recording_id": recording_id or participant_id,
+                },
+            )
+        )
+        if not source_analysis_span_plan.get("spans"):
+            message = (
+                f"Every project condition is explicitly excluded for {file_path.name}; "
+                "no signal was preprocessed and no condition workbook was written."
+            )
+            logger.info(
+                "all_conditions_excluded file=%s participant_id=%s recording_id=%s "
+                "conditions=%s",
+                file_path.name,
+                participant_id,
+                recording_id,
+                list(excluded_condition_labels),
+            )
+            return _make_excluded_result(
+                file_path=file_path,
+                reason="all_conditions_excluded_from_analysis",
+                message=message,
+                stage="condition_scope",
+                start_time=t0,
+            )
+        settings["_fpvs_source_analysis_span_plan"] = source_analysis_span_plan
+        settings["_fpvs_excluded_condition_labels"] = list(
+            excluded_condition_labels
+        )
+        if settings.get("_fpvs_condition_interpolation_requests"):
+            settings["_fpvs_condition_interpolation_requests"] = normalize_condition_interpolation_requests(
+                settings["_fpvs_condition_interpolation_requests"],
+                excluded_condition_labels=excluded_condition_labels,
+            )
+        settings["_fpvs_require_analysis_spans"] = True
+        stim = str(settings.get("stim_channel") or settings.get("stim") or "Status")
+
+        # 1) Cache lookup, then load/preprocess only on misses.
+        stage = "cache_lookup"
+        logger.debug("[PIPELINE STAGE] file=%s stage=cache_lookup_start", file_path.name)
+        section_started = time.perf_counter()
+        raw_proc, audit_before, n_rejected, cache_status = _load_preprocessed_cache(
+            file_path=file_path,
+            settings=settings,
+            project_root=project_root,
+            mne_module=mne,
+            frequency_protocol=frequency_protocol,
+            event_map=event_map,
+        )
+        _record_timing("cache_lookup", section_started)
+        logger.debug(
+            "[PIPELINE] %s: preproc cache status=%s",
+            file_path.name,
+            cache_status,
+        )
+        logger.debug(
+            "[PIPELINE STAGE] file=%s stage=cache_lookup_done status=%s",
+            file_path.name,
+            cache_status,
+        )
+
+        if raw_proc is None:
+            # 2) Load only the first 64 channels plus selected ref pair and stim.
+            stage = "load"
+            logger.debug("[PIPELINE STAGE] file=%s stage=load_start", file_path.name)
+            section_started = time.perf_counter()
+            ram_preload = settings.get("experimental_ram_preload", False) is True
+            raw = load_eeg_file(
+                _App(),
+                str(file_path),
+                ref_pair=ref_pair,
+                first_n_channels=_configured_biosemi64_channel_limit(settings),
+                stim_channel=str(settings.get("stim_channel") or "Status"),
+                electrode_mapping_profile=settings.get(
+                    "electrode_mapping_profile"
+                ),
+                electrode_montage=settings.get("electrode_montage"),
+                **({"preload_in_memory": True} if ram_preload else {}),
+            )
+            _record_timing("load", section_started)
+            if raw is None:
+                raise RuntimeError("load_eeg_file returned None")
+            logger.debug("[PIPELINE STAGE] file=%s stage=load_done", file_path.name)
+
+            sfreq = float(raw.info.get("sfreq", -1.0))
+            n_ch = len(raw.ch_names)
+            logger.debug(
+                "[PIPELINE] %s: load complete sfreq=%.3f n_channels=%d",
+                file_path.name,
+                sfreq,
+                n_ch,
+            )
+
+            source_events, source_event_source = _find_raw_events(
+                raw,
+                mne_module=mne,
+                stim_channel=stim,
+            )
+            source_analysis_span_plan = validate_source_analysis_span_plan(
+                event_plan_payload=event_plan_payload,
+                events=source_events,
+                sampling_rate_hz=float(raw.info["sfreq"]),
+                n_times=int(raw.n_times),
+                first_samp=int(raw.first_samp),
+                event_map=event_map,
+                protocol=frequency_protocol,
+                recording_id=marker_recording_id,
+            )
+            source_analysis_span_plan = (
+                restrict_source_analysis_span_plan_by_condition(
+                    source_analysis_span_plan,
+                    excluded_condition_labels=excluded_condition_labels,
+                    exclusion_scope={
+                        "participant_id": participant_id,
+                        "recording_id": recording_id or participant_id,
+                    },
+                )
+            )
+            settings["_fpvs_source_analysis_span_plan"] = (
+                source_analysis_span_plan
+            )
+            source_qc_spans = relative_spans_from_plan(
+                source_analysis_span_plan
+            )
+            logger.debug(
+                "source_analysis_span_plan_validated file=%s event_source=%s "
+                "span_count=%d unique_sample_count=%d fingerprint=%s",
+                file_path.name,
+                source_event_source,
+                len(source_analysis_span_plan["spans"]),
+                int(source_analysis_span_plan["unique_sample_count"]),
+                source_analysis_span_plan["fingerprint"],
+            )
+
+            settings["_fpvs_raw_qc_bad_channels"] = []
+            settings["_fpvs_raw_qc_low_variance_channels"] = []
+            settings["_fpvs_raw_qc_high_amplitude_channels"] = []
+            settings["_fpvs_raw_qc_rare_burst_channels"] = []
+            settings["_fpvs_raw_qc_spatial_outlier_channels"] = []
+            settings["_fpvs_raw_qc_manual_removed_channels"] = []
+            settings["_fpvs_raw_qc_warning_rules"] = []
+            settings["_fpvs_raw_qc_method_version"] = RAW_CHANNEL_QC_METHOD_VERSION
+            settings["_fpvs_raw_qc_review_rules"] = []
+            settings["_fpvs_raw_qc_candidate_sources"] = {}
+            settings["_fpvs_raw_qc_candidate_burden_findings"] = []
+            settings["_fpvs_raw_qc_amplitude_review_findings"] = []
+            settings["_fpvs_raw_qc_baseline_severe_review"] = False
+            settings["_fpvs_raw_qc_baseline_median_std_uv"] = 0.0
+            settings["_fpvs_raw_qc_baseline_median_p2p_99_uv"] = 0.0
+            settings["_fpvs_raw_qc_baseline_warning"] = False
+            settings["_fpvs_raw_qc_baseline_excluded"] = False
+            settings["_fpvs_participant_id"] = _participant_id_for_file(
+                file_path,
+                settings,
+            )
+            _apply_removed_electrode_review_metadata(file_path, settings)
+            settings["_fpvs_manual_removed_electrodes"] = (
+                _manual_removed_electrodes_for_file(file_path, settings)
+            )
+            raw_qc_result = evaluate_raw_channel_qc(
+                raw,
+                settings,
+                filename=file_path.name,
+                analysis_spans=source_qc_spans,
+            )
+            if raw_qc_result.excluded:
+                logger.warning(
+                    "raw_channel_qc_excluded file=%s reason=%s n_bad=%d n_channels=%d "
+                    "left=%d/%d right=%d/%d midline=%d/%d rules=%s",
+                    file_path.name,
+                    raw_qc_result.reason,
+                    raw_qc_result.n_bad_channels,
+                    raw_qc_result.n_channels,
+                    raw_qc_result.left_bad,
+                    raw_qc_result.left_total,
+                    raw_qc_result.right_bad,
+                    raw_qc_result.right_total,
+                    raw_qc_result.midline_bad,
+                    raw_qc_result.midline_total,
+                    list(raw_qc_result.triggered_rules),
+                )
+                crop_logger.warning(
+                    "file=%s stage=raw_qc excluded=true reason=%s n_bad=%d n_channels=%d "
+                    "left=%d/%d right=%d/%d midline=%d/%d rules=%s",
+                    file_path.name,
+                    raw_qc_result.reason,
+                    raw_qc_result.n_bad_channels,
+                    raw_qc_result.n_channels,
+                    raw_qc_result.left_bad,
+                    raw_qc_result.left_total,
+                    raw_qc_result.right_bad,
+                    raw_qc_result.right_total,
+                    raw_qc_result.midline_bad,
+                    raw_qc_result.midline_total,
+                    ",".join(raw_qc_result.triggered_rules),
+                )
+                return _make_excluded_result(
+                    file_path=file_path,
+                    reason=raw_qc_result.reason or "raw_channel_qc_failure",
+                    message=raw_qc_result.message,
+                    stage="raw_qc",
+                    start_time=t0,
+                    qc_info=_raw_channel_qc_payload_with_review(
+                        raw_qc_result.to_payload(),
+                        settings,
+                    ),
+                    geometry=read_raw_biosemi64_geometry(raw),
+                )
+            logger.debug(
+                "raw_channel_qc_passed file=%s n_bad=%d n_channels=%d",
+                file_path.name,
+                raw_qc_result.n_bad_channels,
+                raw_qc_result.n_channels,
+            )
+            raw_qc_bads = _string_list(raw_qc_result.channels_to_interpolate)
+            settings["_fpvs_raw_qc_bad_channels"] = list(raw_qc_bads)
+            settings["_fpvs_raw_qc_low_variance_channels"] = list(
+                raw_qc_result.low_variance_channels
+            )
+            settings["_fpvs_raw_qc_high_amplitude_channels"] = list(
+                raw_qc_result.high_amplitude_channels
+            )
+            settings["_fpvs_raw_qc_rare_burst_channels"] = list(
+                raw_qc_result.rare_burst_channels
+            )
+            settings["_fpvs_raw_qc_spatial_outlier_channels"] = list(
+                raw_qc_result.spatial_outlier_channels
+            )
+            settings["_fpvs_raw_qc_manual_removed_channels"] = list(
+                raw_qc_result.manual_removed_channels
+            )
+            settings["_fpvs_raw_qc_warning_rules"] = list(raw_qc_result.warning_rules)
+            raw_qc_payload = raw_qc_result.to_payload()
+            settings["_fpvs_raw_qc_method_version"] = str(
+                raw_qc_payload.get("method_version") or RAW_CHANNEL_QC_METHOD_VERSION
+            )
+            settings["_fpvs_raw_qc_review_rules"] = list(raw_qc_result.review_rules)
+            settings["_fpvs_raw_qc_candidate_sources"] = {
+                str(channel): list(sources)
+                for channel, sources in raw_qc_result.candidate_sources.items()
+            }
+            settings["_fpvs_raw_qc_candidate_burden_findings"] = [
+                dict(finding) for finding in raw_qc_result.burden_findings
+            ]
+            settings["_fpvs_raw_qc_amplitude_review_findings"] = _mapping_list(
+                raw_qc_payload.get("raw_amplitude_review_findings")
+            )
+            settings["_fpvs_raw_qc_baseline_severe_review"] = (
+                raw_qc_result.raw_baseline_severe_review
+            )
+            settings["_fpvs_raw_qc_baseline_median_std_uv"] = (
+                raw_qc_result.raw_baseline_median_std_uv
+            )
+            settings["_fpvs_raw_qc_baseline_median_p2p_99_uv"] = (
+                raw_qc_result.raw_baseline_median_p2p_99_uv
+            )
+            settings["_fpvs_raw_qc_baseline_warning"] = (
+                raw_qc_result.raw_baseline_warning
+            )
+            settings["_fpvs_raw_qc_baseline_excluded"] = (
+                raw_qc_result.raw_baseline_excluded
+            )
+            settings["_fpvs_raw_qc_scoring_scope"] = raw_qc_result.scoring_scope
+            settings["_fpvs_raw_qc_scoring_spans"] = [
+                list(span) for span in raw_qc_result.scoring_spans
+            ]
+            settings["_fpvs_raw_qc_scoring_sample_count"] = (
+                raw_qc_result.scoring_sample_count
+            )
+            if raw_qc_bads:
+                existing_bads = {str(channel) for channel in raw.info.get("bads", [])}
+                new_bads = [
+                    channel
+                    for channel in raw_qc_bads
+                    if channel in raw.ch_names and channel not in existing_bads
+                ]
+                if new_bads:
+                    raw.info["bads"].extend(new_bads)
+                logger.info(
+                    "raw_channel_qc_marked file=%s channels=%s",
+                    file_path.name,
+                    raw_qc_bads,
+                )
+                crop_logger.info(
+                    "file=%s stage=raw_qc marked_channels=%s",
+                    file_path.name,
+                    ",".join(raw_qc_bads),
+                )
+            if raw_qc_result.warning_rules:
+                logger.warning(
+                    "raw_channel_qc_warning file=%s rules=%s cluster_size=%d cluster=%s",
+                    file_path.name,
+                    list(raw_qc_result.warning_rules),
+                    raw_qc_result.largest_bad_cluster_size,
+                    list(raw_qc_result.largest_bad_cluster_channels),
+                )
+                crop_logger.warning(
+                    "file=%s stage=raw_qc warning_rules=%s cluster_size=%d cluster=%s",
+                    file_path.name,
+                    ",".join(raw_qc_result.warning_rules),
+                    raw_qc_result.largest_bad_cluster_size,
+                    ",".join(raw_qc_result.largest_bad_cluster_channels),
+                )
+
+            # 3) Preproc audit (before)
+            stage = "preprocess"
+            section_started = time.perf_counter()
+            audit_before = backend_preprocess.begin_preproc_audit(
+                raw,
+                settings,
+                file_path.name,
+            )
+            _record_timing("preproc_audit_before", section_started)
+            logger.debug(
+                "[PIPELINE] %s: preproc audit_before complete",
+                file_path.name,
+            )
+
+            # 4) Preprocessing via PySide6 backend (handles:
+            #    initial EXG ref -> drop EXGs -> channel limit keeping stim ->
+            #    filter -> downsample -> kurtosis/interp -> final avg ref)
+            logger.debug(
+                "RUNNER_SETTINGS_SNAPSHOT file=%s high_pass=%r low_pass=%r downsample_rate=%r "
+                "reject_thresh=%r ref=(%r,%r) stim=%r",
+                Path(file_path).name if file_path else "UNKNOWN",
+                settings.get("high_pass"),
+                settings.get("low_pass"),
+                settings.get("downsample_rate", settings.get("downsample")),
+                settings.get("reject_thresh"),
+                settings.get("ref_channel1"),
+                settings.get("ref_channel2"),
+                settings.get("stim_channel"),
+                extra={
+                    "source": "process_runner",
+                    "file": file_path.name,
+                    "high_pass": settings.get("high_pass"),
+                    "low_pass": settings.get("low_pass"),
+                    "downsample_rate": settings.get("downsample_rate"),
+                    "downsample": settings.get("downsample"),
+                    "reject_thresh": settings.get("reject_thresh"),
+                    "ref_channel1": settings.get("ref_channel1"),
+                    "ref_channel2": settings.get("ref_channel2"),
+                    "stim_channel": settings.get("stim_channel"),
+                },
+            )
+            logger.debug(
+                "RUNNER_PREPROC_PARAMS file=%s high_pass=%r low_pass=%r downsample_rate=%r "
+                "reject_thresh=%r",
+                Path(file_path).name,
+                settings.get("high_pass"),
+                settings.get("low_pass"),
+                settings.get("downsample_rate", settings.get("downsample")),
+                settings.get("reject_thresh"),
+            )
+            section_started = time.perf_counter()
+            raw_proc, n_rejected = backend_preprocess.perform_preprocessing(
+                raw_input=raw,
+                params=settings,
+                log_func=_worker_log,
+                filename_for_log=file_path.name,
+                **({"before_kurtosis_scoring": _WORKER_ADMISSION.before_kurtosis,
+                    "before_processing_finish": _WORKER_ADMISSION.before_finish}
+                   if _WORKER_ADMISSION is not None else {}),
+            )
+            _record_timing("preprocessing", section_started)
+            if raw_proc is None:
+                raise RuntimeError(
+                    settings.get("_fpvs_preprocessing_error")
+                    or "perform_preprocessing returned None"
+                )
+            raw_target_span_plan = settings.get(
+                "_fpvs_realized_analysis_span_plan"
+            )
+            if not isinstance(raw_target_span_plan, Mapping):
+                raise RuntimeError(
+                    "Preprocessing did not realize the approved analysis spans."
+                )
+            target_analysis_span_plan = (
+                validate_realized_target_analysis_span_plan(
+                    raw_target_span_plan,
+                    source_plan=source_analysis_span_plan,
+                    target_sfreq_hz=float(raw_proc.info["sfreq"]),
+                    target_n_times=int(raw_proc.n_times),
+                    target_first_samp=int(raw_proc.first_samp),
+                )
+            )
+            settings["_fpvs_realized_analysis_span_plan"] = (
+                target_analysis_span_plan
+            )
+            interpolated_count = len(
+                _string_list(settings.get("_fpvs_interpolated_channels"))
+            )
+            if interpolated_count:
+                n_rejected = max(int(n_rejected), interpolated_count)
+
+            sfreq_proc = float(raw_proc.info.get("sfreq", -1.0))
+            n_ch_proc = len(raw_proc.ch_names)
+            logger.debug(
+                "[PIPELINE] %s: preprocess complete n_rejected=%d sfreq=%.3f n_channels=%d",
+                file_path.name,
+                int(n_rejected),
+                sfreq_proc,
+                n_ch_proc,
+            )
+
+            section_started = time.perf_counter()
+            cache_status = _store_preprocessed_cache(
+                raw=raw_proc,
+                file_path=file_path,
+                settings=settings,
+                project_root=project_root,
+                mne_module=mne,
+                audit_before=audit_before,
+                n_rejected=int(n_rejected),
+                frequency_protocol=frequency_protocol,
+                event_map=event_map,
+            )
+            _record_timing("cache_store", section_started)
+            logger.debug(
+                "[PIPELINE] %s: preproc cache store status=%s",
+                file_path.name,
+                cache_status,
+            )
+
+            # Free loader Raw ASAP
+            del raw
+            gc.collect()
+        elif audit_before is None:
+            raise RuntimeError("preprocessed cache hit missing audit metadata")
+
+        if _WORKER_ADMISSION is not None:
+            _WORKER_ADMISSION.before_tail(raw_proc)
+        geometry_identity = _attach_processed_geometry(raw_proc, settings)
+        settings["_fpvs_geometry"] = geometry_identity
+        settings["_fpvs_retained_scalp_channels"] = list(
+            geometry_identity["retained_scalp_channels"]
+        )
+        settings["_fpvs_retained_scalp_set_fingerprint"] = str(
+            geometry_identity["retained_scalp_set_fingerprint"]
+        )
+
+        raw_target_span_plan = settings.get("_fpvs_realized_analysis_span_plan")
+        if not isinstance(raw_target_span_plan, Mapping):
+            raise RuntimeError(
+                "Processed data is missing realized analyzed-interval coordinates."
+            )
+        target_analysis_span_plan = validate_realized_target_analysis_span_plan(
+            raw_target_span_plan,
+            source_plan=source_analysis_span_plan,
+            target_sfreq_hz=float(raw_proc.info["sfreq"]),
+            target_n_times=int(raw_proc.n_times),
+            target_first_samp=int(raw_proc.first_samp),
+        )
+        settings["_fpvs_realized_analysis_span_plan"] = target_analysis_span_plan
+
+        # 4) Events — prefer explicit stim channel (BioSemi 'Status')
+        stage = "events"
+        section_started = time.perf_counter()
+        events, events_source = _find_raw_events(
+            raw_proc,
+            mne_module=mne,
+            stim_channel=stim,
+        )
+        if float(source_analysis_span_plan["source_grid"]["sfreq_hz"]) != float(
+            raw_proc.info["sfreq"]
+        ):
+            if events_source != "stim" or len(raw_proc._first_samps) != 1:
+                raise AnalysisSpanPlanError(
+                    "Exact v3 trigger alignment after downsampling requires a "
+                    "single recording segment with recorded stimulus markers."
+                )
+            # Also check cache hits against the resident stim channel, so cached
+            # coordinates cannot silently disagree with the actual crop trigger.
+            validate_target_analysis_span_markers(target_analysis_span_plan, events)
+
+        events_info = {
+            "stim_channel": stim,
+            "n_events": int(len(events)),
+            "source": events_source,
+        }
+        logger.debug(
+            "[PIPELINE] %s: events complete source=%s stim=%s n_events=%d",
+            file_path.name,
+            events_source,
+            stim,
+            events_info["n_events"],
+        )
+        _record_timing("events", section_started)
+
+        # 5) Epochs from the exact preflight-approved occurrence spans.
+        stage = "epochs"
+        section_started = time.perf_counter()
+        sfreq = float(raw_proc.info["sfreq"])
+        _, n_step, step_err = compute_onbin_step(
+            fs=sfreq,
+            f_oddball=frequency_protocol.oddball_rate_hz,
+        )
+        if step_err or not n_step:
+            raise RuntimeError(
+                "The reviewed project marker plan has no exact FFT grid: "
+                f"{step_err or 'unknown'}."
+            )
+
+        raw_marker_plan = event_plan_payload.get("marker_integrity_plan")
+        if not isinstance(raw_marker_plan, Mapping):
+            raise RuntimeError("The reviewed marker plan is missing occurrence evidence.")
+        raw_occurrences = raw_marker_plan.get("occurrences")
+        if not isinstance(raw_occurrences, list):
+            raise RuntimeError("The reviewed marker occurrences are malformed.")
+        occurrence_evidence: dict[str, Mapping[str, object]] = {}
+        for raw_occurrence in raw_occurrences:
+            if not isinstance(raw_occurrence, Mapping):
+                raise RuntimeError("The reviewed marker occurrence is malformed.")
+            key = (
+                f"{int(raw_occurrence['condition_code'])}:"
+                f"{int(raw_occurrence['repetition_index'])}"
+            )
+            occurrence_evidence[key] = raw_occurrence
+
+        raw_approved_occurrences = event_plan_payload.get("approved_occurrences")
+        if not isinstance(raw_approved_occurrences, list):
+            raise RuntimeError("The reviewed approved occurrences are malformed.")
+        approved_by_condition: dict[int, list[Mapping[str, object]]] = {}
+        for raw_approved in raw_approved_occurrences:
+            if not isinstance(raw_approved, Mapping):
+                raise RuntimeError("A reviewed approved occurrence is malformed.")
+            approved_by_condition.setdefault(
+                int(raw_approved["condition_code"]),
+                [],
+            ).append(raw_approved)
+
+        raw_target_spans = target_analysis_span_plan.get("spans")
+        if not isinstance(raw_target_spans, list):
+            raise RuntimeError("Realized target analysis spans are malformed.")
+        target_spans_by_condition: dict[int, list[Mapping[str, object]]] = {}
+        for raw_target_span in raw_target_spans:
+            if not isinstance(raw_target_span, Mapping):
+                raise RuntimeError("A realized target analysis span is malformed.")
+            target_spans_by_condition.setdefault(
+                int(raw_target_span["condition_code"]),
+                [],
+            ).append(raw_target_span)
+
+        have_codes = {
+            int(item["condition_code"])
+            for item in raw_occurrences
+        }
+        epochs_dict: Dict[str, List[object]] = {}
+        skipped_conditions: list[tuple[str, int, str]] = []
+        total_epochs = 0
+        expected_n = frequency_protocol.expected_analyzed_samples(sfreq)
+        excluded_condition_keys = {
+            label.casefold() for label in excluded_condition_labels
+        }
+
+        for label, code in event_map.items():
+            code_int = int(code)
+            condition_occurrences = approved_by_condition.get(code_int, [])
+            retained_occurrences = target_spans_by_condition.get(code_int, [])
+
+            if code_int not in have_codes:
+                skipped_conditions.append((label, code_int, "0 matching events"))
+                epochs_dict[label] = []
+                continue
+            if not retained_occurrences:
+                if label.casefold() in excluded_condition_keys:
+                    reason = "project condition exclusion"
+                else:
+                    reason = (
+                        "all marker occurrences excluded after review"
+                        if condition_occurrences
+                        else "no approved marker occurrences"
+                    )
+                skipped_conditions.append((label, code_int, reason))
+                epochs_dict[label] = []
+                continue
+
+            rep_spans: List[Tuple[int, int]] = []
+            rep_events: List[List[int]] = []
+            rep_metadata: List[dict] = []
+            for target_span in retained_occurrences:
+                target_coordinates = target_span.get("target_coordinates")
+                source_coordinates = target_span.get("source_coordinates")
+                if not isinstance(target_coordinates, Mapping) or not isinstance(
+                    source_coordinates,
+                    Mapping,
+                ):
+                    raise RuntimeError(
+                        "A retained occurrence reached epoching without coordinates."
+                    )
+                repetition_index = int(target_span["repetition_index"])
+                occurrence_key = str(target_span["occurrence_key"])
+                start_samp = int(target_coordinates["start_relative_sample"])
+                stop_samp = int(target_coordinates["stop_relative_sample"])
+                start_samp_absolute = int(target_coordinates["start_sample"])
+                stop_samp_absolute = int(target_coordinates["stop_sample"])
+                n_used = stop_samp - start_samp
+                if n_used != expected_n:
+                    raise RuntimeError(
+                        "The realized marker span does not match the target protocol: "
+                        f"expected={expected_n}, actual={n_used}, file={file_path.name}, "
+                        f"condition={label}, rep={repetition_index}."
+                    )
+                n_mod_step = int(n_used % n_step)
+                if n_mod_step != 0:
+                    raise RuntimeError(
+                        "Approved marker span is not on the exact FFT grid: "
+                        f"N={n_used}, N_step={n_step}, file={file_path.name}, "
+                        f"condition={label}, rep={repetition_index}."
+                    )
+
+                evidence = occurrence_evidence.get(occurrence_key)
+                if evidence is None:
+                    raise RuntimeError(
+                        "Approved marker occurrence lost its preflight evidence."
+                    )
+                retained_samples = evidence.get("retained_marker_samples")
+                if not isinstance(retained_samples, list):
+                    raise RuntimeError("Retained marker evidence is malformed.")
+                raw_samples = evidence.get("raw_marker_samples")
+                if not isinstance(raw_samples, list):
+                    raise RuntimeError("Raw marker evidence is malformed.")
+                first_marker = int(retained_samples[0]) if retained_samples else None
+                last_marker = int(retained_samples[-1]) if retained_samples else None
+                marker_code = frequency_protocol.oddball_marker_code_for_condition(
+                    code_int, recording_id=marker_recording_id,
+                )
+                df_hz = sfreq / float(n_used)
+                k0 = float(frequency_protocol.oddball_rate_hz) * n_used / sfreq
+                f_bin_hz = round(k0) * df_hz
+
+                crop_logger.info(
+                    (
+                        "file=%s condition=%s rep=%d fs=%.6f N_step=%s "
+                        "oddball_id=%s marker_raw=%d marker_retained=%d "
+                        "first_marker_sample=%s last_marker_sample=%s N=%d "
+                        "N_mod_step=%s df_hz=%.9f k0=%.9f f_bin_hz=%.9f "
+                        "crop_mode=project_marker_plan_target_grid_v2 disposition=%s"
+                    ),
+                    file_path.name,
+                    label,
+                    repetition_index,
+                    sfreq,
+                    n_step,
+                    marker_code,
+                    len(raw_samples),
+                    len(retained_samples),
+                    first_marker,
+                    last_marker,
+                    n_used,
+                    n_mod_step,
+                    df_hz,
+                    k0,
+                    f_bin_hz,
+                    target_span.get("marker_disposition"),
+                )
+
+                rep_spans.append((start_samp, stop_samp))
+                rep_events.append([start_samp_absolute, 0, code_int])
+                rep_metadata.append(
+                    {
+                        "crop_mode": "project_marker_plan_target_grid_v2",
+                        "oddball_id": marker_code,
+                        "occurrence_key": occurrence_key,
+                        "repetition_index": repetition_index,
+                        "n55": len(retained_samples),
+                        "first55_samp": first_marker,
+                        "last55_samp": last_marker,
+                        "N_step": int(n_step),
+                        "N_mod_step": n_mod_step,
+                        "fallback_reason": "",
+                        "marker_raw_count": len(raw_samples),
+                        "marker_retained_count": len(retained_samples),
+                        "marker_duplicate_count": len(raw_samples)
+                        - len(retained_samples),
+                        "marker_plan_fingerprint": target_span.get(
+                            "marker_plan_fingerprint"
+                        ),
+                        "approved_span_fingerprint": target_span.get(
+                            "approved_span_fingerprint"
+                        ),
+                        "marker_disposition": target_span.get(
+                            "marker_disposition"
+                        ),
+                        "analysis_span_plan_version": ANALYSIS_SPAN_PLAN_VERSION,
+                        "source_analysis_span_plan_fingerprint": (
+                            source_analysis_span_plan["fingerprint"]
+                        ),
+                        "target_analysis_span_plan_fingerprint": (
+                            target_analysis_span_plan["fingerprint"]
+                        ),
+                        "source_start_sample": int(
+                            source_coordinates["start_sample"]
+                        ),
+                        "source_stop_sample": int(
+                            source_coordinates["stop_sample"]
+                        ),
+                        "source_first_samp": int(
+                            source_coordinates["first_samp"]
+                        ),
+                        "target_start_sample": start_samp_absolute,
+                        "target_stop_sample": stop_samp_absolute,
+                        "target_first_samp": int(
+                            target_coordinates["first_samp"]
+                        ),
+                    }
+                )
+
+            n_ep = len(rep_spans)
+            logger.debug(
+                "[AUDIT DEBUG] %s: label='%s' code=%s events_for_code=%d epochs_after_crop=%d",
+                file_path.name,
+                label,
+                code_int,
+                sum(
+                    1
+                    for occurrence in raw_occurrences
+                    if int(occurrence["condition_code"]) == code_int
+                ),
+                n_ep,
+            )
+
+            import pandas as pd
+
+            epoch_data = _build_epoch_data_from_spans(raw_proc, rep_spans)
+            epochs = mne.EpochsArray(
+                epoch_data,
+                raw_proc.info.copy(),
+                events=np.asarray(rep_events, dtype=int),
+                event_id={label: code_int},
+                tmin=0.0,
+                baseline=None,
+                verbose=False,
+            )
+            epochs.metadata = pd.DataFrame(rep_metadata)
+            epochs_dict[label] = [epochs]
+            total_epochs += n_ep
+
+        _log_skipped_condition_summary(file_path, skipped_conditions)
+
+        # If no epochs at all were created for any label, this is a real failure
+        if total_epochs == 0:
+            raise RuntimeError(
+                f"No epochs created for any configured labels in {file_path.name}. "
+                "Check the event map and triggers; valid marker-derived locked FFT "
+                "crops are required."
+            )
+
+        logger.debug(
+            "[PIPELINE] %s: epochs complete total_epochs=%d",
+            file_path.name,
+            total_epochs,
+        )
+        _record_timing("epochs", section_started)
+
+        # 6) Post-export (delegates to Legacy post_process via adapter)
+        stage = "export"
+        section_started = time.perf_counter()
+        export_timing_records: List[Dict[str, object]] = []
+        ctx = LegacyCtx(
+            preprocessed_data=epochs_dict,
+            save_folder_path=SimpleNamespace(get=lambda: str(save_folder)),
+            data_paths=[str(file_path)],
+            settings=settings,
+            log=_worker_log,
+            export_timing_records=export_timing_records,
+            export_receipts=export_receipts,
+        )
+        export_conditions = list(event_map.keys())
+        requested_exports = settings.get("_fpvs_export_only_conditions")
+        if requested_exports is not None:
+            if (not isinstance(requested_exports, (list, tuple)) or not requested_exports
+                    or not set(requested_exports).issubset(event_map)):
+                raise ValueError("Focused repair requires existing named export conditions.")
+            export_conditions = [label for label in export_conditions if label in requested_exports]
+        fif_written = run_post_export(ctx, export_conditions)
+        logger.debug(
+            "[PIPELINE] %s: export complete",
+            file_path.name,
+        )
+        _record_timing("export", section_started)
+
+        # Preserve the exact signed, repetition-averaged time-domain waveform
+        # while the validated on-bin Epochs remain resident. Source estimation
+        # itself stays in the LORETA source-producer package.
+        source_derivative_status = "incomplete"
+        source_derivative_manifest = ""
+        source_derivative_outputs: list[str] = []
+        source_derivative_warning = ""
+        stage = "source_time_domain_export"
+        section_started = time.perf_counter()
+        try:
+            processing_fingerprint = str(
+                settings.get("_fpvs_processing_fingerprint") or ""
+            ).strip()
+            processing_fingerprint_version = str(
+                settings.get("_fpvs_processing_fingerprint_version") or ""
+            ).strip()
+            if not processing_fingerprint or not processing_fingerprint_version:
+                raise RuntimeError(
+                    "The canonical processing fingerprint was not supplied; "
+                    "source-ready time-domain derivatives were not published."
+                )
+            source_epochs = _available_source_epoch_set(epochs_dict, event_map)
+            if requested_exports is not None:
+                source_epochs = {label: epochs for label, epochs in source_epochs.items() if label in export_conditions}
+            source_stat = file_path.stat()
+            source_result = write_source_ready_time_domain_derivatives(
+                project_root=project_root,
+                participant_id=_participant_id_for_file(file_path, settings),
+                recording_id=_recording_id_for_file(file_path, settings),
+                session_id=_session_id_for_file(file_path, settings),
+                group_id=_group_id_for_file(file_path, settings),
+                group_folder=(
+                    str(settings.get("output_group_folder"))
+                    if settings.get("output_group_folder")
+                    else None
+                ),
+                condition_epochs=source_epochs,
+                condition_ids={
+                    label: int(event_map[label])
+                    for label in source_epochs
+                },
+                processing_provenance={
+                    "processing_fingerprint": processing_fingerprint,
+                    "processing_fingerprint_version": processing_fingerprint_version,
+                    "preprocessing_order_version": backend_preprocess.PREPROCESSING_ORDER_VERSION,
+                    "preprocessed_raw_cache_version": PREPROC_CACHE_VERSION,
+                    "geometry": geometry_identity,
+                    "analysis_span_plan_version": ANALYSIS_SPAN_PLAN_VERSION,
+                    "source_analysis_span_plan": source_analysis_span_plan,
+                    "realized_analysis_span_plan": target_analysis_span_plan,
+                    **({"condition_electrode_interpolation": settings["_fpvs_condition_interpolation_provenance"]}
+                       if settings.get("_fpvs_condition_interpolation_provenance") else {}),
+                },
+                source_signature={
+                    "raw_file": str(file_path.resolve()),
+                    "raw_size": int(source_stat.st_size),
+                    "raw_mtime_ns": int(source_stat.st_mtime_ns),
+                },
+                resolved_protocol_by_condition={
+                    label: {
+                        "presentation_rate_hz": float(
+                            frequency_protocol.presentation_rate_hz
+                        ),
+                        "oddball_rate_hz": float(
+                            frequency_protocol.oddball_rate_hz
+                        ),
+                        "oddball_every_n": frequency_protocol.oddball_every_n,
+                        "expected_analyzed_oddball_cycles": (
+                            frequency_protocol.expected_analyzed_oddball_cycles
+                        ),
+                        "oddball_marker_code": (
+                            frequency_protocol.oddball_marker_code_for_condition(
+                                event_map[label], recording_id=marker_recording_id,
+                            )
+                        ),
+                        "frequency_protocol_version": frequency_protocol.version,
+                        "frequency_protocol_fingerprint": (
+                            frequency_protocol.fingerprint
+                        ),
+                        "contrast_modulation": settings.get("contrast_modulation"),
+                    }
+                    for label in source_epochs
+                },
+                **({"merge_existing": True} if requested_exports is not None else {}),
+            )
+            source_derivative_status = "complete"
+            source_derivative_manifest = source_ready_project_relative_path(
+                project_root,
+                source_result.manifest_path,
+            )
+            source_derivative_outputs = [
+                source_ready_project_relative_path(project_root, path)
+                for artifact in source_result.artifacts
+                for path in (artifact.fif_path, artifact.sidecar_path)
+            ]
+            source_derivative_outputs.append(source_derivative_manifest)
+            logger.info(
+                "source_ready_time_domain_complete file=%s participant=%s conditions=%d",
+                file_path.name,
+                source_result.participant_id,
+                len(source_result.artifacts),
+            )
+        except (OSError, RuntimeError, TypeError, ValueError) as exc:
+            source_derivative_warning = str(exc)
+            _log_source_derivative_issue(file_path, exc)
+        _record_timing("source_time_domain_export", section_started)
+
+        # 7) Preproc audit (after)
+        stage = "audit"
+        section_started = time.perf_counter()
+        audit_after, problems = backend_preprocess.finalize_preproc_audit(
+            audit_before,
+            raw_proc,
+            settings,
+            file_path.name,
+            events_info=events_info,
+            fif_written=fif_written,
+            n_rejected=n_rejected,
+        )
+        audit_after["geometry"] = geometry_identity
+        audit_after["retained_scalp_channels"] = list(
+            geometry_identity["retained_scalp_channels"]
+        )
+        audit_after["retained_scalp_set_fingerprint"] = str(
+            geometry_identity["retained_scalp_set_fingerprint"]
+        )
+        audit_after["interpolation_status"] = str(
+            settings.get("_fpvs_interpolation_status") or ""
+        )
+        audit_after["interpolation_requested_channels"] = _string_list(
+            settings.get("_fpvs_interpolation_requested_channels")
+        )
+        audit_after["interpolation_error"] = str(
+            settings.get("_fpvs_interpolation_error") or ""
+        )
+        condition_proof = settings.get("_fpvs_condition_interpolation_provenance")
+        if isinstance(condition_proof, Mapping):
+            audit_after["condition_electrode_interpolation"] = dict(condition_proof)
+        audit_after["analysis_span_plan_version"] = ANALYSIS_SPAN_PLAN_VERSION
+        audit_after["source_analysis_span_plan"] = source_analysis_span_plan
+        audit_after["realized_analysis_span_plan"] = target_analysis_span_plan
+        audit_after["raw_qc_scoring_scope"] = str(
+            settings.get("_fpvs_raw_qc_scoring_scope") or ""
+        )
+        audit_after["raw_qc_scoring_sample_count"] = int(
+            settings.get("_fpvs_raw_qc_scoring_sample_count") or 0
+        )
+        audit_after["raw_qc_method_version"] = str(
+            settings.get("_fpvs_raw_qc_method_version") or ""
+        )
+        audit_after["raw_signal_screening_enabled"] = settings.get("raw_signal_screening_enabled", True)
+        audit_after["raw_qc_review_rules"] = _string_list(
+            settings.get("_fpvs_raw_qc_review_rules")
+        )
+        audit_after["raw_qc_candidate_sources"] = _string_list_mapping(
+            settings.get("_fpvs_raw_qc_candidate_sources")
+        )
+        audit_after["raw_qc_candidate_burden_findings"] = _mapping_list(
+            settings.get("_fpvs_raw_qc_candidate_burden_findings")
+        )
+        audit_after["raw_qc_amplitude_review_findings"] = _mapping_list(
+            settings.get("_fpvs_raw_qc_amplitude_review_findings")
+        )
+        audit_after["raw_qc_baseline_severe_review"] = bool(
+            settings.get("_fpvs_raw_qc_baseline_severe_review")
+        )
+
+        logger.debug(
+            "[PIPELINE] %s: audit complete n_rejected=%s problems=%s",
+            file_path.name,
+            audit_after.get("n_rejected"),
+            problems,
+        )
+        _record_timing("preproc_audit_after", section_started)
+
+        # Developer-only audit debug: summarize final preprocessing state when a
+        # reference pair was requested in the settings. Uses the new audit payload
+        # schema from backend_preprocess.finalize_preproc_audit.
+        ref_expected = [
+            ch
+            for ch in (
+                settings.get("ref_channel1"),
+                settings.get("ref_channel2"),
+            )
+            if ch
+        ]
+
+        if ref_expected:
+            fields = {
+                "ref_expected": tuple(ref_expected),
+                "ref_chans": audit_after.get("ref_chans"),
+                "sfreq": audit_after.get("sfreq"),
+                "lowpass": audit_after.get("lowpass"),
+                "highpass": audit_after.get("highpass"),
+                "n_channels": audit_after.get("n_channels"),
+                "stim": audit_after.get("stim_channel"),
+                "n_events": audit_after.get("n_events"),
+                "n_rejected": audit_after.get("n_rejected"),
+                "fif_written": audit_after.get("fif_written"),
+            }
+
+            parts = [f"file={file_path.name}"]
+            parts.extend(
+                f"{key}={value}"
+                for key, value in fields.items()
+                if value is not None
+            )
+            if problems:
+                parts.append(f"problems={problems}")
+
+            logger.debug("[AUDIT DEBUG] %s", " ".join(parts))
+
+        # Done with Raw/Epochs
+        section_started = time.perf_counter()
+        del raw_proc, epochs_dict
+        gc.collect()
+
+        # Attempt memmap cleanup for this file (safe if still open -> ignore)
+        try:
+            p = _memmap_path_for_file(file_path)
+            if p.exists():
+                p.unlink(missing_ok=True)  # type: ignore[arg-type]
+            pid_dir = p.parent
+            try:
+                pid_dir.rmdir()  # remove if empty
+            except OSError:
+                pass
+        except Exception:
+            pass
+        _record_timing("cleanup", section_started)
+
+        elapsed_ms = int((time.perf_counter() - t0) * 1000)
+        logger.debug(
+            "[PIPELINE END] file=%s elapsed_ms=%d",
+            file_path.name,
+            elapsed_ms,
+        )
+        return {
+            "status": "ok",
+            "file": str(file_path),
+            "stage": "done",
+            "elapsed_ms": elapsed_ms,
+            "audit": audit_after,
+            "problems": problems,
+            "events_info": events_info,
+            "timings_ms": dict(timings_ms),
+            "export_timing_records": export_timing_records,
+            "export_receipts": export_receipts,
+            "preproc_cache_status": cache_status,
+            "post_export_ok": True,
+            "source_derivative_status": source_derivative_status,
+            "source_derivative_manifest": source_derivative_manifest,
+            "source_derivative_outputs": source_derivative_outputs,
+            "source_derivative_warning": source_derivative_warning,
+            "geometry": geometry_identity,
+            "analysis_span_plan_version": ANALYSIS_SPAN_PLAN_VERSION,
+            "source_analysis_span_plan_fingerprint": source_analysis_span_plan[
+                "fingerprint"
+            ],
+            "target_analysis_span_plan_fingerprint": target_analysis_span_plan[
+                "fingerprint"
+            ],
+            **_interpolation_provenance_from_settings(settings),
+        }
+    except Exception as e:  # pragma: no cover - worker error path
+        crop_logger.exception("file=%s stage=%s worker_error=%s", file_path.name, stage, str(e))
+        error_result = _make_error_result(
+            file_path=file_path,
+            stage=stage,
+            exc=e,
+            start_time=t0,
+        )
+        interpolation = _interpolation_provenance_from_settings(settings)
+        failure_audit = dict(interpolation)
+        geometry = settings.get("_fpvs_geometry")
+        if isinstance(geometry, Mapping):
+            geometry_identity = dict(geometry)
+            retained = _string_list(
+                settings.get("_fpvs_retained_scalp_channels")
+            )
+            retained_fingerprint = str(
+                settings.get("_fpvs_retained_scalp_set_fingerprint") or ""
+            )
+            error_result["geometry"] = geometry_identity
+            failure_audit.update(
+                {
+                    "geometry": geometry_identity,
+                    "retained_scalp_channels": retained,
+                    "retained_scalp_set_fingerprint": retained_fingerprint,
+                }
+            )
+        error_result.update(interpolation)
+        if stage == "export":
+            error_result["export_receipts"] = list(export_receipts)
+        error_result["audit"] = failure_audit
+        return error_result
+    finally:
+        _close_worker_logger(crop_logger)
+
+
+
+def _process_one_file(
+    file_path: Path,
+    settings: Dict[str, object],
+    event_map: Dict[str, int],
+    save_folder: Path,
+    project_root: Path,
+) -> Dict[str, object]:
+    """
+    Execute the processing steps for a single file using the PySide6 backend.
+
+    This is the worker entry point used by multiprocessing. It delegates to
+    _run_full_pipeline_for_file so the same pipeline can be reused by other callers.
+    """
+    from Main_App.processing.prepared_fir import prepared_fir_scope
+
+    settings = _with_current_condition_repairs(
+        settings, project_root,
+        current_sources=_condition_repair_sources_for_files([file_path], settings),
+    )
+    with prepared_fir_scope(_WORKER_FIR_CACHE):
+        return _run_full_pipeline_for_file(file_path, settings, event_map, save_folder, project_root)
+
+
+def _condition_repair_sources_for_files(
+    files: List[Path], settings: Mapping[str, object],
+) -> dict[str, str]:
+    return {
+        (_recording_id_for_file(path, settings) or _participant_id_for_file(path, dict(settings))): str(path.resolve())
+        for path in files
+    }
+
+
+def _with_current_condition_repairs(
+    settings: Mapping[str, object], project_root: Path, *,
+    current_sources: Mapping[str, str] | None = None,
+) -> Dict[str, object]:
+    """Accepted project requests remain authoritative even when the toggle is off."""
+    current = dict(settings)
+    requests = active_condition_interpolation_requests(project_root, current_sources=current_sources)
+    current.pop("condition_electrode_interpolation_requests", None)
+    current.pop("_fpvs_condition_interpolation_requests", None)
+    current.pop("_fpvs_condition_interpolation_provenance", None)
+    if requests:
+        current["condition_electrode_interpolation_requests"] = requests
+    return current
+
+
+def _log_export_timing_records(result: Dict[str, object]) -> None:
+    log_router.replay_worker_timing_records(logger, result=result)
+
+
+def _memory_ok(limit_ratio: Optional[float]) -> Tuple[bool, float]:
+    """Return (is_ok, percent_used) for system memory usage."""
+    vm = psutil.virtual_memory()
+    if limit_ratio is None:
+        return True, vm.percent
+    return (vm.percent / 100.0) < float(limit_ratio), vm.percent
+
+
+def _terminate_executor_workers(pool: Any) -> int:
+    """Best-effort termination for active ProcessPoolExecutor child processes."""
+    processes = getattr(pool, "_processes", None)
+    if not processes:
+        return 0
+
+    terminated = 0
+    for proc in list(processes.values()):
+        if proc is None:
+            continue
+        try:
+            if proc.is_alive():
+                proc.terminate()
+                terminated += 1
+        except (OSError, RuntimeError, ValueError):
+            logger.debug("process_pool_worker_terminate_failed", exc_info=True)
+
+    for proc in list(processes.values()):
+        if proc is None:
+            continue
+        try:
+            proc.join(timeout=0.2)
+            if proc.is_alive() and hasattr(proc, "kill"):
+                proc.kill()
+                proc.join(timeout=0.2)
+        except (OSError, RuntimeError, ValueError):
+            logger.debug("process_pool_worker_join_failed", exc_info=True)
+
+    return terminated
+
+
+def _scavenge_stale_memmaps() -> None:
+    """Remove memmap PID folders for processes that are no longer alive."""
+    try:
+        import psutil as _psutil
+        base = memmap_root()
+        if not base.exists():
+            return
+        for d in base.glob("pid_*"):
+            pid = memmap_process_id(d.name)
+            if pid is None or d.is_symlink() or getattr(d, "is_junction", lambda: False)():
+                continue
+            if not _psutil.pid_exists(pid):
+                shutil.rmtree(d, ignore_errors=True)
+        try:
+            base.rmdir()  # remove root if empty
+        except OSError:
+            pass
+    except OSError:
+        logger.debug("stale_memory_map_directory_retained", exc_info=True)
+
+
+def run_project_parallel(
+    params: RunParams,
+    progress_queue: Optional[Queue] = None,
+    cancel_event: Optional[Event] = None,
+) -> Dict[str, object]:
+    """Own one terminal outcome across setup, execution, and cleanup.
+
+    Per-file progress precedes one ``done`` message containing the complete
+    result snapshot. Synchronous callers without a queue retain exception
+    propagation; queued callers receive the controller error in that snapshot.
+    """
+    results: list[Dict[str, object]] = []
+    metadata: Dict[str, object] = {}
+    controller_error = ""
+
+    def report(message: Dict[str, object]) -> None:
+        result = message["result"]
+        results.append(result)
+        if progress_queue is not None:
+            progress_queue.put(message)
+
+    try:
+        metadata = _run_project_parallel(params, report, cancel_event)
+    except BaseException as exc:
+        controller_error = f"{type(exc).__name__}: {exc}"
+        logger.exception("mp_run_controller_failed")
+        if progress_queue is None:
+            raise
+    finally:
+        completed_files = {str(result.get("file")) for result in results}
+        interrupted = [str(path) for path in params.data_files if str(path) not in completed_files]
+        cancelled = bool(metadata.get("cancelled"))
+        errors = [result for result in results if result.get("status") == "error"]
+        if controller_error:
+            errors.extend(
+                {"status": "error", "file": path, "stage": "controller", "error": controller_error}
+                for path in interrupted
+            )
+        excluded = [result for result in results if result.get("status") == "excluded"]
+        terminal = {
+            **metadata,
+            "type": "done",
+            "count": len(results),
+            "status": "error" if controller_error else ("cancelled" if cancelled else ("error" if errors else "success")),
+            "cancelled": cancelled,
+            "controller_error": controller_error,
+            "results": [result for result in results if result.get("status") == "ok"],
+            "errors": errors,
+            "excluded": excluded,
+            "excluded_count": len(excluded),
+            "interrupted_files": interrupted,
+        }
+        if progress_queue is not None:
+            progress_queue.put(terminal)
+    return terminal
+
+
+def _run_project_parallel(
+    params: RunParams,
+    report: Callable[[Dict[str, object]], None],
+    cancel_event: Optional[Event] = None,
+) -> Dict[str, object]:
+    """Schedule files; the public wrapper owns terminal notification."""
+    files = list(params.data_files)
+    if not files:
+        return {"cancelled": False}
+
+    current_sources = _condition_repair_sources_for_files(files, params.settings)
+    _requests, retired_repair_warnings = reconcile_condition_interpolation_sources(
+        params.project_root, current_sources=current_sources,
+    )
+    for warning in retired_repair_warnings:
+        logger.warning("condition_interpolation_approval_retired: %s", warning)
+    current_settings = _with_current_condition_repairs(
+        params.settings, params.project_root, current_sources=current_sources,
+    )
+    run_snapshot = current_settings.pop("_fpvs_condition_interpolation_run_snapshot", None)
+    if run_snapshot is not None:
+        from Main_App.processing.condition_interpolation_executor import persist_condition_interpolation_run_snapshot
+        persist_condition_interpolation_run_snapshot(params.project_root, run_snapshot)
+    params = replace(params, settings=current_settings)
+
+    total = len(files)
+    completed = 0
+    excluded_results: List[Dict[str, object]] = []
+    active_files: list[Path] = []
+    for file_path in files:
+        if _file_in_preflight_recording_exclusions(file_path, params.settings):
+            preflight_info = inspect_bdf_header(file_path)
+            result = _make_excluded_result(
+                file_path=file_path,
+                reason=BDF_RECORDING_NOT_STARTED_REASON,
+                message=format_bdf_recording_not_started_message([file_path.name]),
+                stage="preflight",
+                preflight_info=preflight_info,
+            )
+            excluded_results.append(result)
+            completed += 1
+            logger.info(
+                "recording_not_started_excluded_pre_submit file=%s",
+                file_path.name,
+            )
+            report(
+                {
+                    "type": "progress",
+                    "completed": completed,
+                    "total": total,
+                    "result": result,
+                }
+            )
+            continue
+
+        manually_excluded, participant_id = _participant_is_manually_excluded(
+            file_path,
+            params.settings,
+        )
+        recording_excluded, recording_id = _recording_is_manually_excluded(
+            file_path,
+            params.settings,
+        )
+        if not manually_excluded and not recording_excluded:
+            active_files.append(file_path)
+            continue
+        if manually_excluded:
+            reason = "manual_participant_exclusion"
+            message = (
+                f"Participant {participant_id} was manually excluded from processing. "
+                "The raw BDF file was not altered."
+            )
+            log_event = "manual_participant_excluded_pre_submit"
+            log_identifier = participant_id
+        else:
+            reason = "manual_recording_exclusion"
+            message = (
+                f"Recording {recording_id} was manually excluded from processing. "
+                "The raw BDF file was not altered."
+            )
+            log_event = "manual_recording_excluded_pre_submit"
+            log_identifier = recording_id
+        result = _make_excluded_result(
+            file_path=file_path,
+            reason=reason,
+            message=message,
+            stage="preflight",
+        )
+        excluded_results.append(result)
+        completed += 1
+        logger.info(
+            "%s file=%s identifier=%s participant_id=%s",
+            log_event,
+            file_path.name,
+            log_identifier,
+            participant_id,
+        )
+        report(
+            {
+                "type": "progress",
+                "completed": completed,
+                "total": total,
+                "result": result,
+            }
+        )
+
+    if not active_files:
+        return {"cancelled": False}
+
+    worker_ceiling = min(len(active_files), compute_dynamic_worker_ceiling(params.max_workers))
+    maxw = 0
+    ctx = get_context("spawn")
+    admission = ProcessingAdmission(active_files, params.settings, params.event_map, ctx)
+
+    remaining = list(active_files)
+    in_flight: Dict[object, Path] = {}
+    in_flight_indices: Dict[object, int] = {}
+    remaining_indices = list(range(len(active_files)))
+    peak_in_flight = 0
+    max_memory_percent = 0.0
+    memory_limit_ratio = getattr(params, "memory_soft_limit_ratio", None)
+    memory_check_interval = getattr(params, "memory_check_interval_s", 0.25)
+    run_started_at = time.perf_counter()
+
+    # Batch-level stats for n_rejected (number of channels interpolated per file)
+    total_rejected = 0
+    files_with_audit = 0
+    cancelled = False
+    shutdown_wait = True
+    interrupted_files: List[str] = []
+
+    def _cancelled() -> bool:
+        nonlocal cancelled
+        if cancel_event is not None and cancel_event.is_set():
+            cancelled = True
+        return cancelled
+
+    pool = None
+    peak_pool_workers = 0
+    memory_paused = False
+    growth_drain = False
+
+    def _memory_status(waiting: bool) -> None:
+        nonlocal memory_paused
+        if waiting == memory_paused:
+            return
+        memory_paused = waiting
+        logger.info("processing_memory_admission status=%s",
+                    "waiting_for_RAM_or_commit" if waiting else "resumed")
+
+    def _prepare_idle_pool() -> bool:
+        nonlocal pool, maxw, peak_pool_workers
+        if in_flight or not remaining:
+            return pool is not None
+        index = remaining_indices[0]
+        admission.solo_owner = None
+        if pool is not None:
+            if (not admission.exclusive[index] and maxw < min(worker_ceiling, len(remaining))
+                    and admission.fits(index, population=maxw + 1)):
+                pass  # Grow only after every current file has completed.
+            elif ((not admission.exclusive[index] or maxw == 1)
+                  and admission.fits(index, solo=admission.exclusive[index])):
+                admission.solo_owner = index if admission.exclusive[index] else None
+                return True
+            elif maxw == 1 and admission.fits(index, solo=True):
+                admission.solo_owner = index
+                return True
+            pool.shutdown(wait=True, cancel_futures=True)
+            pool = None
+            admission.reset_pool(0)
+        population, solo = admission.next_population(index, worker_ceiling)
+        if not population:
+            _memory_status(True)
+            return False
+        maxw = population
+        admission.reset_pool(population, index if solo else None)
+        logger.debug("[MP STAGE] pool_create_start max_workers=%d files=%d", maxw, total)
+        pool = ProcessPoolExecutor(
+            max_workers=maxw, mp_context=ctx, initializer=_admitted_worker_init,
+            initargs=(_worker_init, *admission.initializer_args()),
+        )
+        peak_pool_workers = max(peak_pool_workers, maxw)
+        logger.debug("[MP STAGE] pool_created max_workers=%d", maxw)
+        return True
+
+    def _record_future(fut: Any) -> None:
+        nonlocal completed, total_rejected, files_with_audit
+        f = in_flight.pop(fut, None)
+        index = in_flight_indices.pop(fut, None)
+        if index is not None:
+            admission.completed(index)
+        try:
+            res = fut.result()
+        except Exception as exc:
+            res = {
+                "status": "error",
+                "file": str(f) if f else "unknown",
+                "error": str(exc),
+            }
+
+        completed += 1
+        report(
+            {
+                "type": "progress",
+                "completed": completed,
+                "total": total,
+                "result": res,
+            }
+        )
+
+        # Accumulate per-file rejected-channel counts when available
+        if isinstance(res, dict) and res.get("status") == "ok":
+            _log_export_timing_records(res)
+            audit = res.get("audit") or {}
+            if isinstance(audit, dict):
+                n_rejected = audit.get("n_rejected")
+                if isinstance(n_rejected, (int, float)):
+                    total_rejected += int(n_rejected)
+                    files_with_audit += 1
+        elif isinstance(res, dict) and res.get("status") == "excluded":
+            excluded_results.append(res)
+            logger.debug(
+                "mp_run_file_excluded file=%s reason=%s message=%s",
+                res.get("file"),
+                res.get("reason"),
+                res.get("message"),
+            )
+
+    try:
+
+        def _cancel_active_pool() -> None:
+            nonlocal shutdown_wait, interrupted_files
+            if not _cancelled():
+                return
+            for fut in list(in_flight):
+                if fut.done() and not fut.cancelled():
+                    _record_future(fut)
+            admission.cancel_event.set()
+            interrupted = list(in_flight.values()) + list(remaining)
+            interrupted_files = [str(file_path) for file_path in interrupted]
+            for fut in list(in_flight.keys()):
+                try:
+                    fut.cancel()
+                except RuntimeError:
+                    logger.debug("process_pool_future_cancel_failed", exc_info=True)
+
+            terminated = _terminate_executor_workers(pool)
+            shutdown_wait = False
+            remaining.clear()
+            in_flight.clear()
+            in_flight_indices.clear()
+            logger.info(
+                "mp_run_cancel_terminated_workers interrupted_files=%d workers_terminated=%d",
+                len(interrupted_files),
+                terminated,
+            )
+
+        def _submit_next_available() -> bool:
+            """Submit one file if capacity and (if enabled) memory is OK."""
+            nonlocal remaining, peak_in_flight, max_memory_percent, growth_drain
+            if not remaining:
+                return False
+            if _cancelled():
+                return False
+            admission.grant_waiting()
+            if not in_flight:
+                growth_drain = False
+            if growth_drain:
+                return False
+            if not _prepare_idle_pool() or len(in_flight) >= maxw:
+                return False
+            index = remaining_indices[0]
+            if (in_flight and not admission.requests and not admission.exclusive[index]
+                    and maxw < min(worker_ceiling, len(remaining))
+                    and admission.fits(index, population=maxw + 1)):
+                # Refilling every free slot prevents a reduced pool from ever
+                # draining. Finish its current owners before a fresh resize.
+                growth_drain = True
+                logger.info("processing_pool_growth_drain workers=%d pending_files=%d", maxw, len(remaining))
+                return False
+            if admission.requests or not admission.fits(index, solo=admission.solo_owner == index):
+                _memory_status(True)
+                return False
+
+            # Optional soft-cap on system RAM
+            mem_ok, percent_used = _memory_ok(memory_limit_ratio)
+            if percent_used > max_memory_percent:
+                max_memory_percent = percent_used
+            if not mem_ok:
+                _memory_status(True)
+                return False
+
+            f = remaining[0]
+            logger.debug(
+                "[MP STAGE] submit_file_start file=%s in_flight=%d remaining=%d",
+                f.name,
+                len(in_flight),
+                len(remaining),
+            )
+            admission.submitted(index)
+            fut = pool.submit(
+                _process_admitted_file,
+                f,
+                params.settings,
+                params.event_map,
+                params.save_folder,
+                params.project_root,
+                index,
+            )
+            remaining.pop(0)
+            remaining_indices.pop(0)
+            in_flight[fut] = f
+            in_flight_indices[fut] = index
+            _memory_status(False)
+            logger.debug(
+                "[MP STAGE] submit_file_done file=%s in_flight=%d remaining=%d",
+                f.name,
+                len(in_flight),
+                len(remaining),
+            )
+            if len(in_flight) > peak_in_flight:
+                peak_in_flight = len(in_flight)
+            return True
+
+        def _fill_available_slots() -> int:
+            """Submit as many files as capacity and memory limits currently allow."""
+            submitted = 0
+            while remaining:
+                if not _submit_next_available():
+                    break
+                submitted += 1
+            return submitted
+
+        # Prime pool
+        _fill_available_slots()
+
+        # Drain
+        while in_flight or remaining:
+            if _cancelled():
+                _cancel_active_pool()
+                break
+            admission.grant_waiting()
+            if not in_flight:
+                if _cancelled():
+                    _cancel_active_pool()
+                    break
+                if not _fill_available_slots():
+                    # Nothing could be submitted (likely due to cancellation).
+                    if _cancelled() or not remaining:
+                        if _cancelled():
+                            _cancel_active_pool()
+                        break
+                    time.sleep(max(0.01, float(memory_check_interval)))
+                continue
+
+            done, _ = wait(in_flight.keys(), return_when=FIRST_COMPLETED, timeout=0.5)
+            if not done:
+                if _cancelled():
+                    _cancel_active_pool()
+                    break
+                _fill_available_slots()
+                continue
+
+            for fut in done:
+                _record_future(fut)
+
+            if _cancelled():
+                _cancel_active_pool()
+                break
+
+            _fill_available_slots()
+    except BaseException:
+        shutdown_wait = False
+        try:
+            for fut in list(in_flight):
+                if fut.done() and not fut.cancelled():
+                    _record_future(fut)
+        finally:
+            _terminate_executor_workers(pool)
+        raise
+    finally:
+        try:
+            if pool is not None:
+                pool.shutdown(wait=shutdown_wait, cancel_futures=True)
+        except Exception:  # Cleanup boundary: stop children before propagating any shutdown failure.
+            _terminate_executor_workers(pool)
+            raise
+        finally:
+            admission.close()
+
+    # Final cleanup: remove any stale memmaps in the %TEMP% folder from previous runs
+    _scavenge_stale_memmaps()
+
+    elapsed_seconds = time.perf_counter() - run_started_at
+    logger.debug(
+        (
+            "mp_run_summary num_files=%d completed=%d "
+            "max_workers_param=%s max_workers_used=%d "
+            "peak_in_flight=%d max_memory_percent=%.2f "
+            "elapsed_seconds=%.3f cancelled=%s"
+        ),
+        total,
+        completed,
+        params.max_workers,
+        peak_pool_workers,
+        peak_in_flight,
+        max_memory_percent,
+        elapsed_seconds,
+        cancelled,
+    )
+
+    # Batch-level summary: average number of channels rejected per file.
+    avg_rejected: Optional[float] = None
+    if files_with_audit:
+        avg_rejected = total_rejected / files_with_audit
+        logger.debug(
+            "batch_summary average_rejected_channels_per_file=%.2f "
+            "files_with_audit=%d total_rejected=%d",
+            avg_rejected,
+            files_with_audit,
+            total_rejected,
+        )
+    if excluded_results:
+        logger.warning(
+            "batch_summary excluded_files=%d files=%s",
+            len(excluded_results),
+            [Path(str(result.get("file", ""))).name for result in excluded_results],
+        )
+
+    done_msg: Dict[str, object] = {
+        "type": "done",
+        "count": completed,
+    }
+    if cancelled:
+        done_msg["cancelled"] = True
+    else:
+        done_msg["cancelled"] = False
+
+    if avg_rejected is not None:
+        done_msg.update(
+            {
+                "avg_rejected": avg_rejected,
+                "total_rejected": total_rejected,
+                "files_with_audit": files_with_audit,
+            }
+        )
+    if interrupted_files:
+        done_msg["interrupted_files"] = interrupted_files
+    if excluded_results:
+        done_msg["excluded"] = list(excluded_results)
+        done_msg["excluded_count"] = len(excluded_results)
+    return done_msg

@@ -2,6 +2,12 @@
 
 Project-aware workflows should resolve paths from the active project root, not from the process current directory or a developer-machine path.
 
+Full FPVS Studio interoperability and multi-hardware/montage project support are
+future goals in the [shared roadmap](hardware-pipeline-studio-roadmap.md).
+The importer and acquisition-evidence adapter described here implement separate,
+bounded subsets. Neither establishes full compatibility with every Studio
+version, and external identities must still pass canonical project validation.
+
 The Unicorn acquisition foundation adds a read-only
 `Main_App.io.studio_acquisition_evidence` adapter for Studio's candidate handoff:
 top-level schema string `1.0`, nested RecordingSnapshot schema integer `1`, and
@@ -61,7 +67,7 @@ Primary paths:
 - `src/Main_App/projects/` is the canonical active import surface for project
   model, metadata, manager, projects-root, and preprocessing-settings behavior.
   It owns those implementations.
-- `src/Main_App/Shared/settings_paths.py`
+- `src/Main_App/settings/settings_paths.py`
 - tool modules that import, export, or generate files under `src/Tools/`
 
 ## Manifest transactions
@@ -182,7 +188,7 @@ FPVS Toolbox uses a strict hybrid settings model:
   use an absolute override to keep its location stable across launch folders.
   Windows override expansion, relative-path handling, `%LOCALAPPDATA%` lookup,
   and missing-variable errors remain unchanged.
-- `Main_App.Shared.settings_manager.SettingsManager` is the single active writer for app-level settings.
+- `Main_App.settings.settings_manager.SettingsManager` is the single active writer for app-level settings.
   Ordinary saves merge keys changed since that instance last loaded or saved
   into the latest INI, then publish atomically under an in-process lock. An
   unrelated save from an older settings instance cannot resurrect a deleted

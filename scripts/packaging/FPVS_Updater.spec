@@ -38,6 +38,7 @@ a = Analysis(
         # components exposes unrelated main-application classes lazily;
         # updater surfaces use only its direct dialog/theme primitives.
         "Main_App.projects", "Main_App.gui.main_window", "Main_App.Shared.settings_manager",
+        "Main_App.settings.settings_manager",
     ],
     noarchive=False,
 )

@@ -17,7 +17,7 @@ import pandas as pd
 
 from config import DEFAULT_ELECTRODE_NAMES_64
 from Main_App.projects import load_project_dataset_index
-from Tools.Stats.io.xlsx_selected_reader import (
+from Main_App.io.xlsx_selected_reader import (
     MissingXlsxColumnsError,
     read_xlsx_sheet_header,
     read_xlsx_sheet_selected_columns,

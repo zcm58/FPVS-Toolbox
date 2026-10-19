@@ -5,7 +5,7 @@ from pathlib import Path
 
 from PySide6.QtWidgets import QFileDialog, QMessageBox, QWidget
 
-from Main_App.Shared.settings_manager import SettingsManager
+from Main_App.settings.settings_manager import SettingsManager
 
 
 def ensure_projects_root(parent: QWidget | None) -> Path | None:

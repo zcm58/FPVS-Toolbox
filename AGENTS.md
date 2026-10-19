@@ -8,6 +8,14 @@ Stimulation experiments. Releases currently ship through a Windows installer.
 
 ## Working Rules
 
+- The product direction is modular acquisition hardware and montages, a shared
+  processing pipeline whose steps can be selected/replaced by the resolved
+  hardware/montage policy, and complete FPVS Studio interoperability. Read
+  [the current-state and future-direction contract](docs/agent/architecture/hardware-pipeline-studio-roadmap.md)
+  for related work. These are goals, not claims of completed support: production
+  preprocessing remains BioSemi64, Unicorn is gated, and Studio import is partial.
+  Preserve the locked scientific contracts while extending these boundaries.
+
 - Think before coding: state assumptions, surface ambiguity, and ask when the safe interpretation is unclear.
 - Prefer the smallest behavior-preserving change that solves the task.
 - Touch only files required by the task; do not refactor adjacent code opportunistically.
@@ -35,7 +43,7 @@ Stimulation experiments. Releases currently ship through a Windows installer.
 
 - `src/Main_App/Legacy_App/**` and `src/Main_App/PySide6_App/**` have been retired. Do not recreate them; use purpose-based `Main_App` packages instead.
 - Active EEG preprocessing imports should use `src/Main_App/processing/preprocess.py`; this is the current implementation owner.
-- Active BDF loading imports should use `src/Main_App/io/load_utils.py`; it delegates to the current shared implementation while the Main App layout is migrated.
+- Active BDF loading imports should use `src/Main_App/io/load_utils.py`; it owns the implementation and `Main_App.Shared.load_utils` remains a compatibility alias.
 - Active Main App GUI imports should use `src/Main_App/gui/`; the main window shell, focused workflow helpers, reusable widgets, style tokens, update manager, and GUI presentation helpers live there.
 - New or migrated GUI surfaces should start from `src/Main_App/gui/components/` for shared cards, buttons, forms, status banners, window/dialog shells, action rows, and message helpers before adding local UI primitives.
 - Subsection headers should use `Main_App.gui.components.SubsectionHeaderLabel`; edit shared subsection-header font, weight, color, and padding in `src/Main_App/gui/widgets/labels.py`, not per-surface QSS.
@@ -43,6 +51,10 @@ Stimulation experiments. Releases currently ship through a Windows installer.
 - New or substantially revised embedded tool pages must fit the supported 1280x900 workspace without a page-level scroll area. When coherent controls cannot fit, divide the workflow into purpose-based tabs or progressive pages instead of adding whole-page scrolling. Content-native scrolling inside tables, text viewers, and focused dialogs remains allowed.
 - Publication-oriented figure generation must follow [docs/agent/quality/figure-generation.md](docs/agent/quality/figure-generation.md): matching `.pdf`/`.png` outputs, 600 dpi, Arial figure typography, and figure typography separated from GUI typography.
 - Active worker/process-runner imports should use `src/Main_App/workers/`.
+- Active application-settings imports should use `src/Main_App/settings/`.
+  Keep its initializer and `settings_paths` lightweight for the independent
+  updater; `settings_manager` remains application-only. `Shared` and
+  `Performance` contain compatibility aliases only; do not add implementations there.
 - Active project model, project manager, project metadata, projects-root, and preprocessing-settings imports should use `src/Main_App/projects/`.
 - Processed-workbook discovery and downstream group identity must use
   `Main_App.projects.dataset_index` through the public `Main_App.projects`
@@ -50,8 +62,8 @@ Stimulation experiments. Releases currently ship through a Windows installer.
   `project.json`; tool packages must not infer membership from output folders
   or maintain independent participant/group detection logic.
 - Active runtime diagnostics imports should use `src/Main_App/diagnostics/`; repo-evaluation checks belong in `scripts/` or `.agents/skills/`, and manual project probes belong in `scripts/manual_diagnostics/`.
-- Source Localization/eLORETA has been removed from active runtime. Do not add GUI, settings, tests, imports, quarantine-tree dependencies, or bundled `fsaverage` MRI template data unless the user explicitly scopes a restoration feature.
-- The new LORETA Visualizer work is a separate source-localization visualization branch under `src/Tools/LORETA_Visualizer/`, not a revival of `src/Tools/SourceLocalization/**`. Keep visualizer rendering, mesh helpers, payload adapters, demo data, and tool-local docs in that directory; preserve the boundary where future source-localization calculations produce prepared values and visualizer helpers bridge them into renderer payloads.
+- The historical `src/Tools/SourceLocalization/**` implementation is retired. Do not restore its GUI, settings, tests, imports, or quarantine-tree dependencies unless the user explicitly scopes restoration. Do not bundle `fsaverage` MRI template data.
+- The separate LORETA Visualizer lives under `src/Tools/LORETA_Visualizer/`. Keep its rendering, mesh helpers, payload adapters, demo data, and tool-local docs there. Existing source calculations belong in its isolated `source_producers/` package; renderer and payload helpers consume prepared values and must not compute inverse solutions. This does not reopen the retired implementation.
 - Preserve the ignored root `.fpvs_cache/` when it contains MNE/fsaverage template data for the LORETA Visualizer. It is a local dependency cache, not a deletion target for routine cleanup.
 - The active preprocessing order is locked to match the Volfart et al. (2021) FPVS implementation decision: initial reference, drop reference channels, optional channel limit preserving stim, FIR filter, downsample, kurtosis/interpolation, final average reference. Do not reorder filtering and downsampling, change FIR duration scaling, or remove the order/version fingerprint guards unless the user explicitly requests a statistical-method change and updates `docs/agent/architecture/preprocessing-contract.md`, `docs/user/reference/methods-reporting-checklist.md`, and the focused processing-order tests.
 - The versioned Stats harmonic-selection profiles are locked statistical
@@ -112,6 +124,8 @@ Stimulation experiments. Releases currently ship through a Windows installer.
 - Use `python .agents/scripts/verify.py --scope <scope> --tier focused` first;
   use `python .agents/scripts/verify.py --scope repo --tier precommit` for the
   broad local handoff gate. The driver selects `.venv1` or `.venv`.
+- For documentation-only changes, use the audit, strict documentation build,
+  and link/owner checks in [verification gates](docs/agent/quality/verification-gates.md#documentation-only-changes).
 - For GUI changes, leave Qt execution to CI and document the visible/manual
   smoke path. If a gate cannot run, report the command, failure reason, and
   residual risk.

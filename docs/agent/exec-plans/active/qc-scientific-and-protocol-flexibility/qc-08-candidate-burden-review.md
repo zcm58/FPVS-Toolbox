@@ -68,7 +68,7 @@ repository verification is complete; CI-only Qt and visible smoke checks remain.
 
 Use `raw_channel_qc.py` for the shared structured findings, `preflight_qc.py`
 and `gui/preprocessing_qc_workflow.py` for review delivery, and
-`Performance/process_runner.py` for enforcement of the accepted authority.
+`workers/process_runner.py` for enforcement of the accepted authority.
 Carry the results through `processing_ledger.py`, the Raw cache, the QC report,
 and the existing downstream review persistence. Reuse the recording identity
 and decision-provenance work in QC-03 rather than creating another exclusion

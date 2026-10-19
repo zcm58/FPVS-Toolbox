@@ -4,7 +4,9 @@ Status: implemented; source-method contract retained here. Final visible
 packaged-app acceptance remains pending in the
 [v3 release ledger](v3-release-readiness.md#5-perform-one-compact-installed-app-acceptance-pass).
 Owner: FPVS Toolbox
-Feature branch: `codex/hauk-source-psd`
+Historical implementation branch: `codex/hauk-source-psd` (integrated and
+retired). Source CI passed; retained checks below distinguish method evidence
+from the unclaimed human visible acceptance.
 
 ## Goal
 

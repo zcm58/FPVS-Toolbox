@@ -31,7 +31,10 @@ git status --short --ignored
 ## Guardrails
 
 - Delete only ignored/generated artifacts or user-approved local data caches.
-- Keep Source Localization/eLORETA code quarantined, but do not keep bundled `fsaverage` MRI template data in tracked source or quarantine paths.
+- The retired `Tools.SourceLocalization` package must not return to runtime.
+  Preserve current `Tools.LORETA_Visualizer` source and its isolated producers;
+  they are not cleanup targets. Do not keep bundled `fsaverage` MRI template
+  data in tracked source or quarantine paths.
 - Preserve root `.fpvs_cache/` when it contains MNE/fsaverage template data for local LORETA Visualizer use.
 - Do not remove `src/quarantine/` when it exists; it is optional historical
   reference material, not a required directory.

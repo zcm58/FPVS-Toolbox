@@ -2,7 +2,7 @@ import configparser
 import logging
 from pathlib import Path
 
-from Main_App.Shared.settings_paths import app_plot_settings_file, legacy_plot_settings_file
+from Main_App.settings.settings_paths import app_plot_settings_file, legacy_plot_settings_file
 from Tools.Plot_Generator.spectrum_style import SNR_TRACE_COLOR, SNR_SECOND_TRACE_COLOR
 
 logger = logging.getLogger(__name__)

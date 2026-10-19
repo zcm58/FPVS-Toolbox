@@ -32,6 +32,8 @@ manual_smoke = ["In a visible Main App session, start processing, cancel, and re
 [scopes.repo]
 audits = ["agent-harness", "garbage-collection"]
 tests = [
+  "tests/audit/test_agent_audit_owner_moves.py",
+  "tests/audit/test_canonical_runtime_owners.py",
   "tests/audit/test_agent_audit_change_detection.py",
   "tests/audit/test_agent_audit_stats_reporting_legibility.py",
   "tests/audit/test_figure_style_contract.py",
@@ -43,6 +45,7 @@ manual_smoke = []
 [scopes.gui]
 audits = ["gui"]
 tests = [
+  "tests/gui/test_settings_page_ownership_static.py",
   "tests/gui/test_dynamic_eeg_worker_settings_static.py",
   "tests/gui/test_sidebar_style_tokens.py",
   "tests/gui/test_project_protocol.py",
@@ -91,6 +94,7 @@ manual_smoke = ["Use File > Check for Updates in a visible Main App window: canc
 [scopes.project-io]
 audits = ["paths"]
 tests = [
+  "tests/project_io/test_shared_workbook_primitives.py",
   "tests/project_io/test_acquisition_profiles.py",
   "tests/project_io/test_bdf_format.py",
   "tests/project_io/test_recording_inspection.py",
@@ -126,12 +130,13 @@ tests = [
   "tests/project_io/test_settings_paths.py",
   "tests/settings/test_roi_preset_settings.py",
 ]
-include = ["src/Main_App/projects/**", "src/Main_App/io/**", "src/Main_App/Shared/settings_paths.py", "src/Main_App/gui/project_workflows.py", "src/Main_App/gui/tool_workflows.py", "tests/project_io/**"]
+include = ["src/Main_App/projects/**", "src/Main_App/io/**", "src/Main_App/Shared/settings_paths.py", "src/Main_App/settings/**", "src/Main_App/gui/project_workflows.py", "src/Main_App/gui/tool_workflows.py", "tests/project_io/**"]
 manual_smoke = []
 
 [scopes.processing]
 audits = ["protected", "source-localization"]
 tests = [
+  "tests/processing/test_qc_exception_boundaries.py",
   "tests/processing/test_dynamic_worker_ceiling.py",
   "tests/processing/test_processing_admission.py",
   "tests/processing/test_processing_admission_lifecycle.py",
@@ -259,6 +264,9 @@ include = [
   "src/Main_App/io/buffered_fif.py",
   "src/Main_App/io/bdf_preload.py",
   "src/Main_App/exports/__init__.py",
+  "src/Main_App/exports/post_process.py",
+  "src/Main_App/exports/post_process_excel.py",
+  "src/Main_App/exports/post_export_adapter.py",
   "src/Main_App/exports/source_time_domain_export.py",
   "src/Main_App/exports/analysis_ready_workbook.py",
   "src/Main_App/gui/processing_inputs.py",

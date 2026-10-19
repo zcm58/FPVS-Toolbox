@@ -23,7 +23,7 @@ from Main_App.processing.frequency_domain_qc import (
     FREQUENCY_DOMAIN_QC_METHOD_VERSION,
     active_frequency_domain_exclusions,
 )
-from Tools.Stats.analysis.canonical_harmonics import (
+from Main_App.processing.canonical_harmonics import (
     CanonicalHarmonicSelectionError,
     load_project_processing_harmonics,
 )

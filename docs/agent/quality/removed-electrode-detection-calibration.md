@@ -225,7 +225,7 @@ If a calibration change can alter which raw files or channels are included in
 the processed dataset, bump the preprocessing cache and processing-fingerprint
 labels:
 
-- `src/Main_App/Performance/process_runner.py`: `PREPROC_CACHE_VERSION`
+- `src/Main_App/workers/process_runner.py`: `PREPROC_CACHE_VERSION`
 - `src/Main_App/processing/processing_ledger.py`:
   `PROCESSING_FINGERPRINT_VERSION`
 - `src/Tools/Stats/data/group_harmonic_cache.py`:

@@ -51,7 +51,7 @@ from Main_App.projects import (
     resolve_active_project_root,
 )
 
-from Tools.Stats.analysis.canonical_harmonics import (
+from Main_App.processing.canonical_harmonics import (
     CANONICAL_HARMONIC_SOURCE,
     CUSTOM_HARMONIC_SOURCE,
 )

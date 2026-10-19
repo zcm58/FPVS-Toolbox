@@ -25,6 +25,15 @@ Use this workflow for file dialogs, manifests, imports, exports, generated outpu
 11. Cover missing, invalid, permission-denied, repeated-operation, and existing-file cases when they are realistic for the workflow.
 12. Use `tmp_path` for tests and avoid depending on developer-machine paths.
 
+For Studio or hardware import work, read the
+[shared roadmap](../../../docs/agent/architecture/hardware-pipeline-studio-roadmap.md)
+and `docs/agent/architecture/project-io.md`. Inspect the actual versioned Studio
+contract before extending adapters; do not infer compatibility from a file
+extension or invent interchange fields. Preserve canonical participant,
+recording, session, condition, and group identity plus source timing/units and
+device provenance. New adapters must use shared project/I/O owners, reject
+unsupported semantics explicitly, and preserve historical inputs.
+
 ## Checks
 
 - Use `python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py` instead of manually scanning all paths.

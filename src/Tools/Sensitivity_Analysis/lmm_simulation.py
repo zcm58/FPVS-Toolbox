@@ -17,7 +17,7 @@ import psutil
 from scipy.stats import norm
 import statsmodels.formula.api as smf
 
-from Main_App.Performance.mp_env import (
+from Main_App.workers.mp_env import (
     compute_effective_max_workers,
     set_blas_threads_multiprocess,
 )

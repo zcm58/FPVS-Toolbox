@@ -2,13 +2,14 @@
 
 ## Status
 
-Implementation is integrated. A bounded two-recording baseline/current
-comparison and archived prepared-FHC replay passed on 2026-10-15; the
-[v3 release ledger](v3-release-readiness.md#release-closeout-and-open-source-restoration--2026-10-15)
-records the exact scope and private-receipt limits. Fresh-project/full-cohort
-qualification, release CI, and packaged/visible acceptance are tracked in the
-[v3 release ledger](v3-release-readiness.md#3-qualify-processing-and-project-compatibility)
-and remain open; archived prepared inputs do not close those gates.
+Reviewed 2026-10-18: implementation is integrated, source CI passed, and the
+exact published v3 installer passed automated native lifecycle acceptance.
+Bounded two-recording comparisons and archived prepared-FHC replay passed.
+Broader private fresh-project/full-cohort qualification was stopped at the
+user's direction; human visible acceptance remains unclaimed. The
+[v3 ledger](v3-release-readiness.md#3-qualify-processing-and-project-compatibility)
+owns current evidence and deferrals. Dated implementation records below retain
+their original measurement scope and do not reopen completed CI/release gates.
 
 ### Adaptive QC-16 process preparation (2026-10-13)
 
@@ -170,14 +171,14 @@ supersede the preliminary fixed-seed runs before native-thread guarding.
 
 The production changes are limited to:
 
-- `Shared/post_process.py`: local eligibility-fingerprint hoist.
+- `exports/post_process.py`: local eligibility-fingerprint hoist.
 - `processing/frequency_domain_qc.py` and `post_processing_context.py`:
   ledger snapshot, bounded scoped admission and detached reuse.
 - `Tools/Free_Harmonic_Clustering/analysis.py`: empty-node scan guard.
 - `processing/prepared_fir.py`, `processing/preprocess.py` and
-  `Performance/process_runner.py`: isolated MNE adapter and batch-worker owner.
+  `workers/process_runner.py`: isolated MNE adapter and batch-worker owner.
 
-The `processing/`, `Shared/` and `Performance/` paths above are under
+The `processing/`, `exports/` and `workers/` paths above are under
 `src/Main_App/`. Four focused test modules characterize the changed behavior;
 the processing verification registry includes the new ledger/FIR modules.
 Those modules are `tests/processing/test_post_process_output_receipts.py`,

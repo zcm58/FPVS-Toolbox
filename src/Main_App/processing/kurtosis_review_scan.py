@@ -27,7 +27,7 @@ import psutil
 if TYPE_CHECKING:
     from Main_App.processing.qc_source_prefetch import QcSourcePrefetch
 
-from Main_App.Performance.mp_env import compute_effective_max_workers
+from Main_App.workers.mp_env import compute_effective_max_workers
 from Main_App.io import load_utils
 from Main_App.io.eeg_geometry import (
     BIOSEMI64_CHANNELS,

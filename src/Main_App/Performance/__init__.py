@@ -1,4 +1,4 @@
-"""Performance helpers for multiprocessing execution."""
+"""Compatibility package for canonical :mod:`Main_App.workers` helpers."""
 
 from __future__ import annotations
 

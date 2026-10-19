@@ -1,10 +1,18 @@
 The Plot_Generator directory contains the embedded PySide6 tool that builds SNR
-line plots from Excel files created by the FPVS Toolbox. The Main App GUI is its
+line plots from processed data created by the FPVS Toolbox, including validated
+NumPy companions and native `.fpvs` declarations through shared readers. The Main App GUI is its
 only user-facing entry point. GUI adjustments
 and minor bug fixes are allowed. Keep processing code modular and under 500 lines
 per file. ROI definitions should be loaded from the existing settings using the
 neutral utilities in `Main_App.processing.roi_settings`. Plots should be averaged across participants within
 each condition and saved to a user-selected output folder.
+
+Hardware and FPVS Studio integration follow the
+[shared roadmap](../../../docs/agent/architecture/hardware-pipeline-studio-roadmap.md).
+Plotting consumes canonical processed sources, frozen rates, and explicit ROI
+definitions. New acquisition or montage support must not introduce a plot-local
+loader, guess geometry from channel count, silently shrink an ROI, or recalculate
+SNR. Current storage support does not establish complete Studio compatibility.
 
 Current ownership map:
 
@@ -34,9 +42,11 @@ Current ownership map:
   only when a preference is absent.
 - `excel_inputs.py`: thin shared participant-identity adapter plus
   frequency-column helpers.
-- `full_snr_reader.py`: companion-aware shared workbook session, with the
-  direct `.xlsx` XML reader retained for legacy FullSNR/FullFFT inputs,
-  selected-frequency parsing, ROI electrode filtering, and load subtimings.
+- `Main_App.io.spectral_workbook`: canonical companion-aware workbook session
+  and FullSNR frequency-window reader. `full_snr_reader.py` is a same-object
+  compatibility alias. Shared XML cell decoding lives in `Main_App.io.xlsx_xml`;
+  exact-column and frequency-window selection policies remain distinct.
+  Plot spectral-QC assembly consumes these readers and preserves its own math.
 - `data_collection.py`: shared dataset-index consumption, source-data
   collection, and required-sheet failure handling.
 - `aggregation.py`: selected ROI resolution, ROI averaging, group curves, and

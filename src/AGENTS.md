@@ -15,8 +15,22 @@ toolbar option is needed when adding new features.
 
 `src/main.py` is the launcher for the PySide6 application. Active Main App code
 now belongs in purpose-based packages under `Main_App` such as `gui`,
-`processing`, `projects`, `workers`, `io`, `diagnostics`, and `exports`.
+`processing`, `projects`, `workers`, `io`, `diagnostics`, `settings`, and `exports`.
 Do not add new `PySide6_App` or `Legacy_App` imports or files.
+`Shared` and `Performance` are compatibility aliases; implementations and new
+imports belong in those purpose-based packages.
+
+For hardware, montage, processing-stage, or FPVS Studio integration work, read
+the [hardware, pipeline, and Studio roadmap](../docs/agent/architecture/hardware-pipeline-studio-roadmap.md).
+The target is modular support for different acquisition systems and montages,
+a pipeline whose validated stages can be selected or replaced for that recording
+context, and complete FPVS Studio compatibility. These are development goals,
+not a claim that every device, montage, or Studio workflow is supported today.
+Keep format, acquisition, montage, and event semantics distinct; a montage alone
+cannot establish reference, sample-rate, integrity, or trigger policy. Preserve
+the locked BioSemi processing order and scientific profiles while adding
+explicitly versioned, tested capabilities. Tool-specific restrictions remain
+in force until that tool's new capability is qualified.
 
 
 When adding new features, please try to keep the code modular and under 500 lines per file. You are allowed to import

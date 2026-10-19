@@ -620,7 +620,7 @@ def test_settings_editor_exposes_only_retained_electrode_thresholds():
     import ast
     from pathlib import Path
 
-    path = Path(__file__).resolve().parents[2] / "src/Main_App/gui/settings_panel.py"
+    path = Path(__file__).resolve().parents[2] / "src/Main_App/gui/settings_experimental_page.py"
     tree = ast.parse(path.read_text(encoding="utf-8"))
     strings = {node.value for node in ast.walk(tree) if isinstance(node, ast.Constant)
                and isinstance(node.value, str)}

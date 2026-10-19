@@ -10,6 +10,11 @@ also works when the main application cannot start. Users do not download a
 helper each time, and updates install compiled files rather than compiling on
 the user's computer.
 
+This parity concerns update delivery only. Complete experiment/data compatibility
+with Studio is a separate goal in the
+[hardware, pipeline, and Studio roadmap](hardware-pipeline-studio-roadmap.md);
+do not infer project, acquisition, or scientific compatibility from updater tests.
+
 ## Ownership and parity
 
 | Owner | Responsibility |

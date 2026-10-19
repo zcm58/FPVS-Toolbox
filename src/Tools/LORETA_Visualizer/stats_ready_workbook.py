@@ -19,11 +19,11 @@ from Main_App.projects import (
     STATS_SUBFOLDER_NAME,
     load_project_dataset_index,
 )
-from Tools.Stats.analysis.canonical_harmonics import (
+from Main_App.processing.canonical_harmonics import (
     CanonicalHarmonicSelectionError,
     load_project_processing_harmonics,
 )
-from Tools.Stats.data.shared_rois import load_rois_from_settings
+from Main_App.processing.roi_settings import load_rois_from_settings
 from Tools.Stats.io.stats_ready_export import STATS_READY_WORKBOOK_NAME, prepare_stats_ready_export
 
 

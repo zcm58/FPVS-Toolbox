@@ -1,9 +1,12 @@
 # QC Performance: Exact Numerical Reuse
 
-Status: implementation is integrated. The final v3 representative-recording,
-CI, and visible acceptance gates remain pending in
-[release readiness](v3-release-readiness.md#3-qualify-processing-and-project-compatibility).
-Retain the detailed contracts below while those checks are open.
+Status reviewed 2026-10-18: implementation is integrated and source CI passed.
+The published v3 installer passed automated native acceptance; human visible
+review remains unclaimed. Broader optional private-project qualification was
+stopped by the user, not left as an active task. The
+[release ledger](v3-release-readiness.md#3-qualify-processing-and-project-compatibility)
+owns current evidence and deferrals. Dated records below preserve contracts
+and original measurement limits; earlier pending CI statements are historical.
 
 ## Postprocessing Review Readiness And Audit Parsing (2026-09-08)
 
@@ -655,7 +658,7 @@ LORETA/path gate remain blocked by eight existing hardcoded paths in unrelated
 untracked `outputs/`. No local Qt workflow, numerical reprocessing or source-map
 generation was run. The visible smoke above remains the final application check.
 
-Runtime changes are confined to `Shared/settings_manager.py`,
+Runtime changes are confined to `settings/settings_manager.py`,
 `gui/processing_inputs.py`, `processing/frequency_domain_qc.py`,
 `processing/full_fft_provenance.py`, `workers/post_processing_pipeline_worker.py`
 under `src/Main_App`, and
@@ -757,7 +760,7 @@ checkpoints and final-runner behavior remain intact. No numerical method,
 processing order, exported format, or approval authority changes. No complete
 user dataset was reprocessed, and no wall-clock speedup is claimed.
 
-Runtime changes are confined to `Shared/load_utils.py`, `gui/main_window.py`,
+Runtime changes are confined to `io/load_utils.py`, `gui/main_window.py`,
 `gui/preprocessing_qc_workflow.py`, `processing/kurtosis_review_scan.py`, new
 `processing/qc_source_prefetch.py`, and new
 `workers/qc_source_prefetch_worker.py` under `src/Main_App/`. Loading,

@@ -393,7 +393,7 @@ def test_workflow_only_reads_and_saves_new_preference_after_acceptance(accepted,
 
 @pytest.mark.parametrize("saved", [{}, {"kurtosis_auto_interpolate_all": False}, {"kurtosis_auto_interpolate_all": True}])
 def test_experimental_settings_checkbox_roundtrips_project_preference(saved):
-    init = _function_node(SETTINGS_PATH, "_init_experimental_tab")
+    init = _function_node(SETTINGS_PATH.with_name("settings_experimental_preprocessing_page.py"), "build_signal_review")
     collect = _function_node(SETTINGS_PATH, "_collect_project_preprocessing_inputs")
     checkbox_name = "self.kurtosis_auto_interpolate_all_check"
     load_node = next(

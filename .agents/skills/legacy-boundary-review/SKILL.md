@@ -17,9 +17,10 @@ Use this workflow when a task is near retired `Legacy_App` references or when it
 4. Identify whether the requested behavior crosses a retired-path, historical-boundary, or removed-feature path:
    - `src/Main_App/Legacy_App/**` is retired and must not be recreated
    - `src/Main_App/PySide6_App/**` is retired and must not be recreated
-   - Source Localization/eLORETA is removed from active runtime; `src/Tools/SourceLocalization/**` should stay empty of source files
+   - the historical Source Localization/eLORETA package is removed; `src/Tools/SourceLocalization/**` should stay empty of source files
+   - the separate current `src/Tools/LORETA_Visualizer/` owns prepared-payload rendering and isolated `source_producers/`; use its scoped contracts rather than retired code
    - `src/quarantine/**`, when present, is ignored quarantine, not active runtime
-   - historical legacy modules listed in the quarantine audit
+   - `Main_App.Shared` and `Main_App.Performance` are same-object compatibility aliases; active implementations and imports belong in purpose-based packages
 5. Inspect existing public APIs, imports, adapters, and tests before proposing new boundaries.
 6. Prefer a thin adapter, caller-side normalization, or current-app module when that preserves behavior.
 7. Do not recreate retired package paths; if historical behavior is needed, use existing current-app APIs or a focused adapter outside the retired path.
@@ -29,10 +30,18 @@ Use this workflow when a task is near retired `Legacy_App` references or when it
 ## Checks
 
 - Use `python .agents/skills/legacy-boundary-review/scripts/audit_protected_edits.py` instead of manually scanning all protected paths.
-- Confirm Source Localization/eLORETA was not revived unless explicitly requested.
+- Confirm the retired Source Localization package was not revived; preserve the
+  current Visualizer/source-producer boundary.
 - Confirm any adapter has focused tests around the boundary behavior.
 - Confirm compatibility exports in `src/Main_App/__init__.py` are not changed accidentally.
 - Confirm retired `Legacy_App` and `PySide6_App` paths were not recreated.
+
+For hardware, montage, pipeline-stage, or FPVS Studio changes, first read the
+[shared roadmap](../../../docs/agent/architecture/hardware-pipeline-studio-roadmap.md).
+Modularity is a target for explicit versioned capabilities, not permission to
+reorder locked BioSemi processing or enable unqualified spatial methods. Keep
+existing compatibility aliases and historical project behavior while extending
+the canonical owners.
 
 ## Response Requirements
 

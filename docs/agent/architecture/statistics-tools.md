@@ -2,6 +2,12 @@
 
 Statistics and tool code is organized under one active Stats package. Old `PySide6` and `Legacy` Stats import namespaces have been removed.
 
+Montage expansion must preserve each tool's scientific eligibility. Follow the
+[hardware, pipeline, and Studio roadmap](hardware-pipeline-studio-roadmap.md):
+channel/ROI geometry, FHC adjacency, interpolation, and source models require
+their own validated capability contracts. A newly readable recording must not
+automatically enable a spatial method qualified only for BioSemi64.
+
 Primary paths:
 
 - `src/Tools/Free_Harmonic_Clustering/`: independent analysis package for the
@@ -12,8 +18,10 @@ Primary paths:
   validates processing-owned neutral FullFFT provenance rather than a Stats
   harmonic cache, and does not alter or consume the standard Stats profile,
   included list, noise, or summation rules.
-  It supports one two-level paired-condition or independent-group contrast per
-  run on a complete BioSemi64 tensor.
+  Its inference unit is a two-level paired or independent contrast on a complete
+  BioSemi64 tensor. The current GUI freezes an analysis-family plan covering
+  flat or two-visit projects, including paired conditions, groups, visit changes,
+  and group differences in visit change; legacy single-contrast APIs remain.
 - `src/Tools/Stats/`: active single- and multi-group statistics GUI, controller,
   workers, analysis helpers, QC helpers, reporting, I/O, and shared helpers
   grouped by function. Its GUI is exposed through the optional Beta Tools

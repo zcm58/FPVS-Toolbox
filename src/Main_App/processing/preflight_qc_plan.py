@@ -10,7 +10,7 @@ from typing import Any
 
 import numpy as np
 
-from Main_App.Shared.fft_crop_utils import compute_onbin_step
+from Main_App.processing.fft_crop_utils import compute_onbin_step
 from Main_App.processing.analysis_spans import (
     attach_source_analysis_span_plan,
     canonical_condition_event_map,

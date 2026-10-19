@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from Main_App.Shared.settings_manager import SettingsManager
+from Main_App.settings.settings_manager import SettingsManager
 from Main_App.gui.op_guard import OpGuard
 from Main_App.projects.fpvs_config_import import (
     CONFIG_SUFFIX,

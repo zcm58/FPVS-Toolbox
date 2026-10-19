@@ -1,79 +1,48 @@
 # Technical Debt Tracker
 
-This page tracks unresolved, implementation-ready debt. It is not a list of
-permanent guardrails, completed migrations, product ideas, or past verification
-runs. Measurements below were refreshed against the repository on 2026-07-10;
-remeasure an item before promoting it to an active plan.
+This page tracks unresolved, implementation-ready debt. Keep permanent rules
+in `AGENTS.md` and architecture contracts; keep implementation evidence in the
+active plan while work is underway. Counts are review signals, not deletion or
+refactoring thresholds.
 
 ## Open Debt
 
-### TD-001: High-context production modules
+No open implementation-ready items remain from the bounded 2026-10-18 cleanup
+scope. Future findings need a named responsibility, evidence and an observable
+completion condition before becoming another cleanup item. The review census
+below remains relevant; it is not a claim that the whole application has no
+architectural debt.
 
-- **Evidence:** 38 production Python modules exceed 600 lines (excluding
-  `src/Standalone_Scripts/**`). The largest current hotspots are:
-  - `Tools/LORETA_Visualizer/gui.py` - 3,220 lines
-  - `Tools/Stats/analysis/dv_policy_group_significant.py` - 2,256 lines
-  - `Main_App/Performance/process_runner.py` - 1,975 lines
-  - `Tools/LORETA_Visualizer/renderer.py` - 1,833 lines
-  - `Tools/LORETA_Visualizer/source_producers/l2_mne_hauk_zscore.py` - 1,648 lines
-  - `Main_App/gui/settings_panel.py` - 1,623 lines
-  - `Main_App/gui/preprocessing_qc_workflow.py` - 1,612 lines
-  - `Main_App/gui/processing_workflows.py` - 1,433 lines
-- **Cost:** agents must load broad files to make narrow changes, increasing
-  context use and the chance of crossing ownership boundaries.
-- **Next slice:** choose one behavior-covered owner and extract named helpers
-  behind its existing public API. Favor high-churn orchestration before locked
-  scientific algorithms.
-- **Done when:** the selected owner has a documented responsibility boundary,
-  focused characterization tests, and materially smaller change/context scope
-  without changed behavior or exports.
+## Remaining Review Context
 
-### TD-002: Broad exception boundaries
+The 2026-10-18 implementation census contains 519 production Python modules,
+107 above 600 physical lines, and 428 exact `except Exception` handlers across
+116 modules. The original snapshot contained 504 modules and 435 handlers
+across 118 modules. This census uses tracked/new source Python files, excludes
+`src/Standalone_Scripts/**` and quarantine before reading, decodes UTF-8-SIG,
+and counts handlers with the Python AST.
 
-- **Evidence:** 362 `except Exception` handlers remain across 88 production
-  Python files (excluding `src/Standalone_Scripts/**`). They are concentrated
-  in GUI, processing, source-production, and export orchestration.
-- **Cost:** unrelated failures are hard to attribute, while silent recovery can
-  hide bad state from both users and verification agents.
-- **Next slice:** tighten handlers only inside one covered workflow. Preserve
-  intentional best-effort behavior, add operation/path context to logs, and
-  keep user-facing recovery semantics unchanged.
-- **Done when:** the selected workflow catches expected exceptions explicitly,
-  any remaining broad boundary is justified and logged, and focused failure
-  tests cover its recovery behavior.
+Large QC, Stats, source-visualization and worker orchestration modules remain.
+Their size alone does not identify unused code or justify changing scientific
+kernels. Further extraction should choose a coherent, behavior-covered owner.
+Likewise, remaining broad catches need workflow-specific review: terminal
+worker failures, best-effort previews, logging and transactional cleanup can
+require broad boundaries. A handler count is not a list of confirmed bugs.
 
-### TD-004: Current Main App ownership still uses transitional package names
-
-- **Evidence:** active implementations remain under `Main_App/Shared` (11
-  Python modules) and `Main_App/Performance` (3 Python modules), while newer
-  purpose-based packages expose the intended public import surfaces.
-- **Cost:** agents must distinguish current owners, adapters, and historical
-  naming before changing loading, exports, processing, or worker behavior.
-- **Next slice:** migrate one responsibility at a time behind its existing
-  public adapter, update the module map, and retain compatibility only where an
-  active caller proves it is needed.
-- **Done when:** each migrated responsibility has one documented owner and no
-  active caller depends directly on the transitional path.
-
-### TD-005: Default-tool adapter consolidation
-
-- **Owner:** Main App and I/O maintainers; explicitly deferred beyond v3.0.0.
-- **Evidence:** FHC now uses neutral exact-XLSX ingestion, but the v3 ledger
-  retains follow-up work for shared ROI/harmonic adapters and the remaining
-  selected-column readers. This is consolidation, not an identified release bug.
-- **Next slice:** inventory active callers, characterize exact values, column
-  order, missing-column/error behavior and performance, then migrate one owner
-  behind a public API with a thin compatibility adapter where required.
-- **Done when:** the migrated owner has one implementation, no new tool-to-tool
-  private dependency, and unchanged numerical/export behavior under those checks.
+Canonical ownership and retained compatibility are documented in
+[Main App target layout](../architecture/main-app-target-layout.md),
+[GUI architecture](../architecture/gui.md), and
+[the module map](../architecture/module-map.md). `Shared` and `Performance`
+contain compatibility aliases, with zero active implementation owners or
+active runtime imports relying on those transitional paths. Neutral ROI,
+harmonic and workbook readers own their shared implementations.
 
 ## Tracking Rules
 
-- Give every new item a stable `TD-###` identifier, evidence, a bounded next
-  slice, and an observable completion condition.
-- Promote an item to `exec-plans/active/` only when implementation starts.
-- Reverify counts before planning; snapshots describe scale, not acceptance
+- Give new items stable `TD-###` identifiers, evidence, a bounded next slice,
+  and an observable completion condition.
+- Promote an item to `exec-plans/active/` when implementation starts.
+- Reverify evidence before planning; snapshots describe scale, not acceptance
   thresholds.
-- Remove an item when fixed or explicitly accepted. Keep permanent safety rules
-  in `AGENTS.md` or architecture contracts, and keep product backlog in future
-  plans instead of this tracker.
+- Remove fixed or explicitly accepted items; do not retain completed migration
+  logs as open debt.

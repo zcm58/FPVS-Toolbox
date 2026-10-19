@@ -1,7 +1,8 @@
 # FHC exploratory reporting
 
-Status: implemented; CI Qt and the visible reporting smoke below remain pending
-at the final release commit. See the [v3 release ledger](v3-release-readiness.md#free-harmonic-clustering).
+Status reviewed 2026-10-18: implemented; registered Qt coverage passed in source
+CI. Human visible reporting smoke remains unclaimed. See the
+[v3 release ledger](v3-release-readiness.md#free-harmonic-clustering).
 
 ## Scope and decisions
 

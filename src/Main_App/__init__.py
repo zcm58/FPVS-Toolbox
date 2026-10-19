@@ -25,7 +25,7 @@ class _SettingsProxy:
         if env in {"0", "false", "no", "off"}:
             return False
         try:
-            from Main_App.Shared.settings_manager import SettingsManager
+            from Main_App.settings.settings_manager import SettingsManager
 
             return SettingsManager().debug_enabled()
         except Exception:
@@ -62,12 +62,12 @@ __all__ = [
 ]
 
 def SettingsManager(*args: Any, **kwargs: Any) -> Any:  # pragma: no cover
-    from Main_App.Shared.settings_manager import SettingsManager as _SharedSettingsManager
+    from Main_App.settings.settings_manager import SettingsManager as _SharedSettingsManager
 
     return _SharedSettingsManager(*args, **kwargs)
 
 def ProcessingMixin(*args: Any, **kwargs: Any) -> Any:  # pragma: no cover
-    from Main_App.Shared.processing_mixin import ProcessingMixin as _SharedProcessingMixin
+    from Main_App.workers.processing_mixin import ProcessingMixin as _SharedProcessingMixin
 
     return _SharedProcessingMixin(*args, **kwargs)
 
@@ -87,7 +87,7 @@ def preprocess_raw(*args: Any, **kwargs: Any) -> Any:  # pragma: no cover
     raise RuntimeError("Legacy preprocess_raw has been quarantined; use the PySide6 preprocessing path.")
 
 def post_process(*args: Any, **kwargs: Any) -> Any:  # pragma: no cover
-    from Main_App.Shared.post_process import post_process as _shared_post_process
+    from Main_App.exports.post_process import post_process as _shared_post_process
 
     return _shared_post_process(*args, **kwargs)
 

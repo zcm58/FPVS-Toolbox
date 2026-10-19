@@ -87,9 +87,9 @@ stopped at the same eight pre-existing path findings under unrelated untracked
 ## Owners, Migration, and Provenance
 
 Primary owners are project protocol settings/migration, Studio project import,
-`gui/settings_panel.py`, `Shared/fft_crop_utils.py`,
+`gui/settings_panel.py`, `processing/fft_crop_utils.py`,
 `processing/preflight_qc_plan.py`, `processing/preflight_qc.py`,
-`gui/preprocessing_qc_workflow.py`, `Performance/process_runner.py`,
+`gui/preprocessing_qc_workflow.py`, `workers/process_runner.py`,
 `processing/preflight_qc_cache.py`, processing-ledger/freshness owners, and the
 QC-02 report.
 

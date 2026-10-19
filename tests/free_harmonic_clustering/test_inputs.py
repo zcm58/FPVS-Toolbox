@@ -16,6 +16,7 @@ from Main_App.processing.full_fft_provenance import (
 from Main_App.processing.frequency_domain_qc import (
     FrequencyDomainCoverageDecisions,
 )
+from Main_App.projects import DatasetIndexError, ProjectDatasetIndex
 from Tools.Free_Harmonic_Clustering import inputs
 from Tools.Free_Harmonic_Clustering.models import (
     AnalysisDesign,
@@ -380,6 +381,67 @@ def _independent_request(root: Path) -> ProjectContrastRequest:
         condition_a="Faces",
         group_ids=("anxious", "non_anxious"),
     )
+
+
+@pytest.mark.parametrize("stage", ["group_assignments", "independent_selection", "paired_selection"])
+@pytest.mark.parametrize("error_type", [DatasetIndexError, RuntimeError, TypeError])
+def test_cohort_index_errors_keep_domain_errors_distinct_from_faults(
+    tmp_path, monkeypatch, stage, error_type,
+):
+    root, _ = _independent_project(tmp_path)
+    index = inputs.load_project_dataset_index(root)
+    _install_frequency_exclusions(monkeypatch)
+    request = _independent_request(root)
+    if stage == "paired_selection":
+        request = ProjectContrastRequest(
+            project_root=root, design=AnalysisDesign.PAIRED_CONDITIONS,
+            condition_a="Faces", condition_b="Objects", group_ids=("anxious",),
+        )
+    error = error_type("injected index failure")
+
+    def fail(_index, **_kwargs):
+        raise error
+
+    method = "require_group_assignments" if stage == "group_assignments" else "select"
+    monkeypatch.setattr(ProjectDatasetIndex, method, fail)
+    expected = FreeHarmonicInputError if error_type is DatasetIndexError else error_type
+    with pytest.raises(expected, match="injected index failure") as caught:
+        inputs._select_cohort(index, request, root)
+    if error_type is DatasetIndexError:
+        assert caught.value.__cause__ is error
+    else:
+        assert caught.value is error
+
+
+@pytest.mark.parametrize("method", [
+    "require_group_assignments", "require_recording_assignments", "require_session_assignments",
+])
+@pytest.mark.parametrize("error_type", [DatasetIndexError, RuntimeError, TypeError])
+def test_repeated_cohort_index_errors_keep_domain_errors_distinct_from_faults(
+    tmp_path, monkeypatch, method, error_type,
+):
+    root = _write_repeated_project(
+        tmp_path / "Repeated", participants_by_group={"bc_group": ("BC1",), "control_group": ("C1",)},
+        conditions=("Faces",),
+    )
+    index = inputs.load_project_dataset_index(root)
+    request = RepeatedSessionBatchRequest(
+        project_root=root, conditions=("Faces",), group_ids=("bc_group", "control_group"),
+        session_ids=("follicular_phase", "luteal_phase"),
+    )
+    error = error_type("injected index failure")
+
+    def fail(_index):
+        raise error
+
+    monkeypatch.setattr(ProjectDatasetIndex, method, fail)
+    expected = FreeHarmonicInputError if error_type is DatasetIndexError else error_type
+    with pytest.raises(expected, match="injected index failure") as caught:
+        inputs._select_repeated_batch_cohort(index, request, root)
+    if error_type is DatasetIndexError:
+        assert caught.value.__cause__ is error
+    else:
+        assert caught.value is error
 
 
 def test_repeated_session_project_is_blocked_before_provenance_or_workbook_io(

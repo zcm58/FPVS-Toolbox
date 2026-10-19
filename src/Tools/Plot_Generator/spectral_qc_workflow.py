@@ -11,9 +11,9 @@ import zipfile
 
 import pandas as pd
 
-from Tools.Plot_Generator.full_snr_reader import (
+from Main_App.io.spectral_workbook import (
     XlsxWorkbookReadSession,
-    _read_full_snr_sheet_read_only,
+    read_full_snr_sheet as _read_full_snr_sheet_read_only,
 )
 from Tools.Plot_Generator.source_identity import SourceWorkbookSnapshot
 from Tools.Plot_Generator.spectral_qc import (

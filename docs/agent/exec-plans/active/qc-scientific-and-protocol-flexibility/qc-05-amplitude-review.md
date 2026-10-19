@@ -102,7 +102,7 @@ recording is necessarily unusable or that interpolation cannot rescue it.
 
 Primary owners are `src/Main_App/processing/raw_channel_qc.py`,
 `src/Main_App/processing/preflight_qc.py`,
-`src/Main_App/Performance/process_runner.py`, and
+`src/Main_App/workers/process_runner.py`, and
 `src/Main_App/gui/preprocessing_qc_workflow.py`; update shared text/calibration
 and reporting/cache adapters only as required. Reuse existing manual
 recording-exclusion controls; QC-03 supplies the consistent identity principle

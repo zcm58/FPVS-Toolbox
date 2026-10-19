@@ -3127,7 +3127,17 @@ def _find_first_bca_columns(
                     if column != "Electrode"
                 ]
             except Exception:
-                logger.debug("frequency_domain_qc_bca_header_read_failed", exc_info=True)
+                # This is a best-effort probe across native and legacy workbook
+                # readers; a later source may provide the representative header.
+                logger.debug(
+                    "frequency_domain_qc_bca_header_read_failed",
+                    exc_info=True,
+                    extra={
+                        "path": str(file_path),
+                        "subject": subject,
+                        "condition": condition,
+                    },
+                )
     return []
 
 
@@ -3280,34 +3290,6 @@ def _recording_assignments_from_index(
             "days_from_baseline": recording.days_from_baseline,
         }
     return assignments
-
-
-def _filter_to_completed_subjects(
-    *,
-    project_root: Path,
-    subjects: list[str],
-    subject_data: dict[str, dict[str, str]],
-) -> tuple[list[str], dict[str, dict[str, str]]]:
-    from Main_App.processing.processing_ledger import load_ledger
-
-    try:
-        ledger = load_ledger(project_root)
-    except Exception:
-        return subjects, subject_data
-    entries = ledger.get("entries") if isinstance(ledger, Mapping) else None
-    if not isinstance(entries, Mapping):
-        return subjects, subject_data
-    completed = {
-        str(pid).upper()
-        for pid, entry in entries.items()
-        if isinstance(entry, Mapping) and str(entry.get("status") or "") == "completed"
-    }
-    if not completed:
-        return subjects, subject_data
-    filtered_subjects = [subject for subject in subjects if subject.upper() in completed]
-    return filtered_subjects, {
-        subject: dict(subject_data.get(subject, {})) for subject in filtered_subjects
-    }
 
 
 def _ordered_conditions(project: Any, scanned_conditions: list[str]) -> list[str]:

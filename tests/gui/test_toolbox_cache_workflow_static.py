@@ -162,9 +162,8 @@ def test_modal_workflow_releases_navigation_and_start_guard(raises, tmp_path):
 
 
 def test_settings_exposes_cache_action_and_worker_imports_no_widgets():
-    settings = ast.parse((ROOT / "src/Main_App/gui/settings_panel.py").read_text(encoding="utf-8"))
-    dialog = next(node for node in settings.body if isinstance(node, ast.ClassDef) and node.name == "SettingsDialog")
-    application = next(node for node in dialog.body if isinstance(node, ast.FunctionDef) and node.name == "_init_application_tab")
+    settings = ast.parse((ROOT / "src/Main_App/gui/settings_preferences_pages.py").read_text(encoding="utf-8"))
+    application = next(node for node in settings.body if isinstance(node, ast.FunctionDef) and node.name == "build_application_page")
     assert any(isinstance(node, ast.Constant) and node.value == "Clear Toolbox Cache…" for node in ast.walk(application))
     assert "self._clear_toolbox_cache" in ast.unparse(application)
     worker = ast.parse(WORKER.read_text(encoding="utf-8"))

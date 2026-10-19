@@ -11,6 +11,13 @@ schemas, harmonic-selection caches, project metadata, ledgers, QC state, or
 source workbooks. Both layers validate the same neutral, processing-owned
 FullFFT provenance; neither requires the standard Stats harmonic cache.
 
+The [hardware, pipeline, and Studio roadmap](../../../docs/agent/architecture/hardware-pipeline-studio-roadmap.md)
+is the future integration target. The current inference core remains BioSemi64
+only. A qualified import/processing path for another montage is insufficient:
+its spatial graph and statistical behavior require a separately versioned,
+validated extension. Preserve the existing graph identity and empirical
+calibration scope for current analyses.
+
 The Main App supplies either a snapshot from the confirmed project protocol
 or its precise validation reason. A missing snapshot blocks inspection and
 offers a `protocol_settings_required` signal that the host routes to Settings >
@@ -407,7 +414,7 @@ Default runs publish beneath:
 
 The output is additive, never overwrites a completed run, uses project-relative
 source paths, and writes its completion manifest last before atomically
-publishing the staged directory. Its primary human-readable artifact is
+publishing the staged directory. The legacy single-contrast human-readable artifact is
 `Free_Harmonic_Clustering_Results.xlsx`, with ordered Run Summary, Significant
 Clusters, All Clusters, Cluster Membership, Harmonic Selection, Participants
 and Exclusions, Methods and Provenance, Node Statistics, and Null Distribution
@@ -419,12 +426,13 @@ Repeated batches publish the same way but use
 summary, cohort/exclusion, shared-harmonic, cluster/membership, node/null,
 methods/provenance, and source-audit tables within one additive directory.
 
-## Legacy Version 1 Acceptance
+## Portable Workflow Acceptance
 
-Automated tests use synthetic or temporary project fixtures and never bundle or
-depend on the private ACR project. Final acceptance additionally requires a
-visible end-to-end GUI reproduction of the canonical ACR Neutral Happy result:
-18 anxious versus 16 non-anxious participants, retained H1/H2, a positive H1
-C1/Cz/CPz cluster, and raw sign-specific p approximately `.0043`. This manual
-gate validates the complete project discovery, preparation, GUI, permutation,
-and export path.
+Automated tests and visible/manual smoke use synthetic or temporary managed
+projects. Exercise project discovery, preparation, frozen plan review,
+permutation inference, results/maps, cancellation, project switching, and
+additive export. Historical private research reproductions are not a routine
+development or release prerequisite; run such validation only when explicitly
+scoped by the user. Never bundle private data or make automated tests depend on
+it. The separate powered-null receipt has only its documented statistical
+validation scope and does not replace workflow acceptance.

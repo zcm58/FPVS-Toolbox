@@ -64,7 +64,7 @@ are not proof of successful interpolation.
 Primary owners are `src/Main_App/processing/qc_summary_export.py`,
 `src/Main_App/processing/preprocess.py`, and
 `src/Main_App/diagnostics/audit.py`; follow outcome metadata through
-`src/Main_App/Performance/process_runner.py`,
+`src/Main_App/workers/process_runner.py`,
 `src/Main_App/processing/processing_ledger.py`, and the export caller in
 `src/Main_App/gui/processing_workflows.py` only as required.
 

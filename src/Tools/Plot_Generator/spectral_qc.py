@@ -14,7 +14,7 @@ from xml.etree import ElementTree
 import numpy as np
 import pandas as pd
 
-from Tools.Plot_Generator.full_snr_reader import (
+from Main_App.io.spectral_workbook import (
     _ROW_TAG,
     XlsxWorkbookReadSession,
     _add_timing_detail,

@@ -25,7 +25,7 @@ from Tools.Stats.analysis.dv_policy_settings import (
 )
 from Tools.Stats.data.group_harmonic_cache import project_processing_signature_hash
 from Main_App.processing.post_processing_context import post_processing_validation_scope
-from Tools.Stats.analysis.canonical_harmonics import (
+from Main_App.processing.canonical_harmonics import (
     CANONICAL_HARMONIC_SOURCE,
     CUSTOM_HARMONIC_SOURCE,
     SharedHarmonicSelection,

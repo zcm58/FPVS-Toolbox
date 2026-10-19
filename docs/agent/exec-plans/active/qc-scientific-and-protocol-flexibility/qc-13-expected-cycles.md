@@ -57,7 +57,7 @@ Implementation files for this follow-up:
 - `src/Main_App/gui/project_protocol.py`, `settings_panel.py` and
   `processing_inputs.py`: Duration/Automatic/Advanced setup and project-wide
   sampling-grid resolution before QC and artifact classification.
-- `src/Main_App/Shared/load_utils.py` and `src/Main_App/io/load_utils.py`:
+- `src/Main_App/io/load_utils.py`:
   canonical header-only BDF sampling-rate discovery, with explicit failures.
 - `tests/project_io/test_analysis_window.py` and
   `test_fpvs_config_import.py`; `tests/processing/test_analysis_window_setup.py`,
@@ -126,7 +126,7 @@ method change, shorter-window implementation or installer rebuild was performed.
 
 Implement project schema/import/manual-entry ownership in `Main_App/projects/`
 and the project setup GUI. Route the expected target through preflight and
-`Main_App/Shared/fft_crop_utils.py`, processing provenance, FullFFT grid QC,
+`Main_App/processing/fft_crop_utils.py`, processing provenance, FullFFT grid QC,
 review dialogs, caches, and fingerprints. Preserve the shortest-common-span
 calculation only after each repetition has been checked against the declared
 target; do not let one short repetition silently reduce valid siblings.

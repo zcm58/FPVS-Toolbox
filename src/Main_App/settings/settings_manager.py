@@ -1,0 +1,534 @@
+"""Utilities for storing and retrieving user preferences.
+
+This module defines :class:`SettingsManager` which reads and writes an INI file
+containing GUI options, analysis defaults and other persistent settings.  It
+also provides helpers for manipulating event label/ID pairs and detecting debug
+mode.
+"""
+
+import json
+import configparser
+import logging
+import os
+import ast
+import tempfile
+import threading
+import time
+from pathlib import Path
+from typing import List, Tuple
+
+from Main_App.processing.roi_presets import (
+    DEFAULT_ROI_MONTAGE,
+    default_roi_name_keys,
+    validate_roi_montage,
+)
+from Main_App.settings.settings_paths import app_settings_dir, app_settings_file, legacy_settings_file
+
+logger = logging.getLogger("Main_App.Shared.settings_manager")
+_SETTINGS_SAVE_LOCK = threading.RLock()
+
+DEFAULTS = {
+    'appearance': {
+        'mode': 'System',
+        'theme': 'blue'
+    },
+    'paths': {
+        'data_folder': '',
+        'output_folder': ''
+    },
+    'gui': {
+        'main_size': '750x920',
+        'stats_size': '700x650',
+        'resizer_size': '600x600',
+        'advanced_size': '500x500'
+    },
+    'stim': {
+        'channel': 'Status'
+    },
+    'events': {
+        'labels': '',
+        'ids': ''
+    },
+    'analysis': {
+        'base_freq': '6.0',
+        'oddball_freq': '1.2',
+        'alpha': '0.05'
+    },
+    'preprocessing': {
+        'electrode_montage': 'biosemi64',
+        'electrode_mapping_profile': 'anatomical_labels',
+        'line_noise_filter_enabled': 'True',
+        'line_noise_frequency_hz': '60',
+        'harmonic_selection_policy': 'Group-level significant harmonics (Volfart/Retter/Rossion style)',
+        'harmonic_selection_profile': 'legacy_fpvs_toolbox',
+        'harmonic_selection_profile_version': '1.0',
+        'group_significant_electrode_scope': 'union_roi_electrodes',
+        'group_significant_selection_electrodes': '',
+        'group_significant_summation_method': 'through_highest_significant',
+        'fixed_harmonic_frequencies_hz': '1.2, 2.4, 3.6, 4.8, 7.2',
+        'fixed_harmonic_input_mode': 'frequency_list',
+        'fixed_harmonic_upper_harmonic_index': '0',
+        'fixed_harmonic_upper_frequency_hz': '0.0',
+        'fixed_harmonic_auto_exclude_base': 'True',
+    },
+    'rois': {
+        'montage': DEFAULT_ROI_MONTAGE,
+        'names': 'LOT;ROT;Central',
+        'electrodes': 'P7,P9,PO7,PO3,O1;P8,P10,PO8,PO4,O2;FCZ,CZ,CPZ,CP1,C1,FC1'
+    },
+    # An absent canonical key allows existing saved preset lists to be read
+    # from their legacy name. An explicitly saved [] must remain empty.
+    'roi_presets': {},
+    'visualization': {
+        'threshold': '0.0',
+        'surface_opacity': '0.5',
+        'time_index_ms': '100',
+        'show_brain_mesh': 'True'
+    },
+    'debug': {
+        'enabled': 'False'
+    },
+    'tools': {
+        'enable_beta_tools': 'False'
+    }
+}
+
+_LEGACY_DEFAULT_ROI_NAMES = 'Frontal Lobe;Central Lobe;Parietal Lobe;Occipital Lobe'
+_LEGACY_DEFAULT_ROI_ELECTRODES = 'F3,F4,Fz;C3,C4,Cz;P3,P4,Pz;O1,O2,Oz'
+
+_LEGACY_QT_KEYS = (
+    ("paths/projectsRoot", "paths", "projectsRoot"),
+    ("recentProjects", "recent", "projects"),
+    ("updates/last_checked_utc", "updates", "last_checked_utc"),
+)
+
+INI_NAME = 'settings.ini'
+CONFIGS_DIR = 'configs'
+
+
+def _custom_roi_presets_option(montage: str) -> str:
+    montage_key = validate_roi_montage(montage)
+    return f"custom_{montage_key.replace('-', '_')}"
+
+
+def _config_values(config: configparser.ConfigParser) -> dict[str, dict[str, str]]:
+    """Snapshot explicit raw values, without expanding defaults/interpolation."""
+
+    # Public items()/options() include inherited DEFAULT values, which would
+    # turn an unrelated default edit into explicit changes in every section.
+    return {
+        config.default_section: dict(config.defaults()),
+        **{section: dict(config._sections[section]) for section in config.sections()},
+    }
+
+
+def _default_config() -> configparser.ConfigParser:
+    config = configparser.ConfigParser()
+    config.read_dict(DEFAULTS)
+    return config
+
+
+def _merge_config_changes(
+    latest: configparser.ConfigParser,
+    current: configparser.ConfigParser,
+    baseline: dict[str, dict[str, str]],
+) -> configparser.ConfigParser:
+    values = _config_values(current)
+    for section in baseline.keys() - values.keys():
+        latest.remove_section(section)
+    for section, options in values.items():
+        previous = baseline.get(section, {})
+        changed = {key: value for key, value in options.items() if key not in previous or value != previous[key]}
+        removed = previous.keys() - options.keys()
+        if section == current.default_section:
+            for key in removed:
+                latest.defaults().pop(key, None)
+            latest.defaults().update(changed)
+            continue
+        if (section not in baseline or changed) and not latest.has_section(section):
+            latest.add_section(section)
+        if latest.has_section(section):
+            for key in removed:
+                latest.remove_option(section, key)
+            for key, value in changed.items():
+                latest.set(section, key, value)
+    return latest
+
+
+def _replace_settings_file(source: Path, target: Path) -> None:
+    """Allow brief Windows scanner locks without truncating the previous INI."""
+
+    delays = (0.01, 0.02, 0.05, 0.1, 0.1)
+    for attempt in range(len(delays) + 1):
+        try:
+            os.replace(source, target)
+            return
+        except PermissionError:
+            if attempt == len(delays):
+                raise
+            time.sleep(delays[attempt])
+
+def _default_ini_path() -> str:
+    """Return the default path for the central app settings file."""
+    return str(app_settings_file())
+
+
+def _default_configs_dir() -> str:
+    return str(app_settings_dir() / CONFIGS_DIR)
+
+
+def _legacy_qt_settings_file() -> Path | None:
+    try:
+        from PySide6.QtCore import QCoreApplication, QStandardPaths
+    except Exception:
+        return None
+    if not QCoreApplication.organizationName():
+        QCoreApplication.setOrganizationName("MississippiStateUniversity")
+    if not QCoreApplication.applicationName():
+        QCoreApplication.setApplicationName("FPVS Toolbox")
+    location = QStandardPaths.writableLocation(QStandardPaths.AppDataLocation)
+    if not location:
+        return None
+    old_path = Path(location) / "settings.ini"
+    try:
+        if old_path.resolve() == Path(_default_ini_path()).resolve():
+            return None
+    except OSError:
+        pass
+    return old_path
+
+
+def _read_legacy_qt_value(path: Path | None, key: str):
+    try:
+        from PySide6.QtCore import QSettings
+    except Exception:
+        return None
+    stores = [QSettings()]
+    if _path_exists_for_migration(path):
+        stores.append(QSettings(str(path), QSettings.IniFormat))
+    for store in stores:
+        value = store.value(key, None)
+        if value not in (None, ""):
+            return value
+    return None
+
+
+def _path_exists_for_migration(path: Path | None) -> bool:
+    """Return whether a legacy settings path exists without failing startup."""
+
+    if path is None:
+        return False
+    try:
+        return path.exists()
+    except OSError as exc:
+        logger.warning(
+            "legacy_settings_probe_failed",
+            extra={"path": str(path), "error": str(exc)},
+        )
+        return False
+
+class SettingsManager:
+    """Handles loading and saving user preferences to an INI file."""
+
+    def __init__(self, ini_path: str = None):
+        self._uses_default_path = ini_path is None
+        if ini_path is None:
+            ini_path = _default_ini_path()
+        self.ini_path = ini_path
+        self.configs_dir = (
+            _default_configs_dir()
+            if self._uses_default_path
+            else os.path.join(os.path.dirname(self.ini_path), CONFIGS_DIR)
+        )
+        self.load()
+
+    def load(self) -> None:
+        """Load settings from disk, applying defaults where needed."""
+        self.config = _default_config()
+        self._saved_values = _config_values(self.config)
+        migrated = False
+        if os.path.exists(self.ini_path):
+            self.config.read(self.ini_path)
+            self._saved_values = _config_values(self.config)
+        elif self._uses_default_path:
+            old_path = legacy_settings_file()
+            if _path_exists_for_migration(old_path):
+                self.config.read(old_path)
+                migrated = True
+        if self._uses_default_path:
+            migrated = self._migrate_legacy_qt_settings() or migrated
+        migrated = self._migrate_legacy_roi_defaults() or migrated
+        if migrated:
+            self.save()
+
+    def _migrate_legacy_qt_settings(self) -> bool:
+        migrated = False
+        old_path = _legacy_qt_settings_file()
+        for qt_key, section, option in _LEGACY_QT_KEYS:
+            if self.config.has_option(section, option):
+                continue
+            value = _read_legacy_qt_value(old_path, qt_key)
+            if value in (None, ""):
+                continue
+            if section == 'recent' and option == 'projects' and isinstance(value, (list, tuple)):
+                self.set(section, option, json.dumps([str(item) for item in value]))
+            else:
+                self.set(section, option, str(value))
+            migrated = True
+        return migrated
+
+    def _migrate_legacy_roi_defaults(self) -> bool:
+        names = self.get('rois', 'names', '').strip()
+        electrodes = self.get('rois', 'electrodes', '').strip()
+        if names != _LEGACY_DEFAULT_ROI_NAMES or electrodes != _LEGACY_DEFAULT_ROI_ELECTRODES:
+            return False
+        self.set('rois', 'names', DEFAULTS['rois']['names'])
+        self.set('rois', 'electrodes', DEFAULTS['rois']['electrodes'])
+        return True
+
+    def save(self, *, replace_existing: bool = False) -> None:
+        """Publish local edits without overwriting newer, unrelated settings.
+
+        Reset/import explicitly replace the configuration. Normal saves merge
+        changes since this instance last loaded or successfully saved settings.
+        """
+
+        target = Path(self.ini_path)
+        with _SETTINGS_SAVE_LOCK:
+            if replace_existing:
+                merged = self.config
+            else:
+                latest = _default_config()
+                if target.exists():
+                    with target.open() as stream:
+                        latest.read_file(stream)
+                merged = _merge_config_changes(latest, self.config, self._saved_values)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            temporary: Path | None = None
+            try:
+                with tempfile.NamedTemporaryFile(
+                    mode="w", dir=target.parent, prefix=f".{target.name}.",
+                    suffix=".tmp", delete=False,
+                ) as stream:
+                    temporary = Path(stream.name)
+                    merged.write(stream)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                _replace_settings_file(temporary, target)
+                temporary = None
+            finally:
+                if temporary is not None:
+                    temporary.unlink(missing_ok=True)
+            self.config = merged
+            self._saved_values = _config_values(merged)
+
+    def export(self, path: str) -> None:
+        """Write the current settings to ``path`` as INI or JSON."""
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        ext = os.path.splitext(path)[1].lower()
+        if ext == '.json':
+            data = {"DEFAULT": dict(self.config.defaults())}
+            for section in self.config.sections():
+                data[section] = dict(self.config.items(section))
+            with open(path, 'w') as f:
+                json.dump(data, f, indent=2)
+        else:
+            with open(path, 'w') as f:
+                self.config.write(f)
+
+    def export_named(self, name: str, ext: str = '.ini') -> str:
+        """Export settings to the managed configs directory using ``name``."""
+        os.makedirs(self.configs_dir, exist_ok=True)
+        if not ext.startswith('.'):
+            ext = '.' + ext
+        path = os.path.join(self.configs_dir, name + ext)
+        self.export(path)
+        return path
+
+
+    def reset(self) -> None:
+        """Reset settings to defaults and save."""
+        self.config = _default_config()
+        self.save(replace_existing=True)
+
+    def load_from(self, path: str) -> None:
+        """Load settings from ``path`` then save to the default ini file."""
+        imported = _default_config()
+        ext = os.path.splitext(path)[1].lower()
+        if ext == '.json':
+            with open(path, 'r') as f:
+                data = json.load(f)
+            imported.read_dict(data)
+        else:
+            imported.read(path)
+        self.config = imported
+        self.save(replace_existing=True)
+
+
+    def list_configs(self) -> List[str]:
+        """Return saved configuration names in the configs directory."""
+        if not os.path.isdir(self.configs_dir):
+            return []
+        names = []
+        for fname in os.listdir(self.configs_dir):
+            if fname.endswith('.ini') or fname.endswith('.json'):
+                names.append(os.path.splitext(fname)[0])
+        return sorted(names)
+
+    def delete_named(self, name: str) -> None:
+        """Delete the saved configuration ``name``."""
+        removed = False
+        for ext in ('.ini', '.json'):
+            path = os.path.join(self.configs_dir, name + ext)
+            if os.path.exists(path):
+                os.remove(path)
+                removed = True
+        if not removed:
+            raise FileNotFoundError(name)
+
+    def load_named(self, name: str) -> None:
+        """Load config with ``name`` from the configs directory."""
+        path_ini = os.path.join(self.configs_dir, name + '.ini')
+        path_json = os.path.join(self.configs_dir, name + '.json')
+        if os.path.exists(path_ini):
+            self.load_from(path_ini)
+        elif os.path.exists(path_json):
+            self.load_from(path_json)
+        else:
+            raise FileNotFoundError(name)
+
+
+    def get(self, section: str, option: str, fallback: str = '') -> str:
+        return self.config.get(section, option, fallback=fallback)
+
+    def set(self, section: str, option: str, value: str) -> None:
+        if not self.config.has_section(section):
+            self.config.add_section(section)
+        self.config.set(section, option, value)
+
+    def get_project_root(self, fallback: str = '') -> str:
+        return self.get('paths', 'projectsRoot', fallback)
+
+    def set_project_root(self, value: str) -> None:
+        self.set('paths', 'projectsRoot', value)
+
+    def get_recent_projects(self) -> List[str]:
+        raw = self.get('recent', 'projects', '')
+        if not raw:
+            return []
+        for parser in (json.loads, ast.literal_eval):
+            try:
+                parsed = parser(raw)
+            except (ValueError, SyntaxError, TypeError, json.JSONDecodeError):
+                continue
+            if isinstance(parsed, (list, tuple)):
+                return [str(item) for item in parsed if str(item)]
+        return [item.strip() for item in raw.splitlines() if item.strip()]
+
+    def set_recent_projects(self, projects: List[str]) -> None:
+        self.set('recent', 'projects', json.dumps([str(project) for project in projects]))
+
+    # --- Convenience helpers for event mappings ---
+    def get_event_pairs(self) -> List[Tuple[str, str]]:
+        labels = [label_part.strip() for label_part in self.get('events', 'labels', '').split(',') if label_part.strip()]
+        ids = [i.strip() for i in self.get('events', 'ids', '').split(',') if i.strip()]
+        pairs = []
+        for label, id_val in zip(labels, ids):
+            pairs.append((label, id_val))
+        return pairs
+
+    def set_event_pairs(self, pairs: List[Tuple[str, str]]) -> None:
+        labels = ','.join([p[0] for p in pairs])
+        ids = ','.join([p[1] for p in pairs])
+        self.set('events', 'labels', labels)
+        self.set('events', 'ids', ids)
+
+    # --- Convenience helpers for ROI mappings ---
+    def get_roi_pairs(self) -> List[Tuple[str, List[str]]]:
+        names = [n.strip() for n in self.get('rois', 'names', '').split(';') if n.strip()]
+        groups = [g.strip() for g in self.get('rois', 'electrodes', '').split(';') if g.strip()]
+        pairs = []
+        for name, group in zip(names, groups):
+            electrodes = [e.strip().upper() for e in group.split(',') if e.strip()]
+            pairs.append((name, electrodes))
+        return pairs
+
+    def set_roi_pairs(self, pairs: List[Tuple[str, List[str]]]) -> None:
+        names = ';'.join([p[0] for p in pairs])
+        electrodes = ';'.join([','.join([e.upper() for e in p[1]]) for p in pairs])
+        self.set('rois', 'names', names)
+        self.set('rois', 'electrodes', electrodes)
+
+    def get_roi_montage(self) -> str:
+        montage = self.get('rois', 'montage', DEFAULT_ROI_MONTAGE)
+        if montage.strip() == '10-10':
+            # The old ROI selector named preset lists, not EEG geometry.
+            return DEFAULT_ROI_MONTAGE
+        try:
+            return validate_roi_montage(montage)
+        except ValueError:
+            logger.warning("unsupported_roi_montage_setting", extra={"montage": montage})
+            return DEFAULT_ROI_MONTAGE
+
+    def set_roi_montage(self, montage: str) -> None:
+        self.set('rois', 'montage', validate_roi_montage(montage))
+
+    def get_custom_roi_presets(self, montage: str | None = None) -> List[Tuple[str, List[str]]]:
+        montage_key = validate_roi_montage(montage or self.get_roi_montage())
+        raw = self.get(
+            'roi_presets',
+            _custom_roi_presets_option(montage_key),
+            self.get('roi_presets', 'custom_10_10', '[]'),
+        )
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError:
+            logger.warning("custom_roi_presets_invalid_json", extra={"montage": montage_key})
+            return []
+        if not isinstance(payload, list):
+            logger.warning("custom_roi_presets_invalid_payload", extra={"montage": montage_key})
+            return []
+
+        default_names = default_roi_name_keys(montage_key)
+        seen: set[str] = set()
+        presets: List[Tuple[str, List[str]]] = []
+        for item in payload:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name", "")).strip()
+            electrodes_raw = item.get("electrodes", [])
+            if not name or not isinstance(electrodes_raw, list):
+                continue
+            name_key = name.casefold()
+            if name_key in default_names or name_key in seen:
+                continue
+            electrodes = [str(e).strip().upper() for e in electrodes_raw if str(e).strip()]
+            if electrodes:
+                presets.append((name, electrodes))
+                seen.add(name_key)
+        return presets
+
+    def set_custom_roi_presets(self, montage: str, pairs: List[Tuple[str, List[str]]]) -> None:
+        montage_key = validate_roi_montage(montage)
+        default_names = default_roi_name_keys(montage_key)
+        seen: set[str] = set()
+        payload = []
+        for name, electrodes_raw in pairs:
+            clean_name = str(name).strip()
+            name_key = clean_name.casefold()
+            if not clean_name or name_key in default_names or name_key in seen:
+                continue
+            electrodes = [str(e).strip().upper() for e in electrodes_raw if str(e).strip()]
+            if electrodes:
+                payload.append({"name": clean_name, "electrodes": electrodes})
+                seen.add(name_key)
+        self.set('roi_presets', _custom_roi_presets_option(montage_key), json.dumps(payload))
+
+    def debug_enabled(self) -> bool:
+        return self.get('debug', 'enabled', 'False').lower() == 'true'
+
+    def beta_tools_enabled(self) -> bool:
+        return self.get('tools', 'enable_beta_tools', 'False').lower() == 'true'
+
+    def set_beta_tools_enabled(self, enabled: bool) -> None:
+        self.set('tools', 'enable_beta_tools', str(bool(enabled)))

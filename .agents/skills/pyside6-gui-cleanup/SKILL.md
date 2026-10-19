@@ -33,6 +33,13 @@ Use this workflow when changing PySide6 widgets, dialogs, menus, toolbar actions
 17. Document the visible/manual smoke path and why automated GUI execution was
     skipped.
 
+For hardware/montage controls or Studio integration, read the
+[shared roadmap](../../../docs/agent/architecture/hardware-pipeline-studio-roadmap.md).
+Present capabilities resolved by shared backend contracts; do not choose a
+scientific policy from widget labels, channel count, or a device-name branch.
+Keep unsupported actions explicit and existing pages uncluttered. A modular
+pipeline does not imply a free-form GUI for arbitrary stage reordering.
+
 ## Checks
 
 - Use `python .agents/skills/pyside6-gui-cleanup/scripts/audit_gui_imports.py` instead of manually searching all GUI imports.

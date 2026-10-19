@@ -362,23 +362,6 @@ def _visit_label(value: Any) -> str:
     return str(visit_index) if visit_index is not None else "—"
 
 
-def _merge_removed_maps(
-    existing: dict[str, list[str]],
-    suggestions: dict[str, list[str]],
-) -> dict[str, list[str]]:
-    merged = normalize_manual_removed_electrodes_map(existing)
-    for pid, electrodes in suggestions.items():
-        current = merged.get(pid, [])
-        seen = {electrode.casefold() for electrode in current}
-        for electrode in electrodes:
-            if electrode.casefold() in seen:
-                continue
-            current.append(electrode)
-            seen.add(electrode.casefold())
-        merged[pid] = current
-    return dict(sorted(merged.items(), key=lambda item: participant_sort_key(item[0])))
-
-
 def _filter_removed_map_for_participants(
     values: dict[str, list[str]],
     participant_ids: Sequence[str],
@@ -608,19 +591,6 @@ def _removed_review_records_from_rows(
     return records, final_confirmed, warnings
 
 
-def _casefold_electrode_lookup(
-    values: dict[str, list[str]],
-    participant_id: str,
-) -> list[str]:
-    if participant_id in values:
-        return list(values[participant_id])
-    key = participant_id.casefold()
-    for candidate, electrodes in values.items():
-        if candidate.casefold() == key:
-            return list(electrodes)
-    return []
-
-
 def _path_strings(items: Sequence[HeaderOnlyPreflight]) -> list[str]:
     return [str(item.path.resolve()) for item in items]
 
@@ -630,13 +600,6 @@ def _path_key(path: Path) -> str:
         return str(path.resolve()).casefold()
     except (OSError, RuntimeError, ValueError):
         return str(path).casefold()
-
-
-def _scan_progress_text(message: str | None = None) -> str:
-    detail = (message or "").strip()
-    if detail:
-        return f"{_DATA_QUALITY_SCAN_WAIT_MESSAGE}\n\n{detail}"
-    return _DATA_QUALITY_SCAN_WAIT_MESSAGE
 
 
 def _show_data_quality_notice(

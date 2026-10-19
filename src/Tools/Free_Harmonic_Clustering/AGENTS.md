@@ -8,6 +8,15 @@ remain GUI-neutral. The GUI gathers active-project context, runs one legacy
 contrast or one versioned repeated-session batch, and presents a concise
 current-session result while delegating long work to signal-driven workers.
 
+Future acquisition and montage work follows the
+[shared roadmap](../../../docs/agent/architecture/hardware-pipeline-studio-roadmap.md).
+The current FHC method requires the complete BioSemi64 sensor set and its fixed
+versioned inference graph. Modular loading, a registered montage, or successful
+FPVS Studio import does not qualify FHC for that montage. A new spatial graph
+requires an explicitly scoped method version, provenance, fixtures, and
+scientific validation; never reuse the BioSemi64 graph by dropping, renaming,
+or inventing sensors.
+
 ## Non-Negotiables
 
 - The public tool title is `Free Harmonic Clustering Analysis`.
@@ -242,11 +251,14 @@ A pending, partial, interrupted, or unreviewed later receipt is not a pass and
 must not support a changed statistical claim.
 
 The headless numerical modules must not import PySide6. Keep GUI smoke coverage
-registered for CI and do not run Qt locally on Windows.
+registered for CI. Local Qt execution requires an explicitly approved safe
+visible environment; never run offscreen Qt locally.
 
-The version 1 release gate is a visible end-to-end GUI reproduction of the
-private ACR Neutral Happy comparison: 18 anxious versus 16 non-anxious
-participants, retained H1/H2, positive H1 cluster at C1/Cz/CPz, and raw
-sign-specific p approximately `.0043`. Do not bundle the ACR project or make
-automated tests depend on it; automated preparation, inference, export, and GUI
-coverage must use synthetic or temporary project fixtures.
+Visible/manual smoke uses a synthetic or temporary managed project: inspect
+valid FullFFT inputs, review the frozen plan, run one small contrast, inspect
+its results and cluster maps, and verify the additive output bundle. Confirm a
+cancelled run leaves no completed partial bundle and a project switch clears
+current-session results. Historical private research reproductions are not a
+routine development or release prerequisite. Use private research data only
+when the user explicitly scopes that validation; never bundle it or make
+automated tests depend on it.

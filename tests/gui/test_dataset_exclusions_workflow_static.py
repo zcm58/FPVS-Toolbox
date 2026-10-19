@@ -139,7 +139,13 @@ def test_navigation_and_start_guard_release_when_modal_finishes_or_fails(raises,
 
 
 def test_settings_has_one_participant_exclusion_management_surface():
-    source = (ROOT / "src/Main_App/gui/settings_panel.py").read_text(encoding="utf-8")
+    source = "\n".join(
+        (ROOT / "src/Main_App/gui" / filename).read_text(encoding="utf-8")
+        for filename in (
+            "settings_panel.py", "settings_preferences_pages.py",
+            "settings_experimental_page.py", "settings_experimental_preprocessing_page.py",
+        )
+    )
     assert '"Manage Dataset Exclusions…"' in source
     assert "self._manage_dataset_exclusions" in source
     assert "settings_manual_participant_exclusions_edit" not in source

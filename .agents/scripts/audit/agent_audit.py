@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+from collections import Counter
 import fnmatch
 import os
 import re
@@ -138,6 +139,16 @@ BROAD_EXCEPTION_BASELINES = {
     "src/Main_App/workers/mp_runner_bridge.py": (
         "src/Main_App/PySide6_App/workers/mp_runner_bridge.py"
     ),
+}
+BROAD_EXCEPTION_OWNER_MOVES = {
+    # Full implementation moves recorded in main-app-target-layout.md. Unlike
+    # the older retirement baselines above, these preserve each enclosing try
+    # exactly and require the historical module to relinquish its handlers.
+    "src/Main_App/exports/post_process.py": "src/Main_App/Shared/post_process.py",
+    "src/Main_App/gui/user_messages.py": "src/Main_App/Shared/user_messages.py",
+    "src/Main_App/io/load_utils.py": "src/Main_App/Shared/load_utils.py",
+    "src/Main_App/settings/settings_manager.py": "src/Main_App/Shared/settings_manager.py",
+    "src/Main_App/workers/process_runner.py": "src/Main_App/Performance/process_runner.py",
 }
 PRINT_BASELINES = {
     # Pre-existing processing diagnostics moved with preprocessing ownership.
@@ -277,10 +288,6 @@ def _is_python(path: str) -> bool:
     return path.endswith(".py")
 
 
-def _is_current_code(path: str) -> bool:
-    return path.startswith("src/") and _is_python(path) and not path.startswith(CURRENT_CODE_EXCLUDES)
-
-
 def _is_production_code(path: str) -> bool:
     return path.startswith("src/") and _is_python(path) and not path.startswith(PRODUCTION_EXCLUDES)
 
@@ -332,6 +339,8 @@ def _file_text_at_comparison_ref(path: str) -> str:
             ["git", "show", f"{_comparison_ref()}:{path}"],
             cwd=REPO_ROOT,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             capture_output=True,
             check=False,
         )
@@ -362,6 +371,60 @@ def _broad_exception_increase_allowed(path: str) -> bool:
     )
     baseline_count = _broad_exception_count(_file_text_at_comparison_ref(baseline_path))
     return baseline_count > 0 and current_count <= baseline_count
+
+
+def _broad_exception_try_signatures(text: str) -> list[tuple[int, tuple]]:
+    """Bind handlers to their unchanged try/else/finally and lexical owner."""
+
+    signatures: list[tuple[int, tuple]] = []
+
+    def visit(node: ast.AST, scope: tuple[str, ...]) -> None:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            scope = (*scope, f"{type(node).__name__}:{node.name}")
+        if isinstance(node, (ast.Try, ast.TryStar)):
+            for index, handler in enumerate(node.handlers):
+                if isinstance(handler.type, ast.Name) and handler.type.id == "Exception":
+                    signatures.append((
+                        handler.lineno,
+                        (scope, ast.dump(node, include_attributes=False), index),
+                    ))
+        for child in ast.iter_child_nodes(node):
+            visit(child, scope)
+
+    visit(ast.parse(text.lstrip("\ufeff")), ())
+    return signatures
+
+
+def _preserved_moved_broad_exception_lines(path: str) -> frozenset[int]:
+    """Allow only one-for-one unchanged handlers from a documented owner move."""
+
+    historical_path = BROAD_EXCEPTION_OWNER_MOVES.get(path)
+    if historical_path is None:
+        return frozenset()
+    try:
+        historical_current = REPO_ROOT / historical_path
+        if historical_current.exists() and _broad_exception_try_signatures(
+            historical_current.read_text(encoding="utf-8-sig")
+        ):
+            # A moved boundary cannot also survive in the original owner.
+            return frozenset()
+        remaining = Counter(
+            signature
+            for _, signature in _broad_exception_try_signatures(
+                _file_text_at_comparison_ref(historical_path)
+            )
+        )
+        current = _broad_exception_try_signatures(
+            (REPO_ROOT / path).read_text(encoding="utf-8-sig")
+        )
+    except (OSError, UnicodeError, SyntaxError):
+        return frozenset()
+    allowed: set[int] = set()
+    for line, signature in current:
+        if remaining[signature] > 0:
+            remaining[signature] -= 1
+            allowed.add(line)
+    return frozenset(allowed)
 
 
 def _print_increase_allowed(path: str) -> bool:
@@ -846,6 +909,10 @@ def check_garbage_collection() -> list[Issue]:
             continue
         if not (_is_python(normalized) or Path(normalized).suffix in {".md", ".txt"}):
             continue
+        preserved_handler_lines = (
+            _preserved_moved_broad_exception_lines(normalized)
+            if _is_production_code(normalized) else frozenset()
+        )
         for line_no, line in _added_lines(normalized):
             if GARBAGE_MARKER_RE.search(line):
                 issues.append(
@@ -860,6 +927,7 @@ def check_garbage_collection() -> list[Issue]:
                 _is_production_code(normalized)
                 and BROAD_EXCEPTION_RE.search(line)
                 and not _broad_exception_increase_allowed(normalized)
+                and line_no not in preserved_handler_lines
             ):
                 issues.append(
                     Issue(

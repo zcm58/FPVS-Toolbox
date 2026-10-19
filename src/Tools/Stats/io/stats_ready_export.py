@@ -1027,7 +1027,7 @@ def _resolve_stats_ready_dv_policy(
 
     if project_root in (None, ""):
         return dv_policy
-    from Tools.Stats.analysis.canonical_harmonics import (
+    from Main_App.processing.canonical_harmonics import (
         load_project_processing_harmonics,
     )
 

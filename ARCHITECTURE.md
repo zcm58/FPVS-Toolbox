@@ -23,6 +23,14 @@ The docs tree is split into [docs/agent](docs/agent/) for agent-facing guidance 
 
 ## Application Shape
 
+Current source ownership and supported behavior are described below. The
+[hardware, pipeline, and Studio roadmap](docs/agent/architecture/hardware-pipeline-studio-roadmap.md)
+records the intended next architecture: modular acquisition/montages, shared
+processing steps resolved from their capabilities, and complete FPVS Studio
+compatibility. The current acquisition registry, gated Unicorn reader, and
+partial Studio import are foundations, not completed production support.
+Published installer behavior is bound to its release tag, not later source work.
+
 FPVS Toolbox is a PySide6 desktop application built around GUI entry points,
 processing backends, and analysis tools under `src/`. Windows 11 is the current
 release platform; source development and execution may also occur on CachyOS
@@ -37,10 +45,11 @@ Primary areas:
   FPVS Studio; Toolbox adapters and packaging are documented in
   [docs/agent/architecture/updater.md](docs/agent/architecture/updater.md).
   Public source history, release tags, client updates and downloads use
-  `zcm58/FPVS-Toolbox-Repo`. Historical release-only assets remain preserved.
+  `zcm58/FPVS-Toolbox`. The original repository stays private; historical
+  release-only assets remain preserved.
 - `src/Main_App/gui/`: canonical Main App GUI package. It owns the main-window shell/coordinator, focused GUI workflow helpers, reusable widgets, theme helpers, menu/sidebar/header helpers, icon/style-token/update-manager helpers, and GUI operation guards. `main_window.py` has been appropriately downsized; do not target it for further refactor unless the user explicitly scopes that work.
 - `src/Main_App/gui/components/`: canonical shared component layer for new and migrated GUI surfaces. Prefer this import surface for shared cards, buttons, forms, status banners, window/dialog shells, action rows, and message helpers.
-- `src/Main_App/exports/`: canonical Main App export adapter import surface. It owns post-export adapter behavior used by workers and the process runner while shared post-processing/workbook generation remains behavior-preserving. It also owns GUI-neutral publication figure and publication-table style contracts used by export tooling. The lightweight style surface must not eagerly import Stats-owned workbook builders; heavy processing exports remain lazy compatibility attributes.
+- `src/Main_App/exports/`: canonical Main App export package. It owns post-processing/workbook generation and the post-export adapter used by workers and the process runner. It also owns GUI-neutral publication figure and publication-table style contracts used by export tooling. The lightweight style surface must not eagerly import Stats-owned workbook builders; heavy processing exports remain lazy compatibility attributes.
 - `src/Main_App/processing/`: canonical Main App processing package. It owns
   active EEG preprocessing, the stable `process_data` entry point,
   processing-controller helpers, neutral ROI settings, project-local neutral FullFFT provenance, and
@@ -49,9 +58,11 @@ Primary areas:
   exclusive atomic writer (`atomic_write.py`), guarded in-place lock/log opens
   (`safe_file.py`), private process memory-map paths (`memmap_paths.py`),
   exact-column/header reader, separate uncompressed dense-spectral and compact
-  condition-table NumPy companions, and legacy XLSX compatibility. It delegates BDF loading to the
-  existing shared implementation while the repo moves toward purpose-based
-  Main App folders.
+  condition-table NumPy companions, BDF loading, EEG geometry, file filters,
+  resource paths, and legacy XLSX compatibility. `spectral_workbook.py` owns
+  reusable workbook sessions and FullSNR window reads; `xlsx_xml.py` owns the
+  shared XML cell primitives. Reader-specific ordering and error policies stay
+  with their readers.
 - `src/Main_App/projects/`: canonical Main App project import surface. It owns
   the project model, project manager workflows, project metadata scanning,
   projects-root helpers, preprocessing-settings normalization, canonical
@@ -59,10 +70,10 @@ Primary areas:
   index used by downstream tools. Generated group folders are validation
   provenance only; canonical participant-group membership comes from
   `project.json`.
-- `src/Main_App/workers/`: canonical Main App worker package for Qt workers, process-runner wrappers, and multiprocessing environment helpers.
+- `src/Main_App/workers/`: canonical Main App worker package for Qt workers, the process runner, multiprocessing environment helpers, and the compatibility processing mixin.
 - `src/Main_App/diagnostics/`: canonical Main App runtime diagnostics package for preprocessing audit helpers, event-time lock reporting, and runtime log routing. Repo-evaluation scripts stay in `scripts/` and `.agents/skills/`.
-- `src/Main_App/Shared/`: current shared owners for cross-path behavior such as the canonical BDF loader, processing mixin, settings helpers, FFT crop helpers, and post-processing export behavior.
-- `src/Main_App/Performance/`: process-runner and multiprocessing support for heavy processing.
+- `src/Main_App/settings/`: application settings and settings-path ownership. The package initializer and `settings_paths` remain importable by the standalone updater without project, EEG, or GUI dependencies; `settings_manager` remains excluded from that bundle.
+- `src/Main_App/Shared/` and `src/Main_App/Performance/`: same-object compatibility aliases only. Runtime implementations and active imports use purpose-based packages; aliases preserve historical imports, monkeypatches and pickle lookups.
 - `src/Main_App/Legacy_App/`: retired historical package. Do not recreate it; active code belongs in purpose-based `Main_App` packages.
 - `src/Main_App/PySide6_App/`: retired historical package designation. Do not recreate it; PySide6 runtime code now lives under purpose-based `Main_App` packages.
 - `src/Tools/`: embedded GUI tools for preprocessing, plotting,
@@ -102,7 +113,8 @@ Primary areas:
   documentation route.
 - `tests/`: unit, integration, and pytest-qt smoke coverage.
 - `.agents/scripts/audit/`: repo-level agent invariant checks such as `agent_audit.py`.
-- `scripts/docs/`: documentation publishing and maintenance helpers.
+- `.github/workflows/docs.yml`: strict user-documentation build and GitHub Pages
+  artifact deployment from `main`; no generated documentation branch is needed.
 - `.agents/scripts/smoke/`, when present: optional agent-facing probes that are
   not default gates. Its absence is valid.
 - `scripts/migration/`: one-off or repeatable local data migration helpers.
@@ -126,6 +138,7 @@ Focused architecture pages:
 - [Post-Processing Export Contract](docs/agent/architecture/post-processing-export-contract.md)
 - [Processing Mixin Contract](docs/agent/architecture/processing-mixin-contract.md)
 - [BDF Loading Contract](docs/agent/architecture/eeg-loading-contract.md)
+- [Hardware, Processing, and Studio Direction](docs/agent/architecture/hardware-pipeline-studio-roadmap.md)
 - [Module Map](docs/agent/architecture/module-map.md)
 - [Protected Paths](docs/agent/architecture/protected-paths.txt)
 - [LORETA Visualizer Tool Architecture](src/Tools/LORETA_Visualizer/ARCHITECTURE.md)
@@ -145,7 +158,7 @@ Focused architecture pages:
 - Long-running EEG, plotting, export, and statistics work must run outside the UI thread.
 - Historical legacy behavior should be consumed through existing current-app APIs or thin adapters in purpose-based packages. Do not add new `Legacy_App` or `PySide6_App` modules.
 - Project-aware workflows should resolve files through the active project root and preserve existing generated formats.
-- Source Localization/eLORETA has been removed from active runtime. Keep `src/Tools/SourceLocalization/**` empty of source files and do not add GUI, settings, tests, or quarantine-tree imports for it unless restoration is explicitly scoped as a new feature. The new `src/Tools/LORETA_Visualizer/` branch is a separate visualization tool, not a design continuation of the removed implementation; it must keep renderer logic separate from future calculation logic and must not bundle `fsaverage` MRI template data in active source or quarantine.
+- The historical Source Localization/eLORETA package has been removed from active runtime. Keep `src/Tools/SourceLocalization/**` empty of source files and do not add GUI, settings, tests, or quarantine-tree imports for it unless restoration is explicitly scoped as a new feature. The separate `src/Tools/LORETA_Visualizer/` tool keeps renderer logic separate from its existing `source_producers/` calculations and must not bundle `fsaverage` MRI template data in active source or quarantine.
 - The ignored repository-root `.fpvs_cache/` is the local MNE/fsaverage cache used by the LORETA Visualizer. Preserve it during routine cleanup unless the user explicitly requests cache removal.
 
 ## Verification Strategy

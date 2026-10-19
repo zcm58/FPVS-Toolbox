@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from Main_App.projects.project_metadata import read_project_experimental_qc_settings
-from Tools.Stats.analysis.canonical_harmonics import (
+from Main_App.processing.canonical_harmonics import (
     CanonicalHarmonicSelectionError,
     SharedHarmonicSelection,
     load_project_processing_harmonics,
