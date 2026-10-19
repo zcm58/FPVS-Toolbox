@@ -527,21 +527,28 @@ def test_single_append_confirms_only_selected_recording_then_uses_strict_selecti
     assert "P04__luteal" not in project.recordings
 
 
-def test_locked_flat_project_confirms_new_participant_from_canonical_group(tmp_path):
+@pytest.mark.parametrize("extension", [".bdf", ".vhdr", ".bvrh"])
+def test_locked_flat_project_confirms_new_participant_from_canonical_group(tmp_path, extension):
+    from Main_App.projects.hardware import confirm_hardware_selection
+
     raw = tmp_path / "raw"
     raw.mkdir()
-    (raw / "P01.bdf").write_bytes(b"old")
+    (raw / f"P01{extension}").write_bytes(b"old")
     project = _build_group_project(tmp_path, {
         "control": {"label": "Control", "folder_name": "Control", "raw_input_folder": raw},
     })
+    platform = "biosemi" if extension == ".bdf" else "brain_products"
+    project.update_preprocessing(confirm_hardware_selection(project.preprocessing, platform, confirmed_change=True))
     register_participants(project, discover_raw_files(project))
     project.groups_locked = True
     project.save()
-    (raw / "P02.bdf").write_bytes(b"new")
+    (raw / f"P02{extension}").write_bytes(b"new")
     review = prepare_raw_registration_review(project)
     assert [(row.participant_id, row.group_id) for row in review.review_rows] == [("P02", "control")]
     commit_raw_registration_review(project, review)
     assert project.participants["P02"]["group_id"] == "control"
+    assert Path(project.participants["P02"]["raw_file"]).suffix == extension
+    assert Project.load(project.project_root).preprocessing["hardware_platform"] == platform
 
 
 def test_discover_raw_files_rejects_duplicate_subjects_same_folder(tmp_path) -> None:

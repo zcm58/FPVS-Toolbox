@@ -56,11 +56,12 @@ from tests.gui.ux_capture import capture as capture_ux
 
 
 @pytest.mark.parametrize("accept", [False, True])
-def test_recording_additions_dialog_shows_canonical_proposal_and_explicit_confirmation(qtbot, tmp_path, accept):
+@pytest.mark.parametrize("extension", [".bdf", ".vhdr", ".bvrh"])
+def test_recording_additions_dialog_shows_canonical_proposal_and_explicit_confirmation(qtbot, tmp_path, accept, extension):
     from Main_App.gui.participant_review import ParticipantReviewDialog
     from Main_App.processing.processing_controller import ParticipantReviewRow
 
-    raw_file = Path(tmp_path) / "Control" / "Visit2" / "P07_followup.bdf"
+    raw_file = Path(tmp_path) / "Control" / "Visit2" / f"P07_followup{extension}"
     row = ParticipantReviewRow(
         participant_id="P07", group_id="control", group_label="Control",
         raw_file=raw_file, status="New session recording", recording_id="P07_visit2",
@@ -71,16 +72,17 @@ def test_recording_additions_dialog_shows_canonical_proposal_and_explicit_confir
     dialog.show()
     qtbot.waitExposed(dialog)
 
-    assert dialog.windowTitle() == "Add BDF Files"
+    assert dialog.windowTitle() == "Add EEG Recordings"
     assert dialog.continue_button.text() == "Add Files and Continue"
     assert dialog.cancel_button.isDefault()
     assert [dialog.table.item(0, column).text() for column in range(7)] == [
-        "P07", "Control", "Follow-up", "2", "P07_visit2", "P07_followup.bdf", "New session recording",
+        "P07", "Control", "Follow-up", "2", "P07_visit2", raw_file.name, "New session recording",
     ]
     assert "group_id: control" in dialog.table.item(0, 1).toolTip()
     assert "session_id: visit2" in dialog.table.item(0, 2).toolTip()
     assert dialog.table.item(0, 5).toolTip() == str(raw_file)
     summary = dialog.findChild(QLabel, "participant_review_summary").text()
+    assert "New EEG recordings" in summary
     assert "configured source folder" in summary
     assert "registry unchanged" in summary
     assert "before planning processing" in summary

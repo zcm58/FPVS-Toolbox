@@ -1131,15 +1131,16 @@ def test_hardware_confirmation_rebuilds_registration_against_saved_manifest(tmp_
     assert timeline.index("commit") > timeline.index("confirm")
 
 
-def test_single_file_picker_stages_extra_file_without_confirming_or_saving(tmp_path):
-    chosen = tmp_path / "P2.bdf"
+@pytest.mark.parametrize("extension", [".bdf", ".vhdr", ".bvrh"])
+def test_single_file_picker_stages_extra_file_without_confirming_or_saving(tmp_path, extension):
+    chosen = tmp_path / f"P2{extension}"
     project = SimpleNamespace(groups_locked=True)
     stage = Mock(return_value=SimpleNamespace(files=(SimpleNamespace(path=chosen),)))
     namespace = {
         "Path": Path, "raw_selection_start_folder": lambda _: tmp_path,
         "EEG_RECORDING_FILTER": EEG_RECORDING_FILTER,
         "is_eeg_recording_file": is_eeg_recording_file,
-        "QFileDialog": SimpleNamespace(getOpenFileName=lambda *_: (str(chosen), "")),
+        "QFileDialog": SimpleNamespace(getOpenFileName=Mock(return_value=(str(chosen), ""))),
         "QMessageBox": Mock(), "prepare_raw_registration_review": stage,
         "raw_file_info_for_path": Mock(side_effect=AssertionError("Do not require registration just to select")),
     }
@@ -1149,6 +1150,7 @@ def test_single_file_picker_stages_extra_file_without_confirming_or_saving(tmp_p
     select(host)
 
     stage.assert_called_once_with(project, selected_path=chosen)
+    assert f"*{extension}" in namespace["QFileDialog"].getOpenFileName.call_args.args[3]
     assert host.data_paths == [str(chosen)]
     assert host._selected_bdf == str(chosen)
     host.le_input_file.setText.assert_called_once_with(str(chosen))

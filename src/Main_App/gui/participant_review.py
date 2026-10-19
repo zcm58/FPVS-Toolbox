@@ -35,7 +35,7 @@ class ParticipantReviewDialog(AppDialog):
     ) -> None:
         repeated = any(row.recording_id for row in rows)
         super().__init__(
-            "Add BDF Files" if additions_only else "Review Recordings" if repeated else "Review Participants",
+            "Add EEG Recordings" if additions_only else "Review Recordings" if repeated else "Review Participants",
             parent,
             size=SurfaceSize(
                 width=1100 if repeated else 860,
@@ -53,7 +53,7 @@ class ParticipantReviewDialog(AppDialog):
                 if repeated else "Group comes from the project's configured raw folder. "
             )
             summary_text = (
-                "New BDF files were found in this project's configured raw folders. "
+                "New EEG recordings were found in this project's configured raw folders. "
                 "Review the proposed assignments below. " + source_text
                 + "Add Files and Continue saves these additions before planning processing. "
                 "Existing analysis outputs will need processing to finish before reuse. "
