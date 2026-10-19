@@ -29,9 +29,11 @@ but interpolation is unavailable. A selected standard montage is a template,
 not participant-specific digitization. Never select a cap solely because its
 channel count matches. Channel-type overrides, such as `VEOG=eog`, can exclude
 auxiliary channels from scalp analysis when a file does not identify their role.
-For BVRF, recorded CapTrak positions require explicit electrode composition and
-nasion/left/right preauricular fiducials in the same coordinate frame; unanchored
-or MNI positions are not treated as individual head coordinates.
+For BVRF, recorded CapTrak positions require complete EEG electrode composition
+and coordinates, plus nasion/left/right preauricular fiducials in the same
+CapTrak coordinate frame. Electrode and fiducial units must both be declared as
+millimetres. Unanchored or MNI positions are not treated as individual head
+coordinates.
 
 The initial reference defaults to the reference already present in the samples.
 You may choose recorded reference channels explicitly and choose whether to drop
@@ -46,9 +48,10 @@ participant per recording, the documented four numeric sample types, and
 version 1.0.0. Unsupported versions, ambiguous units, incomplete companions,
 and stimulus collisions that cannot be represented faithfully are errors.
 Export each participant separately for a multi-participant BVRF acquisition.
-Segmented/averaged recordings, discontinuous sample streams, and bipolar EEG
-derivations are rejected rather than passed through the continuous scalp-EEG
-average-reference pipeline.
+Supply continuous, unaveraged, referential scalp EEG. The reader rejects
+segmentation/averaging declared in BVCDF headers, acquisition gaps identified by
+markers, and bipolar EEG explicitly declared in BVRF channel composition. It
+cannot detect every incompatible acquisition when that metadata is absent.
 
 BioSemi-calibrated automatic raw-channel/kurtosis screens and their review
 policies are unavailable for Brain Products. LORETA, Scalp Maps, and Free Harmonic
