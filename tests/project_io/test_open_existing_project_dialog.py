@@ -153,7 +153,8 @@ def test_open_existing_project_cancel_from_dialog(tmp_path, main_window, monkeyp
     assert not message_spy["critical"]
 
 
-def test_import_fpvs_config_project_from_file_menu(tmp_path, main_window, monkeypatch, message_spy):
+@pytest.mark.parametrize("hardware_label,platform", [("BioSemi", "biosemi"), ("Brain Products", "brain_products")])
+def test_import_fpvs_config_project_from_file_menu(tmp_path, main_window, monkeypatch, message_spy, hardware_label, platform):
     config_path = tmp_path / "studio.fpvsconfig"
     input_dir = tmp_path / "raw_bdf"
     input_dir.mkdir()
@@ -191,9 +192,19 @@ def test_import_fpvs_config_project_from_file_menu(tmp_path, main_window, monkey
         "_choose_new_project_source",
         lambda _host: project_workflows.NEW_PROJECT_FPVS_CONFIG,
     )
+    hardware_prompts = []
+
+    def select_hardware(_parent, title, prompt, options, *_args):
+        hardware_prompts.append((title, prompt, options))
+        return hardware_label, True
+
+    monkeypatch.setattr(project_manager.QInputDialog, "getItem", select_hardware)
 
     main_window.actionCreateNewProject.trigger()
 
+    assert len(hardware_prompts) == 1
+    assert hardware_prompts[0][0] == "Project EEG Hardware"
+    assert hardware_prompts[0][2] == ["BioSemi", "Brain Products"]
     assert main_window.currentProject.name == "Semantic Categories"
     assert main_window.currentProject.event_map == {
         "Fruit vs Vegetable": 1,
@@ -204,6 +215,9 @@ def test_import_fpvs_config_project_from_file_menu(tmp_path, main_window, monkey
     assert manifest_path.is_file()
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert manifest["input_folder"] == str(input_dir)
+    assert manifest["preprocessing"]["hardware_platform"] == platform
+    assert manifest["preprocessing"]["hardware_confirmed"] is True
+    assert main_window.currentProject.preprocessing["hardware_platform"] == platform
     assert message_spy["info"]
 
 

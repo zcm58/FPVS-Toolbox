@@ -359,14 +359,15 @@ def test_settings_save_starting_work_blocks_exit_without_hiding_activity(
     win._settings_page = None
 
 
-def test_single_selection_survives_completion_and_missing_file_disables_start(tmp_path, qtbot, monkeypatch):
+@pytest.mark.parametrize("extension", [".bdf", ".vhdr", ".bvrh"])
+def test_single_selection_survives_completion_and_missing_file_disables_start(tmp_path, qtbot, monkeypatch, extension):
     from Main_App.gui.processing_completion import finalize_processing_host_state
     from Main_App.gui.processing_inputs import selected_single_file
     from Main_App.Shared import user_messages
 
     win = _build_window(tmp_path, qtbot, monkeypatch)
     monkeypatch.setattr(user_messages, "show_info", lambda *_: None)
-    path = tmp_path / "sample.bdf"
+    path = tmp_path / f"sample{extension}"
     path.touch()
     win.rb_single.setChecked(True)
     label, ident = _row_fields(win, _live_rows(win)[0])
@@ -382,7 +383,7 @@ def test_single_selection_survives_completion_and_missing_file_disables_start(tm
     path.unlink()
     win._update_start_enabled()
     assert not win.btn_start.isEnabled()
-    assert "available BDF" in win.processing_readiness_label.text()
+    assert "available EEG recording" in win.processing_readiness_label.text()
 
 
 def test_last_run_summary_and_actions_fit_supported_workspace(tmp_path, qtbot, monkeypatch):

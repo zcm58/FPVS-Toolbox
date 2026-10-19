@@ -222,8 +222,6 @@ class SettingsPanel(QWidget):
         super().__init__(parent)
         self.controller = controller
         self._build_ui()
-        from Main_App.gui.settings_hardware_controls import refresh_hardware_qc_controls
-        refresh_hardware_qc_controls(self)
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -284,6 +282,8 @@ class SettingsDialog(QDialog):
         self.cond_edit = None
         self.id_edit = None
         self._build_ui()
+        from Main_App.gui.settings_hardware_controls import refresh_hardware_qc_controls
+        refresh_hardware_qc_controls(self)
         self._draft_tracker = SettingsDraftTracker(self)
         self._pending_save_succeeded = False
 

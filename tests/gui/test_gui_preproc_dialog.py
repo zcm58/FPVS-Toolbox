@@ -239,7 +239,7 @@ def test_dialog_loads_saves_project(tmp_path, qtbot):
     assert dlg.line_noise_filter_enabled_check.isChecked() is True
     assert dlg.line_noise_frequency_combo.currentData() == 60
     assert dlg.line_noise_frequency_combo.isEnabled() is True
-    assert dlg.electrode_montage_combo.count() == 1
+    assert dlg.hardware_platform_combo.currentData() == "biosemi"
     assert dlg.electrode_montage_combo.currentText() == "BioSemi ActiveTwo 64"
     assert dlg.electrode_montage_combo.currentData() == "biosemi64"
     assert dlg.electrode_montage_combo.isEnabled() is False
