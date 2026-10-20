@@ -11,6 +11,7 @@ from Main_App.io.recording_contract import RecordingContract
 
 def apply_recorded_reference(
     raw: Any, params: dict[str, Any], policy: RecordingContract,
+    *, drop_reference_channels: bool = True,
 ) -> None:
     """Apply an explicitly resolved recorded/channel-reference method."""
     policy.validate_qc(params)
@@ -24,7 +25,10 @@ def apply_recorded_reference(
         raw.set_eeg_reference(ref_channels=refs, projection=False, verbose=False)
         params["_fpvs_initial_ref_ok"] = True
         params["_fpvs_initial_ref_pair"] = tuple(refs)
-        if policy.drop_reference_channels:
+        if policy.drop_reference_channels and drop_reference_channels:
             raw.drop_channels(refs)
-    if len(mne.pick_types(raw.info, eeg=True, exclude=[])) < 2:
+    retained_count = len(mne.pick_types(raw.info, eeg=True, exclude=[]))
+    if policy.drop_reference_channels and not drop_reference_channels:
+        retained_count -= len(refs)
+    if retained_count < 2:
         raise ValueError("Average-reference processing requires at least two retained EEG channels.")

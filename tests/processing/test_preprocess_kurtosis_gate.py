@@ -376,8 +376,8 @@ def test_scanner_receipts_match_actual_runner_preprocessing(
     captured = {}
     real_preprocess = perform_preprocessing
 
-    def _run_to_preprocessed_boundary(raw_input, params, log_func, filename_for_log):
-        processed, count = real_preprocess(raw_input, params, log_func, filename_for_log)
+    def _run_to_preprocessed_boundary(raw_input, params, log_func, filename_for_log, **kwargs):
+        processed, count = real_preprocess(raw_input, params, log_func, filename_for_log, **kwargs)
         captured.update(processed=processed, params=deepcopy(params), count=count)
         if processed is not None:
             # Export is outside this regression: the actual shared preprocessing

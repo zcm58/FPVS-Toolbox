@@ -100,8 +100,10 @@ tests = [
   "tests/project_io/test_acquisition_profiles.py",
   "tests/test_brain_products_reader.py",
   "tests/project_io/test_project_hardware.py",
+  "tests/project_io/test_project_pipeline_settings.py",
   "tests/project_io/test_brain_products_sources.py",
   "tests/project_io/test_bids_import.py",
+  "tests/project_io/test_multi_hardware_bids_import.py",
   "tests/project_io/test_bdf_format.py",
   "tests/project_io/test_recording_inspection.py",
   "tests/project_io/test_unicorn_units.py",
@@ -142,6 +144,10 @@ manual_smoke = []
 [scopes.processing]
 audits = ["protected", "source-localization"]
 tests = [
+  "tests/processing/test_pipeline_plan.py",
+  "tests/processing/test_pipeline_review_identity.py",
+  "tests/processing/test_modular_preprocessing.py",
+  "tests/processing/test_modular_pipeline_exports.py",
   "tests/processing/test_qc_exception_boundaries.py",
   "tests/processing/test_dynamic_worker_ceiling.py",
   "tests/processing/test_processing_admission.py",
@@ -255,6 +261,10 @@ tests = [
   "tests/processing/test_roi_settings.py",
   "tests/processing/test_shared_load_utils.py",
   "tests/processing/test_bids_loader_integration.py",
+  "tests/processing/test_multi_hardware_contract.py",
+  "tests/processing/test_multi_hardware_bids_integration.py",
+  "tests/processing/test_pipeline_events.py",
+  "tests/processing/test_bids_canonical_events.py",
   "tests/processing/test_acquisition_policy_contract.py",
   "tests/processing/test_generic_recording_pipeline.py",
   "tests/processing/test_generic_geometry_metadata.py",
@@ -293,6 +303,24 @@ include = [
   "tests/workers/test_post_processing_pipeline_worker.py",
 ]
 manual_smoke = ["Start preprocessing at 1280x900. Complete marker, condition and electrode review, then verify step 6 reports the resource-bounded process-worker count and several recordings advance concurrently when CPU/RAM permits. Confirm no parent source prefetch is staged, the GUI stays responsive, and Close is guarded while preparation is active. Cancel and restart to verify child Raw cleanup and exact prepared-checkpoint reuse, then apply decisions and confirm ordinary processing resumes before final reference and exports. Repeat with a project worker override of 1 and with RAM preload off/on; the override must remain an upper bound. Cross-CPU/RAM limits have non-Qt tests; Qt execution is CI-only unless a safe visible session is explicitly approved."]
+
+[scopes.pipeline-methods]
+audits = ["protected", "paths"]
+tests = [
+  "tests/processing/test_pipeline_plan.py",
+  "tests/processing/test_pipeline_review_identity.py",
+  "tests/processing/test_modular_preprocessing.py",
+  "tests/processing/test_modular_pipeline_exports.py",
+  "tests/project_io/test_project_pipeline_settings.py",
+  "tests/processing/test_generic_recording_pipeline.py",
+  "tests/processing/test_prepared_fir.py",
+  "tests/processing/test_prepared_kurtosis_cache.py",
+  "tests/processing/test_condition_interpolation_execution.py",
+  "tests/processing/test_source_time_domain_export.py",
+  "tests/processing/test_multi_hardware_bids_integration.py",
+]
+include = ["src/Main_App/processing/**", "src/Main_App/projects/**", "src/Main_App/exports/**", "src/Main_App/workers/process_runner.py", "tests/processing/**", "tests/project_io/**"]
+manual_smoke = ["In a visible Main App session, open a project, save and cancel Settings drafts, reopen/restart and confirm method selections and acquisition settings persist. Process with the current methods unchanged. There are no alternative production methods or single-option selectors in this pass; Qt execution remains CI-only locally."]
 
 [scopes.plot-generator]
 audits = ["gui", "paths"]

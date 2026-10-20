@@ -17,7 +17,7 @@ from Main_App.io.eeg_geometry import (
     BIOSEMI64_MONTAGE_ID,
     biosemi64_geometry_identity,
 )
-from Main_App.io.hardware_identity import brain_products_settings_identity
+from Main_App.io.hardware_identity import recorded_settings_identity
 from Main_App.io.recorded_eeg_geometry import (
     RECORDED_GEOMETRY_VERSION,
     validate_recorded_geometry_identity,
@@ -76,8 +76,8 @@ def validate_source_geometry_identity(value: Mapping[str, Any]) -> dict[str, obj
 def configured_geometry_identity(settings: Mapping[str, Any]) -> dict[str, object]:
     """Resolve the exact historical ledger identity without reading samples."""
     hardware = resolve_hardware(settings)
-    if hardware.platform == "brain_products":
-        return brain_products_settings_identity(settings)
+    if hardware.platform != "biosemi":
+        return recorded_settings_identity(settings)
     raw_limit = settings.get("max_idx_keep")
     if raw_limit is None:
         raw_limit = settings.get("max_chan_idx_keep")
@@ -104,7 +104,9 @@ def project_spectral_geometry(settings: Mapping[str, Any]) -> ProjectGeometryMet
     """Resolve normalized project expectations for nonspatial cohort matching."""
     hardware = resolve_hardware(settings)
     montage_id = str(settings.get("electrode_montage") or "")
-    if hardware.platform == "brain_products":
+    if hardware.platform != "biosemi":
+        if hardware.platform == "unicorn":
+            montage_id = str(recorded_settings_identity(settings)["montage_id"])
         return ProjectGeometryMetadata(True, montage_id, hardware.platform)
     if montage_id != BIOSEMI64_MONTAGE_ID:
         raise ValueError(
@@ -123,6 +125,6 @@ def project_spectral_geometry(settings: Mapping[str, Any]) -> ProjectGeometryMet
 def condition_repair_channel_order(settings: Mapping[str, Any]) -> tuple[str, ...]:
     """Return the channel domain qualified for condition-specific repairs."""
     hardware = resolve_hardware(settings)
-    if hardware.platform == "brain_products":
+    if hardware.platform != "biosemi":
         raise ValueError("Condition-specific interpolation is not qualified for this project's montage.")
     return BIOSEMI64_CHANNELS

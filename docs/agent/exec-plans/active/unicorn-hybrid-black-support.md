@@ -1,8 +1,17 @@
 # Unicorn Hybrid Black Support
 
-Status reviewed 2026-10-18: inspection/Raw-adapter/project-profile foundation
-is integrated; production preprocessing and hardware qualification are incomplete.
-The application must not advertise qualified Unicorn processing.
+Status reviewed 2026-10-19: scoped BIDS admission and shared processing are now
+implemented through the [multi-hardware plan](multi-hardware-bids.md), including
+native 250 Hz, eight-channel average reference, canonical markers, exports and
+cache reuse. Generated fixtures establish software acceptance; physical amplitude,
+reference wiring, wireless-loss semantics and stimulus timing remain unqualified.
+The application must not advertise hardware-qualified Unicorn processing.
+
+The phases and dated inspection notes below retain the broader physical/Studio
+qualification plan. They are not a current implementation inventory: use the
+[multi-hardware plan](multi-hardware-bids.md) and
+[hardware guide](../../../user/reference/eeg-hardware.md) for current software
+support. No physical qualification checkboxes are closed by synthetic tests.
 
 Created 2026-09-25; implementation started 2026-09-29. The former
 `codex/unicorn-headset-support` and `codex/v3-release` branch names are historical

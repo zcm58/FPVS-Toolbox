@@ -2,8 +2,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from copy import deepcopy
 from typing import Any, Callable, Dict, Iterable, Mapping
-from Main_App.projects.hardware import normalize_hardware_settings, resolve_hardware
+from Main_App.projects.hardware import (
+    HARDWARE_SETTINGS_KEYS,
+    RECORDED_GEOMETRY_PLATFORMS, UNICORN_FACTORY_MAPPING_PROFILE,
+    normalize_hardware_settings, resolve_hardware,
+)
+from Main_App.processing.pipeline_plan import default_pipeline_config, normalize_pipeline_config
 
 from Main_App.processing.removed_electrode_detection import (
     REMOVED_ELECTRODE_DETECTION_MODE_AUTO,
@@ -150,6 +156,7 @@ SUPPORTED_ELECTRODE_MONTAGES: tuple[tuple[str, str], ...] = (
     ("standard_1005", "Standard 10-05"),
     ("easycap-M1", "EasyCap M1"),
     ("easycap-M10", "EasyCap M10"),
+    ("unicorn8", "Unicorn Hybrid Black 8"),
 )
 SUPPORTED_ELECTRODE_MAPPING_PROFILES: tuple[tuple[str, str], ...] = (
     (ELECTRODE_MAPPING_PROFILE_ANATOMICAL, "Anatomical BDF labels (default)"),
@@ -157,6 +164,7 @@ SUPPORTED_ELECTRODE_MAPPING_PROFILES: tuple[tuple[str, str], ...] = (
         ELECTRODE_MAPPING_PROFILE_BIOSEMI64_1020_AB_V1,
         "BioSemi standard 64 10-20 A1-A32 / B1-B32 wiring (v1)",
     ),
+    (UNICORN_FACTORY_MAPPING_PROFILE, "Unicorn factory EEG 1–8 wiring (v1)"),
 )
 
 
@@ -389,6 +397,25 @@ PREPROCESSING_CANONICAL_KEYS: tuple[str, ...] = tuple(
     if field.name not in REPEATED_SESSION_PREPROCESSING_KEYS
 ) + _REMOVED_ELECTRODE_CHOICE_METADATA_KEYS
 PREPROCESSING_DEFAULTS: Dict[str, Any] = {field.name: field.default for field in _FIELDS}
+OPTIONAL_PREPROCESSING_KEYS = ("processing_pipeline",)
+
+
+def processing_metadata_snapshot(settings: Mapping[str, Any]) -> dict[str, Any]:
+    """Carry project-owned acquisition/method metadata into worker settings.
+
+    Preserve the historical ActiveTwo snapshot and keep the independently
+    collected experimental-QC switch authoritative.
+    """
+    result: dict[str, Any] = {}
+    if "hardware_platform" in settings:
+        if resolve_hardware(settings).platform == "biosemi":
+            result.update(hardware_platform="biosemi", hardware_confirmed=settings.get("hardware_confirmed", False))
+        else:
+            result.update({key: deepcopy(settings[key]) for key in HARDWARE_SETTINGS_KEYS
+                           if key in settings and key != "kurtosis_screening_enabled"})
+    if "processing_pipeline" in settings:
+        result["processing_pipeline"] = normalize_pipeline_config(settings["processing_pipeline"])
+    return result
 
 
 def new_project_preprocessing_settings() -> Dict[str, Any]:
@@ -403,6 +430,7 @@ def new_project_preprocessing_settings() -> Dict[str, Any]:
     return normalize_preprocessing_settings(
         {
             **PREPROCESSING_DEFAULTS,
+            "processing_pipeline": default_pipeline_config(),
             "removed_electrode_detection_mode": (
                 REMOVED_ELECTRODE_DETECTION_MODE_OFF
             ),
@@ -788,7 +816,7 @@ def normalize_electrode_montage(value: Any) -> str:
 
 
 def normalize_electrode_mapping_profile(value: Any) -> str:
-    """Return a supported explicit BioSemi64 channel-label mapping profile."""
+    """Return a supported explicit channel-label mapping profile."""
 
     return _coerce_supported_choice(
         value,
@@ -1056,20 +1084,29 @@ def normalize_preprocessing_settings(
     """Normalize preprocessing values into canonical keys and runtime aliases."""
 
     source: Mapping[str, Any] = raw or {}
+    pipeline = (
+        normalize_pipeline_config(source["processing_pipeline"])
+        if "processing_pipeline" in source else None
+    )
     hardware = normalize_hardware_settings(source)
-    brain_products = resolve_hardware(source).platform == "brain_products"
+    platform = resolve_hardware(source).platform
+    recorded_geometry = platform in RECORDED_GEOMETRY_PLATFORMS
+    unicorn = platform == "unicorn"
     normalized: Dict[str, Any] = {}
 
     for field in _FIELDS:
         raw_value = _first_value(source, field.aliases)
-        if brain_products and field.name in {"ref_chan1", "ref_chan2"}:
+        if (recorded_geometry or unicorn) and field.name in {"ref_chan1", "ref_chan2"}:
             normalized[field.name] = ""
             continue
-        if brain_products and field.name == "max_chan_idx_keep" and raw_value in (None, ""):
+        if recorded_geometry and field.name == "max_chan_idx_keep" and raw_value in (None, ""):
             normalized[field.name] = None
             continue
-        if brain_products and field.name == "electrode_montage" and raw_value in (None, ""):
+        if recorded_geometry and field.name == "electrode_montage" and raw_value in (None, ""):
             raw_value = "recorded"
+        if unicorn and raw_value in (None, ""):
+            raw_value = {"electrode_montage": "unicorn8", "max_chan_idx_keep": 8,
+                         "downsample": 250}.get(field.name, raw_value)
         if field.type == _FLOAT:
             normalized[field.name] = _coerce_float(raw_value, default=field.default, field=field.name)
         elif field.type == _INT:
@@ -1186,17 +1223,35 @@ def normalize_preprocessing_settings(
         )
 
     channel_limit = normalized["max_chan_idx_keep"]
-    if brain_products and channel_limit is not None and int(channel_limit) < 2:
+    if recorded_geometry and channel_limit is not None and int(channel_limit) < 2:
         raise ValueError("max_chan_idx_keep must be at least two for average reference, or blank to retain all channels.")
-    if not brain_products and not 1 <= int(channel_limit) <= 64:
+    if platform == "biosemi" and not 1 <= int(channel_limit) <= 64:
         raise ValueError(
             "max_chan_idx_keep must be between 1 and 64 for the supported "
             "BioSemi ActiveTwo 64 montage."
         )
 
-    if not brain_products and normalized["electrode_montage"] != ELECTRODE_MONTAGE_BIOSEMI64:
+    if platform == "biosemi" and normalized["electrode_montage"] != ELECTRODE_MONTAGE_BIOSEMI64:
         raise ValueError("Unsupported electrode montage: BioSemi processing requires the BioSemi ActiveTwo 64 montage.")
+    if recorded_geometry and normalized["electrode_montage"] == "unicorn8":
+        raise ValueError("The Unicorn montage requires a Unicorn project.")
+    mapping = normalized["electrode_mapping_profile"]
+    if mapping == UNICORN_FACTORY_MAPPING_PROFILE and not unicorn:
+        raise ValueError("The Unicorn factory channel mapping requires a Unicorn project.")
+    if unicorn:
+        if normalized["electrode_montage"] != "unicorn8" or channel_limit != 8:
+            raise ValueError("Unicorn processing requires all eight scalp channels in the Unicorn montage.")
+        if normalized["downsample"] != 250:
+            raise ValueError("Unicorn processing must retain the native 250 Hz sampling grid.")
+        if mapping not in {ELECTRODE_MAPPING_PROFILE_ANATOMICAL, UNICORN_FACTORY_MAPPING_PROFILE}:
+            raise ValueError("Unicorn requires anatomical labels or its explicitly selected factory mapping.")
+        if normalized["manual_removed_electrodes_enabled"] or normalized["kurtosis_auto_interpolate_all"]:
+            raise ValueError("Unicorn processing does not permit EEG interpolation.")
+        if normalized["removed_electrode_detection_mode"] != REMOVED_ELECTRODE_DETECTION_MODE_OFF:
+            raise ValueError("Unicorn processing does not support the calibrated removed-electrode detector.")
     normalized.update(hardware)
+    if pipeline is not None:
+        normalized["processing_pipeline"] = pipeline
 
     # Surface runtime aliases expected by legacy helpers without duplicating storage
     for canonical, aliases in _ALIASES_FOR_OUTPUT.items():
@@ -1335,6 +1390,8 @@ __all__ = [
     "PREPROCESSING_CANONICAL_KEYS",
     "REPEATED_SESSION_PREPROCESSING_KEYS",
     "PREPROCESSING_DEFAULTS",
+    "OPTIONAL_PREPROCESSING_KEYS",
+    "processing_metadata_snapshot",
     "SUPPORTED_ELECTRODE_MAPPING_PROFILES",
     "SUPPORTED_ELECTRODE_MONTAGES",
 ]

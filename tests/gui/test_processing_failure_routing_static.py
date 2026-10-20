@@ -149,6 +149,7 @@ def _build_params_for_project(project):
         MANUAL_REMOVED_ELECTRODES_ENABLED_KEY,
         RemovedElectrodeDetectionConfirmationRequired,
         normalize_preprocessing_settings,
+        processing_metadata_snapshot,
     )
 
     protocol = FrequencyProtocol.from_recurrence(
@@ -161,6 +162,7 @@ def _build_params_for_project(project):
         {
             "processing_protocol_snapshot": lambda _project: protocol,
             "normalize_preprocessing_settings": normalize_preprocessing_settings,
+            "processing_metadata_snapshot": processing_metadata_snapshot,
             "require_removed_electrode_detection_choice_ready": lambda _settings: None,
             "RemovedElectrodeDetectionConfirmationRequired": RemovedElectrodeDetectionConfirmationRequired,
             "validate_protocol_condition_codes": lambda *_args: None,
@@ -266,6 +268,59 @@ def test_processing_blocks_stale_geometry_when_current_manifest_is_invalid(tmp_p
     messages.warning.assert_called_once()
     assert messages.warning.call_args.args[1] == "Project Settings Unavailable"
     assert manifest_path.read_text(encoding="utf-8") == "{invalid project metadata"
+
+
+@pytest.mark.parametrize("platform", ["brain_products", "biosemi_active_three", "unicorn"])
+def test_processing_params_preserve_all_acquisition_metadata_and_methods(tmp_path, platform):
+    from Main_App.processing.pipeline_plan import default_pipeline_config
+    from Main_App.projects import Project
+    from Main_App.projects.hardware import confirm_hardware_selection
+
+    settings = confirm_hardware_selection({}, platform, confirmed_change=True)
+    settings["processing_pipeline"] = default_pipeline_config()
+    if platform == "unicorn":
+        settings["electrode_mapping_profile"] = "unicorn_factory_v1"
+        settings["recording_event_policy"] = {"authority": "status"}
+    else:
+        settings.update(initial_reference="channels", initial_reference_channels=["TP9", "TP10"],
+                        drop_reference_channels=True, channel_types={"VEOG": "eog"})
+    project = Project.load(tmp_path, manifest={"preprocessing": settings})
+    project.save()
+    params, messages = _build_params_for_project(project)
+    assert params["hardware_platform"] == platform
+    assert params["processing_pipeline"] == default_pipeline_config()
+    assert params["processing_pipeline"] is not project.preprocessing["processing_pipeline"]
+    if platform == "unicorn":
+        assert params["acquisition_profile"] == project.preprocessing["acquisition_profile"]
+        assert params["recording_event_policy"] == project.preprocessing["recording_event_policy"]
+        assert params["downsample_rate"] == 250
+    else:
+        assert params["initial_reference"] == "channels"
+        assert params["initial_reference_channels"] == ["TP9", "TP10"]
+        assert params["drop_reference_channels"] is True
+        assert params["channel_types"] == {"VEOG": "eog"}
+    assert params["kurtosis_screening_enabled"] is False
+    messages.warning.assert_not_called()
+
+
+def test_processing_blocks_invalid_pipeline_in_changed_manifest(tmp_path):
+    from Main_App.processing.pipeline_plan import default_pipeline_config
+    from Main_App.projects import Project
+
+    project = Project.load(tmp_path)
+    project.save()
+    path = tmp_path / "project.json"
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    invalid = default_pipeline_config()
+    invalid["methods"]["temporal_filter"] = "unknown_method_v1"
+    manifest["preprocessing"]["processing_pipeline"] = invalid
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    before = path.read_bytes()
+    params, messages = _build_params_for_project(project)
+    assert params is None
+    messages.warning.assert_called_once()
+    assert messages.warning.call_args.args[1] == "Project Settings Unavailable"
+    assert path.read_bytes() == before
 
 
 def test_many_file_errors_keep_batch_running_until_one_finished_payload():
@@ -1028,7 +1083,8 @@ def _registration_validation_harness(tmp_path, *, mode="Batch", additions=True):
         "review_participants_for_processing": Mock(),
         "_planning_settings_from_params": lambda params: (params, params["event_id_map"]),
         "classify_processing_inputs": Mock(side_effect=lambda *_: timeline.append("plan") or SimpleNamespace(states=[])),
-        "PREPROCESSING_CANONICAL_KEYS": (), "FFT_MULTINOTCH_METHOD_VERSION": "unchanged",
+        "PREPROCESSING_CANONICAL_KEYS": (), "OPTIONAL_PREPROCESSING_KEYS": ("processing_pipeline",),
+        "FFT_MULTINOTCH_METHOD_VERSION": "unchanged",
         "FFT_MULTINOTCH_HALF_WIDTH_HZ": 1, "FFT_MULTINOTCH_COMPONENT_COUNT": 1,
     }
     _load_function("src/Main_App/gui/processing_inputs.py", "_resolve_analysis_window_for_processing", namespace)

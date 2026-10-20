@@ -87,6 +87,16 @@ fallback), or the no-offscreen-Qt rule.
   comparison on registered project recordings with optional QC disabled,
   preserving saved filters/reference settings. It requires a new diagnostic
   output directory and does not edit the source project's manifest or results.
+- Modular methods use `processing.pipeline_plan`, with current scientific
+  implementations at their existing owners. Read
+  `docs/agent/architecture/pipeline-methods.md` and
+  `docs/agent/exec-plans/active/modular-processing-methods.md` before changing
+  slots, methods, project persistence or cache identity.
+  Use the `pipeline-methods` focused verification scope for this foundation;
+  it includes real replacements, checkpoint/repair paths and the hardware matrix.
+- Multi-hardware BIDS admission and its synthetic processing matrix are tracked
+  in `docs/agent/exec-plans/active/multi-hardware-bids.md`. Unicorn physical
+  qualification remains separate from this software acceptance.
 - Active plans live in `docs/agent/exec-plans/active/`; read them before
   changing the covered area.
 - Future plans live in `docs/agent/exec-plans/future/`; read them only when
@@ -104,7 +114,7 @@ Route local verification through one command:
 python .agents/scripts/verify.py --scope <scope> --tier focused
 ```
 
-Supported scopes are `repo`, `backend-hardening`, `gui`, `updates`, `project-io`, `processing`,
+Supported scopes are `repo`, `backend-hardening`, `gui`, `updates`, `project-io`, `processing`, `pipeline-methods`,
 `plot-generator`, `publication-maps`, `sequence-figure`,
 `sensitivity-analysis`, `stats`, `free-harmonic-clustering`, `loreta`,
 `figures`, and `legacy-boundary`. Use `--scope repo --tier precommit` for the

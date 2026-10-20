@@ -28,6 +28,7 @@ from Main_App.io.acquisition_metadata import (
     source_load_kwargs,
 )
 from Main_App.io.load_utils import RECORDING_NOT_STARTED_REASON, RecordingPreflightInfo
+from Main_App.io.pipeline_events import canonical_recording_events
 from Main_App.processing.processing_controller import RawFileInfo
 
 from Main_App.processing.preflight_qc_cache import (
@@ -850,6 +851,11 @@ def _configured_stim_channel(settings: Mapping[str, Any]) -> str:
 
 def _find_preflight_events(raw: Any, *, stim_channel: str) -> tuple[np.ndarray, str]:
     from Main_App.io.recording_access import owned_recording_lazy_read
+    canonical = canonical_recording_events(raw)
+    if canonical is not None:
+        if not len(canonical):
+            raise RuntimeError("No admitted markers found for preflight QC.")
+        return canonical, "canonical"
     event_kwargs = event_detection_kwargs(raw=raw)
 
     try:
@@ -1171,6 +1177,8 @@ def _preflight_cache_settings(
     recording_id: str | None = None,
     condition_labels: Sequence[str] = (),
 ) -> dict[str, object]:
+    from Main_App.processing.pipeline_plan import pipeline_fingerprint_payload
+
     analysis = settings.get("analysis")
     analysis_payload = dict(analysis) if isinstance(analysis, Mapping) else {}
     analysis_protocol = analysis_payload.get("frequency_protocol")
@@ -1225,6 +1233,7 @@ def _preflight_cache_settings(
             raw_protocol
         ).to_manifest()
     payload["analysis"] = analysis_payload
+    payload.update(pipeline_fingerprint_payload(settings))
     contract = resolve_recording_contract(settings)
     if contract.provenance:
         payload["acquisition_policy"] = contract.provenance
@@ -2586,6 +2595,9 @@ def scan_preprocessing_qc(
     map. Callers without that context receive a planning result and no EEG
     samples are scored.
     """
+
+    from Main_App.processing.pipeline_plan import resolve_pipeline_plan
+    resolve_pipeline_plan(settings).validate_capabilities(resolve_recording_contract(settings))
 
     skip_keys = {_path_key(Path(path)) for path in skip_paths}
     pending_infos = [

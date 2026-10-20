@@ -44,6 +44,7 @@ environment.
 | `updates` | Release selection, download/install backend, packaging syntax, GUI-module compilation | Update dialog and manager interaction |
 | `project-io` | Project settings, acquisition profiles and source formats, BIDS import, enumeration/scanning, result paths, manifest contracts, shared exact XLSX reading | File dialogs and visible project workflows |
 | `processing` | Shared MNE admission, acquisition policy, order/fingerprint, QC calibration, persistence, FFT crop, runner/export contracts | Processing-window wiring and Qt workers |
+| `pipeline-methods` | Fixed-slot replacements, project selections, default identity, review/checkpoint/repair paths, spectral/source exports and synthetic hardware integration | Settings save/cancel and worker snapshots use existing CI coverage |
 | `plot-generator` | Excel/config helpers, aggregation, FFT/SNR behavior, rendering and export contracts | Plot Generator page/layout/workflow smoke |
 | `publication-maps` | Processing-time harmonics, BCA/SNR rendering, figure-only paired/group outputs, colorbars | Embedded Scalp Maps page behavior |
 | `sequence-figure` | Renderer behavior and high-DPI outputs | Embedded Sequence Figure wiring |

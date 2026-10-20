@@ -175,7 +175,7 @@ def load_source_events(project_root: Path, **key: Any) -> tuple[np.ndarray, str]
         return None
     rows = cached.get("events")
     source = cached.get("source")
-    if not isinstance(source, str) or source not in {"stim", "annotations"} or not isinstance(rows, list) or not rows:
+    if not isinstance(source, str) or source not in {"stim", "annotations", "canonical"} or not isinstance(rows, list) or not rows:
         return None
     if any(
         not isinstance(row, list) or len(row) != 3 or any(type(item) is not int for item in row)

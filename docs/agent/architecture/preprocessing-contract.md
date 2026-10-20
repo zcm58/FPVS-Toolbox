@@ -33,15 +33,19 @@ The [hardware, pipeline, and Studio roadmap](hardware-pipeline-studio-roadmap.md
 sets the future direction: a shared pipeline whose steps are resolved from
 explicit acquisition/montage capabilities and versioned scientific policies.
 The current BioSemi order and numerical guards below remain the regression
-baseline. Optional QC switches do not yet constitute a general composable
-pipeline; alternate profiles must not bypass these contracts or reuse
-incompatible prepared state.
+baseline. The [versioned method foundation](pipeline-methods.md) now dispatches
+fixed processing slots, including review, preprocessing, epochs and spectral
+operations. Each slot currently exposes only its existing production method.
+Alternate methods must not bypass these contracts or reuse incompatible state.
 
 ## Current Decision
 
 `src/Main_App/processing/preprocess.py` is large because it preserves a
 behavior-sensitive pipeline, not because it is automatically a refactor target.
-Do not refactor it for size alone. Prefer documentation, characterization tests,
+The maintainer-authorized modular-method extraction keeps scientific stage
+bodies here and uses a typed execution context to preserve public APIs and
+late-bound numerical helpers. Do not refactor it for size alone. Prefer
+documentation, characterization tests,
 and focused regression checks unless there is a concrete bug, behavior change,
 or maintenance task that requires code movement.
 

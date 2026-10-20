@@ -14,6 +14,7 @@ from Main_App.io.acquisition_metadata import (
     validate_loaded_geometry,
 )
 from Main_App.processing.analysis_spans import merge_relative_spans
+from Main_App.processing.pipeline_plan import PipelineCancelled, PipelineExecutionError, resolve_pipeline_plan
 from Main_App.processing.removed_electrode_detection import (
     DEFAULT_REMOVED_ELECTRODE_DETECTION_CALIBRATION,
     REMOVED_ELECTRODE_DETECTION_MODE_AUTO,
@@ -310,7 +311,7 @@ CONDITION_RAW_CHANNEL_QC_METHOD_VERSION = (
 )
 
 
-class ConditionRawChannelQCCancelled(RuntimeError):
+class ConditionRawChannelQCCancelled(PipelineCancelled):
     """Raised when condition-aware raw-channel QC is cancelled between blocks."""
 
 
@@ -1438,6 +1439,30 @@ def evaluate_raw_channel_qc(
     filename: str,
     analysis_spans: Sequence[Sequence[int]] | None = None,
 ) -> RawChannelQCResult:
+    """Run the selected raw-screening method for processing and review alike."""
+    plan = resolve_pipeline_plan(settings)
+    contract = resolve_recording_contract(settings, raw=raw)
+    plan.validate_capabilities(contract)
+    if any(method.stage_id == "raw_screening" and method.implementation is not None for method in plan.methods):
+        contract.validate(raw, settings)
+        if analysis_spans is not None:
+            merge_relative_spans(analysis_spans, n_times=int(raw.n_times))
+    result = plan.execute(
+        "raw_screening", _evaluate_raw_channel_qc, raw, settings,
+        filename=filename, analysis_spans=analysis_spans,
+    )
+    if not isinstance(result, RawChannelQCResult):
+        raise PipelineExecutionError("Raw screening must return the typed QC evidence and decision result.")
+    return result
+
+
+def _evaluate_raw_channel_qc(
+    raw: Any,
+    settings: Mapping[str, Any],
+    *,
+    filename: str,
+    analysis_spans: Sequence[Sequence[int]] | None = None,
+) -> RawChannelQCResult:
     """Detect flat/dead electrode channels before interpolation can hide them."""
 
     contract = resolve_recording_contract(settings, raw=raw)
@@ -2525,6 +2550,31 @@ def _assemble_unique_condition_data(
 
 
 def evaluate_condition_raw_channel_qc_v2(
+    blocks: Iterable[ConditionRawChannelQCBlock],
+    channel_names: Sequence[str],
+    settings: Mapping[str, Any],
+    *,
+    filename: str,
+    sfreq: float,
+    block_duration_s: float = 10.0,
+    window_hop_s: float | None = None,
+    should_cancel: Callable[[], bool] | None = None,
+) -> ConditionRawChannelQCResult:
+    """Run the selected condition-window screen for preflight and review."""
+    plan = resolve_pipeline_plan(settings)
+    plan.validate_capabilities(resolve_recording_contract(settings))
+    result = plan.execute(
+        "condition_raw_screening", _evaluate_condition_raw_channel_qc_v2,
+        blocks, channel_names, settings, filename=filename, sfreq=sfreq,
+        block_duration_s=block_duration_s, window_hop_s=window_hop_s,
+        should_cancel=should_cancel,
+    )
+    if not isinstance(result, ConditionRawChannelQCResult):
+        raise PipelineExecutionError("Condition raw screening must return typed condition evidence.")
+    return result
+
+
+def _evaluate_condition_raw_channel_qc_v2(
     blocks: Iterable[ConditionRawChannelQCBlock],
     channel_names: Sequence[str],
     settings: Mapping[str, Any],

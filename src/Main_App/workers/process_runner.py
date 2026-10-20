@@ -34,6 +34,11 @@ from Main_App.io.atomic_write import atomic_write
 from Main_App.io.buffered_fif import save_raw_fif
 from Main_App.io.safe_file import regular_file_info
 from Main_App.processing.preflight_qc_pruning import safe_cache_directory
+from Main_App.processing.pipeline_plan import (
+    PipelineExecutionError,
+    pipeline_fingerprint_payload,
+    resolve_pipeline_plan,
+)
 from Main_App.io.acquisition_metadata import (
     attach_processed_geometry,
     cache_acquisition_identity,
@@ -43,6 +48,11 @@ from Main_App.io.acquisition_metadata import (
     resolve_recording_contract,
     restore_processed_geometry,
     source_load_kwargs,
+)
+from Main_App.io.pipeline_events import (
+    canonical_recording_events,
+    restore_canonical_event_metadata,
+    snapshot_canonical_event_metadata,
 )
 from Main_App.exports.source_time_domain_export import (
     source_ready_project_relative_path,
@@ -227,6 +237,11 @@ def _find_raw_events(
 ) -> tuple[np.ndarray, str]:
     """Use the same event-discovery contract as condition-aware preflight."""
 
+    canonical = canonical_recording_events(raw)
+    if canonical is not None:
+        if not len(canonical):
+            raise RuntimeError("No admitted markers found.")
+        return canonical, "canonical"
     event_kwargs = event_detection_kwargs(raw=raw)
     try:
         events = mne_module.find_events(
@@ -850,6 +865,7 @@ def _preproc_cache_payload(
     frequency_protocol: FrequencyProtocol | None = None,
     event_map: Mapping[str, int] | None = None,
 ) -> Dict[str, object]:
+    pipeline_identity = pipeline_fingerprint_payload(settings)
     stat = file_path.stat()
     channel_limit = configured_channel_limit(settings)
     source_span_plan = settings.get("_fpvs_source_analysis_span_plan")
@@ -977,6 +993,7 @@ def _preproc_cache_payload(
         "condition_event_map": condition_event_map_identity,
         "analysis_span_plan": analysis_span_identity,
         "preprocessing_settings": relevant_settings,
+        **pipeline_identity,
     }
 
 
@@ -1106,6 +1123,13 @@ def _load_preprocessed_cache(
             if callable(close):
                 close()
             return None, None, 0, "miss_geometry_mismatch"
+        try:
+            restore_canonical_event_metadata(
+                raw, metadata.get("canonical_events"), cache_key=cache_key,
+            )
+        except (KeyError, TypeError, ValueError, OverflowError):
+            raw.close()
+            return None, None, 0, "miss_event_metadata_mismatch"
         source_span_plan = settings.get("_fpvs_source_analysis_span_plan")
         cached_source_span_plan = metadata.get("source_analysis_span_plan")
         cached_target_span_plan = metadata.get("realized_analysis_span_plan")
@@ -1446,6 +1470,9 @@ def _store_preprocessed_cache(
             ),
             **_review_metadata_from_settings(settings),
         }
+        canonical_metadata = snapshot_canonical_event_metadata(raw, cache_key=cache_key)
+        if canonical_metadata is not None:
+            metadata["canonical_events"] = canonical_metadata
         with atomic_write(meta_path) as stream:
             stream.write(json.dumps(metadata, sort_keys=True, default=str))
         pruned = _prune_stale_preprocessed_cache(
@@ -1619,6 +1646,8 @@ def _run_full_pipeline_for_file(
     try:
         from Main_App.projects.hardware import require_hardware_ready
         require_hardware_ready(settings, paths=(file_path,))
+        pipeline_plan = resolve_pipeline_plan(settings)
+        pipeline_plan.validate_capabilities(resolve_recording_contract(settings))
         logger.debug(
             "[PIPELINE START] file=%s stage=%s",
             file_path.name,
@@ -2493,7 +2522,14 @@ def _run_full_pipeline_for_file(
 
             import pandas as pd
 
-            epoch_data = _build_epoch_data_from_spans(raw_proc, rep_spans)
+            epoch_data = pipeline_plan.execute(
+                "epoching", _build_epoch_data_from_spans, raw_proc, rep_spans,
+            )
+            expected_shape = (len(rep_spans), len(raw_proc.ch_names), rep_spans[0][1] - rep_spans[0][0])
+            if not isinstance(epoch_data, np.ndarray) or epoch_data.shape != expected_shape or epoch_data.dtype != np.dtype(np.float64):
+                raise PipelineExecutionError(
+                    f"Epoching must preserve the reviewed occurrence/channel/sample shape {expected_shape} in float64."
+                )
             epochs = mne.EpochsArray(
                 epoch_data,
                 raw_proc.info.copy(),
@@ -2601,10 +2637,12 @@ def _run_full_pipeline_for_file(
                     "analysis_span_plan_version": ANALYSIS_SPAN_PLAN_VERSION,
                     "source_analysis_span_plan": source_analysis_span_plan,
                     "realized_analysis_span_plan": target_analysis_span_plan,
+                    **pipeline_fingerprint_payload(settings),
                     **({"condition_electrode_interpolation": settings["_fpvs_condition_interpolation_provenance"]}
                        if settings.get("_fpvs_condition_interpolation_provenance") else {}),
                 },
                 source_signature=raw_file_metadata(file_path),
+                pipeline_settings=settings,
                 resolved_protocol_by_condition={
                     label: {
                         "presentation_rate_hz": float(

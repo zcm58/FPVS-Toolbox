@@ -94,7 +94,7 @@ def test_policy_reference_provenance_is_detached_from_mutable_project_settings()
     assert policy.provenance["channel_types"] == {"ECG": "ecg"}
 
 
-@pytest.mark.parametrize("platform", ["unknown_device", "unicorn", None])
+@pytest.mark.parametrize("platform", ["unknown_device", None])
 def test_explicit_unsupported_hardware_never_selects_legacy_policy(platform):
     with pytest.raises(ValueError, match="Unsupported EEG hardware"):
         resolve_acquisition_policy({"hardware_platform": platform, "hardware_confirmed": True})

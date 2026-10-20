@@ -33,6 +33,8 @@ from Main_App.io.recorded_eeg_geometry import (
 )
 
 BRAIN_PRODUCTS_PIPELINE_VERSION = "brain_products_recorded_eeg_v1"
+ACTIVE_THREE_PIPELINE_VERSION = "biosemi_active_three_recorded_eeg_v1"
+UNICORN_PIPELINE_VERSION = "unicorn_native_eeg_v1"
 ACQUISITION_POLICY_ATTRIBUTE = "_fpvs_resolved_acquisition_policy"
 
 
@@ -44,14 +46,14 @@ def _resolve_policy(settings: Mapping[str, Any]) -> RecordingContract:
     """Resolve project acquisition facts once, before numerical processing.
 
     The source filename and native signal format have no authority here. The
-    current two qualified policies retain their historical numerical behavior
+    existing policies retain their historical numerical behavior
     and fingerprints, including the legacy EXG-pair fallback.
     """
-    from Main_App.projects.hardware import resolve_hardware
+    from Main_App.projects.hardware import HARDWARE_LABELS, resolve_hardware
 
     hardware = resolve_hardware(settings)
-    if hardware.platform == "brain_products":
-        policy = brain_products_policy(settings)
+    if hardware.platform in {"brain_products", "biosemi_active_three"}:
+        policy = recorded_channel_policy(settings, hardware.platform)
         encoded = json.dumps(policy, sort_keys=True, separators=(",", ":"))
         return ResolvedAcquisitionPolicy(
             initial_reference_mode=policy["initial_reference"],
@@ -60,10 +62,38 @@ def _resolve_policy(settings: Mapping[str, Any]) -> RecordingContract:
             max_idx_keep=policy["max_idx_keep"], canonical_scalp_order=None,
             recorded_channel_geometry=True, kurtosis_screening_supported=False,
             strict_processing_errors=True, geometry_fingerprint=RECORDED_GEOMETRY_VERSION,
-            acquisition_label="Brain Products",
-            marker_impulses=True,
+            acquisition_label=HARDWARE_LABELS[hardware.platform],
+            marker_impulses=hardware.platform == "brain_products",
             acquisition_fingerprint=hashlib.sha256(encoded.encode()).hexdigest(),
             provenance_json=encoded,
+        )
+    if hardware.platform == "unicorn":
+        from Main_App.io.acquisition_profiles import resolve_acquisition_contract
+        from Main_App.projects.hardware import unicorn_acquisition_profile
+
+        if not hardware.confirmed:
+            raise ValueError("Confirm Unicorn hardware in this project's settings before processing.")
+        if (settings.get("initial_reference", "recorded") not in {"recorded", "average_scalp"}
+                or settings.get("initial_reference_channels") or settings.get("drop_reference_channels", False)):
+            raise ValueError("Unicorn uses the eight-scalp average reference; recorded reference channel overrides are unavailable.")
+        selected = resolve_acquisition_contract({"acquisition_profile": unicorn_acquisition_profile(settings)})
+        policy = {
+            "version": UNICORN_PIPELINE_VERSION, "hardware_platform": hardware.platform,
+            "acquisition_contract": selected.identity, "acquisition_contract_fingerprint": selected.fingerprint,
+            "reference_policy": "average_scalp",
+            "recording_event_policy": deepcopy(settings.get("recording_event_policy") or {}),
+        }
+        encoded = json.dumps(policy, sort_keys=True, separators=(",", ":"))
+        return ResolvedAcquisitionPolicy(
+            initial_reference_mode="recorded", initial_reference_channels=(),
+            drop_reference_channels=False, max_idx_keep=None,
+            canonical_scalp_order=selected.montage.channel_names, recorded_channel_geometry=True,
+            kurtosis_screening_supported=False, strict_processing_errors=True,
+            geometry_fingerprint=RECORDED_GEOMETRY_VERSION, acquisition_label=HARDWARE_LABELS[hardware.platform],
+            acquisition_fingerprint=hashlib.sha256(encoded.encode()).hexdigest(), provenance_json=encoded,
+            event_encoding="sample", required_sfreq=selected.profile.capabilities.native_sfreq,
+            resampling_allowed=False, interpolation_allowed=False,
+            montage_id=selected.montage.id,
         )
     return ResolvedAcquisitionPolicy(
         initial_reference_mode="legacy_pair",
@@ -150,11 +180,22 @@ def is_brain_products(settings: Mapping[str, Any]) -> bool:
 
 def brain_products_policy(settings: Mapping[str, Any]) -> dict[str, Any]:
     """Resolve explicit reference policy without BioSemi reference fallbacks."""
+    return recorded_channel_policy(settings, "brain_products")
+
+
+def recorded_channel_policy(settings: Mapping[str, Any], platform: str) -> dict[str, Any]:
+    """Resolve configured recorded-channel policy without inventing reference electrodes."""
+    from Main_App.projects.hardware import HARDWARE_LABELS
+
+    versions = {"brain_products": BRAIN_PRODUCTS_PIPELINE_VERSION, "biosemi_active_three": ACTIVE_THREE_PIPELINE_VERSION}
+    if platform not in versions:
+        raise ValueError(f"Unsupported recorded-channel acquisition platform: {platform!r}.")
+    label = HARDWARE_LABELS[platform]
     if settings.get("hardware_confirmed") is not True:
-        raise ValueError("Confirm Brain Products hardware in this project's settings before processing.")
+        raise ValueError(f"Confirm {label} hardware in this project's settings before processing.")
     mode = settings.get("initial_reference", "recorded")
     if mode not in {"recorded", "channels"}:
-        raise ValueError("Brain Products initial reference must be recorded or channels.")
+        raise ValueError(f"{label} initial reference must be recorded or channels.")
     channels = settings.get("initial_reference_channels", [])
     if not isinstance(channels, (list, tuple)) or any(
         not isinstance(channel, str) or not channel.strip() for channel in channels
@@ -171,8 +212,8 @@ def brain_products_policy(settings: Mapping[str, Any]) -> dict[str, Any]:
     if limit is not None and (type(limit) is not int or limit < 2):
         raise ValueError("Average-reference EEG channel limit must be at least two or unset.")
     return {
-        "version": BRAIN_PRODUCTS_PIPELINE_VERSION,
-        "hardware_platform": "brain_products", "initial_reference": mode,
+        "version": versions[platform],
+        "hardware_platform": platform, "initial_reference": mode,
         "initial_reference_channels": list(channels), "drop_reference_channels": drop,
         "max_idx_keep": limit, "electrode_montage": settings.get("electrode_montage", "recorded"),
         "channel_types": dict(settings.get("channel_types") or {}),
@@ -201,8 +242,14 @@ def configured_channel_limit(settings: Mapping[str, Any]) -> int | None:
     """Resolve the admitted sensor limit, including historical project aliases."""
     from Main_App.projects.hardware import resolve_hardware
 
-    if resolve_hardware(settings).platform == "brain_products":
-        return brain_products_policy(settings)["max_idx_keep"]
+    platform = resolve_hardware(settings).platform
+    if platform in {"brain_products", "biosemi_active_three"}:
+        return recorded_channel_policy(settings, platform)["max_idx_keep"]
+    if platform == "unicorn":
+        limit = settings.get("max_idx_keep", settings.get("max_chan_idx_keep"))
+        if limit is not None and (type(limit) is not int or limit != 8):
+            raise ValueError("Unicorn processing requires all eight scalp channels; channel limits are unavailable.")
+        return None
     raw_limit = settings.get("max_idx_keep")
     if raw_limit is None:
         raw_limit = settings.get("max_chan_idx_keep")
@@ -235,7 +282,7 @@ def resolve_recording_contract(
     identity = read_raw_eeg_geometry(raw) if raw is not None else None
     return replace(
         policy,
-        montage_id=str(settings.get("electrode_montage") or ("recorded" if recorded else "biosemi64")),
+        montage_id=str(settings.get("electrode_montage") or policy.montage_id or ("recorded" if recorded else "biosemi64")),
         mapping_profile=str(settings.get("electrode_mapping_profile") or ("recorded_labels" if recorded else "anatomical_labels")),
         # Historical scientific fingerprints used these defaults for every
         # platform. Keep them opaque and distinct from the effective geometry.
@@ -260,7 +307,13 @@ resolve_acquisition_policy = resolve_recording_contract
 def validate_processing_geometry(raw: Any, contract: RecordingContract) -> None:
     """Enforce the previously qualified loaded-geometry admission behavior."""
     if contract.recorded_channel_geometry:
-        validate_raw_recorded_geometry(raw)
+        identity = validate_raw_recorded_geometry(raw)
+        if contract.canonical_scalp_order is not None and (
+            tuple(identity["retained_scalp_channels"]) != contract.canonical_scalp_order
+        ):
+            raise ValueError("Processing requires the complete configured scalp-channel order.")
+        if not contract.interpolation_allowed and identity.get("interpolation_supported"):
+            raise ValueError("Recorded geometry conflicts with the configured interpolation capability.")
 
 
 def validate_loaded_geometry(
@@ -279,10 +332,10 @@ def validate_loaded_geometry(
 
 def cache_acquisition_identity(settings: Mapping[str, Any]) -> dict[str, Any] | None:
     """Preserve the historical cache extension only where it was already used."""
-    from Main_App.io.hardware_identity import brain_products_settings_identity
+    from Main_App.io.hardware_identity import recorded_settings_identity
     from Main_App.projects.hardware import resolve_hardware
 
-    return brain_products_settings_identity(settings) if resolve_hardware(settings).platform == "brain_products" else None
+    return recorded_settings_identity(settings) if resolve_hardware(settings).platform != "biosemi" else None
 
 
 def geometry_identity_for_channels(
@@ -311,8 +364,15 @@ def attach_processed_geometry(raw: Any, settings: Mapping[str, Any]) -> dict[str
     contract = resolve_recording_contract(settings)
     if contract.recorded_channel_geometry:
         if read_raw_eeg_geometry(raw) is not None:
-            return validate_raw_recorded_geometry(raw)
-        return attach_raw_recorded_geometry(raw, montage_id=contract.montage_id)
+            identity = validate_raw_recorded_geometry(raw)
+        else:
+            identity = attach_raw_recorded_geometry(
+                raw, montage_id=contract.montage_id, mapping_profile=contract.mapping_profile,
+                hardware_platform=contract.provenance["hardware_platform"],
+                interpolation_allowed=contract.interpolation_allowed,
+            )
+        attach_recording_contract(raw, settings)
+        return identity
     geometry_identity_for_channels(settings, list(raw.ch_names))
     present = set(raw.ch_names)
     return attach_raw_biosemi64_geometry(
@@ -330,7 +390,9 @@ def restore_processed_geometry(
     if contract.recorded_channel_geometry and isinstance(cached_geometry, Mapping):
         from Main_App.io.hardware_loader import restore_cached_recorded_geometry
 
-        return restore_cached_recorded_geometry(raw, cached_geometry)
+        identity = restore_cached_recorded_geometry(raw, cached_geometry)
+        attach_recording_contract(raw, settings)
+        return identity
     return attach_processed_geometry(raw, settings)
 
 
@@ -358,7 +420,7 @@ def source_load_kwargs(
         return {
             "first_n_channels": limit,
             "stim_channel": str(settings.get("stim_channel") or "Status"),
-            "electrode_montage": settings.get("electrode_montage", "recorded"),
+            "electrode_montage": contract.montage_id if contract.required_sfreq is not None else settings.get("electrode_montage", "recorded"),
         }
     return {
         "ref_pair": contract.load_reference_channels,

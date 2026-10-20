@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import replace
 
 import mne
 import numpy as np
@@ -173,3 +174,19 @@ def test_downsampled_concatenated_recording_requires_single_segment() -> None:
         preprocess._realize_analysis_spans_for_raw(raw, params, preprocess.resolve_recording_contract(params, raw=raw))
 
     assert "_fpvs_realized_analysis_span_plan" not in params
+
+
+@pytest.mark.parametrize("remove_boundary", [False, True])
+def test_native_sample_encoding_validates_actual_marker_without_resampling(remove_boundary):
+    raw, source_plan = _recording()
+    contract = replace(preprocess.resolve_recording_contract({}, raw=raw), event_encoding="sample")
+    params = _params(source_plan)
+    if remove_boundary:
+        raw._data[-1, 103] = 0
+        with pytest.raises(AnalysisSpanPlanError, match="no longer matches an actual oddball marker"):
+            preprocess._realize_analysis_spans_for_raw(raw, params, contract)
+        assert "_fpvs_realized_analysis_span_plan" not in params
+    else:
+        target_plan = preprocess._realize_analysis_spans_for_raw(raw, params, contract)
+        assert target_plan["spans"][0]["target_coordinates"]["start_sample"] == 103
+        assert raw.info["sfreq"] == 100.0

@@ -618,12 +618,13 @@ def open_preflight_eeg_file(
     base = os.path.basename(filepath)
     app.log(f"[PREFLIGHT LAZY LOADER START] {base}: ext='{ext}'")
 
-    from Main_App.io.hardware_loader import open_brain_products_raw, project_acquisition_settings
+    from Main_App.io.hardware_loader import open_brain_products_raw, open_profiled_bdf_raw, project_acquisition_settings
     settings = project_acquisition_settings(app, acquisition_settings)
     from Main_App.projects.hardware import require_hardware_ready
-    require_hardware_ready(settings, paths=(Path(filepath),))
-    if ext in {".vhdr", ".bvrh"}:
-        raw = open_brain_products_raw(
+    platform = require_hardware_ready(settings, paths=(Path(filepath),))
+    if platform in {"brain_products", "biosemi_active_three", "unicorn"}:
+        reader = open_brain_products_raw if platform == "brain_products" else open_profiled_bdf_raw
+        raw = reader(
             app, filepath, settings=settings,
             stim_channel=str(stim_channel or settings.get("stim_channel") or "Status"),
         )
@@ -794,10 +795,10 @@ def load_eeg_file(
     app.log(f"[LOADER START] {base}: ext='{ext}'")
     raw: Optional[mne.io.BaseRaw] = None
     try:
-        from Main_App.io.hardware_loader import open_brain_products_raw, project_acquisition_settings
+        from Main_App.io.hardware_loader import open_brain_products_raw, open_profiled_bdf_raw, project_acquisition_settings
         settings = project_acquisition_settings(app, acquisition_settings)
         from Main_App.projects.hardware import require_hardware_ready
-        require_hardware_ready(settings, paths=(Path(filepath),))
+        platform = require_hardware_ready(settings, paths=(Path(filepath),))
         if preload_in_memory:
             memmap_path = None
         elif preload_path is None:
@@ -812,8 +813,9 @@ def load_eeg_file(
             # before preloading and owns cleanup if loading fails.
             memmap_path = str(destination)
 
-        if ext in {".vhdr", ".bvrh"}:
-            return open_brain_products_raw(
+        if platform in {"brain_products", "biosemi_active_three", "unicorn"}:
+            reader = open_brain_products_raw if platform == "brain_products" else open_profiled_bdf_raw
+            return reader(
                 app, filepath, settings=settings,
                 preload=True if preload_in_memory else memmap_path,
                 stim_channel=str(stim_channel or settings.get("stim_channel") or "Status"),

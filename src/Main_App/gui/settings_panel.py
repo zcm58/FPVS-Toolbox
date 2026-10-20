@@ -92,6 +92,7 @@ from Main_App.projects.preprocessing_settings import (
     ELECTRODE_MAPPING_PROFILE_ANATOMICAL,
     ELECTRODE_MONTAGE_BIOSEMI64,
     MANUAL_REMOVED_ELECTRODES_ENABLED_KEY,
+    OPTIONAL_PREPROCESSING_KEYS,
     PREPROCESSING_DEFAULTS,
     REMOVED_ELECTRODE_DETECTION_CHOICE_CANONICAL_KEYS,
     normalize_manual_excluded_participant_conditions,
@@ -544,8 +545,7 @@ class SettingsDialog(QDialog):
         self.condition_specific_interpolation_enabled_check.setEnabled(summed_bca_enabled)
         for edit in self.summed_bca_threshold_edits.values():
             edit.setEnabled(project_enabled)
-        if (hasattr(self, "hardware_platform_combo")
-                and self.hardware_platform_combo.currentData() == "brain_products"):
+        if hasattr(self, "hardware_platform_combo"):
             from Main_App.gui.settings_hardware_controls import refresh_hardware_qc_controls
             refresh_hardware_qc_controls(self)
 
@@ -2880,6 +2880,9 @@ class SettingsDialog(QDialog):
         )
         values.update(self._sync_electrode_geometry_controls())
         if self.project is not None:
+            self.project.refresh_processing_pipeline_settings()
+            values.update({key: copy.deepcopy(self.project.preprocessing[key])
+                           for key in OPTIONAL_PREPROCESSING_KEYS if key in self.project.preprocessing})
             for key in REMOVED_ELECTRODE_DETECTION_CHOICE_CANONICAL_KEYS:
                 if key in self.project.preprocessing:
                     values[key] = self.project.preprocessing[key]

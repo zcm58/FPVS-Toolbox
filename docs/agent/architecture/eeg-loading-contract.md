@@ -40,12 +40,17 @@ complete directories and never replace another reader's open files. Original
 recordings are not modified. Conversion and identity-validation times are
 reported separately; reuse records zero conversion time.
 
-BDF data is copied byte-for-byte. BVCDF signal bytes are copied unchanged while
+BioSemi BDF data is copied byte-for-byte. BVCDF signal bytes are copied unchanged while
 header/marker companion links are relocated. MNE-BIDS 0.16 loads these datasets
 using the pinned MNE 1.9 readers. Metadata normalization preserves source events,
 annotations, channel/sample identity, acquisition metadata and original subject
 fields. Internal BIDS identifiers must not replace canonical project identity
 or leak into scientific outputs. Channel selection precedes RAM/memmap preload.
+
+Unicorn uses a normalized BDF copy with the same packed signal samples. Only
+the existing reviewed `?V` physical-dimension exception is corrected to `uV`
+when its complete source contract matches. The original BDF is also retained
+under `sourcedata`; source and normalized-copy identities remain distinct.
 
 BVRF arbitrary calibrated float64 values cannot generally be preserved by
 BrainVision float32 export. This route therefore preserves the original BVRF
@@ -54,11 +59,31 @@ loaded by MNE. It is a precision-preserving import exception, **not standard
 raw EEG-BIDS compliance**. Template/recorded geometry and FPVS marker policies
 are applied at the shared admission boundary; import performs no filtering,
 resampling, rereferencing, or interpolation. Full BIDS study import/export,
-additional manufacturers, and physical hardware qualification remain separate
+unsupported acquisition configurations, and physical hardware qualification remain separate
 features; a readable recording does not enable unqualified spatial methods.
 
 See the [conceptual map](hardware-pipeline-studio-roadmap.md#intended-conceptual-map-canonical-eeg-recording)
-and [implementation/verification plan](../exec-plans/active/bids-shared-pipeline.md).
+and [multi-hardware implementation plan](../exec-plans/active/multi-hardware-bids.md).
+
+## Supported project routes
+
+Confirmed project hardware selects upstream admission: `biosemi` retains the
+existing ActiveTwo64 contract; `biosemi_active_three` uses recording-owned
+geometry and explicit reference/channel settings; `brain_products` accepts the
+documented BrainVision formats; `unicorn` uses its registered eight-channel
+native-rate policy. BDF extensions never select a manufacturer or BioSemi
+generation. All four routes return MNE Raw and an immutable `RecordingContract`
+to the shared numerical engine. No manufacturer-specific numerical pipeline is
+introduced.
+
+ActiveThree BDF receives the source's calibrated units/sample rate, declared
+channel roles, and recorded coordinates or an explicitly selected supported
+template. The default preserves the recorded reference until final average
+reference; selected recorded reference channels are optional. No 64-channel
+limit or BioSemi64-calibrated QC is inherited. This does not add arbitrary
+sensor types, multi-subject splitting, or physical device qualification.
+[BioSemi's BDF documentation](https://www.biosemi.com/faq/file_format.htm)
+confirms the shared container format, not a shared montage/reference policy.
 
 ## Brain Products project route
 
@@ -90,7 +115,7 @@ Reviewed marker plans and existing resampling/crop guards still apply.
 
 See the [user hardware guide](../../user/reference/brain-products.md) for format
 limits and primary sources. These software contracts do not qualify physical
-amplifier gain or stimulus latency. The separate Unicorn inspector remains gated.
+amplifier gain or stimulus latency.
 
 
 This page documents the BDF loader contract for the active Main App processing
@@ -100,9 +125,9 @@ explicitly changes the processing pipeline.
 
 For new devices or montages, also read the
 [hardware, pipeline, and Studio roadmap](hardware-pipeline-studio-roadmap.md).
-The registry and Unicorn reader below are extension foundations. Current
-BioSemi64/confirmed Brain Products processing and inspection-only Unicorn
-acquisition remain distinct.
+The standalone inspector and temporary Unicorn reader below remain evidence
+owners. Production Unicorn admission adds the explicit project and processing
+contracts described here rather than changing inspection into a QC approval.
 
 ## Entry Contract
 
@@ -111,10 +136,12 @@ acquisition remain distinct.
 `Main_App.io.load_utils.inspect_eeg_recording(path, settings,
 event_authority=...)` is a separate **read-only inspection result**, not a Raw
 loader or a QC release. It composes `io.acquisition_profiles`, `io.bdf_format`,
-and `io.recording_events`. Scientific processing is always unavailable from this
-entry point while the [Unicorn implementation plan](../exec-plans/active/unicorn-hybrid-black-support.md)
-is completing qualification and pipeline integration. The existing full/lazy
-BioSemi loaders below, their settings and scientific identities are unchanged.
+and `io.recording_events`. This evidence API retains
+`scientific_processing_allowed=False`: callers cannot treat it as hardware
+qualification. Confirmed production projects instead enter through
+`bids_loader`, whose mobile admission adapter validates the source and adds
+the generic processing contract. Physical qualification questions remain in the
+[Unicorn plan](../exec-plans/active/unicorn-hybrid-black-support.md).
 
 - The immutable built-in registry separates format, acquisition, montage,
   event decoding and capability definitions. Unknown IDs/versions and incompatible
@@ -122,12 +149,12 @@ BioSemi loaders below, their settings and scientific identities are unchanged.
   BioSemi without modifying saved settings or adding fingerprint fields.
 - Explicit Unicorn contracts select `unicorn_hybrid_black` / `unicorn8`, version
   `1.0`, native 250 Hz, eight-channel `average_scalp`, no resampling/interpolation,
-  and unavailable normalized kurtosis/spatial capabilities. These are proposed
-  processing constraints, not implemented alternate preprocessing routes.
+  and unavailable normalized kurtosis/spatial capabilities. Production admission
+  enforces these constraints before the shared numerical stages.
 - The factory `EEG 1`-`EEG 8` mapping is opt-in with an evidence reference.
   Anatomical labels are never inferred from channel count. Template-coordinate
-  source metadata is declared, but a generic runtime geometry validator and
-  coordinate fingerprint remain later integration work.
+  source metadata and runtime coordinate identity remain explicitly template-based;
+  they do not claim measured headset positions.
 - Byte inspection retains signal ranges/units, native samples, source SHA256,
   fractional record origin and BDF+ TALs, including notes/timekeeping. It checks
   record sizes and timestamps before any MNE flattening. BDF+D is inspectable but
@@ -150,7 +177,8 @@ Tests independently generate BDF/BDF+ format cases and cross-check a known EEG
 scale with MNE. A sanitized 426-event receipt binds the original test-signal BDF
 checksum and exact marker positions; it is not participant EEG or hardware
 qualification. A third test-only profile reaches the same inspector without
-device-name dispatch. Full/lazy/prefetch and preprocessing parity remain open.
+device-name dispatch. Production acceptance uses the separate supported-hardware
+loading/pipeline tests and the [current plan](../exec-plans/active/multi-hardware-bids.md).
 
 ### Unicorn-Only Unit Interpretation
 
@@ -182,11 +210,9 @@ continues to materialize only Status.
 The detached inspection summary/fingerprint retains policy ID/version, source
 and interpreted units, per-channel factors, conversion order and source hash.
 The sample view remains inspection-only: it cannot authorize processing, QC,
-or cache reuse. The context-owned Raw adapter below now consumes the same
-versioned interpretation. Application-level dispatch, prefetch adoption and
-scientific processing integration remain later plan gates. BioSemi loading,
-identities, preprocessing and the shared volts-to-microvolts FFT conversion
-are unchanged.
+or cache reuse. Both the context-owned Raw adapter below and production BIDS
+admission consume the same versioned interpretation. BioSemi identities,
+preprocessing and the shared volts-to-microvolts FFT conversion are unchanged.
 
 ### Unicorn MNE Reader
 
@@ -219,8 +245,8 @@ is applied by this unit-correction adapter. Canonical events and original
 BDF+ timing evidence remain authoritative rather than a fresh `find_events`
 call or an inferred time origin.
 
-The wrapper retains `scientific_processing_allowed=False` and the unresolved
-acquisition/integration issues. Its provenance binds the original source SHA256,
+The wrapper retains `scientific_processing_allowed=False` and unresolved
+acquisition-evidence issues. Its provenance binds the original source SHA256,
 inspection fingerprint, unit policy, adapter/MNE versions, normalized-copy
 SHA256 and exact patched fields. `raw.filenames` points to the temporary reader
 copy and must not replace original recording identity. These receipts are not
@@ -230,8 +256,17 @@ Context exit closes Raw and explicitly releases an owned memmap before removing
 only `reader.bdf`, `samples.dat` and their uniquely owned directory. Error paths
 retain traceback locations while releasing incomplete MNE construction frames
 that can otherwise keep Windows mappings open. Redirected/replaced directories
-are never recursively removed. Production BioSemi/Brain Products full, lazy,
-and prefetch reads do not dispatch through this gated Unicorn adapter.
+are never recursively removed. `io.mobile_eeg.open_mobile_import_source` uses
+this context during production Unicorn BIDS preparation. Nonfinite telemetry
+fails. Identity-scaled unitless telemetry additionally requires VALID=1 and
+consecutive integer CNT samples; other calibration/units and absent telemetry
+remain explicitly unverified and unchanged. No rounding, inferred rollover or
+wireless-loss reconstruction is permitted. It freezes canonical sample-wise events and
+provenance before the temporary reader is released. BIDS reuse reconstructs
+those facts, not temporary filenames. The shared processing contract requires
+native 250 Hz, eight channels, and no resampling or interpolation. The generic
+event extractor preserves adjacent equal codes without interpreting them as
+one BioSemi-style edge.
 
 ### Production BioSemi Entry
 

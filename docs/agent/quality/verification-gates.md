@@ -71,6 +71,9 @@ normal change loop; the precommit tier is the broad local handoff gate.
 - Processing pipeline changes: run `python .agents/scripts/verify.py --scope
   processing --tier focused`; verify processing order, output filenames,
   sheets, and formats remain compatible.
+  For a method-registry or module-boundary change, begin with `--scope
+  pipeline-methods --tier focused`; it exercises replacements and the default
+  path without rerunning the scientific calibration suite.
 - Garbage collection and repo-wide invariants are part of `python
   .agents/scripts/verify.py --scope repo --tier precommit`.
 

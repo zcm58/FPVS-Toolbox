@@ -1,6 +1,7 @@
 # Hardware, Processing, and FPVS Studio Direction
 
-Status: current implementation and product direction, updated 2026-10-19 for the BIDS/shared-pipeline branch and upstream acquisition refactor.
+Status: current implementation and product direction, updated 2026-10-19 for
+`codex/multi-hardware-bids` and its upstream acquisition adapters.
 This page separates the current implementation from the intended future state.
 It guides scoped implementation plans; it does not enable new hardware or change
 scientific methods by itself. Read it when changing acquisition, montages,
@@ -25,7 +26,7 @@ The original user-supplied diagram is preserved without alteration:
 Interpret the diagram as a future architecture and UX reference:
 
 - Native hardware/file adapters feed the shared MNE processing boundary through
-  the BIDS import layer. BioSemi and Brain Products have the scoped routes below;
+  the BIDS import layer. ActiveTwo, ActiveThree, Brain Products, and Unicorn have the scoped routes below;
   EGI and NeuroScan in this diagram are target families, not enabled support.
   The documented lossless BVRF derivative exception still applies.
 - Each project's users choose supported modules, methods, and parameters for
@@ -48,12 +49,13 @@ silently turn aspirational boxes into current support claims.
 
 | Area | Implemented boundary | Still to do |
 | --- | --- | --- |
-| Production acquisition | BioSemi BDF retains its validated 64-channel contract. Confirmed Brain Products projects use BrainVision adapters and recording-owned channel geometry. | Validate representative laboratory recordings and visible acceptance before release; qualify additional montage-specific tools separately. |
-| Acquisition definitions | `io.acquisition_metadata` resolves existing production routes into the immutable generic `io.recording_contract.RecordingContract`; `io.geometry_metadata` owns source/expected geometry identity. The separate `io.acquisition_profiles` registry owns inspection definitions. | Extend qualified adapters and reconcile inspection/production coverage without inventing supported hardware. |
-| Unicorn | Read-only BDF/BDF+ inspection, explicit channel/unit/event policies, and a context-owned lazy/RAM/memmap MNE reader exist. Results retain `scientific_processing_allowed=False`. | Complete the [Unicorn plan](../exec-plans/active/unicorn-hybrid-black-support.md), including unresolved acquisition evidence and production integration. A readable recording is not scientific qualification. |
+| Production acquisition | Confirmed ActiveTwo64 BDF, ActiveThree BDF, Brain Products BVCDF/BVRF, and Unicorn raw BDF/continuous BDF+ enter the common BIDS and MNE boundary. Project hardware, mappings and method choices persist. | Validate representative laboratory recordings and visible acceptance before release; qualify additional montage-specific tools separately. |
+| Acquisition definitions | `io.acquisition_metadata` resolves the four routes into immutable `io.recording_contract.RecordingContract`; `io.geometry_metadata` owns source/expected geometry identity. `io.acquisition_profiles` owns the explicit Unicorn profile and inspection definitions. | Extend scoped adapters and declared capabilities without inventing supported formats or hardware. |
+| ActiveThree | Explicit project identity, recorded/selected-template geometry, channel-role overrides, and recorded/selected-channel reference. No inherited 64-channel limit or calibrated spatial QC. | Qualify physical recordings and additional auxiliary/multi-subject configurations; sharing BDF does not imply ActiveTwo64 geometry. |
+| Unicorn | Production BIDS admission reuses the reviewed units/grid reader, exact marker semantics and explicit mapping. The generic contract requires eight channels, native 250 Hz, average reference and no resampling/interpolation. Standalone inspection evidence still retains `scientific_processing_allowed=False`. | Resolve the [Unicorn plan's](../exec-plans/active/unicorn-hybrid-black-support.md) physical amplitude, reference, wireless-loss and stimulus-timing evidence. Software processing is not hardware qualification. |
 | Brain Products | Shared discovery/loading/preflight/pipeline/export routes accept BVCDF and single-participant BVRF 1.0.0. Project hardware, reference, channel roles, and selected montage persist. See [scope and sources](../../user/reference/brain-products.md). | Historical formats, multi-participant BVRF splitting, hardware gain/latency qualification, and BioSemi-specific statistical/spatial capability qualification remain separate work. |
-| BIDS admission | `io.bids_import` / `bids_loader` publish project-local BDF/BVCDF datasets and a lossless BVRF derivative, returning MNE Raw through common full/lazy/prefetch reads. | External BIDS study import/export, additional source formats, and laboratory acceptance remain separate work. |
-| Processing | Shared MNE stages consume generic recording metadata and project settings. Hardware defaults, geometry interpretation, and method qualification are resolved upstream; numerical methods and historical fingerprints remain locked. | Broader registry-driven stage composition remains a goal; the contract boundary is not an arbitrary pipeline editor. |
+| BIDS admission | `io.bids_import` / `bids_loader` publish project-local BDF/BVCDF datasets and a lossless BVRF derivative, returning MNE Raw through common full/lazy/prefetch reads. Unicorn preserves original BDF plus the narrowly normalized unit-header copy and unchanged packed samples. | External BIDS study import/export, additional source formats, and laboratory acceptance remain separate work. |
+| Processing | Shared MNE stages consume generic recording metadata and project settings through 19 fixed versioned method slots. Per-project selections, checkpoints and exports share method identity; current algorithms and historical default fingerprints are preserved. Hardware defaults and geometry qualification remain upstream. | Qualify alternative algorithms and add compact method selectors with their parameter controls. Arbitrary reordering is unsupported. |
 | Studio project import | `Main_App.projects.fpvs_config_import` accepts `.fpvsconfig` schemas 1.0.0–1.8.0 for FPVS Oddball and Cognitive Load FPVS, importing the Toolbox-owned project/protocol/marker and optional removed-electrode subset. | Verify complete field and workflow coverage against explicitly identified Studio versions and real, sanitized exports. Current import is not complete Studio compatibility. |
 | Studio acquisition evidence | `Main_App.io.studio_acquisition_evidence` validates a candidate handoff and compares ordered trigger codes only after reviewed recording association. | Qualify receiver integration, recording identity, acquisition facts, and timing semantics. Code agreement alone does not prove sample timing or recording completeness. |
 | Updates | The independent updater uses ported Studio design/contracts with Toolbox-specific application and installer identities. | Maintain versioned protocol parity where intended. Updater similarity does not establish experiment/data interoperability. |
@@ -63,9 +65,9 @@ Runtime acquisition resolution uses `projects.hardware`,
 `RecordingContract` carries resolved channel/reference/event semantics,
 geometry identity, historical fingerprints, and capabilities.
 `processing.acquisition_policy` is retained only as a compatibility import shim.
-The immutable `io.acquisition_profiles` registry still owns the separate
-BioSemi/Unicorn inspection contracts; do not assume it resolves dynamic
-recording montages or authorizes Unicorn processing.
+The immutable `io.acquisition_profiles` registry owns the explicit Unicorn
+acquisition definition and BioSemi/Unicorn inspection contracts. It does not
+resolve arbitrary recording montages or establish physical qualification.
 
 Evidence owners: [EEG loading](eeg-loading-contract.md),
 [preprocessing](preprocessing-contract.md), [project I/O](project-io.md),
@@ -75,16 +77,17 @@ source tree; a release tag and its acceptance receipt define shipped behavior.
 
 ## Intended conceptual map: canonical EEG recording
 
-Updated 2026-10-19 for `codex/bids-shared-pipeline`. The import boundary,
+Updated 2026-10-19 for `codex/multi-hardware-bids`. The import boundary,
 upstream acquisition resolution, and shared numerical pipeline below are
-implemented for the existing BioSemi and Brain Products routes. The dashed Studio acquisition handoff remains a future
-verified integration. This does not enable additional hardware or montages.
+implemented for the four scoped routes above. The dashed Studio acquisition
+handoff remains a future verified integration; arbitrary hardware and montages
+are not implied.
 The [editable Mermaid figure](figures/canonical-eeg-recording.mmd) and this
 embedded copy must remain synchronized.
 
 ```mermaid
 flowchart TD
-    A[Native EEG files] --> B[Project-local import and validation]
+    A[ActiveTwo / ActiveThree / Brain Products / Unicorn files] --> B[Project-local import and validation]
     P[Confirmed hardware and montage settings] --> B
     S[Verified Studio acquisition handoff - future] -.-> B
     B --> C[BIDS recordings or lossless BVRF derivative]
@@ -92,7 +95,7 @@ flowchart TD
     P --> D
     D --> E
     E[MNE Raw and immutable generic RecordingContract]
-    E --> F[Shared MNE processing pipeline]
+    E --> F[Shared MNE pipeline - fixed versioned method slots]
     U[Project processing settings] --> F
     Q[Upstream qualified spatial profiles] --> F
     F --> G[FPVS results and exports]
@@ -100,10 +103,12 @@ flowchart TD
 
 `io.bids_import` publishes content-verified datasets inside the active project;
 `io.bids_loader` admits them into the common full/lazy/prefetch loader. BDF
-samples are copied byte-for-byte. BrainVision Core signal bytes are unchanged,
+samples for the BioSemi routes are copied byte-for-byte. BrainVision Core signal bytes are unchanged,
 with companion links relocated. MNE-BIDS 0.16 reads these normalized datasets.
 Original annotations, subject metadata, events, units and geometry evidence are
-preserved. Import does not filter, resample, rereference, or interpolate.
+preserved. Unicorn retains original source bytes plus a normalized BDF copy;
+only the reviewed `?V` unit-header exception changes, with packed samples exact.
+Import does not filter, resample, rereference, or interpolate.
 
 BVRF is an explicit precision exception: original companions are retained in
 `sourcedata` and calibrated samples are saved as a lossless FIF64 derivative.
@@ -124,8 +129,9 @@ existing scientific fingerprints and output identities do not change.
 
 A readable file still cannot enable an unqualified interpolation, QC, or
 source-estimation method. Hardware identity, file format, montage and analysis
-policy remain separate concerns. The generic contract does not expand supported
-manufacturers or turn the project settings into a general pipeline editor.
+policy remain separate concerns. The generic contract alone does not qualify
+new manufacturers or turn project settings into a general pipeline editor.
+Production routes require their own admission and preservation checks.
 
 BIDS supplies standard dataset organization and metadata; it allows several
 signal formats. Full external BIDS study ingestion/export and complete Studio
@@ -135,9 +141,11 @@ Sources: [EEG-BIDS specification](https://bids-specification.readthedocs.io/en/s
 [MNE-BIDS reader](https://mne.tools/mne-bids/v0.16/generated/mne_bids.read_raw_bids.html),
 and [MNE precision documentation](https://mne.tools/1.9/documentation/implementation.html#floating-point-precision).
 
-The [implementation and quick comparison plan](../exec-plans/active/bids-shared-pipeline.md)
-records the five-participant old/new synthetic check and its scope. Laboratory
-recordings, enabled-QC workflows and visible GUI acceptance are separate evidence.
+The [initial comparison plan](../exec-plans/active/bids-shared-pipeline.md)
+records the five-participant old/new preservation check. The
+[multi-hardware plan](../exec-plans/active/multi-hardware-bids.md) records the
+subsequent admission/pipeline matrix and its limits. Laboratory recordings,
+enabled-QC workflows and visible GUI acceptance are separate evidence.
 
 ## Target: modular hardware and montages
 
@@ -197,8 +205,10 @@ The plan must support swapping, including, or omitting supported steps according
 to project choices and device/montage requirements, without duplicating the
 orchestration for each headset. Provide multiple supported implementations of
 a step where qualified, such as different filtering or interpolation methods,
-with method-specific configuration. A project-level pipeline editor remains
-future work; the current generic recording contract is its foundation.
+with method-specific configuration. The [method foundation](pipeline-methods.md)
+now provides executable fixed slots and per-project versioned method selections
+for the current algorithms, preserving legacy identities. Alternate algorithms
+and their GUI selectors remain future work.
 
 Persist the selected step/method identities, their versions and parameters, and
 the resolved plan in the project, restoring them across application launches.
@@ -274,10 +284,10 @@ into source control to demonstrate interoperability.
    gaps and unresolved evidence before claiming support.
 2. Characterize the existing BioSemi behavior, then extract reusable step
    contracts and deterministic plan resolution while preserving that baseline.
-3. Integrate alternate acquisitions through the shared contracts: finish the
-   already-defined Unicorn path and add the required Brain Products format and
-   hardware-family coverage. Complete each profile's evidence gates and shared
-   execution routes before enabling production support.
+3. Maintain the four implemented acquisition routes and extend formats through
+   shared contracts. Use the multi-hardware synthetic matrix for software
+   regressions; complete each new profile's acquisition evidence and laboratory
+   acceptance separately before making physical qualification claims.
 4. Generalize downstream capability checks, geometry/ROI/adjacency ownership,
    persistence, provenance, and cache identity; qualify each additional montage.
    Prove the extension boundary with a third synthetic profile/montage that

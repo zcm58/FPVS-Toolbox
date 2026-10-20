@@ -1,12 +1,16 @@
 """Compact project acquisition controls for the existing Preprocessing page."""
 from __future__ import annotations
 
+from copy import deepcopy
+
 from PySide6.QtWidgets import QCheckBox, QComboBox, QLabel, QLineEdit
 
 from Main_App.gui.hardware_selection import confirm_hardware_change
 from Main_App.projects.hardware import (
     HARDWARE_LABELS, HARDWARE_SETTINGS_KEYS, confirm_hardware_selection,
-    normalize_hardware_settings, resolve_hardware,
+    RECORDED_GEOMETRY_PLATFORMS, UNICORN_FACTORY_MAPPING_PROFILE,
+    hardware_supports_calibrated_qc, normalize_hardware_settings, resolve_hardware,
+    unicorn_acquisition_profile,
 )
 
 
@@ -44,7 +48,7 @@ def build_hardware_controls(dialog, grid, row: int, settings: dict) -> None:
     grid.addWidget(dialog.channel_types_edit, row + 1, 1)
     dialog.hardware_platform_combo.activated.connect(lambda _index: _choose_hardware(dialog))
     dialog.initial_reference_combo.currentIndexChanged.connect(lambda _index: _refresh_controls(dialog))
-    if choice.platform == "brain_products":
+    if choice.platform in RECORDED_GEOMETRY_PLATFORMS:
         dialog.preproc_edits[4].setText(", ".join(settings.get("initial_reference_channels", [])))
     _refresh_controls(dialog)
 
@@ -67,6 +71,7 @@ def _choose_hardware(dialog) -> None:
     dialog.preproc_edits[4].setText(draft["ref_chan1"])
     dialog.preproc_edits[5].setText(draft["ref_chan2"])
     dialog.preproc_edits[6].setText("" if draft["max_chan_idx_keep"] is None else str(draft["max_chan_idx_keep"]))
+    dialog.preproc_edits[2].setText(str(draft.get("downsample", 256)))
     dialog.initial_reference_combo.setCurrentIndex(0)
     dialog.drop_reference_channels_check.setChecked(False)
     dialog.channel_types_edit.clear()
@@ -74,23 +79,42 @@ def _choose_hardware(dialog) -> None:
 
 
 def _refresh_controls(dialog) -> None:
-    brain_products = dialog.hardware_platform_combo.currentData() == "brain_products"
+    platform = dialog.hardware_platform_combo.currentData()
+    recorded_geometry = platform in RECORDED_GEOMETRY_PLATFORMS
+    unicorn = platform == "unicorn"
+    qualified_qc = hardware_supports_calibrated_qc({"hardware_platform": platform})
     selected_reference = dialog.initial_reference_combo.currentData() == "channels"
-    dialog.initial_reference_label.setVisible(brain_products)
-    dialog.initial_reference_combo.setVisible(brain_products)
-    dialog.drop_reference_channels_check.setVisible(brain_products and selected_reference)
-    dialog.channel_types_label.setVisible(brain_products)
-    dialog.channel_types_edit.setVisible(brain_products)
+    dialog.initial_reference_label.setVisible(recorded_geometry)
+    dialog.initial_reference_combo.setVisible(recorded_geometry)
+    dialog.drop_reference_channels_check.setVisible(recorded_geometry and selected_reference)
+    dialog.channel_types_label.setVisible(recorded_geometry)
+    dialog.channel_types_edit.setVisible(recorded_geometry)
     for index in (4, 5):
-        visible = not brain_products or (index == 4 and selected_reference)
+        visible = not unicorn and (not recorded_geometry or (index == 4 and selected_reference))
         dialog._preproc_field_containers[index].setVisible(visible)
         dialog._preproc_field_labels[index].setVisible(visible)
-    dialog._preproc_field_labels[4].setText("Reference channels (comma-separated):" if brain_products else "Initial reference channel 1:")
-    dialog.preproc_edits[6].setPlaceholderText("All channels" if brain_products else "")
-    dialog.electrode_montage_combo.setEnabled(brain_products and dialog.project is not None)
-    dialog.electrode_mapping_profile_combo.setEnabled(not brain_products and dialog.project is not None)
-    dialog.preproc_edits[3].setEnabled(not brain_products)
-    dialog.preproc_edits[3].setToolTip("BioSemi64 kurtosis screening is unavailable for other montages." if brain_products else "")
+    dialog._preproc_field_labels[4].setText("Reference channels (comma-separated):" if recorded_geometry else "Initial reference channel 1:")
+    dialog.preproc_edits[6].setPlaceholderText("All channels" if recorded_geometry else "")
+    dialog.preproc_edits[6].setEnabled(not unicorn and dialog.project is not None)
+    dialog.preproc_edits[2].setEnabled(not unicorn and dialog.project is not None)
+    dialog.preproc_edits[2].setToolTip("Unicorn retains its native 250 Hz sampling grid." if unicorn else "")
+    dialog.electrode_montage_combo.setEnabled(recorded_geometry and dialog.project is not None)
+    for index in range(dialog.electrode_montage_combo.count()):
+        dialog.electrode_montage_combo.model().item(index).setEnabled(
+            dialog.electrode_montage_combo.itemData(index) != "unicorn8" or unicorn
+        )
+    dialog.electrode_mapping_profile_combo.setEnabled(not recorded_geometry and dialog.project is not None)
+    allowed_mappings = {"anatomical_labels", UNICORN_FACTORY_MAPPING_PROFILE if unicorn else "biosemi64_1020_ab_v1"}
+    for index in range(dialog.electrode_mapping_profile_combo.count()):
+        dialog.electrode_mapping_profile_combo.model().item(index).setEnabled(
+            dialog.electrode_mapping_profile_combo.itemData(index) in allowed_mappings
+        )
+    dialog.electrode_mapping_profile_combo.setToolTip(
+        "Select factory EEG 1–8 only after confirming the headset uses the documented factory electrode positions."
+        if unicorn else "Choose the mapping that matches the recorded electrode labels and cap wiring."
+    )
+    dialog.preproc_edits[3].setEnabled(qualified_qc and dialog.project is not None)
+    dialog.preproc_edits[3].setToolTip("This kurtosis screening is qualified for BioSemi64 only." if not qualified_qc else "")
     refresh_hardware_qc_controls(dialog)
 
 
@@ -101,7 +125,8 @@ def collect_hardware_controls(dialog) -> dict:
         if current != dialog._hardware_control_baseline:
             raise ValueError("Project EEG hardware settings changed in another window. Reopen Settings before saving.")
     result = {key: draft[key] for key in HARDWARE_SETTINGS_KEYS if key in draft}
-    if resolve_hardware(draft).platform == "brain_products":
+    platform = resolve_hardware(draft).platform
+    if platform in RECORDED_GEOMETRY_PLATFORMS:
         selected_reference = dialog.initial_reference_combo.currentData() == "channels"
         result.update(
             initial_reference=dialog.initial_reference_combo.currentData(),
@@ -112,11 +137,23 @@ def collect_hardware_controls(dialog) -> dict:
             auto_detect_removed_electrodes=False, removed_electrode_detection_mode="off",
             kurtosis_auto_interpolate_all=False, ref_chan1="", ref_chan2="",
         )
+    elif platform == "unicorn":
+        mapping = dialog.electrode_mapping_profile_combo.currentData()
+        profile_settings = deepcopy(draft)
+        if mapping != draft.get("electrode_mapping_profile", "anatomical_labels"):
+            profile_settings["acquisition_profile"].pop("source_to_canonical", None)
+            profile_settings["acquisition_profile"].pop("label_mapping_evidence", None)
+        profile_settings["electrode_mapping_profile"] = mapping
+        result.update(acquisition_profile=unicorn_acquisition_profile(profile_settings),
+                      kurtosis_screening_enabled=False, downsample=250,
+                      max_chan_idx_keep=8, ref_chan1="", ref_chan2="",
+                      auto_detect_removed_electrodes=False, removed_electrode_detection_mode="off",
+                      kurtosis_auto_interpolate_all=False, manual_removed_electrodes_enabled=False)
     return result
 
 
 def refresh_hardware_qc_controls(dialog) -> None:
-    brain_products = dialog.hardware_platform_combo.currentData() == "brain_products"
+    qualified_qc = hardware_supports_calibrated_qc({"hardware_platform": dialog.hardware_platform_combo.currentData()})
     for name in (
         "raw_signal_screening_enabled_check", "kurtosis_screening_enabled_check",
         "interpolation_burden_review_enabled_check",
@@ -125,18 +162,24 @@ def refresh_hardware_qc_controls(dialog) -> None:
     ):
         control = getattr(dialog, name, None)
         if control is not None:
-            if brain_products:
+            if not qualified_qc:
                 control.setChecked(False)
-            enabled = not brain_products and dialog.project is not None
+            enabled = qualified_qc and dialog.project is not None
             if name in {"kurtosis_auto_interpolate_all_check", "kurtosis_review_auto_interpolate_extreme_check"}:
                 enabled = enabled and dialog.kurtosis_screening_enabled_check.isChecked()
             if name == "condition_specific_interpolation_enabled_check":
                 enabled = enabled and dialog.summed_bca_screening_enabled_check.isChecked()
             control.setEnabled(enabled)
-            if brain_products:
+            if not qualified_qc:
                 control.setToolTip("This review/repair policy is qualified for BioSemi64 only.")
     detector = getattr(dialog, "removed_electrode_detection_mode_combo", None)
     if detector is not None:
-        if brain_products:
+        if not qualified_qc:
             detector.setCurrentIndex(detector.findData("off"))
-        detector.setEnabled(not brain_products and dialog.project is not None)
+        detector.setEnabled(qualified_qc and dialog.project is not None)
+    manual = getattr(dialog, "manual_removed_electrodes_enabled_check", None)
+    if manual is not None:
+        unicorn = dialog.hardware_platform_combo.currentData() == "unicorn"
+        if unicorn:
+            manual.setChecked(False)
+        manual.setEnabled(not unicorn and dialog.project is not None)

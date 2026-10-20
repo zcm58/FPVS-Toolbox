@@ -97,7 +97,7 @@ def test_invalid_explicit_hardware_cannot_fall_back_to_biosemi(tmp_path):
 
 @pytest.mark.parametrize("paths, expected", [
     (["p01.VHDR", "p02.bvrh"], "brain_products"),
-    (["p01.bdf"], "biosemi"), (["p01.eeg"], None),
+    (["p01.bdf"], None), (["p01.eeg"], None),
 ])
 def test_file_evidence_uses_primary_header_only(paths, expected):
     assert detect_hardware_from_paths(paths) == expected
@@ -157,3 +157,141 @@ def test_biosemi_cannot_select_other_montage():
 def test_brain_products_channel_limit_rejects_unusable_average_reference():
     with pytest.raises(ValueError, match="at least two"):
         normalize_preprocessing_settings({**_brain_products(), "max_chan_idx_keep": 1})
+
+
+@pytest.mark.parametrize("platform", ["biosemi", "biosemi_active_three", "unicorn"])
+def test_bdf_requires_explicit_platform_without_inferring_manufacturer(platform):
+    settings = confirm_hardware_selection({}, platform, confirmed_change=True)
+    assert detect_hardware_from_paths(["p01.bdf"]) is None
+    assert require_hardware_ready(settings, ["p01.bdf"]) == platform
+    with pytest.raises(ValueError, match="Confirm"):
+        require_hardware_ready({**settings, "hardware_confirmed": False}, ["p01.bdf"])
+    with pytest.raises(ValueError, match="configured"):
+        require_hardware_ready(settings, ["p01.vhdr"])
+
+
+def test_brain_products_cannot_process_a_bdf_under_a_different_reader():
+    with pytest.raises(ValueError, match="incompatible"):
+        require_hardware_ready(_brain_products(), ["p01.bdf"])
+
+
+@pytest.mark.parametrize("spelling", ["BrainProducts", "brain products", "brain_products"])
+def test_brain_products_spelling_aliases_canonicalize(spelling):
+    assert confirm_hardware_selection({}, spelling, confirmed_change=True)["hardware_platform"] == "brain_products"
+
+
+@pytest.mark.parametrize("platform", ["biosemi_active_three", "unicorn"])
+def test_new_platforms_require_warning_and_persist_settings_without_biosemi_defaults(tmp_path, platform):
+    original = new_project_preprocessing_settings()
+    with pytest.raises(HardwareChangeConfirmationRequired):
+        confirm_hardware_selection(original, platform)
+    selected = confirm_hardware_selection(original, platform, confirmed_change=True)
+    project = Project.load(tmp_path, manifest={"preprocessing": selected})
+    project.save()
+    reopened = Project.load(tmp_path)
+    assert reopened.preprocessing["hardware_platform"] == platform
+    assert reopened.preprocessing["hardware_confirmed"] is True
+    assert reopened.preprocessing["ref_chan1"] == ""
+    assert reopened.preprocessing["ref_chan2"] == ""
+    assert not reopened.experimental_qc_settings.kurtosis_screening_enabled
+    assert not reopened.experimental_qc_settings.raw_signal_screening_enabled
+    assert not reopened.experimental_qc_settings.condition_specific_interpolation_enabled
+    if platform == "unicorn":
+        assert reopened.preprocessing["downsample"] == 250
+        assert reopened.preprocessing["max_chan_idx_keep"] == 8
+        assert reopened.preprocessing["electrode_montage"] == "unicorn8"
+        assert reopened.preprocessing["acquisition_profile"]["reference_policy"] == "average_scalp"
+    else:
+        assert reopened.preprocessing["max_chan_idx_keep"] is None
+        assert reopened.preprocessing["electrode_montage"] == "recorded"
+        assert reopened.preprocessing["initial_reference"] == "recorded"
+
+
+def test_activethree_retains_configured_references_and_template(tmp_path):
+    selected = confirm_hardware_selection({}, "biosemi_active_three", confirmed_change=True)
+    selected.update(initial_reference="channels", initial_reference_channels=["EXG1", "EXG2"],
+                    drop_reference_channels=True, electrode_montage="standard_1020", channel_types={"VEOG": "eog"})
+    project = Project.load(tmp_path, manifest={"preprocessing": selected})
+    project.save()
+    reopened = Project.load(tmp_path)
+    assert reopened.preprocessing["initial_reference_channels"] == ["EXG1", "EXG2"]
+    assert reopened.preprocessing["drop_reference_channels"] is True
+    assert reopened.preprocessing["electrode_montage"] == "standard_1020"
+    assert reopened.preprocessing["channel_types"] == {"VEOG": "eog"}
+
+
+def test_unicorn_factory_mapping_is_explicit_and_persists_with_evidence(tmp_path):
+    from Main_App.io.acquisition_profiles import UNICORN_FACTORY_RECORDED_LABEL_MAP, UNICORN_FACTORY_MAPPING_SOURCE_URL
+    from Main_App.projects.hardware import UNICORN_FACTORY_MAPPING_PROFILE
+
+    selected = confirm_hardware_selection({}, "unicorn", confirmed_change=True)
+    assert "source_to_canonical" not in selected["acquisition_profile"]
+    selected["electrode_mapping_profile"] = UNICORN_FACTORY_MAPPING_PROFILE
+    project = Project.load(tmp_path, manifest={"preprocessing": selected})
+    project.save()
+    reopened = Project.load(tmp_path)
+    profile = reopened.preprocessing["acquisition_profile"]
+    assert profile["source_to_canonical"] == dict(UNICORN_FACTORY_RECORDED_LABEL_MAP)
+    assert profile["label_mapping_evidence"] == {"status": "verified", "reference": UNICORN_FACTORY_MAPPING_SOURCE_URL}
+
+
+@pytest.mark.parametrize("override, message", [
+    ({"downsample": 256}, "250 Hz"),
+    ({"max_chan_idx_keep": 7}, "all eight"),
+    ({"electrode_montage": "biosemi64"}, "all eight"),
+    ({"manual_removed_electrodes_enabled": True}, "interpolation"),
+    ({"kurtosis_auto_interpolate_all": True}, "interpolation"),
+    ({"electrode_mapping_profile": "biosemi64_1020_ab_v1"}, "mapping"),
+    ({"initial_reference": "channels", "initial_reference_channels": ["Fz"]}, "average reference"),
+    ({"drop_reference_channels": True}, "reference channels"),
+])
+def test_unicorn_rejects_incompatible_processing_settings(override, message):
+    settings = confirm_hardware_selection({}, "unicorn", confirmed_change=True)
+    with pytest.raises(ValueError, match=message):
+        normalize_preprocessing_settings({**settings, **override})
+
+
+def test_unicorn_event_policy_roundtrips_without_guessing_annotation_codes(tmp_path):
+    selected = confirm_hardware_selection({}, "unicorn", confirmed_change=True)
+    selected["acquisition_profile"]["event_decoder_id"] = "explicit_annotations"
+    with pytest.raises(ValueError, match="event policy"):
+        normalize_preprocessing_settings(selected)
+    selected["recording_event_policy"] = {
+        "authority": "annotations", "numeric_annotations": False,
+        "named_annotation_codes": {"Target": 17}, "marker_labels": ["Target"],
+    }
+    project = Project.load(tmp_path, manifest={"preprocessing": selected})
+    project.save()
+    assert Project.load(tmp_path).preprocessing["recording_event_policy"] == selected["recording_event_policy"]
+
+
+@pytest.mark.parametrize("value", [None, {"authority": "guess"}, {"authority": {}}, {"named_annotation_codes": {"Target": 0}},
+                                  {"named_annotation_codes": {"Target": True}}, {"marker_labels": "Target"}])
+def test_unicorn_invalid_event_policy_is_rejected(value):
+    selected = confirm_hardware_selection({}, "unicorn", confirmed_change=True)
+    with pytest.raises(ValueError):
+        normalize_preprocessing_settings({**selected, "recording_event_policy": value})
+
+
+def test_unicorn_profile_is_in_stale_save_conflict_boundary(tmp_path):
+    selected = confirm_hardware_selection({}, "unicorn", confirmed_change=True)
+    original = Project.load(tmp_path, manifest={"preprocessing": selected})
+    original.save()
+    current = Project.load(tmp_path)
+    current.preprocessing["acquisition_profile"]["event_decoder_id"] = "explicit_annotations"
+    current.preprocessing["recording_event_policy"] = {"authority": "annotations"}
+    current.save()
+    original.name = "Unrelated change"
+    original.save()
+    reopened = Project.load(tmp_path)
+    assert reopened.name == "Unrelated change"
+    assert reopened.preprocessing["acquisition_profile"]["event_decoder_id"] == "explicit_annotations"
+
+
+def test_switching_away_from_unicorn_drops_nested_profile_and_event_policy():
+    selected = confirm_hardware_selection({}, "unicorn", confirmed_change=True)
+    selected["recording_event_policy"] = {"authority": "status"}
+    switched = confirm_hardware_selection(selected, "biosemi", confirmed_change=True)
+    assert "acquisition_profile" not in switched
+    assert "recording_event_policy" not in switched
+    assert normalize_preprocessing_settings(switched)["max_chan_idx_keep"] == 64

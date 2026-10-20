@@ -21,14 +21,57 @@ flow, reset incompatible defaults, and invalidate processing through its policy
 fingerprint; outputs are not silently deleted. Concurrent project saves reconcile
 the hardware baseline atomically with other geometry settings.
 
-Brain Products stores initial-reference mode/channels, optional reference-channel
-drop, channel-type overrides, and a recording/explicit template montage. Its
+The four choices are BioSemi ActiveTwo (`biosemi`, preserving the legacy key),
+BioSemi ActiveThree (`biosemi_active_three`), Brain Products (`brain_products`),
+and Unicorn Hybrid Black (`unicorn`). A `.bdf` suffix supplies no manufacturer
+or BioSemi-generation evidence. Confirmed BDF projects retain their choice;
+BrainVision headers remain format evidence, and incompatible format/platform
+pairs fail before processing. `BrainProducts` and `brain products` normalize to
+the same Brain Products key.
+
+Brain Products and ActiveThree store initial-reference mode/channels, optional reference-channel
+drop, channel-type overrides, and a recording/explicit template montage. Their
 unavailable BioSemi QC policies are disabled in the project and GUI. Source
 registration accepts header entrypoints for BVCDF and BVRF; companion changes
 invalidate cached processing. Future verified Studio adapters can provide
 `hardware_evidence`, which remains unconfirmed until the user accepts it; no
 undocumented Studio schema field is assumed. See
 [Brain Products setup](../../user/reference/brain-products.md).
+
+Unicorn persists `acquisition_profile` with its versioned `unicorn_hybrid_black`
+profile, `unicorn8` montage, sample-wise event decoder and `average_scalp`
+reference. The fixed policy retains all eight scalp channels at native 250 Hz
+and disallows interpolation. The existing mapping selector can explicitly select
+`unicorn_factory_v1`, which saves the documented EEG 1–8 mapping and its evidence
+reference. Anatomical labels remain the default; channel count never supplies a
+mapping. A supported explicit custom mapping remains in the nested profile.
+
+Optional `recording_event_policy` stores `authority` (`status`, `annotations`,
+or `reconcile`), `numeric_annotations`, `named_annotation_codes`, and
+`marker_labels`. Its decoder must match the acquisition profile. Annotation
+interpretation is an advanced project configuration; the GUI does not invent
+annotation codes or provide a new mapping editor. Hardware, profile, and event
+settings participate in the same persistence/conflict boundary. See the
+[hardware guide](../../user/reference/eeg-hardware.md) for supported input limits.
+
+## Project processing methods
+
+Optional `preprocessing.processing_pipeline` stores schema version `1.0` and a
+complete `methods` map from fixed processing-step IDs to registered, versioned
+method IDs. `processing.pipeline_plan` owns normalization and executable method
+resolution; project JSON cannot supply executable code. Legacy projects without
+this field retain its absence. New-project defaults explicitly name the current
+methods. Missing and explicit current methods retain identical processing
+fingerprints; unavailable methods or schema versions fail before processing.
+
+`Project.save` reconciles these selections inside the manifest transaction.
+Unrelated stale saves retain newer disk selections; competing method changes
+fail without replacing the disk manifest or local draft. Settings refreshes
+retain the hidden configuration, and `processing_metadata_snapshot` carries a
+detached, validated selection and all required acquisition metadata into worker
+inputs. The current GUI keeps its existing controls while each step has only
+one qualified method. The processing ledger rejects disagreements between
+project and runtime method selections and fingerprints non-default selections.
 
 
 Project-aware workflows should resolve paths from the active project root, not from the process current directory or a developer-machine path.
@@ -48,7 +91,7 @@ Code-order comparison requires a caller-reviewed recording ID/hash association;
 it does not infer participant membership, import a project, produce EEG samples,
 estimate a timing offset, or approve scientific processing. Canonical project
 registration and persistence remain owned by the existing APIs below. Production
-project schemas and legacy preprocessing dictionaries are unchanged in this slice.
+project schemas remain separate from this candidate evidence contract.
 
 Processed condition discovery supports native `.fpvs` manifest anchors and
 historical `.xlsx` workbooks through `Main_App.projects.dataset_index`.

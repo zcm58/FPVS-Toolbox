@@ -21,8 +21,16 @@ from typing import Any, Mapping, Sequence
 import mne
 import numpy as np
 
-from Main_App.io.eeg_geometry import biosemi64_geometry_identity
+from Main_App.io.geometry_metadata import validate_source_geometry_identity
 from Main_App.io.buffered_fif import save_raw_fif
+from Main_App.io.acquisition_metadata import resolve_recording_contract
+from Main_App.processing.pipeline_plan import (
+    PIPELINE_SETTINGS_KEY,
+    PipelineConfigurationError,
+    PipelineExecutionError,
+    pipeline_fingerprint_payload,
+    resolve_pipeline_plan,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -98,6 +106,7 @@ def write_source_ready_time_domain_derivatives(
     source_signature: Mapping[str, Any] | None = None,
     resolved_protocol_by_condition: Mapping[str, Mapping[str, Any] | None] | None = None,
     merge_existing: bool = False,
+    pipeline_settings: Mapping[str, Any] | None = None,
 ) -> SourceReadyTimeDomainExportResult:
     """Write all source-ready conditions for one participant and commit last.
 
@@ -108,6 +117,15 @@ def write_source_ready_time_domain_derivatives(
     been replaced successfully.
     """
 
+    selected_settings = pipeline_settings if pipeline_settings is not None else processing_provenance or {}
+    pipeline_plan = resolve_pipeline_plan(selected_settings)
+    pipeline_identity = pipeline_fingerprint_payload(selected_settings)
+    if pipeline_settings is not None and processing_provenance is not None and PIPELINE_SETTINGS_KEY in processing_provenance:
+        if pipeline_fingerprint_payload(processing_provenance) != pipeline_identity:
+            raise PipelineConfigurationError(
+                "Source derivative processing provenance disagrees with the selected pipeline methods."
+            )
+    pipeline_plan.validate_capabilities(resolve_recording_contract(selected_settings))
     root = _active_project_root(project_root)
     participant = _path_component(participant_id, field="participant_id")
     normalized_recording_id = _optional_identifier(
@@ -144,7 +162,10 @@ def write_source_ready_time_domain_derivatives(
 
     crop_lookup = crop_provenance_by_condition or {}
     protocol_lookup = resolved_protocol_by_condition or {}
-    processing = _json_value(dict(processing_provenance or {}))
+    processing_values = dict(processing_provenance or {})
+    processing_values.pop(PIPELINE_SETTINGS_KEY, None)
+    processing_values.update(pipeline_identity)
+    processing = _json_value(processing_values)
     geometry = _validated_processing_geometry(processing)
     signature = _json_value(dict(source_signature or {})) if source_signature is not None else None
     written_paths: list[Path] = []
@@ -170,6 +191,11 @@ def write_source_ready_time_domain_derivatives(
             sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
             if sidecar.get("source_signature") != signature:
                 raise ValueError("Cannot preserve source derivatives from a changed recording.")
+            prior_processing = sidecar.get("processing", {}).get("provenance", {})
+            if not isinstance(prior_processing, Mapping) or pipeline_fingerprint_payload(prior_processing) != pipeline_identity:
+                raise PipelineConfigurationError(
+                    "Cannot preserve source derivatives produced by different pipeline methods."
+                )
             artifacts.append(SourceReadyTimeDomainArtifact(
                 condition_id=item["condition_id"], condition_label=item["condition_label"],
                 fif_path=fif_path, sidecar_path=sidecar_path,
@@ -182,7 +208,9 @@ def write_source_ready_time_domain_derivatives(
     try:
         for plan in plans:
             plan.fif_path.parent.mkdir(parents=True, exist_ok=True)
-            average_raw, repetition_count = _averaged_eeg_raw(plan.epochs)
+            average_raw, repetition_count = _averaged_eeg_raw(
+                plan.epochs, pipeline_plan=pipeline_plan,
+            )
             _assert_geometry_matches_raw(geometry, average_raw)
             crop = _crop_payload(
                 epochs=plan.epochs,
@@ -356,7 +384,12 @@ def _coerce_epochs(value: Any, *, condition_label: str) -> Any:
     raise TypeError(f"condition {condition_label!r} does not contain an MNE Epochs object")
 
 
-def _averaged_eeg_raw(epochs: Any) -> tuple[Any, int]:
+def _source_repetition_mean(data: np.ndarray) -> np.ndarray:
+    """Preserve the source derivative's historical float64 reduction."""
+    return np.mean(data, axis=0, dtype=np.float64)
+
+
+def _averaged_eeg_raw(epochs: Any, *, pipeline_plan=None) -> tuple[Any, int]:
     eeg_picks = mne.pick_types(
         epochs.info,
         meg=False,
@@ -376,7 +409,12 @@ def _averaged_eeg_raw(epochs: Any) -> tuple[Any, int]:
         raise ValueError("source-ready time-domain export requires at least one time sample")
     if not np.isfinite(data).all():
         raise ValueError("source-ready time-domain Epochs contain non-finite values")
-    averaged = np.mean(data, axis=0, dtype=np.float64)
+    plan = pipeline_plan if pipeline_plan is not None else resolve_pipeline_plan()
+    averaged = plan.execute("repetition_average", _source_repetition_mean, data)
+    if not isinstance(averaged, np.ndarray) or averaged.shape != data.shape[1:] or averaged.dtype != np.dtype(np.float64):
+        raise PipelineExecutionError("Repetition averaging must preserve the EEG channel/sample shape in float64.")
+    if not np.isfinite(averaged).all():
+        raise PipelineExecutionError("Repetition averaging returned non-finite EEG samples.")
     info = mne.pick_info(epochs.info.copy(), eeg_picks, copy=True)
     raw = mne.io.RawArray(averaged, info, first_samp=0, copy="auto", verbose=False)
     return raw, int(data.shape[0])
@@ -462,31 +500,9 @@ def _validated_processing_geometry(processing: Any) -> dict[str, Any]:
     candidate = processing.get("geometry")
     if not isinstance(candidate, Mapping):
         raise ValueError(
-            "processing_provenance must include the canonical BioSemi64 geometry"
+            "processing_provenance must include canonical source geometry"
         )
-    if candidate.get("hardware_platform") == "brain_products":
-        from Main_App.io.recorded_eeg_geometry import validate_recorded_geometry_identity
-        return validate_recorded_geometry_identity(candidate)
-    retained = candidate.get("retained_scalp_channels")
-    if not isinstance(retained, Sequence) or isinstance(retained, (str, bytes)):
-        raise ValueError(
-            "BioSemi64 geometry provenance must include retained scalp channels"
-        )
-    try:
-        expected = biosemi64_geometry_identity(
-            electrode_mapping_profile=candidate.get(
-                "electrode_mapping_profile"
-            ),
-            retained_channels=[str(value) for value in retained],
-        )
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"Invalid BioSemi64 geometry provenance: {exc}") from exc
-    if dict(candidate) != expected:
-        raise ValueError(
-            "BioSemi64 geometry provenance is stale or does not match the "
-            "current coordinate definition"
-        )
-    return expected
+    return validate_source_geometry_identity(candidate)
 
 
 def _assert_geometry_matches_raw(
@@ -499,7 +515,7 @@ def _assert_geometry_matches_raw(
     observed = {str(value) for value in raw.ch_names}
     if observed != expected or len(raw.ch_names) != len(expected):
         raise ValueError(
-            "Source-ready EEG channels do not match the retained BioSemi64 "
+            "Source-ready EEG channels do not match the retained scalp "
             "geometry provenance"
         )
 

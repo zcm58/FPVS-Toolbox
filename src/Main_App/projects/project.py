@@ -13,7 +13,8 @@ from typing import Any, Dict, Mapping
 
 from .manifest_store import manifest_file_path, project_manifest_transaction
 from .hardware import (
-    HARDWARE_SETTINGS_KEYS, brain_products_qc_defaults, normalize_hardware_settings,
+    HARDWARE_SETTINGS_KEYS, brain_products_qc_defaults, hardware_supports_calibrated_qc,
+    normalize_hardware_settings,
     resolve_hardware,
 )
 
@@ -34,6 +35,7 @@ from .grouping import (
     normalize_project_participants,
 )
 from .preprocessing_settings import (
+    OPTIONAL_PREPROCESSING_KEYS,
     PREPROCESSING_CANONICAL_KEYS,
     REMOVED_ELECTRODE_DETECTION_CHOICE_CANONICAL_KEYS,
     REMOVED_ELECTRODE_DETECTION_CHOICE_SOURCE_USER_CONFIRMED,
@@ -44,6 +46,7 @@ from .preprocessing_settings import (
     normalize_preprocessing_settings,
     removed_electrode_detection_choice_was_saved,
 )
+from Main_App.processing.pipeline_plan import normalize_pipeline_config
 from .recordings import (
     normalize_project_recording_sources,
     normalize_project_recordings,
@@ -103,6 +106,7 @@ def _preprocessing_manifest_payload(
         key: normalized[key] for key in PREPROCESSING_CANONICAL_KEYS
     }
     payload.update({key: normalized[key] for key in HARDWARE_SETTINGS_KEYS if key in normalized})
+    payload.update({key: deepcopy(normalized[key]) for key in OPTIONAL_PREPROCESSING_KEYS if key in normalized})
     if not include_removed_electrode_choice:
         for key in REMOVED_ELECTRODE_DETECTION_CHOICE_CANONICAL_KEYS:
             payload.pop(key, None)
@@ -316,6 +320,13 @@ def _electrode_geometry_settings(preprocessing: Mapping[str, Any]) -> dict[str, 
     }
 
 
+def _pipeline_settings(preprocessing: Mapping[str, Any]) -> dict[str, Any]:
+    """Preserve absence for legacy manifests and validate explicit selections."""
+    if "processing_pipeline" not in preprocessing:
+        return {}
+    return {"processing_pipeline": normalize_pipeline_config(preprocessing["processing_pipeline"])}
+
+
 def _processing_fingerprint_v9_compatibility(
     manifest: Mapping[str, Any],
 ) -> dict[str, float]:
@@ -419,7 +430,7 @@ class Project:
         self._raw_registration_baseline = _raw_registration_fingerprint(manifest)
 
         self.experimental_qc_settings = normalize_project_experimental_qc_settings(manifest)
-        if (resolve_hardware(manifest.get("preprocessing", {})).platform == "brain_products"
+        if (not hardware_supports_calibrated_qc(manifest.get("preprocessing", {}))
                 and "experimental_qc" not in manifest):
             self.experimental_qc_settings = brain_products_qc_defaults(self.experimental_qc_settings)
 
@@ -479,7 +490,7 @@ class Project:
                 ),
             )
         except ValueError as exc:
-            if "hardware_platform" in raw_pp:
+            if "hardware_platform" in raw_pp or "processing_pipeline" in raw_pp:
                 raise ValueError(f"Invalid project hardware or preprocessing settings: {exc}") from exc
             logger.warning(
                 "Invalid preprocessing settings in manifest; using defaults: %s",
@@ -510,6 +521,7 @@ class Project:
         self._electrode_geometry_baseline = _electrode_geometry_settings(
             self.preprocessing
         )
+        self._processing_pipeline_baseline = _pipeline_settings(self.preprocessing)
         manifest["preprocessing"] = _preprocessing_manifest_payload(
             self.preprocessing,
             repeated_session=bool(
@@ -779,6 +791,37 @@ class Project:
         preprocessing["max_idx_keep"] = preprocessing["max_chan_idx_keep"]
         self.preprocessing = preprocessing
         self._electrode_geometry_baseline = disk
+
+    def _reconciled_pipeline_settings(
+        self, preprocessing: Mapping[str, Any], current: Mapping[str, Any] | None,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Keep an unrelated stale save from overwriting a newer method choice."""
+        local = _pipeline_settings(preprocessing)
+        baseline = self._processing_pipeline_baseline
+        if current is None:
+            return local, baseline
+        disk_preprocessing = current.get("preprocessing", {})
+        if not isinstance(disk_preprocessing, Mapping):
+            raise ValueError("Project preprocessing settings must contain an object.")
+        disk = _pipeline_settings(disk_preprocessing)
+        if local == baseline:
+            return disk, disk
+        if disk != baseline and disk != local:
+            raise ValueError("Project processing pipeline changed in another window. Reload the project before saving.")
+        return local, disk
+
+    def refresh_processing_pipeline_settings(self) -> None:
+        """Refresh untouched method selections without saving or discarding edits."""
+        try:
+            current = json.loads(self.manifest_path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return
+        if not isinstance(current, Mapping):
+            raise ValueError("Project manifest must contain an object.")
+        merged, disk = self._reconciled_pipeline_settings(self.preprocessing, current)
+        self.preprocessing.pop("processing_pipeline", None)
+        self.preprocessing.update(merged)
+        self._processing_pipeline_baseline = disk
 
     def append_registered_inputs(
         self,
@@ -1218,6 +1261,7 @@ class Project:
             geometry, _disk_geometry, current = self._reconciled_electrode_geometry_settings(
                 normalized_pp
             )
+            pipeline, _disk_pipeline = self._reconciled_pipeline_settings(normalized_pp, current)
             disk_registration = _raw_registration_fingerprint(current)
             if disk_registration and disk_registration != self._raw_registration_baseline:
                 raise ValueError(
@@ -1230,6 +1274,10 @@ class Project:
             normalized_pp.update(geometry)
             normalized_pp["max_idx_keep"] = normalized_pp["max_chan_idx_keep"]
             data["preprocessing"].update(geometry)
+            normalized_pp.pop("processing_pipeline", None)
+            data["preprocessing"].pop("processing_pipeline", None)
+            normalized_pp.update(pipeline)
+            data["preprocessing"].update(deepcopy(pipeline))
             if (current is not None and resolve_hardware(self._electrode_geometry_baseline).platform
                     != resolve_hardware(geometry).platform
                     and geometry == _disk_geometry):
@@ -1251,6 +1299,7 @@ class Project:
             self.preprocessing = normalized_pp
             self.experimental_qc_settings = normalized_experimental_qc
             self._electrode_geometry_baseline = geometry
+            self._processing_pipeline_baseline = deepcopy(pipeline)
 
     # ------------------------------------------------------------------
     def update_preprocessing(self, values: Mapping[str, Any]) -> Dict[str, Any]:
@@ -1260,6 +1309,8 @@ class Project:
         current_settings = normalize_preprocessing_settings(
             self.preprocessing if isinstance(self.preprocessing, Mapping) else {}
         )
+        if "processing_pipeline" not in candidate_values and "processing_pipeline" in current_settings:
+            candidate_values["processing_pipeline"] = deepcopy(current_settings["processing_pipeline"])
         current_choice_unresolved = (
             current_settings["removed_electrode_detection_choice_status"]
             == REMOVED_ELECTRODE_DETECTION_CHOICE_STATUS_CONFIRMATION_REQUIRED
@@ -1274,8 +1325,8 @@ class Project:
             for key in REMOVED_ELECTRODE_DETECTION_CHOICE_CANONICAL_KEYS:
                 candidate_values[key] = current_settings[key]
         normalized = normalize_preprocessing_settings(candidate_values)
-        if (resolve_hardware(current_settings).platform != "brain_products"
-                and resolve_hardware(normalized).platform == "brain_products"):
+        if (hardware_supports_calibrated_qc(current_settings)
+                and not hardware_supports_calibrated_qc(normalized)):
             self.experimental_qc_settings = brain_products_qc_defaults(self.experimental_qc_settings)
             normalized = confirm_removed_electrode_detection_choice(normalized, "off")
         self.preprocessing = normalized

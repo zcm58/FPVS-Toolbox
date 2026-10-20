@@ -63,7 +63,7 @@ def _reader_roles(inspection: RecordingInspection, status_channel: str) -> tuple
             continue
         if name == status_channel.casefold():
             stim.append(signal.label)
-        elif name in {"cnt", "valid", "dt"}:
+        elif name in {"cnt", "valid", "dt", "bat", "acc x", "acc y", "acc z", "gyr x", "gyr y", "gyr z"}:
             misc.append(signal.label)
         else:
             raise UnicornUnitError(f"Unregistered Unicorn channel role: {signal.label!r}.")

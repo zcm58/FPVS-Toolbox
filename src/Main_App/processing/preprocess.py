@@ -19,6 +19,8 @@ Pipeline Order:
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 from pathlib import Path
 from time import perf_counter
@@ -42,7 +44,10 @@ from Main_App.io.acquisition_metadata import (
     resolve_recording_contract,
 )
 from Main_App.io.recording_contract import RecordingContract
+from Main_App.io.pipeline_events import canonical_recording_events
 from Main_App.processing.reference import apply_recorded_reference
+from Main_App.processing.preprocessing_context import PreprocessingContext, execute_preprocessing_stage
+from Main_App.processing.pipeline_plan import resolve_pipeline_plan, pipeline_fingerprint_payload
 from Main_App.processing.fft_multinotch import (
     FFT_MULTINOTCH_COMPONENT_COUNT,
     FFT_MULTINOTCH_HALF_WIDTH_HZ,
@@ -67,6 +72,7 @@ from Main_App.processing.prepared_kurtosis_cache import (
 from Main_App.processing.prepared_fir import filter_raw_with_prepared_fir
 from Main_App.processing.condition_electrode_interpolation import (
     apply_condition_repairs,
+    execute_condition_repairs,
     prepare_condition_repairs,
 )
 
@@ -123,6 +129,10 @@ def _build_preproc_fingerprint(
         # Keep historical fingerprint bytes stable; additional acquisition policies
         # additionally bind their reference, montage and channel-selection rules.
         fingerprint += f"|acquisition={policy.acquisition_fingerprint}"
+    method_identity = pipeline_fingerprint_payload(params)
+    if method_identity:
+        encoded = json.dumps(method_identity, sort_keys=True, separators=(",", ":"))
+        fingerprint += "|pipeline_methods=sha256:" + hashlib.sha256(encoded.encode()).hexdigest()
     return fingerprint
 
 
@@ -150,7 +160,10 @@ def _realize_analysis_spans_for_raw(
         target_first_samp=int(raw.first_samp),
     )
     source_sfreq = float(source_plan["source_grid"]["sfreq_hz"])
-    if source_sfreq != float(raw.info["sfreq"]):
+    canonical_events = canonical_recording_events(raw, recording_contract=recording_contract)
+    if canonical_events is not None:
+        validate_target_analysis_span_markers(realized, canonical_events)
+    elif source_sfreq != float(raw.info["sfreq"]):
         # MNE restarts its stim sampling windows for each concatenated segment.
         # The file-level BDF pipeline supplies one segment; never approximate a
         # different acquisition layout with the single-recording mapping.
@@ -220,6 +233,7 @@ def _kurtosis_filter_identity(
         "fft_multinotch_method_version": FFT_MULTINOTCH_METHOD_VERSION,
         "fft_multinotch_half_width_hz": FFT_MULTINOTCH_HALF_WIDTH_HZ,
         "fft_multinotch_component_count": FFT_MULTINOTCH_COMPONENT_COUNT,
+        **pipeline_fingerprint_payload(params),
         "fft_multinotch_requested_centers_hz": list(
             params.get("_fpvs_fft_multinotch_requested_centers_hz", ())
         ),
@@ -247,6 +261,7 @@ def _kurtosis_downsample_identity(
         "requested_sfreq_hz": requested,
         "realized_sfreq_hz": float(raw.info["sfreq"]),
         "resampled": bool(float(raw.info["sfreq"]) != float(source_sfreq_hz)),
+        **pipeline_fingerprint_payload(params),
     }
 
 
@@ -645,6 +660,14 @@ def _finish_preprocessing_at_kurtosis(
     """Resume the same calculation/decision/repair stages after preparation."""
 
     policy = recording_contract
+    pipeline = resolve_pipeline_plan(params)
+    pipeline.validate_capabilities(policy)
+    context = PreprocessingContext(
+        raw=raw, params=params, policy=policy, plan=pipeline, log_func=log_func,
+        filename_for_log=filename_for_log, debug_enabled=debug_enabled,
+        orig_sfreq=orig_sfreq, checkpoint=checkpoint,
+        stim_ch=str(params.get("stim_channel", policy.stim_channel)),
+    )
     if before_processing_finish is not None:
         before_processing_finish(raw)
     reject_thresh = params.get("reject_thresh")
@@ -710,8 +733,8 @@ def _finish_preprocessing_at_kurtosis(
             )
             ch_names_pick = [raw.info["ch_names"][i] for i in eeg_picks]
             calculation_started = perf_counter()
-            evidence = cached_evidence if cached_evidence is not None else evaluate_kurtosis_qc(
-                data,
+            evidence = cached_evidence if cached_evidence is not None else pipeline.execute(
+                "bad_channel_screening", evaluate_kurtosis_qc, data,
                 ch_names_pick,
                 threshold=reject_thresh,
                 realized_analysis_span_plan=realized_plan,
@@ -831,14 +854,7 @@ def _finish_preprocessing_at_kurtosis(
                     extra={"file": filename_for_log, "n_eeg_picks": len(eeg_picks)},
                 )
 
-        condition_repairs = prepare_condition_repairs(raw, params)
-        _interpolate_current_bads(
-            raw,
-            params,
-            log_func,
-            filename_for_log=filename_for_log,
-            description="bads",
-        )
+        context.interpolation_description = "bads"
     else:
         disabled = not params.get("kurtosis_screening_enabled", policy.kurtosis_screening_supported)
         if disabled:
@@ -853,14 +869,18 @@ def _finish_preprocessing_at_kurtosis(
         )
         if debug_enabled:
             logger.debug("kurtosis_skipped_no_threshold", extra={"file": filename_for_log})
-        condition_repairs = prepare_condition_repairs(raw, params)
-        _interpolate_current_bads(
-            raw,
-            params,
-            log_func,
-            filename_for_log=filename_for_log,
-            description="pre-marked bads",
-        )
+        context.interpolation_description = "pre-marked bads"
+    condition_repairs = prepare_condition_repairs(
+        raw, params,
+        interpolate=lambda branch: execute_preprocessing_stage(
+            "interpolation", _stage_interpolation, context.for_condition(branch),
+        ),
+        final_reference=lambda branch: execute_preprocessing_stage(
+            "final_reference", _stage_final_reference, context.for_condition(branch),
+        ),
+    )
+    execute_preprocessing_stage("interpolation", _stage_interpolation, context)
+    raw = context.raw
     try:
         logger.debug(
             "preprocess_stage_after_kurtosis",
@@ -875,43 +895,17 @@ def _finish_preprocessing_at_kurtosis(
             extra={"file": filename_for_log},
         )
 
-    # 8) Average reference (final)
-    average_reference_applied = False
-    try:
-        log_func(f"Applying average reference to {filename_for_log}...")
-        eeg_picks_for_ref = mne.pick_types(
-            raw.info, eeg=True, exclude=raw.info["bads"]
-        )
-        if len(eeg_picks_for_ref) > 0:
-            raw.set_eeg_reference(
-                ref_channels="average",
-                projection=True,
-                verbose=False,
-            )
-            raw.apply_proj(verbose=False)
-            average_reference_applied = True
-            log_func(
-                f"Average reference applied to {filename_for_log}."
-            )
-        else:
-            log_func(
-                f"Skip average ref for {filename_for_log}: "
-                f"No good EEG channels."
-            )
-    except Exception as e:
-        if policy.strict_processing_errors:
-            raise RuntimeError(f"{policy.acquisition_label} final average reference failed: {e}") from e
-        log_func(
-            f"Warn: Average reference failed for {filename_for_log}: {e}"
-        )
+    execute_preprocessing_stage("final_reference", _stage_final_reference, context)
+    raw = context.raw
+    average_reference_applied = context.average_reference_applied
 
     if policy.strict_processing_errors and not average_reference_applied:
         raise RuntimeError(f"{policy.acquisition_label} processing requires a successful final average reference.")
     if condition_repairs is not None:
         if not average_reference_applied:
             raise RuntimeError("Condition-local interpolation requires successful final average reference.")
-        params["_fpvs_condition_interpolation_provenance"] = apply_condition_repairs(
-            raw, condition_repairs,
+        params["_fpvs_condition_interpolation_provenance"] = execute_condition_repairs(
+            pipeline, apply_condition_repairs, raw, condition_repairs,
         )
         log_func(f"Applied condition-local electrode repairs in the exact analyzed intervals for {filename_for_log}.")
 
@@ -970,6 +964,600 @@ def _finish_preprocessing_at_kurtosis(
 
 
 
+def _stage_interpolation(context: PreprocessingContext) -> None:
+    if context.condition_branch:
+        context.raw.interpolate_bads(reset_bads=True, mode="accurate", verbose=False)
+        return
+    _interpolate_current_bads(
+        context.raw, context.params, context.log_func,
+        filename_for_log=context.filename_for_log,
+        description=context.interpolation_description,
+    )
+
+
+def _stage_final_reference(context: PreprocessingContext) -> None:
+    raw, policy = context.raw, context.policy
+    log_func, filename_for_log = context.log_func, context.filename_for_log
+    if context.condition_branch:
+        raw.set_eeg_reference(ref_channels="average", projection=True, verbose=False)
+        raw.apply_proj(verbose=False)
+        context.average_reference_applied = True
+        return
+
+    # 8) Average reference (final)
+    average_reference_applied = False
+    try:
+        log_func(f"Applying average reference to {filename_for_log}...")
+        eeg_picks_for_ref = mne.pick_types(
+            raw.info, eeg=True, exclude=raw.info["bads"]
+        )
+        if len(eeg_picks_for_ref) > 0:
+            raw.set_eeg_reference(
+                ref_channels="average",
+                projection=True,
+                verbose=False,
+            )
+            raw.apply_proj(verbose=False)
+            average_reference_applied = True
+            log_func(
+                f"Average reference applied to {filename_for_log}."
+            )
+        else:
+            log_func(
+                f"Skip average ref for {filename_for_log}: "
+                f"No good EEG channels."
+            )
+    except Exception as e:
+        if policy.strict_processing_errors:
+            raise RuntimeError(f"{policy.acquisition_label} final average reference failed: {e}") from e
+        log_func(
+            f"Warn: Average reference failed for {filename_for_log}: {e}"
+        )
+
+    context.average_reference_applied = average_reference_applied
+
+
+def _stage_initial_reference(context: PreprocessingContext) -> None:
+    raw, params, policy = context.raw, context.params, context.policy
+    log_func, filename_for_log = context.log_func, context.filename_for_log
+    debug_enabled = context.debug_enabled
+    orig_ch_names = context.orig_ch_names
+    legacy_pair = policy.initial_reference_mode == "legacy_pair"
+    ref1, ref2 = policy.initial_reference_channels if legacy_pair else (None, None)
+    checkpoint = context.checkpoint
+
+    # 1) Initial reference using the admitted method and channel roles.
+    if not legacy_pair:
+        apply_recorded_reference(raw, params, policy, drop_reference_channels=False)
+        log_func(f"{policy.acquisition_label} initial reference: {policy.initial_reference_mode}.")
+    elif ref1 and ref2 and ref1 in orig_ch_names and ref2 in orig_ch_names:
+        try:
+            coerced = _coerce_refs_to_eeg_if_needed(raw, (ref1, ref2))
+            if coerced:
+                log_func(f"DEBUG: coerced {coerced} → EEG for referencing.")
+
+            log_func(
+                f"Applying reference pair [{ref1}, {ref2}] on {filename_for_log}..."
+            )
+            raw.set_eeg_reference(
+                ref_channels=[ref1, ref2],
+                projection=False,
+                verbose=False,
+            )
+
+            # Mark explicit success in params so the audit layer can trust it
+            params["_fpvs_initial_ref_ok"] = True
+            params["_fpvs_initial_ref_pair"] = (ref1, ref2)
+
+            # Debug: inspect MNE's own custom_ref flag after applying the pair
+            try:
+                mne_custom = raw.info.get("custom_ref_applied", None)
+            except Exception:  # Diagnostic boundary: unavailable MNE reference metadata must not undo successful referencing.
+                mne_custom = None
+            if debug_enabled:
+                logger.debug(
+                    "preprocess_initial_reference_applied",
+                    extra={"file": filename_for_log, "mne_custom_ref": mne_custom,
+                           "initial_ref_ok": params.get("_fpvs_initial_ref_ok", False),
+                           "reference_pair": (ref1, ref2)},
+                )
+
+            log_func(
+                f"AUDIT: custom_ref_applied=True pair=[{ref1},{ref2}]"
+            )
+        except Exception as e:
+            checkpoint = None
+            log_func(
+                f"Warn: Initial reference failed for {filename_for_log}: {e}"
+            )
+    else:
+        checkpoint = None
+        log_func(
+            f"Skip initial referencing for {filename_for_log} "
+            f"(Ref channels '{ref1}', '{ref2}' not found or not specified)."
+        )
+    context.checkpoint = checkpoint
+
+
+def _stage_reference_channel_drop(context: PreprocessingContext) -> None:
+    raw, policy = context.raw, context.policy
+    log_func, filename_for_log = context.log_func, context.filename_for_log
+    ref1, ref2 = policy.initial_reference_channels if policy.initial_reference_mode == "legacy_pair" else (None, None)
+
+    # 2) Explicitly drop the selected reference channels after initial reference
+    refs_to_drop: List[str] = []
+    selected = (
+        (ref1, ref2) if policy.initial_reference_mode == "legacy_pair"
+        else policy.initial_reference_channels if policy.drop_reference_channels else ()
+    )
+    for ch in selected:
+        if ch in raw.ch_names and ch not in refs_to_drop:
+            refs_to_drop.append(ch)
+    if refs_to_drop:
+        raw.drop_channels(refs_to_drop)
+        for ch in refs_to_drop:
+            log_func(f"Dropped {ch} after initial referencing.")
+    try:
+        logger.debug(
+            "preprocess_stage_after_drop_refs",
+            extra={
+                "file": filename_for_log,
+                "n_channels": len(raw.info.get("ch_names", [])),
+            },
+        )
+    except Exception:  # Diagnostic boundary: channel-count logging cannot invalidate completed reference-channel removal.
+        logger.debug(
+            "preprocess_stage_after_drop_refs_logging_failed",
+            extra={"file": filename_for_log},
+        )
+
+
+def _stage_channel_selection(context: PreprocessingContext) -> None:
+    raw, policy = context.raw, context.policy
+    log_func, filename_for_log = context.log_func, context.filename_for_log
+    debug_enabled = context.debug_enabled
+    max_keep, stim_ch = policy.max_idx_keep, context.stim_ch
+
+    # 3) Optional channel limit (keeps stim if present)
+    current_names_before_drop = list(raw.info["ch_names"])
+    if debug_enabled:
+        log_func(
+            f"DEBUG [preprocess for {filename_for_log}]: Channel names BEFORE drop logic "
+            f"({len(current_names_before_drop)}): {current_names_before_drop}"
+        )
+    current_scalp_channels = policy.scalp_channels(raw)
+    if max_keep is not None and 0 < max_keep < len(current_scalp_channels):
+        canonical_scalp_order = policy.ordered_scalp_channels(raw)
+        retained_scalp = set(canonical_scalp_order[:max_keep])
+        final_keep = [
+            channel
+            for channel in current_names_before_drop
+            if channel in retained_scalp or channel == stim_ch
+        ]
+        unique_keep = set(final_keep)
+
+        if debug_enabled:
+            ordered_keep = [
+                nm for nm in current_names_before_drop if nm in unique_keep
+            ]
+            to_drop = [
+                nm for nm in current_names_before_drop if nm not in ordered_keep
+            ]
+            log_func(
+                f"DEBUG [preprocess for {filename_for_log}]: Final KEEP "
+                f"({len(ordered_keep)}): {ordered_keep}"
+            )
+            log_func(
+                f"DEBUG [preprocess for {filename_for_log}]: Final DROP "
+                f"({len(to_drop)}): {to_drop}"
+            )
+            drop_count = len(to_drop)
+        else:
+            keep_count = sum(
+                1 for nm in current_names_before_drop if nm in unique_keep
+            )
+            drop_count = len(current_names_before_drop) - keep_count
+
+        if drop_count:
+            log_func(
+                f"Attempting to drop {drop_count} channels from "
+                f"{filename_for_log}..."
+            )
+            raw.pick_channels(final_keep, ordered=False)
+            log_func(
+                f"{len(raw.ch_names)} channels remain in "
+                f"{filename_for_log} after drop."
+            )
+            if debug_enabled:
+                log_func(
+                    f"DEBUG [preprocess for {filename_for_log}]: Channel names AFTER "
+                    f"drop: {list(raw.info['ch_names'])}"
+                )
+        else:
+            log_func(
+                f"No channels selected to be dropped for {filename_for_log}."
+            )
+    else:
+        log_func(
+            f"Skip channel drop for {filename_for_log} (max_keep: {max_keep}). "
+            f"Current channels: {len(current_names_before_drop)}"
+        )
+    try:
+        logger.debug(
+            "preprocess_stage_after_channel_limit",
+            extra={
+                "file": filename_for_log,
+                "n_channels": len(raw.info.get("ch_names", [])),
+            },
+        )
+    except Exception:  # Diagnostic boundary: channel-count logging cannot invalidate completed channel selection.
+        logger.debug(
+            "preprocess_stage_after_channel_limit_logging_failed",
+            extra={"file": filename_for_log},
+        )
+
+
+def _stage_temporal_filter(context: PreprocessingContext) -> None:
+    raw, params, policy = context.raw, context.params, context.policy
+    log_func, filename_for_log = context.log_func, context.filename_for_log
+    debug_enabled = context.debug_enabled
+    high_pass, low_pass = context.high_pass, context.low_pass
+    hp = float(high_pass) if high_pass is not None else None
+    lp = float(low_pass) if low_pass is not None else None
+    downsample_rate = context.downsample_rate
+    fingerprint_in, checkpoint = context.fingerprint_in, context.checkpoint
+
+    # 4) FILTER before downsampling
+    l_freq = hp if (hp is not None and hp > 0) else None
+    h_freq = lp
+    filter_info_to_preserve: Dict[str, float] = {}
+    effective_low_pass_for_notch: Optional[float] = None
+    if l_freq or h_freq:
+        try:
+            low_trans_bw, high_trans_bw = 0.1, 0.1
+            effective_l = l_freq if l_freq is not None else "DC"
+            effective_h = h_freq if h_freq is not None else "Nyq"
+            sf_current = float(raw.info.get("sfreq", 0.0))
+            filter_len_points = _scaled_filter_length(
+                8449,
+                current_sfreq=sf_current,
+                downsample_rate=downsample_rate,
+            )
+            snapshot_payload = (
+                f"file={filename_for_log} "
+                f"param_high_pass={high_pass!r} "
+                f"param_low_pass={low_pass!r} "
+                f"computed_l_freq={l_freq!r} "
+                f"computed_h_freq={h_freq!r} "
+                f"sfreq={sf_current} "
+                f"filter_length={filter_len_points}"
+            )
+            snapshot_message = f"FILTER_SNAPSHOT {snapshot_payload}"
+            log_func(snapshot_message)
+            logger.debug(snapshot_message)
+            if debug_enabled:
+                logger.debug(
+                    "preprocess_filter_snapshot",
+                    extra={"file": filename_for_log, "param_high_pass": high_pass,
+                           "param_low_pass": low_pass, "l_freq": l_freq,
+                           "h_freq": h_freq, "sfreq": sf_current,
+                           "filter_length": filter_len_points},
+                )
+            if h_freq is not None and h_freq > sf_current / 2.0:
+                nyquist_warning = (
+                    "FILTER_NYQUIST_WARNING "
+                    f"file={filename_for_log} "
+                    f"computed_h_freq={h_freq!r} "
+                    f"sfreq={sf_current}"
+                )
+                log_func(nyquist_warning)
+                logger.warning(nyquist_warning)
+            fingerprint_before_filter = _build_preproc_fingerprint(params, policy)
+            if fingerprint_before_filter != fingerprint_in:
+                mutation_warning = (
+                    "PREPROC_FINGERPRINT_MUTATION_WARNING "
+                    f"file={filename_for_log} "
+                    f"before={fingerprint_in} "
+                    f"current={fingerprint_before_filter}"
+                )
+                log_func(mutation_warning)
+                logger.warning(mutation_warning)
+            if l_freq is not None and h_freq is not None and l_freq >= h_freq:
+                range_warning = (
+                    "FILTER_RANGE_WARNING "
+                    f"file={filename_for_log} "
+                    f"computed_l_freq={l_freq!r} "
+                    f"computed_h_freq={h_freq!r}"
+                )
+                log_func(range_warning)
+                logger.warning(range_warning)
+            log_func(
+                f"Filtering {filename_for_log} "
+                f"({effective_l}-{effective_h} Hz) at sfreq={sf_current:.3f}..."
+            )
+            if debug_enabled:
+                logger.debug(
+                    "preprocess_fir_filter_started",
+                    extra={"file": filename_for_log, "l_freq": effective_l,
+                           "h_freq": effective_h, "sfreq": sf_current},
+                )
+            filter_raw_with_prepared_fir(
+                raw,
+                l_freq,
+                h_freq,
+                method="fir",
+                phase="zero-double",
+                fir_window="hamming",
+                fir_design="firwin",
+                l_trans_bandwidth=low_trans_bw,
+                h_trans_bandwidth=high_trans_bw,
+                filter_length=filter_len_points,
+                skip_by_annotation="edge",
+                verbose=False,
+            )
+            applied_highpass = raw.info.get("highpass", None)
+            applied_lowpass = raw.info.get("lowpass", None)
+            if l_freq is not None and applied_highpass is not None:
+                filter_info_to_preserve["highpass"] = float(applied_highpass)
+            if h_freq is not None and applied_lowpass is not None:
+                filter_info_to_preserve["lowpass"] = float(applied_lowpass)
+                effective_low_pass_for_notch = float(applied_lowpass)
+            applied_payload = (
+                f"file={filename_for_log} "
+                f"applied_highpass={applied_highpass!r} "
+                f"applied_lowpass={applied_lowpass!r} "
+                f"sfreq={sf_current}"
+            )
+            applied_message = f"FILTER_APPLIED {applied_payload}"
+            log_func(applied_message)
+            logger.debug(applied_message)
+            if debug_enabled:
+                logger.debug(
+                    "preprocess_filter_applied",
+                    extra={"file": filename_for_log, "applied_highpass": applied_highpass,
+                           "applied_lowpass": applied_lowpass, "sfreq": sf_current},
+                )
+            expected_highpass = l_freq if l_freq is not None else 0.0
+            expected_lowpass = (
+                h_freq
+                if h_freq is not None
+                else float(raw.info.get("sfreq", 0.0)) / 2.0
+            )
+            tol = 1e-6
+            mismatch = False
+            if applied_highpass is None or applied_lowpass is None:
+                mismatch = True
+            elif (
+                abs(applied_highpass - expected_highpass) > tol
+                or abs(applied_lowpass - expected_lowpass) > tol
+            ):
+                mismatch = True
+            if mismatch:
+                checkpoint = None
+                mismatch_warning = (
+                    "FILTER_MISMATCH_WARNING "
+                    f"file={filename_for_log} "
+                    f"expected_highpass={expected_highpass!r} "
+                    f"expected_lowpass={expected_lowpass!r} "
+                    f"applied_highpass={applied_highpass!r} "
+                    f"applied_lowpass={applied_lowpass!r}"
+                )
+                log_func(mismatch_warning)
+                logger.warning(mismatch_warning)
+                if policy.strict_processing_errors:
+                    raise RuntimeError(f"Applied {policy.acquisition_label} filter cutoffs do not match the project settings.")
+            log_func(
+                f"DEBUG [raw.info cutoffs {filename_for_log}]: "
+                f"highpass={raw.info.get('highpass')} "
+                f"lowpass={raw.info.get('lowpass')}"
+            )
+            log_func(f"Filter OK for {filename_for_log}.")
+        except Exception as e:
+            checkpoint = None
+            if policy.strict_processing_errors:
+                raise RuntimeError(f"{policy.acquisition_label} filtering failed: {e}") from e
+            log_func(
+                f"Warn: Filter failed for {filename_for_log}: {e}"
+            )
+            if debug_enabled:
+                logger.debug(
+                    "preprocess_filter_failed",
+                    extra={"file": filename_for_log, "l_freq": l_freq, "h_freq": h_freq},
+                )
+    else:
+        log_func(f"Skip filter for {filename_for_log}.")
+        if debug_enabled:
+            logger.debug(
+                "preprocess_filter_skipped",
+                extra={"file": filename_for_log, "reason": "no_filter_cutoffs"},
+            )
+    try:
+        logger.debug(
+            "preprocess_stage_after_filter",
+            extra={
+                "file": filename_for_log,
+                "sfreq": float(raw.info.get("sfreq", -1.0)),
+            },
+        )
+    except Exception:  # Diagnostic boundary: sampling-rate logging cannot invalidate completed filtering.
+        logger.debug(
+            "preprocess_stage_after_filter_logging_failed",
+            extra={"file": filename_for_log},
+        )
+    context.checkpoint = checkpoint
+    context.filter_info_to_preserve = filter_info_to_preserve
+    context.effective_low_pass_for_notch = effective_low_pass_for_notch
+
+
+def _stage_line_noise_filter(context: PreprocessingContext) -> None:
+    raw, params = context.raw, context.params
+    log_func, filename_for_log = context.log_func, context.filename_for_log
+    line_noise_filter_enabled = context.line_noise_filter_enabled
+    line_noise_frequency_hz = context.line_noise_frequency_hz
+    effective_low_pass_for_notch = context.effective_low_pass_for_notch
+    stim_ch = context.stim_ch
+
+    # 5) Optional smart FFT multi-notch after FIR and before downsampling
+    if line_noise_filter_enabled:
+        try:
+            notch_result = apply_fft_multinotch(
+                raw,
+                fundamental_hz=line_noise_frequency_hz,
+                low_pass=effective_low_pass_for_notch,
+                stim_channel=stim_ch,
+                h_trans_bandwidth=0.1,
+            )
+        except Exception as exc:
+            raise RuntimeError(
+                f"FFT multi-notch failed for {filename_for_log}: {exc}"
+            ) from exc
+
+        requested_centers = list(notch_result.requested_centers_hz)
+        applied_centers = list(notch_result.applied_centers_hz)
+        skipped_centers = [
+            {"center_hz": skipped.center_hz, "reason": skipped.reason}
+            for skipped in notch_result.skipped_centers
+        ]
+        params["_fpvs_fft_multinotch_requested_centers_hz"] = requested_centers
+        params["_fpvs_fft_multinotch_applied_centers_hz"] = applied_centers
+        params["_fpvs_fft_multinotch_skipped_centers"] = skipped_centers
+
+        requested_text = ",".join(f"{value:g}" for value in requested_centers)
+        applied_text = ",".join(f"{value:g}" for value in applied_centers)
+        skipped_text = ";".join(
+            f"{entry['center_hz']:g}:{entry['reason']}"
+            for entry in skipped_centers
+        )
+        if applied_centers:
+            message = (
+                "FFT_MULTINOTCH_APPLIED "
+                f"file={filename_for_log} requested_hz={requested_text} "
+                f"applied_hz={applied_text} skipped={skipped_text or 'none'} "
+                f"half_width_hz={notch_result.half_width_hz:g} "
+                f"channel_count={len(notch_result.filtered_channels)} "
+                f"segments={notch_result.segment_count}"
+            )
+        else:
+            message = (
+                "FFT_MULTINOTCH_SMART_SKIP "
+                f"file={filename_for_log} requested_hz={requested_text} "
+                f"skipped={skipped_text or 'none'}"
+            )
+        log_func(message)
+        logger.debug(message)
+        try:
+            logger.debug(
+                "preprocess_stage_after_fft_multinotch",
+                extra={
+                    "file": filename_for_log,
+                    "requested_centers_hz": requested_centers,
+                    "applied_centers_hz": applied_centers,
+                    "skipped_centers": skipped_centers,
+                    "sfreq": float(raw.info.get("sfreq", -1.0)),
+                },
+            )
+        except (TypeError, ValueError, RuntimeError):
+            logger.debug(
+                "preprocess_stage_after_fft_multinotch_logging_failed",
+                extra={"file": filename_for_log},
+            )
+    else:
+        log_func(f"Skip FFT multi-notch for {filename_for_log} (disabled).")
+
+
+def _stage_resample(context: PreprocessingContext) -> None:
+    raw, policy = context.raw, context.policy
+    log_func, filename_for_log = context.log_func, context.filename_for_log
+    debug_enabled = context.debug_enabled
+    downsample_rate = context.downsample_rate
+    filter_info_to_preserve, checkpoint = context.filter_info_to_preserve, context.checkpoint
+
+    # 6) Downsample after filtering
+    if downsample_rate:
+        sf = float(raw.info["sfreq"])
+        log_func(
+            f"Downsample check for {filename_for_log}: "
+            f"Curr {sf:.3f} Hz, Tgt {downsample_rate} Hz."
+        )
+        if sf > downsample_rate:
+            try:
+                resample_raw(
+                    raw,
+                    downsample_rate,
+                    npad="auto",
+                    window="hann",
+                    verbose=False,
+                )
+                new_sf = float(raw.info["sfreq"])
+                if filter_info_to_preserve:
+                    try:
+                        with raw.info._unlock():
+                            for key, value in filter_info_to_preserve.items():
+                                raw.info[key] = value
+                    except (AttributeError, RuntimeError, TypeError, ValueError):
+                        checkpoint = None
+                        logger.debug(
+                            "preprocess_restore_filter_info_after_downsample_failed",
+                            extra={"file": filename_for_log},
+                            exc_info=True,
+                        )
+                log_func(
+                    f"Resampled {filename_for_log} to {new_sf:.3f} Hz."
+                )
+                if debug_enabled:
+                    logger.debug(
+                        "[DS] %s: sfreq %.3f -> %.3f",
+                        filename_for_log,
+                        sf,
+                        new_sf,
+                    )
+            except Exception as resample_err:
+                checkpoint = None
+                if policy.strict_processing_errors:
+                    raise RuntimeError(f"{policy.acquisition_label} resampling failed: {resample_err}") from resample_err
+                log_func(
+                    f"Warn: Resampling failed for {filename_for_log}: "
+                    f"{resample_err}"
+                )
+                if debug_enabled:
+                    logger.debug(
+                        "[DS] %s: RESAMPLE FAILED (sfreq=%.3f, target=%s)",
+                        filename_for_log,
+                        sf,
+                        downsample_rate,
+                    )
+        else:
+            log_func(
+                f"No downsampling needed for {filename_for_log} "
+                f"(sfreq={sf:.3f}, target={downsample_rate})."
+            )
+            if debug_enabled:
+                logger.debug(
+                    "[DS] %s: no resample (sfreq=%.3f, target=%s)",
+                    filename_for_log,
+                    sf,
+                    downsample_rate,
+                )
+    else:
+        log_func(f"Skip downsample for {filename_for_log}.")
+        if debug_enabled:
+            logger.debug("[DS] %s: skip (no downsample_rate set)", filename_for_log)
+    try:
+        logger.debug(
+            "preprocess_stage_after_downsample",
+            extra={
+                "file": filename_for_log,
+                "sfreq": float(raw.info.get("sfreq", -1.0)),
+            },
+        )
+    except (TypeError, ValueError, RuntimeError):
+        logger.debug(
+            "preprocess_stage_after_downsample_logging_failed",
+            extra={"file": filename_for_log},
+        )
+    context.checkpoint = checkpoint
+
+
 def perform_preprocessing(
     raw_input: mne.io.BaseRaw,
     params: Dict[str, Any],
@@ -1011,9 +1599,11 @@ def perform_preprocessing(
         ValueError: If filter cutoffs are logically invalid (HPF >= LPF).
     """
     raw = raw_input
+    pipeline = resolve_pipeline_plan(params)
     # Legacy direct callers resolve once at admission; production callers pass
     # the immutable contract explicitly, so the engine never interprets hardware.
     policy = recording_contract or resolve_recording_contract(params, raw=raw)
+    pipeline.validate_capabilities(policy)
     attach_recording_contract(raw, recording_contract=policy)
 
     # Ensure per-run audit keys do not leak across files when params is reused
@@ -1145,157 +1735,21 @@ def perform_preprocessing(
                 f"'{stim_ch}' is NOT in initial channel list."
             )
 
-        # 1) Initial reference using the admitted method and channel roles.
-        if not legacy_pair:
-            apply_recorded_reference(raw, params, policy)
-            log_func(f"{policy.acquisition_label} initial reference: {policy.initial_reference_mode}.")
-        elif ref1 and ref2 and ref1 in orig_ch_names and ref2 in orig_ch_names:
-            try:
-                coerced = _coerce_refs_to_eeg_if_needed(raw, (ref1, ref2))
-                if coerced:
-                    log_func(f"DEBUG: coerced {coerced} → EEG for referencing.")
-
-                log_func(
-                    f"Applying reference pair [{ref1}, {ref2}] on {filename_for_log}..."
-                )
-                raw.set_eeg_reference(
-                    ref_channels=[ref1, ref2],
-                    projection=False,
-                    verbose=False,
-                )
-
-                # Mark explicit success in params so the audit layer can trust it
-                params["_fpvs_initial_ref_ok"] = True
-                params["_fpvs_initial_ref_pair"] = (ref1, ref2)
-
-                # Debug: inspect MNE's own custom_ref flag after applying the pair
-                try:
-                    mne_custom = raw.info.get("custom_ref_applied", None)
-                except Exception:
-                    mne_custom = None
-                if debug_enabled:
-                    print(
-                        f"[REF APPLY] {filename_for_log}: "
-                        f"mne_custom_ref={mne_custom} "
-                        f"initial_ref_ok={params.get('_fpvs_initial_ref_ok', False)} "
-                        f"pair=({ref1},{ref2})"
-                    )
-
-                log_func(
-                    f"AUDIT: custom_ref_applied=True pair=[{ref1},{ref2}]"
-                )
-            except Exception as e:
-                checkpoint = None
-                log_func(
-                    f"Warn: Initial reference failed for {filename_for_log}: {e}"
-                )
-        else:
-            checkpoint = None
-            log_func(
-                f"Skip initial referencing for {filename_for_log} "
-                f"(Ref channels '{ref1}', '{ref2}' not found or not specified)."
-            )
-
-        # 2) Explicitly drop the selected reference channels after initial reference
-        refs_to_drop: List[str] = []
-        for ch in (ref1, ref2):
-            if ch in raw.ch_names and ch not in refs_to_drop:
-                refs_to_drop.append(ch)
-        if refs_to_drop:
-            raw.drop_channels(refs_to_drop)
-            for ch in refs_to_drop:
-                log_func(f"Dropped {ch} after initial referencing.")
-        try:
-            logger.debug(
-                "preprocess_stage_after_drop_refs",
-                extra={
-                    "file": filename_for_log,
-                    "n_channels": len(raw.info.get("ch_names", [])),
-                },
-            )
-        except Exception:
-            logger.debug(
-                "preprocess_stage_after_drop_refs_logging_failed",
-                extra={"file": filename_for_log},
-            )
-
-        # 3) Optional channel limit (keeps stim if present)
-        current_names_before_drop = list(raw.info["ch_names"])
-        if debug_enabled:
-            log_func(
-                f"DEBUG [preprocess for {filename_for_log}]: Channel names BEFORE drop logic "
-                f"({len(current_names_before_drop)}): {current_names_before_drop}"
-            )
-        current_scalp_channels = policy.scalp_channels(raw)
-        if max_keep is not None and 0 < max_keep < len(current_scalp_channels):
-            canonical_scalp_order = policy.ordered_scalp_channels(raw)
-            retained_scalp = set(canonical_scalp_order[:max_keep])
-            final_keep = [
-                channel
-                for channel in current_names_before_drop
-                if channel in retained_scalp or channel == stim_ch
-            ]
-            unique_keep = set(final_keep)
-
-            if debug_enabled:
-                ordered_keep = [
-                    nm for nm in current_names_before_drop if nm in unique_keep
-                ]
-                to_drop = [
-                    nm for nm in current_names_before_drop if nm not in ordered_keep
-                ]
-                log_func(
-                    f"DEBUG [preprocess for {filename_for_log}]: Final KEEP "
-                    f"({len(ordered_keep)}): {ordered_keep}"
-                )
-                log_func(
-                    f"DEBUG [preprocess for {filename_for_log}]: Final DROP "
-                    f"({len(to_drop)}): {to_drop}"
-                )
-                drop_count = len(to_drop)
-            else:
-                keep_count = sum(
-                    1 for nm in current_names_before_drop if nm in unique_keep
-                )
-                drop_count = len(current_names_before_drop) - keep_count
-
-            if drop_count:
-                log_func(
-                    f"Attempting to drop {drop_count} channels from "
-                    f"{filename_for_log}..."
-                )
-                raw.pick_channels(final_keep, ordered=False)
-                log_func(
-                    f"{len(raw.ch_names)} channels remain in "
-                    f"{filename_for_log} after drop."
-                )
-                if debug_enabled:
-                    log_func(
-                        f"DEBUG [preprocess for {filename_for_log}]: Channel names AFTER "
-                        f"drop: {list(raw.info['ch_names'])}"
-                    )
-            else:
-                log_func(
-                    f"No channels selected to be dropped for {filename_for_log}."
-                )
-        else:
-            log_func(
-                f"Skip channel drop for {filename_for_log} (max_keep: {max_keep}). "
-                f"Current channels: {len(current_names_before_drop)}"
-            )
-        try:
-            logger.debug(
-                "preprocess_stage_after_channel_limit",
-                extra={
-                    "file": filename_for_log,
-                    "n_channels": len(raw.info.get("ch_names", [])),
-                },
-            )
-        except Exception:
-            logger.debug(
-                "preprocess_stage_after_channel_limit_logging_failed",
-                extra={"file": filename_for_log},
-            )
+        context = PreprocessingContext(
+            raw=raw, params=params, policy=policy, plan=pipeline, log_func=log_func,
+            filename_for_log=filename_for_log, debug_enabled=debug_enabled,
+            orig_ch_names=orig_ch_names, orig_sfreq=orig_sfreq,
+            fingerprint_in=fingerprint_in, checkpoint=checkpoint,
+            downsample_rate=downsample_rate, high_pass=high_pass, low_pass=low_pass,
+            line_noise_filter_enabled=line_noise_filter_enabled,
+            line_noise_frequency_hz=line_noise_frequency_hz, stim_ch=str(stim_ch),
+        )
+        execute_preprocessing_stage("initial_reference", _stage_initial_reference, context)
+        execute_preprocessing_stage("reference_channel_drop", _stage_reference_channel_drop, context)
+        execute_preprocessing_stage("channel_selection", _stage_channel_selection, context)
+        raw, checkpoint = context.raw, context.checkpoint
+        if not pipeline.is_legacy_default and len(mne.pick_types(raw.info, eeg=True, exclude=[])) < 2:
+            raise ValueError("Average-reference processing requires at least two retained EEG channels.")
 
         geometry_identity = freeze_retained_geometry(
             raw,
@@ -1318,321 +1772,10 @@ def perform_preprocessing(
             },
         )
 
-        # 4) FILTER before downsampling
-        l_freq = hp if (hp is not None and hp > 0) else None
-        h_freq = lp
-        filter_info_to_preserve: Dict[str, float] = {}
-        effective_low_pass_for_notch: Optional[float] = None
-        if l_freq or h_freq:
-            try:
-                low_trans_bw, high_trans_bw = 0.1, 0.1
-                effective_l = l_freq if l_freq is not None else "DC"
-                effective_h = h_freq if h_freq is not None else "Nyq"
-                sf_current = float(raw.info.get("sfreq", 0.0))
-                filter_len_points = _scaled_filter_length(
-                    8449,
-                    current_sfreq=sf_current,
-                    downsample_rate=downsample_rate,
-                )
-                snapshot_payload = (
-                    f"file={filename_for_log} "
-                    f"param_high_pass={high_pass!r} "
-                    f"param_low_pass={low_pass!r} "
-                    f"computed_l_freq={l_freq!r} "
-                    f"computed_h_freq={h_freq!r} "
-                    f"sfreq={sf_current} "
-                    f"filter_length={filter_len_points}"
-                )
-                snapshot_message = f"FILTER_SNAPSHOT {snapshot_payload}"
-                log_func(snapshot_message)
-                logger.debug(snapshot_message)
-                if debug_enabled:
-                    print(f"[FILTER_SNAPSHOT] {snapshot_payload}")
-                if h_freq is not None and h_freq > sf_current / 2.0:
-                    nyquist_warning = (
-                        "FILTER_NYQUIST_WARNING "
-                        f"file={filename_for_log} "
-                        f"computed_h_freq={h_freq!r} "
-                        f"sfreq={sf_current}"
-                    )
-                    log_func(nyquist_warning)
-                    logger.warning(nyquist_warning)
-                fingerprint_before_filter = _build_preproc_fingerprint(params, policy)
-                if fingerprint_before_filter != fingerprint_in:
-                    mutation_warning = (
-                        "PREPROC_FINGERPRINT_MUTATION_WARNING "
-                        f"file={filename_for_log} "
-                        f"before={fingerprint_in} "
-                        f"current={fingerprint_before_filter}"
-                    )
-                    log_func(mutation_warning)
-                    logger.warning(mutation_warning)
-                if l_freq is not None and h_freq is not None and l_freq >= h_freq:
-                    range_warning = (
-                        "FILTER_RANGE_WARNING "
-                        f"file={filename_for_log} "
-                        f"computed_l_freq={l_freq!r} "
-                        f"computed_h_freq={h_freq!r}"
-                    )
-                    log_func(range_warning)
-                    logger.warning(range_warning)
-                log_func(
-                    f"Filtering {filename_for_log} "
-                    f"({effective_l}-{effective_h} Hz) at sfreq={sf_current:.3f}..."
-                )
-                if debug_enabled:
-                    print(
-                        f"[FILTER] {filename_for_log}: FIR bandpass "
-                        f"l_freq={effective_l} h_freq={effective_h} "
-                        f"sfreq={sf_current:.3f}"
-                    )
-                filter_raw_with_prepared_fir(
-                    raw,
-                    l_freq,
-                    h_freq,
-                    method="fir",
-                    phase="zero-double",
-                    fir_window="hamming",
-                    fir_design="firwin",
-                    l_trans_bandwidth=low_trans_bw,
-                    h_trans_bandwidth=high_trans_bw,
-                    filter_length=filter_len_points,
-                    skip_by_annotation="edge",
-                    verbose=False,
-                )
-                applied_highpass = raw.info.get("highpass", None)
-                applied_lowpass = raw.info.get("lowpass", None)
-                if l_freq is not None and applied_highpass is not None:
-                    filter_info_to_preserve["highpass"] = float(applied_highpass)
-                if h_freq is not None and applied_lowpass is not None:
-                    filter_info_to_preserve["lowpass"] = float(applied_lowpass)
-                    effective_low_pass_for_notch = float(applied_lowpass)
-                applied_payload = (
-                    f"file={filename_for_log} "
-                    f"applied_highpass={applied_highpass!r} "
-                    f"applied_lowpass={applied_lowpass!r} "
-                    f"sfreq={sf_current}"
-                )
-                applied_message = f"FILTER_APPLIED {applied_payload}"
-                log_func(applied_message)
-                logger.debug(applied_message)
-                if debug_enabled:
-                    print(f"[FILTER_APPLIED] {applied_payload}")
-                expected_highpass = l_freq if l_freq is not None else 0.0
-                expected_lowpass = (
-                    h_freq
-                    if h_freq is not None
-                    else float(raw.info.get("sfreq", 0.0)) / 2.0
-                )
-                tol = 1e-6
-                mismatch = False
-                if applied_highpass is None or applied_lowpass is None:
-                    mismatch = True
-                elif (
-                    abs(applied_highpass - expected_highpass) > tol
-                    or abs(applied_lowpass - expected_lowpass) > tol
-                ):
-                    mismatch = True
-                if mismatch:
-                    checkpoint = None
-                    mismatch_warning = (
-                        "FILTER_MISMATCH_WARNING "
-                        f"file={filename_for_log} "
-                        f"expected_highpass={expected_highpass!r} "
-                        f"expected_lowpass={expected_lowpass!r} "
-                        f"applied_highpass={applied_highpass!r} "
-                        f"applied_lowpass={applied_lowpass!r}"
-                    )
-                    log_func(mismatch_warning)
-                    logger.warning(mismatch_warning)
-                    if policy.strict_processing_errors:
-                        raise RuntimeError(f"Applied {policy.acquisition_label} filter cutoffs do not match the project settings.")
-                log_func(
-                    f"DEBUG [raw.info cutoffs {filename_for_log}]: "
-                    f"highpass={raw.info.get('highpass')} "
-                    f"lowpass={raw.info.get('lowpass')}"
-                )
-                log_func(f"Filter OK for {filename_for_log}.")
-            except Exception as e:
-                checkpoint = None
-                if policy.strict_processing_errors:
-                    raise RuntimeError(f"{policy.acquisition_label} filtering failed: {e}") from e
-                log_func(
-                    f"Warn: Filter failed for {filename_for_log}: {e}"
-                )
-                if debug_enabled:
-                    print(
-                        f"[FILTER] {filename_for_log}: FAILED "
-                        f"l_freq={l_freq} h_freq={h_freq}"
-                    )
-        else:
-            log_func(f"Skip filter for {filename_for_log}.")
-            if debug_enabled:
-                print(f"[FILTER] {filename_for_log}: skip (no l_freq/h_freq)")
-        try:
-            logger.debug(
-                "preprocess_stage_after_filter",
-                extra={
-                    "file": filename_for_log,
-                    "sfreq": float(raw.info.get("sfreq", -1.0)),
-                },
-            )
-        except Exception:
-            logger.debug(
-                "preprocess_stage_after_filter_logging_failed",
-                extra={"file": filename_for_log},
-            )
-
-        # 5) Optional smart FFT multi-notch after FIR and before downsampling
-        if line_noise_filter_enabled:
-            try:
-                notch_result = apply_fft_multinotch(
-                    raw,
-                    fundamental_hz=line_noise_frequency_hz,
-                    low_pass=effective_low_pass_for_notch,
-                    stim_channel=stim_ch,
-                    h_trans_bandwidth=0.1,
-                )
-            except Exception as exc:
-                raise RuntimeError(
-                    f"FFT multi-notch failed for {filename_for_log}: {exc}"
-                ) from exc
-
-            requested_centers = list(notch_result.requested_centers_hz)
-            applied_centers = list(notch_result.applied_centers_hz)
-            skipped_centers = [
-                {"center_hz": skipped.center_hz, "reason": skipped.reason}
-                for skipped in notch_result.skipped_centers
-            ]
-            params["_fpvs_fft_multinotch_requested_centers_hz"] = requested_centers
-            params["_fpvs_fft_multinotch_applied_centers_hz"] = applied_centers
-            params["_fpvs_fft_multinotch_skipped_centers"] = skipped_centers
-
-            requested_text = ",".join(f"{value:g}" for value in requested_centers)
-            applied_text = ",".join(f"{value:g}" for value in applied_centers)
-            skipped_text = ";".join(
-                f"{entry['center_hz']:g}:{entry['reason']}"
-                for entry in skipped_centers
-            )
-            if applied_centers:
-                message = (
-                    "FFT_MULTINOTCH_APPLIED "
-                    f"file={filename_for_log} requested_hz={requested_text} "
-                    f"applied_hz={applied_text} skipped={skipped_text or 'none'} "
-                    f"half_width_hz={notch_result.half_width_hz:g} "
-                    f"channel_count={len(notch_result.filtered_channels)} "
-                    f"segments={notch_result.segment_count}"
-                )
-            else:
-                message = (
-                    "FFT_MULTINOTCH_SMART_SKIP "
-                    f"file={filename_for_log} requested_hz={requested_text} "
-                    f"skipped={skipped_text or 'none'}"
-                )
-            log_func(message)
-            logger.debug(message)
-            try:
-                logger.debug(
-                    "preprocess_stage_after_fft_multinotch",
-                    extra={
-                        "file": filename_for_log,
-                        "requested_centers_hz": requested_centers,
-                        "applied_centers_hz": applied_centers,
-                        "skipped_centers": skipped_centers,
-                        "sfreq": float(raw.info.get("sfreq", -1.0)),
-                    },
-                )
-            except (TypeError, ValueError, RuntimeError):
-                logger.debug(
-                    "preprocess_stage_after_fft_multinotch_logging_failed",
-                    extra={"file": filename_for_log},
-                )
-        else:
-            log_func(f"Skip FFT multi-notch for {filename_for_log} (disabled).")
-
-        # 6) Downsample after filtering
-        if downsample_rate:
-            sf = float(raw.info["sfreq"])
-            log_func(
-                f"Downsample check for {filename_for_log}: "
-                f"Curr {sf:.3f} Hz, Tgt {downsample_rate} Hz."
-            )
-            if sf > downsample_rate:
-                try:
-                    resample_raw(
-                        raw,
-                        downsample_rate,
-                        npad="auto",
-                        window="hann",
-                        verbose=False,
-                    )
-                    new_sf = float(raw.info["sfreq"])
-                    if filter_info_to_preserve:
-                        try:
-                            with raw.info._unlock():
-                                for key, value in filter_info_to_preserve.items():
-                                    raw.info[key] = value
-                        except (AttributeError, RuntimeError, TypeError, ValueError):
-                            checkpoint = None
-                            logger.debug(
-                                "preprocess_restore_filter_info_after_downsample_failed",
-                                extra={"file": filename_for_log},
-                                exc_info=True,
-                            )
-                    log_func(
-                        f"Resampled {filename_for_log} to {new_sf:.3f} Hz."
-                    )
-                    if debug_enabled:
-                        logger.debug(
-                            "[DS] %s: sfreq %.3f -> %.3f",
-                            filename_for_log,
-                            sf,
-                            new_sf,
-                        )
-                except Exception as resample_err:
-                    checkpoint = None
-                    if policy.strict_processing_errors:
-                        raise RuntimeError(f"{policy.acquisition_label} resampling failed: {resample_err}") from resample_err
-                    log_func(
-                        f"Warn: Resampling failed for {filename_for_log}: "
-                        f"{resample_err}"
-                    )
-                    if debug_enabled:
-                        logger.debug(
-                            "[DS] %s: RESAMPLE FAILED (sfreq=%.3f, target=%s)",
-                            filename_for_log,
-                            sf,
-                            downsample_rate,
-                        )
-            else:
-                log_func(
-                    f"No downsampling needed for {filename_for_log} "
-                    f"(sfreq={sf:.3f}, target={downsample_rate})."
-                )
-                if debug_enabled:
-                    logger.debug(
-                        "[DS] %s: no resample (sfreq=%.3f, target=%s)",
-                        filename_for_log,
-                        sf,
-                        downsample_rate,
-                    )
-        else:
-            log_func(f"Skip downsample for {filename_for_log}.")
-            if debug_enabled:
-                logger.debug("[DS] %s: skip (no downsample_rate set)", filename_for_log)
-        try:
-            logger.debug(
-                "preprocess_stage_after_downsample",
-                extra={
-                    "file": filename_for_log,
-                    "sfreq": float(raw.info.get("sfreq", -1.0)),
-                },
-            )
-        except (TypeError, ValueError, RuntimeError):
-            logger.debug(
-                "preprocess_stage_after_downsample_logging_failed",
-                extra={"file": filename_for_log},
-            )
+        execute_preprocessing_stage("temporal_filter", _stage_temporal_filter, context)
+        execute_preprocessing_stage("line_noise_filter", _stage_line_noise_filter, context)
+        execute_preprocessing_stage("resample", _stage_resample, context)
+        raw, checkpoint = context.raw, context.checkpoint
 
         _realize_analysis_spans_for_raw(raw, params, policy)
 

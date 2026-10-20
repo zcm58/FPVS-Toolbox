@@ -8,16 +8,19 @@ changed here. Unaffected samples are left to the ordinary preprocessing path.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from copy import deepcopy
 from dataclasses import dataclass
 import hashlib
 import json
-from typing import Any
+from typing import Any, Callable
 
 import mne
 import numpy as np
 
 from Main_App.io.recorded_eeg_geometry import validate_raw_eeg_geometry
+from Main_App.io.pipeline_events import canonical_recording_events
 from Main_App.processing.analysis_spans import validate_realized_target_analysis_span_plan
+from Main_App.processing.pipeline_plan import PipelineCancelled, PipelineExecutionError, PipelinePlan
 
 
 CONDITION_INTERPOLATION_VERSION = "condition_electrode_interpolation_v1"
@@ -55,7 +58,11 @@ class PreparedConditionRepairs:
     provenance: dict[str, Any]
 
 
-def prepare_condition_repairs(raw: Any, params: Mapping[str, Any]) -> PreparedConditionRepairs | None:
+def prepare_condition_repairs(
+    raw: Any, params: Mapping[str, Any], *,
+    interpolate: Callable[[Any], None] | None = None,
+    final_reference: Callable[[Any], None] | None = None,
+) -> PreparedConditionRepairs | None:
     requests = normalize_condition_interpolation_requests(
         params.get("_fpvs_condition_interpolation_requests"),
         excluded_condition_labels=params.get("_fpvs_excluded_condition_labels", ()),
@@ -126,11 +133,17 @@ def prepare_condition_repairs(raw: Any, params: Mapping[str, Any]) -> PreparedCo
             raise ValueError("Condition interpolation requires finite scalp donor electrodes.")
         branch = mne.io.RawArray(data, raw.info.copy(), first_samp=raw.first_samp + start, verbose=False)
         branch.info["bads"] = [name for name in raw.ch_names if name in effective]
-        branch.interpolate_bads(reset_bads=True, mode="accurate", verbose=False)
+        if interpolate is None:
+            branch.interpolate_bads(reset_bads=True, mode="accurate", verbose=False)
+        else:
+            interpolate(branch)
         if branch.info["bads"]:
             raise RuntimeError("Condition interpolation left unresolved bad electrodes.")
-        branch.set_eeg_reference(ref_channels="average", projection=True, verbose=False)
-        branch.apply_proj(verbose=False)
+        if final_reference is None:
+            branch.set_eeg_reference(ref_channels="average", projection=True, verbose=False)
+            branch.apply_proj(verbose=False)
+        else:
+            final_reference(branch)
         repaired = branch.get_data(picks=eeg_picks)
         if not np.isfinite(repaired).all():
             raise RuntimeError("Condition interpolation produced nonfinite EEG samples.")
@@ -164,6 +177,66 @@ def apply_condition_repairs(raw: Any, repairs: PreparedConditionRepairs | None) 
     for start, stop, values in repairs.replacements:
         raw._data[repairs.eeg_picks, start:stop] = values
     return repairs.provenance
+
+
+def execute_condition_repairs(
+    plan: PipelinePlan, builtin: Callable[..., Any], raw: Any, repairs: PreparedConditionRepairs,
+) -> dict[str, Any]:
+    """Allow replacement splicing only within the already admitted EEG spans.
+
+    Preparation, interpolation and reference methods have already established
+    the authoritative repair scope. A replacement cannot redefine that scope or
+    its provenance. Historical execution adds no recording-sized snapshots.
+    """
+    method = next(method for method in plan.methods if method.stage_id == "condition_repairs")
+    if method.implementation is None:
+        return plan.execute("condition_repairs", builtin, raw, repairs)
+    try:
+        original = raw.get_data()
+        grid = (float(raw.info["sfreq"]), int(raw.n_times), int(raw.first_samp))
+        names, kinds = tuple(raw.ch_names), tuple(raw.get_channel_types())
+        geometry = validate_raw_eeg_geometry(raw, require_coordinates=True)
+        locations = np.array([channel["loc"] for channel in raw.info["chs"]])
+        coordinate_frames = tuple(channel["coord_frame"] for channel in raw.info["chs"])
+        events = canonical_recording_events(raw)
+        provenance = deepcopy(repairs.provenance)
+        eeg_picks = repairs.eeg_picks.copy()
+        non_eeg_picks = np.setdiff1d(np.arange(len(names)), eeg_picks)
+        allowed = np.zeros(raw.n_times, dtype=bool)
+        for start, stop, _values in repairs.replacements:
+            allowed[start:stop] = True
+        result = plan.execute("condition_repairs", builtin, raw, repairs)
+        if (float(raw.info["sfreq"]), int(raw.n_times), int(raw.first_samp)) != grid:
+            raise ValueError("Condition repairs must preserve the admitted sampling grid.")
+        if tuple(raw.ch_names) != names or tuple(raw.get_channel_types()) != kinds:
+            raise ValueError("Condition repairs must preserve channel names, roles and order.")
+        if (
+            not np.array_equal(np.array([channel["loc"] for channel in raw.info["chs"]]), locations, equal_nan=True)
+            or tuple(channel["coord_frame"] for channel in raw.info["chs"]) != coordinate_frames
+            or validate_raw_eeg_geometry(raw, require_coordinates=True) != geometry
+        ):
+            raise ValueError("Condition repairs must preserve admitted electrode geometry.")
+        after_events = canonical_recording_events(raw)
+        if (events is None) != (after_events is None) or (
+            events is not None and not np.array_equal(events, after_events)
+        ):
+            raise ValueError("Condition repairs must preserve canonical events.")
+        after = raw.get_data()
+        if after[non_eeg_picks].tobytes() != original[non_eeg_picks].tobytes():
+            raise ValueError("Condition repairs cannot change non-EEG samples.")
+        if after[eeg_picks][:, ~allowed].tobytes() != original[eeg_picks][:, ~allowed].tobytes():
+            raise ValueError("Condition repairs cannot change EEG outside approved sample spans.")
+        if not np.isfinite(after[eeg_picks][:, allowed]).all():
+            raise ValueError("Condition repairs produced nonfinite EEG samples.")
+        if not isinstance(result, dict) or result != provenance:
+            raise ValueError("Condition repairs must return the authoritative prepared provenance.")
+        return result
+    except (PipelineExecutionError, PipelineCancelled):
+        raise
+    except Exception as exc:
+        raise PipelineExecutionError(
+            f"Processing method {method.method_id!r} violated the condition repair contract: {exc}"
+        ) from exc
 
 
 def validate_condition_interpolation_provenance(

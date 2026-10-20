@@ -48,22 +48,35 @@ def ensure_project_hardware_ready(host: Any, paths: Iterable[str | Path]) -> boo
         current = resolve_hardware(project.preprocessing)
         detected = detect_hardware_from_paths(paths)
         if current.confirmed and (detected is None or detected == current.platform):
+            require_hardware_ready(project.preprocessing, paths)
             return True
         proposed = detected or current.platform
         if current.platform != proposed and current.confirmed:
             if not confirm_hardware_change(host, current.platform, proposed):
                 return False
         else:
-            response = QMessageBox.question(
-                host, "Confirm Project EEG Hardware",
-                f"The selected recording format indicates {HARDWARE_LABELS[proposed]}.\n\n"
-                "Was this the EEG hardware used for data collection? "
-                "The choice will be saved for this project.",
-                QMessageBox.Yes | QMessageBox.Cancel, QMessageBox.Cancel,
-            )
+            if detected is None:
+                selected, accepted = QInputDialog.getItem(
+                    host, "Confirm Project EEG Hardware", "EEG hardware used for data collection:",
+                    list(HARDWARE_LABELS.values()),
+                    list(HARDWARE_LABELS).index(current.platform), False,
+                )
+                if not accepted:
+                    return False
+                proposed = next(key for key, label in HARDWARE_LABELS.items() if label == selected)
+                response = QMessageBox.Yes
+            else:
+                response = QMessageBox.question(
+                    host, "Confirm Project EEG Hardware",
+                    f"The selected recording format indicates {HARDWARE_LABELS[proposed]}.\n\n"
+                    "Was this the EEG hardware used for data collection? "
+                    "The choice will be saved for this project.",
+                    QMessageBox.Yes | QMessageBox.Cancel, QMessageBox.Cancel,
+                )
             if response != QMessageBox.Yes:
                 return False
         updated = confirm_hardware_selection(project.preprocessing, proposed, confirmed_change=True)
+        require_hardware_ready(updated, paths)
         snapshot = deepcopy(vars(project))
         try:
             project.update_preprocessing(updated)

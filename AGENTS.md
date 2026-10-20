@@ -16,18 +16,23 @@ PySide6 and releases ship through a Windows installer.
   processing pipeline whose methods and parameters users select per project
   within the resolved hardware/montage capabilities, and complete FPVS Studio
   interoperability. Save and restore project pipeline choices; method changes
-  must explicitly invalidate affected results and caches. The pipeline editor
-  is a future feature, not an already implemented capability. Read
+  must explicitly invalidate affected results and caches. Versioned executable
+  method slots and persisted selections live in `processing.pipeline_plan`;
+  each slot currently has one production method. Alternative methods and their
+  selectors remain future work. Read
   [the current-state and future-direction contract](docs/agent/architecture/hardware-pipeline-studio-roadmap.md)
-  for related work. Complete Studio interoperability remains a goal: BioSemi64 and confirmed
-  Brain Products projects have processing routes, Unicorn remains gated, and
-  Studio import is partial. Brain Products format/capability limits are in
-  [the hardware guide](docs/user/reference/brain-products.md).
+  for related work. Confirmed ActiveTwo64, ActiveThree, Brain Products and
+  Unicorn projects have scoped BIDS/MNE processing routes. Studio import remains
+  partial; full interoperability is a goal. Supported formats, montage limits
+  and physical qualification gaps are in
+  [the hardware guide](docs/user/reference/eeg-hardware.md).
   Preserve the locked scientific contracts while extending these boundaries.
 
 - Production EEG reads use the project-local BIDS import boundary in
   `Main_App.io.bids_import` / `bids_loader`, reached through `io.load_utils`.
-  BDF and BVCDF signal bytes are preserved in raw EEG-BIDS datasets. BVRF uses
+  BDF and BVCDF signal bytes are preserved in raw EEG-BIDS datasets. Unicorn
+  permits only the reviewed unit-header correction, retaining original source
+  bytes and the correction receipt. BVRF uses
   an explicitly labeled lossless FIF64 derivative; do not describe that route
   as standard raw EEG-BIDS. Numerical preprocessing consumes MNE Raw and the
   immutable `io.recording_contract.RecordingContract`, never native-format
@@ -38,7 +43,16 @@ PySide6 and releases ship through a Windows installer.
   metadata and project settings. Existing calibrated QC stays restricted to
   its qualified geometry; this boundary does not qualify new hardware.
   Preserve source metadata, event semantics, precision, and existing scientific
-  fingerprints. See [the loading contract](docs/agent/architecture/eeg-loading-contract.md).
+  fingerprints. Canonical sample events must survive preflight, processing and
+  cache reload without edge-based redecoding. Unicorn stays at 250 Hz with eight
+  scalp channels, average reference, and no interpolation or calibrated spatial
+  QC. See [the loading contract](docs/agent/architecture/eeg-loading-contract.md).
+
+- Keep processing steps dispatched through their fixed method slots. Project
+  method IDs must be registered in application code; never import executable
+  code from project settings. Preserve mandatory timing/geometry/review guards,
+  checkpoint and condition-repair boundaries, and default fingerprint identity.
+  See [the module contract](docs/agent/architecture/pipeline-methods.md).
 
 - Think before coding: state assumptions, surface ambiguity, and ask when the safe interpretation is unclear.
 - Prefer the smallest behavior-preserving change that solves the task.

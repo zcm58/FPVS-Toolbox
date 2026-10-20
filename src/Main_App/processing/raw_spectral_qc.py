@@ -18,6 +18,7 @@ from Main_App.processing.fft_multinotch import (
     resolve_effective_centers,
 )
 from Main_App.processing.raw_channel_qc import SCALP_CHANNELS
+from Main_App.processing.pipeline_plan import PipelineCancelled
 from Main_App.processing.spectral_eligibility import (
     SpectralEligibilityResult,
     SpectralTargetAvailability,
@@ -52,7 +53,7 @@ RAW_SPECTRAL_NOTCH_COLLISION_MESSAGE = (
 )
 
 
-class ConditionSpectralQCCancelled(RuntimeError):
+class ConditionSpectralQCCancelled(PipelineCancelled):
     """Raised when condition spectral QC is cancelled between FFT batches."""
 
 
@@ -1011,6 +1012,35 @@ def _iter_condition_spectral_amplitude_batches(
 
 
 def evaluate_condition_spectral_qc_v2(
+    data: np.ndarray,
+    *,
+    sfreq: float,
+    settings: Mapping[str, Any],
+    effective_upper_frequency_hz: float,
+    channel_names: Sequence[str] | None = None,
+    condition_label: str = "condition",
+    thresholds: ConditionSpectralQCThresholds | None = None,
+    should_cancel: Callable[[], bool] | None = None,
+) -> ConditionSpectralQCResult:
+    """Dispatch the project's method for exact-span spectral review."""
+    from Main_App.processing.pipeline_plan import resolve_pipeline_plan
+    from Main_App.io.acquisition_metadata import resolve_recording_contract
+    plan = resolve_pipeline_plan(settings)
+    plan.validate_capabilities(resolve_recording_contract(settings))
+    result = plan.execute(
+        "raw_spectral_screening", _evaluate_condition_spectral_qc_v2, data,
+        sfreq=sfreq, settings=settings,
+        effective_upper_frequency_hz=effective_upper_frequency_hz,
+        channel_names=channel_names, condition_label=condition_label,
+        thresholds=thresholds, should_cancel=should_cancel,
+    )
+    if not isinstance(result, ConditionSpectralQCResult):
+        from Main_App.processing.pipeline_plan import PipelineExecutionError
+        raise PipelineExecutionError("Raw spectral screening returned incompatible evidence.")
+    return result
+
+
+def _evaluate_condition_spectral_qc_v2(
     data: np.ndarray,
     *,
     sfreq: float,

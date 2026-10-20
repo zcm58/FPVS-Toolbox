@@ -7,17 +7,24 @@ this module does not assume any field in today's Studio interchange schemas.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from copy import deepcopy
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
-HARDWARE_LABELS = {"biosemi": "BioSemi", "brain_products": "Brain Products"}
+HARDWARE_LABELS = {
+    "biosemi": "BioSemi ActiveTwo", "biosemi_active_three": "BioSemi ActiveThree",
+    "brain_products": "Brain Products", "unicorn": "Unicorn Hybrid Black",
+}
 HARDWARE_KEYS = ("hardware_platform", "hardware_confirmed", "hardware_selection_source")
 BRAIN_PRODUCTS_KEYS = (
     "initial_reference", "initial_reference_channels", "drop_reference_channels",
     "kurtosis_screening_enabled", "channel_types",
 )
-HARDWARE_SETTINGS_KEYS = (*HARDWARE_KEYS, *BRAIN_PRODUCTS_KEYS)
-_FORMAT_PLATFORMS = {".bdf": "biosemi", ".vhdr": "brain_products", ".bvrh": "brain_products"}
+HARDWARE_SETTINGS_KEYS = (*HARDWARE_KEYS, *BRAIN_PRODUCTS_KEYS, "acquisition_profile", "recording_event_policy")
+RECORDED_GEOMETRY_PLATFORMS = frozenset({"brain_products", "biosemi_active_three"})
+BDF_PLATFORMS = frozenset({"biosemi", "biosemi_active_three", "unicorn"})
+UNICORN_FACTORY_MAPPING_PROFILE = "unicorn_factory_v1"
+_FORMAT_PLATFORMS = {".vhdr": "brain_products", ".bvrh": "brain_products"}
 
 
 class HardwareChangeConfirmationRequired(ValueError):
@@ -32,9 +39,11 @@ class HardwareSelection:
 
 
 def _platform(value: Any) -> str:
-    if not isinstance(value, str) or value.strip().lower() not in HARDWARE_LABELS:
+    normalized = value.strip().lower() if isinstance(value, str) else ""
+    normalized = {"brainproducts": "brain_products", "brain products": "brain_products"}.get(normalized, normalized)
+    if normalized not in HARDWARE_LABELS:
         raise ValueError(f"Unsupported EEG hardware platform: {value!r}.")
-    return value.strip().lower()
+    return normalized
 
 
 def _boolean(value: Any, field: str) -> bool:
@@ -64,7 +73,24 @@ def normalize_hardware_settings(settings: Mapping[str, Any] | None) -> dict[str,
         return {}
     choice = resolve_hardware(source)
     result = dict(zip(HARDWARE_KEYS, (choice.platform, choice.confirmed, choice.source)))
-    if choice.platform != "brain_products":
+    if choice.platform == "unicorn":
+        if (source.get("initial_reference") not in (None, "", "recorded", "average_scalp")
+                or source.get("initial_reference_channels") not in (None, "", [], ())
+                or _boolean(source.get("drop_reference_channels", False), "drop_reference_channels")):
+            raise ValueError("Unicorn requires its eight-scalp-channel average reference without dropped reference channels.")
+        result.update(acquisition_profile=unicorn_acquisition_profile(source),
+                      kurtosis_screening_enabled=False)
+        if "recording_event_policy" in source:
+            result["recording_event_policy"] = normalize_recording_event_policy(source["recording_event_policy"])
+        authority = result.get("recording_event_policy", {}).get("authority", "status")
+        decoder = result["acquisition_profile"]["event_decoder_id"]
+        expected = "explicit_annotations" if authority == "annotations" else "unicorn_sample"
+        if decoder != expected:
+            raise ValueError("Unicorn event decoder must match its explicit recording event policy.")
+        return result
+    if "acquisition_profile" in source:
+        raise ValueError("An explicit acquisition profile is supported only for Unicorn project settings.")
+    if choice.platform not in RECORDED_GEOMETRY_PLATFORMS:
         return result
     reference = str(source.get("initial_reference", "recorded")).strip().lower()
     if reference not in {"recorded", "channels"}:
@@ -89,6 +115,55 @@ def normalize_hardware_settings(settings: Mapping[str, Any] | None) -> dict[str,
         channel_types=normalize_channel_types(source.get("channel_types", {})),
     )
     return result
+
+
+def unicorn_acquisition_profile(settings: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    """Validate and detach the explicit native-rate, eight-scalp policy."""
+    from Main_App.io.acquisition_profiles import (
+        UNICORN_FACTORY_MAPPING_SOURCE_URL, UNICORN_FACTORY_RECORDED_LABEL_MAP,
+        resolve_acquisition_contract,
+    )
+
+    source = settings or {}
+    profile = deepcopy(source.get("acquisition_profile", {
+        "id": "unicorn_hybrid_black", "version": "1.0",
+        "montage_id": "unicorn8", "montage_version": "1.0",
+        "event_decoder_id": "unicorn_sample", "event_decoder_version": "1.0",
+        "reference_policy": "average_scalp",
+    }))
+    if source.get("electrode_mapping_profile") == UNICORN_FACTORY_MAPPING_PROFILE:
+        if not isinstance(profile, dict):
+            raise ValueError("acquisition_profile must be an explicit configuration object.")
+        profile.update(
+            source_to_canonical=dict(UNICORN_FACTORY_RECORDED_LABEL_MAP),
+            label_mapping_evidence={"status": "verified", "reference": UNICORN_FACTORY_MAPPING_SOURCE_URL},
+        )
+    contract = resolve_acquisition_contract({"acquisition_profile": profile})
+    if contract.profile.id != "unicorn_hybrid_black":
+        raise ValueError("Unicorn projects require the Unicorn Hybrid Black acquisition profile.")
+    return profile
+
+
+def normalize_recording_event_policy(value: Any) -> dict[str, Any]:
+    """Persist explicit annotation semantics; numeric text is never guessed."""
+    allowed = {"authority", "numeric_annotations", "named_annotation_codes", "marker_labels"}
+    if not isinstance(value, Mapping) or set(value) - allowed:
+        raise ValueError("recording_event_policy must contain supported event-policy fields.")
+    authority = value.get("authority", "status")
+    if not isinstance(authority, str) or authority not in {"status", "annotations", "reconcile"}:
+        raise ValueError("Event authority must be status, annotations, or reconcile.")
+    codes = value.get("named_annotation_codes", {})
+    if not isinstance(codes, Mapping) or any(
+        not isinstance(name, str) or not name.strip() or isinstance(code, bool)
+        or not isinstance(code, int) or not 1 <= code <= 255 for name, code in codes.items()
+    ):
+        raise ValueError("Named annotation codes require nonempty labels and integer codes from 1 to 255.")
+    labels = value.get("marker_labels", [])
+    if not isinstance(labels, (tuple, list)) or any(not isinstance(label, str) or not label.strip() for label in labels):
+        raise ValueError("Marker labels must be a list of nonempty annotation labels.")
+    return {"authority": authority,
+            "numeric_annotations": _boolean(value.get("numeric_annotations", False), "numeric_annotations"),
+            "named_annotation_codes": dict(codes), "marker_labels": list(labels)}
 
 
 def normalize_channel_types(value: Any) -> dict[str, str]:
@@ -134,11 +209,17 @@ def brain_products_qc_defaults(qc_settings: Any) -> Any:
                    kurtosis_review_auto_interpolate_extreme=False)
 
 
+def hardware_supports_calibrated_qc(settings: Mapping[str, Any] | None) -> bool:
+    """Only the existing ActiveTwo64 policy qualifies the calibrated reviews."""
+    return resolve_hardware(settings).platform == "biosemi"
+
+
 def detect_hardware_from_paths(paths: Iterable[str | Path]) -> str | None:
-    detected = {_FORMAT_PLATFORMS[Path(path).suffix.lower()] for path in paths
-                if Path(path).suffix.lower() in _FORMAT_PLATFORMS}
-    if len(detected) > 1:
-        raise ValueError("This project mixes BioSemi and BrainVision recordings. Use a separate project for each acquisition hardware platform.")
+    suffixes = {Path(path).suffix.lower() for path in paths}
+    if ".bdf" in suffixes and suffixes.intersection(_FORMAT_PLATFORMS):
+        raise ValueError("This project mixes BDF and BrainVision recordings. Use a separate project for each acquisition hardware platform.")
+    # BDF is shared by multiple manufacturers and BioSemi generations.
+    detected = {_FORMAT_PLATFORMS[suffix] for suffix in suffixes if suffix in _FORMAT_PLATFORMS}
     return next(iter(detected), None)
 
 
@@ -157,7 +238,10 @@ def confirm_hardware_selection(
     updated = dict(settings or {})
     changed = selected != current.platform
     updated.update(hardware_platform=selected, hardware_confirmed=True, hardware_selection_source=source)
-    if selected == "brain_products" and (changed or "initial_reference" not in updated):
+    if changed:
+        for key in (*BRAIN_PRODUCTS_KEYS, "acquisition_profile", "recording_event_policy"):
+            updated.pop(key, None)
+    if selected in RECORDED_GEOMETRY_PLATFORMS and (changed or "initial_reference" not in updated):
         updated.update(
             initial_reference="recorded", initial_reference_channels=[],
             drop_reference_channels=False, kurtosis_screening_enabled=False, channel_types={},
@@ -166,9 +250,17 @@ def confirm_hardware_selection(
             ref_chan1="", ref_chan2="", removed_electrode_detection_mode="off",
             auto_detect_removed_electrodes=False, kurtosis_auto_interpolate_all=False,
         )
+    elif selected == "unicorn" and (changed or "acquisition_profile" not in updated):
+        updated.update(
+            electrode_montage="unicorn8", electrode_mapping_profile="anatomical_labels",
+            downsample=250, downsample_rate=250, max_chan_idx_keep=8, max_idx_keep=8,
+            ref_chan1="", ref_chan2="", kurtosis_screening_enabled=False,
+            removed_electrode_detection_mode="off", auto_detect_removed_electrodes=False,
+            kurtosis_auto_interpolate_all=False, manual_removed_electrodes_enabled=False,
+            manual_removed_electrodes={}, manual_removed_electrodes_by_recording={},
+            acquisition_profile=unicorn_acquisition_profile(),
+        )
     elif selected == "biosemi" and changed:
-        for key in BRAIN_PRODUCTS_KEYS:
-            updated.pop(key, None)
         updated.update(electrode_montage="biosemi64", electrode_mapping_profile="anatomical_labels",
                        max_chan_idx_keep=64, max_idx_keep=64, ref_chan1="EXG1", ref_chan2="EXG2")
     return updated
@@ -176,9 +268,12 @@ def confirm_hardware_selection(
 
 def require_hardware_ready(settings: Mapping[str, Any] | None, paths: Iterable[str | Path] = ()) -> str:
     choice = resolve_hardware(settings)
+    paths = tuple(paths)
     detected = detect_hardware_from_paths(paths)
     if not choice.confirmed:
         raise ValueError("Confirm this project's EEG hardware in Settings before processing.")
     if detected is not None and detected != choice.platform:
         raise ValueError(f"Recording format indicates {HARDWARE_LABELS[detected]}, but this project is configured for {HARDWARE_LABELS[choice.platform]}. Confirm the correct hardware in Settings.")
+    if any(Path(path).suffix.lower() == ".bdf" for path in paths) and choice.platform not in BDF_PLATFORMS:
+        raise ValueError(f"BDF recording format is incompatible with the configured {HARDWARE_LABELS[choice.platform]} reader. Confirm the correct hardware in Settings.")
     return choice.platform

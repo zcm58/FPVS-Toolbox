@@ -20,10 +20,16 @@ from Tools.Stats.analysis.full_snr import (
     compute_full_snr_prefix_from_amplitudes,
 )
 from Tools.Stats.analysis.noise_utils import (
+    QC14NoiseMetricResult,
     compute_qc14_standard_metrics,
 )
 from Main_App.processing.fft_crop_utils import compute_onbin_N, compute_onbin_step
+from Main_App.processing.pipeline_plan import (
+    PipelineExecutionError,
+    resolve_pipeline_plan,
+)
 from Main_App.io.acquisition_metadata import event_detection_kwargs, resolve_recording_contract
+from Main_App.io.pipeline_events import canonical_recording_events
 from Main_App.processing.fft_multinotch import (
     FFT_MULTINOTCH_HALF_WIDTH_HZ,
     FFT_MULTINOTCH_METHOD_VERSION,
@@ -223,6 +229,73 @@ def _mean_epochs_float64(epoch_data: np.ndarray) -> np.ndarray:
         # arrays, whose reduction can otherwise differ at the final bit.
         averaging_data = epoch_array.astype(np.float64)
     return np.mean(averaging_data, axis=0)
+
+
+def _amplitude_spectrum(
+    averaged_microvolts: np.ndarray, sampling_rate_hz: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Retain the established FFT, normalization and one-sided bin selection."""
+    sample_count = averaged_microvolts.shape[1]
+    frequencies = np.fft.rfftfreq(sample_count, d=1.0 / sampling_rate_hz)
+    full_spectrum = np.fft.fft(averaged_microvolts, axis=1)
+    amplitudes = np.abs(full_spectrum[:, :sample_count // 2 + 1]) / sample_count * 2
+    return frequencies, amplitudes
+
+
+def _full_snr(
+    amplitudes: np.ndarray, *, output_bin_count: int | None = None,
+) -> np.ndarray:
+    """One method contract for the exact full-spectrum and prefix paths."""
+    if output_bin_count is None:
+        return compute_full_snr_from_amplitudes(amplitudes)
+    return compute_full_snr_prefix_from_amplitudes(
+        amplitudes, output_bin_count=output_bin_count,
+    )
+
+
+def _average_accumulated(accumulated: np.ndarray, count: int) -> np.ndarray:
+    """Preserve the current equal-object arithmetic mean after accumulation."""
+    return accumulated / count
+
+
+def _capture_occurrence_values(
+    destinations: dict[str, list[np.ndarray]], **metrics: np.ndarray,
+) -> None:
+    """Retain detached inputs only when an alternative aggregator needs them."""
+    for name, values in metrics.items():
+        snapshot = values.copy()
+        snapshot.flags.writeable = False
+        destinations[name].append(snapshot)
+
+
+def _aggregate_occurrences(
+    plan, accumulated: np.ndarray, count: int, *, metric_name: str,
+    occurrence_values: dict[str, list[np.ndarray]] | None,
+) -> np.ndarray:
+    """Custom methods also receive each original metric array in input order.
+
+    The built-in path retains only the existing running sum and passes no new
+    keyword arguments. A custom implementation accepts ``occurrence_values``
+    (a tuple of detached read-only arrays) and ``metric_name`` in addition to
+    the historical sum and count; it can therefore compute a median or another
+    qualified aggregation without changing the export orchestration.
+    """
+    kwargs = {}
+    if occurrence_values is not None:
+        values = tuple(occurrence_values[metric_name])
+        if len(values) != count:
+            raise PipelineExecutionError("Occurrence aggregation inputs do not match the contributing count.")
+        kwargs = {"occurrence_values": values, "metric_name": metric_name}
+    return plan.execute("occurrence_average", _average_accumulated, accumulated, count, **kwargs)
+
+
+def _pipeline_array(value: Any, *, shape: tuple[int, ...], stage: str) -> np.ndarray:
+    """Enforce the array boundary without changing valid scientific values."""
+    if not isinstance(value, np.ndarray) or value.shape != shape or value.dtype != np.dtype(np.float64):
+        raise PipelineExecutionError(
+            f"Processing step {stage!r} must return a float64 array with shape {shape}."
+        )
+    return value
 
 
 def _eeg_pick_indices(data_object: Any, *, is_evoked: bool) -> np.ndarray:
@@ -482,6 +555,9 @@ def _load_events_for_file(
     ) as raw:
         if raw is None:
             raise RuntimeError("Could not load the normalized recording for event recovery.")
+        canonical = canonical_recording_events(raw)
+        if canonical is not None:
+            return canonical, int(raw.n_times)
         events = np.array([])
         if len(raw.annotations) > 0 and event_id_map:
             mne_annots_event_id_map = {
@@ -577,6 +653,16 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
     but must not change metric calculation, processing order, output formats,
     filenames, sheet names, or export behavior.
     """
+    # Resolve every slot before any output folder or artifact is published.
+    pipeline_plan = resolve_pipeline_plan(getattr(app, "settings", None) or {})
+    pipeline_identity = {} if pipeline_plan.is_legacy_default else {"processing_pipeline": pipeline_plan.to_config()}
+    custom_occurrence_aggregation = any(
+        method.stage_id == "occurrence_average" and method.implementation is not None
+        for method in pipeline_plan.methods
+    )
+    pipeline_plan.validate_capabilities(resolve_recording_contract(
+        app.settings if isinstance(getattr(app, "settings", None), dict) else {}
+    ))
     validate_condition_output_names(
         label for label in condition_labels_present
         if label != getattr(app, "group_name_for_output", None)
@@ -774,6 +860,10 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
 
         # --- Metrics Calculation (largely unchanged) ---
         accum = {"fft": None, "snr": None, "z": None, "bca": None}
+        occurrence_values = (
+            {name: [] for name in (*accum, "full_snr", "full_fft")}
+            if custom_occurrence_aggregation else None
+        )
         full_snr_accum = None
         full_snr_frequencies = None
         full_fft_accum = None
@@ -849,6 +939,10 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                     continue
 
                 if is_evoked:
+                    if any(method.stage_id == "repetition_average" and method.implementation is not None for method in pipeline_plan.methods):
+                        raise PipelineExecutionError(
+                            "A different repetition-averaging method requires the original Epochs; this Evoked input is already averaged."
+                        )
                     avg_data = (
                         data_object.data[eeg_pick_indices, :]
                         if data_eeg is None
@@ -864,7 +958,12 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                         if data_eeg is None
                         else data_eeg.get_data()
                     )
-                    avg_data = _mean_epochs_float64(ep_data)
+                    avg_data = pipeline_plan.execute(
+                        "repetition_average", _mean_epochs_float64, ep_data,
+                    )
+                    avg_data = _pipeline_array(
+                        avg_data, shape=ep_data.shape[1:], stage="repetition_average",
+                    )
                     _log_export_timing(
                         "epochs_get_data_average",
                         average_started,
@@ -1070,13 +1169,23 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                         f"    Scaling to uV. Max: {np.max(np.abs(avg_data_uv)):.2f} uV"
                     )
 
-                num_fft_bins = num_times // 2 + 1
                 fft_started = perf_counter()
-                fft_frequencies = np.fft.rfftfreq(num_times, d=1.0 / sfreq)
-                fft_full_spectrum = np.fft.fft(avg_data_uv, axis=1)
-                fft_amplitudes = (
-                    np.abs(fft_full_spectrum[:, :num_fft_bins]) / num_times * 2
+                spectrum_result = pipeline_plan.execute(
+                    "spectrum", _amplitude_spectrum, avg_data_uv, sfreq,
                 )
+                if not isinstance(spectrum_result, tuple) or len(spectrum_result) != 2:
+                    raise PipelineExecutionError("Amplitude spectrum must return its frequency and amplitude arrays.")
+                fft_frequencies, fft_amplitudes = spectrum_result
+                fft_frequencies = _pipeline_array(
+                    fft_frequencies, shape=(num_times // 2 + 1,), stage="spectrum",
+                )
+                fft_amplitudes = _pipeline_array(
+                    fft_amplitudes, shape=(num_channels, num_times // 2 + 1), stage="spectrum",
+                )
+                if not np.array_equal(fft_frequencies, np.fft.rfftfreq(num_times, d=1.0 / sfreq)):
+                    raise PipelineExecutionError("Amplitude spectrum changed the required on-bin frequency grid.")
+                if not np.isfinite(fft_amplitudes).all() or np.any(fft_amplitudes < 0):
+                    raise PipelineExecutionError("Amplitude spectrum must contain finite nonnegative amplitudes.")
                 _log_export_timing(
                     "fft_amplitudes",
                     fft_started,
@@ -1193,7 +1302,8 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                         )
                         + 1,
                     )
-                    full_snr_matrix = compute_full_snr_prefix_from_amplitudes(
+                    full_snr_matrix = pipeline_plan.execute(
+                        "full_snr", _full_snr,
                         fft_amplitudes,
                         output_bin_count=full_snr_bin_count,
                     )
@@ -1202,8 +1312,9 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                     # Multiple objects can carry distinct sampling grids while
                     # retaining the same FFT matrix shape. Keep the established
                     # full-spectrum accumulation for that uncommon case.
-                    full_snr_matrix = compute_full_snr_from_amplitudes(
-                        fft_amplitudes
+                    full_snr_matrix = pipeline_plan.execute(
+                        "full_snr", _full_snr, fft_amplitudes,
+                        output_bin_count=None,
                     )
                     full_snr_frequencies = fft_frequencies
                 _log_export_timing(
@@ -1213,6 +1324,10 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                     condition=cond_label_from_keys,
                     object_index=data_idx + 1,
                     extra=f"channels={num_channels} bins={fft_amplitudes.shape[1]}",
+                )
+                full_snr_matrix = _pipeline_array(
+                    full_snr_matrix, shape=(num_channels, len(full_snr_frequencies)),
+                    stage="full_snr",
                 )
 
                 num_target_freqs = len(target_frequencies)
@@ -1236,7 +1351,8 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                     for freq_idx, availability in enumerate(
                         condition_eligibility.targets
                     ):
-                        metric_result = compute_qc14_standard_metrics(
+                        metric_result = pipeline_plan.execute(
+                            "target_metrics", compute_qc14_standard_metrics,
                             channel_amplitudes,
                             target_idx=availability.target_bin_index,
                             candidate_bin_indices=(
@@ -1250,6 +1366,18 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                                 availability.target_amplitude_status
                             ),
                         )
+                        if not isinstance(metric_result, QC14NoiseMetricResult):
+                            raise PipelineExecutionError(
+                                "Target-frequency metrics must return the typed metric and availability result."
+                            )
+                        if metric_result.target_bin_index != availability.target_bin_index or metric_result.candidate_bin_indices != tuple(availability.noise_candidate_bin_indices):
+                            raise PipelineExecutionError("Target-frequency metrics changed the validated frequency/noise domain.")
+                        if not availability.standard_metrics_available and any(
+                            value is not None for value in (metric_result.bca, metric_result.snr, metric_result.local_z)
+                        ):
+                            raise PipelineExecutionError("A metric method cannot enable a spectrally ineligible target.")
+                        if availability.target_amplitude_status != "available" and metric_result.target_amplitude_status not in {availability.target_amplitude_status, "unavailable"}:
+                            raise PipelineExecutionError("A metric method cannot upgrade unavailable target-amplitude evidence.")
                         if (
                             metric_result.target_amplitude is not None
                             and metric_result.target_amplitude_status != "unavailable"
@@ -1318,6 +1446,12 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                     extra=f"channels={final_num_channels} targets={num_target_freqs}",
                 )
 
+                if occurrence_values is not None:
+                    _capture_occurrence_values(
+                        occurrence_values, fft=metrics_fft, snr=metrics_snr,
+                        z=metrics_z, bca=metrics_bca,
+                        full_snr=full_snr_matrix, full_fft=fft_amplitudes,
+                    )
                 if accum["fft"] is None:
                     accum = {
                         "fft": metrics_fft,
@@ -1342,7 +1476,7 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                 app.log(
                     f"!!! Error post-processing data object {data_idx + 1}: {e}\n{traceback.format_exc()}"
                 )
-                if isinstance(e, (SpectralEligibilityError, OutputIntegrityError)):
+                if isinstance(e, (SpectralEligibilityError, OutputIntegrityError, PipelineExecutionError)):
                     export_receipts.append(
                         _blocked_export_receipt(
                             app,
@@ -1352,6 +1486,7 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                             stage=(
                                 e.stage
                                 if isinstance(e, OutputIntegrityError)
+                                else "pipeline_method" if isinstance(e, PipelineExecutionError)
                                 else "spectral_eligibility"
                             ),
                             reason=str(e),
@@ -1380,7 +1515,15 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                     "No canonical spectral eligibility result was retained for export."
                 )
             dataframe_started = perf_counter()
-            avg_metrics = {k: v / valid_data_count for k, v in accum.items()}
+            avg_metrics = {
+                key: _pipeline_array(
+                    _aggregate_occurrences(
+                        pipeline_plan, value, valid_data_count, metric_name=key,
+                        occurrence_values=occurrence_values,
+                    ), shape=value.shape, stage="occurrence_average",
+                )
+                for key, value in accum.items()
+            }
             try:
                 bca_integrity_receipt = require_finite_computable_bca(
                     avg_metrics["bca"],
@@ -1411,11 +1554,21 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                 raise
             freq_column_names = _frequency_column_names(target_frequencies)
             full_snr_avg = (
-                full_snr_accum / valid_data_count if full_snr_accum is not None else None
+                _aggregate_occurrences(
+                    pipeline_plan, full_snr_accum, valid_data_count,
+                    metric_name="full_snr", occurrence_values=occurrence_values,
+                ) if full_snr_accum is not None else None
             )
             full_fft_avg = (
-                full_fft_accum / valid_data_count if full_fft_accum is not None else None
+                _aggregate_occurrences(
+                    pipeline_plan, full_fft_accum, valid_data_count,
+                    metric_name="full_fft", occurrence_values=occurrence_values,
+                ) if full_fft_accum is not None else None
             )
+            if full_snr_avg is not None:
+                _pipeline_array(full_snr_avg, shape=full_snr_accum.shape, stage="occurrence_average")
+            if full_fft_avg is not None:
+                _pipeline_array(full_fft_avg, shape=full_fft_accum.shape, stage="occurrence_average")
             dataframes_to_save = {
                 "FFT Amplitude (uV)": pd.DataFrame(
                     avg_metrics["fft"],
@@ -1538,6 +1691,7 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                     spectral_metric_qc_df=spectral_metric_qc_df,
                     timing_sink=export_timing_sink if isinstance(export_timing_sink, list) else None,
                     spectral_metadata={
+                        **pipeline_identity,
                         "sampling_frequency_hz": float(sfreq),
                         "fft_sample_count": int(num_times),
                         "frequencies_hz": fft_frequencies.tolist(),
@@ -1554,6 +1708,7 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                     _fingerprinted_export_receipt({
                         "version": RECORDING_CONDITION_EXPORT_RECEIPT_VERSION,
                         "status": "written",
+                        **pipeline_identity,
                         **_run_identity_payload(
                             app,
                             fallback_recording_id=pid,

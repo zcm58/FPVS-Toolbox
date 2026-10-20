@@ -97,6 +97,7 @@ from Main_App.projects.preprocessing_settings import (
     normalize_manual_excluded_recording_conditions,
     normalize_manual_excluded_recordings,
 )
+from Main_App.processing.pipeline_plan import fingerprint_settings as pipeline_fingerprint_settings
 
 if TYPE_CHECKING:
     from Main_App.processing.processing_controller import RawFileInfo
@@ -803,7 +804,10 @@ def build_processing_fingerprint(
     settings: Mapping[str, Any],
     event_map: Mapping[str, int],
 ) -> str:
-    project_preprocessing = getattr(project, "preprocessing", {}) or {}
+    project_preprocessing = pipeline_fingerprint_settings(getattr(project, "preprocessing", {}) or {})
+    settings = pipeline_fingerprint_settings(settings)
+    if settings.get("processing_pipeline") != project_preprocessing.get("processing_pipeline"):
+        raise ValueError("Processing settings and project pipeline method selections disagree.")
     repeated_session_project = bool(
         getattr(project, "sessions", {})
         or getattr(project, "recording_sources", {})

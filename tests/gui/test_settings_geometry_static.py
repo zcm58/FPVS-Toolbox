@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import copy
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -41,6 +42,7 @@ def _load_methods(panel):
                  and node.name == "SettingsDialog")
     namespace = {
         **vars(preprocessing_settings), **vars(dv_policy_settings),
+        "copy": copy,
         "config": SimpleNamespace(DEFAULT_STIM_CHANNEL="Status"),
         "REMOVED_ELECTRODE_DETECTION_MODE_AUTO": "auto",
         "QMessageBox": panel.messages,
@@ -179,3 +181,29 @@ def test_settings_geometry_refresh_failure_blocks_save_validation(tmp_path, fail
         assert str(failure) in panel.messages.warning.call_args.args[2]
     else:
         panel._show_settings_validation.assert_called_once_with(str(failure))
+
+
+def test_settings_collection_preserves_newer_hidden_method_selection(tmp_path, monkeypatch):
+    from Main_App.processing import pipeline_plan
+
+    registry = pipeline_plan.BUILTIN_PIPELINE_REGISTRY.with_methods(
+        pipeline_plan.PipelineMethod(
+            "temporal_filter", "test_settings_filter_v1", "Test filter", lambda *args, **kwargs: None,
+        ),
+    )
+    monkeypatch.setattr(pipeline_plan, "get_pipeline_registry", lambda: registry)
+    panel = _panel(tmp_path, ANATOMICAL)
+    concurrent = Project.load(tmp_path)
+    selected = pipeline_plan.default_pipeline_config()
+    selected["methods"]["temporal_filter"] = "test_settings_filter_v1"
+    concurrent.preprocessing["processing_pipeline"] = selected
+    concurrent.save()
+    panel.preproc_edits[0] = SimpleNamespace(text=lambda: "42")
+    values = panel._collect_project_preprocessing_inputs()
+    assert values["processing_pipeline"] == selected
+    assert values["processing_pipeline"] is not panel.project.preprocessing["processing_pipeline"]
+    panel.project.update_preprocessing(values)
+    panel.project.save()
+    reopened = Project.load(tmp_path)
+    assert reopened.preprocessing["processing_pipeline"] == selected
+    assert reopened.preprocessing["low_pass"] == 42.0

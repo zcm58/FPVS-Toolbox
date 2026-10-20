@@ -75,10 +75,12 @@ def _cache_key_payload(
     method: Mapping[str, object],
     event_plan: Sequence[Mapping[str, object]] | Mapping[str, object],
 ) -> dict[str, Any]:
+    from Main_App.processing.pipeline_plan import fingerprint_settings
+
     return _json_snapshot(
         {
             "file_identity": dict(file_identity),
-            "settings": dict(settings),
+            "settings": fingerprint_settings(settings),
             "method": dict(method),
             "event_plan": event_plan,
         }

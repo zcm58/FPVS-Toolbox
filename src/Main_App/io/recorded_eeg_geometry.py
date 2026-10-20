@@ -58,11 +58,16 @@ def _coordinates(raw: Any, names: Sequence[str]) -> dict[str, list[float] | None
 def _identity(
     *, montage_id: str, mapping_profile: str, canonical: list[str],
     retained: list[str], coordinates: Mapping[str, Any], coordinate_source: str,
+    hardware_platform: str = "brain_products", interpolation_allowed: bool = True,
 ) -> dict[str, Any]:
+    if not isinstance(hardware_platform, str) or not hardware_platform or hardware_platform != hardware_platform.strip():
+        raise ValueError("Recorded EEG geometry requires an explicit acquisition platform.")
+    if type(interpolation_allowed) is not bool:
+        raise ValueError("Interpolation capability must be a boolean.")
     retained_coordinates = {name: coordinates[name] for name in retained}
     complete = all(value is not None for value in retained_coordinates.values())
     identity = {
-        "hardware_platform": "brain_products",
+        "hardware_platform": hardware_platform,
         "montage_id": montage_id,
         "geometry_version": RECORDED_GEOMETRY_VERSION,
         "coordinate_source": coordinate_source,
@@ -77,8 +82,11 @@ def _identity(
         "retained_scalp_channels": retained,
         "retained_scalp_channel_count": len(retained),
         "retained_scalp_set_fingerprint": _fingerprint(sorted(retained)),
-        "interpolation_supported": complete and len(retained) >= 4,
+        "interpolation_supported": interpolation_allowed and complete and len(retained) >= 4,
     }
+    # Existing Brain Products geometry is a frozen scientific identity.
+    if hardware_platform != "brain_products" or not interpolation_allowed:
+        identity["interpolation_allowed"] = interpolation_allowed
     identity["geometry_identity_fingerprint"] = _fingerprint(identity)
     return identity
 
@@ -86,6 +94,7 @@ def _identity(
 def attach_raw_recorded_geometry(
     raw: Any, *, montage_id: str = "recorded", template_montage: str | None = None,
     scalp_channels: Sequence[str] | None = None, mapping_profile: str = "recorded_labels",
+    hardware_platform: str | None = None, interpolation_allowed: bool | None = None,
 ) -> dict[str, Any]:
     """Attach identity after type/position resolution; never infer a cap by count.
 
@@ -98,11 +107,18 @@ def attach_raw_recorded_geometry(
     if set(retained) != set(eeg):
         raise ValueError("Recorded scalp identity must include every EEG channel and no auxiliary channels.")
     prior = read_raw_eeg_geometry(raw)
+    prior_recorded = prior if prior and prior.get("geometry_version") == RECORDED_GEOMETRY_VERSION else {}
+    platform = hardware_platform if hardware_platform is not None else prior_recorded.get("hardware_platform", "brain_products")
+    allow_interpolation = (
+        interpolation_allowed if interpolation_allowed is not None
+        else prior_recorded.get("interpolation_allowed", True)
+    )
     if template_montage is not None:
         if template_montage not in mne.channels.get_builtin_montages():
             raise ValueError(f"Unknown EEG montage template {template_montage!r}.")
         raw.set_montage(template_montage, match_case=True, on_missing="raise", verbose=False)
-        montage_id = template_montage
+        if montage_id == "recorded":
+            montage_id = template_montage
         source = "explicit_project_template"
     else:
         source = (
@@ -120,6 +136,7 @@ def attach_raw_recorded_geometry(
     identity = _identity(
         montage_id=montage_id, mapping_profile=mapping_profile, canonical=canonical,
         retained=retained, coordinates=_coordinates(raw, retained), coordinate_source=source,
+        hardware_platform=platform, interpolation_allowed=allow_interpolation,
     )
     setattr(raw, BIOSEMI64_RUNTIME_ATTRIBUTE, identity)
     return copy.deepcopy(identity)
@@ -145,6 +162,8 @@ def validate_raw_recorded_geometry(raw: Any, *, require_coordinates: bool = Fals
         canonical=_names(stored["canonical_scalp_channels"], label="Original EEG channels"),
         retained=retained, coordinates=_coordinates(raw, retained),
         coordinate_source=stored["coordinate_source"],
+        hardware_platform=stored["hardware_platform"],
+        interpolation_allowed=stored.get("interpolation_allowed", True),
     )
     if stored != expected:
         raise ValueError("Recorded EEG geometry changed after validation.")
@@ -176,6 +195,8 @@ def validate_recorded_geometry_identity(value: Mapping[str, Any]) -> dict[str, A
         montage_id=str(value.get("montage_id")), mapping_profile=str(value.get("electrode_mapping_profile")),
         canonical=canonical, retained=retained, coordinates=coordinates,
         coordinate_source=str(value.get("coordinate_source")),
+        hardware_platform=value.get("hardware_platform"),
+        interpolation_allowed=value.get("interpolation_allowed", True),
     )
     if dict(value) != expected:
         raise ValueError("Recorded EEG geometry identity or fingerprint is inconsistent.")

@@ -1,7 +1,7 @@
 # Brain Products recordings
 
-This feature is developed on the v3.0.1 feature branch; it is not part of the
-published v3.0.0 installer.
+This guide describes the development source, not the published v3.0.0 installer.
+For the other supported acquisition routes, see [EEG hardware](eeg-hardware.md).
 
 Select **Brain Products** when creating the project or in **Settings >
 Preprocessing > EEG hardware**. The setting belongs to the project and survives
@@ -39,6 +39,12 @@ The initial reference defaults to the reference already present in the samples.
 You may choose recorded reference channels explicitly and choose whether to drop
 them afterward. Processing finishes with the shared average EEG reference.
 All recorded EEG channels are retained by default; no 64-channel limit is applied.
+
+Both formats enter the project-local BIDS adapter before the shared MNE
+processing pipeline. BVCDF signal bytes are retained unchanged. BVRF retains
+its original companions and uses a lossless float64 FIF derivative to preserve
+calibration precision; that derivative is not a standard raw EEG-BIDS recording.
+Import itself does not filter, rereference, resample, or interpolate the data.
 
 ## Scope
 

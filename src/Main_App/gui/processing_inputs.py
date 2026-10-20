@@ -53,8 +53,10 @@ from Main_App.projects.preprocessing_settings import (
     KURTOSIS_REVIEW_DECISIONS_BY_RECORDING_KEY,
     MANUAL_REMOVED_ELECTRODES_ENABLED_KEY,
     PREPROCESSING_CANONICAL_KEYS,
+    OPTIONAL_PREPROCESSING_KEYS,
     RemovedElectrodeDetectionConfirmationRequired,
     normalize_preprocessing_settings,
+    processing_metadata_snapshot,
     removed_electrode_detection_choice_requires_confirmation,
     require_removed_electrode_detection_choice_ready,
 )
@@ -370,6 +372,7 @@ def validate_inputs(host: Any) -> bool:
     project_preproc = getattr(host.currentProject, "preprocessing", {}) or {}
     project_snapshot = {key: project_preproc.get(key) for key in PREPROCESSING_CANONICAL_KEYS}
     project_snapshot.update({key: project_preproc[key] for key in HARDWARE_SETTINGS_KEYS if key in project_preproc})
+    project_snapshot.update({key: project_preproc[key] for key in OPTIONAL_PREPROCESSING_KEYS if key in project_preproc})
     settings_snapshot = None
     if hasattr(host, "settings") and hasattr(host.settings, "config"):
         settings_snapshot = {}
@@ -660,6 +663,13 @@ def build_validated_params(host: Any) -> dict | None:
         except (OSError, ValueError) as exc:
             QMessageBox.warning(host, "Project Settings Unavailable", str(exc))
             return None
+    refresh_pipeline = getattr(host.currentProject, "refresh_processing_pipeline_settings", None)
+    if callable(refresh_pipeline):
+        try:
+            refresh_pipeline()
+        except (OSError, ValueError) as exc:
+            QMessageBox.warning(host, "Project Settings Unavailable", str(exc))
+            return None
     normalized = normalize_preprocessing_settings(host.currentProject.preprocessing)
     raw_spectral_screening = (
         host.currentProject.experimental_qc_settings.raw_spectral_screening
@@ -782,14 +792,7 @@ def build_validated_params(host: Any) -> dict | None:
         },
         "raw_spectral_screening": raw_spectral_screening.to_manifest(),
     }
-    if normalized.get("hardware_platform") == "brain_products":
-        params.update({key: normalized[key] for key in (
-            "hardware_platform", "hardware_confirmed", "hardware_selection_source",
-            "initial_reference", "initial_reference_channels", "drop_reference_channels", "channel_types",
-        ) if key in normalized})
-    elif "hardware_platform" in normalized:
-        params["hardware_platform"] = normalized["hardware_platform"]
-        params["hardware_confirmed"] = normalized.get("hardware_confirmed", False)
+    params.update(processing_metadata_snapshot(normalized))
 
     logger.debug(
         "VALIDATED_PARAMS_SNAPSHOT high_pass=%r low_pass=%r downsample_rate=%r "

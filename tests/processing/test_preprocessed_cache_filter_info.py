@@ -10,6 +10,7 @@ import numpy as np
 import pytest
 
 from Main_App.Performance import process_runner
+from Main_App.io.pipeline_events import canonical_recording_events
 from Main_App.processing.preprocessed_cache_info import snapshot_preprocessed_filter_info
 from Main_App.processing.spectral_eligibility import (
     SpectralEligibilityError,
@@ -169,3 +170,28 @@ def test_preprocessed_fif_cache_preserves_linked_outside_file(tmp_path):
     assert process_runner._store_preprocessed_cache(raw=raw, audit_before={}, n_rejected=0, **kwargs) == "write_error"
 
     assert victim.read_bytes() == b"outside content"
+
+
+@pytest.mark.parametrize("corrupt_metadata", [False, True])
+def test_real_fif_cache_preserves_canonical_marker_authority(tmp_path, corrupt_metadata):
+    raw, kwargs, _key, _fif_path, meta_path = _cache_case(tmp_path)
+    events = np.array([[0, 0, 3], [1, 0, 3], [25, 0, 55], [26, 0, 55]], dtype=np.int64)
+    raw._fpvs_canonical_events = events
+    raw._fpvs_canonical_events_sfreq = float(raw.info["sfreq"])
+    assert process_runner._store_preprocessed_cache(
+        raw=raw, audit_before={"original": True}, n_rejected=0, **kwargs,
+    ) == "stored"
+    metadata = json.loads(meta_path.read_text(encoding="utf-8"))
+    assert metadata["canonical_events"]["events"] == events.tolist()
+    if corrupt_metadata:
+        metadata["canonical_events"]["events"][1][2] = 99
+        meta_path.write_text(json.dumps(metadata), encoding="utf-8")
+    loaded, _audit, _rejected, status = process_runner._load_preprocessed_cache(**kwargs)
+    if corrupt_metadata:
+        assert loaded is None and status == "miss_event_metadata_mismatch"
+    else:
+        assert status == "hit"
+        try:
+            np.testing.assert_array_equal(canonical_recording_events(loaded), events)
+        finally:
+            loaded.close()

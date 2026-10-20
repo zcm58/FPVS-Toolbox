@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from PySide6.QtWidgets import QAbstractButton, QComboBox, QLabel, QLineEdit, QMessageBox, QPushButton, QScrollArea, QWidget
 
 from Main_App.gui import hardware_selection
@@ -58,14 +60,15 @@ def test_new_project_hardware_dialog_cancellation_returns_no_draft(monkeypatch):
     assert settings == {"existing": "kept"}
 
 
-def test_brain_products_settings_controls_save_reference_and_roles(qtbot, tmp_path, monkeypatch):
+@pytest.mark.parametrize("platform", ["brain_products", "biosemi_active_three"])
+def test_recorded_geometry_settings_controls_save_reference_and_roles(qtbot, tmp_path, monkeypatch, platform):
     monkeypatch.setenv("FPVS_CONFIG_HOME", str(tmp_path / "config"))
     project = _prep_project(tmp_path)
-    project.update_preprocessing(confirm_hardware_selection(project.preprocessing, "brain_products", confirmed_change=True))
+    project.update_preprocessing(confirm_hardware_selection(project.preprocessing, platform, confirmed_change=True))
     project.save()
     widget = SettingsDialog(SettingsManager(str(tmp_path / "settings.ini")), project=project)
     qtbot.addWidget(widget)
-    assert widget.hardware_platform_combo.currentData() == "brain_products"
+    assert widget.hardware_platform_combo.currentData() == platform
     assert widget.electrode_montage_combo.isEnabled()
     assert not widget.kurtosis_screening_enabled_check.isEnabled()
     assert not widget.raw_signal_screening_enabled_check.isEnabled()
@@ -81,6 +84,44 @@ def test_brain_products_settings_controls_save_reference_and_roles(qtbot, tmp_pa
     reopened = Project.load(project.project_root)
     assert reopened.preprocessing["channel_types"] == {"VEOG": "eog", "ECG": "ecg"}
     assert reopened.preprocessing["initial_reference"] == "channels"
+
+
+def test_unicorn_settings_keep_native_policy_and_persist_explicit_factory_mapping(qtbot, tmp_path, monkeypatch):
+    from Main_App.projects.hardware import UNICORN_FACTORY_MAPPING_PROFILE
+    from Main_App.io.acquisition_profiles import UNICORN_FACTORY_RECORDED_LABEL_MAP
+
+    monkeypatch.setenv("FPVS_CONFIG_HOME", str(tmp_path / "config"))
+    project = _prep_project(tmp_path)
+    project.update_preprocessing(confirm_hardware_selection(project.preprocessing, "unicorn", confirmed_change=True))
+    project.save()
+    widget = SettingsDialog(SettingsManager(str(tmp_path / "settings.ini")), project=project)
+    qtbot.addWidget(widget)
+    assert widget.hardware_platform_combo.currentData() == "unicorn"
+    assert widget.preproc_edits[2].text() == "250"
+    assert not widget.preproc_edits[2].isEnabled()
+    assert widget.preproc_edits[6].text() == "8"
+    assert not widget.preproc_edits[6].isEnabled()
+    assert not widget.electrode_montage_combo.isEnabled()
+    assert not widget.kurtosis_screening_enabled_check.isEnabled()
+    assert not widget.manual_removed_electrodes_enabled_check.isEnabled()
+    assert widget.electrode_mapping_profile_combo.currentData() == "anatomical_labels"
+    combo = widget.electrode_mapping_profile_combo
+    combo.setCurrentIndex(combo.findData(UNICORN_FACTORY_MAPPING_PROFILE))
+    payload = widget._validated_preproc_payload()
+    assert payload["acquisition_profile"]["source_to_canonical"] == dict(UNICORN_FACTORY_RECORDED_LABEL_MAP)
+    assert widget.save_pending_changes()
+    reopened = Project.load(project.project_root)
+    assert reopened.preprocessing["electrode_mapping_profile"] == UNICORN_FACTORY_MAPPING_PROFILE
+    assert reopened.preprocessing["acquisition_profile"]["source_to_canonical"] == dict(UNICORN_FACTORY_RECORDED_LABEL_MAP)
+
+
+@pytest.mark.parametrize("platform", ["biosemi_active_three", "unicorn"])
+def test_bdf_does_not_replace_confirmed_hardware_with_biosemi(tmp_path, monkeypatch, platform):
+    project = Project.load(tmp_path, manifest={"preprocessing": confirm_hardware_selection({}, platform, confirmed_change=True)})
+    project.save()
+    monkeypatch.setattr(QMessageBox, "warning", lambda *_: pytest.fail("Confirmed BDF hardware must not be replaced."))
+    assert hardware_selection.ensure_project_hardware_ready(SimpleNamespace(currentProject=project), ["P01.bdf"])
+    assert Project.load(tmp_path).preprocessing["hardware_platform"] == platform
 
 
 def test_recorded_reference_mode_clears_hidden_selected_channel_policy(qtbot, tmp_path, monkeypatch):
@@ -208,3 +249,57 @@ def test_brain_products_reference_and_channel_controls_fit_1280_by_900_workspace
     assert footer is not None
     for button in footer.findChildren(QPushButton):
         _assert_settings_widget_unclipped(button, window)
+
+
+def test_settings_save_preserves_newer_hidden_pipeline_selection(qtbot, tmp_path, monkeypatch):
+    from Main_App.processing import pipeline_plan
+
+    monkeypatch.setenv("FPVS_CONFIG_HOME", str(tmp_path / "config"))
+    registry = pipeline_plan.BUILTIN_PIPELINE_REGISTRY.with_methods(
+        pipeline_plan.PipelineMethod(
+            "temporal_filter", "test_dialog_filter_v1", "Test filter", lambda *args, **kwargs: None,
+        ),
+    )
+    monkeypatch.setattr(pipeline_plan, "get_pipeline_registry", lambda: registry)
+    project = _prep_project(tmp_path)
+    widget = SettingsDialog(SettingsManager(str(tmp_path / "settings.ini")), project=project)
+    qtbot.addWidget(widget)
+    concurrent = Project.load(project.project_root)
+    selected = pipeline_plan.default_pipeline_config()
+    selected["methods"]["temporal_filter"] = "test_dialog_filter_v1"
+    concurrent.preprocessing["processing_pipeline"] = selected
+    concurrent.save()
+
+    widget.preproc_edits[0].setText("42")
+    assert widget._validated_preproc_payload()["processing_pipeline"] == selected
+    assert widget.save_pending_changes()
+    reopened = Project.load(project.project_root)
+    assert reopened.preprocessing["processing_pipeline"] == selected
+    assert reopened.preprocessing["low_pass"] == 42.0
+
+
+@pytest.mark.parametrize("platform", ["brain_products", "biosemi_active_three", "unicorn"])
+def test_processing_inputs_forward_acquisition_and_pipeline_contracts(tmp_path, monkeypatch, platform):
+    from Main_App.gui import processing_inputs
+    from Main_App.processing.pipeline_plan import default_pipeline_config
+    from Main_App.projects.preprocessing_settings import processing_metadata_snapshot
+
+    project = _prep_project(tmp_path)
+    settings = confirm_hardware_selection(project.preprocessing, platform, confirmed_change=True)
+    settings["processing_pipeline"] = default_pipeline_config()
+    if platform == "unicorn":
+        settings["electrode_mapping_profile"] = "unicorn_factory_v1"
+        settings["recording_event_policy"] = {"authority": "status"}
+    else:
+        settings.update(initial_reference="channels", initial_reference_channels=["TP9", "TP10"],
+                        drop_reference_channels=True, channel_types={"VEOG": "eog"})
+    project.update_preprocessing(settings)
+    project.save()
+    monkeypatch.setattr(processing_inputs, "validated_event_map", lambda *_args, **_kwargs: {"CondA": 10})
+    monkeypatch.setattr(QMessageBox, "warning", lambda *_: pytest.fail("Valid project should produce processing inputs."))
+    params = processing_inputs.build_validated_params(SimpleNamespace(currentProject=project))
+    assert params is not None
+    for key, value in processing_metadata_snapshot(project.preprocessing).items():
+        assert params[key] == value
+    assert params["processing_pipeline"] is not project.preprocessing["processing_pipeline"]
+    assert params["kurtosis_screening_enabled"] is False

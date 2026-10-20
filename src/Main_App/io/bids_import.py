@@ -1,6 +1,7 @@
 """Project-local BIDS import boundary, without scientific preprocessing.
 
-BDF payloads are copied byte-for-byte; BrainVision signal bytes are copied and
+BDF sample bytes are preserved; reviewed mobile unit headers may be corrected
+with the original retained in sourcedata. BrainVision signal bytes are copied and
 only companion links change. BVRF has no standard raw EEG-BIDS representation
 that preserves arbitrary calibrated float64 samples, so it uses an explicitly
 labeled FIF64 derivative. That exception is never advertised as raw EEG-BIDS.
@@ -8,6 +9,7 @@ labeled FIF64 derivative. That exception is never advertised as raw EEG-BIDS.
 from __future__ import annotations
 
 import csv
+from contextlib import ExitStack
 from dataclasses import dataclass
 from datetime import date, datetime
 import hashlib
@@ -20,6 +22,7 @@ import shutil
 import tempfile
 from time import perf_counter
 import traceback
+from types import SimpleNamespace
 from typing import Any, Mapping
 import uuid
 
@@ -32,7 +35,8 @@ logger = logging.getLogger(__name__)
 IMPORT_VERSION = "bids_import_v1"
 _BIDS_TYPES = {"eeg": "EEG", "eog": "EOG", "ecg": "ECG", "emg": "EMG", "stim": "TRIG"}
 _SETTING_KEYS = ("hardware_platform", "hardware_confirmed", "hardware_selection_source",
-                 "channel_types", "electrode_montage", "electrode_mapping_profile", "stim_channel")
+                 "channel_types", "electrode_montage", "electrode_mapping_profile", "stim_channel",
+                 "acquisition_profile", "recording_event_policy")
 
 
 @dataclass(frozen=True)
@@ -141,7 +145,8 @@ def _source_subject(raw: mne.io.BaseRaw) -> dict | None:
             for key, value in subject.items()}
 
 
-def _metadata(raw: mne.io.BaseRaw, target: Path, settings: Mapping, *, source: Path) -> dict:
+def _metadata(raw: mne.io.BaseRaw, target: Path, settings: Mapping, *, source: Path,
+              import_key: str = "") -> dict:
     """Write source facts, never project preprocessing choices masquerading as acquisition."""
     from Main_App.projects.hardware import resolve_hardware
 
@@ -153,6 +158,8 @@ def _metadata(raw: mne.io.BaseRaw, target: Path, settings: Mapping, *, source: P
     roles = settings.get("channel_types") or {}
     if not isinstance(roles, Mapping) or any(name not in raw.ch_names for name in roles):
         raise ValueError("Channel type overrides must name recorded channels.")
+    if hardware.platform == "biosemi_active_three":
+        roles = {**{name: "misc" for name in raw.ch_names if re.fullmatch(r"EXG\d+", name, re.IGNORECASE)}, **roles}
     effective_types = [roles.get(name, kind) for name, kind in zip(raw.ch_names, types, strict=True)]
     rows = [{"name": name, "type": _BIDS_TYPES.get(kind, "MISC"),
              "units": units.get(name) or "n/a", "status": "bad" if name in raw.info["bads"] else "good"}
@@ -160,10 +167,12 @@ def _metadata(raw: mne.io.BaseRaw, target: Path, settings: Mapping, *, source: P
     _tsv(folder / f"{stem}_channels.tsv", ("name", "type", "units", "status"), rows)
     metadata = {
         "TaskName": "FPVS", "SamplingFrequency": raw.info["sfreq"],
-        "EEGReference": "CMS" if hardware.platform == "biosemi" else "n/a",
+        "EEGReference": "CMS" if hardware.platform in {"biosemi", "biosemi_active_three"} else "n/a",
         "PowerLineFrequency": raw.info.get("line_freq") or "n/a", "SoftwareFilters": "n/a",
         "HardwareFilters": "n/a", "RecordingDuration": raw.n_times / raw.info["sfreq"],
-        "RecordingType": "continuous", "Manufacturer": {"biosemi": "BioSemi", "brain_products": "Brain Products"}[hardware.platform],
+        "RecordingType": "continuous", "Manufacturer": {
+            "biosemi": "BioSemi", "biosemi_active_three": "BioSemi", "brain_products": "Brain Products", "unicorn": "g.tec",
+        }[hardware.platform],
         "EEGChannelCount": effective_types.count("eeg"), "EOGChannelCount": effective_types.count("eog"),
         "ECGChannelCount": effective_types.count("ecg"), "EMGChannelCount": effective_types.count("emg"),
         "TriggerChannelCount": effective_types.count("stim"),
@@ -173,7 +182,13 @@ def _metadata(raw: mne.io.BaseRaw, target: Path, settings: Mapping, *, source: P
     events = [{"onset": repr(float(onset - raw.first_time)), "duration": repr(float(duration)),
                "trial_type": str(label), "value": "n/a", "sample": int(round((onset - raw.first_time) * raw.info["sfreq"]))}
               for onset, duration, label in zip(raw.annotations.onset, raw.annotations.duration, raw.annotations.description, strict=True)]
-    if source.suffix.lower() == ".bdf":
+    from Main_App.io.pipeline_events import canonical_recording_events, snapshot_canonical_event_metadata
+    canonical = canonical_recording_events(raw)
+    if canonical is not None:
+        events.extend({"onset": repr(int(sample) / raw.info["sfreq"]), "duration": "0",
+                       "trial_type": f"Event/{int(code)}", "value": int(code), "sample": int(sample)}
+                      for sample, _, code in canonical)
+    elif source.suffix.lower() == ".bdf":
         stim = str(settings.get("stim_channel") or "Status")
         if stim in raw.ch_names:
             values = raw.get_data(picks=[stim])[0].astype(np.int64)
@@ -184,11 +199,11 @@ def _metadata(raw: mne.io.BaseRaw, target: Path, settings: Mapping, *, source: P
     events.sort(key=lambda item: (item["sample"], item["trial_type"]))
     _tsv(folder / f"{stem}_events.tsv", ("onset", "duration", "trial_type", "value", "sample"), events)
     _json(folder / f"{stem}_events.json", {
-        "trial_type": {"Description": "Original annotation description or unmasked Status-channel value."},
-        "value": {"Description": "Unmasked recorded Status value; n/a for source annotations."},
+        "trial_type": {"Description": "Original annotation description or explicitly decoded canonical event." if canonical is not None else "Original annotation description or unmasked Status-channel value."},
+        "value": {"Description": "Canonical code under the declared event policy; n/a for original annotation rows." if canonical is not None else "Unmasked recorded Status value; n/a for source annotations."},
         "sample": {"Description": "Zero-based sample relative to recording start."},
     })
-    return {"annotations": _annotation_identity(raw), "channel_names": raw.ch_names,
+    result = {"annotations": _annotation_identity(raw), "channel_names": raw.ch_names,
             "channel_types": effective_types, "original_units": units,
             "sfreq": float(raw.info["sfreq"]), "n_times": int(raw.n_times),
             "subject_info": _source_subject(raw),
@@ -199,6 +214,30 @@ def _metadata(raw: mne.io.BaseRaw, target: Path, settings: Mapping, *, source: P
             "bvrf_marker_rows": getattr(raw, "_fpvs_brain_products_marker_rows", None),
             "channel_locations": [{"loc": [float(value) if np.isfinite(value) else None for value in ch["loc"]],
                                    "coord_frame": int(ch["coord_frame"])} for ch in raw.info["chs"]]}
+    if canonical is not None:
+        evidence = snapshot_canonical_event_metadata(raw, cache_key=import_key)
+        result["canonical_events"] = canonical.tolist()
+        result["canonical_events_sfreq"] = float(raw.info["sfreq"])
+        result["canonical_events_first_samp"] = int(raw.first_samp)
+        result["canonical_events_schema_version"] = evidence["schema_version"]
+        result["canonical_events_sha256"] = evidence["sha256"]
+        result["mobile_import"] = raw._fpvs_mobile_import
+    return result
+
+
+def _restore_import_events(raw: Any, metadata: Mapping, *, import_key: str) -> np.ndarray:
+    """Validate original serialized values before any integer coercion or use."""
+    from Main_App.io.pipeline_events import canonical_recording_events, restore_canonical_event_metadata
+
+    evidence = {
+        "schema_version": metadata["canonical_events_schema_version"],
+        "sfreq": metadata["canonical_events_sfreq"],
+        "first_samp": metadata["canonical_events_first_samp"],
+        "n_times": metadata["n_times"], "events": metadata["canonical_events"],
+        "sha256": metadata["canonical_events_sha256"],
+    }
+    restore_canonical_event_metadata(raw, evidence, cache_key=import_key)
+    return canonical_recording_events(raw)
 
 
 def _valid_publication(folder: Path, identity: tuple[dict, ...], key: str) -> dict | None:
@@ -208,6 +247,13 @@ def _valid_publication(folder: Path, identity: tuple[dict, ...], key: str) -> di
                 or manifest["source_identity"] != list(identity)
                 or not {"subject_info", "digitization", "bvrf_header", "bvrf_marker_rows"}.issubset(manifest["recording"])):
             return None
+        metadata = manifest["recording"]
+        if "mobile_import" in metadata or any(name.startswith("canonical_events") for name in metadata):
+            probe = SimpleNamespace(
+                info={"sfreq": metadata["sfreq"]}, n_times=metadata["n_times"],
+                first_samp=metadata["canonical_events_first_samp"],
+            )
+            _restore_import_events(probe, metadata, import_key=key)
         for row in manifest["outputs"]:
             path = _contained(folder / row["path"], folder.resolve())
             if not path.is_file() or path.stat().st_size != row["size"] or _digest(path) != row["sha256"]:
@@ -243,7 +289,7 @@ def prepare_bids_recording(source: str | Path, *, project_root: str | Path, sett
     started = perf_counter()
     source = Path(source).resolve(strict=True)
     settings = dict(settings or {})
-    require_hardware_ready(settings, paths=(source,))
+    hardware = require_hardware_ready(settings, paths=(source,))
     if source.suffix.lower() not in {".bdf", ".vhdr", ".bvrh"}:
         raise ValueError("BIDS import supports BDF, BrainVision .vhdr and BVRF .bvrh recordings.")
     root = Path(project_root).resolve(strict=True)
@@ -291,22 +337,33 @@ def prepare_bids_recording(source: str | Path, *, project_root: str | Path, sett
                 shutil.copyfile(file, original / file.name)
         target = raw_root / f"sub-{subject}" / "eeg" / f"sub-{subject}_task-fpvs_eeg{extension}"
         target.parent.mkdir(parents=True)
-        if suffix == ".bdf":
-            raw = mne.io.read_raw_bdf(source, preload=False, stim_channel=str(settings.get("stim_channel") or "Status"), verbose=False)
-        else:
-            from Main_App.io.brain_products import read_brain_products_raw
-            raw = read_brain_products_raw(source, preload=False, synthesize_status=False)
-        try:
-            metadata = _metadata(raw, target, settings, source=source)
+        with ExitStack() as owners:
+            if hardware == "unicorn":
+                from Main_App.io.mobile_eeg import open_mobile_import_source
+                raw = owners.enter_context(open_mobile_import_source(source, settings, project_root=root))
+            elif suffix == ".bdf":
+                raw = mne.io.read_raw_bdf(source, preload=False, stim_channel=str(settings.get("stim_channel") or "Status"), verbose=False)
+                owners.callback(raw.close)
+            else:
+                from Main_App.io.brain_products import read_brain_products_raw
+                raw = read_brain_products_raw(source, preload=False, synthesize_status=False)
+                owners.callback(raw.close)
+            metadata = _metadata(raw, target, settings, source=source, import_key=key)
             if suffix == ".bdf":
-                shutil.copyfile(source, target)
+                if hardware == "unicorn":
+                    # Only reviewed physical-dimension header fields changed;
+                    # packed samples stay exact and the original stays available.
+                    shutil.copyfile(raw.filenames[0], target)
+                    original = dataset / "sourcedata" / subject
+                    original.mkdir(parents=True)
+                    shutil.copyfile(source, original / source.name)
+                else:
+                    shutil.copyfile(source, target)
             elif suffix == ".vhdr":
                 _copy_brainvision(source, target)
             else:
                 raw.save(target, fmt="double", overwrite=False, verbose=False)
             _tsv(raw_root / "participants.tsv", ("participant_id",), [{"participant_id": f"sub-{subject}"}])
-        finally:
-            raw.close()
         verification_started = perf_counter()
         if _source_identity(source) != identity:
             raise OSError("Source recording changed during BIDS import; no cache was published.")
@@ -356,6 +413,8 @@ def read_bids_recording(recording: BidsRecording, *, preload: bool | str = False
         params["preload"] = False
         if source_suffix != ".bdf":
             params.pop("stim_channel", None)
+        elif "mobile_import" in metadata or "canonical_events" in metadata:
+            params["stim_channel"] = [name for name, kind in zip(metadata["channel_names"], metadata["channel_types"], strict=True) if kind == "stim"] or None
         raw = read_raw_bids(recording.bids_path, extra_params=params, verbose=False)
     owns_preload = False
     try:
@@ -393,6 +452,19 @@ def read_bids_recording(recording: BidsRecording, *, preload: bool | str = False
                 owns_preload = True
             raw = _RawWithStatus(raw, events, stim_channel, preload)
             raw._fpvs_brain_products_source_files = tuple(row["path"] for row in recording.source_identity)
+        if "mobile_import" in metadata or "canonical_events" in metadata:
+            events = _restore_import_events(raw, metadata, import_key=manifest["key"])
+            present_stim = [name for name, kind in zip(raw.ch_names, raw.get_channel_types(), strict=True) if kind == "stim"]
+            if present_stim and present_stim != [stim_channel]:
+                if len(present_stim) != 1 or stim_channel in raw.ch_names:
+                    raise ValueError("Ambiguous recorded stimulus channel identity.")
+                raw.rename_channels({present_stim[0]: stim_channel})
+            if stim_channel not in raw.ch_names:
+                from Main_App.io.brain_products import _RawWithStatus
+                raw = _RawWithStatus(raw, events, stim_channel, False)
+            raw._fpvs_canonical_events = events
+            raw._fpvs_canonical_events_sfreq = metadata["canonical_events_sfreq"]
+            raw._fpvs_mobile_import = metadata["mobile_import"]
         if include is not None:
             raw.pick([name for name in raw.ch_names if name in include])
         if source_suffix == ".bdf" and preload is not False:

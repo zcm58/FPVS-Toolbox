@@ -153,7 +153,10 @@ def test_open_existing_project_cancel_from_dialog(tmp_path, main_window, monkeyp
     assert not message_spy["critical"]
 
 
-@pytest.mark.parametrize("hardware_label,platform", [("BioSemi", "biosemi"), ("Brain Products", "brain_products")])
+@pytest.mark.parametrize("hardware_label,platform", [
+    ("BioSemi ActiveTwo", "biosemi"), ("BioSemi ActiveThree", "biosemi_active_three"),
+    ("Brain Products", "brain_products"), ("Unicorn Hybrid Black", "unicorn"),
+])
 def test_import_fpvs_config_project_from_file_menu(tmp_path, main_window, monkeypatch, message_spy, hardware_label, platform):
     config_path = tmp_path / "studio.fpvsconfig"
     input_dir = tmp_path / "raw_bdf"
@@ -204,7 +207,7 @@ def test_import_fpvs_config_project_from_file_menu(tmp_path, main_window, monkey
 
     assert len(hardware_prompts) == 1
     assert hardware_prompts[0][0] == "Project EEG Hardware"
-    assert hardware_prompts[0][2] == ["BioSemi", "Brain Products"]
+    assert hardware_prompts[0][2] == ["BioSemi ActiveTwo", "BioSemi ActiveThree", "Brain Products", "Unicorn Hybrid Black"]
     assert main_window.currentProject.name == "Semantic Categories"
     assert main_window.currentProject.event_map == {
         "Fruit vs Vegetable": 1,

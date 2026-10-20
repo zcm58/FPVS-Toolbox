@@ -24,6 +24,7 @@ from Main_App.exports.post_process import post_process as _external_post_process
 from Main_App.gui.processing_completion import finalize_processing_host_state
 from Main_App.processing.preprocess import perform_preprocessing
 from Main_App.io.acquisition_metadata import event_detection_kwargs
+from Main_App.io.pipeline_events import canonical_recording_events
 from Main_App.io.load_utils import load_eeg_file
 from Main_App.processing.fft_crop_utils import (
     compute_fft_crop_from_events,
@@ -335,7 +336,10 @@ class ProcessingMixin:
 
                     file_extension = os.path.splitext(f_path)[1].lower()
 
-                    if file_extension == ".set":
+                    canonical_events = canonical_recording_events(raw_proc)
+                    if canonical_events is not None:
+                        events = canonical_events
+                    elif file_extension == ".set":
                         if hasattr(raw_proc, 'annotations') and raw_proc.annotations and len(raw_proc.annotations) > 0:
                             if self.settings.debug_enabled():
                                 gui_queue.put({'type': 'log',

@@ -236,11 +236,12 @@ def active_condition_requests(expected, identity: str, requests: Mapping) -> dic
 
 def project_processing_identity(project_root: str | Path) -> str:
     """Track processing-affecting project settings separately from review metadata."""
+    from Main_App.processing.pipeline_plan import fingerprint_settings
     from Main_App.processing.processing_ledger import _DOWNSTREAM_ONLY_PREPROCESSING_KEYS
     from Main_App.projects.experimental_qc_settings import normalize_experimental_qc_settings
 
     manifest = json.loads((Path(project_root) / "project.json").read_text(encoding="utf-8"))
-    preprocessing = manifest.get("preprocessing") or {}
+    preprocessing = fingerprint_settings(manifest.get("preprocessing") or {})
     payload = {key: manifest.get(key) for key in (
         "frequency_protocol", "options", "subfolders", "groups", "participants", "sessions", "recording_sources", "recordings",
     )}

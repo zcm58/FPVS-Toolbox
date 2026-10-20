@@ -6,7 +6,11 @@ project-local BIDS imports and returns MNE Raw. Native BDF/BVCDF samples remain
 unchanged; BVRF retains exact calibrated values in a labeled FIF64 derivative.
 `io.acquisition_metadata` resolves reference, geometry, channel selection,
 event semantics, and qualification into an immutable `io.recording_contract.RecordingContract`
-before the shared numerical stages. `io.geometry_metadata` owns acquisition
+before the shared numerical stages. `processing.pipeline_plan` owns the
+lightweight fixed-slot method catalog, persisted selection schema and dispatch.
+Scientific implementations remain at their numerical owners; default selections
+preserve legacy fingerprints. See [method modules](docs/agent/architecture/pipeline-methods.md).
+`io.geometry_metadata` owns acquisition
 geometry identities used by provenance, and calibrated spatial-profile metadata
 stays upstream. The numerical engine accepts an explicit contract without
 resolving a manufacturer. `processing.acquisition_policy` only preserves old
@@ -14,13 +18,18 @@ imports; numerical reference operations live in `processing.reference`. See the
 [loading contract](docs/agent/architecture/eeg-loading-contract.md) and
 [conceptual map](docs/agent/architecture/hardware-pipeline-studio-roadmap.md#intended-conceptual-map-canonical-eeg-recording).
 
-Brain Products processing uses the same canonical Main App pipeline: project-owned
-hardware confirmation in `projects/hardware.py`, BVCDF/BVRF readers and recording
-geometry and reference/QC applicability in `io/`. Header and companion identity reaches shared
-preflight, caches, and export provenance. BioSemi remains the locked regression
-baseline; unsupported spatial capabilities remain gated. See the
+ActiveTwo64, ActiveThree, Brain Products and Unicorn use this shared pipeline.
+Project-owned hardware confirmation lives in `projects/hardware.py`; native
+format readers, geometry, reference and QC applicability stay in `io/`.
+`io.mobile_eeg` admits Unicorn raw BDF/BDF+C using the reviewed unit/grid reader,
+retains originals and records any narrow unit-header correction. Its generic
+contract prohibits resampling and interpolation. `io.pipeline_events` preserves
+canonical sample events through preflight, processing and cache reload. Source
+identity and geometry reach exports and cache fingerprints. ActiveTwo64 remains
+the locked regression baseline; software tests do not qualify physical hardware
+or optional spatial tools. See the
 [hardware roadmap](docs/agent/architecture/hardware-pipeline-studio-roadmap.md) and
-[format/setup guide](docs/user/reference/brain-products.md) for exact scope.
+[format/setup guide](docs/user/reference/eeg-hardware.md) for exact scope.
 
 
 ## Purpose
@@ -59,8 +68,10 @@ Current source ownership and supported behavior are described below. The
 records the intended next architecture: modular acquisition/montages, shared
 processing steps selected through persisted project settings and validated
 against acquisition capabilities, and complete FPVS Studio
-compatibility. The current acquisition registry, gated Unicorn reader, and
-partial Studio import are foundations, not completed production support.
+compatibility. Four scoped acquisition routes now reach shared processing;
+versioned method slots and persisted selections form the modular foundation.
+Alternative methods, their UI selectors and complete Studio handoff remain
+future work.
 Published installer behavior is bound to its release tag, not later source work.
 
 FPVS Toolbox is a PySide6 desktop application built around GUI entry points,

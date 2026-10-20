@@ -29,6 +29,7 @@ if TYPE_CHECKING:
 
 from Main_App.workers.mp_env import compute_effective_max_workers
 from Main_App.io import load_utils
+from Main_App.io.pipeline_events import canonical_recording_events
 from Main_App.io.acquisition_metadata import (
     configured_channel_limit,
     resolve_recording_contract,
@@ -460,6 +461,11 @@ def _event_plan_for_path(
 def _find_raw_events(raw: Any, *, stim_channel: str) -> tuple[np.ndarray, str]:
     """Use the event-discovery behavior shared by preflight and final processing."""
 
+    canonical = canonical_recording_events(raw)
+    if canonical is not None:
+        if not len(canonical):
+            raise KurtosisReviewScanError("No admitted markers found.")
+        return canonical, "canonical"
     try:
         events = mne.find_events(
             raw,
