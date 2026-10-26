@@ -10,6 +10,9 @@ For the lossless NumPy companions created alongside condition workbooks, see
 For signal inspection, related findings, diagnostic cues and repair support,
 see [Inspecting preprocessing QC evidence](preprocessing-qc-review.md).
 
+For projects combining different trigger conventions or reused participant labels,
+see [Combining studies with different trigger codes](source-trigger-maps.md).
+
 ## Processing Contract
 
 For raw EEG preprocessing, the active order is:

@@ -508,6 +508,25 @@ def test_project_processing_signature_tracks_participant_condition_exclusions(
     ] == {"P1": ["Negative Valence"]}
 
 
+def test_source_map_cache_identity_uses_saved_semantics_not_profile_labels_or_defaults():
+    maps = {
+        "schema_version": "1.0", "canonical_conditions": {"faces": {"label": "Faces"}},
+        "profiles": {"source": {"label": "Original source", "conditions": {
+            "faces": {"onset_code": 21, "oddball_code": 55}}, "boundary_only_onset_codes": [22]}},
+        "recording_assignments": {"ACRP1": "source"}, "registration_group_defaults": {},
+    }
+    protocol = FrequencyProtocol.from_recurrence(6, 5).with_condition_trigger_maps(maps)
+    manifest = {"frequency_protocol": protocol.to_manifest(), "event_map": {}}
+    before = build_project_processing_signature(manifest)
+    maps["profiles"]["source"]["label"] = "Renamed source"
+    maps["registration_group_defaults"]["adults"] = "source"
+    manifest["frequency_protocol"] = protocol.with_condition_trigger_maps(maps).to_manifest()
+    assert build_project_processing_signature(manifest) == before
+    maps["profiles"]["source"]["conditions"]["faces"]["onset_code"] = 23
+    manifest["frequency_protocol"] = protocol.with_condition_trigger_maps(maps).to_manifest()
+    assert build_project_processing_signature(manifest) != before
+
+
 def test_frequency_domain_workflow_status_does_not_invalidate_harmonics(
     tmp_path: Path,
 ) -> None:

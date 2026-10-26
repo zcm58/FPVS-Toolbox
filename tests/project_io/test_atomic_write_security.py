@@ -193,6 +193,44 @@ def test_json_publication_failure_is_bounded_preserves_target_and_cleans_staging
     assert not list(tmp_path.glob("*.tmp"))
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows open-file directory rename semantics")
+def test_directory_publication_recovers_after_real_descendant_handle_closes(tmp_path, monkeypatch):
+    from Main_App.io import atomic_write as module
+
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    receipt = staging / "import.json"
+    receipt.write_bytes(b'{"complete": true}')
+    target = tmp_path / "published"
+    delays = []
+    with receipt.open("rb") as stream:
+        def release_handle(delay):
+            delays.append(delay)
+            assert staging.is_dir() and not target.exists()
+            stream.close()
+
+        monkeypatch.setattr(module.time, "sleep", release_handle)
+        module.rename_with_retry(staging, target)
+    assert delays and delays[0] == 0.01
+    assert not staging.exists()
+    assert (target / "import.json").read_bytes() == b'{"complete": true}'
+
+
+def test_directory_publication_does_not_replace_existing_complete_dataset(tmp_path):
+    from Main_App.io.atomic_write import rename_with_retry
+
+    staging = tmp_path / "staging"
+    target = tmp_path / "published"
+    staging.mkdir()
+    target.mkdir()
+    (staging / "payload").write_bytes(b"new")
+    (target / "payload").write_bytes(b"reader-owned")
+    with pytest.raises(OSError):
+        rename_with_retry(staging, target)
+    assert (staging / "payload").read_bytes() == b"new"
+    assert (target / "payload").read_bytes() == b"reader-owned"
+
+
 @pytest.mark.parametrize("kind", ["hardlink", "symlink"])
 def test_run_log_rejects_linked_outside_file(tmp_path, kind):
     from Main_App.processing.processing_ledger import append_run_log, runs_path

@@ -867,7 +867,9 @@ def test_raw_file_info_for_path_accepts_registered_group_source(tmp_path) -> Non
     assert info.group == "control"
 
 
-def test_validate_inputs_reviews_and_registers_batch_participants(tmp_path) -> None:
+def test_validate_inputs_reviews_and_registers_batch_participants(
+    tmp_path, inline_source_registration_work,
+) -> None:
     control_dir = tmp_path / "raw" / "Control"
     control_dir.mkdir(parents=True)
     p01 = control_dir / "P01.bdf"
@@ -907,6 +909,9 @@ def test_validate_inputs_reviews_and_registers_batch_participants(tmp_path) -> N
     assert validate_inputs(host) is True
     saved = json.loads((project.project_root / "project.json").read_text(encoding="utf-8"))
 
+    assert len(inline_source_registration_work) == 1
+    assert not inline_source_registration_work[0].requires_source_review
+    assert [row.raw_file for row in inline_source_registration_work[0].additions] == [p01]
     assert [row.participant_id for row in reviewed_rows] == ["P01"]
     assert host.data_paths == [str(p01.resolve())]
     assert saved["participants"]["P01"] == {
@@ -915,7 +920,9 @@ def test_validate_inputs_reviews_and_registers_batch_participants(tmp_path) -> N
     }
 
 
-def test_validate_inputs_cancelled_review_does_not_register_participants(tmp_path) -> None:
+def test_validate_inputs_cancelled_review_does_not_register_participants(
+    tmp_path, inline_source_registration_work,
+) -> None:
     control_dir = tmp_path / "raw" / "Control"
     control_dir.mkdir(parents=True)
     p01 = control_dir / "P01.bdf"
@@ -949,6 +956,9 @@ def test_validate_inputs_cancelled_review_does_not_register_participants(tmp_pat
     assert validate_inputs(host) is False
     saved = json.loads((project.project_root / "project.json").read_text(encoding="utf-8"))
 
+    assert len(inline_source_registration_work) == 1
+    assert not inline_source_registration_work[0].requires_source_review
+    assert [row.raw_file for row in inline_source_registration_work[0].additions] == [p01]
     assert "participants" not in saved
 
 
@@ -998,8 +1008,11 @@ def test_compatibility_processing_forwards_project_ram_preload_without_changing_
     processing_controller_module.start_processing(host)
 
     assert stages == ["load", "preprocess", "process", "export"]
-    assert loader_calls == [(
-        (project.input_folder / "P01.bdf").resolve(),
-        {"preload_in_memory": True} if ram_preload else {},
-    )]
+    assert len(loader_calls) == 1
+    loaded_path, load_kwargs = loader_calls[0]
+    assert loaded_path == (project.input_folder / "P01.bdf").resolve()
+    acquisition = load_kwargs.pop("acquisition_settings")
+    assert acquisition["project_root"] == str(project.project_root)
+    assert acquisition["experimental_ram_preload"] is ram_preload
+    assert load_kwargs == ({"preload_in_memory": True} if ram_preload else {})
     assert messages[-1] == "Processing complete"

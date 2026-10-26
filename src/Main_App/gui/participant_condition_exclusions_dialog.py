@@ -29,6 +29,7 @@ from Main_App.gui.components import (
 from Main_App.gui.condition_exclusion_review_model import (
     evidence_text, needs_attention, reference_text, status_label,
 )
+from Main_App.gui.recording_qc_identity import participant_identity_label
 from Main_App.processing.full_fft_grid_qc import FullFftGridAudit
 from Main_App.processing.missing_condition_outputs import MissingConditionOutput
 from Main_App.projects.preprocessing_settings import (
@@ -57,6 +58,7 @@ class ParticipantConditionExclusionsDialog(AppDialog):
         )
         self.setObjectName("participant_condition_exclusions_dialog")
         self._audit = audit
+        self._identity_project = getattr(parent, "project", None) or getattr(parent, "currentProject", None)
         self._observations = audit.review_rows
         self._recording_aware = any(row.recording_id for row in self._observations)
         self._existing = normalize_manual_excluded_participant_conditions(
@@ -182,9 +184,12 @@ class ParticipantConditionExclusionsDialog(AppDialog):
         }
         candidate_pairs = {observation.pair_key for observation in self._audit.review_candidates}
         for row, observation in enumerate(self._observations):
+            identity_label = participant_identity_label(observation.participant_id, self._identity_project)
+            recording_label = observation.recording_id or "Not registered"
+            if identity_label != observation.participant_id:
+                recording_label = f"{identity_label} / {recording_label}"
             values = (
-                observation.recording_id or "Not registered"
-                if self._recording_aware else observation.participant_id,
+                recording_label if self._recording_aware else identity_label,
                 observation.condition,
                 "--" if isinstance(observation, MissingConditionOutput)
                 else (f"{observation.oddball_cycles} cycles"
@@ -194,7 +199,10 @@ class ParticipantConditionExclusionsDialog(AppDialog):
             for column, value in enumerate(values):
                 item = QTableWidgetItem(value)
                 item.setFlags(item.flags() & ~Qt.ItemIsEditable)
-                item.setToolTip(self._evidence[row] if column == 3 else value)
+                item.setToolTip(self._evidence[row] if column == 3 else (
+                    participant_identity_label(observation.participant_id, self._identity_project) + "\n" + value
+                    if column == 0 and self._recording_aware else value
+                ))
                 self.table.setItem(row, column, item)
             exclude_item = QTableWidgetItem()
             exclude_item.setFlags(

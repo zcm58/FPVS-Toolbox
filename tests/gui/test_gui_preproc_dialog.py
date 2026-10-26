@@ -66,6 +66,7 @@ def test_recording_additions_dialog_shows_canonical_proposal_and_explicit_confir
         participant_id="P07", group_id="control", group_label="Control",
         raw_file=raw_file, status="New session recording", recording_id="P07_visit2",
         session_id="visit2", session_label="Follow-up", visit_index=2,
+        source_study_id="source_a", source_participant_id="P07",
     )
     dialog = ParticipantReviewDialog([row], additions_only=True)
     qtbot.addWidget(dialog)
@@ -75,12 +76,13 @@ def test_recording_additions_dialog_shows_canonical_proposal_and_explicit_confir
     assert dialog.windowTitle() == "Add EEG Recordings"
     assert dialog.continue_button.text() == "Add Files and Continue"
     assert dialog.cancel_button.isDefault()
-    assert [dialog.table.item(0, column).text() for column in range(7)] == [
-        "P07", "Control", "Follow-up", "2", "P07_visit2", raw_file.name, "New session recording",
+    assert [dialog.table.item(0, column).text() for column in range(9)] == [
+        "P07", "source_a", "P07", "Control", "Follow-up", "2", "P07_visit2",
+        raw_file.name, "New session recording",
     ]
-    assert "group_id: control" in dialog.table.item(0, 1).toolTip()
-    assert "session_id: visit2" in dialog.table.item(0, 2).toolTip()
-    assert dialog.table.item(0, 5).toolTip() == str(raw_file)
+    assert "group_id: control" in dialog.table.item(0, 3).toolTip()
+    assert "session_id: visit2" in dialog.table.item(0, 4).toolTip()
+    assert dialog.table.item(0, 7).toolTip() == str(raw_file)
     summary = dialog.findChild(QLabel, "participant_review_summary").text()
     assert "New EEG recordings" in summary
     assert "configured source folder" in summary

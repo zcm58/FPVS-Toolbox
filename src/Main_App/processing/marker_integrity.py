@@ -21,10 +21,12 @@ from Main_App.projects.frequency_protocol import (
     FrequencyProtocolError,
     validate_protocol_condition_codes,
 )
+from Main_App.projects.condition_trigger_maps import resolve_recording_event_schema
 
 MARKER_INTEGRITY_METHOD_VERSION = "marker_integrity_v3_review_receipt"
 MARKER_REVIEW_DECISION_SCHEMA_VERSION = "marker_review_decision_v2_audit_receipt"
 MARKER_REVIEWER_STATE_EXPLICIT_GUI = "explicit_gui_review"
+MARKER_REVIEWER_STATE_CONDITION_EXCLUDED = "persisted_condition_exclusion"
 MARKER_REVIEWER_IDENTITY_STATUS_NOT_COLLECTED = "not_collected"
 MARKER_REVIEWER_IDENTITY_STATUS_PROVIDED = "provided"
 EARLY_MARKER_BOUNDARY_CYCLES = Fraction(1, 2)
@@ -47,6 +49,8 @@ def marker_recording_identity(
 ) -> str | None:
     """Bind recording-specific marker plans to an explicitly supplied registry ID."""
 
+    if protocol.condition_trigger_maps is not None:
+        return resolve_recording_event_schema(protocol, recording_id).recording_id
     if not protocol.recording_oddball_marker_codes:
         return None
     requested = str(recording_id or "").strip()
@@ -218,6 +222,8 @@ class MarkerOccurrencePlan:
     status: str
     review_reasons: tuple[str, ...]
     fingerprint: str
+    canonical_condition_id: str | None = None
+    trigger_map_fingerprint: str | None = None
 
     @property
     def requires_review(self) -> bool:
@@ -240,7 +246,7 @@ class MarkerOccurrencePlan:
         return self.raw_marker_count - self.retained_marker_count
 
     def to_payload(self) -> dict[str, Any]:
-        return {
+        payload = {
             "condition_label": self.condition_label,
             "condition_code": self.condition_code,
             "repetition_index": self.repetition_index,
@@ -266,6 +272,10 @@ class MarkerOccurrencePlan:
             "review_reasons": list(self.review_reasons),
             "fingerprint": self.fingerprint,
         }
+        if self.canonical_condition_id is not None:
+            payload["canonical_condition_id"] = self.canonical_condition_id
+            payload["trigger_map_fingerprint"] = self.trigger_map_fingerprint
+        return payload
 
 
 @dataclass(frozen=True, slots=True)
@@ -592,6 +602,11 @@ def build_marker_integrity_plan(
     sample_origin = int(first_samp)
     recording_stop = sample_origin + sample_count
 
+    source_schema = None
+    if protocol.condition_trigger_maps is not None:
+        source_schema = resolve_recording_event_schema(protocol, recording_id)
+        event_map = source_schema.event_map
+
     labels_by_code: dict[int, list[str]] = defaultdict(list)
     for raw_label, raw_code in event_map.items():
         label = str(raw_label).strip()
@@ -602,7 +617,7 @@ def build_marker_integrity_plan(
     if not labels_by_code:
         raise MarkerIntegrityError("A non-empty condition event map is required.")
     try:
-        validate_protocol_condition_codes(protocol, labels_by_code)
+        validate_protocol_condition_codes(protocol, labels_by_code, recording_id=recording_id)
         recording_identity = marker_recording_identity(protocol, recording_id)
         marker_codes_by_condition = {
             code: protocol.oddball_marker_code_for_condition(
@@ -616,6 +631,8 @@ def build_marker_integrity_plan(
 
     normalized = _normalized_events(events)
     onset_codes = set(labels_by_code)
+    if source_schema is not None:
+        onset_codes.update(source_schema.boundary_only_onset_codes)
     onset_rows = [row for row in normalized if int(row[2]) in onset_codes]
     if not onset_rows:
         raise MarkerIntegrityError(
@@ -639,6 +656,10 @@ def build_marker_integrity_plan(
                 "Configured condition onset is outside the Raw sample grid."
             )
         condition_code = int(onset_row[2])
+        if condition_code not in labels_by_code:
+            # A recognized, unselected source condition still closes the prior
+            # block. It must never produce an analyzed occurrence itself.
+            continue
         marker_code = marker_codes_by_condition[condition_code]
         marker_samples = marker_samples_by_code[marker_code]
         repetition_index = repetition_counts[condition_code]
@@ -708,6 +729,13 @@ def build_marker_integrity_plan(
             ],
             "review_reasons": reasons,
         }
+        canonical_condition_id = None
+        trigger_map_fingerprint = None
+        if source_schema is not None:
+            canonical_condition_id = source_schema.canonical_condition_ids[labels_by_code[condition_code][0]]
+            trigger_map_fingerprint = source_schema.interpretation_fingerprint
+            base_payload.update(canonical_condition_id=canonical_condition_id,
+                                trigger_map_fingerprint=trigger_map_fingerprint)
         occurrences.append(
             MarkerOccurrencePlan(
                 condition_label=labels_by_code[condition_code][0],
@@ -732,6 +760,8 @@ def build_marker_integrity_plan(
                 status=status,
                 review_reasons=tuple(reasons),
                 fingerprint=_occurrence_fingerprint(base_payload),
+                canonical_condition_id=canonical_condition_id,
+                trigger_map_fingerprint=trigger_map_fingerprint,
             )
         )
 
@@ -782,8 +812,11 @@ def _validate_marker_review_receipt(
             "Marker review decision schema is missing or stale; review this "
             "occurrence again."
         )
-    _validate_utc_review_time(decision.reviewed_at_utc)
-    if decision.reviewer_state != MARKER_REVIEWER_STATE_EXPLICIT_GUI:
+    if decision.reviewer_state == MARKER_REVIEWER_STATE_CONDITION_EXCLUDED:
+        _validate_condition_exclusion_receipt(decision)
+    elif decision.reviewer_state == MARKER_REVIEWER_STATE_EXPLICIT_GUI:
+        _validate_utc_review_time(decision.reviewed_at_utc)
+    else:
         raise MarkerIntegrityError(
             "Marker review decision does not record an explicit GUI reviewer state."
         )
@@ -873,12 +906,132 @@ def _validate_marker_review_receipt(
             )
 
 
+def _configured_condition_exclusion(
+    settings: Mapping[str, Any], *, participant_id: str,
+    recording_id: str | None, condition_label: str,
+) -> dict[str, str] | None:
+    from Main_App.projects.preprocessing_settings import (
+        is_participant_condition_excluded, is_recording_condition_excluded,
+        normalize_manual_excluded_participant_conditions,
+        normalize_manual_excluded_recording_conditions,
+    )
+    if is_participant_condition_excluded(
+        normalize_manual_excluded_participant_conditions(
+            settings.get("manual_excluded_participant_conditions")),
+        participant_id, condition_label,
+    ):
+        return {"setting": "manual_excluded_participant_conditions",
+                "subject_id": participant_id, "condition_label": condition_label}
+    if recording_id and is_recording_condition_excluded(
+        normalize_manual_excluded_recording_conditions(
+            settings.get("manual_excluded_recording_conditions")),
+        recording_id, condition_label,
+    ):
+        return {"setting": "manual_excluded_recording_conditions",
+                "subject_id": recording_id, "condition_label": condition_label}
+    return None
+
+
+def _validate_condition_exclusion_receipt(decision: MarkerReviewDecision) -> dict[str, str]:
+    """Validate a deterministic settings receipt without claiming human review."""
+    if (
+        decision.decision != MARKER_DECISION_EXCLUDE
+        or decision.reviewed_at_utc is not None
+        or decision.reviewer_identity is not None
+        or decision.reviewer_identity_status != MARKER_REVIEWER_IDENTITY_STATUS_NOT_COLLECTED
+        or decision.verified_start_sample is not None
+        or decision.verified_stop_sample is not None
+        or decision.evidence_type != MARKER_REVIEWER_STATE_CONDITION_EXCLUDED
+    ):
+        raise MarkerIntegrityError("A persisted condition exclusion can only exclude an occurrence.")
+    try:
+        evidence = json.loads(str(decision.evidence_note))
+    except (ValueError, TypeError) as exc:
+        raise MarkerIntegrityError("Persisted condition exclusion evidence is malformed.") from exc
+    scopes = {
+        "manual_excluded_participant_conditions": decision.participant_id,
+        "manual_excluded_recording_conditions": decision.recording_id,
+    }
+    if (
+        not isinstance(evidence, dict)
+        or set(evidence) != {"setting", "subject_id", "condition_label"}
+        or evidence.get("setting") not in scopes
+        or not scopes.get(evidence.get("setting"))
+        or evidence.get("subject_id") != scopes.get(evidence.get("setting"))
+        or evidence.get("condition_label") != decision.condition_label
+        or decision.evidence_reference != f"project.preprocessing.{evidence.get('setting')}"
+    ):
+        raise MarkerIntegrityError("Persisted condition exclusion evidence does not match its scope.")
+    return evidence
+
+
+def approve_configured_condition_exclusion(
+    occurrence: MarkerOccurrencePlan, *, marker_plan_fingerprint: str,
+    review_scope: Mapping[str, Any], settings: Mapping[str, Any],
+) -> ApprovedOccurrenceSpan | None:
+    """Apply an already configured condition exclusion to unresolved markers only."""
+    evidence = _configured_condition_exclusion(
+        settings, participant_id=str(review_scope.get("participant_id") or ""),
+        recording_id=review_scope.get("recording_id"),
+        condition_label=occurrence.condition_label,
+    )
+    if evidence is None:
+        return None
+    decision = MarkerReviewDecision(
+        decision=MARKER_DECISION_EXCLUDE,
+        schema_version=MARKER_REVIEW_DECISION_SCHEMA_VERSION,
+        reason="Condition excluded in project preprocessing settings.",
+        reviewer_state=MARKER_REVIEWER_STATE_CONDITION_EXCLUDED,
+        reviewer_identity_status=MARKER_REVIEWER_IDENTITY_STATUS_NOT_COLLECTED,
+        source_file_path=str(review_scope.get("source_file_path") or ""),
+        participant_id=review_scope.get("participant_id"),
+        recording_id=review_scope.get("recording_id"),
+        session_id=review_scope.get("session_id"),
+        session_label=review_scope.get("session_label"),
+        condition_label=occurrence.condition_label,
+        condition_code=occurrence.condition_code,
+        repetition_index=occurrence.repetition_index,
+        occurrence_key=occurrence.occurrence_key,
+        reviewed_marker_plan_fingerprint=marker_plan_fingerprint,
+        reviewed_occurrence_fingerprint=occurrence.fingerprint,
+        evidence_type=MARKER_REVIEWER_STATE_CONDITION_EXCLUDED,
+        evidence_note=json.dumps(evidence, sort_keys=True, separators=(",", ":")),
+        evidence_reference=f"project.preprocessing.{evidence['setting']}",
+    )
+    return apply_marker_review_decision(
+        occurrence, decision, marker_plan_fingerprint=marker_plan_fingerprint,
+        review_scope=review_scope, condition_exclusion_settings=settings,
+    )
+
+
+def validate_configured_condition_exclusions(
+    event_plan_payload: Mapping[str, Any], *, settings: Mapping[str, Any],
+    participant_id: str, recording_id: str | None,
+) -> None:
+    """Reject a settings-derived exclusion after its persisted source changes."""
+    for approved in event_plan_payload.get("approved_occurrences", ()):
+        payload = approved.get("decision_payload") if isinstance(approved, Mapping) else None
+        if not isinstance(payload, Mapping) or payload.get("reviewer_state") != MARKER_REVIEWER_STATE_CONDITION_EXCLUDED:
+            continue
+        decision = MarkerReviewDecision.from_payload(payload)
+        evidence = _validate_condition_exclusion_receipt(decision)
+        if decision.participant_id != participant_id or decision.recording_id != recording_id:
+            raise MarkerIntegrityError("Persisted condition exclusion belongs to a different recording.")
+        current = _configured_condition_exclusion(
+            settings, participant_id=participant_id, recording_id=recording_id,
+            condition_label=str(decision.condition_label),
+        )
+        if current != evidence:
+            raise MarkerIntegrityError("Persisted condition exclusion is stale; rerun preflight.")
+
+
 def apply_marker_review_decision(
     occurrence: MarkerOccurrencePlan,
     decision: MarkerReviewDecision,
     *,
     marker_plan_fingerprint: str,
     review_scope: Mapping[str, Any],
+    condition_exclusion_settings: Mapping[str, Any] | None = None,
 ) -> ApprovedOccurrenceSpan:
     """Validate one GUI decision and return the sole downstream span record."""
 
@@ -896,6 +1049,15 @@ def apply_marker_review_decision(
         marker_plan_fingerprint=marker_plan_fingerprint,
         review_scope=review_scope,
     )
+    if decision.reviewer_state == MARKER_REVIEWER_STATE_CONDITION_EXCLUDED:
+        evidence = _validate_condition_exclusion_receipt(decision)
+        if _configured_condition_exclusion(
+            condition_exclusion_settings or {},
+            participant_id=str(decision.participant_id),
+            recording_id=decision.recording_id,
+            condition_label=str(decision.condition_label),
+        ) != evidence:
+            raise MarkerIntegrityError("Persisted condition exclusion is not configured.")
 
     decision_payload = asdict(decision)
     if choice == MARKER_DECISION_EXCLUDE:
@@ -998,6 +1160,8 @@ def validate_approved_event_plan(
 ) -> tuple[ApprovedOccurrenceSpan, ...]:
     """Validate preflight's exact approved spans without rebuilding crop logic."""
 
+    if protocol.condition_trigger_maps is not None:
+        event_map = resolve_recording_event_schema(protocol, recording_id).event_map
     if not isinstance(event_plan_payload, Mapping):
         raise MarkerIntegrityError("Preflight event plan must be an object.")
     marker_plan = event_plan_payload.get("marker_integrity_plan")

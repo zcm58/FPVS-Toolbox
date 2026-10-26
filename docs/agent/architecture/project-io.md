@@ -111,6 +111,100 @@ participant-owned state may depend on them. An explicit repair must preserve
 those references and reject conflicting identities. No raw filename change is
 needed for a correctly separated participant token.
 
+### Independent source-study identities
+
+The optional `source_studies` registry supplies portable, stable source IDs and
+display labels. Participant metadata may retain `source_study_id`,
+`source_participant_id`, and `display_label`. Both source identity fields are
+required together, and a source/local-ID pair may identify only one canonical
+participant. `ACRP1` and `MCCTRP1` may both retain original ID `P1`; they remain
+different people. Leading zeros in original labels are preserved. Existing
+canonical IDs are never reconstructed from a group label or source prefix.
+
+`registered_raw_identities` and `resolve_registered_raw_identity`, exported from
+`Main_App.projects`, resolve exact registered paths before any filename
+inference. Discovery and the dataset-exclusions manager share that authority.
+`propose_source_participant_id` is only a reviewed registration proposal; it
+rejects case-insensitive and sanitized-ID collisions. Source study is separate
+from biological group and from repeated-session `recording_sources.source_id`.
+
+`Project.append_registered_inputs` accepts optional new source-study entries
+and explicit `trigger_map_assignments` for new processing IDs. It cannot replace
+existing source identities or profile assignments. Mapped projects require an
+assignment for every added recording; group defaults are not automatic evidence.
+The checksum-guarded transaction publishes registrations, maps and scientific
+freshness together. A failed or stale save leaves the prior registry intact.
+
+`projects.source_registration` owns source-aware proposals, validation and atomic
+commit before strict flat-recording discovery. `prepare_source_registration_review`
+inspects configured folders without reading EEG samples; existing registered paths
+remain authoritative. The GUI opens this review for source-aware projects or
+duplicate bare participant IDs. Existing participant/source identities and raw
+ownership are read-only; new namespace, original-ID and project-ID choices are
+reviewed before `commit_source_registration_review` checks the manifest and file
+list again. Mapped and group-locked projects can append new participants with an
+explicit saved trigger profile for each new recording. Group defaults supply
+proposals only. Repeated visits continue through repeated-session registration.
+
+### Source trigger maps
+
+`projects.condition_trigger_maps` owns the immutable source interpretation model,
+canonical condition catalog, resolver and detached draft. The opt-in
+`frequency_protocol.condition_trigger_maps` extension uses schema `1.0` and
+requires protocol **1.5.0**, also when an analysis-window policy is present.
+Earlier Toolbox versions refuse the unsupported protocol version. Unmapped
+projects retain their prior protocol payloads, event maps and fingerprints.
+
+`canonical_conditions` maps stable condition IDs to output labels. Each named
+profile supplies every selected condition's actual onset and oddball codes,
+plus `boundary_only_onset_codes` for recognized source conditions not analyzed.
+`recording_assignments` binds a profile to each canonical processing ID: participant
+ID in a flat project, recording ID in a repeated-session project. Coverage includes
+currently excluded recordings. `registration_group_defaults` proposes profiles
+for later registration and never changes an existing assignment.
+
+Mapped projects retire the active global `event_map` and all competing oddball
+marker stores. The ordinary editor does not convert them back to a shared map.
+Explicit legacy conversion retains the prior map/protocol in
+`tools.trigger_map_migration` and preserves recording-specific oddball differences
+as distinct profiles. Invalid coverage, duplicate onset codes, onset/oddball
+collisions, selected/boundary overlap, ambiguous output names, or unknown IDs fail
+validation. Each source profile may reuse codes belonging to another profile.
+All profiles still share one timing and analyzed-length protocol.
+
+Consumers use `project_conditions(context)` for labels/IDs and
+`resolve_recording_event_schema(context, processing_id)` for native codes.
+The resolved snapshot includes the source profile, canonical condition IDs,
+boundary-only onsets and interpretation fingerprint. Its tuples are immutable
+and pickleable. Native event samples and codes remain unchanged; recognized
+boundary-only events terminate source blocks without creating expected outputs.
+
+Scientific catalog, marker or assignment edits conservatively stale all
+interpreted processing and downstream results through the full protocol identity.
+Profile display names, boundary labels and future-registration defaults persist
+but do not change that identity. Condition display labels remain scientific
+identity because they determine existing output names. `TriggerMapDraft` checks
+its baseline and returns a validated manifest candidate; the caller publishes it
+through the existing transaction. `Project.save` rejects a stale mapped-protocol
+baseline and applies processing freshness inside that same transaction.
+
+`apply_condition_catalog_transition` carries explicit participant/recording
+condition exclusions through stable IDs during that atomic publication. Home
+publishes the draft's remapped candidate and rebases live preprocessing; Settings
+remaps once in `Project.save` against the previous disk protocol. Simultaneous
+label swaps do not chain or remap twice. Removing a referenced ID or reusing an
+unowned historical exclusion label fails closed; accepted condition-electrode
+repair requests require their own reviewed resolution before a label/ID change.
+The dataset index limits mapped projects to canonical output-folder components
+using `condition_output_folder_name`, then exposes the exact saved labels. It
+diagnoses and ignores obsolete folders without deleting them. Legacy discovery
+is unchanged.
+
+Home and Settings use one source-map editor. Settings applies only to its detached
+draft until the outer Save; Home publishes its reviewed draft atomically. Guided
+setup preserves the extension but requires leaving the wizard to edit source
+maps. See the [user workflow](../../user/reference/source-trigger-maps.md).
+
 For single-session projects, the dataset index recognizes historical exports
 named from a sanitized registered raw stem (for example,
 `SCP10_Faces_Results.xlsx`). It maps that prefix to `P10` only when the registered
@@ -175,6 +269,14 @@ only permission failures, with six attempts and 0.28 seconds of total scheduled
 delay; other I/O errors propagate immediately. Each caller still owns its
 same-directory staging, cleanup, and synchronization. Other atomic writers do
 not acquire this retry policy implicitly.
+
+`Main_App.io.atomic_write.rename_with_retry` applies that same bounded policy
+to the BIDS import's final staged-directory publication. It keeps `os.rename`
+semantics and the importer's unique destination, source verification, and
+staging cleanup. A brief open handle on a descendant file can deny a Windows
+directory rename even after the importer has closed its own handles. Persistent
+permission failures still abort publication; this does not change import cache
+identity or payload bytes.
 
 `Project.save` reconciles newer disk geometry and worker-authored tool metadata
 inside this transaction. Its existing explicit tool-namespace update policy

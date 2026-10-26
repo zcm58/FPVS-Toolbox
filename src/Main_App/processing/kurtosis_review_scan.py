@@ -943,7 +943,7 @@ def _validate_review_request(
         raise KurtosisReviewScanError("Raw-file infos must be a sequence.")
     if not isinstance(settings, Mapping):
         raise KurtosisReviewScanError("Kurtosis review settings must be an object.")
-    if not isinstance(event_map, Mapping) or not event_map:
+    if not isinstance(event_map, Mapping):
         raise KurtosisReviewScanError("Kurtosis review requires the current condition event map.")
     if raw_channel_qc_by_recording is not None and not isinstance(raw_channel_qc_by_recording, Mapping):
         raise KurtosisReviewScanError("Raw-channel QC display evidence must be a recording-to-payload map.")
@@ -951,14 +951,14 @@ def _validate_review_request(
         canonical_event_map = {str(label).strip(): int(code) for label, code in event_map.items() if str(label).strip()}
     except (TypeError, ValueError) as exc:
         raise KurtosisReviewScanError("Kurtosis review condition event map is malformed.") from exc
-    if not canonical_event_map:
-        raise KurtosisReviewScanError("Kurtosis review requires the current condition event map.")
     try:
         protocol = normalize_frequency_protocol(settings.get("frequency_protocol"))
     except Exception as exc:
         raise KurtosisReviewScanError(f"Kurtosis review requires a valid project frequency protocol: {exc}") from exc
     if not protocol.is_ready:
         raise KurtosisReviewScanError("Kurtosis review requires a confirmed project frequency protocol.")
+    if not canonical_event_map and protocol.condition_trigger_maps is None:
+        raise KurtosisReviewScanError("Kurtosis review requires the current condition event map.")
     return canonical_event_map, protocol
 
 
@@ -1040,6 +1040,11 @@ def scan_kurtosis_review(
         else:
             try:
                 event_plan = _event_plan_for_path(plans, path)
+                from Main_App.processing.marker_integrity import validate_configured_condition_exclusions
+                validate_configured_condition_exclusions(
+                    event_plan, settings=settings, participant_id=participant,
+                    recording_id=getattr(info, "recording_id", None),
+                )
                 source_plan = validate_source_analysis_span_context(
                     event_plan_payload=event_plan,
                     event_map=canonical_event_map,
@@ -1215,7 +1220,16 @@ def _scan_kurtosis_review_serial(
         raw: Any | None = None
         prefetched = False
         try:
+            file_event_map = canonical_event_map
+            if protocol.condition_trigger_maps is not None:
+                from Main_App.projects.condition_trigger_maps import resolve_recording_event_schema
+                file_event_map = resolve_recording_event_schema(protocol, recording).event_map
             event_plan = _event_plan_for_path(plans, path)
+            from Main_App.processing.marker_integrity import validate_configured_condition_exclusions
+            validate_configured_condition_exclusions(
+                event_plan, settings=settings, participant_id=participant,
+                recording_id=getattr(info, "recording_id", None),
+            )
             source_plan = validate_source_analysis_span_context(
                 event_plan_payload=event_plan,
                 event_map=canonical_event_map,
@@ -1235,7 +1249,11 @@ def _scan_kurtosis_review_serial(
                 continue
             excluded_conditions = tuple(
                 condition
-                for condition in all_conditions
+                # Preserve configured exclusions even when no onset produced a
+                # span. Production binds that full scope into the same source
+                # plan; omitting an absent condition makes identical samples
+                # acquire incompatible review evidence fingerprints.
+                for condition in file_event_map
                 if is_participant_condition_excluded(
                     participant_condition_exclusions,
                     participant,
@@ -1247,7 +1265,8 @@ def _scan_kurtosis_review_serial(
                     condition,
                 )
             )
-            if len(excluded_conditions) == len(all_conditions):
+            excluded_lookup = {condition.casefold() for condition in excluded_conditions}
+            if all(condition.casefold() in excluded_lookup for condition in all_conditions):
                 results.append(
                     _skipped_result(
                         identity,
@@ -1283,7 +1302,7 @@ def _scan_kurtosis_review_serial(
                     _LoaderLogAdapter(path),
                     str(path),
                     **source_load_kwargs(settings),
-                    acquisition_settings=dict(settings),
+                    acquisition_settings={**settings, "event_id_map": file_event_map},
                     **({"preload_in_memory": True} if settings.get("experimental_ram_preload") is True else {}),
                 )
             elif progress:

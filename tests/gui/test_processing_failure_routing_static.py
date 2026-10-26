@@ -1042,6 +1042,7 @@ def _registration_validation_harness(tmp_path, *, mode="Batch", additions=True):
     """Drive the real GUI orchestration without widgets or EEG processing."""
     project = SimpleNamespace(
         project_root=tmp_path, groups_locked=True, subfolders={"excel": "excel"},
+        sessions={"visit1": {}},
         preprocessing={}, recordings={"P1_visit1": {"participant_id": "P1"}},
     )
     manifest = tmp_path / "project.json"

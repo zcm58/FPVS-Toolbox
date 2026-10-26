@@ -303,6 +303,18 @@ def init_ui(self) -> None:
         compact=True,
         parent=grp_event,
     )
+    self.trigger_maps_button = make_action_button("Use source maps…", compact=True, parent=grp_event)
+    self.trigger_maps_button.setObjectName("home_trigger_maps")
+    from Main_App.gui.trigger_maps_workflow import show_home_trigger_maps, show_source_participants
+    self.trigger_maps_button.clicked.connect(lambda: show_home_trigger_maps(self))
+    self.source_participants_button = make_action_button("Source participants…", compact=True, parent=grp_event)
+    self.source_participants_button.setObjectName("home_source_participants")
+    self.source_participants_button.clicked.connect(lambda: show_source_participants(self))
+    source_actions = QHBoxLayout()
+    source_actions.addWidget(self.trigger_maps_button)
+    source_actions.addWidget(self.source_participants_button)
+    source_actions.addStretch(1)
+    event_group_layout.addLayout(source_actions)
 
     event_header = QWidget(grp_event)
     event_header.setObjectName("event_map_header")
@@ -314,6 +326,8 @@ def init_ui(self) -> None:
     lbl_id = SubsectionHeaderLabel("Trigger ID", event_header, alignment=Qt.AlignCenter)
     lbl_id.setFixedWidth(EVENT_ID_COLUMN_WIDTH)
     lbl_actions = QLabel("", event_header)
+    self.event_id_header = lbl_id
+    self.event_actions_header = lbl_actions
     lbl_actions.setFixedWidth(EVENT_REMOVE_BUTTON_SIZE)
 
     header_layout.addWidget(lbl_condition, 1)

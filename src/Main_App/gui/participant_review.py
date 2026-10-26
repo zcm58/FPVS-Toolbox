@@ -7,6 +7,7 @@ from collections.abc import Sequence
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog,
+    QComboBox,
     QHeaderView,
     QLabel,
     QTableWidget,
@@ -46,6 +47,10 @@ class ParticipantReviewDialog(AppDialog):
         )
         self.rows = list(rows)
         self.repeated_session = repeated
+        project = getattr(parent, "currentProject", None)
+        maps = getattr(getattr(project, "frequency_protocol", None), "condition_trigger_maps", None)
+        self._trigger_maps = maps if additions_only else None
+        self._map_selectors = []
 
         if additions_only:
             source_text = (
@@ -75,7 +80,9 @@ class ParticipantReviewDialog(AppDialog):
 
         headers = (
             [
-                "Participant",
+                "Project ID",
+                "Source study",
+                "Original ID",
                 "Group",
                 "Session",
                 "Visit",
@@ -84,8 +91,10 @@ class ParticipantReviewDialog(AppDialog):
                 "Status",
             ]
             if repeated
-            else ["Participant", "Group", "Raw File", "Status"]
+            else ["Project ID", "Source study", "Original ID", "Group", "Raw File", "Status"]
         )
+        if self._trigger_maps is not None:
+            headers.append("Source map")
         self.table = QTableWidget(len(self.rows), len(headers), self)
         self.table.setObjectName("participant_review_table")
         self.table.setHorizontalHeaderLabels(headers)
@@ -105,6 +114,8 @@ class ParticipantReviewDialog(AppDialog):
             values = (
                 (
                     row.participant_id,
+                    getattr(row, "source_study_id", "") or "",
+                    getattr(row, "source_participant_id", "") or "",
                     row.group_label,
                     row.session_label or row.session_id or "",
                     str(row.visit_index or ""),
@@ -115,6 +126,8 @@ class ParticipantReviewDialog(AppDialog):
                 if repeated
                 else (
                     row.participant_id,
+                    getattr(row, "source_study_id", "") or "",
+                    getattr(row, "source_participant_id", "") or "",
                     row.group_label,
                     str(row.raw_file),
                     row.status,
@@ -131,6 +144,16 @@ class ParticipantReviewDialog(AppDialog):
                     item.setToolTip(f"{row.session_label or row.session_id} (session_id: {row.session_id})")
                 item.setFlags(item.flags() & ~Qt.ItemIsEditable)
                 self.table.setItem(row_index, col_index, item)
+            if self._trigger_maps is not None:
+                selector = QComboBox(self.table)
+                selector.addItem("Choose source map…", "")
+                for profile in self._trigger_maps.profiles:
+                    selector.addItem(profile.label, profile.profile_id)
+                proposed = dict(self._trigger_maps.registration_group_defaults).get(row.group_id)
+                if proposed:
+                    selector.setCurrentIndex(selector.findData(proposed))
+                self._map_selectors.append((row.recording_id or row.participant_id, selector))
+                self.table.setCellWidget(row_index, len(headers) - 1, selector)
         self.root_layout.addWidget(self.table)
 
         self.continue_button = make_action_button(
@@ -156,8 +179,19 @@ class ParticipantReviewDialog(AppDialog):
 
         has_conflict = any("conflict" in row.status.casefold() for row in self.rows)
         self.continue_button.setEnabled(not has_conflict)
+        for _recording_id, selector in self._map_selectors:
+            selector.currentIndexChanged.connect(self._refresh_assignments)
+        self._refresh_assignments()
         self.continue_button.clicked.connect(self.accept)
         self.cancel_button.clicked.connect(self.reject)
+
+    def _refresh_assignments(self):
+        has_conflict = any("conflict" in row.status.casefold() for row in self.rows)
+        assigned = all(selector.currentData() for _identity, selector in self._map_selectors)
+        self.continue_button.setEnabled(not has_conflict and assigned)
+
+    def trigger_map_assignments(self):
+        return {identity: selector.currentData() for identity, selector in self._map_selectors}
 
 
 def review_participants_for_processing(
@@ -178,4 +212,7 @@ def review_recording_additions_for_processing(
     if not rows:
         return True
     dialog = ParticipantReviewDialog(rows, parent, additions_only=True)
-    return dialog.exec() == QDialog.Accepted
+    accepted = dialog.exec() == QDialog.Accepted
+    if parent is not None:
+        parent._reviewed_trigger_map_assignments = dialog.trigger_map_assignments() if accepted else {}
+    return accepted

@@ -317,6 +317,66 @@ def test_scan_validates_raw_and_limits_evidence_to_current_conditions(
     )
 
 
+@pytest.mark.parametrize("exclusion_scope", ["participant", "recording"])
+def test_scan_preserves_configured_exclusion_without_observed_onset(
+    tmp_path, monkeypatch, exclusion_scope,
+):
+    path = tmp_path / "P01.bdf"
+    path.touch()
+    captured = _configure_active_scan(monkeypatch, loaded_raws=[])
+    key = f"manual_excluded_{exclusion_scope}_conditions"
+    identity = "P01" if exclusion_scope == "participant" else "P01__visit-1"
+    scan = scan_kurtosis_review(
+        [_info(path, "P01", "P01__visit-1")],
+        _settings(**{key: {identity: ["Absent"]}}),
+        event_map={"Faces": 1, "Objects": 2, "Absent": 3},
+        reviewed_event_plans_by_file={str(path): {}},
+    )
+    assert not scan.errors
+    assert scan.results[0].analyzed_conditions == ("Faces", "Objects")
+    assert captured["excluded_conditions"] == ("Absent",)
+    assert captured["prepare"]["params"]["_fpvs_source_analysis_span_plan"] == _source_plan("Faces", "Objects")
+
+
+def test_scan_all_observed_excluded_with_additional_absent_exclusion_skips_load(tmp_path, monkeypatch):
+    path = tmp_path / "P01.bdf"
+    path.touch()
+    loaded = []
+    _configure_active_scan(monkeypatch, loaded_raws=loaded)
+    scan = scan_kurtosis_review(
+        [_info(path, "P01")],
+        _settings(manual_excluded_participant_conditions={"P01": ["Faces", "Objects", "Absent"]}),
+        event_map={"Faces": 1, "Objects": 2, "Absent": 3},
+        reviewed_event_plans_by_file={str(path): {}},
+    )
+    assert not scan.errors
+    assert scan.results[0].skip_reason == KURTOSIS_REVIEW_SKIP_ALL_CONDITIONS_EXCLUDED
+    assert not loaded
+
+
+def test_mapped_scan_preserves_absent_exclusion_with_empty_global_event_map(tmp_path, monkeypatch):
+    path = tmp_path / "P01.bdf"
+    path.touch()
+    captured = _configure_active_scan(monkeypatch, loaded_raws=[])
+    labels = {"faces": "Faces", "objects": "Objects", "absent": "Absent"}
+    protocol = _protocol().with_condition_trigger_maps({
+        "schema_version": "1.0",
+        "canonical_conditions": {key: {"label": label} for key, label in labels.items()},
+        "profiles": {"source": {"conditions": {key: {"onset_code": index, "oddball_code": index + 50}
+                                                   for index, key in enumerate(labels, 1)}}},
+        "recording_assignments": {"P01__visit-1": "source"},
+    })
+    scan = scan_kurtosis_review(
+        [_info(path, "P01", "P01__visit-1")],
+        _settings(frequency_protocol=protocol, manual_excluded_participant_conditions={"P01": ["Absent"]}),
+        event_map={}, reviewed_event_plans_by_file={str(path): {}},
+    )
+    assert not scan.errors
+    assert scan.results[0].analyzed_conditions == ("Faces", "Objects")
+    assert captured["excluded_conditions"] == ("Absent",)
+    assert captured["prepare"]["params"]["_fpvs_source_analysis_span_plan"] == _source_plan("Faces", "Objects")
+
+
 @pytest.mark.parametrize("prefetch_hit", [True, False])
 def test_scan_adopts_preload_without_reloading_and_keeps_current_choices(tmp_path, monkeypatch, prefetch_hit):
     path = tmp_path / "P01.bdf"

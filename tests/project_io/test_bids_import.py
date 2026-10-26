@@ -127,6 +127,70 @@ def test_concurrent_imports_publish_complete_independent_datasets(tmp_path):
             assert raw.ch_names == ["Fz"]
 
 
+@pytest.mark.parametrize("failed_attempts", [1, 5])
+def test_import_publication_recovers_from_brief_permission_locks(tmp_path, monkeypatch, failed_attempts):
+    from Main_App.io import atomic_write as publication
+
+    source = write_bdf(tmp_path / "native.bdf", variant="BDF", record_onsets=("0",))
+    before = source.read_bytes()
+    original_rename = publication.os.rename
+    attempts = []
+    delays = []
+
+    def temporarily_denied(staging, target):
+        attempts.append((staging, target))
+        assert staging.parent == target.parent == tmp_path / ".fpvs_cache" / "bids-import"
+        manifest = json.loads((staging / "import.json").read_text())
+        assert manifest["outputs"]
+        assert not target.exists()
+        if len(attempts) <= failed_attempts:
+            raise PermissionError("brief publication lock")
+        original_rename(staging, target)
+
+    monkeypatch.setattr(publication.os, "rename", temporarily_denied)
+    monkeypatch.setattr(publication.time, "sleep", delays.append)
+    prepared = prepare_bids_recording(source, project_root=tmp_path)
+    assert len(attempts) == failed_attempts + 1
+    assert len(set(attempts)) == 1
+    assert delays == [0.01, 0.02, 0.05, 0.1, 0.1][:failed_attempts]
+    assert source.read_bytes() == prepared.header_path.read_bytes() == before
+    reused = prepare_bids_recording(source, project_root=tmp_path)
+    assert reused.reused and reused.header_path == prepared.header_path
+    assert not list(prepared.manifest_path.parent.parent.glob(".import-*"))
+
+
+@pytest.mark.parametrize("failure", [PermissionError("persistent lock"), OSError("publication failed")])
+def test_import_publication_failure_is_bounded_and_cleans_only_own_staging(tmp_path, monkeypatch, failure):
+    from Main_App.io import atomic_write as publication
+
+    source = write_bdf(tmp_path / "native.bdf", variant="BDF", record_onsets=("0",))
+    before = source.read_bytes()
+    cache = tmp_path / ".fpvs_cache" / "bids-import"
+    preserved = cache / "independent-publication" / "payload"
+    preserved.parent.mkdir(parents=True)
+    preserved.write_bytes(b"another reader owns this")
+    attempts = []
+    delays = []
+
+    def denied(staging, target):
+        attempts.append((staging, target))
+        assert (staging / "import.json").is_file()
+        assert not target.exists()
+        raise failure
+
+    monkeypatch.setattr(publication.os, "rename", denied)
+    monkeypatch.setattr(publication.time, "sleep", delays.append)
+    with pytest.raises(type(failure)) as error:
+        prepare_bids_recording(source, project_root=tmp_path)
+    assert error.value is failure
+    permission_failure = isinstance(failure, PermissionError)
+    assert len(attempts) == (6 if permission_failure else 1)
+    assert delays == ([0.01, 0.02, 0.05, 0.1, 0.1] if permission_failure else [])
+    assert source.read_bytes() == before
+    assert preserved.read_bytes() == b"another reader owns this"
+    assert set(cache.iterdir()) == {preserved.parent}
+
+
 def test_external_cache_link_is_rejected(tmp_path):
     source = write_bdf(tmp_path / "native.bdf", variant="BDF", record_onsets=("0",))
     project = tmp_path / "project"

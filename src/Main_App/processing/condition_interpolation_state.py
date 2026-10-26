@@ -245,6 +245,11 @@ def project_processing_identity(project_root: str | Path) -> str:
     payload = {key: manifest.get(key) for key in (
         "frequency_protocol", "options", "subfolders", "groups", "participants", "sessions", "recording_sources", "recordings",
     )}
+    if payload["frequency_protocol"] is not None:
+        from Main_App.projects.frequency_protocol import normalize_frequency_protocol
+        protocol = normalize_frequency_protocol(payload["frequency_protocol"])
+        if protocol.condition_trigger_maps is not None:
+            payload["frequency_protocol"] = protocol.canonical_payload()
     payload["preprocessing"] = {key: value for key, value in preprocessing.items()
                                 if key not in _DOWNSTREAM_ONLY_PREPROCESSING_KEYS}
     experimental = normalize_experimental_qc_settings(manifest.get("experimental_qc"))

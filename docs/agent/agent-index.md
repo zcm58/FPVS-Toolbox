@@ -94,6 +94,11 @@ fallback), or the no-offscreen-Qt rule.
   slots, methods, project persistence or cache identity.
   Use the `pipeline-methods` focused verification scope for this foundation;
   it includes real replacements, checkpoint/repair paths and the hardware matrix.
+- Guided pipeline setup uses `projects.pipeline_setup`,
+  `gui.pipeline_setup_dialog` and `gui.pipeline_setup_workflow`. Read
+  `docs/agent/exec-plans/active/guided-pipeline-setup.md` for current acceptance
+  work. Use the `pipeline-setup` and `gui` focused scopes; leave the
+  registered dialog Qt tests to CI and use the documented visible smoke path.
 - Multi-hardware BIDS admission and its synthetic processing matrix are tracked
   in `docs/agent/exec-plans/active/multi-hardware-bids.md`. Unicorn physical
   qualification remains separate from this software acceptance.

@@ -310,13 +310,18 @@ def build_project_processing_signature(manifest: Mapping[str, object] | None) ->
                 event_map[str(key)] = int(value)
             except (TypeError, ValueError):
                 continue
+    protocol_identity = source.get("frequency_protocol")
+    if isinstance(protocol_identity, Mapping) and protocol_identity.get("condition_trigger_maps") is not None:
+        # Source names and defaults for future registration do not reinterpret
+        # existing EEG. Preserve the exact legacy signature for unmapped data.
+        protocol_identity = normalize_frequency_protocol(protocol_identity).canonical_payload()
     return {
         "project_schema_version": str(source.get("schema_version") or PROJECT_SCHEMA_VERSION),
         "preprocessing_order_version": PREPROCESSING_ORDER_VERSION_LABEL,
         "processing_fingerprint_version": PROCESSING_FINGERPRINT_VERSION_LABEL,
         "preprocessing": canonical_preprocessing,
         "event_map": dict(sorted(event_map.items())),
-        "frequency_protocol": _json_safe(source.get("frequency_protocol")),
+        "frequency_protocol": _json_safe(protocol_identity),
         "frequency_domain_qc": _frequency_domain_qc_signature(source),
     }
 

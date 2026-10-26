@@ -15,12 +15,30 @@ editor: cutoff frequencies, target sampling, reference choices and optional QC
 flags retain their current meanings. Settings drafts, Save/Cancel, project reload
 and worker snapshots preserve the method selection.
 
+**Settings > Processing > Guided setup** offers an optional seven-page editor:
+recording setup, reference/channels, filtering, resampling, channel QC/repair,
+epochs/spectra, and final review. `projects.pipeline_setup.PipelineSetupDraft`
+owns detached project values, backend validation, capability-based control
+policy, method summaries, change review and one atomic manifest transaction.
+`gui.pipeline_setup_dialog` presents those values; `gui.pipeline_setup_workflow`
+holds the processing/navigation guard for its entire modal lifetime.
+
+Opening requires an idle active project with no pending Settings or condition
+edits. Navigation edits only the draft. Save validates again and writes in a
+worker; Cancel and failed writes preserve the live project. Unrelated manifest
+fields are retained and conflicting processing edits are rejected. Saving closes
+the cached Settings page so reopening reads the saved values. No processing is
+started automatically. Unsupported controls follow the backend's resolved
+policy. Advanced marker maps and Studio window evidence remain intact when
+unrelated fields change.
+
 Do not add single-option method dropdowns. When another method is implemented
 and qualified, expose a compact selector within its existing settings section,
 show only its relevant parameters and filter choices by recording capabilities.
 Use the catalog's labels and parameter ownership as metadata, not GUI-derived
 scientific policy. A method change applies to a subsequent run, never halfway
-through an active run. A general pipeline editor is not yet implemented.
+through an active run. Guided setup configures the current fixed sequence;
+arbitrary reordering and alternative algorithms are not implemented.
 
 Unknown schemas, incomplete method maps, unknown IDs and methods selected in the
 wrong slot fail explicitly. Project files cannot name Python modules or run code.
@@ -102,6 +120,21 @@ To add a future method:
    migration; never silently fill a malformed explicit project plan.
 
 ## Identity and reuse
+
+`processing.pipeline_settings_freshness` adds a per-recording settings receipt
+for guided-setup changes. The draft transaction marks dependent outputs stale
+and activates `tools.processing.pipeline_setup_requirements` when scientific
+settings change. Processing plans capture the identity before execution;
+completed or automatically excluded recordings receive that immutable receipt
+in the ledger. Post-processing readiness and the final mark-current transaction
+require every active contributor to match current project settings. A partial
+Single run or Resume Post-processing cannot release untouched recordings.
+Explicit whole-recording exclusions retain their existing handling.
+
+This requirement remains active for subsequent runs/settings edits. It does not
+alter the numerical fingerprint or erase caches/results. An unchanged setup
+confirmation does not activate it. The GUI clears its harmonic selection cache
+and restores Start Processing only after a changed pipeline saves successfully.
 
 `pipeline_fingerprint_payload` produces no extra fields for the exact historical
 plan, whether implicit or explicitly selected. Existing default numerical results,

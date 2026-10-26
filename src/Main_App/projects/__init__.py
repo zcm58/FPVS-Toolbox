@@ -6,6 +6,13 @@ import importlib
 from typing import Any
 
 _MANIFEST_NAMES = {"project_manifest_transaction"}
+_TRIGGER_MAP_NAMES = {
+    "CONDITION_TRIGGER_MAPS_SCHEMA_VERSION", "CanonicalCondition", "ConditionTrigger",
+    "ConditionTriggerMaps", "SourceTriggerProfile", "ResolvedConditionTrigger",
+    "ResolvedRecordingEventSchema", "TriggerMapDraft", "TriggerMapError",
+    "migrate_legacy_trigger_maps", "project_conditions", "resolve_recording_event_schema",
+    "validate_project_trigger_maps",
+}
 _PROJECT_NAMES = {
     "Project",
     "DEFAULTS",
@@ -37,7 +44,11 @@ _RECORDING_PREFLIGHT_NAMES = {
     "derive_filename_token_rules",
     "preflight_repeated_recording_sources",
 }
-_RAW_IDENTITY_NAMES = {"infer_raw_participant_id"}
+_RAW_IDENTITY_NAMES = {
+    "infer_raw_participant_id", "RegisteredRawIdentity", "normalize_source_studies",
+    "validate_source_participants", "registered_raw_identities",
+    "resolve_registered_raw_identity", "propose_source_participant_id",
+}
 _SESSION_COMPATIBILITY_NAMES = {"repeated_session_tool_block_reason"}
 _PROJECT_CONTEXT_NAMES = {"resolve_active_project_root"}
 _EXPERIMENTAL_QC_SETTINGS_NAMES = {
@@ -57,6 +68,7 @@ _EXPERIMENTAL_QC_SETTINGS_NAMES = {
     "normalize_summed_bca_screening_settings",
 }
 _FREQUENCY_PROTOCOL_NAMES = {
+    "CONDITION_TRIGGER_MAPS_PROTOCOL_VERSION",
     "CONDITION_MARKER_PROTOCOL_VERSION",
     "RECORDING_MARKER_PROTOCOL_VERSION",
     "DEFAULT_ODDBALL_EVERY_N",
@@ -165,6 +177,7 @@ _PREPROCESSING_NAMES = {
 
 __all__ = sorted(
     _MANIFEST_NAMES
+    | _TRIGGER_MAP_NAMES
     | _DATASET_INDEX_NAMES
     | _DATASET_PATH_NAMES
     | _EXPERIMENTAL_QC_SETTINGS_NAMES
@@ -181,6 +194,9 @@ __all__ = sorted(
 
 
 def __getattr__(name: str) -> Any:
+    if name in _TRIGGER_MAP_NAMES:
+        trigger_maps = importlib.import_module("Main_App.projects.condition_trigger_maps")
+        return getattr(trigger_maps, name)
     if name in _MANIFEST_NAMES:
         manifest_store = importlib.import_module("Main_App.projects.manifest_store")
         return getattr(manifest_store, name)

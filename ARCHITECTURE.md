@@ -70,6 +70,9 @@ processing steps selected through persisted project settings and validated
 against acquisition capabilities, and complete FPVS Studio
 compatibility. Four scoped acquisition routes now reach shared processing;
 versioned method slots and persisted selections form the modular foundation.
+Settings > Processing offers optional guided setup through a detached project
+draft (`projects/pipeline_setup.py`) and a worker-saved dialog
+(`gui/pipeline_setup_dialog.py`); `gui/pipeline_setup_workflow.py` owns launch guards.
 Alternative methods, their UI selectors and complete Studio handoff remain
 future work.
 Published installer behavior is bound to its release tag, not later source work.

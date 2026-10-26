@@ -22,6 +22,7 @@ from Main_App.processing.marker_integrity import (
     validate_approved_event_plan,
 )
 from Main_App.projects.frequency_protocol import FrequencyProtocol
+from Main_App.projects.condition_trigger_maps import resolve_recording_event_schema
 
 ANALYSIS_SPAN_PLAN_VERSION = "analysis_span_plan_v2_v3_stim_alignment"
 ANALYSIS_SPAN_COORDINATE_VERSION = "raw_half_open_relative_to_first_samp_v1"
@@ -375,6 +376,8 @@ def validate_source_analysis_span_context(
 ) -> dict[str, Any]:
     """Bind an internally valid source plan to the current project context."""
 
+    if protocol.condition_trigger_maps is not None:
+        event_map = resolve_recording_event_schema(protocol, recording_id).event_map
     plan = read_source_analysis_span_plan(event_plan_payload)
     if not protocol.is_ready or str(plan["protocol_fingerprint"]) != protocol.fingerprint:
         raise AnalysisSpanPlanError(

@@ -141,7 +141,7 @@ def test_extracted_pages_keep_one_dialog_owner_and_initial_draft(tmp_path, qtbot
         (widget, widget.preprocessing_qc_tabs.widget(index)) for index in range(3)
     ]
     assert [widget.tabs.tabText(index) for index in range(widget.tabs.count())] == [
-        "Preprocessing", "Protocol", "Harmonics", "ROIs", "Quality Control",
+        "Processing", "Protocol", "Harmonics", "ROIs", "Quality Control",
         "Experimental", "Application",
     ]
     assert not widget.has_unsaved_changes()

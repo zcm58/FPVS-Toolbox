@@ -66,6 +66,124 @@ _open_project_guard = OpGuard()
 _open_selected_project_guard = OpGuard()
 
 
+def register_source_participants(host, *, selected_path=None, only_if_needed=False) -> bool:
+    """Review independent source identities before strict flat-file discovery."""
+    from Main_App.gui.source_participant_registration import SourceParticipantRegistrationDialog
+    from Main_App.projects.source_registration import (
+        prepare_source_registration_review, commit_source_registration_review,
+    )
+
+    project = getattr(host, "currentProject", None)
+    if project is None:
+        QMessageBox.warning(host, "No Project", "Open a project before registering source participants.")
+        return False
+    if project.sessions or project.recordings:
+        QMessageBox.warning(host, "Repeated Sessions", "Use the repeated-session registration review to add visits to existing participants.")
+        return False
+    try:
+        review = _run_source_registration_work(
+            host, lambda: prepare_source_registration_review(project, selected_path=selected_path),
+            "Checking source participants…",
+        )
+        if only_if_needed and not review.requires_source_review:
+            return True
+        if not review.additions:
+            QMessageBox.information(host, "Source participants", "All recordings in the configured raw folders are already registered.")
+            return True
+        settings = getattr(host, "_settings_page", None)
+        if settings is not None and settings.has_unsaved_changes():
+            raise ValueError("Save or cancel Settings edits before registering new source participants.")
+        dialog = SourceParticipantRegistrationDialog(review.editor_rows(), host, project=project, review=review)
+        try:
+            if not dialog.exec():
+                return False
+            if getattr(host, "currentProject", None) is not project:
+                raise ValueError("The active project changed during registration. Start again in the intended project.")
+            rows = dialog.registrations()
+            assignments = dialog.trigger_map_assignments()
+            _run_source_registration_work(
+                host,
+                lambda: commit_source_registration_review(project, review, rows, trigger_map_assignments=assignments),
+                "Registering source participants…",
+            )
+        finally:
+            dialog.deleteLater()
+        # Keep the launch draft and selected file intact while refreshing identities.
+        from Main_App.gui.trigger_maps_workflow import refresh_home_trigger_maps
+        baseline = getattr(host, "_condition_draft_baseline", None)
+        refresh_home_trigger_maps(host)
+        if only_if_needed and baseline is not None:
+            host._condition_draft_baseline = baseline
+        settings = getattr(host, "_settings_page", None)
+        if settings is not None and not settings.has_unsaved_changes():
+            settings.reject()
+        return True
+    except (OSError, ValueError, RuntimeError) as exc:
+        logger.exception("Source participant registration failed")
+        QMessageBox.warning(host, "Source Registration", str(exc))
+        return False
+
+
+class _SourceRegistrationSignals(QObject):
+    finished = Signal(object)
+
+
+class _SourceRegistrationJob(QRunnable):
+    """Run filesystem inspection/publication without accessing widgets."""
+
+    def __init__(self, operation):
+        super().__init__()
+        self.operation = operation
+        self.signals = _SourceRegistrationSignals()
+
+    def run(self):
+        try:
+            result = self.operation()
+        except Exception as exc:  # noqa: BLE001 - worker boundary must always release the progress dialog.
+            logger.exception("source_participant_registration_worker_failed")
+            self.signals.finished.emit((False, str(exc)))
+        else:
+            self.signals.finished.emit((True, result))
+
+
+class _SourceRegistrationProgress(QProgressDialog):
+    def reject(self):
+        # Publication cannot be abandoned once the atomic append has started.
+        return None
+
+    def closeEvent(self, event):  # noqa: N802 - Qt override
+        event.ignore()
+
+
+def _run_source_registration_work(host, operation, label):
+    """Keep the caller's review sequence while Qt continues handling events."""
+    progress = _SourceRegistrationProgress(label, "", 0, 0, host)
+    progress.setWindowTitle("Source participants")
+    progress.setWindowFlag(Qt.WindowCloseButtonHint, False)
+    progress.setCancelButton(None)
+    progress.setWindowModality(Qt.WindowModal)
+    progress.setMinimumDuration(0)
+    progress.setAutoClose(False)
+    progress.setAutoReset(False)
+    outcome = []
+    job = _SourceRegistrationJob(operation)
+
+    def finished(value):
+        outcome.append(value)
+        progress.accept()
+
+    job.signals.finished.connect(finished, Qt.QueuedConnection)
+    QTimer.singleShot(0, lambda: QThreadPool.globalInstance().start(job))
+    progress.exec()
+    progress.deleteLater()
+    if not outcome:
+        raise RuntimeError("Source registration did not finish. Reopen the project before trying again.")
+    success, result = outcome[0]
+    if not success:
+        raise RuntimeError(result)
+    return result
+
+
 class _ProjectScanSignals(QObject):
     error = Signal(str)
     finished = Signal(object)
@@ -1469,6 +1587,9 @@ def loadProject(self, project: Project) -> None:
             self.add_event_row(str(label), str(ident))
     else:
         self.add_event_row()
+
+    from Main_App.gui.trigger_maps_workflow import refresh_home_trigger_maps
+    refresh_home_trigger_maps(self)
 
     self.log(f"Loaded project: {project.name}")
     if preference_error is not None:

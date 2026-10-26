@@ -52,6 +52,7 @@ CHANNEL_VALIDITY_REFERENCE_UNAVAILABLE = "reference_unavailable"
 KURTOSIS_DECISION_APPROVE = "approve_interpolation"
 KURTOSIS_DECISION_REJECT = "reject_interpolation"
 KURTOSIS_REVIEWER_STATE_EXPLICIT_GUI = "explicit_gui_review"
+KURTOSIS_REVIEWER_STATE_AUTHORIZED_REVIEW = "explicit_authorized_signal_review"
 KURTOSIS_REVIEWER_STATE_EXPERIMENTAL_AUTO = "gui_enabled_experimental_abs_z_gt_10_v1"
 KURTOSIS_REVIEWER_STATE_EXPERIMENTAL_AUTO_ALL = "gui_enabled_experimental_all_flags_v1"
 KURTOSIS_NO_REASON_PROVIDED = "No reason provided"
@@ -1038,6 +1039,10 @@ def _validate_review_authority(
 ) -> None:
     if receipt.reviewer_state == KURTOSIS_REVIEWER_STATE_EXPLICIT_GUI:
         return
+    if receipt.reviewer_state == KURTOSIS_REVIEWER_STATE_AUTHORIZED_REVIEW:
+        if not receipt.reviewer_identity or receipt.reason == KURTOSIS_NO_REASON_PROVIDED:
+            raise KurtosisQCError("Authorized signal review requires a reviewer identity and reason.")
+        return
     if (
         receipt.reviewer_state == KURTOSIS_REVIEWER_STATE_EXPERIMENTAL_AUTO
         and receipt.decision == KURTOSIS_DECISION_APPROVE
@@ -1067,8 +1072,17 @@ def build_kurtosis_review_decision(
     reviewed_at_utc: str | None = None,
     experimental_auto: bool = False,
     experimental_auto_all: bool = False,
+    authorized_signal_review: bool = False,
 ) -> KurtosisReviewDecision:
-    """Build an auditable GUI receipt from one cached evidence payload."""
+    """Bind an explicit review or selected experimental policy to exact evidence.
+
+    ``authorized_signal_review`` records a user-authorized review performed
+    outside the GUI. It does not imply a GUI visit and takes precedence over
+    the project auto-all policy for this channel only.
+    """
+
+    if authorized_signal_review and (experimental_auto or experimental_auto_all):
+        raise KurtosisQCError("An explicit signal review cannot also be an automatic approval.")
 
     if not isinstance(evidence, Mapping):
         raise KurtosisQCError("Kurtosis review evidence must be an object.")
@@ -1156,7 +1170,9 @@ def build_kurtosis_review_decision(
         reason=normalized_reason,
         reviewed_at_utc=reviewed_time,
         reviewer_state=(
-            KURTOSIS_REVIEWER_STATE_EXPERIMENTAL_AUTO_ALL
+            KURTOSIS_REVIEWER_STATE_AUTHORIZED_REVIEW
+            if authorized_signal_review
+            else KURTOSIS_REVIEWER_STATE_EXPERIMENTAL_AUTO_ALL
             if experimental_auto_all
             else KURTOSIS_REVIEWER_STATE_EXPERIMENTAL_AUTO
             if experimental_auto
@@ -1758,7 +1774,20 @@ def build_kurtosis_decision_plan(
             else:
                 reasons.append("kurtosis_statistic_invalid")
             eligible = tuple(item for item in assessments if item.eligible)
-            if channel_evidence.exceeds_threshold and eligible:
+            explicit = decisions.get(channel)
+            explicit_authority = (explicit.get("reviewer_state") if isinstance(explicit, Mapping)
+                                  else getattr(explicit, "reviewer_state", None))
+            if (explicit_authority == KURTOSIS_REVIEWER_STATE_AUTHORIZED_REVIEW
+                    and not (channel_evidence.exceeds_threshold and eligible)):
+                receipt = validate_kurtosis_review_decision(
+                    explicit, evidence=evidence, channel_evidence=channel_evidence,
+                    review_scope=scope, kurtosis_auto_interpolate_all=kurtosis_auto_interpolate_all,
+                )
+                used_decisions.add(channel)
+                authorized = receipt.decision == KURTOSIS_DECISION_APPROVE
+                state = CHANNEL_DECISION_USER_APPROVED if authorized else CHANNEL_DECISION_USER_REJECTED
+                reasons.append("explicit_authorized_signal_review")
+            elif channel_evidence.exceeds_threshold and eligible:
                 state = CHANNEL_DECISION_CORROBORATED_AUTO
                 authorized = True
                 reasons.extend(
@@ -1890,6 +1919,7 @@ __all__ = [
     "KURTOSIS_REVIEWER_IDENTITY_STATUS_NOT_COLLECTED",
     "KURTOSIS_REVIEWER_IDENTITY_STATUS_PROVIDED",
     "KURTOSIS_REVIEWER_STATE_EXPLICIT_GUI",
+    "KURTOSIS_REVIEWER_STATE_AUTHORIZED_REVIEW",
     "KURTOSIS_REVIEWER_STATE_EXPERIMENTAL_AUTO",
     "KURTOSIS_REVIEWER_STATE_EXPERIMENTAL_AUTO_ALL",
     "KURTOSIS_NO_REASON_PROVIDED",

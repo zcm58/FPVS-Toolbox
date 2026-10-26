@@ -602,6 +602,7 @@ def test_stale_or_non_gui_receipt_is_rejected(tmp_path) -> None:
             review_scope=_scope(source_path),
         )
 
+
     receipt = _receipt(evidence, candidate, source_path)
     receipt["reviewer_state"] = "dialog_closed"
     with pytest.raises(KurtosisQCError, match="explicit GUI"):
@@ -610,6 +611,100 @@ def test_stale_or_non_gui_receipt_is_rejected(tmp_path) -> None:
             review_decisions={candidate: receipt},
             review_scope=_scope(source_path),
         )
+
+
+@pytest.mark.parametrize("decision", [KURTOSIS_DECISION_APPROVE, KURTOSIS_DECISION_REJECT])
+def test_authorized_signal_review_overrides_auto_all_only_with_current_evidence(tmp_path, decision):
+    evidence = _evidence()
+    candidate = evidence.candidate_channels[0]
+    source = tmp_path / "recording.bdf"
+    source.touch()
+    scope = _scope(source)
+    receipt = build_kurtosis_review_decision(
+        evidence.to_payload(), channel=candidate, decision=decision,
+        reason="User-authorized signal review; local condition repairs recorded separately.",
+        review_scope=scope, reviewer_identity="authorized signal reviewer",
+        authorized_signal_review=True,
+    ).to_payload()
+    assert receipt["reviewer_state"] == "explicit_authorized_signal_review"
+    normalized = normalize_kurtosis_review_decisions_by_recording({receipt["recording_id"]: {candidate: receipt}})
+    plan = build_kurtosis_decision_plan(
+        evidence, review_decisions=normalized[receipt["recording_id"]],
+        review_scope=scope, kurtosis_auto_interpolate_all=True,
+    )
+    row = next(row for row in plan.channel_decisions if row.channel == candidate)
+    assert row.interpolation_authorized == (decision == KURTOSIS_DECISION_APPROVE)
+    assert row.state == (CHANNEL_DECISION_USER_APPROVED if row.interpolation_authorized else CHANNEL_DECISION_USER_REJECTED)
+    assert row.reasons[-1] == "explicit_authorized_signal_review"
+    assert plan.ready_for_interpolation
+    receipt["reviewed_evidence_fingerprint"] = "f" * 64
+    with pytest.raises(KurtosisQCError, match="evidence changed"):
+        build_kurtosis_decision_plan(evidence, review_decisions={candidate: receipt},
+                                     review_scope=scope, kurtosis_auto_interpolate_all=True)
+
+
+def test_authorized_signal_review_requires_truthful_attribution_and_reason(tmp_path):
+    evidence = _evidence()
+    source = tmp_path / "recording.bdf"
+    source.touch()
+    kwargs = dict(channel=evidence.candidate_channels[0], decision=KURTOSIS_DECISION_REJECT,
+                  review_scope=_scope(source), authorized_signal_review=True)
+    with pytest.raises(KurtosisQCError, match="reviewer identity and reason"):
+        build_kurtosis_review_decision(evidence.to_payload(), reason="reviewed", **kwargs)
+    with pytest.raises(KurtosisQCError, match="reviewer identity and reason"):
+        build_kurtosis_review_decision(evidence.to_payload(), reason="", reviewer_identity="reviewer", **kwargs)
+
+
+def test_authorized_review_does_not_override_qualified_corroborator(tmp_path):
+    registry = _future_registry()
+    evidence = _evidence(registry=registry)
+    channel = evidence.candidate_channels[0]
+    source = tmp_path / "recording.bdf"
+    source.touch()
+    receipt = build_kurtosis_review_decision(
+        evidence.to_payload(), channel=channel, decision=KURTOSIS_DECISION_REJECT,
+        reason="Explicit review", review_scope=_scope(source), reviewer_identity="reviewer",
+        authorized_signal_review=True,
+    )
+    with pytest.raises(KurtosisQCError, match="corroborated automatic channel"):
+        build_kurtosis_decision_plan(evidence, registry=registry,
+            corroborator_findings=(_finding(evidence, channel),), review_decisions={channel: receipt},
+            review_scope=_scope(source), kurtosis_auto_interpolate_all=True)
+
+
+def test_authorized_review_is_recording_scoped_for_caches_and_incremental_reuse(tmp_path):
+    from Main_App.processing.processing_ledger import _authorized_recording_review_changed
+    from Main_App.workers import process_runner
+    from types import SimpleNamespace
+
+    evidence = _evidence()
+    first, second = tmp_path / "A.bdf", tmp_path / "B.bdf"
+    first.write_bytes(b"A")
+    second.write_bytes(b"B")
+    scope = {**_scope(first), "participant_id": "A", "recording_id": "A"}
+    channel = evidence.candidate_channels[0]
+    receipt = build_kurtosis_review_decision(
+        evidence.to_payload(), channel=channel, decision=KURTOSIS_DECISION_REJECT,
+        reason="Reviewed local condition masks", review_scope=scope,
+        reviewer_identity="authorized reviewer", authorized_signal_review=True,
+    ).to_payload()
+    baseline = {"_fpvs_participant_id_by_file": {str(first): "A", str(second): "B"},
+                "kurtosis_auto_interpolate_all": True}
+    reviewed = {**baseline, "kurtosis_review_decisions_by_recording": {"A": {channel: receipt}}}
+
+    def key(path, settings):
+        local = process_runner._settings_for_file(path, settings)
+        payload = process_runner._preproc_cache_payload(path, local, mne_version="test")
+        return process_runner._preproc_cache_key(payload)
+
+    assert key(first, baseline) != key(first, reviewed)
+    assert key(second, baseline) == key(second, reviewed)
+    project = SimpleNamespace(preprocessing=reviewed)
+    assert _authorized_recording_review_changed(project, "A", {})
+    assert not _authorized_recording_review_changed(project, "B", {})
+    entry = {"kurtosis_decision_plan": {"channel_decisions": [{"channel": channel, "review_receipt": receipt}]}}
+    assert not _authorized_recording_review_changed(project, "A", entry)
+    assert _authorized_recording_review_changed(SimpleNamespace(preprocessing={}), "A", entry)
 
 
 def test_nonfinite_channel_requires_review_and_unavailable_evidence_blocks(tmp_path) -> None:

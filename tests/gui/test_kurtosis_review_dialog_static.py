@@ -130,8 +130,8 @@ def test_scanner_remains_gui_neutral_and_callback_driven() -> None:
     assert "should_cancel" in source
     assert "prepare_kurtosis_review_evidence(" in source
     assert "validate_source_analysis_span_plan(" in source
-    assert "validate_raw_biosemi64_geometry(" in source
-    assert "BIOSEMI64_MONTAGE_ID" in source
+    assert "validate_loaded_geometry(" in source
+    assert "resolve_recording_contract(" in source
 
 
 def test_preprocessing_workflow_runs_and_persists_the_fail_closed_review() -> None:

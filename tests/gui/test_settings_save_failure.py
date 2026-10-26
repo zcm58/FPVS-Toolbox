@@ -37,6 +37,7 @@ def _panel(tmp_path):
         "_save", "_restore_failed_project_settings_save",
         "_capture_harmonic_settings_rollback", "_clear_harmonic_settings_rollback",
         "_experimental_qc_changes_after_processing", "_mark_frequency_analysis_outputs_stale",
+        "_trigger_protocol_is_current", "_save_project_with_trigger_guard",
     }
     tree = ast.parse(SOURCE.read_text(encoding="utf-8"))
     owner = next(node for node in tree.body
@@ -55,6 +56,9 @@ def _panel(tmp_path):
     payload = dict(project.preprocessing, low_pass=45.0)
     panel = SimpleNamespace(
         project=project, manager=manager, _project_cache=dict(project.preprocessing),
+        _trigger_protocol_baseline=(project.frequency_protocol.to_manifest(), copy.deepcopy(project.event_map)),
+        _trigger_maps_payload=None, _initial_trigger_maps_payload=None,
+        _show_settings_validation=Mock(),
         alpha_edit=SimpleNamespace(text=lambda: "0.025"),
         roi_editor=SimpleNamespace(get_pairs=lambda: [("Audit", ["O1"]) ]),
         preproc_edits=[],
@@ -88,6 +92,45 @@ def _panel(tmp_path):
     for name in methods:
         setattr(panel, name, namespace[name].__get__(panel))
     return panel, namespace["QMessageBox"]
+
+
+def test_stale_settings_cannot_overwrite_protocol_saved_elsewhere(tmp_path):
+    panel, _messages = _panel(tmp_path)
+    other = Project.load(panel.project.project_root)
+    other.update_frequency_protocol(FrequencyProtocol.from_recurrence(
+        6, 5, expected_analyzed_oddball_cycles=120,
+        expected_analyzed_oddball_cycles_source="manual",
+    ))
+    other.save()
+    saved = other.manifest_path.read_bytes()
+    panel._save()
+    assert panel.project.manifest_path.read_bytes() == saved
+    panel.accept.assert_not_called()
+    assert "Reopen Settings" in panel._show_settings_validation.call_args.args[0]
+
+
+def test_settings_map_conversion_retires_legacy_map_only_when_saved(tmp_path):
+    from Main_App.projects import migrate_legacy_trigger_maps
+
+    panel, _messages = _panel(tmp_path)
+    project = panel.project
+    project.event_map = {"Angry": 11}
+    project.participants = {"P1": {"raw_file": project.input_folder / "p1.bdf"}}
+    project.update_frequency_protocol(panel._validated_project_protocol())
+    project.save()
+    panel._trigger_protocol_baseline = (project.frequency_protocol.to_manifest(), copy.deepcopy(project.event_map))
+    before = project.manifest_path.read_bytes()
+    maps = migrate_legacy_trigger_maps(project)
+    mapped_protocol = project.frequency_protocol.with_condition_trigger_maps(maps)
+    panel._trigger_maps_payload = maps.to_manifest()
+    panel._validated_project_protocol = lambda: mapped_protocol
+    assert project.manifest_path.read_bytes() == before
+    assert project.event_map == {"Angry": 11}
+    panel._save()
+    reopened = Project.load(project.project_root)
+    assert reopened.event_map == {}
+    assert reopened.frequency_protocol.condition_trigger_maps == maps
+    assert reopened.manifest["tools"]["trigger_map_migration"]["legacy_event_map"] == {"Angry": 11}
 
 
 @pytest.mark.parametrize("error_type", [OSError, ValueError])

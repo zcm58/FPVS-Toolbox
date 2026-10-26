@@ -169,8 +169,12 @@ def validate_inputs(host: Any) -> bool:
             QMessageBox.warning(host, "No File Selected", "Please choose an available EEG recording first.")
             return False
         host.data_paths = [selected]
+        if not host.currentProject.sessions and not host.currentProject.recordings:
+            from Main_App.projects.project_manager import register_source_participants
+            if not register_source_participants(host, selected_path=Path(selected), only_if_needed=True):
+                return False
         try:
-            if bool(getattr(host.currentProject, "groups_locked", False)):
+            if bool(getattr(host.currentProject, "groups_locked", False)) or host.currentProject.frequency_protocol.condition_trigger_maps is not None:
                 registration_review = prepare_raw_registration_review(
                     host.currentProject, selected_path=Path(host.data_paths[0]),
                 )
@@ -188,8 +192,12 @@ def validate_inputs(host: Any) -> bool:
     # (multi-group aware via prepare_batch_files). This ensures that
     # all .bdf files from all configured group input folders are used.
     if mode_now == "Batch":
+        if not host.currentProject.sessions and not host.currentProject.recordings:
+            from Main_App.projects.project_manager import register_source_participants
+            if not register_source_participants(host, only_if_needed=True):
+                return False
         try:
-            if bool(getattr(host.currentProject, "groups_locked", False)):
+            if bool(getattr(host.currentProject, "groups_locked", False)) or host.currentProject.frequency_protocol.condition_trigger_maps is not None:
                 registration_review = prepare_raw_registration_review(host.currentProject)
                 raw_file_infos = list(registration_review.files)
             else:
@@ -274,6 +282,7 @@ def validate_inputs(host: Any) -> bool:
     host.validated_params = params
 
     if registration_review is not None:
+        host._reviewed_trigger_map_assignments = {}
         if registration_review.review_rows:
             reviewer = getattr(host, "review_recording_additions_for_processing", None)
             if not callable(reviewer):
@@ -284,7 +293,17 @@ def validate_inputs(host: Any) -> bool:
         try:
             if host.currentProject is not registration_project:
                 raise ValueError("The active project changed during review. Start processing again in the intended project.")
-            raw_file_infos = commit_raw_registration_review(host.currentProject, registration_review)
+            assignments = getattr(host, "_reviewed_trigger_map_assignments", {})
+            raw_file_infos = commit_raw_registration_review(
+                host.currentProject, registration_review,
+                **({"trigger_map_assignments": assignments} if assignments else {}),
+            )
+            host._reviewed_trigger_map_assignments = {}
+            if assignments:
+                params = host._build_validated_params()
+                if params is None:
+                    return False
+                host.validated_params = params
         except Exception as exc:
             logger.exception("Recording additions could not be confirmed and saved.")
             QMessageBox.critical(host, "Recording Files Not Added", str(exc))
@@ -302,7 +321,7 @@ def validate_inputs(host: Any) -> bool:
                 host,
                 "Participant Assignment Conflict",
                 "One or more discovered files conflict with existing participant assignments. "
-                "Move or rename the raw files, then try processing again.",
+                "Use Source participants on Home to assign distinct project IDs to recordings from different studies, then try processing again.",
             )
             return False
         reviewer = getattr(host, "review_participants_for_processing", None)
@@ -698,12 +717,16 @@ def build_validated_params(host: Any) -> dict | None:
     event_map = validated_event_map(host, focus_error=True)
     if event_map is None:
         return None
-    if not event_map:
+    mapped = frequency_protocol.condition_trigger_maps is not None
+    if not event_map and not mapped:
         QMessageBox.warning(host, "No Events", "Please add at least one event map entry.")
         return None
     try:
         validate_protocol_condition_codes(frequency_protocol, event_map.values())
-    except FrequencyProtocolError as exc:
+        if mapped:
+            from Main_App.projects.condition_trigger_maps import validate_project_trigger_maps
+            validate_project_trigger_maps(host.currentProject)
+    except ValueError as exc:
         QMessageBox.warning(host, "Invalid FPVS Protocol", str(exc))
         return None
 
@@ -938,6 +961,15 @@ def update_start_enabled(host: Any) -> None:
         return
     mapping = validated_event_map(host)
     event_map_ready = bool(mapping)
+    map_error = ""
+    project = getattr(host, "currentProject", None)
+    if getattr(getattr(project, "frequency_protocol", None), "condition_trigger_maps", None) is not None:
+        from Main_App.projects.condition_trigger_maps import validate_project_trigger_maps
+        try:
+            validate_project_trigger_maps(project)
+            event_map_ready = True
+        except ValueError as exc:
+            map_error = str(exc)
     refresh_dirty_indicator(host)
     try:
         mode = host.file_mode.get()
@@ -957,7 +989,7 @@ def update_start_enabled(host: Any) -> None:
         btn.setEnabled(event_map_ready)
         reason = ""
     if not event_map_ready:
-        reason = "Correct the condition rows above." if mapping is None else "Add a condition name and recorded marker ID."
+        reason = map_error or ("Correct the condition rows above." if mapping is None else "Add a condition name and recorded marker ID.")
     label = getattr(host, "processing_readiness_label", None)
     if label is not None:
         label.setText(reason)

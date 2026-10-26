@@ -1286,13 +1286,12 @@ def _ordered_conditions(project: Any, scanned_conditions: list[str]) -> list[str
     scanned = [str(condition) for condition in scanned_conditions]
     seen: set[str] = set()
     ordered: list[str] = []
-    event_map = getattr(project, "event_map", {}) or {}
-    if isinstance(event_map, Mapping):
-        for condition in event_map.keys():
-            text = str(condition)
-            if text in scanned and text not in seen:
-                ordered.append(text)
-                seen.add(text)
+    from Main_App.projects.condition_trigger_maps import project_conditions
+    for condition in project_conditions(project):
+        text = condition.label
+        if text in scanned and text not in seen:
+            ordered.append(text)
+            seen.add(text)
     for condition in scanned:
         if condition not in seen:
             ordered.append(condition)

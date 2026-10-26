@@ -24,7 +24,8 @@ Open **Settings** and check:
   and BioSemi64 label mapping.
 - **Protocol:** presentation rate, oddball rule, analyzed duration and condition
   markers. Confirm recording-specific trigger assignments if acquisition codes
-  changed during the study.
+  changed during the study. For differing condition-onset codes or reused source
+  participant IDs, follow the [source trigger map guide](reference/source-trigger-maps.md).
 - **Harmonics:** the profile and search/domain limits that define Summed BCA.
   New projects use the two-consecutive-failures profile; existing legacy
   projects keep their earlier profile.

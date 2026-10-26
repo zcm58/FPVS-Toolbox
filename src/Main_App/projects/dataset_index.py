@@ -38,7 +38,7 @@ from .dataset_scan import (
     workbook_candidate_score,
     workbook_location,
 )
-from .grouping import GroupInfo, ParticipantInfo
+from .grouping import GroupInfo, ParticipantInfo, condition_output_folder_name
 from .preprocessing_settings import (
     normalize_manual_excluded_participant_conditions,
     normalize_manual_excluded_recording_conditions,
@@ -648,6 +648,20 @@ def load_project_dataset_index(dataset_path: str | Path) -> ProjectDatasetIndex:
         }
         manifest_view = MappingProxyType(dict(manifest))
 
+    catalog_by_folder: dict[str, str] | None = None
+    if manifest_view is not None:
+        raw_protocol = manifest_view.get("frequency_protocol")
+        if isinstance(raw_protocol, Mapping) and raw_protocol.get("condition_trigger_maps") is not None:
+            from .condition_trigger_maps import validate_project_trigger_maps
+            try:
+                maps = validate_project_trigger_maps(manifest_view)
+                catalog_by_folder = {
+                    condition_output_folder_name(item.label).casefold(): item.label
+                    for item in maps.canonical_conditions
+                }
+            except ValueError as exc:
+                raise DatasetIndexError(f"Invalid mapped condition catalog: {exc}") from exc
+
     alias_probe = {
         participant.participant_id: participant.group_id
         for participant in participants.values()
@@ -723,6 +737,21 @@ def load_project_dataset_index(dataset_path: str | Path) -> ProjectDatasetIndex:
                 )
             )
             continue
+        filename_condition = condition
+        if catalog_by_folder is not None:
+            # The native export folder can omit a display-only numeric prefix.
+            # Match its exact output component, then expose the saved label.
+            output_folder = path.resolve(strict=False).relative_to(excel_root).parts[0]
+            canonical_label = catalog_by_folder.get(output_folder.casefold())
+            if canonical_label is None:
+                diagnostics.append(DatasetDiagnostic(
+                    code="condition_not_in_catalog",
+                    message=f"Result folder {output_folder!r} is absent from the current condition catalog; ignored {path.name}.",
+                    paths=(path,),
+                ))
+                continue
+            filename_condition = condition_output_folder_name(canonical_label)
+            condition = canonical_label
         if layout == "unexpected_nested":
             diagnostics.append(
                 DatasetDiagnostic(
@@ -739,7 +768,7 @@ def load_project_dataset_index(dataset_path: str | Path) -> ProjectDatasetIndex:
         if repeated_session_project:
             recording_id = _generated_recording_id(
                 path,
-                condition=condition,
+                condition=filename_condition,
                 known_recording_ids=recordings,
             )
             if recording_id is None:
@@ -765,7 +794,7 @@ def load_project_dataset_index(dataset_path: str | Path) -> ProjectDatasetIndex:
                 path,
                 known_participant_ids=participants,
                 require_leading_legacy_match=manifest_view is not None,
-                generated_condition=condition if manifest_view is not None else None,
+                generated_condition=filename_condition if manifest_view is not None else None,
             )
             if participant_id is None:
                 diagnostics.append(

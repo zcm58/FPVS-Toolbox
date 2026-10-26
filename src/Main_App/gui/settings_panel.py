@@ -271,6 +271,14 @@ class SettingsDialog(QDialog):
         self.host = parent
         self.manager = manager
         self.project = project
+        self._trigger_maps_payload = (
+            project.frequency_protocol.condition_trigger_maps.to_manifest()
+            if project is not None and project.frequency_protocol.condition_trigger_maps is not None else None
+        )
+        self._initial_trigger_maps_payload = copy.deepcopy(self._trigger_maps_payload)
+        self._trigger_protocol_baseline = (
+            (project.frequency_protocol.to_manifest(), copy.deepcopy(project.event_map)) if project is not None else None
+        )
         self._project_cache: Dict[str, Any] | None = None
         self._settings_footer_buttons: list[QWidget] = []
         # Stub attributes for pruned settings to avoid AttributeError if referenced
@@ -287,6 +295,21 @@ class SettingsDialog(QDialog):
         refresh_hardware_qc_controls(self)
         self._draft_tracker = SettingsDraftTracker(self)
         self._pending_save_succeeded = False
+        self._refresh_guided_setup_availability()
+
+    def _refresh_guided_setup_availability(self) -> None:
+        from Main_App.gui.pipeline_setup_workflow import refresh_guided_setup_availability
+
+        refresh_guided_setup_availability(self)
+
+    def _show_pipeline_setup(self) -> None:
+        from Main_App.gui.pipeline_setup_workflow import show_pipeline_setup
+
+        show_pipeline_setup(self)
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self._refresh_guided_setup_availability()
 
     # ------------------------------------------------------------------
     # UI Construction
@@ -620,6 +643,8 @@ class SettingsDialog(QDialog):
         )
 
     def _protocol_save_requested(self) -> bool:
+        if self._trigger_maps_payload != self._initial_trigger_maps_payload:
+            return True
         initial = getattr(
             self,
             "_initial_protocol_editor_values",
@@ -635,7 +660,7 @@ class SettingsDialog(QDialog):
 
     def _protocol_from_editor(self, *, require_ready: bool, include_recordings: bool = True) -> FrequencyProtocol:
         values = self._protocol_editor_values()
-        return build_manual_protocol(
+        protocol = build_manual_protocol(
             presentation_rate_hz=values.presentation_rate_hz,
             oddball_input_mode=values.oddball_input_mode,
             oddball_every_n=values.oddball_every_n,
@@ -654,8 +679,16 @@ class SettingsDialog(QDialog):
             recording_oddball_markers_enabled=values.recording_oddball_markers_enabled if include_recordings else False,
             recording_oddball_marker_codes=values.recording_oddball_marker_codes if include_recordings else (),
         )
+        if self._trigger_maps_payload is not None:
+            protocol = protocol.with_condition_trigger_maps(self._trigger_maps_payload)
+        return protocol
 
     def _validate_recording_marker_configuration(self, protocol: FrequencyProtocol) -> None:
+        if protocol.condition_trigger_maps is not None:
+            from Main_App.projects.condition_trigger_maps import validate_project_trigger_maps
+            context = dict(self.project.manifest, frequency_protocol=protocol, event_map={})
+            validate_project_trigger_maps(context)
+            return
         if protocol.recording_oddball_marker_codes:
             from .recording_marker_schemas import recording_marker_editor_rows, validate_recording_marker_assignments
 
@@ -663,6 +696,9 @@ class SettingsDialog(QDialog):
 
     def _configure_recording_marker_schemas(self) -> None:
         if self.project is None:
+            return
+        if self._trigger_maps_payload is not None:
+            self._configure_trigger_maps()
             return
         from .recording_marker_schemas import recording_marker_editor_rows
         from .recording_marker_schemas_dialog import RecordingMarkerSchemasDialog
@@ -687,16 +723,92 @@ class SettingsDialog(QDialog):
         finally:
             dialog.deleteLater()
 
+    def _configure_trigger_maps(self) -> None:
+        if self.project is None:
+            return
+        from Main_App.gui.trigger_maps_dialog import TriggerMapsDialog
+        from Main_App.gui.trigger_maps_model import trigger_map_editor_payload
+        from Main_App.gui.toolbox_cache_workflow import _cache_work_is_active
+        from Main_App.gui.project_drafts import has_condition_changes
+        if _cache_work_is_active(self.host or self):
+            self._show_settings_validation("Wait for processing or guided setup to finish before editing trigger maps.")
+            return
+        if self.host is not None and has_condition_changes(self.host):
+            self._show_settings_validation("Save or cancel your Home condition edits before editing trigger maps.")
+            return
+        try:
+            if not self._trigger_protocol_is_current():
+                return
+            payload = self._trigger_maps_payload
+            if payload is None:
+                payload = trigger_map_editor_payload(self.project)
+            dialog = TriggerMapsDialog(self.project, self, payload=payload, apply_to_settings=True)
+        except ValueError as exc:
+            self._show_settings_validation(str(exc))
+            return
+        try:
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                self._trigger_maps_payload = dialog.maps().to_manifest()
+                self.protocol_condition_markers_check.setChecked(False)
+                self.protocol_recording_markers_check.setChecked(False)
+                self._refresh_protocol_preview()
+                self._draft_tracker.changed()
+        finally:
+            dialog.deleteLater()
+
+    def _trigger_protocol_is_current(self) -> bool:
+        if self.project is None:
+            return True
+        baseline = self._trigger_protocol_baseline
+        live = (self.project.frequency_protocol.to_manifest(), self.project.event_map)
+        try:
+            disk = json.loads(self.project.manifest_path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return live == baseline
+        except OSError as exc:
+            self._show_settings_validation(str(exc))
+            return False
+        saved = (disk.get("frequency_protocol"), disk.get("event_map", {}))
+        # An inferred legacy protocol may intentionally be absent on disk.
+        disk_matches = saved == baseline or (saved[0] is None and not self.project._frequency_protocol_was_persisted and saved[1] == baseline[1])
+        if live != baseline or not disk_matches:
+            self._show_settings_validation("The project protocol or trigger maps changed. Reopen Settings before saving these edits.")
+            return False
+        return True
+
+    def _save_project_with_trigger_guard(self) -> None:
+        """Keep the trigger baseline check and publication under the same lock."""
+        from Main_App.projects.manifest_store import project_manifest_transaction
+        with project_manifest_transaction(self.project.manifest_path):
+            try:
+                disk = json.loads(self.project.manifest_path.read_text(encoding="utf-8"))
+            except FileNotFoundError:
+                disk = None
+            if disk is not None:
+                saved = (disk.get("frequency_protocol"), disk.get("event_map", {}))
+                baseline = self._trigger_protocol_baseline
+                legacy_absent = saved[0] is None and baseline[0].get("status") == "confirmation_required" and saved[1] == baseline[1]
+                if saved != baseline and not legacy_absent:
+                    raise ValueError("The project protocol or trigger maps changed. Reopen Settings before saving these edits.")
+            self.project.save()
+        self._trigger_protocol_baseline = (self.project.frequency_protocol.to_manifest(), copy.deepcopy(self.project.event_map))
+
     def _refresh_protocol_preview(self, *_args: object) -> None:
         analysis_mode = str(self.protocol_analysis_window_mode_combo.currentData())
         self._protocol_form.setRowVisible(self.protocol_expected_cycles_edit, analysis_mode == ANALYSIS_WINDOW_MODE_CYCLES)
         self._protocol_form.setRowVisible(self.protocol_requested_duration_edit, analysis_mode == ANALYSIS_WINDOW_MODE_DURATION)
         recording_markers = self.protocol_recording_markers_check.isChecked()
-        self.protocol_recording_markers_row.setVisible(recording_markers)
+        source_maps = self._trigger_maps_payload is not None
+        self.protocol_recording_markers_row.setVisible(recording_markers and not source_maps)
         self.protocol_recording_markers_summary.setText(f"{len(self._recording_marker_codes)} recording schemas configured.")
         condition_markers = self.protocol_condition_markers_check.isChecked()
-        self.protocol_condition_markers_table.setVisible(condition_markers)
-        self.protocol_oddball_marker_code_edit.setEnabled(self.project is not None and not condition_markers)
+        self.protocol_condition_markers_table.setVisible(condition_markers and not source_maps)
+        self.protocol_oddball_marker_code_edit.setEnabled(self.project is not None and not condition_markers and not source_maps)
+        self._protocol_markers_form.setRowVisible(self.protocol_oddball_marker_code_edit, not source_maps)
+        self.protocol_condition_markers_check.setVisible(not source_maps)
+        self.protocol_recording_markers_check.setVisible(not source_maps)
+        self.protocol_marker_code_help.setVisible(not source_maps)
+        self.protocol_trigger_maps_button.setText("Trigger maps…" if source_maps else "Use source maps…")
         self.protocol_marker_code_help.setText(
             "Enter the oddball marker emitted in each condition. Every condition needs a value; "
             "turn off this option to use the shared code above."
@@ -724,7 +836,7 @@ class SettingsDialog(QDialog):
                 (getattr(self.project, "event_map", {}) or {}).values(),
             )
             self._validate_recording_marker_configuration(protocol)
-        except FrequencyProtocolError as exc:
+        except ValueError as exc:
             self.protocol_resolved_oddball_rate_edit.setText("Invalid protocol")
             self.protocol_derived_duration_edit.setText("—")
             self.protocol_status.set_variant("warning")
@@ -777,6 +889,8 @@ class SettingsDialog(QDialog):
         else:
             self.protocol_status.set_variant("success")
             markers = (
+                f"{len(protocol.condition_trigger_maps.profiles)} source trigger maps"
+                if protocol.condition_trigger_maps is not None else
                 f"{len(protocol.recording_oddball_marker_codes)} recording-specific trigger schemas"
                 if protocol.recording_oddball_marker_codes else
                 f"{len(protocol.condition_oddball_marker_codes)} condition-specific oddball markers"
@@ -799,7 +913,7 @@ class SettingsDialog(QDialog):
             )
             self._validate_recording_marker_configuration(protocol)
             return protocol
-        except FrequencyProtocolError as exc:
+        except ValueError as exc:
             self._show_settings_validation(str(exc))
             message = str(exc).casefold()
             if "target sampling rate" in message:
@@ -1083,6 +1197,8 @@ class SettingsDialog(QDialog):
         self,
         validated_preproc: Dict[str, Any],
     ) -> bool:
+        if not self._trigger_protocol_is_current():
+            return False
         if self.project is None:
             QMessageBox.information(
                 self,
@@ -1105,7 +1221,11 @@ class SettingsDialog(QDialog):
 
     def _save_analysis_inputs_for_harmonic_recalculation(self) -> bool:
         """Persist every non-project input consumed by harmonic selection."""
-
+        if not self._trigger_protocol_is_current():
+            return False
+        if self._trigger_maps_payload != self._initial_trigger_maps_payload:
+            self._show_settings_validation("Save trigger-map edits in Settings and run Processing before recalculating harmonics.")
+            return False
         if not self._validate_roi_draft():
             return False
         protocol = None
@@ -2376,6 +2496,12 @@ class SettingsDialog(QDialog):
 
     def _settings_save_completed(self) -> None:
         self._pending_save_succeeded = True
+        if self.project is not None:
+            self._trigger_protocol_baseline = (self.project.frequency_protocol.to_manifest(), copy.deepcopy(self.project.event_map))
+            self._initial_trigger_maps_payload = copy.deepcopy(self._trigger_maps_payload)
+            if self.project.frequency_protocol.condition_trigger_maps is not None and getattr(self.host, "currentProject", None) is self.project:
+                from Main_App.gui.trigger_maps_workflow import refresh_home_trigger_maps
+                refresh_home_trigger_maps(self.host)
         self._draft_tracker.mark_saved()
 
     def accept(self) -> None:
@@ -2566,6 +2692,8 @@ class SettingsDialog(QDialog):
         self._clear_harmonic_settings_rollback()
 
     def _save(self) -> None:
+        if not self._trigger_protocol_is_current():
+            return
         if self._full_fft_grid_review_is_running():
             QMessageBox.information(
                 self,
@@ -2700,12 +2828,18 @@ class SettingsDialog(QDialog):
                         )
                     )
                 if validated_protocol is not None:
+                    if validated_protocol.condition_trigger_maps is not None:
+                        if self.project.frequency_protocol.condition_trigger_maps is None:
+                            migration = self.project.manifest.setdefault("tools", {}).setdefault("trigger_map_migration", {})
+                            migration["legacy_protocol"] = self.project.frequency_protocol.to_manifest()
+                            migration["legacy_event_map"] = copy.deepcopy(self.project.event_map)
+                        self.project.event_map = {}
                     self.project.update_frequency_protocol(validated_protocol)
                 self.project.update_experimental_qc_settings(
                     validated_experimental_qc
                 )
                 self._project_cache = normalized
-                self.project.save()
+                self._save_project_with_trigger_guard()
             except ValueError as exc:
                 self._restore_failed_project_settings_save(project_save_snapshot)
                 QMessageBox.warning(self, "Invalid Settings", str(exc))

@@ -145,6 +145,10 @@ def condition_row_values(owner: object) -> list[tuple[str, str]]:
 
 def validated_event_map(owner: object, *, focus_error: bool = False) -> dict[str, int] | None:
     """Present field errors and optionally focus the first invalid control."""
+    project = getattr(owner, "currentProject", None)
+    if getattr(getattr(project, "frequency_protocol", None), "condition_trigger_maps", None) is not None:
+        # A source-mapped project deliberately has no global numeric onset map.
+        return {}
     mapping, errors = validate_condition_rows(condition_row_values(owner))
     rows = getattr(owner, "event_rows", [])
     for index, row in enumerate(rows):
@@ -221,6 +225,9 @@ def handle_event_filter(owner: object, watched: object, event: QEvent) -> bool |
 
 
 def add_event_row(owner: object, label: str = "", ident: str = "") -> None:
+    project = getattr(owner, "currentProject", None)
+    if getattr(getattr(project, "frequency_protocol", None), "condition_trigger_maps", None) is not None:
+        return
     row = QWidget(getattr(owner, "event_container"))
     row.setObjectName("event_map_row")
     row.setAttribute(Qt.WA_StyledBackground, True)

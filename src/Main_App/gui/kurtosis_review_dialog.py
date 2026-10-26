@@ -32,6 +32,7 @@ from Main_App.gui.components import (
     make_action_button,
 )
 from Main_App.gui.components.review_dialog import ReviewDialog
+from Main_App.gui.recording_qc_identity import participant_identity_label
 from Main_App.gui.style_tokens import (
     ACCENT_COLOR,
     BORDER_COLOR,
@@ -215,6 +216,7 @@ class KurtosisReviewDialog(ReviewDialog):
         self._auto_interpolate_all = bool(auto_interpolate_all)
         self._auto_interpolate_extreme = bool(auto_interpolate_extreme)
         self._project_root = Path(project_root) if project_root is not None else None
+        self._identity_project = getattr(parent, "project", None) or getattr(parent, "currentProject", None)
         self._signal_params = dict(signal_params or {})
         self._decision_controls: dict[tuple[str, str], QComboBox] = {}
         self._reason_controls: dict[tuple[str, str], QLineEdit] = {}
@@ -324,8 +326,9 @@ class KurtosisReviewDialog(ReviewDialog):
         self.table.setUpdatesEnabled(False)
         for row, item in enumerate(self._items):
             recording = _recording_text(item)
-            if item.participant_id.casefold() != item.recording_id.casefold():
-                recording = f"{item.participant_id} / {recording}"
+            identity_label = participant_identity_label(item.participant_id, self._identity_project)
+            if item.participant_id.casefold() != item.recording_id.casefold() or identity_label != item.participant_id:
+                recording = f"{identity_label} / {recording}"
             values = (
                 recording,
                 item.channel,

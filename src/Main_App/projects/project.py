@@ -29,6 +29,8 @@ from .frequency_protocol import (
     new_manual_frequency_protocol,
     normalize_frequency_protocol,
 )
+from .raw_identity import normalize_source_studies, validate_source_participants
+from .condition_trigger_maps import validate_project_trigger_maps
 from .grouping import (
     make_group_id as make_group_id,
     normalize_project_groups,
@@ -436,6 +438,10 @@ class Project:
 
         self._frequency_protocol_was_persisted = "frequency_protocol" in manifest
         raw_frequency_protocol = manifest.get("frequency_protocol")
+        self._trigger_configuration_baseline = deepcopy({
+            "frequency_protocol": raw_frequency_protocol,
+            "event_map": manifest.get("event_map", {}),
+        })
         self.frequency_protocol = (
             normalize_frequency_protocol(raw_frequency_protocol)
             if self._frequency_protocol_was_persisted
@@ -557,6 +563,8 @@ class Project:
             self.groups,
             group_aliases,
         )
+        self.source_studies = normalize_source_studies(manifest.get("source_studies"))
+        validate_source_participants(self.participants, self.source_studies)
         self.sessions = normalize_project_sessions(manifest.get("sessions", {}))
         self.recording_sources = normalize_project_recording_sources(
             self.project_root,
@@ -572,6 +580,7 @@ class Project:
             self.sessions,
             self.recording_sources,
         )
+        validate_project_trigger_maps(self)
         if self.groups:
             # Grouped projects have no project-level raw-data folder. Keeping a
             # synthesized ``<project>/Input`` path here would recreate the old
@@ -830,6 +839,8 @@ class Project:
         recordings: Mapping[str, Mapping[str, Any]],
         expected_manifest_sha256: str,
         tool_namespace_updates: Mapping[str, Mapping[str, Any]],
+        source_studies: Mapping[str, Mapping[str, Any]] | None = None,
+        trigger_map_assignments: Mapping[str, str] | None = None,
     ) -> None:
         """Persist explicitly reviewed additions without changing existing ownership.
 
@@ -851,7 +862,7 @@ class Project:
         disk_project = Project(self.project_root, deepcopy(disk_manifest))
         for name in (
             "groups", "participants", "sessions", "recording_sources", "recordings",
-            "groups_locked", "groups_locked_at",
+            "groups_locked", "groups_locked_at", "source_studies", "frequency_protocol",
         ):
             if getattr(self, name) != getattr(disk_project, name):
                 raise ValueError(
@@ -866,9 +877,19 @@ class Project:
                 "Project input_folder changed before registration. Reload the project and review the new inputs again."
             )
         if not participants and not recordings:
+            if source_studies or trigger_map_assignments:
+                raise ValueError("Source identities and trigger assignments require reviewed new inputs.")
             return
 
         candidate = deepcopy(disk_manifest)
+        normalized_sources = dict(disk_project.source_studies)
+        new_sources = normalize_source_studies(source_studies)
+        existing_sources = {key.casefold() for key in normalized_sources}
+        if any(key.casefold() in existing_sources for key in new_sources):
+            raise ValueError("Registration cannot replace an existing source study.")
+        normalized_sources.update(new_sources)
+        if normalized_sources:
+            candidate["source_studies"] = normalized_sources
         additions = {"participants": participants, "recordings": recordings}
         for name, entries in additions.items():
             if not isinstance(entries, Mapping):
@@ -886,11 +907,26 @@ class Project:
         normalized_participants = normalize_project_participants(
             self.project_root, candidate.get("participants", {}), groups, aliases,
         )
+        validate_source_participants(normalized_participants, normalized_sources)
         normalized_recordings = normalize_project_recordings(
             self.project_root, candidate.get("recordings", {}), groups,
             normalized_participants, disk_project.sessions, disk_project.recording_sources,
         )
         repeated_session = bool(disk_project.sessions or disk_project.recording_sources)
+        candidate_protocol = disk_project.frequency_protocol
+        assignments = trigger_map_assignments if trigger_map_assignments is not None else {}
+        if not isinstance(assignments, Mapping):
+            raise ValueError("New trigger assignments must map canonical processing IDs to saved source profiles.")
+        if candidate_protocol.condition_trigger_maps is not None:
+            new_processing_ids = set(recordings if repeated_session else participants)
+            if set(assignments) != new_processing_ids:
+                raise ValueError("Assign a saved source trigger profile explicitly to every new recording before registration.")
+            mapping_payload = candidate_protocol.condition_trigger_maps.to_manifest()
+            mapping_payload["recording_assignments"].update(assignments)
+            candidate_protocol = candidate_protocol.with_condition_trigger_maps(mapping_payload)
+            candidate["frequency_protocol"] = candidate_protocol.to_manifest()
+        elif assignments:
+            raise ValueError("Source trigger assignments require a source-mapped project.")
         new_recording_participants = {
             normalized_recordings[key]["participant_id"] for key in recordings
         }
@@ -934,12 +970,23 @@ class Project:
             if not isinstance(name, str) or not isinstance(namespace, Mapping):
                 raise ValueError("Registration freshness updates require named mappings.")
             tools[name] = deepcopy(dict(namespace))
+        validate_project_trigger_maps(candidate)
+        if candidate_protocol.condition_trigger_maps is not None:
+            from Main_App.processing.pipeline_settings_freshness import apply_pipeline_setup_freshness
+
+            apply_pipeline_setup_freshness(candidate, disk_manifest)
         _replace_reviewed_manifest(manifest_path, candidate, expected_manifest_sha256)
         self.participants = normalized_participants
         self.recordings = normalized_recordings
+        self.source_studies = normalized_sources
+        self.frequency_protocol = candidate_protocol
         self._recordings_lock_fingerprint = fingerprint
         self.manifest = candidate
         self._raw_registration_baseline = _raw_registration_fingerprint(candidate)
+        self._trigger_configuration_baseline = deepcopy({
+            "frequency_protocol": candidate.get("frequency_protocol"),
+            "event_map": candidate.get("event_map", {}),
+        })
 
     def save(self, *, updated_tool_namespaces: Collection[str] = ()) -> None:
         """
@@ -954,6 +1001,7 @@ class Project:
         manifest_path = self.project_root / "project.json"
 
         # Build from in-memory manifest once
+        validate_project_trigger_maps(self)
         data: Dict[str, Any] = dict(self.manifest)
         data["schema_version"] = PROJECT_SCHEMA_VERSION
 
@@ -1138,8 +1186,17 @@ class Project:
             group_aliases,
         )
         self.participants = normalized_participants
+        normalized_studies = normalize_source_studies(getattr(self, "source_studies", {}))
+        validate_source_participants(normalized_participants, normalized_studies)
+        if normalized_studies:
+            data["source_studies"] = normalized_studies
+        else:
+            data.pop("source_studies", None)
         for participant_id, info in normalized_participants.items():
             participant_out: Dict[str, Any] = {}
+            for key in ("source_study_id", "source_participant_id", "display_label"):
+                if key in info:
+                    participant_out[key] = info[key]
             if info.get("group_id"):
                 participant_out["group_id"] = str(info["group_id"])
             if info.get("raw_file"):
@@ -1291,6 +1348,26 @@ class Project:
                 updated_tool_namespaces=updated_tool_namespaces,
             )
 
+            if current is not None:
+                old_protocol = (normalize_frequency_protocol(current["frequency_protocol"])
+                                if "frequency_protocol" in current else FrequencyProtocol.confirmation_required())
+                if old_protocol.condition_trigger_maps is not None and normalized_frequency_protocol.condition_trigger_maps is None:
+                    raise ValueError("Source trigger maps cannot be removed by an ordinary project save.")
+                if (old_protocol.condition_trigger_maps is not None
+                        or normalized_frequency_protocol.condition_trigger_maps is not None):
+                    current_triggers = {
+                        "frequency_protocol": current.get("frequency_protocol"),
+                        "event_map": current.get("event_map", {}),
+                    }
+                    if current_triggers != self._trigger_configuration_baseline:
+                        raise ValueError("Trigger maps or protocol changed after this project was loaded. Reload before saving.")
+                    if old_protocol.fingerprint != normalized_frequency_protocol.fingerprint:
+                        from .condition_trigger_maps import apply_condition_catalog_transition
+                        from Main_App.processing.pipeline_settings_freshness import apply_pipeline_setup_freshness
+                        if apply_condition_catalog_transition(data, current):
+                            normalized_pp = normalize_preprocessing_settings(data["preprocessing"])
+                        apply_pipeline_setup_freshness(data, current)
+
             _write_manifest_if_changed(manifest_path, data)
 
             # Rebase only after a successful write or verified no-op. A failed save
@@ -1300,6 +1377,10 @@ class Project:
             self.experimental_qc_settings = normalized_experimental_qc
             self._electrode_geometry_baseline = geometry
             self._processing_pipeline_baseline = deepcopy(pipeline)
+            self._trigger_configuration_baseline = deepcopy({
+                "frequency_protocol": data.get("frequency_protocol"),
+                "event_map": data.get("event_map", {}),
+            })
 
     # ------------------------------------------------------------------
     def update_preprocessing(self, values: Mapping[str, Any]) -> Dict[str, Any]:
@@ -1393,6 +1474,8 @@ class Project:
         """Replace the project protocol with one validated immutable value."""
 
         normalized = normalize_frequency_protocol(value)
+        if self.frequency_protocol.condition_trigger_maps is not None and normalized.condition_trigger_maps is None:
+            raise ValueError("Source trigger maps cannot be removed by an ordinary protocol update.")
         self.frequency_protocol = normalized
         self.manifest["frequency_protocol"] = normalized.to_manifest()
         self._frequency_protocol_was_persisted = True

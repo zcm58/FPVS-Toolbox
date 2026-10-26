@@ -66,6 +66,7 @@ nav:
   - Reference:
       - Methods and References: reference/index.md
       - EEG Hardware: reference/eeg-hardware.md
+      - Source Trigger Maps: reference/source-trigger-maps.md
       - Brain Products Recordings: reference/brain-products.md
       - Preprocessing QC Review: reference/preprocessing-qc-review.md
       - Missing Condition Outputs: reference/missing-condition-outputs.md

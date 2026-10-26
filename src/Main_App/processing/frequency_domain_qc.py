@@ -1395,6 +1395,7 @@ def mark_frequency_domain_outputs_stale(
 
 
 def mark_frequency_domain_outputs_current(project_root: str | Path) -> None:
+    from Main_App.processing.pipeline_settings_freshness import require_current_pipeline_settings
     from Main_App.processing.condition_interpolation_state import (
         require_no_pending_condition_interpolation,
     )
@@ -1408,6 +1409,7 @@ def mark_frequency_domain_outputs_current(project_root: str | Path) -> None:
     manifest_path = root / "project.json"
     with project_manifest_transaction(manifest_path):
         manifest = _read_manifest(manifest_path)
+        require_current_pipeline_settings(root, manifest=manifest)
         state = _metadata_from_manifest(manifest)
         if not state:
             return
@@ -3296,13 +3298,12 @@ def _ordered_conditions(project: Any, scanned_conditions: list[str]) -> list[str
     scanned = [str(condition) for condition in scanned_conditions]
     seen: set[str] = set()
     ordered: list[str] = []
-    event_map = getattr(project, "event_map", {}) or {}
-    if isinstance(event_map, Mapping):
-        for condition in event_map.keys():
-            text = str(condition)
-            if text in scanned and text not in seen:
-                ordered.append(text)
-                seen.add(text)
+    from Main_App.projects.condition_trigger_maps import project_conditions
+    for condition in project_conditions(project):
+        text = condition.label
+        if text in scanned and text not in seen:
+            ordered.append(text)
+            seen.add(text)
     for condition in scanned:
         if condition not in seen:
             ordered.append(condition)

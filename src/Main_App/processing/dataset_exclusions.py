@@ -18,6 +18,7 @@ from Main_App.projects import (
     load_project_dataset_index,
     normalize_preprocessing_settings,
 )
+from Main_App.projects.raw_identity import registered_raw_identities
 
 from .artifact_freshness import (
     HARMONIC_SELECTION_SUMMARY_ARTIFACT,
@@ -126,13 +127,15 @@ def _snapshot_from_manifest(root: Path, content: bytes, manifest: dict, index):
             folder = Path(manifest.get("input_folder") or "Input")
             raw_folders = [(None, folder if folder.is_absolute() else root / folder)]
         raw_seen = {}
+        registered = registered_raw_identities(manifest, project_root=root)
         for group_id, folder in raw_folders:
             if not folder.is_dir():
                 continue
             for path in sorted(folder.iterdir()):
                 if not path.is_file() or not is_eeg_recording_file(path):
                     continue
-                pid = infer_raw_participant_id(path)
+                identity = registered.get(path.resolve(strict=False))
+                pid = identity.participant_id if identity else infer_raw_participant_id(path)
                 key = pid.casefold()
                 if key in raw_seen:
                     raise ValueError(f"Duplicate raw participant identity {pid}; review the project sources first.")

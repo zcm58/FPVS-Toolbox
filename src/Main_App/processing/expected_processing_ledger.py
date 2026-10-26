@@ -443,10 +443,15 @@ class ExpectedRecordingConditionCell:
     occurrences: tuple[ExpectedOccurrencePlan, ...]
     no_output_decision: Mapping[str, Any] | None = None
     planning_issues: tuple[str, ...] = ()
+    canonical_condition_id: str | None = None
+    trigger_map_fingerprint: str | None = None
 
     def __post_init__(self) -> None:
         _required_plan_text(self.processing_id, field_name="processing_id")
         _required_plan_text(self.condition_label, field_name="condition_label")
+        if self.canonical_condition_id is not None:
+            _required_plan_text(self.canonical_condition_id, field_name="canonical_condition_id")
+            _required_plan_text(self.trigger_map_fingerprint, field_name="trigger_map_fingerprint")
         expected_workbook = _required_plan_text(
             self.expected_workbook,
             field_name="expected_workbook",
@@ -525,7 +530,7 @@ class ExpectedRecordingConditionCell:
 
     @property
     def cell_id(self) -> str:
-        return f"{self.processing_id}:{self.condition_code}"
+        return f"{self.processing_id}:{self.canonical_condition_id or self.condition_code}"
 
     @property
     def planned_occurrence_count(self) -> int:
@@ -545,7 +550,7 @@ class ExpectedRecordingConditionCell:
         return self.planned_occurrence_count - self.planned_contributing_occurrence_count
 
     def canonical_payload(self) -> dict[str, Any]:
-        return {
+        payload = {
             "cell_id": self.cell_id,
             "processing_id": self.processing_id,
             "condition_label": self.condition_label,
@@ -570,6 +575,10 @@ class ExpectedRecordingConditionCell:
             "planning_issues": list(self.planning_issues),
             "final_outcome": None,
         }
+        if self.canonical_condition_id is not None:
+            payload["canonical_condition_id"] = self.canonical_condition_id
+            payload["trigger_map_fingerprint"] = self.trigger_map_fingerprint
+        return payload
 
     @property
     def fingerprint(self) -> str:
@@ -623,6 +632,8 @@ class ExpectedRecordingConditionCell:
                     else None
                 ),
                 planning_issues=tuple(str(item) for item in raw_issues),
+                canonical_condition_id=value.get("canonical_condition_id"),
+                trigger_map_fingerprint=value.get("trigger_map_fingerprint"),
             )
         except (KeyError, TypeError, ValueError) as exc:
             raise ExpectedRecordingConditionPlanError(
@@ -1070,6 +1081,18 @@ class ExpectedRecordingConditionPlan:
             raise ExpectedRecordingConditionPlanError(
                 "Expected plan contains duplicate raw-file identities."
             )
+        if protocol.condition_trigger_maps is not None:
+            from Main_App.projects.condition_trigger_maps import resolve_recording_event_schema
+            for recording in self.recordings:
+                schema = resolve_recording_event_schema(protocol, recording.processing_id)
+                expected_cells = {(item.condition_id, item.label, item.onset_code) for item in schema.conditions}
+                actual_cells = {(cell.canonical_condition_id, cell.condition_label, cell.condition_code)
+                                for cell in recording.cells}
+                if actual_cells != expected_cells or any(
+                    cell.trigger_map_fingerprint != schema.interpretation_fingerprint
+                    for cell in recording.cells
+                ):
+                    raise ExpectedRecordingConditionPlanError("Expected cells use stale source trigger interpretations.")
 
     def canonical_payload(self) -> dict[str, Any]:
         return {
@@ -1174,6 +1197,10 @@ def _validate_expected_event_map(
     event_rows: Sequence[tuple[str, int]],
     protocol: FrequencyProtocol,
 ) -> None:
+    if protocol.condition_trigger_maps is not None:
+        if event_rows:
+            raise ExpectedRecordingConditionPlanError("Source-mapped projects cannot declare a global onset map.")
+        return
     if not event_rows:
         raise ExpectedRecordingConditionPlanError(
             "The expected matrix requires at least one project condition."
@@ -1292,7 +1319,7 @@ def _approved_occurrences_from_event_plan(
         raise ExpectedRecordingConditionPlanError(
             "Approved event plan was built from a different project protocol."
         )
-    if protocol.recording_oddball_marker_codes and (
+    if (protocol.recording_oddball_marker_codes or protocol.condition_trigger_maps is not None) and (
         str(marker_plan.get("recording_id") or "").casefold()
         != str(recording_id).casefold()
     ):
@@ -1777,9 +1804,11 @@ def build_expected_recording_condition_plan(
             "A ready project frequency protocol is required for the expected matrix."
         )
     event_rows = _normalized_expected_event_map(event_map, protocol)
-    if tuple(processing_plan.condition_labels) != tuple(
-        label for label, _code in event_rows
-    ):
+    from Main_App.projects.condition_trigger_maps import project_conditions, resolve_recording_event_schema
+    condition_labels = (tuple(item.label for item in project_conditions(protocol))
+                        if protocol.condition_trigger_maps is not None
+                        else tuple(label for label, _code in event_rows))
+    if tuple(processing_plan.condition_labels) != condition_labels:
         raise ExpectedRecordingConditionPlanError(
             "Processing-plan conditions are stale relative to the project event map."
         )
@@ -1807,6 +1836,11 @@ def build_expected_recording_condition_plan(
     seen_raw_paths: set[Path] = set()
     recording_plans: list[ExpectedRecordingPlan] = []
     for state in processing_plan.states:
+        source_schema = None
+        recording_event_rows = event_rows
+        if protocol.condition_trigger_maps is not None:
+            source_schema = resolve_recording_event_schema(protocol, state.processing_id)
+            recording_event_rows = tuple(source_schema.event_map.items())
         processing_key = _required_plan_text(
             state.processing_id,
             field_name="processing_id",
@@ -1826,6 +1860,16 @@ def build_expected_recording_condition_plan(
             state,
             approved_event_plans,
         )
+        if event_plan is not None:
+            from Main_App.processing.marker_integrity import validate_configured_condition_exclusions
+            try:
+                validate_configured_condition_exclusions(
+                    event_plan, settings=planning_settings or {},
+                    participant_id=state.info.subject_id,
+                    recording_id=state.info.recording_id,
+                )
+            except ValueError as exc:
+                raise ExpectedRecordingConditionPlanError(str(exc)) from exc
         recording_no_output = _recording_no_output_decision(
             state,
             exclusions=exclusions,
@@ -1844,13 +1888,13 @@ def build_expected_recording_condition_plan(
             planning_state = EXPECTED_PLANNING_STATE_PLANNED
             planned_recording_action = EXPECTED_RECORDING_ACTION_EXCLUDE
             marker_identity = None
-            occurrences_by_code = {code: () for _label, code in event_rows}
+            occurrences_by_code = {code: () for _label, code in recording_event_rows}
         elif event_plan is None:
             planning_state = EXPECTED_PLANNING_STATE_LEGACY_UNKNOWN
             planned_recording_action = EXPECTED_RECORDING_ACTION_LEGACY_UNKNOWN
             marker_identity = None
             occurrences_by_code: dict[int, tuple[ExpectedOccurrencePlan, ...]] = {
-                code: () for _label, code in event_rows
+                code: () for _label, code in recording_event_rows
             }
         else:
             planning_state = EXPECTED_PLANNING_STATE_PLANNED
@@ -1858,19 +1902,19 @@ def build_expected_recording_condition_plan(
             occurrences_by_code, marker_identity = (
                 _approved_occurrences_from_event_plan(
                     event_plan,
-                    event_rows=event_rows,
+                    event_rows=recording_event_rows,
                     protocol=protocol,
                     recording_id=state.processing_id,
                 )
             )
 
-        if len(state.expected_outputs) != len(event_rows):
+        if len(state.expected_outputs) != len(recording_event_rows):
             raise ExpectedRecordingConditionPlanError(
                 f"Expected workbook routes are incomplete for {state.processing_id}."
             )
         cells: list[ExpectedRecordingConditionCell] = []
         for (condition_label, condition_code), output_path in zip(
-            event_rows,
+            recording_event_rows,
             state.expected_outputs,
             strict=True,
         ):
@@ -1928,6 +1972,10 @@ def build_expected_recording_condition_plan(
                     occurrences=occurrences,
                     no_output_decision=cell_no_output,
                     planning_issues=issues,
+                    canonical_condition_id=(source_schema.canonical_condition_ids[condition_label]
+                                            if source_schema is not None else None),
+                    trigger_map_fingerprint=(source_schema.interpretation_fingerprint
+                                             if source_schema is not None else None),
                 )
             )
 

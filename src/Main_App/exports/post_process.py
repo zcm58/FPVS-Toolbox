@@ -468,7 +468,7 @@ def _resolve_frequency_protocol(app: Any) -> FrequencyProtocol:
             "Post-processing requires a ready project frequency protocol with an "
             "expected analyzed oddball-cycle count."
         )
-    if protocol.recording_oddball_marker_codes:
+    if protocol.recording_oddball_marker_codes or protocol.condition_trigger_maps is not None:
         try:
             protocol.recording_marker_codes(
                 settings.get("_fpvs_recording_id")
@@ -477,6 +477,23 @@ def _resolve_frequency_protocol(app: Any) -> FrequencyProtocol:
         except FrequencyProtocolError as exc:
             raise SpectralEligibilityError(str(exc)) from exc
     return protocol
+
+
+def _trigger_interpretation_payload(protocol: FrequencyProtocol, settings: dict, condition: str) -> dict:
+    if protocol.condition_trigger_maps is None:
+        return {}
+    from Main_App.projects.condition_trigger_maps import resolve_recording_event_schema
+    schema = resolve_recording_event_schema(
+        protocol, settings.get("_fpvs_recording_id") or settings.get("_fpvs_participant_id"),
+    )
+    item = next(item for item in schema.conditions if item.label == condition)
+    return {
+        "canonical_condition_id": item.condition_id,
+        "source_trigger_profile_id": schema.profile_id,
+        "source_onset_code": item.onset_code,
+        "source_oddball_code": item.oddball_code,
+        "trigger_map_fingerprint": schema.interpretation_fingerprint,
+    }
 
 
 def _applied_notch_centers(settings: Any) -> tuple[float, ...]:
@@ -693,7 +710,7 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
     if (
         frequency_protocol.oddball_rate_hz is None
         or frequency_protocol.presentation_rate_hz is None
-        or frequency_protocol.oddball_marker_code is None
+        or (frequency_protocol.oddball_marker_code is None and frequency_protocol.condition_trigger_maps is None)
     ):
         raise SpectralEligibilityError(
             "The project frequency protocol is missing canonical rate or marker identity."
@@ -1035,8 +1052,17 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                     crop_started = perf_counter()
                     validated_params = getattr(app, "validated_params", {}) or {}
                     event_id_map = validated_params.get("event_id_map", {})
+                    boundary_only_onsets = ()
+                    if frequency_protocol.condition_trigger_maps is not None:
+                        from Main_App.projects.condition_trigger_maps import resolve_recording_event_schema
+                        source_schema = resolve_recording_event_schema(
+                            frequency_protocol,
+                            app.settings.get("_fpvs_recording_id") or app.settings.get("_fpvs_participant_id"),
+                        )
+                        event_id_map = source_schema.event_map
+                        boundary_only_onsets = source_schema.boundary_only_onset_codes
                     condition_id = _resolve_condition_id(event_id_map, cond_label_from_keys)
-                    onset_ids = sorted({int(v) for v in event_id_map.values() if str(v).isdigit()})
+                    onset_ids = sorted({int(v) for v in event_id_map.values() if str(v).isdigit()} | set(boundary_only_onsets))
                     epoch_tmin_sec = float(data_object.times[0])
                     if condition_id is None:
                         fallback_reason = "missing_condition_id"
@@ -1683,6 +1709,9 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                 condition_repair = condition_interpolation_export_provenance(
                     getattr(app, "settings", {}) or {}, cond_label_from_keys,
                 )
+                trigger_interpretation = _trigger_interpretation_payload(
+                    frequency_protocol, app.settings, cond_label_from_keys,
+                )
                 workbook_write_receipt = write_results_workbook(
                     full_excel_path=full_excel_path,
                     dataframes_to_save=dataframes_to_save,
@@ -1692,6 +1721,7 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                     timing_sink=export_timing_sink if isinstance(export_timing_sink, list) else None,
                     spectral_metadata={
                         **pipeline_identity,
+                        **trigger_interpretation,
                         "sampling_frequency_hz": float(sfreq),
                         "fft_sample_count": int(num_times),
                         "frequencies_hz": fft_frequencies.tolist(),
@@ -1715,6 +1745,7 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                         ),
                         "condition_label": cond_label_from_keys,
                         "path": str(Path(full_excel_path).resolve()),
+                        **trigger_interpretation,
                         "protocol_fingerprint": frequency_protocol.fingerprint,
                         "spectral_eligibility_fingerprint": (
                             condition_eligibility.fingerprint

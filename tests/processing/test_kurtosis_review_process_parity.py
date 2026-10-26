@@ -8,8 +8,11 @@ from multiprocessing import get_context
 import os
 from pathlib import Path
 from types import SimpleNamespace
+import traceback
+from unittest.mock import patch
 
 import numpy as np
+import pytest
 from threadpoolctl import threadpool_info, threadpool_limits
 
 from Main_App.io.eeg_geometry import BIOSEMI64_CHANNELS
@@ -78,8 +81,10 @@ def _prepare_shared_probe(source, project_root):
     # Checkpoints hold the exact pre-interpolation state and never approve QC.
     checkpoint_params = {**params, "enable_kurtosis_checkpoint_cache": True}
     checkpoint_source = _prepared_source()
+    from Main_App.io.acquisition_metadata import attach_recording_contract
+    contract = attach_recording_contract(checkpoint_source, checkpoint_params)
     identity = checkpoints.checkpoint_identity(
-        checkpoint_source, checkpoint_params, _build_preproc_fingerprint(checkpoint_params),
+        checkpoint_source, checkpoint_params, _build_preproc_fingerprint(checkpoint_params, contract),
     )
     assert identity is not None
     with fir.prepared_fir_scope(cache):
@@ -108,11 +113,25 @@ def _prepare_shared_probe(source, project_root):
 
 
 def _run_review_probe(info, settings, event_map, plans):
+    from Main_App.processing import kurtosis_review_scan
     from Main_App.workers.kurtosis_review_process import _run_one_review
+
+    loader_logs = []
+    original_log = kurtosis_review_scan._LoaderLogAdapter.log
+
+    def capture_loader_log(adapter, message):
+        original_log(adapter, message)
+        loader_logs.append(str(message))
+        if str(message).startswith("!!! Load Error"):
+            # The loader catches its exception before returning None. Capture
+            # its active traceback here, before the scanner can only report the
+            # secondary no-Raw error. This changes diagnostics only.
+            loader_logs.append(traceback.format_exc())
 
     if _START_BARRIER is not None:
         _START_BARRIER.wait(timeout=30)
-    result = _run_one_review(info, settings, event_map, plans, None)
+    with patch.object(kurtosis_review_scan._LoaderLogAdapter, "log", capture_loader_log):
+        result = _run_one_review(info, settings, event_map, plans, None)
     cache = process_runner._WORKER_FIR_CACHE
     return {
         "result": result,
@@ -120,6 +139,7 @@ def _run_review_probe(info, settings, event_map, plans):
         "pid": os.getpid(), "hits": cache.hits, "misses": cache.misses,
         "scope_reset": fir.current_prepared_fir_cache() is None,
         "pools": threadpool_info(),
+        "loader_logs": loader_logs,
     }
 
 
@@ -143,7 +163,7 @@ def _prepare_native_policy_probe(source, native_threads):
         raw.close()
 
 
-def _small_bdf(path):
+def _small_bdf(path, onset=1, oddball=55):
     labels = ("EXG1", "EXG2", *BIOSEMI64_CHANNELS, "Status")
     sample_count = 1000
     header_bytes = _write_sampling_bdf(path, labels=labels, samples=(sample_count,) * len(labels), duration="10")
@@ -151,7 +171,7 @@ def _small_bdf(path):
     values[2] *= .02
     values[2, ::50] = 500.0
     values[-1] = 0.0
-    events = np.asarray([[1, 0, 1], *[[100 + index * 50, 0, 55] for index in range(11)]], dtype=int)
+    events = np.asarray([[1, 0, onset], *[[100 + index * 50, 0, oddball] for index in range(11)]], dtype=int)
     values[-1, events[:, 0]] = events[:, 2]
     digital = np.rint(values * 32).astype(np.int64)
     # MNE reads status as digital values; EEG uses the fixture's 1/32 uV scale.
@@ -191,28 +211,40 @@ def test_spawned_shared_preparation_cache_and_checkpoint_are_exact(tmp_path, mon
     assert hashlib.sha256(source.read_bytes()).hexdigest() == source_digest
 
 
-def test_actual_bdf_review_serial_and_concurrent_processes_preserve_full_evidence(tmp_path, monkeypatch):
+@pytest.mark.parametrize("source_maps", [False, True])
+def test_actual_bdf_review_serial_and_concurrent_processes_preserve_full_evidence(tmp_path, monkeypatch, source_maps):
     protocol = FrequencyProtocol.from_recurrence(
         10, 5, expected_analyzed_oddball_cycles=10,
         expected_analyzed_oddball_cycles_source=EXPECTED_CYCLES_SOURCE_MANUAL,
     )
+    event_map = {"Condition": 1}
+    if source_maps:
+        protocol = protocol.with_condition_trigger_maps({
+            "schema_version": "1.0", "canonical_conditions": {"condition": {"label": "Condition"}},
+            "profiles": {f"study{index}": {"conditions": {"condition": {
+                "onset_code": index, "oddball_code": 54 + index}}} for index in (1, 2)},
+            "recording_assignments": {f"P00{index}_session-1": f"study{index}" for index in (1, 2)},
+        })
+        event_map = {}
     infos, plans, hashes = [], {}, {}
     for index in (1, 2):
         path = tmp_path / f"P00{index}.bdf"
-        events = _small_bdf(path)
+        events = _small_bdf(path, index if source_maps else 1, 54 + index if source_maps else 55)
         participant = f"P00{index}"
         infos.append(SimpleNamespace(
             path=path, subject_id=participant, recording_id=f"{participant}_session-1",
             session_id="session-1", session_label="Visit 1", visit_index=1,
         ))
         plans[str(path)] = plan_preflight_qc_events(
-            events=events, event_map={"Condition": 1}, sfreq=100.0, n_times=1000,
+            events=events, event_map=event_map, sfreq=100.0, n_times=1000,
             first_samp=0, frequency_protocol=protocol,
+            recording_id=f"{participant}_session-1" if source_maps else None,
         ).to_payload()
         hashes[path] = hashlib.sha256(path.read_bytes()).hexdigest()
     settings = deepcopy(_params(infos[0].path))
     settings.update(
         frequency_protocol=protocol, high_pass=1.0, low_pass=30.0, downsample_rate=80.0,
+        project_root=str(tmp_path),
         enable_kurtosis_checkpoint_cache=False, removed_electrode_detection_mode="off",
     )
     monkeypatch.setenv("PYTHONHASHSEED", "0")
@@ -224,19 +256,35 @@ def test_actual_bdf_review_serial_and_concurrent_processes_preserve_full_evidenc
             max_workers=1, mp_context=context, initializer=_initialize_review_probe,
             initargs=(context.Event(), queue),
         ) as pool:
-            serial = [pool.submit(_run_review_probe, info, settings, {"Condition": 1}, plans).result(timeout=60)
+            serial = [pool.submit(_run_review_probe, info, settings, event_map, plans).result(timeout=60)
                       for info in infos]
         with ProcessPoolExecutor(
             max_workers=2, mp_context=context, initializer=_initialize_review_probe,
             initargs=(context.Event(), queue, context.Barrier(2)),
         ) as pool:
-            futures = [pool.submit(_run_review_probe, info, settings, {"Condition": 1}, plans) for info in infos]
+            futures = [pool.submit(_run_review_probe, info, settings, event_map, plans) for info in infos]
             concurrent = [future.result(timeout=60) for future in futures]
     finally:
         queue.close()
         queue.join_thread()
     assert len({item["pid"] for item in serial}) == 1
     assert len({item["pid"] for item in concurrent}) == 2
+    for mode, probes in (("serial", serial), ("concurrent", concurrent)):
+        for probe in probes:
+            scan = probe["result"]
+            diagnostic = {
+                "mode": mode, "pid": probe["pid"], "cancelled": scan.cancelled,
+                "loader_logs": probe["loader_logs"],
+                "results": [
+                    {"recording_id": row.recording_id, "status": row.status,
+                     "error": row.error, "skip_reason": row.skip_reason}
+                    for row in scan.results
+                ],
+            }
+            assert not scan.cancelled and scan.results and all(
+                row.status in {"complete_no_review", "review_required"}
+                for row in scan.results
+            ), diagnostic
     assert [item["exact"] for item in serial] == [item["exact"] for item in concurrent]
     for item in serial + concurrent:
         assert not item["result"].errors

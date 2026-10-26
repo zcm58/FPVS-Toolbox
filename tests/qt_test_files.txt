@@ -20,6 +20,7 @@ tests/gui/test_main_window_processing.py
 tests/gui/test_marker_occurrence_panel_qt.py
 tests/gui/test_nonblocking_qmessagebox.py
 tests/gui/test_participant_condition_exclusions_dialog.py
+tests/gui/test_pipeline_setup_dialog_qt.py
 tests/gui/test_project_hardware_qt.py
 tests/gui/test_protocol_condition_markers.py
 tests/gui/test_qc_group_membership.py
@@ -31,6 +32,7 @@ tests/gui/test_settings_and_status.py
 tests/gui/test_sidebar_vector_icons.py
 tests/gui/test_signal_review_panel_qt.py
 tests/gui/test_toolbox_cache_dialog_qt.py
+tests/gui/test_trigger_maps_dialog_qt.py
 tests/gui/test_ui_components_smoke.py
 tests/gui/test_update_dialog.py
 tests/gui/test_update_manager_manual_force.py

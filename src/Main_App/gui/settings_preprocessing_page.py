@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QCheckBox,
 )
-from Main_App.gui.components import SectionCard
+from Main_App.gui.components import SectionCard, make_action_button
 from Main_App.gui.settings_feedback import refresh_preprocessing_feedback
 from Main_App.gui.settings_hardware_controls import build_hardware_controls
 from Main_App.projects.preprocessing_settings import (
@@ -35,6 +35,10 @@ def build_preprocessing_page(self, tabs: QTabWidget) -> QWidget:
     layout = QVBoxLayout(tab)
     layout.setContentsMargins(12, 12, 12, 12)
     layout.setSpacing(10)
+    self.guided_setup_button = make_action_button("Guided setup", parent=tab)
+    self.guided_setup_button.setObjectName("guided_pipeline_setup_button")
+    self.guided_setup_button.clicked.connect(self._show_pipeline_setup)
+    layout.addWidget(self.guided_setup_button, 0, Qt.AlignRight)
     self._add_settings_scope(
         layout,
         "Signal preparation for the current project."
@@ -254,7 +258,7 @@ def build_preprocessing_page(self, tabs: QTabWidget) -> QWidget:
     layout.addWidget(self.group_preproc)
 
     layout.addStretch(1)
-    tabs.addTab(tab, "Preprocessing")
+    tabs.addTab(tab, "Processing")
     canonical_keys = [
         "low_pass",
         "high_pass",

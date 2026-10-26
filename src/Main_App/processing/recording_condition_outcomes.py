@@ -398,6 +398,12 @@ def _validate_written_receipt(
         "condition_label": str(getattr(cell, "condition_label")),
         "protocol_fingerprint": plan.protocol_fingerprint,
     }
+    if getattr(cell, "canonical_condition_id", None) is not None:
+        expected_identity.update({
+            "canonical_condition_id": cell.canonical_condition_id,
+            "trigger_map_fingerprint": cell.trigger_map_fingerprint,
+            "source_onset_code": cell.condition_code,
+        })
     for key, expected in expected_identity.items():
         if str(receipt.get(key) or "") != str(expected):
             reasons.append(f"{key}_mismatch")

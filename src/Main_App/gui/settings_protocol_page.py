@@ -78,7 +78,13 @@ def build_protocol_page(self, tabs: QTabWidget) -> QWidget:
         object_name="settings_protocol_markers_card",
     )
     markers_form = make_form_layout()
+    self._protocol_markers_form = markers_form
     markers_card.content_layout.addLayout(markers_form)
+    self.protocol_trigger_maps_button = make_action_button("Use source maps…", compact=True, parent=markers_card)
+    self.protocol_trigger_maps_button.setObjectName("settings_trigger_maps")
+    self.protocol_trigger_maps_button.setEnabled(self.project is not None)
+    self.protocol_trigger_maps_button.clicked.connect(self._configure_trigger_maps)
+    markers_card.content_layout.addWidget(self.protocol_trigger_maps_button)
     markers_layout.addWidget(markers_card, 1)
 
     if self.project is None:

@@ -87,7 +87,9 @@ def test_subset_processing_preserves_the_previously_verified_project_grids(tmp_p
     assert warning_messages == []
 
 
-def test_single_file_launch_resolves_against_the_entire_project_before_qc(tmp_path, warning_messages):
+def test_single_file_launch_resolves_against_the_entire_project_before_qc(
+    tmp_path, warning_messages, inline_source_registration_work,
+):
     project, params = _project_and_params(tmp_path)
     project.input_folder.mkdir(parents=True, exist_ok=True)
     first = project.input_folder / "P1.bdf"
@@ -111,6 +113,9 @@ def test_single_file_launch_resolves_against_the_entire_project_before_qc(tmp_pa
         run_preprocessing_qc_workflow=qc_workflow,
     )
     assert processing_inputs.validate_inputs(host)
+    assert len(inline_source_registration_work) == 1
+    assert not inline_source_registration_work[0].requires_source_review
+    assert [row.raw_file for row in inline_source_registration_work[0].additions] == [first]
     assert qc_targets == [144]
     assert project.frequency_protocol.analysis_window.source_sampling_rates_hz == (
         Fraction(250), Fraction(256),

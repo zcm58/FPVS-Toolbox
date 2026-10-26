@@ -27,7 +27,7 @@ which this action does not control.
 
 ### Settings
 
-Settings groups controls into **Preprocessing**, **Protocol**, **Harmonics**,
+Settings groups controls into **Processing**, **Protocol**, **Harmonics**,
 **ROIs**, **Quality Control**, **Experimental**, and **Application**. Use
 **Quality Control** for dataset exclusions and read-only frequency-QC limits.
 **Experimental** separates **Preprocessing QC** from **Post-processing QC**,
@@ -45,6 +45,15 @@ projects-root controls.
 
 The shared **Save** and **Cancel** buttons apply to edits across all Settings
 tabs. Focused review dialogs retain their own Apply/Cancel actions.
+
+For an optional walkthrough, choose **Processing > Guided setup** after saving
+or canceling any pending edits. Review recording setup, reference/channels,
+filtering, resampling, channel QC/repair, and epochs/spectra. The final page
+shows the configured steps and changes. **Save pipeline** saves to this project;
+**Cancel** discards the draft. Saving does not start processing. Changes that
+affect existing results require reprocessing, as shown on the review page.
+The current methods and their order are fixed; additional method choices are
+planned. Direct editing in Settings remains available.
 
 ### Dataset Exclusions
 

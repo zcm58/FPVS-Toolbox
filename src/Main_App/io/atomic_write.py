@@ -11,6 +11,9 @@ import time
 from typing import IO, Any
 
 
+_PUBLICATION_RETRY_DELAYS = (0.0, 0.01, 0.02, 0.05, 0.1, 0.1)
+
+
 def replace_with_retry(temporary: Path, target: Path) -> None:
     """Retry brief file-lock permission failures, then propagate the last error.
 
@@ -18,11 +21,29 @@ def replace_with_retry(temporary: Path, target: Path) -> None:
     attempts wait at most 0.28 seconds in total, matching manifest publication.
     Other I/O failures propagate immediately.
     """
-    for attempt, delay in enumerate((0.0, 0.01, 0.02, 0.05, 0.1, 0.1)):
+    for attempt, delay in enumerate(_PUBLICATION_RETRY_DELAYS):
         if delay:
             time.sleep(delay)
         try:
             os.replace(temporary, target)
+            return
+        except PermissionError:
+            if attempt == 5:
+                raise
+
+
+def rename_with_retry(temporary: Path, target: Path) -> None:
+    """Publish a staged directory despite brief permission locks on its files.
+
+    Preserve ``os.rename`` semantics rather than replacing an existing
+    publication. The caller owns unique destination selection and staging
+    cleanup. Persistent permission errors and other I/O errors still propagate.
+    """
+    for attempt, delay in enumerate(_PUBLICATION_RETRY_DELAYS):
+        if delay:
+            time.sleep(delay)
+        try:
+            os.rename(temporary, target)
             return
         except PermissionError:
             if attempt == 5:

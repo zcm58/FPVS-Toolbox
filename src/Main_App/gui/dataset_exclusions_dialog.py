@@ -16,6 +16,7 @@ from Main_App.gui.components import (
 )
 from Main_App.processing.dataset_exclusions import DatasetExclusionRow, DatasetExclusionsSnapshot
 from Main_App.workers.dataset_exclusions import DatasetExclusionsWorker
+from Main_App.gui.recording_qc_identity import participant_identity_label
 
 
 SCOPE_LABELS = {
@@ -82,6 +83,7 @@ class DatasetExclusionsDialog(AppDialog):
         self.setWindowModality(Qt.ApplicationModal)
         self.setObjectName("dataset_exclusions_dialog")
         self.project_root = Path(project_root)
+        self._identity_project = getattr(parent, "project", None) or getattr(parent, "currentProject", None)
         self.snapshot: DatasetExclusionsSnapshot | None = None
         self._scopes: dict[str, str] = {}
         self._reasons: dict[str, str] = {}
@@ -251,7 +253,7 @@ class DatasetExclusionsDialog(AppDialog):
         self._reasons = {row.identity: row.reason for row in self.snapshot.rows}
         self.table.setRowCount(len(self.snapshot.rows))
         for index, row in enumerate(self.snapshot.rows):
-            values = (row.participant_id, row.recording_id or "All recordings", row.group_label,
+            values = (participant_identity_label(row.participant_id, self._identity_project), row.recording_id or "All recordings", row.group_label,
                       "Available" if row.has_processed_data else "Not available", _TABLE_SCOPES[row.scope])
             for column, value in enumerate(values):
                 item = QTableWidgetItem(value)
@@ -294,7 +296,7 @@ class DatasetExclusionsDialog(AppDialog):
             self._showing_selection = False
             return
         self.details.setPlainText("\n".join([
-            f"Participant: {row.participant_id}",
+            f"Participant: {participant_identity_label(row.participant_id, self._identity_project)}",
             f"Recording: {row.recording_id or 'All recordings for this participant'}",
             f"Group: {row.group_label}",
             f"Pending direct scope: {SCOPE_LABELS[self._scopes[row.identity]]}",
@@ -387,7 +389,7 @@ class DatasetExclusionsDialog(AppDialog):
             return
         query = self.search.text().strip().casefold()
         for index, row in enumerate(self.snapshot.rows):
-            text = " ".join((row.participant_id, row.recording_id, row.group_label,
+            text = " ".join((participant_identity_label(row.participant_id, self._identity_project), row.recording_id, row.group_label,
                              SCOPE_LABELS[self._scopes[row.identity]],
                              _TABLE_SCOPES[effective_exclusion_scope(row, self.snapshot.rows, self._scopes)],
                              self._reasons[row.identity],

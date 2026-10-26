@@ -29,6 +29,7 @@ import uuid
 import mne
 import numpy as np
 
+from Main_App.io.atomic_write import rename_with_retry
 from Main_App.io.recording_sources import recording_source_files
 
 logger = logging.getLogger(__name__)
@@ -374,7 +375,7 @@ def prepare_bids_recording(source: str | Path, *, project_root: str | Path, sett
                     "subject": subject, "extension": extension, "representation": representation,
                     "outputs": outputs, "recording": metadata}
         _json(staging / "import.json", manifest)
-        os.rename(staging, final)
+        rename_with_retry(staging, final)
     elapsed = perf_counter() - conversion_started - verification_seconds
     identity_seconds += verification_seconds
     logger.info("BIDS import published source=%s representation=%s conversion_seconds=%.6f identity_seconds=%.6f",

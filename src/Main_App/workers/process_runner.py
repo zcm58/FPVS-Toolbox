@@ -807,13 +807,19 @@ def _make_excluded_result(
     return payload
 
 
-def _build_fft_crop_file_logger(project_root: Path, file_path: Path) -> logging.Logger:
+def _build_fft_crop_file_logger(
+    project_root: Path, file_path: Path, *, processing_id: str | None = None,
+) -> logging.Logger:
     """Create a per-file crop logger so child-process diagnostics are always persisted."""
     logs_dir = project_root / "logs"
     logs_dir.mkdir(parents=True, exist_ok=True)
-    log_path = logs_dir / f"fft_crop_{file_path.stem}_{os.getpid()}.log"
+    identity = str(processing_id or file_path.stem)
+    safe_identity = "".join(char for char in identity if char.isalnum() or char in "_-")[:64] or "recording"
+    source_key = hashlib.sha256(os.path.normcase(str(file_path.resolve())).encode("utf-8")).hexdigest()[:16]
+    log_stem = f"fft_crop_{safe_identity}_{source_key}_{os.getpid()}"
+    log_path = logs_dir / f"{log_stem}.log"
 
-    logger_name = f"{logger.name}.fft_crop.{file_path.stem}.{os.getpid()}"
+    logger_name = f"{logger.name}.{log_stem}"
     crop_logger = logging.getLogger(logger_name)
     crop_logger.setLevel(logging.INFO)
     crop_logger.propagate = False
@@ -1630,6 +1636,7 @@ def _run_full_pipeline_for_file(
     cache_status = "not_checked"
     settings = _settings_for_file(file_path, settings)
     settings["project_root"] = str(project_root)
+    source_schema = None
 
     def _record_timing(section: str, started_at: float) -> None:
         elapsed_ms = int((time.perf_counter() - started_at) * 1000)
@@ -1642,7 +1649,10 @@ def _run_full_pipeline_for_file(
         )
 
     stage = "preflight"
-    crop_logger = _build_fft_crop_file_logger(project_root=project_root, file_path=file_path)
+    crop_logger = _build_fft_crop_file_logger(
+        project_root=project_root, file_path=file_path,
+        processing_id=settings.get("_fpvs_recording_id") or settings.get("_fpvs_participant_id"),
+    )
     try:
         from Main_App.projects.hardware import require_hardware_ready
         require_hardware_ready(settings, paths=(file_path,))
@@ -1776,11 +1786,25 @@ def _run_full_pipeline_for_file(
         loader_kwargs = source_load_kwargs(settings)
 
         frequency_protocol = _project_frequency_protocol(settings)
+        if frequency_protocol.condition_trigger_maps is not None:
+            from Main_App.projects.condition_trigger_maps import resolve_recording_event_schema
+            source_schema = resolve_recording_event_schema(
+                frequency_protocol,
+                settings.get("_fpvs_recording_id") or settings["_fpvs_participant_id"],
+            )
+            event_map = source_schema.event_map
+        validate_condition_output_names(event_map)
         marker_recording_id = (
             _recording_id_for_file(file_path, settings)
             or _mapped_text_for_file(file_path, settings, "_fpvs_participant_id_by_file")
+            or (str(settings["_fpvs_participant_id"]) if source_schema is not None else None)
         )
         event_plan_payload = _preflight_event_plan_for_file(file_path, settings)
+        from Main_App.processing.marker_integrity import validate_configured_condition_exclusions
+        validate_configured_condition_exclusions(
+            event_plan_payload, settings=settings, participant_id=participant_id,
+            recording_id=recording_id,
+        )
         unresolved_occurrences = event_plan_payload.get("unresolved_occurrences")
         if unresolved_occurrences not in (None, [], ()):
             raise RuntimeError(
@@ -2637,6 +2661,14 @@ def _run_full_pipeline_for_file(
                     "analysis_span_plan_version": ANALYSIS_SPAN_PLAN_VERSION,
                     "source_analysis_span_plan": source_analysis_span_plan,
                     "realized_analysis_span_plan": target_analysis_span_plan,
+                    **({"source_trigger_interpretation": {
+                        "recording_id": source_schema.recording_id,
+                        "profile_id": source_schema.profile_id,
+                        "fingerprint": source_schema.interpretation_fingerprint,
+                        "canonical_condition_ids": source_schema.canonical_condition_ids,
+                        "source_onsets": source_schema.event_map,
+                        "boundary_only_onset_codes": list(source_schema.boundary_only_onset_codes),
+                    }} if source_schema is not None else {}),
                     **pipeline_fingerprint_payload(settings),
                     **({"condition_electrode_interpolation": settings["_fpvs_condition_interpolation_provenance"]}
                        if settings.get("_fpvs_condition_interpolation_provenance") else {}),

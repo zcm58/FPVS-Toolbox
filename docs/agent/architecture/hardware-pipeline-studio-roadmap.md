@@ -210,6 +210,13 @@ now provides executable fixed slots and per-project versioned method selections
 for the current algorithms, preserving legacy identities. Alternate algorithms
 and their GUI selectors remain future work.
 
+The initial **Settings > Processing > Guided setup** workflow now groups these
+fixed slots into seven pages, with capability-aware controls and one final
+review/save transaction. Direct Settings editing remains available. It provides
+the extension point for future qualified method selectors without adding
+controls to the main processing screen or allowing arbitrary stage reordering.
+See the [current workflow and extension contract](pipeline-methods.md).
+
 Persist the selected step/method identities, their versions and parameters, and
 the resolved plan in the project, restoring them across application launches.
 Keep existing projects' methods/results stable until the user explicitly changes

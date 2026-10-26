@@ -81,23 +81,28 @@ def missing_condition_output_rows(
     recordings = {key.casefold(): value for key, value in index.recordings.items()}
     participant_exclusions = {str(value).casefold() for value in excluded_participants}
     recording_exclusions = {str(value).casefold() for value in excluded_recordings}
-    event_map = (index.manifest or {}).get("event_map")
-    if not isinstance(event_map, Mapping):
-        return ()  # Only currently declared project conditions can be selected.
-    declared_conditions = {
-        str(label).casefold(): (str(label), int(code)) for label, code in event_map.items()
-    }
+    from Main_App.projects.condition_trigger_maps import project_conditions, resolve_recording_event_schema
+    from Main_App.projects.frequency_protocol import normalize_frequency_protocol
+    manifest = index.manifest or {}
+    raw_protocol = manifest.get("frequency_protocol")
+    mapped = raw_protocol is not None and normalize_frequency_protocol(raw_protocol).condition_trigger_maps is not None
+    declared_conditions = {item.label.casefold(): item.label for item in project_conditions(index.manifest or {})}
     rows = []
     for cell in outcomes.cells:
         identity = cell.processing_id.casefold()
         participant_key = cell.participant_id.casefold()
         condition_key = cell.condition_label.casefold()
         declaration = declared_conditions.get(condition_key)
+        if declaration is not None:
+            source_map = (resolve_recording_event_schema(index.manifest, cell.processing_id).event_map
+                          if mapped else manifest.get("event_map", {}))
+            if source_map[declaration] != cell.condition_code:
+                continue
         if (
             (identity, condition_key) in present
             or participant_key in participant_exclusions
             or identity in recording_exclusions
-            or declaration is None or declaration[1] != cell.condition_code
+            or declaration is None
             or cell.planned_occurrence_count != 0
             or cell.status not in {CELL_BLOCKED, CELL_EXCLUDED, CELL_UNAVAILABLE}
             or (cell.status == CELL_BLOCKED and "condition_input" not in cell.reason_codes)
@@ -126,7 +131,7 @@ def missing_condition_output_rows(
         session = index.sessions.get(recording.session_id) if recording else None
         rows.append(MissingConditionOutput(
             participant_id=participant.participant_id,
-            condition=declaration[0],
+            condition=declaration,
             group_id=participant.group_id,
             group_label=group.label if group else None,
             outcome_status=cell.status,

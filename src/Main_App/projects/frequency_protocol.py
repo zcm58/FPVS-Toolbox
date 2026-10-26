@@ -16,6 +16,7 @@ from .analysis_window import (
     MANUAL_DURATION_WINDOW,
     STUDIO_PLANNED_WINDOW,
 )
+from .condition_trigger_maps import ConditionTriggerMaps, TriggerMapError
 
 LEGACY_FREQUENCY_PROTOCOL_VERSION = "1.0.0"
 FREQUENCY_PROTOCOL_VERSION = "1.1.0"
@@ -23,6 +24,7 @@ FREQUENCY_PROTOCOL_VERSION = "1.1.0"
 CONDITION_MARKER_PROTOCOL_VERSION = "1.2.0"
 RECORDING_MARKER_PROTOCOL_VERSION = "1.3.0"
 ANALYSIS_WINDOW_PROTOCOL_VERSION = "1.4.0"
+CONDITION_TRIGGER_MAPS_PROTOCOL_VERSION = "1.5.0"
 
 ODDBALL_INPUT_MODE_RECURRENCE = "oddball_every_n"
 ODDBALL_INPUT_MODE_DIRECT_HZ = "oddball_rate_hz"
@@ -55,7 +57,9 @@ DEFAULT_ODDBALL_MARKER_CODE = 55
 RateValue: TypeAlias = Fraction | Decimal | int | float | str
 
 
-def _protocol_version(condition_markers: Any, recording_markers: Any, window: Any = None) -> str:
+def _protocol_version(condition_markers: Any, recording_markers: Any, window: Any = None, trigger_maps: Any = None) -> str:
+    if trigger_maps is not None:
+        return CONDITION_TRIGGER_MAPS_PROTOCOL_VERSION
     if window is not None:
         return ANALYSIS_WINDOW_PROTOCOL_VERSION
     if recording_markers:
@@ -233,20 +237,31 @@ class FrequencyProtocol:
     condition_oddball_marker_codes: tuple[tuple[int, int], ...] = ()
     recording_oddball_marker_codes: tuple[tuple[str, tuple[tuple[int, int], ...]], ...] = ()
     analysis_window: AnalysisWindow | None = None
+    condition_trigger_maps: ConditionTriggerMaps | None = None
 
     def __post_init__(self) -> None:
         if self.version not in {
             FREQUENCY_PROTOCOL_VERSION, CONDITION_MARKER_PROTOCOL_VERSION,
             RECORDING_MARKER_PROTOCOL_VERSION, ANALYSIS_WINDOW_PROTOCOL_VERSION,
+            CONDITION_TRIGGER_MAPS_PROTOCOL_VERSION,
         }:
             raise FrequencyProtocolError(
                 "Unsupported frequency protocol version "
                 f"{self.version!r}; expected {FREQUENCY_PROTOCOL_VERSION!r} or "
                 f"{CONDITION_MARKER_PROTOCOL_VERSION!r}, {RECORDING_MARKER_PROTOCOL_VERSION!r} "
-                f"or {ANALYSIS_WINDOW_PROTOCOL_VERSION!r}."
+                f"or {ANALYSIS_WINDOW_PROTOCOL_VERSION!r}, {CONDITION_TRIGGER_MAPS_PROTOCOL_VERSION!r}."
             )
         condition_markers = _condition_marker_codes(self.condition_oddball_marker_codes)
         recording_markers = _recording_marker_codes(self.recording_oddball_marker_codes)
+        maps = self.condition_trigger_maps
+        if maps is not None:
+            try:
+                maps = ConditionTriggerMaps.from_manifest(maps)
+            except TriggerMapError as exc:
+                raise FrequencyProtocolError(str(exc)) from exc
+            if condition_markers or recording_markers or self.oddball_marker_code is not None or self.oddball_marker_code_source is not None:
+                raise FrequencyProtocolError("Source trigger maps are authoritative; retire competing global, condition and recording oddball marker assignments.")
+        object.__setattr__(self, "condition_trigger_maps", maps)
         window = self.analysis_window
         if window is not None and not isinstance(window, AnalysisWindow):
             try:
@@ -254,7 +269,7 @@ class FrequencyProtocol:
             except AnalysisWindowError as exc:
                 raise FrequencyProtocolError(str(exc)) from exc
         object.__setattr__(self, "analysis_window", window)
-        expected_version = _protocol_version(condition_markers, recording_markers, window)
+        expected_version = _protocol_version(condition_markers, recording_markers, window, maps)
         if self.version != expected_version:
             raise FrequencyProtocolError(
                 "The nonempty marker assignments and analysis-window policy require protocol version "
@@ -276,7 +291,7 @@ class FrequencyProtocol:
         if window is not None and self.status != FREQUENCY_PROTOCOL_STATUS_READY:
             raise FrequencyProtocolError("An analysis-window policy requires a resolved ready protocol.")
         if marker_confirmation_required:
-            if condition_markers or recording_markers:
+            if condition_markers or recording_markers or maps is not None:
                 raise FrequencyProtocolError(
                     "A confirmation-required protocol cannot claim confirmed condition marker codes."
                 )
@@ -372,7 +387,7 @@ class FrequencyProtocol:
 
         marker_code: int | None = None
         marker_source: str | None = None
-        if not marker_confirmation_required:
+        if not marker_confirmation_required and maps is None:
             marker_code = _positive_integer(
                 self.oddball_marker_code,
                 field_name="oddball_marker_code",
@@ -576,6 +591,7 @@ class FrequencyProtocol:
                 condition_oddball_marker_codes=value.get("condition_oddball_marker_codes", ()),
                 recording_oddball_marker_codes=value.get("recording_oddball_marker_codes", ()),
                 analysis_window=value.get("analysis_window"),
+                condition_trigger_maps=value.get("condition_trigger_maps"),
             )
         if not status:
             status = (
@@ -633,6 +649,7 @@ class FrequencyProtocol:
             condition_oddball_marker_codes=value.get("condition_oddball_marker_codes", ()),
             recording_oddball_marker_codes=value.get("recording_oddball_marker_codes", ()),
             analysis_window=value.get("analysis_window"),
+            condition_trigger_maps=value.get("condition_trigger_maps"),
         )
 
     @property
@@ -690,6 +707,8 @@ class FrequencyProtocol:
             }
         if self.analysis_window is not None:
             payload["analysis_window"] = self.analysis_window.to_manifest()
+        if self.condition_trigger_maps is not None:
+            payload["condition_trigger_maps"] = self.condition_trigger_maps.canonical_payload()
         return payload
 
     def canonical_json(self) -> str:
@@ -703,6 +722,8 @@ class FrequencyProtocol:
     def to_manifest(self) -> dict[str, Any]:
         payload = self.canonical_payload()
         payload["entered_oddball_rate_hz"] = self.entered_oddball_rate_hz
+        if self.condition_trigger_maps is not None:
+            payload["condition_trigger_maps"] = self.condition_trigger_maps.to_manifest()
         return payload
 
     def with_expected_cycles(
@@ -718,7 +739,7 @@ class FrequencyProtocol:
         normalized_cycles, normalized_source, status = _normalize_cycles(cycles, source)
         return replace(
             self,
-            version=_protocol_version(self.condition_oddball_marker_codes, self.recording_oddball_marker_codes),
+            version=_protocol_version(self.condition_oddball_marker_codes, self.recording_oddball_marker_codes, trigger_maps=self.condition_trigger_maps),
             status=status,
             expected_analyzed_oddball_cycles=normalized_cycles,
             expected_analyzed_oddball_cycles_source=normalized_source,
@@ -738,7 +759,7 @@ class FrequencyProtocol:
             raise FrequencyProtocolError(str(exc)) from exc
         return replace(
             self,
-            version=ANALYSIS_WINDOW_PROTOCOL_VERSION,
+            version=_protocol_version(self.condition_oddball_marker_codes, self.recording_oddball_marker_codes, window, self.condition_trigger_maps),
             status=FREQUENCY_PROTOCOL_STATUS_READY,
             expected_analyzed_oddball_cycles=cycles,
             expected_analyzed_oddball_cycles_source=(
@@ -800,6 +821,8 @@ class FrequencyProtocol:
     ) -> "FrequencyProtocol":
         """Return the same rate/cycle protocol with explicit marker identity."""
 
+        if self.condition_trigger_maps is not None:
+            raise FrequencyProtocolError("Edit oddball codes in the source trigger maps for this project.")
         if self.status == FREQUENCY_PROTOCOL_STATUS_CONFIRMATION_REQUIRED:
             raise FrequencyProtocolError(
                 "Confirm canonical project rates before setting the oddball marker code."
@@ -813,6 +836,8 @@ class FrequencyProtocol:
     def with_condition_oddball_marker_codes(self, mapping: Any) -> "FrequencyProtocol":
         """Opt into an explicit condition mapping, or restore one shared code."""
 
+        if self.condition_trigger_maps is not None:
+            raise FrequencyProtocolError("Edit oddball codes in the source trigger maps for this project.")
         if self.status == FREQUENCY_PROTOCOL_STATUS_CONFIRMATION_REQUIRED:
             raise FrequencyProtocolError("Confirm the project protocol before setting condition markers.")
         markers = _condition_marker_codes(mapping)
@@ -825,6 +850,8 @@ class FrequencyProtocol:
     def with_recording_oddball_marker_codes(self, mapping: Any) -> "FrequencyProtocol":
         """Save explicit schemas for a mixed-acquisition project, or disable them."""
 
+        if self.condition_trigger_maps is not None:
+            raise FrequencyProtocolError("Edit oddball codes in the source trigger maps for this project.")
         if self.status == FREQUENCY_PROTOCOL_STATUS_CONFIRMATION_REQUIRED:
             raise FrequencyProtocolError("Confirm the project protocol before setting recording markers.")
         recordings = _recording_marker_codes(mapping)
@@ -834,9 +861,29 @@ class FrequencyProtocol:
             recording_oddball_marker_codes=recordings,
         )
 
+    def with_condition_trigger_maps(self, mapping: Any) -> "FrequencyProtocol":
+        """Explicitly opt into source maps, retiring competing marker stores."""
+        if self.status == FREQUENCY_PROTOCOL_STATUS_CONFIRMATION_REQUIRED:
+            raise FrequencyProtocolError("Confirm the project protocol before setting source trigger maps.")
+        if mapping is None:
+            raise FrequencyProtocolError("Source trigger maps cannot be disabled through ordinary editing.")
+        try:
+            maps = ConditionTriggerMaps.from_manifest(mapping)
+        except TriggerMapError as exc:
+            raise FrequencyProtocolError(str(exc)) from exc
+        return replace(self, version=CONDITION_TRIGGER_MAPS_PROTOCOL_VERSION,
+                       condition_trigger_maps=maps, oddball_marker_code=None,
+                       oddball_marker_code_source=None, condition_oddball_marker_codes=(),
+                       recording_oddball_marker_codes=())
+
     def recording_marker_codes(self, recording_id: str | None) -> tuple[tuple[int, int], ...]:
         """Require a canonical recording assignment without guessing a fallback."""
 
+        if self.condition_trigger_maps is not None:
+            try:
+                return tuple(sorted(self.condition_trigger_maps.resolve(recording_id).oddball_marker_codes.items()))
+            except TriggerMapError as exc:
+                raise FrequencyProtocolError(str(exc)) from exc
         if not isinstance(recording_id, str) or not recording_id.strip():
             raise FrequencyProtocolError(
                 "This project's trigger schemas require a canonical recording ID before processing."
@@ -858,7 +905,7 @@ class FrequencyProtocol:
         onset = _positive_integer(condition_onset_code, field_name="condition_onset_code")
         codes = (
             self.recording_marker_codes(recording_id)
-            if self.recording_oddball_marker_codes else self.condition_oddball_marker_codes
+            if self.recording_oddball_marker_codes or self.condition_trigger_maps is not None else self.condition_oddball_marker_codes
         )
         if codes:
             for configured_onset, marker in codes:
@@ -945,9 +992,19 @@ def normalize_frequency_protocol(
 def validate_protocol_condition_codes(
     protocol: FrequencyProtocol,
     condition_onset_codes: Any,
+    *, recording_id: str | None = None,
 ) -> None:
     """Require complete marker assignment, disjoint from all condition onsets."""
 
+    if protocol.condition_trigger_maps is not None:
+        if recording_id is not None:
+            schema = protocol.condition_trigger_maps.resolve(recording_id)
+            supplied = {_positive_integer(value, field_name="condition_onset_code") for value in condition_onset_codes}
+            if supplied != set(schema.event_map.values()):
+                raise FrequencyProtocolError("Condition onset codes must match the recording's assigned source trigger profile.")
+        # Each complete profile was validated at construction. There is no one
+        # global onset set to compare in a mapped project.
+        return
     if protocol.oddball_marker_code is None:
         raise FrequencyProtocolError(
             "Confirm the project oddball marker code before processing."

@@ -95,7 +95,8 @@ class SettingsDraftTracker:
         ]
         manual = [getattr(self.panel, name) for name in _MANUAL_DRAFTS]
         hardware = getattr(self.panel, "_hardware_draft", None)
-        return copy.deepcopy((values, rois, manual, hardware))
+        trigger_maps = getattr(self.panel, "_trigger_maps_payload", None)
+        return copy.deepcopy((values, rois, manual, hardware, trigger_maps))
 
     def is_dirty(self) -> bool:
         return self.snapshot() != self.baseline
@@ -114,3 +115,6 @@ class SettingsDraftTracker:
         refresh = getattr(self.panel.host, "_refresh_project_dirty_indicator", None)
         if callable(refresh):
             refresh()
+        refresh_setup = getattr(self.panel, "_refresh_guided_setup_availability", None)
+        if callable(refresh_setup):
+            refresh_setup()

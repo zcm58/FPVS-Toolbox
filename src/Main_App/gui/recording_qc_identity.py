@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Sequence
@@ -11,6 +11,19 @@ from Main_App.projects.recordings import (
     ProjectRecordingContext,
     project_recording_context,
 )
+
+
+def participant_identity_label(participant_id: str, project=None) -> str:
+    """Add source context for display while leaving canonical selection keys intact."""
+    participants = project.get("participants", {}) if isinstance(project, Mapping) else getattr(project, "participants", {})
+    sources = project.get("source_studies", {}) if isinstance(project, Mapping) else getattr(project, "source_studies", {})
+    person = participants.get(participant_id, {})
+    source = person.get("source_study_id")
+    original = person.get("source_participant_id")
+    if not source or not original:
+        return participant_id
+    label = sources.get(source, {}).get("label", source)
+    return f"{participant_id} · {label} / {original}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -179,5 +192,6 @@ __all__ = [
     "build_recording_coverage_rows",
     "ordered_participant_ids",
     "participant_sort_key",
+    "participant_identity_label",
     "project_recording_coverage_rows",
 ]

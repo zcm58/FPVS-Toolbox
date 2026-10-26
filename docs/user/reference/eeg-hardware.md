@@ -12,7 +12,8 @@ product, acquisition mode, or cap sold by a manufacturer.
 | Brain Products | BrainVision `.vhdr` or single-participant BVRF 1.0.0 `.bvrh`, with companions | Recorded channels, explicit reference/montage settings, and final average reference. See [format limits](brain-products.md). |
 | Unicorn Hybrid Black | Raw classic BDF or continuous BDF+ | All eight declared scalp channels at native 250 Hz, final eight-channel average reference, no resampling or interpolation. |
 
-Choose the acquisition system in **Settings > Preprocessing > EEG hardware**.
+Choose the acquisition system in **Settings > Processing > EEG hardware**, or
+on the **Recording setup** page of **Guided setup**.
 The choice, montage, and processing settings survive app restarts. Changing
 hardware requires confirmation and reprocessing. Keep different acquisition
 systems in separate projects. A BDF filename does not identify the hardware:

@@ -319,7 +319,7 @@ separates File/View/Tools from the project header. Toggle Debug Mode, Save and
 return Home; only the menu-row indicator should change. Repeat at 1280x900 and
 Windows 150% scaling. Registered logo/layout coverage remains CI-only locally.
 
-The Settings page has seven tabs: **Preprocessing**, **Protocol**, **Harmonics**,
+The Settings page has seven tabs: **Processing**, **Protocol**, **Harmonics**,
 **ROIs**, **Quality Control**, **Experimental**, and **Application**. The first
 four contain project processing values, the presentation/oddball protocol,
 harmonic selection/summation, and ROI definitions respectively. Quality Control
@@ -349,6 +349,31 @@ Settings tab panes stay unframed around their section cards; both levels disable
 native tab-bar base drawing to avoid a gray line behind the styled tabs. One shared
 Save/Cancel footer applies the full Settings draft from every tab. Invalid
 summed-BCA input reveals its sub-tab before focusing the affected field.
+
+**Processing > Guided setup** opens the optional seven-page processing wizard.
+It uses shared dialog/form components, a numbered page list, current-method
+tables, and a final configuration/change review. There are no single-option
+method dropdowns or additional main-window controls. Backend-owned draft and
+capability policy live in `projects/pipeline_setup.py`; the dialog does not
+choose scientific policy from hardware labels. Existing advanced marker maps
+and Studio timing evidence survive unrelated edits.
+
+`gui/pipeline_setup_workflow.py` requires a saved Settings/conditions draft and
+an idle active project, then holds the existing navigation/start guard while
+the modal is open. `gui/pipeline_setup_dialog.py` saves through a `QThread`,
+blocks navigation/close only while saving, reports transaction errors in place,
+and accepts only after the worker finishes. After success the normal Settings
+completion path retires the page. Nothing starts processing on save.
+
+Visible acceptance (not run locally): at 1280x900 open Settings > Processing >
+Guided setup for each supported hardware profile. Check all seven pages fit;
+review unchanged settings, use Back/page navigation, edit and Cancel, then edit
+and Save pipeline. Reopen/restart to verify persistence. Check unsupported
+controls, hardware-change confirmation, invalid cutoffs, failed save recovery,
+advanced marker-map preservation and reprocessing guidance. Pending Settings
+edits and active processing must block entry. Qt tests in
+`tests/gui/test_pipeline_setup_dialog_qt.py` cover navigation, cancellation,
+save failure/success and worker lifetime in CI.
 The ROI map uses BioSemi64 anatomical labels, matching the default preprocessing
 geometry. The former `10-10` ROI-preset
 setting is a read-compatibility alias only; named ROI electrodes and saved custom
@@ -957,3 +982,53 @@ the correct choices. Change a preprocessing screen after a completed run and
 confirm the rerun-Processing message; change summed-BCA/burden review and confirm
 Resume Post-processing. Revisit cached SNR/Stats pages to check their displayed
 QC state and next worker request follow the committed project settings.
+
+## Source trigger maps and participant identity
+
+`trigger_maps_dialog.py` owns the reusable Assignments, Condition maps and Review
+dialog. Home commits through `trigger_maps_workflow.py`; Settings holds a detached
+payload until its own Save. The model and scientific validation belong to
+`projects.condition_trigger_maps`. Existing shared-map projects keep their
+condition rows and marker editors. Opting in is one-way in the editor. Mapped
+Home shows the canonical condition catalog without a fictional global onset
+column, and the old oddball-schema entry routes to the same source-map editor.
+
+Each recording has an explicit saved map. Group defaults affect future
+registration proposals only; the bulk assignment action changes selected
+recordings in the draft. The source selector bounds table width. Boundary-only
+source onsets remain editable separately from analyzed conditions. Removed
+analyzed conditions become source boundaries so their markers still terminate
+the preceding block.
+
+Source participant registration previews project IDs alongside source study,
+original ID, group and raw file. Existing project IDs are read-only. New IDs
+must be unique under case and filename sanitization; the same source-local P1
+in different studies remains independent. Selection and persistence use project
+IDs, never display labels. Appended recordings require an explicit source-map
+choice in their registration review. Source folder inspection and atomic
+registration run in a `QRunnable`; queued signals return the result to a modal
+progress dialog without blocking Qt. The progress dialog stays open through
+publication so a completed append cannot arrive after the caller has cancelled.
+QC and exclusion tables use `recording_qc_identity.participant_identity_label`
+to show source study and original ID alongside the project ID. Selection state
+still uses the original canonical participant/recording keys.
+
+Home rejects dirty Settings or condition drafts and active work. Settings checks
+its saved protocol baseline under the manifest transaction before publication.
+Cancel and failed save preserve both live state and disk. Scientific mapping
+changes invalidate interpreted processing and downstream results. Guided setup
+preserves maps and shows their summary; leave the wizard through Save or Cancel
+before editing maps in Settings > Protocol.
+
+Non-GUI checks live in `tests/gui/test_trigger_maps_model.py` and the Settings
+transaction tests. `tests/gui/test_trigger_maps_dialog_qt.py` is registered for
+CI. Visible smoke at 1280x900: open a legacy project, register source P1/P1 as
+distinct project IDs, opt into source maps, edit differing onset/oddball codes,
+and inspect boundary-only markers. Verify missing assignments and local marker
+collisions block Apply; changing a group default does not reassign existing
+recordings. Cancel, then Save/reopen. From Settings, Apply to Settings followed
+by Cancel must discard the map draft. Open guided setup and verify its summary
+and retained maps after an unrelated edit. Keep all three editor tabs and the
+footer visible without a page-level scroll area. Add P2 to each source folder,
+start Batch, confirm distinct proposed IDs and source maps, and verify Cancel
+leaves the registry unchanged. Accept, reopen and inspect both new identities.

@@ -21,6 +21,7 @@ from Main_App.projects.preprocessing_settings import (
 from Main_App.gui.recording_qc_identity import (
     QcRecordingIdentity,
     ordered_participant_ids,
+    participant_identity_label,
 )
 
 
@@ -40,6 +41,7 @@ class ManualParticipantExclusionsDialog(QDialog):
         self.setWindowTitle("Manual Participant Exclusions")
         self.setObjectName("manual_participant_exclusions_dialog")
         self._recording_rows = tuple(recording_rows)
+        self._identity_project = getattr(parent, "project", None) or getattr(parent, "currentProject", None)
         self._recording_mode = bool(self._recording_rows)
         self._participant_table_rows: dict[int, str] = {}
         self._recording_table_rows: dict[int, str] = {}
@@ -117,7 +119,7 @@ class ManualParticipantExclusionsDialog(QDialog):
                     self.table,
                     table_row,
                     (
-                        pid,
+                        participant_identity_label(pid, self._identity_project),
                         "All recordings",
                         "All sessions",
                         "—",
@@ -139,7 +141,7 @@ class ManualParticipantExclusionsDialog(QDialog):
                     self.table,
                     table_row,
                     (
-                        identity.participant_id,
+                        participant_identity_label(identity.participant_id, self._identity_project),
                         recording_id or identity.coverage_status,
                         identity.session_label or identity.session_id or "—",
                         str(identity.visit_index or "—"),
@@ -162,7 +164,8 @@ class ManualParticipantExclusionsDialog(QDialog):
                 table_row += 1
         else:
             for row, pid in enumerate(pids):
-                pid_item = QTableWidgetItem(pid)
+                pid_item = QTableWidgetItem(participant_identity_label(pid, self._identity_project))
+                pid_item.setData(Qt.UserRole, pid)
                 pid_item.setFlags(pid_item.flags() & ~Qt.ItemIsEditable)
                 self.table.setItem(row, 0, pid_item)
                 self.table.setItem(
@@ -198,7 +201,7 @@ class ManualParticipantExclusionsDialog(QDialog):
         for row in range(self.table.rowCount()):
             pid_item = self.table.item(row, 0)
             exclude_item = self.table.item(row, 1)
-            pid = pid_item.text().strip() if pid_item else ""
+            pid = str(pid_item.data(Qt.UserRole) or pid_item.text()).strip() if pid_item else ""
             if not pid or exclude_item is None:
                 continue
             if exclude_item.checkState() == Qt.Checked:

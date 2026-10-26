@@ -258,7 +258,9 @@ def build_processing_estimate(
         source = validate_source_analysis_span_context(
             event_plan_payload=_preflight_event_plan_for_file(path, file_settings),
             event_map=event_map, protocol=protocol,
-            recording_id=_recording_id_for_file(path, file_settings),
+            recording_id=(_recording_id_for_file(path, file_settings)
+                          or (file_settings.get("_fpvs_participant_id")
+                              if protocol.condition_trigger_maps is not None else None)),
         )
         grid = source["source_grid"]
         if (grid["n_times"] != geometry.source_n_times or grid["first_samp"] != 0

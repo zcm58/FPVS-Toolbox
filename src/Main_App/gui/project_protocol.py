@@ -218,6 +218,10 @@ def build_manual_protocol(
     cycles: str | None = (cycles_text or None) if mode == ANALYSIS_WINDOW_MODE_CYCLES else None
     source = EXPECTED_CYCLES_SOURCE_MANUAL if cycles is not None else None
     marker_text = str(oddball_marker_code).strip()
+    if existing is not None and existing.condition_trigger_maps is not None:
+        # The timing constructor still supports legacy shared-marker inputs.
+        # Its temporary default is retired when the authoritative maps attach below.
+        marker_text = str(DEFAULT_ODDBALL_MARKER_CODE)
     if oddball_input_mode == ODDBALL_INPUT_MODE_RECURRENCE:
         protocol = FrequencyProtocol.from_recurrence(
             presentation_rate_hz,
@@ -327,6 +331,8 @@ def build_manual_protocol(
                 source_sampling_rates_hz=window.source_sampling_rates_hz if window is not None else (),
             )
 
+    if existing is not None and existing.condition_trigger_maps is not None:
+        protocol = protocol.with_condition_trigger_maps(existing.condition_trigger_maps)
     if require_ready and not protocol.is_ready:
         raise FrequencyProtocolError(
             "Enter the expected number of analyzed oddball cycles before saving."

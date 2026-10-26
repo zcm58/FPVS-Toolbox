@@ -206,6 +206,7 @@ class ProcessingPlan:
     choice: str = "incremental"
     geometry_identity: Mapping[str, object] = field(default_factory=dict)
     preprocessing_qc_settings: Mapping[str, bool] = field(default_factory=dict)
+    pipeline_settings_identity: str = ""
 
     @property
     def completed_count(self) -> int:
@@ -806,6 +807,11 @@ def build_processing_fingerprint(
 ) -> str:
     project_preprocessing = pipeline_fingerprint_settings(getattr(project, "preprocessing", {}) or {})
     settings = pipeline_fingerprint_settings(settings)
+    analysis = settings.get("analysis")
+    if isinstance(analysis, Mapping) and analysis.get("frequency_protocol") is not None:
+        nested_protocol = normalize_frequency_protocol(analysis["frequency_protocol"])
+        if nested_protocol.condition_trigger_maps is not None:
+            settings["analysis"] = {**analysis, "frequency_protocol": nested_protocol.canonical_payload()}
     if settings.get("processing_pipeline") != project_preprocessing.get("processing_pipeline"):
         raise ValueError("Processing settings and project pipeline method selections disagree.")
     repeated_session_project = bool(
@@ -878,6 +884,10 @@ def build_processing_fingerprint(
         project,
         settings,
     )
+    if (frequency_protocol_identity is not None
+            and frequency_protocol_identity["canonical_payload"].get("condition_trigger_maps") is not None
+            and event_map):
+        raise ValueError("Source-mapped processing uses the shared condition catalog, not a global onset map.")
     payload = {
         "version": PROCESSING_FINGERPRINT_VERSION,
         "geometry": geometry_identity,
@@ -995,7 +1005,8 @@ def _preprocessing_qc_required_entries(
         ).items() for condition in labels
     } | {(identity.casefold(), condition.casefold())
          for identity, condition in frequency.excluded_recording_conditions}
-    conditions = {str(label).casefold() for label in manifest.get("event_map", {})}
+    from Main_App.projects.condition_trigger_maps import project_conditions
+    conditions = {item.label.casefold() for item in project_conditions(manifest)}
     for identity, entry in entries.items():
         if not isinstance(entry, Mapping) or entry.get("status") not in {"completed", "excluded"}:
             continue
@@ -1029,10 +1040,16 @@ def require_current_preprocessing_qc_settings(
     workbooks they still use, without making unused historical entries active.
     """
     root = Path(project_root)
+    required_processing_ids = tuple(required_processing_ids or ())
     manifest_path = root / "project.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else {}
     if not isinstance(manifest, Mapping):
         raise PreprocessingQcSettingsChangedError("Project settings are invalid. Check project.json before continuing.")
+    from Main_App.processing.pipeline_settings_freshness import require_current_pipeline_settings
+
+    require_current_pipeline_settings(
+        root, ledger=ledger, required_processing_ids=required_processing_ids, manifest=manifest,
+    )
     current = _preprocessing_qc_settings_snapshot({}, manifest.get("experimental_qc"))
     state = load_ledger(root) if ledger is None else ledger
     entries = state.get("entries", {})
@@ -1114,15 +1131,44 @@ def _ensure_processing_state_dir(project_root: Path) -> None:
         raise OSError(f"Refusing a redirected processing state directory: {directory}")
 
 
+def _authorized_recording_review_changed(project: Any, processing_id: str, entry: Mapping) -> bool:
+    """Keep an explicit recording review from being carried as metadata-only QC."""
+    from Main_App.processing.kurtosis_qc import KURTOSIS_REVIEWER_STATE_AUTHORIZED_REVIEW
+
+    by_recording = (getattr(project, "preprocessing", {}) or {}).get("kurtosis_review_decisions_by_recording") or {}
+    current = next((value for key, value in by_recording.items()
+                    if str(key).casefold() == processing_id.casefold()), {})
+    requested = {channel: dict(receipt) for channel, receipt in current.items()
+                 if isinstance(receipt, Mapping)
+                 and receipt.get("reviewer_state") == KURTOSIS_REVIEWER_STATE_AUTHORIZED_REVIEW}
+    plan = entry.get("kurtosis_decision_plan") or {}
+    applied = {}
+    for row in plan.get("channel_decisions", ()):
+        receipt = row.get("review_receipt") if isinstance(row, Mapping) else None
+        if isinstance(receipt, Mapping) and receipt.get("reviewer_state") == KURTOSIS_REVIEWER_STATE_AUTHORIZED_REVIEW:
+            applied[str(row["channel"])] = dict(receipt)
+    return requested != applied
+
+
 def classify_processing_inputs(
     project: Any,
     files: Sequence[RawFileInfo],
     settings: Mapping[str, Any],
     event_map: Mapping[str, int],
 ) -> ProcessingPlan:
-    condition_labels = tuple(str(label) for label in event_map.keys())
+    from Main_App.projects.condition_trigger_maps import project_conditions
+    raw_protocol = settings.get("frequency_protocol")
+    mapped = raw_protocol is not None and normalize_frequency_protocol(raw_protocol).condition_trigger_maps is not None
+    condition_labels = (tuple(item.label for item in project_conditions(project))
+                        if mapped else tuple(str(label) for label in event_map.keys()))
     validate_condition_output_names(condition_labels)
     fingerprint = build_processing_fingerprint(project, settings, event_map)
+    from Main_App.processing.pipeline_settings_freshness import (
+        pipeline_settings_requirement_enabled, project_pipeline_settings_identity,
+    )
+
+    settings_identity = project_pipeline_settings_identity(project)
+    require_settings_receipt = pipeline_settings_requirement_enabled(getattr(project, "manifest", {}) or {})
     geometry_identity = _configured_geometry_identity(settings)
     excluded_participants = {
         participant_id.casefold()
@@ -1207,6 +1253,13 @@ def classify_processing_inputs(
                 exclusion_reason in _GEOMETRY_INDEPENDENT_EXCLUSION_REASONS
             )
             if not geometry_independent:
+                if require_settings_receipt and entry.get("pipeline_settings_identity") != settings_identity:
+                    states.append(ProcessingInputState(
+                        info=info, participant_id=participant_id, status="changed_settings",
+                        reason="The prior automatic QC exclusion predates the selected pipeline settings.",
+                        expected_outputs=expected_outputs,
+                    ))
+                    continue
                 if (
                     entry.get("processing_fingerprint_version")
                     != PROCESSING_FINGERPRINT_VERSION
@@ -1289,6 +1342,20 @@ def classify_processing_inputs(
                     expected_outputs=expected_outputs,
                 )
             )
+            continue
+
+        if require_settings_receipt and entry.get("pipeline_settings_identity") != settings_identity:
+            states.append(ProcessingInputState(
+                info=info, participant_id=participant_id, status="changed_settings",
+                reason="The recording predates the selected pipeline settings.", expected_outputs=expected_outputs,
+            ))
+            continue
+
+        if _authorized_recording_review_changed(project, processing_id, entry):
+            states.append(ProcessingInputState(
+                info=info, participant_id=participant_id, status="changed_settings",
+                reason="Explicit recording signal-review decisions changed.", expected_outputs=expected_outputs,
+            ))
             continue
 
         if entry.get("processing_fingerprint_version") != PROCESSING_FINGERPRINT_VERSION:
@@ -1407,6 +1474,7 @@ def classify_processing_inputs(
         preprocessing_qc_settings=_preprocessing_qc_settings_snapshot(
             settings, getattr(project, "experimental_qc_settings", None),
         ),
+        pipeline_settings_identity=settings_identity,
     )
 
 
@@ -1430,6 +1498,7 @@ def with_processing_choice(plan: ProcessingPlan, choice: str) -> ProcessingPlan:
         choice=choice,
         geometry_identity=plan.geometry_identity,
         preprocessing_qc_settings=plan.preprocessing_qc_settings,
+        pipeline_settings_identity=plan.pipeline_settings_identity,
     )
 
 
@@ -1485,6 +1554,7 @@ def carry_forward_pre_qc_completed_states(
     if pre_qc_plan is None:
         return current_plan
 
+    current_entries = load_ledger(Path(project.project_root)).get("entries", {})
     pre_by_path: dict[Path, ProcessingInputState] = {}
     for state in pre_qc_plan.states:
         try:
@@ -1502,10 +1572,15 @@ def carry_forward_pre_qc_completed_states(
         pre_qc = pre_by_path.get(key)
         if (
             pre_qc is not None
+            and pre_qc_plan.pipeline_settings_identity == current_plan.pipeline_settings_identity
             and pre_qc.status in {"completed", "excluded"}
             and current.status == "changed_settings"
             and pre_qc.participant_id == current.participant_id
             and _state_still_matches_ledger(project, current)
+            and not _authorized_recording_review_changed(
+                project, current.processing_id,
+                current_entries.get(current.processing_id, {}),
+            )
         ):
             states.append(
                 ProcessingInputState(
@@ -1529,6 +1604,7 @@ def carry_forward_pre_qc_completed_states(
         choice=current_plan.choice,
         geometry_identity=current_plan.geometry_identity,
         preprocessing_qc_settings=current_plan.preprocessing_qc_settings,
+        pipeline_settings_identity=current_plan.pipeline_settings_identity,
     )
 
 
@@ -2000,6 +2076,7 @@ def record_processing_results(
             "processing_fingerprint_version": PROCESSING_FINGERPRINT_VERSION,
             "processing_fingerprint": plan.fingerprint,
             "preprocessing_qc_settings": dict(plan.preprocessing_qc_settings) or _preprocessing_qc_settings_snapshot({}),
+            "pipeline_settings_identity": plan.pipeline_settings_identity,
             "geometry": geometry_identity,
             "expected_outputs": [str(path) for path in state.expected_outputs],
             "export_receipts": _export_receipts_payload(result),
@@ -2093,6 +2170,7 @@ def record_processing_results(
                 "processing_fingerprint_version": PROCESSING_FINGERPRINT_VERSION,
                 "processing_fingerprint": plan.fingerprint,
                 "preprocessing_qc_settings": dict(plan.preprocessing_qc_settings) or _preprocessing_qc_settings_snapshot({}),
+                "pipeline_settings_identity": plan.pipeline_settings_identity,
                 "geometry": geometry_identity,
                 "expected_outputs": [str(path) for path in state.expected_outputs],
                 "export_receipts": _export_receipts_payload(excluded_result),

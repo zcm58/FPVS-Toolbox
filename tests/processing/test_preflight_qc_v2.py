@@ -514,6 +514,36 @@ def test_preflight_resolves_recording_markers_using_registered_input_identity(
     assert raw.reads == [(tuple(range(len(names) - 1)), 300, 940)]
 
 
+@pytest.mark.parametrize("recording_id,onset", [("ACRP1", 11), ("MCCTRP1", 12)])
+def test_preflight_source_maps_cold_and_warm_use_registered_identity(monkeypatch, tmp_path, recording_id, onset):
+    source = tmp_path / "P1.bdf"
+    source.write_bytes(b"source map cache fixture")
+    data, names = _raw_data()
+    cold_raw, warm_raw = _LazyRaw(data, names), _LazyRaw(data, names)
+    events = _event_rows()
+    events[0, 2] = onset
+    _install_lazy_fakes(monkeypatch, [cold_raw, warm_raw], events)
+    settings = _settings()
+    settings["frequency_protocol"] = settings["frequency_protocol"].with_condition_trigger_maps({
+        "schema_version": "1.0", "canonical_conditions": {"faces": {"label": "Faces"}},
+        "profiles": {"adolescents": {"conditions": {"faces": {"onset_code": 11, "oddball_code": 55}}},
+                     "adults": {"conditions": {"faces": {"onset_code": 12, "oddball_code": 55}}}},
+        "recording_assignments": {"ACRP1": "adolescents", "MCCTRP1": "adults"},
+    })
+    info = RawFileInfo(source, recording_id)
+    cold, warm = [preflight_qc.scan_preprocessing_qc([info], settings, project_root=tmp_path, event_map={})
+                  for _ in range(2)]
+    assert cold.results[0].load_error is None
+    assert warm.results[0].load_error is None
+    assert cold.results[0].condition_qc["cache_status"] == "miss"
+    assert warm.results[0].condition_qc["cache_status"] == "hit"
+    assert cold.results[0].condition_qc["event_plan"] == warm.results[0].condition_qc["event_plan"]
+    occurrence = cold.results[0].condition_qc["event_plan"]["marker_integrity_plan"]["occurrences"][0]
+    assert occurrence["condition_code"] == onset
+    assert occurrence["canonical_condition_id"] == "faces"
+    assert cold_raw.reads and not warm_raw.reads
+
+
 def test_preflight_preserves_detector_off_without_signal_candidate_leakage(
     monkeypatch,
     tmp_path: Path,
@@ -805,6 +835,27 @@ def test_preflight_does_not_score_an_explicitly_excluded_condition(
         "condition_excluded_from_analysis"
     )
 
+
+
+def test_preflight_excluded_short_condition_has_native_disposition_and_no_signal_reads(monkeypatch, tmp_path):
+    path = tmp_path / "P06-short.bdf"
+    path.write_bytes(b"short recording identity")
+    data, names = _raw_data()
+    raw = _LazyRaw(data, names)
+    _install_lazy_fakes(monkeypatch, [raw], _event_rows()[:3])
+    scan = preflight_qc.scan_preprocessing_qc(
+        [RawFileInfo(path, "P06", "control")],
+        {**_settings(), "manual_excluded_participant_conditions": {"P06": ["Faces"]}},
+        project_root=tmp_path, event_map={"Faces": 1},
+    )
+    result = scan.results[0]
+    assert result.load_error is None
+    assert raw.reads == []
+    plan = result.condition_qc["event_plan"]
+    assert plan["unresolved_occurrences"] == []
+    assert plan["spans"] == []
+    assert plan["approved_occurrences"][0]["decision_payload"]["reviewer_state"] == "persisted_condition_exclusion"
+    assert result.condition_qc["excluded_condition_labels"] == ["Faces"]
 
 def test_v3_converts_absolute_plan_bounds_to_relative_raw_reads(
     monkeypatch,

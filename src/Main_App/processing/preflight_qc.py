@@ -662,6 +662,10 @@ def _condition_crop_observations(
     event_plan = condition_qc.get("event_plan")
     if not isinstance(event_plan, Mapping):
         return []
+    if not expected_event_map:
+        source_event_map = event_plan.get("condition_event_map")
+        if isinstance(source_event_map, Mapping):
+            expected_event_map = source_event_map
     spans = event_plan.get("spans")
     if not isinstance(spans, Sequence) or isinstance(spans, (str, bytes)):
         return []
@@ -1183,9 +1187,11 @@ def _preflight_cache_settings(
     analysis_payload = dict(analysis) if isinstance(analysis, Mapping) else {}
     analysis_protocol = analysis_payload.get("frequency_protocol")
     if analysis_protocol is not None:
-        analysis_payload["frequency_protocol"] = normalize_frequency_protocol(
-            analysis_protocol
-        ).to_manifest()
+        normalized_protocol = normalize_frequency_protocol(analysis_protocol)
+        analysis_payload["frequency_protocol"] = (
+            normalized_protocol.canonical_payload() if normalized_protocol.condition_trigger_maps is not None
+            else normalized_protocol.to_manifest()
+        )
     keys = (
         "stim_channel",
         "ref_channel1",
@@ -1229,9 +1235,11 @@ def _preflight_cache_settings(
     }
     raw_protocol = settings.get("frequency_protocol")
     if raw_protocol is not None:
-        payload["frequency_protocol"] = normalize_frequency_protocol(
-            raw_protocol
-        ).to_manifest()
+        normalized_protocol = normalize_frequency_protocol(raw_protocol)
+        payload["frequency_protocol"] = (
+            normalized_protocol.canonical_payload() if normalized_protocol.condition_trigger_maps is not None
+            else normalized_protocol.to_manifest()
+        )
     payload["analysis"] = analysis_payload
     payload.update(pipeline_fingerprint_payload(settings))
     contract = resolve_recording_contract(settings)
@@ -1687,6 +1695,12 @@ def _scan_one_preflight_file_v2(
     participant_id = str(info.subject_id)
     group_id = str(info.group).strip() if info.group else None
     recording_id = str(info.recording_id).strip() if info.recording_id else None
+    from Main_App.projects.condition_trigger_maps import resolve_recording_event_schema
+    frequency_protocol = normalize_frequency_protocol(qc_settings.get("frequency_protocol"))
+    if frequency_protocol.condition_trigger_maps is not None:
+        event_map = resolve_recording_event_schema(
+            frequency_protocol, recording_id or participant_id,
+        ).event_map
     session_id = str(info.session_id).strip() if info.session_id else None
     session_label = str(info.session_label).strip() if info.session_label else None
     visit_index = info.visit_index
@@ -1829,6 +1843,7 @@ def _scan_one_preflight_file_v2(
             frequency_protocol=frequency_protocol,
             recording_id=recording_id or participant_id,
             marker_review_decisions=marker_review_decisions,
+            condition_exclusion_settings=qc_settings,
             marker_review_scope={
                 "source_file_path": str(file_path.resolve()),
                 "participant_id": participant_id,
@@ -1862,7 +1877,8 @@ def _scan_one_preflight_file_v2(
                     session_label=session_label,
                     visit_index=visit_index,
                 )
-            raise RuntimeError("Preflight QC v4 planned no relevant condition intervals.")
+            if not event_plan.approved_occurrences:
+                raise RuntimeError("Preflight QC v4 planned no relevant condition intervals.")
 
         event_plan_payload = event_plan.to_payload()
         excluded_condition_labels = _excluded_condition_labels_for_scan(
@@ -2304,7 +2320,7 @@ def _scan_one_preflight_file(
     session_id = str(info.session_id).strip() if info.session_id else None
     session_label = str(info.session_label).strip() if info.session_label else None
     visit_index = info.visit_index
-    if project_root is not None and event_map:
+    if project_root is not None and _has_condition_context(qc_settings, event_map):
         try:
             return _scan_one_preflight_file_v2(
                 info,
@@ -2470,7 +2486,7 @@ def _scan_preprocessing_qc_parallel(
             info = pending_infos[submitted]
             if index not in credits:
                 credits[index] = _preflight_memory_credit(
-                    info, qc_settings, signal_context=bool(project_root is not None and event_map),
+                    info, qc_settings, signal_context=bool(project_root is not None and _has_condition_context(qc_settings, event_map)),
                     event_map=event_map,
                 )
             try:
@@ -2578,6 +2594,13 @@ def _scan_preprocessing_qc_parallel(
     return PreflightQcScan(results=_ordered_results(indexed_results), cancelled=False)
 
 
+def _has_condition_context(settings: Mapping[str, Any], event_map: Mapping[str, int] | None) -> bool:
+    if event_map:
+        return True
+    raw_protocol = settings.get("frequency_protocol")
+    return bool(raw_protocol is not None and normalize_frequency_protocol(raw_protocol).condition_trigger_maps is not None)
+
+
 def scan_preprocessing_qc(
     raw_file_infos: Sequence[RawFileInfo],
     settings: Mapping[str, Any],
@@ -2634,7 +2657,7 @@ def scan_preprocessing_qc(
         PREFLIGHT_QC_MAX_SPECTRAL_WORKERS
     )
     worker_count = preflight_worker_count(total, max_workers)
-    if worker_count <= 1 and not (resolved_project_root is not None and resolved_event_map):
+    if worker_count <= 1 and not (resolved_project_root is not None and _has_condition_context(qc_settings, resolved_event_map)):
         scan = _scan_preprocessing_qc_serial(
             pending_infos,
             qc_settings,

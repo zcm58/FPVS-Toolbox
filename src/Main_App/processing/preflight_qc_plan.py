@@ -19,10 +19,12 @@ from Main_App.processing.marker_integrity import (
     ApprovedOccurrenceSpan,
     MarkerReviewDecision,
     apply_marker_review_decision,
+    approve_configured_condition_exclusion,
     approve_clean_occurrence,
     build_marker_integrity_plan,
 )
 from Main_App.projects.frequency_protocol import FrequencyProtocol
+from Main_App.projects.condition_trigger_maps import resolve_recording_event_schema
 
 PREFLIGHT_QC_METHOD_NAME = "condition_aware_preflight_qc"
 PREFLIGHT_QC_METHOD_VERSION = "v7_analyzed_condition_scope"
@@ -151,6 +153,7 @@ def plan_preflight_qc_events(
     recording_id: str | None = None,
     marker_review_decisions: Mapping[str, Mapping[str, Any]] | None = None,
     marker_review_scope: Mapping[str, Any] | None = None,
+    condition_exclusion_settings: Mapping[str, Any] | None = None,
 ) -> PreflightQcEventPlan:
     """Plan every relevant condition interval without reading EEG data.
 
@@ -169,6 +172,8 @@ def plan_preflight_qc_events(
     if sample_count <= 0:
         raise ValueError("n_times must be positive")
 
+    if frequency_protocol.condition_trigger_maps is not None:
+        event_map = resolve_recording_event_schema(frequency_protocol, recording_id).event_map
     labels_by_code: dict[int, list[str]] = defaultdict(list)
     for label, value in event_map.items():
         clean_label = str(label).strip()
@@ -216,6 +221,14 @@ def plan_preflight_qc_events(
         if occurrence.requires_review:
             raw_decision = decisions.get(occurrence.occurrence_key)
             if raw_decision is None:
+                approved = approve_configured_condition_exclusion(
+                    occurrence, marker_plan_fingerprint=marker_plan.fingerprint,
+                    review_scope=marker_review_scope or {},
+                    settings=condition_exclusion_settings or {},
+                )
+                if approved is not None:
+                    approved_by_key[occurrence.occurrence_key] = approved
+                    continue
                 unresolved_payloads.append(occurrence.to_payload())
                 continue
             approved = apply_marker_review_decision(
@@ -223,6 +236,7 @@ def plan_preflight_qc_events(
                 MarkerReviewDecision.from_payload(raw_decision),
                 marker_plan_fingerprint=marker_plan.fingerprint,
                 review_scope=marker_review_scope or {},
+                condition_exclusion_settings=condition_exclusion_settings,
             )
         else:
             approved = approve_clean_occurrence(occurrence)

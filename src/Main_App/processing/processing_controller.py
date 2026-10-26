@@ -18,7 +18,7 @@ from Main_App.projects.recordings import (
     project_recording_context,
 )
 from Main_App.projects.preprocessing_settings import normalize_preprocessing_settings
-from Main_App.projects.raw_identity import infer_raw_participant_id
+from Main_App.projects.raw_identity import infer_raw_participant_id, registered_raw_identities
 from Main_App.projects.recording_preflight import (
     RecordingPreflightReport,
     derive_filename_token_rules,
@@ -93,6 +93,9 @@ class ParticipantReviewRow:
     session_id: str | None = None
     session_label: str | None = None
     visit_index: int | None = None
+    source_study_id: str | None = None
+    source_participant_id: str | None = None
+    display_label: str | None = None
 
 
 @dataclass(frozen=True)
@@ -332,9 +335,8 @@ def _registered_participant_ids_by_path(project: "Project") -> dict[Path, str]:
     """Keep registered raw-file ownership independent of filename heuristics."""
 
     return {
-        participant.raw_file.resolve(strict=False): participant.participant_id
-        for participant in project_group_context(project).participants
-        if participant.raw_file is not None
+        path: identity.participant_id
+        for path, identity in registered_raw_identities(project).items()
     }
 
 
@@ -804,6 +806,9 @@ def participant_review_rows(
                 group_label=_group_label(project, info.group),
                 raw_file=info.path,
                 status=status,
+                source_study_id=(existing or {}).get("source_study_id"),
+                source_participant_id=(existing or {}).get("source_participant_id"),
+                display_label=(existing or {}).get("display_label"),
             )
         )
     return rows
@@ -864,6 +869,9 @@ def _recording_review_rows(
                 session_id=info.session_id,
                 session_label=info.session_label,
                 visit_index=info.visit_index,
+                source_study_id=(participant_entry or {}).get("source_study_id"),
+                source_participant_id=(participant_entry or {}).get("source_participant_id"),
+                display_label=(participant_entry or {}).get("display_label"),
             )
         )
     return rows
@@ -1068,6 +1076,7 @@ def prepare_raw_registration_review(
 
 def commit_raw_registration_review(
     project: "Project", review: RawRegistrationReview,
+    *, trigger_map_assignments: Mapping[str, str] | None = None,
 ) -> list[RawFileInfo]:
     """Revalidate exactly what was confirmed, then atomically append membership."""
     if not review.review_rows:
@@ -1111,6 +1120,7 @@ def commit_raw_registration_review(
         recordings=recordings,
         expected_manifest_sha256=review.manifest_sha256,
         tool_namespace_updates=tool_updates,
+        trigger_map_assignments=trigger_map_assignments,
     )
     logger.info(
         "raw_recordings_registered",
@@ -1209,6 +1219,11 @@ def start_processing(self) -> None:
     """
     try:
         project: Project = self.currentProject
+        if project.frequency_protocol.condition_trigger_maps is not None:
+            raise ValueError(
+                "Source trigger maps require the main Processing workflow with reviewed "
+                "marker spans. This compatibility entry point cannot process source maps."
+            )
         input_dir = raw_selection_start_folder(project)
 
         batch_mode = bool(getattr(self, "rb_batch", None) and self.rb_batch.isChecked())
@@ -1416,7 +1431,8 @@ def start_processing(self) -> None:
             )
             process_data(raw, out_dir)
 
-            condition_labels = list(self.currentProject.event_map.keys())
+            from Main_App.projects.condition_trigger_maps import project_conditions
+            condition_labels = [item.label for item in project_conditions(self.currentProject)]
             self.log(f"Post-process condition labels: {condition_labels}")
             logger.debug(
                 "start_processing_call_post_process",

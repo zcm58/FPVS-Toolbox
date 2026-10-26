@@ -137,6 +137,26 @@ requires matching saved source/run evidence.
 Canonical event plans, trigger/protocol validation, geometry and output
 integrity remain mandatory, including when every optional screen is off.
 
+The backend also accepts evidence-bound `explicit_authorized_signal_review`
+receipts for a user-authorized signal review performed outside the GUI. They
+require a reviewer identity and reason and bind the same recording, channel,
+current score, analyzed intervals and source identity as GUI receipts. For that
+reviewed candidate, an explicit approval or rejection takes precedence over the
+project's experimental auto-all setting; unreviewed recordings retain the saved
+auto-all behavior. These receipts never claim that a GUI visit occurred. Changes
+invalidate the affected recording's processed cache and prevent incremental
+carry-forward of its prior outputs. Exact pre-interpolation checkpoints remain
+reusable because they contain samples and evidence, not repair authority; current
+receipts are validated again after loading. No detector statistic, threshold,
+filter, reference order or condition-repair method changes.
+
+Review preparation and production bind condition exclusions from the full
+configured condition catalog, including a condition with no observed onset.
+Such a condition contributes no samples, but its explicit exclusion remains in
+the source/target plan provenance. A historical review that omitted this scope
+must be regenerated and rebound through normal review and run identities; equal
+sample values do not authorize reuse of a stale evidence fingerprint.
+
 Frequency-domain QC may request one electrode repair in one recording-condition
 when both summed-BCA review and its repair option are enabled and the reviewer
 confirms an artifact.
@@ -357,6 +377,16 @@ Epochs or legacy Evoked inputs under a recording-specific protocol.
 These assignments change trigger interpretation only. They do not merge adjacent
 condition-onset blocks, relabel an unexpected onset, or infer a missing condition.
 An unexpected repetition count remains a separate condition/occurrence finding.
+
+An unresolved marker occurrence in an already excluded participant-condition or
+recording-condition cell receives a deterministic `persisted_condition_exclusion`
+receipt from native preflight. This records the saved exclusion setting, subject,
+condition, source identity and marker fingerprints; it records no human reviewer,
+GUI interaction or review timestamp. It can only exclude the occurrence and
+cannot approve, pad or reconstruct an analysis interval. The expected ledger,
+kurtosis scan and process runner check that the exclusion remains configured;
+removing or changing its scope requires new preflight. Existing GUI review
+receipts and clean-occurrence fingerprints retain their prior behavior.
 
 When valid `55_onbin` repetition crops exist for a condition, those repetitions
 must keep `N % N_step == 0` and metadata `N_mod_step == 0`. Do not downgrade

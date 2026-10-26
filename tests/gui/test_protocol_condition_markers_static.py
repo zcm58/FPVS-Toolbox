@@ -39,6 +39,7 @@ def _editor():
     rows = [(_Edit("2"), _Edit("52")), (_Edit("1"), _Edit("51"))]
     panel = SimpleNamespace(
         project=SimpleNamespace(frequency_protocol=protocol),
+        _trigger_maps_payload=None, _initial_trigger_maps_payload=None,
         protocol_presentation_rate_edit=_Edit("6"),
         protocol_oddball_every_n_edit=_Edit("5"),
         protocol_direct_oddball_rate_edit=_Edit("1.2"),

@@ -131,6 +131,51 @@ def test_clean_occurrence_uses_declared_cycle_count_and_exact_project_code() -> 
     assert not approved.is_excluded
 
 
+@pytest.mark.parametrize("setting,subject", [
+    ("manual_excluded_participant_conditions", "P01"),
+    ("manual_excluded_recording_conditions", "P01_visit-1"),
+])
+def test_persisted_condition_exclusion_resolves_short_markers_without_human_review(setting, subject):
+    settings = {setting: {subject: ["Faces"]}}
+    events = _events([10, 16])
+    kwargs = dict(events=events, event_map={"Faces": 1}, sfreq=12, n_times=60,
+                  frequency_protocol=_protocol(), marker_review_scope=_review_scope())
+    unresolved = plan_preflight_qc_events(**kwargs)
+    assert len(unresolved.unresolved_occurrences) == 1
+    resolved = plan_preflight_qc_events(**kwargs, condition_exclusion_settings=settings)
+    assert not resolved.unresolved_occurrences
+    assert not resolved.spans
+    payload = resolved.to_payload()
+    receipt = payload["approved_occurrences"][0]["decision_payload"]
+    assert receipt["reviewer_state"] == "persisted_condition_exclusion"
+    assert receipt["reviewed_at_utc"] is None
+    assert receipt["reviewer_identity"] is None
+    assert receipt["evidence_reference"] == f"project.preprocessing.{setting}"
+    assert payload == plan_preflight_qc_events(**kwargs, condition_exclusion_settings=settings).to_payload()
+    approved = validate_approved_event_plan(
+        event_plan_payload=payload, events=events, sampling_rate_hz=12,
+        n_times=60, event_map={"Faces": 1}, protocol=_protocol(),
+    )
+    assert approved[0].is_excluded
+    marker_module.validate_configured_condition_exclusions(
+        payload, settings=settings, participant_id="P01", recording_id="P01_visit-1",
+    )
+    with pytest.raises(MarkerIntegrityError, match="stale"):
+        marker_module.validate_configured_condition_exclusions(
+            payload, settings={}, participant_id="P01", recording_id="P01_visit-1",
+        )
+    with pytest.raises(MarkerIntegrityError, match="different recording"):
+        marker_module.validate_configured_condition_exclusions(
+            payload, settings=settings, participant_id="P02", recording_id="P01_visit-1",
+        )
+    original = MarkerReviewDecision.from_payload(receipt)
+    plan = _plan([10, 16])
+    with pytest.raises(MarkerIntegrityError, match="not configured"):
+        _apply_review(plan, plan.occurrences[0], original)
+    with pytest.raises(MarkerIntegrityError, match="only exclude"):
+        _apply_review(plan, plan.occurrences[0], replace(original, decision=MARKER_DECISION_RETAIN_FULL))
+
+
 def _valence_marker_plan(
     onsets: list[tuple[int, int]],
     event_map: dict[str, int],

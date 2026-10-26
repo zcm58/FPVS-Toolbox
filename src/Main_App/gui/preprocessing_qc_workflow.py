@@ -191,6 +191,13 @@ class _PreflightQcWorker(QObject):
                     for label, condition_id in self._event_map.items()
                     if str(label).strip()
                 }
+                def source_onset(observation):
+                    protocol = self._settings.get("frequency_protocol")
+                    if getattr(protocol, "condition_trigger_maps", None) is not None:
+                        from Main_App.projects import resolve_recording_event_schema
+                        schema = resolve_recording_event_schema(protocol, observation.recording_id or observation.participant_id)
+                        return {label.casefold(): code for label, code in schema.event_map.items()}.get(observation.condition.casefold(), -1)
+                    return event_ids.get(observation.condition.casefold(), -1)
                 scan = replace(
                     scan,
                     project_grid_observations=tuple(
@@ -199,10 +206,7 @@ class _PreflightQcWorker(QObject):
                             participant_id=observation.participant_id,
                             group_id=observation.group_id,
                             condition_label=observation.condition,
-                            condition_id=event_ids.get(
-                                observation.condition.casefold(),
-                                -1,
-                            ),
+                            condition_id=source_onset(observation),
                             repetition_count=0,
                             oddball_cycles=observation.oddball_cycles,
                             duration_s=observation.duration_s,

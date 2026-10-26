@@ -42,7 +42,7 @@ def _load_methods(panel):
                  and node.name == "SettingsDialog")
     namespace = {
         **vars(preprocessing_settings), **vars(dv_policy_settings),
-        "copy": copy,
+        "copy": copy, "json": json,
         "config": SimpleNamespace(DEFAULT_STIM_CHANNEL="Status"),
         "REMOVED_ELECTRODE_DETECTION_MODE_AUTO": "auto",
         "QMessageBox": panel.messages,
@@ -50,6 +50,7 @@ def _load_methods(panel):
     names = {
         "_collect_project_preprocessing_inputs", "_sync_electrode_geometry_controls",
         "_validated_preproc_payload", "_save_project_preprocessing_for_harmonic_recalculation",
+        "_trigger_protocol_is_current",
     }
     methods = [node for node in owner.body if isinstance(node, ast.FunctionDef)
                and node.name in names]
@@ -80,6 +81,7 @@ def _panel(tmp_path, mapping):
 
     panel = SimpleNamespace(
         project=project, messages=Mock(), _project_cache=dict(defaults),
+        _trigger_protocol_baseline=(project.frequency_protocol.to_manifest(), copy.deepcopy(project.event_map)),
         _electrode_geometry_control_baseline={
             "electrode_montage": "biosemi64", "electrode_mapping_profile": mapping,
         },

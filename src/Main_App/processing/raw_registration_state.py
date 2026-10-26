@@ -297,7 +297,8 @@ def _validate_accounting(
         event_map = manifest.get("event_map")
         if not isinstance(event_map, Mapping) or dict(plan.event_map) != dict(event_map):
             raise RawRegistrationPendingError("The processing plan does not cover the current project conditions.")
-        if normalize_frequency_protocol(manifest.get("frequency_protocol")).fingerprint != plan.protocol_fingerprint:
+        protocol = normalize_frequency_protocol(manifest.get("frequency_protocol"))
+        if protocol.fingerprint != plan.protocol_fingerprint:
             raise RawRegistrationPendingError("The processing plan uses a different project frequency protocol.")
         expected_cells = {cell.cell_id: cell for recording in plan.recordings for cell in recording.cells}
         saved_cells = {cell.cell_id: cell for cell in outcomes.cells}
@@ -307,7 +308,11 @@ def _validate_accounting(
             if saved_cells[cell_id].expected_cell_fingerprint != cell.fingerprint:
                 raise RawRegistrationPendingError("The current condition outcomes do not match the processing plan.")
         for recording in marked:
-            if {(cell.condition_label, cell.condition_code) for cell in recording.cells} != set(plan.event_map):
+            expected_map = dict(plan.event_map)
+            if protocol.condition_trigger_maps is not None:
+                from Main_App.projects.condition_trigger_maps import resolve_recording_event_schema
+                expected_map = resolve_recording_event_schema(protocol, recording.processing_id).event_map
+            if {(cell.condition_label, cell.condition_code) for cell in recording.cells} != set(expected_map.items()):
                 raise RawRegistrationPendingError("An added recording has an incomplete expected condition matrix.")
         marked_cells = tuple(saved_cells[cell.cell_id] for recording in marked for cell in recording.cells)
         receipts = [cell.export_receipt for cell in marked_cells if cell.export_receipt is not None]

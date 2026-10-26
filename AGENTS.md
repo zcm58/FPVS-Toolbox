@@ -18,8 +18,9 @@ PySide6 and releases ship through a Windows installer.
   interoperability. Save and restore project pipeline choices; method changes
   must explicitly invalidate affected results and caches. Versioned executable
   method slots and persisted selections live in `processing.pipeline_plan`;
-  each slot currently has one production method. Alternative methods and their
-  selectors remain future work. Read
+  each slot currently has one production method. Optional guided setup lives in
+  Settings > Processing, backed by `projects.pipeline_setup` and an isolated
+  atomic draft. Alternative methods and their selectors remain future work. Read
   [the current-state and future-direction contract](docs/agent/architecture/hardware-pipeline-studio-roadmap.md)
   for related work. Confirmed ActiveTwo64, ActiveThree, Brain Products and
   Unicorn projects have scoped BIDS/MNE processing routes. Studio import remains

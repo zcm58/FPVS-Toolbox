@@ -50,6 +50,9 @@ class ParticipantInfo:
     participant_id: str
     group_id: str | None
     raw_file: Path | None
+    source_study_id: str | None = None
+    source_participant_id: str | None = None
+    display_label: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -229,6 +232,12 @@ def normalize_project_participants(
             )
 
         normalized: dict[str, Any] = {}
+        for key in ("source_study_id", "source_participant_id", "display_label"):
+            if key in raw_info:
+                value = raw_info[key]
+                if not isinstance(value, str) or not value.strip():
+                    raise GroupConfigurationError(f"Participant '{participant_id}' requires nonblank {key} text.")
+                normalized[key] = value.strip()
         raw_group = (
             raw_info.get("group_id")
             if raw_info.get("group_id") is not None
@@ -344,6 +353,9 @@ def _build_context(
             participant_id=participant_id,
             group_id=(str(info["group_id"]) if info.get("group_id") else None),
             raw_file=(Path(info["raw_file"]) if info.get("raw_file") else None),
+            source_study_id=info.get("source_study_id"),
+            source_participant_id=info.get("source_participant_id"),
+            display_label=info.get("display_label"),
         )
         for participant_id, info in participants.items()
     )
