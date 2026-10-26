@@ -86,6 +86,7 @@ def asset_from_dict(value: Any) -> InstallerAsset:
     if (
         not isinstance(value["name"], str)
         or not isinstance(value["download_url"], str)
+        or not isinstance(value["kind"], str)
         or value["kind"] not in {"full", "patch"}
         or any(
             value[field] is not None and not isinstance(value[field], str)
@@ -109,7 +110,7 @@ def result_from_dict(value: Any) -> UpdateCheckResult:
     for field in ("current_version", "latest_version", "release_notes_summary", "selection_reason"):
         if not isinstance(value[field], str):
             raise UpdateError("The updater result contains invalid text.")
-    for field in ("update_available", "is_prerelease"):
+    for field in ("update_available", "is_prerelease", "metadata_incomplete"):
         if type(value[field]) is not bool:
             raise UpdateError("The updater result contains an invalid state.")
     if value["release_url"] is not None and not isinstance(value["release_url"], str):

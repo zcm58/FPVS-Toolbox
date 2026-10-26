@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import builtins
 import copy
 import json
 from concurrent.futures import ThreadPoolExecutor
@@ -159,6 +160,54 @@ def test_reset_and_import_replace_stale_configuration(tmp_path: Path, operation:
     assert not saved.config.has_section("newer")
     assert saved.get("rois", "names") == DEFAULTS["rois"]["names"]
     assert saved.get("analysis", "alpha") == ("0.05" if operation == "reset" else "0.01")
+
+
+@pytest.mark.parametrize("failure", ["missing", "permission"])
+def test_failed_ini_import_preserves_saved_and_unsaved_settings(
+    tmp_path: Path, monkeypatch, failure: str,
+) -> None:
+    path = tmp_path / "settings.ini"
+    manager = _seed(path)
+    original = path.read_bytes()
+    manager.set("analysis", "alpha", "0.01")
+    pending = module._config_values(manager.config)
+    imported = tmp_path / "import.ini"
+    error = FileNotFoundError
+    if failure == "permission":
+        imported.write_text("[analysis]\nalpha=0.10\n")
+        real_open = builtins.open
+
+        def deny_import(source, *args, **kwargs):
+            if Path(source) == imported:
+                raise PermissionError("blocked import")
+            return real_open(source, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "open", deny_import)
+        error = PermissionError
+
+    with pytest.raises(error):
+        manager.load_from(str(imported))
+
+    assert path.read_bytes() == original
+    assert module._config_values(manager.config) == pending
+
+
+@pytest.mark.parametrize("ext", ["ini", "json"])
+def test_export_to_current_directory_roundtrips_settings(
+    tmp_path: Path, monkeypatch, ext: str,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    manager = _seed(tmp_path / "settings.ini")
+    manager.set("analysis", "alpha", "0.01")
+    exported = f"preferences.{ext}"
+
+    manager.export(exported)
+
+    assert (tmp_path / exported).is_file()
+    imported = SettingsManager(str(tmp_path / "imported.ini"))
+    imported.load_from(exported)
+    assert imported.get("analysis", "alpha") == "0.01"
+    assert imported.get_roi_pairs() == manager.get_roi_pairs()
 
 
 def test_failed_atomic_save_keeps_original_and_retryable_local_changes(tmp_path: Path, monkeypatch) -> None:

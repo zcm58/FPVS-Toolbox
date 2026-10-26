@@ -117,13 +117,28 @@ def test_protocol_refuses_ambiguous_unbounded_or_unsupported_messages(raw: bytes
 
 
 @pytest.mark.parametrize(
-    "change", [{"size_bytes": True}, {"kind": "shell"}, {"name": "../bad.exe"}]
+    "change",
+    [
+        {"size_bytes": True},
+        {"kind": "shell"},
+        {"kind": []},
+        {"kind": {}},
+        {"name": "../bad.exe"},
+    ],
 )
 def test_protocol_refuses_invalid_asset_identity(change: dict) -> None:
     value = helper_protocol.asset_to_dict(_asset())
     value.update(change)
     with pytest.raises(UpdateError):
         helper_protocol.asset_from_dict(value)
+
+
+@pytest.mark.parametrize("metadata_incomplete", [None, 0, 1, "false", [], {}])
+def test_protocol_refuses_non_boolean_metadata_state(metadata_incomplete: object) -> None:
+    value = helper_protocol.result_to_dict(_result())
+    value["metadata_incomplete"] = metadata_incomplete
+    with pytest.raises(UpdateError, match="invalid state"):
+        helper_protocol.result_from_dict(value)
 
 
 def test_service_uses_installed_version_not_updater_version(

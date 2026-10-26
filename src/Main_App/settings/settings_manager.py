@@ -324,7 +324,7 @@ class SettingsManager:
 
     def export(self, path: str) -> None:
         """Write the current settings to ``path`` as INI or JSON."""
-        os.makedirs(os.path.dirname(path), exist_ok=True)
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
         ext = os.path.splitext(path)[1].lower()
         if ext == '.json':
             data = {"DEFAULT": dict(self.config.defaults())}
@@ -360,7 +360,8 @@ class SettingsManager:
                 data = json.load(f)
             imported.read_dict(data)
         else:
-            imported.read(path)
+            with open(path, 'r') as f:
+                imported.read_file(f)
         self.config = imported
         self.save(replace_existing=True)
 
