@@ -10,12 +10,18 @@ python .agents/scripts/verify.py --scope <scope> --tier focused
 ```
 
 Run `python .agents/scripts/verify.py --scope repo --tier precommit` for the
-broad local handoff gate. Do not duplicate its pytest lists in documentation;
+lightweight local handoff gate: all invariant audits, changed Python lint and
+compilation, the bounded repo test bundle, and changed non-Qt test files.
+Run the focused scope for the affected feature first; precommit does not infer
+feature coverage from source changes. The full application suite remains in CI
+and is not launched by local precommit.
+
+Do not duplicate the driver's pytest lists in documentation;
 update `.agents/verification.toml` when executable coverage changes and
 `tests/qt_test_files.txt` when Qt dependencies change. Check both with
 `python .agents/scripts/verify.py --check-config`.
 
-Application verification excludes `tests/standalone_scripts` from broad local
+Application verification excludes `tests/standalone_scripts` from local
 precommit and CI runs because those tests import the opt-in
 `src/Standalone_Scripts` utilities. Run standalone-script tests separately only
 when the user explicitly scopes that directory or approves access, following
@@ -54,7 +60,7 @@ environment.
 | `loreta` | Payloads, source producers, project exports, rendering helpers and legacy boundaries | Embedded visualizer interaction and Qt worker smoke |
 | `figures` | Shared figure-style contract and focused output/rendering checks | Figure-export dialog interaction where applicable |
 | `legacy-boundary` | Retired package/source-localization audits and focused compatibility checks | None by default |
-| `repo` with `precommit` | Broad non-Qt handoff gate: audits, changed-file static checks, and safe tests | CI runs the separate Qt job |
+| `repo` with `precommit` | Lightweight handoff gate: all audits, changed-file static checks, bounded repo tests, and changed non-Qt test files | CI retains the full application suite, including Qt |
 
 ## Selection Rules
 
@@ -64,6 +70,10 @@ environment.
   that a test is locally safe. The driver's Qt registry decides execution.
 - Add focused tests next to the owning workflow. Register new Qt-dependent
   tests before relying on local scope output.
+- Precommit includes changed non-Qt test files even when they are not yet in a
+  focused bundle, and avoids rerunning files already covered by that bundle.
+  Helpers and deleted test files are not collected. Registered Qt tests remain
+  excluded from local precommit even when the Qt opt-in environment is set.
 - Use isolated temporary paths for file/project tests; never depend on a
   developer-machine directory.
 - For shared harmonic-selection changes, run both `publication-maps` and

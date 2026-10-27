@@ -123,8 +123,10 @@ Supported scopes are `repo`, `backend-hardening`, `gui`, `updates`, `project-io`
 `plot-generator`, `publication-maps`, `sequence-figure`,
 `sensitivity-analysis`, `stats`, `free-harmonic-clustering`, `loreta`,
 `figures`, and `legacy-boundary`. Use `--scope repo --tier precommit` for the
-broad local handoff gate. The driver owns the executable
-test registry and excludes Qt execution locally.
+lightweight local handoff gate after the relevant focused scopes. It runs
+the full invariant audit, changed Python lint/compile checks, bounded scope
+tests, and changed non-Qt test files. The full suite remains in CI. The driver
+owns the executable test registry and excludes Qt execution locally.
 
 PySide6/pytest-qt targets remain useful coverage definitions, but execute them
 only in the configured CI Qt job or an explicitly user-approved safe visible

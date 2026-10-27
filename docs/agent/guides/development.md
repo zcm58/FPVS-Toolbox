@@ -242,3 +242,8 @@ Common gates:
 python .agents/scripts/verify.py --scope <scope> --tier focused
 python .agents/scripts/verify.py --scope repo --tier precommit
 ```
+
+Run the relevant focused scopes before the lightweight local precommit gate.
+Precommit runs the full invariant audit, changed Python lint/compile checks,
+bounded scope tests, and changed non-Qt test files. The full suite, including
+Qt coverage, remains in CI.

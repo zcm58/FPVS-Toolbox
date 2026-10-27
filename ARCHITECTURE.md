@@ -216,8 +216,10 @@ Use focused checks for the changed area first.
 - Processing or export changes: targeted unit tests around data format, processing order, and output paths.
 - Retired-path work: activate the available repo environment, then confirm `src/Main_App/Legacy_App/**` and `src/Main_App/PySide6_App/**` are not recreated with `git diff --name-only` and `python .agents/scripts/audit/agent_audit.py`.
 - Agent invariants: activate the available repo environment, then run `python .agents/scripts/audit/agent_audit.py`.
-- Broad shared behavior: run `python .agents/scripts/verify.py --scope repo
-  --tier precommit`; the driver selects the repo environment and locally safe
-  checks.
+- Local handoff: run `python .agents/scripts/verify.py --scope repo
+  --tier precommit` after the relevant focused scopes. It runs the full
+  invariant audit, changed Python lint/compile checks, bounded scope tests,
+  and changed non-Qt test files. The full suite, including Qt coverage, remains
+  in CI.
 
 See [docs/agent/quality/verification-gates.md](docs/agent/quality/verification-gates.md) for the current command list and fallback reporting rules.

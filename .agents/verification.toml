@@ -34,6 +34,8 @@ manual_smoke = ["In a visible Main App session, start processing, cancel, and re
 [scopes.repo]
 audits = ["agent-harness", "garbage-collection"]
 tests = [
+  "tests/audit/test_verification_driver.py",
+  "tests/audit/test_qt_test_registry.py",
   "tests/audit/test_agent_audit_owner_moves.py",
   "tests/audit/test_canonical_runtime_owners.py",
   "tests/audit/test_agent_audit_change_detection.py",

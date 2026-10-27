@@ -41,7 +41,15 @@ python .agents/scripts/verify.py --scope repo --tier precommit
 ```
 
 Choose the scope from `docs/agent/agent-index.md`. The focused tier is the
-normal change loop; the precommit tier is the broad local handoff gate.
+normal change loop. The precommit tier is the lightweight local handoff gate:
+all invariant audits, changed Python lint/compilation, the selected scope's
+bounded tests, and changed non-Qt test files. With `--scope repo`, it runs the
+repo verification tests instead of the full application suite. Feature coverage
+still comes from the affected focused scope; precommit does not select feature
+scopes automatically. CI retains the full application suite, including Qt.
+
+Use `--list` to inspect the selected commands without running them. Full-suite
+verification is an explicit CI responsibility, not a routine local handoff step.
 
 ## Targeted Checks
 

@@ -117,7 +117,7 @@ def validate_config(
             candidates = (
                 [absolute]
                 if absolute.is_file()
-                else sorted(absolute.rglob("test_*.py"))
+                else sorted(path for path in absolute.rglob("*.py") if _is_test_module(path))
             )
             for candidate in candidates:
                 relative = candidate.relative_to(repo_root).as_posix()
@@ -170,12 +170,51 @@ def scope_python_files(scope: VerificationScope, paths: Iterable[str]) -> tuple[
     return tuple(sorted(set(selected)))
 
 
+def _is_opt_in_path(path: str) -> bool:
+    return path.startswith(("src/Standalone_Scripts/", "tests/standalone_scripts/"))
+
+
+def _is_test_module(path: Path) -> bool:
+    return fnmatch.fnmatch(path.name, "test_*.py") or fnmatch.fnmatch(path.name, "*_test.py")
+
+
+def precommit_test_targets(
+    scope: VerificationScope,
+    changed: Sequence[str],
+    qt_tests: frozenset[str],
+    *,
+    repo_root: Path,
+) -> tuple[str, ...]:
+    """Add changed local test modules without expanding the configured bundle."""
+
+    targets = list(dict.fromkeys(path.replace("\\", "/") for path in scope.tests))
+    configured = [repo_root / path for path in targets]
+    for path in sorted({path.replace("\\", "/") for path in changed}):
+        candidate = Path(path)
+        if (
+            _is_opt_in_path(path)
+            or not candidate.parts
+            or candidate.parts[0] != "tests"
+            or not _is_test_module(candidate)
+            or path in qt_tests
+        ):
+            continue
+        absolute = repo_root / candidate
+        if not absolute.is_file():
+            continue
+        if any(absolute == target or (target.is_dir() and target in absolute.parents) for target in configured):
+            continue
+        targets.append(path)
+    return tuple(targets)
+
+
 def build_commands(
     scope: VerificationScope,
     *,
     tier: str,
     python: Path,
     changed: Sequence[str],
+    qt_tests: frozenset[str],
 ) -> list[list[str]]:
     """Build commands for a focused, precommit, or CI verification tier."""
 
@@ -198,17 +237,26 @@ def build_commands(
         )
 
     python_files = (
-        tuple(sorted({path for path in changed if path.replace("\\", "/").endswith(".py")}))
+        tuple(sorted({
+            normalized
+            for path in changed
+            if (normalized := path.replace("\\", "/")).endswith(".py")
+            and not _is_opt_in_path(normalized)
+            and (REPO_ROOT / normalized).is_file()
+        }))
         if tier == "precommit"
         else scope_python_files(scope, changed)
     )
     if python_files:
         commands.append([str(python), "-m", "ruff", "check", *python_files])
         commands.append([str(python), "-m", "py_compile", *python_files])
-    if tier == "precommit" and scope.name == "repo":
-        commands.append([str(python), "-m", "pytest", "--ignore=tests/standalone_scripts", "-q"])
-    elif scope.tests:
-        commands.append([str(python), "-m", "pytest", *scope.tests, "-q"])
+    tests = (
+        precommit_test_targets(scope, changed, qt_tests, repo_root=REPO_ROOT)
+        if tier == "precommit"
+        else scope.tests
+    )
+    if tests:
+        commands.append([str(python), "-m", "pytest", *tests, "-q"])
     return commands
 
 
@@ -268,6 +316,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             tier=args.tier,
             python=python,
             changed=changed_files(),
+            qt_tests=read_qt_registry(registry),
         )
     except (RuntimeError, ValueError) as exc:
         print(f"verification error: {exc}", file=sys.stderr)

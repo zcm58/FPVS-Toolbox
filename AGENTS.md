@@ -162,7 +162,9 @@ PySide6 and releases ship through a Windows installer.
   unless a task explicitly introduces a web surface.
 - Use `python .agents/scripts/verify.py --scope <scope> --tier focused` first;
   use `python .agents/scripts/verify.py --scope repo --tier precommit` for the
-  broad local handoff gate. The driver selects `.venv1` or `.venv`.
+  lightweight local handoff gate: full invariant audit, changed Python
+  lint/compile checks, bounded scope tests, and changed non-Qt test files.
+  The driver selects `.venv1` or `.venv`; the full suite remains in CI.
 - For documentation-only changes, use the audit, strict documentation build,
   and link/owner checks in [verification gates](docs/agent/quality/verification-gates.md#documentation-only-changes).
 - For GUI changes, leave Qt execution to CI and document the visible/manual
