@@ -136,7 +136,12 @@ class ManifestTransaction:
         )
         temporary = Path(name)
         try:
-            with os.fdopen(descriptor, "wb") as stream:
+            try:
+                stream = os.fdopen(descriptor, "wb")
+            except BaseException:
+                os.close(descriptor)
+                raise
+            with stream:
                 stream.write(payload)
                 stream.flush()
                 os.fsync(stream.fileno())

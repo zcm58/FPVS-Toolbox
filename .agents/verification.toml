@@ -298,6 +298,7 @@ tests = [
   "tests/processing/test_memmap_security.py",
   "tests/workers/test_post_processing_pipeline_worker.py",
   "tests/workers/test_post_processing_pipeline_worker_static.py",
+  "tests/workers/test_harmonic_selection_worker_static.py",
 ]
 include = [
   "src/Main_App/processing/**",

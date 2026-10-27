@@ -28,11 +28,6 @@ class ProcessingHarmonicSelectionWorker(QObject):
         messages: list[str] = []
         project_root = str(getattr(self._project, "project_root", "") or "")
         previous_selection_fingerprint: str | None = None
-        resolved_project_root = (
-            Path(project_root).expanduser().resolve(strict=False)
-            if project_root
-            else None
-        )
         def _record_status(message: str) -> None:
             text = str(message).strip()
             if not text:
@@ -51,6 +46,11 @@ class ProcessingHarmonicSelectionWorker(QObject):
         )
         report = None
         try:
+            resolved_project_root = (
+                Path(project_root).expanduser().resolve(strict=False)
+                if project_root
+                else None
+            )
             from Main_App.workers.post_processing_pipeline_worker import (
                 POST_PROCESSING_PHASE_COUNT,
                 run_postprocessing_from_selection,

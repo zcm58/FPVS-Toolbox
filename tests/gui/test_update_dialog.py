@@ -1109,6 +1109,49 @@ def test_default_handoff_resolves_drafts_before_launch_and_closes_once(
     lifecycle.deleteLater()
 
 
+@pytest.mark.parametrize("raise_on_start", [False, True])
+def test_failed_thread_start_deletes_unstarted_qt_worker(qapp, qtbot, monkeypatch, raise_on_start):
+    """CI-only: a moved worker has no event loop to service deleteLater."""
+    threads = []
+    workers = []
+    callbacks = []
+    outcomes = []
+    worker_type = lifecycle_module._UpdateWorker
+
+    class UnstartedThread(QThread):
+        def __init__(self, parent):
+            super().__init__(parent)
+            threads.append(self)
+
+        def start(self, *_args, **_kwargs):
+            if raise_on_start:
+                raise RuntimeError("Injected thread startup failure")
+            # Model Qt's native failure: return without starting a thread.
+
+    def create_worker(*args):
+        worker = worker_type(*args)
+        workers.append(worker)
+        return worker
+
+    monkeypatch.setattr(lifecycle_module, "QThread", UnstartedThread)
+    monkeypatch.setattr(lifecycle_module, "_UpdateWorker", create_worker)
+    job = UpdateJob(lambda *_args: callbacks.append("ran"), parent=qapp)
+    job.finished.connect(outcomes.append)
+    try:
+        job.start()
+
+        assert len(outcomes) == 1
+        assert isinstance(outcomes[0].error, RuntimeError)
+        assert not job.is_running
+        assert job.worker_thread is None
+        assert not callbacks
+        assert len(workers) == len(threads) == 1
+        assert not isValid(workers[0])
+        qtbot.waitUntil(lambda: not isValid(threads[0]))
+    finally:
+        job.deleteLater()
+
+
 def assert_visible_children_within_parent(root: QWidget) -> None:
     for child in root.findChildren(QWidget):
         parent = child.parentWidget()

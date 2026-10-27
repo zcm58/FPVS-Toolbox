@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import json
 import logging
 from pathlib import Path
+import sys
 from types import MethodType, SimpleNamespace
 from unittest.mock import Mock
 
@@ -693,3 +694,80 @@ def test_exception_after_core_outputs_does_not_report_a_required_output_failure(
     assert payload["failure_reason"] == ""
     assert payload["steps"][-1]["message"] == "Optional source export failed"
     assert (phase, completed, total) == ("post_processing_complete", 5, 5)
+
+
+@pytest.mark.parametrize("error_type", [MemoryError, AttributeError, IndexError])
+@pytest.mark.parametrize("selection_resume", [False, True])
+def test_unexpected_stage_error_still_finishes_and_releases_caches(
+    tmp_path, error_type, selection_resume,
+):
+    from Main_App.processing.post_processing_context import validation_scope_active
+
+    worker = _pipeline_without_qt(tmp_path)
+    worker._resume_from_selection = selection_resume
+    failed_stage = "_run_stats_ready_export" if selection_resume else "_run_frequency_domain_qc_review"
+    setattr(worker, failed_stage, Mock(side_effect=error_type("Injected stage failure")))
+    worker._run_source_maps = Mock()
+
+    worker.run()
+
+    worker.finished.emit.assert_called_once()
+    payload = worker.finished.emit.call_args.args[0]
+    assert payload["ok"] is False
+    assert payload["failure_reason"] == "Injected stage failure"
+    assert payload["steps"][-1]["message"] == "Injected stage failure"
+    worker._run_source_maps.assert_not_called()
+    assert not validation_scope_active()
+    assert worker._dataset_index is None
+    assert worker._harmonic_selection_metadata is None
+    assert worker._selection_fingerprint is None
+    assert worker._artifact_targets == worker._artifact_archives == {}
+
+
+def test_failure_status_error_cannot_suppress_worker_completion(tmp_path, monkeypatch):
+    from Main_App.processing import frequency_domain_qc
+
+    worker = _pipeline_without_qt(tmp_path, review_error="Original review failure")
+    monkeypatch.setattr(
+        frequency_domain_qc, "mark_frequency_domain_outputs_stale",
+        Mock(side_effect=MemoryError("Failure status allocation failed")),
+    )
+
+    worker.run()
+
+    worker.finished.emit.assert_called_once()
+    payload = worker.finished.emit.call_args.args[0]
+    assert payload["ok"] is False
+    assert payload["failure_reason"] == "Original review failure"
+
+
+def test_setup_import_failure_still_finishes(tmp_path, monkeypatch):
+    worker = _pipeline_without_qt(tmp_path)
+    worker._run_frequency_domain_qc_review = Mock()
+    monkeypatch.setitem(sys.modules, "Main_App.processing.condition_interpolation_executor", None)
+
+    worker.run()
+
+    worker.finished.emit.assert_called_once()
+    payload = worker.finished.emit.call_args.args[0]
+    assert payload["ok"] is False
+    assert "condition_interpolation_executor" in payload["failure_reason"]
+    assert payload["requires_processing"] is False
+    worker._run_frequency_domain_qc_review.assert_not_called()
+
+
+def test_processing_required_error_retains_existing_recovery_signal(tmp_path):
+    from Main_App.processing.condition_interpolation_executor import ConditionInterpolationProcessingRequired
+
+    worker = _pipeline_without_qt(tmp_path)
+    worker._run_frequency_domain_qc_review = Mock(
+        side_effect=ConditionInterpolationProcessingRequired("Processing required"),
+    )
+
+    worker.run()
+
+    worker.finished.emit.assert_called_once()
+    payload = worker.finished.emit.call_args.args[0]
+    assert payload["ok"] is False
+    assert payload["failure_reason"] == "Processing required"
+    assert payload["requires_processing"] is True

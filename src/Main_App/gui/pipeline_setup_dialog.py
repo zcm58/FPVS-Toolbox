@@ -584,9 +584,20 @@ class PipelineSetupDialog(AppDialog):
         self.error_banner.hide()
         self._pending_reprocessing = self.draft.requires_reprocessing
         self._set_saving(True)
-        self._save_worker = _PipelineSaveWorker(self.draft, self.project, self)
-        self._save_worker.finished.connect(self._save_finished)
-        self._save_worker.start()
+        try:
+            self._save_worker = _PipelineSaveWorker(self.draft, self.project, self)
+            self._save_worker.finished.connect(self._save_finished)
+            self._save_worker.start()
+            if not self._save_worker.isRunning() and not self._save_worker.isFinished():
+                raise RuntimeError("Could not start the pipeline save thread.")
+        except Exception as exc:
+            logger.exception("Could not start pipeline setup save")
+            worker = self._save_worker
+            self._save_worker = None
+            if worker is not None:
+                worker.deleteLater()
+            self._set_saving(False)
+            self._error(str(exc) or "Could not start saving the pipeline.")
 
     def _set_saving(self, saving):
         for widget in (self.navigation, self.pages, self.cancel_button,

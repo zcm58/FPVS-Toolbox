@@ -303,6 +303,9 @@ class SettingsManager:
                     with target.open() as stream:
                         latest.read_file(stream)
                 merged = _merge_config_changes(latest, self.config, self._saved_values)
+            # Capture the next baseline before publication so an allocation
+            # failure cannot leave the live configuration behind the saved INI.
+            saved_values = _config_values(merged)
             target.parent.mkdir(parents=True, exist_ok=True)
             temporary: Path | None = None
             try:
@@ -320,7 +323,7 @@ class SettingsManager:
                 if temporary is not None:
                     temporary.unlink(missing_ok=True)
             self.config = merged
-            self._saved_values = _config_values(merged)
+            self._saved_values = saved_values
 
     def export(self, path: str) -> None:
         """Write the current settings to ``path`` as INI or JSON."""
@@ -348,8 +351,13 @@ class SettingsManager:
 
     def reset(self) -> None:
         """Reset settings to defaults and save."""
+        previous = self.config
         self.config = _default_config()
-        self.save(replace_existing=True)
+        try:
+            self.save(replace_existing=True)
+        except Exception:  # noqa: BLE001 - restore live settings on any failed publication, then re-raise
+            self.config = previous
+            raise
 
     def load_from(self, path: str) -> None:
         """Load settings from ``path`` then save to the default ini file."""
@@ -362,8 +370,13 @@ class SettingsManager:
         else:
             with open(path, 'r') as f:
                 imported.read_file(f)
+        previous = self.config
         self.config = imported
-        self.save(replace_existing=True)
+        try:
+            self.save(replace_existing=True)
+        except Exception:  # noqa: BLE001 - restore live settings on any failed publication, then re-raise
+            self.config = previous
+            raise
 
 
     def list_configs(self) -> List[str]:

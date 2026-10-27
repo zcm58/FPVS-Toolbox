@@ -171,14 +171,17 @@ class PostProcessingPipelineWorker(QObject):
         self._requires_recording_aware_export = False
         cache_stack = ExitStack()
         requires_processing = False
+        processing_required_errors: tuple[type[Exception], ...] = ()
         try:
             from Main_App.io import xlsx_read_cache_scope
             from Main_App.processing.post_processing_context import (
                 post_processing_validation_scope,
             )
             from Main_App.processing.condition_interpolation_executor import (
+                ConditionInterpolationProcessingRequired,
                 execute_pending_condition_interpolations,
             )
+            processing_required_errors = (ConditionInterpolationProcessingRequired,)
             from Main_App.processing.condition_interpolation_state import (
                 require_no_pending_condition_interpolation,
             )
@@ -306,12 +309,8 @@ class PostProcessingPipelineWorker(QObject):
                     # These exports share an accepted selection; a failure in
                     # one sibling must not suppress the other consumers.
                     steps.extend(self._run_source_maps(project_root))
-        except PIPELINE_STEP_EXCEPTIONS as exc:
-            from Main_App.processing.condition_interpolation_executor import (
-                ConditionInterpolationProcessingRequired,
-            )
-
-            requires_processing = isinstance(exc, ConditionInterpolationProcessingRequired)
+        except Exception as exc:  # noqa: BLE001 - every stage failure must release the owning QThread
+            requires_processing = isinstance(exc, processing_required_errors)
             logger.exception("post_processing_pipeline_failed")
             steps.append(
                 PostProcessingStepResult(
@@ -620,7 +619,7 @@ class PostProcessingPipelineWorker(QObject):
                 project_root,
                 reason=f"Post-processing did not complete: {reason}",
             )
-        except PIPELINE_STEP_EXCEPTIONS:
+        except Exception:  # noqa: BLE001 - failure reporting must not suppress worker completion
             logger.exception("post_processing_failure_status_save_failed")
 
     def _run_harmonic_selection(self) -> PostProcessingStepResult:

@@ -200,6 +200,40 @@ def test_project_save_failure_preserves_manifest_and_releases_transaction(tmp_pa
     assert json.loads(path.read_bytes())["name"] == "Pending local edit"
 
 
+def test_manifest_stream_open_failure_closes_descriptor_and_allows_retry(tmp_path, monkeypatch):
+    path = tmp_path / "project.json"
+    before = b'{"preserved": true}'
+    path.write_bytes(before)
+    descriptors = []
+
+    def fail_fdopen(descriptor, *_args, **_kwargs):
+        descriptors.append(descriptor)
+        raise OSError("injected stream-open failure")
+
+    try:
+        with project_manifest_transaction(path) as transaction:
+            with monkeypatch.context() as patch:
+                patch.setattr(manifest_store.os, "fdopen", fail_fdopen)
+                with pytest.raises(OSError, match="injected stream-open failure"):
+                    transaction.write({"pending": True})
+            assert len(descriptors) == 1
+            with pytest.raises(OSError):
+                os.fstat(descriptors[0])
+            assert path.read_bytes() == before
+            assert not list(tmp_path.glob(".project.json.*.tmp"))
+            assert transaction.write({"pending": True})
+    finally:
+        # A regression must not leave a leaked native descriptor in the test
+        # process or prevent Windows from removing the temporary directory.
+        for descriptor in descriptors:
+            try:
+                os.fstat(descriptor)
+            except OSError:
+                continue
+            os.close(descriptor)
+    assert json.loads(path.read_bytes()) == {"pending": True}
+
+
 @pytest.mark.parametrize("execution", ["threads", "spawn"])
 def test_independent_worker_metadata_survives_concurrent_updates(tmp_path, execution):
     project = Project.load(tmp_path)

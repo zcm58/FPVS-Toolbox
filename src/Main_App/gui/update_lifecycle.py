@@ -14,6 +14,7 @@ from typing import cast
 
 from PySide6.QtCore import QEvent, QObject, Qt, QThread, QTimer, Signal, Slot
 from PySide6.QtWidgets import QApplication
+from shiboken6 import delete as delete_qobject
 
 from Main_App.updates.models import UpdateCancelled, UpdatePhase
 
@@ -105,21 +106,44 @@ class UpdateJob(QObject):
             raise RuntimeError("An updater job can only be started once.")
         self._started = True
         self._running = True
-        thread = QThread(self)
-        thread.setObjectName("fpvs-toolbox-update-thread")
-        worker = _UpdateWorker(self.callback, self.cancel_event, self._outcome)
-        worker.moveToThread(thread)
-        thread.started.connect(worker.run)
-        worker.progress_changed.connect(self.progress_changed)
-        # quit() is thread-safe. A direct connection lets it run even during shutdown;
-        # the result still waits for the subsequent queued QThread.finished delivery.
-        worker.finished.connect(thread.quit, Qt.ConnectionType.DirectConnection)
-        worker.finished.connect(worker.deleteLater)
-        thread.finished.connect(self._finish)
-        thread.finished.connect(thread.deleteLater)
-        self._thread = thread
-        self._worker = worker
-        thread.start()
+        thread = None
+        worker = None
+        try:
+            thread = QThread(self)
+            thread.setObjectName("fpvs-toolbox-update-thread")
+            worker = _UpdateWorker(self.callback, self.cancel_event, self._outcome)
+            worker.moveToThread(thread)
+            thread.started.connect(worker.run)
+            worker.progress_changed.connect(self.progress_changed)
+            # quit() is thread-safe. A direct connection lets it run even during shutdown;
+            # the result still waits for the subsequent queued QThread.finished delivery.
+            worker.finished.connect(thread.quit, Qt.ConnectionType.DirectConnection)
+            worker.finished.connect(worker.deleteLater)
+            thread.finished.connect(self._finish)
+            thread.finished.connect(thread.deleteLater)
+            self._thread = thread
+            self._worker = worker
+            thread.start()
+            # Native thread creation can fail with only a Qt warning. A fast
+            # successful worker may already be finished when start() returns.
+            if not thread.isRunning() and not thread.isFinished():
+                raise RuntimeError("The updater background task could not start.")
+        except Exception as error:
+            # A failed launch has no thread-finished signal. Deliver its error through
+            # the normal completion path so the lifecycle releases its shutdown hold.
+            self._outcome.error = error
+            if thread is not None and (thread.isRunning() or thread.isFinished()):
+                # Keep ownership if startup did launch a thread before failing;
+                # its queued finished delivery remains the completion boundary.
+                thread.quit()
+                return
+            if worker is not None:
+                # Its target thread never started, so deferred deletion cannot run.
+                # No worker code or event can be active in this branch.
+                delete_qobject(worker)
+            if thread is not None:
+                thread.deleteLater()
+            self._finish()
 
     @Slot()
     def cancel(self) -> None:

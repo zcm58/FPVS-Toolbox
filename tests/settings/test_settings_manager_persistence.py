@@ -232,6 +232,55 @@ def test_failed_atomic_save_keeps_original_and_retryable_local_changes(tmp_path:
     assert SettingsManager(str(path)).get_roi_pairs() == [("Central", ["CZ"])]
 
 
+@pytest.mark.parametrize("operation", ["reset", "ini", "json"])
+@pytest.mark.parametrize("failure", ["baseline", "fsync", "replace"])
+def test_failed_reset_or_import_restores_live_settings(
+    tmp_path: Path, monkeypatch, operation: str, failure: str,
+) -> None:
+    path = tmp_path / "settings.ini"
+    manager = _seed(path)
+    original = path.read_bytes()
+    manager.set("analysis", "alpha", "0.01")
+    prior_config = manager.config
+    prior_values = module._config_values(prior_config)
+    prior_baseline = copy.deepcopy(manager._saved_values)
+    imported = tmp_path / f"import.{operation}"
+    if operation != "reset":
+        imported.write_text(
+            "[analysis]\nalpha=0.10\n" if operation == "ini"
+            else json.dumps({"analysis": {"alpha": "0.10"}}),
+        )
+
+    error_type = MemoryError if failure == "baseline" else OSError
+
+    def fail(*_args) -> None:
+        raise error_type("injected publication failure")
+
+    with monkeypatch.context() as publication:
+        if failure == "baseline":
+            publication.setattr(module, "_config_values", fail)
+        else:
+            publication.setattr(module.os, failure, fail)
+        with pytest.raises(error_type, match="injected publication failure"):
+            if operation == "reset":
+                manager.reset()
+            else:
+                manager.load_from(str(imported))
+
+    assert path.read_bytes() == original
+    assert manager.config is prior_config
+    assert module._config_values(manager.config) == prior_values
+    assert manager._saved_values == prior_baseline
+    assert not list(tmp_path.glob("*.tmp"))
+
+    # A later ordinary save must publish the user's pending edits, not the
+    # imported/reset settings from the failed operation.
+    manager.save()
+    restored = SettingsManager(str(path))
+    assert restored.get("analysis", "alpha") == "0.01"
+    assert restored.get_roi_pairs() == manager.get_roi_pairs()
+
+
 def test_atomic_save_retries_transient_permission_error(tmp_path: Path, monkeypatch) -> None:
     path = tmp_path / "settings.ini"
     manager = _seed(path)

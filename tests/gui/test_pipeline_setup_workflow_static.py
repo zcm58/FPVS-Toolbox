@@ -135,3 +135,101 @@ def test_settings_entry_remains_optional_and_tracks_dirty_state():
     assert "self.guided_setup_button.clicked.connect(self._show_pipeline_setup)" in page
     assert 'getattr(self.panel, "_refresh_guided_setup_availability", None)' in feedback
     assert "self._refresh_guided_setup_availability()" in ast.unparse(show_event)
+
+
+def _save_dialog(worker_factory):
+    source = ROOT / "src/Main_App/gui/pipeline_setup_dialog.py"
+    tree = ast.parse(source.read_text(encoding="utf-8"))
+    dialog_class = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "PipelineSetupDialog")
+    methods = [node for node in dialog_class.body if isinstance(node, ast.FunctionDef)
+               and node.name in {"_save", "_save_finished", "_set_saving"}]
+    for method in methods:
+        method.decorator_list = []
+    namespace = {
+        "PIPELINE_SETUP_PAGES": [object()],
+        "_PipelineSaveWorker": worker_factory,
+        "logger": Mock(),
+    }
+    exec(compile(ast.Module(body=methods, type_ignores=[]), str(source), "exec"), namespace)
+    dialog = SimpleNamespace(
+        _current_page=0, _save_worker=None, _can_save=None,
+        _collect_all=Mock(), draft=SimpleNamespace(requires_reprocessing=True),
+        project=object(), error_banner=Mock(), _error=Mock(), accept=Mock(),
+        requires_reprocessing_saved=False,
+        **{name: Mock() for name in (
+            "navigation", "pages", "cancel_button", "back_button", "next_button", "save_button",
+        )},
+    )
+    for method in methods:
+        setattr(dialog, method.name, namespace[method.name].__get__(dialog))
+    return dialog
+
+
+@pytest.mark.parametrize("failure_stage", ["construct", "connect", "start", "native_start"])
+def test_pipeline_save_startup_failure_restores_editable_draft_and_allows_retry(failure_stage):
+    worker = Mock(error="")
+    factory = Mock(return_value=worker)
+    failure = RuntimeError("cannot start save worker")
+    if failure_stage == "construct":
+        factory.side_effect = failure
+    elif failure_stage == "connect":
+        worker.finished.connect.side_effect = failure
+    elif failure_stage == "start":
+        worker.start.side_effect = failure
+    else:
+        failure = RuntimeError("Could not start the pipeline save thread.")
+        worker.isRunning.return_value = False
+        worker.isFinished.return_value = False
+    dialog = _save_dialog(factory)
+    original_draft = dialog.draft
+    original_project = dialog.project
+
+    dialog._save()
+
+    assert dialog._save_worker is None
+    assert dialog.draft is original_draft
+    assert dialog.project is original_project
+    assert not dialog.requires_reprocessing_saved
+    dialog.accept.assert_not_called()
+    dialog._error.assert_called_once_with(str(failure))
+    assert worker.deleteLater.call_count == int(failure_stage != "construct")
+    for name in ("navigation", "pages", "cancel_button", "back_button", "next_button", "save_button"):
+        assert [call.args[0] for call in getattr(dialog, name).setEnabled.call_args_list] == [False, True]
+    dialog.save_button.setText.assert_called_with("Save pipeline")
+
+    retry_worker = Mock(error="")
+    factory.side_effect = None
+    factory.return_value = retry_worker
+    dialog._save()
+
+    assert dialog._save_worker is retry_worker
+    retry_worker.start.assert_called_once()
+    dialog.accept.assert_not_called()
+    dialog._save_finished()
+    assert dialog._save_worker is None
+    assert dialog.requires_reprocessing_saved
+    retry_worker.deleteLater.assert_called_once()
+    dialog.accept.assert_called_once()
+
+
+@pytest.mark.parametrize("already_finished", [False, True])
+def test_pipeline_save_waits_for_finished_delivery_even_when_thread_finishes_quickly(already_finished):
+    worker = Mock(error="")
+    worker.isRunning.return_value = not already_finished
+    worker.isFinished.return_value = already_finished
+    dialog = _save_dialog(Mock(return_value=worker))
+
+    dialog._save()
+
+    assert dialog._save_worker is worker
+    dialog._error.assert_not_called()
+    dialog.accept.assert_not_called()
+    worker.deleteLater.assert_not_called()
+    dialog.cancel_button.setEnabled.assert_called_once_with(False)
+
+    dialog._save_finished()
+
+    assert dialog._save_worker is None
+    assert dialog.requires_reprocessing_saved
+    dialog.accept.assert_called_once()
+    worker.deleteLater.assert_called_once()
