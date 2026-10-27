@@ -79,7 +79,7 @@ Current ownership map:
 - `overlay_legend.py`: measured wrapping and figure-height allocation for
   condition legends outside the data axes.
 - `spectrum_style.py`: open spectrum axes, rate-derived harmonic ticks in Hz,
-  original-value base-peak highlighting, and the illustrative timing key.
+  and original-value base-peak highlighting.
 - `session_controls.py`: pure canonical session-selector state;
   `session_selection.py` owns its GUI binding and request validation, while
   `session_rendering.py` owns the figure-only fixed-order interpretation caveat.
@@ -106,10 +106,9 @@ v2.1 project contract:
   traces, and numeric harmonic ticks in Hz derived from frozen processing rates and the
   existing technical oddball domain. A single spectrum overdraws its original
   base-frequency segments in black; overlays retain their per-curve colors
-  and distinct peak markers. Legends wrap outside ordinary data axes. Append
-  one illustrative stimulus/response key below each figure, preserving the
-  physical size of its data panels and legends. Only depict every-Nth-stimulus
-  timing when F/f is an integer from 2 to 12; otherwise show the numeric rates.
+  and distinct peak markers. Legends wrap below ordinary data axes, preserving
+  the physical size of the data panels. SNR figures contain spectra and their
+  legends without a stimulus/response timing schematic.
   Manuscript titles and captions stay outside the artwork, including session
   figures; titles still determine filenames. Canonical group panel labels,
   participant counts, and the session interpretation caveat remain annotations.
@@ -290,9 +289,8 @@ markers, participant counts, and complete labels below the axes in both files.
 
 Visible smoke for publication styling: generate one condition/ROI, a condition
 overlay, a group overlay, and a session comparison. In both PNG and PDF, verify
-open axes, readable harmonic frequencies in Hz and numeric rates, unchanged axis ranges, a clear
-timing key below all data/legend content, and no manuscript title or caption.
-Check a non-integer F/f ratio shows rates without a pulse sequence. Verify
+open axes, readable harmonic frequencies in Hz, unchanged axis ranges,
+legends below ordinary data axes, and no timing schematic, manuscript title or caption. Verify
 session group labels, participant n, visit indices, and the interpretation
 caveat remain visible. Inspect the PNG's 600-DPI metadata, compare PNG/PDF
 physical dimensions, and verify filenames and the selected output folder are

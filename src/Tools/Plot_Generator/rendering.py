@@ -21,7 +21,6 @@ from Tools.Plot_Generator.render_naming import (
 from Tools.Plot_Generator.export_plan import save_worker_figure_pair
 from Tools.Plot_Generator.overlay_legend import add_condition_overlay_legend
 from Tools.Plot_Generator.spectrum_style import (
-    add_stimulation_schematic,
     highlight_base_responses,
     style_spectrum_axis,
 )
@@ -262,7 +261,6 @@ class PlotRenderingMixin:
 
             style_spectrum_axis(ax, self, odd_freqs)
             add_condition_overlay_legend(fig, ax)
-            add_stimulation_schematic(fig, self)
             if self._cancellation_checkpoint():
                 plt.close(fig)
                 return
@@ -349,7 +347,6 @@ class PlotRenderingMixin:
             style_spectrum_axis(ax, self, odd_freqs)
             base = self.title or condition_overlay_title(conditions)
             add_condition_overlay_legend(fig, ax)
-            add_stimulation_schematic(fig, self)
             if self._cancellation_checkpoint():
                 plt.close(fig)
                 return

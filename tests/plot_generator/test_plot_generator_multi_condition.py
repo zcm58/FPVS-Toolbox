@@ -223,9 +223,7 @@ def test_large_legend_is_below_axes_and_fits_full_size_text(tmp_path, monkeypatc
     assert ax.get_window_extent(renderer).height / figure.dpi == pytest.approx(
         reference_ax.get_window_extent().height / reference.dpi, abs=0.01
     )
-    key = figure.axes[-1]
-    assert key.get_label() == "stimulation_schematic"
-    assert key.get_tightbbox(renderer).y1 < bbox.y0
+    assert len(figure.axes) == 1
     plt.close(reference)
 
 

@@ -13,10 +13,7 @@ legend labels, colors, axis labels, and axis ranges. Every figure is exported
 directly to the selected plot folder as a matching 600-DPI PNG and PDF pair.
 Titles are used in filenames only; figures contain no manuscript title or
 caption. Open spectrum axes label oddball and base harmonics with their actual
-frequencies in Hz, using each plot's processing rates. An illustrative
-stimulus/response key below the spectrum shows the
-processing rates in Hz. It depicts two cycles when F/f is an integer from 2
-to 12; other ratios show the rates without inventing a stimulus sequence.
+frequencies in Hz, using each plot's processing rates.
 </p>
 
 <h3>Typical Workflow</h3>

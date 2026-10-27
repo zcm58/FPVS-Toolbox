@@ -22,7 +22,7 @@ from Tools.Plot_Generator.rendering import (
 )
 from Tools.Plot_Generator.session_aggregation import SessionSNRAggregation
 from Tools.Plot_Generator.export_plan import save_worker_figure_pair
-from Tools.Plot_Generator.spectrum_style import add_stimulation_schematic, style_spectrum_axis
+from Tools.Plot_Generator.spectrum_style import style_spectrum_axis
 
 FIXED_ORDER_CAVEAT = (
     "Phase is confounded with visit order and elapsed time because every participant "
@@ -106,7 +106,6 @@ class SessionPlotRenderingMixin:
                 **figure_text_kwargs("small"),
             )
             fig.tight_layout(rect=(0.0, 0.055, 1.0, 1.0))
-            add_stimulation_schematic(fig, self)
             if self._cancellation_checkpoint():
                 plt.close(fig)
                 return

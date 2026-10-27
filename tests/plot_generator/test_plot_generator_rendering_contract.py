@@ -20,7 +20,7 @@ from Tools.Plot_Generator.session_aggregation import (
     SessionSNRCell,
 )
 from Tools.Plot_Generator.session_rendering import SessionPlotRenderingMixin
-from Tools.Plot_Generator.spectrum_style import SCHEMATIC_HEIGHT_IN, _harmonics
+from Tools.Plot_Generator.spectrum_style import _harmonics
 
 
 class _RenderHarness(PlotRenderingMixin):
@@ -195,11 +195,10 @@ def test_session_figure_stacks_normal_width_group_panels_without_differences(
     assert tuple(figure.get_size_inches()) == pytest.approx(
         (
             FIGURE_JOURNAL_TEXT_WIDTH_IN,
-            FIGURE_STANDARD_LANDSCAPE_HEIGHT_IN * 2 + SCHEMATIC_HEIGHT_IN,
+            FIGURE_STANDARD_LANDSCAPE_HEIGHT_IN * 2,
         )
     )
-    assert len(figure.axes) == 3
-    assert figure.axes[-1].get_label() == "stimulation_schematic"
+    assert len(figure.axes) == 2
     assert figure._suptitle is None
     spectra = figure.axes[:2]
     upper, lower = spectra
@@ -247,6 +246,7 @@ def test_single_and_overlay_figures_use_shared_width_and_show_participant_n(
         Path(_path).write_bytes(b"rendered figure")
         dimensions.append(tuple(float(value) for value in figure.get_size_inches()))
         legends.append(figure.axes[0].get_legend_handles_labels()[1])
+        assert len(figure.axes) == 1
 
     monkeypatch.setattr("matplotlib.figure.Figure.savefig", capture_save)
     harness = _RenderHarness(tmp_path)
@@ -260,7 +260,7 @@ def test_single_and_overlay_figures_use_shared_width_and_show_participant_n(
 
     assert dimensions
     assert all(width == FIGURE_JOURNAL_TEXT_WIDTH_IN for width, _height in dimensions)
-    assert all(height > FIGURE_STANDARD_LANDSCAPE_HEIGHT_IN + SCHEMATIC_HEIGHT_IN for _width, height in dimensions)
+    assert all(height > FIGURE_STANDARD_LANDSCAPE_HEIGHT_IN for _width, height in dimensions)
     assert legends[0][0] == "Faces (n=2)"
     assert "Faces (n=2)" in legends[2]
     assert "Objects (n=3)" in legends[2]
@@ -414,7 +414,7 @@ def test_harmonics_include_decimal_boundaries_without_expanding_the_domain(
 
 
 @pytest.mark.parametrize("oddball_rate", [0.6, 1.2, 1.5])
-def test_frozen_rates_drive_harmonic_labels_and_timing_without_changing_values(tmp_path, monkeypatch, oddball_rate):
+def test_frozen_rates_drive_harmonic_labels_without_changing_values(tmp_path, monkeypatch, oddball_rate):
     figures = []
 
     def capture_save(figure, path, **_kwargs):
@@ -435,7 +435,7 @@ def test_frozen_rates_drive_harmonic_labels_and_timing_without_changing_values(t
     harness._plot(frequencies.tolist(), {"Occipital": values.tolist()})
 
     figure = figures[0]
-    ax, key = figure.axes
+    (ax,) = figure.axes
     assert [tick.get_text() for tick in ax.get_xticklabels()] == [
         f"{oddball_rate * harmonic:g}" for harmonic in range(1, 11)
     ]
@@ -448,38 +448,12 @@ def test_frozen_rates_drive_harmonic_labels_and_timing_without_changing_values(t
     for segment in segments:
         for x, y in segment:
             assert y == original[int(np.abs(frequencies - x).argmin())]
-    labels = [text.get_text() for text in key.texts]
-    assert labels.count("O") == 2
-    assert labels.count("S") == 8
-    assert f"Base response ({base_rate:g} Hz)" in labels
-    assert f"Oddball response ({oddball_rate:g} Hz)" in labels
     assert figure._suptitle is None and ax.get_title() == ""
     figure.canvas.draw()
     renderer = figure.canvas.get_renderer()
-    for text in key.texts:
-        bbox = text.get_window_extent(renderer)
-        assert 0 <= bbox.x0 <= bbox.x1 <= figure.bbox.x1
-        assert 0 <= bbox.y0 <= bbox.y1 <= figure.bbox.y1
-    assert figure.legends[0].get_window_extent(renderer).y0 > key.get_tightbbox(renderer).y1
-
-
-def test_nonintegral_protocol_does_not_invent_every_nth_stimulus(tmp_path, monkeypatch):
-    from Tools.Plot_Generator.rendering import plt
-    from Tools.Plot_Generator.spectrum_style import add_stimulation_schematic
-
-    harness = _RenderHarness(tmp_path)
-    harness._analysis_base_freq, harness._analysis_oddball_freq = 7.0, 2.0
-    figure, ax = plt.subplots()
-    ax.plot([1, 2], [1, 2])
-    figure.tight_layout()
-    old_size = ax.get_window_extent().height / figure.dpi
-    add_stimulation_schematic(figure, harness)
-    key = figure.axes[-1]
-    assert not key.lines
-    assert not any(text.get_text() in {"S", "O"} for text in key.texts)
-    assert any(text.get_text() == "Base: 7 Hz; Oddball: 2 Hz" for text in key.texts)
-    assert ax.get_window_extent().height / figure.dpi == pytest.approx(old_size)
-    plt.close(figure)
+    legend_bbox = figure.legends[0].get_window_extent(renderer)
+    assert legend_bbox.y1 < ax.get_tightbbox(renderer).y0
+    assert legend_bbox.y0 >= figure.bbox.y0
 
 
 def test_new_plot_colors_preserve_user_saved_preferences(tmp_path):
