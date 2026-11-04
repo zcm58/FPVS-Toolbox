@@ -3977,28 +3977,6 @@ def _compute_noise_stats_for_planned_bin(
     )
 
 
-def _electrodes_for_scope(
-    df_fft: pd.DataFrame,
-    *,
-    rois: Dict[str, List[str]],
-    electrode_scope: str,
-    selection_electrodes: Sequence[str] = (),
-) -> list[str]:
-    wanted = _wanted_electrodes_for_scope(
-        rois=rois,
-        electrode_scope=electrode_scope,
-        selection_electrodes=selection_electrodes,
-    )
-    if wanted is not None:
-        return [
-            idx
-            for idx in df_fft.index.astype(str)
-            if str(idx).strip().upper() in wanted
-        ]
-    _ = rois
-    return list(df_fft.index.astype(str))
-
-
 def _wanted_electrodes_for_scope(
     *,
     rois: Dict[str, List[str]],

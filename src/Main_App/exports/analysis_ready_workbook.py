@@ -2140,10 +2140,6 @@ def _ordered_unique(values: Any) -> list[Any]:
     return result
 
 
-def _combine_notes(*groups: Sequence[str]) -> list[str]:
-    return _ordered_unique(note for group in groups for note in group if str(note or "").strip())
-
-
 def _yes_no(value: bool) -> str:
     return "Yes" if value else "No"
 

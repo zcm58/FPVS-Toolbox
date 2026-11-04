@@ -179,8 +179,16 @@ boundary-only onsets and interpretation fingerprint. Its tuples are immutable
 and pickleable. Native event samples and codes remain unchanged; recognized
 boundary-only events terminate source blocks without creating expected outputs.
 
+Existing per-recording `condition_code` evidence remains the actual source code;
+canonical condition IDs and map fingerprints are separate fields. Expected-ledger
+joins use canonical condition identity and recording ID, retaining source codes
+separately. Numerical APIs receive the label-to-source-onset adapter derived from
+the immutable resolved schema, never GUI state.
+
 Scientific catalog, marker or assignment edits conservatively stale all
 interpreted processing and downstream results through the full protocol identity.
+Raw-byte/event caches may survive only when both their keys and payloads are
+source-only; interpreted evidence must follow the changed protocol identity.
 Profile display names, boundary labels and future-registration defaults persist
 but do not change that identity. Condition display labels remain scientific
 identity because they determine existing output names. `TriggerMapDraft` checks

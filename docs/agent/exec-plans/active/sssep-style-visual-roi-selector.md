@@ -456,7 +456,7 @@ Embedded visual-first follow-up:
 - [x] Follow-up local safe gates completed and recorded.
 - [x] Follow-up registered CI Qt coverage authored and registered.
 - [x] Follow-up registered CI Qt coverage executed in the source CI recorded by
-      the [v3 release ledger](v3-release-readiness.md#publication--2026-10-15).
+      the [v3 release ledger](v3-release-readiness.md).
 - [ ] Visible installed-application smoke completed.
 
 ## Historical Receipt — First Implementation (`8d84b216`)

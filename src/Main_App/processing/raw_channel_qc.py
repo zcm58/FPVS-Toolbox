@@ -974,24 +974,6 @@ def _channel_positions(raw: Any, channels: Sequence[str]) -> dict[str, np.ndarra
     return positions
 
 
-def _bad_channel_clusters(
-    raw: Any,
-    bad_channels: Sequence[str],
-    *,
-    config: RawChannelQCConfig,
-) -> list[tuple[str, ...]]:
-    all_scalp = [
-        str(channel)
-        for channel in getattr(raw, "ch_names", [])
-        if str(channel) in SCALP_CHANNELS
-    ]
-    return _bad_channel_clusters_from_positions(
-        _channel_positions(raw, all_scalp),
-        bad_channels,
-        config=config,
-    )
-
-
 def _bad_channel_clusters_from_positions(
     positions: Mapping[str, Sequence[float]],
     bad_channels: Sequence[str],

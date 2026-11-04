@@ -885,41 +885,6 @@ def _fixed_source_workbook_fingerprints(
     return tuple(fingerprints)
 
 
-def _aggregate_bca_sum_harmonics(
-    file_path: str,
-    roi_name: str,
-    log_func: Callable[[str], None],
-    harmonic_freqs: List[float],
-    rois: Optional[Dict[str, List[str]]] = None,
-    diag_meta: Optional[dict[str, object]] = None,
-) -> float:
-    try:
-        if diag_meta is not None:
-            diag_meta.setdefault("source_file", file_path)
-            diag_meta.setdefault("sheet", "BCA (uV)")
-            diag_meta.setdefault("row_label", None)
-            diag_meta.setdefault("col_label", None)
-            diag_meta.setdefault("raw_cell", None)
-
-        roi_map = rois if rois is not None else _current_rois_map()
-        values, provenance = _aggregate_bca_sum_harmonics_for_all_rois(
-            file_path=file_path,
-            rois={roi_name: list(roi_map.get(roi_name, []))},
-            log_func=log_func,
-            harmonic_freqs=harmonic_freqs,
-            provenance_enabled=diag_meta is not None,
-        )
-        if diag_meta is not None and roi_name in provenance:
-            diag_meta.update(provenance[roi_name])
-        return values.get(roi_name, np.nan)
-
-    except Exception as exc:  # noqa: BLE001
-        if isinstance(exc, RuntimeError):
-            raise
-        log_func(f"Error aggregating fixed predefined BCA for {file_path}, ROI {roi_name}: {exc}")
-        return np.nan
-
-
 def _aggregate_bca_sum_harmonics_for_all_rois(
     *,
     file_path: str,

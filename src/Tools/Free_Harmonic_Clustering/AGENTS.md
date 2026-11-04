@@ -4,9 +4,10 @@
 
 This package owns the clean-room Free Harmonic Clustering Analysis backend and
 its thin embedded GUI. Numerical preparation, inference, and export modules
-remain GUI-neutral. The GUI gathers active-project context, runs one legacy
-contrast or one versioned repeated-session batch, and presents a concise
-current-session result while delegating long work to signal-driven workers.
+remain GUI-neutral. The GUI gathers active-project context and runs a versioned
+analysis-family plan for flat or repeated-session projects, delegating long work
+to signal-driven workers. Legacy contrast and repeated-batch APIs remain available
+for compatibility; they are not the current GUI launch route.
 
 Future acquisition and montage work follows the
 [shared roadmap](../../../docs/agent/architecture/hardware-pipeline-studio-roadmap.md).

@@ -230,13 +230,6 @@ def validate_repeated_recording_sources_for_processing(
     return report
 
 
-def _iter_recording_sources(
-    project: "Project",
-) -> Iterable[RecordingSourceInfo]:
-    context = _recording_context(project)
-    yield from context.sources
-
-
 def raw_selection_start_folder(project: "Project") -> Path:
     """Return a real registered raw root for file-dialog navigation only."""
 

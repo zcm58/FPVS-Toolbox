@@ -82,16 +82,6 @@ SUMMED_BCA_ODDBALL_EVERY_N_DEFAULT = 5
 SUMMED_BCA_STOP_AFTER_N_CONSEC_NONSIG_DEFAULT = 2
 
 
-def _rm_anova_value_is_valid(value: object) -> bool:
-    """Run the rm anova value is valid helper used by the Stats workflow."""
-    if pd.isna(value):
-        return False
-    try:
-        return bool(np.isfinite(value))
-    except Exception:
-        return False
-
-
 def _preview_values(values: list[object], limit: int = 50) -> str:
     """Run the preview values helper used by the Stats workflow."""
     sorted_vals = sorted(values, key=lambda v: repr(v))

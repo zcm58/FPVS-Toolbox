@@ -1,153 +1,97 @@
 # Agent Index
 
-Use this page before gathering broad context. Pick the row that matches the
-task, run the first command, then read only the focused docs or files needed by
-the result.
+Choose the task row, run its first check, then read only the relevant contract.
+Do not rescan broad folders to reconfirm passing invariants. Root
+[AGENTS.md](../../AGENTS.md) owns rules; [ARCHITECTURE.md](../../ARCHITECTURE.md)
+owns the package map. Exclude `src/Standalone_Scripts/**` from all routine
+inspection and execution unless explicitly scoped or approved.
 
 ## First Commands
 
-The verification driver selects `.venv1` when present and otherwise `.venv`
-on Windows 11 or CachyOS. Use it for test/lint/compile verification; use the
-narrow audits below for initial routing. See `guides/development.md` only when
-shell-specific setup is needed.
+Use the existing `.venv1`, otherwise `.venv`; the verification driver selects
+that interpreter. See [development](guides/development.md) for shell setup.
 
-| Task | First command |
+| Task | Initial check |
 | --- | --- |
-| General repo invariant check | `python .agents/scripts/audit/agent_audit.py` |
-| App updates, independent updater, patch/full installer packaging | `python .agents/scripts/verify.py --scope updates --tier focused` |
-| GUI, PySide6 imports, QAction, CustomTkinter/Tkinter boundaries | `python .agents/skills/pyside6-gui-cleanup/scripts/audit_gui_imports.py` |
-| Retired paths, legacy boundaries, removed features | `python .agents/skills/legacy-boundary-review/scripts/audit_protected_edits.py` |
-| Project paths, dialogs, exports, generated files | `python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py` |
-| Stats package structure | `python .agents/scripts/audit/agent_audit.py --check stats-structure` |
-| Free Harmonic Clustering backend and embedded default GUI | `python .agents/scripts/verify.py --scope free-harmonic-clustering --tier focused` |
-| Powered FHC automatic-domain null calibration | `python scripts/manual_diagnostics/run_free_harmonic_clustering_null_calibration.py --help` |
-| Stats reporting size and legibility | `python .agents/scripts/audit/agent_audit.py --check stats-reporting-legibility` |
-| Cache/temp/debt-marker cleanup | `python .agents/scripts/audit/agent_audit.py --check garbage-collection` |
+| General invariants | `python .agents/scripts/audit/agent_audit.py` |
+| GUI imports/toolkit boundaries | `python .agents/skills/pyside6-gui-cleanup/scripts/audit_gui_imports.py` |
+| Retired/protected paths | `python .agents/skills/legacy-boundary-review/scripts/audit_protected_edits.py` |
+| Project paths, file I/O, exports | `python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py` |
+| Stats structure or reporting legibility | `python .agents/scripts/audit/agent_audit.py --check stats-structure` or `--check stats-reporting-legibility` |
+| Generated-file cleanup | `python .agents/scripts/audit/agent_audit.py --check garbage-collection` |
+| Feature verification | `python .agents/scripts/verify.py --scope <scope> --tier focused`; select a [scope](quality/test-selection.md#scope-map). |
 
 ## Skill Map
 
-| Task | Skill | Focused docs |
+Repo-local skills take precedence for this repo. Web/frontend skills apply
+only to explicitly web-scoped work, not the PySide6 desktop GUI.
+
+| Task | Skill | Focused contract |
 | --- | --- | --- |
-| PySide6 GUI, widgets, menus, workers, processing orchestration, status UX | `pyside6-gui-cleanup` | `docs/agent/architecture/gui.md`; `docs/agent/architecture/workers-threading.md` |
-| Updater, verified downloads, patch inventories, installer lifecycle | `project-path-audit` plus GUI skills for changed surfaces | `docs/agent/architecture/updater.md` |
-| Main App package layout, ownership, folder naming, retired package boundaries | `legacy-boundary-review` | `docs/agent/architecture/main-app-target-layout.md`; `docs/agent/architecture/legacy-boundaries.md` |
-| EEG preprocessing ownership, entry points, or processing order | `legacy-boundary-review` + `pyside6-gui-cleanup` | `docs/agent/architecture/preprocessing-contract.md` |
-| Removed-electrode auto-detection thresholds, QC calibration, or accuracy testing | `legacy-boundary-review` | `docs/agent/quality/removed-electrode-detection-calibration.md`; `docs/agent/architecture/preprocessing-contract.md` |
-| Kurtosis screening, QC-16 decisions, or corroborator calibration | `legacy-boundary-review` | `docs/agent/quality/kurtosis-screening-calibration.md`; `docs/agent/architecture/preprocessing-contract.md` |
-| BDF loading, memmap paths, EXG typing | `legacy-boundary-review` + `project-path-audit` | `docs/agent/architecture/eeg-loading-contract.md` |
-| Hardware profiles, montages, composable processing, FPVS Studio interoperability | `project-path-audit` plus processing/GUI skills for changed boundaries | `docs/agent/architecture/hardware-pipeline-studio-roadmap.md`; `docs/agent/architecture/eeg-loading-contract.md`; `docs/agent/architecture/preprocessing-contract.md`; `docs/agent/architecture/project-io.md` |
-| Post-processing, FFT crop, or Excel export behavior | `legacy-boundary-review` | `docs/agent/architecture/post-processing-export-contract.md`; `docs/agent/architecture/fft-crop-method.md` |
-| Project manifests, project roots, file dialogs, exports, imports | `project-path-audit` | `docs/agent/architecture/project-io.md` |
-| Publication figure generation, `.png`/`.pdf` outputs, 600 dpi, figure typography | `project-path-audit` | `docs/agent/quality/figure-generation.md` |
-| Stats analysis, GUI/pipeline structure, reporting, exports | `pyside6-gui-cleanup` plus focused Stats tests | `docs/agent/architecture/statistics-tools.md` |
-| Free Harmonic Clustering, FullFFT tensor reads, cluster permutations | `project-path-audit` plus focused backend tests | `src/Tools/Free_Harmonic_Clustering/AGENTS.md`; `src/Tools/Free_Harmonic_Clustering/ARCHITECTURE.md` |
-| Powered FHC automatic-domain validation | `project-path-audit` plus the manual resumable runner | `docs/agent/quality/free-harmonic-clustering-null-calibration.md` |
-| LORETA Visualizer, source visualization, or source-localization-adjacent rendering | `legacy-boundary-review` plus focused tool tests | `src/Tools/LORETA_Visualizer/AGENTS.md`; `src/Tools/LORETA_Visualizer/ARCHITECTURE.md` |
-| Publication scalp-map PNG/PDF figures | `pyside6-gui-cleanup` + `project-path-audit` | `src/Tools/Publication_Maps/AGENTS.md`; `docs/agent/architecture/statistics-tools.md` |
-| FPVS sequence illustration figures, manual stimulus image slots, and high-DPI export | `pyside6-gui-cleanup` + `project-path-audit` | `src/Tools/Sequence_Figure/AGENTS.md` |
-| Publication-ready table PNG/SVG exports under a project root | `publication-table-export` + `project-path-audit` | `.agents/skills/publication-table-export/SKILL.md`; `docs/agent/architecture/statistics-tools.md` |
-| GUI smoke coverage definitions | `pytest-qt-smoke` | `docs/agent/quality/test-selection.md`; Qt execution is CI-only unless the user approves a safe visible environment |
-| Generated files, temp folders, local caches | `cleanup-generated-files` | `docs/agent/quality/garbage-collection.md`; `docs/agent/exec-plans/tech-debt-tracker.md` |
-| Plan pressure-testing, design interrogation, dependency-aware decision trees | `grillme` | Explore code first when the answer is discoverable locally; ask one question at a time |
-| Web/frontend design skill requests outside normal FPVS PySide6 app work | `frontend-design`, `web-design-guidelines`, `emil-design-eng` | Use only when the user explicitly requests web/frontend design; normal FPVS Toolbox GUI work remains PySide6-first |
-
-Repo-local skills and rules are the default for FPVS Toolbox work. Use
-installed/global skills only when the user explicitly names them or the task is
-outside the repo-local skill set; they do not override `AGENTS.md`,
-`ARCHITECTURE.md`, the repo environment (`.venv1` preferred; `.venv`
-fallback), or the no-offscreen-Qt rule.
-
-## Script Layout
-
-- `.agents/scripts/audit/`: repo invariant checks.
-- `.agents/scripts/smoke/`, when present: optional agent-facing probes, never a
-  default gate. Its absence is valid.
-- `scripts/debug/`: focused debugging probes.
-- `scripts/manual_diagnostics/`: developer-run project/data probes and
-  explicitly scoped resumable scientific-calibration runners. Long
-  calibrations are never default verification gates.
-- `scripts/packaging/`: release packaging and installer inputs.
-- `src/Standalone_Scripts/`: developer-only scratch/manual scripts. Do not read
-  or use as architectural precedent unless the user explicitly asks.
+| PySide6 widgets, menus, workers, orchestration, status | `pyside6-gui-cleanup` | [GUI](architecture/gui.md), [threading](architecture/workers-threading.md) |
+| Updater/downloads/installers | `project-path-audit`; GUI skill for changed surfaces | [Updater](architecture/updater.md) |
+| Package ownership/retired boundaries | `legacy-boundary-review` | [Target layout](architecture/main-app-target-layout.md), [legacy](architecture/legacy-boundaries.md) |
+| Preprocessing entry points/order | `legacy-boundary-review`; GUI skill for orchestration | [Preprocessing](architecture/preprocessing-contract.md) |
+| Removed-electrode or kurtosis calibration | `legacy-boundary-review` | [Removed electrodes](quality/removed-electrode-detection-calibration.md), [kurtosis](quality/kurtosis-screening-calibration.md) |
+| Recording loading/memmaps | `legacy-boundary-review` + `project-path-audit` | [Loading](architecture/eeg-loading-contract.md) |
+| Hardware/montages, pipeline methods, Studio | `project-path-audit`; processing/GUI skills as affected | [Roadmap](architecture/hardware-pipeline-studio-roadmap.md), [methods](architecture/pipeline-methods.md), [Project I/O](architecture/project-io.md) |
+| Post-processing/FFT crop/export | `legacy-boundary-review` | [Exports](architecture/post-processing-export-contract.md), [crop](architecture/fft-crop-method.md) |
+| Manifests, project roots, dialogs/imports | `project-path-audit` | [Project I/O](architecture/project-io.md) |
+| Publication figures | `project-path-audit` | [Figure standard](quality/figure-generation.md) |
+| Stats | `pyside6-gui-cleanup` for GUI changes; focused Stats tests | [Statistics/tools](architecture/statistics-tools.md), scoped `src/Tools/Stats/AGENTS.md` |
+| Free Harmonic Clustering | `project-path-audit` | [Scoped rules](../../src/Tools/Free_Harmonic_Clustering/AGENTS.md), [architecture](../../src/Tools/Free_Harmonic_Clustering/ARCHITECTURE.md) |
+| LORETA Visualizer | `legacy-boundary-review` | [Scoped rules](../../src/Tools/LORETA_Visualizer/AGENTS.md), [architecture](../../src/Tools/LORETA_Visualizer/ARCHITECTURE.md) |
+| Scalp Maps / Sequence Figure | `pyside6-gui-cleanup` + `project-path-audit` | [Scalp Maps](../../src/Tools/Publication_Maps/AGENTS.md), [Sequence Figure](../../src/Tools/Sequence_Figure/AGENTS.md) |
+| Publication tables | `publication-table-export` + `project-path-audit` | [Skill](../../.agents/skills/publication-table-export/SKILL.md) |
+| Qt smoke definitions | `pytest-qt-smoke` | [Test selection](quality/test-selection.md); execution is CI-only by default |
+| Generated files/caches | `cleanup-generated-files` | [Cleanup](quality/garbage-collection.md), [debt](exec-plans/tech-debt-tracker.md) |
+| Pressure-testing a plan | `grillme` | Inspect locally answerable questions first; ask one question at a time |
 
 ## Execution Plans
 
-- For release work, use
-  `docs/agent/exec-plans/active/v3-release-readiness.md` for the published v3.0.0
-  evidence and pending human acceptance, not as an instruction to republish v3.
-- For acquisition/montage, pipeline composition, or Studio integration, start
-  with `docs/agent/architecture/hardware-pipeline-studio-roadmap.md`, then the
-  matching active plan. Current support and future targets must stay distinct.
-- BIDS admission and shared processing are covered by
-  `docs/agent/exec-plans/active/bids-shared-pipeline.md` and the EEG loading
-  contract. Its quick synthetic comparison is
-  `scripts/manual_diagnostics/compare_bids_pipeline.py`; run it only for an
-  explicitly scoped old/new comparison, not as a routine repo gate.
-  `scripts/manual_diagnostics/compare_project_bids_pipeline.py` runs the same
-  comparison on registered project recordings with optional QC disabled,
-  preserving saved filters/reference settings. It requires a new diagnostic
-  output directory and does not edit the source project's manifest or results.
-- Modular methods use `processing.pipeline_plan`, with current scientific
-  implementations at their existing owners. Read
-  `docs/agent/architecture/pipeline-methods.md` and
-  `docs/agent/exec-plans/active/modular-processing-methods.md` before changing
-  slots, methods, project persistence or cache identity.
-  Use the `pipeline-methods` focused verification scope for this foundation;
-  it includes real replacements, checkpoint/repair paths and the hardware matrix.
-- Guided pipeline setup uses `projects.pipeline_setup`,
-  `gui.pipeline_setup_dialog` and `gui.pipeline_setup_workflow`. Read
-  `docs/agent/exec-plans/active/guided-pipeline-setup.md` for current acceptance
-  work. Use the `pipeline-setup` and `gui` focused scopes; leave the
-  registered dialog Qt tests to CI and use the documented visible smoke path.
-- Multi-hardware BIDS admission and its synthetic processing matrix are tracked
-  in `docs/agent/exec-plans/active/multi-hardware-bids.md`. Unicorn physical
-  qualification remains separate from this software acceptance.
-- Active plans live in `docs/agent/exec-plans/active/`; read them before
-  changing the covered area.
-- Future plans live in `docs/agent/exec-plans/future/`; read them only when
-  scoping or starting the matching work.
-- Known debt lives in `docs/agent/exec-plans/tech-debt-tracker.md`.
-- Completed plans are removed by default. Do not route routine work through
-  completed plans or historical implementation logs unless the user explicitly
-  asks for that context.
+Read the matching active plan before changing its area. The
+[plan index](exec-plans/README.md) owns status and remaining acceptance.
+Future plans are read only when scoping that work; completed implementation
+history is not routine context. Installer evidence belongs to the
+[v3 release ledger](exec-plans/active/v3-release-readiness.md), not later source.
+
+| Area | Plan / verification route |
+| --- | --- |
+| BIDS/shared processing | [BIDS](exec-plans/active/bids-shared-pipeline.md), [multi-hardware](exec-plans/active/multi-hardware-bids.md); `project-io` and `processing` as affected |
+| Fixed method slots/selections/cache identity | [Modular methods](exec-plans/active/modular-processing-methods.md); `pipeline-methods` |
+| Guided setup/draft/save workflow | [Guided setup](exec-plans/active/guided-pipeline-setup.md); `pipeline-setup` and `gui` |
+| Hardware/Studio extensions | [Roadmap](architecture/hardware-pipeline-studio-roadmap.md), then the matching plan; physical qualification stays separate |
 
 ## Test Selection
 
-Route local verification through one command:
-
 ```console
 python .agents/scripts/verify.py --scope <scope> --tier focused
+python .agents/scripts/verify.py --scope repo --tier precommit
 ```
 
-Supported scopes are `repo`, `backend-hardening`, `gui`, `updates`, `project-io`, `processing`, `pipeline-methods`,
-`plot-generator`, `publication-maps`, `sequence-figure`,
-`sensitivity-analysis`, `stats`, `free-harmonic-clustering`, `loreta`,
-`figures`, and `legacy-boundary`. Use `--scope repo --tier precommit` for the
-lightweight local handoff gate after the relevant focused scopes. It runs
-the full invariant audit, changed Python lint/compile checks, bounded scope
-tests, and changed non-Qt test files. The full suite remains in CI. The driver
-owns the executable test registry and excludes Qt execution locally.
+Run the affected focused scope first. Precommit runs all invariants, changed
+Python lint/compile checks, bounded repo tests, and changed non-Qt tests; it
+does not infer feature scopes or run the full suite. The executable registry is
+`.agents/verification.toml`; the complete [scope map](quality/test-selection.md#scope-map)
+includes `pipeline-setup`. See [verification gates](quality/verification-gates.md)
+for docs-only checks and failure reporting.
 
-PySide6/pytest-qt targets remain useful coverage definitions, but execute them
-only in the configured CI Qt job or an explicitly user-approved safe visible
-environment. Never set `QT_QPA_PLATFORM=offscreen` on local development
-machines.
-See `docs/agent/quality/test-selection.md` for what each scope covers.
+Qt runs in CI unless the user explicitly approves a safe visible environment.
+Never set `QT_QPA_PLATFORM=offscreen` or run ad-hoc offscreen Qt locally.
+GUI changes need non-GUI checks and a documented visible/manual smoke path.
 
-## Long-Running Scientific Validation
+## Manual Diagnostics
 
-Free Harmonic Clustering has two distinct validation routes. The focused
-verification command owns the deterministic 24 x 199 regression smoke. The
-4,000 x 10,000 powered calibration is a separate manual diagnostic with a
-frozen protocol, resumable checkpoints, and a reviewed final receipt. Run it
-only from `docs/agent/quality/free-harmonic-clustering-null-calibration.md`;
-never put it in routine pytest/precommit or substitute partial output for a
-completed assessment.
+`scripts/debug/` and `scripts/manual_diagnostics/` contain developer probes;
+`scripts/packaging/` owns releases. Optional `.agents/scripts/smoke/` probes
+are not default gates, and that directory may be absent.
 
-## Reading Rule
+BIDS comparison scripts run only for an explicitly scoped old/new comparison,
+not a routine gate; see the BIDS plan. Real-project probes require their own
+new diagnostic output directory and must preserve source manifests/results.
 
-Do not scan broad folders just to confirm invariants that a script already
-checks. Read focused architecture docs after a script fails, when the task
-changes that area, or when the user asks for design/context rather than code.
-Exclude `src/Standalone_Scripts/**` from routine code search and context
-gathering unless the user explicitly scopes that folder.
+FHC focused tests include the deterministic 24 x 199 regression smoke. Its
+4,000 x 10,000 powered calibration is separate manual work under the
+[frozen protocol](quality/free-harmonic-clustering-null-calibration.md);
+never launch it as routine pytest/precommit or present a partial run as
+completed acceptance.

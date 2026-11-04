@@ -1,58 +1,27 @@
-# Agent Docs Knowledge Base
+# Agent Knowledge Base
 
-This directory is the repo-local agent system of record for FPVS Toolbox. Agents should
-start with `AGENTS.md`, `ARCHITECTURE.md`, and `docs/agent/agent-index.md`, then use
-this map to choose the narrowest deeper source of truth.
-
-User-facing MkDocs pages live under `docs/user/`.
-
-Command examples assume the available `.venv1` or `.venv` environment is
-active. Windows 11 and CachyOS setup commands live only in
-`guides/development.md`.
+Start with root [AGENTS.md](../../AGENTS.md) and the
+[agent index](agent-index.md). Use [ARCHITECTURE.md](../../ARCHITECTURE.md)
+for ownership, then read only the focused contract needed for the task.
+User documentation lives in `docs/user/`; shell setup belongs in
+[development](guides/development.md).
 
 ## Directory Map
 
-- `architecture/`: durable architecture maps, ownership boundaries, and behavior contracts.
-- `design-docs/`: product and engineering beliefs that guide future design choices.
-- `exec-plans/`: active plans, future plans, and technical-debt tracking.
-- `generated/`: generated reference artifacts. Do not edit generated files by hand.
-- `guides/`: developer setup and maintenance guidance.
-- `product-specs/`: durable product behavior and workflow specifications.
-- `quality/`: test-selection and verification-gate guidance.
-- `quality/figure-generation.md`: publication figure output, DPI, typography, and renderer-boundary standard.
-- `quality/removed-electrode-detection-calibration.md`: calibration and
-  accuracy-testing guide for conservative removed-electrode auto QC.
-- `quality/kurtosis-screening-calibration.md`: evidence and receipt contract
-  for QC-16 kurtosis screening and future corroborator authority.
-- `quality/free-harmonic-clustering-null-calibration.md`: frozen two-layer
-  automatic-domain null-validation protocol, manual powered runner, acceptance
-  envelope, and receipt boundary.
-- `references/`: external or copied reference material useful to agents.
-- `reviews/`: pre-ship and review checklists.
+| Directory | Contents |
+| --- | --- |
+| `architecture/` | Runtime ownership and behavior contracts. |
+| `design-docs/` | [Design](design-docs/DESIGN.md), [PySide6 frontend](design-docs/FRONTEND.md), and [product direction](design-docs/PRODUCT_SENSE.md). |
+| `exec-plans/` | [Active/future plan routing](exec-plans/README.md) and [bounded debt](exec-plans/tech-debt-tracker.md). |
+| `guides/` | Developer setup and maintenance. |
+| `product-specs/`, `references/` | Product workflows and reference material. |
+| `generated/` | Generated references; do not edit by hand. |
+| `quality/` | [Test selection](quality/test-selection.md), [gates](quality/verification-gates.md), [quality posture](quality/QUALITY_SCORE.md), [reliability](quality/RELIABILITY.md), and [security](quality/SECURITY.md). |
+| `reviews/` | [Pre-ship checklist](reviews/pre_ship_checklist.md) and scoped review evidence. |
 
-## Entry Files
-
-- `README.md`: this directory map.
-- `agent-index.md`: fast command, skill, doc, and focused-test index.
-- `architecture/hardware-pipeline-studio-roadmap.md`: implemented acquisition
-  and Studio boundaries, modular hardware/montage and processing goals, and
-  acceptance requirements for complete Studio interoperability.
-
-Current contracts describe the checked-out source. Future goals and gated
-foundations must be identified explicitly; they are not shipped capabilities.
-Use the release ledger for installer evidence and the execution-plan index for
-remaining work. Historical review receipts apply only to their named revision.
-
-## Focused Knowledge Files
-
-- `design-docs/DESIGN.md`: design-system and UX guidance.
-- `design-docs/FRONTEND.md`: PySide6 frontend implementation guidance.
-- `design-docs/PRODUCT_SENSE.md`: product goals and user workflow priorities.
-- `exec-plans/README.md`: plan index and planning rules.
-- `guides/development.md`: developer setup and verification notes.
-- `quality/QUALITY_SCORE.md`: current quality posture and gaps.
-- `quality/RELIABILITY.md`: reliability and verification expectations.
-- `quality/SECURITY.md`: security and privacy boundaries.
-- `architecture/legacy-boundaries.md`: current retirement and compatibility boundaries.
-
-Keep this page compact. Add details to focused docs, not here.
+Current contracts describe checked-out source. The
+[hardware/pipeline/Studio roadmap](architecture/hardware-pipeline-studio-roadmap.md)
+separates implemented support from future goals. Release tags and their
+acceptance receipts define shipped behavior; historical reviews apply only to
+their named revision. Keep detailed methods, calibration, and evidence in their
+focused contracts instead of duplicating them in routing pages.

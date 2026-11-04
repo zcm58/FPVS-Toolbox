@@ -1,175 +1,166 @@
-# AGENTS.md
+# FPVS Toolbox — Agent Rules
 
-## Repo Purpose
+## Purpose and current state
 
-FPVS Toolbox's primary product is its EEG processing pipeline for Fast Periodic
-Visual Stimulation experiments. The product direction is a modular processing
-package supporting many acquisition systems and user-configurable pipelines
-saved per project. FHC, scalp maps, and other analysis/visualization tools are
-secondary add-ons that consume its outputs. Prioritize pipeline correctness,
-reproducibility, extensibility, and usability. The current application uses
-PySide6 and releases ship through a Windows installer.
+The EEG processing pipeline is the primary product; analysis and visualization
+tools consume its outputs. Prioritize correctness, reproducibility, extensibility,
+and usability. The app uses PySide6, ships a Windows installer, and supports source
+development on Windows 11 and CachyOS (Arch Linux).
 
-## Working Rules
+Confirmed ActiveTwo64, ActiveThree, Brain Products and Unicorn projects have
+scoped BIDS/MNE routes. Versioned method slots and persisted project selections
+exist; each slot has one production method. Settings > Processing offers optional
+guided setup. Alternative methods/selectors and complete FPVS Studio
+interoperability remain future work. Read the
+[roadmap](docs/agent/architecture/hardware-pipeline-studio-roadmap.md) for related
+changes and the [hardware guide](docs/user/reference/eeg-hardware.md) for exact
+format, montage and physical-qualification limits.
 
-- The product direction is modular acquisition hardware and montages, a shared
-  processing pipeline whose methods and parameters users select per project
-  within the resolved hardware/montage capabilities, and complete FPVS Studio
-  interoperability. Save and restore project pipeline choices; method changes
-  must explicitly invalidate affected results and caches. Versioned executable
-  method slots and persisted selections live in `processing.pipeline_plan`;
-  each slot currently has one production method. Optional guided setup lives in
-  Settings > Processing, backed by `projects.pipeline_setup` and an isolated
-  atomic draft. Alternative methods and their selectors remain future work. Read
-  [the current-state and future-direction contract](docs/agent/architecture/hardware-pipeline-studio-roadmap.md)
-  for related work. Confirmed ActiveTwo64, ActiveThree, Brain Products and
-  Unicorn projects have scoped BIDS/MNE processing routes. Studio import remains
-  partial; full interoperability is a goal. Supported formats, montage limits
-  and physical qualification gaps are in
-  [the hardware guide](docs/user/reference/eeg-hardware.md).
-  Preserve the locked scientific contracts while extending these boundaries.
+## Work and navigation
 
-- Production EEG reads use the project-local BIDS import boundary in
-  `Main_App.io.bids_import` / `bids_loader`, reached through `io.load_utils`.
-  BDF and BVCDF signal bytes are preserved in raw EEG-BIDS datasets. Unicorn
-  permits only the reviewed unit-header correction, retaining original source
-  bytes and the correction receipt. BVRF uses
-  an explicitly labeled lossless FIF64 derivative; do not describe that route
-  as standard raw EEG-BIDS. Numerical preprocessing consumes MNE Raw and the
-  immutable `io.recording_contract.RecordingContract`, never native-format
-  reader logic or manufacturer dispatch. `io.acquisition_metadata` owns hardware
-  defaults, geometry admission and qualified capability/profile selection;
-  `processing.acquisition_policy` is a compatibility surface only. Keep numerical
-  reference/filter/interpolation operations in `processing`, driven by generic
-  metadata and project settings. Existing calibrated QC stays restricted to
-  its qualified geometry; this boundary does not qualify new hardware.
-  Preserve source metadata, event semantics, precision, and existing scientific
-  fingerprints. Canonical sample events must survive preflight, processing and
-  cache reload without edge-based redecoding. Unicorn stays at 250 Hz with eight
-  scalp channels, average reference, and no interpolation or calibrated spatial
-  QC. See [the loading contract](docs/agent/architecture/eeg-loading-contract.md).
+- Start with [agent-index](docs/agent/agent-index.md) for skills, audits and focused
+  checks. Run the applicable audit before broad inspection; do not rescan a
+  passing invariant. Repo-local skills govern this project; web skills apply only
+  to explicitly web-scoped work.
+- Read [ARCHITECTURE.md](ARCHITECTURE.md) before structural changes and the
+  relevant [active plan](docs/agent/exec-plans/README.md) before a non-trivial
+  refactor. Read focused contracts only for the affected area.
+- State assumptions and ask when the safe interpretation is unclear. Make the
+  smallest scoped change; preserve processing, formats, exports and workflows
+  unless explicitly requested otherwise.
+- Keep one portable implementation using `pathlib`, Python and PySide6;
+  isolate OS-specific code to packaging/system integration. Use structured
+  logging instead of production `print` calls.
+- `src/Standalone_Scripts/**` is opt-in: do not list, search, read, run, import,
+  edit or use it as precedent without explicit directory scope or user approval.
+  Read its scoped `AGENTS.md` only after authorization. Exclude its tests from
+  routine application verification.
+- Unreferenced code is not automatically dead: check dynamic dispatch, Qt
+  callbacks, public exports, compatibility aliases and persisted/pickle names
+  before deletion. Preserve scientific baselines and historical-schema tests.
+- Keep guidance current when ownership, boundaries, workflows or verification
+  change; otherwise explain why no doc update is needed. Keep entry-point docs
+  brief, link to canonical contracts, and use Git history for completed chronology.
 
-- Keep processing steps dispatched through their fixed method slots. Project
-  method IDs must be registered in application code; never import executable
-  code from project settings. Preserve mandatory timing/geometry/review guards,
-  checkpoint and condition-repair boundaries, and default fingerprint identity.
-  See [the module contract](docs/agent/architecture/pipeline-methods.md).
+## Canonical ownership
 
-- Think before coding: state assumptions, surface ambiguity, and ask when the safe interpretation is unclear.
-- Prefer the smallest behavior-preserving change that solves the task.
-- Touch only files required by the task; do not refactor adjacent code opportunistically.
-- Preserve existing processing order, data formats, exports, and user workflows unless the task explicitly changes them.
-- Development and source execution may occur on Windows 11 or CachyOS (Arch
-  Linux). Keep paths, subprocesses, GUI behavior, and tests compatible with
-  both; prefer `pathlib`, Python/PySide6 platform abstractions, and one simple
-  shared implementation. Isolate OS-specific behavior only when packaging or
-  system integration requires it.
-- Prefer executable checks over broad reading. Use the available `.venv1` or
-  `.venv` environment, then run the relevant skill audit or
-  `python .agents/scripts/audit/agent_audit.py`. Shell-specific setup lives in
-  [docs/agent/guides/development.md](docs/agent/guides/development.md).
-- Treat [ARCHITECTURE.md](ARCHITECTURE.md) as the repo map before structural changes; do not read every architecture page by default.
-- Start with [docs/agent/agent-index.md](docs/agent/agent-index.md) when choosing skills, scripts, and focused tests.
-- Treat `src/Standalone_Scripts/**` as an opt-in boundary. Do not list, search,
-  read, run, import, edit, or use those scripts as precedent unless the current
-  user request explicitly scopes that directory or the user approves access
-  after the agent asks. See `src/Standalone_Scripts/AGENTS.md` after access is
-  authorized. These scripts are developer-only manual utilities, not active
-  runtime or user-facing application behavior.
-- For non-trivial refactors, read the active execution plan first. Update architecture docs or the nearest scoped `AGENTS.md` when structure, ownership, boundaries, or workflows change; otherwise state why no doc update was needed.
+Use these owners for active imports; `Main_App.Shared` and `Main_App.Performance`
+contain compatibility aliases only. Preserve their identity and public contracts;
+do not add implementations there.
 
-## Non-Negotiables
+| Responsibility | Owner |
+| --- | --- |
+| EEG preprocessing | `Main_App.processing.preprocess` |
+| BDF/common loading | `Main_App.io.load_utils` |
+| GUI shell, workflows, widgets, styles | `Main_App.gui` |
+| Shared GUI components | `Main_App.gui.components` |
+| Workers and process runner | `Main_App.workers` |
+| Project model, manager, roots, metadata, preprocessing settings | `Main_App.projects` |
+| Processed-workbook discovery and group identity | `Main_App.projects.dataset_index`, via the public `Main_App.projects` surface |
+| Application settings | `Main_App.settings` |
+| Runtime diagnostics | `Main_App.diagnostics` |
 
-- `src/Main_App/Legacy_App/**` and `src/Main_App/PySide6_App/**` have been retired. Do not recreate them; use purpose-based `Main_App` packages instead.
-- Active EEG preprocessing imports should use `src/Main_App/processing/preprocess.py`; this is the current implementation owner.
-- Active BDF loading imports should use `src/Main_App/io/load_utils.py`; it owns the implementation and `Main_App.Shared.load_utils` remains a compatibility alias.
-- Active Main App GUI imports should use `src/Main_App/gui/`; the main window shell, focused workflow helpers, reusable widgets, style tokens, update manager, and GUI presentation helpers live there.
-- New or migrated GUI surfaces should start from `src/Main_App/gui/components/` for shared cards, buttons, forms, status banners, window/dialog shells, action rows, and message helpers before adding local UI primitives.
-- Subsection headers should use `Main_App.gui.components.SubsectionHeaderLabel`; edit shared subsection-header font, weight, color, and padding in `src/Main_App/gui/widgets/labels.py`, not per-surface QSS.
-- Avoid card-within-card GUI designs unless the user explicitly asks for that visual treatment. `SectionCard` should frame a top-level subsection; tab panes, splitters, setup areas, and other parent layout containers should stay visually flat when they contain section cards.
-- New or substantially revised embedded tool pages must fit the supported 1280x900 workspace without a page-level scroll area. When coherent controls cannot fit, divide the workflow into purpose-based tabs or progressive pages instead of adding whole-page scrolling. Content-native scrolling inside tables, text viewers, and focused dialogs remains allowed.
-- Publication-oriented figure generation must follow [docs/agent/quality/figure-generation.md](docs/agent/quality/figure-generation.md): matching `.pdf`/`.png` outputs, 600 dpi, Arial figure typography, and figure typography separated from GUI typography.
-- Active worker/process-runner imports should use `src/Main_App/workers/`.
-- Active application-settings imports should use `src/Main_App/settings/`.
-  Keep its initializer and `settings_paths` lightweight for the independent
-  updater; `settings_manager` remains application-only. `Shared` and
-  `Performance` contain compatibility aliases only; do not add implementations there.
-- Active project model, project manager, project metadata, projects-root, and preprocessing-settings imports should use `src/Main_App/projects/`.
-- Processed-workbook discovery and downstream group identity must use
-  `Main_App.projects.dataset_index` through the public `Main_App.projects`
-  import surface. Canonical group IDs come from participant metadata in
-  `project.json`; tool packages must not infer membership from output folders
-  or maintain independent participant/group detection logic.
-- Active runtime diagnostics imports should use `src/Main_App/diagnostics/`; repo-evaluation checks belong in `scripts/` or `.agents/skills/`, and manual project probes belong in `scripts/manual_diagnostics/`.
-- The historical `src/Tools/SourceLocalization/**` implementation is retired. Do not restore its GUI, settings, tests, imports, or quarantine-tree dependencies unless the user explicitly scopes restoration. Do not bundle `fsaverage` MRI template data.
-- The separate LORETA Visualizer lives under `src/Tools/LORETA_Visualizer/`. Keep its rendering, mesh helpers, payload adapters, demo data, and tool-local docs there. Existing source calculations belong in its isolated `source_producers/` package; renderer and payload helpers consume prepared values and must not compute inverse solutions. This does not reopen the retired implementation.
-- Preserve the ignored root `.fpvs_cache/` when it contains MNE/fsaverage template data for the LORETA Visualizer. It is a local dependency cache, not a deletion target for routine cleanup.
-- The active preprocessing order is locked to match the Volfart et al. (2021) FPVS implementation decision: initial reference, drop reference channels, optional channel limit preserving stim, FIR filter, downsample, kurtosis/interpolation, final average reference. Do not reorder filtering and downsampling, change FIR duration scaling, or remove the order/version fingerprint guards unless the user explicitly requests a statistical-method change and updates `docs/agent/architecture/preprocessing-contract.md`, `docs/user/reference/methods-reporting-checklist.md`, and the focused processing-order tests.
-- The versioned Stats harmonic-selection profiles are locked statistical
-  behavior. New projects explicitly default to
-  `dzhelyova_poncet_two_consecutive_failures` v1 with all retained scalp
-  electrodes; a missing or unversioned profile in an existing project resolves
-  to `legacy_fpvs_toolbox` v1 so prior values do not change silently. The four
-  supported profiles are Legacy FPVS Toolbox, Fixed/preregistered domain,
-  Significant-only exploratory, and Dzhelyova/Poncet two consecutive failures.
-  Adaptive non-legacy profiles average participants within every declared
-  group x condition cell, weight groups equally within condition, calculate
-  local Z separately by condition, and weight conditions equally; an entirely
-  missing declared cell is a hard failure. They use all retained scalp
-  electrodes or one frozen a-priori selection mask, never mutable Stats ROIs.
-  The literature profile stops only after two consecutive eligible non-base
-  harmonics have `z <= 1.64`, includes eligible harmonics through the preceding
-  cutoff, and fails if the configured search ceiling is reached first. The
-  significant-only profile includes only strict local `z > 1.64` detections in
-  its bounded domain. The fixed profile accepts an exact frequency list, upper
-  harmonic index, or upper frequency and requires exact BCA columns after
-  mandatory dynamic base-overlap exclusion. Legacy alone preserves equal-available-
-  workbook pooling, mutable ROI-union scope, fill-through-highest summation,
-  and the one-pass greater-than-10 isolated-highest gap guard. Every adaptive
-  profile retains the locked neighboring-noise calculation: +/-10 FFT bins,
-  excluding target-1, target, and target+1, then dropping one finite minimum
-  and maximum before the mean and population SD. Downstream standard consumers
-  must use the exact canonical included list and selection fingerprint; they
-  must not reselect, refill, or truncate it. Free Harmonic Clustering remains
-  independent and consumes original FullFFT plus neutral processing-owned
-  provenance, never this standard selected list. Do not alter these contracts
-  without an explicitly scoped statistical-method change and corresponding
-  architecture, user-method, and focused-test updates.
-- Sensitivity Analysis is locked as an input-only idealized design-sensitivity calculator. Its mixed-model mode estimates a minimum standardized detectable contrast conditional on manually entered design assumptions. Do not describe it as observed/post-hoc power or model-fit validation, and do not add project-data reads, observed residuals, fitted variance components, persistence, or Stats-pipeline coupling unless the user explicitly scopes a separate data-informed feature.
-- Prefer thin adapters outside protected folders when legacy behavior must be reused.
-- Use PySide6 for GUI work. Do not introduce Tkinter, CustomTkinter, or CTkMessagebox imports anywhere in repo code.
-- Import `QAction` from `PySide6.QtGui` only.
-- Do not block the UI thread. Long work must use `QThread` or `QRunnable` with `QThreadPool`.
-- Workers must not touch widgets directly; communicate with signals.
-- All project I/O must use the active project root and preserve existing output formats.
-- Use structured logging instead of `print` in production code.
-- Do not run offscreen Qt workflows in this repo. Do not set
-  `QT_QPA_PLATFORM=offscreen`, do not run pytest-qt/offscreen GUI tests, and
-  do not launch ad-hoc offscreen Qt scripts; they can freeze or hang
-  indefinitely in supported local development environments.
-- GUI changes need non-GUI checks plus a documented visible/manual smoke path.
-  PySide6/pytest-qt execution is CI-only by default; run it locally only in an
-  explicitly user-approved safe visible environment.
+Keep `settings.__init__` and `settings_paths` lightweight for the independent
+updater; `settings_manager` is application-only. Repo checks belong in `scripts/`
+or `.agents/`; manual project probes belong in `scripts/manual_diagnostics/`.
+All project I/O uses the active project root and existing output formats.
+Canonical groups come from participant metadata in `project.json`; downstream
+tools must not infer membership from output folders or duplicate discovery logic.
 
-## Routing And Verification
+## Protected boundaries and scientific contracts
 
-- [docs/agent/agent-index.md](docs/agent/agent-index.md) is the compact source
-  for skill selection, first commands, focused docs, and verification scopes.
-  Run applicable skill-local audits before manual inspection, and do not scan
-  broad folders to reconfirm a passing invariant.
-- Repo-local skills and rules take precedence over generic installed skills for
-  FPVS Toolbox work. Web/frontend skills do not apply to the PySide6 desktop UI
-  unless a task explicitly introduces a web surface.
-- Use `python .agents/scripts/verify.py --scope <scope> --tier focused` first;
-  use `python .agents/scripts/verify.py --scope repo --tier precommit` for the
-  lightweight local handoff gate: full invariant audit, changed Python
-  lint/compile checks, bounded scope tests, and changed non-Qt test files.
-  The driver selects `.venv1` or `.venv`; the full suite remains in CI.
-- For documentation-only changes, use the audit, strict documentation build,
-  and link/owner checks in [verification gates](docs/agent/quality/verification-gates.md#documentation-only-changes).
-- For GUI changes, leave Qt execution to CI and document the visible/manual
-  smoke path. If a gate cannot run, report the command, failure reason, and
-  residual risk.
-- Use [docs/agent/README.md](docs/agent/README.md) for the knowledge-base map and
-  [docs/agent/reviews/pre_ship_checklist.md](docs/agent/reviews/pre_ship_checklist.md)
-  for final review criteria.
+- Do not recreate `src/Main_App/Legacy_App/**`, `src/Main_App/PySide6_App/**` or
+  the retired `src/Tools/SourceLocalization/**`. Do not restore the latter's GUI,
+  settings, tests, imports or quarantine dependencies without explicit restoration
+  scope. Use current public APIs or thin adapters outside retired paths.
+- The active `src/Tools/LORETA_Visualizer/` owns rendering, meshes, payloads,
+  demo data and tool docs. Inverse calculations stay in `source_producers/`;
+  renderer/payload helpers consume prepared values only. Do not bundle fsaverage
+  data. Preserve the ignored root `.fpvs_cache/` MNE/fsaverage dependency cache
+  during routine cleanup.
+- Read the [loading contract](docs/agent/architecture/eeg-loading-contract.md)
+  before loading/acquisition changes. Production reads cross project-local
+  `io.bids_import`/`bids_loader` via `io.load_utils`. BDF/BVCDF samples stay
+  unchanged; Unicorn permits only reviewed unit-header correction with originals
+  and receipt retained. BVRF uses a labeled lossless FIF64 derivative, not standard
+  raw EEG-BIDS. Numerical stages consume MNE Raw and immutable
+  `io.recording_contract.RecordingContract`, never native readers/manufacturer
+  dispatch. `io.acquisition_metadata` owns hardware defaults, geometry and
+  qualification; `processing.acquisition_policy` is compatibility-only.
+  Numerical reference/filter/interpolation stays in `processing`. Preserve
+  precision, source metadata, canonical event samples and fingerprints through
+  preflight, processing and cache reload; never edge-redecode canonical events.
+  Unicorn remains eight scalp channels at 250 Hz, average reference, without
+  interpolation or calibrated spatial QC. New hardware does not inherit QC
+  qualification from this boundary.
+- Read the [method contract](docs/agent/architecture/pipeline-methods.md) before
+  dispatch/persistence changes. Keep fixed slots, application-registered method
+  IDs, mandatory timing/geometry/review guards, checkpoints and condition repair.
+  Never import code from project settings. Persist choices and explicitly
+  invalidate affected results/caches; preserve default fingerprint identity.
+- The Volfart-aligned preprocessing order is locked: initial reference → drop
+  reference channels → optional channel limit preserving stim → FIR filter →
+  downsample → kurtosis/interpolation → final average reference. Changing order,
+  FIR duration scaling or version/fingerprint guards requires explicit
+  statistical-method scope plus updates to the
+  [preprocessing contract](docs/agent/architecture/preprocessing-contract.md),
+  [methods checklist](docs/user/reference/methods-reporting-checklist.md) and
+  focused order tests.
+- Harmonic selection is locked by the
+  [Stats contract](docs/agent/architecture/statistics-tools.md). Read it before
+  selection, pooling, local-Z, summation or consumer changes. New projects persist
+  `dzhelyova_poncet_two_consecutive_failures` v1 with all retained scalp channels;
+  missing/unversioned existing profiles resolve to `legacy_fpvs_toolbox` v1.
+  Preserve all four profiles, balanced non-legacy pooling, missing-cell failures,
+  frozen masks, base-overlap exclusion, exact columns, strict `z > 1.64`,
+  two-consecutive-failure stopping, and legacy-only gap/fill rules. The adaptive
+  noise rule remains ±10 bins, excluding target±1 and target, dropping one finite
+  minimum/maximum, then mean and population SD. Standard consumers use the exact
+  canonical included list/fingerprint without reselection, refill or truncation.
+  FHC independently consumes original FullFFT plus processing-owned provenance.
+  Contract changes require explicit statistical-method scope and matching
+  architecture, user-method and focused-test updates.
+- Sensitivity Analysis remains input-only idealized design sensitivity under
+  manually entered assumptions. Do not add project reads, observed residuals,
+  fitted variance components, persistence or Stats coupling without separate
+  data-informed feature scope. Do not call it observed/post-hoc power or
+  model-fit validation.
+
+## GUI and publication output
+
+- Use PySide6 only; no Tkinter, CustomTkinter or CTkMessagebox. Import `QAction`
+  from `PySide6.QtGui`.
+- Long work uses `QThread` or `QRunnable`/`QThreadPool`. Workers signal results;
+  they never touch widgets or block the UI thread.
+- Start new/migrated surfaces from `gui.components`. Use its
+  `SubsectionHeaderLabel`; shared typography belongs in `gui/widgets/labels.py`,
+  not local QSS. `SectionCard` frames top-level subsections; keep parent
+  containers flat and avoid nested cards unless requested.
+- New/substantially revised embedded pages must fit 1280x900 without page-level
+  scrolling. Split workflows into tabs/pages when needed. Tables, text viewers
+  and focused dialogs may scroll.
+- Publication figures follow the
+  [figure standard](docs/agent/quality/figure-generation.md): paired PDF/PNG,
+  600 dpi, Arial, and figure typography independent of GUI typography.
+
+## Verification and handoff
+
+Use existing `.venv1`, otherwise `.venv`; see
+[development setup](docs/agent/guides/development.md). Run:
+
+```console
+python .agents/scripts/verify.py --scope <scope> --tier focused
+python .agents/scripts/verify.py --scope repo --tier precommit
+```
+
+The driver owns test selection, audits, changed-file lint/compilation and the
+bounded handoff gate. The full suite remains in CI. Documentation changes also
+need the strict MkDocs build and link/owner checks in
+[verification gates](docs/agent/quality/verification-gates.md#documentation-only-changes).
+
+Never set `QT_QPA_PLATFORM=offscreen`, run offscreen scripts or run local
+pytest-qt by default: they can hang. Qt execution is CI-only unless the user
+explicitly approves a safe visible environment. GUI changes require non-GUI
+checks and a documented visible/manual smoke path. Report unavailable gates,
+reasons and residual risk. Use the
+[pre-ship checklist](docs/agent/reviews/pre_ship_checklist.md) for final review.

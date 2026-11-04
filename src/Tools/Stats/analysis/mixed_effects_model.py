@@ -411,19 +411,6 @@ def _lrt(full_ml, reduced_ml) -> Tuple[float, int, float]:
     return LR, df_diff, p
 
 
-def _fit_for_lrt(
-    df: pd.DataFrame,
-    dv_col: str,
-    group_col: str,
-    processed_terms: List[str],
-    re_formula: str,
-) -> "MixedLMResults":  # type: ignore[name-defined]
-    """Fit an ML model for a given set of processed fixed-effect terms."""
-    fixed_formula = " + ".join(processed_terms) or "1"
-    formula = f"{dv_col} ~ {fixed_formula}"
-    return _fit_formula_for_lrt(df, formula, group_col, re_formula)
-
-
 def _fit_formula_for_lrt(
     df: pd.DataFrame,
     formula: str,

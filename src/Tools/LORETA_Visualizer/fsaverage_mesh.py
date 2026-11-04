@@ -835,39 +835,6 @@ def _geometry_shading_values(points: np.ndarray) -> np.ndarray:
     return np.clip((depth - minimum) / (maximum - minimum), 0.0, 1.0)
 
 
-def _decimate_hemisphere(
-    points: np.ndarray,
-    faces: np.ndarray,
-    *,
-    max_triangles: int,
-) -> BrainHemisphereMesh:
-    if max_triangles <= 0 or len(faces) <= max_triangles:
-        return BrainHemisphereMesh(points=np.asarray(points, dtype=float), faces=_faces_to_vtk(faces))
-    try:
-        import pyvista as pv
-
-        surface = pv.PolyData(points, _faces_to_vtk(faces))
-        target_reduction = 1.0 - (max_triangles / max(len(faces), 1))
-        decimated = surface.decimate_pro(
-            target_reduction,
-            preserve_topology=True,
-            boundary_vertex_deletion=False,
-            splitting=False,
-        )
-        decimated = decimated.triangulate()
-        decimated_faces = _vtk_faces_to_triangles(np.asarray(decimated.faces, dtype=np.int64))
-        return BrainHemisphereMesh(
-            points=np.asarray(decimated.points, dtype=float),
-            faces=_faces_to_vtk(decimated_faces),
-        )
-    except (AttributeError, RuntimeError, TypeError, ValueError, ImportError, ModuleNotFoundError) as exc:
-        logger.warning(
-            "fsaverage_hemisphere_decimation_failed",
-            extra={"error": str(exc), "original_triangles": len(faces)},
-        )
-        return BrainHemisphereMesh(points=np.asarray(points, dtype=float), faces=_faces_to_vtk(faces))
-
-
 def _display_transform(points: np.ndarray) -> MeshDisplayTransform:
     try:
         return MeshDisplayTransform.from_native_points(

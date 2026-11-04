@@ -137,14 +137,6 @@ def _result_by_path(results: Sequence[Mapping[str, Any]]) -> dict[Path, Mapping[
     return by_path
 
 
-def _channels_from_result(result: Mapping[str, Any] | None) -> list[str]:
-    if not result:
-        return []
-    audit = result.get("audit") if isinstance(result.get("audit"), Mapping) else {}
-    interpolated = _string_list(audit.get("interpolated_channels"))
-    return interpolated
-
-
 def _raw_qc_channels_from_result(result: Mapping[str, Any] | None) -> list[str]:
     if not result:
         return []

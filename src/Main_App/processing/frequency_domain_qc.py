@@ -35,8 +35,6 @@ from Main_App.projects.experimental_qc_settings import (
     SummedBcaScreeningSettings,
 )
 from Main_App.projects.preprocessing_settings import (
-    normalize_manual_excluded_participants,
-    normalize_manual_excluded_recordings,
     normalize_preprocessing_settings,
 )
 
@@ -3215,46 +3213,6 @@ def _harmonic_selection_settings(project: Any) -> Any:
             GROUP_SIGNIFICANT_ELECTRODE_SCOPE_ROI_UNION,
         )
     return normalize_dv_policy(policy)
-
-
-def _filter_preprocessing_manual_exclusions(project: Any, subjects: list[str]) -> list[str]:
-    preprocessing = getattr(project, "preprocessing", {}) or {}
-    excluded = set(
-        normalize_manual_excluded_participants(
-            preprocessing.get("manual_excluded_participants", [])
-        )
-    )
-    return [subject for subject in subjects if str(subject).upper() not in excluded]
-
-
-def _filter_preprocessing_manual_recording_exclusions(
-    project: Any,
-    recording_ids: list[str],
-    *,
-    recording_assignments: Mapping[str, Mapping[str, object]],
-) -> list[str]:
-    preprocessing = getattr(project, "preprocessing", {}) or {}
-    excluded_participants = {
-        str(value).casefold()
-        for value in normalize_manual_excluded_participants(
-            preprocessing.get("manual_excluded_participants", [])
-        )
-    }
-    excluded_recordings = {
-        str(value).casefold()
-        for value in normalize_manual_excluded_recordings(
-            preprocessing.get("manual_excluded_recordings", [])
-        )
-    }
-    return [
-        recording_id
-        for recording_id in recording_ids
-        if recording_id.casefold() not in excluded_recordings
-        and str(
-            recording_assignments.get(recording_id, {}).get("participant_id") or ""
-        ).casefold()
-        not in excluded_participants
-    ]
 
 
 def _recording_assignments_from_index(

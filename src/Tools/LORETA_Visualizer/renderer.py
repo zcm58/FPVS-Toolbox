@@ -1130,10 +1130,6 @@ class BrainRendererWidget(QWidget):
             return
         self._set_actor_scalar_visibility(actor, visible)
 
-    def _set_split_scalar_visibility(self, visible: bool) -> None:
-        for actor in self._active_cortical_actors():
-            self._set_actor_scalar_visibility(actor, visible)
-
     def _set_actor_scalar_visibility(self, actor: Any, visible: bool) -> None:
         mapper = self._actor_mapper(actor)
         if mapper is not None:

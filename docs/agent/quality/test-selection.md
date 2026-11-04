@@ -1,121 +1,92 @@
 # Test Selection
 
-Use the repository verification driver as the executable source of truth. It
-selects `.venv1` or `.venv`, keeps output compact, applies the explicit Qt-test
-registry, and composes the tests, audits, compilation, and lint checks required
-for each scope.
+Use `.agents/verification.toml` as the executable scope registry and
+`tests/qt_test_files.txt` as the Qt registry. The driver selects `.venv1` or
+`.venv` and combines audits, lint, compilation, and tests:
 
 ```console
 python .agents/scripts/verify.py --scope <scope> --tier focused
+python .agents/scripts/verify.py --scope repo --tier precommit
 ```
 
-Run `python .agents/scripts/verify.py --scope repo --tier precommit` for the
-lightweight local handoff gate: all invariant audits, changed Python lint and
-compilation, the bounded repo test bundle, and changed non-Qt test files.
-Run the focused scope for the affected feature first; precommit does not infer
-feature coverage from source changes. The full application suite remains in CI
-and is not launched by local precommit.
-
-Do not duplicate the driver's pytest lists in documentation;
-update `.agents/verification.toml` when executable coverage changes and
-`tests/qt_test_files.txt` when Qt dependencies change. Check both with
-`python .agents/scripts/verify.py --check-config`.
-
-Application verification excludes `tests/standalone_scripts` from local
-precommit and CI runs because those tests import the opt-in
-`src/Standalone_Scripts` utilities. Run standalone-script tests separately only
-when the user explicitly scopes that directory or approves access, following
-its scoped `AGENTS.md`. Routine application tests must not collect that suite.
-Default Ruff discovery also excludes these opt-in utilities and their tests;
-Stats remains part of the active application lint baseline.
+Start with the affected feature. Precommit runs all invariants, changed Python
+checks, bounded repo tests, and changed non-Qt test files; it does not infer
+feature scopes or launch the full suite. Use `--list` to inspect commands and
+`--check-config` after changing the registries. Do not duplicate pytest lists
+in prose. [Verification gates](verification-gates.md) owns docs-only checks,
+CI details, and failure reporting.
 
 ## Qt Execution Boundary
 
-PySide6/pytest-qt tests are CI-only by default. Do not run them on local
-development machines, do not set `QT_QPA_PLATFORM=offscreen`, and do not
-launch ad-hoc offscreen Qt scripts. They can freeze indefinitely even when a filename or
-marker does not obviously identify it as a Qt test.
+PySide6/pytest-qt execution is CI-only unless the user explicitly approves a
+safe visible environment. Never set `QT_QPA_PLATFORM=offscreen` or launch
+ad-hoc offscreen Qt locally; these can hang indefinitely. Filenames and markers
+alone do not establish safety: the registry controls local selection.
 
-For GUI changes, keep the CI Qt coverage definition current, run the local
-focused scope for non-GUI checks, and document a visible/manual smoke path. Run
-Qt tests locally only when the user explicitly approves a safe visible GUI
-environment.
+GUI changes require local non-GUI checks, current CI coverage definitions, and
+a documented visible/manual smoke path. Precommit excludes registered Qt tests
+even when the Qt opt-in environment is set.
 
 ## Scope Map
 
-| Scope | Local focused coverage | Qt coverage retained for CI |
+| Scope | Local focused coverage | CI Qt / visible coverage |
 | --- | --- | --- |
-| `backend-hardening` | Canonical import boundaries, settings/persistence, transaction recovery, runner lifecycle, exact spectral reads and source-model caches | None in this local bundle |
-| `gui` | GUI import boundaries, syntax/static checks, non-window contracts | Main-window layout/wiring, stable/beta visibility, per-tool beta acknowledgement, dialogs, settings/status, embedded-page smoke |
-| `updates` | Release selection, download/install backend, packaging syntax, GUI-module compilation | Update dialog and manager interaction |
-| `project-io` | Project settings, acquisition profiles and source formats, BIDS import, enumeration/scanning, result paths, manifest contracts, shared exact XLSX reading | File dialogs and visible project workflows |
-| `processing` | Shared MNE admission, acquisition policy, order/fingerprint, QC calibration, persistence, FFT crop, runner/export contracts | Processing-window wiring and Qt workers |
-| `pipeline-methods` | Fixed-slot replacements, project selections, default identity, review/checkpoint/repair paths, spectral/source exports and synthetic hardware integration | Settings save/cancel and worker snapshots use existing CI coverage |
-| `plot-generator` | Excel/config helpers, aggregation, FFT/SNR behavior, rendering and export contracts | Plot Generator page/layout/workflow smoke |
-| `publication-maps` | Processing-time harmonics, BCA/SNR rendering, figure-only paired/group outputs, colorbars | Embedded Scalp Maps page behavior |
-| `sequence-figure` | Renderer behavior and high-DPI outputs | Embedded Sequence Figure wiring |
-| `sensitivity-analysis` | Paired-test/RM-ANOVA power math plus mixed-model simulation, search, cancellation, uncertainty, and validation | Embedded page wiring, background worker, controls, results, reset, information tabs, and clipping smoke |
-| `stats` | Data/project context, pipeline, DV/harmonic rules, FullSNR, exports and reporting | Stats layout, focus, and window workflow smoke |
-| `free-harmonic-clustering` | FullFFT selected reads, spectral preparation, adjacency, paired/independent permutation inference, Excel/run-bundle exports, and static embedded-GUI contracts | Open the tool visibly from the default Quick Tools list, exercise prepare/run/cancel/results/folder actions, and preserve the documented optional human acceptance path; pytest-qt remains CI-only locally |
-| `loreta` | Payloads, source producers, project exports, rendering helpers and legacy boundaries | Embedded visualizer interaction and Qt worker smoke |
-| `figures` | Shared figure-style contract and focused output/rendering checks | Figure-export dialog interaction where applicable |
-| `legacy-boundary` | Retired package/source-localization audits and focused compatibility checks | None by default |
-| `repo` with `precommit` | Lightweight handoff gate: all audits, changed-file static checks, bounded repo tests, and changed non-Qt test files | CI retains the full application suite, including Qt |
+| `repo` | Verification/audit contracts; precommit adds all audits and changed-file checks | Full application suite remains in CI |
+| `backend-hardening` | Imports, settings/persistence, transaction recovery, runner lifecycle, exact spectral reads, source-model caches | None in this bundle |
+| `gui` | Import/static checks and non-window state contracts | Windows, dialogs, settings, menus, embedded pages |
+| `updates` | Release selection, download/install backend, packaging syntax | Update dialog/manager and Windows installer smoke |
+| `project-io` | Settings, acquisition/BIDS, discovery, paths, manifests, exact XLSX reads | File dialogs/project workflows |
+| `processing` | MNE admission, order/fingerprints, QC, persistence, crop, runner/exports | Processing-window wiring and workers |
+| `pipeline-methods` | Slot replacements, selections/default identity, review/checkpoint/repair, exports, synthetic hardware matrix | Settings save/cancel and worker snapshots |
+| `pipeline-setup` | Detached setup draft, project settings, freshness, protocol and static launch workflow | Guided dialog navigation, save/cancel, guards and fit |
+| `plot-generator` | Config/data helpers, aggregation, FFT/SNR, rendering/exports | Plot Generator page/workflow |
+| `publication-maps` | Harmonics, BCA/SNR rendering, paired/group figures, colorbars | Scalp Maps page |
+| `sequence-figure` | Renderer and high-DPI outputs | Sequence Figure wiring |
+| `sensitivity-analysis` | Power/design-sensitivity math, simulation/search, cancellation, uncertainty | Inputs, worker, results/reset, information tabs, fit |
+| `stats` | Project/data context, pipeline, DV/harmonics, FullSNR, exports/reporting | Stats layout/focus/workflow |
+| `free-harmonic-clustering` | FullFFT reads, preparation/adjacency, permutations, exports, static GUI contracts | Prepare/run/cancel/results/folder actions |
+| `loreta` | Payloads, source producers, exports, rendering helpers, legacy boundaries | Visualizer/Qt workers |
+| `figures` | Shared figure-style and render/export contracts | Relevant export dialogs |
+| `legacy-boundary` | Retired-package audits and compatibility | None by default |
 
 ## Selection Rules
 
-- Start with the scope that owns the changed behavior. Add a second scope only
-  when the change crosses a documented boundary.
-- The file and directory names under `tests/` are orientation aids, not proof
-  that a test is locally safe. The driver's Qt registry decides execution.
-- Add focused tests next to the owning workflow. Register new Qt-dependent
-  tests before relying on local scope output.
-- Precommit includes changed non-Qt test files even when they are not yet in a
-  focused bundle, and avoids rerunning files already covered by that bundle.
-  Helpers and deleted test files are not collected. Registered Qt tests remain
-  excluded from local precommit even when the Qt opt-in environment is set.
-- Use isolated temporary paths for file/project tests; never depend on a
-  developer-machine directory.
-- For shared harmonic-selection changes, run both `publication-maps` and
-  `stats`. For shared figure-style changes, run `figures` plus the affected
-  tool scope.
-- When a GUI behavior cannot be exercised locally, report the CI target and a
-  concrete visible/manual smoke path instead of substituting an offscreen run.
+- Add a second scope when a shared boundary changes. Shared harmonic selection
+  needs `publication-maps` and `stats`; shared figure styles need `figures`
+  plus the affected tool. Guided setup needs `pipeline-setup` and `gui`.
+- Put regression tests beside their owning workflow; register Qt dependencies
+  before relying on local scope results. Precommit includes changed non-Qt test
+  files even outside a focused bundle, skips helpers/deletions, and avoids
+  rerunning files already covered in that invocation.
+- File/project tests use isolated temporary paths, never developer data.
+- Routine tests and Ruff exclude opt-in `src/Standalone_Scripts` and
+  `tests/standalone_scripts`; do not collect that suite without explicit scope
+  or approval and its scoped instructions. Stats remains in active lint.
+- Scientific calibration and real-data diagnostics require their separate
+  protocol/scope; focused synthetic tests do not replace qualification.
 
-## Maintaining older tests
+## Maintaining Older Tests
 
-Retirement names are not sufficient grounds for deletion. Keep scientific
-baselines, historical-project/schema behavior, compatibility-alias identity,
-and guards against reintroducing retired GUI packages. Ordinary tests should
-import current implementation owners; only explicit compatibility tests should
-exercise transitional aliases.
+Keep scientific baselines, historical schemas, compatibility-alias identity,
+and retirement guards. A legacy name alone is not grounds for removal.
+Ordinary tests use current owners; compatibility tests alone exercise aliases.
 
-Remove migration-only symbol checks when current behavioral tests cover the
-same contract. Refresh reader mocks at the current public boundary instead of
-weakening assertions to accommodate a new implementation. Do not catch every
-import error and skip: a supported import failing is a regression. Split
-backend and Qt-dependent tests when possible so the backend coverage runs
-locally. Keep the scope map and Qt registry aligned with file moves/removals.
+Remove obsolete symbol-only checks only when behavioral tests cover the same
+contract. Update mocks at the public boundary rather than weakening assertions.
+A supported import failure is a regression, not a reason to catch every import
+error and skip. Split backend/Qt tests where practical and update both registries.
 
-## Hardware and Studio extension coverage
+## Hardware and Studio Extension Coverage
 
-The [roadmap](../architecture/hardware-pipeline-studio-roadmap.md) owns future
-acceptance criteria. Existing acquisition-profile and BDF/Studio inspection
-fixtures live under project I/O; production stage selection also requires
-processing, provenance/cache and affected downstream-consumer coverage.
-An inspection fixture passing for a third profile does not establish an
-extensible production pipeline. Keep hardware/timing validation separate from
-synthetic tests and do not promote unqualified support through documentation.
+The [roadmap](../architecture/hardware-pipeline-studio-roadmap.md) separates the
+four implemented acquisition routes from remaining hardware/Studio work.
+Extensions need relevant admission, pipeline, cache/provenance, and downstream
+coverage. Inspection fixtures do not establish production or physical
+qualification; keep timing/laboratory evidence distinct from synthetic tests.
 
-## Retired Source Localization package
+## Retired Source Localization Package
 
-The retired `Tools.SourceLocalization` package and its old eLORETA runtime
-remain removed. Do not add tests that import that package, restore its
-availability shims, or require bundled fsaverage MRI/template data.
-
-The separate, current `Tools.LORETA_Visualizer` owns its visualization workflow
-and isolated source producers under its scoped architecture contract. Its
-existing L2-MNE/eLORETA producers are supported by the `loreta` verification
-scope; this boundary does not prohibit their current tests or imply that those
-producers must be removed. Keep numerical producer code separate from rendering
-and GUI code, and preserve the ignored root `.fpvs_cache` dependency cache.
+Do not restore `Tools.SourceLocalization`, its tests/shims, or bundled fsaverage.
+The current `Tools.LORETA_Visualizer` and isolated `source_producers` have
+supported `loreta` coverage; their existing L2-MNE/eLORETA tests are not retired.
+Preserve renderer/calculation separation and the ignored root `.fpvs_cache`.

@@ -254,22 +254,6 @@ def _get_montage_info():
     return info, name_to_idx
 
 
-def _parse_freq_columns(columns: Sequence[object]) -> dict[float, str]:
-    out: dict[float, str] = {}
-    for c in columns:
-        if not isinstance(c, str):
-            continue
-        m = _FREQ_COL_RE.match(c)
-        if not m:
-            continue
-        try:
-            f = float(m.group(1))
-        except ValueError:
-            continue
-        out[round(f, 4)] = c
-    return out
-
-
 def _ensure_no_nan(values) -> None:
     import numpy as np
 

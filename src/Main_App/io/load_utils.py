@@ -341,25 +341,6 @@ def _canon_present(raw_names: Iterable[str], candidates: Iterable[str]) -> Set[s
     return out
 
 
-def _resolve_channel_subset(
-    filepath: str,
-    *,
-    stim_name: str,
-    ref_pair: Tuple[str, str],
-    first_n_channels: Optional[int],
-    electrode_mapping_profile: Any = None,
-) -> Optional[list[str]]:
-    """Validate the full header, then return a source-order reduced include list."""
-
-    geometry = _read_biosemi64_header_geometry(
-        filepath,
-        stim_name=stim_name,
-        ref_pair=ref_pair,
-        electrode_mapping_profile=electrode_mapping_profile,
-    )
-    return geometry.included_source_names(first_n_channels)
-
-
 def _read_biosemi64_header_geometry(
     filepath: str,
     *,
