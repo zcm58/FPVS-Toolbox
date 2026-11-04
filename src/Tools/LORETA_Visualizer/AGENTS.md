@@ -238,6 +238,10 @@ per-method/group/condition correction scope in outputs and disclosures.
   anatomical display meshes are context only. They must never clip volume
   points, remove values from the volume color-scale inputs, or redefine the
   valid volume source domain.
+- 3D volume anatomy defaults to the detailed pial surface; the smooth whole-brain
+  shell is an optional session display setting shared by comparison panes.
+  Switching anatomy changes only the backdrop actor, preserving the source
+  overlay, camera, masks and scale. Missing shell anatomy falls back to pial.
 - Interactive 3D volume display uses a display-smoothed grid/contour, not
   screen-aligned source-point glyphs. It may constrain interpolation to the
   prepared source support, but anatomical context meshes must never act as

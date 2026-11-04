@@ -1197,6 +1197,8 @@ class SourceMapOptionsDialog(AppDialog):
         project_available: bool,
         export_busy: bool,
         cancel_available: bool = False,
+        volume_smooth_shell_enabled: bool = False,
+        volume_smooth_shell_available: bool = True,
     ) -> None:
         super().__init__("Options", parent, size=SurfaceSize(width=480, height=440, min_width=430))
         self.selected_action: str | None = None
@@ -1262,6 +1264,18 @@ class SourceMapOptionsDialog(AppDialog):
         self.source_map_visible_check.setChecked(bool(source_map_visible))
         self.source_map_visible_check.setToolTip("Turn off to inspect the anatomical cortical surface without source colors.")
         display_layout.addWidget(self.source_map_visible_check)
+
+        self.volume_smooth_shell_check = QCheckBox("Use smooth shell in 3D volume view", display_tab)
+        self.volume_smooth_shell_check.setObjectName("loreta_volume_smooth_shell_check")
+        self.volume_smooth_shell_check.setChecked(bool(volume_smooth_shell_enabled))
+        self.volume_smooth_shell_check.setEnabled(bool(volume_smooth_shell_available))
+        self.volume_smooth_shell_check.setToolTip(
+            "Replace the detailed cortical backdrop with a smooth whole-brain shell. "
+            "Source estimates, masks and colors are unchanged."
+            if volume_smooth_shell_available else
+            "Smooth whole-brain anatomy is unavailable; the detailed cortical backdrop is used."
+        )
+        display_layout.addWidget(self.volume_smooth_shell_check)
 
         self.transparent_spin_check = QCheckBox("Spin transparent mesh view", display_tab)
         self.transparent_spin_check.setObjectName("loreta_transparent_spin_check")
@@ -1649,6 +1663,7 @@ class LoretaVisualizerWindow(QWidget):
         self._use_cluster_mask = True
         self._activation_visible = True
         self._transparent_spin_enabled = False
+        self._volume_smooth_shell_enabled = False
         self._display_mode = DEFAULT_DISPLAY_MODE
 
         root = QVBoxLayout(self)
@@ -2272,6 +2287,7 @@ class LoretaVisualizerWindow(QWidget):
                 mesh = self.renderer.current_brain_mesh()
                 if mesh is not None:
                     comparison.replace_brain_mesh(mesh, reset_camera=False)
+                comparison.set_volume_smooth_shell_enabled(self._volume_smooth_shell_enabled)
                 initialized = True
             finally:
                 if not initialized:
@@ -2979,6 +2995,10 @@ class LoretaVisualizerWindow(QWidget):
             project_available=project_root is not None and self._project is not None,
             export_busy=self._source_export_thread is not None or self._stats_ready_export_thread is not None,
             cancel_available=self._source_export_worker is not None,
+            volume_smooth_shell_enabled=self._volume_smooth_shell_enabled,
+            volume_smooth_shell_available=(
+                getattr(self.renderer.current_brain_mesh(), "volume_context", None) is not None
+            ),
         )
         if getattr(self, "_group_comparison_enabled", False):
             dialog.transparent_spin_check.setEnabled(False)
@@ -2986,10 +3006,17 @@ class LoretaVisualizerWindow(QWidget):
         dialog.exec()
         self._include_flagged_subjects = dialog.include_flagged_check.isChecked()
         self._l2_source_orientation_mode = str(dialog.source_orientation_combo.currentData())
-        self._set_zscore_display_threshold(dialog.zscore_threshold_spin.value())
-        self._set_cluster_mask_enabled(dialog.use_cluster_mask_check.isChecked())
-        self._set_activation_visibility_enabled(dialog.source_map_visible_check.isChecked())
-        self._set_transparent_spin_enabled(dialog.transparent_spin_check.isChecked())
+        # A backdrop-only edit must not rebuild the activation overlay or reset
+        # its camera by reapplying unchanged cutoff, mask or spin settings.
+        if dialog.zscore_threshold_spin.value() != self._zscore_display_threshold:
+            self._set_zscore_display_threshold(dialog.zscore_threshold_spin.value())
+        if dialog.use_cluster_mask_check.isChecked() != self._use_cluster_mask:
+            self._set_cluster_mask_enabled(dialog.use_cluster_mask_check.isChecked())
+        if dialog.source_map_visible_check.isChecked() != self._activation_visible:
+            self._set_activation_visibility_enabled(dialog.source_map_visible_check.isChecked())
+        if dialog.transparent_spin_check.isChecked() != self._transparent_spin_enabled:
+            self._set_transparent_spin_enabled(dialog.transparent_spin_check.isChecked())
+        self._set_volume_smooth_shell_enabled(dialog.volume_smooth_shell_check.isChecked())
         if dialog.selected_action == SOURCE_OPTIONS_ACTION_REBUILD_ZSCORE:
             self._build_project_zscore_source_maps()
         elif dialog.selected_action == SOURCE_OPTIONS_ACTION_CANCEL_BUILD:
@@ -3047,6 +3074,15 @@ class LoretaVisualizerWindow(QWidget):
             renderer.set_transparent_spin_enabled(
                 self._transparent_spin_enabled and not getattr(self, "_group_comparison_enabled", False)
             )
+
+    def _set_volume_smooth_shell_enabled(self, enabled: bool) -> None:
+        enabled = bool(enabled)
+        if enabled == self._volume_smooth_shell_enabled:
+            return
+        self._volume_smooth_shell_enabled = enabled
+        for renderer in (self.renderer, getattr(self, "_comparison_renderer", None)):
+            if renderer is not None:
+                renderer.set_volume_smooth_shell_enabled(enabled)
 
     def _load_prepared_source_manifest(self) -> None:
         renderer = self.renderer
@@ -3856,9 +3892,10 @@ class LoretaVisualizerWindow(QWidget):
             else ""
         )
         volume_context_note = (
-            f" 3D volume view uses {result.mesh.volume_context.source_label} as anatomical context."
+            " 3D volume defaults to detailed cortical anatomy; Options offers "
+            f"{result.mesh.volume_context.source_label} as an optional smooth shell."
             if result.mesh.volume_context is not None
-            else " 3D volume view uses cerebral pial anatomy as fallback context."
+            else " 3D volume uses detailed cortical anatomy; the optional smooth shell is unavailable."
         )
         self.mesh_status.set_text("fsaverage template anatomy")
         self.mesh_status.setToolTip(

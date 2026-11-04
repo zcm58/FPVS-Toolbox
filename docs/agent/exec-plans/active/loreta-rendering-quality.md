@@ -3,8 +3,8 @@
 Status: rendering implementation and continuous MRI dragging complete with
 scoped visible Windows review and automated source verification, 2026-11-04.
 User authorized visible Toolbox inspection.
-All preceding uncommitted scientific-integrity work is preserved. Cross-platform
-graphics and final-source Qt CI remain separate acceptance.
+Preserve unrelated worktree changes. Cross-platform graphics and final-source Qt
+CI remain separate acceptance. The volume-backdrop follow-up is complete below.
 
 ## Boundaries and resume
 
@@ -89,6 +89,33 @@ Resume from these checkpoints and the current diff. Widget owner is
 in `volume_slices.py`. No inverse, processing or new statistical work is scoped.
 Use cached fsaverage plus synthetic prepared data for local review. Keep task
 keep-awake credentials in context only; no offscreen Qt or private-project reads.
+
+## 3D volume anatomy follow-up
+
+Requested behavior: detailed fsaverage pial anatomy is the default translucent
+3D volume backdrop; a Display option selects the smooth whole-brain shell.
+
+- B0 complete: GUI/protected audits and LORETA baseline (717 tests) passed.
+- B1 complete: renderer swaps only the anatomy actor, preserving source
+  payload/support, overlay geometry/scalars, masks, limits and user camera.
+- B2 complete: session-only Display option applies to both comparison panes
+  and later-created renderers; unrelated options must not trigger a refresh.
+- B3 complete: LORETA 728, GUI 768 and repository 391 / 1 skipped passed;
+  invariant audits, strict MkDocs and diff checks passed. Scoped Windows visible
+  review verified detailed default, shell option, retained rotation and comparison
+  inheritance. Before/after captures were identical for payload points/values/
+  metadata, overlay points/faces/scalars/actor identity, color limits and camera;
+  only backdrop selection changed. Native Qt interaction definitions remain in
+  the registered source-options file for CI; no cross-platform acceptance claimed.
+
+Changed owners: `renderer.py`, `gui.py`; safe regressions in
+`test_renderer_updates.py`, `test_volume_overlay.py`, `test_volume_anatomy_gui.py`,
+and CI smoke in `tests/gui/test_loreta_source_options_qt.py`. Tool rules,
+architecture, user guide and validation notes own the durable behavior.
+
+No producer, inverse, statistical, file-format or source-cache changes are scoped.
+Existing MRI and cortical source views keep their behavior. Missing optional
+shell anatomy falls back to pial context without removing source points.
 
 ## Published guidance
 

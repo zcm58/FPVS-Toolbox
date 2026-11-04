@@ -222,6 +222,11 @@ Run only in an approved visible environment on Windows 11 or CachyOS:
 
 1. Open LORETA with existing cortical and volume outputs in a 1280×900 workspace.
    Verify the main controls fit without page scrolling or explanatory subtitles.
+   In 3D volume mode, detailed pial anatomy is the default. Toggle **Options >
+   Display > Use smooth shell in 3D volume view**: only anatomy changes; the
+   colored contour, limits and camera stay fixed. Repeat with group comparison,
+   including enabling comparison after choosing the shell. Missing shell anatomy
+   keeps the detailed backdrop and disables the option with an explanation.
 2. Switch between conditions using current, all-conditions and fixed scales.
    Compare preview colorbar limits with single/stacked PNG/PDF exports. A condition
    without the chosen summary must not contribute a fallback summary.

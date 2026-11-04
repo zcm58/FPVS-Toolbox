@@ -292,8 +292,12 @@ The renderer displays prepared eLORETA `volume_points` through a smoothed,
 display-space grid/contour overlay in 3D volume mode. This smoothing is for
 visualization only: it is applied after source-mask/exploratory filtering and
 does not modify saved source values, source-space statistics, or payload
-metadata. Cerebral pial surfaces and whole-brain anatomical actors are context
-only. They never filter prepared volume points, change the values used for the
+metadata. The default anatomical backdrop is the detailed fsaverage pial
+surface; Source Map Options > Display can select the smooth whole-brain shell.
+This session-only choice is shared by comparison panes and swaps only the
+backdrop actor, retaining the source overlay and user camera. Missing shell
+anatomy falls back to pial. Both anatomical actors are context only. They never
+filter prepared volume points, change the values used for the
 color scale, or define the valid volume source domain. Display interpolation
 may be constrained to the prepared source support, but anatomical context
 meshes never act as source or interpolation masks. The contour does not

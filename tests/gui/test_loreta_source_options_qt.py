@@ -139,6 +139,35 @@ def test_loreta_source_options_exposes_l2_orientation_modes(qtbot) -> None:
     assert note is not None
     assert "L2-MNE cortical maps only" in note.text()
     assert "eLORETA volume maps always use the corrected vector norm" in note.text()
+    assert dialog.volume_smooth_shell_check.text() == "Use smooth shell in 3D volume view"
+    assert not dialog.volume_smooth_shell_check.isChecked()
+    assert dialog.volume_smooth_shell_check.isEnabled()
+    assert "Source estimates, masks and colors are unchanged" in dialog.volume_smooth_shell_check.toolTip()
+    dialog.volume_smooth_shell_check.click()
+    assert dialog.volume_smooth_shell_check.isChecked()
+
+
+def test_loreta_smooth_shell_option_retains_preference_when_anatomy_is_unavailable(qtbot) -> None:
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    dialog = SourceMapOptionsDialog(
+        parent,
+        include_flagged_subjects=False,
+        zscore_display_threshold=1.64,
+        use_cluster_mask=True,
+        source_map_visible=True,
+        transparent_spin_enabled=False,
+        source_orientation_mode=SOURCE_ORIENTATION_MODE_CORTICAL_NORMAL,
+        project_available=False,
+        export_busy=False,
+        volume_smooth_shell_enabled=True,
+        volume_smooth_shell_available=False,
+    )
+    qtbot.addWidget(dialog)
+    assert dialog.volume_smooth_shell_check.isChecked()
+    assert not dialog.volume_smooth_shell_check.isEnabled()
+    assert "unavailable" in dialog.volume_smooth_shell_check.toolTip()
+    assert "detailed cortical backdrop is used" in dialog.volume_smooth_shell_check.toolTip()
 
 
 def test_loreta_display_selector_separates_cortical_and_volume_views(qtbot) -> None:

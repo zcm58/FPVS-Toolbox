@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from types import SimpleNamespace
 import sys
 
@@ -10,6 +11,8 @@ import pyvista as pv
 import pytest
 
 from Tools.LORETA_Visualizer import renderer as rendering
+from Tools.LORETA_Visualizer.source_payloads import make_source_payload
+from Tools.LORETA_Visualizer.synthetic_brain import BrainVolumeContextMesh, make_synthetic_brain_mesh
 
 
 class _Property:
@@ -18,13 +21,17 @@ class _Property:
 
 
 class _Actor:
-    def __init__(self, surface):
+    def __init__(self, surface, **options):
         self.surface = surface
+        self.options = options
         self.ranges = []
         self.mapper = SimpleNamespace(SetScalarRange=lambda *values: self.ranges.append(values))
 
     def GetProperty(self):  # noqa: N802
         return _Property()
+
+    def SetVisibility(self, visible):  # noqa: N802
+        self.visible = visible
 
 
 class _Plotter:
@@ -47,7 +54,7 @@ class _Plotter:
 
     def add_mesh(self, surface, **kwargs):
         assert kwargs["render"] is False
-        actor = _Actor(surface)
+        actor = _Actor(surface, **kwargs)
         self.actors.append(actor)
         return actor
 
@@ -247,7 +254,8 @@ def test_partial_backend_initialization_retains_ownership_for_shutdown(monkeypat
     assert renderer._plotter is None
 
 
-def test_volume_entry_and_reset_use_isometric_but_payload_refresh_keeps_camera():
+@pytest.mark.parametrize("smooth_shell", [False, True])
+def test_volume_entry_and_reset_use_isometric_but_payload_refresh_keeps_camera(smooth_shell):
     renderer = _renderer()
     renderer._display_mode = rendering.DISPLAY_MODE_TRANSPARENT_MESH
     renderer._transparent_spin_enabled = False
@@ -257,6 +265,7 @@ def test_volume_entry_and_reset_use_isometric_but_payload_refresh_keeps_camera()
     renderer._brain_actor_context = "cortical"
     renderer._surface = object()
     renderer._volume_context_surface = object()
+    renderer._volume_smooth_shell_enabled = smooth_shell
     payload = SimpleNamespace(kind=rendering.SOURCE_KIND_VOLUME_POINTS)
     renderer._last_activation_payload = payload
 
@@ -278,6 +287,115 @@ def test_volume_entry_and_reset_use_isometric_but_payload_refresh_keeps_camera()
     assert renderer._plotter.camera_set is True
     assert renderer._plotter.isometric_views == 2
     assert renderer._plotter.renders == 1
+
+
+def _volume_renderer():
+    renderer = _renderer()
+    renderer._display_mode = rendering.DISPLAY_MODE_TRANSPARENT_MESH
+    renderer._transparent_spin_enabled = False
+    renderer._cortical_paint_active = False
+    renderer._split_hemisphere_active = False
+    renderer._activation_actor = None
+    renderer._last_activation_payload = None
+    renderer._current_mesh = make_synthetic_brain_mesh(lat_steps=6, lon_steps=12)
+    renderer._surface = renderer._to_polydata(pv, renderer._current_mesh)
+    renderer._volume_context_surface = pv.Sphere(radius=1.4, theta_resolution=12, phi_resolution=8)
+    renderer._brain_actor = _Actor(renderer._surface)
+    renderer._brain_actor_context = "cortical"
+    return renderer
+
+
+def test_backdrop_switch_preserves_source_support_overlay_geometry_and_camera(monkeypatch):
+    renderer = _volume_renderer()
+    grid = np.linspace(-0.25, 0.25, 4)
+    original_points = np.stack(np.meshgrid(grid, grid, grid, indexing="ij"), axis=-1).reshape(-1, 3)
+    valid = np.ones(len(original_points), dtype=bool)
+    valid[22] = False
+    payload = make_source_payload(
+        points=original_points[valid], values=np.linspace(2., 8., valid.sum()),
+        kind=rendering.SOURCE_KIND_VOLUME_POINTS, label="Synthetic volume",
+        metadata={"synthetic": True, "cluster_mask_source_indices": [1, 3]}, normalize_values=False,
+    )
+    renderer.set_activation_payload(payload, volume_support_points=original_points, volume_support_valid_mask=valid)
+    assert renderer.volume_smooth_shell_enabled() is False
+    assert renderer._brain_actor.surface is renderer._surface
+    assert renderer._volume_overlay_active is True
+    actor = renderer._activation_actor
+    geometry = actor.surface
+    before = (geometry.points.copy(), geometry.faces.copy(), geometry["activation"].copy())
+    source_points, source_values = payload.points.copy(), payload.values.copy()
+    support = renderer._last_volume_support_points
+    support_valid = renderer._last_volume_support_valid_mask
+    scalar_range = renderer._activation_scalar_range
+    user_camera = ((3., -2., 1.), (0.1, 0.2, 0.3), (0., 0., 1.))
+    renderer._plotter.camera_position = user_camera
+    camera = pv.Camera()
+    camera.SetParallelScale(0.7)
+    camera.SetViewAngle(18.0)
+    renderer._plotter.camera = camera
+    renders_before = renderer._plotter.renders
+    monkeypatch.setattr(renderer, "set_activation_payload", lambda *_a, **_k: pytest.fail("Backdrop rebuilt sources"))
+    monkeypatch.setattr(renderer, "_add_activation_overlay", lambda *_a: pytest.fail("Backdrop rebuilt overlay"))
+
+    for smooth in (True, True, False, False):
+        renderer.set_volume_smooth_shell_enabled(smooth)
+        expected = renderer._volume_context_surface if smooth else renderer._surface
+        assert renderer._brain_actor.surface is expected
+        assert renderer._brain_actor.options["reset_camera"] is False
+        assert renderer._activation_actor is actor
+        assert renderer._last_activation_payload is payload
+        assert renderer._last_volume_support_points is support
+        assert renderer._last_volume_support_valid_mask is support_valid
+        assert renderer._activation_scalar_range == scalar_range
+        assert renderer._plotter.camera_position == user_camera
+        assert renderer._plotter.camera is camera
+        assert camera.GetParallelScale() == 0.7
+        assert camera.GetViewAngle() == 18.0
+    assert renderer._plotter.renders - renders_before == 2
+    assert actor not in renderer._plotter.removed
+    for actual, expected in zip((geometry.points, geometry.faces, geometry["activation"]), before):
+        np.testing.assert_array_equal(actual, expected)
+    np.testing.assert_array_equal(payload.points, source_points)
+    np.testing.assert_array_equal(payload.values, source_values)
+    np.testing.assert_array_equal(support, original_points)
+    np.testing.assert_array_equal(support_valid, valid)
+    assert payload.metadata["cluster_mask_source_indices"] == [1, 3]
+
+
+def test_unavailable_shell_keeps_pial_and_preference_survives_mesh_load():
+    renderer = _volume_renderer()
+    renderer._volume_context_surface = None
+    payload = SimpleNamespace(kind=rendering.SOURCE_KIND_VOLUME_POINTS)
+    renderer._last_activation_payload = payload
+    renderer._restore_base_brain_actor(payload=payload, render=False)
+    old_actor = renderer._brain_actor
+    renderer.set_volume_smooth_shell_enabled(True)
+    assert renderer.volume_smooth_shell_enabled() is True
+    assert renderer._brain_actor is old_actor
+    assert renderer._plotter.renders == 0
+
+    mesh = renderer._current_mesh
+    updated_mesh = replace(mesh, volume_context=BrainVolumeContextMesh(mesh.points * 1.2, mesh.faces))
+    renderer.replace_brain_mesh(updated_mesh, reset_camera=False)
+    assert renderer.volume_smooth_shell_enabled() is True
+    renderer._restore_base_brain_actor(payload=payload, render=False)
+    assert renderer._brain_actor.surface is renderer._volume_context_surface
+
+
+@pytest.mark.parametrize("mode,kind", [
+    (rendering.DISPLAY_MODE_SPLIT_HEMISPHERE, rendering.SOURCE_KIND_VOLUME_POINTS),
+    (rendering.DISPLAY_MODE_CORTICAL_SURFACE, rendering.SOURCE_KIND_VOLUME_POINTS),
+    (rendering.DISPLAY_MODE_MRI_SLICES, rendering.SOURCE_KIND_VOLUME_POINTS),
+    (rendering.DISPLAY_MODE_TRANSPARENT_MESH, rendering.SOURCE_KIND_SURFACE_POINTS),
+])
+def test_shell_preference_does_not_change_other_display_modes(monkeypatch, mode, kind):
+    renderer = _volume_renderer()
+    renderer._display_mode = mode
+    renderer._last_activation_payload = SimpleNamespace(kind=kind)
+    monkeypatch.setattr(renderer, "_restore_base_brain_actor", lambda **_k: pytest.fail("Inactive backdrop changed"))
+    renderer.set_volume_smooth_shell_enabled(True)
+    assert renderer.volume_smooth_shell_enabled() is True
+    assert renderer._plotter.renders == 0
 
 
 def test_nonvolume_reset_and_requested_spin_keep_their_camera_owners(monkeypatch):

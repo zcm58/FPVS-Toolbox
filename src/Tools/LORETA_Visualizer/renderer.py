@@ -164,6 +164,7 @@ class BrainRendererWidget(QWidget):
         self._split_right_render_cache: _SplitHemisphereRenderCache | None = None
         self._surface: Any | None = None
         self._volume_context_surface: Any | None = None
+        self._volume_smooth_shell_enabled = False
         self._brain_actor_context: str | None = None
         self._current_mesh: BrainMesh | None = None
         self._brain_opacity = initial_opacity
@@ -298,6 +299,7 @@ class BrainRendererWidget(QWidget):
             specular_power=12,
             ambient=0.42,
             diffuse=0.72,
+            reset_camera=False,
             render=False,
         )
         self._apply_brain_material(actor)
@@ -1053,6 +1055,24 @@ class BrainRendererWidget(QWidget):
     def display_mode(self) -> str:
         return self._display_mode
 
+    def set_volume_smooth_shell_enabled(self, enabled: bool) -> None:
+        """Switch anatomical context without touching prepared sources or overlays."""
+
+        enabled = bool(enabled)
+        if enabled == self.volume_smooth_shell_enabled():
+            return
+        self._volume_smooth_shell_enabled = enabled
+        payload = getattr(self, "_last_activation_payload", None)
+        if (
+            getattr(self, "_display_mode", None) == DISPLAY_MODE_TRANSPARENT_MESH
+            and payload is not None
+            and payload.kind == SOURCE_KIND_VOLUME_POINTS
+        ):
+            self._restore_base_brain_actor(render=True, payload=payload)
+
+    def volume_smooth_shell_enabled(self) -> bool:
+        return bool(getattr(self, "_volume_smooth_shell_enabled", False))
+
     def set_transparent_spin_enabled(self, enabled: bool) -> None:
         self._transparent_spin_enabled = bool(enabled)
         self._sync_transparent_spin_state(reset_orientation=True)
@@ -1253,15 +1273,20 @@ class BrainRendererWidget(QWidget):
             and not getattr(self, "_split_hemisphere_active", False)
         ):
             return
+        previous_context = getattr(self, "_brain_actor_context", None)
         self._remove_brain_actor(render=False)
         self._remove_split_hemisphere_actors(render=False)
         self._brain_actor = self._add_brain_actor(surface)
         self._brain_actor_context = context
         self._cortical_paint_active = False
         self._split_hemisphere_active = False
-        if context == "whole_brain_anatomy" and not self._transparent_spin_should_run():
-            # A three-quarter view reveals the translucent anatomical shell.
-            # Same-context refreshes return above, retaining the user's camera.
+        volume_contexts = {"volume_cortical", "whole_brain_anatomy"}
+        if (
+            context in volume_contexts
+            and previous_context not in volume_contexts
+            and not self._transparent_spin_should_run()
+        ):
+            # Frame volume entry once; changing its backdrop keeps the camera.
             plotter.view_isometric(render=False)
             # PyVista's default view permits later actor additions to refit it.
             plotter.camera_set = True
@@ -1273,9 +1298,10 @@ class BrainRendererWidget(QWidget):
             getattr(self, "_display_mode", DISPLAY_MODE_TRANSPARENT_MESH) == DISPLAY_MODE_TRANSPARENT_MESH
             and payload is not None
             and payload.kind == SOURCE_KIND_VOLUME_POINTS
-            and getattr(self, "_volume_context_surface", None) is not None
         ):
-            return self._volume_context_surface, "whole_brain_anatomy"
+            if self.volume_smooth_shell_enabled() and getattr(self, "_volume_context_surface", None) is not None:
+                return self._volume_context_surface, "whole_brain_anatomy"
+            return getattr(self, "_surface", None), "volume_cortical"
         return getattr(self, "_surface", None), "cortical"
 
     def set_activation_scalar_range(self, vmin: float, vmax: float, *, refresh: bool = True) -> None:

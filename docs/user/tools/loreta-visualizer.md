@@ -158,6 +158,11 @@ Depending on the loaded source-map method, you can use options such as:
 
 The available options may differ depending on whether you are viewing an L2-MNE cortical map or an eLORETA volume map.
 
+The 3D volume view uses the detailed fsaverage cortical surface by default.
+For a smoother backdrop, open **Options > Display** and enable **Use smooth shell
+in 3D volume view**. This changes only the anatomy backdrop, including both brains
+in group comparison; source estimates, masks and color limits stay the same.
+
 Choose **Scale: current map** for limits from the displayed map,
 **Scale: all conditions** for shared limits within the selected method and
 summary, or **Scale: fixed limits** to enter a range. Exports use the selected

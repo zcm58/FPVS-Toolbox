@@ -335,7 +335,7 @@ def test_empty_volume_overlay_has_no_actor_or_point_fallback() -> None:
     assert renderer._plotter.added_mesh is None
 
 
-def test_volume_payload_uses_whole_brain_context_while_l2_stays_cortical() -> None:
+def test_volume_defaults_to_pial_with_optional_whole_brain_context_while_l2_stays_cortical() -> None:
     cortical_surface = object()
     whole_brain_surface = object()
     renderer = BrainRendererWidget.__new__(BrainRendererWidget)
@@ -359,6 +359,8 @@ def test_volume_payload_uses_whole_brain_context_while_l2_stays_cortical() -> No
         normalize_values=False,
     )
 
+    assert renderer._base_brain_surface_for_payload(volume_payload) == (cortical_surface, "volume_cortical")
+    renderer._volume_smooth_shell_enabled = True
     assert renderer._base_brain_surface_for_payload(volume_payload) == (
         whole_brain_surface,
         "whole_brain_anatomy",
