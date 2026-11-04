@@ -522,7 +522,7 @@ def test_loreta_manifest_methods_group_source_psd_and_legacy_entries_separately(
         SOURCE_METHOD_ELORETA_VOLUME,
     }
     assert list(groups[SOURCE_METHOD_L2_MNE_SOURCE_PSD].condition_groups) == ["color_response"]
-    assert groups[SOURCE_METHOD_L2_MNE_SOURCE_PSD].label == "L2-MNE cortical source PSD (Hauk-style)"
+    assert groups[SOURCE_METHOD_L2_MNE_SOURCE_PSD].label == "L2-MNE cortical source PSD"
     assert list(groups[SOURCE_METHOD_L2_MNE_SURFACE].condition_groups) == ["color_response"]
     assert list(groups[SOURCE_METHOD_ELORETA_VOLUME_SOURCE_PSD].condition_groups) == [
         "color_response"
@@ -584,7 +584,7 @@ def test_default_project_zscore_manifest_path_requires_existing_manifest(tmp_pat
     assert default_project_zscore_manifest_path(project_root) == manifest_path
 
 
-def test_default_project_source_psd_manifest_path_requires_existing_manifest(tmp_path) -> None:
+def test_default_project_source_psd_manifest_path_requires_verified_current_bundle(tmp_path) -> None:
     project_root = tmp_path / "Project"
     source_psd_dir = default_project_l2_mne_hauk_source_psd_output_dir(project_root)
     source_psd_dir.mkdir(parents=True)
@@ -593,10 +593,10 @@ def test_default_project_source_psd_manifest_path_requires_existing_manifest(tmp
     assert default_project_source_psd_manifest_path(project_root) is None
 
     manifest_path.write_text("{}", encoding="utf-8")
-    assert default_project_source_psd_manifest_path(project_root) == manifest_path
+    assert default_project_source_psd_manifest_path(project_root) is None
 
 
-def test_default_project_eloreta_source_psd_manifest_path_requires_existing_manifest(tmp_path) -> None:
+def test_default_project_eloreta_source_psd_manifest_path_requires_verified_current_bundle(tmp_path) -> None:
     project_root = tmp_path / "Project"
     source_psd_dir = default_project_eloreta_volume_hauk_source_psd_output_dir(project_root)
     source_psd_dir.mkdir(parents=True)
@@ -607,10 +607,10 @@ def test_default_project_eloreta_source_psd_manifest_path_requires_existing_mani
     assert default_project_eloreta_source_psd_manifest_path(project_root) is None
 
     manifest_path.write_text("{}", encoding="utf-8")
-    assert default_project_eloreta_source_psd_manifest_path(project_root) == manifest_path
+    assert default_project_eloreta_source_psd_manifest_path(project_root) is None
 
 
-def test_default_project_source_manifest_paths_returns_current_pair_then_legacy(tmp_path) -> None:
+def test_default_project_source_manifest_paths_does_not_auto_import_unverified_or_legacy(tmp_path) -> None:
     project_root = tmp_path / "Project"
     source_psd_dir = default_project_l2_mne_hauk_source_psd_output_dir(project_root)
     eloreta_source_psd_dir = default_project_eloreta_volume_hauk_source_psd_output_dir(
@@ -635,95 +635,24 @@ def test_default_project_source_manifest_paths_returns_current_pair_then_legacy(
     zscore_manifest.write_text("{}", encoding="utf-8")
     eloreta_manifest.write_text("{}", encoding="utf-8")
 
-    assert default_project_source_manifest_paths(project_root) == (
-        source_psd_manifest,
-        eloreta_source_psd_manifest,
-    )
+    assert default_project_source_manifest_paths(project_root) == ()
 
     source_psd_manifest.unlink()
-    assert default_project_source_manifest_paths(project_root) == (eloreta_source_psd_manifest,)
+    assert default_project_source_manifest_paths(project_root) == ()
 
     eloreta_source_psd_manifest.unlink()
-    assert default_project_source_manifest_paths(project_root) == (zscore_manifest, eloreta_manifest)
+    assert default_project_source_manifest_paths(project_root) == ()
 
 
-def test_loreta_reload_project_source_maps_from_disk_clears_stale_status(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    project_root = tmp_path / "Project"
-    project_root.mkdir()
-    manifest_paths = (
-        project_root / "l2_manifest.json",
-        project_root / "eloreta_manifest.json",
-    )
-    available_paths = [manifest_paths]
-    monkeypatch.setattr(
-        "Tools.LORETA_Visualizer.gui.default_project_source_manifest_paths",
-        lambda root: available_paths[0] if root == project_root else (),
-    )
-    statuses: list[tuple[str, str]] = []
-    imports: list[tuple[tuple[Path, ...], str | None]] = []
+def test_loreta_reload_project_source_maps_schedules_worker_validation(tmp_path: Path) -> None:
+    requests = []
     window = LoretaVisualizerWindow.__new__(LoretaVisualizerWindow)
-    window._auto_project_zscore_attempted = False
-    window._selected_source_method_id = SOURCE_METHOD_ELORETA_VOLUME_SOURCE_PSD
-    window._refresh_project_root = lambda: project_root
-    window._set_source_export_status = (
-        lambda message, *, variant: statuses.append((message, variant))
-    )
-    window._import_prepared_source_manifests = (
-        lambda paths, *, preferred_source_method_id=None: imports.append(
-            (paths, preferred_source_method_id)
-        )
-    )
-
+    window._refresh_project_root = lambda: tmp_path
+    window._start_project_source_discovery = lambda root, **kwargs: requests.append((root, kwargs))
     assert window.reload_project_source_maps_from_disk() is True
+    assert window.reload_project_source_maps_from_disk(invalidate_if_missing=True) is True
+    assert requests == [(tmp_path, {"invalidate_if_missing": False}), (tmp_path, {"invalidate_if_missing": True})]
     assert window._auto_project_zscore_attempted is True
-    assert statuses == [
-        ("Loading newly generated project source-space z-score maps...", "info")
-    ]
-    assert imports == [
-        (manifest_paths, SOURCE_METHOD_ELORETA_VOLUME_SOURCE_PSD)
-    ]
-
-    available_paths[0] = ()
-    statuses.clear()
-    imports.clear()
-    assert window.reload_project_source_maps_from_disk() is False
-    assert statuses == []
-    assert imports == []
-
-
-def test_loreta_pipeline_reload_invalidates_project_map_when_manifest_is_missing(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    project_root = tmp_path / "Project"
-    project_root.mkdir()
-    legacy_manifest = project_root / "legacy_manifest.json"
-    legacy_manifest.write_text("{}", encoding="utf-8")
-    monkeypatch.setattr(
-        "Tools.LORETA_Visualizer.gui.default_project_source_manifest_paths",
-        lambda _root: (legacy_manifest,),
-    )
-    monkeypatch.setattr(
-        "Tools.LORETA_Visualizer.gui.default_project_source_psd_manifest_path",
-        lambda _root: None,
-    )
-    monkeypatch.setattr(
-        "Tools.LORETA_Visualizer.gui.default_project_eloreta_source_psd_manifest_path",
-        lambda _root: None,
-    )
-    invalidations: list[Path | None] = []
-    window = LoretaVisualizerWindow.__new__(LoretaVisualizerWindow)
-    window._refresh_project_root = lambda: project_root
-    window._invalidate_project_source_maps_after_pipeline = invalidations.append
-
-    assert (
-        window.reload_project_source_maps_from_disk(invalidate_if_missing=True)
-        is False
-    )
-    assert invalidations == [project_root]
 
 
 @pytest.mark.parametrize("project_map_loaded", [False, True])

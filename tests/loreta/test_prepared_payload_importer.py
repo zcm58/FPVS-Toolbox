@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 
 import numpy as np
 import pytest
@@ -81,7 +82,11 @@ def test_prepared_source_payload_json_cache_reuses_unchanged_file(monkeypatch, t
     updated_payload = dict(raw_payload)
     updated_payload["label"] = "Updated prepared source payload"
     updated_payload["metadata"] = {"changed": True}
+    previous_stat = payload_path.stat()
     payload_path.write_text(json.dumps(updated_payload) + "\n", encoding="utf-8")
+    # On Windows this rewrite has the same byte size and may land in the same
+    # filesystem clock tick. Make the cache's documented mtime change explicit.
+    os.utime(payload_path, ns=(previous_stat.st_atime_ns, previous_stat.st_mtime_ns + 2_000_000_000))
 
     third = load_prepared_source_payload_json(
         payload_path,

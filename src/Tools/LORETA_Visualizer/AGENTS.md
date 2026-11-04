@@ -58,10 +58,9 @@ renderers continue to consume prepared payloads only.
   L2-MNE beta producer. It consumes signed, repetition-averaged EEG Raw FIF
   derivatives and calls MNE source PSD with `pick_ori="normal"` so the cortical
   surface-normal component is selected before power-to-amplitude conversion,
-  harmonic aggregation, and participant-first z scoring. This orientation
-  estimator matches the Hauk source-spectrum approach more closely than the
-  historical pooled-orientation implementation, without claiming exact study
-  reproduction.
+  harmonic aggregation, and participant-first z scoring. Cortical-normal output
+  is a Toolbox adaptation: Hauk's public 2025 code leaves MNE's pooled orientation
+  default. Do not describe normal output as closer to that executable estimator.
 - `l2_mne_hauk_source_psd_v1` is retained as the explicit legacy L2-MNE mode.
   The Source Map Options GUI may select it for a rebuild to reproduce older
   maps that used MNE's pooled free-orientation source-PSD output. The two modes
@@ -206,6 +205,14 @@ renderers continue to consume prepared payloads only.
 
 ## Retained Display And Fallback Behavior
 
+The [scientific integrity plan](../../../docs/agent/exec-plans/active/loreta-scientific-integrity.md)
+owns the November repair checkpoints. New bundles require transactional
+publication/current-selection integrity; undefined source measurements use
+versioned validity and JSON null on complete-valid source support. Historical
+saved values stay historical. All current cluster masks are exploratory with
+unverified full-pipeline null calibration; retain adaptive-selection and
+per-method/group/condition correction scope in outputs and disclosures.
+
 - Opaque cortical paint is display-only. It may interpolate prepared cortical
   values onto the higher-resolution pial mesh and apply saved masks or a
   user-selected cutoff; it must not alter source values.
@@ -241,10 +248,10 @@ renderers continue to consume prepared payloads only.
   which are the preferred view for anatomical localization. Slice rendering is
   display/export-only, uses prepared points, and standardizes anatomy planes
   across the loaded conditions for the current method/summary/mask state. It
-  must keep the same mask/exploratory filtering as volume display, crop to
-  anatomy bounds, use comparable Gaussian-neighbor smoothing, and surface
-  visible errors when anatomy, template generation, or the all-condition
-  reference is unavailable.
+  must keep the same mask/exploratory filtering as volume display, stable
+  physical anatomy bounds and volume-wide grayscale window, and Gaussian
+  width derived from original source support rather than selected points.
+  Surface visible errors when anatomy or the all-condition reference is absent.
 - Transparent mesh modes use plain alpha blending. Do not re-enable VTK depth
   peeling without visible validation on supported Windows 11 and CachyOS
   (Arch Linux) VTK/graphics stacks;
@@ -260,8 +267,12 @@ renderers continue to consume prepared payloads only.
   `method_info.py` owns explanatory copy and links only.
 - `slice_viewer.py` owns image hit-testing, linked crosshairs, and navigation
   requests. MRI preview rendering/anatomy loading runs in a worker, coalesces
-  pending requests, and discards obsolete results. Plane orientation comes from
-  the MRI affine; voxel-axis numbers must not be treated as anatomical axes.
+  pending requests, and discards obsolete display contexts. Dragging pins the
+  originating plane and moves the local crosshair immediately; compatible
+  progressive frames must not restore an older requested cursor. Navigation reuses
+  scale/reference settings and a bounded worker-owned preview cache; context
+  changes replace the cache and publication exports stay uncached. Plane
+  orientation comes from the MRI affine; voxel-axis numbers are not anatomical axes.
 - `source_producers/model_diagnostics.py` copies computable inverse/input facts
   into existing reports; absence of interpolation provenance is not evidence of
   no interpolation, and inverse covariance must not be called participant data
@@ -318,10 +329,10 @@ renderers continue to consume prepared payloads only.
 - Prepared display meshes may be cached under
   `.fpvs_cache/loreta_visualizer/meshes/`, keyed by source fingerprints,
   surface, decimation, and schema.
-- MRI slice display requires cached `fsaverage/mri/brain.mgz` and retains its
-  visualizer-only 0.5 mm display template under
-  `.fpvs_cache/loreta_visualizer/mri_templates/`. That underlay must never
-  replace or mutate fsaverage or become a producer/toolbox dependency.
+- MRI slices prefer native cached `fsaverage/mri/T1.mgz`, with `brain.mgz`
+  fallback, using each file's tkregister affine. Do not fabricate detail in an
+  averaged atlas. Preserve historical 0.5 mm display caches but do not generate
+  or use them in normal viewing; anatomy never changes source support.
 - Project source exports stay under the active project root and reject silent
   output escapes. Do not write visualizer settings or source outputs into
   `project.json` unless a future plan explicitly scopes that migration.
@@ -343,6 +354,12 @@ renderers continue to consume prepared payloads only.
   limits apply only to the selected method and exact summary; never substitute
   a different summary. Preview and comparison export use the same limits.
   Use Matplotlib viridis for the current positive source displays.
+- Live group comparison pairs exactly two explicit canonical groups for one
+  condition, numerical method and exact summary. Resolve identity from prepared
+  metadata and the public project group context, never labels or filenames.
+  Share limits and controls across both 3D panes; separate saved masks remain
+  within-group masks, not a between-group test. Missing or ambiguous pairs must
+  not fall back. Load in workers; unlink cameras and stop work on close/exit.
 - Source-build cancellation checks run before participant calculations and
   before publication. Finish an already-started method publication intact;
   retain completed sibling methods. Never terminate a running worker thread.

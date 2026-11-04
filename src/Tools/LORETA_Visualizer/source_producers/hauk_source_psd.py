@@ -16,6 +16,8 @@ import numpy as np
 from scipy.fft import rfft
 from scipy.signal import get_window
 
+from Tools.LORETA_Visualizer.source_producers.source_validity import SOURCE_VALIDITY_POLICY
+
 HAUK_SOURCE_PSD_METHOD_ID = "l2_mne_hauk_source_psd_v1"
 HAUK_SOURCE_PSD_CORTICAL_NORMAL_METHOD_ID = "l2_mne_hauk_source_psd_cortical_normal_v1"
 HAUK_SOURCE_PSD_METHOD_VERSION = "hauk_source_psd_v1"
@@ -110,6 +112,7 @@ class HaukSourcePsdConfig:
         return {
             "method_id": self.method_id,
             "method_version": HAUK_SOURCE_PSD_METHOD_VERSION,
+            "source_validity_policy": SOURCE_VALIDITY_POLICY,
             "reference_publication_doi": HAUK_2021_REFERENCE_DOI,
             "reference_code_repository": HAUK_REFERENCE_CODE_URL,
             "reference_method_relation": (
@@ -186,6 +189,7 @@ class HaukSourcePsdZScoreResult:
     noise_std_values: np.ndarray
     noise_values_after_extreme_drop: np.ndarray
     zero_noise_sd_source_count: int
+    valid_source_mask: np.ndarray | None = None
 
 
 @dataclass(frozen=True)
@@ -365,9 +369,9 @@ def compute_hauk_source_zscores(
     valid = np.isfinite(noise_std) & (noise_std > scale * relative_tolerance)
     if not np.any(valid):
         raise ValueError("No source points have a finite, non-zero neighboring-bin noise SD.")
-    z_values = np.zeros_like(target, dtype=float)
+    z_values = np.full_like(target, np.nan, dtype=float)
     z_values[valid] = (target[valid] - noise_mean[valid]) / noise_std[valid]
-    if not np.all(np.isfinite(z_values)):
+    if not np.all(np.isfinite(z_values[valid])):
         raise ValueError("Hauk source-PSD z-scoring produced non-finite values.")
     return HaukSourcePsdZScoreResult(
         values=z_values,
@@ -376,6 +380,7 @@ def compute_hauk_source_zscores(
         noise_std_values=noise_std.astype(float),
         noise_values_after_extreme_drop=retained_noise.astype(float),
         zero_noise_sd_source_count=int(np.count_nonzero(~valid)),
+        valid_source_mask=valid.copy(),
     )
 
 

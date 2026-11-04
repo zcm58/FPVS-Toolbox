@@ -25,6 +25,11 @@ from Tools.LORETA_Visualizer.prepared_payload_validator import (
     validate_prepared_source_manifest_json,
 )
 from Tools.LORETA_Visualizer.source_producers.contracts import SourceProducerRunResult
+from Tools.LORETA_Visualizer.source_producers.project_source_publication import (
+    source_bundle_identity,
+    source_project_cohort_snapshot,
+    stage_source_bundle,
+)
 from Tools.LORETA_Visualizer.source_producers.eloreta_volume import (
     DEFAULT_CLUSTER_ALPHA,
     DEFAULT_CLUSTER_FORMING_P_VALUE,
@@ -91,7 +96,7 @@ from Tools.LORETA_Visualizer.source_producers.source_psd_cache import (
 from Tools.LORETA_Visualizer.source_producers.source_validation_report import (
     write_project_source_validation_report,
 )
-from Tools.LORETA_Visualizer.source_producers.model_diagnostics import summarize_inverse_model
+from Tools.LORETA_Visualizer.source_producers.model_diagnostics import summarize_inverse_model, summarize_recorded_data_rank
 
 logger = logging.getLogger(__name__)
 
@@ -210,6 +215,7 @@ def write_project_eloreta_volume_hauk_source_psd_payloads(
     cluster_permutation_seed: int = DEFAULT_CLUSTER_PERMUTATION_SEED,
     progress_callback: ProgressCallback | None = None,
     cancellation_callback: Callable[[], None] | None = None,
+    build_batch_id: str | None = None,
 ) -> ProjectELORETAVolumeHaukSourcePsdExportResult:
     """Build time-domain eLORETA participant and group volume maps."""
 
@@ -220,6 +226,9 @@ def write_project_eloreta_volume_hauk_source_psd_payloads(
         project_root=project_root,
     )
     resolved_output = _project_output_dir(root, output_dir)
+    cohort_snapshot = source_project_cohort_snapshot(
+        root, include_flagged_subjects=include_flagged_subjects, project=project,
+    )
     _emit_progress(progress_callback, "Reading completed processing-ledger participants...")
     input_plan = build_project_hauk_source_psd_input_plan(
         project,
@@ -339,6 +348,7 @@ def write_project_eloreta_volume_hauk_source_psd_payloads(
     frequency_metadata = frequency_plan.to_metadata()
     cache_hit_count = 0
     cache_miss_count = 0
+    participant_data_rank_diagnostics: list[dict[str, Any]] = []
     source_count = len(model.forward_model.source_points)
 
     for index, record in enumerate(project_inputs.records, start=1):
@@ -363,6 +373,7 @@ def write_project_eloreta_volume_hauk_source_psd_payloads(
         )
         if lookup.hit:
             cache_hit_count += 1
+            rank_diagnostic = dict(lookup.result.metadata.get("source_ready_data_rank", {"participant_data_rank_status": "not_measured"}))
             participant_values = _participant_values_from_cache(
                 lookup.result,
                 participant_id=record.participant_id,
@@ -371,6 +382,7 @@ def write_project_eloreta_volume_hauk_source_psd_payloads(
         else:
             cache_miss_count += 1
             with load_project_time_domain_raw(record) as raw:
+                rank_diagnostic = summarize_recorded_data_rank(raw, expected_info=model.info)
                 source_psd_result = compute_hauk_source_psd(
                     averaged_raw=raw,
                     inverse_operator=model.inverse_operator,
@@ -389,8 +401,15 @@ def write_project_eloreta_volume_hauk_source_psd_payloads(
                     participant_values,
                     record=record,
                     source_psd_result=source_psd_result,
+                    source_ready_data_rank=rank_diagnostic,
                 ),
             )
+        participant_data_rank_diagnostics.append({
+            "participant_id": record.participant_id,
+            "group_id": record.group_id,
+            "condition_id": record.condition_id,
+            "source_ready_data_rank": rank_diagnostic,
+        })
         rows_by_condition[record.condition_id].append(participant_values)
 
     prepared_conditions = _precomputed_conditions(
@@ -440,121 +459,146 @@ def write_project_eloreta_volume_hauk_source_psd_payloads(
         },
     )
 
-    _emit_progress(
-        progress_callback,
-        "Writing participant and group eLORETA volume source-PSD payloads...",
-    )
-    if cancellation_callback is not None:
-        cancellation_callback()
-    participant_result = write_eloreta_volume_precomputed_participant_zscore_payloads(
-        forward_model=model.forward_model,
-        conditions=prepared_conditions,
-        config=output_config,
-        output_dir=resolved_output,
-        manifest_name=(DEFAULT_PROJECT_ELORETA_VOLUME_HAUK_SOURCE_PSD_MANIFEST_NAME),
-        aggregations=aggregations,
-        trim_fraction=trim_fraction,
-        progress_callback=progress_callback,
-    )
-    enrich_project_hauk_source_psd_provenance(
-        manifest_path=participant_result.producer_result.manifest_path,
-        participant_sidecar_path=participant_result.participant_sidecar_path,
-        output_dir=participant_result.producer_result.output_dir,
-        method_metadata=method_metadata,
-        conditions=prepared_conditions,
-        included_participants=input_plan.participants,
-        excluded_subjects=input_plan.participant_selection.excluded_subjects,
-        flagged_subjects=input_plan.participant_selection.flagged_subjects,
-        source_ineligible_participants=input_plan.source_ineligible_participants,
-        source_condition_omissions=input_plan.source_condition_omissions,
-        source_sample_count_n_times=project_inputs.n_times,
-        source_sample_count_omission_count=sampling_omission_count,
-    )
-    producer_result = SourceProducerRunResult(
-        method_id=participant_result.producer_result.method_id,
-        output_dir=participant_result.producer_result.output_dir,
-        manifest_path=participant_result.producer_result.manifest_path,
-        payloads=participant_result.producer_result.payloads,
-        manifest_validation=validate_prepared_source_manifest_json(
-            participant_result.producer_result.manifest_path,
-            require_payload_files=True,
-        ),
-    )
+    with stage_source_bundle(root, resolved_output, "eloreta_volume_source_psd") as publication:
+        _emit_progress(
+            progress_callback,
+            "Writing participant and group eLORETA volume source-PSD payloads...",
+        )
+        if cancellation_callback is not None:
+            cancellation_callback()
+        participant_result = write_eloreta_volume_precomputed_participant_zscore_payloads(
+            forward_model=model.forward_model,
+            conditions=prepared_conditions,
+            config=output_config,
+            output_dir=publication.output_dir,
+            manifest_name=(DEFAULT_PROJECT_ELORETA_VOLUME_HAUK_SOURCE_PSD_MANIFEST_NAME),
+            aggregations=aggregations,
+            trim_fraction=trim_fraction,
+            progress_callback=progress_callback,
+        )
+        enrich_project_hauk_source_psd_provenance(
+            manifest_path=participant_result.producer_result.manifest_path,
+            participant_sidecar_path=participant_result.participant_sidecar_path,
+            output_dir=participant_result.producer_result.output_dir,
+            method_metadata=method_metadata,
+            conditions=prepared_conditions,
+            included_participants=input_plan.participants,
+            excluded_subjects=input_plan.participant_selection.excluded_subjects,
+            flagged_subjects=input_plan.participant_selection.flagged_subjects,
+            source_ineligible_participants=input_plan.source_ineligible_participants,
+            source_condition_omissions=input_plan.source_condition_omissions,
+            source_sample_count_n_times=project_inputs.n_times,
+            source_sample_count_omission_count=sampling_omission_count,
+        )
+        producer_result = SourceProducerRunResult(
+            method_id=participant_result.producer_result.method_id,
+            output_dir=participant_result.producer_result.output_dir,
+            manifest_path=participant_result.producer_result.manifest_path,
+            payloads=participant_result.producer_result.payloads,
+            manifest_validation=validate_prepared_source_manifest_json(
+                participant_result.producer_result.manifest_path,
+                require_payload_files=True,
+            ),
+        )
 
-    _emit_progress(progress_callback, "Writing eLORETA source-validation report...")
-    validation_inputs = _ValidationReportInputs(
-        project_root=root,
-        selected_harmonics_hz=source_psd_config.selected_harmonics_hz,
-        conditions=prepared_conditions,
-        excluded_subjects=input_plan.participant_selection.excluded_subjects,
-        flagged_subjects=input_plan.participant_selection.flagged_subjects,
-        source_ineligible_participants=tuple(item.to_metadata() for item in input_plan.source_ineligible_participants),
-        source_condition_omissions=tuple(item.to_metadata() for item in input_plan.source_condition_omissions),
-        diagnostics=(
-            f"validated_time_domain_derivatives={len(project_inputs.records)}",
-            f"included_participants={len(input_plan.participants)}",
-            f"source_ineligible_participants={len(input_plan.source_ineligible_participants)}",
-            f"source_condition_omissions={len(input_plan.source_condition_omissions)}",
-            "source_sample_count_selection_policy="
-            + SOURCE_SAMPLE_COUNT_SELECTION_POLICY,
-            f"source_sample_count_n_times={project_inputs.n_times}",
-            f"source_sample_count_omissions={sampling_omission_count}",
-            f"prepared_group_conditions={len(prepared_conditions)}",
-            f"cache_hits={cache_hit_count}",
-            f"cache_misses={cache_miss_count}",
-            "inverse_method=eLORETA",
-            "legacy_fullfft_fallback=forbidden",
-        ),
-        bin_plan=_ValidationBinPlan(
-            frequency_resolution_hz=project_inputs.frequency_resolution_hz,
-        ),
-        summaries=tuple(
-            _ValidationConditionSummary(
-                condition=condition.label,
-                input_file_count=len(condition.participant_values),
-                workbook_count=0,
-                included_subject_count=len(condition.participant_values),
-                included_subjects=tuple(row.participant_id for row in condition.participant_values),
-                flagged_subjects=tuple(
-                    row.participant_id
-                    for row in condition.participant_values
-                    if row.participant_id in input_plan.participant_selection.flagged_subjects
-                ),
-            )
-            for condition in prepared_conditions
-        ),
-    )
-    validation_report = write_project_source_validation_report(
-        output_dir=producer_result.output_dir,
-        manifest_path=producer_result.manifest_path,
-        payloads=producer_result.payloads,
-        project_inputs=validation_inputs,
-        export_model=METHOD_ID_ELORETA_VOLUME_HAUK_SOURCE_PSD_VECTOR_NORM_V1,
-        participant_sidecar_path=participant_result.participant_sidecar_path,
-        lateralization_summary_path=None,
-        lateralization_summary_csv_path=None,
-        forward_model_metadata=dict(model.forward_model.metadata),
-        inverse_model_diagnostics=summarize_inverse_model(model.info, model.inverse_operator),
-        time_domain_records=project_inputs.records,
-    )
-    result = ProjectELORETAVolumeHaukSourcePsdExportResult(
-        project_inputs=project_inputs,
-        producer_result=producer_result,
-        forward_model=model.forward_model,
-        selected_harmonics_hz=source_psd_config.selected_harmonics_hz,
-        processing_fingerprint=input_plan.processing_fingerprint,
-        processing_fingerprint_version=input_plan.processing_fingerprint_version,
-        included_participants=input_plan.participants,
-        excluded_subjects=input_plan.participant_selection.excluded_subjects,
-        flagged_subjects=input_plan.participant_selection.flagged_subjects,
-        source_ineligible_participants=input_plan.source_ineligible_participants,
-        source_condition_omissions=input_plan.source_condition_omissions,
-        cache_hit_count=cache_hit_count,
-        cache_miss_count=cache_miss_count,
-        participant_sidecar_path=participant_result.participant_sidecar_path,
-        validation_report_path=validation_report.json_path,
-        validation_report_markdown_path=validation_report.markdown_path,
-    )
+        _emit_progress(progress_callback, "Writing eLORETA source-validation report...")
+        validation_inputs = _ValidationReportInputs(
+            project_root=root,
+            selected_harmonics_hz=source_psd_config.selected_harmonics_hz,
+            conditions=prepared_conditions,
+            excluded_subjects=input_plan.participant_selection.excluded_subjects,
+            flagged_subjects=input_plan.participant_selection.flagged_subjects,
+            source_ineligible_participants=tuple(item.to_metadata() for item in input_plan.source_ineligible_participants),
+            source_condition_omissions=tuple(item.to_metadata() for item in input_plan.source_condition_omissions),
+            diagnostics=(
+                f"validated_time_domain_derivatives={len(project_inputs.records)}",
+                f"included_participants={len(input_plan.participants)}",
+                f"source_ineligible_participants={len(input_plan.source_ineligible_participants)}",
+                f"source_condition_omissions={len(input_plan.source_condition_omissions)}",
+                "source_sample_count_selection_policy="
+                + SOURCE_SAMPLE_COUNT_SELECTION_POLICY,
+                f"source_sample_count_n_times={project_inputs.n_times}",
+                f"source_sample_count_omissions={sampling_omission_count}",
+                f"prepared_group_conditions={len(prepared_conditions)}",
+                f"cache_hits={cache_hit_count}",
+                f"cache_misses={cache_miss_count}",
+                "inverse_method=eLORETA",
+                "legacy_fullfft_fallback=forbidden",
+            ),
+            bin_plan=_ValidationBinPlan(
+                frequency_resolution_hz=project_inputs.frequency_resolution_hz,
+            ),
+            summaries=tuple(
+                _ValidationConditionSummary(
+                    condition=condition.label,
+                    input_file_count=len(condition.participant_values),
+                    workbook_count=0,
+                    included_subject_count=len(condition.participant_values),
+                    included_subjects=tuple(row.participant_id for row in condition.participant_values),
+                    flagged_subjects=tuple(
+                        row.participant_id
+                        for row in condition.participant_values
+                        if row.participant_id in input_plan.participant_selection.flagged_subjects
+                    ),
+                )
+                for condition in prepared_conditions
+            ),
+        )
+        validation_report = write_project_source_validation_report(
+            output_dir=producer_result.output_dir,
+            manifest_path=producer_result.manifest_path,
+            payloads=producer_result.payloads,
+            project_inputs=validation_inputs,
+            export_model=METHOD_ID_ELORETA_VOLUME_HAUK_SOURCE_PSD_VECTOR_NORM_V1,
+            participant_sidecar_path=participant_result.participant_sidecar_path,
+            lateralization_summary_path=None,
+            lateralization_summary_csv_path=None,
+            forward_model_metadata=dict(model.forward_model.metadata),
+            inverse_model_diagnostics=summarize_inverse_model(model.info, model.inverse_operator),
+            time_domain_records=project_inputs.records,
+            participant_data_rank_diagnostics=participant_data_rank_diagnostics,
+        )
+        result = ProjectELORETAVolumeHaukSourcePsdExportResult(
+            project_inputs=project_inputs,
+            producer_result=producer_result,
+            forward_model=model.forward_model,
+            selected_harmonics_hz=source_psd_config.selected_harmonics_hz,
+            processing_fingerprint=input_plan.processing_fingerprint,
+            processing_fingerprint_version=input_plan.processing_fingerprint_version,
+            included_participants=input_plan.participants,
+            excluded_subjects=input_plan.participant_selection.excluded_subjects,
+            flagged_subjects=input_plan.participant_selection.flagged_subjects,
+            source_ineligible_participants=input_plan.source_ineligible_participants,
+            source_condition_omissions=input_plan.source_condition_omissions,
+            cache_hit_count=cache_hit_count,
+            cache_miss_count=cache_miss_count,
+            participant_sidecar_path=participant_result.participant_sidecar_path,
+            validation_report_path=validation_report.json_path,
+            validation_report_markdown_path=validation_report.markdown_path,
+        )
+        result = publication.publish(
+            result,
+            identity=source_bundle_identity(
+                project_inputs=project_inputs,
+                harmonic_metadata=harmonic_metadata,
+                include_flagged_subjects=include_flagged_subjects,
+                method_id=source_psd_config.method_id,
+                cohort_snapshot=cohort_snapshot,
+                method_options={
+                    "source_psd": method_metadata,
+                    "model": numerical_model_metadata,
+                    "aggregations": list(aggregations),
+                    "trim_fraction": trim_fraction,
+                    "cluster_mask_enabled": cluster_mask_enabled,
+                    "cluster_forming_p_value": cluster_forming_p_value,
+                    "cluster_alpha": cluster_alpha,
+                    "cluster_permutation_count": cluster_permutation_count,
+                    "cluster_permutation_seed": cluster_permutation_seed,
+                },
+                build_batch_id=build_batch_id,
+            ),
+            cancellation_callback=cancellation_callback,
+        )
     logger.info(
         "project_eloreta_volume_hauk_source_psd_payloads_written",
         extra={
@@ -732,6 +776,7 @@ def _participant_values_from_source_psd(
         noise_std_values=np.asarray(result.zscore.noise_std_values, dtype=float),
         noise_offsets_used=DEFAULT_HAUK_SOURCE_PSD_NOISE_OFFSETS,
         zero_noise_sd_source_count=result.zscore.zero_noise_sd_source_count,
+        valid_source_mask=result.zscore.valid_source_mask.copy(),
     )
 
 
@@ -753,6 +798,7 @@ def _participant_values_from_cache(
         noise_std_values=cached.noise_std_values.copy(),
         noise_offsets_used=cached.noise_offsets_used,
         zero_noise_sd_source_count=cached.zero_noise_sd_source_count,
+        valid_source_mask=cached.valid_source_mask.copy() if cached.valid_source_mask is not None else None,
     )
 
 
@@ -761,6 +807,7 @@ def _cache_result(
     *,
     record: ProjectTimeDomainInputRecord,
     source_psd_result: HaukSourcePsdResult,
+    source_ready_data_rank: Mapping[str, Any],
 ) -> SourcePsdParticipantResult:
     return SourcePsdParticipantResult(
         participant_id=values.participant_id,
@@ -770,7 +817,9 @@ def _cache_result(
         noise_std_values=values.noise_std_values,
         noise_offsets_used=values.noise_offsets_used,
         zero_noise_sd_source_count=values.zero_noise_sd_source_count,
+        valid_source_mask=values.valid_source_mask,
         metadata={
+            "source_ready_data_rank": dict(source_ready_data_rank),
             "participant_id": record.participant_id,
             "group_id": record.group_id,
             "condition_id": record.condition_id,

@@ -110,6 +110,49 @@ def test_source_lateralization_writer_emits_json_and_csv(tmp_path) -> None:
     assert csv_rows[0]["lateralization_index_sum"] == "0.5"
 
 
+def test_unmasked_roi_means_use_absolute_values_common_support_and_ignore_cluster_mask() -> None:
+    participants = (
+        _ParticipantMap("P1", np.array([-2., 6., 100., -4.])),
+        _ParticipantMap("P2", np.array([4., -8., np.nan, 6.])),
+    )
+    arguments = dict(
+        source_points=[[-1., 0., 0.], [-2., 0., 0.], [1., 0., 0.], [2., 0., 0.]],
+        condition_id="condition", condition_label="Condition", participant_values=participants,
+        group_summaries=(), roi_ids=(SOURCE_LATERALIZATION_ROI_WHOLE_HEMISPHERE,),
+    )
+    masked = build_source_lateralization_rows(**arguments, cluster_mask=[False, True, True, False])
+    unmasked = build_source_lateralization_rows(**arguments, cluster_mask=None)
+    for row_index, row in enumerate(masked):
+        assert row["left_valid_source_count"] == 2
+        assert row["right_roi_source_count"] == 2
+        assert row["right_valid_source_count"] == 1
+        assert row["interpretation"] == "descriptive_only_no_hemisphere_or_group_test"
+        for key in ("left_unmasked_mean_absolute_z", "right_unmasked_mean_absolute_z"):
+            assert row[key] == unmasked[row_index][key]
+    assert masked[0]["left_unmasked_mean_absolute_z"] == 4.
+    assert masked[0]["right_unmasked_mean_absolute_z"] == 4.
+    assert masked[0]["right_minus_left_unmasked_mean_absolute_z"] == 0.
+    assert masked[1]["left_unmasked_mean_absolute_z"] == 6.
+    assert masked[1]["right_unmasked_mean_absolute_z"] == 6.
+
+
+def test_unmasked_roi_without_valid_support_stays_missing() -> None:
+    rows = build_source_lateralization_rows(
+        source_points=[[-1., 0., 0.], [1., 0., 0.]], condition_id="c", condition_label="C",
+        participant_values=(_ParticipantMap("P1", np.array([np.nan, 4.])),),
+        group_summaries=(), cluster_mask=None, roi_ids=(SOURCE_LATERALIZATION_ROI_WHOLE_HEMISPHERE,),
+    )
+    assert rows[0]["left_unmasked_mean_absolute_z"] is None
+    assert rows[0]["right_minus_left_unmasked_mean_absolute_z"] is None
+    assert rows[0]["right_unmasked_mean_absolute_z"] == 4.
+    assert rows[0]["left_sum_positive_z"] is None
+    assert rows[0]["right_sum_positive_z"] == 4.
+    assert rows[0]["right_minus_left_sum_positive_z"] is None
+    assert rows[0]["lateralization_index_sum"] is None
+    assert rows[0]["dominant_hemisphere"] == "none"
+    assert rows[0]["comparison_status"] == "missing_roi_support"
+
+
 def test_source_lateralization_emits_precomputed_desikan_killiany_roi_first() -> None:
     rows = build_source_lateralization_rows(
         source_points=np.asarray(

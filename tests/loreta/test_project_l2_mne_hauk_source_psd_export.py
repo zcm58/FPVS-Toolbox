@@ -10,6 +10,8 @@ import mne
 import numpy as np
 import pytest
 
+from Tools.LORETA_Visualizer.source_producers.source_psd_cache import SOURCE_PSD_CACHE_RELATIVE_ROOT
+
 from Tools.LORETA_Visualizer.source_producers import project_time_domain_inputs as time_inputs
 
 from config import DEFAULT_ELECTRODE_NAMES_64
@@ -52,6 +54,29 @@ import Tools.LORETA_Visualizer.source_producers.project_source_psd_inputs as inp
 SFREQ = 200.0
 N_TIMES = 200
 PROCESSING_FINGERPRINT = "f" * 64
+
+
+def test_failed_source_report_preserves_complete_previous_bundle(tmp_path, monkeypatch):
+    project = _project_with_ledger(tmp_path, participants=("P01",))
+    _write_time_domain_derivative(project.project_root, participant_id="P01")
+    kwargs = dict(
+        project=project,
+        source_psd_model=_source_psd_model(),
+        selected_harmonics_hz=(20.0,),
+        compute_source_psd_func=_source_psd_callable([]),
+        cluster_mask_enabled=False,
+    )
+    previous = write_project_l2_mne_hauk_source_psd_payloads(**kwargs, aggregations=("mean",))
+    before = {p.relative_to(previous.output_dir): p.read_bytes() for p in previous.output_dir.rglob("*") if p.is_file()}
+
+    def fail_report(**_kwargs):
+        raise OSError("injected report failure")
+
+    monkeypatch.setattr(export_module, "write_project_source_validation_report", fail_report)
+    with pytest.raises(OSError, match="injected report failure"):
+        write_project_l2_mne_hauk_source_psd_payloads(**kwargs, aggregations=("mean", "median"))
+    after = {p.relative_to(previous.output_dir): p.read_bytes() for p in previous.output_dir.rglob("*") if p.is_file()}
+    assert after == before
 
 
 def test_source_aligned_leadfield_collapses_only_the_display_descriptor() -> None:
@@ -120,6 +145,7 @@ def test_project_source_psd_export_streams_inputs_writes_payloads_and_reuses_cac
 
     assert first.manifest_path.name == DEFAULT_PROJECT_HAUK_SOURCE_PSD_MANIFEST_NAME
     assert first.manifest_path.is_file()
+    assert all(b".staging-" not in path.read_bytes() for path in first.output_dir.rglob("*") if path.is_file())
     assert first.participant_sidecar_path.is_file()
     assert first.validation_report_path is not None and first.validation_report_path.is_file()
     assert first.validation_report_markdown_path is not None and first.validation_report_markdown_path.is_file()
@@ -164,6 +190,9 @@ def test_project_source_psd_export_streams_inputs_writes_payloads_and_reuses_cac
     assert input_provenance["participant_id"] == "P01"
     assert input_provenance["reference"]["projections"][0]["active"] is True
     assert input_provenance["interpolation_provenance_status"] == "not_recorded"
+    rank = input_provenance["source_ready_data_rank"]
+    assert rank["participant_data_rank_status"] == "measured_source_ready_derivative"
+    assert rank["model_reference_status"] == "matching_projection_operator"
 
     cold_values = payload["values"]
     assert reads == [(False, False), (True, True)]
@@ -189,6 +218,8 @@ def test_project_source_psd_export_streams_inputs_writes_payloads_and_reuses_cac
     warm_manifest = json.loads(second.manifest_path.read_text(encoding="utf-8"))
     warm_payload = json.loads((second.output_dir / warm_manifest["conditions"][0]["file"]).read_text(encoding="utf-8"))
     assert warm_payload["values"] == cold_values
+    warm_report = json.loads(second.validation_report_path.read_text(encoding="utf-8"))
+    assert warm_report["input_model_provenance"][0]["source_ready_data_rank"] == rank
 
     # A warm result never bypasses the committed derivative checksum check.
     record = second.project_inputs.records[0]
@@ -347,7 +378,7 @@ def test_project_source_psd_orientation_modes_have_distinct_methods_and_caches(
     assert pick_ori_calls == ["normal", None]
 
     cache_metadata_paths = sorted(
-        (project.project_root / ".fpvs_processing" / "source_psd_cache" / "v1").glob("*.json")
+        (project.project_root / SOURCE_PSD_CACHE_RELATIVE_ROOT).glob("*.json")
     )
     assert len(cache_metadata_paths) == 2
     cached_methods = {
@@ -438,7 +469,7 @@ def test_project_source_psd_export_loads_harmonics_from_the_active_project(
     assert seen_projects == [project]
     assert result.selected_harmonics_hz == (20.0,)
     cache_metadata = json.loads(
-        next((project.project_root / ".fpvs_processing" / "source_psd_cache" / "v1").glob("*.json")).read_text(
+        next((project.project_root / SOURCE_PSD_CACHE_RELATIVE_ROOT).glob("*.json")).read_text(
             encoding="utf-8"
         )
     )
@@ -1196,6 +1227,9 @@ def _source_psd_model() -> MneFsaverageSourcePsdModel:
     )
     info = mne.create_info(list(DEFAULT_ELECTRODE_NAMES_64), sfreq=SFREQ, ch_types="eeg")
     info.set_montage("biosemi64", on_missing="raise")
+    reference_probe = mne.EvokedArray(np.zeros((len(info["ch_names"]), 1)), info, verbose=False)
+    reference_probe.set_eeg_reference("average", projection=True, verbose=False)
+    info = reference_probe.info
     return MneFsaverageSourcePsdModel(
         forward_model=forward,
         info=info,

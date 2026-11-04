@@ -49,6 +49,7 @@ class SourceSpaceClusterPermutationResult:
     permutation_count_requested: int
     permutation_mode: str
     minimum_attainable_p: float
+    valid_source_mask: np.ndarray | None = None
 
     @property
     def significant_clusters(self) -> tuple[SourceSpaceCluster, ...]:
@@ -61,11 +62,11 @@ def participant_zscore_matrix(participant_values: Sequence[Any]) -> np.ndarray:
     rows = tuple(participant_values)
     if len(rows) < 2:
         raise ValueError("Source-space cluster permutation requires at least two participant maps.")
-    matrix = np.vstack([np.asarray(row.values, dtype=float).reshape(1, -1) for row in rows])
+    from .source_validity import complete_valid_source_support
+
+    matrix, _support = complete_valid_source_support(rows)
     if matrix.ndim != 2 or matrix.shape[1] == 0:
         raise ValueError("Participant source z-score matrix must be participants x source_points.")
-    if not np.all(np.isfinite(matrix)):
-        raise ValueError("Participant source z-score matrix contains non-finite values.")
     return matrix.astype(float)
 
 
@@ -80,7 +81,12 @@ def compute_source_space_cluster_permutation_mask(
     tail: str = CLUSTER_TAIL_POSITIVE,
 ) -> SourceSpaceClusterPermutationResult:
     """Compute a source-space sign-flip max-cluster-mass mask."""
-    matrix = participant_zscore_matrix(participant_values)
+    from .source_validity import complete_valid_source_support
+
+    rows = tuple(participant_values)
+    if len(rows) < 2:
+        raise ValueError("Source-space cluster permutation requires at least two participant maps.")
+    matrix, support = complete_valid_source_support(rows)
     requested_count = int(permutation_count)
     if requested_count < 1:
         raise ValueError("Cluster permutation count must be at least 1.")
@@ -88,7 +94,13 @@ def compute_source_space_cluster_permutation_mask(
         raise ValueError("Cluster alpha must be > 0 and < 1.")
     source_count = matrix.shape[1]
     normalized_adjacency = validate_adjacency(adjacency, source_count=source_count)
-    observed_t = one_sample_t_values(matrix)
+    # An excluded vertex cannot bridge clusters. Keep full source index identity.
+    normalized_adjacency = tuple(
+        {neighbor for neighbor in neighbors if support[neighbor]} if support[index] else set()
+        for index, neighbors in enumerate(normalized_adjacency)
+    )
+    observed_t = np.full(source_count, np.nan)
+    observed_t[support] = one_sample_t_values(matrix[:, support])
     threshold = cluster_forming_t_threshold(
         participant_count=matrix.shape[0],
         p_value=cluster_forming_p_value,
@@ -106,6 +118,7 @@ def compute_source_space_cluster_permutation_mask(
         "permutation_count_requested": requested_count,
         "permutation_mode": "exact" if exact else "sampled",
         "minimum_attainable_p": float(minimum_p),
+        "valid_source_mask": support.copy(),
     }
     observed_clusters = signed_cluster_components(
         observed_t,
@@ -136,6 +149,7 @@ def compute_source_space_cluster_permutation_mask(
         tail=cluster_tail,
         permutation_count=int(permutation_count),
         seed=int(permutation_seed),
+        valid_source_mask=support,
     )
     clusters: list[SourceSpaceCluster] = []
     mask = empty_mask.copy()
@@ -187,7 +201,9 @@ def cluster_permutation_p_value(observed_mass: float, null_max_masses: np.ndarra
 
 def cluster_inference_metadata(result: Any) -> dict[str, Any]:
     """Serialize shared inferential provenance without changing source identity."""
-    return {
+    from .inference_qualification import source_inference_qualification_metadata
+
+    metadata = {
         "cluster_mask_algorithm_version": CLUSTER_MASK_ALGORITHM_VERSION,
         "cluster_mask_participant_count": int(result.participant_count),
         "cluster_permutation_count_requested": int(result.permutation_count_requested),
@@ -196,7 +212,17 @@ def cluster_inference_metadata(result: Any) -> dict[str, Any]:
             "exact_tail_proportion" if result.permutation_mode == "exact" else "monte_carlo_plus_one"
         ),
         "cluster_minimum_attainable_p": float(result.minimum_attainable_p),
+        **source_inference_qualification_metadata(),
     }
+    support = getattr(result, "valid_source_mask", None)
+    if support is not None:
+        support = np.asarray(support, dtype=bool)
+        metadata.update({
+            "cluster_source_support_policy": "complete_valid_support_all_cohort_participants",
+            "cluster_tested_source_count": int(np.count_nonzero(support)),
+            "cluster_unsupported_source_indices": np.flatnonzero(~support).tolist(),
+        })
+    return metadata
 
 
 def adjacency_from_triangular_faces(faces: np.ndarray, *, source_count: int) -> tuple[set[int], ...]:
@@ -300,13 +326,16 @@ def permutation_max_cluster_masses(
     tail: str,
     permutation_count: int,
     seed: int,
+    valid_source_mask: np.ndarray | None = None,
 ) -> np.ndarray:
     """Return null max-cluster masses from sign-flipped participant maps."""
     values = np.asarray(matrix, dtype=float)
+    support = np.ones(values.shape[1], dtype=bool) if valid_source_mask is None else np.asarray(valid_source_mask, dtype=bool)
     masses: list[float] = []
     for signs in sign_flip_vectors(values.shape[0], permutation_count=permutation_count, seed=seed):
-        signed = values * signs[:, np.newaxis]
-        t_values = one_sample_t_values(signed)
+        signed = values[:, support] * signs[:, np.newaxis]
+        t_values = np.full(values.shape[1], np.nan)
+        t_values[support] = one_sample_t_values(signed)
         clusters = signed_cluster_components(t_values, threshold=threshold, adjacency=adjacency, tail=tail)
         if clusters:
             masses.append(

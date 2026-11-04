@@ -6,6 +6,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from Tools.LORETA_Visualizer.source_validity_contract import declared_source_validity
+
 from Tools.LORETA_Visualizer.source_payloads import SOURCE_KIND_SURFACE_MESH, SourcePayload
 
 DEFAULT_CORTICAL_PAINT_NEIGHBORS = 4
@@ -147,9 +149,10 @@ def project_cortical_surface_payload(
     source_points = np.asarray(payload.points, dtype=float)
     source_values = np.asarray(payload.values, dtype=float).reshape(-1)
     _validate_projection_inputs(target_points, source_points, source_values)
+    valid_sources = declared_source_validity(source_values, payload.metadata)
 
-    original_min = float(np.min(source_values))
-    original_max = float(np.max(source_values))
+    original_min = float(np.min(source_values[valid_sources]))
+    original_max = float(np.max(source_values[valid_sources]))
     projection_values = source_values.copy()
     is_zscore_payload = source_payload_uses_zscores(payload)
     source_cluster_mask = payload_cluster_mask(payload) if is_zscore_payload and use_cluster_mask else None
@@ -160,6 +163,7 @@ def project_cortical_surface_payload(
         else:
             threshold = _valid_z_threshold(z_threshold)
             projection_values = np.where(projection_values >= threshold, projection_values, 0.0)
+    projection_values[~valid_sources] = np.nan
 
     interpolated = _inverse_distance_values(
         target_points,
@@ -173,6 +177,9 @@ def project_cortical_surface_payload(
         interpolated = np.where(display_cluster_mask & np.isfinite(interpolated), interpolated, np.nan)
     elif is_zscore_payload:
         interpolated = np.where(interpolated >= threshold, interpolated, np.nan)
+    if not np.all(valid_sources):
+        display_validity = _nearest_mask_values(target_points, source_points, valid_sources)
+        interpolated = np.where(display_validity, interpolated, np.nan)
     return CorticalPaintProjection(
         values=np.asarray(interpolated, dtype=float),
         source_value_min=original_min,
@@ -253,8 +260,8 @@ def _validate_projection_inputs(
         raise ValueError("Cortical paint source values must align one-to-one with source points.")
     if not np.all(np.isfinite(target_points)):
         raise ValueError("Cortical paint target points must be finite.")
-    if not np.all(np.isfinite(source_points)) or not np.all(np.isfinite(source_values)):
-        raise ValueError("Cortical paint source points and values must be finite.")
+    if not np.all(np.isfinite(source_points)) or np.any(np.isinf(source_values)):
+        raise ValueError("Cortical paint source points must be finite and values must not be infinite.")
 
 
 def _inverse_distance_values(

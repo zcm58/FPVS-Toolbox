@@ -9,6 +9,8 @@ import pytest
 from Tools.LORETA_Visualizer.source_producers.model_diagnostics import (
     summarize_inverse_model,
     summarize_time_domain_inputs,
+    numerical_rank_summary,
+    summarize_recorded_data_rank,
 )
 from Tools.LORETA_Visualizer.source_producers.source_validation_report import (
     _cluster_inference_summary,
@@ -36,11 +38,79 @@ def test_model_covariance_is_reported_without_claiming_participant_rank() -> Non
     assert reported["variance_min"] == pytest.approx(float(np.min(actual)), abs=0)
     assert reported["variance_max"] == pytest.approx(float(np.max(actual)), abs=0)
     assert "rank" not in reported
+    assert reported["unprojected_numerical_rank"]["rank"] == 3
+    assert reported["projected_numerical_rank"]["rank"] == 2
 
 
 def test_absent_covariance_is_not_fabricated() -> None:
     info = mne.create_info(["Fz"], 100.0, "eeg")
     assert "model_noise_covariance" not in summarize_inverse_model(info, {})
+
+
+def test_rank_diagnostic_measures_known_linear_dependence_and_zero_matrix():
+    time = np.linspace(-1., 1., 100)
+    matrix = np.vstack((time, time**2, 2*time + time**2))
+    result = numerical_rank_summary(matrix)
+    assert result["rank"] == 2
+    assert result["full_rank"] is False
+    assert result["absolute_tolerance"] > 0
+    zero = numerical_rank_summary(np.zeros((3, 10)))
+    assert zero["rank"] == 0
+    assert zero["condition_number_on_retained_subspace"] is None
+
+
+def test_derivative_rank_and_reference_diagnostic_never_mutates_samples():
+    info = mne.create_info(["Fz", "Cz", "Pz"], 100., "eeg")
+    data = np.random.default_rng(11).normal(size=(3, 100)) * 1e-6
+    raw = mne.io.RawArray(data.copy(), info, verbose=False)
+    raw.set_eeg_reference("average", projection=True, verbose=False)
+    result = summarize_recorded_data_rank(raw, expected_info=raw.info)
+    assert result["unprojected"]["rank"] == 3
+    assert result["after_recorded_projectors"]["rank"] == 2
+    assert result["participant_data_rank_status"] == "measured_source_ready_derivative"
+    assert result["model_geometry_status"] == "incomplete_coordinates_unverified"
+    np.testing.assert_array_equal(raw.get_data(), data)
+
+
+def test_derivative_rank_rejects_ordered_channel_mismatch():
+    info = mne.create_info(["Fz", "Cz"], 100., "eeg")
+    raw = mne.io.RawArray(np.ones((2, 10)), info, verbose=False)
+    other = mne.create_info(["Cz", "Fz"], 100., "eeg")
+    with pytest.raises(ValueError, match="ordered inverse"):
+        summarize_recorded_data_rank(raw, expected_info=other)
+
+
+def test_applied_and_pending_average_reference_have_same_projector():
+    info = mne.create_info(["Fz", "Cz", "Pz"], 100., "eeg")
+    raw = mne.io.RawArray(np.random.default_rng(1).normal(size=(3, 100)), info, verbose=False)
+    raw.set_eeg_reference("average", projection=True, verbose=False)
+    expected = raw.info.copy()
+    raw.apply_proj(verbose=False)
+    result = summarize_recorded_data_rank(raw, expected_info=expected)
+    assert result["model_reference_status"] == "matching_projection_operator"
+    assert raw.info["projs"][0]["active"] is True
+
+
+def test_derivative_rank_rejects_known_electrode_geometry_mismatch():
+    info = mne.create_info(["Fz", "Cz"], 100., "eeg")
+    info.set_montage(mne.channels.make_standard_montage("standard_1020"))
+    raw = mne.io.RawArray(np.ones((2, 10)), info, verbose=False)
+    other = info.copy()
+    other["chs"][0]["loc"][0] += 0.001
+    with pytest.raises(ValueError, match="electrode coordinates"):
+        summarize_recorded_data_rank(raw, expected_info=other)
+
+
+def test_derivative_rank_rejects_geometry_frame_mismatch_even_with_equal_coordinates():
+    from mne.io.constants import FIFF
+
+    info = mne.create_info(["Fz", "Cz"], 100., "eeg")
+    info.set_montage(mne.channels.make_standard_montage("standard_1020"))
+    raw = mne.io.RawArray(np.ones((2, 10)), info, verbose=False)
+    other = info.copy()
+    other["chs"][0]["coord_frame"] = FIFF.FIFFV_COORD_MRI
+    with pytest.raises(ValueError, match="coordinate frames"):
+        summarize_recorded_data_rank(raw, expected_info=other)
 
 
 @pytest.mark.parametrize("recorded", [False, True])

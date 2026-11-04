@@ -381,7 +381,7 @@ def test_hauk_cluster_mask_readout_names_publication_mask() -> None:
 
     assert _activation_value_readout(payload) == (
         "Value: source-space z-score; unit: z-score; input: raw FFT amplitude uV; "
-        "display: Hauk et al. (2025) cluster mask"
+        "display: exploratory cluster mask (calibration unverified)"
     )
 
 
@@ -483,7 +483,7 @@ def test_hauk_cluster_mask_load_status_messages() -> None:
     assert status.variant == "info"
     assert status.text == (
         "Map cohort: 24 participants. "
-        "Showing vertices in clusters retained by the group-level permutation test."
+        "Showing vertices in exploratory clusters; spectral-null calibration is unverified."
     )
 
     window._set_payload_display_status(empty_payload)

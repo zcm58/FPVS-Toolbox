@@ -50,6 +50,32 @@ def test_smoothed_volume_overlay_interpolates_sparse_points_to_grid() -> None:
     assert overlay.origin[2] > display_bounds[0][2]
 
 
+def test_renderer_passes_original_volume_support_validity(monkeypatch) -> None:
+    from Tools.LORETA_Visualizer import renderer as renderer_module
+
+    original_points = np.array([[-1.0, 0, 0], [0, 0, 0], [1.0, 0, 0]])
+    valid = np.array([True, False, True])
+    payload = make_source_payload(
+        points=original_points[valid], values=np.array([4.0, 4.0]), label="Filtered volume",
+        kind=SOURCE_KIND_VOLUME_POINTS, normalize_values=False,
+    )
+    renderer = BrainRendererWidget.__new__(BrainRendererWidget)
+    renderer._plotter = object()
+    renderer._last_volume_support_points = original_points
+    renderer._last_volume_support_valid_mask = valid
+    renderer._activation_scalar_range = (0.0, 4.0)
+    captured = {}
+
+    def capture(_points, _values, **kwargs):
+        captured.update(kwargs)
+        return None
+
+    monkeypatch.setattr(renderer_module, "build_smoothed_volume_overlay", capture)
+    assert renderer._add_smoothed_volume_overlay(None, payload) is False
+    np.testing.assert_array_equal(captured["support_points"], original_points)
+    np.testing.assert_array_equal(captured["support_valid_source_mask"], valid)
+
+
 def test_smoothed_volume_overlay_omits_values_below_display_floor() -> None:
     points = _volume_fixture_points()
     values = np.linspace(-2.0, 4.0, len(points), dtype=float)

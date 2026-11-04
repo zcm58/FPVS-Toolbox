@@ -5,6 +5,8 @@ import pytest
 
 from Tools.LORETA_Visualizer.source_producers.source_recovery_benchmark import (
     probe_native_inverse,
+    sampled_resolution_metrics,
+    probe_inverse_sensitivity,
     summarize_source_recovery,
 )
 
@@ -57,6 +59,49 @@ def test_cortical_probe_uses_only_native_normal_column() -> None:
         probe_count=1, orientation_components=(2,),
     )
     np.testing.assert_allclose(columns[0].ravel(), [2e-9, 8e-9], atol=0)
+
+
+def test_point_spread_and_cross_talk_sample_different_resolution_directions():
+    # R = K G: input 1 leaks to output 0, while input 0 is localized.
+    resolution = np.array([[1., .5, 0.], [0., 1., 0.], [0., 0., 1.]])
+    result = sampled_resolution_metrics(
+        leadfield=np.eye(3), inverse_kernel=resolution,
+        points_mm=np.array([[0., 0, 0], [30., 0, 0], [60., 0, 0]]),
+        probe_indices=[0], components=1,
+    )
+    psf = result["point_spread_columns"][0]
+    ctf = result["cross_talk_rows"][0]
+    assert psf["energy_fraction_outside_radius"] == 0
+    assert ctf["energy_fraction_outside_radius"] == pytest.approx(.2)
+    assert ctf["rms_spread_from_target_source_mm"] > 0
+    assert ctf["target_absolute_resolution_amplitude"] == 1
+
+
+def test_vector_resolution_block_metrics_are_orientation_rotation_invariant():
+    gain = np.eye(6)
+    rotation = np.array([[0., -1., 0.], [1., 0., 0.], [0., 0., 1.]])
+    kernel = np.zeros((6, 6))
+    kernel[:3, :3] = rotation
+    kernel[3:, 3:] = rotation
+    result = sampled_resolution_metrics(
+        leadfield=gain, inverse_kernel=kernel,
+        points_mm=np.array([[0., 0, 0], [30., 0, 0]]), probe_indices=[0, 1], components=3,
+    )
+    assert result["amplitude_reduction"] == "3_by_3_orientation_block_frobenius_norm"
+    assert [row["target_absolute_resolution_amplitude"] for row in result["cross_talk_rows"]] == pytest.approx([np.sqrt(3), np.sqrt(3)])
+    assert all(row["energy_fraction_outside_radius"] == 0 for row in result["point_spread_columns"])
+
+
+def test_synthetic_noise_sensitivity_is_reproducible_and_reports_leakage():
+    kwargs = dict(
+        leadfield=np.eye(6), points_mm=np.array([[0., 0, 0], [30., 0, 0]]),
+        estimate_amplitudes=lambda values: np.linalg.norm(values.reshape(2, 3, -1), axis=1),
+        probe_count=2,
+    )
+    result = probe_inverse_sensitivity(**kwargs)
+    assert result == probe_inverse_sensitivity(**kwargs)
+    assert result["scenarios"]["matched_model"][0]["energy_fraction_outside_radius"] == 0
+    assert result["scenarios"]["sensor_noise_20_percent_rms"][0]["energy_fraction_outside_radius"] > 0
 
 
 @pytest.mark.parametrize("amplitudes", [np.array([[0.0]]), np.array([[np.nan]]), np.array([[-1.0]])])

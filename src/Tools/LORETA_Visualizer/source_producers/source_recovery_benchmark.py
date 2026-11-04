@@ -1,14 +1,16 @@
-"""Opt-in matched-model, noiseless inverse recovery for current source methods.
+"""Opt-in native inverse resolution and synthetic sensitivity diagnostics.
 
 This producer-side diagnostic injects isolated sources through each model's
 native forward matrix, then applies that same model's inverse. It does not
 validate EEG preprocessing, spectral z scoring, inference, or real-data
-localization. No project data, GUI, or renderer is loaded.
+localization. Sampled cross-talk, noise and channel-gain sensitivity remain
+explicitly synthetic. No project data, GUI, or renderer is loaded.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import logging
 from collections.abc import Callable, Sequence
@@ -92,6 +94,79 @@ def probe_native_inverse(
     return rows
 
 
+def sampled_resolution_metrics(
+    *, leadfield: np.ndarray, inverse_kernel: np.ndarray, points_mm: np.ndarray,
+    probe_indices: Sequence[int], components: int,
+) -> dict[str, Any]:
+    """Sample PSF columns and CTF rows without allocating a full resolution matrix.
+
+    Scalar cortical normal input/output uses absolute entries. Volume input and
+    output each have three components; spatial summaries use the Frobenius norm
+    of each 3x3 resolution block. These describe the linear inverse, not Z maps.
+    """
+    points = np.asarray(points_mm, dtype=float)
+    gain = np.asarray(leadfield, dtype=float)
+    kernel = np.asarray(inverse_kernel, dtype=float)
+    indices = np.asarray(probe_indices, dtype=int)
+    count = len(points)
+    if components not in (1, 3) or gain.shape[1] != components * count or kernel.shape != (components * count, gain.shape[0]):
+        raise ValueError("Resolution kernel/leadfield must align with one or three components per source.")
+    if not np.all(np.isfinite(gain)) or not np.all(np.isfinite(kernel)) or not len(indices) or np.any(indices < 0) or np.any(indices >= count):
+        raise ValueError("Resolution probes require finite matrices and existing source indices.")
+    columns = (indices[:, None] * components + np.arange(components)).reshape(-1)
+    psf = kernel @ gain[:, columns]
+    ctf = kernel[columns] @ gain
+    if components == 3:
+        psf = np.sqrt(np.sum(psf.reshape(count, 3, len(indices), 3)**2, axis=(1, 3)))
+        ctf = np.sqrt(np.sum(ctf.reshape(len(indices), 3, count, 3)**2, axis=(1, 3))).T
+    else:
+        psf, ctf = np.abs(psf), np.abs(ctf).T
+    result: dict[str, Any] = {
+        "scope": "sampled_linear_inverse_resolution_not_spectral_Z",
+        "amplitude_reduction": "absolute_scalar" if components == 1 else "3_by_3_orientation_block_frobenius_norm",
+        "source_components": components,
+    }
+    for name, values in (("point_spread_columns", psf), ("cross_talk_rows", ctf)):
+        rows = summarize_source_recovery(points_mm=points, recovered_amplitudes=values, injected_source_indices=indices)
+        for column, (row, index) in enumerate(zip(rows, indices, strict=True)):
+            row["target_source_index"] = row.pop("injected_source_index")
+            row["target_position_mm"] = row.pop("injected_position_mm")
+            row["rms_spread_from_target_source_mm"] = row.pop("rms_spread_from_injected_source_mm")
+            row["target_amplitude_relative_to_peak"] = row.pop("injected_source_amplitude_relative_to_peak")
+            row["target_absolute_resolution_amplitude"] = float(values[index, column])
+        result[name] = rows
+    return result
+
+
+def probe_inverse_sensitivity(
+    *, leadfield: np.ndarray, points_mm: np.ndarray,
+    estimate_amplitudes: Callable[[np.ndarray], np.ndarray], probe_count: int,
+    seed: int = 20261104,
+) -> dict[str, Any]:
+    """Named 20%-RMS sensor noise and 10% gain perturbations on isolated probes."""
+    gain = np.asarray(leadfield, dtype=float)
+    points = np.asarray(points_mm, dtype=float)
+    indices = np.linspace(0, len(points) - 1, min(probe_count, len(points)), dtype=int)
+    sensor = gain[:, 3 * indices + 2] * 1e-9
+    rng = np.random.default_rng(seed)
+    noise = rng.normal(size=sensor.shape)
+    noise *= .2 * np.sqrt(np.mean(sensor**2, axis=0)) / np.sqrt(np.mean(noise**2, axis=0))
+    gain_multiplier = 1. + .1 * np.sin(np.arange(len(sensor)))
+    scenarios = {
+        "matched_model": sensor,
+        "sensor_noise_20_percent_rms": sensor + noise,
+        "sensor_gain_10_percent_sinusoidal": sensor * gain_multiplier[:, None],
+    }
+    return {
+        "seed": seed, "native_orientation_component": 2,
+        "scope": "one_seed_synthetic_sensor_noise_and_gain_perturbations_not_anatomical_or_empirical_accuracy",
+        "scenarios": {
+            name: summarize_source_recovery(points_mm=points, recovered_amplitudes=estimate_amplitudes(data), injected_source_indices=indices)
+            for name, data in scenarios.items()
+        },
+    }
+
+
 def run_fsaverage_source_recovery_benchmark(*, probe_count: int = 8) -> dict[str, Any]:
     """Run both current inverse configurations using installed template files."""
     import mne
@@ -126,7 +201,7 @@ def run_fsaverage_source_recovery_benchmark(*, probe_count: int = 8) -> dict[str
         pick_ori = "normal" if method == "MNE" else "vector"
         params = {} if method == "MNE" else dict(model.method_params)
 
-        def estimate(sensor_data: np.ndarray) -> np.ndarray:
+        def estimate_signed(sensor_data: np.ndarray) -> np.ndarray:
             evoked = mne.EvokedArray(sensor_data, model.info.copy(), tmin=0, nave=1, verbose=False)
             evoked.apply_proj(verbose=False)
             result = apply_inverse(
@@ -135,8 +210,21 @@ def run_fsaverage_source_recovery_benchmark(*, probe_count: int = 8) -> dict[str
                 pick_ori=pick_ori, prepared=method == "eLORETA",
                 method_params=params or None, verbose=False,
             )
-            data = np.asarray(result.data)
+            return np.asarray(result.data)
+
+        def estimate(sensor_data: np.ndarray) -> np.ndarray:
+            data = estimate_signed(sensor_data)
             return np.abs(data) if method == "MNE" else np.sqrt(np.sum(np.abs(data)**2, axis=1))
+
+        native_gain = model.native_leadfield if method == "MNE" else model.forward_model.leadfield
+        points = model.forward_model.source_points
+        kernel = estimate_signed(np.eye(len(model.info["ch_names"]))).reshape((-1, len(model.info["ch_names"])))
+        indices = np.linspace(0, len(points) - 1, min(probe_count, len(points)), dtype=int)
+        resolution = sampled_resolution_metrics(
+            leadfield=native_gain[:, 2::3] if method == "MNE" else native_gain,
+            inverse_kernel=kernel, points_mm=points, probe_indices=indices,
+            components=1 if method == "MNE" else 3,
+        )
 
         rows = probe_native_inverse(
             leadfield=model.native_leadfield if method == "MNE" else model.forward_model.leadfield,
@@ -151,12 +239,17 @@ def run_fsaverage_source_recovery_benchmark(*, probe_count: int = 8) -> dict[str
             "pick_ori": pick_ori, "method_params": params,
             "coordinate_frame": "FreeSurfer fsaverage MRI surface RAS millimetres",
             "probes": rows,
+            "sampled_resolution": resolution,
+            "sensitivity": probe_inverse_sensitivity(
+                leadfield=native_gain, points_mm=points, estimate_amplitudes=estimate, probe_count=probe_count,
+            ),
         })
     return {
-        "format": "fpvs-matched-model-inverse-recovery-v1",
+        "format": "fpvs-native-inverse-resolution-sensitivity-v2",
+        "diagnostic_source_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
         "synthetic": True, "mne_version": mne.__version__, "numpy_version": np.__version__,
-        "scope": "Noiseless isolated sources generated and recovered with the same template model; inverse-only diagnostic.",
-        "not_tested": ["real-data accuracy", "head-model mismatch", "noise", "correlated sources", "FPVS spectral processing", "statistical calibration"],
+        "scope": "Native template inverse-only recovery, sampled PSFs/CTFs and named synthetic sensor perturbations.",
+        "not_tested": ["real-data accuracy", "anatomical head-model mismatch", "empirical noise", "correlated sources", "FPVS spectral processing", "statistical calibration"],
         "probe_selection": "Evenly spaced source indices including endpoints; not an anatomical sample.",
         "injected_amplitude_nAm": 1.0, "leakage_radius_mm": 20.0,
         "spread_definition": "sqrt(sum(amplitude^2 * distance_from_injected_source^2) / sum(amplitude^2))",

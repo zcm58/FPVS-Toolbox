@@ -9,6 +9,8 @@ import mne
 import numpy as np
 import pytest
 
+from Tools.LORETA_Visualizer.source_producers.source_psd_cache import SOURCE_PSD_CACHE_RELATIVE_ROOT
+
 from Tools.LORETA_Visualizer.source_producers import project_time_domain_inputs as time_inputs
 
 from config import DEFAULT_ELECTRODE_NAMES_64
@@ -88,6 +90,7 @@ def test_project_eloreta_source_psd_uses_signed_fif_exact_method_and_cache(
     assert first.cache_hit_count == 0
     assert first.cache_miss_count == 1
     assert first.participant_sidecar_path.is_file()
+    assert all(b".staging-" not in path.read_bytes() for path in first.output_dir.rglob("*") if path.is_file())
     assert first.validation_report_path is not None
     assert first.validation_report_path.is_file()
     assert not tuple(project.project_root.rglob("*.xlsx"))
@@ -123,6 +126,8 @@ def test_project_eloreta_source_psd_uses_signed_fif_exact_method_and_cache(
     assert validation["input_summary"]["min_noise_bins"] == 18
     assert validation["inverse_model_diagnostics"]["channel_count"] == 64
     assert validation["input_model_provenance"][0]["participant_id"] == "P01"
+    rank = validation["input_model_provenance"][0]["source_ready_data_rank"]
+    assert rank["participant_data_rank_status"] == "measured_source_ready_derivative"
     assert validation["input_model_provenance"][0]["reference"]["projections"][0]["active"] is True
     assert "legacy_fullfft_fallback=forbidden" in validation["input_summary"]["diagnostics"]
 
@@ -148,6 +153,8 @@ def test_project_eloreta_source_psd_uses_signed_fif_exact_method_and_cache(
     warm_manifest = json.loads(second.manifest_path.read_text(encoding="utf-8"))
     warm_payload = json.loads((second.output_dir / warm_manifest["conditions"][0]["file"]).read_text(encoding="utf-8"))
     assert warm_payload["values"] == cold_values
+    warm_report = json.loads(second.validation_report_path.read_text(encoding="utf-8"))
+    assert warm_report["input_model_provenance"][0]["source_ready_data_rank"] == rank
 
     reads.clear()
 
@@ -167,7 +174,7 @@ def test_project_eloreta_source_psd_uses_signed_fif_exact_method_and_cache(
     assert len(alternate_calls) == 1
     assert alternate_calls[0]["method_params"] == alternate_params
     cache_metadata_files = tuple(
-        (project.project_root / ".fpvs_processing" / "source_psd_cache" / "v1").rglob("*.json")
+        (project.project_root / SOURCE_PSD_CACHE_RELATIVE_ROOT).rglob("*.json")
     )
     assert len(cache_metadata_files) == 2
     cache_metadata = [json.loads(path.read_text(encoding="utf-8")) for path in cache_metadata_files]
@@ -579,6 +586,9 @@ def _source_psd_model(
         ch_types="eeg",
     )
     info.set_montage("biosemi64", on_missing="raise")
+    reference_probe = mne.EvokedArray(np.zeros((len(info["ch_names"]), 1)), info, verbose=False)
+    reference_probe.set_eeg_reference("average", projection=True, verbose=False)
+    info = reference_probe.info
     return MneFsaverageELORETAVolumeSourcePsdModel(
         forward_model=forward_model,
         info=info,

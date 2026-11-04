@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 
 import numpy as np
 import pytest
@@ -21,6 +22,35 @@ from Tools.LORETA_Visualizer.source_producers.eloreta_volume import (
 from Tools.LORETA_Visualizer.source_producers.l2_mne_hauk_zscore import (
     PARTICIPANT_ZSCORE_AGGREGATION_MEAN,
 )
+
+
+def test_volume_writer_excludes_partial_source_support_even_with_cluster_mask_disabled(tmp_path):
+    rows = (
+        replace(_participant_row("P1", [1.0, 2.0, 3.0, 4.0]),
+                values=np.array([0.0, np.nan, 3.0, 4.0]), zero_noise_sd_source_count=1,
+                valid_source_mask=np.array([True, False, True, True])),
+        replace(_participant_row("P2", [1.0, 2.0, 3.0, 4.0]),
+                values=np.array([0.0, 2.0, np.nan, 6.0]), zero_noise_sd_source_count=1,
+                valid_source_mask=np.array([True, True, False, True])),
+    )
+    condition = ELORETAVolumePrecomputedParticipantGroupCondition("a", "A", rows)
+    written = write_eloreta_volume_precomputed_participant_zscore_payloads(
+        forward_model=_volume_forward_model([]), conditions=(condition,),
+        config=ELORETAVolumeZScoreConfig(
+            selected_harmonics_hz=(1.2,), method_id=METHOD_ID_ELORETA_VOLUME_HAUK_SOURCE_PSD_VECTOR_NORM_V1,
+            cluster_mask_enabled=False,
+            metadata={"harmonic_selection": {"same_sample_adaptive": True}},
+        ), output_dir=tmp_path,
+    )
+    for output in written.producer_result.payloads:
+        payload = json.loads(output.payload_path.read_text(encoding="utf-8"))
+        assert payload["values"] == [0.0, None, None, 5.0]
+        assert payload["metadata"]["source_validity"]["invalid_source_indices"] == [1, 2]
+        assert payload["metadata"]["source_inference_selection_basis"] == "same_sample_adaptive"
+        assert payload["metadata"]["source_inference_confirmatory"] is False
+    sidecar = json.loads(written.participant_sidecar_path.read_text(encoding="utf-8"))
+    assert sidecar["conditions"][0]["participants"][0]["values"] == [0.0, None, 3.0, 4.0]
+    assert sidecar["conditions"][0]["source_validity"]["participant_count"] == 2
 
 
 def test_precomputed_eloreta_writer_keeps_volume_statistics_and_time_domain_provenance(

@@ -17,7 +17,8 @@ anatomical ground truth.
 The normal FPVS Toolbox workflow generates both EEG-only L2-MNE cortical and
 eLORETA volume maps from signed time-domain derivatives. The default L2 method,
 <code>l2_mne_hauk_source_psd_cortical_normal_v1</code>, uses the cortical-normal
-orientation and matches the Hauk source estimator more closely. The current
+orientation as an explicit Toolbox adaptation. Hauk's published 2025 code uses
+MNE's default pooled-orientation output instead. The current
 eLORETA method, <code>eloreta_volume_hauk_source_psd_vector_norm_v1</code>, is a
 Hauk-informed Toolbox extension for EEG-only fsaverage volume source space.
 Neither claims to reproduce the reference study's combined EEG/MEG or
@@ -72,6 +73,9 @@ every detail matches the reference scripts.
 <p>
 Participant z-score maps are summarized only after the participant-level source
 calculation. You can view the arithmetic mean, a 20% trimmed mean, or the median.
+Undefined source scores remain missing. Each condition uses the source locations
+valid for every included participant, so missing measurements cannot lower a
+group mean or enter a test as zero. Reports retain the omitted source counts.
 </p>
 <p>
 The Method and Display controls only select and render already-prepared values.
@@ -88,6 +92,13 @@ pial surface, and a grid location does not by itself establish a tissue label.
 
 <h3>Cluster-Based Permutation Mask</h3>
 <p>
+These masks are exploratory. Full spectral-pipeline false-positive control and
+the sign-symmetry assumption have not been established. Adaptive harmonics
+selected from these participants add a post-selection limitation. Algorithmic
+p-values do not remove either qualification. Correction is confined to one
+method, group and condition; it does not cover all maps in a study.
+</p>
+<p>
 The producer computes a one-sample t statistic across participant maps, groups
 adjacent locations that pass the cluster-forming threshold, and compares each
 cluster's mass with the maximum cluster mass under sign flips. New builds with small cohorts
@@ -103,6 +114,17 @@ The same participant-level mean-t test supplies the mask for mean, median, and
 trimmed-mean displays. Separate condition masks do not test a condition
 contrast. Display cutoffs are exploratory neighboring-noise z-score thresholds,
 not calibrated Gaussian p-values. Disabling the mask changes display only.
+</p>
+
+<h3>Source Lateralization</h3>
+<p>
+The positive-Z, optionally cluster-masked sums and normalized index are
+descriptive and depend on selected source counts. Separate unmasked mean-absolute-Z
+columns summarize each anatomical ROI on common valid support; they do not depend
+on the cluster mask. These columns use the quantity described in Hauk's temporal
+ROI analysis, but do not reproduce its participant-anatomy pipeline or add a
+hemisphere/group significance test. Positive right-minus-left values indicate
+stronger right-hemisphere estimates.
 </p>
 
 <h3>eLORETA Volume View</h3>
@@ -158,6 +180,7 @@ of the Hauk study rather than an exact reproduction.
   <li><a href="https://doi.org/10.1038/s41467-020-19160-7">Crameri et al. (2020)</a>: scientific colour communication; the viewer uses Matplotlib viridis.</li>
   <li><a href="https://doi.org/10.1016/j.neuroimage.2021.118460">Hauk et al. (2021)</a>: combined EEG/MEG FPVS source estimation for face-selective responses.</li>
   <li><a href="https://github.com/olafhauk/FPVS_sweep">Hauk FPVS_sweep repository</a>: public analysis scripts that informed the time-domain source-PSD sequence.</li>
+  <li><a href="https://github.com/olafhauk/FPVS_WORDS/tree/f9628b088f181e2b5afeabba9fc167d42140b5a3">Hauk 2025 FPVS_WORDS code</a>: signed averaging, source spectra, amplitude summation and neighboring-bin Z. Its imported configuration is not publicly included.</li>
   <li><a href="https://doi.org/10.1016/j.neuroimage.2022.119177">Hauk, Stenroos, and Treder (2022)</a>: practical guidance on what EEG/MEG source estimates can and cannot localize.</li>
   <li><a href="https://doi.org/10.1162/imag_a_00414">Hauk et al. (2025)</a>: word-selective FPVS EEG/MEG source-space analyses.</li>
   <li><a href="https://mne.tools/stable/generated/mne.datasets.fetch_fsaverage.html">MNE fsaverage dataset</a>: the template anatomy files used by the visualizer.</li>

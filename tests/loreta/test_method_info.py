@@ -32,6 +32,13 @@ def test_loreta_method_info_copy_covers_mask_and_references() -> None:
     assert "eloreta_volume_hauk_source_psd_v1" in html
     assert "basis-dependent" in html
     assert "Hauk-informed Toolbox extension" in normalized_html
+    assert "explicit Toolbox adaptation" in normalized_html
+    assert "matches the Hauk source estimator more closely" not in normalized_html
+    assert "These masks are exploratory" in normalized_html
+    assert "Full spectral-pipeline false-positive control" in normalized_html
+    assert "Undefined source scores remain missing" in normalized_html
+    assert "unmasked mean-absolute-Z" in normalized_html
+    assert "FPVS_WORDS" in html
     assert "L2-MNE source space is strictly cortical" in normalized_html
     assert "not a clipping boundary" in normalized_html
     assert "skull-stripped whole-brain" in normalized_html

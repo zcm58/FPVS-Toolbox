@@ -5,7 +5,12 @@
   "description": "Shape-only schema for already-computed source payloads. The Python validator enforces cross-field rules such as one value per point and face-index bounds.",
   "type": "object",
   "additionalProperties": true,
-  "required": ["format", "coordinate_space", "points", "values"],
+  "required": [
+    "format",
+    "coordinate_space",
+    "points",
+    "values"
+  ],
   "properties": {
     "format": {
       "const": "fpvs-loreta-source-payload-v1"
@@ -16,7 +21,13 @@
     },
     "kind": {
       "type": "string",
-      "enum": ["roi_mesh", "surface_mesh", "surface_points", "volume_mesh", "volume_points"]
+      "enum": [
+        "roi_mesh",
+        "surface_mesh",
+        "surface_points",
+        "volume_mesh",
+        "volume_points"
+      ]
     },
     "coordinate_space": {
       "type": "string",
@@ -46,7 +57,10 @@
       "type": "array",
       "minItems": 1,
       "items": {
-        "type": "number"
+        "type": [
+          "number",
+          "null"
+        ]
       }
     },
     "faces": {
@@ -75,7 +89,79 @@
       ]
     },
     "metadata": {
-      "type": "object"
+      "type": "object",
+      "properties": {
+        "source_validity": {
+          "type": "object",
+          "required": [
+            "policy",
+            "version",
+            "scope",
+            "source_count",
+            "valid_source_count",
+            "invalid_source_indices"
+          ],
+          "properties": {
+            "policy": {
+              "const": "complete_valid_source_support_v1"
+            },
+            "version": {
+              "const": 1
+            },
+            "scope": {
+              "enum": [
+                "participant",
+                "group_complete_case"
+              ]
+            },
+            "source_count": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "valid_source_count": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "invalid_source_indices": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "participant_count": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        }
+      }
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "values": {
+            "contains": {
+              "type": "null"
+            }
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "metadata"
+        ],
+        "properties": {
+          "metadata": {
+            "required": [
+              "source_validity"
+            ]
+          }
+        }
+      }
+    }
+  ]
 }

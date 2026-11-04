@@ -14,6 +14,8 @@ from typing import Any
 
 import numpy as np
 
+from Tools.LORETA_Visualizer.source_validity_contract import declared_source_validity
+
 from Tools.LORETA_Visualizer.source_payloads import (
     SOURCE_KIND_ROI_MESH,
     SOURCE_KIND_SURFACE_MESH,
@@ -82,7 +84,7 @@ PREPARED_SOURCE_PAYLOAD_SCHEMA: dict[str, Any] = {
     "supported_kinds": tuple(sorted(SUPPORTED_SOURCE_KINDS)),
     "cross_field_rules": (
         "points must be a finite N x 3 numeric array",
-        "values must be finite and have one scalar per point",
+        "values must be finite, or null only at declared source_validity invalid indices, with one scalar per point",
         "faces, when present, must be triangle rows or VTK-style triangular records",
         "face indices must refer to existing points",
     ),
@@ -257,11 +259,18 @@ def _array_field(raw_payload: dict[str, Any], key: str, *, expected_columns: int
 def _values_field(raw_payload: dict[str, Any]) -> np.ndarray:
     if "values" not in raw_payload:
         raise PreparedSourcePayloadValidationError("Prepared source payload requires 'values'.")
-    values = np.asarray(raw_payload["values"], dtype=float).reshape(-1)
+    raw_values = raw_payload["values"]
+    values = np.asarray(raw_values, dtype=float).reshape(-1)
     if len(values) == 0:
         raise PreparedSourcePayloadValidationError("Prepared source payload 'values' must not be empty.")
-    if not np.all(np.isfinite(values)):
-        raise PreparedSourcePayloadValidationError("Prepared source payload 'values' must contain finite values.")
+    try:
+        valid = declared_source_validity(values, _metadata(raw_payload.get("metadata")))
+    except ValueError as exc:
+        raise PreparedSourcePayloadValidationError(str(exc)) from exc
+    if not np.all(valid):
+        entries = np.asarray(raw_values, dtype=object).reshape(-1)
+        if any(value is not None for value in entries[~valid]):
+            raise PreparedSourcePayloadValidationError("Missing source values must use JSON null, not non-finite numbers.")
     return values
 
 

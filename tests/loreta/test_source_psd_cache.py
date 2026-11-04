@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+from dataclasses import replace
 
 import numpy as np
 import pytest
@@ -343,6 +344,7 @@ def test_cache_round_trip_reconstructs_participant_values_and_stores_only_compac
             "noise_mean_values",
             "noise_std_values",
             "noise_offsets_used",
+            "valid_source_mask",
         }
 
 
@@ -507,7 +509,30 @@ def test_cache_metadata_identifies_format_and_integrity_checksum(tmp_path: Path)
     assert metadata["arrays_file"] == write_result.paths.arrays_path.name
     assert metadata["arrays_sha256"] == hashlib.sha256(write_result.paths.arrays_path.read_bytes()).hexdigest()
     assert metadata["source_count"] == 3
-    assert metadata["zero_noise_sd_source_count"] == 1
+    assert metadata["zero_noise_sd_source_count"] == 0
+
+
+def test_cache_preserves_explicit_missing_sources_and_rejects_old_zero_fill_schema(tmp_path):
+    participant = replace(
+        _participant_result(), values=np.array([1.5, np.nan, 2.0]),
+        valid_source_mask=np.array([True, False, True]), zero_noise_sd_source_count=1,
+    )
+    write = store_source_psd_cache_entry(project_root=tmp_path, key_inputs=_key_inputs(), result=participant)
+    lookup = load_source_psd_cache_entry(project_root=tmp_path, key_inputs=_key_inputs())
+
+    assert lookup.hit
+    assert np.isnan(lookup.result.values[1])
+    assert lookup.result.valid_source_mask.tolist() == [True, False, True]
+    restored = lookup.result.to_l2_mne_participant_zscore_values()
+    assert np.isnan(restored.values[1])
+    assert restored.valid_source_mask.tolist() == [True, False, True]
+
+    metadata = _read_metadata(write.paths.metadata_path)
+    metadata["format"] = "fpvs_source_psd_participant_cache_v1"
+    _write_metadata(write.paths.metadata_path, metadata)
+    lookup = load_source_psd_cache_entry(project_root=tmp_path, key_inputs=_key_inputs())
+    assert lookup.status == CACHE_STATUS_MISS_SCHEMA
+    assert write.paths.metadata_path.exists()
 
 
 def _key_inputs() -> SourcePsdCacheKeyInputs:
@@ -539,7 +564,7 @@ def _participant_result() -> SourcePsdParticipantResult:
         noise_mean_values=np.asarray([1.0, 2.5, 1.5]),
         noise_std_values=np.asarray([0.5, 0.25, 1.0]),
         noise_offsets_used=(*range(-10, -1), *range(2, 11)),
-        zero_noise_sd_source_count=1,
+        zero_noise_sd_source_count=0,
         metadata={"condition": "Color Response"},
     )
 
@@ -552,6 +577,7 @@ def _valid_array_payload() -> dict[str, np.ndarray]:
         "noise_mean_values": result.noise_mean_values,
         "noise_std_values": result.noise_std_values,
         "noise_offsets_used": np.asarray(result.noise_offsets_used, dtype=np.int64),
+        "valid_source_mask": result.valid_source_mask,
     }
 
 

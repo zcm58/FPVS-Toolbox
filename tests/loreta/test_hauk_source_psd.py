@@ -117,7 +117,8 @@ def test_source_zscore_drops_two_tied_extremes_and_reports_zero_sd_sources() -> 
     assert result.noise_values_after_extreme_drop.shape == (2, 16)
     assert np.count_nonzero(result.noise_values_after_extreme_drop[0] == 1.0) == 3
     assert np.count_nonzero(result.noise_values_after_extreme_drop[0] == 3.0) == 3
-    assert result.values[1] == 0.0
+    assert np.isnan(result.values[1])
+    assert result.valid_source_mask.tolist() == [True, False]
     assert result.zero_noise_sd_source_count == 1
 
 

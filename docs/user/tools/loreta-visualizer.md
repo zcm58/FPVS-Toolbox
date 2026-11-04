@@ -49,6 +49,7 @@ Use this tool to:
 - review beta eLORETA volume source maps;
 - switch between loaded source-map methods when more than one method is available;
 - compare conditions visually in source space;
+- compare two groups side by side with linked 3D views;
 - export source-map figures for review, presentations, or manuscript drafting.
 
 ## Source-Map Views
@@ -67,11 +68,12 @@ paint those cortical values on cortical anatomy. The method does not estimate
 activity at arbitrary locations inside the head, and it cannot produce a
 separate cerebellar, brainstem, or other non-cortical volume source.
 
-The recommended L2 setting is "Cortical normal (Hauk-style)" and is recorded as
+The default L2 setting is "Cortical normal" and is recorded as
 `l2_mne_hauk_source_psd_cortical_normal_v1`. It asks MNE to estimate the
 component normal to the cortical surface before converting source power to
-amplitude. This matches Hauk's source estimator more closely, while retaining
-the Toolbox's EEG-only fsaverage and FPVS-bin adaptations. Source Map Options
+amplitude. This is a Toolbox adaptation: Hauk's public 2025 code leaves MNE's
+pooled-orientation default. The Toolbox also differs in EEG-only fsaverage and
+FPVS-bin choices. Source Map Options
 also provides "Legacy MNE pooled orientation" with method ID
 `l2_mne_hauk_source_psd_v1` when you need to reproduce maps generated before
 this correction.
@@ -162,13 +164,41 @@ summary, or **Scale: fixed limits** to enter a range. Exports use the selected
 scale. Use shared or fixed limits when comparing colors across conditions;
 independently scaled maps can assign the same color to different values.
 
-In the MRI slice view, click to position the linked crosshair. Arrow keys move
-it within the active plane; the mouse wheel or Page Up/Down changes that slice.
+### Compare two groups
+
+Enable **Compare groups** to display both groups for the same condition, method
+and summary. Each pane identifies its group and available participant count.
+Rotate or zoom either brain to move both views; the display, mask, cutoff and
+opacity controls apply to both. **Scale: both groups** uses a joint range for
+the pair, while all-conditions and fixed limits remain shared.
+
+Comparison requires exactly two explicit groups and compatible prepared maps.
+A missing group-condition-summary cell is unavailable; another summary or group
+is never substituted. Group masks retain their separate within-group meaning:
+a visible difference, or significance in only one group, is not a statistical
+test of the difference between groups.
+
+Live comparison supports the 3D cortical and volume views. MRI slices use the
+single-map view. Turn off comparison to use the existing figure-export actions.
+The second 3D viewer is created only when needed, and neither pane continuously
+redraws while idle.
+
+In the MRI slice view, click or hold the left mouse button and drag to move the
+linked crosshair. The other two planes update during the drag; the plane you
+started on stays fixed. Release to leave all three views at the final position.
+Arrow keys move within the active plane; the mouse wheel or Page Up/Down changes
+that slice.
 Home resets the location. Slice titles show fsaverage MRI RAS coordinates in
 millimetres and edge labels identify orientation. The hover tooltip reports the
 nearest original source-grid value and its distance from the cursor, including
 when that value is hidden by display masking. It is not an interpolated
 measurement at the cursor or a participant-specific anatomical coordinate.
+
+Slices show the native fsaverage T1 template, including head context when
+available, with skull-stripped anatomy as a fallback. Contrast and anatomical
+scale stay consistent across planes and conditions. Compact windows arrange the
+three planes in a 2×2 layout. This averaged template is naturally softer than an
+individual MRI; display smoothing does not add anatomical resolution.
 
 MRI previews render in the background. **Source Map Options > Rebuild source
 maps** reports the current build stage; **Cancel rebuild** requests cancellation
@@ -195,6 +225,17 @@ Toolbox still writes and displays the descriptive source map, but labels the
 mask as unavailable and treats the unmasked display as exploratory rather than
 as an inferential group result.
 
+All current cluster masks are exploratory, including masks that retain sources.
+Full spectral-pipeline false-positive calibration and sign symmetry are not
+established. Same-sample adaptive harmonic selection adds a post-selection
+limitation. Correction is confined to one method/group/condition map, not all
+maps in a study. These qualifications remain in source reports and metadata.
+
+Undefined source scores are missing, not zero. New builds retain only locations
+valid for every participant in that group-condition map for summaries and tests,
+recording omitted locations separately. Turning off a cluster mask does not
+restore missing measurements.
+
 New builds use the exact tail proportion when all sign flips are enumerated
 and retain the plus-one correction for sampled permutations. Rebuild maps
 created before this correction to update their saved masks; loading them alone
@@ -206,6 +247,22 @@ does not identify an exact effect boundary; see
 [Sassenhagen and Draschkow (2019)](https://doi.org/10.1111/psyp.13335).
 
 ## Outputs
+
+New source-map builds publish each method as a complete bundle. A failed or
+cancelled rebuild retains its preceding files; a partial rebuild loads only the
+methods that succeeded. Normal loading verifies the bundle receipt, current
+harmonic selection, and input provenance. Older files without that evidence can
+be imported explicitly, with current provenance marked unverified.
+
+Source reports include validity counts, selection qualifications, numerical rank
+of the signed averaged inputs, and model covariance facts. Numerical rank alone
+does not establish a suitable noise covariance or localization accuracy.
+Lateralization files retain the positive/masked-sum index and separate unmasked
+mean-absolute-Z ROI columns. The latter use common valid support and remain
+independent of cluster-mask selection. Both quantities are descriptive; positive
+right-minus-left values indicate stronger right-hemisphere estimates.
+If either hemisphere ROI has no valid common support, its sum and the
+between-hemisphere comparison are unavailable; this is not a zero response.
 
 The LORETA Visualizer can export source-map figures from supported views.
 

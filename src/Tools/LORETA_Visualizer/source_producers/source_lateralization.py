@@ -80,6 +80,16 @@ _CSV_FIELDS = (
     "right_minus_left_sum_positive_z",
     "lateralization_index_sum",
     "dominant_hemisphere",
+    "unmasked_value_policy",
+    "left_roi_source_count",
+    "right_roi_source_count",
+    "left_valid_source_count",
+    "right_valid_source_count",
+    "left_unmasked_mean_absolute_z",
+    "right_unmasked_mean_absolute_z",
+    "right_minus_left_unmasked_mean_absolute_z",
+    "interpretation",
+    "comparison_status",
 )
 
 
@@ -162,6 +172,10 @@ def _rows_for_roi(
     right_mask: np.ndarray,
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
+    maps = [*participant_values, *group_summaries]
+    support = np.ones(source_count, dtype=bool)
+    for source_map in maps:
+        support &= np.isfinite(_validate_source_values(getattr(source_map, "values"), source_count=source_count))
     for participant in participant_values:
         rows.append(
             _source_lateralization_row(
@@ -179,6 +193,7 @@ def _rows_for_roi(
                 left_mask=left_mask,
                 right_mask=right_mask,
                 cluster_mask=cluster_mask,
+                common_valid_support=support,
             )
         )
 
@@ -199,6 +214,7 @@ def _rows_for_roi(
                 left_mask=left_mask,
                 right_mask=right_mask,
                 cluster_mask=cluster_mask,
+                common_valid_support=support,
             )
         )
     return rows
@@ -223,6 +239,9 @@ def write_source_lateralization_summary_files(
             "negative_lateralization_index": "left_lateralized",
             "hemisphere_split": "source coordinate x < 0 is left; x > 0 is right; midline sources are ignored",
             "roi_definitions": SOURCE_LATERALIZATION_ROI_DEFINITIONS,
+            "unmasked_value_policy": "roi_mean_absolute_z_complete_support_v1",
+            "inference": "descriptive_only_no_hemisphere_or_group_test",
+            "masked_sum_limitation": "Depends on positive clipping, cluster selection and ROI source counts.",
             **dict(metadata),
         },
         "rows": row_list,
@@ -257,10 +276,15 @@ def _source_lateralization_row(
     left_mask: np.ndarray,
     right_mask: np.ndarray,
     cluster_mask: np.ndarray | None,
+    common_valid_support: np.ndarray,
 ) -> dict[str, Any]:
     values = _validate_source_values(source_values, source_count=source_count)
     positive_values = np.clip(values, 0.0, None)
-    finite_mask = np.isfinite(values)
+    finite_mask = np.isfinite(values) & common_valid_support
+    left_valid = finite_mask & left_mask
+    right_valid = finite_mask & right_mask
+    left_absolute_mean = _mean_or_none(np.abs(values[left_valid]))
+    right_absolute_mean = _mean_or_none(np.abs(values[right_valid]))
     if cluster_mask is None:
         active_mask = finite_mask & (positive_values > 0.0)
         mask_policy = SOURCE_LATERALIZATION_MASK_POSITIVE_FALLBACK
@@ -275,7 +299,8 @@ def _source_lateralization_row(
     left_sum = float(np.sum(left_values)) if left_values.size else 0.0
     right_sum = float(np.sum(right_values)) if right_values.size else 0.0
     denominator = left_sum + right_sum
-    lateralization = None if denominator <= 0.0 else float((right_sum - left_sum) / denominator)
+    comparable = bool(np.any(left_valid) and np.any(right_valid))
+    lateralization = None if not comparable or denominator <= 0.0 else float((right_sum - left_sum) / denominator)
     return {
         "condition_id": str(condition_id),
         "condition_label": str(condition_label),
@@ -292,13 +317,26 @@ def _source_lateralization_row(
         "right_selected_source_count": int(np.count_nonzero(right_active)),
         "left_nonzero_source_count": int(np.count_nonzero(left_values > 0.0)),
         "right_nonzero_source_count": int(np.count_nonzero(right_values > 0.0)),
-        "left_sum_positive_z": left_sum,
-        "right_sum_positive_z": right_sum,
+        "left_sum_positive_z": left_sum if np.any(left_valid) else None,
+        "right_sum_positive_z": right_sum if np.any(right_valid) else None,
         "left_mean_positive_z": _mean_or_none(left_values),
         "right_mean_positive_z": _mean_or_none(right_values),
-        "right_minus_left_sum_positive_z": float(right_sum - left_sum),
+        "right_minus_left_sum_positive_z": float(right_sum - left_sum) if comparable else None,
         "lateralization_index_sum": lateralization,
         "dominant_hemisphere": _dominant_hemisphere(lateralization),
+        "unmasked_value_policy": "roi_mean_absolute_z_complete_support_v1",
+        "left_roi_source_count": int(np.count_nonzero(left_mask)),
+        "right_roi_source_count": int(np.count_nonzero(right_mask)),
+        "left_valid_source_count": int(np.count_nonzero(left_valid)),
+        "right_valid_source_count": int(np.count_nonzero(right_valid)),
+        "left_unmasked_mean_absolute_z": left_absolute_mean,
+        "right_unmasked_mean_absolute_z": right_absolute_mean,
+        "right_minus_left_unmasked_mean_absolute_z": (
+            None if left_absolute_mean is None or right_absolute_mean is None
+            else right_absolute_mean - left_absolute_mean
+        ),
+        "interpretation": "descriptive_only_no_hemisphere_or_group_test",
+        "comparison_status": "descriptive" if comparable else "missing_roi_support",
     }
 
 
@@ -350,6 +388,8 @@ def _validate_source_values(source_values: Sequence[float], *, source_count: int
         raise ValueError(
             f"Source lateralization received {len(values)} values; {source_count} source points expected."
         )
+    if np.any(np.isinf(values)):
+        raise ValueError("Source lateralization values must not be infinite.")
     return values
 
 

@@ -788,8 +788,8 @@ L2-MNE with `method="MNE"`, `loose=0.2`, `depth=None`, `fixed=False`, and
 `lambda2=1/9`; it does not apply dSPM, sLORETA, or eLORETA normalization. By
 default it uses `pick_ori="normal"` to select the cortical surface-normal
 component and records method identity
-`l2_mne_hauk_source_psd_cortical_normal_v1`. This is closer to the Hauk source
-estimator than the older pooled-orientation implementation. Source Map Options
+`l2_mne_hauk_source_psd_cortical_normal_v1`. This orientation is a Toolbox
+adaptation; Hauk's public 2025 code leaves MNE's pooled default. Source Map Options
 can instead select "Legacy MNE pooled orientation" to reproduce older
 `l2_mne_hauk_source_psd_v1` maps; the two results use separate method labels,
 provenance, and caches.
@@ -948,13 +948,21 @@ Report at least:
 - whether a reported volume figure used MRI slices or the 3D contour, and that
   slice/contour interpolation was display-only rather than additional tested
   locations or inferential extent; and
-- that cortical-normal L2 follows the Hauk estimator more closely but remains
-  Toolbox-adapted, and that vector-norm eLORETA is a Toolbox extension, citing
+- that cortical-normal L2 and vector-norm eLORETA are Toolbox adaptations, citing
   both the study and public code reference below.
 
 Retain the source-ready FIF/JSON pairs, participant commit manifests, harmonic
 selection record, and prepared source-output manifest with the analysis record.
 Together they provide the provenance needed to audit the source figures.
+
+For new source builds also retain `source_build_receipt.json`, source-validity
+policy/counts and the input/model validation report. Report that current cluster
+masks are exploratory, with full spectral-pipeline null calibration unqualified;
+correction is within one method/group/condition, not across a study. Preserve
+same-sample adaptive-selection qualifications. Undefined scores are missing and
+source summaries use fixed-cohort complete-valid support. Distinguish the
+positive/masked-sum laterality index from the separate unmasked mean-absolute-Z
+ROI columns; neither is itself a hemisphere significance test.
 
 ### References
 

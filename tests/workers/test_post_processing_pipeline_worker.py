@@ -10,7 +10,6 @@ import pytest
 import Main_App.workers.post_processing_pipeline_worker as worker_module
 from Main_App.processing.artifact_freshness import (
     ARTIFACT_STATUS_CURRENT,
-    ARTIFACT_STATUS_FAILED,
     ARTIFACT_STATUS_STALE,
     SELECTION_DEPENDENT_ARTIFACTS,
     STATS_READY_SUMMED_BCA_ARTIFACT,
@@ -337,7 +336,7 @@ def test_source_map_modes_run_independently_after_a_partial_failure(
     assert failing_mode in next(result.message for result in results if not result.ok)
 
 
-def test_failed_source_map_rebuild_restores_preceding_directory_and_marks_failed(
+def test_failed_source_exporter_is_not_preceded_by_pipeline_deletion(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -370,8 +369,7 @@ def test_failed_source_map_rebuild_restores_preceding_directory_and_marks_failed
     )
 
     def _fail_after_partial_write(**_kwargs):
-        output_dir.mkdir(parents=True)
-        (output_dir / "partial.json").write_text("partial", encoding="utf-8")
+        assert (output_dir / "old.json").read_text(encoding="utf-8") == "old"
         raise RuntimeError("source rebuild failed intentionally")
 
     monkeypatch.setattr(
@@ -388,11 +386,11 @@ def test_failed_source_map_rebuild_restores_preceding_directory_and_marks_failed
     assert (output_dir / "old.json").read_text(encoding="utf-8") == "old"
     assert not (output_dir / "partial.json").exists()
     record = load_artifact_freshness_registry(tmp_path).artifacts[artifact_id]
-    assert record.status == ARTIFACT_STATUS_FAILED
+    assert record.status == ARTIFACT_STATUS_STALE
     assert record.built_from_selection_fingerprint == "old-selection"
 
 
-def test_source_map_freshness_save_failure_restores_preceding_directory(
+def test_pipeline_does_not_repeat_exporter_freshness_publication(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -422,7 +420,7 @@ def test_source_map_freshness_save_failure_restores_preceding_directory(
     )
 
     def _write_replacement(**_kwargs):
-        output_dir.mkdir(parents=True)
+        assert (output_dir / "old.json").is_file()
         manifest = output_dir / "manifest.json"
         manifest.write_text("new", encoding="utf-8")
         return SimpleNamespace(
@@ -451,10 +449,9 @@ def test_source_map_freshness_save_failure_restores_preceding_directory(
 
     recorded = worker._record_artifact_freshness(source_step)  # noqa: SLF001
 
-    assert recorded.ok is False
-    assert "freshness could not be saved" in recorded.message
-    assert (output_dir / "old.json").read_text(encoding="utf-8") == "old"
-    assert not (output_dir / "manifest.json").exists()
+    assert recorded is source_step
+    assert recorded.ok is True
+    assert (output_dir / "manifest.json").read_text(encoding="utf-8") == "new"
 
 
 def test_pipeline_reports_success_with_source_cohort_warnings(tmp_path) -> None:
@@ -1004,7 +1001,10 @@ class _SelectionResumeWorker(PostProcessingPipelineWorker):
         _project_root: Path,
         mode: str,
     ) -> PostProcessingStepResult:
-        return self._publish(mode)
+        result = self._publish(mode)
+        # Production exporters own source freshness in their publication commit.
+        mark_artifact_current(_project_root, mode, canonical_artifact_path(_project_root, mode), self._selection_fingerprint)
+        return result
 
 
 def _write_resume_project(root: Path) -> None:

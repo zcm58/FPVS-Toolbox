@@ -41,6 +41,7 @@ def build_smoothed_volume_overlay(
     values: np.ndarray,
     *,
     support_points: np.ndarray | None = None,
+    support_valid_source_mask: np.ndarray | None = None,
     source_spacing: float | None = None,
     display_bounds: tuple[tuple[float, float, float], tuple[float, float, float]] | None = None,
     min_visible_value: float | None = 0.0,
@@ -62,6 +63,11 @@ def build_smoothed_volume_overlay(
     """
 
     source_points, source_values = _valid_source_arrays(points, values)
+    validity_points = np.asarray(points if support_valid_source_mask is None else support_points, dtype=float)
+    validity_mask = (
+        np.isfinite(np.asarray(values, dtype=float).reshape(-1))
+        if support_valid_source_mask is None else np.asarray(support_valid_source_mask)
+    )
     support = _valid_support_points(source_points if support_points is None else support_points)
     support = _merge_source_support(support, source_points)
     if len(source_points) == 0 or len(support) == 0:
@@ -114,6 +120,9 @@ def build_smoothed_volume_overlay(
     grid_values[~support_mask] = 0.0
     grid_values = grid_values.reshape(dimensions, order="F")
     grid_values = _zero_grid_edges(grid_values, margin=edge_zero_margin)
+    # A missing original source remains a hole, even with finite neighbors.
+    display_validity = nearest_source_validity(grid_points, validity_points, validity_mask)
+    grid_values[~display_validity.reshape(dimensions, order="F")] = np.nan
 
     contour_values = _contour_values(
         grid_values,
@@ -137,6 +146,27 @@ def build_smoothed_volume_overlay(
         rendered_point_count=int(len(source_points)),
         support_point_count=int(len(support)),
     )
+
+
+def nearest_source_validity(
+    query_points: np.ndarray, source_points: np.ndarray, valid_source_mask: np.ndarray,
+) -> np.ndarray:
+    """Preserve missing-source regions using the nearest original grid location."""
+    points = np.asarray(source_points, dtype=float)
+    valid = np.asarray(valid_source_mask)
+    if points.ndim != 2 or points.shape[1] != 3 or valid.dtype != np.dtype(bool) or valid.shape != (len(points),):
+        raise ValueError("Source support coordinates and boolean validity must align.")
+    finite_points = np.all(np.isfinite(points), axis=1)
+    points, valid = points[finite_points], valid[finite_points]
+    queries = np.asarray(query_points, dtype=float)
+    if not len(points):
+        return np.zeros(len(queries), dtype=bool)
+    if np.all(valid):
+        return np.ones(len(queries), dtype=bool)
+    from scipy.spatial import cKDTree
+
+    _distances, nearest = cKDTree(points).query(queries, k=1)
+    return valid[nearest]
 
 
 def _valid_source_arrays(points: np.ndarray, values: np.ndarray) -> tuple[np.ndarray, np.ndarray]:

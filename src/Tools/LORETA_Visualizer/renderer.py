@@ -109,6 +109,20 @@ class _SplitHemisphereState:
     shade_values: np.ndarray | None = None
 
 
+@dataclass
+class _SplitHemisphereRenderCache:
+    """Native-detail geometry reused while only display properties change."""
+
+    geometry_state: _SplitHemisphereState
+    color_state: _SplitHemisphereState
+    surface: Any
+    layout_points: np.ndarray
+    layout_normals: np.ndarray | None
+    rotation_degrees: float
+    scalar_range: tuple[float, float]
+    activation_visible: bool
+
+
 @dataclass(frozen=True)
 class PublicationSplitFigurePanel:
     """One labeled split-hemisphere panel for figure export."""
@@ -134,12 +148,20 @@ class BrainRendererWidget(QWidget):
         super().__init__(parent)
         self.setObjectName("loreta_brain_renderer")
         self._plotter: Any | None = None
+        self._camera_link: Any | None = None
+        self._viewport_aspect: float | None = None
+        self._camera_resize_timer = QTimer(self)
+        self._camera_resize_timer.setSingleShot(True)
+        self._camera_resize_timer.setInterval(80)
+        self._camera_resize_timer.timeout.connect(self._resize_camera_for_viewport)
         self._brain_actor: Any | None = None
         self._activation_actor: Any | None = None
         self._split_left_actor: Any | None = None
         self._split_right_actor: Any | None = None
         self._split_left_state: _SplitHemisphereState | None = None
         self._split_right_state: _SplitHemisphereState | None = None
+        self._split_left_render_cache: _SplitHemisphereRenderCache | None = None
+        self._split_right_render_cache: _SplitHemisphereRenderCache | None = None
         self._surface: Any | None = None
         self._volume_context_surface: Any | None = None
         self._brain_actor_context: str | None = None
@@ -157,6 +179,7 @@ class BrainRendererWidget(QWidget):
         self._cortical_paint_use_cluster_mask = True
         self._last_activation_payload: SourcePayload | None = None
         self._last_volume_support_points: np.ndarray | None = None
+        self._last_volume_support_valid_mask: np.ndarray | None = None
         self._volume_overlay_active = False
         self._transparent_spin_enabled = False
         self._transparent_spin_angle_degrees = 0.0
@@ -175,6 +198,7 @@ class BrainRendererWidget(QWidget):
         try:
             self._initialize_backend(layout, initial_opacity=initial_opacity)
         except Exception as exc:
+            self.shutdown()
             logger.warning("loreta_renderer_initialization_failed", extra={"error": str(exc)})
             raise RenderBackendError(str(exc)) from exc
 
@@ -185,15 +209,15 @@ class BrainRendererWidget(QWidget):
         import pyvista as pv
         from pyvistaqt import QtInteractor
 
-        plotter = QtInteractor(self)
+        plotter = QtInteractor(self, auto_update=False)
+        self._plotter = plotter
         plotter.setObjectName("loreta_pyvista_interactor")
         plotter.set_background("#f7f9fc")
         plotter.enable_trackball_style()
         _configure_transparency_backend(plotter)
+        _configure_render_quality(plotter, pv)
         self._install_transparent_spin_event_filter(plotter)
         layout.addWidget(plotter)
-        self._plotter = plotter
-
         mesh = make_synthetic_brain_mesh()
         self._current_mesh = mesh
         self._surface = self._to_polydata(pv, mesh)
@@ -235,10 +259,10 @@ class BrainRendererWidget(QWidget):
             prop = actor.GetProperty()
             prop.SetInterpolationToPhong()
             prop.SetEdgeVisibility(False)
-            prop.SetAmbient(0.42)
+            prop.SetAmbient(0.28)
             prop.SetDiffuse(0.72)
-            prop.SetSpecular(0.20)
-            prop.SetSpecularPower(16)
+            prop.SetSpecular(0.04)
+            prop.SetSpecularPower(12)
         except (AttributeError, RuntimeError, TypeError):
             logger.debug("loreta_brain_material_failed", exc_info=True)
 
@@ -274,6 +298,7 @@ class BrainRendererWidget(QWidget):
             specular_power=12,
             ambient=0.42,
             diffuse=0.72,
+            render=False,
         )
         self._apply_brain_material(actor)
         return actor
@@ -324,6 +349,7 @@ class BrainRendererWidget(QWidget):
             ambient=0.48,
             diffuse=0.70,
             show_scalar_bar=False,
+            render=False,
         )
         self._apply_brain_material(actor)
         return actor
@@ -338,13 +364,16 @@ class BrainRendererWidget(QWidget):
             rgb=True,
             opacity=1.0,
             smooth_shading=True,
+            split_sharp_edges=False,
+            copy_mesh=False,
             show_edges=False,
             lighting=True,
-            specular=0.16,
-            specular_power=10,
-            ambient=0.58,
-            diffuse=0.56,
+            specular=0.03,
+            specular_power=12,
+            ambient=0.30,
+            diffuse=0.70,
             show_scalar_bar=False,
+            render=False,
         )
         self._apply_publication_material(actor)
         return actor
@@ -355,10 +384,10 @@ class BrainRendererWidget(QWidget):
             prop = actor.GetProperty()
             prop.SetInterpolationToPhong()
             prop.SetEdgeVisibility(False)
-            prop.SetAmbient(0.58)
-            prop.SetDiffuse(0.56)
-            prop.SetSpecular(0.16)
-            prop.SetSpecularPower(10)
+            prop.SetAmbient(0.30)
+            prop.SetDiffuse(0.70)
+            prop.SetSpecular(0.03)
+            prop.SetSpecularPower(12)
         except (AttributeError, RuntimeError, TypeError):
             logger.debug("loreta_publication_material_failed", exc_info=True)
 
@@ -373,8 +402,68 @@ class BrainRendererWidget(QWidget):
 
     def eventFilter(self, watched, event) -> bool:  # noqa: N802, ANN001
         if self._transparent_spin_event_is_user_interaction(event):
-            self._pause_transparent_spin_for_interaction()
+            link = getattr(self, "_camera_link", None)
+            if link is None:
+                self._pause_transparent_spin_for_interaction()
+            else:
+                link.pause_spin_for_interaction()
         return super().eventFilter(watched, event)
+
+    def resizeEvent(self, event) -> None:  # noqa: N802, ANN001
+        super().resizeEvent(event)
+        timer = getattr(self, "_camera_resize_timer", None)
+        if timer is not None and getattr(self, "_plotter", None) is not None:
+            timer.start()
+
+    def _viewport_aspect_ratio(self) -> float:
+        plotter = self._plotter
+        try:
+            width, height = float(plotter.width()), float(plotter.height())
+        except (AttributeError, RuntimeError, TypeError, ValueError):
+            try:
+                width, height = plotter.window_size
+            except (AttributeError, RuntimeError, TypeError, ValueError):
+                return 1.0
+        if not np.isfinite(width) or not np.isfinite(height) or width <= 0 or height <= 0:
+            return 1.0
+        return float(width / height)
+
+    def _resize_camera_for_viewport(self) -> None:
+        plotter = self._plotter
+        if plotter is None:
+            return
+        aspect = self._viewport_aspect_ratio()
+        previous = getattr(self, "_viewport_aspect", None)
+        self._viewport_aspect = aspect
+        link = getattr(self, "_camera_link", None)
+        if previous is None or (link is not None and not link.is_primary(self)):
+            return
+        split = self._split_hemisphere_active
+        ratio = _viewport_framing_factor(aspect, split=split) / _viewport_framing_factor(previous, split=split)
+        if abs(ratio - 1.0) < 1e-9:
+            return
+        camera = plotter.camera
+        if camera.GetParallelProjection():
+            camera.SetParallelScale(camera.GetParallelScale() * ratio)
+        else:
+            focal = np.asarray(camera.GetFocalPoint(), dtype=float)
+            position = np.asarray(camera.GetPosition(), dtype=float)
+            camera.SetPosition(*_xyz_tuple(focal + (position - focal) * ratio))
+        plotter.reset_camera_clipping_range()
+        plotter.render()
+
+    def fit_camera_to_viewport(self) -> None:
+        """Fit current actors after pane insertion, retaining orbit and rotations."""
+        plotter = self._plotter
+        if plotter is None:
+            return
+        timer = getattr(self, "_camera_resize_timer", None)
+        if timer is not None:
+            timer.stop()
+        plotter.reset_camera(render=False)
+        plotter.camera_set = True
+        self._viewport_aspect = self._viewport_aspect_ratio()
+        plotter.render()
 
     @staticmethod
     def _transparent_spin_event_is_user_interaction(event: QEvent) -> bool:
@@ -390,6 +479,8 @@ class BrainRendererWidget(QWidget):
 
     def set_brain_opacity(self, opacity: float) -> None:
         opacity = max(0.05, min(1.0, float(opacity)))
+        if opacity == self._brain_opacity:
+            return
         self._brain_opacity = opacity
         plotter = self._plotter
         if plotter is None:
@@ -410,6 +501,47 @@ class BrainRendererWidget(QWidget):
         if mesh is None:
             return None
         return mesh.points
+
+    def current_brain_mesh(self) -> BrainMesh | None:
+        """Return the shared read-only anatomy used to initialize a peer view."""
+        return self._current_mesh
+
+    def copy_view_from(self, other: BrainRendererWidget) -> None:
+        """Match camera and hemisphere rotations after preparing a peer's map."""
+        plotter = self._plotter
+        other_plotter = getattr(other, "_plotter", None)
+        if other is self or plotter is None or other_plotter is None:
+            return
+        self._split_left_rotation_degrees = other._split_left_rotation_degrees
+        self._split_right_rotation_degrees = other._split_right_rotation_degrees
+        if self._split_hemisphere_active:
+            self._render_split_hemispheres(render=False)
+        plotter.camera.DeepCopy(other_plotter.camera)
+        plotter.camera.Modified()
+        plotter.camera_set = True
+        self._viewport_aspect = self._viewport_aspect_ratio()
+        plotter.render()
+
+    def link_camera(self, other: BrainRendererWidget) -> None:
+        """Synchronize orbit/zoom bidirectionally, initially using this view."""
+        from Tools.LORETA_Visualizer.camera_link import LinkedBrainCameras
+
+        if other is self or self._plotter is None or getattr(other, "_plotter", None) is None:
+            return
+        link = getattr(self, "_camera_link", None)
+        if link is not None and link.connects(self, other):
+            return
+        self.unlink_camera()
+        other.unlink_camera()
+        link = LinkedBrainCameras(self, other)
+        self._camera_link = link
+        other._camera_link = link
+
+    def unlink_camera(self) -> None:
+        """Remove both observers and pending peer renders before hiding/closing."""
+        link = getattr(self, "_camera_link", None)
+        if link is not None:
+            link.close()
 
     def mesh_faces(self) -> Any | None:
         mesh = self._current_mesh
@@ -444,6 +576,7 @@ class BrainRendererWidget(QWidget):
         self._split_right_state = None
         self._last_activation_payload = None
         self._last_volume_support_points = None
+        self._last_volume_support_valid_mask = None
         self._current_mesh = mesh
         self._surface = self._to_polydata(pv, mesh)
         self._volume_context_surface = self._to_volume_context_polydata(pv, mesh)
@@ -459,6 +592,7 @@ class BrainRendererWidget(QWidget):
         payload: SourcePayload,
         *,
         volume_support_points: np.ndarray | None = None,
+        volume_support_valid_mask: np.ndarray | None = None,
     ) -> None:
         plotter = getattr(self, "_plotter", None)
         if plotter is None:
@@ -469,18 +603,28 @@ class BrainRendererWidget(QWidget):
         if payload.kind == SOURCE_KIND_VOLUME_POINTS:
             if volume_support_points is not None:
                 self._last_volume_support_points = _validated_volume_support_points(volume_support_points)
+                if volume_support_valid_mask is not None:
+                    valid = np.asarray(volume_support_valid_mask)
+                    if valid.dtype != np.dtype(bool) or valid.shape != (len(self._last_volume_support_points),):
+                        raise ValueError("Volume source support validity must align with its coordinates.")
+                    self._last_volume_support_valid_mask = valid.copy()
+                else:
+                    self._last_volume_support_valid_mask = None
             elif payload is not previous_payload:
                 self._last_volume_support_points = np.asarray(payload.points, dtype=float).copy()
+                self._last_volume_support_valid_mask = np.isfinite(payload.values)
         else:
             self._last_volume_support_points = None
+            self._last_volume_support_valid_mask = None
         self._last_activation_payload = payload
         preserve_split_view = (
             getattr(self, "_display_mode", DISPLAY_MODE_TRANSPARENT_MESH) == DISPLAY_MODE_SPLIT_HEMISPHERE
             and getattr(self, "_split_hemisphere_active", False)
         )
         self._remove_activation_actor(render=False)
-        self._remove_split_hemisphere_actors(render=False)
-        self._split_hemisphere_active = False
+        if not (preserve_split_view and uses_cortical_surface_paint(payload)):
+            self._remove_split_hemisphere_actors(render=False)
+            self._split_hemisphere_active = False
         if len(payload.points) == 0:
             self._restore_base_brain_actor(render=False, payload=payload)
             plotter.render()
@@ -536,6 +680,7 @@ class BrainRendererWidget(QWidget):
             cloud,
             scalars="activation",
             cmap=list(LORETA_SMOOTH_SCALAR_COLORS),
+            nan_opacity=0.0,
             clim=self._activation_scalar_range,
             interpolate_before_map=True,
             opacity=self._activation_opacity,
@@ -548,6 +693,7 @@ class BrainRendererWidget(QWidget):
             specular=0.0,
             smooth_shading=payload.kind in mesh_kinds and has_faces,
             show_scalar_bar=False,
+            render=False,
         )
         self._activation_actor.SetVisibility(self._activation_visible)
 
@@ -568,6 +714,7 @@ class BrainRendererWidget(QWidget):
                 payload.points,
                 payload.values,
                 support_points=self._volume_support_points(payload),
+                support_valid_source_mask=getattr(self, "_last_volume_support_valid_mask", None),
                 source_spacing=self._volume_source_spacing(),
                 min_visible_value=self._volume_min_visible_value(),
             )
@@ -613,6 +760,7 @@ class BrainRendererWidget(QWidget):
             specular=0.0,
             smooth_shading=True,
             show_scalar_bar=False,
+            render=False,
         )
         self._activation_actor.SetVisibility(self._activation_visible)
         self._volume_overlay_active = True
@@ -657,6 +805,7 @@ class BrainRendererWidget(QWidget):
                 specular=0.0,
                 smooth_shading=True,
                 show_scalar_bar=False,
+                render=False,
             )
         except (AttributeError, MemoryError, RuntimeError, TypeError, ValueError) as exc:
             logger.warning("loreta_volume_3d_fallback_failed", extra={"error": str(exc)})
@@ -798,22 +947,83 @@ class BrainRendererWidget(QWidget):
             return
         import pyvista as pv
 
-        self._remove_split_hemisphere_actors(render=False)
-        left_surface = self._split_state_to_surface(pv, left_state, side="left")
-        right_surface = self._split_state_to_surface(pv, right_state, side="right")
-        self._split_left_actor = self._add_publication_split_actor(left_surface)
-        self._split_right_actor = self._add_publication_split_actor(right_surface)
+        self._update_split_hemisphere_surface(pv, left_state, side="left")
+        self._update_split_hemisphere_surface(pv, right_state, side="right")
         if render:
             plotter.render()
 
-    def _split_state_to_surface(self, pv: Any, state: _SplitHemisphereState, *, side: str) -> Any:
+    def _update_split_hemisphere_surface(self, pv: Any, state: _SplitHemisphereState, *, side: str) -> None:
+        cache_name = f"_split_{side}_render_cache"
+        actor_name = f"_split_{side}_actor"
+        cache = getattr(self, cache_name, None)
+        actor = getattr(self, actor_name, None)
+        same_geometry = cache is not None and (
+            cache.geometry_state is state
+            or (
+                np.array_equal(cache.geometry_state.points, state.points)
+                and np.array_equal(cache.geometry_state.faces, state.faces)
+            )
+        )
+        if not same_geometry or actor is None:
+            if actor is not None:
+                self._plotter.remove_actor(actor, render=False)
+            surface = self._split_state_to_surface(pv, state, side=side, extra_yaw_degrees=0.0)
+            normals = surface.point_data.get("Normals")
+            cache = _SplitHemisphereRenderCache(
+                geometry_state=state,
+                color_state=state,
+                surface=surface,
+                layout_points=np.asarray(surface.points).copy(),
+                layout_normals=None if normals is None else np.asarray(normals).copy(),
+                rotation_degrees=0.0,
+                scalar_range=self._activation_scalar_range,
+                activation_visible=self._activation_visible,
+            )
+            setattr(self, actor_name, self._add_publication_split_actor(surface))
+            setattr(self, cache_name, cache)
+        cache.geometry_state = state
+        angle = self._split_left_rotation_degrees if side == "left" else self._split_right_rotation_degrees
+        if angle != cache.rotation_degrees:
+            offset = np.asarray(_LEFT_HEMISPHERE_OFFSET if side == "left" else _RIGHT_HEMISPHERE_OFFSET)
+            rotation = _rotation_z(angle)
+            cache.surface.points = (cache.layout_points - offset) @ rotation.T + offset
+            if cache.layout_normals is not None:
+                cache.surface.point_data["Normals"] = cache.layout_normals @ rotation.T
+            cache.rotation_degrees = angle
+        if (
+            cache.color_state is not state
+            or cache.scalar_range != self._activation_scalar_range
+            or cache.activation_visible != self._activation_visible
+        ):
+            cache.surface["publication_rgb"] = _publication_surface_rgb(
+                state.values,
+                state.shade_values,
+                scalar_range=self._activation_scalar_range,
+                activation_visible=self._activation_visible,
+            )
+            cache.color_state = state
+            cache.scalar_range = self._activation_scalar_range
+            cache.activation_visible = self._activation_visible
+
+    def _split_state_to_surface(
+        self,
+        pv: Any,
+        state: _SplitHemisphereState,
+        *,
+        side: str,
+        extra_yaw_degrees: float | None = None,
+    ) -> Any:
         points = _publication_hemisphere_points(
             state.points,
             side=side,
             extra_yaw_degrees=(
-                self._split_left_rotation_degrees
-                if side == "left"
-                else self._split_right_rotation_degrees
+                extra_yaw_degrees
+                if extra_yaw_degrees is not None
+                else (
+                    self._split_left_rotation_degrees
+                    if side == "left"
+                    else self._split_right_rotation_degrees
+                )
             ),
         )
         surface = self._to_surface_polydata(pv, points, state.faces)
@@ -996,7 +1206,11 @@ class BrainRendererWidget(QWidget):
                 plotter.camera.ParallelProjectionOn()
             except AttributeError:
                 plotter.camera.SetParallelProjection(True)
-            plotter.camera.SetParallelScale(_PUBLICATION_CAMERA_PARALLEL_SCALE)
+            aspect = self._viewport_aspect_ratio()
+            plotter.camera.SetParallelScale(
+                _PUBLICATION_CAMERA_PARALLEL_SCALE * _viewport_framing_factor(aspect, split=True)
+            )
+            self._viewport_aspect = aspect
             plotter.reset_camera_clipping_range()
         except (AttributeError, RuntimeError, TypeError, ValueError):
             logger.debug("loreta_publication_camera_failed", exc_info=True)
@@ -1004,15 +1218,19 @@ class BrainRendererWidget(QWidget):
 
     def set_cortical_paint_z_threshold(self, threshold: float) -> None:
         numeric_threshold = max(0.0, float(threshold))
+        if numeric_threshold == self._cortical_paint_z_threshold:
+            return
         self._cortical_paint_z_threshold = numeric_threshold
         payload = self._last_activation_payload
         if self._cortical_paint_active and payload is not None:
             self.set_activation_payload(payload)
 
-    def set_cortical_paint_cluster_mask_enabled(self, enabled: bool) -> None:
+    def set_cortical_paint_cluster_mask_enabled(self, enabled: bool, *, refresh: bool = True) -> None:
+        if bool(enabled) == self._cortical_paint_use_cluster_mask:
+            return
         self._cortical_paint_use_cluster_mask = bool(enabled)
         payload = self._last_activation_payload
-        if self._cortical_paint_active and payload is not None:
+        if refresh and self._cortical_paint_active and payload is not None:
             self.set_activation_payload(payload)
 
     def _use_cortical_paint_cluster_mask(self) -> bool:
@@ -1041,6 +1259,12 @@ class BrainRendererWidget(QWidget):
         self._brain_actor_context = context
         self._cortical_paint_active = False
         self._split_hemisphere_active = False
+        if context == "whole_brain_anatomy" and not self._transparent_spin_should_run():
+            # A three-quarter view reveals the translucent anatomical shell.
+            # Same-context refreshes return above, retaining the user's camera.
+            plotter.view_isometric(render=False)
+            # PyVista's default view permits later actor additions to refit it.
+            plotter.camera_set = True
         if render:
             plotter.render()
 
@@ -1057,18 +1281,22 @@ class BrainRendererWidget(QWidget):
     def set_activation_scalar_range(self, vmin: float, vmax: float, *, refresh: bool = True) -> None:
         if vmax <= vmin:
             vmax = vmin + 1.0
-        self._activation_scalar_range = (float(vmin), float(vmax))
+        previous_range = self._activation_scalar_range
+        updated_range = (float(vmin), float(vmax))
+        if updated_range == previous_range:
+            return
+        self._activation_scalar_range = updated_range
         if not refresh:
             return
         if self._split_hemisphere_active:
             self._render_split_hemispheres(render=True)
             return
-        if self._cortical_paint_active:
+        if self._cortical_paint_active and previous_range[0] != updated_range[0]:
             payload = self._last_activation_payload
             if payload is not None:
                 self.set_activation_payload(payload)
             return
-        if getattr(self, "_volume_overlay_active", False):
+        if getattr(self, "_volume_overlay_active", False) and previous_range[0] != updated_range[0]:
             payload = self._last_activation_payload
             if payload is not None:
                 self.set_activation_payload(payload)
@@ -1088,6 +1316,8 @@ class BrainRendererWidget(QWidget):
 
     def set_activation_opacity(self, opacity: float) -> None:
         opacity = max(0.0, min(1.0, float(opacity)))
+        if opacity == self._activation_opacity:
+            return
         self._activation_opacity = opacity
         actor = self._activation_actor
         plotter = self._plotter
@@ -1097,6 +1327,8 @@ class BrainRendererWidget(QWidget):
         plotter.render()
 
     def set_activation_visible(self, visible: bool) -> None:
+        if bool(visible) == self._activation_visible:
+            return
         self._activation_visible = bool(visible)
         plotter = self._plotter
         if plotter is None:
@@ -1173,6 +1405,8 @@ class BrainRendererWidget(QWidget):
         actors = (self._split_left_actor, self._split_right_actor)
         self._split_left_actor = None
         self._split_right_actor = None
+        self._split_left_render_cache = None
+        self._split_right_render_cache = None
         if plotter is None:
             return
         for actor in actors:
@@ -1209,8 +1443,13 @@ class BrainRendererWidget(QWidget):
             self._set_publication_camera()
             plotter.render()
             return
-        plotter.camera_position = "xy"
-        plotter.reset_camera()
+        payload = getattr(self, "_last_activation_payload", None)
+        if payload is not None and payload.kind == SOURCE_KIND_VOLUME_POINTS:
+            plotter.view_isometric(render=False)
+            plotter.camera_set = True
+        else:
+            plotter.camera_position = "xy"
+            plotter.reset_camera()
         plotter.render()
 
     def can_export_split_hemisphere_figure(self) -> bool:
@@ -1259,6 +1498,10 @@ class BrainRendererWidget(QWidget):
         return write_publication_split_hemisphere_stack_figures(output_path, panels=panels)
 
     def shutdown(self) -> None:
+        self.unlink_camera()
+        resize_timer = getattr(self, "_camera_resize_timer", None)
+        if resize_timer is not None:
+            resize_timer.stop()
         self._stop_transparent_spin()
         plotter = self._plotter
         self._plotter = None
@@ -1268,6 +1511,8 @@ class BrainRendererWidget(QWidget):
         self._split_right_actor = None
         self._split_left_state = None
         self._split_right_state = None
+        self._split_left_render_cache = None
+        self._split_right_render_cache = None
         self._surface = None
         self._volume_context_surface = None
         self._current_mesh = None
@@ -1276,6 +1521,7 @@ class BrainRendererWidget(QWidget):
         self._split_hemisphere_active = False
         self._last_activation_payload = None
         self._last_volume_support_points = None
+        self._last_volume_support_valid_mask = None
         if plotter is None:
             return
         try:
@@ -1289,6 +1535,16 @@ def _hex_to_rgb(color: str) -> tuple[float, float, float]:
     if len(value) != 6:
         return (0.79, 0.80, 0.82)
     return tuple(int(value[index : index + 2], 16) / 255 for index in (0, 2, 4))
+
+
+def _viewport_framing_factor(aspect: float, *, split: bool) -> float:
+    """Keep horizontal anatomy in frame when a viewport becomes portrait."""
+    horizontal_fraction = (
+        (abs(_LEFT_HEMISPHERE_OFFSET[0]) + _PUBLICATION_HEMISPHERE_RADIUS)
+        / _PUBLICATION_CAMERA_PARALLEL_SCALE * 1.08
+        if split else 1.0
+    )
+    return max(1.0, horizontal_fraction / max(float(aspect), 1e-6))
 
 
 def _xyz_tuple(values: np.ndarray) -> tuple[float, float, float]:
@@ -1307,6 +1563,24 @@ def _configure_transparency_backend(plotter: Any) -> None:
             logger.debug("loreta_depth_peeling_disable_unavailable", exc_info=True)
     except (RuntimeError, TypeError, ValueError):
         logger.debug("loreta_depth_peeling_disable_failed", exc_info=True)
+
+
+def _configure_render_quality(plotter: Any, pv: Any) -> None:
+    """Use inexpensive edge treatment and a neutral, camera-relative light pair."""
+    try:
+        plotter.enable_anti_aliasing("fxaa")
+    except (AttributeError, RuntimeError, TypeError, ValueError):
+        logger.debug("loreta_fxaa_unavailable", exc_info=True)
+    try:
+        lights = (
+            pv.Light(position=(-0.6, 0.6, 1.0), focal_point=(0., 0., 0.), color="white", intensity=0.8, light_type="camera light"),
+            pv.Light(position=(0.65, 0.05, 1.0), focal_point=(0., 0., 0.), color="white", intensity=0.25, light_type="camera light"),
+        )
+        plotter.remove_all_lights()
+        for light in lights:
+            plotter.add_light(light)
+    except (AttributeError, RuntimeError, TypeError, ValueError):
+        logger.debug("loreta_neutral_lighting_unavailable", exc_info=True)
 
 
 def write_publication_split_hemisphere_figures(

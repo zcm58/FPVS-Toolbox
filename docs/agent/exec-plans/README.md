@@ -23,6 +23,9 @@ Do not switch or merge branches because a dated plan names an old checkout.
 
 | Area | Current status / plan |
 | --- | --- |
+| LORETA group comparison | [Live two-group viewer](active/loreta-group-comparison.md): implemented; scoped Windows synthetic review and source/docs gates passed; Qt CI/cross-platform and real-project acceptance retained. |
+| LORETA rendering | [Rendering quality](active/loreta-rendering-quality.md): lightweight 3D reuse, native MRI and continuous linked dragging implemented; Windows visible review/source gates passed; Qt CI/cross-platform graphics acceptance retained. |
+| LORETA scientific integrity | [Resumable repair plan](active/loreta-scientific-integrity.md): implementation and synthetic/source verification complete; visible/CI Qt acceptance retained. Inference remains exploratory. |
 | v3.0.0 | [Published release ledger](active/v3-release-readiness.md): exact installer and automated lifecycle qualified; human installed-app acceptance deferred by the user. |
 | Modular hardware, montage-selected pipeline, FPVS Studio | [Durable roadmap](../architecture/hardware-pipeline-studio-roadmap.md): agreed future direction and evidence gates; full compatibility is a goal, not an implemented claim. |
 | Brain Products | [Processing support](active/brain-products-support.md): supported BrainVision routes and persistent project hardware are implemented; laboratory and visible acceptance remain pending. |

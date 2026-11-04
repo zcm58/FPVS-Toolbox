@@ -148,6 +148,32 @@ def test_no_candidate_result_retains_planned_resolution() -> None:
     assert result.participant_count == 4
 
 
+def test_invalid_source_cannot_bridge_clusters_or_reduce_participant_count():
+    matrix = np.asarray([[8.+index/10, np.nan, 9.+index/10] for index in range(6)])
+    rows = [SimpleNamespace(values=row, valid_source_mask=np.array([True, False, True])) for row in matrix]
+    # One participant also lacks the right vertex, so the whole cohort excludes it.
+    rows[0].values[2] = np.nan
+    rows[0].valid_source_mask[2] = False
+    result = compute_source_space_cluster_permutation_mask(
+        rows, adjacency=({1}, {0, 2}, {1}), cluster_forming_p_value=.05,
+        cluster_alpha=.05, permutation_count=64, permutation_seed=1,
+    )
+    assert result.participant_count == 6
+    assert result.valid_source_mask.tolist() == [True, False, False]
+    assert np.isnan(result.t_values[1:]).all()
+    assert result.mask.tolist() == [True, False, False]
+    assert cluster_inference_metadata(result)["cluster_tested_source_count"] == 1
+
+
+def test_missing_middle_source_splits_two_supported_clusters():
+    rows = [SimpleNamespace(values=np.array([8.+index/10, np.nan, 9.+index/10]), valid_source_mask=np.array([True, False, True])) for index in range(6)]
+    result = compute_source_space_cluster_permutation_mask(
+        rows, adjacency=({1}, {0, 2}, {1}), cluster_forming_p_value=.05,
+        cluster_alpha=.05, permutation_count=64, permutation_seed=1,
+    )
+    assert [cluster.source_indices for cluster in result.clusters] == [(0,), (2,)]
+
+
 def _run(matrix, *, adjacency=None, tail="positive", count=1024, seed=13):
     return compute_source_space_cluster_permutation_mask(
         tuple(SimpleNamespace(values=row) for row in matrix),

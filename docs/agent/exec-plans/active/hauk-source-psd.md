@@ -55,10 +55,10 @@ This is a Toolbox adaptation of the source-analysis sequence described by Hauk a
 - The eLORETA route is a Hauk-informed Toolbox extension of the source-spectrum
   sequence, not a claim that Hauk et al. implemented this exact EEG-only
   fsaverage eLORETA volume workflow.
-- The cortical-normal L2 orientation choice matches the Hauk source estimator
-  more closely than the historical pooled-orientation route. It remains a
-  Toolbox adaptation because anatomy, modality, covariance, preprocessing, and
-  neighboring-bin details differ from the reference study.
+- The cortical-normal L2 orientation choice is an explicit Toolbox adaptation.
+  The November review established that Hauk's public 2025 code omits `pick_ori`
+  and uses MNE's pooled default. Anatomy, modality, covariance, preprocessing
+  and neighboring-bin details also differ from the reference study.
 - Source orientation and vector pooling are calculation-side contracts. The
   renderer and display selectors consume prepared values without recomputing or
   reinterpreting them.
@@ -212,7 +212,7 @@ Multi-group projects must create separate group-by-condition summaries and clust
   cluster mask; legacy FullFFT manifests remain importable but are not fallback
   inputs.
 - 2026-07-16: Versioned source-orientation behavior. L2-MNE now defaults to the
-  Hauk-closer cortical-normal estimator with a GUI-selectable historical pooled
+  Toolbox cortical-normal estimator with a GUI-selectable historical pooled
   mode. eLORETA now preserves complex exact-bin coefficients through a vector
   inverse and uses a rotation-invariant three-component norm. New method IDs and
   cache provenance prevent either result from being confused with historical

@@ -46,7 +46,8 @@ def test_eloreta_volume_zscore_matches_participant_first_l2_style_order() -> Non
     expected_source0 = (10.0 - 3.0) / np.std(np.asarray([2.0, 3.0, 4.0]), ddof=0)
     assert result.noise_offsets_used == (-3, -2, 2, 3, 4)
     assert result.values[0] == pytest.approx(expected_source0)
-    assert result.values[1] == 0.0
+    assert np.isnan(result.values[1])
+    assert not result.valid_source_mask[1]
     assert result.zero_noise_sd_source_count >= 1
 
 
@@ -156,7 +157,7 @@ def test_eloreta_participant_summary_keeps_group_average_over_participant_zscore
     )
 
     assert summary.method_id == "eloreta_volume_participant_zscore_mean"
-    assert np.allclose(summary.values, np.mean(np.vstack([row.values for row in participant_values]), axis=0))
+    assert np.allclose(summary.values, np.mean(np.vstack([row.values for row in participant_values]), axis=0), equal_nan=True)
 
 
 def _tiny_eloreta_forward_model(channel_names: tuple[str, ...]) -> ELORETAVolumeForwardModel:

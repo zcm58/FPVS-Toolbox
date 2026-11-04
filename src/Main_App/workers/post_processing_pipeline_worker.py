@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from uuid import uuid4
+
 from collections.abc import Callable, Mapping
 from contextlib import ExitStack, contextmanager, nullcontext
 import logging
@@ -957,25 +959,17 @@ class PostProcessingPipelineWorker(QObject):
                 default_output_dir, write_payloads = _load_source_psd_export_api()
                 target = default_output_dir(project_root)
                 self._artifact_targets[artifact_id] = target
-                with self._artifact_rebuild_context(
-                    artifact_id,
-                    target,
-                    label=label,
-                ) as archive:
-                    self._clear_output_dir(
-                        target,
-                        project_root=project_root,
-                        label=label,
-                    )
-                    result = write_payloads(
-                        project=self._project,
-                        project_root=project_root,
-                        include_flagged_subjects=False,
-                        allow_fetch_fsaverage=True,
-                        progress_callback=self._emit_progress,
-                    )
-                if archive is not None:
-                    self._artifact_archives[artifact_id] = archive
+                # The exporter owns staging, rollback and freshness as one commit.
+                if not getattr(self, "_source_build_batch_id", None):
+                    self._source_build_batch_id = uuid4().hex
+                result = write_payloads(
+                    project=self._project,
+                    project_root=project_root,
+                    include_flagged_subjects=False,
+                    allow_fetch_fsaverage=True,
+                    progress_callback=self._emit_progress,
+                    build_batch_id=self._source_build_batch_id,
+                )
             except PIPELINE_STEP_EXCEPTIONS as exc:
                 logger.exception("post_processing_l2_mne_source_psd_maps_failed")
                 return PostProcessingStepResult(mode, False, f"{label} failed: {exc}")
@@ -1035,25 +1029,17 @@ class PostProcessingPipelineWorker(QObject):
                 default_output_dir, write_payloads = _load_eloreta_source_psd_export_api()
                 target = default_output_dir(project_root)
                 self._artifact_targets[artifact_id] = target
-                with self._artifact_rebuild_context(
-                    artifact_id,
-                    target,
-                    label=label,
-                ) as archive:
-                    self._clear_output_dir(
-                        target,
-                        project_root=project_root,
-                        label=label,
-                    )
-                    result = write_payloads(
-                        project=self._project,
-                        project_root=project_root,
-                        include_flagged_subjects=False,
-                        allow_fetch_fsaverage=True,
-                        progress_callback=self._emit_progress,
-                    )
-                if archive is not None:
-                    self._artifact_archives[artifact_id] = archive
+                # The exporter owns staging, rollback and freshness as one commit.
+                if not getattr(self, "_source_build_batch_id", None):
+                    self._source_build_batch_id = uuid4().hex
+                result = write_payloads(
+                    project=self._project,
+                    project_root=project_root,
+                    include_flagged_subjects=False,
+                    allow_fetch_fsaverage=True,
+                    progress_callback=self._emit_progress,
+                    build_batch_id=self._source_build_batch_id,
+                )
             except PIPELINE_STEP_EXCEPTIONS as exc:
                 logger.exception("post_processing_eloreta_volume_source_psd_maps_failed")
                 return PostProcessingStepResult(mode, False, f"{label} failed: {exc}")
@@ -1179,6 +1165,9 @@ class PostProcessingPipelineWorker(QObject):
         self,
         step: PostProcessingStepResult,
     ) -> PostProcessingStepResult:
+        if step.name in {"l2_mne_source_psd", "eloreta_volume_source_psd"}:
+            # Source exporters publish their own receipt and freshness atomically.
+            return step
         project_root = Path(self._project.project_root).expanduser().resolve()
         target = self._artifact_targets.get(step.name)
         if (

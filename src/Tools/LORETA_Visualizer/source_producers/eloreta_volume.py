@@ -30,7 +30,6 @@ from Tools.LORETA_Visualizer.source_producers.l2_mne_cortical import (
     DEFAULT_LAMBDA2,
     HARMONIC_STRATEGY_SUM_SENSOR_TOPOGRAPHIES_THEN_INVERT,
     _array_to_json_rows,
-    _array_to_json_values,
     _json_safe_metadata,
     _round_harmonic,
     _slug,
@@ -70,6 +69,15 @@ from Tools.LORETA_Visualizer.source_producers.source_space_statistics import (
     SourceSpaceClusterPermutationResult,
     compute_source_space_cluster_permutation_mask,
     validate_adjacency,
+)
+from Tools.LORETA_Visualizer.source_producers.inference_qualification import (
+    source_inference_qualification_metadata,
+)
+from Tools.LORETA_Visualizer.source_producers.source_validity import (
+    complete_valid_source_support,
+    source_validity_metadata,
+    source_values_to_json,
+    validated_source_values,
 )
 
 logger = logging.getLogger(__name__)
@@ -234,6 +242,7 @@ class ELORETAVolumeZScoreValues:
     noise_std_values: np.ndarray
     noise_offsets_used: tuple[int, ...]
     zero_noise_sd_source_count: int
+    valid_source_mask: np.ndarray | None = None
 
 
 @dataclass(frozen=True)
@@ -247,6 +256,7 @@ class ELORETAVolumeParticipantZScoreValues:
     noise_std_values: np.ndarray
     noise_offsets_used: tuple[int, ...]
     zero_noise_sd_source_count: int
+    valid_source_mask: np.ndarray | None = None
 
 
 @dataclass(frozen=True)
@@ -304,6 +314,7 @@ class ELORETAVolumeParticipantZScoreSummary:
     values: np.ndarray
     participant_count: int
     trim_fraction: float | None = None
+    valid_source_mask: np.ndarray | None = None
 
 
 @dataclass(frozen=True)
@@ -360,9 +371,9 @@ def compute_eloreta_volume_zscore_source_values(
     valid = np.isfinite(noise_std) & (noise_std > 1e-12)
     if not np.any(valid):
         raise ValueError(f"{condition.label} has no volume source points with finite neighboring-bin noise SD.")
-    z_values = np.zeros_like(target_source_values, dtype=float)
+    z_values = np.full_like(target_source_values, np.nan, dtype=float)
     z_values[valid] = (target_source_values[valid] - noise_mean[valid]) / noise_std[valid]
-    if not np.all(np.isfinite(z_values)):
+    if not np.all(np.isfinite(z_values[valid])):
         raise ValueError("eLORETA volume produced non-finite source z-score values.")
     return ELORETAVolumeZScoreValues(
         values=z_values.astype(float),
@@ -371,6 +382,7 @@ def compute_eloreta_volume_zscore_source_values(
         noise_std_values=noise_std.astype(float),
         noise_offsets_used=tuple(common_offsets),
         zero_noise_sd_source_count=int(np.count_nonzero(~valid)),
+        valid_source_mask=valid.copy(),
     )
 
 
@@ -397,6 +409,7 @@ def compute_eloreta_volume_participant_zscore_source_values(
                 noise_std_values=result.noise_std_values,
                 noise_offsets_used=result.noise_offsets_used,
                 zero_noise_sd_source_count=result.zero_noise_sd_source_count,
+                valid_source_mask=result.valid_source_mask,
             )
         )
     return tuple(rows)
@@ -414,9 +427,8 @@ def summarize_eloreta_volume_participant_zscores(
     rows = tuple(participant_values)
     if not rows:
         raise ValueError("Participant z-score aggregation requires at least one participant map.")
-    matrix = np.vstack([np.asarray(row.values, dtype=float).reshape(1, -1) for row in rows])
-    if not np.all(np.isfinite(matrix)):
-        raise ValueError("Participant eLORETA source z-score maps contain non-finite values.")
+    full_matrix, valid = complete_valid_source_support(rows)
+    matrix = full_matrix[:, valid]
     if aggregation_id == PARTICIPANT_ZSCORE_AGGREGATION_MEAN:
         values = np.mean(matrix, axis=0)
         label_suffix = "Raw mean z-score"
@@ -430,6 +442,8 @@ def summarize_eloreta_volume_participant_zscores(
         values = _trimmed_mean(matrix, trim_fraction=trim_fraction)
         label_suffix = f"{trim_fraction:.0%} trimmed mean z-score"
         summary_trim_fraction = trim_fraction
+    full_values = np.full(full_matrix.shape[1], np.nan)
+    full_values[valid] = values
     return ELORETAVolumeParticipantZScoreSummary(
         aggregation=aggregation_id,
         label_suffix=label_suffix,
@@ -438,9 +452,10 @@ def summarize_eloreta_volume_participant_zscores(
             if method_id is not None
             else ELORETA_PARTICIPANT_ZSCORE_AGGREGATION_METHOD_IDS[aggregation_id]
         ),
-        values=np.asarray(values, dtype=float),
+        values=full_values,
         participant_count=len(rows),
         trim_fraction=summary_trim_fraction,
+        valid_source_mask=valid,
     )
 
 
@@ -487,7 +502,7 @@ def build_eloreta_volume_participant_zscore_summary_payload(
         "source_model": summary.method_id,
         "value_label": config.value_label,
         "points": _array_to_json_rows(forward_model.source_points),
-        "values": _array_to_json_values(values),
+        "values": source_values_to_json(values, summary.valid_source_mask),
         "metadata": _participant_summary_payload_metadata(
             forward_model=forward_model,
             condition=condition,
@@ -634,6 +649,8 @@ def write_eloreta_volume_participant_zscore_payloads(
                     "metadata": {
                         "source_method": SOURCE_METHOD_ELORETA_VOLUME,
                         "producer_method": summary.method_id,
+                        "source_validity": payload["metadata"]["source_validity"],
+                        **source_inference_qualification_metadata(config.metadata.get("harmonic_selection")),
                         "base_producer_method": _participant_base_method_id(config),
                         "participant_zscore_aggregation": summary.aggregation,
                         "selected_harmonics_hz": list(config.selected_harmonics_hz),
@@ -674,6 +691,7 @@ def write_eloreta_volume_participant_zscore_payloads(
             "producer_method": _participant_base_method_id(config),
             "input_domain": _participant_input_domain(config),
             "aggregation_methods": list(aggregation_list),
+            **source_inference_qualification_metadata(config.metadata.get("harmonic_selection")),
             "participant_sidecar_file": sidecar_path.name,
             "cluster_mask": (
                 "source_space_cluster_permutation" if config.cluster_mask_enabled else CLUSTER_MASK_STATUS_DISABLED
@@ -921,6 +939,9 @@ def _validated_precomputed_participant_rows(
             )
         participant_id = _validate_label(row.participant_id, "participant_id")
         participant_ids.append(participant_id)
+        validated_source_values(
+            row.values, row.valid_source_mask, invalid_count=row.zero_noise_sd_source_count
+        )
         for label, values in (
             ("z-score", row.values),
             ("target", row.target_source_values),
@@ -933,7 +954,7 @@ def _validated_precomputed_participant_rows(
                     f"{condition.label} participant {participant_id} {label} map "
                     f"has {len(vector)} sources; {source_count} expected."
                 )
-            if not np.all(np.isfinite(vector)):
+            if label != "z-score" and not np.all(np.isfinite(vector)):
                 raise ValueError(
                     f"{condition.label} participant {participant_id} {label} map "
                     "contains non-finite values."
@@ -1053,14 +1074,15 @@ def _cluster_payload_metadata(
         "cluster_mask": "source_space_cluster_permutation",
         "cluster_mask_status": cluster_result.status,
         **cluster_inference_metadata(cluster_result),
+        **source_inference_qualification_metadata(config.metadata.get("harmonic_selection")),
         "cluster_mask_primary_display": True,
         "cluster_mask_method": _cluster_mask_method_label(cluster_result.tail),
         "cluster_mask_source_space_kind": "volume",
         "cluster_adjacency_source": "mne.spatial_src_adjacency_or_equivalent",
-        "cluster_mask_publication_alignment": "Hauk et al. 2025 FPVS_WORDS source-space cluster strategy",
+        "cluster_mask_publication_alignment": "Hauk-informed exploratory sign-flip strategy; spectral-null calibration unverified",
         "cluster_mask_note": (
             "Renderer uses this producer-computed source-space mask as the primary "
-            "publication-style eLORETA volume display mask; source values remain unchanged."
+            "exploratory eLORETA volume display mask; spectral-null error control remains unverified."
         ),
         "cluster_mask_source_indices": [int(index) for index in retained],
         "cluster_mask_source_index_count": int(len(retained)),
@@ -1120,6 +1142,7 @@ def _cluster_manifest_entry_metadata(
         "cluster_mask": "source_space_cluster_permutation",
         "cluster_mask_status": cluster_result.status,
         **cluster_inference_metadata(cluster_result),
+        **source_inference_qualification_metadata(config.metadata.get("harmonic_selection")),
         "cluster_mask_source_index_count": int(np.count_nonzero(cluster_result.mask)),
         "cluster_mask_source_count": int(len(cluster_result.mask)),
         "cluster_significant_cluster_count": int(len(cluster_result.significant_clusters)),
@@ -1185,6 +1208,10 @@ def _participant_summary_payload_metadata(
         "participant_zscore_aggregation": summary.aggregation,
         "participant_zscore_aggregation_label": summary.label_suffix,
         "participant_zscore_trim_fraction": summary.trim_fraction,
+        "source_validity": source_validity_metadata(
+            validated_source_values(summary.values, summary.valid_source_mask)[1],
+            scope="group_complete_case", participant_count=summary.participant_count,
+        ),
         "participant_count": summary.participant_count,
         "participant_ids": participant_ids,
         "lambda2": float(config.lambda2),
@@ -1251,6 +1278,7 @@ def _participant_summary_payload_metadata(
     metadata.update(_json_safe_metadata(forward_model.metadata, prefix="forward_model"))
     metadata.update(_json_safe_metadata(config.metadata, prefix="config"))
     metadata.update(_json_safe_metadata(condition.metadata, prefix="condition"))
+    metadata.update(source_inference_qualification_metadata(config.metadata.get("harmonic_selection")))
     return metadata
 
 
@@ -1275,10 +1303,18 @@ def _participant_zscore_sidecar_payload(
                 "condition_id": condition.condition_id,
                 "label": condition.label,
                 "participant_count": len(participant_rows),
+                "source_validity": source_validity_metadata(
+                    complete_valid_source_support(participant_rows)[1],
+                    scope="group_complete_case", participant_count=len(participant_rows),
+                ),
+                **source_inference_qualification_metadata(config.metadata.get("harmonic_selection")),
                 "participants": [
                     {
                         "participant_id": row.participant_id,
-                        "values": _array_to_json_values(row.values),
+                        "values": source_values_to_json(row.values, row.valid_source_mask),
+                        "source_validity": source_validity_metadata(
+                            validated_source_values(row.values, row.valid_source_mask)[1]
+                        ),
                         "noise_offsets_used": list(row.noise_offsets_used),
                         "zero_noise_sd_source_count": int(row.zero_noise_sd_source_count),
                     }
@@ -1303,6 +1339,7 @@ def _participant_zscore_sidecar_payload(
         "metadata": {
             "selected_harmonics_hz": list(config.selected_harmonics_hz),
             "participant_level_values": True,
+            **source_inference_qualification_metadata(config.metadata.get("harmonic_selection")),
             "input_domain": _participant_input_domain(config),
             "harmonic_strategy": (
                 HARMONIC_STRATEGY_SUM_SOURCE_PSD_AMPLITUDES_THEN_ZSCORE
@@ -1344,7 +1381,7 @@ def _unique_participant_payload_file_name(condition_id: str, aggregation: str, u
 
 def _write_json(path: Path, payload: Mapping[str, Any]) -> None:
     with atomic_write(path) as handle:
-        json.dump(payload, handle, indent=2)
+        json.dump(payload, handle, indent=2, allow_nan=False)
         handle.write("\n")
 
 

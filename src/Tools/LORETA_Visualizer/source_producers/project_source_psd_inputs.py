@@ -601,7 +601,7 @@ def _resolve_selected_harmonics(
     harmonics = HaukSourcePsdConfig(selected_harmonics_hz=tuple(selection.selected_harmonics_hz)).selected_harmonics_hz
     metadata["source"] = "saved_processing_harmonics"
     metadata["selected_harmonics_hz"] = list(harmonics)
-    metadata["exploratory"] = False
+    metadata["exploratory"] = bool(metadata.get("exploratory", False) or metadata.get("same_sample_adaptive", False))
     return harmonics, metadata
 
 

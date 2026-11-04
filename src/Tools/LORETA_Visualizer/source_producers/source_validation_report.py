@@ -44,6 +44,7 @@ def write_project_source_validation_report(
     forward_model_metadata: dict[str, Any] | None = None,
     inverse_model_diagnostics: dict[str, Any] | None = None,
     time_domain_records: Sequence[Any] = (),
+    participant_data_rank_diagnostics: Sequence[Mapping[str, Any]] = (),
     json_name: str = DEFAULT_SOURCE_VALIDATION_REPORT_JSON_NAME,
     markdown_name: str = DEFAULT_SOURCE_VALIDATION_REPORT_MARKDOWN_NAME,
 ) -> SourceValidationReportResult:
@@ -89,6 +90,7 @@ def write_project_source_validation_report(
         "forward_model_summary": _forward_model_summary(forward_model_metadata or {}),
         "inverse_model_diagnostics": dict(inverse_model_diagnostics or {}),
         "input_model_provenance": summarize_time_domain_inputs(time_domain_records),
+        "participant_data_rank_diagnostics": [dict(row) for row in participant_data_rank_diagnostics],
         "intended_scope": _intended_scope(),
         "validation_checks": _validation_checks(
             payloads=payloads,
@@ -98,6 +100,18 @@ def write_project_source_validation_report(
         "limitations": _beta_limitations(),
         "recommended_manual_checks": _recommended_manual_checks(),
     }
+    rank_by_identity = {
+        (str(row.get("group_id") or ""), str(row.get("participant_id", "")), str(row.get("condition_id", ""))):
+        row.get("source_ready_data_rank", {})
+        for row in participant_data_rank_diagnostics
+    }
+    for row in report["input_model_provenance"]:
+        diagnostic = rank_by_identity.get(
+            (str(row.get("group_id") or ""), row["participant_id"], row["condition_id"]), {}
+        )
+        if diagnostic:
+            row["participant_data_rank_status"] = diagnostic.get("participant_data_rank_status", "not_measured")
+            row["source_ready_data_rank"] = diagnostic
 
     json_path = output_path / json_name
     markdown_path = output_path / markdown_name
@@ -108,8 +122,11 @@ def write_project_source_validation_report(
 
 def _payload_summary(payload: ProducedPayload) -> dict[str, Any]:
     raw = _read_json(payload.payload_path)
-    values = [float(value) for value in raw.get("values", [])]
+    values = [float(value) for value in raw.get("values", []) if value is not None]
     metadata = raw.get("metadata", {}) if isinstance(raw.get("metadata"), dict) else {}
+    source_validity = metadata.get("source_validity")
+    if source_validity is None:
+        source_validity = {"policy": "historical_undeclared"}
     cluster_vertex_count = _int_or_none(metadata.get("cluster_mask_vertex_count"))
     cluster_source_count = _int_or_none(metadata.get("cluster_mask_source_index_count"))
     if cluster_source_count is None:
@@ -127,6 +144,7 @@ def _payload_summary(payload: ProducedPayload) -> dict[str, Any]:
         "participant_zscore_aggregation": str(metadata.get("participant_zscore_aggregation", "")),
         "participant_count": _int_or_none(metadata.get("participant_count")),
         "source_count": len(raw.get("points", [])),
+        "source_validity": source_validity,
         "value_min": min(values) if values else None,
         "value_max": max(values) if values else None,
         "positive_value_count": sum(1 for value in values if value > 0.0),
@@ -207,6 +225,12 @@ def _lateralization_row_summary(row: dict[str, Any]) -> dict[str, Any]:
         "dominant_hemisphere": str(row.get("dominant_hemisphere", "")),
         "left_sum_positive_z": _float_or_none(row.get("left_sum_positive_z")),
         "right_sum_positive_z": _float_or_none(row.get("right_sum_positive_z")),
+        "left_unmasked_mean_absolute_z": _float_or_none(row.get("left_unmasked_mean_absolute_z")),
+        "right_unmasked_mean_absolute_z": _float_or_none(row.get("right_unmasked_mean_absolute_z")),
+        "right_minus_left_unmasked_mean_absolute_z": _float_or_none(row.get("right_minus_left_unmasked_mean_absolute_z")),
+        "left_valid_source_count": _int_or_none(row.get("left_valid_source_count")),
+        "right_valid_source_count": _int_or_none(row.get("right_valid_source_count")),
+        "comparison_status": str(row.get("comparison_status", "historical_unspecified")),
     }
 
 
@@ -391,7 +415,10 @@ def _cluster_inference_summary(metadata: dict[str, Any]) -> dict[str, Any]:
         "cluster_permutation_seed", "cluster_candidate_count",
         "cluster_significant_cluster_count", "cluster_significant_clusters",
     )
-    return {key: metadata[key] for key in keys if key in metadata}
+    return {
+        **{key: metadata[key] for key in keys if key in metadata},
+        **{key: value for key, value in metadata.items() if key.startswith("source_inference_")},
+    }
 
 
 def _validation_checks(
@@ -419,6 +446,9 @@ def _beta_limitations() -> list[str]:
         "This is a beta source-localization workflow.",
         "Template-anatomy source coordinates are approximate and must not be interpreted as participant-specific anatomical localization.",
         "Cluster masks are source-space producer outputs; the renderer only displays prepared masks.",
+        "All source cluster masks are exploratory; spectral-null sign symmetry and full-pipeline false-positive control are unqualified.",
+        "Correction is within one method/group/condition, not across maps; same-sample adaptive harmonics add post-selection uncertainty.",
+        "Undefined source measurements are missing; summaries and masks use common valid support at fixed participant count.",
         "Source-space lateralization summaries are descriptive companion metrics and do not replace sensor-space BCA lateralization statistics.",
     ]
 
@@ -547,6 +577,25 @@ def _markdown_report(report: dict[str, Any]) -> str:
                 f"{row['condition_label']} | {row['aggregation']} | "
                 f"{_format_number(row['lateralization_index_sum'])} | {row['dominant_hemisphere']} |"
             )
+        if any(row.get("comparison_status") == "missing_roi_support" for row in primary_rows):
+            lines.extend((
+                "", "A hemisphere ROI has no valid common support in one or more rows. "
+                "Its sum and the between-hemisphere comparison are unavailable, not zero.",
+            ))
+        lines.extend((
+            "", "The index above uses positive, optionally cluster-masked sums. The following independent "
+            "descriptive quantity uses unmasked absolute values on common valid anatomical support; "
+            "it is not a hemisphere significance test.", "",
+            "| Condition | Aggregation | Left valid sources | Right valid sources | Left mean absolute Z | Right mean absolute Z |",
+            "| --- | --- | ---: | ---: | ---: | ---: |",
+        ))
+        for row in primary_rows:
+            lines.append(
+                f"| {_markdown_cell(row['condition_label'])} | {row['aggregation']} | "
+                f"{_format_number(row['left_valid_source_count'])} | {_format_number(row['right_valid_source_count'])} | "
+                f"{_format_number(row['left_unmasked_mean_absolute_z'])} | "
+                f"{_format_number(row['right_unmasked_mean_absolute_z'])} |"
+            )
     else:
         lines.append("- No Desikan-Killiany temporal group lateralization rows were available.")
     lines.extend(
@@ -554,8 +603,8 @@ def _markdown_report(report: dict[str, Any]) -> str:
             "",
             "## Payload Summary",
             "",
-            "| Payload | Source model | Aggregation | N | Value range | Cluster sources |",
-            "| --- | --- | --- | ---: | ---: | ---: |",
+            "| Payload | Source model | Aggregation | N | Value range | Valid sources | Cluster sources |",
+            "| --- | --- | --- | ---: | ---: | ---: | ---: |",
         )
     )
     for payload in report["payload_summaries"]:
@@ -565,6 +614,7 @@ def _markdown_report(report: dict[str, Any]) -> str:
             f"{payload['file']} | {payload['source_model']} | "
             f"{payload['participant_zscore_aggregation']} | "
             f"{_format_number(payload['participant_count'])} | {value_range} | "
+            f"{_format_number(payload['source_validity'].get('valid_source_count'))} | "
             f"{_format_number(payload['cluster_mask_source_count'])} |"
         )
     inferential = [item for item in report["payload_summaries"] if "cluster_p_value_estimator" in item]
@@ -581,8 +631,9 @@ def _markdown_report(report: dict[str, Any]) -> str:
                 f"{_format_number(item.get('cluster_minimum_attainable_p'))} |"
             )
         lines.extend((
-            "", "Cluster significance applies to retained clusters, not individual source locations. "
-            "The same one-sample mean-t mask can accompany different descriptive summaries.",
+            "", "Cluster masks are exploratory: full spectral-pipeline false-positive control and "
+            "participant sign symmetry are not established. Correction is within one method/group/condition, "
+            "not across a study or between conditions. The same mean-t mask accompanies each descriptive summary.",
         ))
     lines.extend(("", "## Limitations", ""))
     lines.extend(f"- {item}" for item in report["limitations"])
@@ -603,7 +654,7 @@ def _model_diagnostic_markdown(report: dict[str, Any]) -> list[str]:
             f"- Model channels: {diagnostics['channel_count']}",
             f"- Electrode geometry: {diagnostics['electrode_geometry']}",
             f"- Participant coregistration: {diagnostics['participant_coregistration']}",
-            "- Participant data rank: not measured",
+            "- Participant data rank: reported separately from model covariance when source-ready samples are available.",
         ))
         covariance = diagnostics.get("model_noise_covariance", {})
         if covariance:
@@ -615,6 +666,23 @@ def _model_diagnostic_markdown(report: dict[str, Any]) -> list[str]:
             lines.append(
                 f"- Model projector: {_markdown_cell(projection['description'])}; "
                 f"active in model Info: {_yes_no(projection['active'])}"
+            )
+    rank_rows = report.get("participant_data_rank_diagnostics", [])
+    if rank_rows:
+        lines.extend((
+            "", "## Source-Ready Data Rank", "",
+            "Numerical rank is measured after signed repetition averaging and per-channel mean removal. "
+            "It does not establish biological rank, original-recording rank or noise-covariance suitability.", "",
+            "| Participant | Condition | Data rank | After projectors | Geometry | Reference |",
+            "| --- | --- | ---: | ---: | --- | --- |",
+        ))
+        for row in rank_rows:
+            diagnostic = row.get("source_ready_data_rank", {})
+            lines.append(
+                f"| {_markdown_cell(row.get('participant_id', ''))} | {_markdown_cell(row.get('condition_id', ''))} | "
+                f"{diagnostic.get('unprojected', {}).get('rank', '')} | "
+                f"{diagnostic.get('after_recorded_projectors', {}).get('rank', '')} | "
+                f"{diagnostic.get('model_geometry_status', '')} | {diagnostic.get('model_reference_status', '')} |"
             )
     rows = report["input_model_provenance"]
     if rows:

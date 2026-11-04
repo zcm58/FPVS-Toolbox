@@ -51,7 +51,8 @@ def test_hauk_zscore_computes_source_space_noise_corrected_values() -> None:
     assert result.noise_offsets_used == (-3, -2, 2, 3, 4)
     expected_source0 = (10.0 - 3.0) / np.std(np.asarray([2.0, 3.0, 4.0]), ddof=0)
     assert result.values[0] == pytest.approx(expected_source0)
-    assert result.values[1] == 0.0
+    assert np.isnan(result.values[1])
+    assert result.valid_source_mask.tolist() == [True, False, False]
     assert result.zero_noise_sd_source_count == 2
 
 
@@ -148,8 +149,8 @@ def test_participant_first_zscore_computes_each_participant_before_aggregation()
     assert len(calls) == 2
     assert calls[0].shape == (6, 3)
     expected_mean = np.mean(np.vstack([row.values for row in participant_values]), axis=0)
-    assert np.allclose(mean_summary.values, expected_mean)
-    assert np.allclose(median_summary.values, np.median(np.vstack([row.values for row in participant_values]), axis=0))
+    assert np.allclose(mean_summary.values, expected_mean, equal_nan=True)
+    assert np.allclose(median_summary.values, np.median(np.vstack([row.values for row in participant_values]), axis=0), equal_nan=True)
     assert mean_summary.method_id == "l2_mne_fsaverage_participant_zscore_mean"
 
 
@@ -397,6 +398,39 @@ def test_precomputed_source_psd_writer_keeps_descriptive_map_for_one_participant
         and "no inferential cluster mask or significance claim" in message
         for message in progress
     )
+
+
+def test_precomputed_writer_preserves_missingness_and_selection_qualification(tmp_path):
+    rows = tuple(
+        L2MNEHaukParticipantZScoreValues(
+            participant_id=f"P{index}", values=np.array(values),
+            target_source_values=np.ones(3), noise_mean_values=np.ones(3),
+            noise_std_values=np.ones(3), noise_offsets_used=(-2, 2),
+            zero_noise_sd_source_count=1, valid_source_mask=np.isfinite(values),
+        )
+        for index, values in enumerate(([0.0, np.nan, 8.0], [0.0, 6.0, np.nan]))
+    )
+    condition = L2MNEHaukPrecomputedParticipantGroupCondition("a", "A", rows)
+    written = write_l2_mne_hauk_precomputed_participant_zscore_surface_payloads(
+        forward_model=_identity_forward_model(), conditions=(condition,),
+        config=L2MNEHaukZScoreConfig(
+            selected_harmonics_hz=(1.0,), method_id=HAUK_SOURCE_PSD_CORTICAL_NORMAL_METHOD_ID,
+            cluster_mask_enabled=False,
+            metadata={"harmonic_selection": {"same_sample_adaptive": True}},
+        ), output_dir=tmp_path,
+    )
+    for output in written.producer_result.payloads:
+        payload = json.loads(output.payload_path.read_text(encoding="utf-8"))
+        assert payload["values"] == [0.0, None, None]
+        assert payload["metadata"]["source_validity"]["invalid_source_indices"] == [1, 2]
+        assert payload["metadata"]["source_validity"]["participant_count"] == 2
+        assert payload["metadata"]["source_inference_selection_basis"] == "same_sample_adaptive"
+        assert payload["metadata"]["source_inference_confirmatory"] is False
+    sidecar = json.loads(written.participant_sidecar_path.read_text(encoding="utf-8"))
+    assert sidecar["conditions"][0]["participants"][0]["values"] == [0.0, None, 8.0]
+    assert sidecar["conditions"][0]["participants"][1]["values"] == [0.0, 6.0, None]
+    assert sidecar["conditions"][0]["source_validity"]["invalid_source_indices"] == [1, 2]
+
 
 
 def test_hauk_zscore_writer_emits_manifest_importer_contract(tmp_path) -> None:

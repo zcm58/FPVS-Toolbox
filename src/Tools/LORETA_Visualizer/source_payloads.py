@@ -7,6 +7,7 @@ from typing import Any
 
 import numpy as np
 
+from Tools.LORETA_Visualizer.source_validity_contract import declared_source_validity
 from Tools.LORETA_Visualizer.transforms import COORDINATE_SPACE_DISPLAY, MeshDisplayTransform
 
 SOURCE_KIND_SURFACE_POINTS = "surface_points"
@@ -57,13 +58,23 @@ def make_source_payload(
     if len(payload_points) != len(payload_values):
         raise ValueError("Source payload values must have one value per point.")
 
+    payload_metadata = dict(metadata or {})
     finite = np.isfinite(payload_values) & np.all(np.isfinite(payload_points), axis=1)
-    if faces is not None and not np.all(finite):
-        raise ValueError("Source mesh payloads must not contain non-finite points or values.")
-    payload_points = payload_points[finite]
-    payload_values = payload_values[finite]
-    if normalize_values:
-        payload_values = _normalize_values(payload_values)
+    if "source_validity" in payload_metadata:
+        valid = declared_source_validity(payload_values, payload_metadata)
+        if not np.all(np.isfinite(payload_points)):
+            raise ValueError("Source payload coordinates must be finite.")
+        # Preserve geometry/index identity, including holes in valid support.
+        if normalize_values:
+            payload_values = payload_values.copy()
+            payload_values[valid] = _normalize_values(payload_values[valid])
+    else:
+        if faces is not None and not np.all(finite):
+            raise ValueError("Source mesh payloads must not contain non-finite points or values.")
+        payload_points = payload_points[finite]
+        payload_values = payload_values[finite]
+        if normalize_values:
+            payload_values = _normalize_values(payload_values)
 
     payload_faces = None if faces is None else np.asarray(faces, dtype=np.int64)
     return SourcePayload(
@@ -75,7 +86,7 @@ def make_source_payload(
         source_model=str(source_model),
         value_label=str(value_label),
         faces=payload_faces,
-        metadata=dict(metadata or {}),
+        metadata=payload_metadata,
     )
 
 
@@ -129,7 +140,7 @@ def filter_source_payload_values_above(
     filtered_points = payload.points[keep]
     filtered_values = values[keep]
     filtered_faces = _filter_faces_for_kept_points(payload.faces, keep)
-    metadata = dict(payload.metadata)
+    metadata = _subset_display_metadata(payload, keep)
     metadata.update(
         {
             "display_value_filter": "values_above_threshold",
@@ -162,11 +173,12 @@ def filter_source_payload_by_mask(
     keep = np.asarray(mask, dtype=bool).reshape(-1)
     if len(keep) != len(payload.points):
         raise ValueError("Source payload mask must have one value per point.")
+    keep = keep & np.isfinite(payload.values)
 
     filtered_points = payload.points[keep]
     filtered_values = np.asarray(payload.values, dtype=float).reshape(-1)[keep]
     filtered_faces = _filter_faces_for_kept_points(payload.faces, keep)
-    metadata = dict(payload.metadata)
+    metadata = _subset_display_metadata(payload, keep)
     metadata.update(
         {
             "display_value_filter": str(filter_label),
@@ -185,6 +197,36 @@ def filter_source_payload_by_mask(
         faces=filtered_faces,
         metadata=metadata,
     )
+
+
+def _subset_display_metadata(payload: SourcePayload, keep: np.ndarray) -> dict[str, Any]:
+    """Keep source-index metadata aligned after a display-only point filter."""
+    metadata = dict(payload.metadata)
+    indices = np.flatnonzero(keep)
+    validity = metadata.get("source_validity")
+    if isinstance(validity, dict):
+        metadata["prepared_source_validity"] = metadata.get("prepared_source_validity", dict(validity))
+        if len(indices):
+            metadata["source_validity"] = {
+                **validity, "source_count": len(indices), "valid_source_count": len(indices),
+                "invalid_source_indices": [],
+            }
+        else:
+            metadata.pop("source_validity")
+    remap = {int(original): filtered for filtered, original in enumerate(indices)}
+    for key in ("cluster_mask_source_indices", "cluster_mask_vertex_indices"):
+        if isinstance(metadata.get(key), list):
+            metadata[key] = [remap[index] for index in metadata[key] if index in remap]
+    for key in ("cluster_mask_values", "source_vertex_ids", "source_hemispheres"):
+        if isinstance(metadata.get(key), list) and len(metadata[key]) == len(keep):
+            metadata[key] = [metadata[key][index] for index in indices]
+    for index_key, count_key in (
+        ("cluster_mask_source_indices", "cluster_mask_source_index_count"),
+        ("cluster_mask_vertex_indices", "cluster_mask_vertex_count"),
+    ):
+        if index_key in metadata:
+            metadata[count_key] = len(metadata[index_key])
+    return metadata
 
 
 def _filter_faces_for_kept_points(faces: np.ndarray | None, keep: np.ndarray) -> np.ndarray | None:

@@ -22,9 +22,11 @@ from uuid import uuid4
 
 import numpy as np
 
-SOURCE_PSD_CACHE_RELATIVE_ROOT = Path(".fpvs_processing") / "source_psd_cache" / "v1"
-SOURCE_PSD_CACHE_FORMAT = "fpvs_source_psd_participant_cache_v1"
-SOURCE_PSD_CACHE_KEY_FORMAT = "fpvs_source_psd_cache_key_v1"
+from Tools.LORETA_Visualizer.source_producers.source_validity import validated_source_values
+
+SOURCE_PSD_CACHE_RELATIVE_ROOT = Path(".fpvs_processing") / "source_psd_cache" / "v2"
+SOURCE_PSD_CACHE_FORMAT = "fpvs_source_psd_participant_cache_v2"
+SOURCE_PSD_CACHE_KEY_FORMAT = "fpvs_source_psd_cache_key_v2"
 
 CACHE_STATUS_HIT = "hit"
 CACHE_STATUS_MISS_NOT_FOUND = "miss_not_found"
@@ -45,6 +47,7 @@ _ARRAY_NAMES = (
     "noise_mean_values",
     "noise_std_values",
     "noise_offsets_used",
+    "valid_source_mask",
 )
 _HARMONIC_SELECTION_PROVENANCE_FIELDS = frozenset(
     {
@@ -173,13 +176,17 @@ class SourcePsdParticipantResult:
     noise_offsets_used: tuple[int, ...]
     zero_noise_sd_source_count: int
     metadata: Mapping[str, Any] = field(default_factory=dict)
+    valid_source_mask: np.ndarray | None = None
 
     def __post_init__(self) -> None:
         participant_id = str(self.participant_id).strip()
         if not participant_id:
             raise ValueError("Source-PSD cache participant_id cannot be empty.")
+        values, valid = validated_source_values(
+            self.values, self.valid_source_mask, invalid_count=self.zero_noise_sd_source_count
+        )
         vectors = {
-            "values": _finite_vector(self.values, label="values"),
+            "values": values,
             "target_source_values": _finite_vector(
                 self.target_source_values,
                 label="target_source_values",
@@ -202,6 +209,7 @@ class SourcePsdParticipantResult:
             object.__setattr__(self, name, vector)
         object.__setattr__(self, "noise_offsets_used", offsets)
         object.__setattr__(self, "zero_noise_sd_source_count", zero_count)
+        object.__setattr__(self, "valid_source_mask", valid)
         object.__setattr__(self, "metadata", _canonical_mapping(self.metadata, label="metadata"))
 
     @property
@@ -222,6 +230,7 @@ class SourcePsdParticipantResult:
             noise_std_values=self.noise_std_values.copy(),
             noise_offsets_used=self.noise_offsets_used,
             zero_noise_sd_source_count=self.zero_noise_sd_source_count,
+            valid_source_mask=self.valid_source_mask.copy(),
         )
 
     @classmethod
@@ -241,6 +250,7 @@ class SourcePsdParticipantResult:
             noise_offsets_used=tuple(values.noise_offsets_used),
             zero_noise_sd_source_count=values.zero_noise_sd_source_count,
             metadata={} if metadata is None else metadata,
+            valid_source_mask=getattr(values, "valid_source_mask", None),
         )
 
 
@@ -354,6 +364,7 @@ def store_source_psd_cache_entry(
                 "noise_mean_values": [result.source_count],
                 "noise_std_values": [result.source_count],
                 "noise_offsets_used": [len(result.noise_offsets_used)],
+                "valid_source_mask": [result.source_count],
             },
             "result_metadata": dict(result.metadata),
         }
@@ -532,6 +543,7 @@ def _load_source_psd_cache_paths(
             noise_offsets_used=offsets,
             zero_noise_sd_source_count=metadata["zero_noise_sd_source_count"],
             metadata=metadata.get("result_metadata", {}),
+            valid_source_mask=arrays["valid_source_mask"],
         )
         _validate_stored_metadata(metadata, result=result)
     except (KeyError, TypeError, ValueError) as exc:
@@ -571,6 +583,7 @@ def _validate_stored_metadata(metadata: Mapping[str, Any], *, result: SourcePsdP
         "noise_mean_values": [result.source_count],
         "noise_std_values": [result.source_count],
         "noise_offsets_used": [len(result.noise_offsets_used)],
+        "valid_source_mask": [result.source_count],
     }
     if metadata.get("array_shapes") != expected_shapes:
         raise ValueError("Stored array shapes do not match cached arrays.")
@@ -585,6 +598,7 @@ def _write_npz(path: Path, *, result: SourcePsdParticipantResult) -> None:
             noise_mean_values=result.noise_mean_values,
             noise_std_values=result.noise_std_values,
             noise_offsets_used=np.asarray(result.noise_offsets_used, dtype=np.int64),
+            valid_source_mask=result.valid_source_mask,
         )
         stream.flush()
         os.fsync(stream.fileno())

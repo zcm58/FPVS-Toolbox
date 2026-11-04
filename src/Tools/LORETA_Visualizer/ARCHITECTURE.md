@@ -115,9 +115,8 @@ The default L2 method, `l2_mne_hauk_source_psd_cortical_normal_v1`, selects the
 cortical surface-normal component with MNE source PSD `pick_ori="normal"`. The
 GUI can instead request historical `l2_mne_hauk_source_psd_v1` when a user
 needs to reproduce older pooled-orientation maps. Method IDs, provenance, and
-caches remain distinct. The cortical-normal estimator is closer to the Hauk
-source-spectrum implementation, but this EEG-only fsaverage route is still a
-Toolbox adaptation rather than an exact reproduction.
+caches remain distinct. Cortical-normal output is an explicit Toolbox adaptation;
+Hauk's public 2025 source-PSD call uses MNE's default pooled orientation.
 
 The current eLORETA volume method,
 `eloreta_volume_hauk_source_psd_vector_norm_v1`, shares the L2 route's signed
@@ -162,6 +161,46 @@ tests, and documentation. Update any matching active execution plan when one
 exists.
 
 ## Data Flow
+
+### Scientific integrity and publication
+
+`source_producers/project_source_publication.py` owns per-method staged output,
+directory swap/rollback and the versioned `source_build_receipt.json`. Both
+current project exporters use it, including manual and pipeline calls. The
+pipeline must not pre-delete these source directories or independently mark them
+current. A receipt binds method/options, input/cohort and batch identity to hashes
+of the complete payload/report bundle. Current discovery verifies selection
+freshness and input/output integrity in a GUI worker; explicit historical imports
+remain readable but do not establish current provenance. Partial rebuilds load
+only their successful methods; old failed siblings are preserved on disk.
+
+`source_producers/source_validity.py` owns `complete_valid_source_support_v1`.
+Undefined participant source Z is NaN in memory and JSON null on disk, with
+explicit `source_validity` indices/counts. Summaries and statistics use the
+intersection of valid locations across the condition's fixed participant cohort;
+empty support fails. Original geometry/indexing remains intact and invalid
+locations break adjacency. `source_validity_contract.py` validates this prepared
+metadata without calculating statistics. Import, color limits, cortical paint,
+volume interpolation, MRI inspection and exports preserve missingness even when
+the statistical mask is disabled. Historical finite payloads remain readable.
+
+`source_producers/inference_qualification.py` marks current masks exploratory:
+full spectral-null centering/sign symmetry and population error control remain
+unqualified. Saved adaptive-selection provenance must survive unchanged.
+Correction covers one method/group/condition only; mean-t masks shared with
+median/trimmed-mean displays are not tests of those summaries or condition
+contrasts. Synthetic diagnostic results cannot automatically promote qualification.
+
+The native numerical reference, spectral diagnostic and model recovery tools
+live in `source_producers/native_spectral_reference.py`,
+`source_spectral_diagnostics.py` and `source_recovery_benchmark.py`. They require
+no real project data; fsaverage diagnostics use installed cache only. Rank facts
+from already-loaded signed derivatives are cached and reported separately from
+inverse covariance rank, without claiming covariance suitability. The existing
+descriptive laterality rows additionally retain mask-independent mean-absolute-Z
+ROI columns on common support; they are not a new hemisphere significance test.
+See [validation and rerun commands](../../../docs/agent/quality/loreta-validation.md)
+and the [resumable execution plan](../../../docs/agent/exec-plans/active/loreta-scientific-integrity.md).
 
 The renderer consumes display-ready objects. Calculation outputs must be
 prepared and validated before they reach `renderer.py`.
@@ -362,11 +401,12 @@ intentional Toolbox adaptation, not an exact reproduction claim.
 The methodological precedents are Hauk et al. (2021), *Face-selective responses
 in combined EEG/MEG recordings with fast periodic visual stimulation (FPVS)*
 ([DOI](https://doi.org/10.1016/j.neuroimage.2021.118460)), and the public
-[`olafhauk/FPVS_sweep`](https://github.com/olafhauk/FPVS_sweep) repository,
-including `FPVS_PSD_Source_sweep.py`. Cite them as influences on the
-source-spectrum design. The default cortical-normal L2 estimator follows the
-Hauk orientation choice more closely, while the vector-norm eLORETA volume path
-is an FPVS Toolbox extension. Do not claim that either EEG-only template
+[2025 `FPVS_WORDS` implementation](https://github.com/olafhauk/FPVS_WORDS/tree/f9628b088f181e2b5afeabba9fc167d42140b5a3).
+Its executable `FPVSWORDS_PSD_compute.py` supports signed averaging, source PSD,
+amplitude-window summation and Z scoring; its imported configuration is absent.
+The default cortical-normal output and vector-norm eLORETA path are Toolbox
+adaptations. Hauk's executable call leaves MNE's pooled orientation default.
+Do not claim that either EEG-only template
 implementation exactly reproduces their combined EEG/MEG or individual-anatomy
 pipeline.
 
@@ -413,6 +453,16 @@ compact rebuild summaries, but source-estimation math still belongs only to
   project-loaded map and warns that no current result is available; a manually
   imported payload is preserved. This reconciliation never starts source
   estimation and does not instantiate the page when it has not been opened.
+- `group_comparison.py`: GUI-neutral matching of prepared group maps by explicit
+  canonical condition/group metadata, exact summary and numerical method/metric/
+  source-space signature. It performs no I/O, aggregation or statistics. The GUI
+  loads candidates in a worker, constrains project groups through the public
+  project group context, rejects stale results and creates the second 3D pane
+  only when a compatible pair exists. Both panes share scale and controls;
+  saved masks retain their individual within-group interpretation.
+- `camera_link.py`: event-driven, bidirectional camera copying for two renderer
+  widgets, with coalesced peer redraws and explicit observer/timer cleanup.
+  Cameras unlink before a comparison pane closes. No idle polling is added.
 - `renderer.py`: PyVista/VTK scene adapter. It displays base meshes,
   prepared source payloads, opacity where relevant, scalar ranges, cortical
   paint actors, split-hemisphere publication actors, optional whole-brain
@@ -420,7 +470,12 @@ compact rebuild summaries, but source-estimation math still belongs only to
   which prepared volume points or scalar values are valid. It
   disables VTK depth peeling and relies on normal alpha blending so
   transparent brain meshes remain visible across supported Windows 11 and
-  CachyOS (Arch Linux) graphics stacks. It must not calculate source estimates.
+  CachyOS (Arch Linux) graphics stacks. Rendering occurs on changes/interactions
+  or explicitly enabled spin; there is no idle redraw timer. Split actors reuse
+  topology/normals and update only rotated points or RGB arrays. Guarded FXAA
+  and neutral camera key/fill lighting improve edges and shape without extra
+  geometry, shadow passes or source-value changes. It must not calculate source
+  estimates.
 - `fsaverage_cache.py`: shared fsaverage cache path policy. Automatic fetches
   install fsaverage and keep transient ZIP archives under
   `.fpvs_cache/mne/MNE-fsaverage-data/` in the FPVS Toolbox root. `src/`,
@@ -473,19 +528,17 @@ compact rebuild summaries, but source-estimation math still belongs only to
   source-space masks, or imply statistical support between grid locations.
 - `volume_slices.py`: display/export-only orthogonal MRI slice rendering for
   prepared volume point payloads and the preferred display for anatomical
-  localization. It requires `fsaverage/mri/brain.mgz`, builds
-  a visualizer-only 0.5 mm display template in the untracked root
-  `.fpvs_cache/loreta_visualizer/mri_templates/` cache, and loads that higher
-  sampling underlay for embedded and exported MRI slices. The cache preserves
-  the fsaverage RAS frame and must not replace or mutate the fsaverage cache
-  used by source producers, mesh loading, or other toolbox modules. It surfaces
-  a visible error when the source anatomy, display-template generation, or the
-  all-condition slice reference is unavailable, converts display points back to
-  native voxel space, reuses a standard slice triplet across conditions,
-  interpolates already computed source values onto slice planes with the same
-  Gaussian-neighbor policy family as the transparent mesh overlay, crops each
-  panel to the anatomy bounds for high-detail embedded viewing, and writes
-  matched 600-DPI PDF/PNG figures. It must not compute inverse estimates,
+  localization. It loads native `fsaverage/mri/T1.mgz` full-head anatomy, with
+  skull-stripped `brain.mgz` fallback, preserving the recorded tkregister affine.
+  Its shared volume-wide grayscale window and physical field of view prevent
+  contrast/scale jumps across slices. Historical 0.5 mm display-cache helpers
+  remain available to explicit callers; normal viewing neither reads nor
+  regenerates that cache. Compact previews use three equal planes in a 2×2
+  layout; wide previews and 600-dpi paired PDF/PNG exports use a row. Anatomy
+  stays template-derived, never participant MRI or a source-support mask.
+  Gaussian display width comes from original source support, and validity holes
+  remain transparent. Slice/inspection coordinates and all-condition references
+  keep their existing contracts. It must not compute inverse estimates,
   z-scores, cluster masks, or condition effects.
 - `source_producers/`: swappable source-localization calculation methods that
   read explicit source-ready inputs and write validated prepared
@@ -752,19 +805,21 @@ inputs remain key-bound. Project selection acceptance and artifact freshness
 still use the current full selection fingerprint.
 
 Participant caches live separately from published maps at project-local
-`.fpvs_processing/source_psd_cache/v1`, so rebuilding a map directory preserves
+`.fpvs_processing/source_psd_cache/v2`, so rebuilding a map directory preserves
 them. Both source exporters enter a `source_psd_cache_scope`. On the first
 absent normalized key, a bounded read-only compatibility index discovers older
 keys that included selection fingerprints; it retains candidate filenames only
 and is discarded at the end of the export. Candidate keys must match their
 original canonical metadata hash and the complete normalized requested inputs;
-each hit revalidates metadata, NPZ checksum, array schema and finite values.
+each hit revalidates metadata, NPZ checksum, array schema and explicit validity.
 Discovery is limited to 4,096 metadata files, 256 MiB in total, 4 MiB per file,
 and eight aliases per normalized key; exceeding a limit causes ordinary
 recomputation. Current keys are checked on every request so new writes remain
 visible in an existing scope, and corrupt current entries cannot be hidden by
 an older alias. New cache entries retain the existing atomic publication format;
-legacy entries are reused without being rewritten or moved.
+compatible entries within v2 are reused without being rewritten or moved.
+Old v1 zero-filled caches are preserved but cannot serve new-policy requests;
+the numerical key includes the source-validity policy.
 
 The legacy amplitude-derived eLORETA exporter continues to write under
 `6 - Source Localization/eLORETA Volume Beta/`. Its manifest and the legacy
@@ -820,9 +875,14 @@ shared scale. The positive-value palette is Matplotlib viridis.
 `slice_viewer.py` handles only linked cursor drawing and image hit geometry.
 MRI plane axes and orientation derive from the voxel-to-RAS affine, including
 fsaverage's tkregister axis permutation. A single preview worker loads anatomy,
-selects shared default planes, and renders with an Agg canvas. Pending navigation
-requests coalesce to the newest request; obsolete images/errors cannot replace
-the current view. Manual cursor planes persist across conditions with the same
+selects shared default planes, and renders with an Agg canvas. One pending
+navigation request replaces earlier pending positions. Dragging pins the original
+plane and paints its crosshair immediately; completed frames from that gesture's
+display context may advance the other planes without restoring an older cursor.
+Context changes cancel dragging and reject obsolete images/errors. Navigation
+reuses scale/reference settings and a worker-owned preview cache: one Agg canvas
+and at most 16 slice panels/16 MiB. Context changes replace the cache; publication
+exports remain uncached. Manual cursor planes persist across conditions with the same
 method/summary/mask reference; Home or Reset restores shared default planes.
 Coordinate titles/edge letters appear in the existing figure layout. Tooltips
 inspect nearest original prepared grid values and explicitly identify unmasked

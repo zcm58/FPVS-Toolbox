@@ -25,6 +25,65 @@ from Tools.LORETA_Visualizer.source_payloads import (
 )
 
 
+def test_group_comparison_toggle_preserves_single_view_controls(qtbot, monkeypatch) -> None:
+    from pathlib import Path
+    from Tools.LORETA_Visualizer import gui
+    from Tools.LORETA_Visualizer.prepared_payload_importer import PreparedSourceManifestEntry
+
+    class DisplayDouble(QWidget):
+        def __init__(self, parent=None, **_kwargs):
+            super().__init__(parent)
+
+        def set_display_mode(self, *_args, **_kwargs):
+            pass
+
+        def set_cortical_paint_cluster_mask_enabled(self, *_args, **_kwargs):
+            pass
+
+        def set_transparent_spin_enabled(self, *_args, **_kwargs):
+            pass
+
+        def set_activation_payload(self, *_args, **_kwargs):
+            pass
+
+        def shutdown(self):
+            pass
+
+    monkeypatch.setattr(gui, "BrainRendererWidget", DisplayDouble)
+    monkeypatch.setattr(LoretaVisualizerWindow, "_start_fsaverage_load", lambda *_a, **_k: None)
+    monkeypatch.setattr(LoretaVisualizerWindow, "_refresh_current_activation", lambda _self: None)
+    window = LoretaVisualizerWindow()
+    qtbot.addWidget(window)
+    entries = tuple(
+        PreparedSourceManifestEntry(
+            f"{group}_words_mean", f"{group} words raw mean z-score", Path(f"{group}.json"),
+            {"producer_method": "l2_mne_hauk_source_psd_cortical_normal_v1_mean", "participant_zscore_aggregation": "mean"},
+        ) for group in ("a", "b")
+    )
+    window._replace_manifest_conditions(entries)
+    window._select_first_condition_if_needed()
+    window.show()
+    assert window.compare_groups_check.isEnabled()
+
+    window.compare_groups_check.click()
+    assert window._group_comparison_enabled
+    assert window.activation_scale_combo.itemText(0) == "Scale: both groups"
+    assert not window.export_figures_btn.isEnabled()
+    assert "not a between-group statistical test" in window.compare_groups_check.toolTip()
+
+    window.compare_groups_check.click()
+    assert not window._group_comparison_enabled
+    assert window.activation_scale_combo.itemText(0) == "Scale: current map"
+    assert window.export_figures_btn.isEnabled()
+    assert window.condition_combo.count() == 2
+
+    window._display_mode = DISPLAY_MODE_MRI_SLICES
+    window._sync_source_map_selectors_enabled()
+    assert not window.compare_groups_check.isEnabled()
+    assert "3D volume overlay" in window.compare_groups_check.toolTip()
+    assert window.close()
+
+
 def test_unsupported_graphics_show_recoverable_error_before_vtk(qtbot, monkeypatch):
     from Tools.LORETA_Visualizer import graphics_support
 
@@ -69,7 +128,7 @@ def test_loreta_source_options_exposes_l2_orientation_modes(qtbot) -> None:
 
     combo = dialog.source_orientation_combo
     assert combo.currentData() == SOURCE_ORIENTATION_MODE_CORTICAL_NORMAL
-    assert combo.itemText(0) == "Cortical normal (Hauk-style; recommended)"
+    assert combo.itemText(0) == "Cortical normal (Toolbox default)"
     assert combo.itemData(0) == SOURCE_ORIENTATION_MODE_CORTICAL_NORMAL
     assert combo.itemText(1) == "Legacy MNE pooled orientation (reproduce older maps)"
     assert combo.itemData(1) == SOURCE_ORIENTATION_MODE_LEGACY_MNE_PSD_POWER_NORM
@@ -131,4 +190,4 @@ def test_loreta_display_selector_separates_cortical_and_volume_views(qtbot) -> N
     ]
     assert combo.itemText(0) == "Cortical surface — split hemispheres"
     assert combo.itemText(1) == "Cortical surface — combined"
-    assert "Hauk-style L2-MNE values" in combo.toolTip()
+    assert "L2-MNE values" in combo.toolTip()

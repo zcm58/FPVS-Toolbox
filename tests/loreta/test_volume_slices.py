@@ -15,7 +15,6 @@ from Tools.LORETA_Visualizer.volume_slices import (
     DEFAULT_MRI_SLICE_FIGURE_HEIGHT_IN,
     DEFAULT_MRI_SLICE_FIGURE_WIDTH_IN,
     DEFAULT_MRI_SLICE_SUPPORT_SIGMA,
-    LORETA_DISPLAY_MRI_VOXEL_SIZE_MM,
     MriAnatomyVolume,
     build_mri_slice_panels,
     build_mri_slice_figure,
@@ -68,26 +67,25 @@ def test_volume_slice_payload_points_map_from_display_to_mri_voxels(tmp_path) ->
     assert max(float(np.max(panel.overlay)) for panel in panels) > 0.0
 
 
-def test_load_fsaverage_mri_requires_skull_stripped_brain_mgz_and_builds_half_millimeter_display_template(
+def test_load_fsaverage_mri_requires_native_anatomy_and_keeps_brain_fallback_sampling(
     tmp_path,
 ) -> None:
     nib = pytest.importorskip("nibabel")
     fsaverage_dir = tmp_path / "fsaverage"
     mri_dir = fsaverage_dir / "mri"
     mri_dir.mkdir(parents=True)
-    nib.save(nib.MGHImage(np.ones((8, 8, 8), dtype=np.float32), np.eye(4)), str(mri_dir / "T1.mgz"))
-
-    with pytest.raises(FileNotFoundError, match=r"mri\\brain\.mgz|mri/brain\.mgz"):
+    with pytest.raises(FileNotFoundError, match="T1.mgz or brain.mgz"):
         load_fsaverage_mri_volume(fsaverage_dir, display_template_cache_dir=tmp_path / "mri_template_cache")
 
     nib.save(nib.MGHImage(np.full((8, 8, 8), 2.0, dtype=np.float32), np.eye(4)), str(mri_dir / "brain.mgz"))
 
     anatomy = load_fsaverage_mri_volume(fsaverage_dir, display_template_cache_dir=tmp_path / "mri_template_cache")
 
-    assert anatomy.source_path.name == "brain_0p5mm.nii"
-    assert anatomy.source_path.is_relative_to(tmp_path / "mri_template_cache")
-    assert tuple(int(value) for value in anatomy.data.shape) == (16, 16, 16)
-    assert np.isclose(np.linalg.norm(anatomy.vox_to_ras[:3, 0]), LORETA_DISPLAY_MRI_VOXEL_SIZE_MM)
+    assert anatomy.source_path.name == "brain.mgz"
+    assert anatomy.source_path.parent == mri_dir
+    assert tuple(int(value) for value in anatomy.data.shape) == (8, 8, 8)
+    assert np.isclose(np.linalg.norm(anatomy.vox_to_ras[:3, 0]), 1.0)
+    assert not (tmp_path / "mri_template_cache").exists()
     assert float(np.nanmax(anatomy.data)) == 2.0
 
 
@@ -306,7 +304,9 @@ def test_write_mri_slice_figures_creates_matching_pdf_and_png(tmp_path) -> None:
     assert pdf_path.is_file()
     assert png_path.is_file()
     with Image.open(png_path) as image:
-        assert image.info["Description"] == "Slice coordinates: fsaverage MRI RAS, millimetres."
+        assert image.info["Description"] == (
+            "Slice coordinates: fsaverage MRI RAS, millimetres. Underlay: brain.mgz, native sampling."
+        )
         expected_size = (
             int(round(DEFAULT_MRI_SLICE_FIGURE_WIDTH_IN * DEFAULT_MRI_SLICE_FIGURE_DPI)),
             int(round(DEFAULT_MRI_SLICE_FIGURE_HEIGHT_IN * DEFAULT_MRI_SLICE_FIGURE_DPI)),
@@ -333,19 +333,19 @@ def test_slice_planes_follow_native_fsaverage_affine_and_neurological_orientatio
 
     assert selected == (2, 3, 4)
     axial, coronal, sagittal = panels
-    assert np.array_equal(axial.anatomy, data[:, 3, :].T[::-1, ::-1])
-    assert np.array_equal(coronal.anatomy, data[:, :, 4].T[:, ::-1])
-    assert np.array_equal(sagittal.anatomy, data[2, :, :])
+    # Stable physical framing may pad each plane; native samples and their
+    # anatomical orientation remain exact throughout the mapped field of view.
     assert [panel.ras_coordinate_mm for panel in panels] == [4.0, 2.0, 4.0]
     assert [panel.fixed_voxel_axis for panel in panels] == [1, 2, 0]
     assert axial.orientation_labels == ("L", "R", "A", "P")
     assert coronal.orientation_labels == ("L", "R", "S", "I")
     assert sagittal.orientation_labels == ("P", "A", "S", "I")
     for panel in panels:
-        for row in (0, panel.anatomy.shape[0] - 1):
-            for column in (0, panel.anatomy.shape[1] - 1):
+        for row in range(panel.anatomy.shape[0]):
+            for column in range(panel.anatomy.shape[1]):
                 voxel = np.rint(panel.pixel_to_voxel @ [column, row, 1.0]).astype(int)
-                assert panel.anatomy[row, column] == data[tuple(voxel)]
+                inside = np.all((voxel >= 0) & (voxel < data.shape))
+                assert panel.anatomy[row, column] == (data[tuple(voxel)] if inside else 0)
 
 
 def test_slice_planes_reject_oblique_affine_instead_of_mislabeling_anatomy() -> None:
@@ -434,7 +434,7 @@ def test_coordinate_titles_and_colorbar_fit_publication_width(monkeypatch, font_
             tick.set_fontfamily(font_family)
         figure.canvas.draw()
         renderer = figure.canvas.get_renderer()
-        titles = [axis.title.get_bbox_patch().get_window_extent(renderer) for axis in figure.axes[:3]]
+        titles = [axis.title.get_window_extent(renderer) for axis in figure.axes[:3]]
         assert titles[0].x1 < titles[1].x0
         assert titles[1].x1 < titles[2].x0
         for title in titles:

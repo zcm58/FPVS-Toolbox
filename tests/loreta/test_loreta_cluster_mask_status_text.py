@@ -63,7 +63,7 @@ def test_cluster_mask_status_describes_cluster_level_evidence() -> None:
     status = _cluster_mask_display_status_text(_surface_payload(mask_indices=[1]), use_cluster_mask=True)
 
     assert status == (
-        "Showing vertices in clusters retained by the group-level permutation test.",
+        "Showing vertices in exploratory clusters; spectral-null calibration is unverified.",
         "info",
     )
 

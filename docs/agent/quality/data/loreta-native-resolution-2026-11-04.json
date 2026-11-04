@@ -1,0 +1,1949 @@
+{
+  "format": "fpvs-native-inverse-resolution-sensitivity-v2",
+  "diagnostic_source_sha256": "341ff2a086d01604644492a38503f07cce1078a41dae8140e5b6da43521976ad",
+  "synthetic": true,
+  "mne_version": "1.9.0",
+  "numpy_version": "2.3.1",
+  "scope": "Native template inverse-only recovery, sampled PSFs/CTFs and named synthetic sensor perturbations.",
+  "not_tested": [
+    "real-data accuracy",
+    "anatomical head-model mismatch",
+    "empirical noise",
+    "correlated sources",
+    "FPVS spectral processing",
+    "statistical calibration"
+  ],
+  "probe_selection": "Evenly spaced source indices including endpoints; not an anatomical sample.",
+  "injected_amplitude_nAm": 1.0,
+  "leakage_radius_mm": 20.0,
+  "spread_definition": "sqrt(sum(amplitude^2 * distance_from_injected_source^2) / sum(amplitude^2))",
+  "leakage_definition": "sum(amplitude^2 at distance > 20 mm) / sum(amplitude^2)",
+  "methods": [
+    {
+      "method_id": "l2_mne_hauk_source_psd_cortical_normal_v1",
+      "model_preparation_signature": "276fc4622948e5858a0e970b5001d2e9940d1d32837d4b7a38a66d8536542e3f",
+      "source_count": 1284,
+      "lambda2": 0.1111111111111111,
+      "pick_ori": "normal",
+      "method_params": {},
+      "coordinate_frame": "FreeSurfer fsaverage MRI surface RAS millimetres",
+      "probes": [
+        {
+          "injected_source_index": 0,
+          "injected_position_mm": [
+            -36.806278228759766,
+            -18.292722702026367,
+            64.4615249633789
+          ],
+          "peak_source_indices": [
+            0
+          ],
+          "nearest_peak_distance_mm": 0.0,
+          "farthest_peak_distance_mm": 0.0,
+          "rms_spread_from_injected_source_mm": 38.98029090786131,
+          "energy_fraction_outside_radius": 0.7577496584109065,
+          "injected_source_amplitude_relative_to_peak": 1.0,
+          "native_orientation_component": 2
+        },
+        {
+          "injected_source_index": 183,
+          "injected_position_mm": [
+            -55.251564025878906,
+            -15.629384994506838,
+            14.862167358398438
+          ],
+          "peak_source_indices": [
+            531
+          ],
+          "nearest_peak_distance_mm": 17.83526679208795,
+          "farthest_peak_distance_mm": 17.83526679208795,
+          "rms_spread_from_injected_source_mm": 39.54096825444915,
+          "energy_fraction_outside_radius": 0.7063825124209193,
+          "injected_source_amplitude_relative_to_peak": 0.8822021005480893,
+          "native_orientation_component": 2
+        },
+        {
+          "injected_source_index": 366,
+          "injected_position_mm": [
+            -29.086246490478516,
+            0.560003936290741,
+            48.64216995239258
+          ],
+          "peak_source_indices": [
+            363
+          ],
+          "nearest_peak_distance_mm": 21.26027762366608,
+          "farthest_peak_distance_mm": 21.26027762366608,
+          "rms_spread_from_injected_source_mm": 44.92144332932006,
+          "energy_fraction_outside_radius": 0.851891035522994,
+          "injected_source_amplitude_relative_to_peak": 0.828376217064164,
+          "native_orientation_component": 2
+        },
+        {
+          "injected_source_index": 549,
+          "injected_position_mm": [
+            -58.57331085205078,
+            -29.969158172607422,
+            -0.13100507855415344
+          ],
+          "peak_source_indices": [
+            440
+          ],
+          "nearest_peak_distance_mm": 15.904470681960213,
+          "farthest_peak_distance_mm": 15.904470681960213,
+          "rms_spread_from_injected_source_mm": 31.44198812068869,
+          "energy_fraction_outside_radius": 0.5659798575715951,
+          "injected_source_amplitude_relative_to_peak": 0.8055778712104966,
+          "native_orientation_component": 2
+        },
+        {
+          "injected_source_index": 733,
+          "injected_position_mm": [
+            58.244895935058594,
+            -41.445552825927734,
+            -4.9681196212768555
+          ],
+          "peak_source_indices": [
+            1268
+          ],
+          "nearest_peak_distance_mm": 6.762991370452071,
+          "farthest_peak_distance_mm": 6.762991370452071,
+          "rms_spread_from_injected_source_mm": 35.99666097226088,
+          "energy_fraction_outside_radius": 0.6202762763422867,
+          "injected_source_amplitude_relative_to_peak": 0.7443306266562065,
+          "native_orientation_component": 2
+        },
+        {
+          "injected_source_index": 916,
+          "injected_position_mm": [
+            5.375911712646484,
+            25.254718780517578,
+            -5.486599922180176
+          ],
+          "peak_source_indices": [
+            1167
+          ],
+          "nearest_peak_distance_mm": 40.288907823231796,
+          "farthest_peak_distance_mm": 40.288907823231796,
+          "rms_spread_from_injected_source_mm": 47.8207792992218,
+          "energy_fraction_outside_radius": 0.9505744027976922,
+          "injected_source_amplitude_relative_to_peak": 0.5514619222516015,
+          "native_orientation_component": 2
+        },
+        {
+          "injected_source_index": 1099,
+          "injected_position_mm": [
+            18.528520584106445,
+            28.490036010742188,
+            53.003501892089844
+          ],
+          "peak_source_indices": [
+            1099
+          ],
+          "nearest_peak_distance_mm": 0.0,
+          "farthest_peak_distance_mm": 0.0,
+          "rms_spread_from_injected_source_mm": 34.81604310119631,
+          "energy_fraction_outside_radius": 0.6220129224550064,
+          "injected_source_amplitude_relative_to_peak": 1.0,
+          "native_orientation_component": 2
+        },
+        {
+          "injected_source_index": 1283,
+          "injected_position_mm": [
+            55.9749755859375,
+            -18.06252670288086,
+            -31.45770645141602
+          ],
+          "peak_source_indices": [
+            803
+          ],
+          "nearest_peak_distance_mm": 14.931953880145972,
+          "farthest_peak_distance_mm": 14.931953880145972,
+          "rms_spread_from_injected_source_mm": 50.02131912490418,
+          "energy_fraction_outside_radius": 0.8457433561975728,
+          "injected_source_amplitude_relative_to_peak": 0.7477598691909219,
+          "native_orientation_component": 2
+        }
+      ],
+      "sampled_resolution": {
+        "scope": "sampled_linear_inverse_resolution_not_spectral_Z",
+        "amplitude_reduction": "absolute_scalar",
+        "source_components": 1,
+        "point_spread_columns": [
+          {
+            "peak_source_indices": [
+              0
+            ],
+            "nearest_peak_distance_mm": 0.0,
+            "farthest_peak_distance_mm": 0.0,
+            "energy_fraction_outside_radius": 0.7577496584109067,
+            "target_source_index": 0,
+            "target_position_mm": [
+              -36.806278228759766,
+              -18.292722702026367,
+              64.4615249633789
+            ],
+            "rms_spread_from_target_source_mm": 38.98029090786131,
+            "target_amplitude_relative_to_peak": 1.0,
+            "target_absolute_resolution_amplitude": 0.019190925540301135
+          },
+          {
+            "peak_source_indices": [
+              531
+            ],
+            "nearest_peak_distance_mm": 17.83526679208795,
+            "farthest_peak_distance_mm": 17.83526679208795,
+            "energy_fraction_outside_radius": 0.7063825124209192,
+            "target_source_index": 183,
+            "target_position_mm": [
+              -55.251564025878906,
+              -15.629384994506838,
+              14.862167358398438
+            ],
+            "rms_spread_from_target_source_mm": 39.540968254449155,
+            "target_amplitude_relative_to_peak": 0.882202100548089,
+            "target_absolute_resolution_amplitude": 0.012459507045055952
+          },
+          {
+            "peak_source_indices": [
+              363
+            ],
+            "nearest_peak_distance_mm": 21.26027762366608,
+            "farthest_peak_distance_mm": 21.26027762366608,
+            "energy_fraction_outside_radius": 0.8518910355229938,
+            "target_source_index": 366,
+            "target_position_mm": [
+              -29.086246490478516,
+              0.560003936290741,
+              48.64216995239258
+            ],
+            "rms_spread_from_target_source_mm": 44.92144332932006,
+            "target_amplitude_relative_to_peak": 0.8283762170641642,
+            "target_absolute_resolution_amplitude": 0.008525062609505274
+          },
+          {
+            "peak_source_indices": [
+              440
+            ],
+            "nearest_peak_distance_mm": 15.904470681960213,
+            "farthest_peak_distance_mm": 15.904470681960213,
+            "energy_fraction_outside_radius": 0.5659798575715953,
+            "target_source_index": 549,
+            "target_position_mm": [
+              -58.57331085205078,
+              -29.969158172607422,
+              -0.13100507855415344
+            ],
+            "rms_spread_from_target_source_mm": 31.441988120688695,
+            "target_amplitude_relative_to_peak": 0.805577871210497,
+            "target_absolute_resolution_amplitude": 0.01425606507531185
+          },
+          {
+            "peak_source_indices": [
+              1268
+            ],
+            "nearest_peak_distance_mm": 6.762991370452071,
+            "farthest_peak_distance_mm": 6.762991370452071,
+            "energy_fraction_outside_radius": 0.6202762763422867,
+            "target_source_index": 733,
+            "target_position_mm": [
+              58.244895935058594,
+              -41.445552825927734,
+              -4.9681196212768555
+            ],
+            "rms_spread_from_target_source_mm": 35.99666097226088,
+            "target_amplitude_relative_to_peak": 0.7443306266562065,
+            "target_absolute_resolution_amplitude": 0.013658969123234289
+          },
+          {
+            "peak_source_indices": [
+              1167
+            ],
+            "nearest_peak_distance_mm": 40.288907823231796,
+            "farthest_peak_distance_mm": 40.288907823231796,
+            "energy_fraction_outside_radius": 0.9505744027976922,
+            "target_source_index": 916,
+            "target_position_mm": [
+              5.375911712646484,
+              25.254718780517578,
+              -5.486599922180176
+            ],
+            "rms_spread_from_target_source_mm": 47.8207792992218,
+            "target_amplitude_relative_to_peak": 0.5514619222516018,
+            "target_absolute_resolution_amplitude": 0.003003720695650203
+          },
+          {
+            "peak_source_indices": [
+              1099
+            ],
+            "nearest_peak_distance_mm": 0.0,
+            "farthest_peak_distance_mm": 0.0,
+            "energy_fraction_outside_radius": 0.6220129224550063,
+            "target_source_index": 1099,
+            "target_position_mm": [
+              18.528520584106445,
+              28.490036010742188,
+              53.003501892089844
+            ],
+            "rms_spread_from_target_source_mm": 34.8160431011963,
+            "target_amplitude_relative_to_peak": 1.0,
+            "target_absolute_resolution_amplitude": 0.02467640657326467
+          },
+          {
+            "peak_source_indices": [
+              803
+            ],
+            "nearest_peak_distance_mm": 14.931953880145972,
+            "farthest_peak_distance_mm": 14.931953880145972,
+            "energy_fraction_outside_radius": 0.8457433561975728,
+            "target_source_index": 1283,
+            "target_position_mm": [
+              55.9749755859375,
+              -18.06252670288086,
+              -31.45770645141602
+            ],
+            "rms_spread_from_target_source_mm": 50.021319124904196,
+            "target_amplitude_relative_to_peak": 0.7477598691909221,
+            "target_absolute_resolution_amplitude": 0.01023736015474204
+          }
+        ],
+        "cross_talk_rows": [
+          {
+            "peak_source_indices": [
+              0
+            ],
+            "nearest_peak_distance_mm": 0.0,
+            "farthest_peak_distance_mm": 0.0,
+            "energy_fraction_outside_radius": 0.7577496584109068,
+            "target_source_index": 0,
+            "target_position_mm": [
+              -36.806278228759766,
+              -18.292722702026367,
+              64.4615249633789
+            ],
+            "rms_spread_from_target_source_mm": 38.98029090786137,
+            "target_amplitude_relative_to_peak": 1.0,
+            "target_absolute_resolution_amplitude": 0.019190925540301135
+          },
+          {
+            "peak_source_indices": [
+              531
+            ],
+            "nearest_peak_distance_mm": 17.83526679208795,
+            "farthest_peak_distance_mm": 17.83526679208795,
+            "energy_fraction_outside_radius": 0.7063825124209185,
+            "target_source_index": 183,
+            "target_position_mm": [
+              -55.251564025878906,
+              -15.629384994506838,
+              14.862167358398438
+            ],
+            "rms_spread_from_target_source_mm": 39.540968254449105,
+            "target_amplitude_relative_to_peak": 0.8822021005480873,
+            "target_absolute_resolution_amplitude": 0.012459507045055952
+          },
+          {
+            "peak_source_indices": [
+              363
+            ],
+            "nearest_peak_distance_mm": 21.26027762366608,
+            "farthest_peak_distance_mm": 21.26027762366608,
+            "energy_fraction_outside_radius": 0.8518910355229943,
+            "target_source_index": 366,
+            "target_position_mm": [
+              -29.086246490478516,
+              0.560003936290741,
+              48.64216995239258
+            ],
+            "rms_spread_from_target_source_mm": 44.921443329320134,
+            "target_amplitude_relative_to_peak": 0.8283762170641648,
+            "target_absolute_resolution_amplitude": 0.008525062609505274
+          },
+          {
+            "peak_source_indices": [
+              440
+            ],
+            "nearest_peak_distance_mm": 15.904470681960213,
+            "farthest_peak_distance_mm": 15.904470681960213,
+            "energy_fraction_outside_radius": 0.565979857571595,
+            "target_source_index": 549,
+            "target_position_mm": [
+              -58.57331085205078,
+              -29.969158172607422,
+              -0.13100507855415344
+            ],
+            "rms_spread_from_target_source_mm": 31.44198812068868,
+            "target_amplitude_relative_to_peak": 0.8055778712104975,
+            "target_absolute_resolution_amplitude": 0.01425606507531185
+          },
+          {
+            "peak_source_indices": [
+              1268
+            ],
+            "nearest_peak_distance_mm": 6.762991370452071,
+            "farthest_peak_distance_mm": 6.762991370452071,
+            "energy_fraction_outside_radius": 0.6202762763422862,
+            "target_source_index": 733,
+            "target_position_mm": [
+              58.244895935058594,
+              -41.445552825927734,
+              -4.9681196212768555
+            ],
+            "rms_spread_from_target_source_mm": 35.99666097226087,
+            "target_amplitude_relative_to_peak": 0.7443306266562059,
+            "target_absolute_resolution_amplitude": 0.013658969123234289
+          },
+          {
+            "peak_source_indices": [
+              1167
+            ],
+            "nearest_peak_distance_mm": 40.288907823231796,
+            "farthest_peak_distance_mm": 40.288907823231796,
+            "energy_fraction_outside_radius": 0.9505744027976921,
+            "target_source_index": 916,
+            "target_position_mm": [
+              5.375911712646484,
+              25.254718780517578,
+              -5.486599922180176
+            ],
+            "rms_spread_from_target_source_mm": 47.82077929922178,
+            "target_amplitude_relative_to_peak": 0.5514619222516031,
+            "target_absolute_resolution_amplitude": 0.003003720695650203
+          },
+          {
+            "peak_source_indices": [
+              1099
+            ],
+            "nearest_peak_distance_mm": 0.0,
+            "farthest_peak_distance_mm": 0.0,
+            "energy_fraction_outside_radius": 0.6220129224550064,
+            "target_source_index": 1099,
+            "target_position_mm": [
+              18.528520584106445,
+              28.490036010742188,
+              53.003501892089844
+            ],
+            "rms_spread_from_target_source_mm": 34.816043101196314,
+            "target_amplitude_relative_to_peak": 1.0,
+            "target_absolute_resolution_amplitude": 0.02467640657326467
+          },
+          {
+            "peak_source_indices": [
+              803
+            ],
+            "nearest_peak_distance_mm": 14.931953880145972,
+            "farthest_peak_distance_mm": 14.931953880145972,
+            "energy_fraction_outside_radius": 0.8457433561975728,
+            "target_source_index": 1283,
+            "target_position_mm": [
+              55.9749755859375,
+              -18.06252670288086,
+              -31.45770645141602
+            ],
+            "rms_spread_from_target_source_mm": 50.02131912490417,
+            "target_amplitude_relative_to_peak": 0.7477598691909229,
+            "target_absolute_resolution_amplitude": 0.010237360154742038
+          }
+        ]
+      },
+      "sensitivity": {
+        "seed": 20261104,
+        "native_orientation_component": 2,
+        "scope": "one_seed_synthetic_sensor_noise_and_gain_perturbations_not_anatomical_or_empirical_accuracy",
+        "scenarios": {
+          "matched_model": [
+            {
+              "injected_source_index": 0,
+              "injected_position_mm": [
+                -36.806278228759766,
+                -18.292722702026367,
+                64.4615249633789
+              ],
+              "peak_source_indices": [
+                0
+              ],
+              "nearest_peak_distance_mm": 0.0,
+              "farthest_peak_distance_mm": 0.0,
+              "rms_spread_from_injected_source_mm": 38.98029090786131,
+              "energy_fraction_outside_radius": 0.7577496584109065,
+              "injected_source_amplitude_relative_to_peak": 1.0
+            },
+            {
+              "injected_source_index": 183,
+              "injected_position_mm": [
+                -55.251564025878906,
+                -15.629384994506838,
+                14.862167358398438
+              ],
+              "peak_source_indices": [
+                531
+              ],
+              "nearest_peak_distance_mm": 17.83526679208795,
+              "farthest_peak_distance_mm": 17.83526679208795,
+              "rms_spread_from_injected_source_mm": 39.54096825444915,
+              "energy_fraction_outside_radius": 0.7063825124209193,
+              "injected_source_amplitude_relative_to_peak": 0.8822021005480893
+            },
+            {
+              "injected_source_index": 366,
+              "injected_position_mm": [
+                -29.086246490478516,
+                0.560003936290741,
+                48.64216995239258
+              ],
+              "peak_source_indices": [
+                363
+              ],
+              "nearest_peak_distance_mm": 21.26027762366608,
+              "farthest_peak_distance_mm": 21.26027762366608,
+              "rms_spread_from_injected_source_mm": 44.92144332932006,
+              "energy_fraction_outside_radius": 0.851891035522994,
+              "injected_source_amplitude_relative_to_peak": 0.828376217064164
+            },
+            {
+              "injected_source_index": 549,
+              "injected_position_mm": [
+                -58.57331085205078,
+                -29.969158172607422,
+                -0.13100507855415344
+              ],
+              "peak_source_indices": [
+                440
+              ],
+              "nearest_peak_distance_mm": 15.904470681960213,
+              "farthest_peak_distance_mm": 15.904470681960213,
+              "rms_spread_from_injected_source_mm": 31.44198812068869,
+              "energy_fraction_outside_radius": 0.5659798575715951,
+              "injected_source_amplitude_relative_to_peak": 0.8055778712104966
+            },
+            {
+              "injected_source_index": 733,
+              "injected_position_mm": [
+                58.244895935058594,
+                -41.445552825927734,
+                -4.9681196212768555
+              ],
+              "peak_source_indices": [
+                1268
+              ],
+              "nearest_peak_distance_mm": 6.762991370452071,
+              "farthest_peak_distance_mm": 6.762991370452071,
+              "rms_spread_from_injected_source_mm": 35.99666097226088,
+              "energy_fraction_outside_radius": 0.6202762763422867,
+              "injected_source_amplitude_relative_to_peak": 0.7443306266562065
+            },
+            {
+              "injected_source_index": 916,
+              "injected_position_mm": [
+                5.375911712646484,
+                25.254718780517578,
+                -5.486599922180176
+              ],
+              "peak_source_indices": [
+                1167
+              ],
+              "nearest_peak_distance_mm": 40.288907823231796,
+              "farthest_peak_distance_mm": 40.288907823231796,
+              "rms_spread_from_injected_source_mm": 47.8207792992218,
+              "energy_fraction_outside_radius": 0.9505744027976922,
+              "injected_source_amplitude_relative_to_peak": 0.5514619222516015
+            },
+            {
+              "injected_source_index": 1099,
+              "injected_position_mm": [
+                18.528520584106445,
+                28.490036010742188,
+                53.003501892089844
+              ],
+              "peak_source_indices": [
+                1099
+              ],
+              "nearest_peak_distance_mm": 0.0,
+              "farthest_peak_distance_mm": 0.0,
+              "rms_spread_from_injected_source_mm": 34.81604310119631,
+              "energy_fraction_outside_radius": 0.6220129224550064,
+              "injected_source_amplitude_relative_to_peak": 1.0
+            },
+            {
+              "injected_source_index": 1283,
+              "injected_position_mm": [
+                55.9749755859375,
+                -18.06252670288086,
+                -31.45770645141602
+              ],
+              "peak_source_indices": [
+                803
+              ],
+              "nearest_peak_distance_mm": 14.931953880145972,
+              "farthest_peak_distance_mm": 14.931953880145972,
+              "rms_spread_from_injected_source_mm": 50.02131912490418,
+              "energy_fraction_outside_radius": 0.8457433561975728,
+              "injected_source_amplitude_relative_to_peak": 0.7477598691909219
+            }
+          ],
+          "sensor_noise_20_percent_rms": [
+            {
+              "injected_source_index": 0,
+              "injected_position_mm": [
+                -36.806278228759766,
+                -18.292722702026367,
+                64.4615249633789
+              ],
+              "peak_source_indices": [
+                0
+              ],
+              "nearest_peak_distance_mm": 0.0,
+              "farthest_peak_distance_mm": 0.0,
+              "rms_spread_from_injected_source_mm": 47.879549169428536,
+              "energy_fraction_outside_radius": 0.7833179143175961,
+              "injected_source_amplitude_relative_to_peak": 1.0
+            },
+            {
+              "injected_source_index": 183,
+              "injected_position_mm": [
+                -55.251564025878906,
+                -15.629384994506838,
+                14.862167358398438
+              ],
+              "peak_source_indices": [
+                531
+              ],
+              "nearest_peak_distance_mm": 17.83526679208795,
+              "farthest_peak_distance_mm": 17.83526679208795,
+              "rms_spread_from_injected_source_mm": 47.51310470597283,
+              "energy_fraction_outside_radius": 0.7291746784847626,
+              "injected_source_amplitude_relative_to_peak": 0.8152287793423008
+            },
+            {
+              "injected_source_index": 366,
+              "injected_position_mm": [
+                -29.086246490478516,
+                0.560003936290741,
+                48.64216995239258
+              ],
+              "peak_source_indices": [
+                245
+              ],
+              "nearest_peak_distance_mm": 25.219512784241918,
+              "farthest_peak_distance_mm": 25.219512784241918,
+              "rms_spread_from_injected_source_mm": 54.85753466263797,
+              "energy_fraction_outside_radius": 0.8757182592748682,
+              "injected_source_amplitude_relative_to_peak": 0.8919009294508724
+            },
+            {
+              "injected_source_index": 549,
+              "injected_position_mm": [
+                -58.57331085205078,
+                -29.969158172607422,
+                -0.13100507855415344
+              ],
+              "peak_source_indices": [
+                129
+              ],
+              "nearest_peak_distance_mm": 7.827019365967302,
+              "farthest_peak_distance_mm": 7.827019365967302,
+              "rms_spread_from_injected_source_mm": 39.934611396668764,
+              "energy_fraction_outside_radius": 0.5865966629117584,
+              "injected_source_amplitude_relative_to_peak": 0.7907534023054655
+            },
+            {
+              "injected_source_index": 733,
+              "injected_position_mm": [
+                58.244895935058594,
+                -41.445552825927734,
+                -4.9681196212768555
+              ],
+              "peak_source_indices": [
+                1268
+              ],
+              "nearest_peak_distance_mm": 6.762991370452071,
+              "farthest_peak_distance_mm": 6.762991370452071,
+              "rms_spread_from_injected_source_mm": 41.19283948452241,
+              "energy_fraction_outside_radius": 0.6229717201685945,
+              "injected_source_amplitude_relative_to_peak": 0.679312149198687
+            },
+            {
+              "injected_source_index": 916,
+              "injected_position_mm": [
+                5.375911712646484,
+                25.254718780517578,
+                -5.486599922180176
+              ],
+              "peak_source_indices": [
+                526
+              ],
+              "nearest_peak_distance_mm": 59.0201497913411,
+              "farthest_peak_distance_mm": 59.0201497913411,
+              "rms_spread_from_injected_source_mm": 61.500749123306925,
+              "energy_fraction_outside_radius": 0.9599923903792565,
+              "injected_source_amplitude_relative_to_peak": 0.4802444046330493
+            },
+            {
+              "injected_source_index": 1099,
+              "injected_position_mm": [
+                18.528520584106445,
+                28.490036010742188,
+                53.003501892089844
+              ],
+              "peak_source_indices": [
+                1099
+              ],
+              "nearest_peak_distance_mm": 0.0,
+              "farthest_peak_distance_mm": 0.0,
+              "rms_spread_from_injected_source_mm": 42.71852991595086,
+              "energy_fraction_outside_radius": 0.6441454244229547,
+              "injected_source_amplitude_relative_to_peak": 1.0
+            },
+            {
+              "injected_source_index": 1283,
+              "injected_position_mm": [
+                55.9749755859375,
+                -18.06252670288086,
+                -31.45770645141602
+              ],
+              "peak_source_indices": [
+                803
+              ],
+              "nearest_peak_distance_mm": 14.931953880145972,
+              "farthest_peak_distance_mm": 14.931953880145972,
+              "rms_spread_from_injected_source_mm": 57.88373886739644,
+              "energy_fraction_outside_radius": 0.8685909421548645,
+              "injected_source_amplitude_relative_to_peak": 0.7315596972065758
+            }
+          ],
+          "sensor_gain_10_percent_sinusoidal": [
+            {
+              "injected_source_index": 0,
+              "injected_position_mm": [
+                -36.806278228759766,
+                -18.292722702026367,
+                64.4615249633789
+              ],
+              "peak_source_indices": [
+                0
+              ],
+              "nearest_peak_distance_mm": 0.0,
+              "farthest_peak_distance_mm": 0.0,
+              "rms_spread_from_injected_source_mm": 40.55822078733598,
+              "energy_fraction_outside_radius": 0.7748964599216708,
+              "injected_source_amplitude_relative_to_peak": 1.0
+            },
+            {
+              "injected_source_index": 183,
+              "injected_position_mm": [
+                -55.251564025878906,
+                -15.629384994506838,
+                14.862167358398438
+              ],
+              "peak_source_indices": [
+                531
+              ],
+              "nearest_peak_distance_mm": 17.83526679208795,
+              "farthest_peak_distance_mm": 17.83526679208795,
+              "rms_spread_from_injected_source_mm": 38.832802228898814,
+              "energy_fraction_outside_radius": 0.6859076555384684,
+              "injected_source_amplitude_relative_to_peak": 0.8564601284697215
+            },
+            {
+              "injected_source_index": 366,
+              "injected_position_mm": [
+                -29.086246490478516,
+                0.560003936290741,
+                48.64216995239258
+              ],
+              "peak_source_indices": [
+                245
+              ],
+              "nearest_peak_distance_mm": 25.219512784241918,
+              "farthest_peak_distance_mm": 25.219512784241918,
+              "rms_spread_from_injected_source_mm": 47.41264023387374,
+              "energy_fraction_outside_radius": 0.8681212195722906,
+              "injected_source_amplitude_relative_to_peak": 0.8361279330900971
+            },
+            {
+              "injected_source_index": 549,
+              "injected_position_mm": [
+                -58.57331085205078,
+                -29.969158172607422,
+                -0.13100507855415344
+              ],
+              "peak_source_indices": [
+                440
+              ],
+              "nearest_peak_distance_mm": 15.904470681960213,
+              "farthest_peak_distance_mm": 15.904470681960213,
+              "rms_spread_from_injected_source_mm": 30.59776932032418,
+              "energy_fraction_outside_radius": 0.5436618439531459,
+              "injected_source_amplitude_relative_to_peak": 0.7625546171869002
+            },
+            {
+              "injected_source_index": 733,
+              "injected_position_mm": [
+                58.244895935058594,
+                -41.445552825927734,
+                -4.9681196212768555
+              ],
+              "peak_source_indices": [
+                1268
+              ],
+              "nearest_peak_distance_mm": 6.762991370452071,
+              "farthest_peak_distance_mm": 6.762991370452071,
+              "rms_spread_from_injected_source_mm": 36.27882658316017,
+              "energy_fraction_outside_radius": 0.5988008981634941,
+              "injected_source_amplitude_relative_to_peak": 0.71638307127836
+            },
+            {
+              "injected_source_index": 916,
+              "injected_position_mm": [
+                5.375911712646484,
+                25.254718780517578,
+                -5.486599922180176
+              ],
+              "peak_source_indices": [
+                267
+              ],
+              "nearest_peak_distance_mm": 49.77786332587734,
+              "farthest_peak_distance_mm": 49.77786332587734,
+              "rms_spread_from_injected_source_mm": 48.986506879060386,
+              "energy_fraction_outside_radius": 0.9540077365835775,
+              "injected_source_amplitude_relative_to_peak": 0.5051070388404034
+            },
+            {
+              "injected_source_index": 1099,
+              "injected_position_mm": [
+                18.528520584106445,
+                28.490036010742188,
+                53.003501892089844
+              ],
+              "peak_source_indices": [
+                1099
+              ],
+              "nearest_peak_distance_mm": 0.0,
+              "farthest_peak_distance_mm": 0.0,
+              "rms_spread_from_injected_source_mm": 35.21637113224945,
+              "energy_fraction_outside_radius": 0.6290845361180709,
+              "injected_source_amplitude_relative_to_peak": 1.0
+            },
+            {
+              "injected_source_index": 1283,
+              "injected_position_mm": [
+                55.9749755859375,
+                -18.06252670288086,
+                -31.45770645141602
+              ],
+              "peak_source_indices": [
+                1093
+              ],
+              "nearest_peak_distance_mm": 31.093056829477018,
+              "farthest_peak_distance_mm": 31.093056829477018,
+              "rms_spread_from_injected_source_mm": 52.31885713703353,
+              "energy_fraction_outside_radius": 0.8599315779483397,
+              "injected_source_amplitude_relative_to_peak": 0.7227529134911165
+            }
+          ]
+        }
+      }
+    },
+    {
+      "method_id": "eloreta_volume_hauk_source_psd_vector_norm_v1",
+      "model_preparation_signature": "0a9d832a50680d766501353864f06a404ca4c4b5113669827919201901de2f8e",
+      "source_count": 1821,
+      "lambda2": 0.1111111111111111,
+      "pick_ori": "vector",
+      "method_params": {
+        "eps": 1e-06,
+        "max_iter": 20,
+        "force_equal": false
+      },
+      "coordinate_frame": "FreeSurfer fsaverage MRI surface RAS millimetres",
+      "probes": [
+        {
+          "injected_source_index": 0,
+          "injected_position_mm": [
+            -30.0,
+            -60.0,
+            -60.0
+          ],
+          "peak_source_indices": [
+            0
+          ],
+          "nearest_peak_distance_mm": 0.0,
+          "farthest_peak_distance_mm": 0.0,
+          "rms_spread_from_injected_source_mm": 53.460060420785815,
+          "energy_fraction_outside_radius": 0.9389377963037148,
+          "injected_source_amplitude_relative_to_peak": 1.0,
+          "native_orientation_component": 0
+        },
+        {
+          "injected_source_index": 0,
+          "injected_position_mm": [
+            -30.0,
+            -60.0,
+            -60.0
+          ],
+          "peak_source_indices": [
+            0
+          ],
+          "nearest_peak_distance_mm": 0.0,
+          "farthest_peak_distance_mm": 0.0,
+          "rms_spread_from_injected_source_mm": 58.27289100252195,
+          "energy_fraction_outside_radius": 0.9512523382006831,
+          "injected_source_amplitude_relative_to_peak": 1.0,
+          "native_orientation_component": 1
+        },
+        {
+          "injected_source_index": 0,
+          "injected_position_mm": [
+            -30.0,
+            -60.0,
+            -60.0
+          ],
+          "peak_source_indices": [
+            0
+          ],
+          "nearest_peak_distance_mm": 0.0,
+          "farthest_peak_distance_mm": 0.0,
+          "rms_spread_from_injected_source_mm": 58.21546982682314,
+          "energy_fraction_outside_radius": 0.9510032470492665,
+          "injected_source_amplitude_relative_to_peak": 1.0,
+          "native_orientation_component": 2
+        },
+        {
+          "injected_source_index": 260,
+          "injected_position_mm": [
+            40.0,
+            -10.0,
+            -30.0
+          ],
+          "peak_source_indices": [
+            260
+          ],
+          "nearest_peak_distance_mm": 0.0,
+          "farthest_peak_distance_mm": 0.0,
+          "rms_spread_from_injected_source_mm": 48.540250405733914,
+          "energy_fraction_outside_radius": 0.8986401575227766,
+          "injected_source_amplitude_relative_to_peak": 1.0,
+          "native_orientation_component": 0
+        },
+        {
+          "injected_source_index": 260,
+          "injected_position_mm": [
+            40.0,
+            -10.0,
+            -30.0
+          ],
+          "peak_source_indices": [
+            260
+          ],
+          "nearest_peak_distance_mm": 0.0,
+          "farthest_peak_distance_mm": 0.0,
+          "rms_spread_from_injected_source_mm": 52.73978526679698,
+          "energy_fraction_outside_radius": 0.9041748186402021,
+          "injected_source_amplitude_relative_to_peak": 1.0,
+          "native_orientation_component": 1
+        },
+        {
+          "injected_source_index": 260,
+          "injected_position_mm": [
+            40.0,
+            -10.0,
+            -30.0
+          ],
+          "peak_source_indices": [
+            260
+          ],
+          "nearest_peak_distance_mm": 0.0,
+          "farthest_peak_distance_mm": 0.0,
+          "rms_spread_from_injected_source_mm": 54.75630697068458,
+          "energy_fraction_outside_radius": 0.9151105029290473,
+          "injected_source_amplitude_relative_to_peak": 1.0,
+          "native_orientation_component": 2
+        },
+        {
+          "injected_source_index": 520,
+          "injected_position_mm": [
+            -50.0,
+            -50.0,
+            -10.0
+          ],
+          "peak_source_indices": [
+            520
+          ],
+          "nearest_peak_distance_mm": 0.0,
+          "farthest_peak_distance_mm": 0.0,
+          "rms_spread_from_injected_source_mm": 41.232396396992876,
+          "energy_fraction_outside_radius": 0.8562539480934267,
+          "injected_source_amplitude_relative_to_peak": 1.0,
+          "native_orientation_component": 0
+        },
+        {
+          "injected_source_index": 520,
+          "injected_position_mm": [
+            -50.0,
+            -50.0,
+            -10.0
+          ],
+          "peak_source_indices": [
+            520
+          ],
+          "nearest_peak_distance_mm": 0.0,
+          "farthest_peak_distance_mm": 0.0,
+          "rms_spread_from_injected_source_mm": 44.32378292377056,
+          "energy_fraction_outside_radius": 0.8758477588788234,
+          "injected_source_amplitude_relative_to_peak": 1.0,
+          "native_orientation_component": 1
+        },
+        {
+          "injected_source_index": 520,
+          "injected_position_mm": [
+            -50.0,
+            -50.0,
+            -10.0
+          ],
+          "peak_source_indices": [
+            520
+          ],
+          "nearest_peak_distance_mm": 0.0,
+          "farthest_peak_distance_mm": 0.0,
+          "rms_spread_from_injected_source_mm": 48.28852191572767,
+          "energy_fraction_outside_radius": 0.8988982480750499,
+          "injected_source_amplitude_relative_to_peak": 1.0,
+          "native_orientation_component": 2
+        },
+        {
+          "injected_source_index": 780,
+          "injected_position_mm": [
+            0.0,
+            -10.0,
+            0.0
+          ],
+          "peak_source_indices": [
+            780
+          ],
+          "nearest_peak_distance_mm": 0.0,
+          "farthest_peak_distance_mm": 0.0,
+          "rms_spread_from_injected_source_mm": 47.16436556878623,
+          "energy_fraction_outside_radius": 0.9281339764908595,
+          "injected_source_amplitude_relative_to_peak": 1.0,
+          "native_orientation_component": 0
+        },
+        {
+          "injected_source_index": 780,
+          "injected_position_mm": [
+            0.0,
+            -10.0,
+            0.0
+          ],
+          "peak_source_indices": [
+            780
+          ],
+          "nearest_peak_distance_mm": 0.0,
+          "farthest_peak_distance_mm": 0.0,
+          "rms_spread_from_injected_source_mm": 47.023551431952164,
+          "energy_fraction_outside_radius": 0.9306778974043932,
+          "injected_source_amplitude_relative_to_peak": 1.0,
+          "native_orientation_component": 1
+        },
+        {
+          "injected_source_index": 780,
+          "injected_position_mm": [
+            0.0,
+            -10.0,
+            0.0
+          ],
+          "peak_source_indices": [
+            780
+          ],
+          "nearest_peak_distance_mm": 0.0,
+          "farthest_peak_distance_mm": 0.0,
+          "rms_spread_from_injected_source_mm": 49.408150569331376,
+          "energy_fraction_outside_radius": 0.936787403911672,
+          "injected_source_amplitude_relative_to_peak": 1.0,
+          "native_orientation_component": 2
+        },
+        {
+          "injected_source_index": 1040,
+          "injected_position_mm": [
+            20.0,
+            40.0,
+            10.0
+          ],
+          "peak_source_indices": [
+            1040
+          ],
+          "nearest_peak_distance_mm": 0.0,
+          "farthest_peak_distance_mm": 0.0,
+          "rms_spread_from_injected_source_mm": 43.25374865153009,
+          "energy_fraction_outside_radius": 0.8774101052823855,
+          "injected_source_amplitude_relative_to_peak": 1.0,
+          "native_orientation_component": 0
+        },
+        {
+          "injected_source_index": 1040,
+          "injected_position_mm": [
+            20.0,
+            40.0,
+            10.0
+          ],
+          "peak_source_indices": [
+            1040
+          ],
+          "nearest_peak_distance_mm": 0.0,
+          "farthest_peak_distance_mm": 0.0,
+          "rms_spread_from_injected_source_mm": 43.427715272763216,
+          "energy_fraction_outside_radius": 0.882087361023104,
+          "injected_source_amplitude_relative_to_peak": 1.0,
+          "native_orientation_component": 1
+        },
+        {
+          "injected_source_index": 1040,
+          "injected_position_mm": [
+            20.0,
+            40.0,
+            10.0
+          ],
+          "peak_source_indices": [
+            1040
+          ],
+          "nearest_peak_distance_mm": 0.0,
+          "farthest_peak_distance_mm": 0.0,
+          "rms_spread_from_injected_source_mm": 46.75261141684436,
+          "energy_fraction_outside_radius": 0.8926475164544015,
+          "injected_source_amplitude_relative_to_peak": 1.0,
+          "native_orientation_component": 2
+        },
+        {
+          "injected_source_index": 1300,
+          "injected_position_mm": [
+            -50.0,
+            -40.0,
+            30.0
+          ],
+          "peak_source_indices": [
+            1300
+          ],
+          "nearest_peak_distance_mm": 0.0,
+          "farthest_peak_distance_mm": 0.0,
+          "rms_spread_from_injected_source_mm": 42.30098399600708,
+          "energy_fraction_outside_radius": 0.8502161483205297,
+          "injected_source_amplitude_relative_to_peak": 1.0,
+          "native_orientation_component": 0
+        },
+        {
+          "injected_source_index": 1300,
+          "injected_position_mm": [
+            -50.0,
+            -40.0,
+            30.0
+          ],
+          "peak_source_indices": [
+            1300
+          ],
+          "nearest_peak_distance_mm": 0.0,
+          "farthest_peak_distance_mm": 0.0,
+          "rms_spread_from_injected_source_mm": 47.48003382991048,
+          "energy_fraction_outside_radius": 0.8721031708477788,
+          "injected_source_amplitude_relative_to_peak": 1.0,
+          "native_orientation_component": 1
+        },
+        {
+          "injected_source_index": 1300,
+          "injected_position_mm": [
+            -50.0,
+            -40.0,
+            30.0
+          ],
+          "peak_source_indices": [
+            1300
+          ],
+          "nearest_peak_distance_mm": 0.0,
+          "farthest_peak_distance_mm": 0.0,
+          "rms_spread_from_injected_source_mm": 47.445541028015086,
+          "energy_fraction_outside_radius": 0.8783874070479014,
+          "injected_source_amplitude_relative_to_peak": 1.0,
+          "native_orientation_component": 2
+        },
+        {
+          "injected_source_index": 1560,
+          "injected_position_mm": [
+            -10.0,
+            50.0,
+            40.0
+          ],
+          "peak_source_indices": [
+            1560
+          ],
+          "nearest_peak_distance_mm": 0.0,
+          "farthest_peak_distance_mm": 0.0,
+          "rms_spread_from_injected_source_mm": 48.74097105806692,
+          "energy_fraction_outside_radius": 0.9008985671553447,
+          "injected_source_amplitude_relative_to_peak": 1.0,
+          "native_orientation_component": 0
+        },
+        {
+          "injected_source_index": 1560,
+          "injected_position_mm": [
+            -10.0,
+            50.0,
+            40.0
+          ],
+          "peak_source_indices": [
+            1560
+          ],
+          "nearest_peak_distance_mm": 0.0,
+          "farthest_peak_distance_mm": 0.0,
+          "rms_spread_from_injected_source_mm": 45.02658634968086,
+          "energy_fraction_outside_radius": 0.8793006129458396,
+          "injected_source_amplitude_relative_to_peak": 1.0,
+          "native_orientation_component": 1
+        },
+        {
+          "injected_source_index": 1560,
+          "injected_position_mm": [
+            -10.0,
+            50.0,
+            40.0
+          ],
+          "peak_source_indices": [
+            1560
+          ],
+          "nearest_peak_distance_mm": 0.0,
+          "farthest_peak_distance_mm": 0.0,
+          "rms_spread_from_injected_source_mm": 52.9462487422686,
+          "energy_fraction_outside_radius": 0.915871349766297,
+          "injected_source_amplitude_relative_to_peak": 1.0,
+          "native_orientation_component": 2
+        },
+        {
+          "injected_source_index": 1820,
+          "injected_position_mm": [
+            0.0,
+            -20.0,
+            80.0
+          ],
+          "peak_source_indices": [
+            1820
+          ],
+          "nearest_peak_distance_mm": 0.0,
+          "farthest_peak_distance_mm": 0.0,
+          "rms_spread_from_injected_source_mm": 49.90319236879119,
+          "energy_fraction_outside_radius": 0.9250007173487363,
+          "injected_source_amplitude_relative_to_peak": 1.0,
+          "native_orientation_component": 0
+        },
+        {
+          "injected_source_index": 1820,
+          "injected_position_mm": [
+            0.0,
+            -20.0,
+            80.0
+          ],
+          "peak_source_indices": [
+            1820
+          ],
+          "nearest_peak_distance_mm": 0.0,
+          "farthest_peak_distance_mm": 0.0,
+          "rms_spread_from_injected_source_mm": 50.38993055800882,
+          "energy_fraction_outside_radius": 0.9065469116037195,
+          "injected_source_amplitude_relative_to_peak": 1.0,
+          "native_orientation_component": 1
+        },
+        {
+          "injected_source_index": 1820,
+          "injected_position_mm": [
+            0.0,
+            -20.0,
+            80.0
+          ],
+          "peak_source_indices": [
+            1820
+          ],
+          "nearest_peak_distance_mm": 0.0,
+          "farthest_peak_distance_mm": 0.0,
+          "rms_spread_from_injected_source_mm": 44.485626891409716,
+          "energy_fraction_outside_radius": 0.9032726407154691,
+          "injected_source_amplitude_relative_to_peak": 1.0,
+          "native_orientation_component": 2
+        }
+      ],
+      "sampled_resolution": {
+        "scope": "sampled_linear_inverse_resolution_not_spectral_Z",
+        "amplitude_reduction": "3_by_3_orientation_block_frobenius_norm",
+        "source_components": 3,
+        "point_spread_columns": [
+          {
+            "peak_source_indices": [
+              0
+            ],
+            "nearest_peak_distance_mm": 0.0,
+            "farthest_peak_distance_mm": 0.0,
+            "energy_fraction_outside_radius": 0.9431001785302472,
+            "target_source_index": 0,
+            "target_position_mm": [
+              -30.0,
+              -60.0,
+              -60.0
+            ],
+            "rms_spread_from_target_source_mm": 55.137945782923744,
+            "target_amplitude_relative_to_peak": 1.0,
+            "target_absolute_resolution_amplitude": 0.003993272562971375
+          },
+          {
+            "peak_source_indices": [
+              260
+            ],
+            "nearest_peak_distance_mm": 0.0,
+            "farthest_peak_distance_mm": 0.0,
+            "energy_fraction_outside_radius": 0.9027384342187577,
+            "target_source_index": 260,
+            "target_position_mm": [
+              40.0,
+              -10.0,
+              -30.0
+            ],
+            "rms_spread_from_target_source_mm": 51.00390025239197,
+            "target_amplitude_relative_to_peak": 1.0,
+            "target_absolute_resolution_amplitude": 0.003159399563299772
+          },
+          {
+            "peak_source_indices": [
+              520
+            ],
+            "nearest_peak_distance_mm": 0.0,
+            "farthest_peak_distance_mm": 0.0,
+            "energy_fraction_outside_radius": 0.8735220159981618,
+            "target_source_index": 520,
+            "target_position_mm": [
+              -50.0,
+              -50.0,
+              -10.0
+            ],
+            "rms_spread_from_target_source_mm": 44.13521183394335,
+            "target_amplitude_relative_to_peak": 1.0,
+            "target_absolute_resolution_amplitude": 0.006642361075735996
+          },
+          {
+            "peak_source_indices": [
+              780
+            ],
+            "nearest_peak_distance_mm": 0.0,
+            "farthest_peak_distance_mm": 0.0,
+            "energy_fraction_outside_radius": 0.9312249625450598,
+            "target_source_index": 780,
+            "target_position_mm": [
+              0.0,
+              -10.0,
+              0.0
+            ],
+            "rms_spread_from_target_source_mm": 47.66743519532635,
+            "target_amplitude_relative_to_peak": 1.0,
+            "target_absolute_resolution_amplitude": 0.0021318255712409672
+          },
+          {
+            "peak_source_indices": [
+              1040
+            ],
+            "nearest_peak_distance_mm": 0.0,
+            "farthest_peak_distance_mm": 0.0,
+            "energy_fraction_outside_radius": 0.8830901273227136,
+            "target_source_index": 1040,
+            "target_position_mm": [
+              20.0,
+              40.0,
+              10.0
+            ],
+            "rms_spread_from_target_source_mm": 44.2554677565866,
+            "target_amplitude_relative_to_peak": 1.0,
+            "target_absolute_resolution_amplitude": 0.005326708014645288
+          },
+          {
+            "peak_source_indices": [
+              1300
+            ],
+            "nearest_peak_distance_mm": 0.0,
+            "farthest_peak_distance_mm": 0.0,
+            "energy_fraction_outside_radius": 0.8654100423628068,
+            "target_source_index": 1300,
+            "target_position_mm": [
+              -50.0,
+              -40.0,
+              30.0
+            ],
+            "rms_spread_from_target_source_mm": 45.50000573564621,
+            "target_amplitude_relative_to_peak": 1.0,
+            "target_absolute_resolution_amplitude": 0.0072461463739980515
+          },
+          {
+            "peak_source_indices": [
+              1560
+            ],
+            "nearest_peak_distance_mm": 0.0,
+            "farthest_peak_distance_mm": 0.0,
+            "energy_fraction_outside_radius": 0.8985903742722614,
+            "target_source_index": 1560,
+            "target_position_mm": [
+              -10.0,
+              50.0,
+              40.0
+            ],
+            "rms_spread_from_target_source_mm": 49.03367015141929,
+            "target_amplitude_relative_to_peak": 1.0,
+            "target_absolute_resolution_amplitude": 0.008557416055030567
+          },
+          {
+            "peak_source_indices": [
+              1820
+            ],
+            "nearest_peak_distance_mm": 0.0,
+            "farthest_peak_distance_mm": 0.0,
+            "energy_fraction_outside_radius": 0.9092246635694164,
+            "target_source_index": 1820,
+            "target_position_mm": [
+              0.0,
+              -20.0,
+              80.0
+            ],
+            "rms_spread_from_target_source_mm": 47.307574021112536,
+            "target_amplitude_relative_to_peak": 1.0,
+            "target_absolute_resolution_amplitude": 0.010271865517696212
+          }
+        ],
+        "cross_talk_rows": [
+          {
+            "peak_source_indices": [
+              74
+            ],
+            "nearest_peak_distance_mm": 30.0,
+            "farthest_peak_distance_mm": 30.0,
+            "energy_fraction_outside_radius": 0.9688213789009709,
+            "target_source_index": 0,
+            "target_position_mm": [
+              -30.0,
+              -60.0,
+              -60.0
+            ],
+            "rms_spread_from_target_source_mm": 63.456155905411194,
+            "target_amplitude_relative_to_peak": 0.455740361558593,
+            "target_absolute_resolution_amplitude": 0.003993272562971377
+          },
+          {
+            "peak_source_indices": [
+              758
+            ],
+            "nearest_peak_distance_mm": 46.9041575982343,
+            "farthest_peak_distance_mm": 46.9041575982343,
+            "energy_fraction_outside_radius": 0.957203075469234,
+            "target_source_index": 260,
+            "target_position_mm": [
+              40.0,
+              -10.0,
+              -30.0
+            ],
+            "rms_spread_from_target_source_mm": 57.24769937143149,
+            "target_amplitude_relative_to_peak": 0.3043177005367394,
+            "target_absolute_resolution_amplitude": 0.003159399563299771
+          },
+          {
+            "peak_source_indices": [
+              729
+            ],
+            "nearest_peak_distance_mm": 24.49489742783178,
+            "farthest_peak_distance_mm": 24.49489742783178,
+            "energy_fraction_outside_radius": 0.8217481622386575,
+            "target_source_index": 520,
+            "target_position_mm": [
+              -50.0,
+              -50.0,
+              -10.0
+            ],
+            "rms_spread_from_target_source_mm": 38.84018209799214,
+            "target_amplitude_relative_to_peak": 0.44033337220388397,
+            "target_absolute_resolution_amplitude": 0.006642361075735996
+          },
+          {
+            "peak_source_indices": [
+              759
+            ],
+            "nearest_peak_distance_mm": 70.71067811865476,
+            "farthest_peak_distance_mm": 70.71067811865476,
+            "energy_fraction_outside_radius": 0.9823590064617034,
+            "target_source_index": 780,
+            "target_position_mm": [
+              0.0,
+              -10.0,
+              0.0
+            ],
+            "rms_spread_from_target_source_mm": 60.17463233580235,
+            "target_amplitude_relative_to_peak": 0.5185894888874013,
+            "target_absolute_resolution_amplitude": 0.002131825571240967
+          },
+          {
+            "peak_source_indices": [
+              1239
+            ],
+            "nearest_peak_distance_mm": 24.49489742783178,
+            "farthest_peak_distance_mm": 24.49489742783178,
+            "energy_fraction_outside_radius": 0.8807705407112931,
+            "target_source_index": 1040,
+            "target_position_mm": [
+              20.0,
+              40.0,
+              10.0
+            ],
+            "rms_spread_from_target_source_mm": 40.40759354604455,
+            "target_amplitude_relative_to_peak": 0.4993899006048706,
+            "target_absolute_resolution_amplitude": 0.005326708014645289
+          },
+          {
+            "peak_source_indices": [
+              1273
+            ],
+            "nearest_peak_distance_mm": 22.360679774997898,
+            "farthest_peak_distance_mm": 22.360679774997898,
+            "energy_fraction_outside_radius": 0.8072218133704674,
+            "target_source_index": 1300,
+            "target_position_mm": [
+              -50.0,
+              -40.0,
+              30.0
+            ],
+            "rms_spread_from_target_source_mm": 39.74541273496404,
+            "target_amplitude_relative_to_peak": 0.6129628792548979,
+            "target_absolute_resolution_amplitude": 0.007246146373998054
+          },
+          {
+            "peak_source_indices": [
+              1559
+            ],
+            "nearest_peak_distance_mm": 10.0,
+            "farthest_peak_distance_mm": 10.0,
+            "energy_fraction_outside_radius": 0.8543761028791738,
+            "target_source_index": 1560,
+            "target_position_mm": [
+              -10.0,
+              50.0,
+              40.0
+            ],
+            "rms_spread_from_target_source_mm": 43.46563299132437,
+            "target_amplitude_relative_to_peak": 0.9389715078634847,
+            "target_absolute_resolution_amplitude": 0.008557416055030567
+          },
+          {
+            "peak_source_indices": [
+              1818
+            ],
+            "nearest_peak_distance_mm": 10.0,
+            "farthest_peak_distance_mm": 10.0,
+            "energy_fraction_outside_radius": 0.8610888451351761,
+            "target_source_index": 1820,
+            "target_position_mm": [
+              0.0,
+              -20.0,
+              80.0
+            ],
+            "rms_spread_from_target_source_mm": 45.11259140137357,
+            "target_amplitude_relative_to_peak": 0.9922604767128312,
+            "target_absolute_resolution_amplitude": 0.01027186551769621
+          }
+        ]
+      },
+      "sensitivity": {
+        "seed": 20261104,
+        "native_orientation_component": 2,
+        "scope": "one_seed_synthetic_sensor_noise_and_gain_perturbations_not_anatomical_or_empirical_accuracy",
+        "scenarios": {
+          "matched_model": [
+            {
+              "injected_source_index": 0,
+              "injected_position_mm": [
+                -30.0,
+                -60.0,
+                -60.0
+              ],
+              "peak_source_indices": [
+                0
+              ],
+              "nearest_peak_distance_mm": 0.0,
+              "farthest_peak_distance_mm": 0.0,
+              "rms_spread_from_injected_source_mm": 58.21546982682314,
+              "energy_fraction_outside_radius": 0.9510032470492665,
+              "injected_source_amplitude_relative_to_peak": 1.0
+            },
+            {
+              "injected_source_index": 260,
+              "injected_position_mm": [
+                40.0,
+                -10.0,
+                -30.0
+              ],
+              "peak_source_indices": [
+                260
+              ],
+              "nearest_peak_distance_mm": 0.0,
+              "farthest_peak_distance_mm": 0.0,
+              "rms_spread_from_injected_source_mm": 54.75630697068458,
+              "energy_fraction_outside_radius": 0.9151105029290473,
+              "injected_source_amplitude_relative_to_peak": 1.0
+            },
+            {
+              "injected_source_index": 520,
+              "injected_position_mm": [
+                -50.0,
+                -50.0,
+                -10.0
+              ],
+              "peak_source_indices": [
+                520
+              ],
+              "nearest_peak_distance_mm": 0.0,
+              "farthest_peak_distance_mm": 0.0,
+              "rms_spread_from_injected_source_mm": 48.28852191572767,
+              "energy_fraction_outside_radius": 0.8988982480750499,
+              "injected_source_amplitude_relative_to_peak": 1.0
+            },
+            {
+              "injected_source_index": 780,
+              "injected_position_mm": [
+                0.0,
+                -10.0,
+                0.0
+              ],
+              "peak_source_indices": [
+                780
+              ],
+              "nearest_peak_distance_mm": 0.0,
+              "farthest_peak_distance_mm": 0.0,
+              "rms_spread_from_injected_source_mm": 49.408150569331376,
+              "energy_fraction_outside_radius": 0.936787403911672,
+              "injected_source_amplitude_relative_to_peak": 1.0
+            },
+            {
+              "injected_source_index": 1040,
+              "injected_position_mm": [
+                20.0,
+                40.0,
+                10.0
+              ],
+              "peak_source_indices": [
+                1040
+              ],
+              "nearest_peak_distance_mm": 0.0,
+              "farthest_peak_distance_mm": 0.0,
+              "rms_spread_from_injected_source_mm": 46.75261141684436,
+              "energy_fraction_outside_radius": 0.8926475164544015,
+              "injected_source_amplitude_relative_to_peak": 1.0
+            },
+            {
+              "injected_source_index": 1300,
+              "injected_position_mm": [
+                -50.0,
+                -40.0,
+                30.0
+              ],
+              "peak_source_indices": [
+                1300
+              ],
+              "nearest_peak_distance_mm": 0.0,
+              "farthest_peak_distance_mm": 0.0,
+              "rms_spread_from_injected_source_mm": 47.445541028015086,
+              "energy_fraction_outside_radius": 0.8783874070479014,
+              "injected_source_amplitude_relative_to_peak": 1.0
+            },
+            {
+              "injected_source_index": 1560,
+              "injected_position_mm": [
+                -10.0,
+                50.0,
+                40.0
+              ],
+              "peak_source_indices": [
+                1560
+              ],
+              "nearest_peak_distance_mm": 0.0,
+              "farthest_peak_distance_mm": 0.0,
+              "rms_spread_from_injected_source_mm": 52.9462487422686,
+              "energy_fraction_outside_radius": 0.915871349766297,
+              "injected_source_amplitude_relative_to_peak": 1.0
+            },
+            {
+              "injected_source_index": 1820,
+              "injected_position_mm": [
+                0.0,
+                -20.0,
+                80.0
+              ],
+              "peak_source_indices": [
+                1820
+              ],
+              "nearest_peak_distance_mm": 0.0,
+              "farthest_peak_distance_mm": 0.0,
+              "rms_spread_from_injected_source_mm": 44.485626891409716,
+              "energy_fraction_outside_radius": 0.9032726407154691,
+              "injected_source_amplitude_relative_to_peak": 1.0
+            }
+          ],
+          "sensor_noise_20_percent_rms": [
+            {
+              "injected_source_index": 0,
+              "injected_position_mm": [
+                -30.0,
+                -60.0,
+                -60.0
+              ],
+              "peak_source_indices": [
+                0
+              ],
+              "nearest_peak_distance_mm": 0.0,
+              "farthest_peak_distance_mm": 0.0,
+              "rms_spread_from_injected_source_mm": 65.49535065058407,
+              "energy_fraction_outside_radius": 0.9567136752757942,
+              "injected_source_amplitude_relative_to_peak": 1.0
+            },
+            {
+              "injected_source_index": 260,
+              "injected_position_mm": [
+                40.0,
+                -10.0,
+                -30.0
+              ],
+              "peak_source_indices": [
+                401
+              ],
+              "nearest_peak_distance_mm": 17.320508075688775,
+              "farthest_peak_distance_mm": 17.320508075688775,
+              "rms_spread_from_injected_source_mm": 62.78193062276731,
+              "energy_fraction_outside_radius": 0.9278439332560025,
+              "injected_source_amplitude_relative_to_peak": 0.97988264775043
+            },
+            {
+              "injected_source_index": 520,
+              "injected_position_mm": [
+                -50.0,
+                -50.0,
+                -10.0
+              ],
+              "peak_source_indices": [
+                520
+              ],
+              "nearest_peak_distance_mm": 0.0,
+              "farthest_peak_distance_mm": 0.0,
+              "rms_spread_from_injected_source_mm": 52.14191123827931,
+              "energy_fraction_outside_radius": 0.9078349503643464,
+              "injected_source_amplitude_relative_to_peak": 1.0
+            },
+            {
+              "injected_source_index": 780,
+              "injected_position_mm": [
+                0.0,
+                -10.0,
+                0.0
+              ],
+              "peak_source_indices": [
+                581
+              ],
+              "nearest_peak_distance_mm": 10.0,
+              "farthest_peak_distance_mm": 10.0,
+              "rms_spread_from_injected_source_mm": 53.106492275357915,
+              "energy_fraction_outside_radius": 0.947584335062565,
+              "injected_source_amplitude_relative_to_peak": 0.9819886738238062
+            },
+            {
+              "injected_source_index": 1040,
+              "injected_position_mm": [
+                20.0,
+                40.0,
+                10.0
+              ],
+              "peak_source_indices": [
+                1227
+              ],
+              "nearest_peak_distance_mm": 10.0,
+              "farthest_peak_distance_mm": 10.0,
+              "rms_spread_from_injected_source_mm": 49.0209181170794,
+              "energy_fraction_outside_radius": 0.8961157990500626,
+              "injected_source_amplitude_relative_to_peak": 0.9999079195155908
+            },
+            {
+              "injected_source_index": 1300,
+              "injected_position_mm": [
+                -50.0,
+                -40.0,
+                30.0
+              ],
+              "peak_source_indices": [
+                1299
+              ],
+              "nearest_peak_distance_mm": 10.0,
+              "farthest_peak_distance_mm": 10.0,
+              "rms_spread_from_injected_source_mm": 50.12897003138918,
+              "energy_fraction_outside_radius": 0.8727673807887442,
+              "injected_source_amplitude_relative_to_peak": 0.9888282754449255
+            },
+            {
+              "injected_source_index": 1560,
+              "injected_position_mm": [
+                -10.0,
+                50.0,
+                40.0
+              ],
+              "peak_source_indices": [
+                1560
+              ],
+              "nearest_peak_distance_mm": 0.0,
+              "farthest_peak_distance_mm": 0.0,
+              "rms_spread_from_injected_source_mm": 56.0926886593248,
+              "energy_fraction_outside_radius": 0.9209007391767227,
+              "injected_source_amplitude_relative_to_peak": 1.0
+            },
+            {
+              "injected_source_index": 1820,
+              "injected_position_mm": [
+                0.0,
+                -20.0,
+                80.0
+              ],
+              "peak_source_indices": [
+                1820
+              ],
+              "nearest_peak_distance_mm": 0.0,
+              "farthest_peak_distance_mm": 0.0,
+              "rms_spread_from_injected_source_mm": 47.45961668062942,
+              "energy_fraction_outside_radius": 0.9106495707249357,
+              "injected_source_amplitude_relative_to_peak": 1.0
+            }
+          ],
+          "sensor_gain_10_percent_sinusoidal": [
+            {
+              "injected_source_index": 0,
+              "injected_position_mm": [
+                -30.0,
+                -60.0,
+                -60.0
+              ],
+              "peak_source_indices": [
+                0
+              ],
+              "nearest_peak_distance_mm": 0.0,
+              "farthest_peak_distance_mm": 0.0,
+              "rms_spread_from_injected_source_mm": 59.41412258073067,
+              "energy_fraction_outside_radius": 0.9524594359008067,
+              "injected_source_amplitude_relative_to_peak": 1.0
+            },
+            {
+              "injected_source_index": 260,
+              "injected_position_mm": [
+                40.0,
+                -10.0,
+                -30.0
+              ],
+              "peak_source_indices": [
+                260
+              ],
+              "nearest_peak_distance_mm": 0.0,
+              "farthest_peak_distance_mm": 0.0,
+              "rms_spread_from_injected_source_mm": 56.29412950787835,
+              "energy_fraction_outside_radius": 0.9185596301447835,
+              "injected_source_amplitude_relative_to_peak": 1.0
+            },
+            {
+              "injected_source_index": 520,
+              "injected_position_mm": [
+                -50.0,
+                -50.0,
+                -10.0
+              ],
+              "peak_source_indices": [
+                520
+              ],
+              "nearest_peak_distance_mm": 0.0,
+              "farthest_peak_distance_mm": 0.0,
+              "rms_spread_from_injected_source_mm": 48.60443527918778,
+              "energy_fraction_outside_radius": 0.9015852883732713,
+              "injected_source_amplitude_relative_to_peak": 1.0
+            },
+            {
+              "injected_source_index": 780,
+              "injected_position_mm": [
+                0.0,
+                -10.0,
+                0.0
+              ],
+              "peak_source_indices": [
+                780
+              ],
+              "nearest_peak_distance_mm": 0.0,
+              "farthest_peak_distance_mm": 0.0,
+              "rms_spread_from_injected_source_mm": 49.9317231333037,
+              "energy_fraction_outside_radius": 0.9380426269336057,
+              "injected_source_amplitude_relative_to_peak": 1.0
+            },
+            {
+              "injected_source_index": 1040,
+              "injected_position_mm": [
+                20.0,
+                40.0,
+                10.0
+              ],
+              "peak_source_indices": [
+                1040
+              ],
+              "nearest_peak_distance_mm": 0.0,
+              "farthest_peak_distance_mm": 0.0,
+              "rms_spread_from_injected_source_mm": 47.32923131857455,
+              "energy_fraction_outside_radius": 0.8953220391570902,
+              "injected_source_amplitude_relative_to_peak": 1.0
+            },
+            {
+              "injected_source_index": 1300,
+              "injected_position_mm": [
+                -50.0,
+                -40.0,
+                30.0
+              ],
+              "peak_source_indices": [
+                1300
+              ],
+              "nearest_peak_distance_mm": 0.0,
+              "farthest_peak_distance_mm": 0.0,
+              "rms_spread_from_injected_source_mm": 48.091424716393526,
+              "energy_fraction_outside_radius": 0.8818605780842015,
+              "injected_source_amplitude_relative_to_peak": 1.0
+            },
+            {
+              "injected_source_index": 1560,
+              "injected_position_mm": [
+                -10.0,
+                50.0,
+                40.0
+              ],
+              "peak_source_indices": [
+                1560
+              ],
+              "nearest_peak_distance_mm": 0.0,
+              "farthest_peak_distance_mm": 0.0,
+              "rms_spread_from_injected_source_mm": 53.85541089701388,
+              "energy_fraction_outside_radius": 0.9203984509920139,
+              "injected_source_amplitude_relative_to_peak": 1.0
+            },
+            {
+              "injected_source_index": 1820,
+              "injected_position_mm": [
+                0.0,
+                -20.0,
+                80.0
+              ],
+              "peak_source_indices": [
+                1820
+              ],
+              "nearest_peak_distance_mm": 0.0,
+              "farthest_peak_distance_mm": 0.0,
+              "rms_spread_from_injected_source_mm": 43.82606692335876,
+              "energy_fraction_outside_radius": 0.8974851668672976,
+              "injected_source_amplitude_relative_to_peak": 1.0
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

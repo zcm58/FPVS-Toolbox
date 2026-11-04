@@ -350,6 +350,7 @@ def test_source_psd_exporters_are_loaded_through_separate_expected_seams() -> No
             "include_flagged_subjects",
             "allow_fetch_fsaverage",
             "progress_callback",
+            "build_batch_id",
         }
 
     source_text = WORKER_PATH.read_text(encoding="utf-8")
