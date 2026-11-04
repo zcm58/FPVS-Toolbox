@@ -116,6 +116,15 @@ def test_protocol_refuses_ambiguous_unbounded_or_unsupported_messages(raw: bytes
         helper_protocol.read_message(io.BytesIO(raw))
 
 
+def test_protocol_reports_excessive_json_nesting_as_update_error() -> None:
+    depth = 30_000
+    raw = b'{"protocol":1,"kind":"result","result":' + b"[" * depth + b"0" + b"]" * depth + b"}\n"
+    assert len(raw) < helper_protocol.MAX_MESSAGE_BYTES
+
+    with pytest.raises(UpdateError, match="unreadable message"):
+        helper_protocol.read_message(io.BytesIO(raw))
+
+
 @pytest.mark.parametrize(
     "change",
     [

@@ -12,7 +12,7 @@ def resolve_active_project_root(
     *,
     current_project: Any = None,
 ) -> Path | None:
-    """Return the first existing root from the established tool precedence.
+    """Return the first existing directory from the established tool precedence.
 
     The project root is runtime context derived from the directory containing
     ``project.json``.  It is intentionally not persisted inside the manifest so
@@ -21,20 +21,20 @@ def resolve_active_project_root(
 
     if provided_root:
         root = Path(provided_root)
-        if root.exists():
+        if root.is_dir():
             return root
 
     environment_root = os.environ.get("FPVS_PROJECT_ROOT")
     if environment_root:
         root = Path(environment_root)
-        if root.exists():
+        if root.is_dir():
             return root
 
     if current_project:
         project_root = getattr(current_project, "project_root", None)
         if project_root:
             root = Path(project_root)
-            if root.exists():
+            if root.is_dir():
                 return root
     return None
 

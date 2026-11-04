@@ -330,9 +330,7 @@ class SettingsManager:
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         ext = os.path.splitext(path)[1].lower()
         if ext == '.json':
-            data = {"DEFAULT": dict(self.config.defaults())}
-            for section in self.config.sections():
-                data[section] = dict(self.config.items(section))
+            data = _config_values(self.config)
             with open(path, 'w') as f:
                 json.dump(data, f, indent=2)
         else:

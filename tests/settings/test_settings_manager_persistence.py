@@ -210,6 +210,31 @@ def test_export_to_current_directory_roundtrips_settings(
     assert imported.get_roi_pairs() == manager.get_roi_pairs()
 
 
+@pytest.mark.parametrize("ext", ["ini", "json"])
+def test_export_preserves_raw_interpolation_and_inherited_defaults(
+    tmp_path: Path, ext: str,
+) -> None:
+    path = tmp_path / "settings.ini"
+    path.write_text(
+        "[DEFAULT]\nbase=original\n"
+        "[custom]\nvalue=%(base)s/path\nprogress=100%%\n",
+    )
+    manager = SettingsManager(str(path))
+    exported = tmp_path / f"preferences.{ext}"
+
+    manager.export(str(exported))
+
+    imported = SettingsManager(str(tmp_path / "imported.ini"))
+    imported.load_from(str(exported))
+    assert imported.config.get("custom", "value", raw=True) == "%(base)s/path"
+    assert imported.get("custom", "progress") == "100%"
+    assert "base" not in imported.config._sections["custom"]
+    imported.config["DEFAULT"]["base"] = "updated"
+    imported.save()
+    restored = SettingsManager(str(tmp_path / "imported.ini"))
+    assert restored.get("custom", "value") == "updated/path"
+
+
 def test_failed_atomic_save_keeps_original_and_retryable_local_changes(tmp_path: Path, monkeypatch) -> None:
     path = tmp_path / "settings.ini"
     manager = _seed(path)

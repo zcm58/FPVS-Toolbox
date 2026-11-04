@@ -56,7 +56,7 @@ def read_message(stream: IO[bytes]) -> dict[str, Any]:
         raise UpdateError("The updater returned an oversized or incomplete message.")
     try:
         value = json.loads(raw.decode("utf-8"), object_pairs_hook=_unique_fields)
-    except (UnicodeError, ValueError) as error:
+    except (UnicodeError, ValueError, RecursionError) as error:
         raise UpdateError("The updater returned an unreadable message.") from error
     if (
         not isinstance(value, dict)
