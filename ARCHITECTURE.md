@@ -63,6 +63,8 @@ All paths below are under `src/`. Active imports use purpose-based packages.
 versioned harmonic settings and accepted selections; former Stats modules are
 compatibility exports. Processing, Stats, LORETA, and heavy export entry points
 must retain lazy loading so backend contracts do not require GUI initialization.
+`processing.processing_history` reads saved completed-run time and participant
+identity for the asynchronous Home summary; it never infers them from output dates.
 See the [target layout](docs/agent/architecture/main-app-target-layout.md) and
 [module map](docs/agent/architecture/module-map.md) for deeper navigation.
 

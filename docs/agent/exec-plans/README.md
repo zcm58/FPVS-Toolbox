@@ -23,6 +23,7 @@ Do not switch or merge branches because a dated plan names an old checkout.
 
 | Area | Current status / plan |
 | --- | --- |
+| Home processing history | [Persistent summary](active/home-processing-history.md): implemented; source/docs gates and Windows synthetic review passed; Qt CI and real-project acceptance retained. |
 | LORETA group comparison | [Live two-group viewer](active/loreta-group-comparison.md): implemented; scoped Windows synthetic review and source/docs gates passed; Qt CI/cross-platform and real-project acceptance retained. |
 | LORETA rendering | [Rendering quality](active/loreta-rendering-quality.md): lightweight 3D reuse, native MRI and continuous linked dragging implemented; Windows visible review/source gates passed; Qt CI/cross-platform graphics acceptance retained. |
 | LORETA scientific integrity | [Resumable repair plan](active/loreta-scientific-integrity.md): implementation and synthetic/source verification complete; visible/CI Qt acceptance retained. Inference remains exploratory. |

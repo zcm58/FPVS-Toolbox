@@ -7,6 +7,7 @@ from datetime import datetime
 
 from Main_App.gui import user_messages
 from Main_App.gui.run_outcome import present_last_run
+from Main_App.gui.processing_history_label import refresh_processing_history
 
 
 def finalize_processing_host_state(host, success: bool) -> None:
@@ -14,6 +15,7 @@ def finalize_processing_host_state(host, success: bool) -> None:
 
     dialogs_suppressed = bool(getattr(host, "_suppress_completion_dialogs", False))
     cancelled = bool(getattr(host, "_processing_run_cancelled", False))
+    refresh_processing_history(host)
     present_last_run(host, success=success, cancelled=cancelled)
     if dialogs_suppressed and not success:
         host.log("--- Processing Run Cancelled by User ---")

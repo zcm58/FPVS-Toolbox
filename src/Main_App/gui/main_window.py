@@ -65,6 +65,7 @@ from Main_App.gui import post_export_workflows
 from Main_App.gui import tool_workflows
 from Main_App.gui import shell_status
 from Main_App.gui.processing_completion import finalize_processing_host_state
+from Main_App.gui.processing_history_label import refresh_processing_history
 from Main_App.gui.post_export_workflows import (
     excel_snapshot as _excel_snapshot,  # noqa: F401 - compatibility re-export
     should_show_no_excel_popup as _should_show_no_excel_popup,  # noqa: F401 - compatibility re-export
@@ -513,6 +514,7 @@ class MainWindow(QMainWindow):
                 setter(widget.property("role") == role)
 
     def show_home_page(self) -> None:
+        refresh_processing_history(self)
         if not getattr(self, "_run_active", False):
             shell_status.ensure_processing_navigation_unlocked(self)
         if hasattr(self, "stacked"):

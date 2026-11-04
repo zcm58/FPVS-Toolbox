@@ -111,6 +111,7 @@ def test_save_and_leave_waits_for_work_started_during_settings_save(monkeypatch,
 
 def _load_function(relative_path, name, namespace, *, class_name=None, outer_function=None):
     namespace.setdefault("present_last_run", Mock())
+    namespace.setdefault("refresh_processing_history", Mock())
     namespace.setdefault("remember_saved_setup", Mock())
     namespace.setdefault("summarize_run", summarize_run)
     namespace.setdefault("selected_single_file", lambda host: host.data_paths[0] if host.data_paths else "")

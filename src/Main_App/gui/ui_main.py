@@ -26,6 +26,7 @@ from Main_App.gui.header_bar import HeaderBar
 from Main_App.gui.icons import application_icon
 from Main_App.gui.menu_bar import build_menu_bar
 from Main_App.gui.processing_log_dialog import ProcessingLogDialog
+from Main_App.gui.processing_history_label import ProcessingHistoryLabel
 from Main_App.gui.run_outcome import build_last_run_panel
 from .style_tokens import (
     BROWSE_BUTTON_WIDTH,
@@ -191,6 +192,9 @@ def init_ui(self) -> None:
     setup_layout = QVBoxLayout(setup_panel)
     setup_layout.setContentsMargins(0, 0, 0, 0)
     setup_layout.setSpacing(SECTION_GAP)
+
+    self.processing_history_label = ProcessingHistoryLabel(setup_panel)
+    setup_layout.addWidget(self.processing_history_label)
 
     # Processing Options
     grp_proc = SectionCard("Processing Options", setup_panel, object_name="processing_group")

@@ -823,6 +823,36 @@ def test_record_results_creates_completed_ledger_and_run_log(tmp_path) -> None:
     assert entry["interpolation_burden"]["percentage"] == pytest.approx(6.25)
     assert entry["interpolation_burden"]["requires_review"] is True
     assert '"successful_files": 1' in runs
+    run_record = json.loads(runs.splitlines()[-1])
+    assert run_record["successful_participant_ids"] == ["P01"]
+    assert run_record["successful_participant_count"] == 1
+
+
+def test_run_history_participant_count_omits_skipped_and_excluded_inputs(tmp_path) -> None:
+    project, info = _project_with_raw(tmp_path)
+    first = classify_processing_inputs(project, [info], _settings(), project.event_map)
+    _write_expected_outputs(first)
+    record_processing_results(
+        project, first, [{"status": "ok", "geometry": biosemi64_geometry_identity(), "file": str(info.path)}],
+        run_mode="Batch", user_choice="incremental", cancelled=False,
+    )
+    new_info = _add_raw_file(info.path.parent, "P02")
+    excluded_info = _add_raw_file(info.path.parent, "P03")
+    plan = classify_processing_inputs(project, [info, new_info, excluded_info], _settings(), project.event_map)
+    assert plan.completed_count == 1
+    _write_expected_outputs(plan)
+    record_processing_results(
+        project, plan, [
+            {"status": "ok", "geometry": biosemi64_geometry_identity(), "file": str(new_info.path)},
+            {"status": "excluded", "geometry": biosemi64_geometry_identity(), "file": str(excluded_info.path), "reason": "reviewed exclusion"},
+        ], run_mode="Batch", user_choice="incremental", cancelled=False,
+    )
+    latest = json.loads(processing_ledger_module.runs_path(project.project_root).read_text(encoding="utf-8").splitlines()[-1])
+    assert latest["successful_files"] == 1
+    assert latest["excluded_files"] == 1
+    assert latest["completed_before"] == 1
+    assert latest["successful_participant_ids"] == ["P02"]
+    assert latest["successful_participant_count"] == 1
 
 
 def test_record_results_rejects_success_without_observed_geometry(tmp_path) -> None:
@@ -1421,6 +1451,12 @@ def test_repeated_sessions_use_distinct_recording_ledger_and_output_identity(
     assert set(ledger["entries"]) == {"rec_p01_luteal", "rec_p01_follicular"}
     assert ledger["entries"]["rec_p01_luteal"]["participant_id"] == "P01"
     assert ledger["entries"]["rec_p01_luteal"]["session_id"] == "luteal"
+    latest_run = json.loads(
+        processing_ledger_module.runs_path(project.project_root).read_text(encoding="utf-8").splitlines()[-1]
+    )
+    assert latest_run["successful_files"] == 2
+    assert latest_run["successful_participant_ids"] == ["P01"]
+    assert latest_run["successful_participant_count"] == 1
 
 
 def test_two_groups_receive_distinct_canonical_output_routes(tmp_path) -> None:

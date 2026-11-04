@@ -60,6 +60,8 @@ tests = [
   "tests/gui/test_post_export_completion_static.py",
   "tests/gui/test_condition_input_model.py",
   "tests/gui/test_run_outcome_model.py",
+  "tests/gui/test_processing_history_model.py",
+  "tests/processing/test_processing_history.py",
   "tests/gui/test_roi_electrode_selector_state.py",
   "tests/gui/test_frequency_domain_qc_handoff_static.py",
   "tests/workers/test_frequency_domain_qc_decision_worker_static.py",

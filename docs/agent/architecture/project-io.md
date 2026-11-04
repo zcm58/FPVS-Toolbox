@@ -582,6 +582,15 @@ FPVS Toolbox uses a strict hybrid settings model:
   canonical/retained BioSemi64 geometry identity and interpolation request,
   outcome, successful channels, and error text. A missing or mismatched
   geometry identity classifies an otherwise completed input as changed/stale.
+- New processing history entries add `successful_participant_ids` and
+  `successful_participant_count` from the actual successful run inputs, deduplicating
+  repeated visits and excluding skipped or excluded inputs. Historical entries are
+  not rewritten. `processing.processing_history` reads a bounded recent tail and
+  selects a complete, non-cancelled positive-work run; failed, incomplete and
+  zero-work entries do not replace the last completion. Legacy QC-20 identities
+  supply participant counts only when they match that run's successful recordings;
+  otherwise the count stays unknown. This read-only history is independent of
+  downstream QC/analysis readiness and current output freshness.
 - Condition-aware preflight QC stores recoverable, atomically written JSON
   entries under `.fpvs_processing/preflight_qc/v4_biosemi64_geometry`. The GUI
   must pass the active absolute project root explicitly; the cache helper

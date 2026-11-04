@@ -2410,6 +2410,10 @@ def record_processing_results(
         project.groups_locked_at = _now_iso()
         project.save()
 
+    successful_participants = {
+        states_by_path[path].participant_id.casefold(): states_by_path[path].participant_id
+        for path in sorted(successful_paths)
+    }
     append_run_log(
         project_root,
         {
@@ -2422,6 +2426,11 @@ def record_processing_results(
             "new_files": plan.new_count,
             "stale_files": plan.stale_count,
             "successful_files": len(successful_paths),
+            "successful_participant_ids": sorted(
+                successful_participants.values(),
+                key=str.casefold,
+            ),
+            "successful_participant_count": len(successful_participants),
             "excluded_files": len(excluded_paths),
             "failed_files": max(0, len(run_files - successful_paths - excluded_paths)),
             "condition_warning_files": len(partial_condition_paths),

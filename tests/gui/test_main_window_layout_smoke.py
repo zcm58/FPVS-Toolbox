@@ -294,6 +294,10 @@ def test_main_window_layout_smoke(tmp_path: Path, qtbot, monkeypatch) -> None:
     assert isinstance(win.processing_log_dialog, ProcessingLogDialog)
     assert win.text_log is win.processing_log_dialog.viewer
     assert not win.homeWidget.isAncestorOf(win.text_log)
+    assert win.processing_history_label.objectName() == "project_processing_history"
+    assert win.processing_history_label.isVisibleTo(win)
+    assert win.processing_history_label.wordWrap()
+    assert win.homeWidget.layout().indexOf(win.processing_history_label) == 0
 
     assert win.btn_start.text() == "Start Processing"
     run_panel = win.findChild(ActionRow, "run_panel")
@@ -442,6 +446,34 @@ def test_main_window_layout_smoke(tmp_path: Path, qtbot, monkeypatch) -> None:
     assert file_actions[5] is win.actionResetProjectProcessingCache
     assert file_actions[-1] is win.exit_action
     assert [action.text() for action in _menu(win, "viewMenu").actions()] == ["Home"]
+
+
+def test_home_processing_history_long_content_fits_minimum_window(
+    tmp_path: Path, qtbot, monkeypatch,
+) -> None:
+    win = _build_window(tmp_path, qtbot, monkeypatch)
+    win.resize(1280, 900)
+    win.show_home_page()
+    history = win.processing_history_label
+    history.setText(
+        "Last completed processing: 31 Dec 2099, 23:59 Chatham Standard Time "
+        "- 1,234,567 participants"
+    )
+    qtbot.wait(20)
+
+    assert win.size().width() == 1280
+    assert win.size().height() == 900
+    assert win.workspace_stack.currentWidget() is win.homeWidget
+    assert history.isVisibleTo(win)
+    assert history.wordWrap()
+    assert history.height() >= history.heightForWidth(history.width())
+    assert win.homeWidget.rect().contains(history.geometry())
+    assert win.homeWidget.parentWidget() is win.workspace_stack
+    assert win.btn_start.isVisibleTo(win)
+    start_bottom = win.btn_start.mapTo(win.homeWidget, win.btn_start.rect().bottomRight())
+    assert win.homeWidget.rect().contains(start_bottom)
+    run_panel = win.findChild(ActionRow, "run_panel")
+    assert abs(run_panel.geometry().bottom() - (win.homeWidget.height() - 1)) <= 1
 
 
 @pytest.mark.parametrize("debug_enabled", [False, True])

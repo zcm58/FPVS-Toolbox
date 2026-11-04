@@ -80,6 +80,14 @@ Primary paths:
 - `run_outcome_model.py` summarizes actual recording results; `run_outcome.py`
   presents the session-local last outcome and existing output/report/log actions.
   Completion retains the selected single BDF, while a missing file disables Start.
+- `processing_history_label.py` adds one always-visible Home line above Processing
+  Options. A `workers.processing_history_worker` reads the opened project's bounded
+  history off the UI thread; queued results are guarded by project root and request
+  identity. Project opening/returning Home and processing completion refresh it.
+  `processing_history_model.py` formats the local completion time and distinct
+  successful participant count; absent, unavailable and incomplete history remain
+  explicit. This is processing recency, not downstream analysis readiness. At
+  1280x900 verify long timestamps/counts wrap without hiding Start Processing.
 - `src/Main_App/gui/processing_workflows.py`: processing run start/stop,
   queue polling, worker completion/error, and finalization GUI orchestration
   used by `MainWindow` compatibility wrappers.
