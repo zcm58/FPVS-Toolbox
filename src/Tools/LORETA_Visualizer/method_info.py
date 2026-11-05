@@ -71,7 +71,7 @@ rules are reported explicitly because they are adaptations, not a claim that
 every detail matches the reference scripts.
 </p>
 <p>
-Participant z-score maps are summarized only after the participant-level source
+Participant maps are summarized only after the participant-level source
 calculation. You can view the arithmetic mean, a 20% trimmed mean, or the median.
 Undefined source scores remain missing. Each condition uses the source locations
 valid for every included participant, so missing measurements cannot lower a
@@ -90,9 +90,27 @@ BEM setup. It is not restricted to, snapped onto, or clipped by the cerebral
 pial surface, and a grid location does not by itself establish a tissue label.
 </p>
 
+<h3>Metrics And Descriptive Comparisons</h3>
+<p>
+Z-scores express the target response relative to neighboring-frequency noise.
+Baseline-corrected source amplitude subtracts the neighboring-bin mean without
+dividing by its standard deviation. It retains negative values and uses
+method-specific source spectral units, not scalp microvolts or calibrated
+current. Compare amplitudes only with matching inverse, orientation, recording
+length, spectral settings and harmonics. This metric does not change the inverse.
+</p>
+<p>
+Descriptive comparisons show A/B or A−B before display thresholds or independent
+group masks. Condition comparisons use participants present in both conditions;
+the selected summary is applied to their individual differences. Group comparisons
+retain independent cohorts and subtract their summaries. Both use common valid
+source locations. Diverging colors distinguish positive and negative values;
+positive A−B means A is larger. These differences have no significance mask.
+</p>
+
 <h3>Cluster-Based Permutation Mask</h3>
 <p>
-These masks are exploratory. Full spectral-pipeline false-positive control and
+These Z-score masks are exploratory. Full spectral-pipeline false-positive control and
 the sign-symmetry assumption have not been established. Adaptive harmonics
 selected from these participants add a post-selection limitation. Algorithmic
 p-values do not remove either qualification. Correction is confined to one
@@ -150,9 +168,8 @@ boundaries. A one- or two-location result is still rendered as a compact 3D
 volume tied to grid spacing, rather than as a screen-aligned square.
 </p>
 <p>
-When available, the translucent 3D backdrop is derived from fsaverage's
-skull-stripped whole-brain MRI; otherwise the cerebral pial surface provides
-fallback orientation context. The anatomical backdrop is not a clipping
+The translucent 3D backdrop defaults to the detailed fsaverage pial surface;
+a smooth skull-stripped whole-brain shell is optional when available. The backdrop is not a clipping
 boundary: neither version defines the eLORETA source space, removes volume
 locations, or changes the color scale. MRI slices are the preferred view for
 anatomical localization because they show the volume estimate in direct
@@ -177,7 +194,7 @@ of the Hauk study rather than an exact reproduction.
 <ul>
   <li><a href="https://doi.org/10.1111/psyp.13335">Sassenhagen and Draschkow (2019)</a>: limits of cluster-level localization claims.</li>
   <li><a href="https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.permutation_test.html">SciPy permutation-test documentation</a>: exact and sampled p-values.</li>
-  <li><a href="https://doi.org/10.1038/s41467-020-19160-7">Crameri et al. (2020)</a>: scientific colour communication; the viewer uses Matplotlib viridis.</li>
+  <li><a href="https://doi.org/10.1038/s41467-020-19160-7">Crameri et al. (2020)</a>: scientific colour communication; positive maps use viridis and signed maps use a zero-centered diverging scale.</li>
   <li><a href="https://doi.org/10.1016/j.neuroimage.2021.118460">Hauk et al. (2021)</a>: combined EEG/MEG FPVS source estimation for face-selective responses.</li>
   <li><a href="https://github.com/olafhauk/FPVS_sweep">Hauk FPVS_sweep repository</a>: public analysis scripts that informed the time-domain source-PSD sequence.</li>
   <li><a href="https://github.com/olafhauk/FPVS_WORDS/tree/f9628b088f181e2b5afeabba9fc167d42140b5a3">Hauk 2025 FPVS_WORDS code</a>: signed averaging, source spectra, amplitude summation and neighboring-bin Z. Its imported configuration is not publicly included.</li>

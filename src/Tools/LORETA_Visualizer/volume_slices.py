@@ -25,8 +25,8 @@ from Main_App.exports.figure_style import (
 )
 
 from Tools.LORETA_Visualizer.fsaverage_cache import fpvs_toolbox_root
-from Tools.LORETA_Visualizer.scalar_fields import LORETA_SMOOTH_SCALAR_COLORS
-from Tools.LORETA_Visualizer.source_payloads import SOURCE_KIND_VOLUME_POINTS, SourcePayload
+from Tools.LORETA_Visualizer.scalar_fields import scalar_colors
+from Tools.LORETA_Visualizer.source_payloads import SOURCE_KIND_VOLUME_POINTS, SourcePayload, source_payload_is_signed
 from Tools.LORETA_Visualizer.transforms import (
     COORDINATE_SPACE_DISPLAY,
     COORDINATE_SPACE_FSAVERAGE,
@@ -101,6 +101,7 @@ class MriSlicePanel:
     orientation_labels: tuple[str, str, str, str]
     anatomy_window: tuple[float, float] | None = None
     pixel_spacing_mm: tuple[float, float] = (1.0, 1.0)
+    signed_values: bool = False
 
 
 @dataclass(frozen=True)
@@ -339,6 +340,7 @@ def render_mri_orthogonal_slice_image(
         support_source_voxels=support_voxels,
         support_valid_source_mask=np.isfinite(inspected_payload.values),
         preview_cache=preview_cache,
+        signed_values=source_payload_is_signed(payload),
     )
     image_rgb, hit_regions = _draw_mri_slice_figure(
         panels,
@@ -360,7 +362,7 @@ def render_mri_orthogonal_slice_image(
         scalar_range=(float(scalar_range[0]), float(scalar_range[1])),
         source_point_count=int(len(payload.points)),
         rendered_point_count=int(np.count_nonzero(
-            np.isfinite(values) & (values > DEFAULT_MRI_SLICE_MIN_VISIBLE_VALUE)
+            np.isfinite(values) & (source_payload_is_signed(payload) | (values > DEFAULT_MRI_SLICE_MIN_VISIBLE_VALUE))
             & np.all((source_voxels >= 0.0) & (source_voxels <= np.asarray(anatomy.data.shape) - 1), axis=1)
         )),
         hit_regions=hit_regions,
@@ -406,6 +408,7 @@ def write_mri_orthogonal_slice_figures(
         slice_indices=slice_indices,
         support_source_voxels=support_voxels,
         support_valid_source_mask=np.isfinite(original_payload.values),
+        signed_values=source_payload_is_signed(payload),
     )
     figure = build_mri_slice_figure(
         panels,
@@ -509,9 +512,9 @@ def mri_slice_indices_for_payload(
         source_voxels,
         values,
         shape=anatomy.data.shape,
-        min_visible_value=DEFAULT_MRI_SLICE_MIN_VISIBLE_VALUE,
+        min_visible_value=None if source_payload_is_signed(payload) else DEFAULT_MRI_SLICE_MIN_VISIBLE_VALUE,
     )
-    return _peak_voxel(source_voxels, values, shape=anatomy.data.shape)
+    return _peak_voxel(source_voxels, values, shape=anatomy.data.shape, signed_values=source_payload_is_signed(payload))
 
 
 def build_mri_slice_panels(
@@ -524,6 +527,7 @@ def build_mri_slice_panels(
     support_source_voxels: np.ndarray | None = None,
     support_valid_source_mask: np.ndarray | None = None,
     preview_cache: MriSlicePreviewCache | None = None,
+    signed_values: bool = False,
 ) -> tuple[tuple[MriSlicePanel, MriSlicePanel, MriSlicePanel], tuple[int, int, int]]:
     """Build axial/coronal/sagittal anatomy and overlay panels."""
 
@@ -536,10 +540,10 @@ def build_mri_slice_panels(
         source_voxels,
         values,
         shape=anatomy.data.shape,
-        min_visible_value=DEFAULT_MRI_SLICE_MIN_VISIBLE_VALUE,
+        min_visible_value=None if signed_values else DEFAULT_MRI_SLICE_MIN_VISIBLE_VALUE,
     )
     peak_voxel = (
-        _peak_voxel(source_voxels, source_values, shape=anatomy.data.shape)
+        _peak_voxel(source_voxels, source_values, shape=anatomy.data.shape, signed_values=signed_values)
         if slice_indices is None
         else _clip_slice_indices(slice_indices, shape=anatomy.data.shape)
     )
@@ -556,6 +560,7 @@ def build_mri_slice_panels(
             _array_fingerprint(validity_voxels), _array_fingerprint(validity_mask),
             _array_fingerprint(anatomy.vox_to_ras), tuple(scalar_range),
             tuple(window), tuple(center), float(field_of_view),
+            bool(signed_values),
         ))
     ras_axes, _ras_signs = _ras_voxel_axes(anatomy.vox_to_ras)
     panels = []
@@ -577,6 +582,7 @@ def build_mri_slice_panels(
                 anatomy_window=window,
                 crop_center=center,
                 field_of_view_mm=field_of_view,
+                signed_values=signed_values,
             )
             if preview_cache is not None:
                 preview_cache._remember_panel(key, panel)
@@ -621,7 +627,7 @@ def _draw_mri_slice_figure(
 
     signature = (
         tuple(scalar_range), label, bool(activation_visible), tuple(figsize), dpi, layout,
-        tuple((panel.anatomy.shape, panel.pixel_spacing_mm, panel.orientation_labels) for panel in panels),
+        tuple((panel.anatomy.shape, panel.pixel_spacing_mm, panel.orientation_labels, panel.signed_values) for panel in panels),
     )
     figure = preview_cache._figure if preview_cache is not None else None
     if figure is None or preview_cache._figure_signature != signature:
@@ -638,7 +644,7 @@ def _draw_mri_slice_figure(
             preview_cache._figure = figure
             preview_cache._figure_signature = signature
     else:
-        vmin, vmax = _valid_scalar_range(scalar_range)
+        vmin, vmax = _valid_scalar_range(scalar_range, signed_values=any(panel.signed_values for panel in panels))
         for axis, panel in zip(figure.axes[:3], panels):
             axis.images[0].set_data(_normalize_anatomy(panel.anatomy, window=panel.anatomy_window))
             masked_overlay, overlay_alpha = _panel_overlay_display(panel, vmin, vmax, activation_visible)
@@ -671,6 +677,11 @@ def _draw_mri_slice_figure(
 def _panel_overlay_display(panel: MriSlicePanel, vmin: float, vmax: float, activation_visible: bool):
     if not activation_visible:
         return np.ma.masked_all(panel.overlay.shape), 0.0
+    if panel.signed_values:
+        masked_overlay = np.ma.masked_invalid(panel.overlay)
+        bound = max(abs(vmin), abs(vmax), np.finfo(float).tiny)
+        alpha = np.clip(np.abs(panel.overlay) / bound, 0.0, 1.0) * DEFAULT_MRI_SLICE_OVERLAY_ALPHA
+        return masked_overlay, np.where(np.ma.getmaskarray(masked_overlay), 0.0, alpha)
     masked_overlay = np.ma.masked_where(~np.isfinite(panel.overlay) | (panel.overlay <= vmin), panel.overlay)
     overlay_alpha = np.where(
         np.ma.getmaskarray(masked_overlay), 0.0,
@@ -697,8 +708,9 @@ def build_mri_slice_figure(
     from matplotlib.colors import LinearSegmentedColormap, Normalize
     from matplotlib.cm import ScalarMappable
 
-    cmap = LinearSegmentedColormap.from_list("fpvs_loreta_activation", list(LORETA_SMOOTH_SCALAR_COLORS))
-    vmin, vmax = _valid_scalar_range(scalar_range)
+    signed_values = any(panel.signed_values for panel in panels)
+    cmap = LinearSegmentedColormap.from_list("fpvs_loreta_activation", list(scalar_colors(signed=signed_values)))
+    vmin, vmax = _valid_scalar_range(scalar_range, signed_values=signed_values)
 
     figure = Figure(figsize=figsize, dpi=dpi, facecolor="black")
     FigureCanvasAgg(figure)
@@ -872,7 +884,7 @@ def _valid_visible_source_voxels(
     values: np.ndarray,
     *,
     shape: tuple[int, int, int],
-    min_visible_value: float,
+    min_visible_value: float | None,
 ) -> tuple[np.ndarray, np.ndarray]:
     voxels = np.asarray(source_voxels, dtype=float)
     source_values = np.asarray(values, dtype=float).reshape(-1)
@@ -883,15 +895,17 @@ def _valid_visible_source_voxels(
     finite = np.isfinite(source_values) & np.all(np.isfinite(voxels), axis=1)
     bounds = np.asarray(shape, dtype=float) - 1.0
     inside = np.all((voxels >= 0.0) & (voxels <= bounds), axis=1)
-    visible = source_values > float(min_visible_value)
+    visible = np.ones(len(source_values), dtype=bool) if min_visible_value is None else source_values > float(min_visible_value)
     keep = finite & inside & visible
     if not np.any(keep):
-        raise ValueError("No positive source values fall inside the MRI anatomy volume.")
+        raise ValueError("No visible source values fall inside the MRI anatomy volume.")
     return voxels[keep].astype(float), source_values[keep].astype(float)
 
 
-def _peak_voxel(source_voxels: np.ndarray, values: np.ndarray, *, shape: tuple[int, int, int]) -> tuple[int, int, int]:
-    peak_index = int(np.nanargmax(values))
+def _peak_voxel(
+    source_voxels: np.ndarray, values: np.ndarray, *, shape: tuple[int, int, int], signed_values: bool = False,
+) -> tuple[int, int, int]:
+    peak_index = int(np.nanargmax(np.abs(values) if signed_values else values))
     rounded = np.rint(source_voxels[peak_index]).astype(int)
     clipped = np.clip(rounded, 0, np.asarray(shape, dtype=int) - 1)
     return int(clipped[0]), int(clipped[1]), int(clipped[2])
@@ -934,6 +948,7 @@ def _slice_panel(
     anatomy_window: tuple[float, float],
     crop_center: tuple[float, float, float],
     field_of_view_mm: float,
+    signed_values: bool = False,
 ) -> MriSlicePanel:
     # fsaverage's native voxel axes are L/I/A, not R/A/S. Derive the
     # anatomical plane and orientation from its affine instead of axis numbers.
@@ -982,6 +997,7 @@ def _slice_panel(
     coordinate_grid = pixels @ pixel_to_voxel.T
     overlay_plane = _gaussian_interpolated_values(
         coordinate_grid * spacing, source_voxels * spacing, values, sigma=sigma, scalar_range=scalar_range,
+        signed_values=signed_values,
     ).reshape(anatomy_plane.shape)
     display_validity = nearest_source_validity(coordinate_grid * spacing, validity_voxels * spacing, validity_mask)
     overlay_plane[~display_validity.reshape(anatomy_plane.shape)] = np.nan
@@ -1003,6 +1019,7 @@ def _slice_panel(
         }[plane],
         anatomy_window=anatomy_window,
         pixel_spacing_mm=(float(spacing[column_axis]), float(spacing[row_axis])),
+        signed_values=signed_values,
     )
 
 
@@ -1033,11 +1050,12 @@ def _gaussian_interpolated_values(
     *,
     sigma: float,
     scalar_range: tuple[float, float],
+    signed_values: bool = False,
 ) -> np.ndarray:
     try:
         from scipy.spatial import cKDTree
     except (ImportError, ModuleNotFoundError):
-        return _nearest_values(grid_points, source_voxels, values, scalar_range=scalar_range)
+        return _nearest_values(grid_points, source_voxels, values, scalar_range=scalar_range, signed_values=signed_values)
 
     neighbor_count = max(1, min(DEFAULT_MRI_SLICE_GAUSSIAN_NEIGHBORS, len(source_voxels)))
     tree = cKDTree(source_voxels)
@@ -1060,7 +1078,7 @@ def _gaussian_interpolated_values(
     output = np.zeros(len(grid_points), dtype=float)
     nonzero = weight_sums > 0.0
     output[nonzero] = np.sum(weights[nonzero] * neighbor_values[nonzero], axis=1) / weight_sums[nonzero]
-    vmin, vmax = _valid_scalar_range(scalar_range)
+    vmin, vmax = _valid_scalar_range(scalar_range, signed_values=signed_values)
     return np.clip(output, vmin, vmax)
 
 
@@ -1070,11 +1088,12 @@ def _nearest_values(
     values: np.ndarray,
     *,
     scalar_range: tuple[float, float],
+    signed_values: bool = False,
 ) -> np.ndarray:
     distances = np.linalg.norm(grid_points[:, None, :] - source_voxels[None, :, :], axis=2)
     nearest = np.argmin(distances, axis=1)
     output = values[nearest]
-    vmin, vmax = _valid_scalar_range(scalar_range)
+    vmin, vmax = _valid_scalar_range(scalar_range, signed_values=signed_values)
     return np.clip(output, vmin, vmax)
 
 
@@ -1135,13 +1154,16 @@ def _normalize_anatomy(plane: np.ndarray, *, window: tuple[float, float] | None 
     return np.clip((values - low) / (high - low), 0.0, 1.0)
 
 
-def _valid_scalar_range(scalar_range: tuple[float, float]) -> tuple[float, float]:
+def _valid_scalar_range(scalar_range: tuple[float, float], *, signed_values: bool = False) -> tuple[float, float]:
     vmin = float(scalar_range[0])
     vmax = float(scalar_range[1])
     if not np.isfinite(vmin):
         vmin = 0.0
     if not np.isfinite(vmax):
         vmax = vmin + 1.0
+    if signed_values:
+        bound = max(abs(vmin), abs(vmax)) or 1.0
+        return -bound, bound
     vmin = max(0.0, vmin)
     if vmax <= vmin:
         vmax = vmin + 1.0

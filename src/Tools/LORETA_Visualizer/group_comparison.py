@@ -17,6 +17,7 @@ from Tools.LORETA_Visualizer.source_payloads import SourcePayload
 # both historical maps. These are model identities, not data-dependent masks,
 # cohort sizes or source values, which are expected to differ between groups.
 _METHOD_METADATA_FIELDS = (
+    "source_metric", "source_value_polarity",
     "base_producer_method", "source_method", "source_value_unit",
     "selected_harmonics_hz", "template_subject", "source_space",
     "source_map_model", "orientation_constraint", "participant_zscore_trim_fraction",

@@ -205,6 +205,13 @@ renderers continue to consume prepared payloads only.
 
 ## Retained Display And Fallback Behavior
 
+The active [amplitude/comparison plan](../../../docs/agent/exec-plans/active/loreta-amplitude-comparison.md)
+adds producer-owned baseline-corrected source amplitude and descriptive A−B maps.
+Preserve Z/inverse/cache contracts. Explicit signed display metadata enables both
+signs and symmetric diverging scales without Z thresholds or inherited cluster
+masks. Paired condition summaries use complete canonical participant pairs;
+independent groups retain their own cohorts. No contrast inference is authorized.
+
 The [scientific integrity plan](../../../docs/agent/exec-plans/active/loreta-scientific-integrity.md)
 owns the November repair checkpoints. New bundles require transactional
 publication/current-selection integrity; undefined source measurements use

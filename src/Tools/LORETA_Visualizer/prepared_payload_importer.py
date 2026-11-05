@@ -45,6 +45,7 @@ class PreparedSourceManifestEntry:
     label: str
     payload_path: Path
     metadata: dict[str, Any]
+    raw_id: str | None = None
 
 
 def load_prepared_source_payload_json(
@@ -122,6 +123,7 @@ def prepared_source_manifest_from_mapping(
             label=condition.label,
             payload_path=_required_payload_path(condition.payload_path),
             metadata=condition.metadata,
+            raw_id=condition.raw_id,
         )
         for condition in manifest.conditions
     )

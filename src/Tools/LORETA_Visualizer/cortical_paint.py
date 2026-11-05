@@ -8,7 +8,7 @@ import numpy as np
 
 from Tools.LORETA_Visualizer.source_validity_contract import declared_source_validity
 
-from Tools.LORETA_Visualizer.source_payloads import SOURCE_KIND_SURFACE_MESH, SourcePayload
+from Tools.LORETA_Visualizer.source_payloads import SOURCE_KIND_SURFACE_MESH, SourcePayload, source_payload_is_signed
 
 DEFAULT_CORTICAL_PAINT_NEIGHBORS = 4
 DEFAULT_CORTICAL_PAINT_POWER = 2.0
@@ -27,6 +27,9 @@ class CorticalPaintProjection:
 
 def source_payload_uses_zscores(payload: SourcePayload) -> bool:
     """Return whether a payload's scalar values should be read as z-scores."""
+    if source_payload_is_signed(payload):
+        # Descriptive differences may retain Z units but have no Z display mask.
+        return False
     source_unit = str(payload.metadata.get("source_value_unit", "")).strip().lower()
     if source_unit in {"z-score", "z score", "zscore"}:
         return True
@@ -53,6 +56,8 @@ def uses_cortical_surface_paint(payload: SourcePayload) -> bool:
 
 def payload_cluster_mask(payload: SourcePayload) -> np.ndarray | None:
     """Return a usable source-space cluster mask from payload metadata."""
+    if source_payload_is_signed(payload):
+        return None
     if payload_cluster_mask_is_underpowered(payload):
         return None
     metadata = payload.metadata
@@ -87,7 +92,7 @@ def payload_has_cluster_mask(payload: SourcePayload) -> bool:
 
 def payload_cluster_mask_is_empty(payload: SourcePayload) -> bool:
     """Return whether a declared cluster mask retained no source vertices."""
-    if not _payload_declares_cluster_mask(payload.metadata):
+    if source_payload_is_signed(payload) or not _payload_declares_cluster_mask(payload.metadata):
         return False
     return _cluster_mask_retained_count(payload) == 0
 
@@ -100,6 +105,8 @@ def payload_cluster_mask_is_underpowered(payload: SourcePayload) -> bool:
     when the source z-score field is large. In either case, display should use
     the exploratory threshold instead of implying a group-level null result.
     """
+    if source_payload_is_signed(payload):
+        return False
     metadata = payload.metadata
     status = str(metadata.get("cluster_mask_status", "")).strip().lower()
     if status == CLUSTER_MASK_STATUS_INSUFFICIENT_PARTICIPANTS:

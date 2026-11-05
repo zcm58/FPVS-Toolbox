@@ -34,8 +34,15 @@ def resolve_scalar_limits(
     auto_scale: bool,
     manual_min: float = DEFAULT_SCALAR_MIN,
     manual_max: float = DEFAULT_SCALAR_MAX,
+    signed: bool = False,
 ) -> tuple[float, float]:
     """Resolve scalar color limits using scalp-map style auto/fixed bounds."""
+    if signed:
+        data = np.asarray(values if auto_scale else (manual_min, manual_max), dtype=float).reshape(-1)
+        finite = data[np.isfinite(data)]
+        bound = float(np.max(np.abs(finite))) if finite.size else 1.0
+        bound = bound if bound > 0.0 else 1.0
+        return (-bound, bound)
     if not auto_scale:
         return _valid_limits(float(manual_min), float(manual_max))
 
@@ -96,3 +103,18 @@ LORETA_SMOOTH_SCALAR_COLORS: tuple[str, ...] = tuple(
     to_hex(color)
     for color in colormaps["viridis"](np.linspace(0.0, 1.0, LORETA_SMOOTH_SCALAR_COLOR_COUNT))
 )
+
+LORETA_SIGNED_SCALAR_COLORS: tuple[str, ...] = tuple(
+    to_hex(color) for color in colormaps["RdBu_r"](np.linspace(0.0, 1.0, 7))
+)
+LORETA_SMOOTH_SIGNED_SCALAR_COLORS: tuple[str, ...] = tuple(
+    to_hex(color)
+    for color in colormaps["RdBu_r"](np.linspace(0.0, 1.0, LORETA_SMOOTH_SCALAR_COLOR_COUNT))
+)
+
+
+def scalar_colors(*, signed: bool = False, smooth: bool = True) -> tuple[str, ...]:
+    """Choose the prepared field's palette, with neutral zero for signed fields."""
+    if signed:
+        return LORETA_SMOOTH_SIGNED_SCALAR_COLORS if smooth else LORETA_SIGNED_SCALAR_COLORS
+    return LORETA_SMOOTH_SCALAR_COLORS if smooth else LORETA_SCALAR_COLORS

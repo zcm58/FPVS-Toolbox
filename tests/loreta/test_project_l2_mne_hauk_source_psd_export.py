@@ -748,11 +748,11 @@ def test_project_source_psd_export_splits_multi_group_summaries_and_validation(
 
     manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
     assert manifest["metadata"]["group_summary_policy"] == ("separate_canonical_project_groups")
-    assert [condition["id"] for condition in manifest["conditions"]] == [
+    assert [condition["id"] for condition in manifest["conditions"] if condition["metadata"]["source_metric"] == "z_score"] == [
         "control_21_mean",
         "patient_21_mean",
     ]
-    assert [condition["label"] for condition in manifest["conditions"]] == [
+    assert [condition["label"] for condition in manifest["conditions"] if condition["metadata"]["source_metric"] == "z_score"] == [
         "Control Group - Condition A Raw mean z-score",
         "Patient Group - Condition A Raw mean z-score",
     ]
@@ -782,6 +782,16 @@ def test_project_source_psd_export_splits_multi_group_summaries_and_validation(
         [participant["participant_id"] for participant in row["participants"]] for row in sidecar["conditions"]
     ] == [["P01"], ["P02"]]
     assert [row["metadata"]["project_group"]["group_id"] for row in sidecar["conditions"]] == ["control", "patient"]
+
+    from Tools.LORETA_Visualizer.source_producers.descriptive_comparison import build_descriptive_source_comparison
+
+    for suffix in ("", "__baseline_corrected_amplitude"):
+        comparison = build_descriptive_source_comparison(
+            result.manifest_path, f"control_21_mean{suffix}", f"patient_21_mean{suffix}",
+        )
+        assert comparison.metadata["left_participant_ids"] == ["P01"]
+        assert comparison.metadata["right_participant_ids"] == ["P02"]
+        assert comparison.difference_payload["metadata"]["cluster_mask"] == "not_applicable"
 
     assert result.validation_report_path is not None
     validation = json.loads(result.validation_report_path.read_text(encoding="utf-8"))
@@ -997,7 +1007,7 @@ def test_project_source_psd_export_uses_condition_specific_cohorts_and_records_o
     validation_markdown = result.validation_report_markdown_path.read_text(encoding="utf-8")
     assert "| P03 | source_derivative_incomplete |" in validation_markdown
     assert "| P02 | Condition B | missing_canonical_condition_output |" in validation_markdown
-    assert "| Payload | Source model | Aggregation | N |" in validation_markdown
+    assert "| Payload | Source model | Metric / units | Aggregation | N |" in validation_markdown
 
 
 def test_project_source_psd_export_fails_when_every_participant_is_source_ineligible(

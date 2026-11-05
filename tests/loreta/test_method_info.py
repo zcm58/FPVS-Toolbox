@@ -34,7 +34,10 @@ def test_loreta_method_info_copy_covers_mask_and_references() -> None:
     assert "Hauk-informed Toolbox extension" in normalized_html
     assert "explicit Toolbox adaptation" in normalized_html
     assert "matches the Hauk source estimator more closely" not in normalized_html
-    assert "These masks are exploratory" in normalized_html
+    assert "These Z-score masks are exploratory" in normalized_html
+    assert "Baseline-corrected source amplitude" in normalized_html
+    assert "subtracts the neighboring-bin mean without dividing by its standard deviation" in normalized_html
+    assert "the selected summary is applied to their individual differences" in normalized_html
     assert "Full spectral-pipeline false-positive control" in normalized_html
     assert "Undefined source scores remain missing" in normalized_html
     assert "unmasked mean-absolute-Z" in normalized_html

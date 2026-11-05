@@ -55,6 +55,7 @@ def build_smoothed_volume_overlay(
     contour_fraction: float = DEFAULT_VOLUME_CONTOUR_FRACTION,
     padding: float = DEFAULT_VOLUME_PADDING,
     edge_zero_margin: int = DEFAULT_VOLUME_EDGE_ZERO_MARGIN,
+    signed_values: bool = False,
 ) -> SmoothedVolumeOverlay | None:
     """Interpolate sparse display-space volume points onto a smooth grid.
 
@@ -72,7 +73,7 @@ def build_smoothed_volume_overlay(
     support = _merge_source_support(support, source_points)
     if len(source_points) == 0 or len(support) == 0:
         return None
-    if min_visible_value is not None:
+    if min_visible_value is not None and not signed_values:
         floor = float(min_visible_value)
         keep = source_values > floor
         source_points = source_points[keep]
@@ -132,6 +133,7 @@ def build_smoothed_volume_overlay(
         contour_min_count=contour_min_count,
         contour_max_count=contour_max_count,
         contour_fraction=contour_fraction,
+        signed_values=signed_values,
     )
     if not contour_values:
         return None
@@ -374,9 +376,27 @@ def _contour_values(
     contour_min_count: int,
     contour_max_count: int,
     contour_fraction: float,
+    signed_values: bool = False,
 ) -> tuple[float, ...]:
     values = np.asarray(grid_values, dtype=float).reshape(-1)
     finite = values[np.isfinite(values)]
+    if signed_values:
+        # Select contours independently on either side of zero. Their scalars
+        # retain the sign of the interpolated field; no absolute-value overlay.
+        levels = []
+        signs = [sign for sign in (-1.0, 1.0) if np.any(sign * finite > 0.0)]
+        total_count = max(len(signs), min(int(contour_count or contour_min_count), contour_max_count))
+        # Share the existing contour budget between signs rather than doubling
+        # the surface allocation when a descriptive field crosses zero.
+        count = max(1, total_count // max(len(signs), 1))
+        for sign in signs:
+            magnitudes = sign * finite[sign * finite > 0.0]
+            if not magnitudes.size:
+                continue
+            bound = float(np.max(magnitudes))
+            fraction = min(max(float(contour_fraction), 0.01), 0.95)
+            levels.extend(sign * np.linspace(bound * fraction, bound * 0.98, count))
+        return tuple(sorted(float(value) for value in levels))
     if min_visible_value is not None:
         floor = float(min_visible_value)
         finite = finite[finite > floor]

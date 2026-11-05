@@ -25,6 +25,47 @@ from Tools.LORETA_Visualizer.source_payloads import (
 )
 
 
+def test_scientific_color_range_keeps_small_values_through_edit_and_step(qtbot):
+    from PySide6.QtCore import Qt
+    from Tools.LORETA_Visualizer.scalar_range_control import ScientificDoubleSpinBox
+
+    spin = ScientificDoubleSpinBox()
+    qtbot.addWidget(spin)
+    spin.show()
+    spin.setValue(2e-9)
+    assert spin.value() == 2e-9
+    assert spin.text() == "2e-09"
+    spin.lineEdit().selectAll()
+    qtbot.keyClicks(spin.lineEdit(), "-3.5e-9")
+    qtbot.keyClick(spin.lineEdit(), Qt.Key_Return)
+    assert spin.value() == -3.5e-9
+    assert spin.text() == "-3.5e-09"
+    before = spin.value()
+    spin.stepUp()
+    assert 0.0 < spin.value() - before < 1e-9
+    spin.setValue(1.64)
+    assert spin.text() == "1.64"
+    assert spin.close()
+
+
+def test_scientific_color_range_rejects_invalid_input_without_erasing_value(qtbot):
+    from PySide6.QtGui import QValidator
+    from Tools.LORETA_Visualizer.scalar_range_control import ScientificDoubleSpinBox
+
+    spin = ScientificDoubleSpinBox()
+    qtbot.addWidget(spin)
+    spin.setValue(-2e-9)
+    for text in ("nan", "inf", "1e999", "1e-999", "2e7"):
+        assert spin.validate(text, len(text))[0] == QValidator.State.Invalid
+        assert spin.fixup(text) == "-2e-09"
+    assert spin.validate("1e-", 3)[0] == QValidator.State.Intermediate
+    assert spin.value() == -2e-9
+    spin.setValue(spin.maximum())
+    spin.stepUp()
+    assert spin.value() == spin.maximum()
+    assert spin.close()
+
+
 def test_group_comparison_toggle_preserves_single_view_controls(qtbot, monkeypatch) -> None:
     from pathlib import Path
     from Tools.LORETA_Visualizer import gui
@@ -81,6 +122,67 @@ def test_group_comparison_toggle_preserves_single_view_controls(qtbot, monkeypat
     window._sync_source_map_selectors_enabled()
     assert not window.compare_groups_check.isEnabled()
     assert "3D volume overlay" in window.compare_groups_check.toolTip()
+    assert window.close()
+
+
+def test_metric_and_canonical_comparison_controls_preserve_source_selection(qtbot, monkeypatch, tmp_path):
+    from Tools.LORETA_Visualizer import gui
+    from Tools.LORETA_Visualizer.prepared_payload_importer import PreparedSourceManifestEntry
+
+    class DisplayDouble(QWidget):
+        def __init__(self, parent=None, **_kwargs):
+            super().__init__(parent)
+
+        def set_display_mode(self, *_args, **_kwargs):
+            pass
+
+        def set_cortical_paint_cluster_mask_enabled(self, *_args, **_kwargs):
+            pass
+
+        def set_transparent_spin_enabled(self, *_args, **_kwargs):
+            pass
+
+        def set_activation_payload(self, *_args, **_kwargs):
+            pass
+
+        def shutdown(self):
+            pass
+
+    monkeypatch.setattr(gui, "BrainRendererWidget", DisplayDouble)
+    monkeypatch.setattr(LoretaVisualizerWindow, "_start_fsaverage_load", lambda *_a, **_k: None)
+    monkeypatch.setattr(LoretaVisualizerWindow, "_refresh_current_activation", lambda _self: None)
+    window = LoretaVisualizerWindow()
+    qtbot.addWidget(window)
+    entries = []
+    for metric in (gui.METRIC_Z_SCORE, gui.METRIC_AMPLITUDE):
+        for group, condition in (("a", "words"), ("b", "words"), ("a", "faces")):
+            cell = f"{group}_{condition}"
+            entries.append(PreparedSourceManifestEntry(
+                f"{cell}_mean_{metric}", cell, tmp_path / f"{cell}.json", {
+                    "producer_method": "l2_mne_hauk_source_psd_cortical_normal_v1_mean",
+                    "source_metric": metric, "source_cell_id": cell, "source_cell_label": cell,
+                    "participant_zscore_aggregation": "mean", "group_id": group,
+                    "canonical_condition_id": condition, "descriptive_comparison_available": True,
+                },
+            ))
+    window._replace_manifest_conditions(tuple(entries))
+    window._select_first_condition_if_needed()
+    window.show()
+    window.metric_combo.setCurrentIndex(window.metric_combo.findData(gui.METRIC_AMPLITUDE))
+    assert window._selected_condition_id == "a_words"
+    assert window.summary_combo.currentText() == "Raw mean"
+    window.compare_groups_check.click()
+    assert window.comparison_target_combo.isVisible()
+    assert window.comparison_target_combo.currentData() == "b_words_mean_baseline_corrected_amplitude"
+    window.comparison_kind_combo.setCurrentIndex(window.comparison_kind_combo.findData("conditions"))
+    assert window.comparison_target_combo.currentData() == "a_faces_mean_baseline_corrected_amplitude"
+    assert "paired conditions" in window.compare_groups_check.toolTip()
+    window.comparison_view_combo.setCurrentIndex(window.comparison_view_combo.findData("difference"))
+    assert window._comparison_view == "difference"
+    window.activation_min_spin.setValue(-3e-10)
+    window.activation_max_spin.setValue(2e-10)
+    assert window.activation_min_spin.value() == -3e-10
+    assert window.activation_max_spin.value() == 2e-10
     assert window.close()
 
 

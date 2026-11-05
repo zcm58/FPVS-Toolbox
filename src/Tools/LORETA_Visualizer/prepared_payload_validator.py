@@ -87,6 +87,7 @@ PREPARED_SOURCE_PAYLOAD_SCHEMA: dict[str, Any] = {
         "values must be finite, or null only at declared source_validity invalid indices, with one scalar per point",
         "faces, when present, must be triangle rows or VTK-style triangular records",
         "face indices must refer to existing points",
+        "baseline-corrected amplitude and descriptive comparisons declare signed display and no cluster inference",
     ),
 }
 
@@ -137,6 +138,8 @@ def validate_prepared_source_payload_mapping(raw_payload: Any) -> PreparedSource
     if len(points) != len(values):
         raise PreparedSourcePayloadValidationError("Prepared source payload values must have one value per point.")
     faces = _faces_field(raw_payload.get("faces"), point_count=len(points))
+    metadata = _metadata(raw_payload.get("metadata"))
+    _validate_descriptive_metric_metadata(metadata)
     return PreparedSourcePayloadSpec(
         label=label,
         kind=kind,
@@ -146,8 +149,33 @@ def validate_prepared_source_payload_mapping(raw_payload: Any) -> PreparedSource
         points=points,
         values=values,
         faces=faces,
-        metadata=_metadata(raw_payload.get("metadata")),
+        metadata=metadata,
     )
+
+
+def _validate_descriptive_metric_metadata(metadata: dict[str, Any]) -> None:
+    """Keep new magnitude/contrast maps distinct from thresholded Z maps."""
+    comparison = metadata.get("descriptive_comparison")
+    amplitude = metadata.get("source_metric") == "baseline_corrected_amplitude"
+    if comparison is None and not amplitude:
+        return
+    if metadata.get("source_value_polarity") != "signed":
+        raise PreparedSourcePayloadValidationError(
+            "Baseline-corrected amplitude and descriptive comparisons require signed display metadata."
+        )
+    if comparison is not None:
+        if (not isinstance(comparison, dict)
+                or type(comparison.get("version")) is not int or comparison["version"] != 1
+                or comparison.get("kind") not in ("groups", "conditions")
+                or comparison.get("direction") != "A-B"
+                or metadata.get("source_comparison_role") not in ("left", "right", "difference")):
+            raise PreparedSourcePayloadValidationError("Invalid descriptive comparison metadata.")
+    if (metadata.get("cluster_mask") not in (None, "", "none", "not_applicable")
+            or any(key.startswith("cluster_") and key not in ("cluster_mask", "cluster_mask_status")
+                   for key in metadata)):
+        raise PreparedSourcePayloadValidationError(
+            "Descriptive amplitude/comparison maps must not inherit cluster masks or inference."
+        )
 
 
 def validate_prepared_source_manifest_json(

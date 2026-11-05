@@ -37,6 +37,11 @@ class SourcePayload:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
+def source_payload_is_signed(payload: SourcePayload | None) -> bool:
+    """Read explicit signed display intent without reinterpreting historical Z."""
+    return payload is not None and payload.metadata.get("source_value_polarity") == "signed"
+
+
 def make_source_payload(
     *,
     points: np.ndarray,

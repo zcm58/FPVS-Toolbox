@@ -98,6 +98,61 @@ def test_payload_validator_rejects_nonfinite_values() -> None:
         validate_prepared_source_payload_mapping(raw_payload)
 
 
+def _signed_descriptive_payload(*, comparison=False):
+    payload = prepared_source_payload_example()
+    payload["values"] = [-2.0, 0.0, 3.0]
+    payload["metadata"] = {
+        "source_metric": "baseline_corrected_amplitude",
+        "source_value_polarity": "signed",
+        "cluster_mask": "not_applicable",
+    }
+    if comparison:
+        payload["metadata"].update({
+            "source_metric": "z_score",
+            "descriptive_comparison": {"version": 1, "kind": "conditions", "direction": "A-B"},
+            "source_comparison_role": "difference",
+        })
+    return payload
+
+
+@pytest.mark.parametrize("comparison", [False, True])
+def test_descriptive_payload_keeps_both_signs(comparison):
+    spec = validate_prepared_source_payload_mapping(_signed_descriptive_payload(comparison=comparison))
+    assert spec.values.tolist() == [-2.0, 0.0, 3.0]
+
+
+@pytest.mark.parametrize("comparison", [False, True])
+def test_descriptive_payload_requires_explicit_signed_display(comparison):
+    payload = _signed_descriptive_payload(comparison=comparison)
+    del payload["metadata"]["source_value_polarity"]
+    with pytest.raises(PreparedSourcePayloadValidationError, match="signed display"):
+        validate_prepared_source_payload_mapping(payload)
+
+
+@pytest.mark.parametrize("field,value", [
+    ("cluster_mask", "source_space_cluster_permutation"),
+    ("cluster_mask_source_indices", [0]),
+    ("cluster_mask_vertex_indices", []),
+    ("cluster_mask_primary_display", True),
+    ("cluster_alpha", 0.05),
+])
+def test_descriptive_payload_rejects_inherited_inference(field, value):
+    payload = _signed_descriptive_payload(comparison=True)
+    payload["metadata"][field] = value
+    with pytest.raises(PreparedSourcePayloadValidationError, match="must not inherit"):
+        validate_prepared_source_payload_mapping(payload)
+
+
+@pytest.mark.parametrize("field,value", [
+    ("version", True), ("kind", "unknown"), ("direction", "B-A"),
+])
+def test_descriptive_payload_rejects_ambiguous_comparison(field, value):
+    payload = _signed_descriptive_payload(comparison=True)
+    payload["metadata"]["descriptive_comparison"][field] = value
+    with pytest.raises(PreparedSourcePayloadValidationError, match="comparison metadata"):
+        validate_prepared_source_payload_mapping(payload)
+
+
 def test_manifest_validator_rejects_path_escape_without_manifest_path() -> None:
     raw_manifest = prepared_source_manifest_example()
     raw_manifest["conditions"][0]["file"] = "../condition_a_source.json"

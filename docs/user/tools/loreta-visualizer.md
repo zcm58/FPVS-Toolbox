@@ -48,8 +48,8 @@ Use this tool to:
 - review beta cortical-surface source maps for each condition;
 - review beta eLORETA volume source maps;
 - switch between loaded source-map methods when more than one method is available;
-- compare conditions visually in source space;
-- compare two groups side by side with linked 3D views;
+- view Z-scores or baseline-corrected source amplitudes;
+- compare two groups or paired conditions with linked 3D views and descriptive A − B maps;
 - export source-map figures for review, presentations, or manuscript drafting.
 
 ## Source-Map Views
@@ -143,6 +143,27 @@ If source maps are absent or use a historical orientation method, Source Map
 Options can rebuild them from valid existing FIF derivatives. Reprocessing is
 needed only when those derivatives are missing, stale, or invalid.
 
+## Source Metrics
+
+**Source metric** selects **Z-score** or **Baseline-corrected amplitude**.
+Both use the same prepared inverse estimates and selected harmonics. For each
+participant, baseline-corrected amplitude subtracts the neighboring-bin noise
+mean from the summed target source amplitude, without dividing by the noise SD.
+The selected mean, median or trimmed mean then summarizes those participant
+values. Negative values remain negative; they indicate amplitude below the
+local spectral background, not negative electrical current.
+
+Baseline-corrected amplitude is in method- and window-dependent source spectral
+amplitude units, not calibrated current or scalp microvolts. Compare amplitudes
+only with matching inverse, spectral settings and harmonics. Its blue-to-red
+scale is centered on zero; fixed limits use the larger absolute bound on both
+sides. These maps have no Z cutoff or cluster mask. They retain the same valid
+source support as the prepared measurements.
+
+Older bundles remain viewable. To add the amplitude metric and descriptive
+contrasts, use **Source Map Options > Rebuild source maps**. Current source-ready
+FIF derivatives can be reused without EEG reprocessing.
+
 ## Display Options
 
 Depending on the loaded source-map method, you can use options such as:
@@ -165,28 +186,46 @@ in group comparison; source estimates, masks and color limits stay the same.
 
 Choose **Scale: current map** for limits from the displayed map,
 **Scale: all conditions** for shared limits within the selected method and
-summary, or **Scale: fixed limits** to enter a range. Exports use the selected
+metric/summary, or **Scale: fixed limits** to enter a range. Exports use the selected
 scale. Use shared or fixed limits when comparing colors across conditions;
 independently scaled maps can assign the same color to different values.
 
-### Compare two groups
+### Compare groups or conditions
 
-Enable **Compare groups** to display both groups for the same condition, method
-and summary. Each pane identifies its group and available participant count.
-Rotate or zoom either brain to move both views; the display, mask, cutoff and
-opacity controls apply to both. **Scale: both groups** uses a joint range for
-the pair, while all-conditions and fixed limits remain shared.
+Enable **Compare**, then select **Groups** or **Conditions**. Groups compares
+the same condition across two selected canonical groups. Conditions compares
+two conditions within the current group. The current map is A; select the
+other group or condition in **B**. Maps must have
+matching metric, summary, source geometry, inverse, spectral settings and
+harmonics. Missing or incompatible inputs are unavailable rather than substituted.
 
-Comparison requires exactly two explicit groups and compatible prepared maps.
-A missing group-condition-summary cell is unavailable; another summary or group
-is never substituted. Group masks retain their separate within-group meaning:
-a visible difference, or significance in only one group, is not a statistical
-test of the difference between groups.
+Choose **A and B — shared scale** for linked 3D brains, or **Difference — A − B**
+for a single signed map. Positive differences mean A is larger; negative
+differences mean B is larger. A/B uses one color range, and rotating or zooming
+either brain moves both. The difference uses a symmetric zero-centered range
+and supports MRI slices for volume sources.
 
-Live comparison supports the 3D cortical and volume views. MRI slices use the
-single-map view. Turn off comparison to use the existing figure-export actions.
-The second 3D viewer is created only when needed, and neither pane continuously
-redraws while idle.
+Condition comparisons include only participants with both conditions in the
+same group. A and B are recomputed for that matched cohort; the difference
+summarizes each participant's A − B values. For a median or trimmed mean, this
+can differ from subtracting the displayed A and B summaries. Group comparisons
+retain separate, non-overlapping cohorts and subtract their matching summaries.
+All three maps use the same source locations valid across the included
+participants. Unmatched counts appear with paired comparisons; panel tooltips
+identify omitted participants.
+
+These comparisons are descriptive, without a significance test, independent
+cluster masks or Z cutoffs. They do not remove template-model uncertainty or
+turn a visual difference into statistical evidence. Older bundles still allow
+the existing view for exactly two groups with separate within-group masks; rebuild them to
+enable the new metrics and A − B comparisons.
+
+Live A/B comparison supports the 3D cortical and volume views. Surface A/B
+exports stack the two maps; volume A/B exports create separate A and B MRI-slice
+figures. Difference maps use the single-map export actions. The second 3D viewer
+is created only when needed, and neither pane continuously redraws while idle.
+
+### MRI navigation
 
 In the MRI slice view, click or hold the left mouse button and drag to move the
 linked crosshair. The other two planes update during the drag; the plane you
@@ -224,7 +263,7 @@ never removes retained volume points or changes the map's automatic color
 scale. MRI slices should be the primary view when assigning an approximate
 anatomical description; use the 3D overlay for spatial overview and interaction.
 
-Cluster-permutation masks require at least two eligible participant maps in
+For ordinary Z-score maps, cluster-permutation masks require at least two eligible participant maps in
 each displayed condition/group. With only one eligible participant, FPVS
 Toolbox still writes and displays the descriptive source map, but labels the
 mask as unavailable and treats the unmasked display as exploratory rather than
@@ -269,7 +308,8 @@ right-minus-left values indicate stronger right-hemisphere estimates.
 If either hemisphere ROI has no valid common support, its sum and the
 between-hemisphere comparison are unavailable; this is not a zero response.
 
-The LORETA Visualizer can export source-map figures from supported views.
+The LORETA Visualizer exports paired PDF/PNG figures from supported views,
+preserving the selected metric, comparison direction, scale and palette.
 
 Use exported figures as review or presentation images unless your analysis plan specifically includes source-space reporting. If you report source-space results, cite the relevant source-estimation method and describe the workflow used to generate the maps.
 For volume figures, also identify whether the figure used MRI slices or the 3D
@@ -281,7 +321,7 @@ interpolated contour and state that interpolation was display-only.
 2. Confirm that current source-ready derivatives and harmonic selection exist.
 3. Open the LORETA Visualizer.
 4. Load or generate the available source maps for the project.
-5. Choose the source-map method and condition to view.
+5. Choose the source-map method, metric and condition to view.
 6. Adjust the display settings if needed.
 7. Export figures from the selected view if needed.
 

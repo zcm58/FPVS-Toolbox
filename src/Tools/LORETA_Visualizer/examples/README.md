@@ -33,6 +33,15 @@ Payload JSON files use:
 - `faces`: optional triangle rows that define a mesh over `points`
 - `metadata`: optional provenance and example-only notes
 
+Baseline-corrected source amplitude declares
+`source_metric: baseline_corrected_amplitude` and
+`source_value_polarity: signed`. Descriptive A/B/A−B payloads also declare signed
+display, `source_comparison_role` (`left`, `right`, `difference`) and
+`descriptive_comparison` with version 1, kind `groups` or `conditions`, and
+direction `A-B`. These payloads contain no inherited cluster inference. Missing
+sources still use the versioned validity contract and JSON nulls. The Python
+validator checks these cross-field requirements; display never calculates them.
+
 `source_payload_v1_fsaverage_native_example.json` is the closest shape for a
 future source-localization producer that emits values in fsaverage coordinates.
 The importer converts those coordinates into renderer display space through the

@@ -520,6 +520,14 @@ def write_project_l2_mne_hauk_source_psd_payloads(
                 require_payload_files=True,
             ),
         )
+        from .source_metrics import add_source_amplitude_outputs
+
+        producer_result = add_source_amplitude_outputs(
+            producer_result,
+            participant_sidecar_path=participant_result.participant_sidecar_path,
+            conditions=prepared_conditions,
+            frequency_metadata=frequency_metadata,
+        )
         _emit_progress(progress_callback, "Writing project source-validation report...")
         validation_inputs = _ValidationReportInputs(
             project_root=root,

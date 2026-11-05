@@ -26,8 +26,7 @@ from Tools.LORETA_Visualizer.scalar_fields import (
     CORTICAL_PAINT_BASE_COLOR,
     DEFAULT_SCALAR_MAX,
     DEFAULT_SCALAR_MIN,
-    LORETA_SCALAR_COLORS,
-    LORETA_SMOOTH_SCALAR_COLORS,
+    scalar_colors,
 )
 from Tools.LORETA_Visualizer.source_payloads import (
     SOURCE_KIND_ROI_MESH,
@@ -36,6 +35,7 @@ from Tools.LORETA_Visualizer.source_payloads import (
     SOURCE_KIND_VOLUME_MESH,
     SOURCE_KIND_VOLUME_POINTS,
     SourcePayload,
+    source_payload_is_signed,
 )
 from Tools.LORETA_Visualizer.synthetic_brain import BrainHemisphereMesh, BrainMesh, make_synthetic_brain_mesh
 from Tools.LORETA_Visualizer.transforms import MeshDisplayTransform
@@ -107,6 +107,7 @@ class _SplitHemisphereState:
     faces: np.ndarray
     values: np.ndarray
     shade_values: np.ndarray | None = None
+    signed_values: bool = False
 
 
 @dataclass
@@ -134,6 +135,13 @@ class PublicationSplitFigurePanel:
     activation_visible: bool
     left_rotation_degrees: float = 0.0
     right_rotation_degrees: float = 0.0
+
+
+@dataclass(frozen=True)
+class _SplitFigureHeader:
+    title_lines: tuple[tuple[str, float], ...]
+    hemisphere_y: float | None
+    height: float
 
 
 class BrainRendererWidget(QWidget):
@@ -336,7 +344,7 @@ class BrainRendererWidget(QWidget):
         actor = plotter.add_mesh(
             surface,
             scalars="activation",
-            cmap=list(LORETA_SMOOTH_SCALAR_COLORS),
+            cmap=list(scalar_colors(signed=source_payload_is_signed(getattr(self, "_last_activation_payload", None)))),
             clim=self._activation_scalar_range,
             interpolate_before_map=True,
             color=CORTICAL_PAINT_BASE_COLOR,
@@ -681,7 +689,7 @@ class BrainRendererWidget(QWidget):
         self._activation_actor = plotter.add_mesh(
             cloud,
             scalars="activation",
-            cmap=list(LORETA_SMOOTH_SCALAR_COLORS),
+            cmap=list(scalar_colors(signed=source_payload_is_signed(payload))),
             nan_opacity=0.0,
             clim=self._activation_scalar_range,
             interpolate_before_map=True,
@@ -719,6 +727,7 @@ class BrainRendererWidget(QWidget):
                 support_valid_source_mask=getattr(self, "_last_volume_support_valid_mask", None),
                 source_spacing=self._volume_source_spacing(),
                 min_visible_value=self._volume_min_visible_value(),
+                signed_values=source_payload_is_signed(payload),
             )
         except (ImportError, MemoryError, RuntimeError, TypeError, ValueError) as exc:
             logger.debug("loreta_volume_overlay_smoothing_failed", extra={"error": str(exc)})
@@ -752,7 +761,7 @@ class BrainRendererWidget(QWidget):
         self._activation_actor = plotter.add_mesh(
             surface,
             scalars="activation",
-            cmap=list(LORETA_SMOOTH_SCALAR_COLORS),
+            cmap=list(scalar_colors(signed=source_payload_is_signed(payload))),
             clim=self._activation_scalar_range,
             interpolate_before_map=True,
             opacity=self._activation_opacity,
@@ -797,7 +806,7 @@ class BrainRendererWidget(QWidget):
             self._activation_actor = plotter.add_mesh(
                 glyphs,
                 scalars="activation",
-                cmap=list(LORETA_SMOOTH_SCALAR_COLORS),
+                cmap=list(scalar_colors(signed=source_payload_is_signed(payload))),
                 clim=self._activation_scalar_range,
                 interpolate_before_map=True,
                 opacity=self._activation_opacity,
@@ -854,6 +863,8 @@ class BrainRendererWidget(QWidget):
         return spacing_mm / radius
 
     def _volume_min_visible_value(self) -> float | None:
+        if source_payload_is_signed(getattr(self, "_last_activation_payload", None)):
+            return None
         vmin = float(self._activation_scalar_range[0])
         if not np.isfinite(vmin) or vmin < 0.0:
             return None
@@ -875,6 +886,7 @@ class BrainRendererWidget(QWidget):
             paint_surface["activation"] = _cortical_paint_display_values(
                 projection.values,
                 scalar_range=self._activation_scalar_range,
+                signed_values=source_payload_is_signed(payload),
             )
         except (ImportError, ModuleNotFoundError, RuntimeError, TypeError, ValueError) as exc:
             logger.warning("loreta_cortical_paint_projection_failed", extra={"error": str(exc)})
@@ -934,6 +946,7 @@ class BrainRendererWidget(QWidget):
             points=display_points.copy(),
             faces=np.asarray(hemisphere.faces, dtype=np.int64).copy(),
             values=np.asarray(projection.values, dtype=float),
+            signed_values=source_payload_is_signed(payload),
             shade_values=(
                 np.asarray(hemisphere.shade_values, dtype=float).copy()
                 if hemisphere.shade_values is not None and len(hemisphere.shade_values) == len(display_points)
@@ -1002,6 +1015,7 @@ class BrainRendererWidget(QWidget):
                 state.shade_values,
                 scalar_range=self._activation_scalar_range,
                 activation_visible=self._activation_visible,
+                signed_values=state.signed_values,
             )
             cache.color_state = state
             cache.scalar_range = self._activation_scalar_range
@@ -1034,6 +1048,7 @@ class BrainRendererWidget(QWidget):
             state.shade_values,
             scalar_range=self._activation_scalar_range,
             activation_visible=self._activation_visible,
+            signed_values=state.signed_values,
         )
         return surface
 
@@ -1746,6 +1761,14 @@ def _render_publication_split_image(
     scale = float(width) / float(DEFAULT_SPLIT_FIGURE_WIDTH)
     legend_reserved_height = 225.0 * scale
     panel_height = max((float(height) - legend_reserved_height) / panel_count, 1.0)
+    headers = [
+        _split_figure_header_layout(
+            draw, panel.label, width=width, scale_factor=scale,
+            show_condition_label=panel_count > 1, show_hemisphere_labels=index == 0,
+        )
+        for index, (panel, _left, _right) in enumerate(prepared_panels)
+    ]
+    shared_header_height = max(header.height for header in headers)
     for index, (panel, left, right) in enumerate(prepared_panels):
         _draw_split_figure_panel(
             draw,
@@ -1758,6 +1781,8 @@ def _render_publication_split_image(
             show_condition_label=panel_count > 1,
             show_hemisphere_labels=index == 0,
             scale_factor=scale,
+            header_layout=headers[index],
+            header_height=shared_header_height,
         )
     _draw_split_figure_legend(
         draw,
@@ -1765,8 +1790,66 @@ def _render_publication_split_image(
         height=height,
         scalar_range=prepared_panels[-1][0].scalar_range,
         scale_factor=scale,
+        signed_values=prepared_panels[-1][0].left_state.signed_values,
     )
     return image
+
+
+def _wrap_split_figure_label(draw, text: str, font, *, maximum_width: float) -> tuple[str, ...]:
+    """Wrap measured labels, preferring the condition/metric separator."""
+    paragraphs = text.strip().splitlines()
+    lines = []
+    for paragraph in paragraphs:
+        sections = paragraph.split(" · ") if draw.textlength(paragraph, font=font) > maximum_width else [paragraph]
+        for section in sections:
+            line = ""
+            for word in section.split():
+                candidate = f"{line} {word}".strip()
+                if line and draw.textlength(candidate, font=font) > maximum_width:
+                    lines.append(line)
+                    line = ""
+                if draw.textlength(word, font=font) <= maximum_width:
+                    line = f"{line} {word}".strip()
+                    continue
+                # An unbroken condition identifier must also stay inside the artwork.
+                for character in word:
+                    candidate = line + character
+                    if line and draw.textlength(candidate, font=font) > maximum_width:
+                        lines.append(line)
+                        line = character
+                    else:
+                        line = candidate
+            if line:
+                lines.append(line)
+    return tuple(lines)
+
+
+def _split_figure_header_layout(
+    draw, label: str, *, width: int, scale_factor: float,
+    show_condition_label: bool, show_hemisphere_labels: bool,
+) -> _SplitFigureHeader:
+    if not show_condition_label:
+        return _SplitFigureHeader((), 70.0 * scale_factor if show_hemisphere_labels else None,
+                                  SPLIT_FIGURE_SINGLE_TOP_MARGIN * scale_factor)
+    title_font = _pil_font("panel_label", scale_factor=scale_factor,
+                           point_size=SPLIT_FIGURE_CONDITION_LABEL_SIZE_PT, bold=True)
+    lines = _wrap_split_figure_label(draw, label, title_font, maximum_width=width - 220.0 * scale_factor)
+    cursor = 24.0 * scale_factor
+    placed_lines = []
+    for line in lines:
+        bounds = draw.textbbox((0, 0), line, font=title_font, anchor="mm")
+        center = cursor - bounds[1]
+        placed_lines.append((line, center))
+        cursor = center + bounds[3] + 18.0 * scale_factor
+    hemisphere_y = None
+    if show_hemisphere_labels:
+        font = _pil_font("axis_label", scale_factor=scale_factor,
+                         point_size=SPLIT_FIGURE_HEMISPHERE_LABEL_SIZE_PT, bold=True)
+        bounds = [draw.textbbox((0, 0), word, font=font, anchor="mm") for word in ("Left", "Right")]
+        hemisphere_y = cursor - min(box[1] for box in bounds)
+        cursor = hemisphere_y + max(box[3] for box in bounds) + 24.0 * scale_factor
+    return _SplitFigureHeader(tuple(placed_lines), hemisphere_y,
+                              max(SPLIT_FIGURE_CONDITION_TOP_MARGIN * scale_factor, cursor))
 
 
 def _draw_split_figure_panel(
@@ -1781,15 +1864,19 @@ def _draw_split_figure_panel(
     show_condition_label: bool,
     show_hemisphere_labels: bool,
     scale_factor: float,
+    header_layout: _SplitFigureHeader | None = None,
+    header_height: float | None = None,
 ) -> None:
     all_points = np.vstack((left["points_2d"], right["points_2d"]))
     min_xy = np.min(all_points, axis=0)
     max_xy = np.max(all_points, axis=0)
     span = np.maximum(max_xy - min_xy, 1e-9)
     side_margin = 110.0 * scale_factor
-    top_margin = (
-        SPLIT_FIGURE_CONDITION_TOP_MARGIN if show_condition_label else SPLIT_FIGURE_SINGLE_TOP_MARGIN
-    ) * scale_factor
+    header = header_layout or _split_figure_header_layout(
+        draw, panel.label, width=width, scale_factor=scale_factor,
+        show_condition_label=show_condition_label, show_hemisphere_labels=show_hemisphere_labels,
+    )
+    top_margin = max(header.height, header_height or 0.0)
     bottom_margin = 35.0 * scale_factor
     draw_width = max(float(width) - 2.0 * side_margin, 1.0)
     draw_height = max(float(panel_height) - top_margin - bottom_margin, 1.0)
@@ -1821,19 +1908,19 @@ def _draw_split_figure_panel(
 
     left_center = _figure_label_center(left["points_2d"], scale=coordinate_scale, x_offset=x_offset)
     right_center = _figure_label_center(right["points_2d"], scale=coordinate_scale, x_offset=x_offset)
-    if show_condition_label and panel.label.strip():
+    for line, center_y in header.title_lines:
         _draw_centered_text(
             draw,
             float(width) / 2.0,
-            panel_top + 54.0 * scale_factor,
-            panel.label.strip(),
+            panel_top + center_y,
+            line,
             role="panel_label",
             point_size=SPLIT_FIGURE_CONDITION_LABEL_SIZE_PT,
             bold=True,
             scale_factor=scale_factor,
         )
-    if show_hemisphere_labels:
-        label_y = panel_top + (88.0 if show_condition_label else 70.0) * scale_factor
+    if header.hemisphere_y is not None:
+        label_y = panel_top + header.hemisphere_y
         _draw_centered_text(
             draw,
             left_center,
@@ -1863,12 +1950,13 @@ def _draw_split_figure_legend(
     height: int,
     scalar_range: tuple[float, float],
     scale_factor: float,
+    signed_values: bool = False,
 ) -> None:
     legend_width = int(round(860 * scale_factor))
     legend_height = int(round(52 * scale_factor))
     legend_x = (int(width) - legend_width) / 2.0
     legend_y = int(height) - 150.0 * scale_factor
-    ramp = np.asarray([_hex_to_rgb(color) for color in LORETA_SCALAR_COLORS], dtype=float)
+    ramp = np.asarray([_hex_to_rgb(color) for color in scalar_colors(signed=signed_values, smooth=False)], dtype=float)
     max_x = max(legend_width - 1, 1)
     for x in range(legend_width):
         t = x / max_x
@@ -1995,6 +2083,7 @@ def _figure_surface_faces(
         state.shade_values,
         scalar_range=scalar_range,
         activation_visible=activation_visible,
+        signed_values=state.signed_values,
     )
     face_rows: list[dict[str, Any]] = []
     for triangle in triangles:
@@ -2097,23 +2186,26 @@ def _publication_surface_rgb(
     *,
     scalar_range: tuple[float, float],
     activation_visible: bool,
+    signed_values: bool = False,
 ) -> np.ndarray:
     scalar_values = np.asarray(values, dtype=float).reshape(-1)
     colors = _publication_base_rgb(len(scalar_values), shade_values)
     if not activation_visible:
         return colors
     vmin = float(scalar_range[0])
-    finite = np.isfinite(scalar_values) & (scalar_values >= vmin)
+    finite = np.isfinite(scalar_values) & (signed_values | (scalar_values >= vmin))
     if not np.any(finite):
         return colors
-    colors[finite] = _scalar_values_to_rgb(scalar_values[finite], scalar_range=scalar_range)
+    colors[finite] = _scalar_values_to_rgb(scalar_values[finite], scalar_range=scalar_range, signed_values=signed_values)
     return colors
 
 
-def _cortical_paint_display_values(values: np.ndarray, *, scalar_range: tuple[float, float]) -> np.ndarray:
+def _cortical_paint_display_values(
+    values: np.ndarray, *, scalar_range: tuple[float, float], signed_values: bool = False,
+) -> np.ndarray:
     scalar_values = np.asarray(values, dtype=float).reshape(-1)
     vmin = float(scalar_range[0])
-    return np.where(np.isfinite(scalar_values) & (scalar_values >= vmin), scalar_values, np.nan)
+    return np.where(np.isfinite(scalar_values) & (signed_values | (scalar_values >= vmin)), scalar_values, np.nan)
 
 
 def _validated_volume_support_points(points: np.ndarray) -> np.ndarray:
@@ -2133,7 +2225,9 @@ def _visible_volume_source_arrays(
     if points.ndim != 2 or points.shape[1] != 3 or len(points) != len(values):
         return np.empty((0, 3), dtype=float), np.empty((0,), dtype=float)
     visible = np.isfinite(values) & np.all(np.isfinite(points), axis=1)
-    if min_visible_value is not None:
+    if source_payload_is_signed(payload):
+        visible &= values != 0.0
+    elif min_visible_value is not None:
         visible &= values > float(min_visible_value)
     return points[visible], values[visible]
 
@@ -2172,13 +2266,15 @@ def _publication_base_rgb(count: int, shade_values: np.ndarray | None) -> np.nda
     return np.clip(np.rint(rgb * 255.0), 0, 255).astype(np.uint8)
 
 
-def _scalar_values_to_rgb(values: np.ndarray, *, scalar_range: tuple[float, float]) -> np.ndarray:
+def _scalar_values_to_rgb(
+    values: np.ndarray, *, scalar_range: tuple[float, float], signed_values: bool = False,
+) -> np.ndarray:
     scalar_values = np.asarray(values, dtype=float).reshape(-1)
     vmin, vmax = float(scalar_range[0]), float(scalar_range[1])
     if vmax <= vmin:
         vmax = vmin + 1.0
     t = np.clip((scalar_values - vmin) / (vmax - vmin), 0.0, 1.0)
-    ramp = np.asarray([_hex_to_rgb(color) for color in LORETA_SCALAR_COLORS], dtype=float)
+    ramp = np.asarray([_hex_to_rgb(color) for color in scalar_colors(signed=signed_values, smooth=False)], dtype=float)
     position = t * (len(ramp) - 1)
     lower_index = np.floor(position).astype(np.int64)
     upper_index = np.clip(lower_index + 1, 0, len(ramp) - 1)

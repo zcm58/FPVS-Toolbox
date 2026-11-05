@@ -141,6 +141,7 @@ def _payload_summary(payload: ProducedPayload) -> dict[str, Any]:
         "coordinate_space": str(raw.get("coordinate_space", "")),
         "value_label": str(raw.get("value_label", "")),
         "source_value_unit": str(metadata.get("source_value_unit", "")),
+        "source_metric": str(metadata.get("source_metric", "z_score")),
         "participant_zscore_aggregation": str(metadata.get("participant_zscore_aggregation", "")),
         "participant_count": _int_or_none(metadata.get("participant_count")),
         "source_count": len(raw.get("points", [])),
@@ -148,6 +149,7 @@ def _payload_summary(payload: ProducedPayload) -> dict[str, Any]:
         "value_min": min(values) if values else None,
         "value_max": max(values) if values else None,
         "positive_value_count": sum(1 for value in values if value > 0.0),
+        "negative_value_count": sum(1 for value in values if value < 0.0),
         "cluster_mask": str(metadata.get("cluster_mask", "none")),
         "cluster_mask_status": str(metadata.get("cluster_mask_status", "")),
         **_cluster_inference_summary(metadata),
@@ -603,8 +605,8 @@ def _markdown_report(report: dict[str, Any]) -> str:
             "",
             "## Payload Summary",
             "",
-            "| Payload | Source model | Aggregation | N | Value range | Valid sources | Cluster sources |",
-            "| --- | --- | --- | ---: | ---: | ---: | ---: |",
+            "| Payload | Source model | Metric / units | Aggregation | N | Value range | Valid sources | Cluster sources |",
+            "| --- | --- | --- | --- | ---: | ---: | ---: | ---: |",
         )
     )
     for payload in report["payload_summaries"]:
@@ -612,6 +614,7 @@ def _markdown_report(report: dict[str, Any]) -> str:
         lines.append(
             "| "
             f"{payload['file']} | {payload['source_model']} | "
+            f"{payload['source_metric']} / {payload['source_value_unit']} | "
             f"{payload['participant_zscore_aggregation']} | "
             f"{_format_number(payload['participant_count'])} | {value_range} | "
             f"{_format_number(payload['source_validity'].get('valid_source_count'))} | "

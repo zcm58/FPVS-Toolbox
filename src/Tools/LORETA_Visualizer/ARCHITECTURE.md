@@ -162,6 +162,13 @@ exists.
 
 ## Data Flow
 
+The [amplitude/comparison plan](../../../docs/agent/exec-plans/active/loreta-amplitude-comparison.md)
+extends prepared outputs with signed baseline-corrected source amplitude and
+on-demand descriptive A/B/A−B comparisons. Producers own participant arithmetic,
+pairing and common valid support; GUI workers adapt their prepared mappings.
+Renderers consume explicit signed-display metadata with zero-centered diverging
+scales. Existing inverse/Z calculations and cache identity remain unchanged.
+
 ### Scientific integrity and publication
 
 `source_producers/project_source_publication.py` owns per-method staged output,
@@ -457,7 +464,10 @@ compact rebuild summaries, but source-estimation math still belongs only to
   project-loaded map and warns that no current result is available; a manually
   imported payload is preserved. This reconciliation never starts source
   estimation and does not instantiate the page when it has not been opened.
-- `group_comparison.py`: GUI-neutral matching of prepared group maps by explicit
+- `comparison_selection.py`: metric/operand selection, raw manifest identities
+  and bundle freshness for producer-prepared descriptive comparisons. GUI workers
+  adapt A/B/A−B mappings; matched-cohort summaries stay in `source_producers`.
+- `group_comparison.py`: legacy GUI-neutral matching of prepared group maps by explicit
   canonical condition/group metadata, exact summary and numerical method/metric/
   source-space signature. It performs no I/O, aggregation or statistics. The GUI
   loads candidates in a worker, constrains project groups through the public
@@ -617,6 +627,8 @@ compact rebuild summaries, but source-estimation math still belongs only to
 - `transforms.py`: `MeshDisplayTransform` and coordinate-space constants.
 - `scalar_fields.py`: visual scalar color stops and auto/manual color-limit
   resolution.
+- `scalar_range_control.py`: finite scientific-notation range entry and adaptive
+  stepping, preserving tiny source amplitudes without changing payload values.
 
 When validation code exercises a non-identity native/display transform, demo
 payloads intentionally round-trip through native coordinates and
@@ -670,6 +682,29 @@ payload with:
   producer-computed significant source vertices. For volume or other
   non-surface payloads, metadata may include `cluster_mask_source_indices` for
   the same display-only mask behavior without implying cortical vertices.
+
+`source_producers.source_metrics` augments staged source-PSD bundles and retained
+participant diagnostics, preserving inverse/cache identity. Bundles add `source_metric` (`z_score` or
+`baseline_corrected_amplitude`). The latter is each participant's summed target
+spectral amplitude minus the neighboring-bin mean, without division by noise SD.
+Its units remain method/window-specific source spectral units. Full source
+geometry and the existing common-valid policy are preserved. It has explicit
+`source_value_polarity: signed`, no Z cutoff or inferential cluster metadata,
+and symmetric diverging display/export limits; ordinary Z behavior is unchanged.
+
+`source_producers.descriptive_comparison` prepares A/B/A−B mappings from the
+bundle's retained participant arrays. Group comparisons subtract independent
+cohort summaries for one condition. Within-group condition comparisons intersect
+canonical participant IDs and summarize individual differences; constituent A/B
+maps use the same complete pairs. Median/trimmed paired differences need not equal
+the subtraction of separate medians/trimmed means. Numerical settings, harmonics,
+source identities and common support must agree. Incompatible or historical
+bundles lacking diagnostics require rebuilding, without inferring missing values.
+Bundle receipts, content hashes and recomputed numerical signatures prevent
+mixing participant data or payloads across rebuilds.
+Prepared mappings record `descriptive_comparison` version 1, `groups`/`conditions`,
+direction `A-B`, and `source_comparison_role` (`left`, `right`, `difference`).
+All three panels omit independent cluster masks. No contrast p-value is computed.
 
 If a future method changes from LORETA to another inverse model, the renderer
 should stay unchanged. The adapter/bridge should map the method output into this

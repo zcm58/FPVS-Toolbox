@@ -335,7 +335,7 @@ def test_project_eloreta_source_psd_uses_available_group_condition_cells(
     manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
     assert manifest["metadata"]["participant_eligibility_policy"] == ("available_case_by_group_condition_v1")
     assert manifest["metadata"]["group_summary_policy"] == ("separate_canonical_project_groups")
-    assert [condition["id"] for condition in manifest["conditions"]] == [
+    assert [condition["id"] for condition in manifest["conditions"] if condition["metadata"]["source_metric"] == "z_score"] == [
         "control_21_mean",
         "patient_21_mean",
         "patient_22_mean",
@@ -360,6 +360,16 @@ def test_project_eloreta_source_psd_uses_available_group_condition_cells(
     assert [
         (item["participant_id"], item["condition_id"]) for item in sidecar["metadata"]["source_condition_omissions"]
     ] == [("P01", "22"), ("P03", "22")]
+
+    from Tools.LORETA_Visualizer.source_producers.descriptive_comparison import build_descriptive_source_comparison
+
+    for suffix in ("", "__baseline_corrected_amplitude"):
+        comparison = build_descriptive_source_comparison(
+            result.manifest_path, f"patient_21_mean{suffix}", f"patient_22_mean{suffix}", comparison_kind="conditions",
+        )
+        assert comparison.metadata["left_participant_ids"] == ["P02"]
+        assert comparison.metadata["right_participant_ids"] == ["P02"]
+        assert comparison.difference_payload["metadata"]["cluster_mask"] == "not_applicable"
 
     validation = json.loads(result.validation_report_path.read_text(encoding="utf-8"))
     assert validation["input_summary"]["source_cohort_status"] == ("complete_with_warnings")

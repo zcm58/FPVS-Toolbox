@@ -91,6 +91,24 @@
     "metadata": {
       "type": "object",
       "properties": {
+        "source_metric": {
+          "type": "string"
+        },
+        "source_value_polarity": {
+          "type": "string"
+        },
+        "source_comparison_role": {
+          "enum": ["left", "right", "difference"]
+        },
+        "descriptive_comparison": {
+          "type": "object",
+          "required": ["version", "kind", "direction"],
+          "properties": {
+            "version": {"const": 1},
+            "kind": {"enum": ["groups", "conditions"]},
+            "direction": {"const": "A-B"}
+          }
+        },
         "source_validity": {
           "type": "object",
           "required": [
@@ -136,7 +154,26 @@
             }
           }
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": ["source_metric"],
+            "properties": {"source_metric": {"const": "baseline_corrected_amplitude"}}
+          },
+          "then": {
+            "required": ["source_value_polarity"],
+            "properties": {"source_value_polarity": {"const": "signed"}}
+          }
+        },
+        {
+          "if": {"required": ["descriptive_comparison"]},
+          "then": {
+            "required": ["source_value_polarity", "source_comparison_role"],
+            "properties": {"source_value_polarity": {"const": "signed"}}
+          }
+        }
+      ]
     }
   },
   "allOf": [

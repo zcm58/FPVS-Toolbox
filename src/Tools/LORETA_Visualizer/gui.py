@@ -7,8 +7,9 @@ from uuid import uuid4
 import logging
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 from PySide6.QtCore import QObject, QThread, QTimer, Qt, Signal, Slot
@@ -55,12 +56,24 @@ from Tools.LORETA_Visualizer.group_comparison import (
     build_group_comparison,
     comparison_candidates,
 )
+from Tools.LORETA_Visualizer.comparison_selection import (
+    METRIC_AMPLITUDE,
+    METRIC_LABELS,
+    METRIC_Z_SCORE,
+    comparison_request,
+    comparison_bundle_signature,
+    comparison_targets,
+    entry_metric,
+    metric_entries,
+    operand_label,
+)
 from Tools.LORETA_Visualizer.slice_viewer import MriSliceImageLabel
 from Tools.LORETA_Visualizer.prepared_payload_importer import (
     PreparedSourceManifestEntry,
     PreparedSourcePayloadImportError,
     load_prepared_source_manifest_json,
     load_prepared_source_payload_json,
+    prepared_source_payload_from_mapping,
 )
 from Tools.LORETA_Visualizer.renderer import (
     DISPLAY_MODE_CORTICAL_SURFACE,
@@ -70,6 +83,8 @@ from Tools.LORETA_Visualizer.renderer import (
     SPLIT_HEMISPHERE_ROTATION_STEP_DEGREES,
     BrainRendererWidget,
     RenderBackendError,
+    DEFAULT_SPLIT_FIGURE_SINGLE_HEIGHT_IN,
+    write_publication_split_hemisphere_stack_figures,
 )
 from Tools.LORETA_Visualizer.scalar_fields import (
     DEFAULT_SCALAR_MAX,
@@ -77,7 +92,9 @@ from Tools.LORETA_Visualizer.scalar_fields import (
     LORETA_SCALAR_COLORS,
     format_scalar_value,
     resolve_scalar_limits,
+    scalar_colors,
 )
+from Tools.LORETA_Visualizer.scalar_range_control import ScientificDoubleSpinBox
 from Tools.LORETA_Visualizer.source_producers.hauk_source_psd import (
     SOURCE_ORIENTATION_MODE_CORTICAL_NORMAL,
     SOURCE_ORIENTATION_MODE_LEGACY_MNE_PSD_POWER_NORM,
@@ -93,6 +110,7 @@ from Tools.LORETA_Visualizer.source_payloads import (
     filter_source_payload_by_mask,
     filter_source_payload_values_above,
     make_source_payload,
+    source_payload_is_signed,
 )
 from Tools.LORETA_Visualizer.stats_ready_workbook import (
     stats_ready_workbook_exists,
@@ -397,6 +415,74 @@ class GroupComparisonLoadWorker(QObject):
             self.loaded.emit((request["id"], candidates, groups, after))
         except (OSError, RuntimeError, TypeError, ValueError, PreparedSourcePayloadImportError) as exc:
             self.failed.emit(int(request["id"]), str(exc))
+        finally:
+            self.finished.emit()
+
+
+class DescriptiveComparisonWorker(QObject):
+    """Prepare a participant-level descriptive comparison away from Qt widgets."""
+
+    loaded = Signal(object)
+    failed = Signal(int, str)
+    finished = Signal()
+
+    def __init__(self, request: dict[str, object]) -> None:
+        super().__init__()
+        self.request = request
+
+    @Slot()
+    def run(self) -> None:
+        request = self.request
+        try:
+            from Tools.LORETA_Visualizer.source_producers.descriptive_comparison import (
+                build_descriptive_source_comparison,
+            )
+
+            specification = request["specification"]
+            result = build_descriptive_source_comparison(
+                specification.manifest_path, specification.left_entry_id,
+                specification.right_entry_id, comparison_kind=specification.comparison_kind,
+            )
+            payloads = tuple(
+                prepared_source_payload_from_mapping(document, display_transform=request["display_transform"])
+                for document in (result.left_payload, result.right_payload, result.difference_payload)
+            )
+            if comparison_bundle_signature(specification.manifest_path) != request["key"][1]:
+                raise ValueError("Source bundle changed while preparing the comparison. Reload source maps.")
+            self.loaded.emit((request, payloads, result.metadata))
+        except (ImportError, OSError, RuntimeError, TypeError, ValueError, PreparedSourcePayloadImportError) as exc:
+            self.failed.emit(int(request["id"]), str(exc))
+        finally:
+            self.finished.emit()
+
+
+class ComparisonFigureExportWorker(QObject):
+    """Write snapshots prepared by the GUI, without accessing live renderers."""
+
+    exported = Signal(object)
+    failed = Signal(str)
+    finished = Signal()
+
+    def __init__(self, request: dict) -> None:
+        super().__init__()
+        self.request = request
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            request = self.request
+            if "panels" in request:
+                kwargs = {"panels": request["panels"]}
+                if len(request["panels"]) == 1:
+                    kwargs["height_inches"] = DEFAULT_SPLIT_FIGURE_SINGLE_HEIGHT_IN
+                paths = write_publication_split_hemisphere_stack_figures(request["path"], **kwargs)
+            else:
+                paths = []
+                for path, kwargs in request["mri_jobs"]:
+                    paths.extend(write_mri_orthogonal_slice_figures(path, **kwargs))
+            self.exported.emit(tuple(paths))
+        except (OSError, RuntimeError, TypeError, ValueError) as exc:
+            self.failed.emit(str(exc))
         finally:
             self.finished.emit()
 
@@ -741,10 +827,10 @@ def split_figure_condition_display_label(condition_label: str) -> str:
     return label
 
 
-def _source_summary_label(summary_id: str) -> str:
+def _source_summary_label(summary_id: str, metric: str = METRIC_Z_SCORE) -> str:
     for label, candidate_id in SOURCE_SUMMARY_OPTIONS:
         if candidate_id == summary_id:
-            return label
+            return label if metric == METRIC_Z_SCORE else label.replace(" z-score", "")
     return "Source map"
 
 
@@ -795,6 +881,9 @@ def _manifest_entry_raw_id(entry: PreparedSourceManifestEntry) -> str:
 
 
 def _manifest_entry_condition_id(entry: PreparedSourceManifestEntry) -> str:
+    cell_id = entry.metadata.get("source_cell_id")
+    if isinstance(cell_id, str) and cell_id.strip():
+        return cell_id.strip()
     summary_id = _manifest_entry_summary_id(entry)
     condition_id = _manifest_entry_raw_id(entry)
     if summary_id != SOURCE_SUMMARY_DIRECT:
@@ -810,6 +899,9 @@ def _manifest_entry_condition_id(entry: PreparedSourceManifestEntry) -> str:
 
 
 def _manifest_entry_condition_label(entry: PreparedSourceManifestEntry) -> str:
+    canonical_label = entry.metadata.get("source_cell_label")
+    if isinstance(canonical_label, str) and canonical_label.strip():
+        return canonical_label.strip()
     label = str(entry.label).strip()
     if _manifest_entry_summary_id(entry) == SOURCE_SUMMARY_DIRECT:
         return label
@@ -989,6 +1081,8 @@ def _activation_display_payload(
     transparent_mesh_display: bool = False,
     use_cluster_mask: bool = True,
 ) -> SourcePayload:
+    if source_payload_is_signed(payload):
+        return payload
     if _source_payload_uses_zscores(payload) and (
         transparent_mesh_display or not uses_cortical_surface_paint(payload)
     ):
@@ -1008,6 +1102,8 @@ def _activation_scale_values(
     use_cluster_mask: bool = True,
 ) -> np.ndarray:
     values = np.asarray(payload.values, dtype=float)
+    if source_payload_is_signed(payload):
+        return values[np.isfinite(values)]
     if cortical_threshold_display and uses_cortical_surface_paint(payload) and _source_payload_uses_zscores(payload):
         cluster_mask = payload_cluster_mask(payload) if use_cluster_mask else None
         if cluster_mask is not None and np.any(cluster_mask):
@@ -1604,10 +1700,20 @@ class LoretaVisualizerWindow(QWidget):
         self._group_comparison_group_ids = None
         self._group_comparison_signature = None
         self._group_comparison_thread: QThread | None = None
+        self._comparison_figure_thread: QThread | None = None
+        self._comparison_figure_worker: ComparisonFigureExportWorker | None = None
         self._group_comparison_worker: GroupComparisonLoadWorker | None = None
         self._group_comparison_request_id = 0
         self._comparison_source_payloads: tuple[SourcePayload, ...] = ()
         self._comparison_display_payloads: tuple[SourcePayload, ...] = ()
+        self._comparison_kind = "groups"
+        self._comparison_view = "ab"
+        self._descriptive_payloads: tuple[SourcePayload, ...] = ()
+        self._descriptive_metadata: dict = {}
+        self._descriptive_key = None
+        self._descriptive_requested_key = None
+        self._descriptive_failed_key = None
+        self._comparison_has_framed = False
         self.mri_slice_view: MriSliceImageLabel | None = None
         self._fsaverage_dir: Path | None = None
         self._mri_anatomy_cache: MriAnatomyVolume | None = None
@@ -1648,6 +1754,8 @@ class LoretaVisualizerWindow(QWidget):
         self._pending_source_map_rebuild: tuple[tuple[str, ...], bool] | None = None
         self._selected_condition_id = ""
         self._selected_summary_id = SOURCE_SUMMARY_RAW_MEAN
+        self._selected_metric = METRIC_Z_SCORE
+        self._all_manifest_entries: tuple[PreparedSourceManifestEntry, ...] = ()
         self._source_activation_payload: SourcePayload | None = None
         self._current_activation_payload: SourcePayload | None = None
         self._last_import_dir: Path | None = None
@@ -1751,7 +1859,7 @@ class LoretaVisualizerWindow(QWidget):
         controls.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
         controls.header.setVisible(False)
         controls.shell_layout.setSpacing(0)
-        controls.content_layout.setSpacing(8)
+        controls.content_layout.setSpacing(5)
 
         def add_control_section() -> tuple[QWidget, QVBoxLayout]:
             if controls.content_layout.count() > 0:
@@ -1782,6 +1890,14 @@ class LoretaVisualizerWindow(QWidget):
         self.source_method_combo.currentIndexChanged.connect(self._on_source_method_changed)
         selection_layout.addWidget(self.source_method_combo)
 
+        self.metric_combo = QComboBox(selection_section)
+        self.metric_combo.setObjectName("loreta_source_metric_combo")
+        self.metric_combo.setAccessibleName("Source metric")
+        self.metric_combo.setToolTip("Z-score or estimated amplitude above the neighboring-frequency background.")
+        self.metric_combo.addItem(METRIC_LABELS[METRIC_Z_SCORE], METRIC_Z_SCORE)
+        self.metric_combo.currentIndexChanged.connect(self._on_metric_changed)
+        selection_layout.addWidget(self.metric_combo)
+
         condition_label = make_field_label("Condition", selection_section)
         selection_layout.addWidget(condition_label)
 
@@ -1810,13 +1926,37 @@ class LoretaVisualizerWindow(QWidget):
         selection_layout.addWidget(self.display_mode_combo)
         self._set_display_mode_combo_data(self._display_mode)
 
-        self.compare_groups_check = QCheckBox("Compare groups", selection_section)
+        self.compare_groups_check = QCheckBox("Compare", selection_section)
         self.compare_groups_check.setObjectName("loreta_compare_groups_check")
         self.compare_groups_check.setToolTip(
             "Compare the same condition and summary across two canonical groups, with linked cameras and one color scale."
         )
         self.compare_groups_check.toggled.connect(self._set_group_comparison_enabled)
-        selection_layout.addWidget(self.compare_groups_check)
+        compare_row = QHBoxLayout()
+        compare_row.addWidget(self.compare_groups_check)
+        self.comparison_kind_combo = QComboBox(selection_section)
+        self.comparison_kind_combo.setObjectName("loreta_comparison_kind_combo")
+        self.comparison_kind_combo.setAccessibleName("Comparison type")
+        self.comparison_kind_combo.addItem("Groups", "groups")
+        self.comparison_kind_combo.addItem("Conditions", "conditions")
+        self.comparison_kind_combo.currentIndexChanged.connect(self._on_comparison_kind_changed)
+        compare_row.addWidget(self.comparison_kind_combo, 1)
+        selection_layout.addLayout(compare_row)
+        self.comparison_target_combo = QComboBox(selection_section)
+        self.comparison_target_combo.setObjectName("loreta_comparison_target_combo")
+        self.comparison_target_combo.setAccessibleName("Comparison B")
+        self.comparison_target_combo.setToolTip("B operand. The selected source map above is A.")
+        self.comparison_target_combo.currentIndexChanged.connect(self._on_comparison_target_changed)
+        selection_layout.addWidget(self.comparison_target_combo)
+        self.comparison_view_combo = QComboBox(selection_section)
+        self.comparison_view_combo.setObjectName("loreta_comparison_view_combo")
+        self.comparison_view_combo.setAccessibleName("Comparison view")
+        self.comparison_view_combo.addItem("A and B — shared scale", "ab")
+        self.comparison_view_combo.addItem("Difference — A − B", "difference")
+        self.comparison_view_combo.currentIndexChanged.connect(self._on_comparison_view_changed)
+        selection_layout.addWidget(self.comparison_view_combo)
+        self.comparison_target_combo.setVisible(False)
+        self.comparison_view_combo.setVisible(False)
 
         self.cluster_mask_check = QCheckBox("Use group-level mask", selection_section)
         self.cluster_mask_check.setObjectName("loreta_toolbar_use_cluster_mask_check")
@@ -1863,18 +2003,14 @@ class LoretaVisualizerWindow(QWidget):
         range_row = QHBoxLayout()
         range_row.setContentsMargins(0, 0, 0, 0)
         range_row.setSpacing(6)
-        self.activation_min_spin = QDoubleSpinBox(color_section)
+        self.activation_min_spin = ScientificDoubleSpinBox(color_section)
         self.activation_min_spin.setObjectName("loreta_activation_min_spin")
-        self.activation_min_spin.setDecimals(2)
         self.activation_min_spin.setRange(-1_000_000.0, 1_000_000.0)
-        self.activation_min_spin.setSingleStep(0.05)
         self.activation_min_spin.setValue(DEFAULT_SCALAR_MIN)
         self.activation_min_spin.valueChanged.connect(self._on_activation_range_changed)
-        self.activation_max_spin = QDoubleSpinBox(color_section)
+        self.activation_max_spin = ScientificDoubleSpinBox(color_section)
         self.activation_max_spin.setObjectName("loreta_activation_max_spin")
-        self.activation_max_spin.setDecimals(2)
         self.activation_max_spin.setRange(-1_000_000.0, 1_000_000.0)
-        self.activation_max_spin.setSingleStep(0.05)
         self.activation_max_spin.setValue(DEFAULT_SCALAR_MAX)
         self.activation_max_spin.valueChanged.connect(self._on_activation_range_changed)
         range_row.addWidget(self.activation_min_spin)
@@ -2074,7 +2210,9 @@ class LoretaVisualizerWindow(QWidget):
         self._sync_source_map_selectors_enabled()
         self.display_mode_combo.setEnabled(enabled)
         self.reset_camera_btn.setEnabled(enabled)
-        self.export_figures_btn.setEnabled(enabled and not getattr(self, "_group_comparison_enabled", False))
+        self.export_figures_btn.setEnabled(enabled and getattr(self, "_comparison_figure_thread", None) is None and (
+            not getattr(self, "_group_comparison_enabled", False) or bool(getattr(self, "_descriptive_payloads", ()))
+        ))
         self.source_options_btn.setEnabled(enabled)
         self._sync_activation_render_mode_controls()
         self._sync_cluster_mask_control()
@@ -2108,11 +2246,26 @@ class LoretaVisualizerWindow(QWidget):
         )
         self.condition_combo.setEnabled(renderer_available and has_conditions)
         self.summary_combo.setEnabled(renderer_available and has_conditions and self.summary_combo.count() > 1)
+        if hasattr(self, "metric_combo"):
+            self.metric_combo.setEnabled(renderer_available and bool(self._all_manifest_entries))
+        if hasattr(self, "comparison_kind_combo"):
+            active = bool(self._group_comparison_enabled)
+            self.comparison_kind_combo.setEnabled(renderer_available and has_conditions)
+            self.comparison_target_combo.setVisible(active)
+            self.comparison_view_combo.setVisible(active)
+            self.comparison_target_combo.setEnabled(active and self.comparison_target_combo.count() > 0)
+            self.comparison_view_combo.setEnabled(active)
         if hasattr(self, "compare_groups_check"):
-            available = renderer_available and has_conditions and self._display_mode != DISPLAY_MODE_MRI_SLICES
+            difference = getattr(self, "_comparison_view", "ab") == "difference"
+            available = renderer_available and has_conditions and (self._display_mode != DISPLAY_MODE_MRI_SLICES or difference)
             self.compare_groups_check.setEnabled(available)
-            if self._display_mode == DISPLAY_MODE_MRI_SLICES:
+            if self._display_mode == DISPLAY_MODE_MRI_SLICES and not difference:
                 self.compare_groups_check.setToolTip("Group comparison is available in the 3D views. Choose 3D volume overlay.")
+            elif self._descriptive_comparison_required():
+                self.compare_groups_check.setToolTip(
+                    "Compare groups or paired conditions descriptively. A/B share a color scale; "
+                    "A − B has its own symmetric scale. No significance mask is applied."
+                )
             else:
                 self.compare_groups_check.setToolTip(
                     "Compare two canonical groups with linked cameras and one color scale. "
@@ -2120,7 +2273,7 @@ class LoretaVisualizerWindow(QWidget):
                 )
 
     def _set_group_comparison_enabled(self, enabled: bool) -> None:
-        if enabled and self._display_mode == DISPLAY_MODE_MRI_SLICES:
+        if enabled and self._display_mode == DISPLAY_MODE_MRI_SLICES and getattr(self, "_comparison_view", "ab") != "difference":
             enabled = False
         self._group_comparison_enabled = bool(enabled)
         self._group_comparison_request_id += 1
@@ -2128,19 +2281,23 @@ class LoretaVisualizerWindow(QWidget):
         self.compare_groups_check.setChecked(bool(enabled))
         self.compare_groups_check.blockSignals(previous)
         self.activation_scale_combo.setItemText(0, "Scale: both groups" if enabled else "Scale: current map")
-        self.export_figures_btn.setEnabled(self.renderer is not None and not enabled)
+        self.export_figures_btn.setEnabled(self.renderer is not None and self._comparison_figure_thread is None and (not enabled or self._comparison_view == "difference"))
         self.export_figures_btn.setToolTip(
             "Return to a single group to export publication figures." if enabled else "Export publication figures."
         )
         if self.renderer is not None:
             self.renderer.set_transparent_spin_enabled(False if enabled else self._transparent_spin_enabled)
         if not enabled:
+            self.activation_scale_combo.setItemText(self.activation_scale_combo.findData(SCALE_SHARED), "Scale: all conditions")
             self._release_group_comparison_renderer()
             self._group_comparison_pair = None
             self._comparison_source_payloads = ()
             self._comparison_display_payloads = ()
             self._populate_condition_combo_for_selected_method(preferred_condition=self._selected_condition_id)
             self._sync_summary_combo_for_selected_condition(preferred_summary=self._selected_summary_id)
+        else:
+            self._sync_comparison_targets()
+        self._sync_source_map_selectors_enabled()
         self._refresh_current_activation()
 
     def _release_group_comparison_renderer(self) -> None:
@@ -2159,7 +2316,210 @@ class LoretaVisualizerWindow(QWidget):
         self._group_comparison_pair = None
         self._comparison_source_payloads = ()
         self._comparison_display_payloads = ()
+        self._descriptive_payloads = ()
+        self._descriptive_key = None
+        self._descriptive_requested_key = None
+        self._descriptive_failed_key = None
+        self._comparison_has_framed = False
         self._release_group_comparison_renderer()
+
+    def _descriptive_comparison_required(self) -> bool:
+        entry = self._selected_manifest_entry()
+        return bool(
+            getattr(self, "_comparison_kind", "groups") == "conditions"
+            or getattr(self, "_comparison_view", "ab") == "difference"
+            or (entry is not None and entry.metadata.get("descriptive_comparison_available") is True)
+        )
+
+    def _comparison_left_entry(self) -> PreparedSourceManifestEntry | None:
+        group = self._manifest_condition_groups.get(self._selected_condition_id)
+        return group.entries_by_summary.get(self._selected_summary_id) if group is not None else None
+
+    def _sync_comparison_targets(self) -> None:
+        if not hasattr(self, "comparison_target_combo"):
+            return
+        combo = self.comparison_target_combo
+        selected = combo.currentData()
+        previous = combo.blockSignals(True)
+        self._comparison_target_error = None
+        try:
+            combo.clear()
+            left = self._comparison_left_entry()
+            if left is None:
+                return
+            targets = comparison_targets(self._comparison_manifest_entries(), left, kind=self._comparison_kind)
+            for entry in targets:
+                combo.addItem(f"B: {operand_label(entry, kind=self._comparison_kind)}", entry.condition_id)
+            index = combo.findData(selected)
+            if index >= 0:
+                combo.setCurrentIndex(index)
+            if not targets:
+                combo.setPlaceholderText("No compatible comparison B")
+        except ValueError as exc:
+            self._comparison_target_error = str(exc)
+            combo.clear()
+            combo.setPlaceholderText("Comparison metadata invalid")
+        finally:
+            combo.blockSignals(previous)
+
+    def _on_comparison_kind_changed(self, _index: int) -> None:
+        self._comparison_kind = self.comparison_kind_combo.currentData()
+        self._invalidate_group_comparison()
+        self._populate_condition_combo_for_selected_method(preferred_condition=self._selected_condition_id)
+        self._sync_summary_combo_for_selected_condition(preferred_summary=self._selected_summary_id)
+        self._sync_comparison_targets()
+        self._refresh_current_activation()
+
+    def _on_comparison_target_changed(self, _index: int) -> None:
+        self._invalidate_group_comparison()
+        self._refresh_current_activation()
+
+    def _on_comparison_view_changed(self, _index: int) -> None:
+        ranges = getattr(self, "_comparison_manual_ranges", {})
+        ranges[self._comparison_view] = (self.activation_min_spin.value(), self.activation_max_spin.value())
+        self._comparison_manual_ranges = ranges
+        self._comparison_view = self.comparison_view_combo.currentData()
+        initial_range = (-1., 1.)
+        if len(self._descriptive_payloads) == 3:
+            sources = self._descriptive_payloads[2:] if self._comparison_view == "difference" else self._descriptive_payloads[:2]
+            initial_range = resolve_scalar_limits(np.concatenate([source.values for source in sources]), auto_scale=True, signed=True)
+        for spin, value in zip((self.activation_min_spin, self.activation_max_spin), ranges.get(self._comparison_view, initial_range)):
+            previous = spin.blockSignals(True)
+            spin.setValue(value)
+            spin.blockSignals(previous)
+        if self._comparison_view == "ab" and self._display_mode == DISPLAY_MODE_MRI_SLICES:
+            self._display_mode = DISPLAY_MODE_TRANSPARENT_MESH
+        self._comparison_display_payloads = ()
+        self._refresh_current_activation()
+
+    def _refresh_descriptive_comparison(self) -> None:
+        try:
+            left = self._comparison_left_entry()
+            if left is None:
+                raise ValueError("Select a source map for A.")
+            self._sync_comparison_targets()
+            if self._comparison_target_error:
+                raise ValueError(self._comparison_target_error)
+            target_id = self.comparison_target_combo.currentData()
+            right = next((entry for entry in self._comparison_manifest_entries() if entry.condition_id == target_id), None)
+            if right is None:
+                raise ValueError("No comparison B is available for this method, metric and summary.")
+            specification = comparison_request(left, right, kind=self._comparison_kind)
+            key = (specification, comparison_bundle_signature(specification.manifest_path), _comparison_file_signature((left, right)))
+            changed_request = self._descriptive_requested_key != key
+            if changed_request:
+                self._group_comparison_request_id += 1
+                self._descriptive_requested_key = key
+            if self._descriptive_key == key and self._descriptive_payloads:
+                self._render_descriptive_comparison()
+                return
+            if self._descriptive_failed_key == key:
+                return
+            if changed_request:
+                self._release_group_comparison_renderer()
+                self._comparison_source_payloads = ()
+                self._comparison_display_payloads = ()
+                self.export_figures_btn.setEnabled(False)
+                self._clear_activation_payload()
+            if self._group_comparison_thread is not None:
+                return
+            request = {
+                "id": self._group_comparison_request_id, "key": key, "specification": specification,
+                "display_transform": self.renderer.mesh_display_transform(),
+                "labels": (operand_label(left, kind=self._comparison_kind), operand_label(right, kind=self._comparison_kind)),
+            }
+            thread = QThread(self)
+            worker = DescriptiveComparisonWorker(request)
+            worker.moveToThread(thread)
+            thread.started.connect(worker.run)
+            worker.loaded.connect(self._on_descriptive_comparison_loaded)
+            worker.failed.connect(self._on_descriptive_comparison_failed)
+            worker.finished.connect(thread.quit)
+            worker.finished.connect(worker.deleteLater)
+            thread.finished.connect(thread.deleteLater)
+            thread.finished.connect(self._group_comparison_load_finished)
+            self._group_comparison_thread = thread
+            self._group_comparison_worker = worker
+            self._set_source_export_status("Preparing descriptive comparison…", variant="info")
+            thread.start()
+        except (OSError, RuntimeError, TypeError, ValueError) as exc:
+            self._group_comparison_request_id += 1
+            self._descriptive_requested_key = None
+            self._comparison_source_payloads = ()
+            self._comparison_display_payloads = ()
+            self.export_figures_btn.setEnabled(False)
+            self._release_group_comparison_renderer()
+            self._clear_activation_payload()
+            self._set_source_export_status(f"Comparison unavailable: {exc}", variant="warning")
+
+    @Slot(object)
+    def _on_descriptive_comparison_loaded(self, result: object) -> None:
+        request, payloads, metadata = result
+        if (self._closing_requested or not self._group_comparison_enabled
+                or request["id"] != self._group_comparison_request_id
+                or request["key"] != self._descriptive_requested_key):
+            return
+        self._descriptive_key = request["key"]
+        self._descriptive_payloads = payloads
+        self._descriptive_metadata = dict(metadata)
+        self._descriptive_labels = request["labels"]
+        self._render_descriptive_comparison()
+
+    @Slot(int, str)
+    def _on_descriptive_comparison_failed(self, request_id: int, message: str) -> None:
+        if (self._closing_requested or not self._group_comparison_enabled
+                or request_id != self._group_comparison_request_id):
+            return
+        self._descriptive_failed_key = self._descriptive_requested_key
+        self._descriptive_payloads = ()
+        self._clear_activation_payload()
+        self._set_source_export_status(f"Comparison unavailable: {message}", variant="warning")
+
+    def _render_descriptive_comparison(self) -> None:
+        if len(self._descriptive_payloads) != 3:
+            return
+        left, right, difference = self._descriptive_payloads
+        labels = self._descriptive_labels
+        paired = self._comparison_kind == "conditions"
+        omitted_left = self._descriptive_metadata.get("left_omitted_participant_ids", [])
+        omitted_right = self._descriptive_metadata.get("right_omitted_participant_ids", [])
+        omission = f" · unmatched A/B: {len(omitted_left)} / {len(omitted_right)}" if paired and (omitted_left or omitted_right) else ""
+        omission_details = (
+            f"A participants omitted: {', '.join(omitted_left) or 'none'}\n"
+            f"B participants omitted: {', '.join(omitted_right) or 'none'}"
+        ) if paired else "Independent participant groups."
+        self.activation_scale_combo.setItemText(0, "Scale: difference" if self._comparison_view == "difference" else "Scale: A and B")
+        shared_index = self.activation_scale_combo.findData(SCALE_SHARED)
+        self.activation_scale_combo.setItemText(shared_index, "Scale: comparison" if self._group_comparison_enabled else "Scale: all conditions")
+        if self._comparison_view == "difference":
+            self._release_group_comparison_renderer()
+            self._comparison_source_payloads = (difference,)
+            self._comparison_display_payloads = (difference,)
+            self._set_activation_payload(difference, comparison_payload=True)
+            n_left, n_right = (payload.metadata.get("participant_count", "?") for payload in (left, right))
+            cohort = f"paired n = {n_left}" if paired else f"n = {n_left} / {n_right}"
+            self.primary_group_label.setText(f"A − B: {labels[0]} − {labels[1]} · {cohort}{omission}")
+            self.primary_group_label.setVisible(True)
+            self._set_source_export_status("Descriptive difference · no significance mask", variant="info")
+        else:
+            panels = []
+            for prefix, label, payload in zip(("A", "B"), labels, (left, right)):
+                count = payload.metadata.get("participant_count")
+                panels.append(SimpleNamespace(
+                    payload=payload, participant_count=count,
+                    panel_label=f"{prefix}: {label}" + (f" (n = {count})" if count is not None else ""),
+                ))
+            pair = SimpleNamespace(left=panels[0], right=panels[1], descriptive=True, paired=paired)
+            self._group_comparison_pair = pair
+            self._render_group_comparison_pair(pair)
+            if omission:
+                self._set_source_export_status(f"Complete participant pairs{omission}", variant="info")
+        self.primary_group_label.setToolTip(omission_details)
+        if self._comparison_renderer is not None:
+            self.comparison_group_label.setToolTip(omission_details)
+        self.export_figures_btn.setEnabled(self.renderer is not None and self._mri_render_thread is None and self._comparison_figure_thread is None)
+        self.export_figures_btn.setToolTip("Export the displayed descriptive comparison.")
+        self._sync_source_map_selectors_enabled()
 
     def _comparison_manifest_entries(self) -> tuple[PreparedSourceManifestEntry, ...]:
         return tuple(
@@ -2221,12 +2581,18 @@ class LoretaVisualizerWindow(QWidget):
     def _group_comparison_load_finished(self) -> None:
         self._group_comparison_thread = None
         self._group_comparison_worker = None
-        if self._group_comparison_enabled and self._group_comparison_candidates is None and not self._closing_requested:
-            self._start_group_comparison_load()
+        if self._group_comparison_enabled and not self._closing_requested:
+            if self._descriptive_comparison_required():
+                self._refresh_descriptive_comparison()
+            elif self._group_comparison_candidates is None:
+                self._start_group_comparison_load()
         self._finish_deferred_close()
 
     def _refresh_group_comparison(self) -> None:
         if self.renderer is None or self._closing_requested:
+            return
+        if self._descriptive_comparison_required():
+            self._refresh_descriptive_comparison()
             return
         if self._group_comparison_candidates is None:
             self._start_group_comparison_load()
@@ -2308,7 +2674,8 @@ class LoretaVisualizerWindow(QWidget):
         return self._comparison_renderer
 
     def _render_group_comparison_pair(self, pair) -> None:
-        first_pair = self._comparison_renderer is None
+        descriptive = getattr(pair, "descriptive", False)
+        first_pair = self._comparison_renderer is None and not (descriptive and self._comparison_has_framed)
         comparison = self._ensure_group_comparison_renderer()
         self.renderer.unlink_camera()
         originals = (pair.left.payload, pair.right.payload)
@@ -2345,11 +2712,17 @@ class LoretaVisualizerWindow(QWidget):
         self.renderer.link_camera(comparison)
         if first_pair:
             QTimer.singleShot(0, self._fit_group_comparison_views)
+        if descriptive:
+            self._comparison_has_framed = True
         self.primary_group_label.setVisible(True)
         for label, candidate in zip((self.primary_group_label, self.comparison_group_label), (pair.left, pair.right)):
             payload = candidate.payload
             masked = self._use_cluster_mask and payload_has_cluster_mask(payload) and not payload_cluster_mask_is_empty(payload)
-            state = "Within-group mask" if masked else "Unmasked / exploratory"
+            state = (
+                "Complete participant pairs · descriptive" if descriptive and pair.paired
+                else "Unmasked · descriptive" if descriptive
+                else "Within-group mask" if masked else "Unmasked / exploratory"
+            )
             caption = candidate.panel_label
             if candidate.participant_count is None:
                 caption += " (n unavailable)"
@@ -2361,7 +2734,7 @@ class LoretaVisualizerWindow(QWidget):
         self._sync_activation_render_mode_controls()
         self._sync_source_map_selectors_enabled()
         self._set_source_export_status(
-            "Shared scale · descriptive group comparison",
+            "Shared scale · descriptive comparison",
             variant="info",
         )
         if self._source_build_warning:
@@ -2469,7 +2842,8 @@ class LoretaVisualizerWindow(QWidget):
         )
         previous_block_state = self.cluster_mask_check.blockSignals(True)
         try:
-            self.cluster_mask_check.setChecked(bool(self._use_cluster_mask))
+            signed = any(source is not None and source_payload_is_signed(source) for source in payloads)
+            self.cluster_mask_check.setChecked(bool(self._use_cluster_mask) and not signed)
             self.cluster_mask_check.setEnabled(can_toggle_mask)
         finally:
             self.cluster_mask_check.blockSignals(previous_block_state)
@@ -2521,7 +2895,8 @@ class LoretaVisualizerWindow(QWidget):
         mode = self.display_mode_combo.currentData()
         if not isinstance(mode, str):
             return
-        if mode == DISPLAY_MODE_MRI_SLICES and getattr(self, "_group_comparison_enabled", False):
+        if (mode == DISPLAY_MODE_MRI_SLICES and getattr(self, "_group_comparison_enabled", False)
+                and getattr(self, "_comparison_view", "ab") != "difference"):
             self._set_group_comparison_enabled(False)
         payload = self._source_activation_payload
         if payload is not None and not _display_mode_allowed_for_payload(payload, mode):
@@ -2537,7 +2912,10 @@ class LoretaVisualizerWindow(QWidget):
         renderer = self.renderer
         if renderer is not None:
             if self._source_activation_payload is not None:
-                self._set_activation_payload(self._source_activation_payload)
+                self._set_activation_payload(
+                    self._source_activation_payload,
+                    comparison_payload=bool(self._group_comparison_enabled and self._descriptive_payloads and self._comparison_view == "difference"),
+                )
             else:
                 renderer.set_display_mode(mode)
                 renderer.set_activation_opacity(self.activation_opacity_slider.value() / 100.0)
@@ -2559,7 +2937,20 @@ class LoretaVisualizerWindow(QWidget):
         self._set_display_mode_combo_data(self._display_mode)
         self._populate_condition_combo_for_selected_method(preferred_condition=self._selected_condition_id)
         self._sync_summary_combo_for_selected_condition(preferred_summary=self._selected_summary_id)
+        self._sync_comparison_targets()
         self._refresh_current_activation()
+
+    def _on_metric_changed(self, _index: int) -> None:
+        metric = self.metric_combo.currentData()
+        if not isinstance(metric, str) or metric == self._selected_metric:
+            return
+        self._selected_metric = metric
+        self._replace_manifest_conditions(self._all_manifest_entries)
+        self._select_first_condition_if_needed()
+        self._sync_comparison_targets()
+        self._refresh_current_activation()
+        if not self._manifest_condition_groups:
+            self._set_source_export_status("This metric is unavailable. Rebuild source maps in Options to add baseline-corrected amplitude.", variant="warning")
 
     def _rotate_split_hemisphere(self, side: str, degrees: float) -> None:
         renderer = self.renderer
@@ -2586,12 +2977,18 @@ class LoretaVisualizerWindow(QWidget):
         if isinstance(condition_id, str):
             self._selected_condition_id = condition_id
             self._sync_summary_combo_for_selected_condition(preferred_summary=self._selected_summary_id)
+        if getattr(self, "_group_comparison_enabled", False):
+            self._descriptive_failed_key = None
+            self._sync_comparison_targets()
         self._refresh_current_activation()
 
     def _on_summary_changed(self, _index: int) -> None:
         summary_id = self.summary_combo.currentData()
         if isinstance(summary_id, str):
             self._selected_summary_id = summary_id
+        if getattr(self, "_group_comparison_enabled", False):
+            self._descriptive_failed_key = None
+            self._sync_comparison_targets()
         self._refresh_current_activation()
 
     def _reset_camera(self) -> None:
@@ -2605,8 +3002,17 @@ class LoretaVisualizerWindow(QWidget):
             comparison.copy_view_from(self.renderer)
 
     def _open_export_figures(self) -> None:
-        if getattr(self, "_group_comparison_enabled", False):
+        if getattr(self, "_comparison_figure_thread", None) is not None:
             return
+        if getattr(self, "_group_comparison_enabled", False):
+            if getattr(self, "_descriptive_payloads", ()):
+                if self._descriptive_key != self._descriptive_requested_key:
+                    return
+                if self._comparison_view == "ab":
+                    self._export_comparison_figures()
+                    return
+            else:
+                return
         renderer = self.renderer
         can_export_split_figures = (
             renderer is not None
@@ -2617,6 +3023,7 @@ class LoretaVisualizerWindow(QWidget):
             self._selected_source_method_id
             in {SOURCE_METHOD_L2_MNE_SOURCE_PSD, SOURCE_METHOD_L2_MNE_SURFACE}
             and len(self._condition_options()) >= 2
+            and not getattr(self, "_group_comparison_enabled", False)
         )
         can_export_mri_slice_figures = self._can_export_mri_slice_figure()
         dialog = ExportFiguresDialog(
@@ -2633,6 +3040,87 @@ class LoretaVisualizerWindow(QWidget):
             self._export_stacked_split_hemisphere_figures()
         elif dialog.selected_action == EXPORT_FIGURES_ACTION_MRI_SLICES:
             self._export_mri_slice_figure()
+
+    def _export_comparison_figures(self) -> None:
+        """Export the two prepared, cohort-matched A/B panels with one scale."""
+        if self.renderer is None or len(self._descriptive_payloads) != 3:
+            return
+        left, right, _difference = self._descriptive_payloads
+        metric = METRIC_LABELS.get(self._selected_metric, "Source values")
+        paired = "paired " if self._comparison_kind == "conditions" else ""
+        labels = tuple(
+            f"{prefix}: {label} ({paired}n = {payload.metadata.get('participant_count', '?')}) · {metric}"
+            for prefix, label, payload in zip(("A", "B"), self._descriptive_labels, (left, right))
+        )
+        default_path = default_stacked_split_figure_export_path(
+            project_root=self._refresh_project_root(), last_import_dir=self._last_import_dir,
+            top_condition_label=labels[0], bottom_condition_label=labels[1],
+        )
+        output_path = self._choose_pdf_export_path("Export descriptive comparison", default_path)
+        if output_path is None:
+            return
+        try:
+            limits = self._resolve_activation_scalar_range(left)
+            if left.kind == SOURCE_KIND_VOLUME_POINTS:
+                anatomy = self._load_cached_mri_anatomy()
+                transform = self.renderer.mesh_display_transform()
+                indices = self._mri_slice_indices_for_current_method(anatomy=anatomy)
+                jobs = []
+                for suffix, label, payload in zip(("A", "B"), labels, (left, right)):
+                    jobs.append((output_path.with_name(f"{output_path.stem}_{suffix}.pdf"), {
+                        "payload": payload, "support_payload": payload, "display_transform": transform,
+                        "fsaverage_dir": self._fsaverage_dir, "scalar_range": limits, "label": label,
+                        "activation_visible": self._activation_visible, "anatomy": anatomy, "slice_indices": indices,
+                    }))
+                request = {"mri_jobs": tuple(jobs)}
+            else:
+                panels = tuple(
+                    self.renderer.split_hemisphere_figure_panel_for_payload(payload, label=label, scalar_range=limits)
+                    for label, payload in zip(labels, (left, right))
+                )
+                request = {"path": output_path, "panels": panels}
+            self._start_comparison_figure_export(request)
+        except (OSError, RuntimeError, TypeError, ValueError) as exc:
+            self._set_source_export_status(f"Comparison figure export failed: {exc}", variant="warning")
+
+    def _start_comparison_figure_export(self, request: dict) -> None:
+        if self._comparison_figure_thread is not None:
+            return
+        thread = QThread(self)
+        worker = ComparisonFigureExportWorker(request)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.exported.connect(self._on_comparison_figures_exported)
+        worker.failed.connect(self._on_comparison_figure_export_failed)
+        worker.finished.connect(thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(self._comparison_figure_export_finished)
+        self._comparison_figure_thread, self._comparison_figure_worker = thread, worker
+        self.export_figures_btn.setEnabled(False)
+        self._set_source_export_status("Exporting comparison figures…", variant="info")
+        thread.start()
+
+    @Slot(object)
+    def _on_comparison_figures_exported(self, paths: tuple) -> None:
+        if self._closing_requested:
+            return
+        self._last_import_dir = paths[0].parent
+        self._set_source_export_status("Exported comparison figures: " + "; ".join(str(path) for path in paths), variant="success")
+
+    @Slot(str)
+    def _on_comparison_figure_export_failed(self, message: str) -> None:
+        if not self._closing_requested:
+            self._set_source_export_status(f"Comparison figure export failed: {message}", variant="warning")
+
+    def _comparison_figure_export_finished(self) -> None:
+        self._comparison_figure_thread = None
+        self._comparison_figure_worker = None
+        self.export_figures_btn.setEnabled(
+            self.renderer is not None and self._mri_render_thread is None
+            and (not self._group_comparison_enabled or bool(self._descriptive_payloads))
+        )
+        self._finish_deferred_close()
 
     def _export_split_hemisphere_figures(self) -> None:
         renderer = self.renderer
@@ -2657,6 +3145,13 @@ class LoretaVisualizerWindow(QWidget):
         if output_path is None:
             return
         try:
+            if self._group_comparison_enabled and self._descriptive_payloads:
+                panel = renderer.split_hemisphere_figure_panel_for_payload(
+                    self._source_activation_payload, label=self._selected_condition_label(),
+                    scalar_range=self._resolve_activation_scalar_range(self._source_activation_payload),
+                )
+                self._start_comparison_figure_export({"path": output_path, "panels": (panel,)})
+                return
             pdf_path, png_path = renderer.write_split_hemisphere_figures(output_path)
         except (OSError, RuntimeError, TypeError, ValueError) as exc:
             logger.warning("loreta_split_figure_export_failed", extra={"path": str(output_path), "error": str(exc)})
@@ -2785,6 +3280,8 @@ class LoretaVisualizerWindow(QWidget):
             self._selected_source_method_id,
             self._selected_summary_id,
             bool(self._use_cluster_mask),
+            getattr(self, "_selected_metric", METRIC_Z_SCORE),
+            getattr(self, "_descriptive_key", None) if getattr(self, "_group_comparison_enabled", False) else None,
             tuple(entries),
         )
 
@@ -2816,6 +3313,8 @@ class LoretaVisualizerWindow(QWidget):
         return slice_indices
 
     def _mri_slice_reference_payload(self, display_transform) -> SourcePayload:
+        if getattr(self, "_group_comparison_enabled", False) and getattr(self, "_descriptive_payloads", ()):
+            return self._source_activation_payload
         point_chunks: list[np.ndarray] = []
         value_chunks: list[np.ndarray] = []
         source_model = "eloreta_volume"
@@ -2892,6 +3391,16 @@ class LoretaVisualizerWindow(QWidget):
         if output_path is None:
             return
         try:
+            if self._group_comparison_enabled and self._descriptive_payloads:
+                kwargs = {
+                    "payload": payload, "support_payload": self._source_activation_payload,
+                    "display_transform": display_transform, "fsaverage_dir": self._fsaverage_dir,
+                    "scalar_range": scalar_range, "label": self._selected_condition_label(),
+                    "activation_visible": self._activation_visible, "anatomy": anatomy,
+                    "slice_indices": slice_indices,
+                }
+                self._start_comparison_figure_export({"mri_jobs": ((output_path, kwargs),)})
+                return
             pdf_path, png_path = write_mri_orthogonal_slice_figures(
                 output_path,
                 payload=payload,
@@ -2912,9 +3421,17 @@ class LoretaVisualizerWindow(QWidget):
         self._set_source_export_status(f"Exported MRI slice figures: {pdf_path}; {png_path}", variant="success")
 
     def _selected_condition_label(self) -> str:
+        if getattr(self, "_group_comparison_enabled", False) and getattr(self, "_descriptive_payloads", ()):
+            left, right = self._descriptive_labels
+            metric = METRIC_LABELS.get(self._selected_metric, "Source values")
+            counts = [payload.metadata.get("participant_count", "?") for payload in self._descriptive_payloads[:2]]
+            cohort = f"paired n = {counts[0]}" if self._comparison_kind == "conditions" else f"n = {counts[0]} / {counts[1]}"
+            operands = f"{left} − {right}" if self._comparison_view == "difference" else f"{left} / {right}"
+            return f"{operands} · {metric} · {cohort}"
         group = self._manifest_condition_groups.get(self._selected_condition_id)
         if group is not None:
-            return group.label
+            metric = getattr(self, "_selected_metric", METRIC_Z_SCORE)
+            return f"{group.label} · {METRIC_LABELS[METRIC_AMPLITUDE]}" if metric == METRIC_AMPLITUDE else group.label
         return "source map"
 
     def _choose_pdf_export_path(self, title: str, default_path: str) -> Path | None:
@@ -3672,6 +4189,7 @@ class LoretaVisualizerWindow(QWidget):
         self._last_import_dir = path.parent
         self._project_source_maps_loaded = False
         self._source_build_warning = "Explicitly imported source output; current project provenance is unverified."
+        entries = tuple(replace(entry, metadata={**entry.metadata, "_loaded_manifest_path": str(path.resolve())}) for entry in entries)
         self._replace_manifest_conditions(entries)
         self._select_first_condition_if_needed()
         self._refresh_current_activation()
@@ -3694,7 +4212,10 @@ class LoretaVisualizerWindow(QWidget):
                 )
                 self._set_source_export_status(f"Prepared source manifest import failed: {exc}", variant="warning")
                 continue
-            entries.extend(manifest_entries)
+            entries.extend(
+                replace(entry, metadata={**entry.metadata, "_loaded_manifest_path": str(path.resolve())})
+                for entry in manifest_entries
+            )
             loaded_paths.append(path)
         if not entries:
             self._clear_activation_payload()
@@ -3710,6 +4231,25 @@ class LoretaVisualizerWindow(QWidget):
     def _replace_manifest_conditions(self, entries: tuple[PreparedSourceManifestEntry, ...]) -> None:
         if hasattr(self, "_group_comparison_request_id"):
             self._invalidate_group_comparison()
+        self._all_manifest_entries = entries
+        if hasattr(self, "metric_combo"):
+            previous_metric = self.metric_combo.blockSignals(True)
+            try:
+                self.metric_combo.clear()
+                available = set(entry_metric(entry) for entry in entries)
+                metrics = [metric for metric in METRIC_LABELS if metric in available or metric == METRIC_AMPLITUDE]
+                metrics.extend(sorted(available.difference(metrics)))
+                for metric in metrics:
+                    label = METRIC_LABELS.get(metric, metric)
+                    if metric == METRIC_AMPLITUDE and metric not in available:
+                        label += " (rebuild needed)"
+                    self.metric_combo.addItem(label, metric)
+                if self._selected_metric not in metrics:
+                    self._selected_metric = next(iter(available), METRIC_Z_SCORE)
+                self.metric_combo.setCurrentIndex(self.metric_combo.findData(self._selected_metric))
+            finally:
+                self.metric_combo.blockSignals(previous_metric)
+        entries = metric_entries(entries, getattr(self, "_selected_metric", METRIC_Z_SCORE))
         previous_method_block_state = self.source_method_combo.blockSignals(True)
         previous_block_state = self.condition_combo.blockSignals(True)
         previous_summary_block_state = self.summary_combo.blockSignals(True)
@@ -3816,12 +4356,12 @@ class LoretaVisualizerWindow(QWidget):
             else:
                 summary_ids = _ordered_source_summary_ids(group)
                 for summary_id in summary_ids:
-                    self.summary_combo.addItem(_source_summary_label(summary_id), summary_id)
+                    self.summary_combo.addItem(_source_summary_label(summary_id, getattr(self, "_selected_metric", METRIC_Z_SCORE)), summary_id)
                 selected_summary = preferred_summary if preferred_summary in summary_ids else None
                 if (getattr(self, "_group_comparison_enabled", False)
                         and preferred_summary and selected_summary is None):
                     # An absent cell must never change the requested comparison statistic.
-                    self.summary_combo.addItem(f"{_source_summary_label(preferred_summary)} (unavailable)", preferred_summary)
+                    self.summary_combo.addItem(f"{_source_summary_label(preferred_summary, getattr(self, '_selected_metric', METRIC_Z_SCORE))} (unavailable)", preferred_summary)
                     selected_summary = preferred_summary
                 if selected_summary is None and SOURCE_SUMMARY_RAW_MEAN in summary_ids:
                     selected_summary = SOURCE_SUMMARY_RAW_MEAN
@@ -4044,8 +4584,8 @@ class LoretaVisualizerWindow(QWidget):
         self.activation_scale_min_label.setText("")
         self.activation_scale_max_label.setText("")
 
-    def _set_activation_payload(self, payload: SourcePayload) -> None:
-        if getattr(self, "_group_comparison_enabled", False):
+    def _set_activation_payload(self, payload: SourcePayload, *, comparison_payload: bool = False) -> None:
+        if getattr(self, "_group_comparison_enabled", False) and not comparison_payload:
             self._refresh_group_comparison()
             return
         self._mri_render_request_id += 1
@@ -4136,6 +4676,8 @@ class LoretaVisualizerWindow(QWidget):
             for group in self._manifest_condition_groups.values()
             if self._selected_summary_id in group.entries_by_summary
         )
+        if getattr(self, "_group_comparison_enabled", False) and getattr(self, "_descriptive_payloads", ()):
+            reference_paths = ()
         self._mri_render_request_id += 1
         self._mri_render_pending = {
             "id": self._mri_render_request_id,
@@ -4231,7 +4773,9 @@ class LoretaVisualizerWindow(QWidget):
         self._mri_render_thread = None
         self._mri_render_worker = None
         self.export_figures_btn.setEnabled(
-            self.renderer is not None and not getattr(self, "_group_comparison_enabled", False)
+            self.renderer is not None and getattr(self, "_comparison_figure_thread", None) is None and (
+                not getattr(self, "_group_comparison_enabled", False) or bool(getattr(self, "_descriptive_payloads", ()))
+            )
         )
         self._start_pending_mri_render()
         self._finish_deferred_close()
@@ -4338,13 +4882,16 @@ class LoretaVisualizerWindow(QWidget):
 
     def _scalar_range_for_payloads(self, payloads: tuple[SourcePayload, ...]) -> tuple[float, float]:
         mode = self.activation_scale_combo.currentData()
+        signed = any(source_payload_is_signed(payload) for payload in payloads)
         if mode == SCALE_FIXED:
             return resolve_scalar_limits(
                 np.empty(0), auto_scale=False,
                 manual_min=self.activation_min_spin.value(),
                 manual_max=self.activation_max_spin.value(),
+                signed=signed,
             )
-        if mode == SCALE_SHARED and self._manifest_condition_groups:
+        descriptive = bool(getattr(self, "_group_comparison_enabled", False) and getattr(self, "_descriptive_payloads", ()))
+        if mode == SCALE_SHARED and self._manifest_condition_groups and not descriptive:
             # Never silently compare a median with a fallback mean.
             selected = []
             candidates = getattr(self, "_group_comparison_candidates", None)
@@ -4372,7 +4919,7 @@ class LoretaVisualizerWindow(QWidget):
             for payload in payloads
         ]
         values = np.concatenate(chunks) if chunks else np.empty(0)
-        return resolve_scalar_limits(values, auto_scale=True)
+        return resolve_scalar_limits(values, auto_scale=True, signed=signed)
 
     def _apply_activation_scalar_range(self) -> None:
         renderer = self.renderer
@@ -4395,12 +4942,17 @@ class LoretaVisualizerWindow(QWidget):
     def _update_activation_scale_readout(self, vmin: float, vmax: float) -> None:
         self.activation_scale_min_label.setText(format_scalar_value(vmin))
         self.activation_scale_max_label.setText(format_scalar_value(vmax))
+        payload = getattr(self, "_current_activation_payload", None)
+        if hasattr(self, "activation_color_ramp"):
+            colors = scalar_colors(signed=payload is not None and source_payload_is_signed(payload), smooth=False)
+            self.activation_color_ramp.setStyleSheet(_activation_color_ramp_stylesheet(colors))
 
     def _finish_deferred_close(self) -> None:
         if self._closing_requested and not any((
             self._mesh_thread, self._source_export_thread,
             self._stats_ready_export_thread, self._mri_render_thread, self._source_discovery_thread,
             getattr(self, "_group_comparison_thread", None),
+            getattr(self, "_comparison_figure_thread", None),
         )):
             self.close()
 
@@ -4408,7 +4960,7 @@ class LoretaVisualizerWindow(QWidget):
         self._mri_preview_resize_timer.stop()
         self._mri_drag_active = False
         self._mri_preview_cache = None
-        if any((self._mesh_thread, self._source_export_thread, self._stats_ready_export_thread, self._mri_render_thread, self._source_discovery_thread, self._group_comparison_thread)):
+        if any((self._mesh_thread, self._source_export_thread, self._stats_ready_export_thread, self._mri_render_thread, self._source_discovery_thread, self._group_comparison_thread, self._comparison_figure_thread)):
             self._closing_requested = True
             self._mri_render_pending = None
             self._pending_source_map_rebuild = None
