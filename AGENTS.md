@@ -139,9 +139,11 @@ tools must not infer membership from output folders or duplicate discovery logic
 - New/substantially revised embedded pages must fit 1280x900 without page-level
   scrolling. Split workflows into tabs/pages when needed. Tables, text viewers
   and focused dialogs may scroll.
-- Publication figures follow the
-  [figure standard](docs/agent/quality/figure-generation.md): paired PDF/PNG,
-  600 dpi, Arial, and figure typography independent of GUI typography.
+- Follow the [figure standard](docs/agent/quality/figure-generation.md) when
+  generating figures or adding figure tools. New general-purpose figures use
+  the shared Nature-aligned defaults, paired PDF/PNG, and at least 600 DPI for
+  raster export at the intended size. Keep figure typography independent of GUI
+  typography and retain documented export profiles.
 
 ## Verification and handoff
 
