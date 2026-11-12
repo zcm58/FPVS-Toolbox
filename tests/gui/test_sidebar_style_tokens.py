@@ -8,8 +8,8 @@ import pytest
 from PySide6.QtGui import QColor, QPalette
 
 from Main_App.gui import icons, theme
+from Main_App.gui.shell_actions import BETA_TOOL_SPECS
 from Main_App.gui.sidebar import (
-    BETA_TOOL_SPECS,
     CENTERED_TEXT_TRAILING_SPACER_PX,
     ICON_PX,
     ROW_ITEM_GAP,
@@ -60,14 +60,14 @@ def test_missing_bundled_application_icon_fails_explicitly(tmp_path, monkeypatch
 
 
 def test_beta_tool_inventory_and_routes_match_supported_surfaces() -> None:
-    assert [(role, label, opener) for role, label, _icon, opener in BETA_TOOL_SPECS] == [
+    assert BETA_TOOL_SPECS == (
         ("btn_publication_maps", "Scalp Maps", "open_publication_maps"),
-        ("btn_data", "Data Screening", "open_stats_analyzer"),
+        ("btn_data", "Standard FPVS Screening", "open_stats_analyzer"),
         ("btn_sensitivity_analysis", "Sensitivity Analysis", "open_sensitivity_analysis"),
         ("btn_loreta_visualizer", "LORETA Visualizer", "open_loreta_visualizer"),
         ("btn_sequence_figure", "Sequence Figure", "open_sequence_figure"),
         ("btn_individual_detectability", "Individual Detectability", "open_individual_detectability"),
-    ]
+    )
 
 
 def test_sidebar_section_headers_are_visually_distinct() -> None:

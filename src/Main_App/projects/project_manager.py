@@ -30,6 +30,7 @@ from Main_App.projects.fpvs_config_import import (
     CONFIG_SUFFIX,
     FPVSConfigImportError,
     create_project_from_fpvs_config,
+    fpvs_config_import_message,
 )
 from Main_App.projects.grouping import (
     GroupConfigurationError,
@@ -1294,7 +1295,7 @@ def new_project_from_fpvs_config(self, parent: QWidget | None = None) -> Project
     QMessageBox.information(
         parent,
         "Project Created",
-        f"Created project '{project.name}' with {len(project.event_map)} condition(s).",
+        fpvs_config_import_message(project),
     )
     return project
 

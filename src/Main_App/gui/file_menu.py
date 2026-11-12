@@ -34,9 +34,7 @@ def init_file_menu(self) -> None:
 
     file_menu.addSeparator()
 
-    action_settings = QAction("Settings", self)
-    action_settings.triggered.connect(self.open_settings_window)
-    file_menu.addAction(action_settings)
+    file_menu.addAction(self.shell_actions.settings)
 
     action_reset_cache = QAction("Reset Project Processing Cache...", self)
     action_reset_cache.setObjectName("actionResetProjectProcessingCache")
@@ -53,9 +51,7 @@ def init_file_menu(self) -> None:
     action_check.triggered.connect(self.check_for_updates)
     file_menu.addAction(action_check)
 
-    about_action = QAction("About…", self)
-    about_action.triggered.connect(self.show_about_dialog)
-    file_menu.addAction(about_action)
+    file_menu.addAction(self.shell_actions.about)
 
     file_menu.addSeparator()
 

@@ -11,6 +11,7 @@ if importlib.util.find_spec("PySide6") is None or importlib.util.find_spec("pyte
 
 from PySide6.QtCore import QCoreApplication, QEvent, Signal, Qt
 from PySide6.QtGui import QColor, QIcon, QPalette
+from PySide6.QtTest import QSignalSpy
 from PySide6.QtWidgets import (
     QApplication,
     QFrame,
@@ -37,6 +38,7 @@ from Main_App.gui.components import SectionCard
 from Main_App.gui.components import SubsectionHeaderLabel
 from Main_App.gui.menu_bar import build_menu_bar
 from Main_App.gui.processing_log_dialog import ProcessingLogDialog
+from Main_App.gui.shell_actions import ShellActions
 from Main_App.gui.sidebar import SidebarButton
 from Main_App.gui.settings_panel import EmbeddedSettingsPage
 from Main_App.gui.theme import apply_fpvs_theme
@@ -533,9 +535,11 @@ def test_menu_styles_survive_other_window_teardown(qtbot) -> None:
         qtbot.addWidget(host)
         host.settings = SimpleNamespace(beta_tools_enabled=lambda: False)
         host.show_home_page = lambda: None
+        host.open_settings_window = lambda: None
+        host.show_about_dialog = lambda: None
         host.open_free_harmonic_clustering = lambda: None
         host.open_plot_generator = lambda: None
-        host.setMenuBar(build_menu_bar(host))
+        host.setMenuBar(build_menu_bar(host, ShellActions(host)))
         return host
 
     first, second = build_host(), build_host()
@@ -596,6 +600,8 @@ def test_menu_labels_render_with_dark_cached_palette_and_light_native_background
     qtbot.addWidget(host)
     host.settings = SimpleNamespace(beta_tools_enabled=lambda: False)
     host.show_home_page = lambda: None
+    host.open_settings_window = lambda: None
+    host.show_about_dialog = lambda: None
     host.open_free_harmonic_clustering = lambda: None
     host.open_plot_generator = lambda: None
 
@@ -618,7 +624,7 @@ def test_menu_labels_render_with_dark_cached_palette_and_light_native_background
         previous_style = base_style_name
         apply_fpvs_theme(app)
         assert app.palette().color(QPalette.Window) == QColor("white")
-        bar = build_menu_bar(host)
+        bar = build_menu_bar(host, ShellActions(host))
         bar.setNativeMenuBar(False)
         host.setMenuBar(bar)
         _menu(host, "fileMenu").addAction("New Project…")
@@ -726,6 +732,59 @@ def test_processing_activity_page_locks_navigation_and_reuses_start_button(
     assert win.sidebar.graphicsEffect() is None
     assert win.sidebar.property("processingLocked") is False
     assert win.menuBar().isEnabled()
+
+
+def test_snr_plot_entries_share_action_availability(
+    tmp_path: Path,
+    qtbot,
+    monkeypatch,
+) -> None:
+    opened: list[str] = []
+    monkeypatch.setattr(
+        main_window_module.MainWindow,
+        "open_plot_generator",
+        lambda _window: opened.append("SNR Plots"),
+    )
+    win = _build_window(tmp_path, qtbot, monkeypatch)
+    win.stacked.setCurrentIndex(1)
+    qtbot.wait(20)
+    menu_actions = {action.objectName(): action for action in _menu(win, "toolsMenu").actions()}
+    action = menu_actions["btn_graphs"]
+    button = _sidebar_button(win, "btn_graphs")
+    assert any(action is shared_action for shared_action in win.shell_actions.default_tools)
+
+    triggered = QSignalSpy(action.triggered)
+    qtbot.mouseClick(button, Qt.LeftButton)
+    action.trigger()
+    assert triggered.count() == len(opened) == 2
+
+    action.setEnabled(False)
+    assert not button.isEnabled()
+    assert button.property("processingLocked") is True
+    qtbot.mouseClick(button, Qt.LeftButton)
+    assert triggered.count() == len(opened) == 2
+    action.setEnabled(True)
+    assert button.isEnabled()
+    assert button.property("processingLocked") is False
+
+    disabled_action = menu_actions["btn_free_harmonic_clustering"]
+    disabled_action.setEnabled(False)
+    win._busy_start()
+    assert not action.isEnabled()
+    assert not button.isEnabled()
+    assert button.property("processingLocked") is True
+    qtbot.mouseClick(button, Qt.LeftButton)
+    action.trigger()
+    assert triggered.count() == len(opened) == 2
+
+    win._busy_stop()
+    assert action.isEnabled()
+    assert button.isEnabled()
+    assert button.property("processingLocked") is False
+    assert not disabled_action.isEnabled()
+    assert not _sidebar_button(win, "btn_free_harmonic_clustering").isEnabled()
+    qtbot.keyClick(button, Qt.Key_Return)
+    assert triggered.count() == len(opened) == 3
 
 
 def test_reset_project_processing_cache_action_requires_confirmation_and_is_scoped(

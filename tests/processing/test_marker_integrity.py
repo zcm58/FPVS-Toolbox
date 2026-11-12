@@ -14,6 +14,8 @@ from Main_App.processing.marker_integrity import (
     MARKER_DECISION_USE_CONTIGUOUS,
     MARKER_REVIEW_DECISION_SCHEMA_VERSION,
     MARKER_REVIEWER_IDENTITY_STATUS_NOT_COLLECTED,
+    MARKER_REVIEWER_IDENTITY_STATUS_PROVIDED,
+    MARKER_REVIEWER_STATE_AUTHORIZED_REVIEW,
     MARKER_REVIEWER_STATE_EXPLICIT_GUI,
     MARKER_STATUS_READY,
     MARKER_STATUS_REVIEW_REQUIRED,
@@ -24,6 +26,7 @@ from Main_App.processing.marker_integrity import (
     MarkerReviewDecision,
     apply_marker_review_decision,
     approve_clean_occurrence,
+    build_authorized_marker_exclusion_decision,
     build_marker_integrity_plan,
     validate_approved_event_plan,
 )
@@ -730,6 +733,142 @@ def test_preflight_applies_only_a_receipt_bound_to_its_current_plan() -> None:
             marker_review_decisions={"1:0": asdict(decision)},
             marker_review_scope=_review_scope(),
         )
+
+
+def _authorized_exclusion(plan, occurrence, **kwargs):
+    return build_authorized_marker_exclusion_decision(
+        occurrence,
+        marker_plan_fingerprint=plan.fingerprint,
+        review_scope=_review_scope(),
+        reviewer_identity="Study investigator",
+        reason="Exclude the aborted occurrence; retain its complete restarted repetition.",
+        evidence_reference="review-log.json#authorized-aborted-repeat-exclusion",
+        reviewed_at_utc="2026-11-04T22:00:00Z",
+        **kwargs,
+    )
+
+
+def test_authorized_exclusion_default_timestamp_satisfies_native_utc_receipt() -> None:
+    plan = _plan([10, 16])
+    occurrence = plan.occurrences[0]
+    decision = build_authorized_marker_exclusion_decision(
+        occurrence, marker_plan_fingerprint=plan.fingerprint,
+        review_scope=_review_scope(), reviewer_identity="Study investigator",
+        reason="The aborted repetition is excluded by explicit authorization.",
+        evidence_reference="review-log.json#authorization",
+    )
+
+    assert decision.reviewed_at_utc.endswith("Z")
+    assert _apply_review(plan, occurrence, decision).is_excluded
+
+
+def test_authorized_non_gui_exclusion_retains_complete_restarted_occurrence() -> None:
+    protocol = _protocol()
+    events = np.asarray([
+        [0, 0, 1], [10, 0, 55], [16, 0, 55],
+        [60, 0, 1], *[[sample, 0, 55] for sample in (70, 76, 82, 88, 94)],
+    ])
+    original_events = events.copy()
+    marker_plan = build_marker_integrity_plan(
+        events=events, event_map={"Faces": 1}, sampling_rate_hz=12,
+        n_times=120, protocol=protocol,
+    )
+    aborted, complete = marker_plan.occurrences
+    assert aborted.requires_review and not complete.requires_review
+    decision = _authorized_exclusion(marker_plan, aborted)
+
+    preflight_plan = plan_preflight_qc_events(
+        events=events, event_map={"Faces": 1}, sfreq=12,
+        n_times=120, frequency_protocol=protocol,
+        marker_review_decisions={aborted.occurrence_key: asdict(decision)},
+        marker_review_scope=_review_scope(),
+    )
+    approved = validate_approved_event_plan(
+        event_plan_payload=preflight_plan.to_payload(), events=events,
+        sampling_rate_hz=12, n_times=120, event_map={"Faces": 1}, protocol=protocol,
+    )
+
+    assert not preflight_plan.unresolved_occurrences
+    assert approved[0].is_excluded
+    assert approved[0].start_sample is approved[0].stop_sample is None
+    assert approved[0].decision_payload == asdict(decision)
+    assert decision.reviewer_state == MARKER_REVIEWER_STATE_AUTHORIZED_REVIEW
+    assert decision.reviewer_identity_status == MARKER_REVIEWER_IDENTITY_STATUS_PROVIDED
+    assert decision.evidence_reference == "review-log.json#authorized-aborted-repeat-exclusion"
+    assert approved[1] == approve_clean_occurrence(complete)
+    assert (approved[1].start_sample, approved[1].stop_sample) == (70, 94)
+    np.testing.assert_array_equal(events, original_events)
+
+
+@pytest.mark.parametrize("changes, message", [
+    ({"reviewer_identity": None}, "named reviewer and reason"),
+    ({"reviewer_identity_status": MARKER_REVIEWER_IDENTITY_STATUS_NOT_COLLECTED}, "named reviewer and reason"),
+    ({"reason": ""}, "named reviewer and reason"),
+    ({"reason": "No reason provided"}, "named reviewer and reason"),
+    ({"evidence_reference": " "}, "evidence reference"),
+    ({"evidence_type": "presentation_log"}, "evidence reference"),
+    ({"reviewed_at_utc": None}, "UTC timestamp"),
+    ({"reviewed_at_utc": "2026-11-04T17:00:00-05:00"}, "UTC timestamp"),
+])
+def test_authorized_exclusion_requires_attribution_time_and_evidence_after_reload(changes, message) -> None:
+    plan = _plan([10, 16])
+    occurrence = plan.occurrences[0]
+    payload = asdict(_authorized_exclusion(plan, occurrence))
+    payload.update(changes)
+
+    with pytest.raises(MarkerIntegrityError, match=message):
+        _apply_review(plan, occurrence, MarkerReviewDecision.from_payload(payload))
+
+
+@pytest.mark.parametrize("changes", [
+    {"decision": MARKER_DECISION_RETAIN_FULL},
+    {"decision": MARKER_DECISION_USE_CONTIGUOUS, "verified_start_sample": 10, "verified_stop_sample": 34},
+    {"verified_start_sample": 10},
+    {"verified_stop_sample": 34},
+])
+def test_authorized_marker_receipt_cannot_retain_or_reconstruct_an_interval(changes) -> None:
+    plan = _plan([10, 16, 28, 34, 40])
+    occurrence = plan.occurrences[0]
+    decision = replace(_authorized_exclusion(plan, occurrence), **changes)
+
+    with pytest.raises(MarkerIntegrityError, match="only exclude an occurrence"):
+        _apply_review(plan, occurrence, decision)
+
+
+@pytest.mark.parametrize("changes, message", [
+    ({"reviewed_marker_plan_fingerprint": "a" * 64}, "different marker plan"),
+    ({"reviewed_occurrence_fingerprint": "b" * 64}, "different occurrence evidence"),
+    ({"source_file_path": str(Path("another.bdf").resolve())}, "different source file"),
+    ({"participant_id": "P02"}, "participant_id scope is stale"),
+    ({"recording_id": "P01_visit-2"}, "recording_id scope is stale"),
+    ({"session_id": "visit-2"}, "session_id scope is stale"),
+    ({"session_label": "Another session"}, "session_label scope is stale"),
+    ({"repetition_index": 1}, "occurrence scope does not match"),
+])
+def test_authorized_exclusion_preserves_all_evidence_and_scope_guards(changes, message) -> None:
+    plan = _plan([10, 16])
+    occurrence = plan.occurrences[0]
+    decision = replace(_authorized_exclusion(plan, occurrence), **changes)
+
+    with pytest.raises(MarkerIntegrityError, match=message):
+        _apply_review(plan, occurrence, decision)
+
+
+def test_authorized_exclusion_cannot_be_reused_after_raw_marker_change() -> None:
+    protocol = _protocol()
+    events = _events([10, 16])
+    plan = _plan([10, 16])
+    occurrence = plan.occurrences[0]
+    decision = _authorized_exclusion(plan, occurrence)
+
+    with pytest.raises(MarkerIntegrityError, match="different marker plan"):
+        plan_preflight_qc_events(
+            events=_events([10, 17]), event_map={"Faces": 1}, sfreq=12,
+            n_times=60, frequency_protocol=protocol,
+            marker_review_decisions={occurrence.occurrence_key: asdict(decision)},
+            marker_review_scope=_review_scope(),
+        )
+    np.testing.assert_array_equal(events, _events([10, 16]))
 
 
 def test_plan_fingerprint_changes_with_raw_event_evidence() -> None:

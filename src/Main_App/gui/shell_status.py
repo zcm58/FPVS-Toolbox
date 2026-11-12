@@ -470,17 +470,12 @@ def _refresh_widget_style(widget: QWidget) -> None:
 def _set_sidebar_processing_locked(sidebar: QWidget, locked: bool) -> None:
     sidebar.setProperty("processingLocked", locked)
     _refresh_widget_style(sidebar)
-    for child in sidebar.findChildren(QWidget):
-        if child.objectName() == "SidebarButton":
-            setter = getattr(child, "set_processing_locked", None)
-            if callable(setter):
-                setter(locked)
-            else:
-                child.setProperty("processingLocked", locked)
-                _refresh_widget_style(child)
 
 
 def ensure_processing_navigation_unlocked(host: Any) -> None:
+    actions = getattr(host, "shell_actions", None)
+    if actions is not None:
+        actions.setEnabled(True)
     sidebar = getattr(host, "sidebar", None)
     if sidebar is not None:
         sidebar.setEnabled(True)
@@ -502,6 +497,9 @@ def ensure_processing_navigation_unlocked(host: Any) -> None:
 
 
 def _set_processing_navigation_locked(host: Any, locked: bool) -> None:
+    actions = getattr(host, "shell_actions", None)
+    if actions is not None:
+        actions.setEnabled(not locked)
     if locked:
         if getattr(host, "_processing_navigation_states", None):
             return

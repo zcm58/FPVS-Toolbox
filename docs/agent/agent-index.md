@@ -34,10 +34,11 @@ only to explicitly web-scoped work, not the PySide6 desktop GUI.
 | Preprocessing entry points/order | `legacy-boundary-review`; GUI skill for orchestration | [Preprocessing](architecture/preprocessing-contract.md) |
 | Removed-electrode or kurtosis calibration | `legacy-boundary-review` | [Removed electrodes](quality/removed-electrode-detection-calibration.md), [kurtosis](quality/kurtosis-screening-calibration.md) |
 | Recording loading/memmaps | `legacy-boundary-review` + `project-path-audit` | [Loading](architecture/eeg-loading-contract.md) |
-| Hardware/montages, pipeline methods, Studio | `project-path-audit`; processing/GUI skills as affected | [Roadmap](architecture/hardware-pipeline-studio-roadmap.md), [methods](architecture/pipeline-methods.md), [Project I/O](architecture/project-io.md) |
+| Hardware/montages, pipeline methods, Studio | `project-path-audit`; processing/GUI skills as affected | [Roadmap](architecture/hardware-pipeline-studio-roadmap.md), [methods](architecture/pipeline-methods.md), [Studio handoff](architecture/project-io.md#studio-config-handoff) |
 | Post-processing/FFT crop/export | `legacy-boundary-review` | [Exports](architecture/post-processing-export-contract.md), [crop](architecture/fft-crop-method.md) |
 | Manifests, project roots, dialogs/imports | `project-path-audit` | [Project I/O](architecture/project-io.md) |
 | Publication figures | `project-path-audit` | [Figure standard](quality/figure-generation.md) |
+| Correlation figure templates | `project-path-audit` | [Correlation recipe and runnable example](quality/correlation-figures.md) |
 | Stats | `pyside6-gui-cleanup` for GUI changes; focused Stats tests | [Statistics/tools](architecture/statistics-tools.md), scoped `src/Tools/Stats/AGENTS.md` |
 | Free Harmonic Clustering | `project-path-audit` | [Scoped rules](../../src/Tools/Free_Harmonic_Clustering/AGENTS.md), [architecture](../../src/Tools/Free_Harmonic_Clustering/ARCHITECTURE.md) |
 | LORETA Visualizer | `legacy-boundary-review` | [Scoped rules](../../src/Tools/LORETA_Visualizer/AGENTS.md), [architecture](../../src/Tools/LORETA_Visualizer/ARCHITECTURE.md) |

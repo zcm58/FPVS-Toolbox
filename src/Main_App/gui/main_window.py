@@ -55,6 +55,7 @@ from Main_App.gui import update_manager
 from Main_App.gui import event_map
 from Main_App.gui.file_menu import init_file_menu
 from Main_App.gui.settings_panel import EmbeddedSettingsPage
+from Main_App.gui.shell_actions import ShellActions
 from Main_App.gui.sidebar import init_sidebar
 from Main_App.gui.ui_main import init_ui
 from Main_App.gui import project_workflows
@@ -186,6 +187,7 @@ class MainWindow(QMainWindow):
         self.currentProject: Project | None = None
 
         # Build UI
+        self.shell_actions = ShellActions(self)
         init_ui(self)
         self._bind_existing_event_map_rows()
         shell_status.init_launch_reveal_state(self)

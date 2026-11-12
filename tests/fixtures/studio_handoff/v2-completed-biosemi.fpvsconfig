@@ -1,0 +1,2336 @@
+{
+  "format": "fpvs-handoff",
+  "format_version": 2,
+  "kind": "completed_session",
+  "metadata": {
+    "fixture": "Synthetic compatibility evidence; no EEG was acquired."
+  },
+  "experiment_category": "fpvs_oddball",
+  "producer": {
+    "application": "FPVS Studio",
+    "version": "2.8.2",
+    "exported_at": "2000-01-01T00:00:00Z"
+  },
+  "project": {
+    "project_id": "handoff-fixture",
+    "name": "Shared handoff fixture",
+    "template_id": "fpvs_6hz_every5_v1",
+    "description": "",
+    "allow_repeated_participant_sessions": false
+  },
+  "conditions": [
+    {
+      "condition_id": "words",
+      "name": "Words",
+      "trigger_code": 1,
+      "base_stimulus_set_id": "base",
+      "oddball_stimulus_set_id": "oddball",
+      "stimulus_variant": "original",
+      "sequence_count": 1,
+      "oddball_cycle_repeats_per_sequence": 146,
+      "duty_cycle_mode": "continuous",
+      "order_index": 0,
+      "instructions": "",
+      "presentation": {
+        "common": {},
+        "base": {},
+        "oddball": {}
+      },
+      "pre_task_bindings": [],
+      "post_task_bindings": []
+    }
+  ],
+  "stimulus_sets": [
+    {
+      "set_id": "base",
+      "name": "Base",
+      "modality": "word",
+      "words": [
+        "one",
+        "two",
+        "three"
+      ]
+    },
+    {
+      "set_id": "oddball",
+      "name": "Oddball",
+      "modality": "word",
+      "words": [
+        "four",
+        "five",
+        "six"
+      ]
+    }
+  ],
+  "task_modules": [],
+  "task_assets": [],
+  "display": {
+    "fullscreen": true,
+    "background_color": "#000000",
+    "stimulus_width_degrees": 5.0,
+    "viewing_distance_cm": 80.0,
+    "screen_width_cm": 52.0,
+    "screen_width_px": 1920,
+    "screen_height_px": 1080,
+    "use_current_screen_resolution": false,
+    "stimulus_width_cm": 6.985750865361929,
+    "stimulus_width_px": 258
+  },
+  "presentation": {
+    "pre_stream_fixation_seconds": 2.0,
+    "defaults": {
+      "transform": "none",
+      "image_geometry": {
+        "mode": "natural_aspect",
+        "width_degrees": 5.0
+      },
+      "text_height": {
+        "mode": "fixed",
+        "unit": "degrees",
+        "values": [
+          1.2507442084775813
+        ]
+      },
+      "text_color": "#FFFFFF",
+      "text_position": {
+        "unit": "degrees",
+        "x": 0.0,
+        "y": 0.0
+      }
+    }
+  },
+  "recording": {
+    "recording_backend": "serial",
+    "unicorn_udp_port": 1000,
+    "brainproducts_serial_port": "COM3",
+    "brainproducts_pulse_width_ms": 10,
+    "acquisition_profile": {
+      "id": "biosemi_active_two_64",
+      "version": "1.0",
+      "montage_id": "biosemi64",
+      "montage_version": "1.0",
+      "event_decoder_id": "biosemi_edge",
+      "event_decoder_version": "1.0",
+      "reference_policy": "biosemi_exg_pair_then_average"
+    }
+  },
+  "protocol": {
+    "base_hz": 6.0,
+    "oddball_every_n": 5
+  },
+  "session": {
+    "block_count": 1,
+    "session_seed": 42,
+    "randomize_conditions_per_block": true,
+    "randomize_across_blocks": false,
+    "inter_condition_mode": "manual_continue",
+    "inter_condition_break_seconds": 0.0,
+    "continue_key": "space",
+    "show_condition_title_on_screen": false
+  },
+  "triggers": {
+    "backend": "serial",
+    "enabled": true,
+    "serial_port": "COM3",
+    "baudrate": 115200,
+    "oddball_trigger_code": 55,
+    "allow_nonstandard_oddball_trigger_code": false,
+    "pulse_width_ms": 10,
+    "reset_delay_ms": 5
+  },
+  "toolbox": {
+    "project_title": "Shared handoff fixture",
+    "event_map": {
+      "Words": 1
+    },
+    "oddball_trigger_code": 55,
+    "acquisition_profile": {
+      "id": "biosemi_active_two_64",
+      "version": "1.0",
+      "montage_id": "biosemi64",
+      "montage_version": "1.0",
+      "event_decoder_id": "biosemi_edge",
+      "event_decoder_version": "1.0",
+      "reference_policy": "biosemi_exg_pair_then_average"
+    },
+    "experiment_id": "handoff-fixture"
+  },
+  "completed_session": {
+    "session_id": "fixture-session",
+    "session_seed": 42,
+    "randomization_mode": "new",
+    "randomization_seeds": {
+      "condition_order_seed": 42,
+      "stimulus_seed": 497310562,
+      "fixation_seed": 1875593502
+    },
+    "randomization_algorithm_version": 1,
+    "ordering_policy": "pooled_no_adjacent",
+    "refresh_hz": 60.0,
+    "block_orders": [
+      [
+        "words"
+      ]
+    ],
+    "source_run_dir": "logs/acquisition",
+    "ordered_runs": [
+      {
+        "global_order_index": 0,
+        "block_index": 0,
+        "index_within_block": 0,
+        "run_id": "run-001-words",
+        "condition_id": "words",
+        "condition_name": "Words",
+        "random_seed": 2098423886,
+        "randomization": {
+          "mode": "new",
+          "seeds": {
+            "condition_order_seed": 42,
+            "stimulus_seed": 497310562,
+            "fixation_seed": 1875593502
+          },
+          "algorithm_version": 1,
+          "condition_presentation_index": 1,
+          "stimulus_order_seed": 2098423886,
+          "fixation_count_seed": 1369914562,
+          "fixation_onset_seed": 138605109
+        },
+        "trigger_events": [
+          {
+            "frame_index": 0,
+            "code": 1,
+            "label": "condition_start"
+          },
+          {
+            "frame_index": 40,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 90,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 140,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 190,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 240,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 290,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 340,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 390,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 440,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 490,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 540,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 590,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 640,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 690,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 740,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 790,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 840,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 890,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 940,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 990,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 1040,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 1090,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 1140,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 1190,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 1240,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 1290,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 1340,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 1390,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 1440,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 1490,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 1540,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 1590,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 1640,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 1690,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 1740,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 1790,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 1840,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 1890,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 1940,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 1990,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 2040,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 2090,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 2140,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 2190,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 2240,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 2290,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 2340,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 2390,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 2440,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 2490,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 2540,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 2590,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 2640,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 2690,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 2740,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 2790,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 2840,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 2890,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 2940,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 2990,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 3040,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 3090,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 3140,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 3190,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 3240,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 3290,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 3340,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 3390,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 3440,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 3490,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 3540,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 3590,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 3640,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 3690,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 3740,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 3790,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 3840,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 3890,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 3940,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 3990,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 4040,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 4090,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 4140,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 4190,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 4240,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 4290,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 4340,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 4390,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 4440,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 4490,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 4540,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 4590,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 4640,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 4690,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 4740,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 4790,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 4840,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 4890,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 4940,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 4990,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 5040,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 5090,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 5140,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 5190,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 5240,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 5290,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 5340,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 5390,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 5440,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 5490,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 5540,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 5590,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 5640,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 5690,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 5740,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 5790,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 5840,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 5890,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 5940,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 5990,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 6040,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 6090,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 6140,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 6190,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 6240,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 6290,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 6340,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 6390,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 6440,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 6490,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 6540,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 6590,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 6640,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 6690,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 6740,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 6790,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 6840,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 6890,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 6940,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 6990,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 7040,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 7090,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 7140,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 7190,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 7240,
+            "code": 55,
+            "label": "oddball_onset"
+          },
+          {
+            "frame_index": 7290,
+            "code": 55,
+            "label": "oddball_onset"
+          }
+        ]
+      }
+    ],
+    "execution_id": "fixture-biosemi-execution",
+    "participant_number": "007",
+    "participant_session_number": 2,
+    "acquisition_evidence": {
+      "schema_version": "1.0",
+      "contract_status": "candidate_receiver_validation_pending",
+      "studio_version": "2.8.2",
+      "execution_id": "fixture-biosemi-execution",
+      "project_id": "handoff-fixture",
+      "participant_number": "007",
+      "participant_session_number": 2,
+      "session_id": "fixture-session",
+      "recording": {
+        "schema_version": 1,
+        "selected_backend": "serial",
+        "effective_backend": "serial",
+        "selection_source": "project_settings",
+        "operator_confirmed_raw_bdf_recording": false,
+        "receiver_validation": "pending",
+        "recorded_marker_integrity": "unknown",
+        "physical_timing": "uncharacterized",
+        "acquisition_status": "unknown",
+        "acquisition_profile": {
+          "id": "biosemi_active_two_64",
+          "version": "1.0",
+          "montage_id": "biosemi64",
+          "montage_version": "1.0",
+          "event_decoder_id": "biosemi_edge",
+          "event_decoder_version": "1.0",
+          "reference_policy": "biosemi_exg_pair_then_average"
+        }
+      },
+      "acquisition_profile": {
+        "id": "biosemi_active_two_64",
+        "version": "1.0",
+        "montage_id": "biosemi64",
+        "montage_version": "1.0",
+        "event_decoder_id": "biosemi_edge",
+        "event_decoder_version": "1.0",
+        "reference_policy": "biosemi_exg_pair_then_average"
+      },
+      "created_at_utc": "2000-01-01T00:00:00Z",
+      "updated_at_utc": "2000-01-01T00:00:00Z",
+      "wall_clock_meaning": "UTC evidence write time; not EEG synchronization",
+      "callback_time_units": "seconds",
+      "callback_time_origin": "per-run playback clock after warmup; not EEG time",
+      "sent_status_meaning": "local transport submission only; receipt and disk logging unknown",
+      "persistence_boundary": "between runs and on orderly failure; abrupt process loss may omit current run",
+      "state": "completed",
+      "runs": [
+        {
+          "run_id": "run-001-words",
+          "condition_id": "words",
+          "condition_name": "Words",
+          "code_map": [
+            {
+              "code": 1,
+              "label": "condition_start"
+            },
+            {
+              "code": 55,
+              "label": "oddball"
+            }
+          ],
+          "planned_event_count": 147,
+          "attempted_events": [
+            {
+              "trigger_index": 0,
+              "frame_index": 0,
+              "time_s": 0.0,
+              "code": 1,
+              "label": "condition_start",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 1,
+              "frame_index": 40,
+              "time_s": 0.6666666666666666,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 2,
+              "frame_index": 90,
+              "time_s": 1.5,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 3,
+              "frame_index": 140,
+              "time_s": 2.3333333333333335,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 4,
+              "frame_index": 190,
+              "time_s": 3.1666666666666665,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 5,
+              "frame_index": 240,
+              "time_s": 4.0,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 6,
+              "frame_index": 290,
+              "time_s": 4.833333333333333,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 7,
+              "frame_index": 340,
+              "time_s": 5.666666666666667,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 8,
+              "frame_index": 390,
+              "time_s": 6.5,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 9,
+              "frame_index": 440,
+              "time_s": 7.333333333333333,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 10,
+              "frame_index": 490,
+              "time_s": 8.166666666666666,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 11,
+              "frame_index": 540,
+              "time_s": 9.0,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 12,
+              "frame_index": 590,
+              "time_s": 9.833333333333334,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 13,
+              "frame_index": 640,
+              "time_s": 10.666666666666666,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 14,
+              "frame_index": 690,
+              "time_s": 11.5,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 15,
+              "frame_index": 740,
+              "time_s": 12.333333333333334,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 16,
+              "frame_index": 790,
+              "time_s": 13.166666666666666,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 17,
+              "frame_index": 840,
+              "time_s": 14.0,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 18,
+              "frame_index": 890,
+              "time_s": 14.833333333333334,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 19,
+              "frame_index": 940,
+              "time_s": 15.666666666666666,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 20,
+              "frame_index": 990,
+              "time_s": 16.5,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 21,
+              "frame_index": 1040,
+              "time_s": 17.333333333333332,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 22,
+              "frame_index": 1090,
+              "time_s": 18.166666666666668,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 23,
+              "frame_index": 1140,
+              "time_s": 19.0,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 24,
+              "frame_index": 1190,
+              "time_s": 19.833333333333332,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 25,
+              "frame_index": 1240,
+              "time_s": 20.666666666666668,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 26,
+              "frame_index": 1290,
+              "time_s": 21.5,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 27,
+              "frame_index": 1340,
+              "time_s": 22.333333333333332,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 28,
+              "frame_index": 1390,
+              "time_s": 23.166666666666668,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 29,
+              "frame_index": 1440,
+              "time_s": 24.0,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 30,
+              "frame_index": 1490,
+              "time_s": 24.833333333333332,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 31,
+              "frame_index": 1540,
+              "time_s": 25.666666666666668,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 32,
+              "frame_index": 1590,
+              "time_s": 26.5,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 33,
+              "frame_index": 1640,
+              "time_s": 27.333333333333332,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 34,
+              "frame_index": 1690,
+              "time_s": 28.166666666666668,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 35,
+              "frame_index": 1740,
+              "time_s": 29.0,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 36,
+              "frame_index": 1790,
+              "time_s": 29.833333333333332,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 37,
+              "frame_index": 1840,
+              "time_s": 30.666666666666668,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 38,
+              "frame_index": 1890,
+              "time_s": 31.5,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 39,
+              "frame_index": 1940,
+              "time_s": 32.333333333333336,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 40,
+              "frame_index": 1990,
+              "time_s": 33.166666666666664,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 41,
+              "frame_index": 2040,
+              "time_s": 34.0,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 42,
+              "frame_index": 2090,
+              "time_s": 34.833333333333336,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 43,
+              "frame_index": 2140,
+              "time_s": 35.666666666666664,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 44,
+              "frame_index": 2190,
+              "time_s": 36.5,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 45,
+              "frame_index": 2240,
+              "time_s": 37.333333333333336,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 46,
+              "frame_index": 2290,
+              "time_s": 38.166666666666664,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 47,
+              "frame_index": 2340,
+              "time_s": 39.0,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 48,
+              "frame_index": 2390,
+              "time_s": 39.833333333333336,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 49,
+              "frame_index": 2440,
+              "time_s": 40.666666666666664,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 50,
+              "frame_index": 2490,
+              "time_s": 41.5,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 51,
+              "frame_index": 2540,
+              "time_s": 42.333333333333336,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 52,
+              "frame_index": 2590,
+              "time_s": 43.166666666666664,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 53,
+              "frame_index": 2640,
+              "time_s": 44.0,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 54,
+              "frame_index": 2690,
+              "time_s": 44.833333333333336,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 55,
+              "frame_index": 2740,
+              "time_s": 45.666666666666664,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 56,
+              "frame_index": 2790,
+              "time_s": 46.5,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 57,
+              "frame_index": 2840,
+              "time_s": 47.333333333333336,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 58,
+              "frame_index": 2890,
+              "time_s": 48.166666666666664,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 59,
+              "frame_index": 2940,
+              "time_s": 49.0,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 60,
+              "frame_index": 2990,
+              "time_s": 49.833333333333336,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 61,
+              "frame_index": 3040,
+              "time_s": 50.666666666666664,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 62,
+              "frame_index": 3090,
+              "time_s": 51.5,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 63,
+              "frame_index": 3140,
+              "time_s": 52.333333333333336,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 64,
+              "frame_index": 3190,
+              "time_s": 53.166666666666664,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 65,
+              "frame_index": 3240,
+              "time_s": 54.0,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 66,
+              "frame_index": 3290,
+              "time_s": 54.833333333333336,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 67,
+              "frame_index": 3340,
+              "time_s": 55.666666666666664,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 68,
+              "frame_index": 3390,
+              "time_s": 56.5,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 69,
+              "frame_index": 3440,
+              "time_s": 57.333333333333336,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 70,
+              "frame_index": 3490,
+              "time_s": 58.166666666666664,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 71,
+              "frame_index": 3540,
+              "time_s": 59.0,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 72,
+              "frame_index": 3590,
+              "time_s": 59.833333333333336,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 73,
+              "frame_index": 3640,
+              "time_s": 60.666666666666664,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 74,
+              "frame_index": 3690,
+              "time_s": 61.5,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 75,
+              "frame_index": 3740,
+              "time_s": 62.333333333333336,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 76,
+              "frame_index": 3790,
+              "time_s": 63.166666666666664,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 77,
+              "frame_index": 3840,
+              "time_s": 64.0,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 78,
+              "frame_index": 3890,
+              "time_s": 64.83333333333333,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 79,
+              "frame_index": 3940,
+              "time_s": 65.66666666666667,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 80,
+              "frame_index": 3990,
+              "time_s": 66.5,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 81,
+              "frame_index": 4040,
+              "time_s": 67.33333333333333,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 82,
+              "frame_index": 4090,
+              "time_s": 68.16666666666667,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 83,
+              "frame_index": 4140,
+              "time_s": 69.0,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 84,
+              "frame_index": 4190,
+              "time_s": 69.83333333333333,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 85,
+              "frame_index": 4240,
+              "time_s": 70.66666666666667,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 86,
+              "frame_index": 4290,
+              "time_s": 71.5,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 87,
+              "frame_index": 4340,
+              "time_s": 72.33333333333333,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 88,
+              "frame_index": 4390,
+              "time_s": 73.16666666666667,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 89,
+              "frame_index": 4440,
+              "time_s": 74.0,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 90,
+              "frame_index": 4490,
+              "time_s": 74.83333333333333,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 91,
+              "frame_index": 4540,
+              "time_s": 75.66666666666667,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 92,
+              "frame_index": 4590,
+              "time_s": 76.5,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 93,
+              "frame_index": 4640,
+              "time_s": 77.33333333333333,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 94,
+              "frame_index": 4690,
+              "time_s": 78.16666666666667,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 95,
+              "frame_index": 4740,
+              "time_s": 79.0,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 96,
+              "frame_index": 4790,
+              "time_s": 79.83333333333333,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 97,
+              "frame_index": 4840,
+              "time_s": 80.66666666666667,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 98,
+              "frame_index": 4890,
+              "time_s": 81.5,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 99,
+              "frame_index": 4940,
+              "time_s": 82.33333333333333,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 100,
+              "frame_index": 4990,
+              "time_s": 83.16666666666667,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 101,
+              "frame_index": 5040,
+              "time_s": 84.0,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 102,
+              "frame_index": 5090,
+              "time_s": 84.83333333333333,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 103,
+              "frame_index": 5140,
+              "time_s": 85.66666666666667,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 104,
+              "frame_index": 5190,
+              "time_s": 86.5,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 105,
+              "frame_index": 5240,
+              "time_s": 87.33333333333333,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 106,
+              "frame_index": 5290,
+              "time_s": 88.16666666666667,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 107,
+              "frame_index": 5340,
+              "time_s": 89.0,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 108,
+              "frame_index": 5390,
+              "time_s": 89.83333333333333,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 109,
+              "frame_index": 5440,
+              "time_s": 90.66666666666667,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 110,
+              "frame_index": 5490,
+              "time_s": 91.5,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 111,
+              "frame_index": 5540,
+              "time_s": 92.33333333333333,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 112,
+              "frame_index": 5590,
+              "time_s": 93.16666666666667,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 113,
+              "frame_index": 5640,
+              "time_s": 94.0,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 114,
+              "frame_index": 5690,
+              "time_s": 94.83333333333333,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 115,
+              "frame_index": 5740,
+              "time_s": 95.66666666666667,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 116,
+              "frame_index": 5790,
+              "time_s": 96.5,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 117,
+              "frame_index": 5840,
+              "time_s": 97.33333333333333,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 118,
+              "frame_index": 5890,
+              "time_s": 98.16666666666667,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 119,
+              "frame_index": 5940,
+              "time_s": 99.0,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 120,
+              "frame_index": 5990,
+              "time_s": 99.83333333333333,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 121,
+              "frame_index": 6040,
+              "time_s": 100.66666666666667,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 122,
+              "frame_index": 6090,
+              "time_s": 101.5,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 123,
+              "frame_index": 6140,
+              "time_s": 102.33333333333333,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 124,
+              "frame_index": 6190,
+              "time_s": 103.16666666666667,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 125,
+              "frame_index": 6240,
+              "time_s": 104.0,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 126,
+              "frame_index": 6290,
+              "time_s": 104.83333333333333,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 127,
+              "frame_index": 6340,
+              "time_s": 105.66666666666667,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 128,
+              "frame_index": 6390,
+              "time_s": 106.5,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 129,
+              "frame_index": 6440,
+              "time_s": 107.33333333333333,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 130,
+              "frame_index": 6490,
+              "time_s": 108.16666666666667,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 131,
+              "frame_index": 6540,
+              "time_s": 109.0,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 132,
+              "frame_index": 6590,
+              "time_s": 109.83333333333333,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 133,
+              "frame_index": 6640,
+              "time_s": 110.66666666666667,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 134,
+              "frame_index": 6690,
+              "time_s": 111.5,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 135,
+              "frame_index": 6740,
+              "time_s": 112.33333333333333,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 136,
+              "frame_index": 6790,
+              "time_s": 113.16666666666667,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 137,
+              "frame_index": 6840,
+              "time_s": 114.0,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 138,
+              "frame_index": 6890,
+              "time_s": 114.83333333333333,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 139,
+              "frame_index": 6940,
+              "time_s": 115.66666666666667,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 140,
+              "frame_index": 6990,
+              "time_s": 116.5,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 141,
+              "frame_index": 7040,
+              "time_s": 117.33333333333333,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 142,
+              "frame_index": 7090,
+              "time_s": 118.16666666666667,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 143,
+              "frame_index": 7140,
+              "time_s": 119.0,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 144,
+              "frame_index": 7190,
+              "time_s": 119.83333333333333,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 145,
+              "frame_index": 7240,
+              "time_s": 120.66666666666667,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            },
+            {
+              "trigger_index": 146,
+              "frame_index": 7290,
+              "time_s": 121.5,
+              "code": 55,
+              "label": "oddball_onset",
+              "backend_name": "serial",
+              "status": "sent"
+            }
+          ],
+          "state": "completed"
+        }
+      ]
+    },
+    "manual_removed_electrodes": [
+      "P9",
+      "P10"
+    ]
+  }
+}

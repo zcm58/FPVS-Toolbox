@@ -2,11 +2,10 @@
 # Sidebar construction helpers (custom buttons with precise icon/text alignment)
 from __future__ import annotations
 
-from functools import partial
 from pathlib import Path
 
-from PySide6.QtCore import QSize, Qt, QUrl, Signal
-from PySide6.QtGui import QDesktopServices, QIcon, QPixmap
+from PySide6.QtCore import QSize, Qt, Signal, Slot
+from PySide6.QtGui import QAction, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -36,32 +35,20 @@ CENTERED_TEXT_TRAILING_SPACER_PX = (
 )
 # ---------------------------------------------------------------------------
 
-DOCS_URL = "https://zcm58.github.io/FPVS-Toolbox/"  # MkDocs site for documentation
+_TOOL_ICONS = {
+    "btn_free_harmonic_clustering": "harmonic",
+    "btn_graphs": "chart",
+    "btn_publication_maps": "scalp",
+    "btn_data": "stats",
+    "btn_sensitivity_analysis": "sensitivity",
+    "btn_loreta_visualizer": "loreta",
+    "btn_sequence_figure": "sequence",
+    "btn_individual_detectability": "detectability",
+}
 
-DEFAULT_TOOL_SPECS = (
-    (
-        "btn_free_harmonic_clustering",
-        "Free Harmonic Clustering",
-        "harmonic",
-        "open_free_harmonic_clustering",
-    ),
-    ("btn_graphs", "SNR Plots", "chart", "open_plot_generator"),
-)
-
-BETA_TOOL_SPECS = (
-    ("btn_publication_maps", "Scalp Maps", "scalp", "open_publication_maps"),
-    # Navigation text is shortened for the fixed-width sidebar. The page,
-    # accessible name, tooltip, documentation, and exports use the full title.
-    ("btn_data", "Data Screening", "stats", "open_stats_analyzer"),
-    ("btn_sensitivity_analysis", "Sensitivity Analysis", "sensitivity", "open_sensitivity_analysis"),
-    ("btn_loreta_visualizer", "LORETA Visualizer", "loreta", "open_loreta_visualizer"),
-    ("btn_sequence_figure", "Sequence Figure", "sequence", "open_sequence_figure"),
-    ("btn_individual_detectability", "Individual Detectability", "detectability", "open_individual_detectability"),
-)
-
-TOOL_ACCESSIBLE_NAMES = {
-    "btn_data": "Standard FPVS Screening",
-    "btn_free_harmonic_clustering": "Free Harmonic Clustering Analysis",
+_TOOL_LABELS = {
+    "btn_data": "Data Screening",
+    "btn_free_harmonic_clustering": "Free Harmonic Clustering",
 }
 
 
@@ -145,8 +132,11 @@ class SidebarButton(QWidget):
             lay.addSpacing(CENTERED_TEXT_TRAILING_SPACER_PX)
             lay.addStretch(1)
 
-    def set_processing_locked(self, locked: bool) -> None:
+    @Slot(bool)
+    def set_action_enabled(self, enabled: bool) -> None:
+        locked = not enabled
         self.setProperty("processingLocked", locked)
+        self.setEnabled(enabled)
         self.setCursor(Qt.ArrowCursor if locked else Qt.PointingHandCursor)
         if self._normal_icon_pixmap is not None and self._locked_icon_pixmap is not None:
             self.icon_lbl.setPixmap(self._locked_icon_pixmap if locked else self._normal_icon_pixmap)
@@ -166,12 +156,12 @@ class SidebarButton(QWidget):
         self.update()
 
     def mouseReleaseEvent(self, e):
-        if e.button() == Qt.LeftButton and not self.property("processingLocked"):
+        if e.button() == Qt.LeftButton and self.isEnabled():
             self.clicked.emit()
         super().mouseReleaseEvent(e)
 
     def keyPressEvent(self, e):
-        if e.key() in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Space) and not self.property("processingLocked"):
+        if e.key() in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Space) and self.isEnabled():
             self.clicked.emit()
         else:
             super().keyPressEvent(e)
@@ -179,17 +169,21 @@ class SidebarButton(QWidget):
 
 def make_button(
     layout: QVBoxLayout,
-    name: str,
-    text: str,
-    icon: QIcon | str | Path | None,
-    slot,
+    action: QAction,
+    icon_kind: str,
     *,
+    label: str | None = None,
     center_content: bool = False,
 ) -> SidebarButton:
-    """API-compatible factory that returns a SidebarButton."""
-    btn = SidebarButton(name, text, icon, center_content=center_content)
-    if slot:
-        btn.clicked.connect(slot)
+    btn = SidebarButton(
+        action.objectName(),
+        label if label is not None else action.text(),
+        sidebar_icon(icon_kind, ICON_PX),
+        center_content=center_content,
+    )
+    btn.clicked.connect(action.trigger)
+    action.enabledChanged.connect(btn.set_action_enabled)
+    btn.set_action_enabled(action.isEnabled())
     layout.addWidget(btn)
     return btn
 
@@ -219,23 +213,24 @@ def _make_divider(parent: QWidget, object_name: str = "sidebar_divider") -> QFra
     return divider
 
 
+def _add_tool_button(layout: QVBoxLayout, action: QAction, *, beta: bool = False) -> None:
+    role = action.objectName()
+    label = _TOOL_LABELS.get(role)
+    button = make_button(layout, action, _TOOL_ICONS[role], label=label)
+    if beta or label:
+        title = action.text()
+        button.setToolTip(f"{title} (Beta)" if beta else title)
+        button.setAccessibleName(title)
+
+
 def _add_tool_buttons(layout: QVBoxLayout, host) -> None:
-    for role, text, icon_kind, slot_name in DEFAULT_TOOL_SPECS:
-        button = make_button(
-            layout,
-            role,
-            text,
-            sidebar_icon(icon_kind, ICON_PX),
-            getattr(host, slot_name),
-        )
-        accessible_name = TOOL_ACCESSIBLE_NAMES.get(role)
-        if accessible_name:
-            button.setToolTip(accessible_name)
-            button.setAccessibleName(accessible_name)
+    actions = host.shell_actions
+    for action in actions.default_tools:
+        _add_tool_button(layout, action)
 
     host.sidebar_beta_tools_divider = None
     host.sidebar_beta_tools_label = None
-    if not host.settings.beta_tools_enabled():
+    if not actions.beta_tools:
         return
 
     layout.addSpacing(8)
@@ -252,18 +247,8 @@ def _add_tool_buttons(layout: QVBoxLayout, host) -> None:
     layout.addWidget(beta_label)
     host.sidebar_beta_tools_label = beta_label
 
-    for role, text, icon_kind, slot_name in BETA_TOOL_SPECS:
-        opener = getattr(host, slot_name)
-        button = make_button(
-            layout,
-            role,
-            text,
-            sidebar_icon(icon_kind, ICON_PX),
-            partial(host._open_beta_tool, role, opener),
-        )
-        accessible_name = TOOL_ACCESSIBLE_NAMES.get(role, text)
-        button.setToolTip(f"{accessible_name} (Beta)")
-        button.setAccessibleName(accessible_name)
+    for action in actions.beta_tools:
+        _add_tool_button(layout, action, beta=True)
 
 
 def init_sidebar(self) -> None:
@@ -302,12 +287,11 @@ def init_sidebar(self) -> None:
     primary_layout.setContentsMargins(0, 0, 0, 0)
     primary_layout.setSpacing(4)
 
+    actions = self.shell_actions
     home_btn = make_button(
         primary_layout,
-        "btn_home",
-        "Home",
-        sidebar_icon("home", ICON_PX),
-        self.show_home_page,
+        actions.home,
+        "home",
         center_content=True,
     )
     home_btn.setProperty("homeEntry", True)
@@ -352,25 +336,9 @@ def init_sidebar(self) -> None:
     utilities_layout.addWidget(utility_label)
     self.sidebar_utilities_label = utility_label
 
-    make_button(utilities_layout, "btn_settings", "Settings", sidebar_icon("settings", ICON_PX), self.open_settings_window)
-
-    def _open_docs() -> None:
-        QDesktopServices.openUrl(QUrl(DOCS_URL))
-
-    make_button(
-        utilities_layout,
-        "btn_info",
-        "Information",
-        sidebar_icon("info", ICON_PX),
-        _open_docs,
-    )
-    make_button(
-        utilities_layout,
-        "btn_help",
-        "Help",
-        sidebar_icon("help", ICON_PX),
-        self.show_about_dialog,
-    )
+    make_button(utilities_layout, actions.settings, "settings")
+    make_button(utilities_layout, actions.documentation, "info")
+    make_button(utilities_layout, actions.about, "help", label="Help")
 
     self.sidebar_utilities_group = utilities_group
     lower_layout.addWidget(utilities_group)

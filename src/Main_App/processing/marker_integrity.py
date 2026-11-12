@@ -6,6 +6,7 @@ from bisect import bisect_left, bisect_right
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
 from fractions import Fraction
 import hashlib
 import json
@@ -26,6 +27,7 @@ from Main_App.projects.condition_trigger_maps import resolve_recording_event_sch
 MARKER_INTEGRITY_METHOD_VERSION = "marker_integrity_v3_review_receipt"
 MARKER_REVIEW_DECISION_SCHEMA_VERSION = "marker_review_decision_v2_audit_receipt"
 MARKER_REVIEWER_STATE_EXPLICIT_GUI = "explicit_gui_review"
+MARKER_REVIEWER_STATE_AUTHORIZED_REVIEW = "explicit_authorized_marker_review"
 MARKER_REVIEWER_STATE_CONDITION_EXCLUDED = "persisted_condition_exclusion"
 MARKER_REVIEWER_IDENTITY_STATUS_NOT_COLLECTED = "not_collected"
 MARKER_REVIEWER_IDENTITY_STATUS_PROVIDED = "provided"
@@ -816,9 +818,11 @@ def _validate_marker_review_receipt(
         _validate_condition_exclusion_receipt(decision)
     elif decision.reviewer_state == MARKER_REVIEWER_STATE_EXPLICIT_GUI:
         _validate_utc_review_time(decision.reviewed_at_utc)
+    elif decision.reviewer_state == MARKER_REVIEWER_STATE_AUTHORIZED_REVIEW:
+        _validate_authorized_marker_exclusion_receipt(decision)
     else:
         raise MarkerIntegrityError(
-            "Marker review decision does not record an explicit GUI reviewer state."
+            "Marker review decision does not record an explicit GUI or authorized reviewer state."
         )
     if (
         decision.reviewer_identity_status
@@ -904,6 +908,89 @@ def _validate_marker_review_receipt(
             raise MarkerIntegrityError(
                 f"Marker review decision {field_name} scope is stale."
             )
+
+
+def _validate_authorized_marker_exclusion_receipt(
+    decision: MarkerReviewDecision,
+) -> None:
+    """Allow an attributed external review to exclude, never approve, a span."""
+    if (
+        decision.decision != MARKER_DECISION_EXCLUDE
+        or decision.verified_start_sample is not None
+        or decision.verified_stop_sample is not None
+    ):
+        raise MarkerIntegrityError("Authorized marker review can only exclude an occurrence.")
+    if (
+        decision.reviewer_identity_status != MARKER_REVIEWER_IDENTITY_STATUS_PROVIDED
+        or not str(decision.reviewer_identity or "").strip()
+        or str(decision.reason or "").strip().casefold() in {"", "no reason provided"}
+    ):
+        raise MarkerIntegrityError("Authorized marker review requires a named reviewer and reason.")
+    if (
+        decision.evidence_type != MARKER_REVIEWER_STATE_AUTHORIZED_REVIEW
+        or not str(decision.evidence_reference or "").strip()
+    ):
+        raise MarkerIntegrityError("Authorized marker review requires an explicit evidence reference.")
+    _validate_utc_review_time(decision.reviewed_at_utc)
+
+
+def build_authorized_marker_exclusion_decision(
+    occurrence: MarkerOccurrencePlan,
+    *,
+    marker_plan_fingerprint: str,
+    review_scope: Mapping[str, Any],
+    reviewer_identity: str,
+    reason: str,
+    evidence_reference: str,
+    evidence_note: str | None = None,
+    reviewed_at_utc: str | None = None,
+) -> MarkerReviewDecision:
+    """Bind a user-authorized non-GUI occurrence exclusion to current evidence.
+
+    The caller must have explicit authorization for this occurrence-level
+    exclusion. This receipt records that authority without claiming a GUI
+    visit. It cannot retain a marker gap or approve/reconstruct an interval.
+    Pass its payload to preflight's existing ``marker_review_decisions`` input.
+    """
+    if not isinstance(occurrence, MarkerOccurrencePlan):
+        raise MarkerIntegrityError("Authorized marker review requires occurrence evidence.")
+    if not isinstance(review_scope, Mapping):
+        raise MarkerIntegrityError("Authorized marker review scope must be an object.")
+    source_file_path = str(review_scope.get("source_file_path") or "").strip()
+    if not source_file_path:
+        raise MarkerIntegrityError("Authorized marker review requires a source-file scope.")
+    decision = MarkerReviewDecision(
+        decision=MARKER_DECISION_EXCLUDE,
+        schema_version=MARKER_REVIEW_DECISION_SCHEMA_VERSION,
+        reason=str(reason or "").strip(),
+        reviewed_at_utc=(
+            datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+            if reviewed_at_utc is None else reviewed_at_utc
+        ),
+        reviewer_state=MARKER_REVIEWER_STATE_AUTHORIZED_REVIEW,
+        reviewer_identity=str(reviewer_identity or "").strip() or None,
+        reviewer_identity_status=MARKER_REVIEWER_IDENTITY_STATUS_PROVIDED,
+        source_file_path=source_file_path,
+        participant_id=review_scope.get("participant_id"),
+        recording_id=review_scope.get("recording_id"),
+        session_id=review_scope.get("session_id"),
+        session_label=review_scope.get("session_label"),
+        condition_label=occurrence.condition_label,
+        condition_code=occurrence.condition_code,
+        repetition_index=occurrence.repetition_index,
+        occurrence_key=occurrence.occurrence_key,
+        reviewed_marker_plan_fingerprint=marker_plan_fingerprint,
+        reviewed_occurrence_fingerprint=occurrence.fingerprint,
+        evidence_type=MARKER_REVIEWER_STATE_AUTHORIZED_REVIEW,
+        evidence_note=_optional_text(evidence_note),
+        evidence_reference=str(evidence_reference or "").strip() or None,
+    )
+    _validate_marker_review_receipt(
+        occurrence, decision,
+        marker_plan_fingerprint=marker_plan_fingerprint,
+        review_scope=review_scope,
+    )
+    return decision
 
 
 def _configured_condition_exclusion(
@@ -1033,7 +1120,7 @@ def apply_marker_review_decision(
     review_scope: Mapping[str, Any],
     condition_exclusion_settings: Mapping[str, Any] | None = None,
 ) -> ApprovedOccurrenceSpan:
-    """Validate one GUI decision and return the sole downstream span record."""
+    """Validate one review decision and return the sole downstream span record."""
 
     choice = str(decision.decision).strip()
     if choice not in {

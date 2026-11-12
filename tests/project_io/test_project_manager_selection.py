@@ -13,7 +13,10 @@ from Main_App.gui.op_guard import OpGuard
 from Main_App.projects.grouping import (
     GroupConfigurationError, project_group_context, validate_group_folder_name,
 )
-from Main_App.projects.fpvs_config_import import CONFIG_SUFFIX, FPVSConfigImportError
+from Main_App.projects.fpvs_config_import import (
+    CONFIG_SUFFIX, FPVSConfigImportError, create_project_from_fpvs_config,
+    fpvs_config_import_message,
+)
 from Main_App.projects.hardware import confirm_hardware_selection
 from Main_App.projects.preprocessing_settings import new_project_preprocessing_settings
 from Main_App.projects.project import Project
@@ -41,12 +44,14 @@ def workflow() -> dict:
         "new_project_preprocessing_settings": new_project_preprocessing_settings,
         "confirm_hardware_selection": confirm_hardware_selection,
         "CONFIG_SUFFIX": CONFIG_SUFFIX, "FPVSConfigImportError": FPVSConfigImportError,
+        "fpvs_config_import_message": fpvs_config_import_message,
         "choose_new_project_hardware": lambda _host, settings: settings,
         "logger": logging.getLogger("project_manager_test"),
         "FLAT_PROJECT_STRUCTURE": "flat", "REPEATED_SESSION_PROJECT_STRUCTURE": "repeated",
         "QMessageBox": SimpleNamespace(
             warning=lambda *args: messages.append(args[1:]),
             critical=lambda *args: messages.append(args[1:]),
+            information=lambda *args: messages.append(args[1:]),
         ),
         "QThread": SimpleNamespace(currentThread=lambda: "gui"),
         "_open_selected_project_guard": OpGuard(),
@@ -100,6 +105,32 @@ def test_studio_import_hardware_save_error_keeps_current_project(workflow, tmp_p
     assert host.currentProject is current_project
     assert loaded == []
     assert workflow["messages"] == [("Import Failed", str(failure))]
+
+
+@pytest.mark.parametrize("select_raw", [False, True])
+def test_completed_studio_import_shows_identity_review_without_binding(workflow, tmp_path, select_raw):
+    config = Path(__file__).parents[1] / "fixtures/studio_handoff/v2-completed-biosemi.fpvsconfig"
+    projects_root, raw = tmp_path / "projects", tmp_path / "recordings"
+    raw.mkdir()
+    loaded = []
+    host = SimpleNamespace(loadProject=loaded.append)
+    workflow["ensure_projects_root"] = lambda _parent: projects_root
+    workflow["QFileDialog"] = SimpleNamespace(
+        getOpenFileName=lambda *_: (str(config), ""),
+        getExistingDirectory=lambda *_: str(raw) if select_raw else "",
+    )
+    workflow["choose_new_project_hardware"] = lambda _host, settings: confirm_hardware_selection(
+        settings, "biosemi", confirmed_change=True,
+    )
+    workflow["create_project_from_fpvs_config"] = create_project_from_fpvs_config
+    project = workflow["new_project_from_fpvs_config"](host)
+    assert project is loaded[0] is host.currentProject
+    assert project.participants == {} and project.recordings == {}
+    assert project.preprocessing["manual_removed_electrodes"] == {}
+    assert project.input_folder == (raw if select_raw else project.project_root / "Input")
+    title, message = workflow["messages"][0]
+    assert title == "Project Created"
+    assert "007, visit 2" in message and "P9, P10" in message
 
 
 def test_new_project_safe_name_preserves_settings_and_input(workflow, tmp_path):

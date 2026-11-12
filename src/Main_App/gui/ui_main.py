@@ -53,7 +53,7 @@ def init_ui(self) -> None:
     self.setWindowIcon(application_icon())
 
     # Menu bar
-    menu = build_menu_bar(self)
+    menu = build_menu_bar(self, self.shell_actions)
     self.setMenuBar(menu)
 
     # Keep the debug indicator in the menu row without reserving a toolbar row.

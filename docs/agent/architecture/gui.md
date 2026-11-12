@@ -35,12 +35,14 @@ Primary paths:
   Confirm normal, selected, disabled and popup labels remain legible; move the
   window between differently scaled monitors and repeat. Menus should remain
   hidden on Welcome. Rendering and scale-factor regression tests run in CI.
-- `src/Main_App/gui/menu_bar.py`: File/View/Tools construction and tool-action
-  wiring. `file_menu.py` groups New/Open/Save, Settings/Reset Processing Cache,
-  Check for Updates/About, and Exit with separators. View contains Home.
-  Tools reuses the sidebar's default and beta registrations, with full labels
-  and a conditional Beta Tools submenu. Existing MainWindow callbacks retain
-  project validation, processing guards and beta acknowledgements.
+- `src/Main_App/gui/shell_actions.py` owns the shared Home, Settings, and tool
+  actions and tool registration. The native menus and sidebar use those
+  actions. MainWindow callbacks retain project validation and beta
+  acknowledgements.
+- `src/Main_App/gui/menu_bar.py` builds the native File/View/Tools menus.
+  `file_menu.py` groups New/Open/Save, Settings/Reset Processing Cache, Check
+  for Updates/About, and Exit with separators. View contains Home. Tools shows
+  the full tool labels and a conditional Beta Tools submenu.
 - `src/Main_App/gui/typography.py`: canonical font family, role sizes, font
   weights, monospace font, and QSS font helpers used by the main app,
   component layer, and migrated tool windows.
@@ -605,8 +607,15 @@ still be absent, and Resume Post-processing should use the remaining ROIs.
 Repeat Save with rebuild later and confirm QC is marked stale. Qt behavior is
 covered in CI; local checks exercise the routing without loading Qt.
 
-The sidebar and Tools menu share the default tool list: Free Harmonic Clustering
-Analysis and SNR Plots, in that order. Scalp Maps, Standard FPVS Screening, Sensitivity
+## Native menus and tool navigation
+
+The native menus and sidebar use the same `QAction` for each shared command.
+The sidebar owns its short labels, icons, layout, and selection styling. The
+processing navigation lock updates command availability for both surfaces, and
+the sidebar continues to show its locked state while processing runs.
+
+Free Harmonic Clustering Analysis and SNR Plots are the default tools, in that
+order. Scalp Maps, Standard FPVS Screening, Sensitivity
 Analysis, LORETA Visualizer, Sequence Figure, and Individual
 Detectability are beta tools: they remain
 embedded workspace pages, but the sidebar appends them beneath a visible
@@ -614,13 +623,11 @@ embedded workspace pages, but the sidebar appends them beneath a visible
 Settings option
 `tools.enable_beta_tools` is enabled and the app has been restarted.
 
-The Beta Tools registry owns the shared gate: every entry in `BETA_TOOL_SPECS`
-is connected through `MainWindow._open_beta_tool`, so adding a beta tool to the
-registry must not require per-tool warning code. Before that tool's opener runs
-for the first time in each app session, show an OK-only warning titled `Beta
-Tool` with the text `This tool is currently in beta. Features are subject to
-change.` Track acknowledgement separately for each beta registry role, shared
-between sidebar and menu entry points.
+Each beta tool action connects through `MainWindow._open_beta_tool`. On first
+use in each app session, show an OK-only warning titled `Beta Tool` with the
+text `This tool is currently in beta. Features are subject to change.` Track
+acknowledgement separately for each beta tool, shared between sidebar and menu
+entry points.
 
 Visible menu acceptance (Qt is CI-only locally): at 1280x900, verify native
 File/View/Tools appearance, separated File groups, and complete long labels
@@ -629,13 +636,15 @@ Use Alt, arrow keys and Escape to open, traverse and dismiss menus; verify
 View > Home returns from an embedded page and selects Home in the sidebar.
 On a disposable project, exercise New/Open/Save, Settings, cache-reset
 confirmation/cancellation, Check for Updates, About and Exit with their existing
-draft and processing guards. Confirm menus are hidden on Welcome and disabled
-during processing/cache reset, then restored when work ends. Disable Beta Tools,
-restart and confirm both entry points hide them; enable and restart, then open
-every default and beta tool from the menu. Verify project/stale-output guards,
-one warning per beta role across menu and sidebar, and no warning for default
-tools. Local Qt execution remains unrun without a safe visible-environment
-approval.
+draft and processing guards. Open Settings and a default tool from both the
+menu and sidebar, and confirm they select the same workspace page. Confirm
+menus are hidden on Welcome. During processing and cache reset, check that the
+menus and sidebar commands lock together and recover after work ends. Disable
+Beta Tools, restart and confirm both entry points hide them. Enable and restart,
+then open every default and beta tool from the menu. Verify project and stale
+output guards, one warning per beta role across menu and sidebar, and no
+warning for default tools. Local Qt execution requires an approved visible
+environment.
 
 When the active project changes through create/open/import/path workflows, the
 main shell must return to Home and discard project-bound embedded page instances.
