@@ -31,7 +31,7 @@ ROI. An electrode may belong to more than one ROI; separate color-ring segments
 show every overlapping membership. The fixed map is labeled **BioSemi 64**.
 LOT, ROT, and Central are always available as built-in ROIs: their electrode
 memberships can be edited, but their names and rows cannot be removed. Use
-**+ New ROI** to add another named ROI.
+**New ROI** to add another named ROI.
 
 Only ROI names use normal text entry. If older settings contain an electrode
 label that is not drawn on the BioSemi64 map, the ROI list keeps each such
@@ -212,4 +212,4 @@ itself an inferential significance test.
 
 - Volfart, A., et al. (2021). [Implicit, automatic semantic word categorisation in the left occipito-temporal cortex as revealed by fast periodic visual stimulation](https://doi.org/10.1016/j.neuroimage.2021.118228). *NeuroImage, 238*, 118228.
 - Hauk, O., et al. (2021). [Face-selective responses in combined EEG/MEG recordings with fast periodic visual stimulation (FPVS)](https://doi.org/10.1016/j.neuroimage.2021.118460). *NeuroImage, 242*, 118460.
-- [SNR Plots implementation](https://github.com/zcm58/FPVS-Toolbox/tree/codex/v3-release/src/Tools/Plot_Generator).
+- [SNR Plots implementation](https://github.com/zcm58/FPVS-Toolbox/tree/main/src/Tools/Plot_Generator).

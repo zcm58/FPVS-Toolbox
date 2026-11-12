@@ -2,8 +2,8 @@
 
 ## Status
 
-Applied in source on `codex/slate-signal-teal`. The approved Windows Qt
-smoke checks passed. Cross-platform coverage remains in CI.
+Applied in the Toolbox source. The approved Windows Qt smoke checks passed.
+Cross-platform coverage remains in CI.
 
 ## Target
 
