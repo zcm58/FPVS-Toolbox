@@ -28,8 +28,7 @@ The first upgrade from v2.1.2 uses the full installer; follow the
   require processing again; stale downstream results require the indicated
   rebuild before analysis.
 
-See [project setup and compatibility](index.md), the
-[quick start](processing-quick-start.md), and
+See [project setup and compatibility](index.md) and the
 [QC review guide](reference/preprocessing-qc-review.md).
 
 ## Harmonics and output files

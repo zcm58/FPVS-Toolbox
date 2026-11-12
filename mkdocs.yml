@@ -50,7 +50,6 @@ nav:
   - Home: index.md
   - Installing and Updating: installing-and-updating.md
   - Getting Started:
-      - Processing Quick Start: processing-quick-start.md
       - Upgrading from v2.1.2: migration-v3.md
       - Version 3 Release Notes: release-notes-v3.md
   - Tools:
