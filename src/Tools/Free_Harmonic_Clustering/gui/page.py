@@ -422,6 +422,7 @@ class FreeHarmonicClusteringPage(QWidget):
             "Highest harmonic:",
             self.harmonics_card.content,
         )
+        self.fixed_highest_label.setBuddy(self.fixed_highest_combo)
         harmonics_form.addRow(self.fixed_highest_label, fixed_row)
 
         for combo in (
@@ -483,6 +484,7 @@ class FreeHarmonicClusteringPage(QWidget):
         self.reference_condition_combo = QComboBox(self.condition_plan_row)
         self.reference_condition_combo.setObjectName("free_harmonic_reference_condition")
         self.reference_condition_label = QLabel("Reference:", self.condition_plan_row)
+        self.reference_condition_label.setBuddy(self.reference_condition_combo)
         condition_form.addRow(self.reference_condition_label, self.reference_condition_combo)
         self.plan_card.content_layout.addWidget(self.condition_plan_row)
         self.plan_summary_label = QLabel("Choose the questions to include in this analysis.", self.plan_card.content)

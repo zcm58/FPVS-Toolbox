@@ -72,8 +72,8 @@ def test_snr_user_copy_matches_figures_only_output_contract() -> None:
     ):
         assert stale_claim not in info_text + ui_text + header_text
     for specific_action in (
-        "Choose Excel Folder",
-        "Choose Plot Folder",
+        "Choose processed Excel folder",
+        "Choose plot output folder",
         "Open Plot Folder",
         "View Log",
         "Generate SNR Plots",

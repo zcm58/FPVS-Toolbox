@@ -85,12 +85,17 @@ def test_open_existing_project_missing_root_prompts(monkeypatch, main_window, me
     assert ("Projects Root", "Project root not set.") in message_spy["info"]
 
 
-def test_open_existing_project_empty_root_informs(tmp_path, main_window, monkeypatch, message_spy, qtbot):
+@pytest.mark.parametrize("from_workspace", [False, True])
+def test_open_existing_project_empty_root_informs(
+    tmp_path, main_window, monkeypatch, message_spy, qtbot, from_workspace,
+):
     monkeypatch.setattr(
         project_manager,
         "ensure_projects_root",
         lambda parent: tmp_path,
     )
+    if from_workspace:
+        main_window.stacked.setCurrentIndex(1)
 
     main_window.open_existing_project()
 
@@ -99,6 +104,12 @@ def test_open_existing_project_empty_root_informs(tmp_path, main_window, monkeyp
     _title, text = message_spy["info"][0]
     assert "No projects" in text
     assert str(tmp_path) in text
+    if from_workspace:
+        assert "File > New Project…" in text
+        assert "Settings > Application > Change Projects Folder…" in text
+    else:
+        assert "Choose New Project to create one." in text
+        assert "Settings > Application" not in text
 
 
 def test_open_existing_project_handles_iterdir_error(tmp_path, main_window, monkeypatch, message_spy, caplog, qtbot):

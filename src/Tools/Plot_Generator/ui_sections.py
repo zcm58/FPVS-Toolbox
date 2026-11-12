@@ -65,38 +65,35 @@ class PlotGeneratorUiSectionsMixin:
         file_grid.setVerticalSpacing(8)
 
         input_picker = PathPickerRow(
-            "Choose Excel Folder",
-            placeholder="Select the folder containing your Excel sheets",
+            "Browse…",
+            placeholder="No folder selected",
         )
         input_picker.setObjectName("snr_input_folder_picker")
         self.folder_edit = input_picker.line_edit
         self.folder_edit.setObjectName("snr_input_folder")
         self.folder_edit.setAccessibleName("Processed Excel folder")
         self.folder_edit.setText(self._defaults.get("input_folder", ""))
-        self.folder_edit.setToolTip("Select the folder containing your Excel sheets.")
         self.folder_edit.setMinimumWidth(220)
         input_picker.setMinimumWidth(0)
         self.input_folder_btn = input_picker.button
         self.input_folder_btn.setAccessibleName("Choose processed Excel folder")
-        self.input_folder_btn.setToolTip("Choose the folder containing processed Excel workbooks")
         self.input_folder_btn.setIcon(self.style().standardIcon(QStyle.SP_DirOpenIcon))
         self.input_folder_btn.clicked.connect(self._select_folder)
         self.folder_edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        excel_label = QLabel("Processed Excel Folder:")
+        excel_label = QLabel("Processed Excel folder:")
         excel_label.setBuddy(self.folder_edit)
         file_grid.addWidget(excel_label, 0, 0)
         file_grid.addWidget(input_picker, 0, 1)
 
         output_picker = PathPickerRow(
-            "Choose Plot Folder",
-            placeholder="Folder where plots will be saved",
+            "Browse…",
+            placeholder="No folder selected",
         )
         output_picker.setObjectName("snr_output_folder_picker")
         self.out_edit = output_picker.line_edit
         self.out_edit.setObjectName("snr_output_folder")
         self.out_edit.setAccessibleName("Plot output folder")
         self.out_edit.setText(self._defaults.get("output_folder", ""))
-        self.out_edit.setToolTip("Folder where plots will be saved")
         self.out_edit.setMinimumWidth(220)
         output_picker.setMinimumWidth(0)
         self.output_folder_btn = output_picker.button
@@ -105,7 +102,7 @@ class PlotGeneratorUiSectionsMixin:
         self.output_folder_btn.setIcon(self.style().standardIcon(QStyle.SP_DirOpenIcon))
         self.output_folder_btn.clicked.connect(self._select_output)
         self.out_edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        save_label = QLabel("Plot Output Folder:")
+        save_label = QLabel("Plot output folder:")
         save_label.setBuddy(self.out_edit)
         file_grid.addWidget(save_label, 1, 0)
         file_grid.addWidget(output_picker, 1, 1)
@@ -306,6 +303,7 @@ class PlotGeneratorUiSectionsMixin:
             lambda _text: self._on_legend_condition_label_edited("condition_a_label")
         )
         self.legend_condition_a_label = QLabel("Condition A label:")
+        self.legend_condition_a_label.setBuddy(self.legend_condition_a_edit)
         legend_form.addWidget(self.legend_condition_a_label, 0, 0)
         legend_form.addWidget(self.legend_condition_a_edit, 0, 1)
 
@@ -318,6 +316,7 @@ class PlotGeneratorUiSectionsMixin:
             lambda _text: self._on_legend_condition_label_edited("condition_b_label")
         )
         self.legend_condition_b_label = QLabel("Condition B label:")
+        self.legend_condition_b_label.setBuddy(self.legend_condition_b_edit)
         legend_form.addWidget(self.legend_condition_b_label, 0, 2)
         legend_form.addWidget(self.legend_condition_b_edit, 0, 3)
 
@@ -330,6 +329,7 @@ class PlotGeneratorUiSectionsMixin:
             lambda _text: self._mark_legend_manual_override("a_peaks_label")
         )
         self.legend_a_peaks_label = QLabel("A-Peaks label:")
+        self.legend_a_peaks_label.setBuddy(self.legend_a_peaks_edit)
         legend_form.addWidget(self.legend_a_peaks_label, 1, 0)
         legend_form.addWidget(self.legend_a_peaks_edit, 1, 1)
 
@@ -342,6 +342,7 @@ class PlotGeneratorUiSectionsMixin:
             lambda _text: self._mark_legend_manual_override("b_peaks_label")
         )
         self.legend_b_peaks_label = QLabel("B-Peaks label:")
+        self.legend_b_peaks_label.setBuddy(self.legend_b_peaks_edit)
         legend_form.addWidget(self.legend_b_peaks_label, 1, 2)
         legend_form.addWidget(self.legend_b_peaks_edit, 1, 3)
         legend_labels = (

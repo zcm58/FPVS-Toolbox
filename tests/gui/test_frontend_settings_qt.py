@@ -66,6 +66,24 @@ def test_settings_draft_tracks_values_but_not_roi_navigation(panel):
     assert panel.has_unsaved_changes()
 
 
+def test_settings_categories_support_keyboard_navigation_without_saving(panel, qtbot):
+    navigation = panel.settings_navigation
+    assert not panel.tabs.tabBar().isVisible()
+    assert navigation.accessibleName() == "Settings categories"
+    assert navigation.currentItem().text() == "Processing"
+    saved_low_pass = Project.load(panel.project.project_root).preprocessing["low_pass"]
+    panel.preproc_edits[0].setText("40")
+
+    navigation.setFocus()
+    qtbot.waitUntil(navigation.hasFocus)
+    qtbot.keyClick(navigation, Qt.Key.Key_Down)
+
+    assert panel.tabs.currentIndex() == panel._protocol_tab_index
+    assert panel.settings_page_title.text() == "Protocol"
+    assert panel.has_unsaved_changes()
+    assert Project.load(panel.project.project_root).preprocessing["low_pass"] == saved_low_pass
+
+
 def test_settings_invalid_draft_can_navigate_and_save_locates_field(panel, qtbot, monkeypatch):
     messages = []
     monkeypatch.setattr(QMessageBox, "warning", lambda *args: messages.append(args))
@@ -76,6 +94,7 @@ def test_settings_invalid_draft_can_navigate_and_save_locates_field(panel, qtbot
     assert not messages
     assert not panel.save_pending_changes()
     assert panel.tabs.currentIndex() == panel._preproc_tab_index
+    assert panel.settings_navigation.currentRow() == panel._preproc_tab_index
     qtbot.waitUntil(panel.preproc_edits[0].hasFocus)
     assert panel.preproc_error_labels[0].isVisible()
     assert panel.settings_validation_status.isVisible()
@@ -222,7 +241,11 @@ def test_partial_recalculation_keeps_unrelated_settings_draft(panel, monkeypatch
 def test_settings_tabs_and_actions_fit_supported_workspace(panel, qtbot, tab):
     panel.tabs.setCurrentIndex(tab)
     qtbot.wait(25)
-    assert panel.width() <= 1020 and panel.height() <= 790
+    _capture(panel, f"settings-tab-{tab}")
+    assert panel.width() <= 1020 and panel.height() <= 790, {
+        panel.tabs.tabText(index): panel.tabs.widget(index).minimumSizeHint().toTuple()
+        for index in range(panel.tabs.count())
+    }
     for name in ("settings_footer_save", "settings_footer_cancel"):
         button = panel.findChild(QPushButton, name)
         assert button is not None and button.isVisibleTo(panel), name
@@ -270,7 +293,6 @@ def test_settings_tabs_and_actions_fit_supported_workspace(panel, qtbot, tab):
         for ancestor in [*ancestors, panel]:
             bounds = QRect(widget.mapTo(ancestor, QPoint(0, 0)), widget.size())
             assert ancestor.rect().contains(bounds), (name, ancestor.objectName())
-    _capture(panel, f"settings-tab-{tab}")
 
 
 def test_preprocessing_keyboard_focus_can_leave_invalid_field(panel, qtbot):

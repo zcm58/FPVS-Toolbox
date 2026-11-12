@@ -10,11 +10,14 @@ from PySide6.QtWidgets import QApplication, QStyleFactory, QWidget
 
 from Main_App.gui.style_tokens import (
     ACCENT_COLOR,
-    BORDER_COLOR,
+    ACCENT_SOFT_BG,
+    ACCENT_TINT,
     BORDER_SOFT_COLOR,
     CONTENT_BG,
+    CONTROL_BORDER,
     CORNER_RADIUS,
     DANGER_COLOR,
+    FOCUS_COLOR,
     LOG_BG,
     PAGE_BG,
     SURFACE_ALT_BG,
@@ -163,7 +166,7 @@ def build_fpvs_app_stylesheet() -> str:
         QTextEdit,
         QPlainTextEdit,
         QProgressBar {{
-            border: 1px solid {BORDER_COLOR};
+            border: 1px solid {CONTROL_BORDER};
             border-radius: 8px;
             padding: 6px 10px;
             background: {SURFACE_BG};
@@ -176,7 +179,7 @@ def build_fpvs_app_stylesheet() -> str:
         QDoubleSpinBox:focus,
         QTextEdit:focus,
         QPlainTextEdit:focus {{
-            border-color: {ACCENT_COLOR};
+            border-color: {FOCUS_COLOR};
         }}
 
         QLineEdit:read-only {{
@@ -189,7 +192,7 @@ def build_fpvs_app_stylesheet() -> str:
         QDoubleSpinBox:disabled,
         QTextEdit:disabled,
         QPlainTextEdit:disabled {{
-            background: #F1F3F6;
+            background: {PAGE_BG};
             color: {TEXT_MUTED};
         }}
 
@@ -220,9 +223,38 @@ def build_fpvs_app_stylesheet() -> str:
         }}
 
         QTabBar::tab:selected {{
-            background: {SURFACE_BG};
+            background: {ACCENT_SOFT_BG};
             color: {TEXT_PRIMARY};
             font-weight: {css_font_weight("tab_selected")};
+        }}
+
+        QTabBar::tab:selected:focus {{
+            border-color: {FOCUS_COLOR};
+        }}
+
+        QListWidget#settings_navigation {{
+            background: {PAGE_BG};
+            border: none;
+        }}
+
+        QListWidget#settings_navigation::item {{
+            padding: 6px 9px;
+            border: 1px solid transparent;
+            border-radius: 6px;
+        }}
+
+        QListWidget#settings_navigation::item:hover {{
+            background: {ACCENT_TINT};
+        }}
+
+        QListWidget#settings_navigation::item:selected {{
+            background: {ACCENT_SOFT_BG};
+            border-color: {ACCENT_COLOR};
+            color: {TEXT_PRIMARY};
+        }}
+
+        QListWidget#settings_navigation::item:focus {{
+            border-color: {FOCUS_COLOR};
         }}
 
         QTextEdit[logSurface="true"],
@@ -240,29 +272,30 @@ def apply_fusion_light_palette(app: QApplication) -> None:
     palette = app.palette()
 
     # Core surfaces
-    palette.setColor(QPalette.Window, QColor("white"))
-    palette.setColor(QPalette.Base, QColor("white"))
-    palette.setColor(QPalette.AlternateBase, QColor(245, 245, 245))
+    palette.setColor(QPalette.Window, QColor(PAGE_BG))
+    palette.setColor(QPalette.Base, QColor(SURFACE_BG))
+    palette.setColor(QPalette.AlternateBase, QColor(SURFACE_ALT_BG))
 
     # Text / foregrounds
-    palette.setColor(QPalette.Text, QColor("black"))
-    palette.setColor(QPalette.WindowText, QColor("black"))
-    palette.setColor(QPalette.ButtonText, QColor("black"))
+    palette.setColor(QPalette.Text, QColor(TEXT_PRIMARY))
+    palette.setColor(QPalette.WindowText, QColor(TEXT_PRIMARY))
+    palette.setColor(QPalette.ButtonText, QColor(TEXT_PRIMARY))
 
     # Buttons / controls
-    palette.setColor(QPalette.Button, QColor(240, 240, 240))
+    palette.setColor(QPalette.Button, QColor(SURFACE_BG))
 
     # Tooltips
     palette.setColor(QPalette.ToolTipBase, QColor(255, 255, 220))
-    palette.setColor(QPalette.ToolTipText, QColor("black"))
+    palette.setColor(QPalette.ToolTipText, QColor(TEXT_PRIMARY))
 
     # Selection / accents
-    palette.setColor(QPalette.Highlight, QColor(0, 120, 215))
-    palette.setColor(QPalette.HighlightedText, QColor("white"))
+    palette.setColor(QPalette.Highlight, QColor(ACCENT_SOFT_BG))
+    palette.setColor(QPalette.HighlightedText, QColor(TEXT_PRIMARY))
+    palette.setColor(QPalette.Link, QColor(ACCENT_COLOR))
 
     # Disabled state readability
-    palette.setColor(QPalette.Disabled, QPalette.Text, QColor(128, 128, 128))
-    palette.setColor(QPalette.Disabled, QPalette.ButtonText, QColor(128, 128, 128))
+    palette.setColor(QPalette.Disabled, QPalette.Text, QColor(TEXT_MUTED))
+    palette.setColor(QPalette.Disabled, QPalette.ButtonText, QColor(TEXT_MUTED))
 
     app.setPalette(palette)
 

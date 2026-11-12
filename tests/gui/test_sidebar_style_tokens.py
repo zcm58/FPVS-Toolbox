@@ -19,7 +19,15 @@ from Main_App.gui.sidebar import (
     SELECTION_BAR_WIDTH,
     TEXT_BOX_PX,
 )
-from Main_App.gui.style_tokens import SIDEBAR_WIDTH, build_header_bar_stylesheet, build_sidebar_stylesheet
+from Main_App.gui.style_tokens import (
+    CONTROL_BORDER,
+    FOCUS_COLOR,
+    HEADER_BG,
+    SIDEBAR_WIDTH,
+    SIGNAL_COLOR,
+    build_header_bar_stylesheet,
+    build_sidebar_stylesheet,
+)
 from Main_App.gui.typography import css_font_size, css_font_weight
 
 
@@ -81,6 +89,17 @@ def test_header_bar_uses_project_title_typography() -> None:
     assert "#HeaderBar QLabel" in stylesheet
     assert f"font-size: {css_font_size('project_title')};" in stylesheet
     assert f"font-weight: {css_font_weight('project_title')};" in stylesheet
+
+
+def test_focus_and_selection_use_surface_specific_palette_roles() -> None:
+    sidebar = build_sidebar_stylesheet()
+    assert f"background-color: {HEADER_BG};" in sidebar
+    assert f"border-color: {SIGNAL_COLOR};" in sidebar
+    assert f"background-color: {SIGNAL_COLOR};" in sidebar
+
+    light = theme.build_fpvs_app_stylesheet()
+    assert f"border: 1px solid {CONTROL_BORDER};" in light
+    assert f"border-color: {FOCUS_COLOR};" in light
 
 
 def test_sidebar_icon_and_text_sizing_match_larger_sidebar_style() -> None:

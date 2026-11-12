@@ -28,6 +28,7 @@ from Main_App.gui.menu_bar import build_menu_bar
 from Main_App.gui.processing_log_dialog import ProcessingLogDialog
 from Main_App.gui.processing_history_label import ProcessingHistoryLabel
 from Main_App.gui.run_outcome import build_last_run_panel
+from Main_App.gui.shell_status import PROCESSING_ACTIVITY_MESSAGE
 from .style_tokens import (
     BROWSE_BUTTON_WIDTH,
     EVENT_ID_COLUMN_WIDTH,
@@ -227,7 +228,7 @@ def init_ui(self) -> None:
 
     self.le_input_file = QLineEdit(self.row_single_file)
     self.le_input_file.setReadOnly(True)
-    self.le_input_file.setPlaceholderText("Select one EEG recording for single-file mode")
+    self.le_input_file.setPlaceholderText("No recording selected")
 
     self.btn_select_input_file = make_action_button(
         "Select EEG File...",
@@ -240,6 +241,7 @@ def init_ui(self) -> None:
     single_hl.addWidget(self.btn_select_input_file, 0)
 
     form.addRow(self.lbl_single_file, self.row_single_file)
+    self.lbl_single_file.setBuddy(self.le_input_file)
 
     self.lbl_input_folder = QLabel("Data Folder", grp_proc)
     self.row_input_folder = QWidget(grp_proc)
@@ -250,7 +252,7 @@ def init_ui(self) -> None:
 
     self.le_input_folder = QLineEdit(self.row_input_folder)
     self.le_input_folder.setReadOnly(True)
-    self.le_input_folder.setPlaceholderText("Select the project data folder for batch mode")
+    self.le_input_folder.setPlaceholderText("No folder selected")
 
     self.btn_select_input_folder = make_action_button(
         "Select Data Folder...",
@@ -263,6 +265,7 @@ def init_ui(self) -> None:
     folder_hl.addWidget(self.btn_select_input_folder, 0)
 
     form.addRow(self.lbl_input_folder, self.row_input_folder)
+    self.lbl_input_folder.setBuddy(self.le_input_folder)
     proc_layout.addLayout(form)
 
     self.mode_group = QButtonGroup(self)
@@ -453,8 +456,7 @@ def init_ui(self) -> None:
     processing_intro_layout.addWidget(self.processing_step_label)
 
     self.processing_message_label = QLabel(
-        "Data processing has begun. Please be patient; your device may become "
-        "temporarily slow or unresponsive during processing.",
+        PROCESSING_ACTIVITY_MESSAGE,
         processing_intro,
     )
     self.processing_message_label.setObjectName("processing_message")

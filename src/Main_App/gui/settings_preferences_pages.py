@@ -7,6 +7,7 @@ The dialog retains draft validation, persistence, and background-work ownership.
 from __future__ import annotations
 
 from typing import Callable
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -16,6 +17,7 @@ from PySide6.QtWidgets import (
     QCheckBox,
 )
 from Main_App.gui.components import (
+    ActionRow,
     SectionCard,
     SubsectionHeaderLabel,
     make_action_button,
@@ -38,54 +40,46 @@ def build_application_page(
     layout = QVBoxLayout(tab)
     layout.setContentsMargins(12, 12, 12, 12)
     layout.setSpacing(10)
-    self._add_settings_scope(layout, "Application preferences apply across projects.")
-
-    advanced_group = SectionCard(
-        "Application Options",
+    projects_group = SectionCard(
+        "Projects and cache",
         tab,
         object_name="settings_advanced_application_card",
     )
-    advanced_form = make_form_layout()
-
-    debug_default = self.manager.get("debug", "enabled", "False").lower() == "true"
-    self.debug_check = QCheckBox("Enable debug logging", advanced_group)
-    self.debug_check.setObjectName("settings_enable_debug")
-    self.debug_check.setChecked(debug_default)
-    self.debug_check.setToolTip("Enabling debug logging requires closing and reopening FPVS Toolbox.")
-    advanced_form.addRow(QLabel("Diagnostics", advanced_group), self.debug_check)
-
-    self.btn_changeRoot = make_action_button("Change Projects Root...", parent=advanced_group)
+    actions = ActionRow(projects_group, alignment=Qt.AlignLeft)
+    self.btn_changeRoot = make_action_button("Change Projects Folder…", parent=actions)
     self.btn_changeRoot.setObjectName("settings_advanced_footer_change_root")
     self.btn_changeRoot.clicked.connect(change_projects_root)
-    advanced_form.addRow(QLabel("Project storage", advanced_group), self.btn_changeRoot)
+    actions.add_button(self.btn_changeRoot)
     self._settings_footer_buttons.append(self.btn_changeRoot)
 
     self.clear_toolbox_cache_button = make_action_button(
-        "Clear Toolbox Cache…", compact=True, parent=advanced_group,
+        "Clear Toolbox Cache…", parent=actions,
     )
     self.clear_toolbox_cache_button.setObjectName("settings_clear_toolbox_cache")
     self.clear_toolbox_cache_button.clicked.connect(self._clear_toolbox_cache)
-    advanced_form.addRow(QLabel("Temporary files", advanced_group), self.clear_toolbox_cache_button)
-    cache_note = QLabel(
-        "Keep recordings and results. The next calculations may take longer.",
-        advanced_group,
-    )
-    cache_note.setWordWrap(True)
-    advanced_form.addRow(cache_note)
-
-    advanced_group.content_layout.addLayout(advanced_form)
-    layout.addWidget(advanced_group)
+    actions.add_button(self.clear_toolbox_cache_button)
+    actions.row_layout.addStretch(1)
+    projects_group.content_layout.addWidget(actions)
+    layout.addWidget(projects_group)
 
     analysis_group = SectionCard(
         "Analysis Defaults", tab, object_name="settings_stats_analysis_card",
     )
     analysis_form = make_form_layout()
     self.alpha_edit = QLineEdit(self.manager.get("analysis", "alpha", "0.05"))
-    alpha_label = QLabel("ANOVA alpha value:", analysis_group)
+    alpha_label = QLabel("ANOVA alpha", analysis_group)
     alpha_label.setBuddy(self.alpha_edit)
     analysis_form.addRow(alpha_label, self.alpha_edit)
     analysis_group.content_layout.addLayout(analysis_form)
     layout.addWidget(analysis_group)
+
+    diagnostics_group = SectionCard("Diagnostics", tab)
+    self.debug_check = QCheckBox("Enable debug logging", diagnostics_group)
+    self.debug_check.setObjectName("settings_enable_debug")
+    self.debug_check.setChecked(self.manager.get("debug", "enabled", "False").lower() == "true")
+    self.debug_check.setToolTip("Restart FPVS Toolbox after changing debug logging.")
+    diagnostics_group.content_layout.addWidget(self.debug_check)
+    layout.addWidget(diagnostics_group)
     layout.addStretch(1)
     tabs.addTab(tab, "Application")
 

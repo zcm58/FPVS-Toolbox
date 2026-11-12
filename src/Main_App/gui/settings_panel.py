@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QHBoxLayout,
     QDialog,
+    QListWidget,
     QTabWidget,
     QGridLayout,
     QMessageBox,
@@ -40,6 +41,7 @@ from Main_App.processing.roi_presets import (
 from Main_App.gui.components import (
     ActionRow,
     StatusBanner,
+    SubsectionHeaderLabel,
     make_action_button,
     make_form_layout,
     show_tool_info,
@@ -330,7 +332,22 @@ class SettingsDialog(QDialog):
             "QTabWidget#settings_experimental_sections::pane {"
             " border: none; background: transparent; }"
         )
-        layout.addWidget(self.tabs, 1)
+        self.settings_navigation = QListWidget(self)
+        self.settings_navigation.setObjectName("settings_navigation")
+        self.settings_navigation.setAccessibleName("Settings categories")
+        self.settings_navigation.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.settings_page_title = SubsectionHeaderLabel("", self)
+        body = QGridLayout()
+        body.setContentsMargins(0, 0, 0, 0)
+        body.setHorizontalSpacing(12)
+        body.setVerticalSpacing(8)
+        body.addWidget(SubsectionHeaderLabel("Settings", self), 0, 0)
+        body.addWidget(self.settings_page_title, 0, 1)
+        body.addWidget(self.settings_navigation, 1, 0)
+        body.addWidget(self.tabs, 1, 1)
+        body.setColumnStretch(1, 1)
+        body.setRowStretch(1, 1)
+        layout.addLayout(body, 1)
 
         self.settings_validation_status = StatusBanner("", self, variant="warning")
         self.settings_validation_status.setObjectName("settings_validation_status")
@@ -349,6 +366,14 @@ class SettingsDialog(QDialog):
         experimental_tab = self._init_experimental_tab(self.tabs)
         self._experimental_tab_index = self.tabs.indexOf(experimental_tab)
         self._init_application_tab(self.tabs)
+        self.tabs.tabBar().hide()
+        self.settings_navigation.addItems(
+            [self.tabs.tabText(index) for index in range(self.tabs.count())]
+        )
+        self.settings_navigation.setFixedWidth(
+            max(144, self.settings_navigation.sizeHintForColumn(0) + 24)
+        )
+        self.settings_navigation.currentRowChanged.connect(self.tabs.setCurrentIndex)
         self._add_settings_footer(layout)
         self._initial_protocol_editor_values = self._protocol_editor_values()
         self._initial_harmonic_settings_signature = (
@@ -365,6 +390,7 @@ class SettingsDialog(QDialog):
         self._last_tab_index = self.tabs.currentIndex()
         self._tab_change_guard = False
         self.tabs.currentChanged.connect(self._on_tab_changed)
+        self._on_tab_changed(self.tabs.currentIndex())
 
     def _add_settings_footer(
         self,
@@ -375,10 +401,6 @@ class SettingsDialog(QDialog):
         footer_layout = QHBoxLayout(footer)
         footer_layout.setContentsMargins(0, 0, 0, 0)
         footer_layout.setSpacing(8)
-        note = QLabel("Save applies changes across all settings pages.", footer)
-        note.setWordWrap(True)
-        footer_layout.addWidget(note, 1)
-
         actions = ActionRow(footer, alignment=Qt.AlignRight)
         actions.setObjectName("settings_footer_actions")
         save_btn = make_action_button("Save", variant="primary", parent=actions)
@@ -389,7 +411,7 @@ class SettingsDialog(QDialog):
         cancel_btn.clicked.connect(self.reject)
         actions.add_button(save_btn)
         actions.add_button(cancel_btn)
-        footer_layout.addWidget(actions)
+        footer_layout.addWidget(actions, 1)
         self._settings_footer_buttons.extend((save_btn, cancel_btn))
 
         layout.addWidget(footer)
@@ -2444,6 +2466,8 @@ class SettingsDialog(QDialog):
     def _on_tab_changed(self, index: int) -> None:
         # Drafts may be incomplete while the user edits related fields/tabs.
         self._last_tab_index = index
+        self.settings_navigation.setCurrentRow(index)
+        self.settings_page_title.setText(self.tabs.tabText(index))
 
     # ------------------------------------------------------------------
     def _focus_invalid_preproc_field(self, message: str) -> None:

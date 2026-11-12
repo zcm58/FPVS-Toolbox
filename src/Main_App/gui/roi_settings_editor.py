@@ -177,7 +177,7 @@ class ROISettingsEditor(QWidget):
             self.show_status(
                 f"Clearing {entry.display_name} will remove its legacy / unmapped labels: "
                 + ", ".join(unmapped)
-                + ". Activate Clear Active ROI again to confirm.",
+                + f". Activate {self.clear_button.text()} again to confirm.",
                 "warning",
             )
             return "confirmation_required"

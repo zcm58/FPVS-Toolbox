@@ -27,7 +27,7 @@ class StatsWindowActionsMixin:
         )
         if hasattr(self, "file_input_label"):
             self.file_input_label.setText(
-                "Full-audit workbook:" if repeated else "Excel Files Folder:"
+                "Full-audit workbook:" if repeated else "Processed Excel folder:"
             )
         if hasattr(self, "browse_folder_btn"):
             self.browse_folder_btn.setEnabled(not repeated)

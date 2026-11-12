@@ -81,6 +81,10 @@ class RecordingExclusionsDialog(AppDialog):
         for row, recording in enumerate(self._recordings):
             previous = existing.get(recording.recording_id.casefold())
             include = QTableWidgetItem("")
+            include.setData(
+                Qt.ItemDataRole.AccessibleTextRole,
+                f"Exclude recording {recording.recording_id}",
+            )
             include.setFlags(
                 (include.flags() | Qt.ItemIsUserCheckable) & ~Qt.ItemIsEditable
             )

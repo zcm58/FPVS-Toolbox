@@ -1405,10 +1405,21 @@ def open_existing_project(self, parent: QWidget | None = None) -> None:
             extra={"op": "open_existing_project", "path": str(root)},
         )
         if not metadata:
+            stacked = getattr(self, "stacked", None)
+            if (
+                stacked is not None
+                and stacked.currentWidget() is getattr(self, "landing_page", None)
+            ):
+                recovery = "Choose New Project to create one."
+            else:
+                recovery = (
+                    "Create a project from File > New Project… or use "
+                    "Settings > Application > Change Projects Folder… to look in another folder."
+                )
             QMessageBox.information(
                 parent,
                 "No Projects Found",
-                f"No projects found under {root}.",
+                f"No projects found in this folder.\n{root}\n\n{recovery}",
             )
             logger.debug(
                 "No projects discovered under %s.",

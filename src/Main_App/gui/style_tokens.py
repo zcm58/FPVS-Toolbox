@@ -4,12 +4,15 @@ from __future__ import annotations
 
 from Main_App.gui.typography import css_font_size, css_font_weight
 
-ACCENT_COLOR = "#0F6CBD"
-ACCENT_COLOR_HOVER = "#0D5F9D"
-ACCENT_COLOR_PRESSED = "#0A4978"
-ACCENT_SOFT_BG = "#EAF2FB"
-ACCENT_SOFT_BORDER = "#C8DCF4"
-ACCENT_TINT = "#E3EEF9"
+ACCENT_COLOR = "#00646C"
+ACCENT_COLOR_HOVER = "#00535B"
+ACCENT_COLOR_PRESSED = "#00484F"
+ACCENT_SOFT_BG = "#DDEEF0"
+ACCENT_SOFT_BORDER = "#B9D5D9"
+ACCENT_TINT = "#E8F3F4"
+FOCUS_COLOR = "#805C23"
+SIGNAL_COLOR = "#25B8C4"
+PROGRESS_FILL = "#469DA3"
 DANGER_COLOR = "#B42318"
 DANGER_COLOR_HOVER = "#912018"
 DANGER_SOFT_BG = "#FEEDEB"
@@ -19,29 +22,30 @@ SUCCESS_SOFT_BORDER = "#BFE5CB"
 WARNING_SOFT_BG = "#FFF5D6"
 WARNING_SOFT_BORDER = "#E7D184"
 
-PAGE_BG = "#F3F5F8"
-CONTENT_BG = "#F6F8FB"
+PAGE_BG = "#F3F6F8"
+CONTENT_BG = PAGE_BG
 SURFACE_BG = "#FFFFFF"
-SURFACE_ALT_BG = "#FCFDFE"
-LOG_PANEL_BG = "#F4F7FA"
-LOG_BG = "#EEF2F6"
-LANDING_CARD_BG = "#FBFCFE"
-LANDING_CARD_BORDER = "#D9E3EE"
+SURFACE_ALT_BG = PAGE_BG
+LOG_PANEL_BG = PAGE_BG
+LOG_BG = "#EAF0F3"
+LANDING_CARD_BG = SURFACE_BG
 
-BORDER_COLOR = "#D7DEE8"
-BORDER_SOFT_COLOR = "#E4EAF2"
-TEXT_PRIMARY = "#1F2328"
-TEXT_SECONDARY = "#576171"
-TEXT_MUTED = "#7A8391"
+BORDER_COLOR = "#CBD9DE"
+BORDER_SOFT_COLOR = BORDER_COLOR
+LANDING_CARD_BORDER = BORDER_COLOR
+CONTROL_BORDER = "#6A7C87"
+TEXT_PRIMARY = "#1D2A34"
+TEXT_SECONDARY = "#4D626D"
+TEXT_MUTED = TEXT_SECONDARY
 
-HEADER_BG = "#232A33"
+HEADER_BG = "#222F3B"
 INFO_BG = "#F1F6FC"
 INFO_BORDER = "#D5E2F0"
 
-SIDEBAR_BG = "#1F242B"
-SIDEBAR_BORDER = "#2C333D"
-SIDEBAR_ITEM_HOVER = "#29323A"
-SIDEBAR_ITEM_ACTIVE = "#26323D"
+SIDEBAR_BG = HEADER_BG
+SIDEBAR_BORDER = "#364754"
+SIDEBAR_ITEM_HOVER = "#2C3D49"
+SIDEBAR_ITEM_ACTIVE = "#2A4350"
 
 PAGE_MARGIN = 22
 SECTION_PADDING = 15
@@ -100,11 +104,12 @@ def build_progress_bar_stylesheet() -> str:
     return f"""
         QProgressBar {{
             text-align: center;
-            background: #EBEEF3;
+            background: {SURFACE_BG};
+            color: {TEXT_PRIMARY};
         }}
 
         QProgressBar::chunk {{
-            background-color: {ACCENT_COLOR};
+            background-color: {PROGRESS_FILL};
             border-radius: 7px;
         }}
     """
@@ -116,7 +121,7 @@ def build_action_button_stylesheet() -> str:
     return f"""
         QPushButton,
         QToolButton {{
-            border: 1px solid {BORDER_COLOR};
+            border: 1px solid {CONTROL_BORDER};
             border-radius: 8px;
             padding: 7px 12px;
             background: {SURFACE_BG};
@@ -126,17 +131,17 @@ def build_action_button_stylesheet() -> str:
         QPushButton:hover,
         QToolButton:hover {{
             background: {ACCENT_SOFT_BG};
-            border-color: {ACCENT_SOFT_BORDER};
+            border-color: {ACCENT_COLOR};
         }}
 
         QPushButton:pressed,
         QToolButton:pressed {{
-            background: #DDEAF7;
+            background: {ACCENT_SOFT_BG};
         }}
 
         QPushButton:disabled,
         QToolButton:disabled {{
-            background: #F1F3F6;
+            background: {PAGE_BG};
             border-color: {BORDER_COLOR};
             color: {TEXT_MUTED};
         }}
@@ -182,22 +187,22 @@ def build_action_button_stylesheet() -> str:
 
         QPushButton[primary="true"]:disabled,
         QPushButton[variant="primary"]:disabled {{
-            background: #BFD5EE;
-            border-color: #BFD5EE;
-            color: white;
+            background: {ACCENT_SOFT_BG};
+            border-color: {ACCENT_SOFT_BORDER};
+            color: {TEXT_MUTED};
         }}
 
         QPushButton[secondary="true"],
         QPushButton[variant="secondary"] {{
             background: {SURFACE_ALT_BG};
-            border-color: {BORDER_SOFT_COLOR};
+            border-color: {CONTROL_BORDER};
             color: {TEXT_SECONDARY};
         }}
 
         QPushButton[secondary="true"]:hover,
         QPushButton[variant="secondary"]:hover {{
-            background: #F2F6FA;
-            border-color: {BORDER_COLOR};
+            background: {ACCENT_TINT};
+            border-color: {ACCENT_COLOR};
             color: {TEXT_PRIMARY};
         }}
 
@@ -219,7 +224,7 @@ def build_action_button_stylesheet() -> str:
 
         QPushButton[tertiary="true"]:pressed,
         QPushButton[variant="tertiary"]:pressed {{
-            background: #D7E7F8;
+            background: {ACCENT_SOFT_BG};
         }}
 
         QPushButton[variant="danger"] {{
@@ -237,7 +242,12 @@ def build_action_button_stylesheet() -> str:
         QPushButton[variant="danger"]:disabled {{
             background: {DANGER_SOFT_BORDER};
             border-color: {DANGER_SOFT_BORDER};
-            color: white;
+            color: {DANGER_COLOR};
+        }}
+
+        QPushButton:focus:enabled,
+        QToolButton:focus:enabled {{
+            border-color: {FOCUS_COLOR};
         }}
     """
 
@@ -325,7 +335,7 @@ def build_main_page_stylesheet() -> str:
         QLineEdit,
         QTextEdit,
         QProgressBar {{
-            border: 1px solid {BORDER_COLOR};
+            border: 1px solid {CONTROL_BORDER};
             border-radius: 8px;
             padding: 6px 10px;
             background: {SURFACE_BG};
@@ -334,12 +344,12 @@ def build_main_page_stylesheet() -> str:
 
         QLineEdit:focus,
         QTextEdit:focus {{
-            border-color: {ACCENT_COLOR};
+            border-color: {FOCUS_COLOR};
         }}
 
         QLineEdit:disabled,
         QTextEdit:disabled {{
-            background: #F1F3F6;
+            background: {PAGE_BG};
             color: {TEXT_MUTED};
         }}
 
@@ -483,7 +493,7 @@ def build_sidebar_stylesheet() -> str:
         }}
 
         #SidebarButton:focus {{
-            border-color: rgba(255, 255, 255, 0.12);
+            border-color: {SIGNAL_COLOR};
         }}
 
         #SidebarButton QLabel {{
@@ -507,7 +517,7 @@ def build_sidebar_stylesheet() -> str:
         }}
 
         #SidebarButton[processingLocked="true"][selected="true"] {{
-            background-color: rgba(38, 50, 61, 0.65);
+            background-color: {SIDEBAR_ITEM_ACTIVE};
         }}
 
         #SidebarSelectionBar {{
@@ -516,7 +526,7 @@ def build_sidebar_stylesheet() -> str:
         }}
 
         #SidebarSelectionBar[active="true"] {{
-            background-color: {ACCENT_COLOR};
+            background-color: {SIGNAL_COLOR};
             border-radius: 2px;
         }}
 
@@ -533,7 +543,7 @@ def build_header_bar_stylesheet() -> str:
     return f"""
         #HeaderBar {{
             background-color: {HEADER_BG};
-            border-bottom: 1px solid {ACCENT_COLOR};
+            border-bottom: 1px solid {SIGNAL_COLOR};
         }}
 
         #HeaderBar QLabel {{
@@ -573,7 +583,7 @@ def build_landing_page_stylesheet() -> str:
 
         QPushButton[landingAction="true"] {{
             background: {SURFACE_BG};
-            border: 1px solid {BORDER_COLOR};
+            border: 1px solid {CONTROL_BORDER};
             border-radius: 8px;
             color: {TEXT_PRIMARY};
             font-size: {css_font_size("landing_action")};
@@ -582,15 +592,11 @@ def build_landing_page_stylesheet() -> str:
 
         QPushButton[landingAction="true"]:hover {{
             background: {ACCENT_SOFT_BG};
-            border-color: {ACCENT_SOFT_BORDER};
+            border-color: {ACCENT_COLOR};
         }}
 
         QPushButton[landingAction="true"]:pressed {{
-            background: #DDEAF7;
-        }}
-
-        QPushButton[landingAction="true"]:focus {{
-            border-color: {ACCENT_SOFT_BORDER};
+            background: {ACCENT_SOFT_BG};
         }}
 
         QPushButton[landingAction="true"][variant="primary"] {{
@@ -611,7 +617,11 @@ def build_landing_page_stylesheet() -> str:
 
         QPushButton[landingAction="true"][variant="secondary"] {{
             background: {SURFACE_BG};
-            border-color: {BORDER_COLOR};
+            border-color: {CONTROL_BORDER};
             color: {TEXT_PRIMARY};
+        }}
+
+        QPushButton[landingAction="true"]:focus:enabled {{
+            border-color: {FOCUS_COLOR};
         }}
     """

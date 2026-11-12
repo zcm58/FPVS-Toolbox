@@ -698,17 +698,17 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
     assert "Preprocessing Parameters" in cards
     assert "Project FPVS Protocol" in cards
     assert "Harmonic Selection and Summation" in cards
-    assert "Application Options" in cards
+    assert "Projects and cache" in cards
     assert "Processing QC" in cards
     assert "Experimental Removed-Electrode Detection" in cards
     assert "Experimental Summed-BCA Screening" in cards
-    assert "Diagnostics" not in cards
+    assert "Diagnostics" in cards
     assert "Tool Visibility" not in cards
     assert "Analysis Defaults" in cards
     assert "Quick Add" not in cards
     assert "Regions of Interest" not in cards
     assert [dlg.tabs.tabText(i) for i in range(dlg.tabs.count())] == [
-        "Preprocessing",
+        "Processing",
         "Protocol",
         "Harmonics",
         "ROIs",
@@ -782,8 +782,8 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
     assert dlg.fixed_harmonic_freqs_edit.isEnabled() is False
     assert dlg.fixed_harmonic_upper_index_edit.isEnabled() is True
     assert dlg.fixed_harmonic_upper_frequency_edit.isEnabled() is False
-    assert cards["Application Options"].isAncestorOf(dlg.debug_check)
-    assert not cards["Application Options"].isAncestorOf(dlg.beta_tools_check)
+    assert cards["Diagnostics"].isAncestorOf(dlg.debug_check)
+    assert not cards["Diagnostics"].isAncestorOf(dlg.beta_tools_check)
     detector_card = cards["Experimental Removed-Electrode Detection"]
     summed_bca_card = cards["Experimental Summed-BCA Screening"]
     assert detector_card.isAncestorOf(dlg.auto_detect_removed_electrodes_check)
@@ -873,18 +873,19 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
     application_tab = dlg.tabs.widget(application_tab_index)
     quality_control_tab = dlg.tabs.widget(quality_control_tab_index)
     experimental_tab = dlg.tabs.widget(experimental_tab_index)
-    assert not preproc_tab.isAncestorOf(cards["Application Options"])
+    assert not preproc_tab.isAncestorOf(cards["Projects and cache"])
     assert not preproc_tab.isAncestorOf(cards["Harmonic Selection and Summation"])
     assert not preproc_tab.isAncestorOf(dlg.experimental_ram_preload_check)
     assert protocol_tab.isAncestorOf(cards["Project FPVS Protocol"])
     assert protocol_tab.objectName() == "settings_protocol_tab"
     assert harmonics_tab.isAncestorOf(cards["Harmonic Selection and Summation"])
     assert harmonics_tab.objectName() == "settings_harmonics_tab"
-    assert application_tab.isAncestorOf(cards["Application Options"])
+    assert application_tab.isAncestorOf(cards["Projects and cache"])
+    assert application_tab.isAncestorOf(cards["Diagnostics"])
     assert application_tab.isAncestorOf(cards["Analysis Defaults"])
     assert application_tab.isAncestorOf(dlg.alpha_edit)
-    assert application_tab.isAncestorOf(dlg.btn_changeRoot)
-    assert application_tab.isAncestorOf(dlg.clear_toolbox_cache_button)
+    assert cards["Projects and cache"].isAncestorOf(dlg.btn_changeRoot)
+    assert cards["Projects and cache"].isAncestorOf(dlg.clear_toolbox_cache_button)
     assert quality_control_tab.isAncestorOf(cards["Processing QC"])
     assert quality_control_tab.isAncestorOf(dlg.frequency_domain_qc_thresholds_label)
     assert experimental_tab.isAncestorOf(detector_card)

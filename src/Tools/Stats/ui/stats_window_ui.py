@@ -680,7 +680,7 @@ class StatsWindowUiMixin:
         setup_layout.setContentsMargins(0, 0, 0, 0)
         setup_layout.setSpacing(8)
 
-        self.file_box = SectionCard("File I/O")
+        self.file_box = SectionCard("Input data")
         self.file_box.setObjectName("stats_file_io_section")
         self.file_box.setSizePolicy(
             QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
@@ -700,7 +700,7 @@ class StatsWindowUiMixin:
         file_grid.setContentsMargins(0, 0, 0, 0)
         file_grid.setHorizontalSpacing(10)
         file_grid.setVerticalSpacing(4)
-        self.file_input_label = QLabel("Excel Files Folder:")
+        self.file_input_label = QLabel("Processed Excel folder:")
         file_grid.addWidget(self.file_input_label, 0, 0)
         file_grid.addWidget(self.le_folder, 0, 1)
         file_grid.addWidget(folder_actions, 0, 2)
@@ -844,11 +844,7 @@ class StatsWindowUiMixin:
             0,
             Qt.AlignVCenter,
         )
-        self.stats_processing_message = QLabel(
-            "FPVS Toolbox is currently calculating an average FFT spectrum across "
-            "all electrodes and participants to determine which harmonics are "
-            "considered statistically significant. This could take a few minutes."
-        )
+        self.stats_processing_message = QLabel()
         self.stats_processing_message.setObjectName("stats_processing_message")
         self.stats_processing_message.setWordWrap(True)
         self.stats_processing_message.setSizePolicy(

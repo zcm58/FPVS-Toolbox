@@ -8,6 +8,15 @@ from PySide6.QtWidgets import QApplication, QWidget
 from Main_App.settings.settings_manager import SettingsManager
 from Main_App.settings.settings_paths import app_settings_file
 from Main_App.gui import update_manager
+from Main_App.gui.style_tokens import (
+    ACCENT_COLOR,
+    ACCENT_SOFT_BG,
+    PAGE_BG,
+    SURFACE_ALT_BG,
+    SURFACE_BG,
+    TEXT_MUTED,
+    TEXT_PRIMARY,
+)
 from Main_App.gui.theme import apply_light_palette
 
 
@@ -72,20 +81,14 @@ def test_apply_light_palette_sets_deterministic_light_theme(qtbot) -> None:
     apply_light_palette(app)
     pal = app.palette()
 
-    # Core surfaces: light backgrounds
-    assert pal.color(QPalette.Window) == QColor("white")
-    assert pal.color(QPalette.Base) == QColor("white")
-    assert pal.color(QPalette.AlternateBase) == QColor(245, 245, 245)
-
-    # Text: dark on light
-    assert pal.color(QPalette.Text) == QColor("black")
-    assert pal.color(QPalette.WindowText) == QColor("black")
-    assert pal.color(QPalette.ButtonText) == QColor("black")
-
-    # Highlight: fixed accent color with white highlighted text
-    assert pal.color(QPalette.Highlight) == QColor(0, 120, 215)
-    assert pal.color(QPalette.HighlightedText) == QColor("white")
-
-    # Disabled text should be gray, not pure black/white
-    assert pal.color(QPalette.Disabled, QPalette.Text) == QColor(128, 128, 128)
-    assert pal.color(QPalette.Disabled, QPalette.ButtonText) == QColor(128, 128, 128)
+    assert pal.color(QPalette.Window) == QColor(PAGE_BG)
+    assert pal.color(QPalette.Base) == QColor(SURFACE_BG)
+    assert pal.color(QPalette.AlternateBase) == QColor(SURFACE_ALT_BG)
+    assert pal.color(QPalette.Text) == QColor(TEXT_PRIMARY)
+    assert pal.color(QPalette.WindowText) == QColor(TEXT_PRIMARY)
+    assert pal.color(QPalette.ButtonText) == QColor(TEXT_PRIMARY)
+    assert pal.color(QPalette.Highlight) == QColor(ACCENT_SOFT_BG)
+    assert pal.color(QPalette.HighlightedText) == QColor(TEXT_PRIMARY)
+    assert pal.color(QPalette.Link) == QColor(ACCENT_COLOR)
+    assert pal.color(QPalette.Disabled, QPalette.Text) == QColor(TEXT_MUTED)
+    assert pal.color(QPalette.Disabled, QPalette.ButtonText) == QColor(TEXT_MUTED)

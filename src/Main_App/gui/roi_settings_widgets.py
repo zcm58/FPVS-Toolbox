@@ -35,21 +35,19 @@ class ROIEditorSidePanel(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("settings_rois_list_pane")
-        self.setMinimumWidth(300)
         self.setMaximumWidth(390)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 0, 0, 0)
         layout.setSpacing(6)
 
         list_header = QWidget(self)
-        list_header_layout = QHBoxLayout(list_header)
+        list_header_layout = QVBoxLayout(list_header)
         list_header_layout.setContentsMargins(0, 0, 0, 0)
-        list_header_layout.setSpacing(8)
+        list_header_layout.setSpacing(4)
         list_header_layout.addWidget(SubsectionHeaderLabel("Regions of interest", list_header))
-        list_header_layout.addStretch(1)
-        self.add_button = make_action_button("+ New ROI", compact=True, parent=list_header)
+        self.add_button = make_action_button("New ROI", compact=True, parent=list_header)
         self.add_button.setObjectName("settings_rois_add_roi")
-        list_header_layout.addWidget(self.add_button)
+        list_header_layout.addWidget(self.add_button, alignment=Qt.AlignLeft)
         layout.addWidget(list_header)
 
         self.roi_list = QListWidget(self)
@@ -69,7 +67,7 @@ class ROIEditorSidePanel(QWidget):
         list_actions.setSpacing(8)
         list_actions.addStretch(1)
         self.clear_button = make_action_button(
-            "Clear Active ROI",
+            "Clear ROI",
             variant="secondary",
             compact=True,
             parent=self,

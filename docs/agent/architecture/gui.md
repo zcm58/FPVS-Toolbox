@@ -327,13 +327,14 @@ separates File/View/Tools from the project header. Toggle Debug Mode, Save and
 return Home; only the menu-row indicator should change. Repeat at 1280x900 and
 Windows 150% scaling. Registered logo/layout coverage remains CI-only locally.
 
-The Settings page has seven tabs: **Processing**, **Protocol**, **Harmonics**,
+The Settings category list opens seven pages: **Processing**, **Protocol**, **Harmonics**,
 **ROIs**, **Quality Control**, **Experimental**, and **Application**. The first
 four contain project processing values, the presentation/oddball protocol,
 harmonic selection/summation, and ROI definitions respectively. Quality Control
 contains Dataset Exclusions and read-only frequency-domain QC thresholds.
-Application groups the Stats alpha under **Analysis Defaults**, plus Debug Mode,
-cache controls and **Change Projects Root...**. Experimental separates
+Application groups **Change Projects Folder…** and cache controls under
+**Projects and cache**, the Stats alpha under **Analysis Defaults**, and debug
+logging under **Diagnostics**. Experimental separates
 **Preprocessing QC**, **Post-processing QC**, **Performance** and **Beta Tools**.
 Preprocessing QC has flat **Signals**, **Electrodes** and **Raw-Spectral Review**
 pages. Signals groups raw signal checks and kurtosis screening with its dependent
@@ -353,10 +354,17 @@ setting controls new repair requests; turning it off keeps previously accepted
 signal repairs.
 Each section has its own vertical space within the
 supported workspace, including when raw-spectral details are expanded.
-Settings tab panes stay unframed around their section cards; both levels disable
-native tab-bar base drawing to avoid a gray line behind the styled tabs. One shared
-Save/Cancel footer applies the full Settings draft from every tab. Invalid
-summed-BCA input reveals its sub-tab before focusing the affected field.
+Settings uses a native category list with a matching page heading. The existing
+page host preserves programmatic navigation for tool shortcuts and validation.
+Nested Protocol and Experimental tabs stay unframed around their section cards.
+One shared Save/Cancel row applies the full Settings draft from every category.
+Invalid summed-BCA input reveals its sub-tab before focusing the affected field.
+
+Visible smoke: at 1280 × 900 and Windows 125% and 150% scaling, open Settings
+from the shell and from a tool shortcut. Use the keyboard to switch categories,
+make an invalid edit, and verify Save selects and focuses its field. Cancel and
+reopen to confirm the prior saved values. Check the Application actions and the
+embedded QC and Stats surfaces in the same workspace.
 
 **Processing > Guided setup** opens the optional seven-page processing wizard.
 It uses shared dialog/form components, a numbered page list, current-method

@@ -298,6 +298,8 @@ def test_main_window_layout_smoke(tmp_path: Path, qtbot, monkeypatch) -> None:
     assert win.processing_history_label.isVisibleTo(win)
     assert win.processing_history_label.wordWrap()
     assert win.homeWidget.layout().indexOf(win.processing_history_label) == 0
+    assert win.lbl_single_file.buddy() is win.le_input_file
+    assert win.lbl_input_folder.buddy() is win.le_input_folder
 
     assert win.btn_start.text() == "Start Processing"
     run_panel = win.findChild(ActionRow, "run_panel")
@@ -908,6 +910,9 @@ def test_processing_activity_tracks_completed_files(
 
     win._prepare_processing_activity([first_file, second_file])
 
+    assert win.processing_message_label.text() == (
+        "Toolbox may respond slowly while recordings are processing."
+    )
     assert win.processing_status_title_label.text() == "Run Progress"
     assert win.processing_files_title_label.text() == "File Completion"
     assert win.processing_files_table.rowCount() == 2

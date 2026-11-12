@@ -22,7 +22,11 @@ from Main_App.gui.components import (
 )
 
 
-def test_plot_generator_gui_layout_smoke(qtbot):
+def test_plot_generator_gui_layout_smoke(qtbot, monkeypatch, tmp_path):
+    # Exercise the empty setup before loading any saved paths or project defaults.
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    monkeypatch.delenv("FPVS_PROJECT_ROOT", raising=False)
+    monkeypatch.chdir(tmp_path)
     window = PlotGeneratorWindow()
     qtbot.addWidget(window)
     window.resize(1280, 900)
@@ -60,6 +64,8 @@ def test_plot_generator_gui_layout_smoke(qtbot):
     assert window.findChild(QLabel, "snr_plots_subtitle") is None
     assert window.findChild(StatusBanner, "snr_plot_workflow_status") is window.workflow_status
     assert window.workflow_status.isVisible()
+    assert not window.folder_edit.text()
+    assert not window.out_edit.text()
     assert "Choose the processed Excel folder" in window.workflow_status.text()
     assert not window.gen_btn.isEnabled()
     assert window.progress_bar.isHidden()
@@ -67,8 +73,10 @@ def test_plot_generator_gui_layout_smoke(qtbot):
     assert window.progress_bar.isTextVisible()
     assert window.folder_edit.width() >= 220
     assert window.out_edit.width() >= 220
-    assert window.input_folder_btn.text() == "Choose Excel Folder"
-    assert window.output_folder_btn.text() == "Choose Plot Folder"
+    assert window.input_folder_btn.text() == "Browse…"
+    assert window.output_folder_btn.text() == "Browse…"
+    assert window.input_folder_btn.accessibleName() == "Choose processed Excel folder"
+    assert window.output_folder_btn.accessibleName() == "Choose plot output folder"
     input_picker = window.findChild(PathPickerRow, "snr_input_folder_picker")
     output_picker = window.findChild(PathPickerRow, "snr_output_folder_picker")
     assert input_picker is not None
@@ -117,6 +125,10 @@ def test_plot_generator_gui_layout_smoke(qtbot):
     assert not window.legend_group.isVisible()
     assert window.setup_tabs.tabText(0) == "Plot setup"
     assert window.setup_tabs.tabText(1) == "Legend labels"
+    assert window.legend_condition_a_label.buddy() is window.legend_condition_a_edit
+    assert window.legend_condition_b_label.buddy() is window.legend_condition_b_edit
+    assert window.legend_a_peaks_label.buddy() is window.legend_a_peaks_edit
+    assert window.legend_b_peaks_label.buddy() is window.legend_b_peaks_edit
     assert window.gen_btn.property("primary") is True
     assert window.cancel_btn.property("danger") is True
     action_row = window.findChild(ActionRow, "plot_generator_bottom_actions")

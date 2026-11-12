@@ -20,6 +20,9 @@ from PySide6.QtWidgets import (
 )
 
 
+PROCESSING_ACTIVITY_MESSAGE = "Toolbox may respond slowly while recordings are processing."
+
+
 def init_launch_reveal_state(host: Any) -> None:
     host._launch_reveal_done = False
     host._launch_reveal_animation: QPropertyAnimation | None = None
@@ -165,10 +168,7 @@ def prepare_processing_activity(host: Any, files: list[Path]) -> None:
         step_label.setVisible(False)
     message_label = getattr(host, "processing_message_label", None)
     if message_label is not None:
-        message_label.setText(
-            "Data processing has begun. Please be patient; your device may become "
-            "temporarily slow or unresponsive during processing."
-        )
+        message_label.setText(PROCESSING_ACTIVITY_MESSAGE)
     summary_heading = getattr(host, "processing_summary_heading_label", None)
     if summary_heading is not None:
         summary_heading.setText("Run Status")

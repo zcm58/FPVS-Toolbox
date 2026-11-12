@@ -83,14 +83,12 @@ class StatsWindowPipelineMixin:
         if running and message is not None:
             if getattr(self, "_dv_policy_name", "") == GROUP_SIGNIFICANT_POLICY_NAME:
                 message.setText(
-                    "FPVS Toolbox is currently calculating an average FFT spectrum across "
-                    "all electrodes and participants to determine which harmonics are "
-                    "considered statistically significant. This could take a few minutes."
+                    "Averaging FFT spectra across all electrodes and participants "
+                    "to identify significant harmonics."
                 )
             else:
                 message.setText(
-                    "FPVS Toolbox is currently building Summed BCA values and running "
-                    "the selected statistical analyses. This could take a few minutes."
+                    "Calculating Summed BCA and running the selected analyses."
                 )
         if notice is not None:
             notice.setVisible(running)

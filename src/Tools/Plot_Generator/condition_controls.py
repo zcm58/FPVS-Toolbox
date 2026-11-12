@@ -78,6 +78,7 @@ def build_extra_legend_fields(owner, grid) -> None:
             edit.setMinimumWidth(0)
             edit.setPlaceholderText(caption.rstrip(":"))
             edit.setAccessibleName(caption.rstrip(":"))
+            label.setBuddy(edit)
             edit.textChanged.connect(owner._persist_legend_settings)
             if column == 0:
                 edit.textEdited.connect(lambda _text, field=key: owner._on_legend_condition_label_edited(field))

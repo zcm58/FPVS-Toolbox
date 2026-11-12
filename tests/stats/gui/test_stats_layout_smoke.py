@@ -53,6 +53,7 @@ def test_stats_window_layout_smoke(qtbot, tmp_path, app):
     qtbot.addWidget(window)
     window.show()
     assert window.windowTitle() == "Standard FPVS Screening"
+    assert window.file_input_label.text() == "Processed Excel folder:"
 
     splitters = window.findChildren(QSplitter)
     root_splitter = next(
@@ -99,7 +100,7 @@ def test_stats_window_layout_smoke(qtbot, tmp_path, app):
         for card in window.findChildren(SectionCard)
     }
     for title in [
-        "File I/O",
+        "Input data",
         "Analysis Design",
         "Included Conditions",
         "Manual Exclusions",
@@ -144,7 +145,7 @@ def test_stats_window_layout_smoke(qtbot, tmp_path, app):
         assert page.horizontalScrollBarPolicy() == Qt.ScrollBarAlwaysOff
         assert page.verticalScrollBarPolicy() == Qt.ScrollBarAsNeeded
     for title in [
-        "File I/O",
+        "Input data",
         "Analysis Design",
         "Included Conditions",
         "Manual Exclusions",
@@ -361,9 +362,7 @@ def test_stats_window_layout_smoke(qtbot, tmp_path, app):
 
     assert window.stats_processing_notice.objectName() == "stats_processing_notice"
     assert not window.stats_processing_notice.isVisible()
-    assert window.stats_processing_message.text().startswith(
-        "FPVS Toolbox is currently calculating an average FFT spectrum"
-    )
+    assert not window.stats_processing_message.text()
     assert window.findChild(QWidget, "stats_status_chip") is None
     assert window.findChild(QWidget, "stats_status_footer") is None
     assert not hasattr(window, "btn_copy_folder")
