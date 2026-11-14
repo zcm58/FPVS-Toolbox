@@ -6,7 +6,7 @@ import hashlib
 import json
 import re
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -14,6 +14,7 @@ from Main_App.io.atomic_write import atomic_write, rename_with_retry, replace_wi
 from Main_App.projects.studio_handoff import (
     LEGACY_CONFIG_VERSIONS,
     normalize_studio_handoff,
+    studio_presentation_cadence,
 )
 from Main_App.processing.removed_electrode_detection import (
     REMOVED_ELECTRODE_DETECTION_MODE_MANUAL,
@@ -35,6 +36,7 @@ from Main_App.projects.preprocessing_settings import (
 )
 
 CONFIG_SUFFIX = ".fpvsconfig"
+_FRACTIONAL_DISPLAY_REFRESH_HZ = 60.02
 # Compatibility export for callers that inspect historical support.
 SUPPORTED_CONFIG_VERSIONS = LEGACY_CONFIG_VERSIONS
 WINDOWS_FORBIDDEN_PROJECT_CHARS = set('<>:"/\\|?*')
@@ -64,6 +66,7 @@ class FPVSConfigImport:
     source_filename: str
     source_sha256: str
     provenance: dict[str, Any]
+    presentation_cadence: dict[str, Any] = field(default_factory=dict)
 
 
 def read_fpvs_config(path: Path) -> FPVSConfigImport:
@@ -143,9 +146,10 @@ def read_fpvs_config(path: Path) -> FPVSConfigImport:
         provenance={key: payload[key] for key in (
             "format", "format_version", "schema_version", "kind", "producer", "metadata",
             "experiment_category", "project", "conditions", "condition_defaults", "protocol",
-            "frequency_protocol", "session", "recording", "triggers", "toolbox",
+            "frequency_protocol", "session", "display", "recording", "triggers", "toolbox",
             "completed_session",
         ) if key in payload},
+        presentation_cadence=studio_presentation_cadence(payload),
     )
 
 
@@ -209,6 +213,8 @@ def _write_import_provenance(project: Project, imported: FPVSConfigImport) -> No
         "source_sha256": imported.source_sha256,
         "handoff": imported.provenance,
     }
+    if imported.presentation_cadence:
+        provenance["presentation_cadence"] = imported.presentation_cadence
     with atomic_write(target, replace=replace_with_retry) as stream:
         json.dump(provenance, stream, indent=2, ensure_ascii=False, allow_nan=False)
         stream.write("\n")
@@ -231,6 +237,26 @@ def _write_import_provenance(project: Project, imported: FPVSConfigImport) -> No
                 "participant_session_number", "manual_removed_electrodes",
             ) if key in completed
         }
+    cadence = imported.presentation_cadence
+    summaries = {
+        key: cadence[key] for key in (
+            "requested_base_hz", "requested_oddball_hz", "configured_refresh_hz",
+            "compiled_refresh_hz",
+        ) if key in cadence
+    }
+    compiled_runs = cadence.get("compiled_runs", [])
+    if compiled_runs:
+        summaries["compiled_run_count"] = len(compiled_runs)
+        summaries["completed_run_count"] = cadence["completed_run_count"]
+        summaries["compiled_schedule"] = {
+            key: compiled_runs[0][key] for key in (
+                "frames_per_stimulus", "frames_per_oddball", "base_hz", "oddball_hz",
+            )
+        }
+    elif receipt["kind"] == "setup" and "configured_schedule" in cadence:
+        summaries["configured_schedule"] = cadence["configured_schedule"]
+    if summaries:
+        receipt["presentation_cadence"] = summaries
     project.manifest.setdefault("tools", {})["studio_import"] = receipt
 
 
@@ -238,6 +264,39 @@ def fpvs_config_import_message(project: Project) -> str:
     """Explain the remaining recording/electrode review after project creation."""
     message = f"Created project '{project.name}' with {len(project.event_map)} condition(s)."
     receipt = project.manifest.get("tools", {}).get("studio_import", {})
+    cadence = receipt.get("presentation_cadence", {})
+    schedule_kind = "compiled" if receipt.get("kind") == "completed_session" else "configured"
+    schedule = cadence.get(f"{schedule_kind}_schedule")
+    if cadence.get(f"{schedule_kind}_refresh_hz") == _FRACTIONAL_DISPLAY_REFRESH_HZ:
+        message += (
+            "\n\n60.02 Hz is approximate for a nominal 60 Hz FPVS protocol. Over a nominal "
+            "120-second run, the same frames finish about 40 ms early by calculation. "
+            "Studio's software bench observed about 37 ms. In the 6 Hz example with an oddball "
+            "every fifth stimulus, 50 frames per oddball gives 1.2004 Hz, 0.0004 Hz above the nominal "
+            "1.2 Hz FFT target, so the response can fall between nominal FFT bins. "
+            "Toolbox keeps the requested rates on its standard nominal FFT grid and uses "
+            "the markers recorded in the EEG file. The display setting does not calibrate "
+            "EEG or screen-light timing."
+        )
+    if schedule is not None and (
+        schedule["base_hz"] != cadence["requested_base_hz"]
+        or schedule["oddball_hz"] != cadence["requested_oddball_hz"]
+    ):
+        schedule_description = (
+            "compiled frame schedule"
+            if schedule_kind == "compiled" else "estimated frame schedule"
+        )
+        coverage = ""
+        if schedule_kind == "compiled" and cadence["compiled_run_count"] < cadence["completed_run_count"]:
+            coverage = (
+                f" for {cadence['compiled_run_count']} of {cadence['completed_run_count']} runs"
+            )
+        message += (
+            f"\n\nStudio's {schedule_description} gives {schedule['base_hz']:.8g} Hz base "
+            f"and {schedule['oddball_hz']:.8g} Hz oddball{coverage}. Toolbox's standard FFT uses the "
+            f"requested {cadence['requested_base_hz']:.8g} Hz base and "
+            f"{cadence['requested_oddball_hz']:.8g} Hz oddball."
+        )
     if receipt.get("kind") != "completed_session":
         return message
     review = receipt.get("completed_session_review", {})

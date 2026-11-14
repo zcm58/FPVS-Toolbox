@@ -290,10 +290,29 @@ and snapshot revisions, successful finalization, matching project/session/
 execution/participant identity and ordered run/condition identity. This
 transport-neutral identity check is separate from the Unicorn code-order adapter.
 
+Studio's requested base/oddball rates are the initial Toolbox protocol and FFT
+targets. The source display settings are retained separately. A configured
+refresh yields an estimated frame schedule. For a completed run with an identified
+condition and regular compiled oddball events, the importer derives its planned
+base and oddball rates from the compiled refresh and event frame spacing. For
+example, 60.02 Hz across 10 frames per stimulus and 50 frames per oddball gives
+6.002 and 1.2004 Hz. A completed run with inadequate or inconsistent schedule
+evidence has no inferred cadence. These rates describe the compiled frame schedule
+in display time. They do not measure panel light, BDF timing, or an EEG sample clock.
+
 The importer retains relevant source fields in the new project at
 `.fpvs_imports/studio/<source-sha256>.json`. The `tools.studio_import` receipt in
 `project.json` records its portable relative path, source filename/digest,
-producer/document kind and `recording_association="unreviewed"`. It does not copy
+producer/document kind and `recording_association="unreviewed"`.
+When available, `presentation_cadence` retains source rates, the configured estimate,
+and identified run estimates in the provenance file. The receipt keeps a compact
+summary and counts of derived versus total completed runs. The existing import
+message reports a difference between the available frame schedule and requested
+rates. It also flags 60.02 Hz in setup or in a completed plan's compiled refresh,
+including when the plan lacks enough events to infer its own cadence. It explains
+the nominal-grid mismatch and keeps the requested exact-bin FFT and recorded EEG
+markers in their existing roles.
+The importer does not copy
 stimulus assets, embedded task media or raw EEG. The configured Toolbox Projects
 Root owns the new project; retained provenance moves with that project.
 Project settings and provenance are prepared in a temporary child of that root
