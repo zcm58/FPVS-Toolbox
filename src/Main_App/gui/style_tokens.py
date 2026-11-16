@@ -42,10 +42,10 @@ HEADER_BG = "#222F3B"
 INFO_BG = "#F1F6FC"
 INFO_BORDER = "#D5E2F0"
 
-SIDEBAR_BG = HEADER_BG
-SIDEBAR_BORDER = "#364754"
-SIDEBAR_ITEM_HOVER = "#2C3D49"
-SIDEBAR_ITEM_ACTIVE = "#2A4350"
+CHROME_HOVER = "#2C3D49"
+CHROME_ACTIVE = "#2A4350"
+CHROME_TEXT = "#F1F6F8"
+CHROME_MUTED_TEXT = "#A5B7C2"
 
 PAGE_MARGIN = 22
 SECTION_PADDING = 15
@@ -55,7 +55,6 @@ SECTION_GRID_GAP = 8
 COMPACT_SECTION_MAX_HEIGHT = 170
 CORNER_RADIUS = 9
 
-SIDEBAR_WIDTH = 244
 BROWSE_BUTTON_WIDTH = 156
 EVENT_ID_COLUMN_WIDTH = 88
 EVENT_REMOVE_BUTTON_SIZE = 30
@@ -285,14 +284,6 @@ def build_status_banner_stylesheet() -> str:
 def build_main_page_stylesheet() -> str:
     """Return the scoped stylesheet for the polished main page."""
     return f"""
-        #Page1 {{
-            background: {PAGE_BG};
-        }}
-
-        #MainContent {{
-            background: {CONTENT_BG};
-        }}
-
         QGroupBox {{
             border: 1px solid {BORDER_SOFT_COLOR};
             border-radius: {CORNER_RADIUS}px;
@@ -428,6 +419,29 @@ def build_main_page_stylesheet() -> str:
             border-top: 1px solid {BORDER_SOFT_COLOR};
         }}
 
+        #event_map_scroll QScrollBar:vertical {{
+            width: 12px;
+            margin: 0;
+            background: {PAGE_BG};
+        }}
+
+        #event_map_scroll QScrollBar::handle:vertical {{
+            min-height: 28px;
+            margin: 1px 2px;
+            border-radius: 4px;
+            background: {CONTROL_BORDER};
+        }}
+
+        #event_map_scroll QScrollBar::add-page:vertical,
+        #event_map_scroll QScrollBar::sub-page:vertical {{
+            background: transparent;
+        }}
+
+        #event_map_scroll QScrollBar::add-line:vertical,
+        #event_map_scroll QScrollBar::sub-line:vertical {{
+            height: 0;
+        }}
+
         #event_map_row {{
             background: transparent;
             border: none;
@@ -447,109 +461,43 @@ def build_main_page_stylesheet() -> str:
     """
 
 
-def build_sidebar_stylesheet() -> str:
-    """Return the scoped stylesheet for the left navigation."""
+def build_workspace_chrome_stylesheet() -> str:
+    """Style the main menu in Slate and Signal Teal."""
     return f"""
-        #sidebar {{
-            background-color: {SIDEBAR_BG};
-            border-right: 1px solid {SIDEBAR_BORDER};
+        QMenuBar#workspaceMenuBar {{
+            background-color: {HEADER_BG};
+            color: {CHROME_TEXT};
+            border: none;
+            padding: 2px 8px;
+            spacing: 2px;
         }}
 
-        #SidebarSectionLabel {{
-            color: rgba(255, 255, 255, 0.76);
-            padding-left: 14px;
-            padding-top: 8px;
-            padding-bottom: 6px;
-            font-size: {css_font_size("sidebar_section")};
-            font-weight: {css_font_weight("sidebar_section")};
-        }}
-
-        #SidebarSectionLabel[centered="true"] {{
-            padding-left: 0;
-            padding-right: 0;
-        }}
-
-        #sidebar_primary_group,
-        #sidebar_tools_group,
-        #sidebar_lower_region,
-        #sidebar_utilities_group {{
-            background: transparent;
-        }}
-
-        #SidebarButton {{
-            background-color: transparent;
+        QMenuBar#workspaceMenuBar::item {{
+            background-color: {HEADER_BG};
+            color: {CHROME_TEXT};
             border: 1px solid transparent;
-            border-radius: {CORNER_RADIUS}px;
+            border-radius: 4px;
+            padding: 4px 10px;
         }}
 
-        #SidebarButton:hover {{
-            background-color: {SIDEBAR_ITEM_HOVER};
-            border-color: transparent;
-        }}
-
-        #SidebarButton[selected="true"] {{
-            background-color: {SIDEBAR_ITEM_ACTIVE};
-            border-color: transparent;
-        }}
-
-        #SidebarButton:focus {{
+        QMenuBar#workspaceMenuBar::item:selected:enabled {{
+            background-color: {CHROME_HOVER};
             border-color: {SIGNAL_COLOR};
         }}
 
-        #SidebarButton QLabel {{
-            color: rgba(255, 255, 255, 0.88);
-            font-size: {css_font_size("sidebar_item")};
-            font-weight: {css_font_weight("sidebar_item")};
+        QMenuBar#workspaceMenuBar::item:pressed:enabled {{
+            background-color: {CHROME_ACTIVE};
         }}
 
-        #SidebarButton[selected="true"] QLabel {{
-            color: white;
+        QMenuBar#workspaceMenuBar::item:disabled {{
+            color: {CHROME_MUTED_TEXT};
         }}
 
-        #SidebarButton[processingLocked="true"] QLabel,
-        #SidebarButton[processingLocked="true"] QLabel:disabled {{
-            color: rgba(255, 255, 255, 0.38);
-        }}
-
-        #SidebarButton[processingLocked="true"] {{
-            background-color: transparent;
-            border-color: transparent;
-        }}
-
-        #SidebarButton[processingLocked="true"][selected="true"] {{
-            background-color: {SIDEBAR_ITEM_ACTIVE};
-        }}
-
-        #SidebarSelectionBar {{
-            background-color: transparent;
-            border-radius: 2px;
-        }}
-
-        #SidebarSelectionBar[active="true"] {{
-            background-color: {SIGNAL_COLOR};
-            border-radius: 2px;
-        }}
-
-        #sidebar_home_divider,
-        #sidebar_beta_tools_divider,
-        #sidebar_divider {{
-            background: rgba(255, 255, 255, 0.12);
-        }}
-    """
-
-
-def build_header_bar_stylesheet() -> str:
-    """Return the scoped stylesheet for the project header strip."""
-    return f"""
-        #HeaderBar {{
-            background-color: {HEADER_BG};
-            border-bottom: 1px solid {SIGNAL_COLOR};
-        }}
-
-        #HeaderBar QLabel {{
-            color: white;
-            font-size: {css_font_size("project_title")};
-            font-weight: {css_font_weight("project_title")};
+        QLabel#workspaceDebugLabel {{
+            background: transparent;
+            color: #F9D293;
+            font-weight: {css_font_weight("caption")};
+            padding: 0 10px;
         }}
     """
 

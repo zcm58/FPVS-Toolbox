@@ -409,7 +409,7 @@ def test_stats_window_layout_smoke(qtbot, tmp_path, app):
         button.text()
         for button in action_rows["stats_data_folder_actions"].findChildren(QPushButton)
     ]
-    assert data_buttons == ["Browse..."]
+    assert data_buttons == ["Choose Excel Folder"]
     assert (
         action_rows["stats_output_copy_actions"].row_layout.indexOf(
             window.copy_summary_btn

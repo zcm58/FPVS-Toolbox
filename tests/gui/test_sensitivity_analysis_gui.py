@@ -256,6 +256,7 @@ def test_lmm_mode_exposes_supported_model_and_validation(qtbot) -> None:
     assert page.lmm_tabs.tabText(0) == "Design"
     assert page.lmm_tabs.tabText(1) == "Advanced"
     assert page.lmm_tabs.currentIndex() == 0
+    assert page.result_banner.context_label.text() == "Set the assumptions and select Run Simulation."
     assert page.lmm_design_panel.minimumHeight() == page.lmm_advanced_panel.minimumHeight()
     assert page.lmm_design_panel.minimumHeight() > 0
     assert page.lmm_design_panel.isAncestorOf(page.lmm_sample_size_spin)
@@ -410,24 +411,23 @@ def test_lmm_worker_emits_progress_and_completion(qtbot) -> None:
     assert completed == [expected]
 
 
-def test_embedded_surface_has_no_horizontal_clipping(qtbot) -> None:
+@pytest.mark.parametrize("analysis_type", [0, 1, 2])
+def test_embedded_surface_fits_workspace_without_page_scrolling(qtbot, analysis_type) -> None:
     page = _build_page(qtbot)
-    scroll = page.findChild(QScrollArea, "sensitivity_scroll_area")
+    page.resize(1220, 780)
+    page.analysis_combo.setCurrentIndex(analysis_type)
+    qtbot.wait(30)
     inputs = page.findChild(SectionCard, "sensitivity_inputs_card")
     results = page.findChild(SectionCard, "sensitivity_results_card")
 
-    assert scroll.horizontalScrollBarPolicy() == Qt.ScrollBarAlwaysOff
-    assert scroll.widget().width() <= scroll.viewport().width()
-    assert inputs is not None and inputs.width() >= 350
-    assert results is not None and results.width() >= 350
-    assert inputs.geometry().right() < scroll.widget().width()
-    assert results.geometry().right() < scroll.widget().width()
-    assert inputs.minimumSizeHint().height() <= inputs.height()
-    assert results.minimumSizeHint().height() <= results.height()
-    assert page.calculate_button.isVisibleTo(page)
-    assert page.reset_button.isVisibleTo(page)
+    assert page.width() == 1220
+    assert page.height() == 780
+    assert page.findChildren(QScrollArea) == []
+    for card in (inputs, results):
+        assert card is not None and card.width() >= 350
+        assert page.rect().contains(card.geometry())
+        assert card.minimumSizeHint().height() <= card.height()
+    for button in (page.calculate_button, page.reset_button):
+        assert button.isVisibleTo(page)
+        assert page.rect().contains(button.mapTo(page, button.rect().bottomRight()))
     assert page.findChild(QWidget, "sensitivity_disclaimer") is None
-
-    page.resize(1000, 800)
-    qtbot.wait(30)
-    assert not scroll.verticalScrollBar().isVisible()

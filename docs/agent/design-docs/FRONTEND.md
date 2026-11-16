@@ -32,7 +32,8 @@ Desktop changes follow these contracts:
   production support.
 
 The shared Slate & Signal Teal palette lives in `Main_App.gui.style_tokens` and
-`theme.py`. Use slate for shell chrome, paper and white for work surfaces,
-deep teal for actions, pale teal for selection, and ochre for focus on light
-surfaces. Keep signal teal on dark chrome. Toolbox uses its existing typography,
-icons, native menu appearance, and scientific and status color encodings.
+`theme.py`. The main menu bar and workspace navigation share one slate
+background with light text. Signal teal marks the active workspace and keyboard
+focus in the navigation row. Menu popups, Settings and tools use paper and white
+surfaces, deep teal actions, pale teal selection, and ochre focus. Scientific and
+status colors retain their established meanings.

@@ -12,11 +12,8 @@ _MAIN_WINDOW_NAMES = {
 _SETTINGS_PANEL_NAMES = {
     "SettingsDialog",
 }
-_SIDEBAR_NAMES = {
-    "SidebarButton",
-}
 
-__all__ = sorted(_MAIN_WINDOW_NAMES | _SETTINGS_PANEL_NAMES | _SIDEBAR_NAMES)
+__all__ = sorted(_MAIN_WINDOW_NAMES | _SETTINGS_PANEL_NAMES)
 
 
 def __getattr__(name: str) -> Any:
@@ -28,8 +25,4 @@ def __getattr__(name: str) -> Any:
         settings_panel = importlib.import_module("Main_App.gui.settings_panel")
 
         return getattr(settings_panel, name)
-    if name in _SIDEBAR_NAMES:
-        sidebar = importlib.import_module("Main_App.gui.sidebar")
-
-        return getattr(sidebar, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

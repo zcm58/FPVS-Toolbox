@@ -1208,11 +1208,20 @@ def test_protocol_sections_fit_scaled_workspaces_with_marker_tables(experimental
     assert sections.widget(0).isAncestorOf(page.protocol_derived_duration_edit)
     assert sections.widget(1).isAncestorOf(table)
     assert not sections.isAncestorOf(page.protocol_status)
+    for field in (
+        page.protocol_presentation_rate_edit,
+        page.protocol_oddball_mode_combo,
+        page.protocol_expected_cycles_edit,
+        page.protocol_derived_duration_edit,
+    ):
+        assert page._protocol_form.labelForField(field).buddy() is field
     footer = page.findChild(QWidget, "settings_footer")
 
     def check_current_page():
         QApplication.processEvents()
         assert host.size() == host.minimumSize() == host.maximumSize()
+        _assert_settings_widget_unclipped(page.protocol_status, host)
+        assert page.protocol_status.geometry().bottom() < sections.geometry().top()
         for widget in protocol_page.findChildren(QWidget):
             if widget.isVisibleTo(host) and not table.isAncestorOf(widget) and isinstance(
                 widget, (QLabel, QLineEdit, QComboBox, QAbstractButton)
@@ -1233,6 +1242,7 @@ def test_protocol_sections_fit_scaled_workspaces_with_marker_tables(experimental
         assert page.protocol_resolved_oddball_rate_edit.isVisibleTo(host)
         assert page.protocol_derived_duration_edit.isVisibleTo(host)
         check_current_page()
+        assert page.protocol_presentation_rate_edit.width() < page.protocol_analysis_window_mode_combo.width()
 
     sections.setCurrentIndex(1)
     for condition_markers, recording_markers in ((False, False), (True, False), (True, True), (False, True)):
@@ -1897,8 +1907,6 @@ def test_embedded_settings_harmonic_save_uses_post_processing_activity_page(
     assert win.btn_start.text() == "Post-processing in progress"
     assert win.btn_start.isEnabled() is False
     assert win.busy is True
-    assert win.sidebar.isEnabled() is True
-    assert win.sidebar.property("processingLocked") is True
 
     audit = SimpleNamespace(
         review_candidates=(),
@@ -1931,13 +1939,11 @@ def test_embedded_settings_harmonic_save_uses_post_processing_activity_page(
     # The harmonic worker can finish before the preceding grid thread releases.
     # Keep the shared activity and navigation lock until both workers are gone.
     assert win.workspace_stack.currentWidget() is win.processing_page
-    assert win.sidebar.property("processingLocked") is True
 
     grid_thread.finished.emit()
 
     assert win.workspace_stack.currentWidget() is win.homeWidget
     assert win.processing_spinner.isHidden()
-    assert win.sidebar.property("processingLocked") is False
     assert win.menuBar().isEnabled() is True
     assert win.btn_start.text() == "Start Processing"
     assert win.busy is False

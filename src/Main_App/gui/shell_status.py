@@ -15,7 +15,6 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QSizePolicy,
     QTableWidgetItem,
-    QToolBar,
     QWidget,
 )
 
@@ -458,87 +457,20 @@ def _place_start_button(host: Any, target: str) -> None:
         button.show()
 
 
-def _refresh_widget_style(widget: QWidget) -> None:
-    try:
-        widget.style().unpolish(widget)
-        widget.style().polish(widget)
-        widget.update()
-    except RuntimeError:
-        pass
-
-
-def _set_sidebar_processing_locked(sidebar: QWidget, locked: bool) -> None:
-    sidebar.setProperty("processingLocked", locked)
-    _refresh_widget_style(sidebar)
-    for child in sidebar.findChildren(QWidget):
-        if child.objectName() == "SidebarButton":
-            setter = getattr(child, "set_processing_locked", None)
-            if callable(setter):
-                setter(locked)
-            else:
-                child.setProperty("processingLocked", locked)
-                _refresh_widget_style(child)
-
-
-def ensure_processing_navigation_unlocked(host: Any) -> None:
-    sidebar = getattr(host, "sidebar", None)
-    if sidebar is not None:
-        sidebar.setEnabled(True)
-        sidebar.setGraphicsEffect(None)
-        _set_sidebar_processing_locked(sidebar, False)
-    for widget in (getattr(host, "menuBar", lambda: None)(),):
-        if widget is not None:
-            try:
-                widget.setEnabled(True)
-            except RuntimeError:
-                pass
-    try:
-        for toolbar in host.findChildren(QToolBar):
-            toolbar.setEnabled(True)
-    except RuntimeError:
-        pass
-    host._processing_navigation_states = []
-    host._processing_sidebar_effect = None
-
-
 def _set_processing_navigation_locked(host: Any, locked: bool) -> None:
+    states = getattr(host, "_processing_navigation_states", [])
     if locked:
-        if getattr(host, "_processing_navigation_states", None):
+        if states:
             return
-        widgets: list[QWidget] = []
-        sidebar = getattr(host, "sidebar", None)
-        if sidebar is not None:
-            _set_sidebar_processing_locked(sidebar, True)
-        try:
-            widgets.append(host.menuBar())
-        except Exception:
-            pass
-        try:
-            widgets.extend(host.findChildren(QToolBar))
-        except Exception:
-            pass
-
-        states: list[tuple[QWidget, bool]] = []
-        for widget in widgets:
-            try:
-                states.append((widget, widget.isEnabled()))
-                widget.setEnabled(False)
-            except RuntimeError:
-                continue
-        host._processing_navigation_states = states
+        menu = getattr(host, "menuBar", lambda: None)()
+        if menu is not None:
+            host._processing_navigation_states = [(menu, menu.isEnabled())]
+            menu.setEnabled(False)
         return
 
-    for widget, was_enabled in getattr(host, "_processing_navigation_states", []):
-        try:
-            widget.setEnabled(was_enabled)
-        except RuntimeError:
-            continue
+    for widget, was_enabled in states:
+        widget.setEnabled(was_enabled)
     host._processing_navigation_states = []
-    sidebar = getattr(host, "sidebar", None)
-    if sidebar is not None:
-        sidebar.setGraphicsEffect(None)
-        _set_sidebar_processing_locked(sidebar, False)
-    host._processing_sidebar_effect = None
 
 
 def show_processing_page(host: Any) -> None:
@@ -585,11 +517,6 @@ def hide_processing_page(host: Any) -> None:
             home_widget = getattr(host, "homeWidget", None)
             if home_widget is not None and workspace.indexOf(home_widget) >= 0:
                 workspace.setCurrentWidget(home_widget)
-
-        if workspace.currentWidget() is getattr(host, "homeWidget", None):
-            selector = getattr(host, "_set_sidebar_selection", None)
-            if callable(selector):
-                selector("btn_home")
 
     host._processing_return_widget = None
     host._processing_page_visible = False

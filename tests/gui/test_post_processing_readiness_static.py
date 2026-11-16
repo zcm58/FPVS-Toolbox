@@ -86,16 +86,14 @@ def test_fhc_opens_its_neutral_input_inspection_without_standard_selection_guard
             side_effect=AssertionError("Standard derivative readiness is independent of FHC"),
         ),
         _ensure_free_harmonic_clustering_page=Mock(return_value=page),
-        stacked=SimpleNamespace(setCurrentIndex=Mock()),
-        workspace_stack=SimpleNamespace(setCurrentWidget=Mock()),
-        _set_sidebar_selection=Mock(),
+        _show_workspace_page=Mock(),
     )
     opener(host)
     host._frequency_domain_outputs_ready_for_tool.assert_not_called()
     if managed_project:
         warning.assert_not_called()
         host._ensure_free_harmonic_clustering_page.assert_called_once_with()
-        host.workspace_stack.setCurrentWidget.assert_called_once_with(page)
+        host._show_workspace_page.assert_called_once_with(page)
     else:
         warning.assert_called_once()
         host._ensure_free_harmonic_clustering_page.assert_not_called()

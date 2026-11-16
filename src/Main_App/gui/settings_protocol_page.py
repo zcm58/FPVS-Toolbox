@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QHBoxLayout,
     QComboBox,
+    QFormLayout,
     QTabWidget,
     QCheckBox,
     QSizePolicy,
@@ -36,6 +37,7 @@ from Main_App.gui.project_protocol import (
     editor_values_for_protocol,
 )
 from Main_App.gui.settings_feedback import PREPROCESSING_FIELDS
+from Main_App.gui.style_tokens import SECTION_GAP
 from Main_App.projects import (
     ODDBALL_INPUT_MODE_DIRECT_HZ,
     ODDBALL_INPUT_MODE_RECURRENCE,
@@ -46,8 +48,13 @@ def build_protocol_page(self, tabs: QTabWidget) -> QWidget:
     tab = QWidget()
     tab.setObjectName("settings_protocol_tab")
     layout = QVBoxLayout(tab)
-    layout.setContentsMargins(12, 12, 12, 12)
-    layout.setSpacing(10)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setSpacing(SECTION_GAP)
+
+    self.protocol_status = StatusBanner("", tab, variant="info")
+    self.protocol_status.setObjectName("settings_protocol_status")
+    self.protocol_status.label.setTextFormat(Qt.PlainText)
+    layout.addWidget(self.protocol_status)
 
     # Keep the expandable trigger editor out of the timing form: its table
     # must receive real layout space even in a small logical viewport.
@@ -59,12 +66,12 @@ def build_protocol_page(self, tabs: QTabWidget) -> QWidget:
     timing_page = QWidget()
     timing_page.setObjectName("settings_protocol_timing_page")
     timing_layout = QVBoxLayout(timing_page)
-    timing_layout.setContentsMargins(0, 12, 0, 0)
+    timing_layout.setContentsMargins(0, SECTION_GAP, 0, 0)
     self.protocol_tabs.addTab(timing_page, "Timing")
     markers_page = QWidget()
     markers_page.setObjectName("settings_protocol_markers_page")
     markers_layout = QVBoxLayout(markers_page)
-    markers_layout.setContentsMargins(0, 12, 0, 0)
+    markers_layout.setContentsMargins(0, SECTION_GAP, 0, 0)
     self.protocol_tabs.addTab(markers_page, "Trigger markers")
 
     protocol_card = SectionCard(
@@ -73,6 +80,7 @@ def build_protocol_page(self, tabs: QTabWidget) -> QWidget:
         object_name="settings_project_protocol_card",
     )
     protocol_form = make_form_layout()
+    protocol_form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
     markers_card = SectionCard(
         "Trigger markers", markers_page,
         object_name="settings_protocol_markers_card",
@@ -84,7 +92,7 @@ def build_protocol_page(self, tabs: QTabWidget) -> QWidget:
     self.protocol_trigger_maps_button.setObjectName("settings_trigger_maps")
     self.protocol_trigger_maps_button.setEnabled(self.project is not None)
     self.protocol_trigger_maps_button.clicked.connect(self._configure_trigger_maps)
-    markers_card.content_layout.addWidget(self.protocol_trigger_maps_button)
+    markers_card.content_layout.addWidget(self.protocol_trigger_maps_button, 0, Qt.AlignLeft)
     markers_layout.addWidget(markers_card, 1)
 
     if self.project is None:
@@ -102,7 +110,7 @@ def build_protocol_page(self, tabs: QTabWidget) -> QWidget:
         "fraction entries are accepted."
     )
     protocol_form.addRow(
-        QLabel("Presentation rate (Hz):", protocol_card),
+        "Presentation rate (Hz):",
         self.protocol_presentation_rate_edit,
     )
 
@@ -119,7 +127,7 @@ def build_protocol_page(self, tabs: QTabWidget) -> QWidget:
         ODDBALL_INPUT_MODE_DIRECT_HZ,
     )
     protocol_form.addRow(
-        QLabel("Oddball specification:", protocol_card),
+        "Oddball specification:",
         self.protocol_oddball_mode_combo,
     )
 
@@ -132,7 +140,7 @@ def build_protocol_page(self, tabs: QTabWidget) -> QWidget:
         "A whole number of stimuli between oddballs; the minimum is 2."
     )
     protocol_form.addRow(
-        QLabel("Oddball every N stimuli:", protocol_card),
+        "Oddball every N stimuli:",
         self.protocol_oddball_every_n_edit,
     )
 
@@ -145,7 +153,7 @@ def build_protocol_page(self, tabs: QTabWidget) -> QWidget:
         "The entered rate must resolve to a whole-number stimulus recurrence."
     )
     protocol_form.addRow(
-        QLabel("Direct oddball frequency (Hz):", protocol_card),
+        "Direct oddball frequency (Hz):",
         self.protocol_direct_oddball_rate_edit,
     )
 
@@ -155,9 +163,7 @@ def build_protocol_page(self, tabs: QTabWidget) -> QWidget:
         self.protocol_analysis_window_mode_combo.addItem("Automatic from Studio", ANALYSIS_WINDOW_MODE_STUDIO)
     self.protocol_analysis_window_mode_combo.addItem("Duration (seconds)", ANALYSIS_WINDOW_MODE_DURATION)
     self.protocol_analysis_window_mode_combo.addItem("Cycle count (advanced)", ANALYSIS_WINDOW_MODE_CYCLES)
-    analysis_mode_label = QLabel("Analysis window:", protocol_card)
-    analysis_mode_label.setBuddy(self.protocol_analysis_window_mode_combo)
-    protocol_form.addRow(analysis_mode_label, self.protocol_analysis_window_mode_combo)
+    protocol_form.addRow("Analysis window:", self.protocol_analysis_window_mode_combo)
     self.protocol_requested_duration_edit = QLineEdit(protocol_card)
     self.protocol_requested_duration_edit.setObjectName("settings_protocol_requested_duration_seconds")
     self.protocol_requested_duration_edit.setPlaceholderText("120")
@@ -165,9 +171,7 @@ def build_protocol_page(self, tabs: QTabWidget) -> QWidget:
         "The maximum intended FFT duration. Toolbox retains complete oddball cycles "
         "compatible with the recording and processing sample grids."
     )
-    duration_label = QLabel("Analysis duration (seconds):", protocol_card)
-    duration_label.setBuddy(self.protocol_requested_duration_edit)
-    protocol_form.addRow(duration_label, self.protocol_requested_duration_edit)
+    protocol_form.addRow("Analysis duration (seconds):", self.protocol_requested_duration_edit)
     self.protocol_expected_cycles_edit = QLineEdit(protocol_card)
     self.protocol_expected_cycles_edit.setObjectName(
         "settings_protocol_expected_analyzed_cycles"
@@ -176,9 +180,7 @@ def build_protocol_page(self, tabs: QTabWidget) -> QWidget:
     self.protocol_expected_cycles_edit.setToolTip(
         "The project-wide number of complete oddball cycles intended for the FFT."
     )
-    cycles_label = QLabel("Analyzed oddball cycles (advanced):", protocol_card)
-    cycles_label.setBuddy(self.protocol_expected_cycles_edit)
-    protocol_form.addRow(cycles_label, self.protocol_expected_cycles_edit)
+    protocol_form.addRow("Analyzed oddball cycles (advanced):", self.protocol_expected_cycles_edit)
     self._protocol_form = protocol_form
 
     self.protocol_oddball_marker_code_edit = QLineEdit(markers_card)
@@ -191,7 +193,7 @@ def build_protocol_page(self, tabs: QTabWidget) -> QWidget:
         "from every condition-onset code."
     )
     markers_form.addRow(
-        QLabel("Oddball marker code:", markers_card),
+        "Oddball marker code:",
         self.protocol_oddball_marker_code_edit,
     )
     self.protocol_condition_markers_check = QCheckBox(
@@ -209,6 +211,7 @@ def build_protocol_page(self, tabs: QTabWidget) -> QWidget:
     self.protocol_condition_markers_table.setObjectName(
         "settings_protocol_condition_marker_codes"
     )
+    self.protocol_condition_markers_table.setAccessibleName("Condition-specific oddball marker codes")
     self.protocol_condition_markers_table.setHorizontalHeaderLabels(
         ("Condition", "Onset marker", "Oddball marker")
     )
@@ -251,7 +254,7 @@ def build_protocol_page(self, tabs: QTabWidget) -> QWidget:
     )
     self.protocol_resolved_oddball_rate_edit.setReadOnly(True)
     protocol_form.addRow(
-        QLabel("Resolved oddball frequency:", protocol_card),
+        "Resolved oddball frequency:",
         self.protocol_resolved_oddball_rate_edit,
     )
 
@@ -261,17 +264,27 @@ def build_protocol_page(self, tabs: QTabWidget) -> QWidget:
     )
     self.protocol_derived_duration_edit.setReadOnly(True)
     protocol_form.addRow(
-        QLabel("Expected analyzed duration:", protocol_card),
+        "Expected analyzed duration:",
         self.protocol_derived_duration_edit,
     )
+    for field in (
+        self.protocol_presentation_rate_edit,
+        self.protocol_oddball_every_n_edit,
+        self.protocol_direct_oddball_rate_edit,
+        self.protocol_requested_duration_edit,
+        self.protocol_expected_cycles_edit,
+        self.protocol_oddball_marker_code_edit,
+    ):
+        field.setMaximumWidth(160)
+    for field in (self.protocol_oddball_mode_combo, self.protocol_analysis_window_mode_combo):
+        field.setMaximumWidth(250)
+    for field in (self.protocol_resolved_oddball_rate_edit, self.protocol_derived_duration_edit):
+        field.setMaximumWidth(440)
+
     protocol_card.content_layout.addLayout(protocol_form)
     markers_card.content_layout.addWidget(self.protocol_marker_code_help)
     timing_layout.addWidget(protocol_card)
     timing_layout.addStretch(1)
-
-    self.protocol_status = StatusBanner("", tab, variant="info")
-    self.protocol_status.setObjectName("settings_protocol_status")
-    layout.addWidget(self.protocol_status)
 
     if values is not None:
         self.protocol_presentation_rate_edit.setText(values.presentation_rate_hz)

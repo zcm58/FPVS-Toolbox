@@ -425,6 +425,7 @@ class PlotGeneratorUiSectionsMixin:
         ranges_grid.setVerticalSpacing(6)
 
         self.xmin_spin = QDoubleSpinBox()
+        self.xmin_spin.setAccessibleName("Minimum X frequency")
         self.xmin_spin.setRange(-9999.0, 9999.0)
         self.xmin_spin.setDecimals(2)
         self.xmin_spin.setSingleStep(0.1)
@@ -433,6 +434,7 @@ class PlotGeneratorUiSectionsMixin:
         self.xmin_spin.setToolTip("Minimum X frequency")
         self.xmin_spin.setMinimumWidth(105)
         self.xmax_spin = QDoubleSpinBox()
+        self.xmax_spin.setAccessibleName("Maximum X frequency")
         self.xmax_spin.setRange(-9999.0, 9999.0)
         self.xmax_spin.setDecimals(2)
         self.xmax_spin.setSingleStep(0.1)
@@ -448,6 +450,7 @@ class PlotGeneratorUiSectionsMixin:
         ranges_grid.addWidget(self.xmax_spin, 0, 3)
 
         self.ymin_spin = QDoubleSpinBox()
+        self.ymin_spin.setAccessibleName("Minimum Y value")
         self.ymin_spin.setRange(-9999.0, 9999.0)
         self.ymin_spin.setDecimals(2)
         self.ymin_spin.setSingleStep(0.1)
@@ -455,6 +458,7 @@ class PlotGeneratorUiSectionsMixin:
         self.ymin_spin.setToolTip("Minimum Y value")
         self.ymin_spin.setMinimumWidth(105)
         self.ymax_spin = QDoubleSpinBox()
+        self.ymax_spin.setAccessibleName("Maximum Y value")
         self.ymax_spin.setRange(-9999.0, 9999.0)
         self.ymax_spin.setDecimals(2)
         self.ymax_spin.setSingleStep(0.1)
@@ -478,8 +482,8 @@ class PlotGeneratorUiSectionsMixin:
         advanced_layout.setSpacing(6)
 
         advanced_form = make_form_layout()
-        advanced_form.addRow(QLabel("X-axis label:"), self.xlabel_edit)
-        advanced_form.addRow(QLabel("Y-axis label:"), self.ylabel_edit)
+        advanced_form.addRow("X-axis label:", self.xlabel_edit)
+        advanced_form.addRow("Y-axis label:", self.ylabel_edit)
         advanced_layout.addLayout(advanced_form)
         advanced_layout.addWidget(self.axis_ranges_label)
         advanced_layout.addLayout(ranges_grid)

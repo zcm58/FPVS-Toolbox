@@ -42,6 +42,7 @@ from Main_App.gui.components import (
     ActionRow,
     StatusBanner,
     SubsectionHeaderLabel,
+    apply_font_role,
     make_action_button,
     make_form_layout,
     show_tool_info,
@@ -63,6 +64,7 @@ from Main_App.gui.project_protocol import (
 )
 from Main_App.gui.recording_qc_identity import project_recording_coverage_rows
 from Main_App.gui.roi_settings_editor import ROISettingsEditor
+from Main_App.gui.style_tokens import PAGE_MARGIN, SECTION_GAP, SECTION_HEADER_CONTENT_GAP
 from Main_App.gui.settings_feedback import (
     PREPROCESSING_FIELDS,
     SettingsDraftTracker,
@@ -336,11 +338,13 @@ class SettingsDialog(QDialog):
         self.settings_navigation.setObjectName("settings_navigation")
         self.settings_navigation.setAccessibleName("Settings categories")
         self.settings_navigation.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.settings_page_title = SubsectionHeaderLabel("", self)
+        self.settings_page_title = QLabel(self)
+        self.settings_page_title.setProperty("toolTitle", True)
+        apply_font_role(self.settings_page_title, "tool_title")
         body = QGridLayout()
         body.setContentsMargins(0, 0, 0, 0)
-        body.setHorizontalSpacing(12)
-        body.setVerticalSpacing(8)
+        body.setHorizontalSpacing(SECTION_GAP)
+        body.setVerticalSpacing(SECTION_HEADER_CONTENT_GAP)
         body.addWidget(SubsectionHeaderLabel("Settings", self), 0, 0)
         body.addWidget(self.settings_page_title, 0, 1)
         body.addWidget(self.settings_navigation, 1, 0)
@@ -542,8 +546,8 @@ class SettingsDialog(QDialog):
     def _init_rois_tab(self, tabs: QTabWidget) -> None:
         tab = QWidget()
         layout = QVBoxLayout(tab)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(10)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(SECTION_GAP)
 
         current_montage = self.manager.get_roi_montage()
         montage_labels = dict(supported_roi_montages())
@@ -3156,6 +3160,7 @@ class EmbeddedSettingsPage(SettingsDialog):
         self.setObjectName("embedded_settings_page")
         self.setWindowFlags(Qt.Widget)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.layout().setContentsMargins(PAGE_MARGIN, SECTION_GAP, PAGE_MARGIN, SECTION_GAP)
 
     def accept(self) -> None:
         self._settings_save_completed()

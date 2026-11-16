@@ -605,6 +605,7 @@ class FreeHarmonicClusteringPage(QWidget):
                 "Cluster p",
             ),
         )
+        self.significant_table.setAccessibleName("Significant harmonic clusters")
         self.significant_table.setMinimumHeight(160)
         self.significant_table.setSizePolicy(
             QSizePolicy.Expanding,
@@ -622,6 +623,7 @@ class FreeHarmonicClusteringPage(QWidget):
                 "Interpretation",
             ),
         )
+        self.batch_table.setAccessibleName("Free Harmonic Clustering comparison results")
         self.batch_table.setMinimumHeight(220)
         self.batch_table.setSizePolicy(
             QSizePolicy.Expanding,

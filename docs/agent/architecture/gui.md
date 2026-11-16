@@ -5,7 +5,7 @@ The active desktop UI is PySide6.
 Primary paths:
 
 - `src/Main_App/gui/`: canonical active import surface for main-window,
-  settings-panel, menu, sidebar, icon, style-token, theme, widget, and
+  settings-panel, menu, icon, style-token, theme, widget, and
   update-manager imports.
 - `src/Main_App/gui/components/`: canonical shared component layer for new
   and migrated GUI surfaces. It re-exports presentation widgets and adds
@@ -20,27 +20,15 @@ Primary paths:
 - `src/Main_App/gui/widgets/`: shared PySide6 presentation primitives for
   reusable buttons, cards, form rows, the busy spinner, the welcome brain
   animation, and inline status widgets.
-- `src/Main_App/gui/theme.py`: shared FPVS light palette and stylesheet helpers
-  used by the main app and tool windows. `apply_native_menu_appearance` retains
-  the platform menu style name and palette before the Toolbox theme is applied.
-  Each menu bar and popup menu owns a separate style instance so destroying one
-  window cannot invalidate another window's native menu style. Menus use that
-  retained appearance separately from the
-  application's light palette and widget stylesheet. Local menu rules pair
-  foreground and background colors on both surfaces and items, including
-  selected/pressed states; native Windows painting can ignore the retained
-  palette and otherwise render white labels on a white background.
-  Visible smoke: with Windows light and dark application colors, open a project
-  at 1080p/100% and 4K/150%, visit Home and Settings, and open File/View/Tools.
-  Confirm normal, selected, disabled and popup labels remain legible; move the
-  window between differently scaled monitors and repeat. Menus should remain
-  hidden on Welcome. Rendering and scale-factor regression tests run in CI.
-- `src/Main_App/gui/menu_bar.py`: File/View/Tools construction and tool-action
-  wiring. `file_menu.py` groups New/Open/Save, Settings/Reset Processing Cache,
-  Check for Updates/About, and Exit with separators. View contains Home.
-  Tools reuses the sidebar's default and beta registrations, with full labels
-  and a conditional Beta Tools submenu. Existing MainWindow callbacks retain
-  project validation, processing guards and beta acknowledgements.
+- `src/Main_App/gui/theme.py`: shared Fusion light palette and stylesheet helpers.
+  `style_tokens.py` applies Slate to the main menu bar. Popup menus use the
+  Toolbox light palette. Home and
+  the processing activity page apply their local styles at the page boundary
+  so embedded tools and Settings receive the shared controls.
+- `src/Main_App/gui/menu_bar.py`: File, View, Tools, and Help construction.
+  `file_menu.py` groups project, Settings, cache, and application actions.
+  View contains Home (Ctrl+1), Tools contains default and optional beta actions,
+  and Help links to Documentation.
 - `src/Main_App/gui/typography.py`: canonical font family, role sizes, font
   weights, monospace font, and QSS font helpers used by the main app,
   component layer, and migrated tool windows.
@@ -62,7 +50,7 @@ Primary paths:
   and Start; `event_map.py` presents row errors without dropping entered values.
   `project_drafts.py` tracks condition/mode and cached Settings changes at project
   replacement and exit. Save must finish before leaving; an asynchronous save
-  keeps the current project active. Ordinary sidebar navigation preserves drafts.
+  keeps the current project active. Ordinary workspace navigation preserves drafts.
 - `settings_panel.py` retains Settings state, validation, persistence and worker
   lifetimes. `settings_preprocessing_page.py`, `settings_protocol_page.py`,
   `settings_harmonic_page.py`, `settings_experimental_page.py` and
@@ -310,8 +298,9 @@ Primary paths:
 
 The main app shell uses the outer `MainWindow.stacked` widget for landing vs
 application shell navigation. Inside the application shell, `workspace_stack`
-switches the right-hand workspace content while preserving the persistent
-sidebar and project header. The preprocessing page remains `homeWidget`; the
+switches the full-width workspace beneath the menu bar. The native window
+title shows the active project name. The preprocessing page remains
+`homeWidget`; the
 Settings page, Standard FPVS Screening, Sensitivity Analysis, SNR Plot Generator,
 Free Harmonic Clustering Analysis and Individual Detectability
 are embedded in this workspace stack.
@@ -354,7 +343,9 @@ setting controls new repair requests; turning it off keeps previously accepted
 signal repairs.
 Each section has its own vertical space within the
 supported workspace, including when raw-spectral details are expanded.
-Settings uses a native category list with a matching page heading. The existing
+Settings uses a native category list with an aligned page heading. The
+Processing card groups Guided setup with its parameters, and Protocol shows
+its status above the Timing and Trigger markers tabs. The existing
 page host preserves programmatic navigation for tool shortcuts and validation.
 Nested Protocol and Experimental tabs stay unframed around their section cards.
 One shared Save/Cancel row applies the full Settings draft from every category.
@@ -605,41 +596,40 @@ still be absent, and Resume Post-processing should use the remaining ROIs.
 Repeat Save with rebuild later and confirm QC is marked stale. Qt behavior is
 covered in CI; local checks exercise the routing without loading Qt.
 
-The sidebar and Tools menu share the default tool list: Free Harmonic Clustering
-Analysis and SNR Plots, in that order. Scalp Maps, Standard FPVS Screening, Sensitivity
-Analysis, LORETA Visualizer, Sequence Figure, and Individual
-Detectability are beta tools: they remain
-embedded workspace pages, but the sidebar appends them beneath a visible
-**Beta Tools** subsection and Tools adds a matching submenu only when the global
-Settings option
-`tools.enable_beta_tools` is enabled and the app has been restarted.
+The Tools menu owns the default and beta tool registrations in
+`menu_bar.py`. Optional tools appear under **Tools > Beta Tools** after
+enabling `tools.enable_beta_tools` in Settings and restarting.
+`MainWindow._open_beta_tool` shows the beta notice once per registered tool
+per app session. `shell_status.py` locks the menu during processing,
+processing-cache reset, and Scalp Maps generation, then restores its prior
+enabled state. The Home shortcut follows the same lock.
 
-The Beta Tools registry owns the shared gate: every entry in `BETA_TOOL_SPECS`
-is connected through `MainWindow._open_beta_tool`, so adding a beta tool to the
-registry must not require per-tool warning code. Before that tool's opener runs
-for the first time in each app session, show an OK-only warning titled `Beta
-Tool` with the text `This tool is currently in beta. Features are subject to
-change.` Track acknowledgement separately for each beta registry role, shared
-between sidebar and menu entry points.
+Welcome and Home default to 960 × 660 with a 900 × 620 minimum. The other
+workspace pages use the existing 1280 × 900 minimum. The window follows the
+current stack page and restores a compact size after automatic expansion
+when the expanded window is still at the automatic size. An explicit larger
+size or maximized window persists. The stack size policies prevent hidden
+pages from increasing the compact minimum.
 
-Visible menu acceptance (Qt is CI-only locally): at 1280x900, verify native
-File/View/Tools appearance, separated File groups, and complete long labels
-including Reset Project Processing Cache and Free Harmonic Clustering Analysis.
-Use Alt, arrow keys and Escape to open, traverse and dismiss menus; verify
-View > Home returns from an embedded page and selects Home in the sidebar.
-On a disposable project, exercise New/Open/Save, Settings, cache-reset
-confirmation/cancellation, Check for Updates, About and Exit with their existing
-draft and processing guards. Confirm menus are hidden on Welcome and disabled
-during processing/cache reset, then restored when work ends. Disable Beta Tools,
-restart and confirm both entry points hide them; enable and restart, then open
-every default and beta tool from the menu. Verify project/stale-output guards,
-one warning per beta role across menu and sidebar, and no warning for default
-tools. Local Qt execution remains unrun without a safe visible-environment
-approval.
+Home shows the configured condition count above the run actions. **Edit
+conditions** discloses the same live row widgets and source controls.
+The list scrolls within the editor when long. Hiding the editor preserves
+draft values. Project load collapses the editor, and invalid Save opens it
+and focuses the first invalid field. Mapped projects show **View conditions**
+with their canonical catalog.
+
+For visible acceptance, open a disposable project at 960 × 660 and resize to
+900 × 620. Check keyboard navigation, live condition count, Enter to add a
+row, invalid Save from Settings, and a long mapped catalog. Start Processing
+and View Log must remain visible as the editor opens and closes. Open
+Settings and an analysis tool, verify expansion, and return via **View >
+Home** or Ctrl+1. Repeat after manually enlarging the tool window. Check that
+menus and Ctrl+1 respect the processing lock. Repeat menu and Settings
+checks at 125%, 150%, and 200% Qt scaling.
 
 When the active project changes through create/open/import/path workflows, the
 main shell must return to Home and discard project-bound embedded page instances.
-Tools should be recreated from the new `currentProject` on the next sidebar
+Tools should be recreated from the new `currentProject` on the next tool
 open so stale project roots, default folders, and settings editors cannot
 survive a project switch. Sequence Figure retains its manual image/label inputs
 and any running export; its cached page refreshes the project root, output
@@ -660,8 +650,8 @@ Rename the second condition to `2 - Objects`, confirm validation clears, and
 verify the usual `Faces` and `Objects` output names in a disposable run.
 Local Qt execution remains CI-only without explicit safe-visible approval.
 
-The main shell default and minimum size is `1280x900` to provide enough
-workspace area for embedded tools without requiring individual pop-out windows.
+Embedded tools use a `1280x900` main-window minimum without individual
+pop-out windows.
 
 ## Visual Layout Rules
 
@@ -715,7 +705,7 @@ depend on a lower-level widget implementation.
 
 Typography presentation is owned by `src/Main_App/gui/typography.py` and
 re-exported through `Main_App.gui.components`. To change the global app font
-family, base font size, role-specific sizes, role weights, tab fonts, sidebar
+family, base font size, role-specific sizes, role weights, tab fonts, navigation
 fonts, header fonts, action-button emphasis, or fixed-width log font, edit the
 typography role tokens and helpers there. Runtime surfaces should use
 `apply_font_role()`, `font_for_role()`, or `fixed_width_font()` instead of
@@ -789,7 +779,7 @@ Allowed direct Qt composition:
   has no durable FPVS-specific behavior.
 - Do not wrap a one-off Qt control just to make imports look uniform.
 - Keep domain-specific surfaces local when they own non-reusable behavior such
-  as sidebar selection, color swatches, result tables, export details, or
+  as workspace selection, color swatches, result tables, export details, or
   tool-specific logs.
 
 Promote a local GUI pattern to `Main_App.gui.components` only when all of these
@@ -810,7 +800,7 @@ The main app shell is the visual source of truth. Shared component defaults shou
 
 `src/Main_App/gui/main_window.py` has been appropriately refactored and downsized into the shell/coordinator for the main window. Do not choose it as a future refactor target just to reduce size. Further `main_window.py` refactors require explicit user direction and a concrete clarity or feature-maintenance benefit.
 
-Shell-specific implementations live under `src/Main_App/gui/`, including the main window assembly, event-map row behavior, header bar, sidebar, menus, navigation icons, style tokens, and update manager. Project workflow orchestration is split into `Main_App.gui.project_workflows`, processing input orchestration is split into `Main_App.gui.processing_inputs`, processing run orchestration is split into `Main_App.gui.processing_workflows`, post-export completion handling is split into `Main_App.gui.post_export_workflows`, tool/menu action orchestration is split into `Main_App.gui.tool_workflows`, and shell feedback is split into `Main_App.gui.shell_status`, while `MainWindow` keeps public wrapper methods for actions and tests.
+Shell-specific implementations live under `src/Main_App/gui/`, including the main window assembly, event-map row behavior, workspace navigation, menus, navigation icons, style tokens, and update manager. Project workflow orchestration is split into `Main_App.gui.project_workflows`, processing input orchestration is split into `Main_App.gui.processing_inputs`, processing run orchestration is split into `Main_App.gui.processing_workflows`, post-export completion handling is split into `Main_App.gui.post_export_workflows`, tool/menu action orchestration is split into `Main_App.gui.tool_workflows`, and shell feedback is split into `Main_App.gui.shell_status`, while `MainWindow` keeps public wrapper methods for actions and tests.
 
 General GUI utilities should live under `Main_App.gui` when they coordinate UI-facing behavior. Non-GUI resource/path helpers should live under `Main_App.io`; lightweight application-settings paths belong in `Main_App.settings`.
 
@@ -985,7 +975,7 @@ precedence. Under Experimental > Performance, confirm RAM preloading starts off,
 is disabled without a project, survives Save/reopen for that project, and Cancel
 discards the draft. Verify it is absent from Preprocessing and reachable by
 keyboard on the Performance page. Toggle Beta Tools in its Experimental sub-tab,
-Save, restart, and confirm sidebar visibility updates. All controls and the single shared footer
+Save, restart, and confirm the Tools menu updates. All controls and the single shared footer
 must fit without page-level scrolling. Qt execution remains
 CI-only unless a safe visible local session is explicitly approved.
 

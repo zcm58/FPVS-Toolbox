@@ -9,22 +9,17 @@ import pytest
 if importlib.util.find_spec("PySide6") is None or importlib.util.find_spec("pytestqt") is None:
     pytest.skip("PySide6 or pytest-qt not available", allow_module_level=True)
 
-from PySide6.QtCore import QCoreApplication, QEvent, Signal, Qt
-from PySide6.QtGui import QColor, QIcon, QPalette
+from PySide6.QtCore import QSize, Signal, Qt
+from PySide6.QtGui import QAction, QColor, QIcon
 from PySide6.QtWidgets import (
     QApplication,
-    QFrame,
     QLabel,
     QLineEdit,
-    QMainWindow,
     QMenu,
     QMessageBox,
-    QProxyStyle,
     QPushButton,
     QSizePolicy,
     QStackedWidget,
-    QStyle,
-    QStyleFactory,
     QStatusBar,
     QToolBar,
     QWidget,
@@ -35,12 +30,10 @@ from Main_App.gui import main_window as main_window_module
 from Main_App.gui.components import ActionRow
 from Main_App.gui.components import SectionCard
 from Main_App.gui.components import SubsectionHeaderLabel
-from Main_App.gui.menu_bar import build_menu_bar
 from Main_App.gui.processing_log_dialog import ProcessingLogDialog
-from Main_App.gui.sidebar import SidebarButton
 from Main_App.gui.settings_panel import EmbeddedSettingsPage
 from Main_App.gui.theme import apply_fpvs_theme
-from Main_App.gui import theme as theme_module
+from Main_App.gui.style_tokens import HEADER_BG, PAGE_MARGIN
 from Main_App.processing.preflight_qc_cache import preflight_qc_cache_directory
 from Main_App.processing.project_processing_cache import ProjectProcessingCacheUsage
 import Main_App.gui.update_manager as update_manager
@@ -60,10 +53,6 @@ DEFAULT_TOOL_ROLES = [
     "btn_free_harmonic_clustering",
     "btn_graphs",
 ]
-DEFAULT_TOOL_LABELS = [
-    "Free Harmonic Clustering",
-    "SNR Plots",
-]
 BETA_TOOL_ROLES = [
     "btn_publication_maps",
     "btn_data",
@@ -71,14 +60,6 @@ BETA_TOOL_ROLES = [
     "btn_loreta_visualizer",
     "btn_sequence_figure",
     "btn_individual_detectability",
-]
-BETA_TOOL_LABELS = [
-    "Scalp Maps",
-    "Data Screening",
-    "Sensitivity Analysis",
-    "LORETA Visualizer",
-    "Sequence Figure",
-    "Individual Detectability",
 ]
 BETA_TOOL_ACCESSIBLE_NAMES = [
     "Scalp Maps",
@@ -119,105 +100,46 @@ def _build_window(
     return win
 
 
-def _sidebar_button(win: main_window_module.MainWindow, role: str) -> QWidget:
-    matches = [
-        widget
-        for widget in win.sidebar.findChildren(QWidget)
-        if widget.property("role") == role
-    ]
-    assert len(matches) == 1
-    return matches[0]
-
-
 def _menu(win: main_window_module.MainWindow, object_name: str) -> QMenu:
     menu = win.menuBar().findChild(QMenu, object_name)
     assert menu is not None
     return menu
 
 
-def _sidebar_tool_buttons(win: main_window_module.MainWindow) -> list[SidebarButton]:
-    layout = win.sidebar_tools_group.layout()
-    buttons: list[SidebarButton] = []
-    for index in range(layout.count()):
-        widget = layout.itemAt(index).widget()
-        if isinstance(widget, SidebarButton):
-            buttons.append(widget)
-    return buttons
+def _menu_action(win: main_window_module.MainWindow, menu_name: str, role: str) -> QAction:
+    return next(action for action in _menu(win, menu_name).actions() if action.objectName() == role)
 
 
-def _assert_utilities_anchored_at_bottom(win: main_window_module.MainWindow) -> None:
-    lower_layout = win.sidebar_utilities_group.parentWidget().layout()
-
-    assert lower_layout.itemAt(0).spacerItem() is not None
-    assert lower_layout.itemAt(lower_layout.count() - 1).widget() is win.sidebar_utilities_group
+def _open_beta_tool(win: main_window_module.MainWindow, role: str) -> None:
+    _menu_action(win, "betaToolsMenu", role).trigger()
 
 
-def test_sidebar_default_tool_order(tmp_path: Path, qtbot, monkeypatch) -> None:
-    win = _build_window(tmp_path, qtbot, monkeypatch)
-    buttons = _sidebar_tool_buttons(win)
-
-    assert [button.property("role") for button in buttons] == DEFAULT_TOOL_ROLES
-    assert [button.text_lbl.text() for button in buttons] == DEFAULT_TOOL_LABELS
-    assert win.sidebar_beta_tools_divider is None
-    assert win.sidebar_beta_tools_label is None
-    free_harmonic_button = _sidebar_button(win, "btn_free_harmonic_clustering")
-    assert free_harmonic_button.toolTip() == "Free Harmonic Clustering Analysis"
-    assert free_harmonic_button.accessibleName() == "Free Harmonic Clustering Analysis"
-    visible_roles = {
-        widget.property("role") for widget in win.sidebar.findChildren(QWidget)
-    }
-    assert not set(BETA_TOOL_ROLES) & visible_roles
-    tools_menu = _menu(win, "toolsMenu")
-    assert [action.text() for action in tools_menu.actions()] == [
+@pytest.mark.parametrize("beta_enabled", [False, True])
+def test_tools_menu_contains_default_and_enabled_beta_tools(tmp_path: Path, qtbot, monkeypatch, beta_enabled) -> None:
+    win = _build_window(tmp_path, qtbot, monkeypatch, enable_beta_tools=beta_enabled)
+    win.show_home_page()
+    tools_actions = _menu(win, "toolsMenu").actions()
+    assert [action.text() for action in tools_actions[:2]] == [
         "Free Harmonic Clustering Analysis", "SNR Plots",
     ]
-    assert [action.objectName() for action in tools_menu.actions()] == DEFAULT_TOOL_ROLES
-    assert win.menuBar().findChild(QMenu, "betaToolsMenu") is None
-    _assert_utilities_anchored_at_bottom(win)
-
-
-def test_sidebar_beta_tool_order(tmp_path: Path, qtbot, monkeypatch) -> None:
-    win = _build_window(tmp_path, qtbot, monkeypatch, enable_beta_tools=True)
-    buttons = _sidebar_tool_buttons(win)
-
-    assert [button.property("role") for button in buttons] == DEFAULT_TOOL_ROLES + BETA_TOOL_ROLES
-    assert [button.text_lbl.text() for button in buttons] == DEFAULT_TOOL_LABELS + BETA_TOOL_LABELS
-    assert win.sidebar_beta_tools_divider.objectName() == "sidebar_beta_tools_divider"
-    assert win.sidebar_beta_tools_divider.frameShape() == QFrame.HLine
-    assert win.sidebar_beta_tools_label.text() == "Beta Tools"
-    assert win.sidebar_beta_tools_label.property("sectionRole") == "beta"
-    assert win.sidebar_beta_tools_label.property("centered") is True
-    assert win.sidebar_beta_tools_label.alignment() & Qt.AlignHCenter
-    tools_layout = win.sidebar_tools_group.layout()
-    divider_index = tools_layout.indexOf(win.sidebar_beta_tools_divider)
-    label_index = tools_layout.indexOf(win.sidebar_beta_tools_label)
-    assert divider_index < label_index
-    assert label_index > len(DEFAULT_TOOL_ROLES) - 1
-    beta_buttons = [_sidebar_button(win, role) for role in BETA_TOOL_ROLES]
-    assert [button.accessibleName() for button in beta_buttons] == (
-        BETA_TOOL_ACCESSIBLE_NAMES
-    )
-    assert [button.toolTip() for button in beta_buttons] == [
-        f"{name} (Beta)" for name in BETA_TOOL_ACCESSIBLE_NAMES
-    ]
-    tools_actions = _menu(win, "toolsMenu").actions()
     assert [action.objectName() for action in tools_actions[:2]] == DEFAULT_TOOL_ROLES
-    assert tools_actions[2].isSeparator()
-    beta_menu = _menu(win, "betaToolsMenu")
-    assert tools_actions[3].menu() is beta_menu
-    assert [action.objectName() for action in beta_menu.actions()] == BETA_TOOL_ROLES
-    assert [action.text() for action in beta_menu.actions()] == BETA_TOOL_ACCESSIBLE_NAMES
-    _assert_utilities_anchored_at_bottom(win)
+    if beta_enabled:
+        assert tools_actions[2].isSeparator()
+        beta_menu = _menu(win, "betaToolsMenu")
+        assert tools_actions[3].menu() is beta_menu
+        assert [action.objectName() for action in beta_menu.actions()] == BETA_TOOL_ROLES
+        assert [action.text() for action in beta_menu.actions()] == BETA_TOOL_ACCESSIBLE_NAMES
+    else:
+        assert len(tools_actions) == 2
+        assert win.menuBar().findChild(QMenu, "betaToolsMenu") is None
 
 
 def test_landing_page_full_window_welcome_layout(tmp_path: Path, qtbot, monkeypatch) -> None:
     win = _build_window(tmp_path, qtbot, monkeypatch)
 
     assert win.stacked.currentIndex() == 0
-    assert win.minimumWidth() == 1280
-    assert win.minimumHeight() == 900
-    assert win.size().width() >= 1280
-    assert win.size().height() >= 900
+    assert win.minimumSize() == QSize(900, 620)
+    assert win.size() == QSize(960, 660)
     assert win.windowTitle() == f"FPVS Toolbox v{main_window_module.FPVS_TOOLBOX_VERSION}"
     assert not win.findChildren(QStatusBar)
     assert win.landing_page is win.stacked.currentWidget()
@@ -324,9 +246,16 @@ def test_main_window_layout_smoke(tmp_path: Path, qtbot, monkeypatch) -> None:
     assert win.findChild(QWidget, "processing_action_slot") is win.processing_action_slot
     assert win.processing_files_table.columnCount() == 2
     assert win.findChild(QWidget, "preprocessing_info_strip") is None
+    assert not win.condition_editor_body.isVisible()
+    assert not win.btn_add_row.isVisible()
+    assert not win.trigger_maps_button.isVisible()
+    assert not win.source_participants_button.isVisible()
+    assert win.condition_editor_toggle.text() == "Edit conditions"
+    qtbot.mouseClick(win.condition_editor_toggle, Qt.LeftButton)
+    assert win.condition_editor_body.isVisibleTo(win)
+
     event_map_header = win.findChild(QWidget, "event_map_header")
     assert event_map_header is not None
-    assert event_map_header.isAncestorOf(win.btn_add_row)
     condition_header = next(
         label
         for label in event_map_header.findChildren(SubsectionHeaderLabel)
@@ -339,7 +268,6 @@ def test_main_window_layout_smoke(tmp_path: Path, qtbot, monkeypatch) -> None:
     )
     assert condition_header.font().bold()
     assert trigger_header.font().bold()
-    assert event_map_header.layout().indexOf(win.btn_add_row) < event_map_header.layout().indexOf(trigger_header)
     assert win.findChild(QWidget, "log_group") is None
     assert win.btn_view_log.text() == "View Log"
     assert win.btn_view_log.accessibleName() == "View processing log"
@@ -350,15 +278,8 @@ def test_main_window_layout_smoke(tmp_path: Path, qtbot, monkeypatch) -> None:
     event_map_group = win.findChild(QWidget, "event_map_group")
     assert event_map_group is not None
     assert event_map_group.geometry().bottom() < run_panel.geometry().top()
-    assert abs(run_panel.geometry().bottom() - (win.homeWidget.height() - 1)) <= 1
-    assert event_map_group.height() > win.findChild(QWidget, "processing_group").height()
-    assert not event_map_group.header.isVisible()
-    event_map_titles = [
-        label
-        for label in event_map_group.findChildren(QLabel)
-        if label.text() == "Event Map"
-    ]
-    assert not event_map_titles
+    assert event_map_group.header.isVisible()
+    assert event_map_group.header.title_label.text() == "Conditions"
     event_rows = win._live_event_map_rows()
     assert event_rows
     assert event_rows[0].layout().contentsMargins().left() == 0
@@ -395,40 +316,9 @@ def test_main_window_layout_smoke(tmp_path: Path, qtbot, monkeypatch) -> None:
     assert win.row_input_folder.isVisible()
     assert not win.row_single_file.isVisible()
 
-    selected_sidebar_items = [
-        widget
-        for widget in win.sidebar.findChildren(QWidget)
-        if widget.property("selected") is True
-    ]
-    assert selected_sidebar_items
-    assert win.sidebar.isEnabled()
-    assert win.sidebar.graphicsEffect() is None
-    assert win.sidebar.property("processingLocked") is False
-    sidebar_section_titles = {
-        label.text()
-        for label in win.sidebar.findChildren(QLabel)
-        if label.objectName() == "SidebarSectionLabel"
-    }
-    assert sidebar_section_titles == {"Quick Tools", "Utilities"}
-    assert win.sidebar_tools_label.property("centered") is True
-    assert win.sidebar_tools_label.alignment() & Qt.AlignHCenter
-    assert win.sidebar_utilities_label.property("centered") is False
-    assert win.sidebar_utilities_label.alignment() & Qt.AlignLeft
-    settings_buttons = [
-        widget
-        for widget in win.sidebar.findChildren(QWidget)
-        if widget.property("role") == "btn_settings"
-    ]
-    assert len(settings_buttons) == 1
-    settings_pixmaps = [
-        label.pixmap()
-        for label in settings_buttons[0].findChildren(QLabel)
-        if label.pixmap() is not None
-    ]
-    assert any(not pixmap.isNull() for pixmap in settings_pixmaps)
-
-    assert [action.text() for action in win.menuBar().actions()] == ["File", "View", "Tools"]
-    assert win.menuBar().focusPolicy() == Qt.FocusPolicy.NoFocus
+    assert win.workspace_stack.width() == win.stacked.width() - 2 * PAGE_MARGIN
+    assert [action.text() for action in win.menuBar().actions()] == ["&File", "&View", "&Tools", "&Help"]
+    assert [action.text() for action in _menu(win, "helpMenu").actions()] == ["Documentation"]
     file_actions = _menu(win, "fileMenu").actions()
     assert [None if action.isSeparator() else action.text() for action in file_actions] == [
         "New Project…",
@@ -454,7 +344,7 @@ def test_home_processing_history_long_content_fits_minimum_window(
     tmp_path: Path, qtbot, monkeypatch,
 ) -> None:
     win = _build_window(tmp_path, qtbot, monkeypatch)
-    win.resize(1280, 900)
+    win.resize(900, 620)
     win.show_home_page()
     history = win.processing_history_label
     history.setText(
@@ -463,8 +353,7 @@ def test_home_processing_history_long_content_fits_minimum_window(
     )
     qtbot.wait(20)
 
-    assert win.size().width() == 1280
-    assert win.size().height() == 900
+    assert win.size() == QSize(900, 620)
     assert win.workspace_stack.currentWidget() is win.homeWidget
     assert history.isVisibleTo(win)
     assert history.wordWrap()
@@ -474,8 +363,6 @@ def test_home_processing_history_long_content_fits_minimum_window(
     assert win.btn_start.isVisibleTo(win)
     start_bottom = win.btn_start.mapTo(win.homeWidget, win.btn_start.rect().bottomRight())
     assert win.homeWidget.rect().contains(start_bottom)
-    run_panel = win.findChild(ActionRow, "run_panel")
-    assert abs(run_panel.geometry().bottom() - (win.homeWidget.height() - 1)) <= 1
 
 
 @pytest.mark.parametrize("debug_enabled", [False, True])
@@ -492,9 +379,6 @@ def test_main_window_has_toolbox_logo_and_no_toolbar_gap(tmp_path: Path, qtbot, 
     qtbot.waitUntil(lambda: win.stacked.y() == win.menuBar().geometry().bottom() + 1)
     assert win.menuBar().cornerWidget(Qt.TopRightCorner) is win.lbl_debug
     assert win.lbl_debug.isVisibleTo(win.menuBar()) is debug_enabled
-    header = win.stacked.currentWidget().findChild(QWidget, "HeaderBar")
-    assert header is not None
-    assert header.mapTo(win, header.rect().topLeft()).y() == win.stacked.y()
 
 
 def test_view_menu_returns_to_home(tmp_path: Path, qtbot, monkeypatch) -> None:
@@ -504,157 +388,91 @@ def test_view_menu_returns_to_home(tmp_path: Path, qtbot, monkeypatch) -> None:
     assert win.workspace_stack.currentWidget() is win._settings_page
     assert win.menuBar().isVisibleTo(win)
     assert win.menuBar().isEnabled()
-    assert [action.text() for action in win.menuBar().actions()] == ["File", "View", "Tools"]
+    assert [action.text() for action in win.menuBar().actions()] == ["&File", "&View", "&Tools", "&Help"]
 
     _menu(win, "viewMenu").actions()[0].trigger()
 
     assert win.workspace_stack.currentWidget() is win.homeWidget
-    assert _sidebar_button(win, "btn_home").property("selected") is True
     assert win.menuBar().isVisibleTo(win)
     win.stacked.setCurrentWidget(win.landing_page)
     assert win.menuBar().isHidden()
 
 
-def test_native_menu_style_creation_failure_is_explicit(qtbot, monkeypatch) -> None:
+def test_workspace_menu_paints_slate_and_readable_labels(
+    tmp_path: Path, qtbot, monkeypatch,
+) -> None:
     app = QApplication.instance()
-    monkeypatch.setattr(app, "_fpvs_native_menu_appearance", ("unavailable", QPalette()), raising=False)
-    monkeypatch.setattr(theme_module.QStyleFactory, "create", lambda _name: None)
-    menu = QMenu()
-    qtbot.addWidget(menu)
-    with pytest.raises(RuntimeError, match="Cannot create the native menu style 'unavailable'"):
-        theme_module.apply_native_menu_appearance(menu)
-
-
-def test_menu_styles_survive_other_window_teardown(qtbot) -> None:
-    from shiboken6 import isValid
-
-    def build_host():
-        host = QMainWindow()
-        qtbot.addWidget(host)
-        host.settings = SimpleNamespace(beta_tools_enabled=lambda: False)
-        host.show_home_page = lambda: None
-        host.open_free_harmonic_clustering = lambda: None
-        host.open_plot_generator = lambda: None
-        host.setMenuBar(build_menu_bar(host))
-        return host
-
-    first, second = build_host(), build_host()
-    first_style = first.menuBar()._fpvs_native_menu_style
-    second_style = second.menuBar()._fpvs_native_menu_style
-    assert first_style is not second_style
-    assert first_style.parent() is first.menuBar()
-    assert second_style.parent() is second.menuBar()
-    first.deleteLater()
-    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
-    assert not isValid(first_style)
-    assert isValid(second_style)
-    third = build_host()
-    assert isValid(third.menuBar()._fpvs_native_menu_style)
-    assert second.menuBar()._fpvs_native_menu_style is second_style
-
-
-def test_menu_labels_render_with_dark_cached_palette_and_light_native_background(qtbot, monkeypatch) -> None:
-    class LightNativeMenuStyle(QProxyStyle):
-        def drawControl(self, element, option, painter, widget=None):
-            if element in (QStyle.CE_MenuBarItem, QStyle.CE_MenuBarEmptyArea):
-                # Model platform chrome following the current light app while
-                # a color-only stylesheet still supplies cached white text.
-                painter.fillRect(option.rect, QColor("white"))
-                if element == QStyle.CE_MenuBarItem:
-                    self.drawItemText(
-                        painter, option.rect, Qt.AlignCenter | Qt.TextShowMnemonic,
-                        option.palette, bool(option.state & QStyle.State_Enabled),
-                        option.text, QPalette.ButtonText,
-                    )
-                return
-            super().drawControl(element, option, painter, widget)
-
-    app = QApplication.instance()
-    previous_style = None
     previous_palette = app.palette()
     previous_font = app.font()
     previous_stylesheet = app.styleSheet()
-    create_style = QStyleFactory.create
-    monkeypatch.setattr(
-        theme_module.QStyleFactory,
-        "create",
-        lambda name: LightNativeMenuStyle("Fusion") if name == "test-native-menu" else create_style(name),
-    )
-    native_palette = QPalette(app.palette())
-    for group in (QPalette.Active, QPalette.Inactive, QPalette.Disabled):
-        for role in (QPalette.Window, QPalette.Button, QPalette.Base):
-            native_palette.setColor(group, role, QColor("#202124"))
-        for role in (QPalette.WindowText, QPalette.ButtonText, QPalette.Text):
-            native_palette.setColor(
-                group, role, QColor("#aaaaaa" if group == QPalette.Disabled else "white"),
-            )
-        native_palette.setColor(group, QPalette.Highlight, QColor("#175ea8"))
-        native_palette.setColor(group, QPalette.HighlightedText, QColor("white"))
-    monkeypatch.setattr(app, "_fpvs_native_menu_appearance", ("test-native-menu", native_palette), raising=False)
-
-    host = QMainWindow()
-    qtbot.addWidget(host)
-    host.settings = SimpleNamespace(beta_tools_enabled=lambda: False)
-    host.show_home_page = lambda: None
-    host.open_free_harmonic_clustering = lambda: None
-    host.open_plot_generator = lambda: None
-
-    def assert_painted_label(widget, action):
-        bounds = widget.actionGeometry(action)
-        assert not bounds.isEmpty(), action.text()
-        assert widget.rect().contains(bounds), action.text()
-        # Ignore outer borders: contrast must come from the label itself.
-        image = widget.grab(bounds.adjusted(2, 2, -2, -2)).toImage()
-        levels = [
-            image.pixelColor(x, y).lightness()
-            for y in range(image.height()) for x in range(image.width())
-        ]
-        assert levels and max(levels) - min(levels) > 60, action.text()
-
+    app.setStyleSheet("")
+    previous_style = app.style().objectName()
     try:
-        app.setStyleSheet("")
-        base_style_name = app.style().objectName()
-        assert base_style_name.casefold() in {name.casefold() for name in QStyleFactory.keys()}
-        previous_style = base_style_name
         apply_fpvs_theme(app)
-        assert app.palette().color(QPalette.Window) == QColor("white")
-        bar = build_menu_bar(host)
-        bar.setNativeMenuBar(False)
-        host.setMenuBar(bar)
-        _menu(host, "fileMenu").addAction("New Project…")
-        host.resize(640, 240)
-        host.show()
-        qtbot.waitExposed(host)
-        QApplication.processEvents()
-
-        assert [action.text() for action in bar.actions()] == ["File", "View", "Tools"]
+        win = _build_window(tmp_path, qtbot, monkeypatch)
+        win.show_home_page()
+        qtbot.waitUntil(win.menuBar().isVisible)
+        bar = win.menuBar()
+        menu_image = bar.grab().toImage()
+        slate = QColor(HEADER_BG)
+        assert menu_image.pixelColor(menu_image.width() - 20, 5) == slate
         for action in bar.actions():
-            assert action.isVisible() and action.isEnabled()
-            assert_painted_label(bar, action)
-            qtbot.mouseClick(bar, Qt.LeftButton, pos=bar.actionGeometry(action).center())
-            popup = action.menu()
-            qtbot.waitUntil(popup.isVisible)
-            assert_painted_label(bar, action)
-            for child_action in popup.actions():
-                assert_painted_label(popup, child_action)
-            popup.hide()
-            bar.setActiveAction(None)
-        bar.setEnabled(False)
-        QApplication.processEvents()
-        for action in bar.actions():
-            assert_painted_label(bar, action)
-        bar.setEnabled(True)
-        assert bar.isEnabled()
+            image = bar.grab(bar.actionGeometry(action)).toImage()
+            assert any(
+                image.pixelColor(x, y).lightness() > 150
+                for y in range(image.height())
+                for x in range(image.width())
+            ), action.text()
     finally:
-        host.close()
         app.setStyleSheet("")
-        try:
-            if previous_style is not None:
-                assert app.setStyle(previous_style) is not None
-        finally:
-            app.setFont(previous_font)
-            app.setPalette(previous_palette)
-            app.setStyleSheet(previous_stylesheet)
+        app.setStyle(previous_style)
+        app.setPalette(previous_palette)
+        app.setFont(previous_font)
+        app.setStyleSheet(previous_stylesheet)
+
+
+def test_tool_navigation_guard_keeps_home_compact(tmp_path: Path, qtbot, monkeypatch) -> None:
+    win = _build_window(tmp_path, qtbot, monkeypatch)
+    win.show_home_page()
+    initial_size = win.size()
+    monkeypatch.setattr(win, "_frequency_domain_outputs_ready_for_tool", lambda _title: False)
+
+    _menu_action(win, "toolsMenu", "btn_graphs").trigger()
+
+    assert win.workspace_stack.currentWidget() is win.homeWidget
+    assert win.size() == initial_size
+
+
+def test_long_project_title_does_not_resize_home(tmp_path: Path, qtbot, monkeypatch) -> None:
+    win = _build_window(tmp_path, qtbot, monkeypatch)
+    win.show_home_page()
+    win.resize(900, 620)
+    name = "Long project name " * 30
+    win._set_project_title(name)
+
+    assert win.size() == QSize(900, 620)
+    assert win.windowTitle() == f"{name} — FPVS Toolbox v{main_window_module.FPVS_TOOLBOX_VERSION}"
+
+
+def test_workspace_expands_and_restores_only_automatic_resizes(tmp_path: Path, qtbot, monkeypatch) -> None:
+    win = _build_window(tmp_path, qtbot, monkeypatch)
+    win.show_home_page()
+    win.resize(1010, 690)
+    settings = _menu_action(win, "fileMenu", "actionSettings")
+    home = _menu_action(win, "viewMenu", "btn_home")
+
+    settings.trigger()
+    assert win.minimumSize() == QSize(1280, 900)
+    assert win.size() == QSize(1280, 900)
+    home.trigger()
+    assert win.size() == QSize(1010, 690)
+    assert win.workspace_stack.width() == win.width() - 2 * PAGE_MARGIN
+
+    settings.trigger()
+    win.resize(1340, 940)
+    home.trigger()
+    assert win.minimumSize() == QSize(900, 620)
+    assert win.size() == QSize(1340, 940)
 
 
 def test_processing_log_opens_in_focused_modal(
@@ -701,20 +519,10 @@ def test_processing_activity_page_locks_navigation_and_reuses_start_button(
     assert win.processing_action_layout.indexOf(win.btn_start) >= 0
     assert run_panel.row_layout.indexOf(win.btn_start) < 0
     assert win.processing_spinner.isVisible()
-    assert win.sidebar.isEnabled()
-    assert win.sidebar.graphicsEffect() is None
-    assert win.sidebar.property("processingLocked") is True
-    assert all(
-        widget.property("processingLocked") is True
-        for widget in win.sidebar.findChildren(QWidget)
-        if widget.objectName() == "SidebarButton"
-    )
-    assert all(
-        label.property("processingLocked") is None
-        for label in win.sidebar.findChildren(QLabel)
-        if label.objectName() == "SidebarSectionLabel"
-    )
+    assert win.minimumSize() == QSize(1280, 900)
     assert not win.menuBar().isEnabled()
+    _menu_action(win, "viewMenu", "btn_home").trigger()
+    assert win.workspace_stack.currentWidget() is win.processing_page
 
     win._busy_stop()
     qtbot.wait(20)
@@ -722,9 +530,7 @@ def test_processing_activity_page_locks_navigation_and_reuses_start_button(
     assert win.workspace_stack.currentWidget() is win.homeWidget
     assert run_panel.row_layout.indexOf(win.btn_start) >= 0
     assert win.processing_action_layout.indexOf(win.btn_start) < 0
-    assert win.sidebar.isEnabled()
-    assert win.sidebar.graphicsEffect() is None
-    assert win.sidebar.property("processingLocked") is False
+    assert win.size() == QSize(960, 660)
     assert win.menuBar().isEnabled()
 
 
@@ -987,7 +793,7 @@ def test_processing_activity_tracks_excluded_files(
     assert win.processing_current_file_label.text() == "Latest file: Excluded P002.bdf"
 
 
-def test_sidebar_settings_embeds_in_main_workspace(
+def test_workspace_settings_embeds_in_main_workspace(
     tmp_path: Path,
     qtbot,
     monkeypatch,
@@ -996,32 +802,20 @@ def test_sidebar_settings_embeds_in_main_workspace(
     win.stacked.setCurrentIndex(1)
     qtbot.wait(20)
 
-    qtbot.mouseClick(_sidebar_button(win, "btn_settings"), Qt.LeftButton)
+    _menu_action(win, "fileMenu", "actionSettings").trigger()
     qtbot.wait(20)
 
     assert isinstance(win.workspace_stack.currentWidget(), EmbeddedSettingsPage)
     assert win.workspace_stack.currentWidget().objectName() == "embedded_settings_page"
     assert win._settings_page.parent() is win.workspace_stack
-    selected_roles = [
-        widget.property("role")
-        for widget in win.sidebar.findChildren(QWidget)
-        if widget.property("selected") is True
-    ]
-    assert selected_roles == ["btn_settings"]
 
     win._settings_page.reject()
     qtbot.wait(20)
 
     assert win.workspace_stack.currentWidget() is win.homeWidget
-    selected_roles = [
-        widget.property("role")
-        for widget in win.sidebar.findChildren(QWidget)
-        if widget.property("selected") is True
-    ]
-    assert selected_roles == ["btn_home"]
 
 
-def test_sidebar_stats_embeds_in_main_workspace(
+def test_workspace_stats_embeds_in_main_workspace(
     tmp_path: Path,
     qtbot,
     monkeypatch,
@@ -1040,7 +834,7 @@ def test_sidebar_stats_embeds_in_main_workspace(
     win.stacked.setCurrentIndex(1)
     qtbot.wait(20)
 
-    qtbot.mouseClick(_sidebar_button(win, "btn_data"), Qt.LeftButton)
+    _open_beta_tool(win, "btn_data")
     qtbot.wait(20)
 
     assert isinstance(win.workspace_stack.currentWidget(), StatsWindow)
@@ -1049,26 +843,14 @@ def test_sidebar_stats_embeds_in_main_workspace(
     assert win._stats_page.project_dir == str(project_root)
     assert win._stats_page.minimumWidth() <= win.workspace_stack.width()
     assert win._stats_page.sizePolicy().horizontalPolicy() == QSizePolicy.Ignored
-    selected_roles = [
-        widget.property("role")
-        for widget in win.sidebar.findChildren(QWidget)
-        if widget.property("selected") is True
-    ]
-    assert selected_roles == ["btn_data"]
 
-    qtbot.mouseClick(_sidebar_button(win, "btn_home"), Qt.LeftButton)
+    _menu_action(win, "viewMenu", "btn_home").trigger()
     qtbot.wait(20)
 
     assert win.workspace_stack.currentWidget() is win.homeWidget
-    selected_roles = [
-        widget.property("role")
-        for widget in win.sidebar.findChildren(QWidget)
-        if widget.property("selected") is True
-    ]
-    assert selected_roles == ["btn_home"]
 
 
-def test_sidebar_free_harmonic_clustering_is_available_without_beta_tools(
+def test_workspace_free_harmonic_clustering_is_available_without_beta_tools(
     tmp_path: Path,
     qtbot,
     monkeypatch,
@@ -1092,22 +874,13 @@ def test_sidebar_free_harmonic_clustering_is_available_without_beta_tools(
     )
     monkeypatch.setattr(win, "_ensure_free_harmonic_clustering_page", lambda: page)
 
-    qtbot.mouseClick(
-        _sidebar_button(win, "btn_free_harmonic_clustering"),
-        Qt.LeftButton,
-    )
+    _menu_action(win, "toolsMenu", "btn_free_harmonic_clustering").trigger()
     qtbot.wait(20)
 
     assert win.workspace_stack.currentWidget() is page
-    selected_roles = [
-        widget.property("role")
-        for widget in win.sidebar.findChildren(QWidget)
-        if widget.property("selected") is True
-    ]
-    assert selected_roles == ["btn_free_harmonic_clustering"]
 
 
-def test_sidebar_sensitivity_analysis_embeds_without_project_data(
+def test_workspace_sensitivity_analysis_embeds_without_project_data(
     tmp_path: Path,
     qtbot,
     monkeypatch,
@@ -1122,7 +895,7 @@ def test_sidebar_sensitivity_analysis_embeds_without_project_data(
     win.stacked.setCurrentIndex(1)
     qtbot.wait(20)
 
-    qtbot.mouseClick(_sidebar_button(win, "btn_sensitivity_analysis"), Qt.LeftButton)
+    _open_beta_tool(win, "btn_sensitivity_analysis")
     qtbot.wait(20)
 
     assert isinstance(win.workspace_stack.currentWidget(), SensitivityAnalysisWindow)
@@ -1137,15 +910,9 @@ def test_sidebar_sensitivity_analysis_embeds_without_project_data(
     first_page.lmm_sample_size_spin.setValue(24)
     first_page.lmm_conditions_spin.setValue(4)
     first_page.lmm_rois_spin.setValue(3)
-    selected_roles = [
-        widget.property("role")
-        for widget in win.sidebar.findChildren(QWidget)
-        if widget.property("selected") is True
-    ]
-    assert selected_roles == ["btn_sensitivity_analysis"]
 
-    qtbot.mouseClick(_sidebar_button(win, "btn_home"), Qt.LeftButton)
-    qtbot.mouseClick(_sidebar_button(win, "btn_sensitivity_analysis"), Qt.LeftButton)
+    _menu_action(win, "viewMenu", "btn_home").trigger()
+    _open_beta_tool(win, "btn_sensitivity_analysis")
 
     assert win._sensitivity_analysis_page is first_page
     assert first_page._lmm_config().seed == 202
@@ -1154,7 +921,7 @@ def test_sidebar_sensitivity_analysis_embeds_without_project_data(
     assert first_page.lmm_rois_spin.value() == 0
 
 
-def test_sidebar_snr_plot_generator_embeds_in_main_workspace(
+def test_workspace_snr_plot_generator_embeds_in_main_workspace(
     tmp_path: Path,
     qtbot,
     monkeypatch,
@@ -1193,7 +960,7 @@ def test_sidebar_snr_plot_generator_embeds_in_main_workspace(
     win.stacked.setCurrentIndex(1)
     qtbot.wait(20)
 
-    qtbot.mouseClick(_sidebar_button(win, "btn_graphs"), Qt.LeftButton)
+    _menu_action(win, "toolsMenu", "btn_graphs").trigger()
     qtbot.wait(20)
 
     assert isinstance(win.workspace_stack.currentWidget(), PlotGeneratorWindow)
@@ -1201,26 +968,14 @@ def test_sidebar_snr_plot_generator_embeds_in_main_workspace(
     assert win._plot_generator_page.parent() is win.workspace_stack
     assert win._plot_generator_page.folder_edit.text() == str(excel_dir)
     assert win._plot_generator_page.out_edit.text() == str(snr_dir)
-    selected_roles = [
-        widget.property("role")
-        for widget in win.sidebar.findChildren(QWidget)
-        if widget.property("selected") is True
-    ]
-    assert selected_roles == ["btn_graphs"]
 
-    qtbot.mouseClick(_sidebar_button(win, "btn_home"), Qt.LeftButton)
+    _menu_action(win, "viewMenu", "btn_home").trigger()
     qtbot.wait(20)
 
     assert win.workspace_stack.currentWidget() is win.homeWidget
-    selected_roles = [
-        widget.property("role")
-        for widget in win.sidebar.findChildren(QWidget)
-        if widget.property("selected") is True
-    ]
-    assert selected_roles == ["btn_home"]
 
 
-def test_sidebar_scalp_maps_embeds_in_main_workspace(
+def test_workspace_scalp_maps_embeds_in_main_workspace(
     tmp_path: Path,
     qtbot,
     monkeypatch,
@@ -1259,7 +1014,7 @@ def test_sidebar_scalp_maps_embeds_in_main_workspace(
     win.stacked.setCurrentIndex(1)
     qtbot.wait(20)
 
-    qtbot.mouseClick(_sidebar_button(win, "btn_publication_maps"), Qt.LeftButton)
+    _open_beta_tool(win, "btn_publication_maps")
     qtbot.wait(20)
 
     assert warning_keys == ["btn_publication_maps"]
@@ -1458,7 +1213,6 @@ def test_sidebar_scalp_maps_embeds_in_main_workspace(
     assert not page.run_btn.isEnabled()
     assert page.cancel_btn.isEnabled()
     assert not win.menuBar().isEnabled()
-    assert win.sidebar.property("processingLocked") is True
 
     page._set_busy_state(False)
     qtbot.wait(20)
@@ -1484,7 +1238,6 @@ def test_sidebar_scalp_maps_embeds_in_main_workspace(
     assert page.paired_condition_b_combo.isEnabled()
     assert not page.cancel_btn.isEnabled()
     assert win.menuBar().isEnabled()
-    assert win.sidebar.property("processingLocked") is False
 
     opened: list[bool] = []
 
@@ -1510,23 +1263,11 @@ def test_sidebar_scalp_maps_embeds_in_main_workspace(
     assert opened == [True]
     assert page._last_generated_figure_count == 0
 
-    selected_roles = [
-        widget.property("role")
-        for widget in win.sidebar.findChildren(QWidget)
-        if widget.property("selected") is True
-    ]
-    assert selected_roles == ["btn_publication_maps"]
 
-    qtbot.mouseClick(_sidebar_button(win, "btn_home"), Qt.LeftButton)
+    _menu_action(win, "viewMenu", "btn_home").trigger()
     qtbot.wait(20)
 
     assert win.workspace_stack.currentWidget() is win.homeWidget
-    selected_roles = [
-        widget.property("role")
-        for widget in win.sidebar.findChildren(QWidget)
-        if widget.property("selected") is True
-    ]
-    assert selected_roles == ["btn_home"]
 
 
 def test_beta_warning_is_generic_and_shown_once_per_tool(
@@ -1555,7 +1296,7 @@ def test_beta_warning_is_generic_and_shown_once_per_tool(
     beta_menu = _menu(win, "betaToolsMenu")
     beta_actions = {action.objectName(): action for action in beta_menu.actions()}
     beta_actions["btn_loreta_visualizer"].trigger()
-    qtbot.mouseClick(_sidebar_button(win, "btn_loreta_visualizer"), Qt.LeftButton)
+    _open_beta_tool(win, "btn_loreta_visualizer")
     beta_actions["btn_sequence_figure"].trigger()
 
     assert warning_calls == [
@@ -1832,19 +1573,12 @@ def test_beta_registry_routes_every_entry_through_shared_gate(
     monkeypatch.setattr(main_window_module.MainWindow, "_open_beta_tool", route_beta)
     win = _build_window(tmp_path, qtbot, monkeypatch, enable_beta_tools=True)
 
-    qtbot.mouseClick(_sidebar_button(win, role), Qt.LeftButton)
+    _open_beta_tool(win, role)
 
     assert routed == [(role, opener_name)]
 
-    action = next(
-        action for action in _menu(win, "betaToolsMenu").actions()
-        if action.objectName() == role
-    )
-    action.trigger()
-    assert routed == [(role, opener_name), (role, opener_name)]
 
-
-def test_sidebar_individual_detectability_embeds_in_main_workspace(
+def test_workspace_individual_detectability_embeds_in_main_workspace(
     tmp_path: Path,
     qtbot,
     monkeypatch,
@@ -1864,14 +1598,12 @@ def test_sidebar_individual_detectability_embeds_in_main_workspace(
     )
     win.stacked.setCurrentIndex(1)
     qtbot.wait(20)
-    sidebar_width_before = win.sidebar.width()
     workspace_width_before = win.workspace_stack.width()
 
-    qtbot.mouseClick(_sidebar_button(win, "btn_individual_detectability"), Qt.LeftButton)
+    _open_beta_tool(win, "btn_individual_detectability")
     qtbot.wait(20)
 
-    assert win.sidebar.width() == sidebar_width_before
-    assert win.workspace_stack.width() == workspace_width_before
+    assert win.workspace_stack.width() > workspace_width_before
     assert isinstance(win.workspace_stack.currentWidget(), IndividualDetectabilityWindow)
     assert (
         win.workspace_stack.currentWidget().objectName()
@@ -1881,20 +1613,8 @@ def test_sidebar_individual_detectability_embeds_in_main_workspace(
     assert win._individual_detectability_page.minimumWidth() <= win.workspace_stack.width()
     assert win._individual_detectability_page._project_root == project_root
     assert win._individual_detectability_page.input_root_edit.text() == str(excel_dir)
-    selected_roles = [
-        widget.property("role")
-        for widget in win.sidebar.findChildren(QWidget)
-        if widget.property("selected") is True
-    ]
-    assert selected_roles == ["btn_individual_detectability"]
 
-    qtbot.mouseClick(_sidebar_button(win, "btn_home"), Qt.LeftButton)
+    _menu_action(win, "viewMenu", "btn_home").trigger()
     qtbot.wait(20)
 
     assert win.workspace_stack.currentWidget() is win.homeWidget
-    selected_roles = [
-        widget.property("role")
-        for widget in win.sidebar.findChildren(QWidget)
-        if widget.property("selected") is True
-    ]
-    assert selected_roles == ["btn_home"]

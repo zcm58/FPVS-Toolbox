@@ -195,12 +195,19 @@ data collection.
 
 ## Tool Pages
 
-The **Workspace Tools** section of the app sidebar shows these default tools:
-Free Harmonic Clustering Analysis and SNR Plots.
+Open **Free Harmonic Clustering Analysis** and **SNR Plots** from **Tools**.
+Open **Settings** from **File**. Use **View > Home** or **Ctrl+1** to return to
+the processing page. Home opens in a compact window. Toolbox expands the
+window when a tool, Settings, or a processing review needs more room.
+
+Home shows how many conditions are configured. Select **Edit conditions** to
+see the marker rows, add conditions, or manage source maps and participants.
+Projects that already use source maps show **View conditions**. Hiding the
+editor keeps your draft. Use **File > Save Project Settings** to save it.
 
 Scalp Maps, Standard FPVS Screening, Sensitivity Analysis, LORETA Visualizer,
 Sequence Figure and Individual Detectability are beta tools.
-To show their separate **Beta Tools** sidebar subsection, open
+To show **Tools > Beta Tools**, open
 **Settings > Experimental > Beta Tools**, enable **Beta Tools**, save, then close
 and reopen FPVS Toolbox. Before each beta tool opens for the first time in an app session, the
 Toolbox warns that the tool is in beta and its features may change.

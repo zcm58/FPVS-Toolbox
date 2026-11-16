@@ -131,7 +131,7 @@ def test_settings_entry_remains_optional_and_tracks_dirty_state():
     settings_class = next(node for node in panel.body if isinstance(node, ast.ClassDef) and node.name == "SettingsDialog")
     show_event = next(node for node in settings_class.body if isinstance(node, ast.FunctionDef) and node.name == "showEvent")
     assert 'tabs.addTab(tab, "Processing")' in page
-    assert 'make_action_button("Guided setup", parent=tab)' in page
+    assert "self.group_preproc.header.add_action_widget(self.guided_setup_button)" in page
     assert "self.guided_setup_button.clicked.connect(self._show_pipeline_setup)" in page
     assert 'getattr(self.panel, "_refresh_guided_setup_availability", None)' in feedback
     assert "self._refresh_guided_setup_availability()" in ast.unparse(show_event)

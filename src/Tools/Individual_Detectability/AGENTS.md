@@ -26,6 +26,9 @@ identity includes that identity plus the source evidence and final release
 fingerprints. Refreshing inputs must resolve the current release again; a
 previously cached excluded recording cannot re-enter a figure.
 
+The Run card keeps progress and wrapping status visible. View Generation Log
+opens the full live log in a dialog and preserves history when dismissed.
+
 Run the headless `tests/processing/test_individual_detectability_core.py`,
 `test_individual_detectability_project_coverage.py`, and
 `test_individual_detectability_managed_inputs.py` modules for this contract.
@@ -34,3 +37,6 @@ project with an accepted participant or visit/condition exclusion, generate
 Individual Detectability, confirm only retained files appear, then exclude an
 additional participant using the checkbox and repeat. An unrelated stale or
 unreleased selected workbook must produce an input error before exports.
+At 1280 × 900, open and close View Generation Log while a run is active, then
+reopen it and verify that the complete history is available to copy and that
+the main page has retained its layout.

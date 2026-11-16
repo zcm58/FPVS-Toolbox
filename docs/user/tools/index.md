@@ -3,13 +3,11 @@
 Each guide explains what the corresponding FPVS Toolbox tool does, its required
 inputs, the files it creates, and the main interpretation limits.
 
-The sidebar shows default tools first. A separate **Beta Tools** subsection is
-appended only after you enable Beta Tools in **Settings > Experimental > Beta
-Tools**, save, and reopen
-FPVS Toolbox. Before each beta tool opens for the first time in an app session,
+Free Harmonic Clustering Analysis and SNR Plots open from the **Tools** menu. To add **Tools > Beta Tools**, enable Beta Tools in
+**Settings > Experimental > Beta Tools**, save, and reopen FPVS Toolbox. Before each beta tool opens for the first time in an app session,
 FPVS Toolbox warns that the tool is in beta and its features may change.
 
-| Tool | Sidebar status | Purpose |
+| Tool | Availability | Purpose |
 | --- | --- | --- |
 | [Free Harmonic Clustering Analysis](free-harmonic-clustering.md) | Default | Compare the relative electrode x harmonic response distribution for one paired-condition or independent-group contrast. |
 | [SNR Plots](snr-plot-generator.md) | Default | Create ROI-level SNR spectra for conditions or project groups. |

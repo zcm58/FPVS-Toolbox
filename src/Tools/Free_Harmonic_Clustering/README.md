@@ -34,7 +34,7 @@ environment.
 ## Embedded workflow
 
 Open **Free Harmonic Clustering Analysis** from the default Quick Tools list in
-the Workspace Tools sidebar. The page dynamically
+the Tools menu. The page dynamically
 reads project conditions, groups, exclusions, base and oddball frequencies,
 and FullFFT availability. It does not offer local frequency, group, session,
 condition, or participant-identity overrides. Repeated batches may add

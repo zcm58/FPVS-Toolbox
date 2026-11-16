@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Callable, TypeVar
 
-from PySide6.QtCore import QEvent, QTimer, Qt
+from PySide6.QtCore import QEvent, QSize, QTimer, Qt
 from PySide6.QtGui import QIntValidator, QValidator
 from PySide6.QtWidgets import (
     QHBoxLayout,
@@ -19,6 +19,24 @@ from Main_App.gui.condition_input_model import validate_condition_rows
 from .style_tokens import EVENT_ID_COLUMN_WIDTH
 
 EntryAdapterT = TypeVar("EntryAdapterT")
+
+
+class ConditionRowsArea(QScrollArea):
+    """Size the viewport to its live rows, up to a bounded list height."""
+
+    def sizeHint(self) -> QSize:
+        hint = super().sizeHint()
+        rows = self.widget()
+        if rows is not None:
+            hint.setHeight(min(328, rows.sizeHint().height() + 2 * self.frameWidth()))
+        return hint
+
+    def eventFilter(self, watched, event: QEvent) -> bool:
+        # Row additions/removals and inline error labels change the content
+        # hint, which the default QScrollArea caches.
+        if watched is self.widget() and event.type() == QEvent.LayoutRequest:
+            self.updateGeometry()
+        return super().eventFilter(watched, event)
 
 
 def live_event_map_rows(owner: object) -> list[QWidget]:
@@ -143,6 +161,18 @@ def condition_row_values(owner: object) -> list[tuple[str, str]]:
     ]
 
 
+def refresh_condition_editor_toggle(owner: object) -> None:
+    toggle = getattr(owner, "condition_editor_toggle", None)
+    if toggle is None:
+        return
+    project = getattr(owner, "currentProject", None)
+    mapped = getattr(getattr(project, "frequency_protocol", None), "condition_trigger_maps", None) is not None
+    if toggle.isChecked():
+        toggle.setText("Hide conditions")
+    else:
+        toggle.setText("View conditions" if mapped else "Edit conditions")
+
+
 def validated_event_map(owner: object, *, focus_error: bool = False) -> dict[str, int] | None:
     """Present field errors and optionally focus the first invalid control."""
     project = getattr(owner, "currentProject", None)
@@ -150,6 +180,10 @@ def validated_event_map(owner: object, *, focus_error: bool = False) -> dict[str
         # A source-mapped project deliberately has no global numeric onset map.
         return {}
     mapping, errors = validate_condition_rows(condition_row_values(owner))
+    summary = getattr(owner, "condition_summary_label", None)
+    if summary is not None:
+        text = f"{len(mapping)} configured" if mapping else "None configured"
+        summary.setText(f"{text} · Needs review" if errors else text)
     rows = getattr(owner, "event_rows", [])
     for index, row in enumerate(rows):
         messages = [error.message for error in errors if error.row == index]
@@ -163,6 +197,9 @@ def validated_event_map(owner: object, *, focus_error: bool = False) -> dict[str
                 edit.setAccessibleDescription(field_message)
                 edit.setToolTip(field_message)
     if errors and focus_error:
+        toggle = getattr(owner, "condition_editor_toggle", None)
+        if toggle is not None:
+            toggle.setChecked(True)
         first = errors[0]
         edit = event_row_edits(rows[first.row])[0 if first.field == "label" else 1]
         if edit is not None:
@@ -241,9 +278,11 @@ def add_event_row(owner: object, label: str = "", ident: str = "") -> None:
 
     le_label = QLineEdit(label, row)
     le_label.setPlaceholderText("Condition")
+    le_label.setAccessibleName("Condition name")
     le_label.setProperty("event_map_role", "label")
     le_id = QLineEdit(ident, row)
     le_id.setPlaceholderText("ID")
+    le_id.setAccessibleName("Trigger ID")
     le_id.setProperty("event_map_role", "id")
     le_id.setFixedWidth(EVENT_ID_COLUMN_WIDTH)
     le_id.setAlignment(Qt.AlignCenter)

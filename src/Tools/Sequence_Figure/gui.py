@@ -101,6 +101,7 @@ class SequenceFigureWindow(QWidget):
 
         self.condition_tabs = QTabWidget(card)
         self.condition_tabs.setObjectName("sequence_figure_condition_tabs")
+        self.condition_tabs.setAccessibleName("Stimulus images by condition")
         self.condition_tabs.setElideMode(Qt.ElideRight)
         self.condition_panels: list[QWidget] = []
         self.condition_label_edits: list[QLineEdit] = []
@@ -119,7 +120,9 @@ class SequenceFigureWindow(QWidget):
             form.addRow("Condition label:", label_edit)
             condition_rows: list[PathPickerRow] = []
             for slot in range(DEFAULT_IMAGE_COUNT):
-                row = PathPickerRow("Browse...", panel, placeholder=_image_placeholder(slot))
+                row = PathPickerRow("Choose Image", panel, placeholder=_image_placeholder(slot))
+                row.line_edit.setAccessibleName(f"{_slot_label(slot)} image path")
+                row.button.setAccessibleName(_image_dialog_title(slot, condition=condition))
                 row.setObjectName(
                     f"sequence_figure_image_{slot + 1}_row" if condition == 0
                     else f"sequence_figure_condition_{condition + 1}_image_{slot + 1}_row"
@@ -162,8 +165,10 @@ class SequenceFigureWindow(QWidget):
     def _build_output_card(self, layout: QVBoxLayout) -> None:
         card = SectionCard("Output", self, object_name="sequence_figure_output")
         form = make_form_layout()
-        self.output_row = PathPickerRow("Browse...", card, placeholder="Select output folder")
+        self.output_row = PathPickerRow("Choose Folder", card, placeholder="Select output folder")
         self.output_row.setObjectName("sequence_figure_output_row")
+        self.output_row.line_edit.setAccessibleName("Figure output folder")
+        self.output_row.button.setAccessibleName("Choose figure output folder")
         self.output_row.button.clicked.connect(self._select_output_folder)
         form.addRow("Output Folder:", self.output_row)
         card.content_layout.addLayout(form)
@@ -308,7 +313,9 @@ class SequenceFigureWindow(QWidget):
 
     def _update_condition_tab_label(self, condition: int, text: str) -> None:
         if condition < self.condition_tabs.count():
-            self.condition_tabs.setTabText(condition, text.strip() or f"Condition {condition + 1}")
+            label = text.strip() or f"Condition {condition + 1}"
+            self.condition_tabs.setTabText(condition, label)
+            self.condition_tabs.setTabToolTip(condition, label)
 
     def _on_failed(self, message: str) -> None:
         self.open_btn.setEnabled(self._last_result is not None)

@@ -1887,6 +1887,7 @@ class LoretaVisualizerWindow(QWidget):
 
         self.source_method_combo = QComboBox(selection_section)
         self.source_method_combo.setObjectName("loreta_source_method_combo")
+        source_method_label.setBuddy(self.source_method_combo)
         self.source_method_combo.currentIndexChanged.connect(self._on_source_method_changed)
         selection_layout.addWidget(self.source_method_combo)
 
@@ -1903,6 +1904,7 @@ class LoretaVisualizerWindow(QWidget):
 
         self.condition_combo = QComboBox(selection_section)
         self.condition_combo.setObjectName("loreta_condition_combo")
+        condition_label.setBuddy(self.condition_combo)
         self.condition_combo.setPlaceholderText("No source maps loaded")
         self.condition_combo.currentIndexChanged.connect(self._on_condition_changed)
         selection_layout.addWidget(self.condition_combo)
@@ -1912,6 +1914,7 @@ class LoretaVisualizerWindow(QWidget):
 
         self.summary_combo = QComboBox(selection_section)
         self.summary_combo.setObjectName("loreta_source_summary_combo")
+        summary_label.setBuddy(self.summary_combo)
         self.summary_combo.currentIndexChanged.connect(self._on_summary_changed)
         selection_layout.addWidget(self.summary_combo)
 
@@ -1920,6 +1923,7 @@ class LoretaVisualizerWindow(QWidget):
 
         self.display_mode_combo = QComboBox(selection_section)
         self.display_mode_combo.setObjectName("loreta_display_mode_combo")
+        display_mode_label.setBuddy(self.display_mode_combo)
         for label, mode in DISPLAY_MODE_OPTIONS:
             self.display_mode_combo.addItem(label, mode)
         self.display_mode_combo.currentIndexChanged.connect(self._on_display_mode_changed)
@@ -1971,6 +1975,7 @@ class LoretaVisualizerWindow(QWidget):
 
         self.activation_scale_combo = QComboBox(color_section)
         self.activation_scale_combo.setObjectName("loreta_activation_scale_combo")
+        self.activation_scale_combo.setAccessibleName("Source color scale")
         self.activation_scale_combo.addItem("Scale: current map", SCALE_CURRENT)
         self.activation_scale_combo.addItem("Scale: all conditions", SCALE_SHARED)
         self.activation_scale_combo.addItem("Scale: fixed limits", SCALE_FIXED)
@@ -2005,11 +2010,13 @@ class LoretaVisualizerWindow(QWidget):
         range_row.setSpacing(6)
         self.activation_min_spin = ScientificDoubleSpinBox(color_section)
         self.activation_min_spin.setObjectName("loreta_activation_min_spin")
+        self.activation_min_spin.setAccessibleName("Minimum source color value")
         self.activation_min_spin.setRange(-1_000_000.0, 1_000_000.0)
         self.activation_min_spin.setValue(DEFAULT_SCALAR_MIN)
         self.activation_min_spin.valueChanged.connect(self._on_activation_range_changed)
         self.activation_max_spin = ScientificDoubleSpinBox(color_section)
         self.activation_max_spin.setObjectName("loreta_activation_max_spin")
+        self.activation_max_spin.setAccessibleName("Maximum source color value")
         self.activation_max_spin.setRange(-1_000_000.0, 1_000_000.0)
         self.activation_max_spin.setValue(DEFAULT_SCALAR_MAX)
         self.activation_max_spin.valueChanged.connect(self._on_activation_range_changed)
@@ -2028,6 +2035,7 @@ class LoretaVisualizerWindow(QWidget):
 
         self.transparency_slider = QSlider(Qt.Horizontal, view_section)
         self.transparency_slider.setObjectName("loreta_transparency_slider")
+        self.opacity_label.setBuddy(self.transparency_slider)
         self.transparency_slider.setRange(5, 100)
         self.transparency_slider.setValue(DEFAULT_OPACITY_PERCENT)
         self.transparency_slider.valueChanged.connect(self._on_transparency_changed)
@@ -2041,6 +2049,7 @@ class LoretaVisualizerWindow(QWidget):
 
         self.activation_opacity_slider = QSlider(Qt.Horizontal, view_section)
         self.activation_opacity_slider.setObjectName("loreta_activation_opacity_slider")
+        self.activation_opacity_label.setBuddy(self.activation_opacity_slider)
         self.activation_opacity_slider.setRange(0, 100)
         self.activation_opacity_slider.setValue(DEFAULT_ACTIVATION_OPACITY_PERCENT)
         self.activation_opacity_slider.valueChanged.connect(self._on_activation_opacity_changed)
@@ -2056,12 +2065,14 @@ class LoretaVisualizerWindow(QWidget):
         left_split_rotation_layout.addWidget(QLabel("Left", self.left_split_rotation_row), 1)
         self.left_split_rotate_minus_btn = make_action_button("-", compact=True, parent=self.left_split_rotation_row)
         self.left_split_rotate_minus_btn.setObjectName("loreta_left_split_rotate_minus_btn")
+        self.left_split_rotate_minus_btn.setAccessibleName("Rotate left hemisphere counterclockwise")
         self.left_split_rotate_minus_btn.setToolTip("Rotate left hemisphere counterclockwise")
         self.left_split_rotate_minus_btn.clicked.connect(
             lambda: self._rotate_split_hemisphere("left", -SPLIT_HEMISPHERE_ROTATION_STEP_DEGREES)
         )
         self.left_split_rotate_plus_btn = make_action_button("+", compact=True, parent=self.left_split_rotation_row)
         self.left_split_rotate_plus_btn.setObjectName("loreta_left_split_rotate_plus_btn")
+        self.left_split_rotate_plus_btn.setAccessibleName("Rotate left hemisphere clockwise")
         self.left_split_rotate_plus_btn.setToolTip("Rotate left hemisphere clockwise")
         self.left_split_rotate_plus_btn.clicked.connect(
             lambda: self._rotate_split_hemisphere("left", SPLIT_HEMISPHERE_ROTATION_STEP_DEGREES)
@@ -2077,12 +2088,14 @@ class LoretaVisualizerWindow(QWidget):
         right_split_rotation_layout.addWidget(QLabel("Right", self.right_split_rotation_row), 1)
         self.right_split_rotate_minus_btn = make_action_button("-", compact=True, parent=self.right_split_rotation_row)
         self.right_split_rotate_minus_btn.setObjectName("loreta_right_split_rotate_minus_btn")
+        self.right_split_rotate_minus_btn.setAccessibleName("Rotate right hemisphere counterclockwise")
         self.right_split_rotate_minus_btn.setToolTip("Rotate right hemisphere counterclockwise")
         self.right_split_rotate_minus_btn.clicked.connect(
             lambda: self._rotate_split_hemisphere("right", -SPLIT_HEMISPHERE_ROTATION_STEP_DEGREES)
         )
         self.right_split_rotate_plus_btn = make_action_button("+", compact=True, parent=self.right_split_rotation_row)
         self.right_split_rotate_plus_btn.setObjectName("loreta_right_split_rotate_plus_btn")
+        self.right_split_rotate_plus_btn.setAccessibleName("Rotate right hemisphere clockwise")
         self.right_split_rotate_plus_btn.setToolTip("Rotate right hemisphere clockwise")
         self.right_split_rotate_plus_btn.clicked.connect(
             lambda: self._rotate_split_hemisphere("right", SPLIT_HEMISPHERE_ROTATION_STEP_DEGREES)

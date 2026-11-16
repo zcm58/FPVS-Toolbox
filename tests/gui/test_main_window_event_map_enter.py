@@ -18,7 +18,7 @@ import Main_App.gui.update_manager as update_manager
 _REAL_MESSAGEBOX_QUESTION = QMessageBox.question
 
 
-def _build_window(tmp_path, qtbot, monkeypatch):
+def _build_window(tmp_path, qtbot, monkeypatch, *, open_editor=True):
     os.environ["XDG_CONFIG_HOME"] = str(tmp_path)
     monkeypatch.setattr(update_manager, "cleanup_old_executable", lambda: None)
     monkeypatch.setattr(update_manager, "check_for_updates_on_launch", lambda *_args, **_kwargs: None)
@@ -32,6 +32,7 @@ def _build_window(tmp_path, qtbot, monkeypatch):
     win = main_window_module.MainWindow()
     qtbot.addWidget(win)
     win.show()
+    win.condition_editor_toggle.setChecked(open_editor)
     qtbot.wait(50)
     return win
 
@@ -217,8 +218,12 @@ def test_single_mode_requires_event_map_and_bdf(tmp_path, qtbot, monkeypatch):
 def test_partial_and_duplicate_conditions_block_save_and_focus_exact_field(tmp_path, qtbot, monkeypatch):
     from Main_App.gui import event_map, project_workflows
 
-    win = _build_window(tmp_path, qtbot, monkeypatch)
+    win = _build_window(tmp_path, qtbot, monkeypatch, open_editor=False)
     win.show_home_page()
+    assert not win.condition_editor_body.isVisible()
+    assert win.condition_editor_toggle.text() == "Edit conditions"
+    qtbot.mouseClick(win.condition_editor_toggle, Qt.LeftButton)
+    assert win.condition_editor_body.isVisible()
     label, ident = _row_fields(win, _live_rows(win)[0])
     label.setText("Faces")
     ident.setText("1")
@@ -229,8 +234,15 @@ def test_partial_and_duplicate_conditions_block_save_and_focus_exact_field(tmp_p
     duplicate_label, missing_id = _row_fields(win, row)
     assert not win.btn_start.isEnabled()
     assert row.findChild(QLabel, "condition_row_error").text()
+    qtbot.mouseClick(win.condition_editor_toggle, Qt.LeftButton)
+    assert not win.condition_editor_body.isVisible()
+    assert win.condition_summary_label.text() == "1 configured · Needs review"
+    assert duplicate_label.text() == "Objects"
+    win.workspace_stack.setCurrentWidget(win.processing_page)
     assert project_workflows.save_project_settings(win) is False
     qtbot.waitUntil(missing_id.hasFocus)
+    assert win.workspace_stack.currentWidget() is win.homeWidget
+    assert win.condition_editor_body.isVisible()
     win.resize(1280, 900)
     qtbot.wait(25)
     error = row.findChild(QLabel, "condition_row_error")
@@ -248,6 +260,61 @@ def test_partial_and_duplicate_conditions_block_save_and_focus_exact_field(tmp_p
     assert project_workflows.save_project_settings(win)
     assert project.event_map == {"Faces": 1, "Objects": 2}
     win.currentProject = None
+
+
+def test_mapped_project_disclosure_shows_catalog_without_manual_editor(tmp_path, qtbot, monkeypatch):
+    from Main_App.gui import event_map, trigger_maps_workflow
+
+    win = _build_window(tmp_path, qtbot, monkeypatch, open_editor=False)
+    win.show_home_page()
+    win.currentProject = SimpleNamespace(
+        event_map={}, options={"mode": "batch"},
+        frequency_protocol=SimpleNamespace(condition_trigger_maps=object()),
+    )
+    monkeypatch.setattr(trigger_maps_workflow, "trigger_maps_summary", lambda _: "Two source maps")
+    monkeypatch.setattr(trigger_maps_workflow, "project_conditions", lambda _: (
+        SimpleNamespace(label="Faces", condition_id="faces"),
+        SimpleNamespace(label="Objects", condition_id="objects"),
+    ))
+    trigger_maps_workflow.refresh_home_trigger_maps(win)
+
+    assert win.condition_summary_label.text() == "2 configured · Source maps"
+    assert win.condition_editor_toggle.text() == "View conditions"
+    assert not win.condition_editor_body.isVisible()
+    qtbot.mouseClick(win.condition_editor_toggle, Qt.LeftButton)
+    assert win.condition_editor_body.isVisible()
+    assert win.trigger_maps_button.isVisible() and win.source_participants_button.isVisible()
+    assert win.event_container.findChild(QLabel, "home_trigger_maps_summary").text() == "Two source maps"
+    assert not win.event_id_header.isVisible()
+    assert not win.btn_add_row.isVisible()
+    assert event_map.condition_row_values(win) == []
+    assert event_map.validated_event_map(win) == {}
+
+
+def test_condition_editor_grows_for_long_lists_and_keeps_run_controls_visible(
+    tmp_path, qtbot, monkeypatch,
+):
+    win = _build_window(tmp_path, qtbot, monkeypatch, open_editor=False)
+    win.show_home_page()
+    win.resize(900, 620)
+    for index in range(12):
+        win.add_event_row(f"Condition {index + 1}", str(index + 1))
+
+    qtbot.mouseClick(win.condition_editor_toggle, Qt.LeftButton)
+    area = win._event_map_scroll_area()
+    rows = win._live_event_map_rows()
+    viewport = area.viewport()
+    qtbot.waitUntil(lambda: viewport.height() >= 150 and area.verticalScrollBar().maximum() > 0)
+    top = rows[1].mapTo(viewport, rows[1].rect().topLeft()).y()
+    third_bottom = rows[3].mapTo(viewport, rows[3].rect().bottomLeft()).y()
+    assert 0 <= top < third_bottom < viewport.height()
+    trigger_id = win._event_row_id_edit(rows[1])
+    column_x = trigger_id.mapTo(win.homeWidget, trigger_id.rect().center()).x()
+    header_x = win.event_id_header.mapTo(win.homeWidget, win.event_id_header.rect().center()).x()
+    assert abs(column_x - header_x) <= 2
+    assert win.homeWidget.rect().contains(
+        win.btn_start.mapTo(win.homeWidget, win.btn_start.rect().bottomRight())
+    )
 
 
 @pytest.mark.parametrize("choice,allowed", [(QMessageBox.Cancel, False), (QMessageBox.Discard, True), (QMessageBox.Save, True)])

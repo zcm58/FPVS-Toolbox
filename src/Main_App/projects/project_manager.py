@@ -1572,7 +1572,7 @@ def openProjectPath(self, folder: str) -> Project | None:
 
 def loadProject(self, project: Project) -> None:
     self.currentProject = project
-    self.lbl_currentProject.setText(f"Current Project: {project.name}")
+    self._set_project_title(project.name)
 
     preference_error = None
     if not project_group_context(project).has_group_metadata:

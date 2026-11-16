@@ -14,7 +14,12 @@ sys.path.insert(0, str(Path(SPECPATH)))
 from updater_metadata import version_data
 from runtime_imports import active_runtime_imports
 metadata, _version = version_data(REPO_ROOT)
-datas = [(str(metadata), "."), (str(APP_ICON), "assets")]
+datas = [
+    (str(metadata), "."),
+    (str(APP_ICON), "assets"),
+    (str(SRC_ROOT / "Main_App" / "gui" / "chevron-down.svg"), "Main_App/gui"),
+    (str(SRC_ROOT / "Main_App" / "gui" / "chevron-up.svg"), "Main_App/gui"),
+]
 binaries = []
 hiddenimports = [
     'mne.io.edf', 'scipy', 'scipy._cyutility', 'pandas', 'numpy', 'statsmodels', 'pyvista', 'patsy',

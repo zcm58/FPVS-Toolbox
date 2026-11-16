@@ -14,7 +14,6 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QProgressBar,
     QRadioButton,
-    QScrollArea,
     QSizePolicy,
     QStackedWidget,
     QTableWidget,
@@ -22,7 +21,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from Main_App.gui.header_bar import HeaderBar
+from Main_App.gui.event_map import ConditionRowsArea, refresh_condition_editor_toggle
 from Main_App.gui.icons import application_icon
 from Main_App.gui.menu_bar import build_menu_bar
 from Main_App.gui.processing_log_dialog import ProcessingLogDialog
@@ -58,12 +57,15 @@ def init_ui(self) -> None:
 
     # Keep the debug indicator in the menu row without reserving a toolbar row.
     self.lbl_debug = QLabel("DEBUG MODE ENABLED", menu)
-    self.lbl_debug.setStyleSheet("color: red; background-color: transparent;")
+    self.lbl_debug.setObjectName("workspaceDebugLabel")
     menu.setCornerWidget(self.lbl_debug, Qt.TopRightCorner)
     self.lbl_debug.setVisible(self.settings.debug_enabled())
 
     # Central stack
     self.stacked = QStackedWidget(self)
+    # The window sets the minimum for the active surface. Hidden pages can
+    # have large size hints even when Home is the only visible page.
+    self.stacked.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
     self.setCentralWidget(self.stacked)
 
     # ===== Page 0: Landing =====
@@ -151,44 +153,28 @@ def init_ui(self) -> None:
     page1 = QWidget(self.stacked)
     page1.setObjectName("Page1")
     page1.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-    page1.setStyleSheet(build_main_page_stylesheet())
 
-    row = QHBoxLayout(page1)
-    row.setContentsMargins(0, 0, 0, 0)
-    row.setSpacing(0)
+    shell_layout = QVBoxLayout(page1)
+    shell_layout.setContentsMargins(0, 0, 0, 0)
+    shell_layout.setSpacing(0)
 
-    # Sidebar placeholder (populated by sidebar.init_sidebar)
-    self.sidebar = QWidget(page1)
-    row.addWidget(self.sidebar)
-
-    # Right: vertical stack -> header on top, content below
-    right = QWidget(page1)
-    right.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-    right_v = QVBoxLayout(right)
-    right_v.setContentsMargins(0, 0, 0, 0)
-    right_v.setSpacing(0)
-
-    header = HeaderBar("Current Project: None", right)
-    self.lbl_currentProject = header.titleLabel
-    right_v.addWidget(header)
-
-    container = QWidget(right)
+    container = QWidget(page1)
     container.setObjectName("MainContent")
-    container.setAttribute(Qt.WA_StyledBackground, True)
+    container.setAutoFillBackground(True)
     container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
     main_layout = QVBoxLayout(container)
     main_layout.setContentsMargins(PAGE_MARGIN, PAGE_MARGIN, PAGE_MARGIN, PAGE_MARGIN)
     main_layout.setSpacing(0)
-    right_v.addWidget(container, 1)
-
-    row.addWidget(right, 1)
+    shell_layout.addWidget(container, 1)
 
     self.workspace_stack = QStackedWidget(container)
+    self.workspace_stack.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
     self.workspace_stack.setObjectName("workspace_stack")
     main_layout.addWidget(self.workspace_stack, 1)
 
     setup_panel = QWidget(self.workspace_stack)
     setup_panel.setObjectName("setup_panel")
+    setup_panel.setStyleSheet(build_main_page_stylesheet())
     setup_panel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
     setup_layout = QVBoxLayout(setup_panel)
     setup_layout.setContentsMargins(0, 0, 0, 0)
@@ -297,13 +283,23 @@ def init_ui(self) -> None:
     except Exception:
         pass
 
-    # Event Map
-    grp_event = SectionCard("Event Map", setup_panel, object_name="event_map_group")
+    # Conditions
+    grp_event = SectionCard("Conditions", setup_panel, object_name="event_map_group")
     grp_event.header.setObjectName("event_map_card_header")
-    grp_event.header.title_label.setText("")
-    grp_event.header.hide()
+    self.condition_summary_label = QLabel("None configured", grp_event.header)
+    self.condition_summary_label.setObjectName("home_condition_summary")
+    self.condition_summary_label.setTextFormat(Qt.PlainText)
+    grp_event.header.header_layout.insertWidget(1, self.condition_summary_label)
+
+    self.condition_editor_toggle = make_action_button("Edit conditions", compact=True, parent=grp_event)
+    self.condition_editor_toggle.setObjectName("home_condition_editor_toggle")
+    self.condition_editor_toggle.setCheckable(True)
+    self.condition_editor_toggle.setAccessibleDescription("Show or hide condition rows and source controls.")
+    grp_event.header.add_action_widget(self.condition_editor_toggle)
+
+    self.condition_editor_body = grp_event.content
+    self.condition_editor_body.setObjectName("home_condition_editor")
     event_group_layout = grp_event.content_layout
-    event_group_layout.setSpacing(8)
 
     self.btn_add_row = make_action_button(
         "+ Add Condition",
@@ -317,11 +313,13 @@ def init_ui(self) -> None:
     self.source_participants_button = make_action_button("Source participants…", compact=True, parent=grp_event)
     self.source_participants_button.setObjectName("home_source_participants")
     self.source_participants_button.clicked.connect(lambda: show_source_participants(self))
-    source_actions = QHBoxLayout()
-    source_actions.addWidget(self.trigger_maps_button)
-    source_actions.addWidget(self.source_participants_button)
-    source_actions.addStretch(1)
-    event_group_layout.addLayout(source_actions)
+    condition_actions = ActionRow(grp_event.content, alignment=Qt.AlignLeft)
+    condition_actions.setObjectName("home_condition_actions")
+    condition_actions.add_button(self.trigger_maps_button)
+    condition_actions.add_button(self.source_participants_button)
+    condition_actions.row_layout.addStretch(1)
+    condition_actions.add_button(self.btn_add_row)
+    event_group_layout.addWidget(condition_actions)
 
     event_header = QWidget(grp_event)
     event_header.setObjectName("event_map_header")
@@ -338,14 +336,20 @@ def init_ui(self) -> None:
     lbl_actions.setFixedWidth(EVENT_REMOVE_BUTTON_SIZE)
 
     header_layout.addWidget(lbl_condition, 1)
-    header_layout.addWidget(self.btn_add_row, 0)
     header_layout.addWidget(lbl_id, 0)
     header_layout.addWidget(lbl_actions, 0)
     event_group_layout.addWidget(event_header)
 
-    scroll = QScrollArea(grp_event)
+    scroll = ConditionRowsArea(grp_event)
     scroll.setObjectName("event_map_scroll")
     scroll.setWidgetResizable(True)
+    scroll.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+    scrollbar = scroll.verticalScrollBar()
+    scrollbar.rangeChanged.connect(
+        lambda minimum, maximum: header_layout.setContentsMargins(
+            0, 0, scrollbar.sizeHint().width() if maximum > minimum else 0, 0,
+        ),
+    )
 
     self.event_container = QWidget()
     self.event_container.setObjectName("event_map_list")
@@ -356,7 +360,11 @@ def init_ui(self) -> None:
     scroll.setWidget(self.event_container)
 
     event_group_layout.addWidget(scroll, 1)
-    setup_layout.addWidget(grp_event, 1)
+    grp_event.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
+    self.condition_editor_body.hide()
+    self.condition_editor_toggle.toggled.connect(self.condition_editor_body.setVisible)
+    self.condition_editor_toggle.toggled.connect(lambda _checked: refresh_condition_editor_toggle(self))
+    setup_layout.addWidget(grp_event)
     self.last_run_panel = build_last_run_panel(self, setup_panel)
     setup_layout.addWidget(self.last_run_panel)
     self.processing_readiness_label = QLabel(setup_panel)
@@ -399,6 +407,7 @@ def init_ui(self) -> None:
     run_panel.add_button(self.btn_view_log)
     run_panel.add_button(self.btn_start)
     setup_layout.addWidget(run_panel)
+    setup_layout.addStretch(1)
 
     saved_pairs = self.settings.get_event_pairs()
     if saved_pairs:
@@ -415,6 +424,7 @@ def init_ui(self) -> None:
 
     processing_page = QWidget(self.workspace_stack)
     processing_page.setObjectName("processing_page")
+    processing_page.setStyleSheet(build_main_page_stylesheet())
     processing_page.setAttribute(Qt.WA_StyledBackground, True)
     processing_page.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
     self.processing_page = processing_page

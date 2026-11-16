@@ -9,13 +9,13 @@ from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
+    QDialogButtonBox,
     QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QListWidget,
     QListWidgetItem,
-    QPushButton,
     QProgressBar,
     QPlainTextEdit,
     QSizePolicy,
@@ -33,11 +33,13 @@ from PySide6.QtWidgets import (
 )
 
 from Main_App.gui.components import (
+    AppDialog,
     PathPickerRow,
     SectionCard,
     SurfaceSize,
     StatusBanner,
     configure_window_surface,
+    fixed_width_font,
     make_action_button,
     make_form_layout,
     make_section_grid_layout,
@@ -99,6 +101,12 @@ class IndividualDetectabilityWindow(QWidget):
 
         layout = QVBoxLayout(self)
         self.tabs = QTabWidget()
+        self.tabs.setObjectName("individual_detectability_tabs")
+        self.tabs.setDocumentMode(True)
+        self.tabs.setStyleSheet(
+            "QTabWidget#individual_detectability_tabs::pane {"
+            " border: none; background: transparent; }"
+        )
         self.basic_tab = QWidget()
         self.advanced_tab = QWidget()
         self.tabs.addTab(self.basic_tab, "Basic")
@@ -107,12 +115,10 @@ class IndividualDetectabilityWindow(QWidget):
 
         self._build_basic_tab()
         self._build_advanced_tab()
-        self._apply_button_styling()
         self._apply_button_icons()
 
         self._set_default_input_root()
         self._refresh_conditions()
-        self._update_run_state()
 
     def _resolve_project_root(self, provided_root: str | None) -> Optional[Path]:
         return resolve_active_project_root(
@@ -148,12 +154,13 @@ class IndividualDetectabilityWindow(QWidget):
         layout = make_form_layout()
 
         self.input_root_row = PathPickerRow(
-            "Browse...",
+            "Choose Excel Folder",
             group,
             placeholder="Select Excel root folder",
         )
         self.input_root_row.setObjectName("individual_detectability_input_root_row")
         self.input_root_edit = self.input_root_row.line_edit
+        self.input_root_edit.setAccessibleName("Processed Excel folder")
         self.input_root_btn = self.input_root_row.button
         self.input_root_btn.clicked.connect(self._browse_input_root)
         self.refresh_btn = make_action_button("Refresh conditions", compact=True, parent=group)
@@ -170,6 +177,7 @@ class IndividualDetectabilityWindow(QWidget):
         layout = group.content_layout
 
         self.conditions_list = QListWidget()
+        self.conditions_list.setAccessibleName("Conditions to include")
         self.conditions_list.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.conditions_list.itemChanged.connect(self._on_condition_check_changed)
 
@@ -201,38 +209,30 @@ class IndividualDetectabilityWindow(QWidget):
         form = make_form_layout()
 
         self.output_root_row = PathPickerRow(
-            "Browse...",
+            "Choose Folder",
             group,
             placeholder="Select output folder",
+            compact_button=True,
         )
         self.output_root_row.setObjectName("individual_detectability_output_root_row")
         self.output_root_edit = self.output_root_row.line_edit
+        self.output_root_edit.setAccessibleName("Figure output folder")
         self.output_root_btn = self.output_root_row.button
+        self.output_root_btn.setAccessibleName("Choose figure output folder")
         self.output_root_btn.clicked.connect(self._browse_output_root)
         self.output_root_open_btn = make_action_button("Open", compact=True, parent=group)
+        self.output_root_open_btn.setAccessibleName("Open figure output folder")
         self.output_root_open_btn.clicked.connect(self._open_output_folder)
         self.output_root_row.row_layout.insertWidget(1, self.output_root_open_btn)
         form.addRow("Output folder:", self.output_root_row)
 
         layout.addLayout(form)
 
-        format_row = QWidget()
-        format_layout = QHBoxLayout(format_row)
-        format_layout.setContentsMargins(0, 0, 0, 0)
-        format_layout.setSpacing(10)
-        self.export_pdf_check = QCheckBox("Export PDF (600 DPI)")
-        self.export_pdf_check.setChecked(True)
-        self.export_pdf_check.setEnabled(False)
-        self.export_png_check = QCheckBox("Export PNG (600 DPI)")
-        self.export_png_check.setChecked(True)
-        self.export_png_check.setEnabled(False)
+        formats = QLabel("PNG and PDF (600 DPI)", group)
+        formats.setProperty("caption", True)
         self.open_on_complete_check = QCheckBox("Open output folder on completion")
         self.open_on_complete_check.setChecked(True)
-        format_layout.addWidget(self.export_pdf_check)
-        format_layout.addWidget(self.export_png_check)
-        format_layout.addStretch(1)
-
-        layout.addWidget(format_row)
+        layout.addWidget(formats)
         layout.addWidget(self.open_on_complete_check)
         return group
 
@@ -255,6 +255,7 @@ class IndividualDetectabilityWindow(QWidget):
         filter_layout.setContentsMargins(0, 0, 0, 0)
         filter_layout.setSpacing(6)
         self.participant_search = QLineEdit()
+        self.participant_search.setAccessibleName("Search participants")
         self.participant_search.setPlaceholderText("Search participants")
         self.participant_search.textChanged.connect(self._apply_participant_filter)
         self.show_excluded_check = QCheckBox("Show only excluded")
@@ -263,6 +264,7 @@ class IndividualDetectabilityWindow(QWidget):
         filter_layout.addWidget(self.show_excluded_check)
 
         self.participant_table = QTableWidget(0, 2)
+        self.participant_table.setAccessibleName("Participant exclusions")
         self.participant_table.setHorizontalHeaderLabels(["Exclude", "Participant ID"])
         self.participant_table.horizontalHeader().setSectionResizeMode(
             0, QHeaderView.ResizeToContents
@@ -422,64 +424,69 @@ class IndividualDetectabilityWindow(QWidget):
 
     def _build_bottom_panel(self) -> SectionCard:
         panel = SectionCard("Run", object_name="individual_detectability_run")
-        panel.set_compact()
+        panel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
         layout = panel.content_layout
 
         row = QWidget()
         row_layout = QHBoxLayout(row)
         row_layout.setContentsMargins(0, 0, 0, 0)
         row_layout.setSpacing(6)
-        self.run_btn = make_action_button("Run", variant="primary", parent=panel)
+        self.run_btn = make_action_button("Generate Figures", variant="primary", parent=panel)
         self.run_btn.clicked.connect(self._start_run)
         self.progress = QProgressBar()
+        self.progress.setAccessibleName("Figure generation progress")
         self.progress.setValue(0)
-        self.status_label = StatusBanner("Ready.", panel)
+        self.status_label = StatusBanner("", panel)
         self.status_label.setObjectName("individual_detectability_status")
         row_layout.addWidget(self.run_btn)
         row_layout.addWidget(self.progress, 1)
-        row_layout.addWidget(self.status_label)
 
         log_row = QWidget()
         log_layout = QHBoxLayout(log_row)
         log_layout.setContentsMargins(0, 0, 0, 0)
         log_layout.setSpacing(6)
-        self.toggle_log_btn = make_action_button(
-            "Show log",
+        self.view_generation_log_btn = make_action_button(
+            "View Generation Log",
             variant="tertiary",
             compact=True,
             parent=panel,
         )
-        self.toggle_log_btn.setCheckable(True)
-        self.toggle_log_btn.toggled.connect(self._toggle_log_panel)
-        self.copy_log_btn = make_action_button("Copy log", compact=True, parent=panel)
-        self.copy_log_btn.clicked.connect(self._copy_log)
         self.open_output_btn = make_action_button(
             "Open output folder",
             compact=True,
             parent=panel,
         )
         self.open_output_btn.clicked.connect(self._open_output_folder)
-        log_layout.addWidget(self.toggle_log_btn)
-        log_layout.addWidget(self.copy_log_btn)
+        log_layout.addWidget(self.view_generation_log_btn)
         log_layout.addWidget(self.open_output_btn)
         log_layout.addStretch(1)
 
-        self.log_box = QPlainTextEdit()
+        self.log_dialog = AppDialog(
+            "Individual Detectability Generation Log",
+            self,
+            size=SurfaceSize(width=760, height=500, min_width=560, min_height=360),
+        )
+        self.log_dialog.setModal(True)
+        self.view_generation_log_btn.clicked.connect(self.log_dialog.open)
+        self.log_box = QPlainTextEdit(self.log_dialog)
+        self.log_box.setAccessibleName("Individual Detectability generation log")
         self.log_box.setReadOnly(True)
-        self.log_box.setVisible(False)
-        self.log_box.setMinimumHeight(140)
+        self.log_box.setFont(fixed_width_font())
+        self.log_box.setPlaceholderText("No generation details are available yet.")
         self.log_box.setProperty("logSurface", True)
+        self.log_dialog.root_layout.addWidget(self.log_box, 1)
+        log_buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close, self.log_dialog)
+        log_buttons.rejected.connect(self.log_dialog.reject)
+        self.copy_log_btn = log_buttons.addButton(
+            "Copy Log", QDialogButtonBox.ButtonRole.ActionRole
+        )
+        self.copy_log_btn.clicked.connect(self._copy_log)
+        self.log_dialog.root_layout.addWidget(log_buttons)
 
         layout.addWidget(row)
         layout.addWidget(log_row)
-        layout.addWidget(self.log_box)
+        layout.addWidget(self.status_label)
         return panel
-
-    def _apply_button_styling(self) -> None:
-        for btn in self.findChildren(QPushButton):
-            btn.setFixedHeight(28)
-            btn.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
-        self.toggle_log_btn.setFixedHeight(26)
 
     def _apply_button_icons(self) -> None:
         style = QApplication.instance().style()
@@ -488,8 +495,7 @@ class IndividualDetectabilityWindow(QWidget):
         self.output_root_btn.setIcon(style.standardIcon(QStyle.SP_DirOpenIcon))
         self.output_root_open_btn.setIcon(style.standardIcon(QStyle.SP_DialogOpenButton))
         self.run_btn.setIcon(style.standardIcon(QStyle.SP_MediaPlay))
-        self.toggle_log_btn.setIcon(style.standardIcon(QStyle.SP_FileDialogInfoView))
-        self.copy_log_btn.setIcon(style.standardIcon(QStyle.SP_DialogSaveButton))
+        self.view_generation_log_btn.setIcon(style.standardIcon(QStyle.SP_FileDialogInfoView))
         self.open_output_btn.setIcon(style.standardIcon(QStyle.SP_DirOpenIcon))
 
     def _set_default_input_root(self) -> None:
@@ -764,18 +770,28 @@ class IndividualDetectabilityWindow(QWidget):
                 excluded.add(pid_item.text())
         return excluded
 
-    def _update_run_state(self) -> None:
-        ready = bool(self.output_root_edit.text().strip())
-        ready = ready and bool(self._selected_conditions())
-        self.run_btn.setEnabled(ready and self._thread is None)
+    def _update_run_state(self, *, show_setup_status: bool = True) -> None:
+        if self._thread is not None:
+            self.run_btn.setEnabled(False)
+            return
 
-    def _toggle_log_panel(self, checked: bool) -> None:
-        self.log_box.setVisible(checked)
-        self.toggle_log_btn.setText("Hide log" if checked else "Show log")
+        blocker = ""
+        if not self.input_root_edit.text().strip():
+            blocker = "Choose the folder containing your processed Excel workbooks."
+        elif not self._conditions:
+            blocker = "No conditions found. Choose a folder with processed Excel workbooks."
+        elif not self._selected_conditions():
+            blocker = "Select at least one condition."
+        elif not self.output_root_edit.text().strip():
+            blocker = "Choose an output folder."
+
+        self.run_btn.setEnabled(not blocker)
+        if show_setup_status:
+            self.status_label.set_text(blocker or "Ready to generate figures.")
+            self.status_label.set_variant("info")
 
     def _append_log(self, message: str) -> None:
         self.log_box.appendPlainText(message)
-        self.status_label.set_text(message)
 
     def _copy_log(self) -> None:
         QApplication.clipboard().setText(self.log_box.toPlainText())
@@ -853,6 +869,7 @@ class IndividualDetectabilityWindow(QWidget):
 
     def _on_worker_error(self, message: str) -> None:
         self._append_log(message)
+        self.status_label.set_text("Figure generation failed. See the generation log.")
         self.status_label.set_variant("error")
         show_error(self, "Individual Detectability error", message)
 
@@ -870,4 +887,4 @@ class IndividualDetectabilityWindow(QWidget):
             self._thread.deleteLater()
         self._worker = None
         self._thread = None
-        self._update_run_state()
+        self._update_run_state(show_setup_status=False)

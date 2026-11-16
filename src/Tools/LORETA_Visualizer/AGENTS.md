@@ -14,9 +14,9 @@ The driver selects `.venv1` or `.venv` and does not run Qt tests locally. Read
 schemas. Do not consult retired Source Localization code for additional context.
 
 Implementation should remain inside `src/Tools/LORETA_Visualizer/`. The only
-normal integration edits outside it are the Main App page factory, sidebar,
-icon, cached-page cleanup, focused tests, and agent/user documentation. The
-active Hauk source-PSD plan additionally permits one GUI-neutral Main App
+normal integration edits outside it are the Main App page factory, workspace
+navigation, icon, cached-page cleanup, focused tests, and agent/user documentation.
+The active Hauk source-PSD plan additionally permits one GUI-neutral Main App
 time-domain derivative writer plus narrow process-runner, processing-ledger,
 and post-processing-worker integration. Source estimation must still remain in
 this tool's `source_producers/`; do not spread it into Main App, Stats,

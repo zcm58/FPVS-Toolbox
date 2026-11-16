@@ -27,6 +27,7 @@ from Main_App.gui.components import (
     make_form_layout,
 )
 from Main_App.gui.components import make_info_button
+from Main_App.gui.style_tokens import SECTION_GAP
 from Tools.Stats.analysis.dv_policy_settings import (
     FIXED_HARMONIC_INPUT_FREQUENCY_LIST,
     FIXED_HARMONIC_INPUT_UPPER_FREQUENCY,
@@ -192,8 +193,8 @@ def build_harmonic_page(self, tabs: QTabWidget) -> QWidget:
     tab = QWidget()
     tab.setObjectName("settings_harmonics_tab")
     layout = QVBoxLayout(tab)
-    layout.setContentsMargins(12, 12, 12, 12)
-    layout.setSpacing(10)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setSpacing(SECTION_GAP)
 
     project_pp = self._project_preprocessing() if self.project else None
     self._add_harmonic_selection_section(tab, layout, project_pp)
@@ -258,7 +259,9 @@ def add_harmonic_selection_section(
     )
     self.harmonic_method_info_button.clicked.connect(self._show_harmonic_method_info)
     method_layout.addWidget(self.harmonic_method_info_button)
-    harmonic_form.addRow(QLabel("Method profile:", harmonic_group), method_row)
+    method_label = QLabel("Method profile:", harmonic_group)
+    method_label.setBuddy(self.harmonic_summation_method_combo)
+    harmonic_form.addRow(method_label, method_row)
 
     self.harmonic_electrode_scope_combo = QComboBox(harmonic_group)
     self.harmonic_electrode_scope_combo.setObjectName(
@@ -285,7 +288,7 @@ def add_harmonic_selection_section(
         "spectrum. A frozen mask prevents later ROI edits from changing the method."
     )
     harmonic_form.addRow(
-        QLabel("Selection electrodes:", harmonic_group),
+        "Selection electrodes:",
         self.harmonic_electrode_scope_combo,
     )
 
@@ -303,7 +306,7 @@ def add_harmonic_selection_section(
         "Comma-separated electrode names stored with the method and fingerprint."
     )
     harmonic_form.addRow(
-        QLabel("Frozen electrode mask:", harmonic_group),
+        "Frozen electrode mask:",
         self.harmonic_selection_electrodes_edit,
     )
 
@@ -330,7 +333,7 @@ def add_harmonic_selection_section(
         max(0, fixed_mode_index)
     )
     harmonic_form.addRow(
-        QLabel("Fixed-domain input:", harmonic_group),
+        "Fixed-domain input:",
         self.fixed_harmonic_input_mode_combo,
     )
 
@@ -344,7 +347,7 @@ def add_harmonic_selection_section(
         "Comma-separated harmonic frequencies in Hz. Used only when Fixed harmonic list is selected."
     )
     harmonic_form.addRow(
-        QLabel("Exact frequencies (Hz):", harmonic_group),
+        "Exact frequencies (Hz):",
         self.fixed_harmonic_freqs_edit,
     )
 
@@ -361,10 +364,8 @@ def add_harmonic_selection_section(
     self.fixed_harmonic_upper_index_edit.setToolTip(
         "Include eligible oddball harmonic orders from 1 through this index."
     )
-    harmonic_form.addRow(
-        QLabel("Upper harmonic index:", harmonic_group),
-        self.fixed_harmonic_upper_index_edit,
-    )
+    self.fixed_harmonic_upper_index_edit.setMaximumWidth(160)
+    harmonic_form.addRow("Upper harmonic index:", self.fixed_harmonic_upper_index_edit)
 
     self.fixed_harmonic_upper_frequency_edit = QLineEdit(
         ""
@@ -382,7 +383,7 @@ def add_harmonic_selection_section(
         "Include eligible oddball harmonics at or below this prespecified frequency."
     )
     harmonic_form.addRow(
-        QLabel("Upper frequency (Hz):", harmonic_group),
+        "Upper frequency (Hz):",
         self.fixed_harmonic_upper_frequency_edit,
     )
 

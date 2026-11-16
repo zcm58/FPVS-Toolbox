@@ -23,6 +23,7 @@ from Main_App.gui.components import (
     make_action_button,
     make_form_layout,
 )
+from Main_App.gui.style_tokens import SECTION_GAP
 from Main_App.processing.frequency_domain_qc import thresholds_summary_lines
 from Main_App.projects.preprocessing_settings import (
     normalize_manual_excluded_participant_conditions,
@@ -38,8 +39,8 @@ def build_application_page(
     tab = QWidget()
     tab.setObjectName("settings_application_tab")
     layout = QVBoxLayout(tab)
-    layout.setContentsMargins(12, 12, 12, 12)
-    layout.setSpacing(10)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setSpacing(SECTION_GAP)
     projects_group = SectionCard(
         "Projects and cache",
         tab,
@@ -67,6 +68,7 @@ def build_application_page(
     )
     analysis_form = make_form_layout()
     self.alpha_edit = QLineEdit(self.manager.get("analysis", "alpha", "0.05"))
+    self.alpha_edit.setMaximumWidth(160)
     alpha_label = QLabel("ANOVA alpha", analysis_group)
     alpha_label.setBuddy(self.alpha_edit)
     analysis_form.addRow(alpha_label, self.alpha_edit)
@@ -88,8 +90,8 @@ def build_quality_control_page(self, tabs: QTabWidget) -> None:
     tab = QWidget()
     tab.setObjectName("settings_quality_control_tab")
     layout = QVBoxLayout(tab)
-    layout.setContentsMargins(12, 12, 12, 12)
-    layout.setSpacing(10)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setSpacing(SECTION_GAP)
     self._add_settings_scope(
         layout,
         "Manage exclusions for the current project and inspect the standard QC thresholds."

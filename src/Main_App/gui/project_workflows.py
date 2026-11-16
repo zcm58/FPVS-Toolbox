@@ -543,6 +543,9 @@ def load_project(
     entry_adapter_factory: Callable[[QLineEdit], Any],
 ) -> None:
     _load_project(host, project)
+    condition_editor_toggle = getattr(host, "condition_editor_toggle", None)
+    if condition_editor_toggle is not None:
+        condition_editor_toggle.setChecked(False)
     selected_file = getattr(host, "le_input_file", None)
     if selected_file is not None:
         selected_file.clear()

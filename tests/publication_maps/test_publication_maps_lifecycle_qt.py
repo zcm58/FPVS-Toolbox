@@ -11,8 +11,8 @@ from PySide6.QtWidgets import (
     QLabel,
     QMainWindow,
     QScrollArea,
+    QStackedWidget,
     QTabWidget,
-    QWidget,
 )
 
 from Main_App.gui import main_window as main_window_module
@@ -145,7 +145,8 @@ def _build_page(qtbot, monkeypatch, tmp_path, *, dataset_index=None):
         lambda _path: dataset_index,
     )
     host = QMainWindow()
-    host.sidebar = QWidget(host)
+    host.workspace_stack = QStackedWidget(host)
+    host.setCentralWidget(host.workspace_stack)
     host.currentProject = SimpleNamespace(
         project_root=dataset_index.project_root,
         subfolders={"excel": "1 - Excel Data Files"},
@@ -156,7 +157,7 @@ def _build_page(qtbot, monkeypatch, tmp_path, *, dataset_index=None):
         project_root=str(dataset_index.project_root),
         embedded=True,
     )
-    host.setCentralWidget(page)
+    host.workspace_stack.addWidget(page)
     qtbot.addWidget(host)
     host.show()
     qtbot.waitExposed(host)

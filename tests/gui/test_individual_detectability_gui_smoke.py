@@ -63,14 +63,15 @@ def test_individual_detectability_window_smoke(qtbot, tmp_path: Path, monkeypatc
     assert window.output_root_edit.placeholderText() == "Select output folder"
     assert isinstance(window.status_label, StatusBanner)
     assert window.status_label.objectName() == "individual_detectability_status"
-    assert window.status_label.text() == "Ready."
+    assert window.status_label.text() == "Choose the folder containing your processed Excel workbooks."
+    assert not window.run_btn.isEnabled()
     assert window.status_label.property("statusVariant") == "info"
     assert window.use_custom_harmonics_check.isChecked() is False
     assert window.harmonics_edit.isEnabled() is False
     assert window.custom_harmonics_warning.isHidden() is True
     assert "FPVS Toolbox significant harmonics" in window.summary_box.toPlainText()
     assert window.run_btn.property("variant") == "primary"
-    assert window.toggle_log_btn.property("variant") == "tertiary"
+    assert window.view_generation_log_btn.property("variant") == "tertiary"
     assert window.log_box.property("logSurface") is True
     assert not hasattr(window, "output_table")
     for card in cards.values():
@@ -81,7 +82,6 @@ def test_individual_detectability_window_smoke(qtbot, tmp_path: Path, monkeypatc
     assert cards["individual_detectability_output"].maximumHeight() == (
         COMPACT_SECTION_MAX_HEIGHT
     )
-    assert cards["individual_detectability_run"].maximumHeight() == COMPACT_SECTION_MAX_HEIGHT
     assert cards["individual_detectability_conditions"].sizePolicy().verticalPolicy() == (
         cards["individual_detectability_participants"].sizePolicy().verticalPolicy()
     )
@@ -98,6 +98,19 @@ def test_individual_detectability_window_smoke(qtbot, tmp_path: Path, monkeypatc
     window._browse_output_root()
     assert window.output_root_edit.text() == ""
     assert window._last_dir is None
+
+    window._append_log("Checking retained recordings")
+    window.view_generation_log_btn.click()
+    assert window.log_dialog.isVisible()
+    assert window.log_dialog.isAncestorOf(window.log_box)
+    window.log_dialog.reject()
+    window._append_log("Figure generation complete")
+    window.view_generation_log_btn.click()
+    assert window.log_box.toPlainText().splitlines() == [
+        "Checking retained recordings",
+        "Figure generation complete",
+    ]
+    window.log_dialog.reject()
 
 
 def test_individual_detectability_scan_populates_participants_with_missingness(
@@ -120,6 +133,8 @@ def test_individual_detectability_scan_populates_participants_with_missingness(
 
     assert window.conditions_list.count() == 2
     assert window.participant_table.rowCount() == 2
+    assert window.status_label.text() == "Choose an output folder."
+    assert not window.run_btn.isEnabled()
     participants = {
         window.participant_table.item(row, 1).text()
         for row in range(window.participant_table.rowCount())

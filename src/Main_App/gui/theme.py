@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Literal, Optional
 
 from PySide6.QtGui import QColor, QPalette
-from PySide6.QtWidgets import QApplication, QStyleFactory, QWidget
+from PySide6.QtWidgets import QApplication
 
 from Main_App.gui.style_tokens import (
     ACCENT_COLOR,
@@ -30,6 +31,7 @@ from Main_App.gui.style_tokens import (
     build_progress_bar_stylesheet,
     build_status_banner_stylesheet,
     build_tool_label_stylesheet,
+    build_workspace_chrome_stylesheet,
 )
 from Main_App.gui.typography import apply_app_font, css_font_family, css_font_size, css_font_weight
 
@@ -53,74 +55,10 @@ LIGHT_THEME_MATERIAL: LightThemeName = "material"
 DEFAULT_LIGHT_THEME: LightThemeName = LIGHT_THEME_FUSION
 
 
-def _native_menu_appearance(app: QApplication) -> tuple[str, QPalette]:
-    """Retain platform menu chrome before the application applies its light theme."""
-    appearance = getattr(app, "_fpvs_native_menu_appearance", None)
-    if appearance is None:
-        style_name = app.style().objectName()
-        palette = QPalette(app.palette())
-        # Freeze inherited brushes too: unset roles would otherwise resolve
-        # against the application's later Fusion/light palette.
-        for group in (QPalette.Active, QPalette.Inactive, QPalette.Disabled):
-            for role in QPalette.ColorRole:
-                if role not in (QPalette.NoRole, QPalette.NColorRoles):
-                    palette.setBrush(group, role, palette.brush(group, role))
-        # Cache values, not a C++ style shared between independently destroyed
-        # menus. Each widget owns its own native style below.
-        appearance = (style_name, palette)
-        app._fpvs_native_menu_appearance = appearance
-    return appearance
-
-
-def _native_menu_stylesheet(palette: QPalette) -> str:
-    """Pair painted menu backgrounds with the retained platform text colors."""
-    # Native Windows painting can ignore a widget's palette after the app
-    # switches to its light theme. Give both the surface and item painters
-    # explicit color pairs; a text-only override can produce white on white.
-    return f"""
-        QMenu, QMenuBar {{
-            color: {palette.color(QPalette.Active, QPalette.WindowText).name()};
-            background-color: {palette.color(QPalette.Active, QPalette.Window).name()};
-            font-size: {css_font_size("body")};
-        }}
-        QMenu::item, QMenuBar::item {{
-            color: {palette.color(QPalette.Active, QPalette.WindowText).name()};
-            background-color: {palette.color(QPalette.Active, QPalette.Window).name()};
-        }}
-        QMenu:disabled, QMenuBar:disabled,
-        QMenu::item:disabled, QMenuBar::item:disabled {{
-            color: {palette.color(QPalette.Disabled, QPalette.WindowText).name()};
-        }}
-        QMenu::item:selected:enabled, QMenuBar::item:selected:enabled,
-        QMenuBar::item:pressed:enabled {{
-            color: {palette.color(QPalette.Active, QPalette.HighlightedText).name()};
-            background-color: {palette.color(QPalette.Active, QPalette.Highlight).name()};
-        }}
-    """
-
-
-def apply_native_menu_appearance(widget: QWidget) -> None:
-    """Use the same platform-owned menu appearance as FPVS Studio."""
-    app = QApplication.instance()
-    if app is None:
-        raise RuntimeError("Native menus require an active QApplication.")
-    style_name, palette = _native_menu_appearance(app)
-    style = getattr(widget, "_fpvs_native_menu_style", None)
-    if style is None:
-        style = QStyleFactory.create(style_name)
-        if style is None:
-            raise RuntimeError(f"Cannot create the native menu style {style_name!r}.")
-        # QWidget.setStyle does not transfer ownership. Retain both the Qt
-        # parent and Python wrapper for this menu's lifetime.
-        style.setParent(widget)
-        widget._fpvs_native_menu_style = style
-        widget.setStyle(style)
-    widget.setPalette(palette)
-    widget.setStyleSheet(_native_menu_stylesheet(palette))
-
-
 def build_fpvs_app_stylesheet() -> str:
     """Return the shared FPVS stylesheet for app and tool windows."""
+    chevron_down = Path(__file__).with_name("chevron-down.svg").as_posix()
+    chevron_up = Path(__file__).with_name("chevron-up.svg").as_posix()
     return f"""
         QWidget {{
             color: {TEXT_PRIMARY};
@@ -173,6 +111,78 @@ def build_fpvs_app_stylesheet() -> str:
             color: {TEXT_PRIMARY};
         }}
 
+        QLineEdit,
+        QComboBox,
+        QTextEdit,
+        QPlainTextEdit {{
+            placeholder-text-color: {TEXT_MUTED};
+        }}
+
+        QComboBox {{
+            padding-right: 28px;
+        }}
+
+        QComboBox::drop-down {{
+            subcontrol-origin: border;
+            subcontrol-position: center right;
+            width: 26px;
+            background: transparent;
+            border: none;
+        }}
+
+        QComboBox::down-arrow {{
+            image: url("{chevron_down}");
+            width: 12px;
+            height: 12px;
+        }}
+
+        QSpinBox::up-button,
+        QDoubleSpinBox::up-button,
+        QSpinBox::down-button,
+        QDoubleSpinBox::down-button {{
+            subcontrol-origin: padding;
+            width: 18px;
+            background: transparent;
+            border: none;
+        }}
+
+        QSpinBox::up-button,
+        QDoubleSpinBox::up-button {{
+            subcontrol-position: top right;
+            border-top-right-radius: 7px;
+        }}
+
+        QSpinBox::down-button,
+        QDoubleSpinBox::down-button {{
+            subcontrol-position: bottom right;
+            border-bottom-right-radius: 7px;
+        }}
+
+        QSpinBox::up-button:hover:enabled:on,
+        QDoubleSpinBox::up-button:hover:enabled:on,
+        QSpinBox::down-button:hover:enabled:on,
+        QDoubleSpinBox::down-button:hover:enabled:on {{
+            background: {ACCENT_TINT};
+        }}
+
+        QSpinBox::up-arrow,
+        QDoubleSpinBox::up-arrow,
+        QSpinBox::down-arrow,
+        QDoubleSpinBox::down-arrow {{
+            width: 11px;
+            height: 11px;
+        }}
+
+        QSpinBox::up-arrow,
+        QDoubleSpinBox::up-arrow {{
+            image: url("{chevron_up}");
+        }}
+
+        QSpinBox::down-arrow,
+        QDoubleSpinBox::down-arrow {{
+            image: url("{chevron_down}");
+        }}
+
         QLineEdit:focus,
         QComboBox:focus,
         QSpinBox:focus,
@@ -203,6 +213,8 @@ def build_fpvs_app_stylesheet() -> str:
         {build_progress_bar_stylesheet()}
 
         {build_action_button_stylesheet()}
+
+        {build_workspace_chrome_stylesheet()}
 
         QTabWidget::pane {{
             border: 1px solid {BORDER_SOFT_COLOR};
@@ -235,6 +247,7 @@ def build_fpvs_app_stylesheet() -> str:
         QListWidget#settings_navigation {{
             background: {PAGE_BG};
             border: none;
+            outline: none;
         }}
 
         QListWidget#settings_navigation::item {{
@@ -367,7 +380,6 @@ def apply_fpvs_theme(
     material_theme: str = "light_blue.xml",
 ) -> None:
     """Apply the central FPVS palette and shared stylesheet."""
-    _native_menu_appearance(app)
     chosen: LightThemeName = theme or DEFAULT_LIGHT_THEME
     if chosen == LIGHT_THEME_MATERIAL:
         apply_material_light_theme(app, theme=material_theme)

@@ -2,15 +2,15 @@
 
 ## Status
 
-Applied in the Toolbox source. The approved Windows Qt smoke checks passed.
-Cross-platform coverage remains in CI.
+Applied in the Toolbox source. The compact Home follow-up uses the same
+palette. See [GUI architecture](../../architecture/gui.md) for manual checks.
 
 ## Target
 
 Apply the palette to the PySide6 shell, navigation, shared controls, and
 workflow chrome. Keep the Toolbox icon and existing typography. The app uses
-Fusion light by default, with a dark header and sidebar. Preserve the
-platform menu appearance described in the [GUI architecture](../../architecture/gui.md).
+Fusion light with a single Slate menu bar. Popup menus use
+the light application palette.
 
 Use [style_tokens.py](../../../../src/Main_App/gui/style_tokens.py) for shared
 roles, [theme.py](../../../../src/Main_App/gui/theme.py) for Qt palette and
@@ -21,7 +21,7 @@ for existing buttons, fields, and status banners.
 
 | Role | Color | Toolbox use |
 | --- | --- | --- |
-| Masthead | `#222F3B` | Dark header and sidebar chrome |
+| Masthead | `#222F3B` | Menu bar |
 | Paper | `#F3F6F8` | Light workspace |
 | Panel | `#FFFFFF` | Forms and data surfaces, and text on filled teal actions |
 | Ink | `#1D2A34` | Primary text on light surfaces |
@@ -42,7 +42,7 @@ contracts, project formats, and exported figures and tables.
 ## Implementation
 
 1. Map the selected roles onto the shared Qt palette and tokens. Inventory
-   hardcoded chrome colors in the header, sidebar, widgets, and tool pages.
+   hardcoded chrome colors in navigation, widgets, and tool pages.
    Review foreground and background pairs for each state before replacing a
    value. Use the existing light theme and dark shell roles. Adding a full
    desktop dark mode or appearance preference requires a separate decision.
@@ -73,7 +73,51 @@ contracts, project formats, and exported figures and tables.
   scientific guidance. Free Harmonic Clustering labels are associated with
   their controls, including the recording-exclusion checkboxes.
 
-## Verification
+## Compact Home follow-up
+
+The initial layout audit found duplicate tool entry points, a Conditions list
+that stretched while idle, and source-management options visible throughout
+routine processing. Following FPVS Studio's menu structure, Home now shows
+the recording input, a live condition count, and the processing actions.
+Opening the editor reveals the same draft rows and source controls. The
+condition list sizes to its contents and scrolls within the editor when
+space runs out.
+
+Home defaults to 960 × 660 and supports a 900 × 620 minimum. Settings,
+analysis tools, and the processing activity page keep their 1280 × 900
+minimum. The native title shows the current project.
+
+Windows source verification on 2026-11-16 passed 150 visible Qt cases across
+the shell, condition editor, project switching, Settings, and the Scalp Maps
+navigation lock. The 900 × 620, 960 × 660, and 1280 × 900 captures confirmed
+that the run buttons stay visible and the conditions list uses the space
+available. Three layout and menu tests passed at each of 125%, 150%, and
+200% Qt scaling. The focused GUI, repository precommit, and strict MkDocs
+checks passed.
+
+## Earlier full-width workspace follow-up
+
+The menu and navigation used one Slate surface. The current stack page
+drives navigation state. Home puts condition actions in the Conditions
+header. Settings aligns category headings, keeps Protocol status near its
+inputs, and groups Guided setup with the preprocessing controls. Shared combo
+and numeric controls retain the same focus and border across tool pages.
+
+The tool audit covered both default and all six beta pages. Sensitivity
+Analysis uses the available height without page scrolling. Detectability
+moves its live log to a focused dialog and explains missing inputs in place.
+The other tools received clearer control names and associations, with Scalp
+Maps keeping the navigation lock until its worker exits.
+
+Windows source verification on 2026-11-12 covered 183 visible Qt cases
+across shell, Settings, and tool suites, plus three focused Free Harmonic
+Clustering layout cases. Six menu and Settings cases passed at each of
+125%, 150%, and 200% Qt scaling. Synthetic captures were reviewed at
+1280 × 900. The focused GUI and repository precommit gates passed. Four LORETA frozen
+numerical-reference failures reproduced without importing the changed GUI.
+Installer packaging and OS-theme changes remain separate verification paths.
+
+## Verification of the first palette pass
 
 - The focused GUI gate and repository precommit gate passed locally. The
   GUI gate ran with the repository's native Qt guard in place.

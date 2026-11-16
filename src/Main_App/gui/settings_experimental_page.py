@@ -25,6 +25,7 @@ from Main_App.gui.components import (
     SubsectionHeaderLabel,
 )
 from Main_App.gui.components import make_info_button
+from Main_App.gui.style_tokens import SECTION_GAP
 from Main_App.projects import (
     ExperimentalQcSettings,
     SUMMED_BCA_SCREENING_BRIEF_TEXT,
@@ -39,13 +40,13 @@ def build_experimental_page(self, tabs: QTabWidget) -> QWidget:
     tab = QWidget()
     tab.setObjectName("settings_experimental_tab")
     layout = QVBoxLayout(tab)
-    layout.setContentsMargins(12, 12, 12, 12)
-    layout.setSpacing(10)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setSpacing(SECTION_GAP)
 
     self._add_experimental_info_row(
         layout, tab,
         "Optional checks for this project. New projects start with QC off.",
-        "About experimental QC",
+        "Experimental QC",
         "Turn each check on or off independently. Related repair options stay "
         "with the check they need. Turning a check off keeps saved choices and "
         "accepted repairs. Basic checks for valid data, stimulus timing, complete "
@@ -367,7 +368,7 @@ def build_beta_tools_page(self, tabs: QTabWidget) -> None:
     )
     self._add_settings_scope(
         card.content_layout,
-        "Application-wide. Show the optional Beta Tools section in the sidebar.",
+        "Show optional beta tools in the Tools menu across all projects.",
     )
     self.beta_tools_check = QCheckBox("Enable Beta Tools", card)
     self.beta_tools_check.setObjectName("settings_enable_beta_tools")

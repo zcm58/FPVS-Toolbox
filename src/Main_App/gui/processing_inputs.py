@@ -932,6 +932,7 @@ def set_controls_enabled(host: Any, enabled: bool) -> None:
             "btn_select_input_file", "le_input_file",
             "btn_select_input_folder", "le_input_folder",
             "btn_add_event", "btn_add_row",
+            "condition_editor_toggle",
             "btn_create_project", "btn_open_project",
     ):
         _safe_enable(n)
@@ -989,7 +990,10 @@ def update_start_enabled(host: Any) -> None:
         btn.setEnabled(event_map_ready)
         reason = ""
     if not event_map_ready:
-        reason = map_error or ("Correct the condition rows above." if mapping is None else "Add a condition name and recorded marker ID.")
+        reason = map_error or (
+            "Edit conditions to fix the highlighted fields."
+            if mapping is None else "Add a condition name and recorded marker ID."
+        )
     label = getattr(host, "processing_readiness_label", None)
     if label is not None:
         label.setText(reason)

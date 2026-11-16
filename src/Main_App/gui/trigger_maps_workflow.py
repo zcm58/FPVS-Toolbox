@@ -12,6 +12,7 @@ from Main_App.projects.condition_trigger_maps import TriggerMapDraft, project_co
 from Main_App.projects.manifest_store import project_manifest_transaction
 from Main_App.projects.preprocessing_settings import normalize_preprocessing_settings
 from Main_App.processing.pipeline_settings_freshness import apply_pipeline_setup_freshness
+from .event_map import refresh_condition_editor_toggle
 from .project_drafts import has_condition_changes, remember_saved_setup
 from .toolbox_cache_workflow import _cache_work_is_active
 from .trigger_maps_model import trigger_maps_summary
@@ -21,6 +22,7 @@ def refresh_home_trigger_maps(host):
     project = getattr(host, "currentProject", None)
     maps = getattr(getattr(project, "frequency_protocol", None), "condition_trigger_maps", None)
     mapped = maps is not None
+    refresh_condition_editor_toggle(host)
     layout = getattr(host, "event_layout", None)
     if layout is not None:
         for index in reversed(range(layout.count())):
@@ -49,11 +51,15 @@ def refresh_home_trigger_maps(host):
     summary.setObjectName("home_trigger_maps_summary")
     summary.setProperty("source_trigger_catalog", True)
     layout.addWidget(summary)
-    for condition in project_conditions(project):
+    conditions = project_conditions(project)
+    for condition in conditions:
         label = QLabel(condition.label, host.event_container)
         label.setProperty("source_trigger_catalog", True)
         label.setToolTip(f"Condition ID: {condition.condition_id}")
         layout.addWidget(label)
+    condition_summary = getattr(host, "condition_summary_label", None)
+    if condition_summary is not None:
+        condition_summary.setText(f"{len(conditions)} configured · Source maps")
     remember_saved_setup(host)
 
 

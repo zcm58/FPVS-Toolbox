@@ -15,7 +15,7 @@ from types import MethodType, SimpleNamespace
 from collections import deque
 
 # Qt / PySide6
-from PySide6.QtCore import QObject, QEvent, QThread, QTimer, Signal, Slot
+from PySide6.QtCore import QObject, QEvent, QSize, QThread, QTimer, Signal, Slot
 from PySide6.QtGui import QCloseEvent, QAction, QShowEvent  # noqa: F401
 from PySide6.QtWidgets import (
     QApplication,
@@ -55,7 +55,6 @@ from Main_App.gui import update_manager
 from Main_App.gui import event_map
 from Main_App.gui.file_menu import init_file_menu
 from Main_App.gui.settings_panel import EmbeddedSettingsPage
-from Main_App.gui.sidebar import init_sidebar
 from Main_App.gui.ui_main import init_ui
 from Main_App.gui import project_workflows
 from Main_App.gui import project_drafts
@@ -71,6 +70,12 @@ from Main_App.gui.post_export_workflows import (
     should_show_no_excel_popup as _should_show_no_excel_popup,  # noqa: F401 - compatibility re-export
 )
 from Main_App.gui.op_guard import OpGuard
+
+_WINDOW_TITLE = f"FPVS Toolbox v{FPVS_TOOLBOX_VERSION}"
+_COMPACT_MINIMUM = QSize(900, 620)
+_COMPACT_DEFAULT = QSize(960, 660)
+_WORKSPACE_MINIMUM = QSize(1280, 900)
+
 
 class Processor(QObject):
     """Minimal processing stub emitting progress updates."""
@@ -180,9 +185,10 @@ class MainWindow(QMainWindow):
         self._settings_dialog = None
         self._settings_page = None
         self.processor = Processor()
-        self.setWindowTitle(f"FPVS Toolbox v{FPVS_TOOLBOX_VERSION}")
-        self.setMinimumSize(1280, 900)
-        self.resize(1280, 900)
+        self.setWindowTitle(_WINDOW_TITLE)
+        self.setMinimumSize(_COMPACT_MINIMUM)
+        self.resize(_COMPACT_DEFAULT)
+        self._compact_return_size: QSize | None = None
         self.currentProject: Project | None = None
 
         # Build UI
@@ -217,13 +223,11 @@ class MainWindow(QMainWindow):
         self._mp = None
 
         # Build nav + menus
-        init_sidebar(self)
-        shell_status.ensure_processing_navigation_unlocked(self)
         select_projects_root(self)
         init_file_menu(self)
-        if hasattr(self, "stacked"):
-            self.stacked.currentChanged.connect(self._sync_menu_bar_for_current_page)
-        self._sync_menu_bar_for_current_page()
+        self.stacked.currentChanged.connect(self._sync_window_for_current_page)
+        self.workspace_stack.currentChanged.connect(self._sync_window_for_current_page)
+        self._sync_window_for_current_page()
 
         # Wire landing page buttons if present
         if hasattr(self, "btn_create_project"):
@@ -232,9 +236,7 @@ class MainWindow(QMainWindow):
             self.btn_open_project.clicked.connect(self.actionOpenExistingProject.trigger)
 
         # Default page and initial logs
-        if hasattr(self, "stacked"):
-            self.stacked.setCurrentIndex(0)
-            self._sync_menu_bar_for_current_page()
+        self.stacked.setCurrentIndex(0)
         self.log("Welcome to the FPVS Toolbox!")
         # PySide6 now enforces a fixed light theme regardless of OS settings.
         self.log("Appearance Mode: Light (PySide6 fixed light theme)")
@@ -337,12 +339,30 @@ class MainWindow(QMainWindow):
 
     # -------------------------- processing -------------------------- #
 
-    def _sync_menu_bar_for_current_page(self, _index: int | None = None) -> None:
-        """Hide app-level menus on the welcome page until a project flow starts."""
-        menu_bar = self.menuBar()
-        landing_page = getattr(self, "landing_page", None)
-        current_page = self.stacked.currentWidget() if hasattr(self, "stacked") else None
-        menu_bar.setVisible(current_page is not landing_page)
+    def _sync_window_for_current_page(self, _index: int = -1) -> None:
+        welcome = self.stacked.currentWidget() is self.landing_page
+        self.menuBar().setVisible(not welcome)
+        compact = welcome or self.workspace_stack.currentWidget() is self.homeWidget
+        minimum = _COMPACT_MINIMUM if compact else _WORKSPACE_MINIMUM
+        if self.minimumSize() == minimum:
+            return
+
+        normal_window = not (self.isMaximized() or self.isFullScreen())
+        if compact:
+            return_size = self._compact_return_size
+            self._compact_return_size = None
+            self.setMinimumSize(minimum)
+            if normal_window and return_size is not None and self.size() == return_size.expandedTo(_WORKSPACE_MINIMUM):
+                self.resize(return_size)
+            return
+
+        width, height = self.width(), self.height()
+        if normal_window and (width < minimum.width() or height < minimum.height()):
+            self._compact_return_size = self.size()
+        self.setMinimumSize(minimum)
+
+    def _set_project_title(self, name: str) -> None:
+        self.setWindowTitle(f"{name} — {_WINDOW_TITLE}")
 
     def stop_processing(self) -> None:
         processing_workflows.stop_processing(self)
@@ -447,10 +467,7 @@ class MainWindow(QMainWindow):
 
     # ------------------------- settings UI -------------------------- #
     def open_settings_window(self) -> None:
-        if hasattr(self, "stacked"):
-            self.stacked.setCurrentIndex(1)
-        self.workspace_stack.setCurrentWidget(self._ensure_settings_page())
-        self._set_sidebar_selection("btn_settings")
+        self._show_workspace_page(self._ensure_settings_page())
 
     def _ensure_settings_page(self) -> EmbeddedSettingsPage:
         project = getattr(self, "currentProject", None)
@@ -504,24 +521,13 @@ class MainWindow(QMainWindow):
         project_workflows.reset_project_context_workspace(self)
 
     # --------------------------- tools UI --------------------------- #
-    def _set_sidebar_selection(self, role: str) -> None:
-        sidebar = getattr(self, "sidebar", None)
-        if sidebar is None:
-            return
-        for widget in sidebar.findChildren(QWidget):
-            setter = getattr(widget, "set_selected", None)
-            if callable(setter) and widget.property("role"):
-                setter(widget.property("role") == role)
+    def _show_workspace_page(self, page: QWidget) -> None:
+        self.workspace_stack.setCurrentWidget(page)
+        self.stacked.setCurrentIndex(1)
 
     def show_home_page(self) -> None:
         refresh_processing_history(self)
-        if not getattr(self, "_run_active", False):
-            shell_status.ensure_processing_navigation_unlocked(self)
-        if hasattr(self, "stacked"):
-            self.stacked.setCurrentIndex(1)
-        if hasattr(self, "workspace_stack") and hasattr(self, "homeWidget"):
-            self.workspace_stack.setCurrentWidget(self.homeWidget)
-        self._set_sidebar_selection("btn_home")
+        self._show_workspace_page(self.homeWidget)
 
     def _ensure_stats_page(self) -> PysideStatsWindow:
         project = getattr(self, "currentProject", None)
@@ -543,10 +549,7 @@ class MainWindow(QMainWindow):
             "Standard FPVS Screening"
         ):
             return
-        if hasattr(self, "stacked"):
-            self.stacked.setCurrentIndex(1)
-        self.workspace_stack.setCurrentWidget(self._ensure_stats_page())
-        self._set_sidebar_selection("btn_data")
+        self._show_workspace_page(self._ensure_stats_page())
 
     def _ensure_sensitivity_analysis_page(self) -> SensitivityAnalysisWindow:
         page = getattr(self, "_sensitivity_analysis_page", None)
@@ -645,22 +648,14 @@ class MainWindow(QMainWindow):
         # worker. A failed sibling Summed-BCA selection must not block FHC.
         if not tool_workflows.spatial_tool_available(self, project, "Free Harmonic Clustering Analysis"):
             return
-        if hasattr(self, "stacked"):
-            self.stacked.setCurrentIndex(1)
-        self.workspace_stack.setCurrentWidget(
-            self._ensure_free_harmonic_clustering_page()
-        )
-        self._set_sidebar_selection("btn_free_harmonic_clustering")
+        self._show_workspace_page(self._ensure_free_harmonic_clustering_page())
 
     def open_sensitivity_analysis(self) -> None:
-        if hasattr(self, "stacked"):
-            self.stacked.setCurrentIndex(1)
         existing_page = getattr(self, "_sensitivity_analysis_page", None)
         page = self._ensure_sensitivity_analysis_page()
         if existing_page is not None:
             page.refresh_lmm_seed()
-        self.workspace_stack.setCurrentWidget(page)
-        self._set_sidebar_selection("btn_sensitivity_analysis")
+        self._show_workspace_page(page)
 
     def _ensure_individual_detectability_page(self) -> IndividualDetectabilityWindow:
         page = getattr(self, "_individual_detectability_page", None)
@@ -682,10 +677,7 @@ class MainWindow(QMainWindow):
     def open_individual_detectability(self) -> None:
         if not self._frequency_domain_outputs_ready_for_tool("Individual Detectability"):
             return
-        if hasattr(self, "stacked"):
-            self.stacked.setCurrentIndex(1)
-        self.workspace_stack.setCurrentWidget(self._ensure_individual_detectability_page())
-        self._set_sidebar_selection("btn_individual_detectability")
+        self._show_workspace_page(self._ensure_individual_detectability_page())
 
     def _ensure_sequence_figure_page(self) -> SequenceFigureWindow:
         page = getattr(self, "_sequence_figure_page", None)
@@ -706,10 +698,7 @@ class MainWindow(QMainWindow):
         return page
 
     def open_sequence_figure(self) -> None:
-        if hasattr(self, "stacked"):
-            self.stacked.setCurrentIndex(1)
-        self.workspace_stack.setCurrentWidget(self._ensure_sequence_figure_page())
-        self._set_sidebar_selection("btn_sequence_figure")
+        self._show_workspace_page(self._ensure_sequence_figure_page())
 
     def _ensure_plot_generator_page(self) -> PlotGeneratorWindow:
         page = getattr(self, "_plot_generator_page", None)
@@ -785,26 +774,17 @@ class MainWindow(QMainWindow):
     def open_plot_generator(self) -> None:
         if not self._frequency_domain_outputs_ready_for_tool("SNR Plots"):
             return
-        if hasattr(self, "stacked"):
-            self.stacked.setCurrentIndex(1)
-        self.workspace_stack.setCurrentWidget(self._ensure_plot_generator_page())
-        self._set_sidebar_selection("btn_graphs")
+        self._show_workspace_page(self._ensure_plot_generator_page())
 
     def open_publication_maps(self) -> None:
         if not self._frequency_domain_outputs_ready_for_tool("Scalp Maps"):
             return
-        if hasattr(self, "stacked"):
-            self.stacked.setCurrentIndex(1)
-        self.workspace_stack.setCurrentWidget(self._ensure_publication_maps_page())
-        self._set_sidebar_selection("btn_publication_maps")
+        self._show_workspace_page(self._ensure_publication_maps_page())
 
     def open_loreta_visualizer(self) -> None:
         if not self._frequency_domain_outputs_ready_for_tool("LORETA Visualizer"):
             return
-        if hasattr(self, "stacked"):
-            self.stacked.setCurrentIndex(1)
-        self.workspace_stack.setCurrentWidget(self._ensure_loreta_visualizer_page())
-        self._set_sidebar_selection("btn_loreta_visualizer")
+        self._show_workspace_page(self._ensure_loreta_visualizer_page())
 
     def _frequency_domain_outputs_ready_for_tool(self, tool_name: str) -> bool:
         project = getattr(self, "currentProject", None)

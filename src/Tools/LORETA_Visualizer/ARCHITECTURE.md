@@ -156,9 +156,9 @@ so importing source producers or their shared planning/cache owners does not
 import the Qt window.
 
 Allowed outside this directory are the narrow shell integrations described by
-this contract: Main App sidebar/page/icon wiring, project-page cleanup, focused
-tests, and documentation. Update any matching active execution plan when one
-exists.
+this contract: Main App navigation, page and icon wiring, project-page cleanup,
+focused tests, and documentation. Update the matching active execution plan when
+one exists.
 
 ## Data Flow
 

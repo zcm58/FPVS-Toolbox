@@ -35,6 +35,7 @@ def init_file_menu(self) -> None:
     file_menu.addSeparator()
 
     action_settings = QAction("Settings", self)
+    action_settings.setObjectName("actionSettings")
     action_settings.triggered.connect(self.open_settings_window)
     file_menu.addAction(action_settings)
 

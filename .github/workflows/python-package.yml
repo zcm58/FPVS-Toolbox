@@ -106,5 +106,5 @@ jobs:
       run: |
         for scale in 1.25 1.5 2; do
           QT_SCALE_FACTOR="$scale" python -m pytest --allow-qt-tests tests/gui/test_gui_preproc_dialog.py -k "protocol_sections_fit_scaled_workspaces_with_marker_tables or harmonic_method_help_opens_current_profile_without_changing_drafts" -q || exit $?
-          QT_SCALE_FACTOR="$scale" python -m pytest --allow-qt-tests tests/gui/test_main_window_layout_smoke.py -k "menu_labels_render_with_dark_cached_palette_and_light_native_background" -q || exit $?
+          QT_SCALE_FACTOR="$scale" python -m pytest --allow-qt-tests tests/gui/test_main_window_layout_smoke.py -k "workspace_menu_paints_slate_and_readable_labels" -q || exit $?
         done

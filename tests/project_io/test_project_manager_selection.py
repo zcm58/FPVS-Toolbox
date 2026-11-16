@@ -293,7 +293,7 @@ def test_valid_project_activation_completes_after_preference_failure(
     old_row = SimpleNamespace(setParent=lambda parent: steps.append(("old row", "removed")))
     host = SimpleNamespace(
         currentProject=previous, settings=mirror, event_rows=[old_row],
-        lbl_currentProject=SimpleNamespace(setText=lambda value: steps.append(("label", value))),
+        _set_project_title=lambda value: steps.append(("title", value)),
         rb_single=SimpleNamespace(setChecked=lambda value: steps.append(("single", value))),
         rb_batch=SimpleNamespace(setChecked=lambda value: steps.append(("batch", value))),
         log=lambda value: steps.append(("log", value)),
@@ -339,7 +339,7 @@ def test_valid_project_activation_completes_after_preference_failure(
     assert mirror.save_calls == 1
     assert host.event_rows == [("Condition A", "10"), ("Condition B", "20")]
     assert steps[:5] == [
-        ("label", "Current Project: Valid study"), ("mirror", "set"),
+        ("title", "Valid study"), ("mirror", "set"),
         ("mirror", "save"), ("single", True), ("batch", False),
     ]
     assert steps[-1] == ("ready", True)

@@ -1732,11 +1732,9 @@ class PublicationMapsWindow(QWidget):
         )
 
     def _embedded_host(self) -> QWidget | None:
-        parent = self.parent()
-        while parent is not None:
-            if hasattr(parent, "sidebar") and callable(getattr(parent, "menuBar", None)):
-                return parent
-            parent = parent.parent()
+        host = self.window()
+        if host is not self and getattr(host, "workspace_stack", None) is not None:
+            return host
         return None
 
     def _set_host_navigation_locked(self, locked: bool) -> None:

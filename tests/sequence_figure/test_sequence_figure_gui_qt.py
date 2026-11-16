@@ -77,6 +77,8 @@ def test_active_condition_payload_and_hidden_state_are_preserved(page, tmp_path)
     page.condition_count_spin.setValue(4)
     assert page.condition_label_edits[3].text() == "Scenes"
     assert page.condition_tabs.tabText(3) == "Scenes"
+    assert page.condition_tabs.tabToolTip(3) == "Scenes"
+    assert page.image_rows[3][4].button.accessibleName() == "Condition 4: Select Oddball Image"
     assert len(page._build_spec().image_paths) == 4
 
 

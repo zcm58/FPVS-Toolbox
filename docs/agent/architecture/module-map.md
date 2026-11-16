@@ -11,7 +11,7 @@ complete Studio interoperability.
 
 ## Main App
 
-- `src/Main_App/gui/`: canonical GUI package for the main-window shell, settings panel, event map, menu/sidebar/header/icon helpers, style tokens, theme, reusable widgets, operation guard, and update manager. `ui_main.py` owns landing/main page assembly; `event_map.py` owns event-map row construction, binding, Enter-key handling, and entry adapters; `icons.py`, `header_bar.py`, `file_menu.py`, and `menu_bar.py` own shell/menu presentation helpers; `sidebar.py` owns sidebar construction and sidebar button presentation; `widgets/` owns reusable PySide6 presentation primitives, `theme.py` owns the shared FPVS palette/stylesheet helpers, `op_guard.py` owns the non-blocking GUI operation guard, `project_workflows.py` owns project open/create/load/save GUI orchestration, `processing_inputs.py` owns processing input validation, file/mode UI state, and parameter assembly, `processing_workflows.py` owns processing run start/stop/queue/finalization GUI orchestration, `post_export_workflows.py` owns GUI-side post-processing worker launch/error routing and export completion handling, `tool_workflows.py` owns settings/update/tool/help/about action orchestration, and `shell_status.py` owns launch reveal, GUI log routing, and embedded processing activity-page helpers; `main_window.py` is appropriately downsized and should not be targeted for further refactor unless the user explicitly scopes that work.
+- `src/Main_App/gui/`: canonical GUI package for the main-window shell, settings panel, event map, menu, workspace navigation, and icon helpers, style tokens, theme, reusable widgets, operation guard, and update manager. `ui_main.py` owns landing/main page assembly; `event_map.py` owns event-map row construction, binding, Enter-key handling, and entry adapters; `icons.py`, `file_menu.py`, and `menu_bar.py` own shell navigation and menu presentation; `widgets/` owns reusable PySide6 presentation primitives, `theme.py` owns the shared FPVS palette/stylesheet helpers, `op_guard.py` owns the non-blocking GUI operation guard, `project_workflows.py` owns project open/create/load/save GUI orchestration, `processing_inputs.py` owns processing input validation, file/mode UI state, and parameter assembly, `processing_workflows.py` owns processing run start/stop/queue/finalization GUI orchestration, `post_export_workflows.py` owns GUI-side post-processing worker launch/error routing and export completion handling, `tool_workflows.py` owns settings/update/tool/help/about action orchestration, and `shell_status.py` owns launch reveal, GUI log routing, and embedded processing activity-page helpers; `main_window.py` is appropriately downsized and should not be targeted for further refactor unless the user explicitly scopes that work.
 - `src/Main_App/exports/`: canonical export implementation and adapter surface. `post_process.py` and
   `post_process_excel.py` own post-processing and workbook generation.
   `post_export_adapter.py` bridges process/worker payloads into shared
@@ -94,8 +94,8 @@ Current retirement and compatibility rules live in
 - `src/Tools/Individual_Detectability/`: individual-level detectability workflow.
 - `src/Tools/Sequence_Figure/`: embedded FPVS stimulus sequence figure generator.
   `renderer.py` owns widget-free image validation, stimulus-slot drawing, timing
-  labels, and PNG/PDF/SVG export; `gui.py` owns the manual image-slot sidebar
-  page; `worker.py` keeps rendering off the UI thread.
+  labels, and PNG/PDF/SVG export; `gui.py` owns the condition tabs and
+  manual image-slot controls; `worker.py` keeps rendering off the UI thread.
 - `src/Tools/Sensitivity_Analysis/`: embedded, project-independent, input-only
   idealized design-sensitivity calculator. `calculator.py` owns paired/one-sample t-test and one-way
   repeated-measures ANOVA power math; `lmm_simulation.py` owns reproducible

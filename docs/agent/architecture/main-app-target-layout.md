@@ -83,7 +83,7 @@ output folders.
 owns project workflow orchestration, processing run start/stop/finalization
 orchestration, GUI-side post-export completion handling, landing/main page
 assembly, and shell/menu presentation helpers such as icons, header bar, file
-menu, menu bar, and sidebar. It also owns the main-window shell, settings panel,
+menu, menu bar, and workspace navigation. It also owns the main-window shell, settings panel,
 event-map behavior, style tokens, update manager, and reusable widgets while GUI
 smoke tests protect behavior.
 

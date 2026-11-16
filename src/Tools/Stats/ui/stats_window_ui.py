@@ -92,6 +92,7 @@ class StatsWindowUiMixin:
 
         self.conditions_scroll_area = QScrollArea()
         self.conditions_scroll_area.setObjectName("stats_conditions_scroll_area")
+        self.conditions_scroll_area.setAccessibleName("Included conditions")
         self.conditions_scroll_area.setWidgetResizable(True)
         self.conditions_scroll_area.setMinimumHeight(150)
         self.conditions_scroll_area.setSizePolicy(
@@ -232,15 +233,18 @@ class StatsWindowUiMixin:
 
         manual_filter_row = QHBoxLayout()
         manual_filter_row.setSpacing(6)
-        manual_filter_row.addWidget(QLabel("Filter:"))
+        manual_filter_label = QLabel("Filter:")
+        manual_filter_row.addWidget(manual_filter_label)
         self.manual_exclusion_search_input = QLineEdit()
         self.manual_exclusion_search_input.setObjectName("stats_manual_exclusion_filter")
         self.manual_exclusion_search_input.setPlaceholderText("Filter participants...")
+        manual_filter_label.setBuddy(self.manual_exclusion_search_input)
         manual_filter_row.addWidget(self.manual_exclusion_search_input, 1)
         manual_group_layout.addLayout(manual_filter_row)
 
         self.manual_exclusion_candidates_list = QListWidget()
         self.manual_exclusion_candidates_list.setObjectName("stats_manual_exclusion_candidates_list")
+        self.manual_exclusion_candidates_list.setAccessibleName("Participant exclusion candidates")
         self.manual_exclusion_candidates_list.setSelectionMode(QAbstractItemView.NoSelection)
         self.manual_exclusion_candidates_list.setMinimumHeight(150)
         self.manual_exclusion_candidates_list.setSizePolicy(
@@ -292,7 +296,7 @@ class StatsWindowUiMixin:
             "Selected folder that contains the FPVS result spreadsheets."
         )
         self.le_folder.setMinimumHeight(24)
-        self.browse_folder_btn = make_action_button("Browse...")
+        self.browse_folder_btn = make_action_button("Choose Excel Folder")
         self.browse_folder_btn.setToolTip(
             "Choose the folder that contains FPVS results."
         )
@@ -319,6 +323,7 @@ class StatsWindowUiMixin:
 
         self.pipeline_progress_bar = QProgressBar()
         self.pipeline_progress_bar.setObjectName("stats_pipeline_progress_bar")
+        self.pipeline_progress_bar.setAccessibleName("Standard screening progress")
         self.pipeline_progress_bar.setRange(0, 100)
         self.pipeline_progress_bar.setValue(0)
         self.pipeline_progress_bar.setFormat("%p%")
@@ -629,6 +634,7 @@ class StatsWindowUiMixin:
         self.summary_text.setObjectName("stats_at_a_glance_text")
         self.summary_text.setReadOnly(True)
         self.summary_text.setAcceptRichText(True)
+        self.summary_text.setAccessibleName("Screening results at a glance")
         self.summary_text.setPlaceholderText(
             "A plain-language result summary will appear here after analysis."
         )
@@ -638,6 +644,7 @@ class StatsWindowUiMixin:
         self.log_text = QPlainTextEdit(self)
         self.log_text.setProperty("logSurface", True)
         self.log_text.setObjectName("stats_run_log_text")
+        self.log_text.setAccessibleName("Standard screening run log")
         self.log_text.setReadOnly(True)
         self.log_text.setPlaceholderText(
             "Worker phases, warnings, export messages, and errors will appear here."

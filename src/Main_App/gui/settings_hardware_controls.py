@@ -25,7 +25,9 @@ def build_hardware_controls(dialog, grid, row: int, settings: dict) -> None:
     dialog.hardware_platform_combo.setCurrentIndex(dialog.hardware_platform_combo.findData(choice.platform))
     dialog.hardware_platform_combo.setEnabled(dialog.project is not None)
     dialog.hardware_platform_combo.setToolTip("Saved for this project. Changing hardware requires confirmation and reprocessing.")
-    grid.addWidget(QLabel("EEG hardware:", dialog.group_preproc), row, 0)
+    hardware_label = QLabel("EEG hardware:", dialog.group_preproc)
+    hardware_label.setBuddy(dialog.hardware_platform_combo)
+    grid.addWidget(hardware_label, row, 0)
     grid.addWidget(dialog.hardware_platform_combo, row, 1)
     dialog.initial_reference_label = QLabel("Initial reference:", dialog.group_preproc)
     dialog.initial_reference_combo = QComboBox(dialog.group_preproc)
@@ -33,6 +35,7 @@ def build_hardware_controls(dialog, grid, row: int, settings: dict) -> None:
     dialog.initial_reference_combo.addItem("Keep recorded reference", "recorded")
     dialog.initial_reference_combo.addItem("Selected channels", "channels")
     dialog.initial_reference_combo.setCurrentIndex(max(0, dialog.initial_reference_combo.findData(settings.get("initial_reference", "recorded"))))
+    dialog.initial_reference_label.setBuddy(dialog.initial_reference_combo)
     grid.addWidget(dialog.initial_reference_label, row, 2)
     grid.addWidget(dialog.initial_reference_combo, row, 3)
     dialog.drop_reference_channels_check = QCheckBox("Drop selected reference channels", dialog.group_preproc)
@@ -44,6 +47,7 @@ def build_hardware_controls(dialog, grid, row: int, settings: dict) -> None:
     dialog.channel_types_edit.setPlaceholderText("VEOG=eog, ECG=ecg")
     dialog.channel_types_edit.setToolTip("Optional overrides using exact recorded channel names. Leave blank to keep reader channel types. Supported: eeg, eog, ecg, emg, misc.")
     dialog.channel_types_edit.setText(", ".join(f"{name}={role}" for name, role in settings.get("channel_types", {}).items()))
+    dialog.channel_types_label.setBuddy(dialog.channel_types_edit)
     grid.addWidget(dialog.channel_types_label, row + 1, 0)
     grid.addWidget(dialog.channel_types_edit, row + 1, 1)
     dialog.hardware_platform_combo.activated.connect(lambda _index: _choose_hardware(dialog))
@@ -109,10 +113,20 @@ def _refresh_controls(dialog) -> None:
         dialog.electrode_mapping_profile_combo.model().item(index).setEnabled(
             dialog.electrode_mapping_profile_combo.itemData(index) in allowed_mappings
         )
-    dialog.electrode_mapping_profile_combo.setToolTip(
-        "Select factory EEG 1–8 only after confirming the headset uses the documented factory electrode positions."
-        if unicorn else "Choose the mapping that matches the recorded electrode labels and cap wiring."
-    )
+    if unicorn:
+        mapping_help = (
+            "Select factory EEG 1–8 only after confirming the headset uses "
+            "the documented factory electrode positions."
+        )
+    elif recorded_geometry:
+        mapping_help = "Channel geometry is read from the recording."
+    else:
+        mapping_help = (
+            "Use anatomical labels when the recording names the scalp electrodes. "
+            "Use the BioSemi A/B profile only for standard 64-channel 10–20 A1–A32/B1–B32 wiring. "
+            "BioSemi ABC, equiradial and custom cap layouts are unsupported by this profile."
+        )
+    dialog.electrode_mapping_profile_combo.setToolTip(mapping_help)
     dialog.preproc_edits[3].setEnabled(qualified_qc and dialog.project is not None)
     dialog.preproc_edits[3].setToolTip("This kurtosis screening is qualified for BioSemi64 only." if not qualified_qc else "")
     refresh_hardware_qc_controls(dialog)

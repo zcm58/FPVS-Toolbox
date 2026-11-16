@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 from Main_App.gui.components import SectionCard, make_action_button
 from Main_App.gui.settings_feedback import refresh_preprocessing_feedback
 from Main_App.gui.settings_hardware_controls import build_hardware_controls
+from Main_App.gui.style_tokens import SECTION_GAP
 from Main_App.projects.preprocessing_settings import (
     ELECTRODE_MAPPING_PROFILE_ANATOMICAL,
     ELECTRODE_MONTAGE_BIOSEMI64,
@@ -33,17 +34,10 @@ from Main_App.projects.preprocessing_settings import (
 def build_preprocessing_page(self, tabs: QTabWidget) -> QWidget:
     tab = QWidget()
     layout = QVBoxLayout(tab)
-    layout.setContentsMargins(12, 12, 12, 12)
-    layout.setSpacing(10)
-    self.guided_setup_button = make_action_button("Guided setup", parent=tab)
-    self.guided_setup_button.setObjectName("guided_pipeline_setup_button")
-    self.guided_setup_button.clicked.connect(self._show_pipeline_setup)
-    layout.addWidget(self.guided_setup_button, 0, Qt.AlignRight)
-    self._add_settings_scope(
-        layout,
-        "Signal preparation for the current project."
-        if self.project is not None else "Application preprocessing preferences. Open a project to edit its processing settings.",
-    )
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setSpacing(SECTION_GAP)
+    if self.project is None:
+        self._add_settings_scope(layout, "Open a project to edit its processing settings.")
 
     self.group_preproc = SectionCard(
         "Preprocessing Parameters",
@@ -51,6 +45,12 @@ def build_preprocessing_page(self, tabs: QTabWidget) -> QWidget:
         object_name="preprocessing_parameters_card",
         content_layout=QGridLayout(),
     )
+    self.guided_setup_button = make_action_button(
+        "Guided setup", compact=True, parent=self.group_preproc.header,
+    )
+    self.guided_setup_button.setObjectName("guided_pipeline_setup_button")
+    self.guided_setup_button.clicked.connect(self._show_pipeline_setup)
+    self.group_preproc.header.add_action_widget(self.guided_setup_button)
     grid = self.group_preproc.content_layout
     for column, stretch in enumerate((2, 3, 2, 3)):
         grid.setColumnStretch(column, stretch)
@@ -172,6 +172,7 @@ def build_preprocessing_page(self, tabs: QTabWidget) -> QWidget:
     self.line_noise_frequency_combo.setObjectName(
         "settings_line_noise_frequency_hz"
     )
+    line_noise_frequency_label.setBuddy(self.line_noise_frequency_combo)
     self.line_noise_frequency_combo.setToolTip(line_noise_tooltip)
     self.line_noise_frequency_combo.addItem("60 Hz", 60)
     self.line_noise_frequency_combo.addItem("50 Hz", 50)
@@ -201,6 +202,7 @@ def build_preprocessing_page(self, tabs: QTabWidget) -> QWidget:
     self.electrode_montage_combo.setObjectName(
         "settings_electrode_montage"
     )
+    montage_label.setBuddy(self.electrode_montage_combo)
     self.electrode_montage_combo.setToolTip(montage_tooltip)
     for montage_id, montage_name in SUPPORTED_ELECTRODE_MONTAGES:
         self.electrode_montage_combo.addItem(montage_name, montage_id)
@@ -217,14 +219,7 @@ def build_preprocessing_page(self, tabs: QTabWidget) -> QWidget:
     grid.addWidget(montage_label, montage_row, 0)
     grid.addWidget(self.electrode_montage_combo, montage_row, 1)
 
-    mapping_tooltip = (
-        "Use anatomical labels when the BDF already names scalp electrodes. "
-        "Choose the A/B profile only for the standard BioSemi 64-channel "
-        "10-20 A1-A32/B1-B32 wiring. It does not support BioSemi ABC, "
-        "equiradial, or custom cap layouts."
-    )
     mapping_label = QLabel("Channel mapping profile:", self.group_preproc)
-    mapping_label.setToolTip(mapping_tooltip)
     self.electrode_mapping_profile_combo = QComboBox(self.group_preproc)
     self.electrode_mapping_profile_combo.setSizeAdjustPolicy(
         QComboBox.AdjustToMinimumContentsLengthWithIcon
@@ -233,7 +228,7 @@ def build_preprocessing_page(self, tabs: QTabWidget) -> QWidget:
     self.electrode_mapping_profile_combo.setObjectName(
         "settings_electrode_mapping_profile"
     )
-    self.electrode_mapping_profile_combo.setToolTip(mapping_tooltip)
+    mapping_label.setBuddy(self.electrode_mapping_profile_combo)
     for profile_id, profile_name in SUPPORTED_ELECTRODE_MAPPING_PROFILES:
         self.electrode_mapping_profile_combo.addItem(profile_name, profile_id)
     mapping_index = self.electrode_mapping_profile_combo.findData(
