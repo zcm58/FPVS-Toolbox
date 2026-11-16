@@ -25,6 +25,7 @@ from Main_App.gui.event_map import ConditionRowsArea, refresh_condition_editor_t
 from Main_App.gui.icons import application_icon
 from Main_App.gui.menu_bar import build_menu_bar
 from Main_App.gui.processing_log_dialog import ProcessingLogDialog
+from Main_App.gui.project_welcome import build_project_welcome
 from Main_App.gui.processing_history_label import ProcessingHistoryLabel
 from Main_App.gui.run_outcome import build_last_run_panel
 from Main_App.gui.shell_status import PROCESSING_ACTIVITY_MESSAGE
@@ -34,7 +35,6 @@ from .style_tokens import (
     EVENT_REMOVE_BUTTON_SIZE,
     PAGE_MARGIN,
     SECTION_GAP,
-    build_landing_page_stylesheet,
     build_main_page_stylesheet,
 )
 from Main_App.gui.components import (
@@ -68,86 +68,8 @@ def init_ui(self) -> None:
     self.stacked.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
     self.setCentralWidget(self.stacked)
 
-    # ===== Page 0: Landing =====
-    landing = QWidget(self.stacked)
-    landing.setObjectName("LandingPage")
-    landing.setAttribute(Qt.WA_StyledBackground, True)
-    landing.setStyleSheet(build_landing_page_stylesheet())
-    self.landing_page = landing
-
-    lay0 = QVBoxLayout(landing)
-    lay0.setContentsMargins(26, 26, 26, 24)
-    lay0.setSpacing(0)
-
-    landing_content = QWidget(landing)
-    landing_content.setObjectName("landing_content")
-    landing_content.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-    self.landing_content = landing_content
-
-    landing_layout = QVBoxLayout(landing_content)
-    landing_layout.setContentsMargins(0, 0, 0, 0)
-    landing_layout.setSpacing(0)
-
-    welcome_card = QFrame(landing_content)
-    welcome_card.setObjectName("landing_welcome_card")
-    welcome_card.setAttribute(Qt.WA_StyledBackground, True)
-    welcome_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-    self.landing_card = welcome_card
-
-    card_layout = QVBoxLayout(welcome_card)
-    card_layout.setContentsMargins(32, 32, 32, 32)
-    card_layout.setSpacing(0)
-    card_layout.addStretch(1)
-
-    center_content = QWidget(welcome_card)
-    center_content.setObjectName("landing_center_content")
-    center_content.setMinimumWidth(720)
-    center_content.setMaximumWidth(920)
-    center_content.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-
-    center_layout = QVBoxLayout(center_content)
-    center_layout.setContentsMargins(0, 0, 0, 0)
-    center_layout.setSpacing(18)
-
-    title = QLabel("Welcome to FPVS Toolbox!", center_content)
-    title.setObjectName("landing_title")
-    apply_font_role(title, "landing_title")
-    title.setAlignment(Qt.AlignCenter)
-    title.setWordWrap(False)
-    title.setMinimumHeight(84)
-    title.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-
-    center_layout.addWidget(title)
-
-    self.btn_create_project = make_action_button(
-        "New Project",
-        variant="primary",
-        parent=welcome_card,
-    )
-    self.btn_open_project = make_action_button(
-        "Open Project",
-        variant="secondary",
-        parent=welcome_card,
-    )
-    for btn in (self.btn_create_project, self.btn_open_project):
-        btn.setProperty("landingAction", True)
-        apply_font_role(btn, "landing_action")
-        btn.setFixedSize(260, 66)
-        btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-
-    btn_row = ActionRow(welcome_card, alignment=Qt.AlignRight, spacing=12)
-    btn_row.setObjectName("main_landing_actions")
-    btn_row.add_button(self.btn_create_project)
-    btn_row.add_button(self.btn_open_project)
-    btn_row.row_layout.addStretch(1)
-    center_layout.addWidget(btn_row)
-
-    card_layout.addWidget(center_content, 0, Qt.AlignCenter)
-    card_layout.addStretch(1)
-    landing_layout.addWidget(welcome_card)
-    lay0.addWidget(landing_content, 1)
-
-    self.stacked.addWidget(landing)
+    self.landing_page = build_project_welcome(self, self.stacked)
+    self.stacked.addWidget(self.landing_page)
 
     # ===== Page 1: Main UI =====
     page1 = QWidget(self.stacked)
@@ -180,11 +102,14 @@ def init_ui(self) -> None:
     setup_layout.setContentsMargins(0, 0, 0, 0)
     setup_layout.setSpacing(SECTION_GAP)
 
-    self.processing_history_label = ProcessingHistoryLabel(setup_panel)
-    setup_layout.addWidget(self.processing_history_label)
+    overview = QHBoxLayout()
+    overview.setSpacing(SECTION_GAP)
+    setup_layout.addLayout(overview)
+    processing_column = QVBoxLayout()
+    processing_column.setSpacing(SECTION_GAP)
+    overview.addLayout(processing_column, 3)
 
-    # Processing Options
-    grp_proc = SectionCard("Processing Options", setup_panel, object_name="processing_group")
+    grp_proc = SectionCard("Process recordings", setup_panel, object_name="processing_group")
     grp_proc.header.setObjectName("processing_card_header")
     proc_layout = grp_proc.content_layout
     proc_layout.setSpacing(10)
@@ -265,7 +190,7 @@ def init_ui(self) -> None:
         lambda checked: checked and self._on_mode_changed("batch")
     )
 
-    setup_layout.addWidget(grp_proc)
+    processing_column.addWidget(grp_proc)
 
     self.row_single_file.setVisible(False)
     self.lbl_single_file.setVisible(False)
@@ -282,6 +207,48 @@ def init_ui(self) -> None:
         self._update_start_enabled()
     except Exception:
         pass
+
+    self.processing_readiness_label = QLabel(grp_proc)
+    self.processing_readiness_label.setObjectName("processing_readiness_label")
+    self.processing_readiness_label.setWordWrap(True)
+    self.processing_readiness_label.hide()
+    proc_layout.addWidget(self.processing_readiness_label)
+
+    # Start Row
+    run_panel = ActionRow(grp_proc, alignment=Qt.AlignRight, spacing=10)
+    run_panel.setObjectName("run_panel")
+    self.run_panel = run_panel
+    self.project_draft_status = QLabel(run_panel)
+    self.project_draft_status.setObjectName("project_draft_status")
+    self.project_draft_status.setAccessibleName("Project save status")
+    run_panel.row_layout.insertWidget(0, self.project_draft_status)
+
+    self.processing_log_dialog = ProcessingLogDialog(self)
+    self.text_log = self.processing_log_dialog.viewer
+    self.btn_view_log = make_action_button(
+        "View Log",
+        variant="secondary",
+        parent=run_panel,
+    )
+    self.btn_view_log.setObjectName("processing_view_log_button")
+    self.btn_view_log.setAccessibleName("View processing log")
+    self.btn_view_log.clicked.connect(self.processing_log_dialog.open)
+
+    self.btn_start = make_action_button(
+        "Start Processing",
+        variant="primary",
+        parent=run_panel,
+    )
+    self.btn_start.setMinimumSize(180, 38)
+    self.btn_start.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+
+    btn_h = max(38, self.btn_start.sizeHint().height())
+    self.btn_start.setFixedHeight(btn_h)
+
+    run_panel.add_button(self.btn_view_log)
+    run_panel.add_button(self.btn_start)
+    proc_layout.addWidget(run_panel)
+
 
     # Conditions
     grp_event = SectionCard("Conditions", setup_panel, object_name="event_map_group")
@@ -364,49 +331,27 @@ def init_ui(self) -> None:
     self.condition_editor_body.hide()
     self.condition_editor_toggle.toggled.connect(self.condition_editor_body.setVisible)
     self.condition_editor_toggle.toggled.connect(lambda _checked: refresh_condition_editor_toggle(self))
-    setup_layout.addWidget(grp_event)
-    self.last_run_panel = build_last_run_panel(self, setup_panel)
-    setup_layout.addWidget(self.last_run_panel)
-    self.processing_readiness_label = QLabel(setup_panel)
-    self.processing_readiness_label.setObjectName("processing_readiness_label")
-    self.processing_readiness_label.setWordWrap(True)
-    self.processing_readiness_label.hide()
-    setup_layout.addWidget(self.processing_readiness_label)
+    processing_column.addWidget(grp_event)
+    processing_column.addStretch(1)
 
-    # Start Row
-    run_panel = ActionRow(setup_panel, alignment=Qt.AlignRight, spacing=10)
-    run_panel.setObjectName("run_panel")
-    self.run_panel = run_panel
-    self.project_draft_status = QLabel(run_panel)
-    self.project_draft_status.setObjectName("project_draft_status")
-    self.project_draft_status.setAccessibleName("Project save status")
-    run_panel.row_layout.insertWidget(0, self.project_draft_status)
+    results = SectionCard("Analysis", setup_panel, object_name="home_analysis")
+    self.processing_history_label = ProcessingHistoryLabel(results)
+    results.content_layout.addWidget(self.processing_history_label)
+    self.last_run_panel = build_last_run_panel(self, results)
+    results.content_layout.addWidget(self.last_run_panel)
+    for role in ("btn_graphs", "btn_publication_maps", "btn_loreta_visualizer"):
+        action = self.tool_actions.get(role)
+        if action is not None:
+            button = make_action_button(action.text(), compact=True, parent=results)
+            button.setObjectName(f"home_{role}")
+            # QAction.trigger() can run even when its menu widget is locked.
+            button.clicked.connect(
+                lambda _checked, tool=action: tool.trigger() if menu.isEnabled() else None,
+            )
+            results.content_layout.addWidget(button, 0, Qt.AlignLeft)
+    overview.addWidget(results, 2, Qt.AlignTop)
 
-    self.processing_log_dialog = ProcessingLogDialog(self)
-    self.text_log = self.processing_log_dialog.viewer
-    self.btn_view_log = make_action_button(
-        "View Log",
-        variant="secondary",
-        parent=run_panel,
-    )
-    self.btn_view_log.setObjectName("processing_view_log_button")
-    self.btn_view_log.setAccessibleName("View processing log")
-    self.btn_view_log.clicked.connect(self.processing_log_dialog.open)
-
-    self.btn_start = make_action_button(
-        "Start Processing",
-        variant="primary",
-        parent=run_panel,
-    )
-    self.btn_start.setMinimumSize(180, 38)
-    self.btn_start.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-
-    btn_h = max(38, self.btn_start.sizeHint().height())
-    self.btn_start.setFixedHeight(btn_h)
-
-    run_panel.add_button(self.btn_view_log)
-    run_panel.add_button(self.btn_start)
-    setup_layout.addWidget(run_panel)
+    self.condition_editor_toggle.toggled.connect(lambda opened: results.setVisible(not opened))
     setup_layout.addStretch(1)
 
     saved_pairs = self.settings.get_event_pairs()

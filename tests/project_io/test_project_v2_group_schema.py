@@ -627,17 +627,12 @@ def test_new_project_from_fpvs_config_creates_project_directly(tmp_path, monkeyp
     assert manifest["input_folder"] == str(raw_dir)
 
 
-def test_new_project_workflow_routes_to_fpvs_config_choice(monkeypatch) -> None:
+def test_studio_import_workflow_notifies_project_ready(monkeypatch) -> None:
     from Main_App.gui import project_workflows
 
     host = SimpleNamespace()
     calls: list[str] = []
 
-    monkeypatch.setattr(
-        project_workflows,
-        "_choose_new_project_source",
-        lambda _host: project_workflows.NEW_PROJECT_FPVS_CONFIG,
-    )
     monkeypatch.setattr(project_workflows, "_new_project", lambda _host: calls.append("manual"))
     monkeypatch.setattr(
         project_workflows,
@@ -646,12 +641,12 @@ def test_new_project_workflow_routes_to_fpvs_config_choice(monkeypatch) -> None:
     )
     monkeypatch.setattr(project_workflows, "notify_project_ready", lambda _host: calls.append("ready"))
 
-    project_workflows.new_project(host)
+    project_workflows.import_fpvs_config_project(host)
 
     assert calls == ["ready"]
 
 
-def test_new_project_workflow_routes_to_manual_choice(monkeypatch) -> None:
+def test_manual_project_workflow_notifies_project_ready(monkeypatch) -> None:
     from Main_App.gui import project_workflows
 
     host = SimpleNamespace(currentProject=None)
@@ -661,11 +656,6 @@ def test_new_project_workflow_routes_to_manual_choice(monkeypatch) -> None:
         calls.append("manual")
         _host.currentProject = object()
 
-    monkeypatch.setattr(
-        project_workflows,
-        "_choose_new_project_source",
-        lambda _host: project_workflows.NEW_PROJECT_MANUAL,
-    )
     monkeypatch.setattr(project_workflows, "_new_project", create_manual_project)
     monkeypatch.setattr(
         project_workflows,
@@ -685,11 +675,6 @@ def test_new_project_workflow_manual_cancel_does_not_report_ready(monkeypatch) -
     host = SimpleNamespace(currentProject=None)
     calls: list[str] = []
 
-    monkeypatch.setattr(
-        project_workflows,
-        "_choose_new_project_source",
-        lambda _host: project_workflows.NEW_PROJECT_MANUAL,
-    )
     monkeypatch.setattr(
         project_workflows,
         "_new_project",

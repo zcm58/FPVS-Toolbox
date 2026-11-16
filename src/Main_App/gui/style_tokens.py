@@ -28,11 +28,9 @@ SURFACE_BG = "#FFFFFF"
 SURFACE_ALT_BG = PAGE_BG
 LOG_PANEL_BG = PAGE_BG
 LOG_BG = "#EAF0F3"
-LANDING_CARD_BG = SURFACE_BG
 
 BORDER_COLOR = "#CBD9DE"
 BORDER_SOFT_COLOR = BORDER_COLOR
-LANDING_CARD_BORDER = BORDER_COLOR
 CONTROL_BORDER = "#6A7C87"
 TEXT_PRIMARY = "#1D2A34"
 TEXT_SECONDARY = "#4D626D"
@@ -503,24 +501,14 @@ def build_workspace_chrome_stylesheet() -> str:
 
 
 def build_landing_page_stylesheet() -> str:
-    """Return the scoped stylesheet for the welcome page."""
+    """Style the flat project entry page."""
     return f"""
         #LandingPage {{
             background: {PAGE_BG};
         }}
 
-        #landing_content {{
-            background: transparent;
-        }}
-
-        #landing_welcome_card {{
-            background: {LANDING_CARD_BG};
-            border: 1px solid {LANDING_CARD_BORDER};
-            border-radius: 14px;
-        }}
-
         #landing_title {{
-            color: {TEXT_PRIMARY};
+            color: {HEADER_BG};
             font-size: {css_font_size("landing_title")};
             font-weight: {css_font_weight("landing_title")};
         }}
@@ -529,47 +517,7 @@ def build_landing_page_stylesheet() -> str:
             color: {TEXT_SECONDARY};
         }}
 
-        QPushButton[landingAction="true"] {{
-            background: {SURFACE_BG};
-            border: 1px solid {CONTROL_BORDER};
-            border-radius: 8px;
-            color: {TEXT_PRIMARY};
-            font-size: {css_font_size("landing_action")};
-            font-weight: {css_font_weight("landing_action")};
-        }}
-
-        QPushButton[landingAction="true"]:hover {{
-            background: {ACCENT_SOFT_BG};
-            border-color: {ACCENT_COLOR};
-        }}
-
-        QPushButton[landingAction="true"]:pressed {{
-            background: {ACCENT_SOFT_BG};
-        }}
-
-        QPushButton[landingAction="true"][variant="primary"] {{
-            background: {ACCENT_COLOR};
-            border-color: {ACCENT_COLOR};
-            color: white;
-        }}
-
-        QPushButton[landingAction="true"][variant="primary"]:hover {{
-            background: {ACCENT_COLOR_HOVER};
-            border-color: {ACCENT_COLOR_HOVER};
-        }}
-
-        QPushButton[landingAction="true"][variant="primary"]:pressed {{
-            background: {ACCENT_COLOR_PRESSED};
-            border-color: {ACCENT_COLOR_PRESSED};
-        }}
-
-        QPushButton[landingAction="true"][variant="secondary"] {{
-            background: {SURFACE_BG};
-            border-color: {CONTROL_BORDER};
-            color: {TEXT_PRIMARY};
-        }}
-
-        QPushButton[landingAction="true"]:focus:enabled {{
-            border-color: {FOCUS_COLOR};
+        #welcome_actions_divider {{
+            background: {BORDER_COLOR};
         }}
     """

@@ -193,16 +193,28 @@ PsychoPy or FPVS Studio.
 When creating a project, the condition settings in FPVS Toolbox should match the trigger codes used during
 data collection.
 
+## Start a project
+
+On Welcome, choose **Import FPVS Studio Config** to open the supported
+`.fpvsconfig` exported from Studio. Confirm the project's hardware and select
+the folder containing your EEG recordings. **Open Existing Project** resumes a
+saved project, and **Create Manually** starts a project without a Studio config.
+
+Home puts recording selection and **Start Processing** together. The
+**Analysis** section shows the last completed run recorded for the project
+and opens the tools using their existing project and output checks.
+
 ## Tool Pages
 
-Open **Free Harmonic Clustering Analysis** and **SNR Plots** from **Tools**.
+Open **Free Harmonic Clustering Analysis** from **Tools**. **SNR Plots** is
+available from Home and **Tools**.
 Open **Settings** from **File**. Use **View > Home** or **Ctrl+1** to return to
 the processing page. Home opens in a compact window. Toolbox expands the
 window when a tool, Settings, or a processing review needs more room.
 
 Home shows how many conditions are configured. Select **Edit conditions** to
 see the marker rows, add conditions, or manage source maps and participants.
-Projects that already use source maps show **View conditions**. Hiding the
+Projects that already use source maps show **View conditions**. Closing the
 editor keeps your draft. Use **File > Save Project Settings** to save it.
 
 Scalp Maps, Standard FPVS Screening, Sensitivity Analysis, LORETA Visualizer,

@@ -1,36 +1,74 @@
 # FPVS Toolbox Product Scope
 
-FPVS Toolbox's primary product is its FPVS EEG processing pipeline. Its target
-is a modular processing package with methods and parameters selected and saved
-per project. Analysis and visualization tools are secondary add-ons that consume
-processing outputs; they must not become prerequisites for processing.
+FPVS Toolbox helps researchers turn recorded FPVS EEG into reproducible,
+project-owned results. The processing pipeline is the core product. Processing
+methods and parameters are saved per project, and analysis and visualization
+consume the processed results as optional next steps.
 
-The current interface uses PySide6 and the release artifact is a Windows
-installer, while development and source
-execution may take place on Windows 11 or CachyOS (Arch Linux). Shared runtime
-decisions should remain portable across both without parallel implementations.
+The desktop application uses PySide6 and ships as a Windows installer. Source
+development and execution also support CachyOS (Arch Linux) through the shared
+runtime.
 
-Primary user workflows:
+## Workflow priority
 
-- Create or open a project.
-- Register supported BioSemi64 `.bdf` or confirmed Brain Products `.vhdr`/`.bvrh`
-  recordings with the project. Companion files are not separate participants.
-- Seed a project from the supported subset of FPVS Studio `.fpvsconfig`
-  schemas, then select and validate its recordings through Toolbox project APIs.
-- Configure persisted project hardware, reference, montage, and supported
-  preprocessing settings; changing confirmed hardware requires an explicit
-  warning and invalidates incompatible processing state.
-- Admit supported recordings through the project-local BIDS import boundary
-  into MNE Raw and one shared numerical pipeline. BDF/BVCDF signal bytes are
-  preserved; BVRF uses a labeled lossless FIF64 derivative, not standard raw
-  EEG-BIDS.
-- Run batch or single-file processing without blocking the GUI.
-- Generate native `.fpvs` result anchors and numerical companions while retaining
-  historical workbook readers and existing Excel report formats.
-- Optionally analyze outputs with the included statistics and visualization
-  tools.
+1. Bring a completed experiment from FPVS Studio into Toolbox. Import a
+   supported Studio configuration, select the corresponding EEG recordings, and
+   review the hardware, protocol, and recorded markers before processing.
+2. Run the project's single-file or batch processing. The desktop stays
+   responsive, and the project retains its settings and outputs for review
+   and reruns.
+3. Inspect the processed response in SNR Plots and Scalp Maps. For eligible
+   projects, explore experimental source-space estimates in LORETA Visualizer.
 
-Future product goals:
+Manual project creation and recording setup remain supported for studies run
+outside Studio. Existing projects can reopen directly for processing or review.
+The design hypothesis is that Studio import, processing, and these reviews
+will be the most frequent path for the intended users. Relative usage frequency
+has yet to be measured.
+
+## Current source and evidence
+
+- **Studio configuration import.** Import FPVS Studio Config opens directly
+  from Welcome and File. It imports the Toolbox-owned project, protocol and marker subset of `.fpvsconfig` schemas 1.0.0–1.8.0
+  for FPVS Oddball and Cognitive Load FPVS, including optional removed-electrode
+  metadata. Users choose the hardware and recordings in Toolbox. The separate
+  acquisition-evidence adapter can compare ordered marker codes after reviewed
+  recording association. End-to-end receiver integration and qualification
+  remain open. [Studio roadmap](../architecture/hardware-pipeline-studio-roadmap.md)
+- **Recording preparation.** Confirmed BioSemi ActiveTwo64, ActiveThree,
+  Brain Products and Unicorn Hybrid Black have scoped software routes into the
+  project-local BIDS adapter and shared MNE processing pipeline. The documented
+  format and montage limits govern which recordings can be admitted. Changing
+  the hardware profile requires confirmation and invalidates incompatible
+  results. [EEG hardware guide](../../user/reference/eeg-hardware.md)
+- **Outputs and tools.** Processing generates native `.fpvs` result anchors
+  and numerical companions. Historical workbook readers and Excel report
+  formats remain supported. SNR Plots and Free Harmonic Clustering are enabled
+  by default. Scalp Maps and LORETA Visualizer require the Beta Tools setting,
+  save and restart, and the first-open notice in each session. Current LORETA
+  generation requires eligible source-ready derivatives and current harmonics.
+  Automatic generation is limited to single-session inputs, and the estimates
+  are exploratory. [Tool access](../../user/tools/index.md) ·
+  [LORETA requirements](../../user/tools/loreta-visualizer.md)
+
+Source tests and synthetic examples establish software behavior within their
+tested inputs. Physical EEG recording and stimulus timing require separate
+hardware measurements. The published installer has its own version and
+acceptance evidence. [Release ledger](../exec-plans/active/v3-release-readiness.md)
+
+## Workflow acceptance
+
+Use a paired, sanitized Studio export and supported EEG fixture. A user can
+import the config, review its populated protocol and recording selection,
+resolve missing or incompatible inputs, and complete processing. Current
+outputs open in SNR Plots and Scalp Maps, with beta access enabled for the
+latter. An eligible single-session project can open an experimental LORETA
+estimate, while unavailable derivatives keep that review blocked. Verify that
+manual setup can still create and process a supported project and that existing
+projects reopen with their saved inputs and results. Track Studio version and
+schema coverage in the roadmap.
+
+## Future product goals
 
 - Modular acquisition hardware and montage support through explicit profiles.
 - A per-project pipeline editor for selecting, configuring, replacing, or
@@ -40,16 +78,10 @@ Future product goals:
 - Complete FPVS Studio compatibility across supported experiment-to-analysis
   workflows, with a verified version/schema matrix and end-to-end fixtures.
 
-The [hardware, pipeline, and Studio roadmap](../architecture/hardware-pipeline-studio-roadmap.md)
-defines current foundations, gaps, ownership, and acceptance requirements.
-Current source supports BioSemi64 and the bounded, confirmed Brain Products
-routes documented in the [hardware guide](../../user/reference/brain-products.md).
-The Unicorn reader remains gated and Studio import remains partial. Published
-installer capabilities belong to their release tag, not this source branch.
 Preserve trusted numerical results, locked processing order, and existing
 project compatibility during extension work.
 
-Current boundaries:
+## Current boundaries
 
 - The historical `Tools.SourceLocalization` implementation is retired. The
   separate LORETA Visualizer is an opt-in beta tool with isolated source

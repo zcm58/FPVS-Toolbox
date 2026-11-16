@@ -68,8 +68,8 @@ Primary paths:
 - `run_outcome_model.py` summarizes actual recording results; `run_outcome.py`
   presents the session-local last outcome and existing output/report/log actions.
   Completion retains the selected single BDF, while a missing file disables Start.
-- `processing_history_label.py` adds one always-visible Home line above Processing
-  Options. A `workers.processing_history_worker` reads the opened project's bounded
+- `processing_history_label.py` shows the saved run in Home's Analysis column.
+  A `workers.processing_history_worker` reads the opened project's bounded
   history off the UI thread; queued results are guarded by project root and request
   identity. Project opening/returning Home and processing completion refresh it.
   `processing_history_model.py` formats the local completion time and distinct
@@ -604,28 +604,44 @@ per app session. `shell_status.py` locks the menu during processing,
 processing-cache reset, and Scalp Maps generation, then restores its prior
 enabled state. The Home shortcut follows the same lock.
 
-Welcome and Home default to 960 × 660 with a 900 × 620 minimum. The other
+Welcome and Home default to 960 × 520 with a 900 × 520 minimum. The other
 workspace pages use the existing 1280 × 900 minimum. The window follows the
 current stack page and restores a compact size after automatic expansion
 when the expanded window is still at the automatic size. An explicit larger
 size or maximized window persists. The stack size policies prevent hidden
 pages from increasing the compact minimum.
 
-Home shows the configured condition count above the run actions. **Edit
-conditions** discloses the same live row widgets and source controls.
-The list scrolls within the editor when long. Hiding the editor preserves
-draft values. Project load collapses the editor, and invalid Save opens it
-and focuses the first invalid field. Mapped projects show **View conditions**
-with their canonical catalog.
+`project_welcome.py` presents Import FPVS Studio Config as the primary
+action, with Open Existing Project and Create Manually beside it. Welcome and
+File trigger the same three project actions. Import still confirms hardware
+and requests a recordings folder through the supported configuration import
+workflow. Successful import goes directly to Home.
 
-For visible acceptance, open a disposable project at 960 × 660 and resize to
-900 × 620. Check keyboard navigation, live condition count, Enter to add a
-row, invalid Save from Settings, and a long mapped catalog. Start Processing
-and View Log must remain visible as the editor opens and closes. Open
-Settings and an analysis tool, verify expansion, and return via **View >
-Home** or Ctrl+1. Repeat after manually enlarging the tool window. Check that
-menus and Ctrl+1 respect the processing lock. Repeat menu and Settings
-checks at 125%, 150%, and 200% Qt scaling.
+Home groups recording selection, run readiness, Start Processing, and View
+Log in the processing column. Analysis shows persisted processing history,
+the current session's run outcome when available, and shortcuts to SNR
+Plots, Scalp Maps, and LORETA Visualizer. The shortcuts trigger their Tools
+menu actions, so the menu lock, beta policy, and project and output checks
+apply. History describes a completed run. Each tool checks whether its
+current inputs can be used.
+
+The Conditions strip sits under the processing controls and shows the
+configured count. **Edit conditions** reveals the same live rows and source
+controls at full width, with Analysis out of view while editing. The list scrolls inside the editor.
+Closing it keeps the draft. Project load collapses the editor, and invalid
+Save opens it and focuses the first invalid field. Source-mapped projects
+show **View conditions** with their canonical catalog.
+
+For visible acceptance, start at 960 × 520 and repeat at 900 × 520. Import
+a sanitized Studio config from Welcome, confirm hardware and select the
+recordings folder, then check the project opens directly on Home. Verify
+manual setup and reopening are also reachable from Welcome. On Home,
+check keyboard navigation, long condition lists, invalid Save from
+Settings, and last-run controls alongside the analysis shortcuts. Confirm
+Scalp Maps and LORETA appear after enabling Beta Tools and restarting.
+Check that the shortcuts use the same notices and output checks as Tools.
+Open Settings or an analysis tool, then verify return via View > Home or
+Ctrl+1 restores automatic expansion and respects a manual resize.
 
 When the active project changes through create/open/import/path workflows, the
 main shell must return to Home and discard project-bound embedded page instances.

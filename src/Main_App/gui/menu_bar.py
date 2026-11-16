@@ -48,11 +48,13 @@ def build_menu_bar(parent: QMainWindow) -> QMenuBar:
 
     tools_menu = menu_bar.addMenu("&Tools")
     tools_menu.setObjectName("toolsMenu")
+    parent.tool_actions = {}
     for role, text, opener_name in DEFAULT_TOOL_SPECS:
         action = QAction(text, parent)
         action.setObjectName(role)
         action.triggered.connect(getattr(parent, opener_name))
         tools_menu.addAction(action)
+        parent.tool_actions[role] = action
 
     if parent.settings.beta_tools_enabled():
         tools_menu.addSeparator()
@@ -65,6 +67,7 @@ def build_menu_bar(parent: QMainWindow) -> QMenuBar:
                 partial(parent._open_beta_tool, role, getattr(parent, opener_name))
             )
             beta_menu.addAction(action)
+            parent.tool_actions[role] = action
 
     help_menu = menu_bar.addMenu("&Help")
     help_menu.setObjectName("helpMenu")

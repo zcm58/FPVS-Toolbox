@@ -134,69 +134,58 @@ def test_tools_menu_contains_default_and_enabled_beta_tools(tmp_path: Path, qtbo
         assert win.menuBar().findChild(QMenu, "betaToolsMenu") is None
 
 
-def test_landing_page_full_window_welcome_layout(tmp_path: Path, qtbot, monkeypatch) -> None:
+def test_welcome_prioritizes_studio_import_and_fits_minimum_window(tmp_path: Path, qtbot, monkeypatch) -> None:
     win = _build_window(tmp_path, qtbot, monkeypatch)
 
-    assert win.stacked.currentIndex() == 0
-    assert win.minimumSize() == QSize(900, 620)
-    assert win.size() == QSize(960, 660)
+    assert win.stacked.currentWidget() is win.landing_page
+    assert win.minimumSize() == QSize(900, 520)
+    assert win.size() == QSize(960, 520)
     assert win.windowTitle() == f"FPVS Toolbox v{main_window_module.FPVS_TOOLBOX_VERSION}"
     assert not win.findChildren(QStatusBar)
-    assert win.landing_page is win.stacked.currentWidget()
-    assert win.landing_card.sizePolicy().horizontalPolicy() == QSizePolicy.Expanding
-    assert win.landing_card.sizePolicy().verticalPolicy() == QSizePolicy.Expanding
-    assert win.landing_card.maximumWidth() >= 10_000
-    assert not hasattr(win, "landing_brain_animation")
-
-    labels = {label.text() for label in win.landing_page.findChildren(QLabel)}
-    assert "FPVS Toolbox" not in labels
-    assert "Welcome to FPVS Toolbox!" in labels
-    assert "Create a new FPVS project or open an existing one." not in labels
-    assert win.findChild(QLabel, "landing_subtitle") is None
-    title = next(
-        label
-        for label in win.landing_page.findChildren(QLabel)
-        if label.text() == "Welcome to FPVS Toolbox!"
-    )
-    assert not title.wordWrap()
-    assert title.minimumHeight() >= 84
-    assert title.sizeHint().height() <= title.minimumHeight()
-
-    assert win.btn_create_project.text() == "New Project"
-    assert win.btn_open_project.text() == "Open Project"
-    assert win.btn_create_project.width() >= 260
-    assert win.btn_create_project.height() >= 66
-    assert win.actionImportFpvsConfigProject is win.actionCreateNewProject
-    assert not hasattr(win, "btn_create_from_config")
     assert win.menuBar().isHidden()
-    assert win.btn_create_project.isVisibleTo(win)
-    assert win.btn_open_project.isVisibleTo(win)
-    landing_actions = win.findChild(ActionRow, "main_landing_actions")
-    assert landing_actions is not None
-    assert landing_actions.row_layout.indexOf(win.btn_create_project) >= 0
-    assert landing_actions.row_layout.indexOf(win.btn_open_project) >= 0
+
+    title = win.landing_page.findChild(QLabel, "landing_title")
+    instructions = win.landing_page.findChild(QLabel, "landing_subtitle")
+    assert title.text() == "FPVS Toolbox"
+    assert ".fpvsconfig" in instructions.text()
+    assert win.btn_import_project.text() == "Import FPVS Studio Config…"
+    assert win.btn_open_project.text() == "Open Existing Project…"
+    assert win.btn_create_project.text() == "Create Manually…"
+    assert win.btn_import_project.property("variant") == "primary"
+    assert win.btn_open_project.property("variant") == "secondary"
+    assert win.btn_create_project.property("variant") == "tertiary"
+    assert win.actionImportFpvsConfigProject is not win.actionCreateNewProject
+
+    win.resize(win.minimumSize())
+    QApplication.processEvents()
+    for widget in (title, instructions, win.btn_import_project, win.btn_open_project, win.btn_create_project):
+        assert widget.isVisibleTo(win)
+        assert win.rect().contains(widget.mapTo(win, widget.rect().topLeft()))
+        assert win.rect().contains(widget.mapTo(win, widget.rect().bottomRight()))
 
 
-def test_cancelled_manual_project_creation_returns_to_welcome(
+@pytest.mark.parametrize(("button_name", "workflow_name"), [
+    ("btn_create_project", "_new_project"),
+    ("btn_import_project", "_new_project_from_fpvs_config"),
+])
+def test_cancelled_project_creation_returns_to_welcome(
     tmp_path: Path,
     qtbot,
     monkeypatch,
+    button_name,
+    workflow_name,
 ) -> None:
     win = _build_window(tmp_path, qtbot, monkeypatch)
+    calls = []
     monkeypatch.setattr(
         main_window_module.project_workflows,
-        "_choose_new_project_source",
-        lambda _host: main_window_module.project_workflows.NEW_PROJECT_MANUAL,
-    )
-    monkeypatch.setattr(
-        main_window_module.project_workflows,
-        "_new_project",
-        lambda _host: None,
+        workflow_name,
+        lambda *_args: calls.append(workflow_name),
     )
 
-    win.new_project()
-    qtbot.wait(20)
+    qtbot.mouseClick(getattr(win, button_name), Qt.LeftButton)
 
+    assert calls == [workflow_name]
     assert win.currentProject is None
     assert win.stacked.currentWidget() is win.landing_page
     assert win.menuBar().isHidden()
@@ -219,7 +208,11 @@ def test_main_window_layout_smoke(tmp_path: Path, qtbot, monkeypatch) -> None:
     assert win.processing_history_label.objectName() == "project_processing_history"
     assert win.processing_history_label.isVisibleTo(win)
     assert win.processing_history_label.wordWrap()
-    assert win.homeWidget.layout().indexOf(win.processing_history_label) == 0
+    analysis = win.findChild(SectionCard, "home_analysis")
+    processing = win.findChild(SectionCard, "processing_group")
+    assert analysis.isAncestorOf(win.processing_history_label)
+    assert processing.geometry().top() == analysis.geometry().top()
+    assert processing.geometry().right() < analysis.geometry().left()
     assert win.lbl_single_file.buddy() is win.le_input_file
     assert win.lbl_input_folder.buddy() is win.le_input_folder
 
@@ -253,6 +246,7 @@ def test_main_window_layout_smoke(tmp_path: Path, qtbot, monkeypatch) -> None:
     assert win.condition_editor_toggle.text() == "Edit conditions"
     qtbot.mouseClick(win.condition_editor_toggle, Qt.LeftButton)
     assert win.condition_editor_body.isVisibleTo(win)
+    assert not analysis.isVisible()
 
     event_map_header = win.findChild(QWidget, "event_map_header")
     assert event_map_header is not None
@@ -277,7 +271,7 @@ def test_main_window_layout_smoke(tmp_path: Path, qtbot, monkeypatch) -> None:
     assert win.btn_add_row.text() == "+ Add Condition"
     event_map_group = win.findChild(QWidget, "event_map_group")
     assert event_map_group is not None
-    assert event_map_group.geometry().bottom() < run_panel.geometry().top()
+    assert processing.geometry().bottom() < event_map_group.geometry().top()
     assert event_map_group.header.isVisible()
     assert event_map_group.header.title_label.text() == "Conditions"
     event_rows = win._live_event_map_rows()
@@ -321,8 +315,9 @@ def test_main_window_layout_smoke(tmp_path: Path, qtbot, monkeypatch) -> None:
     assert [action.text() for action in _menu(win, "helpMenu").actions()] == ["Documentation"]
     file_actions = _menu(win, "fileMenu").actions()
     assert [None if action.isSeparator() else action.text() for action in file_actions] == [
-        "New Project…",
+        "Import FPVS Studio Config…",
         "Open Existing Project…",
+        "Create Project Manually…",
         "Save Project Settings",
         None,
         "Settings",
@@ -333,18 +328,52 @@ def test_main_window_layout_smoke(tmp_path: Path, qtbot, monkeypatch) -> None:
         None,
         "Exit",
     ]
-    assert file_actions[0] is win.actionCreateNewProject
+    assert file_actions[0] is win.actionImportFpvsConfigProject
+    assert file_actions[2] is win.actionCreateNewProject
     assert file_actions[1] is win.actionOpenExistingProject
-    assert file_actions[5] is win.actionResetProjectProcessingCache
+    assert file_actions[6] is win.actionResetProjectProcessingCache
     assert file_actions[-1] is win.exit_action
     assert [action.text() for action in _menu(win, "viewMenu").actions()] == ["Home"]
+
+
+@pytest.mark.parametrize("enable_beta", [False, True])
+def test_home_analysis_uses_the_same_tool_routes_and_navigation_lock(
+    tmp_path: Path, qtbot, monkeypatch, enable_beta: bool,
+) -> None:
+    win = _build_window(tmp_path, qtbot, monkeypatch, enable_beta_tools=enable_beta)
+    win.show_home_page()
+    routes = ["btn_graphs"]
+    if enable_beta:
+        routes += ["btn_publication_maps", "btn_loreta_visualizer"]
+    panel = win.findChild(SectionCard, "home_analysis")
+    buttons = panel.findChildren(QPushButton)
+    assert [button.objectName() for button in buttons if button.isVisible()] == [
+        f"home_{role}" for role in routes
+    ]
+
+    opened = []
+    for role in routes:
+        action = win.tool_actions[role]
+        action.triggered.connect(lambda _checked, name=role: opened.append(name))
+    monkeypatch.setattr(win, "_frequency_domain_outputs_ready_for_tool", lambda _name: False)
+    warnings = []
+    monkeypatch.setattr(win, "_acknowledge_beta_tool_warning", warnings.append)
+    win.menuBar().setEnabled(False)
+    qtbot.mouseClick(panel.findChild(QPushButton, "home_btn_graphs"), Qt.LeftButton)
+    assert opened == []
+    win.menuBar().setEnabled(True)
+    for role in routes:
+        qtbot.mouseClick(panel.findChild(QPushButton, f"home_{role}"), Qt.LeftButton)
+    assert opened == routes
+    assert warnings == routes[1:]
+    assert win.workspace_stack.currentWidget() is win.homeWidget
 
 
 def test_home_processing_history_long_content_fits_minimum_window(
     tmp_path: Path, qtbot, monkeypatch,
 ) -> None:
     win = _build_window(tmp_path, qtbot, monkeypatch)
-    win.resize(900, 620)
+    win.resize(900, 520)
     win.show_home_page()
     history = win.processing_history_label
     history.setText(
@@ -353,12 +382,14 @@ def test_home_processing_history_long_content_fits_minimum_window(
     )
     qtbot.wait(20)
 
-    assert win.size() == QSize(900, 620)
+    assert win.size() == QSize(900, 520)
     assert win.workspace_stack.currentWidget() is win.homeWidget
     assert history.isVisibleTo(win)
     assert history.wordWrap()
     assert history.height() >= history.heightForWidth(history.width())
-    assert win.homeWidget.rect().contains(history.geometry())
+    assert win.homeWidget.rect().contains(
+        history.mapTo(win.homeWidget, history.rect().bottomRight())
+    )
     assert win.homeWidget.parentWidget() is win.workspace_stack
     assert win.btn_start.isVisibleTo(win)
     start_bottom = win.btn_start.mapTo(win.homeWidget, win.btn_start.rect().bottomRight())
@@ -446,11 +477,11 @@ def test_tool_navigation_guard_keeps_home_compact(tmp_path: Path, qtbot, monkeyp
 def test_long_project_title_does_not_resize_home(tmp_path: Path, qtbot, monkeypatch) -> None:
     win = _build_window(tmp_path, qtbot, monkeypatch)
     win.show_home_page()
-    win.resize(900, 620)
+    win.resize(900, 520)
     name = "Long project name " * 30
     win._set_project_title(name)
 
-    assert win.size() == QSize(900, 620)
+    assert win.size() == QSize(900, 520)
     assert win.windowTitle() == f"{name} — FPVS Toolbox v{main_window_module.FPVS_TOOLBOX_VERSION}"
 
 
@@ -471,7 +502,7 @@ def test_workspace_expands_and_restores_only_automatic_resizes(tmp_path: Path, q
     settings.trigger()
     win.resize(1340, 940)
     home.trigger()
-    assert win.minimumSize() == QSize(900, 620)
+    assert win.minimumSize() == QSize(900, 520)
     assert win.size() == QSize(1340, 940)
 
 
@@ -530,7 +561,7 @@ def test_processing_activity_page_locks_navigation_and_reuses_start_button(
     assert win.workspace_stack.currentWidget() is win.homeWidget
     assert run_panel.row_layout.indexOf(win.btn_start) >= 0
     assert win.processing_action_layout.indexOf(win.btn_start) < 0
-    assert win.size() == QSize(960, 660)
+    assert win.size() == QSize(960, 520)
     assert win.menuBar().isEnabled()
 
 

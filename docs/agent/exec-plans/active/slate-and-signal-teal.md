@@ -73,6 +73,19 @@ contracts, project formats, and exported figures and tables.
   scientific guidance. Free Harmonic Clustering labels are associated with
   their controls, including the recording-exclusion checkboxes.
 
+## Studio import and processing Home
+
+The [product spec](../../product-specs/fpvs-toolbox.md) prioritizes importing
+a Studio configuration, processing recordings, and opening tools from the
+results. Welcome exposes direct import, reopening, and manual creation.
+Home uses a 960 × 520 starting window. The left column groups input, run
+controls, and the condition count. The right column groups run history
+and analysis shortcuts that share the Tools menu actions. Editing conditions
+uses the full workspace width. Visible Windows checks passed 90 cases
+including Studio import, project switching, analysis action routing, and the
+full-width condition editor. Synthetic captures confirmed the default and
+900 × 520 minimum layouts.
+
 ## Compact Home follow-up
 
 The initial layout audit found duplicate tool entry points, a Conditions list

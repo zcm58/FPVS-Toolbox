@@ -35,30 +35,10 @@ logger.addHandler(logging.NullHandler())
 
 WINDOWS_FORBIDDEN_CONDITION_CHARS = set('<>:"/\\|?*')
 WINDOWS_FORBIDDEN_CONDITION_CHARS_TEXT = '< > : " / \\ | ? *'
-NEW_PROJECT_MANUAL = "manual"
-NEW_PROJECT_FPVS_CONFIG = "fpvs_config"
 
 
 def _illegal_condition_chars(label: str) -> list[str]:
     return sorted({ch for ch in label if ch in WINDOWS_FORBIDDEN_CONDITION_CHARS})
-
-
-def _choose_new_project_source(host: Any) -> str | None:
-    box = QMessageBox(host)
-    box.setWindowTitle("New Project")
-    box.setText("How would you like to create this project?")
-    config_button = box.addButton("Import FPVS Studio Config", QMessageBox.AcceptRole)
-    manual_button = box.addButton("Create Manually", QMessageBox.ActionRole)
-    box.addButton("Cancel", QMessageBox.RejectRole)
-    box.setDefaultButton(manual_button)
-    box.exec()
-
-    clicked = box.clickedButton()
-    if clicked == config_button:
-        return NEW_PROJECT_FPVS_CONFIG
-    if clicked == manual_button:
-        return NEW_PROJECT_MANUAL
-    return None
 
 
 def _return_to_welcome_if_no_project(host: Any) -> None:
@@ -72,23 +52,18 @@ def _return_to_welcome_if_no_project(host: Any) -> None:
 
 
 def new_project(host: Any) -> None:
-    previous_project = getattr(host, "currentProject", None)
-    choice = _choose_new_project_source(host)
-    if choice == NEW_PROJECT_FPVS_CONFIG:
-        new_project_from_fpvs_config(host)
+    if not confirm_project_draft_exit(host):
         return
-    if choice == NEW_PROJECT_MANUAL:
-        if not confirm_project_draft_exit(host):
-            return
-        _new_project(host)
-        current_project = getattr(host, "currentProject", None)
-        if current_project is not None and current_project is not previous_project:
-            notify_project_ready(host)
-            return
+    previous_project = getattr(host, "currentProject", None)
+    _new_project(host)
+    current_project = getattr(host, "currentProject", None)
+    if current_project is not None and current_project is not previous_project:
+        notify_project_ready(host)
+        return
     _return_to_welcome_if_no_project(host)
 
 
-def new_project_from_fpvs_config(host: Any) -> None:
+def import_fpvs_config_project(host: Any) -> None:
     if not confirm_project_draft_exit(host):
         return
     project = _new_project_from_fpvs_config(host, host)
@@ -102,10 +77,6 @@ def open_existing_project(host: Any) -> None:
     if not confirm_project_draft_exit(host):
         return
     _open_existing_project(host, host)
-
-
-def import_fpvs_config_project(host: Any) -> None:
-    new_project_from_fpvs_config(host)
 
 
 def open_project_path(host: Any, folder: str) -> None:

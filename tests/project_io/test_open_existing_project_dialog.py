@@ -105,10 +105,11 @@ def test_open_existing_project_empty_root_informs(
     assert "No projects" in text
     assert str(tmp_path) in text
     if from_workspace:
-        assert "File > New Project…" in text
+        assert "File > Import FPVS Studio Config…" in text
+        assert "File > Create Project Manually…" in text
         assert "Settings > Application > Change Projects Folder…" in text
     else:
-        assert "Choose New Project to create one." in text
+        assert "Import an FPVS Studio config or choose Create Manually." in text
         assert "Settings > Application" not in text
 
 
@@ -201,11 +202,6 @@ def test_import_fpvs_config_project_from_file_menu(tmp_path, main_window, monkey
         "getExistingDirectory",
         lambda *args, **kwargs: str(input_dir),
     )
-    monkeypatch.setattr(
-        project_workflows,
-        "_choose_new_project_source",
-        lambda _host: project_workflows.NEW_PROJECT_FPVS_CONFIG,
-    )
     hardware_prompts = []
 
     def select_hardware(_parent, title, prompt, options, *_args):
@@ -214,7 +210,7 @@ def test_import_fpvs_config_project_from_file_menu(tmp_path, main_window, monkey
 
     monkeypatch.setattr(project_manager.QInputDialog, "getItem", select_hardware)
 
-    main_window.actionCreateNewProject.trigger()
+    main_window.actionImportFpvsConfigProject.trigger()
 
     assert len(hardware_prompts) == 1
     assert hardware_prompts[0][0] == "Project EEG Hardware"
@@ -232,7 +228,8 @@ def test_import_fpvs_config_project_from_file_menu(tmp_path, main_window, monkey
     assert manifest["preprocessing"]["hardware_platform"] == platform
     assert manifest["preprocessing"]["hardware_confirmed"] is True
     assert main_window.currentProject.preprocessing["hardware_platform"] == platform
-    assert message_spy["info"]
+    assert main_window.workspace_stack.currentWidget() is main_window.homeWidget
+    assert not message_spy["info"]
 
 
 @pytest.mark.parametrize("selected_index", [0, 1])
@@ -271,10 +268,6 @@ def test_open_duplicate_project_names_selects_exact_row(
 def test_new_project_invalid_name_shows_warning_before_setup(
     tmp_path, main_window, monkeypatch, message_spy, name,
 ):
-    monkeypatch.setattr(
-        project_workflows, "_choose_new_project_source",
-        lambda host: project_workflows.NEW_PROJECT_MANUAL,
-    )
     monkeypatch.setattr(project_manager.QInputDialog, "getText", lambda *args: (name, True))
     monkeypatch.setattr(
         project_manager.QInputDialog, "getInt",

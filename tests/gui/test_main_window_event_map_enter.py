@@ -296,7 +296,7 @@ def test_condition_editor_grows_for_long_lists_and_keeps_run_controls_visible(
 ):
     win = _build_window(tmp_path, qtbot, monkeypatch, open_editor=False)
     win.show_home_page()
-    win.resize(900, 620)
+    win.resize(900, 520)
     for index in range(12):
         win.add_event_row(f"Condition {index + 1}", str(index + 1))
 
@@ -304,14 +304,17 @@ def test_condition_editor_grows_for_long_lists_and_keeps_run_controls_visible(
     area = win._event_map_scroll_area()
     rows = win._live_event_map_rows()
     viewport = area.viewport()
-    qtbot.waitUntil(lambda: viewport.height() >= 150 and area.verticalScrollBar().maximum() > 0)
-    top = rows[1].mapTo(viewport, rows[1].rect().topLeft()).y()
-    third_bottom = rows[3].mapTo(viewport, rows[3].rect().bottomLeft()).y()
+    qtbot.waitUntil(lambda: viewport.height() >= 120 and area.verticalScrollBar().maximum() > 0)
+    top = rows[0].mapTo(viewport, rows[0].rect().topLeft()).y()
+    third_bottom = rows[2].mapTo(viewport, rows[2].rect().bottomLeft()).y()
     assert 0 <= top < third_bottom < viewport.height()
     trigger_id = win._event_row_id_edit(rows[1])
     column_x = trigger_id.mapTo(win.homeWidget, trigger_id.rect().center()).x()
     header_x = win.event_id_header.mapTo(win.homeWidget, win.event_id_header.rect().center()).x()
     assert abs(column_x - header_x) <= 2
+    area.verticalScrollBar().setValue(area.verticalScrollBar().maximum())
+    last_bottom = rows[-1].mapTo(viewport, rows[-1].rect().bottomLeft()).y()
+    assert 0 <= last_bottom < viewport.height()
     assert win.homeWidget.rect().contains(
         win.btn_start.mapTo(win.homeWidget, win.btn_start.rect().bottomRight())
     )
@@ -457,9 +460,9 @@ def test_last_run_summary_and_actions_fit_supported_workspace(tmp_path, qtbot, m
     from Main_App.gui.run_outcome import present_last_run
     from Main_App.gui.run_outcome_model import RunOutcome
 
-    win = _build_window(tmp_path, qtbot, monkeypatch)
+    win = _build_window(tmp_path, qtbot, monkeypatch, open_editor=False)
     win.show_home_page()
-    win.resize(1280, 900)
+    win.resize(900, 520)
     win._last_run_outcome = RunOutcome(completed=18, skipped=4, excluded=2, failed=1, condition_warnings=3)
     win._last_run_output_folder = str(tmp_path)
     win._post_processing_failure_reason = "QC review must finish."

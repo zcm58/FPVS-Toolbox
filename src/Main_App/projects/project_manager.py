@@ -1291,11 +1291,6 @@ def new_project_from_fpvs_config(self, parent: QWidget | None = None) -> Project
         path,
         extra={"op": "new_project_from_fpvs_config", "path": path},
     )
-    QMessageBox.information(
-        parent,
-        "Project Created",
-        f"Created project '{project.name}' with {len(project.event_map)} condition(s).",
-    )
     return project
 
 
@@ -1410,11 +1405,12 @@ def open_existing_project(self, parent: QWidget | None = None) -> None:
                 stacked is not None
                 and stacked.currentWidget() is getattr(self, "landing_page", None)
             ):
-                recovery = "Choose New Project to create one."
+                recovery = "Import an FPVS Studio config or choose Create Manually."
             else:
                 recovery = (
-                    "Create a project from File > New Project… or use "
-                    "Settings > Application > Change Projects Folder… to look in another folder."
+                    "Use File > Import FPVS Studio Config… or File > Create Project Manually… "
+                    "to start a project. Use Settings > Application > Change Projects Folder… "
+                    "to look in another folder."
                 )
             QMessageBox.information(
                 parent,

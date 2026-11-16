@@ -72,8 +72,8 @@ from Main_App.gui.post_export_workflows import (
 from Main_App.gui.op_guard import OpGuard
 
 _WINDOW_TITLE = f"FPVS Toolbox v{FPVS_TOOLBOX_VERSION}"
-_COMPACT_MINIMUM = QSize(900, 620)
-_COMPACT_DEFAULT = QSize(960, 660)
+_COMPACT_MINIMUM = QSize(900, 520)
+_COMPACT_DEFAULT = QSize(960, 520)
 _WORKSPACE_MINIMUM = QSize(1280, 900)
 
 
@@ -229,7 +229,8 @@ class MainWindow(QMainWindow):
         self.workspace_stack.currentChanged.connect(self._sync_window_for_current_page)
         self._sync_window_for_current_page()
 
-        # Wire landing page buttons if present
+        # The Welcome buttons use the same guarded project actions as File.
+        self.btn_import_project.clicked.connect(self.actionImportFpvsConfigProject.trigger)
         if hasattr(self, "btn_create_project"):
             self.btn_create_project.clicked.connect(self.actionCreateNewProject.trigger)
         if hasattr(self, "btn_open_project"):
