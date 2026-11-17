@@ -858,7 +858,11 @@ are true:
 5. It does not import retired paths, start workers, touch project state, access
    the filesystem at import time, or create windows as an import side effect.
 
-The main app shell is the visual source of truth. Shared component defaults should mirror the main window's current-project shell, card, form, status, and action-button styling through `set_appearance_mode()` in `src/Main_App/gui/theme.py` and the tokens in `src/Main_App/gui/style_tokens.py`.
+The main app shell provides the local implementation reference for existing
+cards, forms, status feedback and action buttons. Reuse `set_appearance_mode()`
+in `src/Main_App/gui/theme.py` and the tokens in `src/Main_App/gui/style_tokens.py`.
+Use the [shared desktop direction](../design-docs/DESIGN.md) to guide visual and
+interaction changes.
 
 `src/Main_App/gui/main_window.py` has been appropriately refactored and downsized into the shell/coordinator for the main window. Do not choose it as a future refactor target just to reduce size. Further `main_window.py` refactors require explicit user direction and a concrete clarity or feature-maintenance benefit.
 

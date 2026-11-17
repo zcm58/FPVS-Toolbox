@@ -9,6 +9,9 @@ The desktop application uses PySide6 and ships as a Windows installer. Source
 development and execution also support CachyOS (Arch Linux) through the shared
 runtime.
 
+Use the [shared desktop direction](../design-docs/DESIGN.md) for audience,
+visual and interaction decisions across Studio and Toolbox.
+
 ## Workflow priority
 
 1. Bring a completed experiment from FPVS Studio into Toolbox. Import a

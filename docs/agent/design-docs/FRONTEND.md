@@ -31,11 +31,8 @@ Desktop changes follow these contracts:
   expose an arbitrary processing-order editor or assume registration enables
   production support.
 
-The shared Slate & Signal Teal palette lives in `Main_App.gui.style_tokens` and
-`theme.py`. The main menu bar and workspace navigation share one slate
-background with light text. Signal teal marks the active workspace and keyboard
-focus in the navigation row. Light mode pairs paper and white surfaces with
-deep teal actions and ochre focus. Dark mode uses slate surfaces, brighter teal
-actions, and amber focus. Menus, Settings, dialogs, and embedded tools inherit
-the same appearance. Use shared tokens for UI chrome. Scientific canvases and
-figure exports keep their scientific palettes.
+The current Toolbox shell uses native menu styling for hover, popups and
+keyboard feedback. Settings, dialogs and embedded tools use the shared Slate
+& Signal Teal tokens in `Main_App.gui.style_tokens` and `theme.py`. Scientific
+canvases and figure exports keep their scientific palettes. Follow the
+[desktop design guidance](DESIGN.md) when revising a surface.

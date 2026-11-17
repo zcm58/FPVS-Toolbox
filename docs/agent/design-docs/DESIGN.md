@@ -1,13 +1,16 @@
 # Design
 
-Design guidance lives in:
+The canonical OpenFPVS desktop experience spec is maintained in the private
+OpenFPVS repository. From the Toolbox repository root, maintainers can find it
+at `../OpenFPVS/DESKTOP_EXPERIENCE.md` in a sibling checkout.
 
-- `docs/agent/design-docs/`
-- `docs/agent/architecture/gui.md`
-- `docs/agent/product-specs/`
-
-For GUI work, preserve existing workflows unless the task explicitly changes
-behavior. Prefer quiet, task-focused PySide6 interfaces over decorative layouts.
+Design for lab members doing routine work. Give new members guidance at the
+point of need and keep detailed controls and evidence available to experts.
+FPVS Studio is the visual and interaction reference. When a Toolbox surface
+changes, use the corresponding Studio pattern where it fits the processing
+task. Preserve current workflows and behavior unless the task explicitly
+changes them. The [product scope](../product-specs/fpvs-toolbox.md) and
+[GUI architecture](../architecture/gui.md) document the local contracts.
 
 Installed design skills can help critique hierarchy, spacing, labels, and
 interaction clarity, but they do not set this repo's design system. Repo rules

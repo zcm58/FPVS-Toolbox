@@ -127,6 +127,7 @@ tools must not infer membership from output folders or duplicate discovery logic
 
 ## GUI and publication output
 
+- Start desktop experience decisions with the [shared desktop direction](docs/agent/design-docs/DESIGN.md).
 - For work crossing a desktop and backend boundary, follow
   [desktop workflow ownership](docs/agent/architecture/gui-backend.md).
   Keep prompts and worker lifetime in the desktop workflow. Exercise the
