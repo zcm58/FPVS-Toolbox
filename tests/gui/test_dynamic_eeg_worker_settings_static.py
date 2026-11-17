@@ -72,5 +72,6 @@ def test_settings_save_does_not_prompt_for_obsolete_ram_tier_override():
     page = ast.parse((ROOT / "src/Main_App/gui/settings_preprocessing_page.py").read_text(encoding="utf-8"))
     literals = [node.value for node in ast.walk(page) if isinstance(node, ast.Constant)
                 and isinstance(node.value, str)]
-    assert "Maximum parallel workers (0 = automatic):" in literals
+    assert "Parallel workers (0 = auto):" in literals
+    assert any("Automatic uses available CPUs" in value for value in literals)
     assert not any("recommended for your RAM tier" in value for value in literals)

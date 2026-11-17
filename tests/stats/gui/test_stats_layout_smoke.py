@@ -318,8 +318,8 @@ def test_stats_window_layout_smoke(qtbot, tmp_path, app):
     assert run_action_bar.isAncestorOf(window.analyze_single_btn)
     assert run_action_bar.isAncestorOf(window.single_advanced_btn)
     run_action_layout = run_action_bar.layout()
-    assert run_action_layout.indexOf(window.analyze_single_btn) < run_action_layout.indexOf(
-        window.single_advanced_btn
+    assert run_action_layout.indexOf(window.single_advanced_btn) < run_action_layout.indexOf(
+        window.analyze_single_btn
     )
 
     window._project_is_multi_group = True

@@ -481,7 +481,7 @@ def render_group_comparison_figures(
             active_transaction.ensure_request_target(request)
         condition, first_id, second_id = _group_comparison_identity(normalized_requests)
         first_result, second_result = normalized_results
-        first_request, second_request = normalized_requests
+        first_request = normalized_requests[0]
         first_title, second_title = _group_comparison_titles(normalized_requests)
         metrics = _request_metrics(first_request)
         first_grand = first_result.grand_average_values

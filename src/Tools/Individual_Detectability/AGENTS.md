@@ -37,6 +37,7 @@ project with an accepted participant or visit/condition exclusion, generate
 Individual Detectability, confirm only retained files appear, then exclude an
 additional participant using the checkbox and repeat. An unrelated stale or
 unreleased selected workbook must produce an input error before exports.
-At 1280 × 900, open and close View Generation Log while a run is active, then
-reopen it and verify that the complete history is available to copy and that
-the main page has retained its layout.
+At the shared workspace size, check that the Advanced harmonic controls, SNR
+and layout forms, and parameters summary fit with the custom-harmonics warning
+visible. Open and close View Generation Log while a run is active, then reopen
+it and verify that the complete history is available to copy.

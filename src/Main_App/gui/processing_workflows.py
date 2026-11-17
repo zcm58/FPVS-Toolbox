@@ -1352,7 +1352,6 @@ def start_processing(host: Any, *, log: logging.Logger = logger) -> None:
     host._run_active = False
     host._processing_plan = None
     host._processing_user_choice = None
-    host._snr_tick = 0
     host._run_had_successful_export = False
     host._run_excel_output_root = (
         host.save_folder_path.get()

@@ -117,12 +117,15 @@ class QcSignalViewer(AppDialog):
             self.mode.addItem(label, value)
         self.mode.model().item(3).setEnabled(bool(self._request.prepared))
         self.mode.setCurrentIndex(self.mode.findData(self._request.mode))
-        for label, widget in (("Occurrence", self.occurrence), ("Electrode", self.channel), ("Signal", self.mode)):
-            selectors.addWidget(QLabel(label, self))
+        for text, widget in (("Occurrence", self.occurrence), ("Electrode", self.channel), ("Signal", self.mode)):
+            label = QLabel(text, self)
+            label.setBuddy(widget)
+            selectors.addWidget(label)
             selectors.addWidget(widget, 1)
         self.root_layout.addLayout(selectors)
         self.overview = _EnvelopePlot(self, overview=True)
         self.overview.setObjectName("qc_signal_overview")
+        self.overview.setToolTip("Click the recording overview to inspect an interval.")
         self.root_layout.addWidget(self.overview)
         navigation = QHBoxLayout()
         self.previous = make_action_button("Earlier", variant="secondary", parent=self)
@@ -136,9 +139,15 @@ class QcSignalViewer(AppDialog):
             self.duration.addItem(f"{seconds} s", float(seconds))
         self.duration.setCurrentIndex(2)
         self.refresh = make_action_button("Show interval", variant="secondary", parent=self)
-        for widget in (self.previous, self.next, QLabel("Start", self), self.start,
-                       QLabel("Window", self), self.duration, self.refresh):
+        navigation.addWidget(self.previous)
+        navigation.addWidget(self.next)
+        navigation.addStretch(1)
+        for text, widget in (("Start", self.start), ("Window", self.duration)):
+            label = QLabel(text, self)
+            label.setBuddy(widget)
+            navigation.addWidget(label)
             navigation.addWidget(widget)
+        navigation.addWidget(self.refresh)
         self.root_layout.addLayout(navigation)
         self.tabs = QTabWidget(self)
         trace_page = QWidget(self.tabs)
@@ -146,8 +155,7 @@ class QcSignalViewer(AppDialog):
         self.plot = _EnvelopePlot(trace_page)
         self.plot.setObjectName("qc_signal_detail")
         trace_layout.addWidget(self.plot, 1)
-        note = QLabel("All traces share the displayed µV scale. The overview preserves extrema; gaps between occurrences are never joined. "
-                      "This inspection does not change data or approve a repair.", trace_page)
+        note = QLabel("Traces share a µV scale. The overview preserves extrema and gaps between occurrences.", trace_page)
         note.setWordWrap(True)
         trace_layout.addWidget(note)
         self.tabs.addTab(trace_page, "Signal")
@@ -175,9 +183,9 @@ class QcSignalViewer(AppDialog):
         self.status = QLabel("Loading signal…", self)
         self.status.setObjectName("qc_signal_status")
         self.status.setWordWrap(True)
-        self.root_layout.addWidget(self.status)
-        actions = ActionRow(self)
-        self.close_button = actions.add_button(make_action_button("Close inspection", variant="secondary", parent=actions))
+        actions = ActionRow(self, alignment=Qt.AlignLeft)
+        actions.row_layout.addWidget(self.status, 1)
+        self.close_button = actions.add_button(make_action_button("Close", parent=actions))
         self.close_button.clicked.connect(self.reject)
         self.root_layout.addWidget(actions)
         self.refresh.clicked.connect(self._load)
@@ -246,7 +254,7 @@ class QcSignalViewer(AppDialog):
         self.overview.set_data((), ())
         self.diagnostics.clear()
         self.event_selector.clear()
-        self.context.setText(f"{self._request.path.name} · loading {self.mode.currentText().lower()}")
+        self.context.setText(self._request.path.name)
         self.status.setText("Loading the selected interval…")
         try:
             thread.start()
@@ -278,8 +286,7 @@ class QcSignalViewer(AppDialog):
         self.context.setText(f"{self._request.path.name} · {result.mode_label}")
         self.overview.set_data(result.overview_times, (result.overview,))
         self.plot.set_data(result.detail_times, result.traces)
-        self.status.setText(f"Showing {result.start_seconds:.3f}–{result.stop_seconds:.3f} s from recording start. "
-                            "Click the overview or use Earlier / Later to inspect another interval.")
+        self.status.setText(f"{result.start_seconds:.3f}–{result.stop_seconds:.3f} s from recording start")
         from Main_App.processing.qc_signal_view import format_signal_diagnostics
         self.diagnostics.setPlainText(format_signal_diagnostics(result.diagnostics))
         if result.spatial_support:

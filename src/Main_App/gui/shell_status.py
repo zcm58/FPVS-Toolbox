@@ -67,25 +67,6 @@ def finish_launch_reveal(host: Any) -> None:
     host._launch_reveal_animation = None
 
 
-def emit_backend_log(host: Any, log: logging.Logger, level: int, message: str) -> None:
-    """
-    Emit to the Python logging backend only when:
-      * Debug mode is enabled, or
-      * Level is WARNING or higher.
-    Prevents noisy INFO logs in the IDE/console during normal runs.
-    """
-    try:
-        debug_on = host.settings.debug_enabled()
-    except Exception:
-        debug_on = False
-    log_router.emit_backend_log(
-        log,
-        level=level,
-        message=message,
-        debug_enabled=debug_on,
-    )
-
-
 def log_message(host: Any, log: logging.Logger, message: str, level: int = logging.INFO) -> None:
     log_router.emit_gui_log(host, log, message=message, level=level)
 
@@ -177,7 +158,7 @@ def prepare_processing_activity(host: Any, files: list[Path]) -> None:
     progress_heading = getattr(host, "processing_progress_heading_label", None)
     if progress_heading is not None:
         progress_heading.setText("Overall Progress")
-        progress_heading.setVisible(True)
+        progress_heading.setVisible(False)
     checklist_panel = getattr(host, "processing_checklist_panel", None)
     if checklist_panel is not None:
         checklist_panel.setVisible(False)
@@ -493,7 +474,6 @@ def show_processing_page(host: Any) -> None:
 
     workspace.setCurrentWidget(processing_page)
     _set_processing_navigation_locked(host, True)
-    host._processing_page_visible = True
 
 
 def hide_processing_page(host: Any) -> None:
@@ -519,7 +499,6 @@ def hide_processing_page(host: Any) -> None:
                 workspace.setCurrentWidget(home_widget)
 
     host._processing_return_widget = None
-    host._processing_page_visible = False
 
 
 def busy_start(host: Any) -> None:
@@ -528,9 +507,3 @@ def busy_start(host: Any) -> None:
 
 def busy_stop(host: Any) -> None:
     hide_processing_page(host)
-
-
-def tick_busy(host: Any) -> None:
-    spinner = getattr(host, "processing_spinner", None)
-    if spinner is not None:
-        spinner.update()

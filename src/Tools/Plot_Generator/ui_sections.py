@@ -120,7 +120,7 @@ class PlotGeneratorUiSectionsMixin:
 
         file_layout.addLayout(file_grid)
 
-        self.params_box = SectionCard("Plot Parameters")
+        self.params_box = SectionCard("Data selection")
         self.params_box.setSizePolicy(
             QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         )
@@ -262,21 +262,21 @@ class PlotGeneratorUiSectionsMixin:
         self.session_controls_widget.hide()
         params_layout.addWidget(self.session_controls_widget)
 
-        self.overlay_check = QCheckBox("Overlay Comparison")
+        self.overlay_check = QCheckBox("Overlay conditions")
         self.overlay_check.toggled.connect(self._overlay_toggled)
 
         self.overlay_row = QWidget()
         overlay_layout = QHBoxLayout(self.overlay_row)
         overlay_layout.setContentsMargins(0, 0, 0, 0)
         overlay_layout.setSpacing(8)
-        overlay_layout.addStretch(1)
         overlay_layout.addWidget(self.overlay_check)
         build_overlay_count(self, overlay_layout)
         overlay_layout.addStretch(1)
 
         params_layout.addWidget(self.overlay_row)
 
-        self.legend_group = SectionCard("Legend labels (optional)")
+        self.legend_group = SectionCard("Legend labels")
+        self.legend_group.header.hide()
         self.legend_group.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum))
         legend_layout = self.legend_group.content_layout
         legend_layout.setSpacing(6)
@@ -473,7 +473,7 @@ class PlotGeneratorUiSectionsMixin:
         ranges_grid.setColumnStretch(1, 1)
         ranges_grid.setColumnStretch(3, 1)
 
-        self.advanced_box = SectionCard("Advanced")
+        self.advanced_box = SectionCard("Axes and quality checks")
         self.advanced_box.setMinimumHeight(256)
         self.advanced_box.setSizePolicy(
             QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
@@ -497,6 +497,7 @@ class PlotGeneratorUiSectionsMixin:
         )
         self.spectral_qc_check.setEnabled(self._project is None)
         advanced_layout.addWidget(self.spectral_qc_check)
+        advanced_layout.addStretch(1)
 
         self.generation_log_dialog = SNRGenerationLogDialog("", self)
         self.log = self.generation_log_dialog.viewer

@@ -16,6 +16,7 @@ from Main_App.gui.style_tokens import (  # noqa: E402
     SECTION_HEADER_CONTENT_GAP,
 )
 from Main_App.gui.components import PathPickerRow, SectionCard, StatusBanner  # noqa: E402
+from Main_App.gui.theme import apply_fpvs_theme  # noqa: E402
 
 
 def test_individual_detectability_window_smoke(qtbot, tmp_path: Path, monkeypatch) -> None:
@@ -111,6 +112,36 @@ def test_individual_detectability_window_smoke(qtbot, tmp_path: Path, monkeypatc
         "Figure generation complete",
     ]
     window.log_dialog.reject()
+
+
+def test_individual_detectability_advanced_fits_embedded_workspace(
+    qtbot,
+    qapp,
+    tmp_path: Path,
+) -> None:
+    apply_fpvs_theme(qapp)
+    window = IndividualDetectabilityWindow(project_root=str(tmp_path), embedded=True)
+    qtbot.addWidget(window)
+    available_size = QtCore.QSize(1156, 725)
+    window.resize(available_size)
+    window.show()
+    qtbot.waitExposed(window)
+
+    window.tabs.setCurrentWidget(window.advanced_tab)
+    window.use_custom_harmonics_check.setChecked(True)
+    qapp.processEvents()
+
+    assert window.size() == available_size
+    for control in (
+        window.harmonics_edit,
+        window.fdr_alpha_spin,
+        window.custom_harmonics_warning,
+        window.show_mid_xtick_check,
+        window.letter_portrait_check,
+        window.summary_box,
+    ):
+        assert control.isVisibleTo(window)
+        assert window.rect().contains(control.mapTo(window, control.rect().bottomRight()))
 
 
 def test_individual_detectability_scan_populates_participants_with_missingness(

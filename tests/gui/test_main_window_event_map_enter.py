@@ -296,8 +296,8 @@ def test_condition_editor_grows_for_long_lists_and_keeps_run_controls_visible(
 ):
     win = _build_window(tmp_path, qtbot, monkeypatch, open_editor=False)
     win.show_home_page()
-    win.resize(900, 520)
-    for index in range(12):
+    win.resize(win.minimumSize())
+    for index in range(24):
         win.add_event_row(f"Condition {index + 1}", str(index + 1))
 
     qtbot.mouseClick(win.condition_editor_toggle, Qt.LeftButton)
@@ -462,7 +462,7 @@ def test_last_run_summary_and_actions_fit_supported_workspace(tmp_path, qtbot, m
 
     win = _build_window(tmp_path, qtbot, monkeypatch, open_editor=False)
     win.show_home_page()
-    win.resize(900, 520)
+    win.resize(win.minimumSize())
     win._last_run_outcome = RunOutcome(completed=18, skipped=4, excluded=2, failed=1, condition_warnings=3)
     win._last_run_output_folder = str(tmp_path)
     win._post_processing_failure_reason = "QC review must finish."

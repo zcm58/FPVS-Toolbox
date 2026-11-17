@@ -76,11 +76,11 @@ class _ResultSummary(QWidget):
         layout.setContentsMargins(16, 14, 16, 14)
         layout.setSpacing(2)
 
-        self.metric_label = QLabel("NOT YET CALCULATED", self)
-        self.metric_label.setProperty("eyebrow", True)
+        self.metric_label = QLabel(self)
+        apply_font_role(self.metric_label, "update_title")
         layout.addWidget(self.metric_label)
 
-        self.value_label = QLabel("—", self)
+        self.value_label = QLabel(self)
         self.value_label.setProperty("resultValue", True)
         apply_font_role(self.value_label, "result_value")
         layout.addWidget(self.value_label)
@@ -88,24 +88,27 @@ class _ResultSummary(QWidget):
         self.context_label = QLabel(self)
         self.context_label.setWordWrap(True)
         layout.addWidget(self.context_label)
-        self.set_placeholder("Calculate")
+        self.set_placeholder()
 
     def text(self) -> str:
         return self._text
 
-    def set_placeholder(self, action: str) -> None:
-        self._text = f"Set the assumptions and select {action}."
-        self.metric_label.setText("NOT YET CALCULATED")
-        self.value_label.setText("—")
+    def set_placeholder(self) -> None:
+        self._text = "No result yet."
+        self.metric_label.hide()
+        self.value_label.hide()
         self.context_label.setText(self._text)
+        self.context_label.show()
         self.set_variant("info")
 
     def set_result(self, metric: str, value: float) -> None:
         formatted_value = f"{value:.2f}"
         self._text = f"{metric} = {formatted_value}"
-        self.metric_label.setText(metric.upper())
+        self.metric_label.setText(metric)
+        self.metric_label.show()
         self.value_label.setText(formatted_value)
-        self.context_label.setText("Minimum detectable standardized effect")
+        self.value_label.show()
+        self.context_label.hide()
         self.set_variant("info")
 
     def set_variant(self, variant: str) -> None:
@@ -155,26 +158,11 @@ class SensitivityAnalysisWindow(QWidget):
         page_layout.setContentsMargins(20, 16, 20, 16)
         page_layout.setSpacing(12)
 
-        header = QWidget(self)
-        header_layout = QVBoxLayout(header)
-        header_layout.setContentsMargins(0, 0, 0, 0)
-        header_layout.setSpacing(4)
-
-        title = QLabel("Sensitivity Analysis", header)
+        title = QLabel("Sensitivity Analysis", self)
         title.setObjectName("sensitivity_title")
         title.setProperty("toolTitle", True)
         apply_font_role(title, "tool_title")
-        header_layout.addWidget(title)
-
-        subtitle = QLabel(
-            "Estimate the smallest standardized effect a study can detect from "
-            "its planned sample size, power, alpha, and design assumptions.",
-            header,
-        )
-        subtitle.setObjectName("sensitivity_subtitle")
-        subtitle.setWordWrap(True)
-        header_layout.addWidget(subtitle)
-        page_layout.addWidget(header)
+        page_layout.addWidget(title)
 
         sections = QGridLayout()
         sections.setContentsMargins(0, 0, 0, 0)
@@ -203,7 +191,7 @@ class SensitivityAnalysisWindow(QWidget):
         self._build_inputs(inputs_card)
 
         results_card = SectionCard(
-            "Sensitivity result",
+            "Minimum detectable effect",
             self,
             object_name="sensitivity_results_card",
         )
@@ -413,9 +401,8 @@ class SensitivityAnalysisWindow(QWidget):
         lmm_design_form.addRow("Number of ROIs:", self.lmm_rois_spin)
 
         advanced_note = QLabel(
-            "Most studies can retain these defaults. Correlation is the "
-            "participant random-intercept ICC; for the supported within-participant "
-            "contrasts in residual-SD units, it usually has little effect on power.",
+            "Correlation is the participant random-intercept ICC. It usually has little "
+            "effect on power for within-participant contrasts in residual-SD units.",
             self.lmm_advanced_panel,
         )
         advanced_note.setObjectName("sensitivity_lmm_advanced_note")
@@ -514,59 +501,56 @@ class SensitivityAnalysisWindow(QWidget):
         self.result_banner.setObjectName("sensitivity_result")
         card.content_layout.addWidget(self.result_banner)
 
-        self.magnitude_label = QLabel("Conventional magnitude: —", card.content)
+        self.result_details = QWidget(card.content)
+        details_layout = QVBoxLayout(self.result_details)
+        details_layout.setContentsMargins(0, 0, 0, 0)
+        details_layout.setSpacing(6)
+        card.content_layout.addWidget(self.result_details)
+
+        self.magnitude_label = QLabel(self.result_details)
         self.magnitude_label.setObjectName("sensitivity_magnitude")
         apply_font_role(self.magnitude_label, "update_title")
         self.magnitude_label.setWordWrap(True)
-        card.content_layout.addWidget(self.magnitude_label)
+        details_layout.addWidget(self.magnitude_label)
 
-        self.equivalent_label = QLabel("", card.content)
+        self.equivalent_label = QLabel(self.result_details)
         self.equivalent_label.setObjectName("sensitivity_equivalent")
         self.equivalent_label.setWordWrap(True)
         self.equivalent_label.hide()
-        card.content_layout.addWidget(self.equivalent_label)
+        details_layout.addWidget(self.equivalent_label)
 
-        self.plain_language_label = QLabel(
-            "An interpretation will appear after calculation.",
-            card.content,
-        )
+        self.plain_language_label = QLabel(self.result_details)
         self.plain_language_label.setObjectName("sensitivity_plain_language_result")
         self.plain_language_label.setWordWrap(True)
-        card.content_layout.addWidget(self.plain_language_label)
+        details_layout.addWidget(self.plain_language_label)
 
-        assumptions_heading = SubsectionHeaderLabel("Assumptions used", card.content)
-        card.content_layout.addWidget(assumptions_heading)
+        assumptions_heading = SubsectionHeaderLabel("Assumptions used", self.result_details)
+        details_layout.addWidget(assumptions_heading)
 
-        self.assumption_summary_label = QLabel(
-            "Current assumptions will appear after calculation.",
-            card.content,
-        )
+        self.assumption_summary_label = QLabel(self.result_details)
         self.assumption_summary_label.setObjectName("sensitivity_assumption_summary")
         self.assumption_summary_label.setProperty("caption", True)
         self.assumption_summary_label.setWordWrap(True)
-        card.content_layout.addWidget(self.assumption_summary_label)
+        details_layout.addWidget(self.assumption_summary_label)
 
-        reporting_heading = SubsectionHeaderLabel("Reporting summary", card.content)
-        card.content_layout.addWidget(reporting_heading)
+        reporting_heading = SubsectionHeaderLabel("Reporting summary", self.result_details)
+        details_layout.addWidget(reporting_heading)
 
-        self.reporting_label = QLabel(
-            "A reporting-ready summary will appear after calculation.",
-            card.content,
-        )
+        self.reporting_label = QLabel(self.result_details)
         self.reporting_label.setObjectName("sensitivity_reporting_text")
         self.reporting_label.setWordWrap(True)
         self.reporting_label.setTextInteractionFlags(
             Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard
         )
-        card.content_layout.addWidget(self.reporting_label)
+        details_layout.addWidget(self.reporting_label)
 
-        benchmark_heading = SubsectionHeaderLabel("Interpretation guide", card.content)
-        card.content_layout.addWidget(benchmark_heading)
+        benchmark_heading = SubsectionHeaderLabel("Interpretation guide", self.result_details)
+        details_layout.addWidget(benchmark_heading)
 
-        self.benchmark_label = QLabel("", card.content)
+        self.benchmark_label = QLabel(self.result_details)
         self.benchmark_label.setObjectName("sensitivity_benchmarks")
         self.benchmark_label.setWordWrap(True)
-        card.content_layout.addWidget(self.benchmark_label)
+        details_layout.addWidget(self.benchmark_label)
         card.content_layout.addStretch(1)
 
     def _connect_signals(self) -> None:
@@ -788,24 +772,14 @@ class SensitivityAnalysisWindow(QWidget):
 
     def _clear_result(self) -> None:
         self.validation_banner.hide()
-        self.result_banner.set_placeholder(self.calculate_button.text())
-        if self.analysis_combo.currentIndex() == self.LMM_SIMULATION:
-            self.magnitude_label.setText(
-                "Effect scale: standardized contrast in residual-SD units"
-            )
-        else:
-            self.magnitude_label.setText("Conventional magnitude: —")
+        self.result_banner.set_placeholder()
+        self.result_details.hide()
+        self.magnitude_label.clear()
         self.equivalent_label.clear()
         self.equivalent_label.hide()
-        self.reporting_label.setText(
-            "A reporting-ready summary will appear after calculation."
-        )
-        self.plain_language_label.setText(
-            "An interpretation will appear after calculation."
-        )
-        self.assumption_summary_label.setText(
-            "Current assumptions will appear after calculation."
-        )
+        self.reporting_label.clear()
+        self.plain_language_label.clear()
+        self.assumption_summary_label.clear()
         if self._lmm_thread is None:
             self.simulation_status.hide()
 
@@ -1030,6 +1004,7 @@ class SensitivityAnalysisWindow(QWidget):
             f"{result.search_effect_high:.3f} effect bracket, and ran on "
             f"{result.workers_used} worker process(es)."
         )
+        self.result_details.show()
 
     def _show_result(self, result: SensitivityResult) -> None:
         self.result_banner.set_result(result.effect_metric, result.effect_size)
@@ -1047,6 +1022,7 @@ class SensitivityAnalysisWindow(QWidget):
         self.plain_language_label.setText(self._plain_language_result(result))
         self.assumption_summary_label.setText(self._assumption_summary())
         self.reporting_label.setText(result.reporting_text)
+        self.result_details.show()
 
     def _plain_language_result(self, result: SensitivityResult) -> str:
         sample_size = self.sample_size_spin.value()

@@ -92,7 +92,7 @@ def test_frequency_review_exposes_recording_scoped_evidence_without_a_default() 
     assert 'combo.setToolTip(context)' in source
     assert 'not in {_CHOOSE_DECISION, DECISION_RETAIN}' in source
     assert '"Reason (optional)"' in source
-    assert 'reason.setPlaceholderText("Optional reason")' in source
+    assert "reason_label.setBuddy(reason)" in source
 
 
 def test_frequency_review_submits_exact_decisions_and_recording_reasons() -> None:

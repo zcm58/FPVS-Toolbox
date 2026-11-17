@@ -77,7 +77,7 @@ Primary paths:
   `processing_history_model.py` formats the local completion time and distinct
   successful participant count; absent, unavailable and incomplete history remain
   explicit. This is processing recency, not downstream analysis readiness. At
-  1280x900 verify long timestamps/counts wrap without hiding Start Processing.
+  1200 × 800 verify long timestamps/counts wrap without hiding Start Processing.
 - `src/Main_App/gui/processing_workflows.py`: processing run start/stop,
   queue polling, worker completion/error, and finalization GUI orchestration
   used by `MainWindow` compatibility wrappers.
@@ -315,7 +315,7 @@ PyInstaller spec also collects this logo under the bundle's `assets/` directory.
 Visible smoke: restart from source and a rebuilt Windows package, inspect the
 top-left title-bar logo on Welcome, Home and Settings, and confirm no strip
 separates File/View/Tools from the project header. Toggle Debug Mode, Save and
-return Home; only the menu-row indicator should change. Repeat at 1280x900 and
+return Home; only the menu-row indicator should change. Repeat at 1200 × 800 and
 Windows 150% scaling. Registered logo/layout coverage remains CI-only locally.
 
 The Settings category list opens seven pages: **Processing**, **Protocol**, **Harmonics**,
@@ -346,11 +346,11 @@ setting controls new repair requests; turning it off keeps previously accepted
 signal repairs.
 Each section has its own vertical space within the
 supported workspace, including when raw-spectral details are expanded.
-Settings places its category list in a dedicated column beside the page
-content and shared actions. A shared header surface connects the Settings and
-category headings. `settings_navigation.py` moves a
-teal marker between categories over 150 ms using Studio's easing. The category
-and page update immediately. Programmatic navigation, hidden Settings pages,
+Settings uses the main workspace gutters and places its category list in a
+dedicated column beside the page content and shared actions. A shared header
+surface connects the Settings and category headings. `settings_navigation.py`
+moves a teal marker between categories over 150 ms using Studio's easing. The
+category and page update immediately. Programmatic navigation, hidden Settings pages,
 and a disabled animation preference snap the marker into place. The Processing
 card groups Guided setup with its parameters, and Protocol shows its status
 above the Timing and Trigger markers tabs. Tool shortcuts and validation
@@ -359,7 +359,7 @@ Nested Protocol and Experimental tabs stay unframed around their section cards.
 One shared Save/Cancel row applies the full Settings draft from every category.
 Invalid summed-BCA input reveals its sub-tab before focusing the affected field.
 
-Visible smoke: at 1280 × 900 and Windows 125% and 150% scaling, open Settings
+Visible smoke: at 1200 × 800 and Windows 125% and 150% scaling, open Settings
 from the shell and from a tool shortcut in Light and Dark. Click a category
 and use the arrow keys to switch quickly. Check that the title updates at once
 and the marker settles on the final selection. Repeat with Windows Animation
@@ -390,9 +390,10 @@ blocks navigation/close only while saving, reports transaction errors in place,
 and accepts only after the worker finishes. After success the normal Settings
 completion path retires the page. Nothing starts processing on save.
 
-Visible acceptance (not run locally): at 1280x900 open Settings > Processing >
-Guided setup for each supported hardware profile. Check all seven pages fit;
-review unchanged settings, use Back/page navigation, edit and Cancel, then edit
+Visible acceptance (pending locally): from the 1200 × 800 workspace, open
+Settings > Processing > Guided setup for each supported hardware profile.
+Check all seven pages fit, review unchanged settings, use Back/page navigation,
+edit and Cancel, then edit
 and Save pipeline. Reopen/restart to verify persistence. Check unsupported
 controls, hardware-change confirmation, invalid cutoffs, failed save recovery,
 advanced marker-map preservation and reprocessing guidance. Pending Settings
@@ -504,7 +505,7 @@ require one. Saving from another unchanged Settings tab leaves either
 unresolved form untouched; it does not turn a
 proposal into project provenance.
 
-Visible smoke for window setup: at 1280x900, create a project and verify
+Visible smoke for window setup: at 1200 × 800, create a project and verify
 Duration entry, use the default 6 Hz/every 5 protocol, enter 121 seconds at
 256 Hz and check the 120-second preview,
 change downsample, Save/reopen and Cancel/reopen. Import a Studio project and
@@ -549,7 +550,7 @@ by mouse and keyboard. Check the matching title, brief explanation and only
 that method's references; follow a publication link in the browser. Resize the
 dialog down to its minimum, scroll to the last reference, and close with Close
 and Escape. Confirm Save/Cancel and draft values are unaffected by reading
-help. Repeat on the supported 1280x900 workspace and after moving monitors.
+help. Repeat on the 1200 × 800 workspace and after moving monitors.
 
 The card must expose only scientifically valid controls for the selected
 profile. Fixed mode chooses an exact Hz list, upper oddball-harmonic index, or
@@ -621,13 +622,10 @@ per app session. `shell_status.py` locks the menu during processing,
 processing-cache reset, and Scalp Maps generation, then restores its prior
 enabled state. The Home shortcut follows the same lock.
 
-Welcome defaults to 600 × 340 with a 480 × 280 minimum. Opening or creating
-a project from the default Welcome size expands the window to Home at
-960 × 520. Home has a 900 × 520 minimum, and other workspace pages have a
-1280 × 900 minimum. The window restores its earlier size after an automatic
-expansion to a workspace page if the user leaves that size in place. Larger
-user-set sizes and maximized windows are respected. Stack size policies keep
-hidden pages from increasing the active page's minimum.
+The main window defaults to 1200 × 800 and uses that minimum for Welcome, Home,
+Settings, embedded tools, and Processing Activity. Navigation preserves the
+window's current size and maximized state. Stack size policies keep hidden
+pages from enlarging the shell. Standalone dialogs size to their content.
 
 `project_welcome.py` places two wide buttons directly on the Welcome background,
 with **Open Existing Project** as the primary action.
@@ -636,13 +634,17 @@ with **Open Existing Project** as the primary action.
 action. Cancel and Escape return to Welcome. A Studio import confirms hardware,
 requests a recordings folder, and opens Home when it succeeds.
 
-Home groups recording selection, run readiness, Start Processing, and View
-Log in the processing column. Analysis shows persisted processing history,
-the current session's run outcome when available, and shortcuts to SNR
-Plots, Scalp Maps, and LORETA Visualizer. The shortcuts trigger their Tools
+Home groups the labeled recording picker, run readiness, Start Processing,
+and View Log in the processing column. Analysis shows persisted processing
+history and the current session's run outcome above one row of shortcuts to
+SNR Plots, Scalp Maps, and LORETA Visualizer. The shortcuts trigger their Tools
 menu actions, so the menu lock, beta policy, and project and output checks
 apply. History describes a completed run. Each tool checks whether its
 current inputs can be used.
+
+Processing Activity puts progress above the run details and file table. Its
+post-processing and QC states keep phase labels and review instructions where
+they help the operator follow or decide the next step.
 
 The Conditions strip sits under the processing controls and shows the
 configured count. **Edit conditions** reveals the same live rows and source
@@ -651,23 +653,23 @@ Closing it keeps the draft. Project load collapses the editor, and invalid
 Save opens it and focuses the first invalid field. Source-mapped projects
 show **View conditions** with their canonical catalog.
 
-For visible acceptance, check Welcome at 600 × 340 and 480 × 280 in Light
-and Dark. Tab through both buttons and confirm they fit and show focus. Open
-Existing Project opens the picker directly. Cancel the picker, then use Cancel
-and Escape in Create New Project and confirm Welcome keeps its current size.
-From the default size, open an existing project and exercise both creation
-methods on disposable fixtures. For Studio import, confirm hardware and select
-the recordings folder. Check that success expands to Home at 960 × 520.
-Repeat with a larger custom Welcome size and with a maximized window to check
-that both are respected. On Home, check keyboard navigation, long condition
-lists, invalid Save from
-Settings, and last-run controls alongside the analysis shortcuts. Confirm
-Scalp Maps and LORETA appear after enabling Beta Tools and restarting.
+For visible acceptance, launch at 1200 × 800 in Light and Dark. Tab through
+the Welcome actions and check visible focus. Cancel the existing-project
+picker, then dismiss Create New Project with Cancel and Escape. Open a
+disposable project and visit Home, Settings, each embedded tool, and Processing
+Activity. Check that the window size stays at 1200 × 800 and that the controls
+fit without page-level scrolling. Repeat navigation after enlarging and
+maximizing the window.
+
+Exercise both project creation methods with disposable fixtures. For Studio
+import, confirm hardware and select the recordings folder. On Home, check
+keyboard navigation, long condition lists, invalid Save from Settings, and
+last-run controls alongside the analysis shortcuts. Confirm Scalp Maps and
+LORETA appear after enabling Beta Tools and restarting.
 Check that the shortcuts use the same notices and output checks as Tools.
 Verify that the menu bar contains File, View, and Tools and that **File > About**
-opens the app information dialog. Open Settings or an analysis tool, then
-verify that **View > Home** or **Ctrl+1** restores the previous window size
-after automatic expansion and respects a manual resize.
+opens the app information dialog. From Settings or a tool, verify that
+**View > Home** and **Ctrl+1** return to Home at the current window size.
 
 When the active project changes through create/open/import/path workflows, the
 main shell must return to Home and discard project-bound embedded page instances.
@@ -692,9 +694,6 @@ Rename the second condition to `2 - Objects`, confirm validation clears, and
 verify the usual `Faces` and `Objects` output names in a disposable run.
 Local Qt execution remains CI-only without explicit safe-visible approval.
 
-Embedded tools use a `1280x900` main-window minimum without individual
-pop-out windows.
-
 ## Visual Layout Rules
 
 Use cards as first-level subsection boundaries, not as wrappers around other
@@ -710,8 +709,8 @@ or rounded outer frame around the child cards. The SNR Plot tool is the current
 reference pattern for embedded tool layout: dedicated subsection cards sit
 directly on the workspace background with normal spacing between them.
 
-New or substantially revised embedded tool pages must fit the supported
-1280x900 workspace without a page-level `QScrollArea`. If one coherent surface
+New or substantially revised embedded tool pages must fit the
+1200 × 800 workspace without a page-level `QScrollArea`. If one coherent surface
 cannot fit without clipping, split the workflow into purpose-based tabs or
 progressive pages and keep each page visually flat. Scrolling remains
 appropriate inside content-native widgets such as tables, log/text viewers,
@@ -988,7 +987,7 @@ rate and marker to check page selection. CI covers fixed logical workspaces
 and runs the Protocol geometry regression again with `QT_SCALE_FACTOR` values
 1.25, 1.5 and 2; this does not replace native Windows display verification.
 
-For Settings changes, open a project at 1280x900 and visit all seven main tabs,
+For Settings changes, open a project at 1200 × 800 and visit all seven main tabs,
 all four Experimental sections, the three Preprocessing QC pages and both
 Post-processing QC pages. Confirm
 every information button opens a brief readable explanation and every label and threshold field is

@@ -33,7 +33,7 @@ class RecordingExclusionsDialog(AppDialog):
         parent=None,
     ) -> None:
         super().__init__(
-            "Repeated-Session Analysis Exclusions",
+            "Recording exclusions",
             parent,
             size=SurfaceSize(1040, 620, min_width=820, min_height=480),
         )
@@ -43,9 +43,8 @@ class RecordingExclusionsDialog(AppDialog):
         existing = {item.recording_id.casefold(): item for item in exclusions}
 
         note = StatusBanner(
-            "These exclusions persist for this project's future Free Harmonic "
-            "Clustering batches until changed. They do not change project QC, "
-            "processing, or source files. Reasons are optional.",
+            "Exclusions are saved for this project's Free Harmonic Clustering batches "
+            "and are separate from project QC.",
             self,
             variant="info",
         )
@@ -112,7 +111,7 @@ class RecordingExclusionsDialog(AppDialog):
         self.root_layout.addWidget(self.table, 1)
 
         self.validation_status = StatusBanner(
-            "No analysis-specific recording exclusions selected.",
+            "Excluded recordings: 0",
             self,
             variant="info",
         )
@@ -192,11 +191,7 @@ class RecordingExclusionsDialog(AppDialog):
             and self.table.item(row, 0).checkState() == Qt.Checked
         )
         self.validation_status.set_variant("info")
-        self.validation_status.set_text(
-            "No analysis-specific recording exclusions selected."
-            if selected == 0
-            else f"{selected} recording exclusion(s) are ready for the batch audit."
-        )
+        self.validation_status.set_text(f"Excluded recordings: {selected}")
         self.apply_button.setEnabled(True)
 
     @Slot()

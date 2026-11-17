@@ -430,7 +430,6 @@ class StatsWindowExclusionsMixin:
         )
         summary_lines = [
             "QC scanned all conditions/ROIs in the project, independent of selections.",
-            "Flagged Participants Summary",
             flag_count_definition,
             f"Manual exclusions: {len(self.manual_excluded_pids)}",
             f"Required exclusions (non-finite DV): {len(report.required_exclusions)}",

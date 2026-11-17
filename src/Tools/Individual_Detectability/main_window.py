@@ -238,14 +238,14 @@ class IndividualDetectabilityWindow(QWidget):
 
     def _build_participant_group(self) -> SectionCard:
         group = SectionCard(
-            "Participant filtering (optional)",
+            "Participants",
             object_name="individual_detectability_participants",
         )
         group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         layout = group.content_layout
 
         help_text = QLabel(
-            "Checked participants are excluded from figure generation for all selected conditions."
+            "Exclusions apply to all selected conditions."
         )
         help_text.setWordWrap(True)
         help_text.setProperty("caption", True)
@@ -304,7 +304,7 @@ class IndividualDetectabilityWindow(QWidget):
         harm_layout = make_form_layout()
 
         self.canonical_harmonics_note = QLabel(
-            "Default: use FPVS Toolbox significant harmonics selected from the current processed dataset."
+            "Default: use the processed dataset's significant harmonics."
         )
         self.canonical_harmonics_note.setWordWrap(True)
         self.canonical_harmonics_note.setProperty("caption", True)
@@ -397,7 +397,7 @@ class IndividualDetectabilityWindow(QWidget):
         layout_group.content_layout.addLayout(layout_form)
 
         summary_group = SectionCard(
-            "Effective parameters summary",
+            "Run settings",
             object_name="individual_detectability_summary",
         )
         summary_group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
@@ -408,8 +408,8 @@ class IndividualDetectabilityWindow(QWidget):
         self.summary_box.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         summary_group.content_layout.addWidget(self.summary_box)
 
-        settings_grid.addWidget(harmonics_group, 0, 0, 1, 2)
-        settings_grid.addWidget(snr_group, 1, 0)
+        settings_grid.addWidget(harmonics_group, 0, 0, 2, 1)
+        settings_grid.addWidget(snr_group, 0, 1)
         settings_grid.addWidget(layout_group, 1, 1)
         settings_grid.addWidget(summary_group, 2, 0, 1, 2)
         settings_grid.setColumnStretch(0, 1)
@@ -441,28 +441,17 @@ class IndividualDetectabilityWindow(QWidget):
         row_layout.addWidget(self.run_btn)
         row_layout.addWidget(self.progress, 1)
 
-        log_row = QWidget()
-        log_layout = QHBoxLayout(log_row)
-        log_layout.setContentsMargins(0, 0, 0, 0)
-        log_layout.setSpacing(6)
         self.view_generation_log_btn = make_action_button(
-            "View Generation Log",
+            "View log",
             variant="tertiary",
             compact=True,
             parent=panel,
         )
-        self.open_output_btn = make_action_button(
-            "Open output folder",
-            compact=True,
-            parent=panel,
-        )
-        self.open_output_btn.clicked.connect(self._open_output_folder)
-        log_layout.addWidget(self.view_generation_log_btn)
-        log_layout.addWidget(self.open_output_btn)
-        log_layout.addStretch(1)
+        self.view_generation_log_btn.setAccessibleName("View Individual Detectability generation log")
+        panel.header.add_action_widget(self.view_generation_log_btn)
 
         self.log_dialog = AppDialog(
-            "Individual Detectability Generation Log",
+            "Individual Detectability log",
             self,
             size=SurfaceSize(width=760, height=500, min_width=560, min_height=360),
         )
@@ -472,7 +461,7 @@ class IndividualDetectabilityWindow(QWidget):
         self.log_box.setAccessibleName("Individual Detectability generation log")
         self.log_box.setReadOnly(True)
         self.log_box.setFont(fixed_width_font())
-        self.log_box.setPlaceholderText("No generation details are available yet.")
+        self.log_box.setPlaceholderText("No log entries yet.")
         self.log_box.setProperty("logSurface", True)
         self.log_dialog.root_layout.addWidget(self.log_box, 1)
         log_buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close, self.log_dialog)
@@ -484,7 +473,6 @@ class IndividualDetectabilityWindow(QWidget):
         self.log_dialog.root_layout.addWidget(log_buttons)
 
         layout.addWidget(row)
-        layout.addWidget(log_row)
         layout.addWidget(self.status_label)
         return panel
 
@@ -496,7 +484,6 @@ class IndividualDetectabilityWindow(QWidget):
         self.output_root_open_btn.setIcon(style.standardIcon(QStyle.SP_DialogOpenButton))
         self.run_btn.setIcon(style.standardIcon(QStyle.SP_MediaPlay))
         self.view_generation_log_btn.setIcon(style.standardIcon(QStyle.SP_FileDialogInfoView))
-        self.open_output_btn.setIcon(style.standardIcon(QStyle.SP_DirOpenIcon))
 
     def _set_default_input_root(self) -> None:
         if self.input_root_edit.text().strip():

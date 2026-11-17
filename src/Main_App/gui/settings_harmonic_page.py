@@ -215,6 +215,7 @@ def add_harmonic_selection_section(
         object_name="settings_harmonic_selection_card",
     )
     harmonic_form = make_form_layout()
+    self._harmonic_selection_form = harmonic_form
 
     self.harmonic_summation_method_combo = QComboBox(harmonic_group)
     self.harmonic_summation_method_combo.setObjectName(
@@ -248,7 +249,8 @@ def add_harmonic_selection_section(
     method_layout = QHBoxLayout(method_row)
     method_layout.setContentsMargins(0, 0, 0, 0)
     method_layout.setSpacing(8)
-    method_layout.addWidget(self.harmonic_summation_method_combo, 1)
+    self.harmonic_summation_method_combo.setMaximumWidth(460)
+    method_layout.addWidget(self.harmonic_summation_method_combo)
     self.harmonic_method_info_button = make_info_button(
         parent=method_row,
         object_name="settings_harmonic_method_info",
@@ -257,6 +259,7 @@ def add_harmonic_selection_section(
     )
     self.harmonic_method_info_button.clicked.connect(self._show_harmonic_method_info)
     method_layout.addWidget(self.harmonic_method_info_button)
+    method_layout.addStretch()
     method_label = QLabel("Method profile:", harmonic_group)
     method_label.setBuddy(self.harmonic_summation_method_combo)
     harmonic_form.addRow(method_label, method_row)
@@ -431,7 +434,7 @@ def add_harmonic_selection_section(
     )
     harmonic_actions.add_button(self.recalculate_harmonics_button)
     harmonic_actions.add_button(self.review_condition_exclusions_button)
-    harmonic_group.content_layout.addWidget(harmonic_actions)
+    harmonic_group.content_layout.addWidget(harmonic_actions, alignment=Qt.AlignLeft)
 
     self.harmonic_recalculation_status = StatusBanner("", harmonic_group, variant="info")
     self.harmonic_recalculation_status.setObjectName(

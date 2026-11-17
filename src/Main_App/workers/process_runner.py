@@ -146,10 +146,6 @@ REMOVED_ELECTRODE_REVIEW_LIST_KEYS = (
     "removed_electrode_auto_manual_overlap",
 )
 REMOVED_ELECTRODE_REVIEW_SCALAR_KEYS = ("removed_electrode_agreement_status",)
-REMOVED_ELECTRODE_REVIEW_KEYS = (
-    *REMOVED_ELECTRODE_REVIEW_LIST_KEYS,
-    *REMOVED_ELECTRODE_REVIEW_SCALAR_KEYS,
-)
 
 
 class _SourceEpochSetIncompleteError(RuntimeError):

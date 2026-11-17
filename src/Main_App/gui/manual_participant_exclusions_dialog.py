@@ -66,11 +66,10 @@ class ManualParticipantExclusionsDialog(QDialog):
 
         prompt = QLabel(
             (
-                "Choose participant-wide exclusions for every visit or exclude only "
-                "one recording. Missing declared visits are shown for coverage and "
-                "cannot be selected. Raw BDF files are not modified."
+                "Exclude all visits for a participant or individual recordings. "
+                "Missing visits appear for coverage only. Raw BDF files are kept."
                 if self._recording_mode
-                else "Select participants to exclude from processing. Raw BDF files are not modified."
+                else "Excluded participants are skipped during processing. Raw BDF files are kept."
             ),
             self,
         )
@@ -91,13 +90,14 @@ class ManualParticipantExclusionsDialog(QDialog):
             row_count = len(pids) + len(self._recording_rows)
         else:
             self.resize(520, 420)
-            headers = ("PID", "Exclude from processing")
+            headers = ("Participant", "Exclude from processing")
             row_count = len(pids)
         self.table = QTableWidget(row_count, len(headers), self)
         self.table.setObjectName("manual_participant_exclusions_table")
         self.table.setHorizontalHeaderLabels(list(headers))
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.table.setAlternatingRowColors(True)
         self.table.verticalHeader().setVisible(False)
         header = self.table.horizontalHeader()
         for column in range(len(headers)):

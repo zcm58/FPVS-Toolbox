@@ -76,7 +76,6 @@ class PlotGeneratorWindow(
         super().__init__(parent)
         self.setWindowTitle("Generate SNR Plots")
         self._ui_initializing = True
-        self._populating_conditions = False
         mgr = SettingsManager()
         self.roi_map = {
             name: list(electrodes)

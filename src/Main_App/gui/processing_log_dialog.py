@@ -25,7 +25,7 @@ class ProcessingLogDialog(AppDialog):
         self.viewer.setAccessibleName("Processing log details")
         self.viewer.setReadOnly(True)
         self.viewer.setFont(fixed_width_font())
-        self.viewer.setPlaceholderText("No processing details are available yet.")
+        self.viewer.setPlaceholderText("No log entries yet.")
         self.root_layout.addWidget(self.viewer, 1)
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close, self)
@@ -39,6 +39,7 @@ class ProcessingLogDialog(AppDialog):
         clear_button.clicked.connect(self.viewer.clear)
         buttons.rejected.connect(self.reject)
         self.root_layout.addWidget(buttons)
+        self.viewer.setFocus()
 
 
 __all__ = ["ProcessingLogDialog"]

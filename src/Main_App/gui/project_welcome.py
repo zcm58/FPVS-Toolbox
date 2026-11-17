@@ -24,7 +24,7 @@ def build_project_welcome(host, parent: QWidget) -> QWidget:
     layout.addStretch(1)
 
     content = QWidget(landing)
-    content.setMaximumWidth(460)
+    content.setMaximumWidth(480)
     host.landing_content = content
     content_layout = QVBoxLayout(content)
     content_layout.setContentsMargins(0, 0, 0, 0)
@@ -32,6 +32,7 @@ def build_project_welcome(host, parent: QWidget) -> QWidget:
 
     identity = QHBoxLayout()
     identity.setSpacing(12)
+    identity.addStretch(1)
     logo = QLabel(content)
     logo.setObjectName("welcomeAppIcon")
     logo.setPixmap(host.windowIcon().pixmap(QSize(44, 44), host.devicePixelRatioF()))
@@ -40,7 +41,8 @@ def build_project_welcome(host, parent: QWidget) -> QWidget:
     title = QLabel("FPVS Toolbox", content)
     title.setObjectName("landing_title")
     apply_font_role(title, "landing_title")
-    identity.addWidget(title, 1)
+    identity.addWidget(title)
+    identity.addStretch(1)
     content_layout.addLayout(identity)
     content_layout.addSpacing(24)
 
@@ -84,7 +86,7 @@ def show_project_creation_choices(host) -> None:
     import_studio.clicked.connect(lambda: choose(host.actionImportFpvsConfigProject))
 
     import_help = QLabel(
-        "Bring over your protocol and trigger settings from a .fpvsconfig file.", dialog,
+        "Uses the protocol and triggers saved in a .fpvsconfig file.", dialog,
     )
     import_help.setWordWrap(True)
     import_studio.setAccessibleDescription(import_help.text())
@@ -98,6 +100,8 @@ def show_project_creation_choices(host) -> None:
     create_manually = make_action_button("Create Project Manually…", parent=dialog)
     create_manually.setObjectName("welcomeCreateManually")
     create_manually.clicked.connect(lambda: choose(host.actionCreateNewProject))
+    import_studio.setMinimumHeight(38)
+    create_manually.setMinimumHeight(38)
     dialog.root_layout.addWidget(create_manually)
 
     footer = QDialogButtonBox(QDialogButtonBox.Cancel, dialog)

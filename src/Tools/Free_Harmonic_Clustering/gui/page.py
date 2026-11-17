@@ -191,11 +191,11 @@ class FreeHarmonicClusteringPage(QWidget):
     def _build_ui(self) -> None:
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(0, 0, 0, 0)
-        root_layout.setSpacing(12)
+        root_layout.setSpacing(8)
 
         header = QWidget(self)
         header_layout = QHBoxLayout(header)
-        header_layout.setContentsMargins(24, 20, 24, 0)
+        header_layout.setContentsMargins(12, 8, 12, 0)
         header_layout.setSpacing(8)
         heading_text = QWidget(header)
         heading_layout = QVBoxLayout(heading_text)
@@ -238,7 +238,7 @@ class FreeHarmonicClusteringPage(QWidget):
         self.map_panel = QWidget(self.result_tabs)
         self.map_panel.setObjectName("free_harmonic_map_panel")
         self.map_layout = QVBoxLayout(self.map_panel)
-        self.map_layout.setContentsMargins(24, 8, 24, 8)
+        self.map_layout.setContentsMargins(12, 8, 12, 8)
         self.result_tabs.addTab(self.map_panel, "Cluster maps")
         self.result_tabs.setTabEnabled(2, False)
         root_layout.addWidget(self.result_tabs, 1)
@@ -250,12 +250,12 @@ class FreeHarmonicClusteringPage(QWidget):
     def _build_setup_panel(self) -> None:
         content = self.setup_panel
         layout = QVBoxLayout(content)
-        layout.setContentsMargins(24, 16, 24, 16)
-        layout.setSpacing(14)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(12)
 
         cards_layout = QHBoxLayout()
         cards_layout.setContentsMargins(0, 0, 0, 0)
-        cards_layout.setSpacing(14)
+        cards_layout.setSpacing(12)
         layout.addLayout(cards_layout)
 
         self.comparison_card = SectionCard(
@@ -487,7 +487,7 @@ class FreeHarmonicClusteringPage(QWidget):
         self.reference_condition_label.setBuddy(self.reference_condition_combo)
         condition_form.addRow(self.reference_condition_label, self.reference_condition_combo)
         self.plan_card.content_layout.addWidget(self.condition_plan_row)
-        self.plan_summary_label = QLabel("Choose the questions to include in this analysis.", self.plan_card.content)
+        self.plan_summary_label = QLabel(self.plan_card.content)
         self.plan_summary_label.setObjectName("free_harmonic_plan_summary")
         self.plan_summary_label.setWordWrap(True)
         self.plan_card.content_layout.addWidget(self.plan_summary_label)
@@ -510,7 +510,7 @@ class FreeHarmonicClusteringPage(QWidget):
         footer.setObjectName("free_harmonic_workflow_footer")
         footer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
         footer_layout = QVBoxLayout(footer)
-        footer_layout.setContentsMargins(24, 0, 24, 20)
+        footer_layout.setContentsMargins(12, 0, 12, 8)
         footer_layout.setSpacing(6)
         self.workflow_status = StatusBanner(
             "Loading project inputs...",
@@ -530,7 +530,7 @@ class FreeHarmonicClusteringPage(QWidget):
         self.progress_bar.hide()
         footer_layout.addWidget(self.progress_bar)
         self.run_analysis_button = make_action_button(
-            "Run Free Harmonic Clustering Analysis",
+            "Run analysis",
             variant="primary",
             parent=footer,
         )
@@ -577,17 +577,18 @@ class FreeHarmonicClusteringPage(QWidget):
 
     def _build_results_panel(self) -> None:
         layout = QVBoxLayout(self.results_panel)
-        layout.setContentsMargins(24, 0, 24, 16)
-        layout.setSpacing(14)
+        layout.setContentsMargins(12, 8, 12, 12)
+        layout.setSpacing(12)
         results_card = SectionCard(
             "Results",
             self.results_panel,
             object_name="free_harmonic_results_card",
         )
         results_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        results_card.header.hide()
         layout.addWidget(results_card, 1)
         self.result_status = StatusBanner(
-            "No result has been run.",
+            "No results yet.",
             results_card.content,
             variant="info",
         )

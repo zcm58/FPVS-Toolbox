@@ -28,7 +28,7 @@ def confirm_hardware_change(parent: Any, previous: str, selected: str) -> bool:
 
 def choose_new_project_hardware(parent: Any, settings: dict[str, Any]) -> dict[str, Any] | None:
     selected, accepted = QInputDialog.getItem(
-        parent, "Project EEG Hardware", "Select the EEG hardware used for data collection:",
+        parent, "Project EEG Hardware", "Recording system",
         list(HARDWARE_LABELS.values()), 0, False,
     )
     if not accepted:
@@ -57,7 +57,7 @@ def ensure_project_hardware_ready(host: Any, paths: Iterable[str | Path]) -> boo
         else:
             if detected is None:
                 selected, accepted = QInputDialog.getItem(
-                    host, "Confirm Project EEG Hardware", "EEG hardware used for data collection:",
+                    host, "Confirm Project EEG Hardware", "Recording system",
                     list(HARDWARE_LABELS.values()),
                     list(HARDWARE_LABELS).index(current.platform), False,
                 )

@@ -36,7 +36,13 @@ class SourceParticipantRegistrationDialog(AppDialog):
         self.table.setHorizontalHeaderLabels(headers)
         self.table.verticalHeader().hide()
         self.table.setAlternatingRowColors(True)
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.Interactive)
+        for column, width in enumerate((136, 112, 104, 112)):
+            self.table.setColumnWidth(column, width)
+        header.setSectionResizeMode(4, QHeaderView.Stretch)
+        if maps is not None:
+            self.table.setColumnWidth(5, 176)
         for row, proposal in enumerate(self._proposals):
             values = (proposal.get("participant_id", ""), proposal.get("source_study_id", ""),
                       proposal.get("source_participant_id", ""), proposal.get("group_label", proposal.get("group_id", "")), str(proposal.get("raw_file", "")))

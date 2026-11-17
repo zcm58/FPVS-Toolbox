@@ -153,5 +153,5 @@ def test_no_removed_flags_keep_editable_review_without_intro_modal(recording_mod
     assert calls.tables[0][2]["editable_columns"] == ((6, 8) if recording_mode else (2, 4))
     assert len(calls.actions) == 1
     assert calls.actions[0][0] == ("Save / Next", "save", "primary")
-    assert "No removed-electrode candidates were flagged." in calls.labels["processing_summary_label"]
+    assert "No new flags. Review saved removals" in calls.labels["processing_summary_label"]
     assert calls.notices == []

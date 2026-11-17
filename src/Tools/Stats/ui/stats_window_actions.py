@@ -849,7 +849,6 @@ class StatsWindowActionsMixin:
                 )
             btn.clicked.connect(cb)
             layout.addWidget(btn)
-        layout.addStretch(1)
         buttons = QDialogButtonBox(QDialogButtonBox.Close)
         buttons.rejected.connect(dialog.reject)
         layout.addWidget(buttons)

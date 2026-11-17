@@ -4,12 +4,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import Qt, Signal, Slot
+from PySide6.QtCore import Signal, Slot
 from PySide6.QtWidgets import QPlainTextEdit
 
 from Main_App.gui.components import (
     AppDialog,
-    SubsectionHeaderLabel,
     SurfaceSize,
     make_action_button,
     make_action_row,
@@ -38,19 +37,13 @@ class ResultDetailsDialog(AppDialog):
         )
         self.setObjectName("free_harmonic_result_details_dialog")
         self._run_index = row.run_index
-        self.identity = SubsectionHeaderLabel(
-            f"{row.condition} | {row.family_label}", self,
-        )
-        self.identity.setTextFormat(Qt.PlainText)
-        self.identity.setWordWrap(True)
-        self.root_layout.addWidget(self.identity)
         self.details = QPlainTextEdit(self)
         self.details.setObjectName("free_harmonic_result_details_text")
         self.details.setReadOnly(True)
         self.details.setPlainText(row.detail_text)
         self.root_layout.addWidget(self.details, 1)
         self.maps_button = make_action_button(
-            "View cluster maps", variant="secondary", parent=self,
+            "View cluster maps", variant="primary" if maps_available else "secondary", parent=self,
         )
         self.maps_button.setObjectName("free_harmonic_details_maps_button")
         self.maps_button.setEnabled(maps_available)
@@ -59,10 +52,10 @@ class ResultDetailsDialog(AppDialog):
             if maps_available
             else "Maps are unavailable for this completed batch."
         )
-        self.close_button = make_action_button("Close", variant="primary", parent=self)
+        self.close_button = make_action_button("Close", parent=self)
         self.close_button.setObjectName("free_harmonic_details_close_button")
         self.root_layout.addWidget(
-            make_action_row((self.maps_button, self.close_button), parent=self),
+            make_action_row((self.close_button, self.maps_button), parent=self),
         )
         self.maps_button.clicked.connect(self._show_maps)
         self.close_button.clicked.connect(self.reject)

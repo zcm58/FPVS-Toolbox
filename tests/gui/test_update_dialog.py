@@ -67,8 +67,10 @@ def test_update_dialog_initial_result_is_themed_and_remind_later_dismisses(qtbot
     dialog.show()
 
     qtbot.waitUntil(lambda: dialog.close_button.text() == "Remind Me Later")
-    from Main_App.gui.theme import build_fpvs_app_stylesheet
-    assert dialog.styleSheet() == build_fpvs_app_stylesheet()
+    from Main_App.gui.style_tokens import render_ui_stylesheet
+    from Main_App.gui.theme import appearance_is_dark, build_fpvs_app_stylesheet
+
+    assert dialog.styleSheet() == render_ui_stylesheet(build_fpvs_app_stylesheet(), dark=appearance_is_dark())
     assert dialog.property("fpvsSurface") is True
     assert "QPushButton" in dialog.styleSheet()
 
@@ -943,7 +945,7 @@ def test_apply_progress_is_minimal_and_preserves_target_version(qtbot, deferred_
     window.resize(*size)
     window.show()
     qtbot.waitUntil(lambda: bool(jobs) and jobs[-1]._started)
-    assert window.status_label.text() == "Updating FPVS Toolbox... Please wait..."
+    assert window.status_label.text() == "Installing the update…"
     assert window.status_label.textFormat() == Qt.TextFormat.PlainText
     version = "2026.12.123rc10"
     jobs[-1].progress_changed.emit(UpdatePhase("Preparing", target_version=version), None)

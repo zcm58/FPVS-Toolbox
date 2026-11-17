@@ -176,7 +176,13 @@ def test_project_picker_binds_duplicate_titles_to_distinct_rows(workflow, tmp_pa
             pass
 
         def setLabelText(self, text):
-            pass
+            assert text == "Project"
+
+        def setOkButtonText(self, text):
+            assert text == "Open"
+
+        def setMinimumWidth(self, width):
+            assert width > 0
 
         def setComboBoxEditable(self, editable):
             assert editable is False

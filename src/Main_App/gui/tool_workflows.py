@@ -39,6 +39,6 @@ def check_for_updates(host: Any, update_manager_module: Any) -> None:
 def show_about_dialog(host: Any, version: str) -> None:
     QMessageBox.information(
         host,
-        "About FPVS ToolBox",
-        f"Version: {version} was developed by Zack Murphy at Mississippi State University.",
+        "About FPVS Toolbox",
+        f"FPVS Toolbox {version}\n\nDeveloped by Zack Murphy at Mississippi State University.",
     )

@@ -488,13 +488,11 @@ def _collect_repeated_session_manifest(
 ) -> dict[str, object] | None:
     session_count, ok = QInputDialog.getInt(
         self,
-        "Repeated Sessions / Visits",
+        "Repeated Sessions",
         (
-            "How many sessions or visits does each participant have?\n\n"
-            "Enter sessions in visit order. A session label (for example, a "
-            "menstrual phase) describes the phase-at-visit; visit_index stores "
-            "order separately. If everyone follows the same phase order, phase "
-            "and visit/order effects are confounded."
+            "Visits per participant\n\n"
+            "Name sessions in visit order. If everyone follows the same phase "
+            "order, phase and visit effects are confounded."
         ),
         2,
         2,
@@ -510,20 +508,11 @@ def _collect_repeated_session_manifest(
         while True:
             session_label, ok = QInputDialog.getText(
                 self,
-                f"Session Label — Visit {visit_index}",
-                (
-                    f"Enter the session/phase-at-visit label for visit {visit_index}.\n"
-                    "The label identifies the session; the visit number records "
-                    "its order."
-                ),
+                f"Visit {visit_index}",
+                "Session or phase label",
                 text=f"Session {visit_index}",
             )
             if not ok:
-                QMessageBox.information(
-                    self,
-                    "Project Creation Cancelled",
-                    "Project creation cancelled.",
-                )
                 return None
             session_label = session_label.strip()
             if not session_label:
@@ -552,11 +541,6 @@ def _collect_repeated_session_manifest(
             "",
         )
         if not folder:
-            QMessageBox.information(
-                self,
-                "Project Creation Cancelled",
-                "Project creation cancelled.",
-            )
             return None
         folder_path = Path(folder).resolve(strict=False)
         if folder_path in used_group_roots:
@@ -571,16 +555,11 @@ def _collect_repeated_session_manifest(
         while True:
             group_name, ok = QInputDialog.getText(
                 self,
-                "Group Name",
-                f"Enter a name for group #{idx + 1}:",
+                f"Group {idx + 1}",
+                "Group name",
                 text=default_name,
             )
             if not ok:
-                QMessageBox.information(
-                    self,
-                    "Project Creation Cancelled",
-                    "Project creation cancelled.",
-                )
                 return None
             group_name = group_name.strip()
             if not group_name:
@@ -642,11 +621,6 @@ def _collect_repeated_session_manifest(
                 str(group_root),
             )
             if not folder:
-                QMessageBox.information(
-                    self,
-                    "Project Creation Cancelled",
-                    "Project creation cancelled.",
-                )
                 return None
             folder_path = Path(folder).resolve(strict=False)
             previous_cell = used_source_folders.get(folder_path)
@@ -980,7 +954,9 @@ def _select_project_metadata(
     dialog = QInputDialog(parent)
     try:
         dialog.setWindowTitle("Open Existing Project")
-        dialog.setLabelText("Select a project:")
+        dialog.setLabelText("Project")
+        dialog.setOkButtonText("Open")
+        dialog.setMinimumWidth(360)
         dialog.setComboBoxEditable(False)
         dialog.setComboBoxItems(labels)
         combo = dialog.findChild(QComboBox)
@@ -1004,7 +980,7 @@ def new_project(self) -> None:
         )
         return
     name, ok = QInputDialog.getText(
-        self, "Project Name", "Enter a name for this new project:"
+        self, "Name Project", "Project name"
     )
     if not ok or not name.strip():
         return
@@ -1052,7 +1028,7 @@ def new_project(self) -> None:
     group_count, ok = QInputDialog.getInt(
         self,
         "Experimental Groups",
-        "How many experimental groups does this project have?",
+        "Number of groups",
         1,
         1,
         20,
@@ -1065,11 +1041,9 @@ def new_project(self) -> None:
         self,
         "Project Structure",
         (
-            "Choose how participant recordings are organized.\n\n"
-            "Repeated sessions store the session/phase-at-visit label separately "
-            "from visit order and require one raw folder per group and session. "
-            "When every participant completes phases in the same order, phase is "
-            "confounded with visit/order."
+            "Repeated sessions need one raw folder per group and session. Phase "
+            "labels are stored separately from visit order. A fixed phase order "
+            "confounds phase with visit order."
         ),
         [FLAT_PROJECT_STRUCTURE, REPEATED_SESSION_PROJECT_STRUCTURE],
         0,
@@ -1105,11 +1079,6 @@ def new_project(self) -> None:
             "",
         )
         if not folder:
-            QMessageBox.information(
-                self,
-                "Project Creation Cancelled",
-                "Project creation cancelled.",
-            )
             return
         group_folders["Input Folder"] = folder
     else:
@@ -1121,11 +1090,6 @@ def new_project(self) -> None:
                 "",
             )
             if not folder:
-                QMessageBox.information(
-                    self,
-                    "Project Creation Cancelled",
-                    "Project creation cancelled.",
-                )
                 return
             folder_path = Path(folder).resolve()
             if folder_path in used_folder_paths:
@@ -1140,16 +1104,11 @@ def new_project(self) -> None:
             while True:
                 group_name, ok = QInputDialog.getText(
                     self,
-                    "Group Name",
-                    f"Enter a name for group #{idx + 1}:",
+                    f"Group {idx + 1}",
+                    "Group name",
                     text=default_name,
                 )
                 if not ok:
-                    QMessageBox.information(
-                        self,
-                        "Project Creation Cancelled",
-                        "Project creation cancelled.",
-                    )
                     return
                 group_name = group_name.strip()
                 if not group_name:

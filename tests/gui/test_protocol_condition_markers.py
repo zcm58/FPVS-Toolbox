@@ -16,6 +16,7 @@ class _ProtocolDialog(QDialog):
     _protocol_editor_values = SettingsDialog._protocol_editor_values
     _protocol_from_editor = SettingsDialog._protocol_from_editor
     _refresh_protocol_preview = SettingsDialog._refresh_protocol_preview
+    _configure_trigger_maps = SettingsDialog._configure_trigger_maps
     _configure_recording_marker_schemas = SettingsDialog._configure_recording_marker_schemas
     _validate_recording_marker_configuration = SettingsDialog._validate_recording_marker_configuration
 
@@ -25,6 +26,7 @@ class _ProtocolDialog(QDialog):
 
 def _dialog(qtbot, protocol):
     dialog = _ProtocolDialog()
+    dialog._trigger_maps_payload = None
     dialog.preproc_edits = [QLineEdit(dialog) for _ in PREPROCESSING_FIELDS]
     dialog.preproc_edits[PREPROCESSING_FIELDS.index("downsample")].setText("256")
     dialog.project = SimpleNamespace(

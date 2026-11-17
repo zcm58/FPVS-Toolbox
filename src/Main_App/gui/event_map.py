@@ -146,12 +146,6 @@ def is_valid_event_map_id(id_edit: QLineEdit) -> bool:
     return state == QValidator.State.Acceptable
 
 
-def has_complete_event_map_entry(owner: object) -> bool:
-    """Return whether the complete draft is valid and contains a condition."""
-    mapping, errors = validate_condition_rows(condition_row_values(owner))
-    return bool(mapping) and not errors
-
-
 def condition_row_values(owner: object) -> list[tuple[str, str]]:
     return [
         (label.text(), ident.text())

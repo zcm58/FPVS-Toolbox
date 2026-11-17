@@ -103,8 +103,6 @@ class StatsWindow(
         self._native_state_by_pipeline: dict[
             PipelineId, dict[str, object]
         ] = {}
-        self._prepared_analysis_payload: object | None = None
-        self._native_report_bundle: object | None = None
         self.rm_anova_results_data: Optional[pd.DataFrame] = None
         self.mixed_model_results_data: Optional[pd.DataFrame] = None
         self.posthoc_results_data: Optional[pd.DataFrame] = None
@@ -240,8 +238,6 @@ class StatsWindow(
         self._native_step_payloads = {}
         self._native_options_by_pipeline = {}
         self._native_state_by_pipeline = {}
-        self._prepared_analysis_payload = None
-        self._native_report_bundle = None
         self.rm_anova_results_data = None
         self.mixed_model_results_data = None
         self.posthoc_results_data = None

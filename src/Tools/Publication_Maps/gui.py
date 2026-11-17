@@ -167,8 +167,8 @@ class PublicationMapsWindow(QWidget):
         generation_layout.setHorizontalSpacing(8)
         generation_layout.addWidget(self.selection_group, 0, 0)
         generation_layout.addWidget(self.generation_group, 0, 1)
-        generation_layout.setColumnStretch(0, 1)
-        generation_layout.setColumnStretch(1, 1)
+        generation_layout.setColumnStretch(0, 2)
+        generation_layout.setColumnStretch(1, 3)
 
         advanced_page = QWidget(self.workflow_tabs)
         self.advanced_layout = QVBoxLayout(advanced_page)
@@ -243,7 +243,7 @@ class PublicationMapsWindow(QWidget):
         return group
 
     def _build_conditions_group(self) -> SectionCard:
-        group = SectionCard("Map selection", object_name="publication_maps_conditions")
+        group = SectionCard("Conditions", object_name="publication_maps_conditions")
         group.setMinimumHeight(SCALP_MAPS_TOP_ROW_MIN_HEIGHT)
         group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
@@ -367,7 +367,7 @@ class PublicationMapsWindow(QWidget):
         section_layout.setContentsMargins(0, 0, 0, 0)
         section_layout.setSpacing(6)
         section_layout.addWidget(
-            SubsectionHeaderLabel("Map appearance and ranges", section)
+            SubsectionHeaderLabel("Colors and scales", section)
         )
         form = make_form_layout()
 
@@ -507,7 +507,7 @@ class PublicationMapsWindow(QWidget):
 
     def _build_advanced_output_group(self) -> SectionCard:
         group = SectionCard(
-            "Output and history",
+            "Output",
             object_name="publication_maps_output",
         )
         group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
@@ -702,7 +702,7 @@ class PublicationMapsWindow(QWidget):
 
     def _build_generation_group(self) -> SectionCard:
         group = SectionCard(
-            "Generate scalp maps",
+            "Map settings",
             object_name="publication_maps_run",
         )
         group.setMinimumHeight(SCALP_MAPS_TOP_ROW_MIN_HEIGHT)

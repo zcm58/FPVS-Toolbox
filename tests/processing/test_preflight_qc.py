@@ -5,11 +5,8 @@ from pathlib import Path
 import threading
 import time
 
-import mne
-import numpy as np
 import pytest
 
-from Main_App.io.eeg_geometry import attach_raw_biosemi64_geometry
 from Main_App.io.load_utils import BdfPreflightInfo
 from Main_App.processing.processing_controller import RawFileInfo
 import Main_App.processing.preflight_qc as preflight_qc
@@ -23,26 +20,6 @@ from Main_App.processing.preflight_qc import (
 )
 from Main_App.projects import FrequencyProtocol
 from Main_App.workers.review_resource_budget import ReviewMemorySnapshot
-
-
-def _raw_with_removed_channel(channel: str) -> mne.io.RawArray:
-    montage = mne.channels.make_standard_montage("biosemi64")
-    names = list(montage.ch_names)
-    rng = np.random.default_rng(99)
-    data = rng.normal(scale=500e-6, size=(len(names), 4096))
-    data[names.index(channel)] = rng.normal(scale=2e-6, size=data.shape[1])
-    raw = mne.io.RawArray(
-        data,
-        mne.create_info(names, sfreq=256.0, ch_types=["eeg"] * len(names)),
-        verbose=False,
-    )
-    raw.set_montage(montage)
-    attach_raw_biosemi64_geometry(
-        raw,
-        electrode_mapping_profile="anatomical_labels",
-        retained_channels=names,
-    )
-    return raw
 
 
 def test_scan_recording_not_started_files_uses_bdf_header(monkeypatch, tmp_path: Path) -> None:

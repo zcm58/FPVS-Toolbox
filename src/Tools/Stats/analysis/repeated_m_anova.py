@@ -768,8 +768,6 @@ def run_repeated_measures_anova(
         # If Pingouin is installed but failed unexpectedly, fall back to statsmodels
         # while preserving the error context in case of repeated failure.
         pingouin_error = e
-    else:
-        pingouin_error = None  # type: ignore
 
     # ----- fallback path: statsmodels.AnovaRM -----
     try:

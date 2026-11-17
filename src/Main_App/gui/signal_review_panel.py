@@ -57,22 +57,14 @@ class SignalReviewPanel(QWidget):
         layout.setSpacing(SECTION_HEADER_CONTENT_GAP)
 
         self.count_label = SubsectionHeaderLabel("", self)
-        layout.addWidget(self.count_label)
-        review_note = QLabel(
-            "Overlapping review windows are grouped for inspection. Linked findings "
-            "are not independent confirmations and do not change data automatically.",
-            self,
-        )
-        review_note.setWordWrap(True)
-        set_themed_stylesheet(review_note, f"color: {TEXT_SECONDARY};")
-        layout.addWidget(review_note)
 
         filters = QHBoxLayout()
         filters.setContentsMargins(0, 0, 0, 0)
         filters.setSpacing(SECTION_HEADER_CONTENT_GAP)
         self.search_edit = QLineEdit(self)
-        self.search_edit.setPlaceholderText("Search participant, recording, condition, channel, or evidence…")
+        self.search_edit.setPlaceholderText("Search findings…")
         self.search_edit.setAccessibleName("Search review findings")
+        self.search_edit.setToolTip("Search participant, recording, condition, channel, or evidence.")
         self.search_edit.setClearButtonEnabled(True)
         self.search_edit.setMinimumHeight(32)
         filters.addWidget(self.search_edit, 1)
@@ -84,6 +76,16 @@ class SignalReviewPanel(QWidget):
             self.kind_combo.addItem(kind, kind)
         filters.addWidget(self.kind_combo)
         layout.addLayout(filters)
+        review_context = QHBoxLayout()
+        review_context.addWidget(self.count_label)
+        review_note = QLabel("Overlapping intervals are grouped into review episodes.", self)
+        review_note.setWordWrap(True)
+        review_note.setToolTip(
+            "Linked findings are not independent confirmations. The review does not change data."
+        )
+        set_themed_stylesheet(review_note, f"color: {TEXT_SECONDARY};")
+        review_context.addWidget(review_note, 1)
+        layout.addLayout(review_context)
 
         self.splitter = QSplitter(Qt.Orientation.Vertical, self)
         self.splitter.setChildrenCollapsible(False)

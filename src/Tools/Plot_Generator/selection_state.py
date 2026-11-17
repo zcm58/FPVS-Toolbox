@@ -203,52 +203,48 @@ class PlotGeneratorSelectionMixin:
                 self.title_edit.setText(condition)
 
     def _populate_conditions(self, folder: str) -> None:
-        self._populating_conditions = True
-        try:
-            self._refresh_group_controls(folder)
-            indexed = getattr(self, "_selection_dataset_index", None)
-            if indexed is not None and indexed.manifest is not None:
-                subfolders = list(indexed.conditions)
-            else:
-                try:
-                    subfolders = sorted(
-                        (
-                            f.name
-                            for f in Path(folder).iterdir()
-                            if f.is_dir() and ".fif" not in f.name.lower()
-                        ),
-                        key=lambda name: (name.casefold(), name),
-                    )
-                except OSError:
-                    subfolders = []
+        self._refresh_group_controls(folder)
+        indexed = getattr(self, "_selection_dataset_index", None)
+        if indexed is not None and indexed.manifest is not None:
+            subfolders = list(indexed.conditions)
+        else:
+            try:
+                subfolders = sorted(
+                    (
+                        f.name
+                        for f in Path(folder).iterdir()
+                        if f.is_dir() and ".fif" not in f.name.lower()
+                    ),
+                    key=lambda name: (name.casefold(), name),
+                )
+            except OSError:
+                subfolders = []
 
-            combos = [self.condition_combo, self.condition_b_combo, *self.extra_condition_combos]
-            with ExitStack() as blockers:
-                for combo in combos:
-                    blockers.enter_context(QSignalBlocker(combo))
-                    combo.clear()
-                if subfolders:
-                    self.condition_combo.addItem(ALL_CONDITIONS_OPTION)
-                    self.condition_combo.addItems(subfolders)
-                    for index, combo in enumerate(combos[1:], start=1):
-                        combo.addItems(subfolders)
-                        combo.setCurrentIndex(index if index < len(subfolders) else -1)
+        combos = [self.condition_combo, self.condition_b_combo, *self.extra_condition_combos]
+        with ExitStack() as blockers:
             for combo in combos:
-                combo.setToolTip(combo.currentText())
-            if (
-                self.overlay_check.isChecked()
-                or self._group_overlay_enabled()
-                or self._session_comparison_active()
-            ):
-                self._ensure_condition_a_valid_for_overlay()
-                self._set_all_conditions_enabled(False)
-            else:
-                self._set_all_conditions_enabled(True)
-            self._update_chart_title_state(self.condition_combo.currentText())
-            self._sync_legend_defaults_with_conditions()
-            self._check_required()
-        finally:
-            self._populating_conditions = False
+                blockers.enter_context(QSignalBlocker(combo))
+                combo.clear()
+            if subfolders:
+                self.condition_combo.addItem(ALL_CONDITIONS_OPTION)
+                self.condition_combo.addItems(subfolders)
+                for index, combo in enumerate(combos[1:], start=1):
+                    combo.addItems(subfolders)
+                    combo.setCurrentIndex(index if index < len(subfolders) else -1)
+        for combo in combos:
+            combo.setToolTip(combo.currentText())
+        if (
+            self.overlay_check.isChecked()
+            or self._group_overlay_enabled()
+            or self._session_comparison_active()
+        ):
+            self._ensure_condition_a_valid_for_overlay()
+            self._set_all_conditions_enabled(False)
+        else:
+            self._set_all_conditions_enabled(True)
+        self._update_chart_title_state(self.condition_combo.currentText())
+        self._sync_legend_defaults_with_conditions()
+        self._check_required()
 
     def _refresh_group_controls(self, folder: str) -> None:
         if not hasattr(self, "group_box"):

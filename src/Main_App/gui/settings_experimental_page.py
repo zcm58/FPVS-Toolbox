@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from Main_App.gui import settings_experimental_preprocessing_page
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -43,22 +44,25 @@ def build_experimental_page(self, tabs: QTabWidget) -> QWidget:
     layout.setContentsMargins(0, 0, 0, 0)
     layout.setSpacing(SECTION_GAP)
 
-    self._add_experimental_info_row(
-        layout, tab,
-        "Optional checks for this project. New projects start with QC off.",
-        "Experimental QC",
-        "Turn each check on or off independently. Related repair options stay "
-        "with the check they need. Turning a check off keeps saved choices and "
-        "accepted repairs. Basic checks for valid data, stimulus timing, complete "
-        "outputs, and required electrodes still run so results remain usable.",
-        "settings_experimental_qc_info",
-    )
-
     # Keep preprocessing and post-processing checks in separate flat pages.
     self.experimental_tabs = QTabWidget(tab)
     self.experimental_tabs.setObjectName("settings_experimental_sections")
     self.experimental_tabs.setDocumentMode(True)
     self.experimental_tabs.tabBar().setDrawBase(False)
+    qc_info = make_info_button(
+        parent=self.experimental_tabs, object_name="settings_experimental_qc_info",
+        tooltip="About experimental QC", size=16,
+    )
+    qc_info.clicked.connect(
+        lambda: QMessageBox.information(
+            self,
+            "Experimental QC",
+            "New projects start with optional checks off. Turning a check off keeps "
+            "saved decisions and accepted repairs. Data validity, stimulus timing, "
+            "output completeness and required-electrode checks still run.",
+        )
+    )
+    self.experimental_tabs.setCornerWidget(qc_info, Qt.TopRightCorner)
     layout.addWidget(self.experimental_tabs, 1)
 
     self.preprocessing_qc_tabs = QTabWidget(tab)
@@ -131,21 +135,18 @@ def build_experimental_page(self, tabs: QTabWidget) -> QWidget:
     performance_layout.setContentsMargins(0, 12, 0, 0)
     performance_layout.setSpacing(10)
     ram_card = SectionCard(
-        "RAM Preloading", performance_page,
+        "Recording loading", performance_page,
         object_name="settings_experimental_ram_preload_card",
     )
-    self._add_settings_scope(
-        ram_card.content_layout,
-        "Current project only. Off by default."
-        if self.project is not None else "Open a project to edit RAM preloading.",
-    )
+    if self.project is None:
+        self._add_settings_scope(ram_card.content_layout, "Open a project to edit RAM preloading.")
     self.experimental_ram_preload_check = QCheckBox(
         "Preload BDF recordings into RAM", ram_card,
     )
     self.experimental_ram_preload_check.setObjectName("experimental_ram_preload_check")
     self.experimental_ram_preload_check.setToolTip(
-        "Use memory instead of temporary disk files when loading raw BDFs "
-        "for QC and processing. QC prefetch uses at most 25% of available "
+        "Use memory instead of temporary disk files for this project's BDFs. "
+        "QC prefetch uses at most 25% of available "
         "memory. Large recordings and parallel workers can exhaust RAM."
     )
     self.experimental_ram_preload_check.setChecked(
@@ -171,7 +172,7 @@ def build_experimental_page(self, tabs: QTabWidget) -> QWidget:
     )
 
     post_review_card = SectionCard(
-        "Experimental Result Review", results_page,
+        "Post-processing flags", results_page,
         object_name="settings_experimental_result_review_card",
     )
     for field_name, label, title, description in (
@@ -208,7 +209,7 @@ def build_experimental_page(self, tabs: QTabWidget) -> QWidget:
 
     screening = experimental_settings.summed_bca_screening
     summed_bca_card = SectionCard(
-        "Experimental Summed-BCA Screening",
+        "Screening and repair",
         summed_bca_page,
         object_name="settings_experimental_summed_bca_card",
     )
@@ -220,10 +221,6 @@ def build_experimental_page(self, tabs: QTabWidget) -> QWidget:
         "settings_experimental_summed_bca_explanation"
     )
     self.summed_bca_explanation_label.setWordWrap(True)
-    summed_bca_card.content_layout.addWidget(
-        self.summed_bca_explanation_label
-    )
-
     self.summed_bca_screening_enabled_check = QCheckBox(
         "Enable experimental summed-BCA screening",
         summed_bca_card,
@@ -240,9 +237,10 @@ def build_experimental_page(self, tabs: QTabWidget) -> QWidget:
         "and may not suit every study. Condition-specific repairs below require this check.",
         "settings_summed_bca_screening_info",
     )
+    summed_bca_card.content_layout.addWidget(self.summed_bca_explanation_label)
 
     absolute_header = SubsectionHeaderLabel(
-        "Saved limits — used when screening is on",
+        "Review thresholds",
         summed_bca_card,
     )
     summed_bca_card.content_layout.addWidget(absolute_header)
@@ -348,12 +346,13 @@ def add_experimental_info_row(
     if isinstance(content, str):
         content = QLabel(content, row)
         content.setWordWrap(True)
-    row_layout.addWidget(content, 1)
+    row_layout.addWidget(content)
     info = make_info_button(
         parent=row, object_name=object_name, tooltip=f"About {title.lower()}", size=16,
     )
     info.clicked.connect(lambda: QMessageBox.information(self, title, description))
     row_layout.addWidget(info)
+    row_layout.addStretch()
     layout.addWidget(row)
 
 
@@ -364,11 +363,7 @@ def build_beta_tools_page(self, tabs: QTabWidget) -> None:
     layout.setContentsMargins(0, 12, 0, 0)
     layout.setSpacing(10)
     card = SectionCard(
-        "Beta Tools", page, object_name="settings_experimental_beta_tools_card",
-    )
-    self._add_settings_scope(
-        card.content_layout,
-        "Show optional beta tools in the Tools menu across all projects.",
+        "Tools menu", page, object_name="settings_experimental_beta_tools_card",
     )
     self.beta_tools_check = QCheckBox("Enable Beta Tools", card)
     self.beta_tools_check.setObjectName("settings_enable_beta_tools")
@@ -376,8 +371,7 @@ def build_beta_tools_page(self, tabs: QTabWidget) -> None:
     card.content_layout.addWidget(self.beta_tools_check)
     self._add_settings_scope(
         card.content_layout,
-        "Save, then close and reopen FPVS Toolbox to update tool visibility. "
-        "Beta tools may change as they are developed.",
+        "Applies to all projects. Save and restart Toolbox to update the Tools menu.",
     )
     layout.addWidget(card)
     layout.addStretch(1)

@@ -40,7 +40,7 @@ def test_defaults_and_paired_result_are_visible(qtbot) -> None:
     qtbot.mouseClick(page.calculate_button, Qt.LeftButton)
 
     assert page.result_banner.text() == "Cohen's dz = 0.60"
-    assert page.result_banner.metric_label.text() == "COHEN'S DZ"
+    assert page.result_banner.metric_label.text() == "Cohen's dz"
     assert page.result_banner.value_label.text() == "0.60"
     assert page.result_banner.property("statusVariant") == "info"
     assert page.magnitude_label.text() == "Conventional magnitude: Medium"
@@ -55,8 +55,8 @@ def test_defaults_and_paired_result_are_visible(qtbot) -> None:
 
     page.sample_size_spin.setValue(30)
 
-    assert page.result_banner.text() == "Set the assumptions and select Calculate."
-    assert "will appear after calculation" in page.plain_language_label.text()
+    assert page.result_banner.text() == "No result yet."
+    assert not page.plain_language_label.isVisibleTo(page)
 
 
 def test_rm_anova_result_and_reset(qtbot) -> None:
@@ -71,7 +71,7 @@ def test_rm_anova_result_and_reset(qtbot) -> None:
 
     assert page.design_stack.currentIndex() == page.RM_ANOVA
     assert page.result_banner.text() == "Cohen's f = 0.30"
-    assert page.result_banner.metric_label.text() == "COHEN'S F"
+    assert page.result_banner.metric_label.text() == "Cohen's f"
     assert page.result_banner.value_label.text() == "0.30"
     assert page.magnitude_label.text() == "Conventional magnitude: Medium"
     assert page.equivalent_label.text() == "Equivalent eta-squared: 0.082"
@@ -82,7 +82,7 @@ def test_rm_anova_result_and_reset(qtbot) -> None:
 
     assert page.analysis_combo.currentIndex() == page.PAIRED_TEST
     assert page.sample_size_spin.value() == 24
-    assert page.result_banner.text() == "Set the assumptions and select Calculate."
+    assert page.result_banner.text() == "No result yet."
 
 
 def test_fpvs_design_inputs_derive_repeated_measurements(qtbot) -> None:
@@ -144,7 +144,7 @@ def test_result_affecting_inputs_clear_stale_output(qtbot) -> None:
         page.calculate()
         change()
         assert page.result_banner.text() == (
-            "Set the assumptions and select Calculate."
+            "No result yet."
         )
 
     rm_changes = (
@@ -166,7 +166,7 @@ def test_result_affecting_inputs_clear_stale_output(qtbot) -> None:
         page.calculate()
         change()
         assert page.result_banner.text() == (
-            "Set the assumptions and select Calculate."
+            "No result yet."
         )
 
 
@@ -182,7 +182,7 @@ def test_one_sided_choice_shows_directional_warning(qtbot) -> None:
     qtbot.mouseClick(page.calculate_button, Qt.LeftButton)
 
     assert page.assumption_guidance.isVisibleTo(page)
-    assert page.result_banner.text() != "Set the assumptions and select Calculate."
+    assert page.result_banner.text() != "No result yet."
 
 
 def test_calculation_error_clears_previous_result(qtbot) -> None:
@@ -196,8 +196,8 @@ def test_calculation_error_clears_previous_result(qtbot) -> None:
 
     assert page.validation_banner.isVisibleTo(page)
     assert "at least 2" in page.validation_banner.text()
-    assert page.result_banner.text() == "Set the assumptions and select Calculate."
-    assert "will appear after calculation" in page.reporting_label.text()
+    assert page.result_banner.text() == "No result yet."
+    assert not page.reporting_label.isVisibleTo(page)
 
 
 def test_info_dialog_explains_repeated_measurement_derivation(qtbot) -> None:
@@ -256,7 +256,7 @@ def test_lmm_mode_exposes_supported_model_and_validation(qtbot) -> None:
     assert page.lmm_tabs.tabText(0) == "Design"
     assert page.lmm_tabs.tabText(1) == "Advanced"
     assert page.lmm_tabs.currentIndex() == 0
-    assert page.result_banner.context_label.text() == "Set the assumptions and select Run Simulation."
+    assert page.result_banner.context_label.text() == "No result yet."
     assert page.lmm_design_panel.minimumHeight() == page.lmm_advanced_panel.minimumHeight()
     assert page.lmm_design_panel.minimumHeight() > 0
     assert page.lmm_design_panel.isAncestorOf(page.lmm_sample_size_spin)

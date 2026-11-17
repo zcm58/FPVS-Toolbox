@@ -114,15 +114,6 @@ def css_font_weight(role: FontRole) -> int:
     return FONT_ROLES[role].css_weight
 
 
-def css_font_declaration(role: FontRole, *, include_family: bool = False) -> str:
-    family_line = f'font-family: {css_font_family()};\n' if include_family else ""
-    return (
-        f"{family_line}"
-        f"font-size: {css_font_size(role)};\n"
-        f"font-weight: {css_font_weight(role)};"
-    )
-
-
 def matplotlib_font_kwargs(
     role: FontRole,
     *,

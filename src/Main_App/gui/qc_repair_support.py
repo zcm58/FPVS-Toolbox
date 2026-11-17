@@ -6,9 +6,9 @@ from collections.abc import Mapping, Sequence
 
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QPainter, QPen
-from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QPlainTextEdit, QWidget
+from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QPlainTextEdit, QVBoxLayout, QWidget
 
-from Main_App.gui.components import ActionRow, AppDialog, StatusBanner, SurfaceSize, make_action_button
+from Main_App.gui.components import ActionRow, AppDialog, StatusBanner, SurfaceSize, make_action_button, make_form_layout
 from Main_App.gui.style_tokens import ACCENT_COLOR, BORDER_COLOR, DANGER_COLOR, TEXT_MUTED, TEXT_PRIMARY
 from Main_App.gui.theme import theme_color
 from Main_App.io.eeg_geometry import canonical_biosemi64_head_coordinates
@@ -84,24 +84,36 @@ class RepairSupportDialog(AppDialog):
         }
         label = "Confirmed successful repairs" if confirmed else "Proposed repair scenario · no changes applied"
         self.root_layout.addWidget(StatusBanner(label, self, variant="info"))
-        description = QLabel(
-            "Red: repaired/proposed electrodes. Blue: nearby usable donors for the selected electrode. "
-            "Neighbor distances describe spatial support; they are not interpolation weights or proof of reconstruction accuracy.", self)
-        description.setWordWrap(True)
-        self.root_layout.addWidget(description)
         self.channel_combo = QComboBox(self)
         self.channel_combo.setAccessibleName("Repaired electrode to inspect")
         for row in self._report.get("channels", ()):
             self.channel_combo.addItem(str(row["channel"]))
-        self.root_layout.addWidget(self.channel_combo)
+        self.channel_combo.setEnabled(self.channel_combo.count() > 0)
         body = QHBoxLayout()
         retained_positions = {name: positions[name] for name in channels if name in positions}
         self.map = RepairSupportMap(retained_positions, repair_channels, self)
-        body.addWidget(self.map, 1)
+        map_column = QVBoxLayout()
+        map_column.addWidget(self.map, 1)
+        legend = QLabel("Red: repair site. Blue: nearby usable donor.", self)
+        legend.setWordWrap(True)
+        map_column.addWidget(legend)
+        body.addLayout(map_column, 1)
+
+        evidence_column = QVBoxLayout()
+        fields = make_form_layout()
+        fields.addRow("Electrode", self.channel_combo)
+        evidence_column.addLayout(fields)
         self.details = QPlainTextEdit(self)
         self.details.setReadOnly(True)
         self.details.setAccessibleName("Donor support evidence and limitations")
-        body.addWidget(self.details, 1)
+        evidence_column.addWidget(self.details, 1)
+        description = QLabel(
+            "Distances describe spatial support. Interpolation weights and reconstruction accuracy need separate evidence.",
+            self,
+        )
+        description.setWordWrap(True)
+        evidence_column.addWidget(description)
+        body.addLayout(evidence_column, 1)
         self.root_layout.addLayout(body, 1)
         self.channel_combo.currentTextChanged.connect(self._show_channel)
         actions = ActionRow(self)

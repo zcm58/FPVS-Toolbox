@@ -36,6 +36,7 @@ from Main_App.gui.components import (
     configure_window_surface,
     confirm,
     make_action_button,
+    make_form_layout,
     make_info_button,
     show_tool_info,
 )
@@ -1300,17 +1301,6 @@ class SourceMapOptionsDialog(AppDialog):
         self.selected_action: str | None = None
         self._syncing_threshold_controls = False
 
-        method_label = QLabel(
-            "New project maps average signed FPVS repetitions in the time domain, estimate an EEG-only "
-            "L2-MNE surface spectrum and an independent eLORETA volume spectrum on the fsaverage "
-            "template, and use the project's selected oddball harmonics with the FPVS Toolbox "
-            "exact-bin noise rule.",
-            self,
-        )
-        method_label.setObjectName("loreta_source_options_method_label")
-        method_label.setWordWrap(True)
-        self.root_layout.addWidget(method_label)
-
         tabs = QTabWidget(self)
         tabs.setObjectName("loreta_source_options_tabs")
         self.root_layout.addWidget(tabs)
@@ -1399,9 +1389,9 @@ class SourceMapOptionsDialog(AppDialog):
         tabs.addTab(data_tab, "Data")
 
         data_note = QLabel(
-            "Project rebuilds generate Hauk-informed time-domain L2-MNE surface and eLORETA volume "
-            "workflows. Older amplitude-derived L2-MNE and eLORETA manifests remain available "
-            "through Load manifest.",
+            "Rebuilds average signed FPVS repetitions in the time domain and estimate EEG-only "
+            "Hauk-informed L2-MNE surface spectra and independent eLORETA volume spectra on fsaverage. "
+            "Both use the project's selected oddball harmonics and the exact-bin noise rule.",
             data_tab,
         )
         data_note.setObjectName("loreta_source_options_data_note")
@@ -1448,17 +1438,15 @@ class SourceMapOptionsDialog(AppDialog):
         data_layout.addWidget(self.include_flagged_check)
 
         if export_busy:
-            availability_text = "A source-map rebuild is already running. Rebuild actions will be available when it finishes."
-        elif project_available:
-            availability_text = (
-                "Rebuilds validate source-ready participant derivatives, write project-local JSON, "
-                "and load the resulting manifest."
-            )
-        else:
+            availability_text = "A source-map rebuild is in progress."
+        elif not project_available:
             availability_text = "Open a project to rebuild source maps."
+        else:
+            availability_text = ""
         availability_label = QLabel(availability_text, self)
         availability_label.setObjectName("loreta_source_options_availability_label")
         availability_label.setWordWrap(True)
+        availability_label.setVisible(bool(availability_text))
         data_layout.addWidget(availability_label)
 
         self.rebuild_zscore_btn = make_action_button(
@@ -1485,7 +1473,9 @@ class SourceMapOptionsDialog(AppDialog):
 
         self.load_source_manifest_btn = make_action_button("Load manifest", compact=True, parent=self)
         self.load_source_manifest_btn.setObjectName("loreta_options_load_source_manifest_btn")
-        self.load_source_manifest_btn.setToolTip("Load a prepared source condition manifest.")
+        self.load_source_manifest_btn.setToolTip(
+            "Load a prepared source condition manifest, including older amplitude-derived maps."
+        )
         self.load_source_manifest_btn.clicked.connect(lambda: self._select_action(SOURCE_OPTIONS_ACTION_LOAD_MANIFEST))
         data_layout.addWidget(self.load_source_manifest_btn)
         data_layout.addStretch(1)
@@ -1558,7 +1548,7 @@ class ExportFiguresDialog(AppDialog):
         super().__init__("Export Figures", parent, size=SurfaceSize(width=420, height=260, min_width=380))
         self.selected_action: str | None = None
 
-        self.split_figures_btn = make_action_button("Export split hemisphere figures", compact=True, parent=self)
+        self.split_figures_btn = make_action_button("Split hemispheres", compact=True, parent=self)
         self.split_figures_btn.setObjectName("loreta_export_figures_split_figures_btn")
         self.split_figures_btn.setEnabled(can_export_split_figures)
         self.split_figures_btn.setToolTip(
@@ -1569,7 +1559,7 @@ class ExportFiguresDialog(AppDialog):
         self.split_figures_btn.clicked.connect(lambda: self._select_action(EXPORT_FIGURES_ACTION_SPLIT_FIGURES))
         self.root_layout.addWidget(self.split_figures_btn)
 
-        self.stacked_split_figures_btn = make_action_button("Export condition stack figures", compact=True, parent=self)
+        self.stacked_split_figures_btn = make_action_button("Condition stack", compact=True, parent=self)
         self.stacked_split_figures_btn.setObjectName("loreta_export_figures_stacked_split_figures_btn")
         self.stacked_split_figures_btn.setEnabled(can_export_stacked_split_figures)
         self.stacked_split_figures_btn.setToolTip(
@@ -1582,7 +1572,7 @@ class ExportFiguresDialog(AppDialog):
         )
         self.root_layout.addWidget(self.stacked_split_figures_btn)
 
-        self.mri_slice_figures_btn = make_action_button("Export MRI slice figure", compact=True, parent=self)
+        self.mri_slice_figures_btn = make_action_button("MRI slices", compact=True, parent=self)
         self.mri_slice_figures_btn.setObjectName("loreta_export_figures_mri_slice_figures_btn")
         self.mri_slice_figures_btn.setEnabled(can_export_mri_slice_figures)
         self.mri_slice_figures_btn.setToolTip(
@@ -1616,19 +1606,15 @@ class StackedSplitFigureExportDialog(AppDialog):
         super().__init__("Export Stacked Split Figures", parent, size=SurfaceSize(width=420, height=220, min_width=380))
         self._condition_options = condition_options
 
-        top_label = QLabel("Top panel", self)
-        top_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        self.root_layout.addWidget(top_label)
+        form = make_form_layout()
         self.top_condition_combo = QComboBox(self)
         self.top_condition_combo.setObjectName("loreta_stack_export_top_condition_combo")
-        self.root_layout.addWidget(self.top_condition_combo)
+        form.addRow("Top panel:", self.top_condition_combo)
 
-        bottom_label = QLabel("Bottom panel", self)
-        bottom_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        self.root_layout.addWidget(bottom_label)
         self.bottom_condition_combo = QComboBox(self)
         self.bottom_condition_combo.setObjectName("loreta_stack_export_bottom_condition_combo")
-        self.root_layout.addWidget(self.bottom_condition_combo)
+        form.addRow("Bottom panel:", self.bottom_condition_combo)
+        self.root_layout.addLayout(form)
 
         for condition_id, label in condition_options:
             self.top_condition_combo.addItem(label, condition_id)
@@ -1759,7 +1745,6 @@ class LoretaVisualizerWindow(QWidget):
         self._source_activation_payload: SourcePayload | None = None
         self._current_activation_payload: SourcePayload | None = None
         self._last_import_dir: Path | None = None
-        self._manifest_conditions: dict[str, PreparedSourceManifestEntry] = {}
         self._manifest_method_groups: dict[str, _ManifestMethodGroup] = {}
         self._manifest_condition_groups: dict[str, _ManifestConditionGroup] = {}
         self._project_source_maps_loaded = False
@@ -1855,15 +1840,15 @@ class LoretaVisualizerWindow(QWidget):
 
     def _build_controls(self) -> SectionCard:
         controls = SectionCard("Source Map", self, object_name="loreta_view_controls")
-        controls.setFixedWidth(260)
+        controls.setFixedWidth(312)
         controls.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
         controls.header.setVisible(False)
         controls.shell_layout.setSpacing(0)
-        controls.content_layout.setSpacing(5)
+        controls.content_layout.setSpacing(4)
 
         def add_control_section() -> tuple[QWidget, QVBoxLayout]:
             if controls.content_layout.count() > 0:
-                controls.content_layout.addSpacing(10)
+                controls.content_layout.addSpacing(8)
             return controls, controls.content_layout
 
         def make_field_label(text: str, parent: QWidget) -> QLabel:
@@ -1872,24 +1857,28 @@ class LoretaVisualizerWindow(QWidget):
             label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
             return label
 
-        def add_label_value_row(target_layout: QVBoxLayout, label: QLabel, value_label: QLabel) -> None:
+        def add_slider_row(target_layout: QVBoxLayout, label: QLabel, slider: QSlider, value_label: QLabel) -> None:
             row = QHBoxLayout()
             row.setContentsMargins(0, 0, 0, 0)
             row.setSpacing(6)
-            row.addWidget(label, 1)
+            row.addWidget(label, 0)
+            row.addWidget(slider, 1)
             row.addWidget(value_label, 0)
             target_layout.addLayout(row)
 
         selection_section, selection_layout = add_control_section()
+        selection_form = make_form_layout()
+        selection_form.setHorizontalSpacing(8)
+        selection_form.setVerticalSpacing(4)
+        selection_layout.addLayout(selection_form)
 
         source_method_label = make_field_label("Method", selection_section)
-        selection_layout.addWidget(source_method_label)
 
         self.source_method_combo = QComboBox(selection_section)
         self.source_method_combo.setObjectName("loreta_source_method_combo")
         source_method_label.setBuddy(self.source_method_combo)
         self.source_method_combo.currentIndexChanged.connect(self._on_source_method_changed)
-        selection_layout.addWidget(self.source_method_combo)
+        selection_form.addRow(source_method_label, self.source_method_combo)
 
         self.metric_combo = QComboBox(selection_section)
         self.metric_combo.setObjectName("loreta_source_metric_combo")
@@ -1897,29 +1886,29 @@ class LoretaVisualizerWindow(QWidget):
         self.metric_combo.setToolTip("Z-score or estimated amplitude above the neighboring-frequency background.")
         self.metric_combo.addItem(METRIC_LABELS[METRIC_Z_SCORE], METRIC_Z_SCORE)
         self.metric_combo.currentIndexChanged.connect(self._on_metric_changed)
-        selection_layout.addWidget(self.metric_combo)
+        metric_label = make_field_label("Metric", selection_section)
+        metric_label.setBuddy(self.metric_combo)
+        selection_form.addRow(metric_label, self.metric_combo)
 
         condition_label = make_field_label("Condition", selection_section)
-        selection_layout.addWidget(condition_label)
 
         self.condition_combo = QComboBox(selection_section)
         self.condition_combo.setObjectName("loreta_condition_combo")
         condition_label.setBuddy(self.condition_combo)
-        self.condition_combo.setPlaceholderText("No source maps loaded")
+        self.condition_combo.setPlaceholderText("No maps loaded")
         self.condition_combo.currentIndexChanged.connect(self._on_condition_changed)
-        selection_layout.addWidget(self.condition_combo)
+        selection_form.addRow(condition_label)
+        selection_form.addRow(self.condition_combo)
 
         summary_label = make_field_label("Summary", selection_section)
-        selection_layout.addWidget(summary_label)
 
         self.summary_combo = QComboBox(selection_section)
         self.summary_combo.setObjectName("loreta_source_summary_combo")
         summary_label.setBuddy(self.summary_combo)
         self.summary_combo.currentIndexChanged.connect(self._on_summary_changed)
-        selection_layout.addWidget(self.summary_combo)
+        selection_form.addRow(summary_label, self.summary_combo)
 
         display_mode_label = make_field_label("Display", selection_section)
-        selection_layout.addWidget(display_mode_label)
 
         self.display_mode_combo = QComboBox(selection_section)
         self.display_mode_combo.setObjectName("loreta_display_mode_combo")
@@ -1927,8 +1916,17 @@ class LoretaVisualizerWindow(QWidget):
         for label, mode in DISPLAY_MODE_OPTIONS:
             self.display_mode_combo.addItem(label, mode)
         self.display_mode_combo.currentIndexChanged.connect(self._on_display_mode_changed)
-        selection_layout.addWidget(self.display_mode_combo)
+        selection_form.addRow(display_mode_label)
+        selection_form.addRow(self.display_mode_combo)
         self._set_display_mode_combo_data(self._display_mode)
+
+        for combo in (self.source_method_combo, self.metric_combo, self.condition_combo, self.summary_combo,
+                      self.display_mode_combo):
+            combo.setMinimumContentsLength(8)
+            combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+            combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        for combo in (self.source_method_combo, self.condition_combo, self.summary_combo):
+            combo.currentTextChanged.connect(combo.setToolTip)
 
         self.compare_groups_check = QCheckBox("Compare", selection_section)
         self.compare_groups_check.setObjectName("loreta_compare_groups_check")
@@ -2003,8 +2001,6 @@ class LoretaVisualizerWindow(QWidget):
         color_layout.addLayout(scale_row)
 
         range_label = make_field_label("Color range", color_section)
-        color_layout.addWidget(range_label)
-
         range_row = QHBoxLayout()
         range_row.setContentsMargins(0, 0, 0, 0)
         range_row.setSpacing(6)
@@ -2020,6 +2016,8 @@ class LoretaVisualizerWindow(QWidget):
         self.activation_max_spin.setRange(-1_000_000.0, 1_000_000.0)
         self.activation_max_spin.setValue(DEFAULT_SCALAR_MAX)
         self.activation_max_spin.valueChanged.connect(self._on_activation_range_changed)
+        range_label.setBuddy(self.activation_min_spin)
+        range_row.addWidget(range_label, 0)
         range_row.addWidget(self.activation_min_spin)
         range_row.addWidget(make_field_label("to", color_section), 0)
         range_row.addWidget(self.activation_max_spin)
@@ -2031,7 +2029,6 @@ class LoretaVisualizerWindow(QWidget):
 
         self.transparency_value_label = make_field_label("", view_section)
         self.transparency_value_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        add_label_value_row(view_layout, self.opacity_label, self.transparency_value_label)
 
         self.transparency_slider = QSlider(Qt.Horizontal, view_section)
         self.transparency_slider.setObjectName("loreta_transparency_slider")
@@ -2039,13 +2036,12 @@ class LoretaVisualizerWindow(QWidget):
         self.transparency_slider.setRange(5, 100)
         self.transparency_slider.setValue(DEFAULT_OPACITY_PERCENT)
         self.transparency_slider.valueChanged.connect(self._on_transparency_changed)
-        view_layout.addWidget(self.transparency_slider)
+        add_slider_row(view_layout, self.opacity_label, self.transparency_slider, self.transparency_value_label)
 
         self.activation_opacity_label = make_field_label("Source opacity", view_section)
 
         self.activation_opacity_value_label = make_field_label("", view_section)
         self.activation_opacity_value_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        add_label_value_row(view_layout, self.activation_opacity_label, self.activation_opacity_value_label)
 
         self.activation_opacity_slider = QSlider(Qt.Horizontal, view_section)
         self.activation_opacity_slider.setObjectName("loreta_activation_opacity_slider")
@@ -2053,10 +2049,12 @@ class LoretaVisualizerWindow(QWidget):
         self.activation_opacity_slider.setRange(0, 100)
         self.activation_opacity_slider.setValue(DEFAULT_ACTIVATION_OPACITY_PERCENT)
         self.activation_opacity_slider.valueChanged.connect(self._on_activation_opacity_changed)
-        view_layout.addWidget(self.activation_opacity_slider)
+        add_slider_row(view_layout, self.activation_opacity_label, self.activation_opacity_slider, self.activation_opacity_value_label)
 
         self.split_rotation_label = make_field_label("Hemisphere rotation", view_section)
         view_layout.addWidget(self.split_rotation_label)
+        split_rotation_layout = QHBoxLayout()
+        split_rotation_layout.setSpacing(12)
 
         self.left_split_rotation_row = QWidget(view_section)
         left_split_rotation_layout = QHBoxLayout(self.left_split_rotation_row)
@@ -2079,7 +2077,7 @@ class LoretaVisualizerWindow(QWidget):
         )
         left_split_rotation_layout.addWidget(self.left_split_rotate_minus_btn, 0)
         left_split_rotation_layout.addWidget(self.left_split_rotate_plus_btn, 0)
-        view_layout.addWidget(self.left_split_rotation_row)
+        split_rotation_layout.addWidget(self.left_split_rotation_row, 1)
 
         self.right_split_rotation_row = QWidget(view_section)
         right_split_rotation_layout = QHBoxLayout(self.right_split_rotation_row)
@@ -2102,13 +2100,13 @@ class LoretaVisualizerWindow(QWidget):
         )
         right_split_rotation_layout.addWidget(self.right_split_rotate_minus_btn, 0)
         right_split_rotation_layout.addWidget(self.right_split_rotate_plus_btn, 0)
-        view_layout.addWidget(self.right_split_rotation_row)
+        split_rotation_layout.addWidget(self.right_split_rotation_row, 1)
+        view_layout.addLayout(split_rotation_layout)
 
         self.reset_camera_btn = make_action_button("Reset view", compact=True, parent=view_section)
         self.reset_camera_btn.setObjectName("loreta_reset_camera_btn")
         self.reset_camera_btn.setToolTip("Reset view")
         self.reset_camera_btn.clicked.connect(self._reset_camera)
-        view_layout.addWidget(self.reset_camera_btn)
 
         actions_section, actions_layout = add_control_section()
 
@@ -2131,6 +2129,7 @@ class LoretaVisualizerWindow(QWidget):
         options_row = QHBoxLayout()
         options_row.setContentsMargins(0, 0, 0, 0)
         options_row.setSpacing(6)
+        options_row.addWidget(self.reset_camera_btn)
         options_row.addWidget(self.source_options_btn, 1)
 
         self.loreta_method_info_btn = make_info_button(
@@ -2252,6 +2251,8 @@ class LoretaVisualizerWindow(QWidget):
             or not hasattr(self, "summary_combo")
         ):
             return
+        for combo in (self.source_method_combo, self.condition_combo, self.summary_combo):
+            combo.setToolTip(combo.currentText())
         has_conditions = bool(self._manifest_condition_groups)
         renderer_available = self.renderer is not None
         self.source_method_combo.setEnabled(
@@ -2889,17 +2890,16 @@ class LoretaVisualizerWindow(QWidget):
         finally:
             self.display_mode_combo.blockSignals(previous_block_state)
         if payload is not None and payload.kind == SOURCE_KIND_VOLUME_POINTS:
-            self.display_mode_combo.setToolTip(
+            description = (
                 "3D uses display-only interpolation of retained volume-grid estimates. "
                 "The anatomical shell is context, not the source boundary; use MRI slices "
                 "for anatomical localization."
             )
         elif payload is not None and uses_cortical_surface_paint(payload):
-            self.display_mode_combo.setToolTip(
-                "L2-MNE values are displayed only on the cortical source surface."
-            )
+            description = "L2-MNE values are displayed only on the cortical source surface."
         else:
-            self.display_mode_combo.setToolTip("Choose a display compatible with the loaded source payload.")
+            description = "Choose a display compatible with the loaded source payload."
+        self.display_mode_combo.setToolTip(f"{self.display_mode_combo.currentText()}\n\n{description}")
 
     def _on_display_mode_changed(self, _index: int) -> None:
         self._mri_render_request_id += 1
@@ -4270,7 +4270,6 @@ class LoretaVisualizerWindow(QWidget):
             self.source_method_combo.clear()
             self.condition_combo.clear()
             self.summary_combo.clear()
-            self._manifest_conditions = {entry.condition_id: entry for entry in entries}
             self._manifest_method_groups = _group_manifest_methods(entries)
             self._populate_method_combo_blocked()
             self._set_selected_source_method_from_loaded_groups()
@@ -4364,7 +4363,7 @@ class LoretaVisualizerWindow(QWidget):
             self.summary_combo.clear()
             group = self._manifest_condition_groups.get(self._selected_condition_id)
             if group is None:
-                self.summary_combo.addItem("No source maps loaded", SOURCE_SUMMARY_DIRECT)
+                self.summary_combo.addItem("No summary available", SOURCE_SUMMARY_DIRECT)
                 self._selected_summary_id = SOURCE_SUMMARY_RAW_MEAN
             else:
                 summary_ids = _ordered_source_summary_ids(group)

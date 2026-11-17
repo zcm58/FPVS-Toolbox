@@ -52,7 +52,13 @@ class MarkerOccurrenceReviewPanel(QWidget):
 
         self.count_label = SubsectionHeaderLabel(f"Decision {index} of {total}", self)
         self.count_label.setObjectName("marker_review_count")
-        layout.addWidget(self.count_label)
+        header = ActionRow(self, alignment=Qt.AlignLeft)
+        header.row_layout.addWidget(self.count_label, 1)
+        self.details_button = make_action_button("Technical details…", variant="tertiary", parent=header)
+        self.details_button.setObjectName("marker_review_technical_details")
+        self.details_button.clicked.connect(self._show_technical_details)
+        header.add_button(self.details_button)
+        layout.addWidget(header)
 
         context = self.summary.context
         if group_label:
@@ -72,9 +78,6 @@ class MarkerOccurrenceReviewPanel(QWidget):
         )
         layout.addWidget(self.required_label)
 
-        choices_heading = SubsectionHeaderLabel("Choose what to analyze", self)
-        choices_heading.setObjectName("marker_review_choices_heading")
-        layout.addWidget(choices_heading)
         choices_layout = QGridLayout()
         choices_layout.setContentsMargins(0, 0, 0, 0)
         choices_layout.setHorizontalSpacing(18)
@@ -95,23 +98,18 @@ class MarkerOccurrenceReviewPanel(QWidget):
             description = self._label(
                 choice.description, f"marker_review_description_{choice.decision}",
             )
-            choices_layout.addWidget(button, row_index, 0, Qt.AlignTop)
-            choices_layout.addWidget(description, row_index, 1, Qt.AlignTop)
+            choices_layout.addWidget(button, row_index, 0, Qt.AlignVCenter)
+            choices_layout.addWidget(description, row_index, 1, Qt.AlignVCenter)
             self.choice_buttons[choice.decision] = button
             self.choice_descriptions[choice.decision] = description
         layout.addLayout(choices_layout)
         layout.addStretch(1)
 
-        self.details_button = make_action_button("Technical details…", variant="tertiary", parent=self)
-        self.details_button.setObjectName("marker_review_technical_details")
-        self.details_button.clicked.connect(self._show_technical_details)
         self.cancel_button = make_action_button("Cancel Processing", parent=self)
         self.cancel_button.setObjectName("marker_review_cancel")
         self.cancel_button.clicked.connect(lambda: self.choice_requested.emit("cancel"))
-        footer = ActionRow(self, alignment=Qt.AlignLeft)
+        footer = ActionRow(self)
         footer.setObjectName("marker_review_footer")
-        footer.add_button(self.details_button)
-        footer.row_layout.addStretch(1)
         footer.add_button(self.cancel_button)
         layout.addWidget(footer)
 

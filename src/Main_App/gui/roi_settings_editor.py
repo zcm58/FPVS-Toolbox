@@ -139,7 +139,7 @@ class ROISettingsEditor(QWidget):
         self.name_edit.setFocus()
         self.name_edit.selectAll()
         self.show_status(
-            "New ROI draft added. Name it and choose at least one electrode on the map.",
+            "Name the ROI and choose at least one electrode on the map.",
             "info",
         )
         self.draft_changed.emit()

@@ -81,10 +81,8 @@ class InterpolationBurdenReviewDialog(ReviewDialog):
 
         explanation = QLabel(
             (
-                "Review the successfully interpolated electrode locations, choose "
-                "Retain or Exclude for every row. Reasons are optional. No choice is "
-                "selected automatically. Canceling or closing this dialog skips "
-                "downstream post-processing."
+                "Choose Retain or Exclude for every recording. Cancel or close "
+                "this review to stop before post-processing."
             ),
             self,
         )
@@ -115,6 +113,9 @@ class InterpolationBurdenReviewDialog(ReviewDialog):
         self.table.setObjectName("interpolation_burden_review_table")
         self.table.setHorizontalHeaderLabels(headers)
         self.table.horizontalHeaderItem(2).setToolTip("Session / phase-at-visit")
+        if not self._batch.is_repeated_session:
+            self.table.hideColumn(2)
+            self.table.hideColumn(3)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.table.verticalHeader().setVisible(False)
@@ -198,21 +199,19 @@ class InterpolationBurdenReviewDialog(ReviewDialog):
         self.table.resizeRowsToContents()
         self.root_layout.addWidget(self.table, 1)
 
-        self.progress_label = QLabel(self)
+        review_actions = ActionRow(self, alignment=Qt.AlignLeft)
+        self.progress_label = QLabel(review_actions)
         self.progress_label.setObjectName("interpolation_burden_review_progress")
         self.progress_label.setWordWrap(True)
-        self.root_layout.addWidget(self.progress_label)
-
-        actions = ActionRow(self)
-        actions.setObjectName("interpolation_burden_review_actions")
-        self.support_button = actions.add_button(
-            make_action_button("Inspect repair support", variant="secondary", parent=actions)
+        review_actions.row_layout.addWidget(self.progress_label, 1)
+        self.support_button = review_actions.add_button(
+            make_action_button("Inspect repair support", variant="secondary", parent=review_actions)
         )
         self.support_button.setObjectName("interpolation_burden_repair_support")
         self.support_button.clicked.connect(self._inspect_repair_support)
         self.table.setCurrentCell(0, 0)
-        self.retain_all_button = actions.add_button(
-            make_action_button("Retain all", variant="secondary", parent=actions)
+        self.retain_all_button = review_actions.add_button(
+            make_action_button("Retain all", variant="secondary", parent=review_actions)
         )
         self.retain_all_button.setObjectName("interpolation_burden_review_retain_all")
         self.retain_all_button.setToolTip(
@@ -220,11 +219,15 @@ class InterpolationBurdenReviewDialog(ReviewDialog):
             "Reasons are preserved. Review and apply the decisions afterward."
         )
         self.retain_all_button.clicked.connect(self._retain_all)
-        self.next_button = actions.add_button(
-            make_action_button("Next needs attention", variant="secondary", parent=actions)
+        self.next_button = review_actions.add_button(
+            make_action_button("Next needs attention", variant="secondary", parent=review_actions)
         )
         self.next_button.setObjectName("interpolation_burden_review_next")
         self.next_button.clicked.connect(self._next_needs_attention)
+        self.root_layout.addWidget(review_actions)
+
+        actions = ActionRow(self)
+        actions.setObjectName("interpolation_burden_review_actions")
         self.cancel_button = actions.add_button(
             make_action_button("Cancel", variant="secondary", parent=actions)
         )

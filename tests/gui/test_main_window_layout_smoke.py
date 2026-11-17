@@ -143,8 +143,8 @@ def test_welcome_prioritizes_opening_a_project_and_fits_minimum_window(
     win = _build_window(tmp_path, qtbot, monkeypatch)
 
     assert win.stacked.currentWidget() is win.landing_page
-    assert win.minimumSize() == QSize(480, 280)
-    assert win.size() == QSize(600, 340)
+    assert win.minimumSize() == QSize(1200, 800)
+    assert win.size() == QSize(1200, 800)
     assert win.windowTitle() == f"FPVS Toolbox v{main_window_module.FPVS_TOOLBOX_VERSION}"
     assert not win.findChildren(QStatusBar)
     assert win.menuBar().isHidden()
@@ -176,36 +176,6 @@ def test_welcome_prioritizes_opening_a_project_and_fits_minimum_window(
         open_button.mapTo(win, open_button.rect().bottomLeft()).y()
         < create_button.mapTo(win, create_button.rect().topLeft()).y()
     )
-
-
-def test_default_welcome_expands_to_home_and_restores_on_return(tmp_path: Path, qtbot, monkeypatch) -> None:
-    win = _build_window(tmp_path, qtbot, monkeypatch)
-
-    win.show_home_page()
-
-    assert win.workspace_stack.currentWidget() is win.homeWidget
-    assert win.minimumSize() == QSize(900, 520)
-    assert win.size() == QSize(960, 520)
-
-    win.stacked.setCurrentWidget(win.landing_page)
-
-    assert win.minimumSize() == QSize(480, 280)
-    assert win.size() == QSize(600, 340)
-
-
-@pytest.mark.parametrize(("welcome_size", "home_size"), [
-    ((1040, 640), (1040, 640)),
-    ((1040, 400), (1040, 520)),
-])
-def test_home_preserves_larger_welcome_dimensions(
-    tmp_path: Path, qtbot, monkeypatch, welcome_size, home_size,
-) -> None:
-    win = _build_window(tmp_path, qtbot, monkeypatch)
-    win.resize(*welcome_size)
-
-    win.show_home_page()
-
-    assert win.size() == QSize(*home_size)
 
 
 def test_welcome_open_existing_project_runs_directly(tmp_path: Path, qtbot, monkeypatch) -> None:
@@ -368,8 +338,10 @@ def test_main_window_layout_smoke(tmp_path: Path, qtbot, monkeypatch) -> None:
     assert win.btn_view_log.text() == "View Log"
     assert win.btn_view_log.accessibleName() == "View processing log"
     assert not hasattr(win, "btn_detect")
-    assert win.btn_select_input_file.text() == "Select EEG File..."
-    assert win.btn_select_input_folder.text() == "Select Data Folder..."
+    assert win.btn_select_input_file.text() == "Browse…"
+    assert win.btn_select_input_folder.text() == "Browse…"
+    assert win.btn_select_input_file.accessibleName() == "Choose EEG recording"
+    assert win.btn_select_input_folder.accessibleName() == "Choose EEG folder"
     assert win.btn_add_row.text() == "+ Add Condition"
     event_map_group = win.findChild(QWidget, "event_map_group")
     assert event_map_group is not None
@@ -474,7 +446,7 @@ def test_home_processing_history_long_content_fits_minimum_window(
     tmp_path: Path, qtbot, monkeypatch,
 ) -> None:
     win = _build_window(tmp_path, qtbot, monkeypatch)
-    win.resize(900, 520)
+    win.resize(win.minimumSize())
     win.show_home_page()
     history = win.processing_history_label
     history.setText(
@@ -483,7 +455,7 @@ def test_home_processing_history_long_content_fits_minimum_window(
     )
     qtbot.wait(20)
 
-    assert win.size() == QSize(900, 520)
+    assert win.size() == QSize(1200, 800)
     assert win.workspace_stack.currentWidget() is win.homeWidget
     assert history.isVisibleTo(win)
     assert history.wordWrap()
@@ -562,7 +534,7 @@ def test_workspace_menu_paints_slate_and_readable_labels(
         app.setStyleSheet(previous_stylesheet)
 
 
-def test_tool_navigation_guard_keeps_home_compact(tmp_path: Path, qtbot, monkeypatch) -> None:
+def test_tool_navigation_guard_keeps_home_size(tmp_path: Path, qtbot, monkeypatch) -> None:
     win = _build_window(tmp_path, qtbot, monkeypatch)
     win.show_home_page()
     initial_size = win.size()
@@ -577,33 +549,41 @@ def test_tool_navigation_guard_keeps_home_compact(tmp_path: Path, qtbot, monkeyp
 def test_long_project_title_does_not_resize_home(tmp_path: Path, qtbot, monkeypatch) -> None:
     win = _build_window(tmp_path, qtbot, monkeypatch)
     win.show_home_page()
-    win.resize(900, 520)
+    win.resize(win.minimumSize())
     name = "Long project name " * 30
     win._set_project_title(name)
 
-    assert win.size() == QSize(900, 520)
+    assert win.size() == QSize(1200, 800)
     assert win.windowTitle() == f"{name} — FPVS Toolbox v{main_window_module.FPVS_TOOLBOX_VERSION}"
 
 
-def test_workspace_expands_and_restores_only_automatic_resizes(tmp_path: Path, qtbot, monkeypatch) -> None:
+@pytest.mark.parametrize(("width", "height"), [(1200, 800), (1340, 940)])
+def test_workspace_navigation_keeps_window_size(tmp_path: Path, qtbot, monkeypatch, width, height) -> None:
     win = _build_window(tmp_path, qtbot, monkeypatch)
+    win.resize(width, height)
+    size = QSize(width, height)
     win.show_home_page()
-    win.resize(1010, 690)
+    assert win.size() == size
     settings = _menu_action(win, "fileMenu", "actionSettings")
     home = _menu_action(win, "viewMenu", "btn_home")
 
     settings.trigger()
-    assert win.minimumSize() == QSize(1280, 900)
-    assert win.size() == QSize(1280, 900)
+    assert win.workspace_stack.currentWidget() is win._settings_page
+    assert win.minimumSize() == QSize(1200, 800)
+    assert win.size() == size
     home.trigger()
-    assert win.size() == QSize(1010, 690)
+    assert win.size() == size
     assert win.workspace_stack.width() == win.width() - 2 * PAGE_MARGIN
 
-    settings.trigger()
-    win.resize(1340, 940)
+    tool = win._ensure_sensitivity_analysis_page()
+    win._show_workspace_page(tool)
+    assert win.workspace_stack.currentWidget() is tool
+    assert win.size() == size
     home.trigger()
-    assert win.minimumSize() == QSize(900, 520)
-    assert win.size() == QSize(1340, 940)
+    assert win.size() == size
+    win.stacked.setCurrentWidget(win.landing_page)
+    assert win.minimumSize() == QSize(1200, 800)
+    assert win.size() == size
 
 
 def test_processing_log_opens_in_focused_modal(
@@ -650,7 +630,7 @@ def test_processing_activity_page_locks_navigation_and_reuses_start_button(
     assert win.processing_action_layout.indexOf(win.btn_start) >= 0
     assert run_panel.row_layout.indexOf(win.btn_start) < 0
     assert win.processing_spinner.isVisible()
-    assert win.minimumSize() == QSize(1280, 900)
+    assert win.size() == QSize(1200, 800)
     assert not win.menuBar().isEnabled()
     _menu_action(win, "viewMenu", "btn_home").trigger()
     assert win.workspace_stack.currentWidget() is win.processing_page
@@ -661,7 +641,7 @@ def test_processing_activity_page_locks_navigation_and_reuses_start_button(
     assert win.workspace_stack.currentWidget() is win.homeWidget
     assert run_panel.row_layout.indexOf(win.btn_start) >= 0
     assert win.processing_action_layout.indexOf(win.btn_start) < 0
-    assert win.size() == QSize(960, 520)
+    assert win.size() == QSize(1200, 800)
     assert win.menuBar().isEnabled()
 
 
@@ -851,6 +831,7 @@ def test_processing_activity_tracks_completed_files(
         "Toolbox may respond slowly while recordings are processing."
     )
     assert win.processing_status_title_label.text() == "Run Progress"
+    assert win.processing_progress_heading_label.isHidden()
     assert win.processing_files_title_label.text() == "File Completion"
     assert win.processing_files_table.rowCount() == 2
     assert win.processing_files_table.item(0, 0).text() == "Queued"
@@ -1180,7 +1161,7 @@ def test_workspace_scalp_maps_embeds_in_main_workspace(
     assert figure_layout_card.minimumHeight() == SCALP_MAPS_BOTTOM_ROW_MIN_HEIGHT
     assert run_card.minimumHeight() == SCALP_MAPS_TOP_ROW_MIN_HEIGHT
     assert abs(conditions_card.geometry().bottom() - run_card.geometry().bottom()) <= 1
-    assert abs(conditions_card.geometry().width() - run_card.geometry().width()) <= 1
+    assert conditions_card.width() < run_card.width()
     assert [
         page.workflow_tabs.tabText(index)
         for index in range(page.workflow_tabs.count())
@@ -1734,7 +1715,7 @@ def test_workspace_individual_detectability_embeds_in_main_workspace(
     _open_beta_tool(win, "btn_individual_detectability")
     qtbot.wait(20)
 
-    assert win.workspace_stack.width() > workspace_width_before
+    assert win.workspace_stack.width() == workspace_width_before
     assert isinstance(win.workspace_stack.currentWidget(), IndividualDetectabilityWindow)
     assert (
         win.workspace_stack.currentWidget().objectName()

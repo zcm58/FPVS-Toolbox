@@ -65,7 +65,7 @@ from Main_App.gui.project_protocol import (
 from Main_App.gui.recording_qc_identity import project_recording_coverage_rows
 from Main_App.gui.roi_settings_editor import ROISettingsEditor
 from Main_App.gui.settings_navigation import SettingsNavigation
-from Main_App.gui.style_tokens import PAGE_MARGIN, SECTION_GAP, SECTION_HEADER_CONTENT_GAP
+from Main_App.gui.style_tokens import SECTION_GAP, SECTION_HEADER_CONTENT_GAP
 from Main_App.gui.theme import set_appearance_mode, set_themed_stylesheet
 from Main_App.gui.settings_feedback import (
     PREPROCESSING_FIELDS,
@@ -288,13 +288,7 @@ class SettingsDialog(QDialog):
         self._project_cache: Dict[str, Any] | None = None
         self._settings_footer_buttons: list[QWidget] = []
         # Stub attributes for pruned settings to avoid AttributeError if referenced
-        self.data_edit = None
         self.out_edit = None
-        self.main_size_edit = None
-        self.stats_size_edit = None
-        self.resize_size_edit = None
-        self.adv_size_edit = None
-        self.cond_edit = None
         self.id_edit = None
         self._build_ui()
         from Main_App.gui.settings_hardware_controls import refresh_hardware_qc_controls
@@ -419,8 +413,6 @@ class SettingsDialog(QDialog):
                 roi_pairs_override=self.manager.get_roi_pairs(),
             )
         )
-        self._last_tab_index = self.tabs.currentIndex()
-        self._tab_change_guard = False
         self.tabs.currentChanged.connect(self._on_tab_changed)
         self._on_tab_changed(self.tabs.currentIndex())
 
@@ -853,19 +845,20 @@ class SettingsDialog(QDialog):
         self.protocol_recording_markers_row.setVisible(recording_markers and not source_maps)
         self.protocol_recording_markers_summary.setText(f"{len(self._recording_marker_codes)} recording schemas configured.")
         condition_markers = self.protocol_condition_markers_check.isChecked()
-        self.protocol_condition_markers_table.setVisible(condition_markers and not source_maps)
+        show_marker_table = condition_markers and not source_maps
+        self.protocol_condition_markers_table.setVisible(show_marker_table)
+        self._protocol_markers_layout.setAlignment(
+            self._protocol_markers_card, Qt.AlignmentFlag(0) if show_marker_table else Qt.AlignTop,
+        )
         self.protocol_oddball_marker_code_edit.setEnabled(self.project is not None and not condition_markers and not source_maps)
         self._protocol_markers_form.setRowVisible(self.protocol_oddball_marker_code_edit, not source_maps)
         self.protocol_condition_markers_check.setVisible(not source_maps)
         self.protocol_recording_markers_check.setVisible(not source_maps)
-        self.protocol_marker_code_help.setVisible(not source_maps)
+        self.protocol_marker_code_help.setVisible(show_marker_table)
         self.protocol_trigger_maps_button.setText("Trigger maps…" if source_maps else "Use source maps…")
-        self.protocol_marker_code_help.setText(
-            "Enter the oddball marker emitted in each condition. Every condition needs a value; "
-            "turn off this option to use the shared code above."
-            if condition_markers else
-            "Oddball marker code: Event code emitted for each oddball in every condition. Default: 55."
-        )
+        direct_mode = self._protocol_input_mode() == ODDBALL_INPUT_MODE_DIRECT_HZ
+        self._protocol_form.setRowVisible(self.protocol_oddball_every_n_edit, not direct_mode)
+        self._protocol_form.setRowVisible(self.protocol_direct_oddball_rate_edit, direct_mode)
         if self.project is None:
             self.protocol_resolved_oddball_rate_edit.setText("—")
             self.protocol_derived_duration_edit.setText("Open a project to edit")
@@ -877,7 +870,6 @@ class SettingsDialog(QDialog):
             self.protocol_status.setVisible(True)
             return
 
-        direct_mode = self._protocol_input_mode() == ODDBALL_INPUT_MODE_DIRECT_HZ
         self.protocol_oddball_every_n_edit.setEnabled(not direct_mode)
         self.protocol_direct_oddball_rate_edit.setEnabled(direct_mode)
         try:
@@ -1063,13 +1055,6 @@ class SettingsDialog(QDialog):
             for name, electrodes in roi_pairs
         )
 
-    @staticmethod
-    def _normalized_signature_number(value: object) -> object:
-        try:
-            return float(value)
-        except (TypeError, ValueError):
-            return str(value).strip()
-
     def _project_has_processed_outputs(self) -> bool:
         if self.project is None:
             return False
@@ -1187,6 +1172,7 @@ class SettingsDialog(QDialog):
         profile_id = self.harmonic_summation_method_combo.currentData()
         legacy_selected = profile_id == HARMONIC_PROFILE_LEGACY_ID
         scope_combo = self.harmonic_electrode_scope_combo
+        self._harmonic_selection_form.setRowVisible(scope_combo, not fixed_selected)
         scope_combo.setEnabled(not fixed_selected)
         legacy_scope_index = scope_combo.findData(GROUP_SIGNIFICANT_ELECTRODE_SCOPE_ROI_UNION)
         scope_combo.model().item(legacy_scope_index).setEnabled(legacy_selected)
@@ -1201,24 +1187,22 @@ class SettingsDialog(QDialog):
             and scope_combo.currentData() == GROUP_SIGNIFICANT_ELECTRODE_SCOPE_FROZEN
         )
         self.harmonic_selection_electrodes_edit.setEnabled(frozen_selected)
+        self._harmonic_selection_form.setRowVisible(self.harmonic_selection_electrodes_edit, frozen_selected)
 
         self.fixed_harmonic_input_mode_combo.setEnabled(fixed_selected)
+        self._harmonic_selection_form.setRowVisible(self.fixed_harmonic_input_mode_combo, fixed_selected)
         fixed_mode = self.fixed_harmonic_input_mode_combo.currentData()
-        self.fixed_harmonic_freqs_edit.setEnabled(
-            fixed_selected and fixed_mode == FIXED_HARMONIC_INPUT_FREQUENCY_LIST
-        )
-        self.fixed_harmonic_upper_index_edit.setEnabled(
-            fixed_selected and fixed_mode == FIXED_HARMONIC_INPUT_UPPER_HARMONIC
-        )
-        self.fixed_harmonic_upper_frequency_edit.setEnabled(
-            fixed_selected and fixed_mode == FIXED_HARMONIC_INPUT_UPPER_FREQUENCY
-        )
+        for field, mode in (
+            (self.fixed_harmonic_freqs_edit, FIXED_HARMONIC_INPUT_FREQUENCY_LIST),
+            (self.fixed_harmonic_upper_index_edit, FIXED_HARMONIC_INPUT_UPPER_HARMONIC),
+            (self.fixed_harmonic_upper_frequency_edit, FIXED_HARMONIC_INPUT_UPPER_FREQUENCY),
+        ):
+            applicable = fixed_selected and fixed_mode == mode
+            field.setEnabled(applicable)
+            self._harmonic_selection_form.setRowVisible(field, applicable)
         if profile_id == HARMONIC_PROFILE_TWO_CONSECUTIVE_FAILURES_ID:
-            note = (
-                "Include harmonics up to the cutoff before two consecutive "
-                "nonsignificant results."
-            )
-            variant = "success"
+            note = ""
+            variant = "info"
         elif profile_id == HARMONIC_PROFILE_FIXED_ID:
             note = (
                 "Choose the harmonic selection independently of this dataset. "
@@ -1239,7 +1223,7 @@ class SettingsDialog(QDialog):
             variant = "warning"
         self.fixed_harmonic_warning.set_variant(variant)
         self.fixed_harmonic_warning.set_text(note)
-        self.fixed_harmonic_warning.setVisible(True)
+        self.fixed_harmonic_warning.setVisible(bool(note))
 
     def _save_project_preprocessing_for_harmonic_recalculation(
         self,
@@ -2390,9 +2374,6 @@ class SettingsDialog(QDialog):
         self._sync_removed_electrode_detection_checkbox()
         self._refresh_removed_electrode_detection_status()
 
-    def _update_manual_removed_electrodes_button(self) -> None:
-        self.manual_removed_electrodes_button.setEnabled(self.project is not None)
-
     def _refresh_removed_electrode_detection_status(self) -> None:
         status = self.removed_electrode_detection_status
         if self.project is None:
@@ -2498,8 +2479,6 @@ class SettingsDialog(QDialog):
         return False
 
     def _on_tab_changed(self, index: int) -> None:
-        # Drafts may be incomplete while the user edits related fields/tabs.
-        self._last_tab_index = index
         self.settings_navigation.sync_current_row(index)
         self.settings_page_title.setText(self.tabs.tabText(index))
 
@@ -2679,9 +2658,6 @@ class SettingsDialog(QDialog):
             self._show_settings_validation(str(exc))
             self._focus_invalid_preproc_field(str(exc))
             return None
-
-    def _validate_preproc_fields(self) -> bool:
-        return self._validated_preproc_payload() is not None
 
     def _on_preproc_edit_finished(self, canonical: str, field: QLineEdit) -> None:  # noqa: ARG002
         refresh_preprocessing_feedback(self)
@@ -3197,7 +3173,7 @@ class EmbeddedSettingsPage(SettingsDialog):
         self.setObjectName("embedded_settings_page")
         self.setWindowFlags(Qt.Widget)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.layout().setContentsMargins(PAGE_MARGIN, SECTION_GAP, PAGE_MARGIN, SECTION_GAP)
+        self.layout().setContentsMargins(0, 0, 0, 0)
 
     def accept(self) -> None:
         self._settings_save_completed()

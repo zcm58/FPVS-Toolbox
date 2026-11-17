@@ -82,7 +82,7 @@ class ClusterMapView(QWidget):
         layout.addLayout(selectors)
 
         options = QHBoxLayout()
-        self.members_only_checkbox = QCheckBox("Harmonics with cluster members only", self)
+        self.members_only_checkbox = QCheckBox("Harmonics with members only", self)
         self.members_only_checkbox.setObjectName("free_harmonic_map_members_only")
         self.members_only_checkbox.setToolTip(
             "Filter the view to harmonics containing members of the selected cluster(s). "
@@ -91,8 +91,8 @@ class ClusterMapView(QWidget):
         self.sensor_names_checkbox = QCheckBox("Show electrode names", self)
         self.sensor_names_checkbox.setObjectName("free_harmonic_map_sensor_names")
         options.addWidget(self.members_only_checkbox)
-        options.addStretch(1)
         options.addWidget(self.sensor_names_checkbox)
+        options.addStretch(1)
         layout.addLayout(options)
 
         self.status = StatusBanner(parent=self)
@@ -113,7 +113,6 @@ class ClusterMapView(QWidget):
         detail_layout = QVBoxLayout(self.details)
         detail_layout.setContentsMargins(0, 0, 0, 0)
         detail_layout.setSpacing(6)
-        detail_layout.addWidget(SubsectionHeaderLabel("Map details", self.details))
         self.contrast_label = self._new_text_label("free_harmonic_map_contrast")
         self.legend_label = self._new_text_label("free_harmonic_map_legend")
         self.value_label = self._new_text_label("free_harmonic_map_value")

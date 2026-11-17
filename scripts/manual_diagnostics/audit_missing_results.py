@@ -43,20 +43,17 @@ def _ensure_pyside6_stubs() -> None:
         return
 
     class _QCoreApplication:
-        _org = ""
-        _app = ""
-
         @staticmethod
         def instance() -> None:
             return None
 
         @staticmethod
-        def setOrganizationName(name: str) -> None:
-            _QCoreApplication._org = name
+        def setOrganizationName(_name: str) -> None:
+            pass
 
         @staticmethod
-        def setApplicationName(name: str) -> None:
-            _QCoreApplication._app = name
+        def setApplicationName(_name: str) -> None:
+            pass
 
     class _QStandardPaths:
         AppDataLocation = 0

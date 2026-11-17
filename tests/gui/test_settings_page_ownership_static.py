@@ -21,7 +21,6 @@ PAGE_METHODS = (
     ("_init_beta_tools_page", "settings_experimental_page", "build_beta_tools_page"),
     ("_add_experimental_threshold_grid", "settings_experimental_page", "add_experimental_threshold_grid"),
     ("_init_quality_control_tab", "settings_preferences_pages", "build_quality_control_page"),
-    ("_add_frequency_domain_qc_settings", "settings_preferences_pages", "add_frequency_domain_qc_settings"),
 )
 EXPERIMENTAL_PREPROCESSING_BUILDERS = (
     ("build_signal_review", ("self", "signals_page", "signals_layout", "qc_preproc", "experimental_settings")),

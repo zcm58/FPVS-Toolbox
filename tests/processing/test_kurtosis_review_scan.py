@@ -1371,7 +1371,7 @@ def test_reconciliation_reprompts_changed_evidence_as_stale(
     tmp_path,
     monkeypatch,
 ) -> None:
-    original_scan, original_item = _scan_one_pending_item(tmp_path, monkeypatch)
+    _, original_item = _scan_one_pending_item(tmp_path, monkeypatch)
     receipt = _approve_receipt(original_item)
     changed_scan, changed_item = _scan_one_pending_item(
         tmp_path,

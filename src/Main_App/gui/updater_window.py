@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QDialog,
     QGridLayout,
+    QHBoxLayout,
     QLabel,
     QMessageBox,
     QPlainTextEdit,
@@ -85,7 +86,6 @@ class UpdaterWindow(UpdateDialog):
         )
         self.setObjectName("standalone_updater")
         self.setWindowTitle("FPVS Toolbox Update & Repair")
-        self.title_label.setText("FPVS Toolbox Update & Repair")
         self.current_version_label.setText("Current version: checking installed application...")
         self.setMinimumHeight(660)
         self.resize(760, 680)
@@ -167,7 +167,7 @@ class ApplyUpdateDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(14)
-        self.status_label = QLabel("Updating FPVS Toolbox... Please wait...", self)
+        self.status_label = QLabel("Installing the update…", self)
         self.status_label.setTextFormat(Qt.TextFormat.PlainText)
         self.status_label.setWordWrap(True)
         layout.addStretch(1)
@@ -186,12 +186,15 @@ class ApplyUpdateDialog(QDialog):
         mark_primary_action(self.repair_button)
         self.repair_button.setVisible(False)
         self.repair_button.clicked.connect(self._open_repair)
-        layout.addWidget(self.repair_button)
         self.close_button = action_button("Cancel", self)
         mark_secondary_action(self.close_button)
         self.close_button.setVisible(False)
         self.close_button.clicked.connect(self.reject)
-        layout.addWidget(self.close_button)
+        actions = QHBoxLayout()
+        actions.addStretch(1)
+        actions.addWidget(self.close_button)
+        actions.addWidget(self.repair_button)
+        layout.addLayout(actions)
         apply_toolbox_theme(self)
         QTimer.singleShot(0, self._start)
 
@@ -334,7 +337,6 @@ def run_visible_smoke(app: QApplication, report: Path) -> int:
     app.setQuitOnLastWindowClosed(False)
     window = UpdaterWindow(auto_check=False)
     window.setWindowTitle("FPVS Toolbox Updater — visible smoke check")
-    window.title_label.setText("Updater smoke check (synthetic data)")
     asset = InstallerAsset(
         name="FPVSToolbox-99.0.0-setup.exe",
         download_url=(

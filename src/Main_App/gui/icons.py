@@ -164,16 +164,6 @@ def sidebar_icon(kind: str, size: int = 20) -> QIcon:
 
 
 @lru_cache(maxsize=4)
-def individual_detectability_icon(size: int = 16) -> QIcon:
-    return sidebar_icon("detectability", size)
-
-
-@lru_cache(maxsize=4)
-def settings_icon(size: int = 16) -> QIcon:
-    return sidebar_icon("settings", size)
-
-
-@lru_cache(maxsize=4)
 def tool_info_icon(size: int = 20) -> QIcon:
     """Return a high-contrast filled information glyph for icon-only buttons."""
     pixmap = QPixmap(size, size)

@@ -70,8 +70,10 @@ class ToolInfoDialog(AppDialog):
                     else f"{content.key}_tool_info_{tab.key}_browser"
                 )
                 browser.setObjectName(object_name)
+                browser.setAccessibleName(tab.title)
                 browser.setOpenExternalLinks(True)
                 browser.setHtml(tab.html)
+                browser.document().setDocumentMargin(12)
                 tab_widget.addTab(browser, tab.title)
                 browsers.append(browser)
             self.root_layout.addWidget(tab_widget, 1)
@@ -85,6 +87,7 @@ class ToolInfoDialog(AppDialog):
             )
             browser.setOpenExternalLinks(True)
             browser.setHtml(content.html)
+            browser.document().setDocumentMargin(12)
             self.root_layout.addWidget(browser, 1)
             self.browsers = (browser,)
             self.browser = browser
