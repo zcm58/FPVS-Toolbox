@@ -29,6 +29,7 @@ only to explicitly web-scoped work, not the PySide6 desktop GUI.
 | Task | Skill | Focused contract |
 | --- | --- | --- |
 | PySide6 widgets, menus, workers, orchestration, status | `pyside6-gui-cleanup` | [GUI](architecture/gui.md), [threading](architecture/workers-threading.md) |
+| Separating a desktop action from project, processing or tool code | `pyside6-gui-cleanup`; start with the owning feature scope | [Workflow owners and regression checks](architecture/gui-backend.md) |
 | Updater/downloads/installers | `project-path-audit`; GUI skill for changed surfaces | [Updater](architecture/updater.md) |
 | Public Experiment Library | `pyside6-gui-cleanup` + `project-path-audit`; `gui` and `project-io` scopes | [Implementation and acceptance](exec-plans/active/public-experiment-library.md), [workflow guide](guides/experiment-library.md) |
 | Package ownership/retired boundaries | `legacy-boundary-review` | [Target layout](architecture/main-app-target-layout.md), [legacy](architecture/legacy-boundaries.md) |

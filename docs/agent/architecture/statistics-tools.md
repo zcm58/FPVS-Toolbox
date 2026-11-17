@@ -32,7 +32,9 @@ Primary paths:
   `_Worker` QObject shell, worker config, Excel input/data collection helpers,
   ROI/group aggregation helpers, Matplotlib rendering,
   and manifest helpers.
-- `src/Tools/Individual_Detectability/`: detectability tool core, GUI, and worker.
+- `src/Tools/Individual_Detectability/`: `export_run.run_detectability_export`
+  owns managed input binding, prevalidation and figure export. The Qt worker
+  relays progress, logs, errors and completion. [Tool contract](../../../src/Tools/Individual_Detectability/AGENTS.md)
 - `src/Tools/Sensitivity_Analysis/`: standalone manual sensitivity calculator
   for minimum detectable Cohen's dz, Cohen's f, or a simulation-based
   standardized contrast for the current random-intercept FPVS mixed model. It

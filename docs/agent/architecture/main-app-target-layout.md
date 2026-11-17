@@ -33,6 +33,10 @@ src/Main_App/
 
 ## Current State
 
+Repeated-session manifest preparation lives in the
+[Qt-free project setup module](project-io.md#repeated-session-setup). The
+project manager coordinates its dialogs and worker.
+
 `src/Main_App/processing/` is now the canonical Main App processing import
 surface. It owns the stable no-op `process_data` coordinator plus raw-file
 discovery, batch-file preparation, and compatibility processing-controller

@@ -1,5 +1,13 @@
 # Project I/O Architecture
 
+## Repeated-session setup
+
+`Main_App.projects.repeated_session_setup` builds the proposed group-by-visit
+manifest and applies the source preflight report to a copy. `project_manager`
+owns the dialogs, asynchronous scan, save and activation. Exercise the setup
+rules through the [backend](../../../src/Main_App/projects/repeated_session_setup.py)
+and the user handoff through the [existing dialog tests](../../../tests/project_io/test_repeated_session_project_setup_qt.py).
+
 ## Project-local BIDS admission
 
 All production recording loads carry the active project root into

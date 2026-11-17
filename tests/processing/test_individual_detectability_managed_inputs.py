@@ -6,8 +6,8 @@ from types import SimpleNamespace
 import pytest
 
 from Main_App.processing.roi_coverage import RoiCoverageGateError
-from Tools.Individual_Detectability import core, worker
-from Tools.Individual_Detectability.core import ConditionInfo, DetectabilitySettings
+from Tools.Individual_Detectability import core, export_run
+from Tools.Individual_Detectability.core import ConditionInfo, DetectabilitySettings, ManagedDetectabilityInputError
 from Tools.Individual_Detectability.project_coverage import (
     load_managed_project_coverage,
     load_managed_workbook_coverage,
@@ -81,6 +81,26 @@ def _select(tmp_path, fixture, *, checkbox_exclusions=()):
         provenance=provenance,
         coverage=coverage,
         excluded_participants=set(checkbox_exclusions),
+    )
+
+
+def _export_request(tmp_path, monkeypatch, fixture, *, excluded=()):
+    _records, _cells, _receipt, index, provenance, conditions = fixture
+    monkeypatch.setattr("Main_App.projects.load_project_dataset_index", lambda root: index)
+    monkeypatch.setattr(
+        "Main_App.processing.full_fft_provenance.require_current_project_full_fft_provenance",
+        lambda root, *, dataset_index: provenance,
+    )
+    return export_run.RunRequest(
+        input_root=tmp_path,
+        output_root=tmp_path / "out",
+        project_root=tmp_path,
+        conditions=conditions,
+        output_stems={},
+        excluded_participants=set(excluded),
+        settings=DetectabilitySettings(
+            harmonic_source=CUSTOM_HARMONIC_SOURCE, oddball_harmonics_hz=[1.2],
+        ),
     )
 
 
@@ -168,46 +188,32 @@ def test_excluded_cells_cannot_mask_duplicate_final_coverage(tmp_path, monkeypat
         load_managed_project_coverage(tmp_path)
 
 
-def test_worker_uses_filtered_sources_before_read_cache_metadata_and_render(
+def test_export_uses_filtered_sources_before_read_cache_metadata_and_render(
     tmp_path, monkeypatch
 ):
     fixture = _managed_fixture(tmp_path, monkeypatch, omitted=(0,))
-    records, cells, receipt, index, provenance, conditions = fixture
+    records, cells, receipt, _index, provenance, conditions = fixture
     # An unreadable/stale excluded input with an old cache must never be touched.
     excluded_path = records[0].path
     excluded_path.write_bytes(b"not a readable workbook")
     cache_path = tmp_path / core._CACHE_DIRNAME / "old-excluded.npz"
     cache_path.parent.mkdir()
     cache_path.write_bytes(b"old cache")
-    monkeypatch.setattr("Main_App.projects.load_project_dataset_index", lambda root: index)
-    monkeypatch.setattr(
-        "Main_App.processing.full_fft_provenance.require_current_project_full_fft_provenance",
-        lambda root, *, dataset_index: provenance,
-    )
     reads = []
     monkeypatch.setattr(core, "_require_managed_fullfft_noise_support", lambda path, *_: reads.append(path))
     rendered = []
+    rendered_coverage = {}
 
     def generate(**kwargs):
         paths = kwargs["condition"].files
-        assert excluded_path not in paths
         rendered.extend(paths)
+        rendered_coverage.update(kwargs["managed_coverage_by_workbook"])
         return len(paths), len(paths)
 
-    monkeypatch.setattr(worker, "generate_condition_figure", generate)
-    request = worker.RunRequest(
-        input_root=tmp_path,
-        output_root=tmp_path / "out",
-        project_root=tmp_path,
-        conditions=conditions,
-        output_stems={},
-        excluded_participants={"P2"},
-        settings=DetectabilitySettings(
-            harmonic_source=CUSTOM_HARMONIC_SOURCE,
-            oddball_harmonics_hz=[1.2],
-        ),
-    )
-    worker.IndividualDetectabilityWorker(request)._run()
+    monkeypatch.setattr(export_run, "generate_condition_figure", generate)
+    request = _export_request(tmp_path, monkeypatch, fixture, excluded={"P2"})
+    events = []
+    export_run.run_detectability_export(request, log=events.append, status=events.append, progress=events.append)
 
     expected = {row.path for row in records[1:4]}
     assert set(reads) == expected == set(rendered)
@@ -218,20 +224,52 @@ def test_worker_uses_filtered_sources_before_read_cache_metadata_and_render(
     assert cache_path.read_bytes() == b"old cache"
 
     # A later accepted release must refresh exclusions and the retained cache key.
-    old_coverage = load_managed_workbook_coverage(tmp_path)[records[1].path]
+    old_coverage = rendered_coverage[records[1].path]
     cells[0].downstream_cell_excluded = False
     provenance.source_paths = tuple(row.path.name for row in records)
     receipt.fingerprint = "release-two"
-    refreshed, current_coverage = worker.IndividualDetectabilityWorker._require_current_project_inputs(request)
-    assert excluded_path in {path for cond in refreshed.conditions for path in cond.files}
+    rendered.clear()
+    export_run.run_detectability_export(request, log=events.append, status=events.append, progress=events.append)
+    assert excluded_path in rendered
     assert core._settings_fingerprint(request.settings, old_coverage) != core._settings_fingerprint(
-        request.settings, current_coverage[records[1].path]
+        request.settings, rendered_coverage[records[1].path]
     )
 
 
 def test_all_explicitly_excluded_conditions_are_omitted(tmp_path, monkeypatch):
     fixture = _managed_fixture(tmp_path, monkeypatch)
     assert _select(tmp_path, fixture, checkbox_exclusions={"P1", "P2"}) == []
+    request = _export_request(tmp_path, monkeypatch, fixture, excluded={"P1", "P2"})
+    log, status, progress = [], [], []
+    assert export_run.run_detectability_export(
+        request, log=log.append, status=status.append, progress=progress.append,
+    ) == request.output_root
+    assert log == ["No selected inputs remain after participant and project QC exclusions."]
+    assert status == [] and progress == []
+    assert not request.output_root.exists()
+
+
+def test_stale_second_condition_blocks_entire_export_before_writes(tmp_path, monkeypatch):
+    fixture = _managed_fixture(tmp_path, monkeypatch)
+    request = _export_request(tmp_path, monkeypatch, fixture)
+    stale = request.conditions[1].files[0]
+    validated = []
+
+    def validate(path, *_args):
+        validated.append(path)
+        if path == stale:
+            raise ValueError("stale source")
+
+    def unexpected_render(**_kwargs):
+        pytest.fail("Rendered before all conditions passed prevalidation")
+
+    monkeypatch.setattr(core, "_require_managed_fullfft_noise_support", validate)
+    monkeypatch.setattr(export_run, "generate_condition_figure", unexpected_render)
+    events = []
+    with pytest.raises(ManagedDetectabilityInputError, match="stale source"):
+        export_run.run_detectability_export(request, log=events.append, status=events.append, progress=events.append)
+    assert validated == [*request.conditions[0].files, stale]
+    assert not request.output_root.exists()
 
 
 def test_managed_canonical_participant_identity_changes_legacy_cache_key(tmp_path, monkeypatch):

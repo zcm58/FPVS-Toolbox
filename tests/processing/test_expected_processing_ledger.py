@@ -34,6 +34,7 @@ from Main_App.processing.processing_ledger import (
     ExpectedRecordingConditionPlanError,
     ProcessingInputState,
     ProcessingPlan,
+    additional_preflight_infos_for_chosen_scope,
     build_expected_recording_condition_plan,
     load_expected_recording_condition_plan,
     save_expected_recording_condition_plan,
@@ -93,6 +94,50 @@ def _processing_plan(
         condition_labels=tuple(event_map),
         geometry_identity=biosemi64_geometry_identity(),
     )
+
+
+def test_additional_preflight_selects_only_unreviewed_files_in_the_chosen_scope(tmp_path):
+    def recording(participant, visit="first"):
+        recording_id = f"{participant}__{visit}"
+        return RawFileInfo(tmp_path / f"{recording_id}.bdf", participant, recording_id=recording_id)
+
+    by_id = recording("P1")
+    by_path = recording("P2")
+    excluded_participant = recording("P3")
+    excluded_visit = recording("P4")
+    other_visit = recording("P4", "second")
+    header_only = recording("P5")
+    excluded_state = recording("P6")
+    completed = recording("P7")
+    invalid_approval = recording("P8")
+    plan = _processing_plan(
+        tmp_path, event_map={"Faces": 1},
+        infos=(by_id, by_path, other_visit, excluded_participant, excluded_visit,
+               header_only, excluded_state, completed, invalid_approval),
+        statuses=("new", "new", "new", "new", "new", "new", "excluded", "completed", "new"),
+    )
+    settings = {
+        "_fpvs_preflight_event_plans_by_file": {
+            by_id.processing_id.lower(): {},
+            str(tmp_path / "subfolder" / ".." / by_path.path.name): {"reviewed": True},
+            invalid_approval.processing_id: [],
+        },
+        "manual_excluded_participants": "p3",
+        "manual_excluded_recordings": [excluded_visit.processing_id.lower()],
+        "_fpvs_preflight_recording_not_started_files": str(header_only.path),
+    }
+
+    assert additional_preflight_infos_for_chosen_scope(plan, settings) == (other_visit, invalid_approval)
+    assert additional_preflight_infos_for_chosen_scope(replace(plan, choice="reprocess_all"), settings) == (
+        other_visit, completed, invalid_approval,
+    )
+
+
+def test_additional_preflight_treats_malformed_plan_collection_as_unreviewed(tmp_path):
+    plan = _processing_plan(tmp_path, event_map={"Faces": 1})
+    info = plan.states[0].info
+    settings = {"_fpvs_preflight_event_plans_by_file": [info.processing_id]}
+    assert additional_preflight_infos_for_chosen_scope(plan, settings) == (info,)
 
 
 def _approved_event_plan(

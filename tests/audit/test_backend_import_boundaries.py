@@ -20,6 +20,10 @@ from tests import repo_root
     "Main_App.processing.canonical_harmonics",
     "Tools.LORETA_Visualizer.source_producers.project_source_psd_inputs",
     "Tools.LORETA_Visualizer.source_producers.source_model_cache",
+    "Tools.Sequence_Figure.renderer",
+    "Main_App.projects.repeated_session_setup",
+    "Tools.Individual_Detectability.export_run",
+    "Main_App.processing.processing_ledger",
 ])
 def test_backend_import_does_not_import_qt(module):
     code = '''
@@ -34,6 +38,7 @@ sys.meta_path.insert(0, RejectGui())
 __import__(sys.argv[1])
 assert "Tools.Stats.ui.stats_window" not in sys.modules
 assert "Tools.LORETA_Visualizer.gui" not in sys.modules
+assert "Tools.Sequence_Figure.gui" not in sys.modules
 '''
     result = subprocess.run(
         [sys.executable, "-c", code, module], cwd=repo_root(),
@@ -45,6 +50,7 @@ assert "Tools.LORETA_Visualizer.gui" not in sys.modules
 @pytest.mark.parametrize("package,module,symbol", [
     ("Tools.Stats", "Tools.Stats.ui.stats_window", "StatsWindow"),
     ("Tools.LORETA_Visualizer", "Tools.LORETA_Visualizer.gui", "LoretaVisualizerWindow"),
+    ("Tools.Sequence_Figure", "Tools.Sequence_Figure.gui", "SequenceFigureWindow"),
 ])
 def test_public_window_export_is_lazy_and_retains_identity(package, module, symbol):
     code = '''

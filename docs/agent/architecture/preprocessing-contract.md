@@ -328,6 +328,15 @@ for the current raw-file metadata and processing fingerprint keep their prior
 QC decisions. If preflight QC adds participant-specific project metadata for
 new files, the GUI carries forward still-valid completed states and refreshes
 only skipped ledger fingerprint metadata so later runs do not rescan old files.
+
+When the user chooses a reprocessing scope,
+`processing_ledger.additional_preflight_infos_for_chosen_scope` returns the
+chosen recordings that still need QC-19 marker review, in plan order. It
+honors participant, recording and header exclusions and recognizes existing
+plans keyed by processing ID or resolved raw path. The GUI passes the returned
+recordings to its existing review with `preserve_existing_plans=True`.
+Cancelling stops the launch before output preparation.
+
 Settings provides a separate processed-workbook FullFFT-grid review for already
 completed files. It reads workbook headers on a worker thread, uses the same
 active harmonic-selection cohort and strict-majority oddball-cycle identity,

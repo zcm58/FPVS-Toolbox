@@ -72,6 +72,25 @@ manual setup can still create and process a supported project and that existing
 projects reopen with their saved inputs and results. Track Studio version and
 schema coverage in the roadmap.
 
+### Desktop workflow compatibility
+
+When work moves behind the desktop UI, a user must still be able to reach the
+operation from the same menu, shortcut or page, with the same defaults, draft
+and confirmation prompts, and project or beta access rules. An active operation
+keeps its existing navigation locks, progress, cancellation and retry behavior.
+Results belong to the project and inputs that started the operation.
+
+For repeated-session setup, compare the saved source and visit identities
+after reopening and verify that cancelling preflight leaves the proposed
+project uncreated. For a figure export, compare filenames, formats and
+destination and verify the current page's result-folder action after a project
+switch. Individual Detectability must reject stale managed inputs before any
+export and complete normally when all inputs are excluded. Expanding a
+reprocessing scope preserves existing marker reviews and prompts only for
+newly eligible recordings. Cancelling that review stops the launch before
+output preparation.
+[Desktop workflow guide](../architecture/gui-backend.md#toolbox-workflow-owners)
+
 ## Future product goals
 
 - Modular acquisition hardware and montage support through explicit profiles.

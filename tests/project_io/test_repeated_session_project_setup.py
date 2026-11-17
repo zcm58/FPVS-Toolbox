@@ -6,13 +6,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from Main_App.projects import project_manager
+from Main_App.projects import repeated_session_setup
+from Main_App.projects.recording_preflight import preflight_repeated_recording_sources
 from Main_App.projects.project import REPEATED_SESSION_PROJECT_SCHEMA_VERSION, Project
-
-
-@pytest.fixture(autouse=True)
-def choose_hardware_for_repeated_setup(monkeypatch):
-    monkeypatch.setattr(project_manager, "choose_new_project_hardware", lambda _parent, settings: settings)
 
 
 def _groups(tmp_path: Path) -> dict[str, dict[str, object]]:
@@ -59,7 +55,7 @@ def _source_folders(tmp_path: Path) -> dict[tuple[str, str], Path]:
 def test_repeated_session_manifest_builder_emits_ordered_complete_design(
     tmp_path: Path,
 ) -> None:
-    manifest = project_manager.build_repeated_session_project_manifest(
+    manifest = repeated_session_setup.build_repeated_session_project_manifest(
         project_root=tmp_path / "Project",
         project_name="Birth Control Study",
         groups=_groups(tmp_path),
@@ -96,10 +92,10 @@ def test_repeated_session_manifest_builder_rejects_incomplete_cells(
     source_folders.pop(("no_birth_control", "follicular"))
 
     with pytest.raises(
-        project_manager.RepeatedSessionProjectSetupError,
+        repeated_session_setup.RepeatedSessionProjectSetupError,
         match="missing no_birth_control/follicular",
     ):
-        project_manager.build_repeated_session_project_manifest(
+        repeated_session_setup.build_repeated_session_project_manifest(
             project_root=tmp_path / "Project",
             project_name="Birth Control Study",
             groups=_groups(tmp_path),
@@ -117,10 +113,10 @@ def test_repeated_session_manifest_builder_rejects_reused_source_folder(
     ]
 
     with pytest.raises(
-        project_manager.RepeatedSessionProjectSetupError,
+        repeated_session_setup.RepeatedSessionProjectSetupError,
         match="same raw_input_folder",
     ):
-        project_manager.build_repeated_session_project_manifest(
+        repeated_session_setup.build_repeated_session_project_manifest(
             project_root=tmp_path / "Project",
             project_name="Birth Control Study",
             groups=_groups(tmp_path),
@@ -139,7 +135,7 @@ def test_repeated_session_manifest_builder_supports_arbitrary_session_count(
         "midpoint": {"label": "Midpoint", "visit_index": 2},
     }
 
-    manifest = project_manager.build_repeated_session_project_manifest(
+    manifest = repeated_session_setup.build_repeated_session_project_manifest(
         project_root=tmp_path / "Project",
         project_name="Three Visits",
         groups={
@@ -163,9 +159,9 @@ def test_repeated_session_manifest_builder_supports_arbitrary_session_count(
 def test_session_id_generation_is_stable_and_collision_safe() -> None:
     used: set[str] = set()
 
-    assert project_manager.make_session_id("Luteal phase", used) == "luteal_phase"
-    assert project_manager.make_session_id("Luteal phase", used) == "luteal_phase_2"
-    assert project_manager.make_session_id("!!!", used) == "session"
+    assert repeated_session_setup.make_session_id("Luteal phase", used) == "luteal_phase"
+    assert repeated_session_setup.make_session_id("Luteal phase", used) == "luteal_phase_2"
+    assert repeated_session_setup.make_session_id("!!!", used) == "session"
 
 
 def test_preflight_report_accepts_only_a_completely_empty_source_scaffold(
@@ -174,24 +170,24 @@ def test_preflight_report_accepts_only_a_completely_empty_source_scaffold(
     source_folders = _source_folders(tmp_path)
     for folder in source_folders.values():
         folder.mkdir(parents=True)
-    manifest = project_manager.build_repeated_session_project_manifest(
+    manifest = repeated_session_setup.build_repeated_session_project_manifest(
         project_root=tmp_path / "Project",
         project_name="Empty Scaffold",
         groups=_groups(tmp_path),
         sessions=_sessions(),
         source_folders=source_folders,
     )
-    context, group_tokens, session_tokens = project_manager._repeated_preflight_inputs(
+    context, group_tokens, session_tokens = repeated_session_setup.repeated_preflight_inputs(
         tmp_path / "Project",
         manifest,
     )
 
-    report = project_manager.preflight_repeated_recording_sources(
+    report = preflight_repeated_recording_sources(
         context,
         group_filename_tokens=group_tokens,
         session_filename_tokens=session_tokens,
     )
-    completed = project_manager.apply_repeated_session_preflight_report(
+    completed = repeated_session_setup.apply_repeated_session_preflight_report(
         manifest,
         report,
     )
@@ -205,6 +201,9 @@ def test_new_project_dispatches_preflight_before_creating_v22_project(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
+    from Main_App.projects import project_manager
+
+    monkeypatch.setattr(project_manager, "choose_new_project_hardware", lambda _parent, settings: settings)
     raw_root = tmp_path / "raw"
     bc_root = raw_root / "Birth Control"
     no_bc_root = raw_root / "No Birth Control"

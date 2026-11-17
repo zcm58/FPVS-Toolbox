@@ -45,6 +45,9 @@ and complete Studio interoperability remain future work. See
 ## Runtime Ownership
 
 All paths below are under `src/`. Active imports use purpose-based packages.
+For an action that spans a page, a worker and a backend, start with the
+[desktop workflow guide](docs/agent/architecture/gui-backend.md). It maps the
+GUI and backend owners and the regression checks for their shared behavior.
 
 | Owner | Responsibility / contract |
 | --- | --- |

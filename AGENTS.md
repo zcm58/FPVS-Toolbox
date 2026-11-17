@@ -127,6 +127,10 @@ tools must not infer membership from output folders or duplicate discovery logic
 
 ## GUI and publication output
 
+- For work crossing a desktop and backend boundary, follow
+  [desktop workflow ownership](docs/agent/architecture/gui-backend.md).
+  Keep prompts and worker lifetime in the desktop workflow. Exercise the
+  project, processing or tool operation through its ordinary Python inputs.
 - Use PySide6 only; no Tkinter, CustomTkinter or CTkMessagebox. Import `QAction`
   from `PySide6.QtGui`.
 - Long work uses `QThread` or `QRunnable`/`QThreadPool`. Workers signal results;

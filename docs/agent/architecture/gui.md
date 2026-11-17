@@ -2,6 +2,10 @@
 
 The active desktop UI is PySide6.
 
+For the path from a user action to its backend and back, see
+[Desktop workflows and backend ownership](gui-backend.md). It traces the
+Studio and Toolbox workflows and records where to test their behavior.
+
 Primary paths:
 
 - `src/Main_App/gui/`: canonical active import surface for main-window,

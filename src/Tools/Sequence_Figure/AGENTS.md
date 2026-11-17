@@ -11,6 +11,8 @@ remain separate from figure rendering.
 
 Current ownership map:
 
+- The package exports the spec, result and renderer directly. Resolve
+  `SequenceFigureWindow` on demand so rendering works in a Qt-free process.
 - `renderer.py`: widget-free validation, image normalization, one-to-four
   condition rows, two-cycle timing scaffold drawing, and PNG/PDF/SVG export.
   It accepts either a legacy flat five-path tuple or nested condition tuples.

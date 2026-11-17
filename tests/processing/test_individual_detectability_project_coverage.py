@@ -463,31 +463,6 @@ def test_individual_detectability_reads_companions_and_rejects_stale_cache(tmp_p
         core._source_fingerprint(companion_workbook)
 
 
-def test_worker_gates_managed_inputs_before_harmonic_mode_selection() -> None:
-    source_path = (
-        Path(__file__).parents[2]
-        / "src"
-        / "Tools"
-        / "Individual_Detectability"
-        / "worker.py"
-    )
-    source = source_path.read_text(encoding="utf-8")
-    run_body = source[source.index("    def _run(self)") : source.index("    @staticmethod")]
-
-    assert run_body.index("_require_current_project_inputs(req)") < run_body.index(
-        "_resolve_effective_settings"
-    )
-    assert run_body.index("prevalidate_managed_conditions") < run_body.index(
-        "req.output_root.mkdir"
-    )
-    assert run_body.index("prevalidate_managed_conditions") < run_body.index(
-        "self._write_run_metadata"
-    )
-    assert run_body.index("prevalidate_managed_conditions") < run_body.index(
-        "generate_condition_figure"
-    )
-
-
 def test_managed_noise_support_is_checked_before_cache_reuse() -> None:
     source_path = (
         Path(__file__).parents[2]

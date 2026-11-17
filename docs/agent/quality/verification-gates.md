@@ -86,6 +86,8 @@ application/tool code (including Stats), tests, and agent scripts. Windows runs
 `project-io` and `backend-hardening` without Qt. Linux runs isolated
 processing-bridge and selected GUI regressions before the full suite, with
 Qt enabled only in CI. The full suite excludes opt-in standalone-script tests.
+The desktop workflow step covers the Sequence Figure page, repeated-session
+setup, Individual Detectability, and the marker-review handoff and choices.
 
 Repo test temporaries use short node hashes for Windows path-length headroom;
 an explicit pytest `--basetemp` is honored. Choose a fresh short directory
