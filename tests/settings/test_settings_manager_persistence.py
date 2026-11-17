@@ -117,14 +117,47 @@ def test_unrelated_stale_save_cannot_restore_deleted_roi(tmp_path: Path) -> None
 
     stale.set("updates", "last_checked_utc", "2026-09-07T13:40:36Z")
     stale.save()
-    stale.set("paths", "data_folder", "new-data-folder")
+    stale.set("paths", "output_folder", "new-output-folder")
     stale.save()
 
     saved = SettingsManager(str(path))
     assert saved.get_roi_pairs() == [("Central", ["CZ"])]
     assert stale.get_roi_pairs() == saved.get_roi_pairs()
     assert saved.get("updates", "last_checked_utc") == "2026-09-07T13:40:36Z"
-    assert saved.get("paths", "data_folder") == "new-data-folder"
+    assert saved.get("paths", "output_folder") == "new-output-folder"
+
+
+@pytest.mark.parametrize("existing_ini", [False, True])
+def test_retired_defaults_are_preserved_only_when_present_in_ini(
+    tmp_path: Path, existing_ini: bool,
+) -> None:
+    path = tmp_path / "settings.ini"
+    retired = {
+        "appearance": {"theme": "legacy"},
+        "paths": {"data_folder": "old-recordings"},
+        "gui": {
+            "main_size": "750x920", "stats_size": "700x650",
+            "resizer_size": "600x600", "advanced_size": "500x500",
+        },
+        "visualization": {
+            "threshold": "0.0", "surface_opacity": "0.5",
+            "time_index_ms": "100", "show_brain_mesh": "True",
+        },
+    }
+    if existing_ini:
+        path.write_text("\n".join(
+            f"[{section}]\n" + "\n".join(f"{key} = {value}" for key, value in options.items())
+            for section, options in retired.items()
+        ), encoding="utf-8")
+
+    manager = SettingsManager(str(path))
+    manager.set("paths", "output_folder", "analysis-outputs")
+    manager.save()
+    saved = SettingsManager(str(path))
+    assert saved.get("paths", "output_folder") == "analysis-outputs"
+    for section, options in retired.items():
+        for key, value in options.items():
+            assert saved.get(section, key, "missing") == (value if existing_ini else "missing")
 
 
 def test_rollback_config_assignment_preserves_unrelated_newer_settings(tmp_path: Path) -> None:

@@ -652,9 +652,6 @@ class SettingsDialog(QDialog):
 
         show_toolbox_cache_clear(self)
 
-    def _add_frequency_domain_qc_settings(self, parent: QWidget) -> None:
-        return settings_preferences_pages.add_frequency_domain_qc_settings(self, parent)
-
     def _removed_electrode_detection_enabled(self) -> bool:
         return (
             self._removed_electrode_detection_mode()
@@ -1189,21 +1186,19 @@ class SettingsDialog(QDialog):
         fixed_selected = self._fixed_harmonic_list_selected()
         profile_id = self.harmonic_summation_method_combo.currentData()
         legacy_selected = profile_id == HARMONIC_PROFILE_LEGACY_ID
-        self.harmonic_electrode_scope_combo.setEnabled(not fixed_selected)
+        scope_combo = self.harmonic_electrode_scope_combo
+        scope_combo.setEnabled(not fixed_selected)
+        legacy_scope_index = scope_combo.findData(GROUP_SIGNIFICANT_ELECTRODE_SCOPE_ROI_UNION)
+        scope_combo.model().item(legacy_scope_index).setEnabled(legacy_selected)
         if (
             not fixed_selected
             and not legacy_selected
-            and self.harmonic_electrode_scope_combo.currentData()
-            == GROUP_SIGNIFICANT_ELECTRODE_SCOPE_ROI_UNION
+            and scope_combo.currentIndex() == legacy_scope_index
         ):
-            all_index = self.harmonic_electrode_scope_combo.findData(
-                GROUP_SIGNIFICANT_ELECTRODE_SCOPE_ALL
-            )
-            self.harmonic_electrode_scope_combo.setCurrentIndex(all_index)
+            scope_combo.setCurrentIndex(scope_combo.findData(GROUP_SIGNIFICANT_ELECTRODE_SCOPE_ALL))
         frozen_selected = (
             not fixed_selected
-            and self.harmonic_electrode_scope_combo.currentData()
-            == GROUP_SIGNIFICANT_ELECTRODE_SCOPE_FROZEN
+            and scope_combo.currentData() == GROUP_SIGNIFICANT_ELECTRODE_SCOPE_FROZEN
         )
         self.harmonic_selection_electrodes_edit.setEnabled(frozen_selected)
 
@@ -1218,7 +1213,6 @@ class SettingsDialog(QDialog):
         self.fixed_harmonic_upper_frequency_edit.setEnabled(
             fixed_selected and fixed_mode == FIXED_HARMONIC_INPUT_UPPER_FREQUENCY
         )
-        self.fixed_harmonic_exclude_base_check.setEnabled(False)
         if profile_id == HARMONIC_PROFILE_TWO_CONSECUTIVE_FAILURES_ID:
             note = (
                 "Include harmonics up to the cutoff before two consecutive "
@@ -3091,6 +3085,7 @@ class SettingsDialog(QDialog):
             for key in REMOVED_ELECTRODE_DETECTION_CHOICE_CANONICAL_KEYS:
                 if key in self.project.preprocessing:
                     values[key] = self.project.preprocessing[key]
+            values["stim_channel"] = self.project.preprocessing.get("stim_channel", config.DEFAULT_STIM_CHANNEL)
         mode = self._removed_electrode_detection_mode()
         values["removed_electrode_detection_mode"] = mode
         values["auto_detect_removed_electrodes"] = (
@@ -3153,7 +3148,6 @@ class SettingsDialog(QDialog):
             self.fixed_harmonic_upper_frequency_edit.text().strip() or 0.0
         )
         values["fixed_harmonic_auto_exclude_base"] = True
-        values["stim_channel"] = config.DEFAULT_STIM_CHANNEL
         from Main_App.gui.settings_hardware_controls import collect_hardware_controls
         values.update(collect_hardware_controls(self))
         return values

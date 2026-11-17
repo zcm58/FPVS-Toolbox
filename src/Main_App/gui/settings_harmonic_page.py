@@ -16,7 +16,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QComboBox,
     QTabWidget,
-    QCheckBox,
 )
 from Main_App.gui.components import (
     ActionRow,
@@ -386,21 +385,6 @@ def add_harmonic_selection_section(
         "Upper frequency (Hz):",
         self.fixed_harmonic_upper_frequency_edit,
     )
-
-    self.fixed_harmonic_exclude_base_check = QCheckBox(
-        "Base-rate overlaps are always excluded",
-        harmonic_group,
-    )
-    self.fixed_harmonic_exclude_base_check.setObjectName(
-        "settings_fixed_harmonics_exclude_base"
-    )
-    self.fixed_harmonic_exclude_base_check.setChecked(True)
-    self.fixed_harmonic_exclude_base_check.setEnabled(False)
-    self.fixed_harmonic_exclude_base_check.setToolTip(
-        "Oddball harmonics that overlap the base stimulation frequency or "
-        "its harmonics cannot enter the fixed oddball composite."
-    )
-    harmonic_form.addRow("", self.fixed_harmonic_exclude_base_check)
 
     harmonic_group.content_layout.addLayout(harmonic_form)
     self.fixed_harmonic_warning = StatusBanner(

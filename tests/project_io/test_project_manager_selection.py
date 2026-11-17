@@ -11,7 +11,7 @@ import pytest
 
 from Main_App.gui.op_guard import OpGuard
 from Main_App.projects.grouping import (
-    GroupConfigurationError, project_group_context, validate_group_folder_name,
+    GroupConfigurationError, validate_group_folder_name,
 )
 from Main_App.projects.fpvs_config_import import CONFIG_SUFFIX, FPVSConfigImportError
 from Main_App.projects.hardware import confirm_hardware_selection
@@ -37,7 +37,6 @@ def workflow() -> dict:
         "ProjectMetadata": ProjectMetadata, "QWidget": object,
         "validate_group_folder_name": validate_group_folder_name,
         "GroupConfigurationError": GroupConfigurationError,
-        "project_group_context": project_group_context,
         "new_project_preprocessing_settings": new_project_preprocessing_settings,
         "confirm_hardware_selection": confirm_hardware_selection,
         "CONFIG_SUFFIX": CONFIG_SUFFIX, "FPVSConfigImportError": FPVSConfigImportError,
@@ -238,13 +237,11 @@ def test_open_project_path_corrupt_manifest_preserves_active_project(workflow, t
     assert workflow["messages"][0][0] == "Project Open Failed"
 
 
-@pytest.mark.parametrize("entry,mirror_fails,recent_fails", [
-    ("selected", True, False), ("path", True, False),
-    ("path", False, True), ("path", True, True),
-    ("selected", False, False), ("path", False, False),
+@pytest.mark.parametrize("entry,recent_fails", [
+    ("selected", False), ("path", False), ("path", True),
 ])
-def test_valid_project_activation_completes_after_preference_failure(
-    workflow, tmp_path, caplog, entry, mirror_fails, recent_fails,
+def test_valid_project_activation_completes_even_if_recent_projects_cannot_save(
+    workflow, tmp_path, caplog, entry, recent_fails,
 ):
     root = tmp_path / "Project"
     raw = tmp_path / "Raw"
@@ -263,22 +260,15 @@ def test_valid_project_activation_completes_after_preference_failure(
     steps = []
 
     class Preferences:
-        def __init__(self, kind, fails):
-            self.kind = kind
-            self.fails = fails
-            self.values = {}
+        def __init__(self):
             self.save_calls = 0
             self.recent = [str(tmp_path / "Older"), str(root)]
 
-        def set(self, section, option, value):
-            self.values[section, option] = value
-            steps.append((self.kind, "set"))
-
         def save(self):
             self.save_calls += 1
-            steps.append((self.kind, "save"))
-            if self.fails:
-                raise PermissionError(f"synthetic {self.kind} preference failure")
+            steps.append(("recent", "save"))
+            if recent_fails:
+                raise PermissionError("synthetic recent preference failure")
 
         def get_recent_projects(self):
             return list(self.recent)
@@ -286,13 +276,12 @@ def test_valid_project_activation_completes_after_preference_failure(
         def set_recent_projects(self, values):
             self.recent = list(values)
 
-    mirror = Preferences("mirror", mirror_fails)
-    recent = Preferences("recent", recent_fails)
+    recent = Preferences()
     workflow["SettingsManager"] = lambda: recent
     previous = object()
     old_row = SimpleNamespace(setParent=lambda parent: steps.append(("old row", "removed")))
     host = SimpleNamespace(
-        currentProject=previous, settings=mirror, event_rows=[old_row],
+        currentProject=previous, event_rows=[old_row],
         _set_project_title=lambda value: steps.append(("title", value)),
         rb_single=SimpleNamespace(setChecked=lambda value: steps.append(("single", value))),
         rb_batch=SimpleNamespace(setChecked=lambda value: steps.append(("batch", value))),
@@ -305,6 +294,7 @@ def test_valid_project_activation_completes_after_preference_failure(
     with caplog.at_level(logging.ERROR, logger="project_manager_test"):
         if entry == "selected":
             workflow["_open_selected_project"](host, read_project_metadata(root), None, tmp_path)
+            assert recent.save_calls == 0
         else:
             wrapper_path = Path(__file__).parents[2] / "src/Main_App/gui/project_workflows.py"
             wrapper_tree = ast.parse(wrapper_path.read_text(encoding="utf-8"))
@@ -331,25 +321,21 @@ def test_valid_project_activation_completes_after_preference_failure(
     project = host.currentProject
     assert project is not previous
     assert project.project_root == root
+    assert project.input_folder == raw
     assert project.preprocessing == preprocessing
     assert project.event_map == manifest["event_map"]
     assert project.options == manifest["options"]
     assert path.read_bytes() == before
-    assert mirror.values["paths", "data_folder"] == str(raw)
-    assert mirror.save_calls == 1
     assert host.event_rows == [("Condition A", "10"), ("Condition B", "20")]
-    assert steps[:5] == [
-        ("title", "Valid study"), ("mirror", "set"),
-        ("mirror", "save"), ("single", True), ("batch", False),
+    assert steps[:3] == [
+        ("title", "Valid study"), ("single", True), ("batch", False),
     ]
     assert steps[-1] == ("ready", True)
     assert steps.count(("ready", True)) == 1
     assert not workflow["_open_selected_project_guard"].is_active()
-    expected_failures = int(mirror_fails) + int(recent_fails)
-    assert len(workflow["messages"]) == expected_failures
-    assert all(title == "Application Preferences Not Saved" for title, _ in workflow["messages"])
-    assert len(caplog.records) == expected_failures
-    for kind, failed in [("mirror", mirror_fails), ("recent", recent_fails)]:
-        if failed:
-            assert any(f"synthetic {kind} preference failure" in message
-                       for _, message in workflow["messages"])
+    assert len(workflow["messages"]) == int(recent_fails)
+    assert len(caplog.records) == int(recent_fails)
+    if recent_fails:
+        title, message = workflow["messages"][0]
+        assert title == "Application Preferences Not Saved"
+        assert "synthetic recent preference failure" in message

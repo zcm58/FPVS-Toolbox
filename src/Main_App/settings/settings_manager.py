@@ -34,18 +34,10 @@ _SETTINGS_SAVE_LOCK = threading.RLock()
 
 DEFAULTS = {
     'appearance': {
-        'mode': DEFAULT_APPEARANCE_MODE,
-        'theme': 'blue'
+        'mode': DEFAULT_APPEARANCE_MODE
     },
     'paths': {
-        'data_folder': '',
         'output_folder': ''
-    },
-    'gui': {
-        'main_size': '750x920',
-        'stats_size': '700x650',
-        'resizer_size': '600x600',
-        'advanced_size': '500x500'
     },
     'stim': {
         'channel': 'Status'
@@ -84,12 +76,6 @@ DEFAULTS = {
     # An absent canonical key allows existing saved preset lists to be read
     # from their legacy name. An explicitly saved [] must remain empty.
     'roi_presets': {},
-    'visualization': {
-        'threshold': '0.0',
-        'surface_opacity': '0.5',
-        'time_index_ms': '100',
-        'show_brain_mesh': 'True'
-    },
     'debug': {
         'enabled': 'False'
     },

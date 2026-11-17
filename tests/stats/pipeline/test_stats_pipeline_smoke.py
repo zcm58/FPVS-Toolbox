@@ -104,7 +104,6 @@ def synced_window(monkeypatch, qtbot, tmp_path, patched_workers):
     monkeypatch.setattr(StatsWindow, "start_step_worker", start_immediate, raising=False)
     monkeypatch.setattr(StatsWindow, "export_pipeline_results", lambda self, pid: True, raising=False)
     monkeypatch.setattr(StatsWindow, "build_and_render_summary", lambda self, pid: None, raising=False)
-    monkeypatch.setattr(StatsWindow, "_start_reporting_summary_worker", lambda self, pid, elapsed_ms: None, raising=False)
     monkeypatch.setattr(StatsWindow, "_show_outlier_exclusion_dialog", lambda self, pid: None, raising=False)
 
     win = StatsWindow(project_dir=str(tmp_path))

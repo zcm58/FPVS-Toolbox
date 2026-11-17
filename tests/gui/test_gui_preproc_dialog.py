@@ -760,7 +760,15 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
     )
     assert dlg.harmonic_summation_method_combo.itemText(3) == "Legacy Toolbox selection"
     assert dlg.harmonic_summation_method_combo.currentData() == "legacy_fpvs_toolbox"
-    assert dlg.harmonic_electrode_scope_combo.currentData() == "union_roi_electrodes"
+    scope_combo = dlg.harmonic_electrode_scope_combo
+    legacy_scope = scope_combo.model().item(scope_combo.findData("union_roi_electrodes"))
+    assert legacy_scope.isEnabled()
+    assert scope_combo.currentData() == "union_roi_electrodes"
+    dlg.harmonic_summation_method_combo.setCurrentIndex(0)
+    assert not legacy_scope.isEnabled()
+    assert scope_combo.currentData() == "all_scalp_electrodes"
+    dlg.harmonic_summation_method_combo.setCurrentIndex(3)
+    assert legacy_scope.isEnabled()
     assert dlg.fixed_harmonic_freqs_edit.isEnabled() is False
     fixed_list_index = dlg.harmonic_summation_method_combo.findData(
         "fixed_preregistered_domain"
@@ -769,8 +777,8 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
     assert dlg.fixed_harmonic_freqs_edit.isEnabled() is True
     assert dlg.fixed_harmonic_input_mode_combo.isEnabled() is True
     assert dlg.harmonic_electrode_scope_combo.isEnabled() is False
-    assert dlg.fixed_harmonic_exclude_base_check.isChecked() is True
-    assert dlg.fixed_harmonic_exclude_base_check.isEnabled() is False
+    assert dlg.findChild(QWidget, "settings_fixed_harmonics_exclude_base") is None
+    assert "Frequencies overlapping the base rate are excluded." in dlg.fixed_harmonic_warning.label.text()
     assert dlg.fixed_harmonic_warning.isHidden() is False
     upper_index_mode = dlg.fixed_harmonic_input_mode_combo.findData(
         "upper_harmonic_index"
@@ -898,7 +906,7 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
         for label in application_tab.findChildren(QLabel)
     )
     assert quality_control_tab.isAncestorOf(cards["Processing QC"])
-    assert quality_control_tab.isAncestorOf(dlg.frequency_domain_qc_thresholds_label)
+    assert quality_control_tab.findChild(QLabel, "settings_frequency_domain_qc_thresholds") is None
     assert experimental_tab.isAncestorOf(detector_card)
     assert experimental_tab.isAncestorOf(summed_bca_card)
     assert experimental_tab.isAncestorOf(dlg.experimental_ram_preload_check)
@@ -1316,6 +1324,10 @@ def test_experimental_dependencies_preserve_saved_choices_and_help_is_modal(
     experimental_settings_page, monkeypatch,
 ):
     page = experimental_settings_page
+    page.kurtosis_screening_enabled_check.setChecked(True)
+    threshold = page.preproc_edits[3]
+    assert threshold.isEnabled()
+    threshold.setText("3.5")
     page.kurtosis_auto_interpolate_all_check.setChecked(True)
     page.condition_specific_interpolation_enabled_check.setChecked(True)
     page.kurtosis_screening_enabled_check.setChecked(False)
@@ -1323,6 +1335,8 @@ def test_experimental_dependencies_preserve_saved_choices_and_help_is_modal(
 
     assert not page.kurtosis_auto_interpolate_all_check.isEnabled()
     assert not page.kurtosis_review_auto_interpolate_extreme_check.isEnabled()
+    assert not threshold.isEnabled()
+    assert threshold.text() == "3.5"
     assert not page.condition_specific_interpolation_enabled_check.isEnabled()
     assert page.kurtosis_auto_interpolate_all_check.isChecked()
     assert page.condition_specific_interpolation_enabled_check.isChecked()
@@ -1332,6 +1346,8 @@ def test_experimental_dependencies_preserve_saved_choices_and_help_is_modal(
 
     page.kurtosis_screening_enabled_check.setChecked(True)
     page.summed_bca_screening_enabled_check.setChecked(True)
+    assert threshold.isEnabled()
+    assert threshold.text() == "3.5"
     assert page.kurtosis_auto_interpolate_all_check.isEnabled()
     assert page.condition_specific_interpolation_enabled_check.isEnabled()
     messages = []

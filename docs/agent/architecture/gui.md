@@ -322,7 +322,8 @@ The Settings category list opens seven pages: **Processing**, **Protocol**, **Ha
 **ROIs**, **Quality Control**, **Experimental**, and **Application**. The first
 four contain project processing values, the presentation/oddball protocol,
 harmonic selection/summation, and ROI definitions respectively. Quality Control
-contains Dataset Exclusions and read-only frequency-domain QC thresholds.
+contains Dataset Exclusions. Summed-BCA thresholds live with their project
+screening controls on the Experimental page.
 Application presents **Appearance**, **Screening alpha**, and **Debug logging**
 in one form. **Projects and cache** groups **Change Projects Folder…** and
 **Clear Toolbox Cache…** below it. Experimental separates
@@ -365,6 +366,14 @@ and the marker settles on the final selection. Repeat with Windows Animation
 effects turned off. Make an invalid edit and verify Save selects and focuses its
 field. Cancel and reopen to confirm the prior saved values. Check the
 Application actions and the embedded QC and Stats surfaces in the same workspace.
+Check that Quality Control opens Dataset Exclusions and that only Experimental
+shows the project’s summed-BCA thresholds. In Harmonics, switch between Legacy,
+adaptive and Fixed profiles to check the available electrode scopes and the
+fixed overlap rule. Toggle kurtosis screening from Experimental and verify
+its Processing threshold stays saved and only becomes editable when applicable.
+Save Settings on a project with a custom trigger channel and reopen it.
+In Standard FPVS Screening, check the Stats-ready workbook action under
+Advanced and the results report after a successful run.
 
 **Processing > Guided setup** opens the optional seven-page processing wizard.
 It uses shared dialog/form components, a numbered page list, current-method
@@ -407,9 +416,9 @@ Products project and check reference/montage controls and unavailable BioSemi
 QC policies. Switch main/Experimental tabs to check the native gray line is
 absent. Save/reopen and confirm project settings and ROI lists are unchanged.
 Quality Control exposes the unified Dataset Exclusions manager, distinguishing
-skipping processing from excluding already-processed data from analysis, and
-retains read-only frequency-domain QC thresholds. Changing analysis exclusions
-marks downstream frequency-domain outputs stale and requires regeneration.
+skipping processing from excluding already-processed data from analysis.
+Changing analysis exclusions marks downstream frequency-domain outputs stale
+and requires regeneration.
 The exclusions dialog retains its own explicit Apply/Cancel transaction.
 The project preference `kurtosis_review_auto_interpolate_extreme` (default True)
 sets the initial >10 experimental checkbox for new kurtosis review decisions.

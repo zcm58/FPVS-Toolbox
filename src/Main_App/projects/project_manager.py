@@ -35,7 +35,6 @@ from Main_App.projects.grouping import (
     GroupConfigurationError,
     make_group_id,
     normalize_project_groups,
-    project_group_context,
     validate_group_folder_name,
 )
 from Main_App.projects.project import Project
@@ -1570,17 +1569,6 @@ def loadProject(self, project: Project) -> None:
     self.currentProject = project
     self._set_project_title(project.name)
 
-    preference_error = None
-    if not project_group_context(project).has_group_metadata:
-        self.settings.set("paths", "data_folder", str(project.input_folder))
-        try:
-            self.settings.save()
-        except OSError as exc:
-            preference_error = exc
-            logger.exception(
-                "project_data_folder_preference_save_failed root=%s", project.project_root,
-            )
-
     mode = project.options.get("mode", "batch").lower()
     self.rb_single.setChecked(mode == "single")
     self.rb_batch.setChecked(mode == "batch")
@@ -1599,14 +1587,6 @@ def loadProject(self, project: Project) -> None:
     refresh_home_trigger_maps(self)
 
     self.log(f"Loaded project: {project.name}")
-    if preference_error is not None:
-        QMessageBox.warning(
-            self,
-            "Application Preferences Not Saved",
-            "The project is open, but Toolbox could not save the last raw-data "
-            "folder preference. Check write access and free space in the application "
-            f"settings folder.\n\n{preference_error}",
-        )
 
 
 def edit_project_settings(self) -> None:

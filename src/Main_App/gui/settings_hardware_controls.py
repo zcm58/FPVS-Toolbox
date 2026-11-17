@@ -86,7 +86,6 @@ def _refresh_controls(dialog) -> None:
     platform = dialog.hardware_platform_combo.currentData()
     recorded_geometry = platform in RECORDED_GEOMETRY_PLATFORMS
     unicorn = platform == "unicorn"
-    qualified_qc = hardware_supports_calibrated_qc({"hardware_platform": platform})
     selected_reference = dialog.initial_reference_combo.currentData() == "channels"
     dialog.initial_reference_label.setVisible(recorded_geometry)
     dialog.initial_reference_combo.setVisible(recorded_geometry)
@@ -127,8 +126,6 @@ def _refresh_controls(dialog) -> None:
             "BioSemi ABC, equiradial and custom cap layouts are unsupported by this profile."
         )
     dialog.electrode_mapping_profile_combo.setToolTip(mapping_help)
-    dialog.preproc_edits[3].setEnabled(qualified_qc and dialog.project is not None)
-    dialog.preproc_edits[3].setToolTip("This kurtosis screening is qualified for BioSemi64 only." if not qualified_qc else "")
     refresh_hardware_qc_controls(dialog)
 
 
@@ -186,6 +183,19 @@ def refresh_hardware_qc_controls(dialog) -> None:
             control.setEnabled(enabled)
             if not qualified_qc:
                 control.setToolTip("This review/repair policy is qualified for BioSemi64 only.")
+    kurtosis_screening = getattr(dialog, "kurtosis_screening_enabled_check", None)
+    threshold_enabled = (
+        qualified_qc and dialog.project is not None
+        and kurtosis_screening is not None and kurtosis_screening.isChecked()
+    )
+    threshold = dialog.preproc_edits[3]
+    threshold.setEnabled(threshold_enabled)
+    if not qualified_qc:
+        threshold.setToolTip("This kurtosis screening is qualified for BioSemi64 only.")
+    elif not threshold_enabled and dialog.project is not None:
+        threshold.setToolTip("Enable kurtosis screening in Experimental to edit this threshold.")
+    else:
+        threshold.setToolTip("")
     detector = getattr(dialog, "removed_electrode_detection_mode_combo", None)
     if detector is not None:
         if not qualified_qc:

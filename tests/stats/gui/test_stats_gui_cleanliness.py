@@ -52,8 +52,7 @@ def test_stats_gui_cleanliness_layout_and_copy(qtbot, tmp_path):
     assert window.manual_exclusion_select_all_btn.text() in buttons
     assert window.manual_exclusion_clear_btn.text() in buttons
     assert isinstance(window.manual_exclusion_candidates_list, QListWidget)
-    assert not hasattr(window, "reporting_summary_export_checkbox")
-    assert window.reporting_summary_export_action.isChecked()
+    assert "Export Options" not in buttons
 
     assert window.findChild(QWidget, "stats_results_selector") is None
     assert window.findChild(QWidget, "stats_results_stack") is None

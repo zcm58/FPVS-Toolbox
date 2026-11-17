@@ -12,7 +12,6 @@ from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
     QLineEdit,
-    QLabel,
     QTabWidget,
     QCheckBox,
     QComboBox,
@@ -27,7 +26,6 @@ from Main_App.gui.components import (
 )
 from Main_App.gui.style_tokens import SECTION_GAP, SECTION_HEADER_CONTENT_GAP
 from Main_App.settings.appearance import APPEARANCE_MODES
-from Main_App.processing.frequency_domain_qc import thresholds_summary_lines
 from Main_App.projects.preprocessing_settings import (
     normalize_manual_excluded_participant_conditions,
     normalize_manual_excluded_participants,
@@ -168,23 +166,7 @@ def build_quality_control_page(self, tabs: QTabWidget) -> None:
     )
     qc_group.content_layout.addWidget(self.dataset_exclusions_button, alignment=Qt.AlignLeft)
 
-    self._add_frequency_domain_qc_settings(qc_group)
     layout.addWidget(qc_group)
 
     layout.addStretch(1)
     tabs.addTab(tab, "Quality Control")
-
-
-def add_frequency_domain_qc_settings(self, parent: QWidget) -> None:
-    header = SubsectionHeaderLabel("Frequency-domain QC thresholds (read-only)", parent)
-    parent.content_layout.addWidget(header)
-
-    self.frequency_domain_qc_thresholds_label = QLabel(
-        "\n".join(thresholds_summary_lines()),
-        parent,
-    )
-    self.frequency_domain_qc_thresholds_label.setObjectName(
-        "settings_frequency_domain_qc_thresholds"
-    )
-    self.frequency_domain_qc_thresholds_label.setWordWrap(True)
-    parent.content_layout.addWidget(self.frequency_domain_qc_thresholds_label)

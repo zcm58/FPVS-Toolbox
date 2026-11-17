@@ -1882,33 +1882,6 @@ def clear_manual_frequency_domain_recording_exclusions(
         return cleared
 
 
-def thresholds_summary_lines() -> list[str]:
-    thresholds = DEFAULT_FREQUENCY_DOMAIN_QC_THRESHOLDS
-    return [
-        "Experimental summed-BCA screening is review-only; no threshold "
-        "automatically excludes data.",
-        f"Warning review band: abs(summed BCA) > {thresholds.warning_summed_bca_uv:g} uV",
-        (
-            "Concentrated review: "
-            f"{thresholds.concentrated_review_flagged_cells} or more flagged cells "
-            "per recording or participant"
-        ),
-        (
-            "Strong review band: "
-            f"abs(summed BCA) > {thresholds.strong_warning_summed_bca_uv:g} uV"
-        ),
-        (
-            "Extreme review band: "
-            f"abs(summed BCA) > {thresholds.extreme_review_summed_bca_uv:g} uV"
-        ),
-        (
-            "Broad review: at least "
-            f"{thresholds.broad_extreme_review_unique_electrodes:g} unique "
-            "extreme-band electrodes"
-        ),
-    ]
-
-
 def _provisional_harmonics(
     *,
     project_root: Path,
@@ -4798,6 +4771,5 @@ __all__ = [
     "resolve_frequency_qc_coverage_decisions",
     "run_frequency_domain_qc_review",
     "sync_frequency_domain_qc_automatic_state",
-    "thresholds_summary_lines",
     "validate_frequency_domain_qc_review_decisions",
 ]

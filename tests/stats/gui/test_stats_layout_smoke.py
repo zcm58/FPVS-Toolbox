@@ -376,9 +376,7 @@ def test_stats_window_layout_smoke(qtbot, tmp_path, app):
     assert window.manual_exclusion_select_all_btn.text() == "Exclude all"
     assert window.manual_exclusion_clear_btn.text() == "Clear exclusions"
     assert isinstance(window.manual_exclusion_summary_label, QLabel)
-    assert not hasattr(window, "reporting_summary_export_checkbox")
-    assert window.reporting_summary_export_action.isCheckable()
-    assert window.reporting_summary_export_action.isChecked()
+    assert window.stats_ready_export_btn.text() == "Export Stats-Ready Workbook"
     assert window.log_text.property("logSurface") is True
     assert window.summary_text.property("logSurface") is True
 

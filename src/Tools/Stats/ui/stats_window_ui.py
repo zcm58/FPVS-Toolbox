@@ -560,21 +560,6 @@ class StatsWindowUiMixin:
         export_actions.add_button(self.export_copy_btn)
         export_row.addWidget(export_actions)
 
-        self.export_options_btn = make_action_button("Export Options", compact=True)
-        self.export_options_btn.setObjectName("stats_export_options_button")
-        self.export_options_menu = QMenu(self.export_options_btn)
-        self.reporting_summary_export_action = QAction(
-            "Auto-save Reporting Summary (.txt)",
-            self.export_options_menu,
-        )
-        self.reporting_summary_export_action.setCheckable(True)
-        self.reporting_summary_export_action.setChecked(True)
-        self.reporting_summary_export_action.setToolTip(
-            "When checked, write a plain-text Reporting Summary at end-of-run."
-        )
-        self.export_options_menu.addAction(self.reporting_summary_export_action)
-        self.export_options_btn.setMenu(self.export_options_menu)
-
         self.stats_ready_export_btn = make_action_button("Export Stats-Ready Workbook")
         self.stats_ready_export_btn.setObjectName("stats_ready_export_button")
         self.stats_ready_export_btn.setToolTip(
@@ -599,7 +584,6 @@ class StatsWindowUiMixin:
         export_options_actions = ActionRow(comparison_exports_section, alignment=Qt.AlignLeft)
         export_options_actions.setObjectName("stats_export_options_actions")
         export_options_actions.add_button(self.stats_ready_export_btn)
-        export_options_actions.add_button(self.export_options_btn)
         export_options_actions.row_layout.addStretch(1)
         comparison_exports_layout.addWidget(export_options_actions)
 
@@ -894,10 +878,6 @@ class StatsWindowUiMixin:
         self._sync_summary_output_visibility()
 
     # --------------------------- actions ---------------------------
-
-    def _auto_export_reporting_summary_enabled(self) -> bool:
-        action = getattr(self, "reporting_summary_export_action", None)
-        return bool(action is None or action.isChecked())
 
     def set_pipeline_progress(
         self,

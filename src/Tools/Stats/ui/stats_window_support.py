@@ -19,7 +19,7 @@ from typing import Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 import pandas as pd
 from PySide6.QtCore import Qt, QTimer, QThreadPool, Slot, QUrl
-from PySide6.QtGui import QAction, QDesktopServices, QGuiApplication, QTextCursor
+from PySide6.QtGui import QDesktopServices, QGuiApplication, QTextCursor
 from PySide6.QtWidgets import (
     QFileDialog,
     QCheckBox,
@@ -36,7 +36,6 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMainWindow,
-    QMenu,
     QMessageBox,
     QPlainTextEdit,
     QScrollArea,
@@ -52,7 +51,6 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-# Qt imports proof: QAction from PySide6.QtGui
 from Main_App import SettingsManager
 from Main_App.projects.project import (
     EXCEL_SUBFOLDER_NAME,
@@ -137,15 +135,9 @@ from Tools.Stats.reporting.summary import (
     build_summary_from_frames,
     build_summary_frames_from_results,
 )
-from Tools.Stats.reporting.reporting_summary import (
-    ReportingSummaryContext,
-    build_default_report_path,
-    build_reporting_summary,
-)
 from Tools.Stats.widgets.elided_label import ElidedPathLabel
 
 logger = logging.getLogger(__name__)
-_unused_qaction = QAction  # keep import alive for Qt resource checkers
 
 
 _UNKNOWN_GROUP_IDS = frozenset(

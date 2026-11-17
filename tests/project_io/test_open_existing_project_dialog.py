@@ -350,11 +350,12 @@ def test_project_open_finishes_when_application_preferences_cannot_save(
 
     qtbot.waitUntil(lambda: len(ready) == 1, timeout=5000)
     assert main_window.currentProject.project_root == root
+    assert main_window.currentProject.input_folder == raw
     assert main_window.currentProject.event_map == mapping
     assert project_workflows.validated_event_map(main_window, focus_error=False) == mapping
-    assert main_window.settings.get("paths", "data_folder") == str(raw)
+    assert not main_window.settings.config.has_option("paths", "data_folder")
     assert path.read_bytes() == before
     assert not message_spy["critical"]
-    assert len(message_spy["warning"]) == (1 if entry == "picker" else 2)
+    assert len(message_spy["warning"]) == (0 if entry == "picker" else 1)
     assert all(title == "Application Preferences Not Saved"
                for title, _ in message_spy["warning"])

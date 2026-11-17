@@ -209,3 +209,18 @@ def test_settings_collection_preserves_newer_hidden_method_selection(tmp_path, m
     reopened = Project.load(tmp_path)
     assert reopened.preprocessing["processing_pipeline"] == selected
     assert reopened.preprocessing["low_pass"] == 42.0
+
+
+def test_settings_collection_preserves_saved_nondefault_stim_channel(tmp_path):
+    panel = _panel(tmp_path, ANATOMICAL)
+    panel.project.update_preprocessing({**panel.project.preprocessing, "stim_channel": "Trigger"})
+    panel.project.save()
+    panel.preproc_edits[0] = SimpleNamespace(text=lambda: "42")
+
+    values = panel._collect_project_preprocessing_inputs()
+    panel.project.update_preprocessing(values)
+    panel.project.save()
+
+    reopened = Project.load(tmp_path)
+    assert reopened.preprocessing["stim_channel"] == "Trigger"
+    assert reopened.preprocessing["low_pass"] == 42.0
