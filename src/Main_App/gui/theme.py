@@ -3,19 +3,21 @@
 from __future__ import annotations
 
 import logging
+from functools import partial
 from pathlib import Path
 from typing import Literal, Optional
 
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QPalette
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QWidget
 
 from Main_App.gui.style_tokens import (
     ACCENT_COLOR,
     ACCENT_SOFT_BG,
     ACCENT_TINT,
     BORDER_SOFT_COLOR,
-    CONTENT_BG,
     CONTROL_BORDER,
+    CONTENT_BG,
     CORNER_RADIUS,
     DANGER_COLOR,
     FOCUS_COLOR,
@@ -32,8 +34,10 @@ from Main_App.gui.style_tokens import (
     build_status_banner_stylesheet,
     build_tool_label_stylesheet,
     build_workspace_chrome_stylesheet,
+    render_ui_stylesheet,
+    resolve_ui_color,
 )
-from Main_App.gui.typography import apply_app_font, css_font_family, css_font_size, css_font_weight
+from Main_App.gui.typography import app_font, apply_app_font, css_font_family, css_font_size, css_font_weight
 
 logger = logging.getLogger(__name__)
 
@@ -57,8 +61,9 @@ DEFAULT_LIGHT_THEME: LightThemeName = LIGHT_THEME_FUSION
 
 def build_fpvs_app_stylesheet() -> str:
     """Return the shared FPVS stylesheet for app and tool windows."""
-    chevron_down = Path(__file__).with_name("chevron-down.svg").as_posix()
-    chevron_up = Path(__file__).with_name("chevron-up.svg").as_posix()
+    chevron_down = _appearance_asset_url("chevron-down")
+    chevron_up = _appearance_asset_url("chevron-up")
+    checkbox_check = _appearance_asset_url("checkbox-check")
     return f"""
         QWidget {{
             color: {TEXT_PRIMARY};
@@ -68,6 +73,15 @@ def build_fpvs_app_stylesheet() -> str:
 
         QWidget[fpvsSurface="true"] {{
             background: {PAGE_BG};
+        }}
+
+        QMenu {{
+            background-color: {SURFACE_BG};
+            border: 1px solid {BORDER_SOFT_COLOR};
+        }}
+
+        QMenu::item:disabled {{
+            color: {TEXT_MUTED};
         }}
 
         QGroupBox {{
@@ -96,6 +110,74 @@ def build_fpvs_app_stylesheet() -> str:
         }}
 
         {build_tool_label_stylesheet()}
+
+        QCheckBox::indicator,
+        QRadioButton::indicator {{
+            width: 11px;
+            height: 11px;
+            border: 1px solid {CONTROL_BORDER};
+            background: {SURFACE_BG};
+        }}
+
+        QCheckBox::indicator {{
+            border-radius: 3px;
+        }}
+
+        QRadioButton::indicator {{
+            border-radius: 6px;
+        }}
+
+        QCheckBox::indicator:checked {{
+            background: {ACCENT_COLOR};
+            border-color: {ACCENT_COLOR};
+            image: {checkbox_check};
+        }}
+
+        QCheckBox::indicator:indeterminate {{
+            background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+                stop: 0 {SURFACE_BG}, stop: 0.38 {SURFACE_BG},
+                stop: 0.39 {TEXT_SECONDARY}, stop: 0.61 {TEXT_SECONDARY},
+                stop: 0.62 {SURFACE_BG}, stop: 1 {SURFACE_BG});
+        }}
+
+        QRadioButton::indicator:checked {{
+            border-color: {ACCENT_COLOR};
+            background: qradialgradient(cx: 0.5, cy: 0.5, fx: 0.5, fy: 0.5, radius: 0.5,
+                stop: 0 {ACCENT_COLOR}, stop: 0.42 {ACCENT_COLOR},
+                stop: 0.57 {SURFACE_BG}, stop: 1 {SURFACE_BG});
+        }}
+
+        QCheckBox::indicator:hover:enabled,
+        QRadioButton::indicator:hover:enabled {{
+            border-color: {ACCENT_COLOR};
+        }}
+
+        QCheckBox::indicator:focus:enabled,
+        QRadioButton::indicator:focus:enabled {{
+            border-color: {FOCUS_COLOR};
+        }}
+
+        QCheckBox:disabled,
+        QRadioButton:disabled {{
+            color: {TEXT_MUTED};
+        }}
+
+        QCheckBox::indicator:unchecked:disabled,
+        QRadioButton::indicator:unchecked:disabled {{
+            background: {PAGE_BG};
+        }}
+
+        QCheckBox::indicator:checked:disabled {{
+            background: {CONTROL_BORDER};
+            border-color: {CONTROL_BORDER};
+        }}
+
+        QRadioButton::indicator:checked:disabled {{
+            border-color: {CONTROL_BORDER};
+            background: qradialgradient(cx: 0.5, cy: 0.5, fx: 0.5, fy: 0.5, radius: 0.5,
+                stop: 0 {CONTROL_BORDER}, stop: 0.42 {CONTROL_BORDER},
+                stop: 0.57 {PAGE_BG}, stop: 1 {PAGE_BG});
+        }}
 
         QLineEdit,
         QComboBox,
@@ -131,7 +213,7 @@ def build_fpvs_app_stylesheet() -> str:
         }}
 
         QComboBox::down-arrow {{
-            image: url("{chevron_down}");
+            image: {chevron_down};
             width: 12px;
             height: 12px;
         }}
@@ -175,12 +257,12 @@ def build_fpvs_app_stylesheet() -> str:
 
         QSpinBox::up-arrow,
         QDoubleSpinBox::up-arrow {{
-            image: url("{chevron_up}");
+            image: {chevron_up};
         }}
 
         QSpinBox::down-arrow,
         QDoubleSpinBox::down-arrow {{
-            image: url("{chevron_down}");
+            image: {chevron_down};
         }}
 
         QLineEdit:focus,
@@ -279,38 +361,131 @@ def build_fpvs_app_stylesheet() -> str:
     """
 
 
+def _appearance_asset_url(name: str, *, dark: bool = False) -> str:
+    filename = f"{name}{'-dark' if dark else ''}.svg"
+    return f'url("{Path(__file__).with_name(filename).as_posix()}")'
+
+
+def _render_stylesheet(stylesheet: str, *, dark: bool) -> str:
+    if not dark:
+        return stylesheet
+    result = render_ui_stylesheet(stylesheet, dark=True)
+    for name in ("chevron-up", "chevron-down", "checkbox-check"):
+        result = result.replace(_appearance_asset_url(name), _appearance_asset_url(name, dark=True))
+    return result
+
+
+def appearance_is_dark(app: QApplication | None = None) -> bool:
+    """Return whether the active Toolbox theme is dark."""
+    app = app if app is not None else QApplication.instance()
+    if app is None:
+        return False
+    mode = app.property("fpvsAppearanceMode")
+    return mode == "dark" or (mode == "auto" and app.styleHints().colorScheme() == Qt.ColorScheme.Dark)
+
+
+def theme_color(light_color: str) -> QColor:
+    """Resolve a shared UI token for custom painting, independently of figure colors."""
+    return QColor(resolve_ui_color(light_color, dark=appearance_is_dark()))
+
+
+def set_themed_stylesheet(widget: QWidget, stylesheet: str) -> None:
+    """Apply widget-local semantic QSS and keep its source for live theme changes."""
+    if widget.property("fpvsStylesheetSource") != stylesheet:
+        widget.setProperty("fpvsStylesheetSource", stylesheet)
+    _apply_widget_stylesheet(widget, stylesheet, dark=appearance_is_dark())
+
+
+def _apply_widget_stylesheet(widget: QWidget, source: str, *, dark: bool) -> None:
+    stylesheet = _render_stylesheet(source, dark=dark)
+    if widget.styleSheet() != stylesheet:
+        widget.setStyleSheet(stylesheet)
+
+
+def _apply_fusion_palette(app: QApplication, *, dark: bool) -> None:
+    palette = app.style().standardPalette()
+
+    for role, color in (
+        (QPalette.Window, PAGE_BG),
+        (QPalette.Base, SURFACE_BG),
+        (QPalette.AlternateBase, SURFACE_ALT_BG),
+        (QPalette.Text, TEXT_PRIMARY),
+        (QPalette.WindowText, TEXT_PRIMARY),
+        (QPalette.ButtonText, TEXT_PRIMARY),
+        (QPalette.Button, SURFACE_BG),
+        (QPalette.ToolTipBase, SURFACE_BG if dark else "#FFFFDC"),
+        (QPalette.ToolTipText, TEXT_PRIMARY),
+        (QPalette.PlaceholderText, TEXT_MUTED),
+        (QPalette.Highlight, ACCENT_SOFT_BG),
+        (QPalette.HighlightedText, TEXT_PRIMARY),
+        (QPalette.Link, ACCENT_COLOR),
+        (QPalette.LinkVisited, ACCENT_COLOR),
+        (QPalette.Mid, BORDER_SOFT_COLOR),
+    ):
+        palette.setColor(role, QColor(resolve_ui_color(color, dark=dark)))
+
+    if dark:
+        palette.setColor(QPalette.Dark, QColor(resolve_ui_color(LOG_BG, dark=True)))
+        palette.setColor(QPalette.Light, QColor(resolve_ui_color(CONTROL_BORDER, dark=True)))
+        palette.setColor(QPalette.Midlight, QColor(resolve_ui_color(BORDER_SOFT_COLOR, dark=True)))
+
+    disabled_color = QColor(resolve_ui_color(TEXT_MUTED, dark=dark))
+    for role in (QPalette.Text, QPalette.WindowText, QPalette.ButtonText):
+        palette.setColor(QPalette.Disabled, role, disabled_color)
+
+    if app.palette() != palette:
+        app.setPalette(palette)
+
+
 def apply_fusion_light_palette(app: QApplication) -> None:
     """Apply a deterministic Fusion + light palette regardless of OS theme."""
     app.setStyle("Fusion")
-    palette = app.palette()
+    _apply_fusion_palette(app, dark=False)
 
-    # Core surfaces
-    palette.setColor(QPalette.Window, QColor(PAGE_BG))
-    palette.setColor(QPalette.Base, QColor(SURFACE_BG))
-    palette.setColor(QPalette.AlternateBase, QColor(SURFACE_ALT_BG))
 
-    # Text / foregrounds
-    palette.setColor(QPalette.Text, QColor(TEXT_PRIMARY))
-    palette.setColor(QPalette.WindowText, QColor(TEXT_PRIMARY))
-    palette.setColor(QPalette.ButtonText, QColor(TEXT_PRIMARY))
+def _apply_app_appearance(app: QApplication) -> None:
+    # Qt wraps the base style when app QSS is active. Keep the actual
+    # wrapper so we can detect a caller switching styles without resetting Fusion.
+    if app.style() is not getattr(app, "_fpvs_fusion_style", None):
+        app.setStyle("Fusion")
+    font = app_font()
+    if app.font() != font:
+        app.setFont(font)
 
-    # Buttons / controls
-    palette.setColor(QPalette.Button, QColor(SURFACE_BG))
+    dark = appearance_is_dark(app)
+    _apply_fusion_palette(app, dark=dark)
+    stylesheet = _render_stylesheet(build_fpvs_app_stylesheet(), dark=dark)
+    if app.styleSheet() != stylesheet:
+        app.setStyleSheet(stylesheet)
+    app._fpvs_fusion_style = app.style()
+    for widget in app.allWidgets():
+        source = widget.property("fpvsStylesheetSource")
+        if source is not None:
+            _apply_widget_stylesheet(widget, source, dark=dark)
 
-    # Tooltips
-    palette.setColor(QPalette.ToolTipBase, QColor(255, 255, 220))
-    palette.setColor(QPalette.ToolTipText, QColor(TEXT_PRIMARY))
 
-    # Selection / accents
-    palette.setColor(QPalette.Highlight, QColor(ACCENT_SOFT_BG))
-    palette.setColor(QPalette.HighlightedText, QColor(TEXT_PRIMARY))
-    palette.setColor(QPalette.Link, QColor(ACCENT_COLOR))
+def _system_appearance_changed(app: QApplication, _scheme: Qt.ColorScheme) -> None:
+    if app.property("fpvsAppearanceMode") == "auto":
+        _apply_app_appearance(app)
 
-    # Disabled state readability
-    palette.setColor(QPalette.Disabled, QPalette.Text, QColor(TEXT_MUTED))
-    palette.setColor(QPalette.Disabled, QPalette.ButtonText, QColor(TEXT_MUTED))
 
-    app.setPalette(palette)
+def set_appearance_mode(app: QApplication, mode: str) -> None:
+    """Apply Light, Dark, or Follow system throughout the running application."""
+    schemes = {
+        "light": Qt.ColorScheme.Light,
+        "dark": Qt.ColorScheme.Dark,
+        "auto": Qt.ColorScheme.Unknown,
+    }
+    key = mode.strip().lower()
+    if key not in schemes:
+        raise ValueError("Appearance must be Light, Dark, or Auto.")
+    hints = app.styleHints()
+    if app.property("fpvsAppearanceMode") is None:
+        # Qt announces colorSchemeChanged before updating the platform palette.
+        hints.colorSchemeChanged.connect(partial(_system_appearance_changed, app), Qt.QueuedConnection)
+    app.setProperty("fpvsAppearanceMode", key)
+    hints.setColorScheme(schemes[key])
+    _apply_app_appearance(app)
 
 
 def apply_material_light_theme(
@@ -381,10 +556,8 @@ def apply_fpvs_theme(
 ) -> None:
     """Apply the central FPVS palette and shared stylesheet."""
     chosen: LightThemeName = theme or DEFAULT_LIGHT_THEME
+    set_appearance_mode(app, "Light")
     if chosen == LIGHT_THEME_MATERIAL:
         apply_material_light_theme(app, theme=material_theme)
-    else:
-        apply_fusion_light_palette(app)
-
-    apply_app_font(app)
-    app.setStyleSheet(build_fpvs_app_stylesheet())
+        apply_app_font(app)
+        app.setStyleSheet(build_fpvs_app_stylesheet())

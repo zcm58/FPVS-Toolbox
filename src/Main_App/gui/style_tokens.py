@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from Main_App.gui.typography import css_font_size, css_font_weight
 
 ACCENT_COLOR = "#00646C"
@@ -35,6 +37,7 @@ CONTROL_BORDER = "#6A7C87"
 TEXT_PRIMARY = "#1D2A34"
 TEXT_SECONDARY = "#4D626D"
 TEXT_MUTED = TEXT_SECONDARY
+ON_ACTION = "white"
 
 HEADER_BG = "#222F3B"
 INFO_BG = "#F1F6FC"
@@ -44,6 +47,68 @@ CHROME_HOVER = "#2C3D49"
 CHROME_ACTIVE = "#2A4350"
 CHROME_TEXT = "#F1F6F8"
 CHROME_MUTED_TEXT = "#A5B7C2"
+
+# Light tokens remain the stylesheet authoring values. Translate only these
+# explicit interface roles so scientific colors and authored asset URLs stay separate.
+_DARK_COLORS = {
+    ACCENT_COLOR: "#61D4CE",
+    ACCENT_COLOR_HOVER: "#82E2DA",
+    ACCENT_COLOR_PRESSED: "#46BAB6",
+    ACCENT_SOFT_BG: "#28454C",
+    ACCENT_SOFT_BORDER: "#557E85",
+    ACCENT_TINT: "#243B43",
+    FOCUS_COLOR: "#F2BF69",
+    SIGNAL_COLOR: "#53CAD0",
+    PROGRESS_FILL: "#267778",
+    DANGER_COLOR: "#F1948D",
+    DANGER_COLOR_HOVER: "#FFAAA0",
+    DANGER_SOFT_BG: "#432B30",
+    DANGER_SOFT_BORDER: "#86535A",
+    SUCCESS_SOFT_BG: "#223B32",
+    SUCCESS_SOFT_BORDER: "#587D68",
+    WARNING_SOFT_BG: "#3F3525",
+    WARNING_SOFT_BORDER: "#897348",
+    PAGE_BG: "#18232B",
+    SURFACE_BG: "#23323C",
+    LOG_BG: "#141F27",
+    BORDER_COLOR: "#435864",
+    CONTROL_BORDER: "#7B919E",
+    TEXT_PRIMARY: "#EEF3F5",
+    TEXT_SECONDARY: "#B5C7D0",
+    ON_ACTION: "#15252B",
+    HEADER_BG: "#121B22",
+    INFO_BG: "#263B49",
+    INFO_BORDER: "#527186",
+    CHROME_HOVER: "#24353F",
+    CHROME_ACTIVE: "#28454C",
+}
+_DARK_COLORS = {color.lower(): dark for color, dark in _DARK_COLORS.items()}
+_STYLE_COLOR = re.compile(
+    r"""url\([^)]*\)|"[^"]*"|'[^']*'"""
+    r"|(?P<hex>#[0-9a-f]{6}(?![0-9a-f]))"
+    r"|(?P<on_action>(?<![\w-])color:\s*white(?=\s*(?:[;}]|$)))",
+    re.IGNORECASE,
+)
+
+
+def resolve_ui_color(color: str, *, dark: bool) -> str:
+    """Resolve a shared semantic color for an opt-in widget paint operation."""
+    return _DARK_COLORS.get(color.lower(), color) if dark else color
+
+
+def render_ui_stylesheet(stylesheet: str, *, dark: bool) -> str:
+    """Resolve semantic colors in a stylesheet authored with light tokens."""
+    if not dark:
+        return stylesheet
+
+    def replace_token(match: re.Match[str]) -> str:
+        if match.lastgroup == "on_action":
+            return f"color: {resolve_ui_color(ON_ACTION, dark=True)}"
+        value = match.group()
+        return resolve_ui_color(value, dark=True) if match.lastgroup == "hex" else value
+
+    return _STYLE_COLOR.sub(replace_token, stylesheet)
+
 
 PAGE_MARGIN = 22
 SECTION_PADDING = 15
@@ -165,7 +230,7 @@ def build_action_button_stylesheet() -> str:
         QPushButton[variant="primary"] {{
             background-color: {ACCENT_COLOR};
             border-color: {ACCENT_COLOR};
-            color: white;
+            color: {ON_ACTION};
             font-weight: {css_font_weight("button_strong")};
             padding: 8px 18px;
         }}
@@ -227,7 +292,7 @@ def build_action_button_stylesheet() -> str:
         QPushButton[variant="danger"] {{
             background: {DANGER_COLOR};
             border-color: {DANGER_COLOR};
-            color: white;
+            color: {ON_ACTION};
             font-weight: {css_font_weight("button_strong")};
         }}
 
@@ -508,7 +573,7 @@ def build_landing_page_stylesheet() -> str:
         }}
 
         #landing_title {{
-            color: {HEADER_BG};
+            color: {TEXT_PRIMARY};
             font-size: {css_font_size("landing_title")};
             font-weight: {css_font_weight("landing_title")};
         }}

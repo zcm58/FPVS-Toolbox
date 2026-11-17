@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 from Main_App.gui.components import SubsectionHeaderLabel, font_for_role, make_action_button
 from Main_App.gui.signal_review_model import SignalReviewItem
 from Main_App.gui.style_tokens import SECTION_HEADER_CONTENT_GAP, TEXT_SECONDARY
+from Main_App.gui.theme import set_themed_stylesheet
 from Main_App.processing.qc_review_episodes import QcReviewEpisode, group_review_episodes
 
 
@@ -63,7 +64,7 @@ class SignalReviewPanel(QWidget):
             self,
         )
         review_note.setWordWrap(True)
-        review_note.setStyleSheet(f"color: {TEXT_SECONDARY};")
+        set_themed_stylesheet(review_note, f"color: {TEXT_SECONDARY};")
         layout.addWidget(review_note)
 
         filters = QHBoxLayout()
@@ -122,7 +123,7 @@ class SignalReviewPanel(QWidget):
         self.details_context_label.setTextFormat(Qt.TextFormat.PlainText)
         self.details_context_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.details_context_label.setWordWrap(True)
-        self.details_context_label.setStyleSheet(f"color: {TEXT_SECONDARY};")
+        set_themed_stylesheet(self.details_context_label, f"color: {TEXT_SECONDARY};")
         details_layout.addWidget(self.details_context_label)
         self.amplitude_help_link = QLabel(details_panel)
         self.amplitude_help_link.setText(

@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Property, QEasingCurve, QPointF, QPropertyAnimation, QSize, Qt
-from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
+from PySide6.QtGui import QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QWidget
+
+from Main_App.gui.style_tokens import ACCENT_COLOR, ACCENT_SOFT_BG
+from Main_App.gui.theme import theme_color
 
 
 class BrainPulseWidget(QWidget):
@@ -52,8 +55,8 @@ class BrainPulseWidget(QWidget):
         painter.setRenderHint(QPainter.Antialiasing, True)
 
         paths = self._brain_paths()
-        guide_color = QColor("#D9EAF9")
-        stroke_color = QColor("#3864A8")
+        guide_color = theme_color(ACCENT_SOFT_BG)
+        stroke_color = theme_color(ACCENT_COLOR)
 
         guide_pen = QPen(guide_color, 4.2, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
         stroke_width = 4.2

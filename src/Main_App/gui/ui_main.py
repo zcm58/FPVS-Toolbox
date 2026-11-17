@@ -29,6 +29,7 @@ from Main_App.gui.project_welcome import build_project_welcome
 from Main_App.gui.processing_history_label import ProcessingHistoryLabel
 from Main_App.gui.run_outcome import build_last_run_panel
 from Main_App.gui.shell_status import PROCESSING_ACTIVITY_MESSAGE
+from Main_App.gui.theme import set_themed_stylesheet
 from .style_tokens import (
     BROWSE_BUTTON_WIDTH,
     EVENT_ID_COLUMN_WIDTH,
@@ -96,7 +97,7 @@ def init_ui(self) -> None:
 
     setup_panel = QWidget(self.workspace_stack)
     setup_panel.setObjectName("setup_panel")
-    setup_panel.setStyleSheet(build_main_page_stylesheet())
+    set_themed_stylesheet(setup_panel, build_main_page_stylesheet())
     setup_panel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
     setup_layout = QVBoxLayout(setup_panel)
     setup_layout.setContentsMargins(0, 0, 0, 0)
@@ -369,7 +370,7 @@ def init_ui(self) -> None:
 
     processing_page = QWidget(self.workspace_stack)
     processing_page.setObjectName("processing_page")
-    processing_page.setStyleSheet(build_main_page_stylesheet())
+    set_themed_stylesheet(processing_page, build_main_page_stylesheet())
     processing_page.setAttribute(Qt.WA_StyledBackground, True)
     processing_page.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
     self.processing_page = processing_page

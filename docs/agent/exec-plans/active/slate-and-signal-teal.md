@@ -9,15 +9,15 @@ palette. See [GUI architecture](../../architecture/gui.md) for manual checks.
 
 Apply the palette to the PySide6 shell, navigation, shared controls, and
 workflow chrome. Keep the Toolbox icon and existing typography. The app uses
-Fusion light with a single Slate menu bar. Popup menus use
-the light application palette.
+Fusion with a single Slate menu bar. Settings offers Light, Dark, and Auto.
+Popup menus, tools, and dialogs follow the current appearance.
 
 Use [style_tokens.py](../../../../src/Main_App/gui/style_tokens.py) for shared
 roles, [theme.py](../../../../src/Main_App/gui/theme.py) for Qt palette and
 stylesheet application, and the [shared components](../../../../src/Main_App/gui/components/)
 for existing buttons, fields, and status banners.
 
-## Palette
+## Light palette
 
 | Role | Color | Toolbox use |
 | --- | --- | --- |
@@ -44,8 +44,7 @@ contracts, project formats, and exported figures and tables.
 1. Map the selected roles onto the shared Qt palette and tokens. Inventory
    hardcoded chrome colors in navigation, widgets, and tool pages.
    Review foreground and background pairs for each state before replacing a
-   value. Use the existing light theme and dark shell roles. Adding a full
-   desktop dark mode or appearance preference requires a separate decision.
+   value. Map light and dark colors to the same semantic UI roles.
 2. Apply the palette to shared navigation, fields, buttons, and selection
    states in the main window. Review a project workspace with keyboard focus
    and both light and dark system menu appearances. Confirm that disabled

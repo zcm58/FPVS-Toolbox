@@ -21,6 +21,9 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from Main_App.gui.theme import set_appearance_mode
+from Main_App.settings.appearance import read_saved_appearance_mode
+
 from Main_App.gui.updater_presentation import (
     action_button,
     apply_toolbox_theme,
@@ -293,6 +296,7 @@ def run_updater_gui(
     app = QApplication([sys.argv[0]])
     app.setApplicationName("FPVS Toolbox Updater")
     app.setOrganizationName("FPVS Toolbox")
+    set_appearance_mode(app, read_saved_appearance_mode())
     if smoke_report is not None:
         return run_visible_smoke(app, smoke_report)
     if startup_error is not None:

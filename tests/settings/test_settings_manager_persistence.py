@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from Main_App.settings import settings_manager as module
+from Main_App.settings.appearance import read_saved_appearance_mode
 from Main_App.settings.settings_manager import DEFAULTS, SettingsManager
 
 
@@ -17,6 +18,50 @@ def _seed(path: Path) -> SettingsManager:
     manager.set_roi_pairs([("Central", ["CZ"]), ("Test ROI", ["OZ"])])
     manager.save()
     return manager
+
+
+@pytest.mark.parametrize(("stored", "effective"), [
+    (None, "Auto"), ("System", "Auto"), ("light", "Light"),
+    ("Dark", "Dark"), ("Auto", "Auto"), ("unsupported", "Auto"),
+])
+def test_appearance_mode_reads_defaults_and_legacy_values(tmp_path, stored, effective):
+    path = tmp_path / "settings.ini"
+    if stored is not None:
+        path.write_text(f"[appearance]\nmode = {stored}\n", encoding="utf-8")
+    manager = SettingsManager(str(path))
+    assert manager.get_appearance_mode() == effective
+    if stored is None:
+        assert not path.exists()
+    else:
+        assert path.read_text(encoding="utf-8") == f"[appearance]\nmode = {stored}\n"
+
+
+@pytest.mark.parametrize(("selected", "stored"), [
+    ("Light", "Light"), (" dark ", "Dark"), ("Auto", "Auto"), ("System", "Auto"),
+])
+def test_appearance_mode_persists_canonical_value(tmp_path, selected, stored):
+    path = tmp_path / "settings.ini"
+    manager = SettingsManager(str(path))
+    manager.set_appearance_mode(selected)
+    manager.save()
+    reloaded = SettingsManager(str(path))
+    assert reloaded.get("appearance", "mode") == stored
+    assert reloaded.get_appearance_mode() == stored
+
+
+def test_standalone_appearance_reader_does_not_create_or_migrate_config(tmp_path, monkeypatch):
+    config_home = tmp_path / "toolbox"
+    monkeypatch.setenv("FPVS_CONFIG_HOME", str(config_home))
+    assert read_saved_appearance_mode() == "Auto"
+    assert not config_home.exists()
+
+    path = config_home / "settings" / "settings.ini"
+    path.parent.mkdir(parents=True)
+    for stored, effective in (("Dark", "Dark"), ("Light", "Light"), ("System", "Auto")):
+        source = f"[appearance]\nmode = {stored}\n"
+        path.write_text(source, encoding="utf-8")
+        assert read_saved_appearance_mode() == effective
+        assert path.read_text(encoding="utf-8") == source
 
 
 @pytest.mark.parametrize("existing_ini", [False, True])

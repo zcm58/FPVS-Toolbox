@@ -20,13 +20,14 @@ from Main_App.gui.style_tokens import (
     ACCENT_COLOR,
     ACCENT_SOFT_BG,
     BORDER_COLOR,
-    HEADER_BG,
+    FOCUS_COLOR,
     SURFACE_ALT_BG,
     SURFACE_BG,
     TEXT_MUTED,
     TEXT_PRIMARY,
     TEXT_SECONDARY,
 )
+from Main_App.gui.theme import set_themed_stylesheet, theme_color
 
 
 ROIMembership = tuple[str, str]
@@ -213,30 +214,34 @@ class ElectrodeMapWidget(QWidget):
             f"{escape(label)}. {tooltip_membership} Editing {escape(self._active_roi_label)}; "
             f"click or press Space to {action} {escape(self._active_roi_label)}."
         )
-        background = self._active_color if checked else SURFACE_BG
-        foreground = SURFACE_BG if checked else TEXT_PRIMARY
+        # Use the membership swatch as-is in both themes.
+        swatch = QColor(self._active_color)
+        membership_color = f"rgb({swatch.red()}, {swatch.green()}, {swatch.blue()})"
+        background = membership_color if checked else SURFACE_BG
+        foreground = "rgb(255, 255, 255)" if checked else TEXT_PRIMARY
         border_width = 3 if checked else 1
         border_style = "double" if checked else "solid"
         hover_border_width = 3 if checked else 2
         focus_border_style = "double" if checked else "solid"
-        button.setStyleSheet(
+        set_themed_stylesheet(
+            button,
             f"""
             QToolButton {{
                 font-size: {self._label_size_px}px;
                 font-weight: {css_font_weight("caption")};
                 background: {background};
                 color: {foreground};
-                border: {border_width}px {border_style} {self._active_color if checked else BORDER_COLOR};
+                border: {border_width}px {border_style} {membership_color if checked else BORDER_COLOR};
                 border-radius: {button.width() // 2}px;
                 padding: 0;
             }}
             QToolButton:hover {{
                 background: {ACCENT_SOFT_BG};
                 color: {TEXT_PRIMARY};
-                border: {hover_border_width}px {border_style} {self._active_color};
+                border: {hover_border_width}px {border_style} {membership_color};
             }}
             QToolButton:focus {{
-                border: 3px {focus_border_style} {HEADER_BG};
+                border: 3px {focus_border_style} {FOCUS_COLOR};
             }}
             """
         )
@@ -245,12 +250,12 @@ class ElectrodeMapWidget(QWidget):
         _ = event
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.fillRect(self.rect(), QColor(SURFACE_ALT_BG))
+        painter.fillRect(self.rect(), theme_color(SURFACE_ALT_BG))
         scale, left, top = self._transform()
         painter.save()
         painter.translate(left, top)
         painter.scale(scale, scale)
-        painter.setPen(QPen(QColor(TEXT_MUTED), 1.5))
+        painter.setPen(QPen(theme_color(TEXT_MUTED), 1.5))
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.drawEllipse(QPointF(320, 300), 195, 195)
 
@@ -264,7 +269,7 @@ class ElectrodeMapWidget(QWidget):
         painter.drawPath(outline)
 
         painter.setFont(font_for_role("caption", self.font()))
-        painter.setPen(QColor(TEXT_SECONDARY))
+        painter.setPen(theme_color(TEXT_SECONDARY))
         for text, rect in (
             ("FRONT", QRectF(260, 21, 120, 24)),
             ("BACK", QRectF(260, 570, 120, 18)),

@@ -9,6 +9,7 @@ import sys
 import numpy as np
 import pyvista as pv
 import pytest
+from PySide6.QtGui import QColor, QPalette
 
 from Tools.LORETA_Visualizer import renderer as rendering
 from Tools.LORETA_Visualizer.source_payloads import make_source_payload
@@ -40,6 +41,8 @@ class _Plotter:
         self.actors = []
         self.removed = []
         self.renders = 0
+        self.backgrounds = []
+        self.axes_colors = []
         self.lights = []
         self.anti_aliasing = None
         self.camera_position = None
@@ -64,6 +67,13 @@ class _Plotter:
     def render(self):
         self.renders += 1
 
+    def set_background(self, color):
+        self.backgrounds.append(color)
+
+    def add_axes(self, *, interactive, color):
+        assert interactive is False
+        self.axes_colors.append(color)
+
     def enable_anti_aliasing(self, kind):
         self.anti_aliasing = kind
 
@@ -80,6 +90,8 @@ class _Plotter:
 def _renderer():
     result = rendering.BrainRendererWidget.__new__(rendering.BrainRendererWidget)
     result._plotter = _Plotter()
+    result._viewport_palette_colors = None
+    result.palette = QPalette
     result._brain_opacity = 0.48
     result._activation_opacity = 0.72
     result._activation_visible = True
@@ -226,6 +238,27 @@ def test_backend_disables_idle_timer_but_initial_frame_is_explicit(monkeypatch):
     assert renderer._plotter.anti_aliasing == "fxaa"
     assert len(renderer._plotter.lights) == 2
     assert all(light.is_camera_light for light in renderer._plotter.lights)
+
+
+def test_preview_palette_updates_only_background_and_axis_labels(monkeypatch):
+    renderer = _renderer()
+    source_actor = object()
+    renderer._plotter.actors.append(source_actor)
+    palette = QPalette()
+    monkeypatch.setattr(renderer, "palette", lambda: palette)
+    palette.setColor(QPalette.Window, QColor("#f3f6f8"))
+    palette.setColor(QPalette.WindowText, QColor("#1d2a34"))
+    renderer._sync_viewport_palette(render=False)
+
+    palette.setColor(QPalette.Window, QColor("#16232b"))
+    palette.setColor(QPalette.WindowText, QColor("#eaf3f7"))
+    renderer._sync_viewport_palette()
+    renderer._sync_viewport_palette()
+
+    assert renderer._plotter.backgrounds == ["#f3f6f8", "#16232b"]
+    assert renderer._plotter.axes_colors == ["#1d2a34", "#eaf3f7"]
+    assert renderer._plotter.renders == 1
+    assert renderer._plotter.actors == [source_actor]
 
 
 def test_quality_features_fail_without_preventing_renderer_use():

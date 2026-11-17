@@ -5,9 +5,8 @@ from pathlib import Path
 import sys
 
 from PySide6.QtCore import QByteArray, QPointF, QRect, QRectF, QSize, Qt
-from PySide6.QtGui import QColor, QIcon, QIconEngine, QPainter, QPalette, QPixmap, QPen
+from PySide6.QtGui import QColor, QIcon, QIconEngine, QPainter, QPixmap, QPen
 from PySide6.QtSvg import QSvgRenderer
-from PySide6.QtWidgets import QApplication
 
 from Main_App.gui.style_tokens import ACCENT_COLOR
 
@@ -20,17 +19,6 @@ def application_icon() -> QIcon:
     if icon.isNull():
         raise RuntimeError(f"Cannot load the FPVS Toolbox application icon: {path}")
     return icon
-
-
-def _icon_color() -> QColor:
-    app = QApplication.instance()
-    return app.palette().color(QPalette.ButtonText) if app else QColor("white")
-
-
-def _draw_dot(painter: QPainter, center: QPointF, radius: float) -> None:
-    painter.setBrush(_icon_color())
-    painter.drawEllipse(center, radius, radius)
-    painter.setBrush(Qt.NoBrush)
 
 
 _SIDEBAR_ICON_PATHS = {
@@ -204,7 +192,7 @@ def tool_info_icon(size: int = 20) -> QIcon:
     painter.drawEllipse(center, size * 0.42, size * 0.42)
 
     painter.setBrush(QColor("white"))
-    _draw_dot(painter, QPointF(size * 0.50, size * 0.33), size * 0.055)
+    painter.drawEllipse(QPointF(size * 0.50, size * 0.33), size * 0.055, size * 0.055)
 
     pen = QPen(QColor("white"))
     pen.setWidth(max(2, round(size * 0.14)))

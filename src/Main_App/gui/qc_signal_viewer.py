@@ -6,7 +6,7 @@ from dataclasses import replace
 import math
 
 from PySide6.QtCore import QPointF, QRectF, QThread, QTimer, Signal, Slot, Qt
-from PySide6.QtGui import QColor, QPainter, QPen
+from PySide6.QtGui import QPainter, QPen
 from PySide6.QtWidgets import (
     QComboBox, QDoubleSpinBox, QHBoxLayout, QLabel, QPlainTextEdit, QTabWidget,
     QVBoxLayout, QWidget,
@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
 
 from Main_App.gui.components import ActionRow, AppDialog, SurfaceSize, make_action_button
 from Main_App.gui.style_tokens import ACCENT_COLOR, BORDER_COLOR, TEXT_MUTED
+from Main_App.gui.theme import theme_color
 from Main_App.processing.qc_signal_view import QcSignalViewRequest, QcSignalViewResult
 from Main_App.workers.qc_signal_view_worker import QcSignalViewWorker
 
@@ -57,12 +58,12 @@ class _EnvelopePlot(QWidget):
             top = row * row_height
             mid = top + row_height / 2
             height = max(1.0, row_height / 2 - 13)
-            painter.setPen(QColor(TEXT_MUTED))
+            painter.setPen(theme_color(TEXT_MUTED))
             painter.drawText(QRectF(0, top, 100, row_height), Qt.TextFlag.TextWordWrap,
                              f"{trace.name}\n±{scale:.3g} µV")
-            painter.setPen(QPen(QColor(BORDER_COLOR), 1.0))
+            painter.setPen(QPen(theme_color(BORDER_COLOR), 1.0))
             painter.drawLine(QPointF(left, mid), QPointF(left + width, mid))
-            painter.setPen(QPen(QColor(ACCENT_COLOR), 1.1))
+            painter.setPen(QPen(theme_color(ACCENT_COLOR), 1.1))
             previous = None
             for time, low, high in zip(self._times, trace.minimum_uv, trace.maximum_uv, strict=True):
                 if low is None or high is None:
@@ -75,7 +76,7 @@ class _EnvelopePlot(QWidget):
                 if previous is not None:
                     painter.drawLine(previous, center)
                 previous = center
-        painter.setPen(QColor(TEXT_MUTED))
+        painter.setPen(theme_color(TEXT_MUTED))
         painter.drawText(QRectF(left, self.height() - 21, width, 20), Qt.AlignmentFlag.AlignLeft,
                          f"{self._times[0]:.3f} s")
         painter.drawText(QRectF(left, self.height() - 21, width, 20), Qt.AlignmentFlag.AlignRight,

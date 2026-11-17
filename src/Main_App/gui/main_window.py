@@ -8,7 +8,7 @@ import queue
 import sys
 from pathlib import Path
 from Main_App.exports.post_process import post_process as _shared_post_process
-from Main_App.gui.theme import apply_fpvs_theme
+from Main_App.gui.theme import set_appearance_mode
 from Main_App.gui.components import show_post_processing_required
 from typing import Callable
 from types import MethodType, SimpleNamespace
@@ -168,16 +168,7 @@ class MainWindow(QMainWindow):
 
         self.settings = SettingsManager()
 
-        # Ensure legacy appearance mode stays in sync with the PySide6 theme.
-        # PySide6 now always uses a fixed light theme, so we normalize the
-        # stored value to "Light" for any legacy consumers that still read it.
-        try:
-            current_mode = self.settings.get("appearance", "mode", "System")
-            if current_mode != "Light":
-                self.settings.set("appearance", "mode", "Light")
-                self.settings.save()
-        except Exception as exc:
-            logger.debug("Unable to persist appearance.mode=Light: %s", exc)
+        set_appearance_mode(QApplication.instance(), self.settings.get_appearance_mode())
 
         self.output_folder: str = ""
         self.data_paths: list[str] = []
@@ -239,8 +230,6 @@ class MainWindow(QMainWindow):
         # Default page and initial logs
         self.stacked.setCurrentIndex(0)
         self.log("Welcome to the FPVS Toolbox!")
-        # PySide6 now enforces a fixed light theme regardless of OS settings.
-        self.log("Appearance Mode: Light (PySide6 fixed light theme)")
         # Announce the active preprocessor (visibility only)
         logger.debug(
             "Using Main App preprocessing module: Main_App.processing.preprocess.perform_preprocessing"
@@ -1189,7 +1178,6 @@ class MainWindow(QMainWindow):
 # ----------------------------------------------------------------------
 def main() -> None:
     app = QApplication(sys.argv)
-    apply_fpvs_theme(app)
     win = MainWindow()
     win.show()
     app.exec()

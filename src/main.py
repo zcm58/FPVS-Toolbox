@@ -54,7 +54,6 @@ import multiprocessing as mp
 from PySide6.QtCore import QCoreApplication
 
 from config import FPVS_TOOLBOX_VERSION
-from Main_App.gui.theme import apply_light_palette
 
 
 def _configure_windows_dpi_awareness() -> None:
@@ -95,7 +94,6 @@ def run_app() -> int:
 
     app = QApplication([])
     app.setWindowIcon(application_icon())
-    apply_light_palette(app)
 
     window = MainWindow()
     window.show()

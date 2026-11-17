@@ -17,8 +17,12 @@ metadata, _version = version_data(REPO_ROOT)
 datas = [
     (str(metadata), "."),
     (str(APP_ICON), "assets"),
+    (str(SRC_ROOT / "Main_App" / "gui" / "checkbox-check.svg"), "Main_App/gui"),
+    (str(SRC_ROOT / "Main_App" / "gui" / "checkbox-check-dark.svg"), "Main_App/gui"),
     (str(SRC_ROOT / "Main_App" / "gui" / "chevron-down.svg"), "Main_App/gui"),
+    (str(SRC_ROOT / "Main_App" / "gui" / "chevron-down-dark.svg"), "Main_App/gui"),
     (str(SRC_ROOT / "Main_App" / "gui" / "chevron-up.svg"), "Main_App/gui"),
+    (str(SRC_ROOT / "Main_App" / "gui" / "chevron-up-dark.svg"), "Main_App/gui"),
 ]
 binaries = []
 hiddenimports = [

@@ -20,11 +20,13 @@ Primary paths:
 - `src/Main_App/gui/widgets/`: shared PySide6 presentation primitives for
   reusable buttons, cards, form rows, the busy spinner, the welcome brain
   animation, and inline status widgets.
-- `src/Main_App/gui/theme.py`: shared Fusion light palette and stylesheet helpers.
-  `style_tokens.py` applies Slate to the main menu bar. Popup menus use the
-  Toolbox light palette. Home and
-  the processing activity page apply their local styles at the page boundary
-  so embedded tools and Settings receive the shared controls.
+- `src/Main_App/gui/theme.py` owns the application-wide Fusion palette and
+  stylesheet. MainWindow applies the saved application appearance before
+  building the workspace. Light and Dark override the Qt color scheme. Auto
+  follows the Qt platform scheme and responds to changes while Toolbox is
+  open. The standalone updater reads the same preference without loading project
+  settings. Appearance-aware page styles use `set_themed_stylesheet()`. Custom
+  UI painters resolve shared tokens through `theme_color()`.
 - `src/Main_App/gui/menu_bar.py`: File, View, Tools, and Help construction.
   `file_menu.py` groups project, Settings, cache, and application actions.
   View contains Home (Ctrl+1), Tools contains default and optional beta actions,
@@ -812,7 +814,7 @@ are true:
 5. It does not import retired paths, start workers, touch project state, access
    the filesystem at import time, or create windows as an import side effect.
 
-The main app shell is the visual source of truth. Shared component defaults should mirror the main window's current-project shell, card, form, status, and action-button styling through `apply_fpvs_theme()` in `src/Main_App/gui/theme.py` and the tokens in `src/Main_App/gui/style_tokens.py`.
+The main app shell is the visual source of truth. Shared component defaults should mirror the main window's current-project shell, card, form, status, and action-button styling through `set_appearance_mode()` in `src/Main_App/gui/theme.py` and the tokens in `src/Main_App/gui/style_tokens.py`.
 
 `src/Main_App/gui/main_window.py` has been appropriately refactored and downsized into the shell/coordinator for the main window. Do not choose it as a future refactor target just to reduce size. Further `main_window.py` refactors require explicit user direction and a concrete clarity or feature-maintenance benefit.
 

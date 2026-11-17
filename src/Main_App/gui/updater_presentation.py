@@ -4,7 +4,7 @@ from __future__ import annotations
 from PySide6.QtWidgets import QPushButton, QWidget
 
 from Main_App.gui.components import make_action_button
-from Main_App.gui.theme import build_fpvs_app_stylesheet
+from Main_App.gui.theme import build_fpvs_app_stylesheet, set_themed_stylesheet
 from Main_App.gui.typography import apply_font_role
 
 
@@ -26,7 +26,7 @@ def mark_secondary_action(button: QPushButton) -> None:
 
 def apply_toolbox_theme(widget: QWidget) -> None:
     widget.setProperty("fpvsSurface", True)
-    widget.setStyleSheet(build_fpvs_app_stylesheet())
+    set_themed_stylesheet(widget, build_fpvs_app_stylesheet())
     title = getattr(widget, "title_label", None)
     if title is not None:
         apply_font_role(title, "update_title")

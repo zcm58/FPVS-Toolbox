@@ -1007,7 +1007,7 @@ def _activation_color_ramp_stylesheet(colors: tuple[str, ...] = LORETA_SCALAR_CO
     return (
         "background: qlineargradient(x1:0, y1:0, x2:1, y2:0, "
         f"{', '.join(stops)});"
-        "border: 1px solid #d6dee8;"
+        "border: 1px solid palette(mid);"
         "border-radius: 2px;"
     )
 

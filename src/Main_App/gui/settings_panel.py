@@ -19,6 +19,7 @@ from Main_App.gui.settings_harmonic_page import HARMONIC_METHOD_INFO as HARMONIC
 
 from PySide6.QtCore import QObject, Qt, QThread, Signal, Slot
 from PySide6.QtWidgets import (
+    QApplication,
     QWidget,
     QVBoxLayout,
     QLineEdit,
@@ -65,6 +66,7 @@ from Main_App.gui.project_protocol import (
 from Main_App.gui.recording_qc_identity import project_recording_coverage_rows
 from Main_App.gui.roi_settings_editor import ROISettingsEditor
 from Main_App.gui.style_tokens import PAGE_MARGIN, SECTION_GAP, SECTION_HEADER_CONTENT_GAP
+from Main_App.gui.theme import set_appearance_mode, set_themed_stylesheet
 from Main_App.gui.settings_feedback import (
     PREPROCESSING_FIELDS,
     SettingsDraftTracker,
@@ -328,7 +330,8 @@ class SettingsDialog(QDialog):
         self.tabs.setObjectName("settings_tabs")
         self.tabs.setDocumentMode(True)
         self.tabs.tabBar().setDrawBase(False)
-        self.tabs.setStyleSheet(
+        set_themed_stylesheet(
+            self.tabs,
             "QTabWidget#settings_tabs::pane, "
             "QTabWidget#settings_protocol_sections::pane, "
             "QTabWidget#settings_experimental_sections::pane {"
@@ -1341,6 +1344,12 @@ class SettingsDialog(QDialog):
         if hasattr(self, "_harmonic_settings_rollback"):
             del self._harmonic_settings_rollback
 
+    def _apply_saved_appearance(self, previous_mode: str) -> None:
+        mode = self.manager.get_appearance_mode()
+        app = QApplication.instance()
+        if mode != previous_mode and app is not None:
+            set_appearance_mode(app, mode)
+
     def _restore_harmonic_settings_after_cancel(self) -> None:
         snapshot = getattr(self, "_harmonic_settings_rollback", None)
         if not isinstance(snapshot, dict):
@@ -1365,11 +1374,13 @@ class SettingsDialog(QDialog):
                 except Exception as exc:  # pragma: no cover - disk I/O failure
                     restore_errors.append(f"project settings ({exc})")
             try:
+                previous_mode = self.manager.get_appearance_mode()
                 self.manager.config = copy.deepcopy(snapshot["manager_config"])
                 self.manager.save()
+                self._apply_saved_appearance(previous_mode)
                 self.roi_editor.set_pairs(self.manager.get_roi_pairs())
             except Exception as exc:  # pragma: no cover - settings I/O failure
-                restore_errors.append(f"application analysis settings ({exc})")
+                restore_errors.append(f"application settings ({exc})")
             self._refresh_roi_consumers()
         finally:
             self._clear_harmonic_settings_rollback()
@@ -2524,6 +2535,8 @@ class SettingsDialog(QDialog):
 
     def _settings_save_completed(self) -> None:
         self._pending_save_succeeded = True
+        self._initial_appearance_mode = self.manager.get_appearance_mode()
+        self.appearance_mode_combo.setCurrentText(self._initial_appearance_mode)
         if self.project is not None:
             self._trigger_protocol_baseline = (self.project.frequency_protocol.to_manifest(), copy.deepcopy(self.project.event_map))
             self._initial_trigger_maps_payload = copy.deepcopy(self._trigger_maps_payload)
@@ -2892,9 +2905,13 @@ class SettingsDialog(QDialog):
                     )
         prev_debug = self.manager.debug_enabled()
         prev_beta_tools = self.manager.beta_tools_enabled()
+        previous_mode = self.manager.get_appearance_mode()
         self.manager.set("debug", "enabled", str(self.debug_check.isChecked()))
         self.manager.set_beta_tools_enabled(self.beta_tools_check.isChecked())
         try:
+            appearance_mode = self.appearance_mode_combo.currentText()
+            if appearance_mode != self._initial_appearance_mode:
+                self.manager.set_appearance_mode(appearance_mode)
             self.manager.save()
         except Exception as exc:  # Application settings may fail after the project saved.
             self.manager.config = application_config_snapshot
@@ -2920,6 +2937,7 @@ class SettingsDialog(QDialog):
             )
             QMessageBox.critical(self, "Save Error", message + str(exc))
             return
+        self._apply_saved_appearance(previous_mode)
         self._refresh_roi_consumers()
 
         if using_project and frequency_analysis_changed:

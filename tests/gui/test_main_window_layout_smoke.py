@@ -32,7 +32,6 @@ from Main_App.gui.components import SectionCard
 from Main_App.gui.components import SubsectionHeaderLabel
 from Main_App.gui.processing_log_dialog import ProcessingLogDialog
 from Main_App.gui.settings_panel import EmbeddedSettingsPage
-from Main_App.gui.theme import apply_fpvs_theme
 from Main_App.gui.style_tokens import HEADER_BG, PAGE_MARGIN
 from Main_App.processing.preflight_qc_cache import preflight_qc_cache_directory
 from Main_App.processing.project_processing_cache import ProjectProcessingCacheUsage
@@ -78,6 +77,7 @@ def _build_window(
     *,
     enable_beta_tools: bool = False,
     debug_enabled: bool = False,
+    appearance_mode: str = "Auto",
 ) -> main_window_module.MainWindow:
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     monkeypatch.setenv("FPVS_CONFIG_HOME", str(tmp_path / "config"))
@@ -90,6 +90,7 @@ def _build_window(
     )
     settings = SettingsManager()
     settings.set_beta_tools_enabled(enable_beta_tools)
+    settings.set_appearance_mode(appearance_mode)
     settings.set("debug", "enabled", str(debug_enabled))
     settings.save()
 
@@ -439,8 +440,7 @@ def test_workspace_menu_paints_slate_and_readable_labels(
     app.setStyleSheet("")
     previous_style = app.style().objectName()
     try:
-        apply_fpvs_theme(app)
-        win = _build_window(tmp_path, qtbot, monkeypatch)
+        win = _build_window(tmp_path, qtbot, monkeypatch, appearance_mode="Light")
         win.show_home_page()
         qtbot.waitUntil(win.menuBar().isVisible)
         bar = win.menuBar()

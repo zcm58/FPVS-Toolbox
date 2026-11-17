@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 from PySide6.QtCore import QPoint, QRect, Qt
@@ -112,6 +113,32 @@ def test_settings_successful_save_clears_dirty_state(panel):
     assert panel.save_pending_changes()
     assert not panel.has_unsaved_changes()
     assert panel.project.preprocessing["low_pass"] == 40.0
+
+
+@pytest.mark.parametrize("save", [True, False])
+def test_application_appearance_uses_shared_save_and_cancel(panel, monkeypatch, save):
+    from Main_App.gui import settings_panel
+
+    apply_appearance = Mock()
+    monkeypatch.setattr(settings_panel, "set_appearance_mode", apply_appearance)
+    panel.tabs.setCurrentIndex(panel.tabs.count() - 1)
+    combo = panel.appearance_mode_combo
+    assert combo.isVisibleTo(panel)
+    assert [combo.itemText(index) for index in range(combo.count())] == ["Light", "Dark", "Auto"]
+    assert combo.currentText() == "Auto"
+    combo.setCurrentText("Dark")
+    assert panel.has_unsaved_changes()
+    apply_appearance.assert_not_called()
+    assert panel.manager.get_appearance_mode() == "Auto"
+
+    if save:
+        assert panel.save_pending_changes()
+        apply_appearance.assert_called_once_with(QApplication.instance(), "Dark")
+    else:
+        panel.reject()
+        apply_appearance.assert_not_called()
+    reopened = SettingsManager(panel.manager.ini_path)
+    assert reopened.get_appearance_mode() == ("Dark" if save else "Auto")
 
 
 def test_extracted_pages_keep_one_dialog_owner_and_initial_draft(tmp_path, qtbot, monkeypatch):

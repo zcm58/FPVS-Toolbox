@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QTabWidget,
     QCheckBox,
+    QComboBox,
 )
 from Main_App.gui.components import (
     ActionRow,
@@ -24,6 +25,7 @@ from Main_App.gui.components import (
     make_form_layout,
 )
 from Main_App.gui.style_tokens import SECTION_GAP
+from Main_App.settings.appearance import APPEARANCE_MODES
 from Main_App.processing.frequency_domain_qc import thresholds_summary_lines
 from Main_App.projects.preprocessing_settings import (
     normalize_manual_excluded_participant_conditions,
@@ -41,6 +43,19 @@ def build_application_page(
     layout = QVBoxLayout(tab)
     layout.setContentsMargins(0, 0, 0, 0)
     layout.setSpacing(SECTION_GAP)
+
+    appearance_group = SectionCard("Appearance", tab, object_name="settings_appearance_card")
+    appearance_form = make_form_layout()
+    self.appearance_mode_combo = QComboBox(appearance_group)
+    self.appearance_mode_combo.setObjectName("settings_appearance_mode")
+    self.appearance_mode_combo.setToolTip("Auto follows your operating system's appearance.")
+    self.appearance_mode_combo.addItems(APPEARANCE_MODES)
+    self._initial_appearance_mode = self.manager.get_appearance_mode()
+    self.appearance_mode_combo.setCurrentText(self._initial_appearance_mode)
+    appearance_form.addRow("Color mode", self.appearance_mode_combo)
+    appearance_group.content_layout.addLayout(appearance_form)
+    layout.addWidget(appearance_group)
+
     projects_group = SectionCard(
         "Projects and cache",
         tab,

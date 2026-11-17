@@ -5,11 +5,12 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QPainter, QPen
+from PySide6.QtGui import QPainter, QPen
 from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QPlainTextEdit, QWidget
 
 from Main_App.gui.components import ActionRow, AppDialog, StatusBanner, SurfaceSize, make_action_button
 from Main_App.gui.style_tokens import ACCENT_COLOR, BORDER_COLOR, DANGER_COLOR, TEXT_MUTED, TEXT_PRIMARY
+from Main_App.gui.theme import theme_color
 from Main_App.io.eeg_geometry import canonical_biosemi64_head_coordinates
 from Main_App.processing.qc_review_diagnostics import review_repair_topology
 
@@ -41,23 +42,24 @@ class RepairSupportMap(QWidget):
         points = {name: QPointF(center.x() + float(xyz[0]) / extent * radius * .88,
                                 center.y() - float(xyz[1]) / extent * radius * .88)
                   for name, xyz in self.positions.items()}
-        painter.setPen(QPen(QColor(BORDER_COLOR), 1.5))
+        painter.setPen(QPen(theme_color(BORDER_COLOR), 1.5))
         painter.drawEllipse(center, radius, radius)
         painter.drawLine(QPointF(center.x() - 9, center.y() - radius),
                          QPointF(center.x(), center.y() - radius - 14))
         painter.drawLine(QPointF(center.x(), center.y() - radius - 14),
                          QPointF(center.x() + 9, center.y() - radius))
-        painter.setPen(QColor(TEXT_PRIMARY))
+        painter.setPen(theme_color(TEXT_PRIMARY))
         painter.drawText(QRectF(0, 0, self.width(), 22), Qt.AlignmentFlag.AlignCenter, "Front / nose")
         if self.selected in points:
-            painter.setPen(QPen(QColor(ACCENT_COLOR), 1, Qt.PenStyle.DotLine))
+            painter.setPen(QPen(theme_color(ACCENT_COLOR), 1, Qt.PenStyle.DotLine))
             for donor in self.donors:
                 if donor in points:
                     painter.drawLine(points[self.selected], points[donor])
         for name, point in points.items():
-            color = DANGER_COLOR if name in self.repairs else ACCENT_COLOR if name in self.donors else TEXT_MUTED
-            painter.setPen(QPen(QColor(color), 1.0))
-            painter.setBrush(QColor(color))
+            role = DANGER_COLOR if name in self.repairs else ACCENT_COLOR if name in self.donors else TEXT_MUTED
+            color = theme_color(role)
+            painter.setPen(QPen(color, 1.0))
+            painter.setBrush(color)
             size = 5.0 if name in self.repairs or name == self.selected else 3.0
             painter.drawEllipse(point, size, size)
             if name in self.repairs or name in self.donors:

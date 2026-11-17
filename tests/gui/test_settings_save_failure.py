@@ -36,6 +36,7 @@ def _panel(tmp_path):
     methods = {
         "_save", "_restore_failed_project_settings_save",
         "_capture_harmonic_settings_rollback", "_clear_harmonic_settings_rollback",
+        "_restore_harmonic_settings_after_cancel",
         "_experimental_qc_changes_after_processing", "_mark_frequency_analysis_outputs_stale",
         "_trigger_protocol_is_current", "_save_project_with_trigger_guard",
     }
@@ -64,6 +65,9 @@ def _panel(tmp_path):
         preproc_edits=[],
         debug_check=SimpleNamespace(isChecked=lambda: False),
         beta_tools_check=SimpleNamespace(isChecked=lambda: False),
+        appearance_mode_combo=SimpleNamespace(currentText=Mock(return_value="Auto")),
+        _initial_appearance_mode="Auto",
+        _apply_saved_appearance=Mock(),
         _manual_excluded_participant_conditions={},
         _manual_excluded_recording_conditions={},
         _full_fft_grid_review_is_running=lambda: False,
@@ -244,6 +248,7 @@ def test_failed_application_save_restores_config_and_retains_committed_project(
     panel._harmonic_settings_changed_after_processing = lambda _payload: (
         using_project and recalculate
     )
+    panel.appearance_mode_combo.currentText.return_value = "Dark"
     previous_config = copy.deepcopy(panel.manager.config)
     ini_bytes = Path(panel.manager.ini_path).read_bytes()
     save = Mock(side_effect=OSError("Synthetic application write failure"))
@@ -256,6 +261,8 @@ def test_failed_application_save_restores_config_and_retains_committed_project(
     assert save.call_count == 1
     assert not hasattr(panel, "_harmonic_settings_rollback")
     panel.accept.assert_not_called()
+    panel._apply_saved_appearance.assert_not_called()
+    assert panel.manager.get_appearance_mode() == "Auto"
     panel._refresh_roi_consumers.assert_not_called()
     assert messages.critical.call_args.args[1] == "Save Error"
     if using_project:
@@ -271,4 +278,19 @@ def test_failed_application_save_restores_config_and_retains_committed_project(
     panel._harmonic_settings_changed_after_processing = lambda _payload: False
     panel._save()
     assert panel.manager.get("analysis", "alpha") == "0.025"
+    assert SettingsManager(panel.manager.ini_path).get_appearance_mode() == "Dark"
+    panel._apply_saved_appearance.assert_called_once_with("Auto")
     panel.accept.assert_called_once()
+
+
+def test_cancelled_harmonic_save_reapplies_previous_persisted_appearance(tmp_path):
+    panel, _ = _panel(tmp_path)
+    panel._capture_harmonic_settings_rollback()
+    panel.roi_editor.set_pairs = Mock()
+    panel.manager.set_appearance_mode("Dark")
+    panel.manager.save()
+
+    panel._restore_harmonic_settings_after_cancel()
+
+    assert SettingsManager(panel.manager.ini_path).get_appearance_mode() == "Auto"
+    panel._apply_saved_appearance.assert_called_once_with("Dark")

@@ -34,6 +34,8 @@ Desktop changes follow these contracts:
 The shared Slate & Signal Teal palette lives in `Main_App.gui.style_tokens` and
 `theme.py`. The main menu bar and workspace navigation share one slate
 background with light text. Signal teal marks the active workspace and keyboard
-focus in the navigation row. Menu popups, Settings and tools use paper and white
-surfaces, deep teal actions, pale teal selection, and ochre focus. Scientific and
-status colors retain their established meanings.
+focus in the navigation row. Light mode pairs paper and white surfaces with
+deep teal actions and ochre focus. Dark mode uses slate surfaces, brighter teal
+actions, and amber focus. Menus, Settings, dialogs, and embedded tools inherit
+the same appearance. Use shared tokens for UI chrome. Scientific canvases and
+figure exports keep their scientific palettes.

@@ -25,7 +25,14 @@ a = Analysis(
     [str(src_root / "updater.py")],
     pathex=[str(src_root)],
     binaries=[],
-    datas=[(str(metadata), ".")],
+    datas=[
+        (str(metadata), "."),
+        *((str(src_root / "Main_App" / "gui" / name), "Main_App/gui")
+          for name in (
+              "checkbox-check.svg", "checkbox-check-dark.svg",
+              "chevron-down.svg", "chevron-down-dark.svg", "chevron-up.svg", "chevron-up-dark.svg",
+          )),
+    ],
     hiddenimports=["Main_App.gui.updater_window"],
     hookspath=[],
     hooksconfig={},

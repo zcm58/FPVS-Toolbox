@@ -9,7 +9,7 @@ from collections.abc import Mapping
 from dataclasses import replace
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QPainter, QPen, QPolygonF
+from PySide6.QtGui import QPainter, QPen, QPolygonF
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -33,6 +33,7 @@ from Main_App.gui.components import (
 )
 from Main_App.gui.components.review_dialog import ReviewDialog
 from Main_App.gui.recording_qc_identity import participant_identity_label
+from Main_App.gui.theme import theme_color
 from Main_App.gui.style_tokens import (
     ACCENT_COLOR,
     BORDER_COLOR,
@@ -100,13 +101,13 @@ class KurtosisSignalPreviewWidget(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         bounds = QRectF(self.rect()).adjusted(1.0, 1.0, -1.0, -1.0)
-        painter.fillRect(bounds, QColor(SURFACE_ALT_BG))
-        painter.setPen(QPen(QColor(BORDER_COLOR), 1.0))
+        painter.fillRect(bounds, theme_color(SURFACE_ALT_BG))
+        painter.setPen(QPen(theme_color(BORDER_COLOR), 1.0))
         painter.drawRoundedRect(bounds, 5.0, 5.0)
 
         finite = [float(value) for value in self._values if value is not None]
         if not finite:
-            painter.setPen(QColor(TEXT_MUTED))
+            painter.setPen(theme_color(TEXT_MUTED))
             painter.drawText(bounds, Qt.AlignmentFlag.AlignCenter, "No finite preview")
             return
 
@@ -119,7 +120,7 @@ class KurtosisSignalPreviewWidget(QWidget):
             high += padding
         if low <= 0.0 <= high:
             zero_y = plot.bottom() - ((0.0 - low) / (high - low)) * plot.height()
-            painter.setPen(QPen(QColor(BORDER_COLOR), 1.0, Qt.PenStyle.DotLine))
+            painter.setPen(QPen(theme_color(BORDER_COLOR), 1.0, Qt.PenStyle.DotLine))
             painter.drawLine(QPointF(plot.left(), zero_y), QPointF(plot.right(), zero_y))
 
         denominator = max(1, len(self._values) - 1)
@@ -136,7 +137,7 @@ class KurtosisSignalPreviewWidget(QWidget):
             current.append(QPointF(x, y))
         if current.size() >= 2:
             segments.append(current)
-        painter.setPen(QPen(QColor(ACCENT_COLOR), 1.35))
+        painter.setPen(QPen(theme_color(ACCENT_COLOR), 1.35))
         for segment in segments:
             painter.drawPolyline(segment)
 

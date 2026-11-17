@@ -42,6 +42,10 @@ project-only RAM preloading, which is off by default. Use **Application > Analys
 Defaults** for the Stats alpha; Application also contains debug, cache and
 projects-root controls.
 
+For the entire Toolbox interface, choose **File > Settings > Application** and
+set **Appearance** to **Light**, **Dark**, or **Auto**. Auto follows your
+operating system's appearance. Select **Save** to apply the choice immediately.
+
 The shared **Save** and **Cancel** buttons apply to edits across all Settings
 tabs. Focused review dialogs retain their own Apply/Cancel actions.
 

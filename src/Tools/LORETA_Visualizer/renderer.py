@@ -156,6 +156,7 @@ class BrainRendererWidget(QWidget):
         super().__init__(parent)
         self.setObjectName("loreta_brain_renderer")
         self._plotter: Any | None = None
+        self._viewport_palette_colors: tuple[str, str] | None = None
         self._camera_link: Any | None = None
         self._viewport_aspect: float | None = None
         self._camera_resize_timer = QTimer(self)
@@ -221,7 +222,6 @@ class BrainRendererWidget(QWidget):
         plotter = QtInteractor(self, auto_update=False)
         self._plotter = plotter
         plotter.setObjectName("loreta_pyvista_interactor")
-        plotter.set_background("#f7f9fc")
         plotter.enable_trackball_style()
         _configure_transparency_backend(plotter)
         _configure_render_quality(plotter, pv)
@@ -233,7 +233,7 @@ class BrainRendererWidget(QWidget):
         self._volume_context_surface = self._to_volume_context_polydata(pv, mesh)
         self._brain_actor = self._add_brain_actor(self._surface)
         self._brain_actor_context = "cortical"
-        plotter.add_axes(interactive=False)
+        self._sync_viewport_palette(render=False)
         plotter.camera_position = "xy"
         plotter.reset_camera()
         plotter.render()
@@ -424,6 +424,26 @@ class BrainRendererWidget(QWidget):
         timer = getattr(self, "_camera_resize_timer", None)
         if timer is not None and getattr(self, "_plotter", None) is not None:
             timer.start()
+
+    def changeEvent(self, event) -> None:  # noqa: N802, ANN001
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.PaletteChange:
+            self._sync_viewport_palette()
+
+    def _sync_viewport_palette(self, *, render: bool = True) -> None:
+        plotter = getattr(self, "_plotter", None)
+        if plotter is None:
+            return
+        palette = self.palette()
+        colors = (palette.window().color().name(), palette.windowText().color().name())
+        if colors == self._viewport_palette_colors:
+            return
+        background, label_color = colors
+        plotter.set_background(background)
+        plotter.add_axes(interactive=False, color=label_color)
+        self._viewport_palette_colors = colors
+        if render:
+            plotter.render()
 
     def _viewport_aspect_ratio(self) -> float:
         plotter = self._plotter

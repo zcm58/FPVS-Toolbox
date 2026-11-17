@@ -7,6 +7,7 @@ from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QSizePolicy, QVBoxLay
 
 from Main_App.gui.components import SubsectionHeaderLabel, make_action_button
 from Main_App.gui.style_tokens import build_landing_page_stylesheet
+from Main_App.gui.theme import set_themed_stylesheet
 from Main_App.gui.typography import apply_font_role
 
 
@@ -15,7 +16,7 @@ def build_project_welcome(host, parent: QWidget) -> QWidget:
     landing = QWidget(parent)
     landing.setObjectName("LandingPage")
     landing.setAttribute(Qt.WA_StyledBackground, True)
-    landing.setStyleSheet(build_landing_page_stylesheet())
+    set_themed_stylesheet(landing, build_landing_page_stylesheet())
 
     layout = QVBoxLayout(landing)
     layout.setContentsMargins(36, 32, 36, 32)

@@ -22,6 +22,11 @@ from Main_App.processing.roi_presets import (
     default_roi_name_keys,
     validate_roi_montage,
 )
+from Main_App.settings.appearance import (
+    DEFAULT_APPEARANCE_MODE,
+    appearance_mode_from_config,
+    normalize_appearance_mode,
+)
 from Main_App.settings.settings_paths import app_settings_dir, app_settings_file, legacy_settings_file
 
 logger = logging.getLogger("Main_App.Shared.settings_manager")
@@ -29,7 +34,7 @@ _SETTINGS_SAVE_LOCK = threading.RLock()
 
 DEFAULTS = {
     'appearance': {
-        'mode': 'System',
+        'mode': DEFAULT_APPEARANCE_MODE,
         'theme': 'blue'
     },
     'paths': {
@@ -417,6 +422,16 @@ class SettingsManager:
         if not self.config.has_section(section):
             self.config.add_section(section)
         self.config.set(section, option, value)
+
+    def get_appearance_mode(self) -> str:
+        """Read the saved mode, treating legacy System as Auto."""
+        return appearance_mode_from_config(self.config)
+
+    def set_appearance_mode(self, mode: str) -> None:
+        normalized = normalize_appearance_mode(mode)
+        if normalized is None:
+            raise ValueError(f"Unsupported appearance mode: {mode!r}")
+        self.set('appearance', 'mode', normalized)
 
     def get_project_root(self, fallback: str = '') -> str:
         return self.get('paths', 'projectsRoot', fallback)
