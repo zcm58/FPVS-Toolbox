@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import QMenuBar, QMainWindow
 
 from Main_App.gui.shell_actions import BETA_TOOL_SPECS as BETA_TOOL_SPECS
 from Main_App.gui.shell_actions import ShellActions
+from Main_App.gui.theme import apply_native_menu_style
 
 
 def build_menu_bar(parent: QMainWindow, actions: ShellActions) -> QMenuBar:
@@ -12,6 +14,7 @@ def build_menu_bar(parent: QMainWindow, actions: ShellActions) -> QMenuBar:
     menu_bar = QMenuBar(parent)
     menu_bar.setObjectName("workspaceMenuBar")
     menu_bar.setNativeMenuBar(False)
+    menu_bar.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
     file_menu = menu_bar.addMenu("&File")
     file_menu.setObjectName("fileMenu")
@@ -37,4 +40,5 @@ def build_menu_bar(parent: QMainWindow, actions: ShellActions) -> QMenuBar:
         beta_menu.setObjectName("betaToolsMenu")
         beta_menu.addActions(actions.beta_tools)
 
+    apply_native_menu_style(menu_bar)
     return menu_bar

@@ -28,6 +28,10 @@ Primary paths:
   settings. Appearance-aware page styles use `set_themed_stylesheet()`. Custom
   UI painters resolve shared tokens through `theme_color()`.
 - `src/Main_App/gui/menu_bar.py` builds File, View, and Tools.
+  Like Studio, it uses an ordinary Qt menu bar with NoFocus and no menu QSS
+  overrides. `theme.py` retains the platform style before applying workspace
+  Fusion, then applies it to the menu bar and its popups for native hover,
+  transitions and keyboard feedback.
   `file_menu.py` groups project, Settings, cache, and application actions,
   including About. View contains Home (Ctrl+1) and Experiment Library, including
   on Welcome. Tools contains default and optional beta actions.
@@ -629,6 +633,13 @@ enabling `tools.enable_beta_tools` in Settings and restarting.
 per app session. `shell_status.py` locks the menu during processing,
 processing-cache reset, and Scalp Maps generation, then restores its prior
 enabled state. The View > Home shortcut follows the same lock.
+
+At 1200 × 800 in Light and Dark, move across File, View and Tools without
+clicking: each title highlights without opening a menu. Blank space and leaving
+clear hover. Open a menu and move into its popup, then use Alt, arrows and
+Escape: the selected item and open title remain clear. Processing-disabled
+menus must accept no commands. Registered main-window Qt smoke covers these
+states; run locally only in an approved visible session.
 
 The main window defaults to 1200 × 800 and uses that minimum for Welcome, Home,
 Settings, embedded tools, and Processing Activity. Navigation preserves the

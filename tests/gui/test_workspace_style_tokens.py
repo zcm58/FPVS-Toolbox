@@ -86,15 +86,10 @@ def _stylesheet_rules(stylesheet: str) -> dict[str, dict[str, str]]:
     return rules
 
 
-def test_menu_uses_slate_chrome_with_distinct_focus_and_disabled_states() -> None:
-    rules = _stylesheet_rules(build_workspace_chrome_stylesheet())
-    for selector in ("QMenuBar#workspaceMenuBar", "QMenuBar#workspaceMenuBar::item"):
-        assert rules[selector]["background-color"] == HEADER_BG
-        assert rules[selector]["color"] == CHROME_TEXT
-    assert rules["QMenuBar#workspaceMenuBar::item:disabled"]["color"] == CHROME_MUTED_TEXT
-    assert rules["QMenuBar#workspaceMenuBar::item:selected:enabled"]["border-color"] == SIGNAL_COLOR
-    assert rules["QMenuBar#workspaceMenuBar::item:pressed:enabled"]["background-color"] == CHROME_ACTIVE
-    assert not any(selector.startswith("QMenu::") for selector in rules)
+def test_menu_feedback_is_owned_by_the_native_style() -> None:
+    for stylesheet in (build_workspace_chrome_stylesheet(), theme.build_fpvs_app_stylesheet()):
+        rules = _stylesheet_rules(stylesheet)
+        assert not any(selector.startswith(("QMenuBar", "QMenu")) for selector in rules)
 
 
 def test_settings_navigation_uses_one_keyboard_focus_indicator() -> None:

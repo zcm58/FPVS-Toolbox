@@ -9,7 +9,7 @@ from typing import Literal, Optional
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QPalette
-from PySide6.QtWidgets import QApplication, QWidget
+from PySide6.QtWidgets import QApplication, QMenu, QMenuBar, QStyle, QStyleFactory, QWidget
 
 from Main_App.gui.style_tokens import (
     ACCENT_COLOR,
@@ -73,15 +73,6 @@ def build_fpvs_app_stylesheet() -> str:
 
         QWidget[fpvsSurface="true"] {{
             background: {PAGE_BG};
-        }}
-
-        QMenu {{
-            background-color: {SURFACE_BG};
-            border: 1px solid {BORDER_SOFT_COLOR};
-        }}
-
-        QMenu::item:disabled {{
-            color: {TEXT_MUTED};
         }}
 
         QGroupBox {{
@@ -460,11 +451,33 @@ def _apply_fusion_palette(app: QApplication, *, dark: bool) -> None:
 
 def apply_fusion_light_palette(app: QApplication) -> None:
     """Apply a deterministic Fusion + light palette regardless of OS theme."""
+    _platform_menu_style(app)
     app.setStyle("Fusion")
     _apply_fusion_palette(app, dark=False)
 
 
+def _platform_menu_style(app: QApplication) -> QStyle:
+    """Retain the platform menu style before the workspace switches to Fusion."""
+    style = getattr(app, "_fpvs_platform_menu_style", None)
+    if style is None:
+        style_name = app.style().objectName()
+        style = QStyleFactory.create(style_name)
+        if style is None:
+            raise RuntimeError(f"Cannot retain the platform menu style: {style_name}")
+        style.setParent(app)
+        app._fpvs_platform_menu_style = style
+    return style
+
+
+def apply_native_menu_style(menu_bar: QMenuBar) -> None:
+    """Use Studio's native menu behavior within the Fusion-based workspace."""
+    style = _platform_menu_style(QApplication.instance())
+    for menu in (menu_bar, *menu_bar.findChildren(QMenu)):
+        menu.setStyle(style)
+
+
 def _apply_app_appearance(app: QApplication) -> None:
+    _platform_menu_style(app)
     # Qt wraps the base style when app QSS is active. Keep the actual
     # wrapper so we can detect a caller switching styles without resetting Fusion.
     if app.style() is not getattr(app, "_fpvs_fusion_style", None):

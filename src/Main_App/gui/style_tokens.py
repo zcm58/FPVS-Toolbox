@@ -531,40 +531,11 @@ def build_main_page_stylesheet() -> str:
 
 
 def build_workspace_chrome_stylesheet() -> str:
-    """Style the main menu in Slate and Signal Teal."""
+    """Style shell status while leaving menus to the native Qt style."""
     return f"""
-        QMenuBar#workspaceMenuBar {{
-            background-color: {HEADER_BG};
-            color: {CHROME_TEXT};
-            border: none;
-            padding: 2px 8px;
-            spacing: 2px;
-        }}
-
-        QMenuBar#workspaceMenuBar::item {{
-            background-color: {HEADER_BG};
-            color: {CHROME_TEXT};
-            border: 1px solid transparent;
-            border-radius: 4px;
-            padding: 4px 10px;
-        }}
-
-        QMenuBar#workspaceMenuBar::item:selected:enabled {{
-            background-color: {CHROME_HOVER};
-            border-color: {SIGNAL_COLOR};
-        }}
-
-        QMenuBar#workspaceMenuBar::item:pressed:enabled {{
-            background-color: {CHROME_ACTIVE};
-        }}
-
-        QMenuBar#workspaceMenuBar::item:disabled {{
-            color: {CHROME_MUTED_TEXT};
-        }}
-
         QLabel#workspaceDebugLabel {{
             background: transparent;
-            color: #F9D293;
+            color: {TEXT_SECONDARY};
             font-weight: {css_font_weight("caption")};
             padding: 0 10px;
         }}

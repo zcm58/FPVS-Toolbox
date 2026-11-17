@@ -9,9 +9,9 @@ import pytest
 if importlib.util.find_spec("PySide6") is None or importlib.util.find_spec("pytestqt") is None:
     pytest.skip("PySide6 or pytest-qt not available", allow_module_level=True)
 
-from PySide6.QtCore import QSize, Signal, Qt
-from PySide6.QtGui import QAction, QColor, QIcon
-from PySide6.QtTest import QSignalSpy
+from PySide6.QtCore import QPoint, QSize, Signal, Qt
+from PySide6.QtGui import QAction, QIcon
+from PySide6.QtTest import QSignalSpy, QTest
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
@@ -35,7 +35,7 @@ from Main_App.gui.components import SectionCard
 from Main_App.gui.components import SubsectionHeaderLabel
 from Main_App.gui.processing_log_dialog import ProcessingLogDialog
 from Main_App.gui.settings_panel import EmbeddedSettingsPage
-from Main_App.gui.style_tokens import HEADER_BG, PAGE_MARGIN
+from Main_App.gui.style_tokens import PAGE_MARGIN
 from Main_App.processing.preflight_qc_cache import preflight_qc_cache_directory
 from Main_App.processing.project_processing_cache import ProjectProcessingCacheUsage
 import Main_App.gui.update_manager as update_manager
@@ -493,7 +493,18 @@ def test_view_menu_returns_to_home(tmp_path: Path, qtbot, monkeypatch) -> None:
     assert win.menuBar().isVisibleTo(win)
 
 
-def test_workspace_menu_paints_slate_and_readable_labels(
+def _activate_menu_window(win, qtbot) -> None:
+    win.raise_()
+    win.activateWindow()
+    qtbot.waitExposed(win)
+    qtbot.waitUntil(win.isActiveWindow)
+
+
+def _menu_action_image(bar, action):
+    return bar.grab(bar.actionGeometry(action)).toImage()
+
+
+def test_workspace_menu_keeps_native_style_and_readable_labels(
     tmp_path: Path, qtbot, monkeypatch,
 ) -> None:
     app = QApplication.instance()
@@ -505,24 +516,118 @@ def test_workspace_menu_paints_slate_and_readable_labels(
     try:
         win = _build_window(tmp_path, qtbot, monkeypatch, appearance_mode="Light")
         win.show_home_page()
-        qtbot.waitUntil(win.menuBar().isVisible)
+        _activate_menu_window(win, qtbot)
         bar = win.menuBar()
-        menu_image = bar.grab().toImage()
-        slate = QColor(HEADER_BG)
-        assert menu_image.pixelColor(menu_image.width() - 20, 5) == slate
+        assert bar.isVisibleTo(win)
+        assert bar.focusPolicy() == Qt.FocusPolicy.NoFocus
+        QTest.mouseMove(win.stacked, QPoint(20, 20), delay=10)
         for action in bar.actions():
-            image = bar.grab(bar.actionGeometry(action)).toImage()
-            assert any(
-                image.pixelColor(x, y).lightness() > 150
+            image = _menu_action_image(bar, action)
+            levels = [
+                image.pixelColor(x, y).lightness()
                 for y in range(image.height())
                 for x in range(image.width())
-            ), action.text()
+            ]
+            assert max(levels) - min(levels) > 60, action.text()
     finally:
         app.setStyleSheet("")
         app.setStyle(previous_style)
         app.setPalette(previous_palette)
         app.setFont(previous_font)
         app.setStyleSheet(previous_stylesheet)
+
+
+@pytest.mark.parametrize("appearance_mode", ["Light", "Dark"])
+def test_workspace_menu_mouse_hover_is_visible_without_opening_or_triggering(
+    tmp_path: Path, qtbot, monkeypatch, appearance_mode: str,
+) -> None:
+    win = _build_window(tmp_path, qtbot, monkeypatch, appearance_mode=appearance_mode)
+    _activate_menu_window(win, qtbot)
+    bar = win.menuBar()
+    actions = bar.actions()
+    triggered = QSignalSpy(bar.triggered)
+    opened = [QSignalSpy(action.menu().aboutToShow) for action in actions]
+
+    blank = QPoint(bar.width() - 12, bar.height() // 2)
+    QTest.mouseMove(bar, blank, delay=10)
+    qtbot.wait(40)
+    idle_images = [_menu_action_image(bar, action) for action in actions]
+    for index, action in enumerate(actions):
+        QTest.mouseMove(bar, bar.actionGeometry(action).center(), delay=10)
+        qtbot.waitUntil(lambda: _menu_action_image(bar, action) != idle_images[index])
+        if index:
+            qtbot.waitUntil(lambda: _menu_action_image(bar, actions[index - 1]) == idle_images[index - 1])
+        assert not any(candidate.menu().isVisible() for candidate in actions)
+
+    assert triggered.count() == 0
+    assert all(spy.count() == 0 for spy in opened)
+    QTest.mouseMove(bar, blank, delay=10)
+    qtbot.waitUntil(lambda: all(
+        _menu_action_image(bar, action) == image
+        for action, image in zip(actions, idle_images)
+    ))
+
+    QTest.mouseMove(bar, bar.actionGeometry(actions[0]).center(), delay=10)
+    qtbot.waitUntil(lambda: _menu_action_image(bar, actions[0]) != idle_images[0])
+    QTest.mouseMove(win.stacked, QPoint(20, 20), delay=10)
+    qtbot.waitUntil(lambda: _menu_action_image(bar, actions[0]) == idle_images[0])
+
+
+def test_workspace_menu_popup_and_keyboard_keep_native_navigation(
+    tmp_path: Path, qtbot, monkeypatch,
+) -> None:
+    win = _build_window(tmp_path, qtbot, monkeypatch)
+    _activate_menu_window(win, qtbot)
+    bar = win.menuBar()
+    file_action, view_action, _tools_action = bar.actions()
+    file_menu, view_menu = file_action.menu(), view_action.menu()
+    triggered = QSignalSpy(bar.triggered)
+    try:
+        QTest.mouseMove(win.stacked, QPoint(20, 20), delay=10)
+        idle_file = _menu_action_image(bar, file_action)
+        QTest.mouseClick(bar, Qt.MouseButton.LeftButton, pos=bar.actionGeometry(file_action).center())
+        qtbot.waitUntil(file_menu.isVisible)
+        QTest.mouseMove(file_menu, file_menu.actionGeometry(file_menu.actions()[0]).center(), delay=10)
+        assert bar.activeAction() is file_action
+        assert _menu_action_image(bar, file_action) != idle_file
+
+        qtbot.keyClick(file_menu, Qt.Key.Key_Right)
+        qtbot.waitUntil(view_menu.isVisible)
+        assert not file_menu.isVisible()
+        assert bar.activeAction() is view_action
+        qtbot.keyClick(view_menu, Qt.Key.Key_Escape)
+        qtbot.waitUntil(lambda: not view_menu.isVisible())
+        qtbot.keyClick(bar, Qt.Key.Key_Escape)
+
+        qtbot.keyClick(win, Qt.Key.Key_F, Qt.KeyboardModifier.AltModifier)
+        qtbot.waitUntil(file_menu.isVisible)
+        assert bar.activeAction() is file_action
+        qtbot.keyClick(file_menu, Qt.Key.Key_Escape)
+        qtbot.waitUntil(lambda: not file_menu.isVisible())
+        assert triggered.count() == 0
+    finally:
+        file_menu.hide()
+        view_menu.hide()
+
+
+@pytest.mark.parametrize("disable_bar", [False, True], ids=["disabled-action", "disabled-bar"])
+def test_workspace_menu_disabled_controls_ignore_pointer_and_do_not_open(
+    tmp_path: Path, qtbot, monkeypatch, disable_bar: bool,
+) -> None:
+    win = _build_window(tmp_path, qtbot, monkeypatch)
+    _activate_menu_window(win, qtbot)
+    bar = win.menuBar()
+    action = bar.actions()[0]
+    triggered = QSignalSpy(bar.triggered)
+    (bar if disable_bar else action).setEnabled(False)
+    QTest.mouseMove(win.stacked, QPoint(20, 20), delay=10)
+    idle_image = _menu_action_image(bar, action)
+    QTest.mouseMove(bar, bar.actionGeometry(action).center(), delay=10)
+    QTest.mouseClick(bar, Qt.MouseButton.LeftButton, pos=bar.actionGeometry(action).center())
+    qtbot.wait(80)
+    assert _menu_action_image(bar, action) == idle_image
+    assert not action.menu().isVisible()
+    assert triggered.count() == 0
 
 
 def test_tool_navigation_guard_keeps_home_size(tmp_path: Path, qtbot, monkeypatch) -> None:
