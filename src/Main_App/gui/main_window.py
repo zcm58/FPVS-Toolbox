@@ -72,8 +72,10 @@ from Main_App.gui.post_export_workflows import (
 from Main_App.gui.op_guard import OpGuard
 
 _WINDOW_TITLE = f"FPVS Toolbox v{FPVS_TOOLBOX_VERSION}"
-_COMPACT_MINIMUM = QSize(900, 520)
-_COMPACT_DEFAULT = QSize(960, 520)
+_WELCOME_MINIMUM = QSize(480, 280)
+_WELCOME_DEFAULT = QSize(600, 340)
+_HOME_MINIMUM = QSize(900, 520)
+_HOME_DEFAULT = QSize(960, 520)
 _WORKSPACE_MINIMUM = QSize(1280, 900)
 
 
@@ -177,8 +179,8 @@ class MainWindow(QMainWindow):
         self._settings_page = None
         self.processor = Processor()
         self.setWindowTitle(_WINDOW_TITLE)
-        self.setMinimumSize(_COMPACT_MINIMUM)
-        self.resize(_COMPACT_DEFAULT)
+        self.setMinimumSize(_WELCOME_MINIMUM)
+        self.resize(_WELCOME_DEFAULT)
         self._compact_return_size: QSize | None = None
         self.currentProject: Project | None = None
 
@@ -220,12 +222,7 @@ class MainWindow(QMainWindow):
         self.workspace_stack.currentChanged.connect(self._sync_window_for_current_page)
         self._sync_window_for_current_page()
 
-        # The Welcome buttons use the same guarded project actions as File.
-        self.btn_import_project.clicked.connect(self.actionImportFpvsConfigProject.trigger)
-        if hasattr(self, "btn_create_project"):
-            self.btn_create_project.clicked.connect(self.actionCreateNewProject.trigger)
-        if hasattr(self, "btn_open_project"):
-            self.btn_open_project.clicked.connect(self.actionOpenExistingProject.trigger)
+        self.btn_open_project.clicked.connect(self.actionOpenExistingProject.trigger)
 
         # Default page and initial logs
         self.stacked.setCurrentIndex(0)
@@ -332,24 +329,38 @@ class MainWindow(QMainWindow):
     def _sync_window_for_current_page(self, _index: int = -1) -> None:
         welcome = self.stacked.currentWidget() is self.landing_page
         self.menuBar().setVisible(not welcome)
-        compact = welcome or self.workspace_stack.currentWidget() is self.homeWidget
-        minimum = _COMPACT_MINIMUM if compact else _WORKSPACE_MINIMUM
+        if welcome:
+            minimum = _WELCOME_MINIMUM
+        elif self.workspace_stack.currentWidget() is self.homeWidget:
+            minimum = _HOME_MINIMUM
+        else:
+            minimum = _WORKSPACE_MINIMUM
         if self.minimumSize() == minimum:
             return
 
         normal_window = not (self.isMaximized() or self.isFullScreen())
-        if compact:
-            return_size = self._compact_return_size
-            self._compact_return_size = None
-            self.setMinimumSize(minimum)
-            if normal_window and return_size is not None and self.size() == return_size.expandedTo(_WORKSPACE_MINIMUM):
-                self.resize(return_size)
+        size = self.size()
+        self.setMinimumSize(minimum)
+        if minimum == _WORKSPACE_MINIMUM:
+            if normal_window and size != size.expandedTo(minimum):
+                self._compact_return_size = size
             return
 
-        width, height = self.width(), self.height()
-        if normal_window and (width < minimum.width() or height < minimum.height()):
-            self._compact_return_size = self.size()
-        self.setMinimumSize(minimum)
+        return_size = self._compact_return_size
+        self._compact_return_size = None
+        if not normal_window:
+            return
+
+        if return_size is not None and size == return_size.expandedTo(_WORKSPACE_MINIMUM):
+            size = return_size
+        if welcome and size == _HOME_DEFAULT:
+            size = _WELCOME_DEFAULT
+        elif not welcome and size == _WELCOME_DEFAULT:
+            size = _HOME_DEFAULT
+
+        target_size = size.expandedTo(minimum)
+        if self.size() != target_size:
+            self.resize(target_size)
 
     def _set_project_title(self, name: str) -> None:
         self.setWindowTitle(f"{name} — {_WINDOW_TITLE}")

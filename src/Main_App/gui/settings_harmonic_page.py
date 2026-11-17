@@ -42,9 +42,8 @@ from Tools.Stats.analysis.dv_policy_settings import (
 )
 
 
-# Primary-source method checks are recorded under "Harmonic method references"
-# in docs/user/reference/methods-reporting-checklist.md. This catalog is presentation
-# only and does not change the versioned profile registry.
+# The publication comparison lives in docs/agent/architecture/statistics-tools.md.
+# This catalog provides descriptions for the versioned profile registry.
 HARMONIC_METHOD_INFO = {
     HARMONIC_PROFILE_TWO_CONSECUTIVE_FAILURES_ID: ToolInfoContent(
         key="harmonic_method_two_failures",

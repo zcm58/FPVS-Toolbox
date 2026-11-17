@@ -12,8 +12,7 @@ integration and unified Home/Settings editor are implemented. Current contracts:
 
 - [Project I/O: identity and trigger maps](../../architecture/project-io.md#independent-source-study-identities)
 - [EEG loading](../../architecture/eeg-loading-contract.md)
-- [GUI](../../architecture/gui.md)
-- [User workflow](../../../user/reference/source-trigger-maps.md)
+- [Trigger map workflow](../../architecture/gui.md#source-trigger-maps-and-participant-identity)
 - [Guided setup acceptance](guided-pipeline-setup.md)
 
 Completed implementation and study-analysis chronology remain in Git history;

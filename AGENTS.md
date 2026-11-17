@@ -13,7 +13,7 @@ exist; each slot has one production method. Settings > Processing offers optiona
 guided setup. Alternative methods/selectors and complete FPVS Studio
 interoperability remain future work. Read the
 [roadmap](docs/agent/architecture/hardware-pipeline-studio-roadmap.md) for related
-changes and the [hardware guide](docs/user/reference/eeg-hardware.md) for exact
+changes and the [loading contract](docs/agent/architecture/eeg-loading-contract.md#supported-project-routes) for exact
 format, montage and physical-qualification limits.
 
 ## Work and navigation
@@ -103,8 +103,7 @@ tools must not infer membership from output folders or duplicate discovery logic
   downsample → kurtosis/interpolation → final average reference. Changing order,
   FIR duration scaling or version/fingerprint guards requires explicit
   statistical-method scope plus updates to the
-  [preprocessing contract](docs/agent/architecture/preprocessing-contract.md),
-  [methods checklist](docs/user/reference/methods-reporting-checklist.md) and
+  [preprocessing contract](docs/agent/architecture/preprocessing-contract.md) and
   focused order tests.
 - Harmonic selection is locked by the
   [Stats contract](docs/agent/architecture/statistics-tools.md). Read it before
@@ -156,8 +155,8 @@ python .agents/scripts/verify.py --scope repo --tier precommit
 ```
 
 The driver owns test selection, audits, changed-file lint/compilation and the
-bounded handoff gate. The full suite remains in CI. Documentation changes also
-need the strict MkDocs build and link/owner checks in
+bounded handoff gate. The full suite remains in CI. Engineering documentation
+changes need the link and owner checks in
 [verification gates](docs/agent/quality/verification-gates.md#documentation-only-changes).
 
 Never set `QT_QPA_PLATFORM=offscreen`, run offscreen scripts or run local

@@ -566,7 +566,7 @@ def build_workspace_chrome_stylesheet() -> str:
 
 
 def build_landing_page_stylesheet() -> str:
-    """Style the flat project entry page."""
+    """Style the project entry page."""
     return f"""
         #LandingPage {{
             background: {PAGE_BG};
@@ -578,11 +578,8 @@ def build_landing_page_stylesheet() -> str:
             font-weight: {css_font_weight("landing_title")};
         }}
 
-        #landing_subtitle {{
-            color: {TEXT_SECONDARY};
-        }}
-
-        #welcome_actions_divider {{
-            background: {BORDER_COLOR};
+        #LandingPage QPushButton {{
+            font-size: {css_font_size("landing_action")};
+            font-weight: {css_font_weight("landing_action")};
         }}
     """

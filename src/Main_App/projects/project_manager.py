@@ -1404,7 +1404,7 @@ def open_existing_project(self, parent: QWidget | None = None) -> None:
                 stacked is not None
                 and stacked.currentWidget() is getattr(self, "landing_page", None)
             ):
-                recovery = "Import an FPVS Studio config or choose Create Manually."
+                recovery = "Choose Create New Project to get started."
             else:
                 recovery = (
                     "Use File > Import FPVS Studio Config… or File > Create Project Manually… "

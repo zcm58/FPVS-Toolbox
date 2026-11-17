@@ -35,8 +35,8 @@ unavailable BioSemi QC policies are disabled in the project and GUI. Source
 registration accepts header entrypoints for BVCDF and BVRF; companion changes
 invalidate cached processing. Future verified Studio adapters can provide
 `hardware_evidence`, which remains unconfirmed until the user accepts it; no
-undocumented Studio schema field is assumed. See
-[Brain Products setup](../../user/reference/brain-products.md).
+undocumented Studio schema field is assumed. See the
+[Brain Products loading contract](eeg-loading-contract.md#brain-products-project-route).
 
 Unicorn persists `acquisition_profile` with its versioned `unicorn_hybrid_black`
 profile, `unicorn8` montage, sample-wise event decoder and `average_scalp`
@@ -52,7 +52,7 @@ or `reconcile`), `numeric_annotations`, `named_annotation_codes`, and
 interpretation is an advanced project configuration; the GUI does not invent
 annotation codes or provide a new mapping editor. Hardware, profile, and event
 settings participate in the same persistence/conflict boundary. See the
-[hardware guide](../../user/reference/eeg-hardware.md) for supported input limits.
+[supported project routes](eeg-loading-contract.md#supported-project-routes) for input limits.
 
 ## Project processing methods
 
@@ -211,7 +211,7 @@ is unchanged.
 Home and Settings use one source-map editor. Settings applies only to its detached
 draft until the outer Save; Home publishes its reviewed draft atomically. Guided
 setup preserves the extension but requires leaving the wizard to edit source
-maps. See the [user workflow](../../user/reference/source-trigger-maps.md).
+maps. See the [visible acceptance path](../exec-plans/active/source-trigger-maps-and-participant-identity.md#remaining-visible-acceptance).
 
 For single-session projects, the dataset index recognizes historical exports
 named from a sanitized registered raw stem (for example,

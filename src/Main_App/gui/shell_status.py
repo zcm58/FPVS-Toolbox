@@ -33,7 +33,7 @@ def launch_reveal_widget(host: Any) -> QWidget | None:
     if not hasattr(host, "stacked"):
         return None
     if host.stacked.currentWidget() is getattr(host, "landing_page", None):
-        return getattr(host, "landing_card", None)
+        return getattr(host, "landing_content", None)
     return getattr(host, "page1_container", None)
 
 

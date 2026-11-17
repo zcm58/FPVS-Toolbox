@@ -2,8 +2,7 @@ from __future__ import annotations
 
 from functools import partial
 
-from PySide6.QtCore import QUrl
-from PySide6.QtGui import QAction, QDesktopServices, QKeySequence
+from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import QMenuBar, QMainWindow
 
 # Role, label, and MainWindow opener, in menu order.
@@ -21,11 +20,9 @@ BETA_TOOL_SPECS = (
     ("btn_individual_detectability", "Individual Detectability", "open_individual_detectability"),
 )
 
-DOCS_URL = "https://zcm58.github.io/FPVS-Toolbox/"
-
 
 def build_menu_bar(parent: QMainWindow) -> QMenuBar:
-    """Return the app-level File, View, Tools, and Help menus."""
+    """Return the app-level File, View, and Tools menus."""
     menu_bar = QMenuBar(parent)
     menu_bar.setObjectName("workspaceMenuBar")
     menu_bar.setNativeMenuBar(False)
@@ -68,11 +65,5 @@ def build_menu_bar(parent: QMainWindow) -> QMenuBar:
             )
             beta_menu.addAction(action)
             parent.tool_actions[role] = action
-
-    help_menu = menu_bar.addMenu("&Help")
-    help_menu.setObjectName("helpMenu")
-    help_menu.addAction(
-        "Documentation", lambda: QDesktopServices.openUrl(QUrl(DOCS_URL)),
-    )
 
     return menu_bar

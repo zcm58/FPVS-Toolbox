@@ -54,7 +54,7 @@ checks remain unclaimed, and optional full-cohort investigations are stopped.
   checks remain incomplete optional evidence, not newly imposed release blockers.
   Release identity and publication are complete. Later changes remain subject to CI.
 - Public restoration is complete at `zcm58/FPVS-Toolbox`, with cleaned source
-  history, verified historical installers, and deployed documentation. The
+  history and verified historical installers. The
   original repository remains private with its retained PR/cached objects;
   those objects were not copied to the new repository.
 - Follow [verification gates](verification-gates.md) for required checks and

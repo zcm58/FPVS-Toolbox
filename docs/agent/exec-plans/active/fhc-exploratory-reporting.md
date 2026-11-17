@@ -80,10 +80,9 @@ Final local verification:
 - `tests/free_harmonic_clustering/test_exploratory_exports.py`
 - `tests/gui/test_free_harmonic_clustering_page.py`
 - `src/Tools/Free_Harmonic_Clustering/ARCHITECTURE.md`
-- `docs/user/tools/free-harmonic-clustering.md`
 - This execution plan.
 
-Architecture and user docs were updated because reporting ownership, GUI
-navigation, and additive completed-run artifacts changed. The numerical
+The architecture contract and former public guide were updated because reporting
+ownership, GUI navigation, and additive completed-run artifacts changed. The numerical
 analysis, preparation, input, model, and orchestration implementations remain
 unchanged; no statistical method/version or new calibration claim is introduced.

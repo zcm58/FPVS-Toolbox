@@ -826,8 +826,8 @@ Owners added: `processing/dataset_exclusions.py`,
 `gui/dataset_exclusions_dialog.py`, `gui/dataset_exclusions_workflow.py`, and
 `workers/dataset_exclusions.py`. Existing Settings and processing-ledger owners
 provide integration; raw preprocessing, numerical methods, and output formats
-are unchanged. The project-I/O architecture and user guide document the
-workflow. Cache-reset wording now states that saved exclusions still apply.
+are unchanged. The project-I/O architecture documents the workflow.
+Cache-reset wording now states that saved exclusions still apply.
 
 Visible smoke after restart (Qt execution remains CI-only locally): open the
 manager on a project containing processed and unprocessed participants; verify
@@ -881,6 +881,6 @@ Files for this feature:
   `tests/gui/test_dataset_exclusions_qt.py`, and
   `tests/gui/test_gui_preproc_dialog.py`; registration in
   `.agents/verification.toml` and `tests/qt_test_files.txt`.
-- Documentation: `docs/user/index.md`,
+- Documentation: the former public overview,
   `docs/agent/architecture/project-io.md`,
   `docs/agent/architecture/cache-maintenance.md`, and this active plan.

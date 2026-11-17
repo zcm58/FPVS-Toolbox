@@ -18,7 +18,6 @@ EXPECTED_SIDEBAR_ICONS = {
     "detectability",
     "settings",
     "info",
-    "help",
 }
 
 

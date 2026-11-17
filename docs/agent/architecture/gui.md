@@ -27,10 +27,10 @@ Primary paths:
   open. The standalone updater reads the same preference without loading project
   settings. Appearance-aware page styles use `set_themed_stylesheet()`. Custom
   UI painters resolve shared tokens through `theme_color()`.
-- `src/Main_App/gui/menu_bar.py`: File, View, Tools, and Help construction.
-  `file_menu.py` groups project, Settings, cache, and application actions.
-  View contains Home (Ctrl+1), Tools contains default and optional beta actions,
-  and Help links to Documentation.
+- `src/Main_App/gui/menu_bar.py` builds File, View, and Tools.
+  `file_menu.py` groups project, Settings, cache, and application actions,
+  including About. View contains Home (Ctrl+1), and Tools contains default
+  and optional beta actions.
 - `src/Main_App/gui/typography.py`: canonical font family, role sizes, font
   weights, monospace font, and QSS font helpers used by the main app,
   component layer, and migrated tool windows.
@@ -534,13 +534,12 @@ Its profile choices and stable backend IDs are:
 
 The information button beside Method profile opens the shared `ToolInfoDialog`
 for the currently selected profile. Brief explanations and method-specific
-publication links live in `HARMONIC_METHOD_INFO` in `settings_panel.py`;
-publication names belong in that dialog, not the selector. References must be
+publication links live in `HARMONIC_METHOD_INFO` in `settings_harmonic_page.py`.
+Use the dialog for publication names. References must be
 checked against primary-source methods and describe any different thresholds,
 pooling, or response measures. Fixed-domain examples do not establish
 preregistration. Legacy's isolated-peak guard has no verified publication
-precedent. The source-review scope and evidence are recorded in the
-[methods checklist](../../user/reference/methods-reporting-checklist.md#harmonic-method-references).
+precedent. See the [comparison with published FPVS methods](statistics-tools.md#relationship-to-published-fpvs-statistics).
 These are presentation changes: persisted profile IDs, versions, defaults,
 fingerprints and calculations remain unchanged.
 
@@ -622,18 +621,20 @@ per app session. `shell_status.py` locks the menu during processing,
 processing-cache reset, and Scalp Maps generation, then restores its prior
 enabled state. The Home shortcut follows the same lock.
 
-Welcome and Home default to 960 × 520 with a 900 × 520 minimum. The other
-workspace pages use the existing 1280 × 900 minimum. The window follows the
-current stack page and restores a compact size after automatic expansion
-when the expanded window is still at the automatic size. An explicit larger
-size or maximized window persists. The stack size policies prevent hidden
-pages from increasing the compact minimum.
+Welcome defaults to 600 × 340 with a 480 × 280 minimum. Opening or creating
+a project from the default Welcome size expands the window to Home at
+960 × 520. Home has a 900 × 520 minimum, and other workspace pages have a
+1280 × 900 minimum. The window restores its earlier size after an automatic
+expansion to a workspace page if the user leaves that size in place. Larger
+user-set sizes and maximized windows are respected. Stack size policies keep
+hidden pages from increasing the active page's minimum.
 
-`project_welcome.py` presents Import FPVS Studio Config as the primary
-action, with Open Existing Project and Create Manually beside it. Welcome and
-File trigger the same three project actions. Import still confirms hardware
-and requests a recordings folder through the supported configuration import
-workflow. Successful import goes directly to Home.
+`project_welcome.py` places two wide buttons directly on the Welcome background,
+with **Open Existing Project** as the primary action.
+**Create New Project** opens a chooser for **Import FPVS Studio Config** and
+**Create Project Manually**. The chooser closes before invoking either File
+action. Cancel and Escape return to Welcome. A Studio import confirms hardware,
+requests a recordings folder, and opens Home when it succeeds.
 
 Home groups recording selection, run readiness, Start Processing, and View
 Log in the processing column. Analysis shows persisted processing history,
@@ -650,16 +651,23 @@ Closing it keeps the draft. Project load collapses the editor, and invalid
 Save opens it and focuses the first invalid field. Source-mapped projects
 show **View conditions** with their canonical catalog.
 
-For visible acceptance, start at 960 × 520 and repeat at 900 × 520. Import
-a sanitized Studio config from Welcome, confirm hardware and select the
-recordings folder, then check the project opens directly on Home. Verify
-manual setup and reopening are also reachable from Welcome. On Home,
-check keyboard navigation, long condition lists, invalid Save from
+For visible acceptance, check Welcome at 600 × 340 and 480 × 280 in Light
+and Dark. Tab through both buttons and confirm they fit and show focus. Open
+Existing Project opens the picker directly. Cancel the picker, then use Cancel
+and Escape in Create New Project and confirm Welcome keeps its current size.
+From the default size, open an existing project and exercise both creation
+methods on disposable fixtures. For Studio import, confirm hardware and select
+the recordings folder. Check that success expands to Home at 960 × 520.
+Repeat with a larger custom Welcome size and with a maximized window to check
+that both are respected. On Home, check keyboard navigation, long condition
+lists, invalid Save from
 Settings, and last-run controls alongside the analysis shortcuts. Confirm
 Scalp Maps and LORETA appear after enabling Beta Tools and restarting.
 Check that the shortcuts use the same notices and output checks as Tools.
-Open Settings or an analysis tool, then verify return via View > Home or
-Ctrl+1 restores automatic expansion and respects a manual resize.
+Verify that the menu bar contains File, View, and Tools and that **File > About**
+opens the app information dialog. Open Settings or an analysis tool, then
+verify that **View > Home** or **Ctrl+1** restores the previous window size
+after automatic expansion and respects a manual resize.
 
 When the active project changes through create/open/import/path workflows, the
 main shell must return to Home and discard project-bound embedded page instances.

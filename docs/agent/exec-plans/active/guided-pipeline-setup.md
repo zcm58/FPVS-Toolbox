@@ -94,8 +94,8 @@ remain unverified locally under the repository's Qt policy.
 - Verification routing: `.agents/verification.toml`, `tests/qt_test_files.txt`.
 - Guidance: `AGENTS.md`, `ARCHITECTURE.md`, `docs/agent/agent-index.md`,
   `docs/agent/architecture/gui.md`, `pipeline-methods.md`,
-  `hardware-pipeline-studio-roadmap.md`, this plan, `docs/user/index.md`,
-  `docs/user/reference/eeg-hardware.md`.
+  `hardware-pipeline-studio-roadmap.md`, this plan, and the former public
+  overview and hardware guide.
 
 All saved state is rooted in the active `Project.project_root` and
 `Project.manifest_path`. No machine-specific runtime paths were added or

@@ -135,5 +135,4 @@ Documentation:
 - `docs/agent/architecture/preprocessing-contract.md`
 - `docs/agent/quality/kurtosis-screening-calibration.md`
 - `docs/agent/reviews/preprocessing-qc-review-experience.md`
-- `docs/user/reference/index.md`
-- `docs/user/reference/preprocessing-qc-review.md`
+- The former public reference index and preprocessing QC guide.

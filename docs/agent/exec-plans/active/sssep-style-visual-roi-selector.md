@@ -264,8 +264,7 @@ execution and visible cross-platform smoke remain pending.
    and accessibility.
 4. Retain existing settings, processing, Stats, SNR, and harmonic
    rollback regressions.
-5. Update GUI architecture and user documentation to describe the embedded
-   workflow.
+5. Update the GUI architecture to describe the embedded workflow.
 
 Exit gate: locally safe gates pass, registered Qt coverage passes in CI, and the
 visible 1280x900 workflow is accepted.
@@ -297,8 +296,7 @@ Focused tests and docs:
 - `tests/gui/test_gui_preproc_dialog.py`
 - existing ROI settings, processing, Plot Generator, and Stats tests
 - `docs/agent/architecture/gui.md`
-- `docs/user/tools/snr-plot-generator.md`
-- `docs/user/tools/statistics.md`
+- `docs/agent/architecture/statistics-tools.md`
 - this active plan
 
 ## Acceptance Criteria
@@ -602,10 +600,8 @@ rebuild-now and deferred rebuild, including a missing built-in draft. Finish a
 harmonic-only rebuild and confirm Settings returns home after worker cleanup.
 The existing detailed Windows/CachyOS visual checklist above still applies.
 
-Final handoff checks: all staged Python files pass Ruff and compilation;
-`git diff --cached --check` passes. The strict MkDocs build command
-`.venv/Scripts/python.exe -m mkdocs build --strict --site-dir .codex-tmp/roi-merge-docs`
-is blocked by two pre-existing pages absent from navigation:
-`reference/missing-condition-outputs.md` and `reference/spectral-data-files.md`.
-Both pages already exist at the pre-merge HEAD, and `mkdocs.yml` is unchanged.
+Final handoff checks passed for staged Python Ruff and compilation and
+`git diff --cached --check`. The former documentation site's strict build was
+blocked by two existing reference pages absent from navigation. Both pages
+were present before the merge and the site configuration was unchanged.
 No publishing or project-data mutation was performed during validation.

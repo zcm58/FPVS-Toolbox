@@ -15,8 +15,9 @@ Windows installers are the release deliverable; shared source also supports
 CachyOS. Release tags and acceptance receipts define shipped behavior.
 
 Current acquisition routes cover confirmed ActiveTwo64, ActiveThree, Brain
-Products, and Unicorn within the [hardware guide's](docs/user/reference/eeg-hardware.md)
-format and qualification limits. Production reads enter
+Products, and Unicorn within the format and qualification limits of the
+[loading contract](docs/agent/architecture/eeg-loading-contract.md#supported-project-routes).
+Production reads enter
 `Main_App.io.bids_import` / `bids_loader` through `io.load_utils`, producing
 MNE Raw and an immutable `io.recording_contract.RecordingContract`.
 `io.acquisition_metadata` resolves hardware defaults and qualified capabilities;
@@ -106,8 +107,8 @@ Tools under `src/Tools/` open through the Main App GUI. Read their scoped
 | `tests/` | Unit/integration tests and CI Qt coverage. |
 | `scripts/debug/`, `scripts/manual_diagnostics/`, `scripts/migration/` | Focused developer probes and migrations; not runtime APIs or default gates. |
 | `scripts/packaging/` | Windows build/installer inputs. |
-| `docs/agent/`, `docs/user/` | [Agent knowledge base](docs/agent/README.md) and user MkDocs source. |
-| `.github/workflows/` | Source/packaging CI and strict documentation deployment from `main`. |
+| `docs/agent/` | [Agent knowledge base](docs/agent/README.md) for internal engineering guidance. |
+| `.github/workflows/` | Source and packaging CI. |
 
 ## Verification Strategy
 

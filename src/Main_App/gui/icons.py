@@ -79,10 +79,6 @@ _SIDEBAR_ICON_PATHS = {
         <circle cx="12" cy="12" r="9"/><path d="M12 11v6"/>
         <path d="M12 7h.01" stroke-width="3"/>
     """,
-    "help": """
-        <circle cx="12" cy="12" r="9"/>
-        <path d="M9.6 9a2.5 2.5 0 1 1 3.5 2.3c-.8.4-1.1.9-1.1 1.7v.5M12 17h.01"/>
-    """,
 }
 
 

@@ -51,7 +51,7 @@ FONT_ROLES: dict[FontRole, FontRoleSpec] = {
     "subsection_header": FontRoleSpec(10, 13, QFont.Bold, 700),
     "sidebar_item": FontRoleSpec(11, 15, QFont.Medium, 500),
     "sidebar_section": FontRoleSpec(11, 13, QFont.DemiBold, 650),
-    "landing_title": FontRoleSpec(44, 60, QFont.Bold, 700),
+    "landing_title": FontRoleSpec(24, 32, QFont.DemiBold, 600),
     "landing_action": FontRoleSpec(15, 20, QFont.DemiBold, 600),
     "project_title": FontRoleSpec(16, 22, QFont.DemiBold, 600),
     "tool_title": FontRoleSpec(20, 27, QFont.DemiBold, 600),

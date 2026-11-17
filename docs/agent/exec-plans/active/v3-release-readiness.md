@@ -52,8 +52,8 @@ The public home is `zcm58/FPVS-Toolbox`, seeded from verified cleaned history.
 The original `zcm58/FPVS-Toolbox-Repo` remains private; its old PR references
 and cached objects were not copied. Private backups preserve removed research
 material. The prepared GitHub Support request was not submitted after the user
-chose the new repository. Cleaned source, historical tags/releases and
-[documentation](https://zcm58.github.io/FPVS-Toolbox/) are public.
+chose the new repository. The cleaned source, historical tags and releases,
+and the former Toolbox documentation were published publicly.
 
 Published v2.1.2 binaries query the old repository, so their first v3 upgrade
 requires the public full installer. Current update/identity URLs use the new

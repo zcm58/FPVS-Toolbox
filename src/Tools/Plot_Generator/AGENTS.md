@@ -297,8 +297,7 @@ physical dimensions, and verify filenames and the selected output folder are
 unchanged. Existing saved colors should remain; missing preferences use the
 blue/red defaults. Leave local Qt execution to CI unless explicitly approved.
 
-Multi-group SNR overlays are implemented; this contract and
-`docs/user/tools/snr-plot-generator.md` own their supported behavior. Final
+Multi-group SNR overlays are implemented. This contract defines their supported behavior. Final
 packaged/visible acceptance is tracked in
 `docs/agent/exec-plans/active/v3-release-readiness.md`.
 

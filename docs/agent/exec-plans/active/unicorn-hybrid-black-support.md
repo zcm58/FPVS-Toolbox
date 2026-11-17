@@ -10,8 +10,9 @@ The application must not advertise hardware-qualified Unicorn processing.
 The phases and dated inspection notes below retain the broader physical/Studio
 qualification plan. They are not a current implementation inventory: use the
 [multi-hardware plan](multi-hardware-bids.md) and
-[hardware guide](../../../user/reference/eeg-hardware.md) for current software
-support. No physical qualification checkboxes are closed by synthetic tests.
+[recording support contract](../../architecture/eeg-loading-contract.md#supported-project-routes)
+for current software support. No physical qualification checkboxes are closed
+by synthetic tests.
 
 Created 2026-09-25; implementation started 2026-09-29. The former
 `codex/unicorn-headset-support` and `codex/v3-release` branch names are historical
@@ -489,10 +490,10 @@ numerically and structurally unchanged.
   status; preserve existing project import and external-recording workflows.
 - [ ] Register GUI coverage and a visible/manual smoke path at the supported
   1280x900 workspace. No local offscreen Qt execution.
-- [ ] Update loading, preprocessing, project-I/O, post-processing/export,
-  statistics/tool, methods-reporting, and user workflow documentation as affected;
-  update `ARCHITECTURE.md` and the agent index only where actual ownership/routes
-  change. Keep detailed contracts in their canonical documents. Include the
+- [ ] Update the affected loading, preprocessing, project-I/O, export, and
+  statistics/tool contracts. Update `ARCHITECTURE.md` and the agent index only
+  where ownership or routes change. Keep detailed contracts in their canonical
+  documents. Include the
   montage-extension checklist, registration/compatibility rules, and common
   contract-test requirements; distinguish BDF+C support from BDF+D inspection.
 

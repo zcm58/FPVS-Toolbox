@@ -1,15 +1,14 @@
 # Development Notes
 
-Use this page for local setup, release notes, and validation commands that are
-not part of the end-user documentation.
+Use this page for local setup, release notes, and validation commands.
 
 ## Main branch
 
 `main` is the default development branch and contains the consolidated v3
 release work. The retired development branches were removed on 2026-10-18;
 release tags remain available. Start independent changes from `main` unless
-the user directs work on an existing feature/release branch. Documentation,
-Windows packaging, and isolated Qt workflow branch filters now target `main`.
+the user directs work on an existing feature/release branch. Windows packaging
+and isolated Qt workflow branch filters target `main`.
 
 The published v3.0.0 installer is bound to its release tag. Later cleanup or
 feature branches are source changes until separately merged, built, qualified,
@@ -179,10 +178,6 @@ the independent updater and owned-file inventory;
 future authenticated baselines can support direct patches. Users of builds
 that checked the temporary release-only address can install the full package
 from the canonical release page.
-
-GitHub Pages publication is separate from repository visibility. The
-documentation workflow validates the site; do not describe it as deployed
-without checking its deployment and Pages configuration.
 
 After uploading a release, manually smoke the installer update path on Windows:
 

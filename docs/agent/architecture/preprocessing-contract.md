@@ -889,8 +889,8 @@ renumber the eight signal-processing stages.
 The order is part of the app contract. A refactor that preserves each individual
 operation but reorders stages is a statistical-method behavior change. Any
 future reorder requires an explicit user request, a fingerprint/cache version
-bump, updates to this page and `docs/user/reference/methods-reporting-checklist.md`,
-and focused tests equivalent to `tests/processing/test_filter_downsample_order.py`.
+bump, an update to this contract, and focused tests equivalent to
+`tests/processing/test_filter_downsample_order.py`.
 
 ## Locked Behavior
 

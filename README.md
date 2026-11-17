@@ -36,17 +36,6 @@ remain available as historical downloads.
   publication-oriented figures
 - Experimental source visualization in the separate LORETA Visualizer beta tool
 
-## Installation
-
-A standalone .exe Windows installer is provided with each release.
-
-1. Download the installer from the
-   [Releases page](https://github.com/zcm58/FPVS-Toolbox/releases).
-2. Double-click the `.exe` file. Because the installer is unsigned, anti-virus software may warn you that the app is 
-from an unverified developer.
-3. Choose **More info** and then **Run anyway** to continue.
-4. Follow the prompts to select an installation location.
-
 ## License
 
 FPVS Toolbox is released under the MIT License. See [LICENSE](LICENSE) for the

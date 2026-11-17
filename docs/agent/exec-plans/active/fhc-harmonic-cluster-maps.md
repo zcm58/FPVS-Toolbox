@@ -94,5 +94,4 @@ Tests: `tests/free_harmonic_clustering/test_visualization.py`,
 
 Documentation: this plan, `src/Tools/Free_Harmonic_Clustering/AGENTS.md`,
 `src/Tools/Free_Harmonic_Clustering/ARCHITECTURE.md`,
-`src/Tools/Free_Harmonic_Clustering/README.md`, and
-`docs/user/tools/free-harmonic-clustering.md`.
+and the former public guides.

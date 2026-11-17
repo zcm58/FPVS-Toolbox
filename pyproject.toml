@@ -17,7 +17,6 @@ norecursedirs = [
     "codex_pytest_tmp",
     "dist",
     "pytest-cache-files-*",
-    "site",
     "src/quarantine",
     "test_tmp",
 ]

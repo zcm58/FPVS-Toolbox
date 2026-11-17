@@ -3,8 +3,7 @@
 Start with root [AGENTS.md](../../AGENTS.md) and the
 [agent index](agent-index.md). Use [ARCHITECTURE.md](../../ARCHITECTURE.md)
 for ownership, then read only the focused contract needed for the task.
-User documentation lives in `docs/user/`; shell setup belongs in
-[development](guides/development.md).
+See [development](guides/development.md) for shell setup.
 
 ## Directory Map
 
