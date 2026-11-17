@@ -84,21 +84,24 @@ class ToolboxCacheDialog(AppDialog):
         self.root_layout.addWidget(self.status)
         note = QLabel(
             "Includes the current project, projects in your configured folder, "
-            "and app caches. Recordings, results, settings, saved exclusions, and "
-            "anatomical templates are kept. The next calculations may take longer.", self,
+            "and the app. Your recordings, results, settings, saved exclusions, and "
+            "anatomical templates are kept. The next run may take longer.", self,
         )
         note.setWordWrap(True)
         self.root_layout.addWidget(note)
         self.details_toggle = QToolButton(self)
         self.details_toggle.setText("Show cache locations")
         self.details_toggle.setCheckable(True)
-        self.root_layout.addWidget(self.details_toggle)
+        self.root_layout.addWidget(self.details_toggle, 0, Qt.AlignLeft)
         self.details = QPlainTextEdit(self)
         self.details.setReadOnly(True)
         self.details.setAccessibleName("Cache locations and operation details")
         self.details.setMinimumHeight(100)
         self.details.hide()
         self.details_toggle.toggled.connect(self.details.setVisible)
+        self.details_toggle.toggled.connect(
+            lambda expanded: self.details_toggle.setText("Hide cache locations" if expanded else "Show cache locations")
+        )
         self.root_layout.addWidget(self.details, 1)
         actions = ActionRow(self)
         self.clear_button = make_action_button("Clear Cache", variant="primary", parent=actions)
@@ -106,8 +109,8 @@ class ToolboxCacheDialog(AppDialog):
         self.close_button = make_action_button("Cancel", parent=actions)
         self.clear_button.clicked.connect(self._clear)
         self.close_button.clicked.connect(self.reject)
-        actions.add_button(self.clear_button)
         actions.add_button(self.close_button)
+        actions.add_button(self.clear_button)
         self.root_layout.addWidget(actions)
 
     def begin(self) -> None:

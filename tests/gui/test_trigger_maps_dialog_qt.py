@@ -5,7 +5,7 @@ from __future__ import annotations
 from copy import deepcopy
 
 import pytest
-from PySide6.QtWidgets import QComboBox, QScrollArea
+from PySide6.QtWidgets import QScrollArea
 
 from Main_App.gui.source_participant_registration import SourceParticipantRegistrationDialog
 from Main_App.gui.trigger_maps_dialog import TriggerMapsDialog
@@ -33,8 +33,7 @@ def test_mapped_mode_is_one_way_and_cancel_is_detached(qtbot, project):
     original = project.manifest_path.read_bytes()
     dialog = TriggerMapsDialog(project, apply_to_settings=True)
     qtbot.addWidget(dialog)
-    assert dialog.mode.text() == "Source maps"
-    assert not isinstance(dialog.mode, QComboBox)
+    assert dialog.windowTitle() == "Source trigger maps"
     assert dialog.apply_button.text() == "Apply to Settings"
     assert not dialog.findChildren(QScrollArea)
     dialog.conditions.item(0, 2).setText("19")

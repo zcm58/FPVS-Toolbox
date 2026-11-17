@@ -253,9 +253,9 @@ template-choice question was unresolved at this point and was later resolved
 by QC-15.
 
 The user questioned the need for this added workflow because current validated
-support is limited to BioSemi ActiveTwo64 files with standard electrode names,
-as documented in `docs/user/index.md:76`. For those files the loader assigns
-the template automatically. The settings surface's montage control manages
+support at the time was limited to BioSemi ActiveTwo64 files with standard
+electrode names. For those files the loader assigns the template automatically.
+The settings surface's montage control manages
 ROI presets, not preprocessing coordinates; it is not a user-facing repair
 route. There is no routine file-correction procedure to prescribe without an
 actual error. Troubleshooting a reproducible failure would distinguish

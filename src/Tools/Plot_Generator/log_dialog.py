@@ -16,7 +16,7 @@ class SNRGenerationLogDialog(AppDialog):
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(
-            "SNR Generation Log",
+            "SNR plot log",
             parent,
             size=SurfaceSize(width=720, height=480, min_width=520, min_height=340),
         )
@@ -28,7 +28,7 @@ class SNRGenerationLogDialog(AppDialog):
         self.viewer.setAccessibleName("SNR plot generation log details")
         self.viewer.setReadOnly(True)
         self.viewer.setFont(fixed_width_font())
-        self.viewer.setPlaceholderText("No generation details are available yet.")
+        self.viewer.setPlaceholderText("No log entries yet.")
         self.viewer.setPlainText(log_text)
         self.root_layout.addWidget(self.viewer, 1)
 

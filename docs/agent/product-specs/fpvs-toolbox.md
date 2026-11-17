@@ -25,15 +25,15 @@ Home centers on choosing recordings and running processing. Settings uses the
 same compact window as Home, with the category list and save actions in view.
 
 Manual project creation and recording setup remain supported for studies run
-outside Studio. Existing projects can reopen directly for processing or review.
-The design hypothesis is that Studio import, processing, and these reviews
-will be the most frequent path for the intended users. Relative usage frequency
-has yet to be measured.
+outside Studio. Welcome prioritizes reopening an existing project for processing
+or review. Studio import and manual setup are available under Create New Project.
+Relative usage frequency has yet to be measured.
 
 ## Current source and evidence
 
-- **Studio configuration import.** Import FPVS Studio Config opens directly
-  from Welcome and File. It imports the Toolbox-owned project, protocol and marker subset of `.fpvsconfig` schemas 1.0.0–1.8.0
+- **Studio configuration import.** Import FPVS Studio Config is available from
+  Welcome > Create New Project and from File. It imports the Toolbox-owned
+  project, protocol and marker subset of `.fpvsconfig` schemas 1.0.0–1.8.0
   for FPVS Oddball and Cognitive Load FPVS, including optional removed-electrode
   metadata. Users choose the hardware and recordings in Toolbox. The separate
   acquisition-evidence adapter can compare ordered marker codes after reviewed
@@ -44,7 +44,7 @@ has yet to be measured.
   project-local BIDS adapter and shared MNE processing pipeline. The documented
   format and montage limits govern which recordings can be admitted. Changing
   the hardware profile requires confirmation and invalidates incompatible
-  results. [EEG hardware guide](../../user/reference/eeg-hardware.md)
+  results. [Recording routes](../architecture/eeg-loading-contract.md#supported-project-routes)
 - **Outputs and tools.** Processing generates native `.fpvs` result anchors
   and numerical companions. Historical workbook readers and Excel report
   formats remain supported. SNR Plots and Free Harmonic Clustering are enabled
@@ -52,8 +52,8 @@ has yet to be measured.
   save and restart, and the first-open notice in each session. Current LORETA
   generation requires eligible source-ready derivatives and current harmonics.
   Automatic generation is limited to single-session inputs, and the estimates
-  are exploratory. [Tool access](../../user/tools/index.md) ·
-  [LORETA requirements](../../user/tools/loreta-visualizer.md)
+  are exploratory. [Desktop tools](../architecture/gui.md) ·
+  [LORETA architecture](../../../src/Tools/LORETA_Visualizer/ARCHITECTURE.md)
 
 Source tests and synthetic examples establish software behavior within their
 tested inputs. Physical EEG recording and stimulus timing require separate

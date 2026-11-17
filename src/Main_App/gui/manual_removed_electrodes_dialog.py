@@ -70,9 +70,8 @@ class ManualRemovedElectrodesDialog(QDialog):
         prompt = QLabel(
             prompt_text
             or (
-                "Enter electrodes that were physically removed before recording. "
-                "Participant-wide entries are fallbacks for every visit. Check a "
-                "recording-specific override to replace that fallback for one recording."
+                "List electrodes physically removed before recording. A participant's list "
+                "applies to all visits unless you check an override for a recording."
                 if self._recording_mode
                 else "Enter electrodes that were physically removed before recording."
             ),
@@ -95,13 +94,14 @@ class ManualRemovedElectrodesDialog(QDialog):
             row_count = len(pids) + len(self._recording_rows)
         else:
             self.resize(620, 420)
-            headers = ("PID", "Removed electrodes")
+            headers = ("Participant", "Removed electrodes")
             row_count = len(pids)
         self.table = QTableWidget(row_count, len(headers), self)
         self.table.setObjectName("manual_removed_electrodes_table")
         self.table.setHorizontalHeaderLabels(list(headers))
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.table.setAlternatingRowColors(True)
         self.table.verticalHeader().setVisible(False)
         header = self.table.horizontalHeader()
         for column in range(len(headers)):

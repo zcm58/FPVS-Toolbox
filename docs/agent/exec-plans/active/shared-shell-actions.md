@@ -2,15 +2,15 @@
 
 ## Scope
 
-Give Home, Settings, and tool commands shared Qt actions. Move tool registration
-out of the sidebar. Keep the menu and sidebar layouts, embedded workspace routes,
-project settings behavior, and beta acknowledgement workflow.
+Give Home, Settings, Library, and tool commands shared Qt actions. Native menus
+reuse the shared registration and command guards. Embedded workspace routes,
+project settings and beta acknowledgement use their existing owners.
 
 ## Plan
 
-1. Build shared actions in `Main_App.gui.shell_actions` and use them in both
-   shell surfaces. Keep sidebar labels, icons and selection styling in the
-   sidebar, and leave project and tool callbacks with `MainWindow`.
+1. Build shared actions in `Main_App.gui.shell_actions` and use them in the
+   native menus. Leave project and tool callbacks with `MainWindow` and the
+   Library controller.
 2. Have the existing processing navigation lock control action availability.
    Preserve the disabled styling and restore the actions' earlier state at
    unlock. Keep project and Settings draft guards on the existing routes.
@@ -28,3 +28,8 @@ three related Settings Qt cases passed. The smoke tests cover shared tool
 activation, processing and cache-reset lockout, restoration, and beta
 acknowledgement. The manual walkthrough with a real project remains available
 in the GUI contract.
+
+On 2026-11-17 the main workflow updates and newer GUI polish were reconciled
+with the public Library. The current shell uses the 1200 × 800 default/minimum,
+File/View/Tools menus and shared action availability. Ten scoped native Qt cases
+passed on the laptop display, including Library visibility and action locking.

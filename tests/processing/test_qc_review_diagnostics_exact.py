@@ -11,8 +11,8 @@ from Main_App.processing import qc_review_diagnostics as qc
 from Main_App.processing.prepared_raw_codec import encode_state
 
 
-BASELINE_REF = "6aab9fa69b926d79097991f30dd84af4b2a579fd"
-# Frozen from git show at BASELINE_REF; retain an oracle in shallow CI checkouts.
+# Frozen from git show at 6aab9fa69b926d79097991f30dd84af4b2a579fd
+# to retain an oracle in shallow CI checkouts.
 BASELINE_SEGMENTS_SOURCE = '''
 def _mne_segments(values, sfreq, peak):
     """Return untrimmed MNE consecutive-difference spans for one bounded row."""

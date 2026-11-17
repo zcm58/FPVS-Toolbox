@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QMessageBox,
     QToolButton,
+    QVBoxLayout,
 )
 from Main_App.gui.components import (
     SectionCard,
@@ -45,11 +46,10 @@ def build_signal_review(
         signals_page,
         object_name="settings_experimental_interpolation_card",
     )
-    self._add_settings_scope(
-        interpolation_card.content_layout,
-        "Current project only. Review defaults do not change previously accepted repairs."
-        if self.project is not None else "Open a project to edit experimental QC settings.",
-    )
+    if self.project is None:
+        self._add_settings_scope(
+            interpolation_card.content_layout, "Open a project to edit experimental QC settings.",
+        )
     self.raw_signal_screening_enabled_check = QCheckBox(
         "Review large signals and brief disturbances", interpolation_card,
     )
@@ -92,7 +92,10 @@ def build_signal_review(
         "configured absolute normalized-score threshold. Off: use the kurtosis "
         "review dialog. Invalid statistics still need review."
     )
-    interpolation_card.content_layout.addWidget(self.kurtosis_auto_interpolate_all_check)
+    repair_options = QVBoxLayout()
+    repair_options.setContentsMargins(20, 0, 0, 0)
+    repair_options.setSpacing(4)
+    repair_options.addWidget(self.kurtosis_auto_interpolate_all_check)
 
     self.kurtosis_review_auto_interpolate_extreme_check = QCheckBox(
         "Preselect extreme-score repairs in review",
@@ -109,9 +112,8 @@ def build_signal_review(
         "it in review and must still apply decisions. Exactly 10 remains manual. "
         "Auto interpolate all kurtosis flags takes precedence when enabled."
     )
-    interpolation_card.content_layout.addWidget(
-        self.kurtosis_review_auto_interpolate_extreme_check
-    )
+    repair_options.addWidget(self.kurtosis_review_auto_interpolate_extreme_check)
+    interpolation_card.content_layout.addLayout(repair_options)
 
     signals_layout.addWidget(interpolation_card)
     signals_layout.addStretch(1)
@@ -149,14 +151,13 @@ def build_removed_electrode_review(
         and (getattr(self.project, "sessions", {}) or {})
     )
     detector_card = SectionCard(
-        "Experimental Removed-Electrode Detection",
+        "Removed electrodes",
         electrodes_page,
         object_name="settings_experimental_removed_electrode_card",
     )
     detector_text = QLabel(
-        "Automatic detection was developed with one lab's BioSemi ActiveTwo "
-        "64 recordings. Treat its output as suggestions for review. Manual "
-        "removed-electrode lists are controlled separately.",
+        "Developed on one lab’s BioSemi ActiveTwo 64 recordings. "
+        "Review automatic suggestions before accepting repairs.",
         detector_card,
     )
     detector_text.setObjectName(
@@ -362,21 +363,17 @@ def build_raw_spectral_review(
         "settings_raw_spectral_screening_info",
     )
 
-    self.raw_spectral_advanced_toggle = QToolButton(raw_spectral_card)
+    self.raw_spectral_advanced_toggle = QToolButton(raw_spectral_card.header)
     self.raw_spectral_advanced_toggle.setObjectName(
         "settings_raw_spectral_advanced_toggle"
     )
-    self.raw_spectral_advanced_toggle.setText("Advanced")
+    self.raw_spectral_advanced_toggle.setText("Thresholds")
     self.raw_spectral_advanced_toggle.setCheckable(True)
     self.raw_spectral_advanced_toggle.setChecked(False)
     self.raw_spectral_advanced_toggle.setToolTip(
         "Show the locked provisional values used by this project."
     )
-    raw_spectral_card.content_layout.addWidget(
-        self.raw_spectral_advanced_toggle,
-        0,
-        Qt.AlignLeft,
-    )
+    raw_spectral_card.header.add_action_widget(self.raw_spectral_advanced_toggle)
 
     self.raw_spectral_advanced_values = QWidget(raw_spectral_card)
     self.raw_spectral_advanced_values.setObjectName(

@@ -84,11 +84,10 @@ def test_recording_additions_dialog_shows_canonical_proposal_and_explicit_confir
     assert "session_id: visit2" in dialog.table.item(0, 4).toolTip()
     assert dialog.table.item(0, 7).toolTip() == str(raw_file)
     summary = dialog.findChild(QLabel, "participant_review_summary").text()
-    assert "New EEG recordings" in summary
     assert "configured source folder" in summary
-    assert "registry unchanged" in summary
-    assert "before planning processing" in summary
-    assert "Existing analysis outputs will need processing to finish before reuse." in summary
+    assert "Cancel stops this run without adding recordings." in summary
+    assert "before processing" in summary
+    assert "completed processing before reuse" in summary
     assert dialog.width() <= 1280 and dialog.height() <= 900
     assert dialog.rect().contains(dialog.continue_button.mapTo(dialog, dialog.continue_button.rect().bottomRight()))
     qtbot.mouseClick(dialog.continue_button if accept else dialog.cancel_button, Qt.LeftButton)
@@ -431,10 +430,8 @@ def test_protocol_tab_requires_explicit_legacy_confirmation(
     assert dlg.protocol_oddball_every_n_edit.text() == "5"
     assert dlg.protocol_expected_cycles_edit.text() == ""
     assert dlg.protocol_oddball_marker_code_edit.text() == "55"
-    assert dlg.protocol_marker_code_help.text() == (
-        "Oddball marker code: Event code emitted for each oddball in every "
-        "condition. Default: 55."
-    )
+    assert dlg.protocol_marker_code_help.isHidden()
+    assert "Default: 55." in dlg.protocol_oddball_marker_code_edit.toolTip()
 
     dlg._save()
     assert not warnings
@@ -696,11 +693,11 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
     section_cards = dlg.findChildren(SectionCard)
     cards = {card.header.title_label.text(): card for card in section_cards}
     assert "Preprocessing Parameters" in cards
-    assert "Project FPVS Protocol" in cards
+    assert "Rates and analysis window" in cards
     assert "Harmonic Selection and Summation" in cards
-    assert "Processing QC" in cards
-    assert "Experimental Removed-Electrode Detection" in cards
-    assert "Experimental Summed-BCA Screening" in cards
+    assert "Processing QC" not in cards
+    assert "Removed electrodes" in cards
+    assert "Screening and repair" in cards
     assert "Tool Visibility" not in cards
     assert "Quick Add" not in cards
     assert "Regions of Interest" not in cards
@@ -722,6 +719,12 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
     assert cards["Preprocessing Parameters"].isAncestorOf(
         dlg.line_noise_frequency_combo
     )
+    processing_grid = dlg.group_preproc.content_layout
+    hardware_row = processing_grid.getItemPosition(processing_grid.indexOf(dlg.hardware_platform_combo))[0]
+    mapping_row = processing_grid.getItemPosition(processing_grid.indexOf(dlg.electrode_mapping_profile_combo))[0]
+    reference_row = processing_grid.getItemPosition(processing_grid.indexOf(dlg._preproc_field_containers[4]))[0]
+    filter_row = processing_grid.getItemPosition(processing_grid.indexOf(dlg._preproc_field_containers[0]))[0]
+    assert hardware_row < mapping_row < reference_row < filter_row
     assert dlg.line_noise_filter_enabled_check.text() == "Remove mains line noise"
     assert dlg.line_noise_filter_enabled_check.isChecked() is True
     assert dlg.line_noise_frequency_combo.currentData() == 60
@@ -767,6 +770,8 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
     dlg.harmonic_summation_method_combo.setCurrentIndex(0)
     assert not legacy_scope.isEnabled()
     assert scope_combo.currentData() == "all_scalp_electrodes"
+    assert dlg.fixed_harmonic_warning.isHidden()
+    assert dlg.harmonic_selection_electrodes_edit.isHidden()
     dlg.harmonic_summation_method_combo.setCurrentIndex(3)
     assert legacy_scope.isEnabled()
     assert dlg.fixed_harmonic_freqs_edit.isEnabled() is False
@@ -775,6 +780,8 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
     )
     dlg.harmonic_summation_method_combo.setCurrentIndex(fixed_list_index)
     assert dlg.fixed_harmonic_freqs_edit.isEnabled() is True
+    assert not dlg.fixed_harmonic_freqs_edit.isHidden()
+    assert dlg.fixed_harmonic_upper_index_edit.isHidden()
     assert dlg.fixed_harmonic_input_mode_combo.isEnabled() is True
     assert dlg.harmonic_electrode_scope_combo.isEnabled() is False
     assert dlg.findChild(QWidget, "settings_fixed_harmonics_exclude_base") is None
@@ -785,16 +792,16 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
     )
     dlg.fixed_harmonic_input_mode_combo.setCurrentIndex(upper_index_mode)
     assert dlg.fixed_harmonic_freqs_edit.isEnabled() is False
+    assert dlg.fixed_harmonic_freqs_edit.isHidden()
     assert dlg.fixed_harmonic_upper_index_edit.isEnabled() is True
     assert dlg.fixed_harmonic_upper_frequency_edit.isEnabled() is False
-    detector_card = cards["Experimental Removed-Electrode Detection"]
-    summed_bca_card = cards["Experimental Summed-BCA Screening"]
+    detector_card = cards["Removed electrodes"]
+    summed_bca_card = cards["Screening and repair"]
     assert detector_card.isAncestorOf(dlg.auto_detect_removed_electrodes_check)
     assert detector_card.isAncestorOf(dlg.removed_electrode_detection_mode_combo)
     assert detector_card.isAncestorOf(dlg.removed_electrode_detection_info_button)
     assert detector_card.isAncestorOf(dlg.manual_removed_electrodes_enabled_check)
     assert detector_card.isAncestorOf(dlg.manual_removed_electrodes_button)
-    assert cards["Processing QC"].isAncestorOf(dlg.dataset_exclusions_button)
     assert dlg.auto_detect_removed_electrodes_check.isChecked() is True
     assert dlg.removed_electrode_detection_mode_combo.currentData() == "auto"
     assert dlg.removed_electrode_detection_mode_combo.itemText(0) == (
@@ -829,7 +836,7 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
     ]
     assert dlg.beta_tools_check.text() == "Enable Beta Tools"
     assert dlg.beta_tools_check.isChecked() is False
-    assert cards["Project FPVS Protocol"].isAncestorOf(dlg.oddball_freq_edit)
+    assert cards["Rates and analysis window"].isAncestorOf(dlg.oddball_freq_edit)
     assert dlg.oddball_freq_edit.text() == "1.2 Hz (exactly 6/5 Hz)"
     assert dlg.oddball_freq_edit.isReadOnly()
     assert dlg.protocol_derived_duration_edit.text() == "120 seconds"
@@ -878,7 +885,7 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
     experimental_tab = dlg.tabs.widget(experimental_tab_index)
     assert not preproc_tab.isAncestorOf(cards["Harmonic Selection and Summation"])
     assert not preproc_tab.isAncestorOf(dlg.experimental_ram_preload_check)
-    assert protocol_tab.isAncestorOf(cards["Project FPVS Protocol"])
+    assert protocol_tab.isAncestorOf(cards["Rates and analysis window"])
     assert protocol_tab.objectName() == "settings_protocol_tab"
     assert harmonics_tab.isAncestorOf(cards["Harmonic Selection and Summation"])
     assert harmonics_tab.objectName() == "settings_harmonics_tab"
@@ -900,12 +907,10 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
         label.text() == "Screening alpha" and label.buddy() is dlg.alpha_edit
         for label in application_tab.findChildren(QLabel)
     )
-    assert dlg.debug_check.text() == "Enabled"
-    assert any(
-        label.text() == "Debug logging" and label.buddy() is dlg.debug_check
-        for label in application_tab.findChildren(QLabel)
-    )
-    assert quality_control_tab.isAncestorOf(cards["Processing QC"])
+    assert dlg.debug_check.text() == "Enable debug logging"
+    assert dlg.debug_check.accessibleName() == dlg.debug_check.text()
+    assert quality_control_tab.isAncestorOf(dlg.dataset_exclusions_button)
+    assert not quality_control_tab.findChildren(SectionCard)
     assert quality_control_tab.findChild(QLabel, "settings_frequency_domain_qc_thresholds") is None
     assert experimental_tab.isAncestorOf(detector_card)
     assert experimental_tab.isAncestorOf(summed_bca_card)
@@ -957,6 +962,9 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
     assert actions.row_layout.indexOf(panel.cancel_btn) >= 0
 
 
+_COMMON_SETTINGS_VIEWPORT = (1156, 725)
+
+
 @pytest.fixture
 def experimental_settings_page(tmp_path, qtbot, request):
     project = _prep_project(tmp_path)
@@ -964,7 +972,7 @@ def experimental_settings_page(tmp_path, qtbot, request):
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     for key in REMOVED_ELECTRODE_DETECTION_CHOICE_CANONICAL_KEYS:
         manifest["preprocessing"].pop(key, None)
-    host_size = getattr(request, "param", (1000, 780))
+    host_size = getattr(request, "param", _COMMON_SETTINGS_VIEWPORT)
     if hasattr(request, "param"):
         manifest["event_map"] = {
             f"Condition {index:02d}": 100 + index for index in range(1, 61)
@@ -983,7 +991,7 @@ def experimental_settings_page(tmp_path, qtbot, request):
     qtbot.addWidget(host)
     try:
         apply_fpvs_theme(app)
-        # This is the settings area inside the supported 1280 x 900 shell.
+        # The default represents the Settings area inside the 1200 x 800 shell.
         # A fixed host prevents a large minimum size from hiding overflow by
         # silently enlarging the test window.
         host.setFixedSize(*host_size)
@@ -1205,7 +1213,7 @@ def test_experimental_sections_fit_embedded_workspace(experimental_settings_page
 
 @pytest.mark.parametrize(
     "experimental_settings_page",
-    [(1000, 780), (1640, 900), (1768, 972), (2280, 1260)],
+    [_COMMON_SETTINGS_VIEWPORT, (1640, 900), (1768, 972), (2280, 1260)],
     indirect=True,
     ids=["supported-workspace", "1080p-logical", "1440p-at-125-percent-logical", "4k-at-150-percent-logical"],
 )
@@ -1273,6 +1281,8 @@ def test_protocol_sections_fit_scaled_workspaces_with_marker_tables(experimental
         assert table.isVisibleTo(host) is condition_markers
         assert page.protocol_recording_markers_row.isVisibleTo(host) is recording_markers
         if not condition_markers:
+            card = page._protocol_markers_card
+            assert card.height() <= card.sizeHint().height()
             continue
         _assert_settings_widget_unclipped(table, host)
         assert table.verticalScrollBar().maximum() > 0
@@ -1684,7 +1694,6 @@ def test_embedded_visual_roi_editor_fits_the_supported_workspace(tmp_path, qtbot
     QApplication.instance() or QApplication([])
     win = MainWindow()
     qtbot.addWidget(win)
-    win.resize(1280, 900)
     win.show()
     qtbot.waitExposed(win)
     win.open_settings_window()
@@ -1699,8 +1708,8 @@ def test_embedded_visual_roi_editor_fits_the_supported_workspace(tmp_path, qtbot
 
     roi_tab = page.tabs.widget(page._roi_tab_index)
     footer = page.findChild(QWidget, "settings_footer")
-    assert win.size().width() == 1280
-    assert win.size().height() == 900
+    assert win.size().width() == 1200
+    assert win.size().height() == 800
     assert {scroll.objectName() for scroll in roi_tab.findChildren(QScrollArea)} == {
         "settings_category_scroll", "settings_rois_map_scroll",
     }
@@ -1714,7 +1723,7 @@ def test_embedded_visual_roi_editor_fits_the_supported_workspace(tmp_path, qtbot
     )
     assert page.roi_editor.unmapped_pane.isVisibleTo(roi_tab)
     assert page.roi_editor.status.isVisibleTo(roi_tab)
-    for widget in (page.roi_editor.map_widget, page.roi_editor.roi_pane):
+    for widget in (page.roi_editor.map_scroll, page.roi_editor.roi_pane):
         assert widget is not None
         assert roi_tab.rect().contains(widget.mapTo(roi_tab, widget.rect().topLeft()))
         assert roi_tab.rect().contains(widget.mapTo(roi_tab, widget.rect().bottomRight()))

@@ -136,33 +136,31 @@ class UpdateDialog(QDialog):
         layout.setContentsMargins(18, 18, 18, 18)
         layout.setSpacing(12)
 
-        self.title_label = QLabel("FPVS Toolbox updates", self)
-        self.title_label.setObjectName("update_dialog_title")
-        layout.addWidget(self.title_label)
-
-        self.status_label = QLabel("Ready to check for updates.", self)
+        self.status_label = QLabel(self)
         self.status_label.setObjectName("update_dialog_status")
         self.status_label.setWordWrap(True)
         layout.addWidget(self.status_label)
 
-        versions_layout = QVBoxLayout()
-        versions_layout.setSpacing(4)
+        versions_layout = QHBoxLayout()
+        versions_layout.setSpacing(12)
         self.current_version_label = QLabel(f"Current version: {__version__}", self)
         self.latest_version_label = QLabel("Latest version: Not checked yet", self)
         self.current_version_label.setWordWrap(True)
         self.latest_version_label.setWordWrap(True)
-        versions_layout.addWidget(self.current_version_label)
-        versions_layout.addWidget(self.latest_version_label)
+        versions_layout.addWidget(self.current_version_label, 1)
+        versions_layout.addWidget(self.latest_version_label, 1)
         layout.addLayout(versions_layout)
 
-        self.notes_heading_label = QLabel("What's New", self)
+        self.notes_heading_label = QLabel("Release notes", self)
         self.notes_heading_label.setObjectName("update_dialog_notes_heading")
+        self.notes_heading_label.hide()
         layout.addWidget(self.notes_heading_label)
-        self.notes_label = QLabel("Release notes will appear when an update is available.", self)
+        self.notes_label = QLabel(self)
         self.notes_label.setObjectName("update_dialog_notes")
         self.notes_label.setWordWrap(True)
         self.notes_label.setTextFormat(Qt.TextFormat.PlainText)
         self.notes_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.notes_label.hide()
         layout.addWidget(self.notes_label)
         layout.addStretch(1)
 
@@ -189,7 +187,7 @@ class UpdateDialog(QDialog):
         actions_layout.setVerticalSpacing(8)
         actions_layout.setColumnStretch(0, 1)
         actions_layout.setColumnStretch(1, 1)
-        self.check_button = action_button("Check Again", self.button_box)
+        self.check_button = action_button("Check Now", self.button_box)
         self.check_button.setObjectName("update_dialog_check_button")
         self.download_button = action_button("Download Update", self.button_box)
         self.download_button.setObjectName("update_dialog_download_button")
@@ -224,6 +222,7 @@ class UpdateDialog(QDialog):
             return
         self._result = None
         self._downloaded_installer = None
+        self._set_notes_text("")
         self._set_busy_state("Checking GitHub Releases...")
         self.progress_bar.setVisible(False)
         check_callback = self._check_callback
@@ -378,7 +377,7 @@ class UpdateDialog(QDialog):
         elif result.release_url is not None:
             self._set_notes_text("No release notes were provided for this release.")
         else:
-            self._set_notes_text("Release notes will appear when an update is available.")
+            self._set_notes_text("")
 
         if result.update_available:
             asset = result.installer_asset
@@ -447,7 +446,7 @@ class UpdateDialog(QDialog):
                 "and try again later from File > Check for Updates."
             )
         self.status_label.setText(message)
-        self._set_notes_text(str(error) or "The update operation could not be completed.")
+        self._set_notes_text(str(error) or "The update operation could not be completed.", heading="Details")
         self.progress_bar.setVisible(False)
         self.check_button.setEnabled(True)
         self.download_button.setEnabled(self._download_available())
@@ -575,12 +574,15 @@ class UpdateDialog(QDialog):
         required_width = max(button.minimumWidth() for button in buttons) * 2 + 8 + 36
         self.setMinimumWidth(max(_MINIMUM_SIZE[0], required_width))
 
-    def _set_notes_text(self, text: str) -> None:
+    def _set_notes_text(self, text: str, *, heading: str = "Release notes") -> None:
         # A compact preview keeps every action visible at the minimum size. The full
         # release/error value remains available by tooltip and release-page action.
         words = (elide_middle(word, 64) for word in text.split())
         self.notes_label.setText(elide_middle(" ".join(words), 240))
         self.notes_label.setToolTip(text)
+        self.notes_heading_label.setText(heading)
+        self.notes_heading_label.setVisible(bool(text.strip()))
+        self.notes_label.setVisible(bool(text.strip()))
 
     def _open_release_notes(self) -> None:
         if self._result is None or self._result.release_url is None:

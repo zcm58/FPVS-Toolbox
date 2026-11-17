@@ -12,7 +12,7 @@ class ScalpMapsGenerationLogDialog(AppDialog):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(
-            "Scalp Maps Generation Log",
+            "Scalp Maps log",
             parent,
             size=SurfaceSize(width=760, height=500, min_width=560, min_height=360),
         )
@@ -25,7 +25,7 @@ class ScalpMapsGenerationLogDialog(AppDialog):
         self.viewer.setAccessibleName("Scalp Maps generation log details")
         self.viewer.setReadOnly(True)
         self.viewer.setFont(fixed_width_font())
-        self.viewer.setPlaceholderText("No generation details are available yet.")
+        self.viewer.setPlaceholderText("No log entries yet.")
         self.root_layout.addWidget(self.viewer, 1)
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close, self)

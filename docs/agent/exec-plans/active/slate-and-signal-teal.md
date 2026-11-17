@@ -74,13 +74,17 @@ contracts, project formats, and exported figures and tables.
 
 ## Studio import and processing Home
 
-The [product spec](../../product-specs/fpvs-toolbox.md) prioritizes importing
-a Studio configuration, processing recordings, and opening tools from the
-results. Welcome exposes direct import, reopening, and manual creation.
-Home uses a 960 × 520 starting window and a 900 × 520 minimum. The form groups
-recording input, condition count, processing actions, and the last-run status.
-The condition editor opens inline. The Tools menu provides analysis entry
-points and applies each tool's output checks and beta policy.
+This earlier layout exposed direct Studio import, reopening, and manual creation
+on Welcome. Home used a 960 × 520 starting window. The left column grouped input,
+run controls, and the condition count. The right column grouped run history
+and analysis shortcuts that used the Tools menu actions. Editing conditions
+used the full workspace width. Visible Windows checks passed 90 cases
+including Studio import, project switching, analysis action routing, and the
+full-width condition editor. Synthetic captures confirmed the default and
+900 × 520 minimum layouts.
+
+The [current Welcome workflow](../../architecture/gui.md) prioritizes reopening
+and puts both setup methods under Create New Project.
 
 ## Compact Home follow-up
 

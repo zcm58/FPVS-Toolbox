@@ -256,7 +256,7 @@ class PlotGeneratorUiSectionsMixin:
         self.session_controls_widget.hide()
         params_layout.addWidget(self.session_controls_widget)
 
-        self.overlay_check = QCheckBox("Overlay Comparison")
+        self.overlay_check = QCheckBox("Overlay conditions")
         self.overlay_check.toggled.connect(self._overlay_toggled)
 
         self.overlay_row = QWidget()

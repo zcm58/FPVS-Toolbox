@@ -36,22 +36,20 @@ class PostProcessingRequiredDialog(AppDialog):
         banner.setObjectName("post_processing_required_banner")
         self.root_layout.addWidget(banner)
 
+        details = QTextBrowser(self)
+        details.setObjectName("post_processing_required_details")
+        details.setAccessibleName("Reason post-processing is required")
+        details.setPlainText(reason.strip() or "Project analysis outputs are incomplete or need refreshing.")
+        self.root_layout.addWidget(details, 1)
+
         explanation = QLabel(
-            "Review the reason below before retrying. Post-processing reuses "
-            "existing processed EEG data. If a condition is missing, resolve its "
-            "triggers or record an intentional condition exclusion and rerun "
-            "processing first.",
+            "Post-processing reuses processed EEG. For a missing condition, "
+            "fix its triggers or record an intentional exclusion, then rerun processing.",
             self,
         )
         explanation.setObjectName("post_processing_required_explanation")
         explanation.setWordWrap(True)
         self.root_layout.addWidget(explanation)
-
-        details = QTextBrowser(self)
-        details.setObjectName("post_processing_required_details")
-        details.setPlainText(reason.strip() or "Project analysis outputs are incomplete or need refreshing.")
-        details.setMaximumHeight(105)
-        self.root_layout.addWidget(details)
 
         self.run_button = make_action_button(
             "Run Post-processing",

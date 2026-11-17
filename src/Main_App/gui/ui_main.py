@@ -63,8 +63,7 @@ def init_ui(self) -> None:
 
     # Central stack
     self.stacked = QStackedWidget(self)
-    # The window sets the minimum for the active surface. Hidden pages can
-    # have large size hints even when Home is the only visible page.
+    # The shell owns the shared minimum. Stack hints include hidden pages.
     self.stacked.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
     self.setCentralWidget(self.stacked)
 
@@ -149,10 +148,11 @@ def init_ui(self) -> None:
     self.le_input_file.setPlaceholderText("No recording selected")
 
     self.btn_select_input_file = make_action_button(
-        "Select EEG File...",
+        "Browse…",
         parent=self.row_single_file,
     )
     self.btn_select_input_file.setFixedWidth(BROWSE_BUTTON_WIDTH)
+    self.btn_select_input_file.setAccessibleName("Choose EEG recording")
     self.btn_select_input_file.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
 
     single_hl.addWidget(self.le_input_file, 1)
@@ -161,7 +161,7 @@ def init_ui(self) -> None:
     form.addRow(self.lbl_single_file, self.row_single_file)
     self.lbl_single_file.setBuddy(self.le_input_file)
 
-    self.lbl_input_folder = QLabel("Data Folder", grp_proc)
+    self.lbl_input_folder = QLabel("EEG folder", grp_proc)
     self.row_input_folder = QWidget(grp_proc)
     self.row_input_folder.setObjectName("input_folder_row")
     folder_hl = QHBoxLayout(self.row_input_folder)
@@ -173,10 +173,11 @@ def init_ui(self) -> None:
     self.le_input_folder.setPlaceholderText("No folder selected")
 
     self.btn_select_input_folder = make_action_button(
-        "Select Data Folder...",
+        "Browse…",
         parent=self.row_input_folder,
     )
     self.btn_select_input_folder.setFixedWidth(BROWSE_BUTTON_WIDTH)
+    self.btn_select_input_folder.setAccessibleName("Choose EEG folder")
     self.btn_select_input_folder.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
 
     folder_hl.addWidget(self.le_input_folder, 1)
@@ -369,7 +370,6 @@ def init_ui(self) -> None:
     # Finalize
     self.workspace_stack.addWidget(setup_panel)
     self.page1_container = container
-    self.page1_right = container
     self.homeWidget = setup_panel
 
     processing_page = QWidget(self.workspace_stack)
@@ -390,9 +390,9 @@ def init_ui(self) -> None:
 
     processing_header_layout = QHBoxLayout(processing_header)
     processing_header_layout.setContentsMargins(0, 0, 0, 0)
-    processing_header_layout.setSpacing(20)
+    processing_header_layout.setSpacing(12)
 
-    self.processing_spinner = BusySpinner(processing_header, diameter=54)
+    self.processing_spinner = BusySpinner(processing_header, diameter=40)
     self.processing_spinner.setObjectName("processing_spinner")
     processing_header_layout.addWidget(self.processing_spinner, 0, Qt.AlignVCenter)
 
@@ -400,7 +400,7 @@ def init_ui(self) -> None:
     processing_intro.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
     processing_intro_layout = QVBoxLayout(processing_intro)
     processing_intro_layout.setContentsMargins(0, 0, 0, 0)
-    processing_intro_layout.setSpacing(8)
+    processing_intro_layout.setSpacing(4)
 
     self.processing_title_label = QLabel("Processing Data", processing_intro)
     self.processing_title_label.setObjectName("processing_title")
@@ -449,7 +449,7 @@ def init_ui(self) -> None:
     self.processing_status_card.setObjectName("processing_status_card")
     processing_status_layout = QVBoxLayout(self.processing_status_card)
     processing_status_layout.setContentsMargins(0, 0, 0, 0)
-    processing_status_layout.setSpacing(16)
+    processing_status_layout.setSpacing(8)
 
     self.processing_status_title_label = SubsectionHeaderLabel(
         "Run Progress",
@@ -488,6 +488,7 @@ def init_ui(self) -> None:
     processing_overview_layout.addWidget(self.processing_instruction_panel, 3)
 
     self.processing_checklist_panel = QWidget(self.processing_overview_row)
+    self.processing_checklist_panel.hide()
     processing_checklist_layout = QVBoxLayout(self.processing_checklist_panel)
     processing_checklist_layout.setContentsMargins(0, 0, 0, 0)
     processing_checklist_layout.setSpacing(8)
@@ -534,7 +535,8 @@ def init_ui(self) -> None:
         self.processing_status_card,
     )
     self.processing_progress_heading_label.setObjectName("processing_progress_heading")
-    processing_status_layout.addWidget(self.processing_progress_heading_label)
+    self.processing_progress_heading_label.hide()
+    processing_status_layout.insertWidget(1, self.processing_progress_heading_label)
 
     self.progress_bar = QProgressBar(self.processing_status_card)
     self.progress_bar.setObjectName("processing_progress_bar")
@@ -544,7 +546,7 @@ def init_ui(self) -> None:
     self.progress_bar.setFormat("%p%")
     self.progress_bar.setAlignment(Qt.AlignCenter)
     self.progress_bar.setFixedHeight(btn_h)
-    processing_status_layout.addWidget(self.progress_bar)
+    processing_status_layout.insertWidget(2, self.progress_bar)
     processing_status_layout.addStretch(1)
     processing_layout.addWidget(self.processing_status_card)
 

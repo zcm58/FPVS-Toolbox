@@ -21,7 +21,7 @@ def page(tmp_path, qtbot, qapp):
     apply_fpvs_theme(qapp)
     window = gui.SequenceFigureWindow(project_root=str(tmp_path))
     qtbot.addWidget(window)
-    # Approximate the embedded area inside the supported 1280x900 main shell.
+    # Keep the standalone fixture narrower than the embedded workspace.
     window.resize(1000, 760)
     window.show()
     qtbot.waitExposed(window)
@@ -46,9 +46,12 @@ def test_condition_tabs_fit_embedded_workspace(page, qtbot, count) -> None:
         qtbot.wait(10)
         for row in page.image_rows[condition]:
             assert row.isVisibleTo(page)
+            assert row.line_edit.placeholderText() == "No image selected"
             assert page.rect().contains(row.mapTo(page, row.rect().topLeft()))
             assert page.rect().contains(row.mapTo(page, row.rect().bottomRight()))
     assert page.export_btn.isVisibleTo(page)
+    output_card = page.findChild(SectionCard, "sequence_figure_output")
+    assert output_card is not None and output_card.isAncestorOf(page.basename_edit)
     assert page.rect().contains(page.export_btn.mapTo(page, page.export_btn.rect().bottomRight()))
 
 

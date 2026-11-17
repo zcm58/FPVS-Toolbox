@@ -76,6 +76,7 @@ def test_review_save_persists_once_and_reopens(qtbot, project, monkeypatch):
     assert dialog.pages.currentIndex() == 6
     assert dialog.review_table.rowCount() >= 19
     assert dialog.changes_table.rowCount() > 0
+    assert dialog.review_tabs.currentWidget() is dialog.changes_table
     assert not dialog.review_notice.isHidden()
     assert project.manifest_path.read_bytes() == original
     dialog._save()
@@ -182,6 +183,8 @@ def test_unchanged_protocol_and_detector_source_are_preserved(qtbot, project):
     assert dialog.draft.frequency_protocol.to_manifest() == protocol
     assert dialog.draft.preprocessing["removed_electrode_detection_choice_source"] == source
     assert dialog.draft.review_changes() == ()
+    assert dialog.review_tabs.currentWidget() is dialog.review_table
+    assert not dialog.review_tabs.isTabEnabled(dialog.review_tabs.indexOf(dialog.changes_table))
     assert not dialog.draft.requires_reprocessing
     assert dialog.review_notice.isHidden()
     dialog._save()

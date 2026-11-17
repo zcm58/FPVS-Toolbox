@@ -17,7 +17,7 @@ from Main_App.gui.components import (
 )
 from Main_App.gui.style_tokens import BORDER_COLOR, PAGE_MARGIN, SURFACE_BG, TEXT_SECONDARY
 from Main_App.gui.theme import set_themed_stylesheet
-from Main_App.gui.typography import css_font_declaration
+from Main_App.gui.typography import css_font_size, css_font_weight
 from Main_App.projects.experiment_library import PublicDataset
 
 
@@ -47,7 +47,10 @@ class ExperimentLibraryPage(QWidget):
         set_themed_stylesheet(self, f"""
             QWidget#experiment_library_page {{ background: {SURFACE_BG}; }}
             QLabel[librarySecondary="true"] {{ color: {TEXT_SECONDARY}; }}
-            QLabel#libraryDatasetTitle {{ {css_font_declaration("project_title")} }}
+            QLabel#libraryDatasetTitle {{
+                font-size: {css_font_size("project_title")};
+                font-weight: {css_font_weight("project_title")};
+            }}
             QFrame[libraryDivider="true"] {{ background: {BORDER_COLOR}; border: none; }}
         """)
         self._items: tuple[PublicDataset, ...] = ()

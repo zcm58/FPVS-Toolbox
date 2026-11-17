@@ -19,7 +19,6 @@ from PySide6.QtWidgets import (
 )
 from Main_App.gui.components import (
     ActionRow,
-    SectionCard,
     SubsectionHeaderLabel,
     make_action_button,
     make_form_layout,
@@ -66,12 +65,12 @@ def build_application_page(
     )
     preferences.addRow("Screening alpha", self.alpha_edit)
 
-    self.debug_check = QCheckBox("Enabled", tab)
+    self.debug_check = QCheckBox("Enable debug logging", tab)
     self.debug_check.setObjectName("settings_enable_debug")
     self.debug_check.setAccessibleName("Enable debug logging")
     self.debug_check.setChecked(self.manager.get("debug", "enabled", "False").lower() == "true")
     self.debug_check.setToolTip("Restart FPVS Toolbox after changing debug logging.")
-    preferences.addRow("Debug logging", self.debug_check)
+    preferences.addRow("", self.debug_check)
     layout.addLayout(preferences)
 
     layout.addSpacing(SECTION_HEADER_CONTENT_GAP)
@@ -144,15 +143,9 @@ def build_quality_control_page(self, tabs: QTabWidget) -> None:
         self._manual_excluded_participant_conditions = {}
         self._manual_excluded_recording_conditions = {}
 
-    qc_group = SectionCard(
-        "Processing QC",
-        tab,
-        object_name="settings_advanced_processing_qc_card",
-    )
     self.dataset_exclusions_button = make_action_button(
         "Manage Dataset Exclusions…",
-        compact=True,
-        parent=qc_group,
+        parent=tab,
     )
     self.dataset_exclusions_button.setObjectName(
         "settings_dataset_exclusions_manage"
@@ -164,9 +157,7 @@ def build_quality_control_page(self, tabs: QTabWidget) -> None:
     self.dataset_exclusions_button.clicked.connect(
         self._manage_dataset_exclusions
     )
-    qc_group.content_layout.addWidget(self.dataset_exclusions_button, alignment=Qt.AlignLeft)
-
-    layout.addWidget(qc_group)
+    layout.addWidget(self.dataset_exclusions_button, alignment=Qt.AlignLeft)
 
     layout.addStretch(1)
     tabs.addTab(tab, "Quality Control")

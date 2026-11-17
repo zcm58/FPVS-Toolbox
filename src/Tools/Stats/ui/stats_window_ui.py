@@ -187,13 +187,11 @@ class StatsWindowUiMixin:
         )
         self.outlier_abs_limit_spin.valueChanged.connect(self._on_outlier_abs_limit_changed)
         self.outlier_abs_limit_spin.setEnabled(self._dv_screening_enabled())
-        outlier_form.addRow("Hard DV limit (abs):", self.outlier_abs_limit_spin)
+        outlier_form.addRow("Absolute DV cutoff:", self.outlier_abs_limit_spin)
 
         outlier_layout.addLayout(outlier_form)
 
-        outlier_note = QLabel(
-            "Flag participants if abs(DV) exceeds the limit; non-finite DV requires exclusion."
-        )
+        outlier_note = QLabel("Non-finite DV requires exclusion.")
         outlier_note.setWordWrap(True)
         outlier_note.setToolTip(
             "Applies to the Primary DV only; manual exclusions control modeling."
@@ -373,7 +371,6 @@ class StatsWindowUiMixin:
         inference_grid.setVerticalSpacing(6)
 
         self.standard_screening_methods_label = QLabel(
-            "Standard screening methods\n"
             "Primary participant-random-intercept LMM; one-sided > 0 response "
             "tests; finite observations with no imputation; Holm family-wise "
             "correction; balanced-only secondary ANOVA compatibility."
@@ -620,7 +617,7 @@ class StatsWindowUiMixin:
         self.summary_text.setAcceptRichText(True)
         self.summary_text.setAccessibleName("Screening results at a glance")
         self.summary_text.setPlaceholderText(
-            "A plain-language result summary will appear here after analysis."
+            "No screening results yet."
         )
         self.summary_text.setMinimumHeight(140)
         self.summary_text.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
@@ -631,7 +628,7 @@ class StatsWindowUiMixin:
         self.log_text.setAccessibleName("Standard screening run log")
         self.log_text.setReadOnly(True)
         self.log_text.setPlaceholderText(
-            "Worker phases, warnings, export messages, and errors will appear here."
+            "No log entries yet."
         )
         self.log_text.setMinimumHeight(140)
         self.log_text.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
@@ -734,9 +731,8 @@ class StatsWindowUiMixin:
         analysis_design_layout.addLayout(self.analysis_design_form)
 
         self.analysis_design_note = QLabel(
-            "The paired workflow keeps one stable group per participant and "
-            "one canonical recording per session. It uses complete observed "
-            "pairs per declared outcome, with no imputation or fallback test."
+            "Screening uses finite selected observations without imputation. "
+            "Complete, balanced data also receive a secondary ANOVA check."
         )
         self.analysis_design_note.setObjectName("stats_analysis_design_note")
         self.analysis_design_note.setWordWrap(True)
@@ -846,7 +842,6 @@ class StatsWindowUiMixin:
         run_action_layout.setContentsMargins(0, 0, 0, 0)
         run_action_layout.setSpacing(8)
         run_action_layout.addStretch(1)
-        run_action_layout.addWidget(self.analyze_single_btn)
         run_action_layout.addWidget(self.single_advanced_btn)
         self.results_toggle_btn = make_action_button("Results and log")
         self.results_toggle_btn.setObjectName("stats_toggle_results")
@@ -854,7 +849,7 @@ class StatsWindowUiMixin:
         self.results_toggle_btn.setToolTip("Show or hide screening results and the run log")
         self.results_toggle_btn.toggled.connect(output_container.setVisible)
         run_action_layout.addWidget(self.results_toggle_btn)
-        run_action_layout.addStretch(1)
+        run_action_layout.addWidget(self.analyze_single_btn)
         setup_layout.addWidget(self.run_action_bar)
 
         root_splitter = QSplitter(Qt.Vertical)

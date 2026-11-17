@@ -933,7 +933,7 @@ def set_controls_enabled(host: Any, enabled: bool) -> None:
             "btn_select_input_folder", "le_input_folder",
             "btn_add_event", "btn_add_row",
             "condition_editor_toggle",
-            "btn_import_project", "btn_create_project", "btn_open_project",
+            "btn_create_project", "btn_open_project",
     ):
         _safe_enable(n)
 

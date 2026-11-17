@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
     QLabel, QLineEdit, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget,
 )
 
-from Main_App.gui.components import AppDialog, StatusBanner, SurfaceSize, make_action_button, make_action_row
+from Main_App.gui.components import AppDialog, StatusBanner, SubsectionHeaderLabel, SurfaceSize, make_action_button, make_action_row
 from .trigger_maps_model import (
     trigger_map_changes, trigger_map_editor_payload, trigger_recording_rows,
     unused_identifier, validated_editor_maps,
@@ -21,7 +21,7 @@ class TriggerMapsDialog(AppDialog):
     """All edits remain in this dialog until its caller commits the result."""
 
     def __init__(self, project, parent=None, *, payload=None, apply_to_settings=False):
-        super().__init__("Trigger maps", parent, size=SurfaceSize(1100, 720, min_width=850, min_height=560))
+        super().__init__("Source trigger maps", parent, size=SurfaceSize(1100, 720, min_width=850, min_height=560))
         self.setObjectName("trigger_maps_dialog")
         self.project = project
         self.payload = deepcopy(payload if payload is not None else trigger_map_editor_payload(project))
@@ -30,11 +30,11 @@ class TriggerMapsDialog(AppDialog):
         self._records = trigger_recording_rows(project)
         self._profile_id = None
         converting = project.frequency_protocol.condition_trigger_maps is None
-        self.mode = QLabel("Use source maps" if converting else "Source maps", self)
-        self.mode.setObjectName("trigger_maps_mode")
-        self.root_layout.addWidget(self.mode)
         if converting:
-            note = QLabel("Saving switches this project to source maps. Each recording keeps an explicit assignment; returning to the shared map is not supported.", self)
+            note = QLabel(
+                "Saving assigns a source map to each recording. This conversion to source maps cannot be reversed.",
+                self,
+            )
             note.setWordWrap(True)
             self.root_layout.addWidget(note)
         self.tabs = QTabWidget(self)
@@ -44,7 +44,7 @@ class TriggerMapsDialog(AppDialog):
         self._build_conditions()
         review = QWidget(self)
         review_layout = QVBoxLayout(review)
-        self.review_note = QLabel("Changes to conditions, markers or existing assignments require processing the project again.", review)
+        self.review_note = QLabel("Changes to conditions, markers, or existing assignments require reprocessing.", review)
         self.review_note.setWordWrap(True)
         review_layout.addWidget(self.review_note)
         self.review_table = self._table(("Setting / recording", "Saved", "Proposed"), review)
@@ -89,6 +89,7 @@ class TriggerMapsDialog(AppDialog):
         layout.addWidget(self.assignments, 2)
         row = QHBoxLayout()
         self.bulk_profile = QComboBox(page)
+        self.bulk_profile.setAccessibleName("Source map for selected recordings")
         self.bulk_button = make_action_button("Assign to selected recordings", compact=True, parent=page)
         self.bulk_button.clicked.connect(self._bulk_assign)
         select = make_action_button("Select all", compact=True, parent=page)
@@ -98,7 +99,7 @@ class TriggerMapsDialog(AppDialog):
         row.addWidget(select)
         row.addStretch(1)
         layout.addLayout(row)
-        note = QLabel("Group defaults propose maps for future registration. Existing assignments change only through the recording table above.", page)
+        note = QLabel("Group defaults apply when registering new recordings.", page)
         note.setWordWrap(True)
         layout.addWidget(note)
         self.defaults = self._table(("Group", "Default for new recordings"), page)
@@ -111,13 +112,16 @@ class TriggerMapsDialog(AppDialog):
         page = QWidget(self)
         layout = QVBoxLayout(page)
         profile_row = QHBoxLayout()
-        profile_row.addWidget(QLabel("Source map:", page))
+        profile_caption = QLabel("Source map", page)
+        profile_row.addWidget(profile_caption)
         self.profile_combo = QComboBox(page)
         self.profile_combo.setObjectName("trigger_map_profile")
+        profile_caption.setBuddy(self.profile_combo)
         self.profile_combo.currentIndexChanged.connect(self._select_profile)
         profile_row.addWidget(self.profile_combo, 1)
         self.profile_label = QLineEdit(page)
         self.profile_label.setPlaceholderText("Source map name")
+        self.profile_label.setAccessibleName("Source map name")
         self.profile_label.textEdited.connect(self._edit_profile_label)
         profile_row.addWidget(self.profile_label, 1)
         add_profile = make_action_button("Add source map…", compact=True, parent=page)
@@ -136,7 +140,7 @@ class TriggerMapsDialog(AppDialog):
         remove_condition = make_action_button("Remove selected condition", compact=True, parent=page)
         remove_condition.clicked.connect(self._remove_condition)
         layout.addWidget(make_action_row((add_condition, remove_condition), parent=page))
-        layout.addWidget(QLabel("Recognized source conditions not analyzed", page))
+        layout.addWidget(SubsectionHeaderLabel("Source boundaries outside analysis", page))
         self.boundaries = self._table(("Onset marker", "Source condition label (optional)"), page)
         self.boundaries.setObjectName("trigger_map_boundaries")
         self.boundaries.itemChanged.connect(self._edit_boundaries)

@@ -81,32 +81,6 @@ def _compute_snr_matrix_for_amplitudes(
     )
 
 
-def _compute_snr_for_amplitudes(
-    amplitudes: np.ndarray,
-    window_size: int = 10,
-    exclude_radius: int = 1,
-) -> np.ndarray:
-    """Return full-spectrum SNR for a single channel.
-
-    Parameters
-    ----------
-    amplitudes
-        1-D numpy array of FFT amplitudes for one channel.
-    window_size
-        Half window size on each side used when estimating the noise floor
-        (±window_size bins).
-    exclude_radius
-        Kept for backward compatibility; the actual exclusion of immediate
-        neighbors is handled inside ``compute_noise_stats_for_bin`` and is
-        fixed at ±1 bin around the target.
-    """
-    _ = exclude_radius
-    return _compute_snr_matrix_for_amplitudes(
-        amplitudes[np.newaxis, :],
-        window_size=window_size,
-    )[0]
-
-
 def compute_full_snr_df(
     data_uv: np.ndarray,
     sfreq: float,

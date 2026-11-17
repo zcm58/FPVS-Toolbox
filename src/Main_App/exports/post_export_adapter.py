@@ -83,7 +83,6 @@ def _build_legacy_shim(ctx: LegacyCtx) -> Any:
     settings_dict["save_preprocessed_fif"] = False
     settings_dict["save_condition_fif"] = False
     shim.save_fif_var = SimpleNamespace(get=lambda: False)
-    shim.save_condition_fif_var = SimpleNamespace(get=lambda: False)
     shim.save_condition_fif = False
     save_pref = False
 

@@ -462,14 +462,6 @@ class StatsWindowPipelineMixin:
                 result_payloads = {}
                 self._native_result_payloads = result_payloads
             result_payloads[step_id] = payload
-        if step_id is StepId.PREPARE_ANALYSIS:
-            prepared = payload.get("prepared_payload")
-            if prepared is not None:
-                self._prepared_analysis_payload = prepared
-        elif step_id is StepId.REPORT_BUNDLE:
-            bundle = payload.get("report_bundle")
-            if bundle is not None:
-                self._native_report_bundle = bundle
 
     def run_primary_analysis(self) -> None:
         """Dispatch the primary action according to immutable project mode."""
@@ -1059,8 +1051,6 @@ class StatsWindowPipelineMixin:
         self._pipeline_run_reports[pipeline_id] = None
         self._native_step_store()[pipeline_id] = {}
         self._native_result_payloads = {}
-        self._prepared_analysis_payload = None
-        self._native_report_bundle = None
         self._active_step_worker = None
         self._active_step_context = None
         suppressed = getattr(self, "_suppressed_native_pipelines", None)
@@ -1301,8 +1291,6 @@ class StatsWindowPipelineMixin:
                     "summary was generated."
                 )
             )
-            if bundle is not None:
-                self._native_report_bundle = bundle
             return
 
         # Compatibility fallback for legacy individual-step actions.

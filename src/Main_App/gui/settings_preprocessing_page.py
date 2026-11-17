@@ -63,14 +63,17 @@ def build_preprocessing_page(self, tabs: QTabWidget) -> QWidget:
         "Initial reference channel 2:",
         "Last channel index to keep:",
         "Bad-channel count warning:",
-        "Maximum parallel workers (0 = automatic):",
+        "Parallel workers (0 = auto):",
     ]
+    # Keep the established field indices while placing acquisition and
+    # reference controls before filtering, resampling, and execution limits.
+    positions = ((5, 2), (5, 0), (7, 0), (8, 0), (4, 0), (4, 2), (7, 2), (8, 2), (9, 0))
     self.preproc_edits: list[QLineEdit] = []
     self.preproc_error_labels: list[QLabel] = []
     self._preproc_field_containers = []
     self._preproc_field_labels = []
     for i, label_text in enumerate(params):
-        row, col = divmod(i, 2)
+        row, col = positions[i]
         lbl = QLabel(label_text, self.group_preproc)
         lbl.setWordWrap(True)
         edit = QLineEdit(self.group_preproc)
@@ -97,8 +100,8 @@ def build_preprocessing_page(self, tabs: QTabWidget) -> QWidget:
         self._preproc_field_containers.append(field)
         self._preproc_field_labels.append(lbl)
         self.preproc_error_labels.append(error)
-        grid.addWidget(lbl, row, col * 2)
-        grid.addWidget(field, row, col * 2 + 1)
+        grid.addWidget(lbl, row, col)
+        grid.addWidget(field, row, col + 1)
 
     pre_keys = [
         ("preprocessing", "low_pass", str(PREPROCESSING_DEFAULTS["low_pass"]), "low_pass"),
@@ -149,7 +152,7 @@ def build_preprocessing_page(self, tabs: QTabWidget) -> QWidget:
         "mains frequency and its first two harmonics. Components already removed "
         "by the FIR low-pass are skipped."
     )
-    line_noise_row = (len(params) + 1) // 2
+    line_noise_row = 6
     self.line_noise_filter_enabled_check = QCheckBox(
         "Remove mains line noise",
         self.group_preproc,
@@ -191,7 +194,7 @@ def build_preprocessing_page(self, tabs: QTabWidget) -> QWidget:
     grid.addWidget(line_noise_frequency_label, line_noise_row, 2)
     grid.addWidget(self.line_noise_frequency_combo, line_noise_row, 3)
 
-    montage_row = line_noise_row + 1
+    montage_row = 2
     montage_tooltip = (
         "Use recorded electrode positions or explicitly select the matching cap template. "
         "Do not select a template merely because it has the same channel count."
@@ -252,7 +255,29 @@ def build_preprocessing_page(self, tabs: QTabWidget) -> QWidget:
     grid.addWidget(mapping_label, montage_row + 1, 0)
     grid.addWidget(self.electrode_mapping_profile_combo, montage_row + 1, 1, 1, 3)
 
-    build_hardware_controls(self, grid, montage_row + 2, project_pp or {})
+    build_hardware_controls(self, grid, 0, project_pp or {})
+    field_order = (
+        self.guided_setup_button,
+        self.hardware_platform_combo,
+        self.initial_reference_combo,
+        self.channel_types_edit,
+        self.drop_reference_channels_check,
+        self.electrode_montage_combo,
+        self.electrode_mapping_profile_combo,
+        self.preproc_edits[4],
+        self.preproc_edits[5],
+        self.preproc_edits[1],
+        self.preproc_edits[0],
+        self.line_noise_filter_enabled_check,
+        self.line_noise_frequency_combo,
+        self.preproc_edits[2],
+        self.preproc_edits[6],
+        self.preproc_edits[3],
+        self.preproc_edits[7],
+        self.preproc_edits[8],
+    )
+    for current, following in zip(field_order, field_order[1:]):
+        QWidget.setTabOrder(current, following)
 
     layout.addWidget(self.group_preproc)
 

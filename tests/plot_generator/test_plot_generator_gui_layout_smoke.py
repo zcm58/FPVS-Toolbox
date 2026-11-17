@@ -28,7 +28,7 @@ def test_plot_generator_gui_layout_smoke(qtbot, monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     window = PlotGeneratorWindow()
     qtbot.addWidget(window)
-    window.resize(1280, 900)
+    window.resize(1156, 725)
     window.show()
     qtbot.waitExposed(window)
 
@@ -165,6 +165,8 @@ def test_plot_generator_gui_layout_smoke(qtbot, monkeypatch, tmp_path):
     condition_a_y = window.condition_combo.mapTo(window, QPoint(0, 0)).y()
     window.overlay_check.setChecked(not window.overlay_check.isChecked())
     qtbot.wait(50)
+    assert window.height() == 725
+    assert window.rect().contains(action_row.mapTo(window, action_row.rect().bottomRight()))
     assert window.condition_b_label.isVisible() != initial_visible
     if window.overlay_check.isChecked():
         condition_b_x = window.condition_b_combo.mapTo(window, QPoint(0, 0)).x()

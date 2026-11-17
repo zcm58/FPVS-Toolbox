@@ -379,7 +379,7 @@ def test_recording_exclusion_dialog_accepts_optional_reason_and_is_analysis_only
     dialog.show()
     qtbot.waitExposed(dialog)
 
-    assert "do not change project QC" in (
+    assert "are separate from project QC" in (
         dialog.findChild(
             QtWidgets.QWidget,
             "free_harmonic_exclusion_scope_note",
@@ -534,7 +534,8 @@ def test_results_use_available_height_and_keep_ten_comparisons_visible(
                 family_label="Between-condition differences",
                 comparison_label=(
                     f"All participants: Mixed Response {index + 1} during the first "
-                    "recording session - Semantic Response during the second recording session"
+                    "recording session - Semantic Response during the second recording session "
+                    "in the final prespecified analysis of the complete eligible cohort"
                 ),
             )
             for index, row in enumerate(report.rows)
@@ -720,11 +721,11 @@ def test_result_details_without_maps_and_page_fit(qtbot, tmp_path: Path, monkeyp
     page._on_inspection_completed(_repeated_options(tmp_path.resolve()))
     run = _repeated_report_run(_repeated_options(tmp_path).conditions, ((0.0402, 0.1608, 0.6029),) * 16)
     page._on_repeated_batch_completed(RepeatedBatchWorkerOutcome(run=run))
-    page.resize(1280, 900)
+    page.resize(1156, 725)
     QtWidgets.QApplication.processEvents()
     assert page.findChildren(QtWidgets.QScrollArea) == []
-    assert page.minimumSizeHint().width() <= 1280
-    assert page.minimumSizeHint().height() <= 900
+    assert page.minimumSizeHint().width() <= 1156
+    assert page.minimumSizeHint().height() <= 725
     for widget in (page.result_view_combo, page.view_details_button, page.view_maps_button, page.workflow_actions):
         assert page.rect().contains(widget.mapTo(page, widget.rect().bottomRight()))
     observed = []
@@ -1123,7 +1124,7 @@ def test_results_appear_in_compact_single_screen_without_run_metadata(
     assert page.run_analysis_button.isVisible()
     assert (
         page.run_analysis_button.text()
-        == "Run Free Harmonic Clustering Analysis"
+        == "Run analysis"
     )
 
     significant = SimpleNamespace(
@@ -1341,7 +1342,7 @@ def test_main_window_close_waits_for_retired_page_operations(
 
 def test_incompatible_grid_has_visible_reason_and_fits_workspace(qtbot, tmp_path):
     page = _page(qtbot, tmp_path)
-    page.resize(1280, 900)
+    page.resize(1156, 725)
     page._on_inspection_completed(replace(
         _options(tmp_path), grid_compatible=False,
         compatibility_message=(
@@ -1353,7 +1354,7 @@ def test_incompatible_grid_has_visible_reason_and_fits_workspace(qtbot, tmp_path
     assert not page.run_analysis_button.isEnabled()
     assert page.workflow_status.isVisible()
     page.layout().activate()
-    assert page.width() == 1280 and page.height() == 900
+    assert page.width() == 1156 and page.height() == 725
     for control in (page.workflow_status, page.run_analysis_button, page.open_results_button):
         assert page.rect().contains(QtCore.QRect(control.mapTo(page, QtCore.QPoint()), control.size()))
     assert page.workflow_status.label.height() >= page.workflow_status.label.heightForWidth(

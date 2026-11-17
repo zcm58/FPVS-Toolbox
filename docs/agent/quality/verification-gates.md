@@ -62,14 +62,12 @@ For instructions, ownership maps, or roadmap edits without runtime changes:
 
 ```console
 python .agents/scripts/audit/agent_audit.py
-python -m mkdocs build --strict
 git diff --check
 ```
 
-Use the repo interpreter. Also verify relative links/anchors, referenced owners,
-and plan status against the checked-out tree; MkDocs covers user documentation
-and is not a complete agent-doc link checker. Do not run scientific suites or
-private-data diagnostics solely for prose. Existing CI triggers remain intact.
+Use the repo interpreter. Verify relative links and anchors, referenced owners,
+and plan status against the checked-out tree. Do not run scientific suites or
+private-data diagnostics solely for prose.
 
 ## Acquisition and Studio Qualification
 

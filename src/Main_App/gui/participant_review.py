@@ -46,7 +46,6 @@ class ParticipantReviewDialog(AppDialog):
             ),
         )
         self.rows = list(rows)
-        self.repeated_session = repeated
         project = getattr(parent, "currentProject", None)
         maps = getattr(getattr(project, "frequency_protocol", None), "condition_trigger_maps", None)
         self._trigger_maps = maps if additions_only else None
@@ -54,29 +53,24 @@ class ParticipantReviewDialog(AppDialog):
 
         if additions_only:
             source_text = (
-                "Group and session come from each file's configured source folder. "
-                if repeated else "Group comes from the project's configured raw folder. "
+                "The configured source folder determines group and session. "
+                if repeated else "The configured raw folder determines group. "
             )
             summary_text = (
-                "New EEG recordings were found in this project's configured raw folders. "
-                "Review the proposed assignments below. " + source_text
-                + "Add Files and Continue saves these additions before planning processing. "
-                "Existing analysis outputs will need processing to finish before reuse. "
-                "Cancel leaves the project registry unchanged and stops this processing request."
+                source_text
+                + "Saving adds these recordings before processing. Existing outputs require "
+                "completed processing before reuse. Cancel stops this run without adding recordings."
             )
         else:
             summary_text = (
-                "FPVS Toolbox found participant and session-recording assignments "
-                "that need review before processing. Each recording remains linked "
-                "to the same participant for paired analysis."
-                if repeated
-                else "FPVS Toolbox found participant assignments that need review "
-                "before processing."
+                "Each recording stays linked to its participant for paired analysis."
+                if repeated else ""
             )
-        summary = QLabel(summary_text)
-        summary.setWordWrap(True)
-        summary.setObjectName("participant_review_summary")
-        self.root_layout.addWidget(summary)
+        if summary_text:
+            summary = QLabel(summary_text, self)
+            summary.setWordWrap(True)
+            summary.setObjectName("participant_review_summary")
+            self.root_layout.addWidget(summary)
 
         headers = (
             [

@@ -83,6 +83,7 @@ class PipelineSetupDialog(AppDialog):
         self.root_layout.addLayout(body, 1)
         self.navigation = QListWidget(self)
         self.navigation.setObjectName("pipeline_setup_navigation")
+        self.navigation.setAccessibleName("Setup steps")
         self.navigation.setFixedWidth(210)
         self.navigation.setSpacing(5)
         for number, page in enumerate(PIPELINE_SETUP_PAGES, 1):
@@ -120,6 +121,8 @@ class PipelineSetupDialog(AppDialog):
                              ("next", self.next_button), ("save", self.save_button)):
             button.setObjectName(f"pipeline_setup_{name}")
             button.setAutoDefault(False)
+        actions.row_layout.insertWidget(0, self.cancel_button)
+        for button in (self.back_button, self.next_button, self.save_button):
             actions.add_button(button)
         self.root_layout.addWidget(actions)
         self.cancel_button.clicked.connect(self.reject)
@@ -130,6 +133,8 @@ class PipelineSetupDialog(AppDialog):
 
     def _form(self, page_id: str, layout: QVBoxLayout) -> QFormLayout:
         form = make_form_layout()
+        form.setHorizontalSpacing(16)
+        form.setVerticalSpacing(8)
         self._forms[page_id] = form
         layout.addLayout(form)
         return form
@@ -179,6 +184,7 @@ class PipelineSetupDialog(AppDialog):
     def _methods(self, page_id: str, layout: QVBoxLayout) -> None:
         # A read-only catalog now; a future editor can replace this one surface.
         table = self._table(("Step", "Method"), self)
+        table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
         table.setObjectName(f"pipeline_setup_{page_id}_methods")
         self._method_tables[page_id] = table
         layout.addWidget(table, 1)
@@ -192,11 +198,12 @@ class PipelineSetupDialog(AppDialog):
         self._combo("recording", "electrode_mapping_profile", "Channel mapping:", SUPPORTED_ELECTRODE_MAPPING_PROFILES).setToolTip(
             "Select the mapping matching recorded channel labels and verified electrode positions.")
         self._edit("recording", "channel_types", "Channel roles:", tooltip="Exact recorded names, for example VEOG=eog, ECG=ecg. Blank keeps recorded roles.").setPlaceholderText("VEOG=eog, ECG=ecg")
-        from Main_App.gui.trigger_maps_model import trigger_maps_summary
-        source_note = QLabel(trigger_maps_summary(self.draft.frequency_protocol), widget)
-        source_note.setObjectName("pipeline_setup_source_maps_summary")
-        source_note.setWordWrap(True)
-        layout.addWidget(source_note)
+        if self.draft.frequency_protocol.condition_trigger_maps is not None:
+            from Main_App.gui.trigger_maps_model import trigger_maps_summary
+            source_note = QLabel(trigger_maps_summary(self.draft.frequency_protocol), widget)
+            source_note.setObjectName("pipeline_setup_source_maps_summary")
+            source_note.setWordWrap(True)
+            layout.addWidget(source_note)
         layout.addStretch(1)
 
     def _build_reference(self, widget, layout):
@@ -264,15 +271,15 @@ class PipelineSetupDialog(AppDialog):
     def _build_review(self, widget, layout):
         self.review_notice = StatusBanner(parent=widget, variant="warning")
         layout.addWidget(self.review_notice)
-        tabs = QTabWidget(widget)
-        self.review_table = self._table(("Section", "Setting", "Value", ""), tabs)
+        self.review_tabs = QTabWidget(widget)
+        self.review_table = self._table(("Section", "Setting", "Value", ""), self.review_tabs)
         self.review_table.setObjectName("pipeline_setup_review_configuration")
         self.review_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
-        self.changes_table = self._table(("Setting", "Saved", "Draft"), tabs)
+        self.changes_table = self._table(("Setting", "Saved", "Draft"), self.review_tabs)
         self.changes_table.setObjectName("pipeline_setup_review_changes")
-        tabs.addTab(self.review_table, "Configuration")
-        tabs.addTab(self.changes_table, "Changes")
-        layout.addWidget(tabs, 1)
+        self.review_tabs.addTab(self.review_table, "Configuration")
+        self.review_tabs.addTab(self.changes_table, "Changes")
+        layout.addWidget(self.review_tabs, 1)
 
     def _value(self, key):
         control = self._fields[key]
@@ -554,6 +561,7 @@ class PipelineSetupDialog(AppDialog):
             for column, text in enumerate((section, setting, value)):
                 self.review_table.setItem(row, column, QTableWidgetItem(str(text)))
             edit = make_action_button("Edit", compact=True, variant="tertiary", parent=self.review_table)
+            edit.setAccessibleName(f"Edit {setting}")
             edit.clicked.connect(lambda _checked=False, target=index: self._navigate(target))
             self.review_table.setCellWidget(row, 3, edit)
         self.review_table.resizeRowsToContents()
@@ -563,6 +571,8 @@ class PipelineSetupDialog(AppDialog):
             for column, value in enumerate((change.label, self._display(change.before), self._display(change.after))):
                 self.changes_table.setItem(row, column, QTableWidgetItem(value))
         self.changes_table.resizeRowsToContents()
+        self.review_tabs.setTabEnabled(self.review_tabs.indexOf(self.changes_table), bool(changes))
+        self.review_tabs.setCurrentWidget(self.changes_table if changes else self.review_table)
         self.review_notice.set_text("Changed processing settings require reprocessing before existing results can be reused.")
         self.review_notice.setVisible(self.draft.requires_reprocessing)
 

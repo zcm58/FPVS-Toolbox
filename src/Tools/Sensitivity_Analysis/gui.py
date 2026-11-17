@@ -103,26 +103,11 @@ class SensitivityAnalysisWindow(QWidget):
         page_layout.setContentsMargins(20, 16, 20, 16)
         page_layout.setSpacing(12)
 
-        header = QWidget(self)
-        header_layout = QVBoxLayout(header)
-        header_layout.setContentsMargins(0, 0, 0, 0)
-        header_layout.setSpacing(4)
-
-        title = QLabel("Sensitivity Analysis", header)
+        title = QLabel("Sensitivity Analysis", self)
         title.setObjectName("sensitivity_title")
         title.setProperty("toolTitle", True)
         apply_font_role(title, "tool_title")
-        header_layout.addWidget(title)
-
-        subtitle = QLabel(
-            "Estimate the smallest standardized effect a study can detect from "
-            "its planned sample size, power, alpha, and design assumptions.",
-            header,
-        )
-        subtitle.setObjectName("sensitivity_subtitle")
-        subtitle.setWordWrap(True)
-        header_layout.addWidget(subtitle)
-        page_layout.addWidget(header)
+        page_layout.addWidget(title)
 
         sections = QGridLayout()
         sections.setContentsMargins(0, 0, 0, 0)
@@ -369,9 +354,8 @@ class SensitivityAnalysisWindow(QWidget):
         lmm_design_form.addRow("Number of ROIs:", self.lmm_rois_spin)
 
         advanced_note = QLabel(
-            "Most studies can retain these defaults. Correlation is the "
-            "participant random-intercept ICC; for the supported within-participant "
-            "contrasts in residual-SD units, it usually has little effect on power.",
+            "Correlation is the participant random-intercept ICC. It usually has little "
+            "effect on power for within-participant contrasts in residual-SD units.",
             self.lmm_advanced_panel,
         )
         advanced_note.setObjectName("sensitivity_lmm_advanced_note")
@@ -970,6 +954,7 @@ class SensitivityAnalysisWindow(QWidget):
             f"{result.search_effect_high:.3f} effect bracket, and ran on "
             f"{result.workers_used} worker process(es)."
         )
+        self.result_details.show()
 
     def _show_result_metric(self, name: str, value: float) -> None:
         self.result_banner.setText(f"{name} = {value:.2f}")
@@ -992,6 +977,7 @@ class SensitivityAnalysisWindow(QWidget):
         self.plain_language_label.setText(self._plain_language_result(result))
         self.assumption_summary_label.setText(self._assumption_summary())
         self.reporting_label.setText(result.reporting_text)
+        self.result_details.show()
 
     def _plain_language_result(self, result: SensitivityResult) -> str:
         sample_size = self.sample_size_spin.value()

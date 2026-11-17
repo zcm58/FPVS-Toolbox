@@ -109,7 +109,7 @@ def test_open_existing_project_empty_root_informs(
         assert "File > Create Project Manually…" in text
         assert "Settings > Application > Change Projects Folder…" in text
     else:
-        assert "Import an FPVS Studio config or choose Create Manually." in text
+        assert "Choose Create New Project to get started." in text
         assert "Settings > Application" not in text
 
 

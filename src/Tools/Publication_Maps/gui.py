@@ -366,7 +366,7 @@ class PublicationMapsWindow(QWidget):
         section_layout.setContentsMargins(0, 0, 0, 0)
         section_layout.setSpacing(6)
         section_layout.addWidget(
-            SubsectionHeaderLabel("Map appearance and ranges", section)
+            SubsectionHeaderLabel("Colors and scales", section)
         )
         form = make_form_layout()
 
@@ -506,7 +506,7 @@ class PublicationMapsWindow(QWidget):
 
     def _build_advanced_output_group(self) -> SectionCard:
         group = SectionCard(
-            "Output and history",
+            "Output",
             object_name="publication_maps_output",
         )
         group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)

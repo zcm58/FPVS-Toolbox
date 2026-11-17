@@ -4,11 +4,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from functools import partial
 
-from PySide6.QtCore import QUrl
-from PySide6.QtGui import QAction, QActionGroup, QDesktopServices
+from PySide6.QtGui import QAction, QActionGroup
 
-
-_DOCUMENTATION_URL = "https://zcm58.github.io/FPVS-Toolbox/"
 
 _DEFAULT_TOOL_SPECS = (
     ("btn_free_harmonic_clustering", "Free Harmonic Clustering Analysis", "open_free_harmonic_clustering"),
@@ -32,9 +29,15 @@ class ShellActions(QActionGroup):
         super().__init__(host)
         self.setExclusive(False)
         self.home = self._add("btn_home", "Home", host.show_home_page)
+
+        def show_library() -> None:
+            from Main_App.gui.experiment_library_workflow import show_experiment_library
+
+            show_experiment_library(host)
+
+        self.library = self._add("actionExperimentLibrary", "Experiment Library…", show_library)
         self.settings = self._add("btn_settings", "Settings", host.open_settings_window)
         self.about = self._add("btn_help", "About…", host.show_about_dialog)
-        self.documentation = self._add("btn_info", "Information", self._open_documentation)
         self.default_tools = tuple(
             self._add(role, title, getattr(host, opener))
             for role, title, opener in _DEFAULT_TOOL_SPECS
@@ -49,9 +52,9 @@ class ShellActions(QActionGroup):
     def _add(self, role: str, title: str, callback: Callable[[], None]) -> QAction:
         action = self.addAction(title)
         action.setObjectName(role)
-        action.triggered.connect(callback)
-        return action
+        def invoke() -> None:
+            if self.parent().menuBar().isEnabled():
+                callback()
 
-    @staticmethod
-    def _open_documentation() -> None:
-        QDesktopServices.openUrl(QUrl(_DOCUMENTATION_URL))
+        action.triggered.connect(invoke)
+        return action

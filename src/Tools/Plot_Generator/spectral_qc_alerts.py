@@ -29,13 +29,6 @@ def _format_range(low: object, high: object) -> str:
     return f"{low_val:.2f}-{high_val:.2f} Hz"
 
 
-def _format_uv(value: object) -> str:
-    value_float = _numeric(value)
-    if value_float is None:
-        return "unknown FFT amplitude"
-    return f"{value_float:.2f} uV"
-
-
 def _format_electrode_list(electrodes: object, *, limit: int = 4) -> str:
     if not isinstance(electrodes, list):
         return "unknown electrode"

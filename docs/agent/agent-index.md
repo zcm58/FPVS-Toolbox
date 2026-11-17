@@ -30,7 +30,7 @@ only to explicitly web-scoped work, not the PySide6 desktop GUI.
 | --- | --- | --- |
 | PySide6 widgets, menus, workers, orchestration, status | `pyside6-gui-cleanup` | [GUI](architecture/gui.md), [threading](architecture/workers-threading.md) |
 | Updater/downloads/installers | `project-path-audit`; GUI skill for changed surfaces | [Updater](architecture/updater.md) |
-| Public Experiment Library | `pyside6-gui-cleanup` + `project-path-audit`; `gui` and `project-io` scopes | [Implementation and acceptance](exec-plans/active/public-experiment-library.md), [user guide](../user/experiment-library.md) |
+| Public Experiment Library | `pyside6-gui-cleanup` + `project-path-audit`; `gui` and `project-io` scopes | [Implementation and acceptance](exec-plans/active/public-experiment-library.md), [workflow guide](guides/experiment-library.md) |
 | Package ownership/retired boundaries | `legacy-boundary-review` | [Target layout](architecture/main-app-target-layout.md), [legacy](architecture/legacy-boundaries.md) |
 | Preprocessing entry points/order | `legacy-boundary-review`; GUI skill for orchestration | [Preprocessing](architecture/preprocessing-contract.md) |
 | Removed-electrode or kurtosis calibration | `legacy-boundary-review` | [Removed electrodes](quality/removed-electrode-detection-calibration.md), [kurtosis](quality/kurtosis-screening-calibration.md) |

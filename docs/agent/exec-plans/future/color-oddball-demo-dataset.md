@@ -90,7 +90,7 @@ scores. [Toolbox crop contract](../../architecture/fft-crop-method.md)
    first and optionally the eLORETA volume view. Show Red minus Green as
    descriptive. Use the existing fsaverage download and cache when needed,
    with its size and preparation reported separately from EEG processing.
-   [LORETA workflow](../../../user/tools/loreta-visualizer.md)
+   [LORETA architecture](../../../../src/Tools/LORETA_Visualizer/ARCHITECTURE.md)
 5. Add the companion to the same Color Oddball Demo page on OpenFPVS as
    **Simulated EEG for Toolbox**. Publish through an explicitly approved
    anonymous dataset record linked to the immutable Studio item and version.

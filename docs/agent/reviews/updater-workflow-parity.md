@@ -50,7 +50,7 @@ names, AppId, ownership headers, and existing cache identity remain unchanged.
   additions were verified by the focused gate above.
 - Registered Qt suites and Main Window code passed final Ruff/compilation;
   the earlier safe GUI-focused gate passed 562 non-Qt tests.
-- Strict MkDocs build passed using `build/docs-updater-parity`.
+- The former documentation site built successfully in strict mode.
 - `build_updater.ps1 -Python ./.venv/Scripts/python.exe` built the independent
   helper and passed its frozen diagnostic: version 3.0.0, protocol 1, no GUI or
   analysis imports in worker mode. Build output remains ignored under `dist/`;
@@ -82,8 +82,7 @@ acceptance. Source diagnostics and mocked-process tests do not replace them.
 - `docs/agent/architecture/updater.md`
 - `docs/agent/exec-plans/active/v3-release-readiness.md`
 - `docs/agent/reviews/updater-workflow-parity.md`
-- `docs/user/installing-and-updating.md`
-- `mkdocs.yml`
+- The former installation guide and documentation site configuration.
 - `scripts/packaging/FPVS Toolbox Setup Script.iss`
 - `scripts/packaging/FPVS_Toolbox.spec`
 - `scripts/packaging/build_installer.ps1`

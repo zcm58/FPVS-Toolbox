@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QAbstractItemView, QComboBox, QHeaderView, QLineEdit, QTableWidget, QTableWidgetItem
 
 from Main_App.gui.components import AppDialog, StatusBanner, SurfaceSize, make_action_button, make_action_row
@@ -20,7 +21,7 @@ class RecordingMarkerSchemasDialog(AppDialog):
         self._saved = {str(recording_id).casefold(): tuple((int(onset), int(marker)) for onset, marker in codes) for recording_id, codes in assignments}
         registered = {row.recording_id.casefold() for row in self._identities}
         obsolete = set(self._saved) - registered
-        self._note = "Choose each recording's trigger schema. New recordings stay unassigned until you choose. Changes are saved only when you save Settings."
+        self._note = "New recordings need an explicit schema. Save Settings to keep these changes."
         if obsolete:
             self._note += f" Applying removes {len(obsolete)} saved entries that are no longer registered."
         self.status = StatusBanner(self._note, self, variant="info")
@@ -64,9 +65,14 @@ class RecordingMarkerSchemasDialog(AppDialog):
             self.table.setItem(row, 4, QTableWidgetItem())
         self.root_layout.addWidget(self.table, 1)
         self.select_all_button = make_action_button("Select all", compact=True, parent=self)
-        self.project_button = make_action_button("Selection: project markers", compact=True, parent=self)
-        self.shared_button = make_action_button(f"Selection: shared {protocol.oddball_marker_code}", compact=True, parent=self)
-        self.root_layout.addWidget(make_action_row((self.select_all_button, self.project_button, self.shared_button), parent=self))
+        self.project_button = make_action_button("Use project markers", compact=True, parent=self)
+        self.project_button.setToolTip("Assign project condition markers to the selected rows.")
+        self.shared_button = make_action_button(f"Use shared {protocol.oddball_marker_code}", compact=True, parent=self)
+        self.shared_button.setToolTip("Assign the shared oddball marker to the selected rows.")
+        self.root_layout.addWidget(make_action_row(
+            (self.select_all_button, self.project_button, self.shared_button),
+            parent=self, alignment=Qt.AlignLeft,
+        ))
         self.cancel_button = make_action_button("Cancel", parent=self)
         self.apply_button = make_action_button("Apply schemas", variant="primary", parent=self)
         self.root_layout.addWidget(make_action_row((self.cancel_button, self.apply_button), parent=self))

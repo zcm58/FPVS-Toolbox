@@ -175,7 +175,7 @@ class RepeatedSessionAnalysisDialog(AppDialog):
         design_form.addRow("Ordered sessions:", self.sessions_value)
         design_form.addRow("Full-audit source:", self.source_path_value)
         design.content_layout.addLayout(design_form)
-        self.coverage_value = QLabel("Recording-pair coverage will appear after loading.")
+        self.coverage_value = QLabel()
         self.coverage_value.setObjectName("stats_repeated_session_pair_coverage")
         self.coverage_value.setWordWrap(True)
         self.coverage_value.setTextInteractionFlags(Qt.TextSelectableByMouse)
@@ -185,9 +185,8 @@ class RepeatedSessionAnalysisDialog(AppDialog):
         outcomes = SectionCard("Prespecified outcomes")
         outcomes.setObjectName("stats_repeated_session_outcomes")
         outcome_note = QLabel(
-            "Select the Condition × ROI outcomes declared for this run. The primary "
-            "Holm family includes every selected outcome; unusable declared outcomes "
-            "remain in the audit and are never replaced by a fallback test."
+            "The primary Holm family includes every selected outcome. "
+            "Unusable outcomes stay in the audit without a fallback test."
         )
         outcome_note.setWordWrap(True)
         outcomes.content_layout.addWidget(outcome_note)
@@ -211,24 +210,18 @@ class RepeatedSessionAnalysisDialog(AppDialog):
         self.select_none_button = make_action_button("Select none", compact=True)
         self.select_all_button.clicked.connect(lambda: self._set_all_outcomes(True))
         self.select_none_button.clicked.connect(lambda: self._set_all_outcomes(False))
-        selection_actions = ActionRow(outcomes, alignment=Qt.AlignLeft)
-        selection_actions.add_button(self.select_all_button)
-        selection_actions.add_button(self.select_none_button)
-        selection_actions.row_layout.addStretch(1)
-        outcomes.content_layout.addWidget(selection_actions)
+        outcomes.header.add_action_widget(self.select_all_button)
+        outcomes.header.add_action_widget(self.select_none_button)
         self.root_layout.addWidget(outcomes, 1)
 
-        results = SectionCard("Result and audit summary")
-        results.setObjectName("stats_repeated_session_results")
-        self.result_text = QPlainTextEdit(results)
+        self.results_section = SectionCard("Results")
+        self.results_section.setObjectName("stats_repeated_session_results")
+        self.result_text = QPlainTextEdit(self.results_section)
         self.result_text.setReadOnly(True)
         self.result_text.setMinimumHeight(110)
-        self.result_text.setPlaceholderText(
-            "Primary estimates, complete-pair N, adjusted p-values, and export path "
-            "will appear here."
-        )
-        results.content_layout.addWidget(self.result_text)
-        self.root_layout.addWidget(results)
+        self.results_section.content_layout.addWidget(self.result_text)
+        self.results_section.hide()
+        self.root_layout.addWidget(self.results_section)
 
         self.status = StatusBanner("Loading repeated-session data…", self, variant="info")
         self.status.setObjectName("stats_repeated_session_status")
@@ -253,10 +246,9 @@ class RepeatedSessionAnalysisDialog(AppDialog):
         self.close_buttons.rejected.connect(self.reject)
 
         actions = ActionRow(self, alignment=Qt.AlignRight)
-        actions.row_layout.addStretch(1)
-        actions.add_button(self.run_button)
-        actions.add_button(self.open_button)
         actions.row_layout.addWidget(self.close_buttons)
+        actions.add_button(self.open_button)
+        actions.add_button(self.run_button)
         self.root_layout.addWidget(actions)
 
     def _start_task(
@@ -279,6 +271,7 @@ class RepeatedSessionAnalysisDialog(AppDialog):
 
     def _set_busy(self, busy: bool, message: str) -> None:
         self.status.setText(message)
+        self.status.setVisible(bool(message))
         self.run_button.setEnabled(not busy and bool(self._selected_outcomes()))
         self.select_all_button.setEnabled(not busy and self._project_data is not None)
         self.select_none_button.setEnabled(not busy and self._project_data is not None)
@@ -303,7 +296,7 @@ class RepeatedSessionAnalysisDialog(AppDialog):
         self._populate_outcomes(raw.available_outcomes)
         self._set_busy(
             False,
-            "Ready. Select at least one prespecified outcome; no outcome is selected by default.",
+            "Select at least one prespecified outcome.",
         )
 
     def _populate_outcomes(self, outcomes: tuple[RepeatedSessionOutcome, ...]) -> None:
@@ -400,8 +393,9 @@ class RepeatedSessionAnalysisDialog(AppDialog):
             format_repeated_session_results(result)
             + f"\n\nWorkbook: {path}"
         )
+        self.results_section.show()
         self.open_button.setEnabled(True)
-        self._set_busy(False, f"Analysis complete. Full results and audits: {path}")
+        self._set_busy(False, "")
 
     @Slot(str)
     def _on_task_failed(self, message: str) -> None:

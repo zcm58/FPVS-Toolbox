@@ -32,9 +32,9 @@ from Main_App.gui.components import (
     ActionRow,
     ColumnFilterMenu,
     StatusBanner,
-    SubsectionHeaderLabel,
     SurfaceSize,
     make_action_button,
+    make_form_layout,
 )
 from Main_App.gui.components.review_dialog import ReviewDialog
 from Main_App.processing.frequency_domain_qc import (
@@ -217,7 +217,6 @@ class FrequencyDomainQcReviewDialog(ReviewDialog):
         findings_panel.setMinimumWidth(490)
         findings_layout = QVBoxLayout(findings_panel)
         findings_layout.setContentsMargins(0, 0, 0, 0)
-        findings_layout.addWidget(SubsectionHeaderLabel("Findings", findings_panel))
         self.finding_sections = QTabBar(findings_panel)
         self.finding_sections.setObjectName("frequency_domain_qc_sections")
         self.finding_sections.setAccessibleName("Finding sections")
@@ -303,13 +302,21 @@ class FrequencyDomainQcReviewDialog(ReviewDialog):
         self.progress_label = QLabel(findings_panel)
         self.progress_label.setObjectName("frequency_domain_qc_progress")
         self.progress_label.setWordWrap(True)
-        findings_layout.addWidget(self.progress_label)
+        self.next_button = make_action_button(
+            "Next needs attention", variant="secondary", parent=findings_panel
+        )
+        self.next_button.setObjectName("frequency_domain_qc_next_undecided")
+        self.next_button.setToolTip("Go to the next missing choice, artifact confirmation or conflicting choice; clear filters if hidden.")
+        self.next_button.clicked.connect(self._select_next_undecided)
+        progress_row = QHBoxLayout()
+        progress_row.addWidget(self.progress_label, 1)
+        progress_row.addWidget(self.next_button)
+        findings_layout.addLayout(progress_row)
 
         detail_panel = QWidget(self.splitter)
         detail_panel.setMinimumWidth(360)
         detail_layout = QVBoxLayout(detail_panel)
         detail_layout.setContentsMargins(8, 0, 0, 0)
-        detail_layout.addWidget(SubsectionHeaderLabel("Review", detail_panel))
         self.detail_tabs = QTabWidget(detail_panel)
         self.detail_tabs.setObjectName("frequency_domain_qc_detail_tabs")
         self.evidence_view = QPlainTextEdit(self.detail_tabs)
@@ -332,13 +339,6 @@ class FrequencyDomainQcReviewDialog(ReviewDialog):
         self.decision_stack.setObjectName("frequency_domain_qc_decision_stack")
         self.decision_stack.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         detail_layout.addWidget(self.decision_stack)
-        self.next_button = make_action_button(
-            "Next needs attention", variant="secondary", parent=detail_panel
-        )
-        self.next_button.setObjectName("frequency_domain_qc_next_undecided")
-        self.next_button.setToolTip("Go to the next missing choice, artifact confirmation or conflicting choice; clear filters if hidden.")
-        self.next_button.clicked.connect(self._select_next_undecided)
-        detail_layout.addWidget(self.next_button)
         self.splitter.setStretchFactor(0, 3)
         self.splitter.setStretchFactor(1, 2)
         self.splitter.setSizes([650, 470])
@@ -632,10 +632,10 @@ class FrequencyDomainQcReviewDialog(ReviewDialog):
                 self.details_table.setItem(row_index, column, table_item)
 
             page = QWidget(self.decision_stack)
-            page_layout = QVBoxLayout(page)
+            page_layout = make_form_layout()
             page_layout.setContentsMargins(0, 4, 0, 0)
-            decision_label = QLabel("Decision for this finding", page)
-            page_layout.addWidget(decision_label)
+            page.setLayout(page_layout)
+            decision_label = QLabel("Decision", page)
             combo = QComboBox(page)
             combo.setObjectName(f"frequency_domain_qc_decision_{row_index}")
             combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
@@ -653,7 +653,7 @@ class FrequencyDomainQcReviewDialog(ReviewDialog):
             allowed.append(DECISION_EXCLUDE_PARTICIPANT)
             for decision in allowed:
                 combo.addItem(_DECISION_LABELS[decision], decision)
-            page_layout.addWidget(combo)
+            page_layout.addRow(decision_label, combo)
             if repair_allowed:
                 confirmation = QCheckBox(
                     "I confirmed an artifact in this condition.", page,
@@ -665,15 +665,13 @@ class FrequencyDomainQcReviewDialog(ReviewDialog):
                 )
                 confirmation.setVisible(False)
                 confirmation.toggled.connect(self._artifact_confirmation_changed)
-                page_layout.addWidget(confirmation)
+                page_layout.addRow(confirmation)
                 self._artifact_controls[fingerprint] = confirmation
             reason_label = QLabel("Reason (optional)", page)
             reason = QLineEdit(page)
             reason.setObjectName(f"frequency_domain_qc_reason_{row_index}")
-            reason.setPlaceholderText("Optional reason")
             reason_label.setBuddy(reason)
-            page_layout.addWidget(reason_label)
-            page_layout.addWidget(reason)
+            page_layout.addRow(reason_label, reason)
             saved = existing.get(fingerprint)
             context = ""
             if saved is not None:

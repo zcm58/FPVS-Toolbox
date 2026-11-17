@@ -257,10 +257,9 @@ def test_action_consequences_count_unique_recordings_and_exclude_hidden_rows(sta
     state.table.selected = {0, 1, 2, 4, 5, 8, 9}
     state._refresh_action_scope()
     text = state.scope_label.text()
-    assert "3 undecided electrode(s) across 2 recording(s)" in text
-    assert "All undecided: 3 electrode(s) across 2 recording(s)" in text
-    assert "0 hidden rows" in text
-    assert "every analyzed condition" in text
+    assert "Undecided in selection: 3 electrodes / 2 recordings" in text
+    assert "All undecided: 3 electrodes / 2 recordings" in text
+    assert "Bulk actions skip hidden rows" in text
     assert state.selected_button.enabled and state.mark_all_button.enabled
     state.table.selected = {2, 4, 5, 9}
     state._refresh_action_scope()

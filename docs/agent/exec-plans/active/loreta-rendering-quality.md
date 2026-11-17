@@ -111,7 +111,7 @@ Requested behavior: detailed fsaverage pial anatomy is the default translucent
 Changed owners: `renderer.py`, `gui.py`; safe regressions in
 `test_renderer_updates.py`, `test_volume_overlay.py`, `test_volume_anatomy_gui.py`,
 and CI smoke in `tests/gui/test_loreta_source_options_qt.py`. Tool rules,
-architecture, user guide and validation notes own the durable behavior.
+architecture and validation notes own the durable behavior.
 
 No producer, inverse, statistical, file-format or source-cache changes are scoped.
 Existing MRI and cortical source views keep their behavior. Missing optional

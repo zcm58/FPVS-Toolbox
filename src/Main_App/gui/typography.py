@@ -51,7 +51,7 @@ FONT_ROLES: dict[FontRole, FontRoleSpec] = {
     "subsection_header": FontRoleSpec(10, 13, QFont.Bold, 700),
     "sidebar_item": FontRoleSpec(11, 15, QFont.Medium, 500),
     "sidebar_section": FontRoleSpec(11, 13, QFont.DemiBold, 650),
-    "landing_title": FontRoleSpec(44, 60, QFont.Bold, 700),
+    "landing_title": FontRoleSpec(24, 32, QFont.DemiBold, 600),
     "landing_action": FontRoleSpec(15, 20, QFont.DemiBold, 600),
     "project_title": FontRoleSpec(16, 22, QFont.DemiBold, 600),
     "tool_title": FontRoleSpec(20, 27, QFont.DemiBold, 600),
@@ -112,15 +112,6 @@ def css_font_size(role: FontRole) -> str:
 
 def css_font_weight(role: FontRole) -> int:
     return FONT_ROLES[role].css_weight
-
-
-def css_font_declaration(role: FontRole, *, include_family: bool = False) -> str:
-    family_line = f'font-family: {css_font_family()};\n' if include_family else ""
-    return (
-        f"{family_line}"
-        f"font-size: {css_font_size(role)};\n"
-        f"font-weight: {css_font_weight(role)};"
-    )
 
 
 def matplotlib_font_kwargs(

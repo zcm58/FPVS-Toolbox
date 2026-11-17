@@ -14,6 +14,8 @@ from PySide6.QtGui import QAction, QColor, QIcon
 from PySide6.QtTest import QSignalSpy
 from PySide6.QtWidgets import (
     QApplication,
+    QDialog,
+    QDialogButtonBox,
     QLabel,
     QLineEdit,
     QMenu,
@@ -132,61 +134,130 @@ def test_tools_menu_contains_default_and_enabled_beta_tools(tmp_path: Path, qtbo
         assert win.menuBar().findChild(QMenu, "betaToolsMenu") is None
 
 
-def test_welcome_prioritizes_studio_import_and_fits_minimum_window(tmp_path: Path, qtbot, monkeypatch) -> None:
+def test_welcome_prioritizes_opening_a_project_and_fits_minimum_window(
+    tmp_path: Path, qtbot, monkeypatch,
+) -> None:
     win = _build_window(tmp_path, qtbot, monkeypatch)
 
     assert win.stacked.currentWidget() is win.landing_page
-    assert win.minimumSize() == QSize(900, 520)
-    assert win.size() == QSize(960, 520)
+    assert win.minimumSize() == QSize(1200, 800)
+    assert win.size() == QSize(1200, 800)
     assert win.windowTitle() == f"FPVS Toolbox v{main_window_module.FPVS_TOOLBOX_VERSION}"
     assert not win.findChildren(QStatusBar)
     assert win.menuBar().isVisibleTo(win)
 
     title = win.landing_page.findChild(QLabel, "landing_title")
-    instructions = win.landing_page.findChild(QLabel, "landing_subtitle")
-    assert title.text() == "FPVS Toolbox"
-    assert ".fpvsconfig" in instructions.text()
-    assert win.btn_import_project.text() == "Import FPVS Studio Config…"
+    icon = win.landing_page.findChild(QLabel, "welcomeAppIcon")
+    assert title is not None and title.text() == "FPVS Toolbox"
+    assert icon is not None and not icon.pixmap().isNull()
     assert win.btn_open_project.text() == "Open Existing Project…"
-    assert win.btn_create_project.text() == "Create Manually…"
-    assert win.btn_import_project.property("variant") == "primary"
-    assert win.btn_open_project.property("variant") == "secondary"
-    assert win.btn_create_project.property("variant") == "tertiary"
+    assert win.btn_create_project.text() == "Create New Project…"
+    assert win.btn_open_project.property("variant") == "primary"
+    assert win.btn_create_project.property("variant") == "secondary"
+    buttons = win.landing_page.findChildren(QPushButton)
+    assert len(buttons) == 2
+    assert win.btn_open_project in buttons and win.btn_create_project in buttons
+    assert win.btn_open_project.width() > 340
     assert win.actionImportFpvsConfigProject is not win.actionCreateNewProject
 
     win.resize(win.minimumSize())
     QApplication.processEvents()
-    for widget in (title, instructions, win.btn_import_project, win.btn_open_project, win.btn_create_project):
+    for widget in (title, icon, win.btn_open_project, win.btn_create_project):
         assert widget.isVisibleTo(win)
         assert win.rect().contains(widget.mapTo(win, widget.rect().topLeft()))
         assert win.rect().contains(widget.mapTo(win, widget.rect().bottomRight()))
+    open_button, create_button = win.btn_open_project, win.btn_create_project
+    assert open_button.height() >= 52 and create_button.height() >= 52
+    assert open_button.width() == create_button.width()
+    assert (
+        open_button.mapTo(win, open_button.rect().bottomLeft()).y()
+        < create_button.mapTo(win, create_button.rect().topLeft()).y()
+    )
 
 
-@pytest.mark.parametrize(("button_name", "workflow_name"), [
-    ("btn_create_project", "_new_project"),
-    ("btn_import_project", "_new_project_from_fpvs_config"),
+def test_welcome_open_existing_project_runs_directly(tmp_path: Path, qtbot, monkeypatch) -> None:
+    win = _build_window(tmp_path, qtbot, monkeypatch)
+    calls = []
+    monkeypatch.setattr(
+        main_window_module.project_workflows,
+        "_open_existing_project",
+        lambda host, parent: calls.append((host, parent)),
+    )
+
+    qtbot.mouseClick(win.btn_open_project, Qt.LeftButton)
+
+    assert calls == [(win, win)]
+    assert QApplication.activeModalWidget() is None
+
+
+def _open_project_creation_choices(win: main_window_module.MainWindow, qtbot) -> QDialog:
+    qtbot.mouseClick(win.btn_create_project, Qt.LeftButton)
+    chooser = win.findChild(QDialog, "projectCreationChoices")
+    assert chooser is not None and chooser.isVisible()
+    assert chooser.windowTitle() == "Create New Project"
+    return chooser
+
+
+@pytest.fixture
+def project_creation_calls(monkeypatch):
+    calls = []
+    for route in ("_new_project", "_new_project_from_fpvs_config"):
+        monkeypatch.setattr(
+            main_window_module.project_workflows,
+            route,
+            lambda *_args, name=route: calls.append((name, QApplication.activeModalWidget())),
+        )
+    return calls
+
+
+@pytest.mark.parametrize(("button_name", "button_text", "workflow_name"), [
+    ("welcomeCreateManually", "Create Project Manually…", "_new_project"),
+    ("welcomeImportStudio", "Import FPVS Studio Config…", "_new_project_from_fpvs_config"),
 ])
 def test_cancelled_project_creation_returns_to_welcome(
     tmp_path: Path,
     qtbot,
     monkeypatch,
+    project_creation_calls,
     button_name,
+    button_text,
     workflow_name,
 ) -> None:
     win = _build_window(tmp_path, qtbot, monkeypatch)
-    calls = []
-    monkeypatch.setattr(
-        main_window_module.project_workflows,
-        workflow_name,
-        lambda *_args: calls.append(workflow_name),
-    )
+    chooser = _open_project_creation_choices(win, qtbot)
+    button = chooser.findChild(QPushButton, button_name)
+    assert button is not None and button.text() == button_text
+    assert project_creation_calls == []
+    qtbot.mouseClick(button, Qt.LeftButton)
 
-    qtbot.mouseClick(getattr(win, button_name), Qt.LeftButton)
-
-    assert calls == [workflow_name]
+    qtbot.waitUntil(lambda: bool(project_creation_calls))
+    assert project_creation_calls == [(workflow_name, None)]
     assert win.currentProject is None
     assert win.stacked.currentWidget() is win.landing_page
     assert win.menuBar().isVisibleTo(win)
+
+
+@pytest.mark.parametrize("dismiss_with_escape", [False, True], ids=["cancel", "escape"])
+def test_dismissing_creation_choices_runs_no_project_action(
+    tmp_path: Path, qtbot, monkeypatch, project_creation_calls, dismiss_with_escape: bool,
+) -> None:
+    win = _build_window(tmp_path, qtbot, monkeypatch)
+    chooser = _open_project_creation_choices(win, qtbot)
+
+    with qtbot.waitSignal(chooser.rejected, timeout=1000):
+        if dismiss_with_escape:
+            qtbot.keyClick(chooser, Qt.Key_Escape)
+        else:
+            buttons = chooser.findChild(QDialogButtonBox)
+            assert buttons is not None
+            cancel = buttons.button(QDialogButtonBox.Cancel)
+            assert cancel is not None
+            qtbot.mouseClick(cancel, Qt.LeftButton)
+
+    QApplication.processEvents()
+    assert project_creation_calls == []
+    assert win.currentProject is None
+    assert win.stacked.currentWidget() is win.landing_page
 
 
 def test_main_window_layout_smoke(tmp_path: Path, qtbot, monkeypatch) -> None:
@@ -265,8 +336,10 @@ def test_main_window_layout_smoke(tmp_path: Path, qtbot, monkeypatch) -> None:
     assert win.btn_view_log.text() == "View Log"
     assert win.btn_view_log.accessibleName() == "View processing log"
     assert not hasattr(win, "btn_detect")
-    assert win.btn_select_input_file.text() == "Select EEG File..."
-    assert win.btn_select_input_folder.text() == "Select Data Folder..."
+    assert win.btn_select_input_file.text() == "Browse…"
+    assert win.btn_select_input_folder.text() == "Browse…"
+    assert win.btn_select_input_file.accessibleName() == "Choose EEG recording"
+    assert win.btn_select_input_folder.accessibleName() == "Choose EEG folder"
     assert win.btn_add_row.text() == "+ Add Condition"
     event_map_group = win.findChild(QWidget, "event_map_group")
     assert event_map_group is not None
@@ -309,8 +382,7 @@ def test_main_window_layout_smoke(tmp_path: Path, qtbot, monkeypatch) -> None:
     assert not win.row_single_file.isVisible()
 
     assert win.workspace_stack.width() == win.stacked.width() - 2 * PAGE_MARGIN
-    assert [action.text() for action in win.menuBar().actions()] == ["&File", "&View", "&Tools", "&Help"]
-    assert [action.text() for action in _menu(win, "helpMenu").actions()] == ["Documentation"]
+    assert [action.text() for action in win.menuBar().actions()] == ["&File", "&View", "&Tools"]
     file_actions = _menu(win, "fileMenu").actions()
     assert [None if action.isSeparator() else action.text() for action in file_actions] == [
         "Import FPVS Studio Config…",
@@ -365,7 +437,7 @@ def test_home_processing_history_long_content_fits_minimum_window(
     tmp_path: Path, qtbot, monkeypatch,
 ) -> None:
     win = _build_window(tmp_path, qtbot, monkeypatch)
-    win.resize(900, 520)
+    win.resize(win.minimumSize())
     win.show_home_page()
     history = win.processing_history_label
     history.setText(
@@ -374,7 +446,7 @@ def test_home_processing_history_long_content_fits_minimum_window(
     )
     qtbot.wait(20)
 
-    assert win.size() == QSize(900, 520)
+    assert win.size() == QSize(1200, 800)
     assert win.workspace_stack.currentWidget() is win.homeWidget
     assert history.isVisibleTo(win)
     assert history.wordWrap()
@@ -411,7 +483,7 @@ def test_view_menu_returns_to_home(tmp_path: Path, qtbot, monkeypatch) -> None:
     assert win.workspace_stack.currentWidget() is win._settings_page
     assert win.menuBar().isVisibleTo(win)
     assert win.menuBar().isEnabled()
-    assert [action.text() for action in win.menuBar().actions()] == ["&File", "&View", "&Tools", "&Help"]
+    assert [action.text() for action in win.menuBar().actions()] == ["&File", "&View", "&Tools"]
 
     _menu(win, "viewMenu").actions()[0].trigger()
 
@@ -453,7 +525,7 @@ def test_workspace_menu_paints_slate_and_readable_labels(
         app.setStyleSheet(previous_stylesheet)
 
 
-def test_tool_navigation_guard_keeps_home_compact(tmp_path: Path, qtbot, monkeypatch) -> None:
+def test_tool_navigation_guard_keeps_home_size(tmp_path: Path, qtbot, monkeypatch) -> None:
     win = _build_window(tmp_path, qtbot, monkeypatch)
     win.show_home_page()
     initial_size = win.size()
@@ -468,47 +540,41 @@ def test_tool_navigation_guard_keeps_home_compact(tmp_path: Path, qtbot, monkeyp
 def test_long_project_title_does_not_resize_home(tmp_path: Path, qtbot, monkeypatch) -> None:
     win = _build_window(tmp_path, qtbot, monkeypatch)
     win.show_home_page()
-    win.resize(900, 520)
+    win.resize(win.minimumSize())
     name = "Long project name " * 30
     win._set_project_title(name)
 
-    assert win.size() == QSize(900, 520)
+    assert win.size() == QSize(1200, 800)
     assert win.windowTitle() == f"{name} — FPVS Toolbox v{main_window_module.FPVS_TOOLBOX_VERSION}"
 
 
-def test_workspace_expands_and_restores_only_automatic_resizes(tmp_path: Path, qtbot, monkeypatch) -> None:
+@pytest.mark.parametrize(("width", "height"), [(1200, 800), (1340, 940)])
+def test_workspace_navigation_keeps_window_size(tmp_path: Path, qtbot, monkeypatch, width, height) -> None:
     win = _build_window(tmp_path, qtbot, monkeypatch)
-    monkeypatch.setattr(win, "_frequency_domain_outputs_ready_for_tool", lambda _name: True)
+    win.resize(width, height)
+    size = QSize(width, height)
     win.show_home_page()
-    win.resize(930, 550)
+    assert win.size() == size
     settings = _menu_action(win, "fileMenu", "btn_settings")
     home = _menu_action(win, "viewMenu", "btn_home")
-    snr = _menu_action(win, "toolsMenu", "btn_graphs")
 
     settings.trigger()
-    assert win.minimumSize() == QSize(900, 520)
-    assert win.size() == QSize(930, 550)
-
-    snr.trigger()
-    assert win.minimumSize() == QSize(960, 600)
-    assert win.size() == QSize(960, 600)
-    win.open_stats_analyzer()
-    assert win.minimumSize() == QSize(1280, 900)
-    assert win.size() == QSize(1280, 900)
-    snr.trigger()
-    assert win.size() == QSize(960, 600)
-    settings.trigger()
-    assert win.minimumSize() == QSize(900, 520)
-    assert win.size() == QSize(930, 550)
+    assert win.workspace_stack.currentWidget() is win._settings_page
+    assert win.minimumSize() == QSize(1200, 800)
+    assert win.size() == size
     home.trigger()
-    assert win.size() == QSize(930, 550)
+    assert win.size() == size
     assert win.workspace_stack.width() == win.width() - 2 * PAGE_MARGIN
 
-    snr.trigger()
-    win.resize(1340, 940)
+    tool = win._ensure_sensitivity_analysis_page()
+    win._show_workspace_page(tool)
+    assert win.workspace_stack.currentWidget() is tool
+    assert win.size() == size
     home.trigger()
-    assert win.minimumSize() == QSize(900, 520)
-    assert win.size() == QSize(1340, 940)
+    assert win.size() == size
+    win.stacked.setCurrentWidget(win.landing_page)
+    assert win.minimumSize() == QSize(1200, 800)
+    assert win.size() == size
 
 
 def test_processing_log_opens_in_focused_modal(
@@ -555,7 +621,7 @@ def test_processing_activity_page_locks_navigation_and_reuses_start_button(
     assert win.processing_action_layout.indexOf(win.btn_start) >= 0
     assert run_panel.row_layout.indexOf(win.btn_start) < 0
     assert win.processing_spinner.isVisible()
-    assert win.minimumSize() == QSize(1280, 900)
+    assert win.size() == QSize(1200, 800)
     assert not win.menuBar().isEnabled()
     _menu_action(win, "viewMenu", "btn_home").trigger()
     assert win.workspace_stack.currentWidget() is win.processing_page
@@ -566,7 +632,7 @@ def test_processing_activity_page_locks_navigation_and_reuses_start_button(
     assert win.workspace_stack.currentWidget() is win.homeWidget
     assert run_panel.row_layout.indexOf(win.btn_start) >= 0
     assert win.processing_action_layout.indexOf(win.btn_start) < 0
-    assert win.size() == QSize(960, 520)
+    assert win.size() == QSize(1200, 800)
     assert win.menuBar().isEnabled()
 
 
@@ -800,6 +866,7 @@ def test_processing_activity_tracks_completed_files(
         "Toolbox may respond slowly while recordings are processing."
     )
     assert win.processing_status_title_label.text() == "Run Progress"
+    assert win.processing_progress_heading_label.isHidden()
     assert win.processing_files_title_label.text() == "File Completion"
     assert win.processing_files_table.rowCount() == 2
     assert win.processing_files_table.item(0, 0).text() == "Queued"
@@ -880,7 +947,7 @@ def test_workspace_settings_embeds_in_main_workspace(
 ) -> None:
     win = _build_window(tmp_path, qtbot, monkeypatch)
     win.stacked.setCurrentIndex(1)
-    win.resize(900, 520)
+    win.resize(win.minimumSize())
     qtbot.wait(20)
 
     _menu_action(win, "fileMenu", "btn_settings").trigger()
@@ -889,7 +956,7 @@ def test_workspace_settings_embeds_in_main_workspace(
     assert isinstance(win.workspace_stack.currentWidget(), EmbeddedSettingsPage)
     assert win.workspace_stack.currentWidget().objectName() == "embedded_settings_page"
     assert win._settings_page.parent() is win.workspace_stack
-    assert win.size() == QSize(900, 520)
+    assert win.size() == QSize(1200, 800)
 
     win._settings_page.reject()
     qtbot.wait(20)
@@ -1681,7 +1748,7 @@ def test_workspace_individual_detectability_embeds_in_main_workspace(
     _open_beta_tool(win, "btn_individual_detectability")
     qtbot.wait(20)
 
-    assert win.workspace_stack.width() > workspace_width_before
+    assert win.workspace_stack.width() == workspace_width_before
     assert isinstance(win.workspace_stack.currentWidget(), IndividualDetectabilityWindow)
     assert (
         win.workspace_stack.currentWidget().objectName()

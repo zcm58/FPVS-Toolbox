@@ -48,9 +48,24 @@ OpenFPVS Node tests and the service dry build passed.
 The next release acceptance covers the rebuilt Windows installer and supported
 cross-platform targets.
 
+## Branch reconciliation
+
+On 2026-11-17, remote GUI polish and current main were integrated with the
+Library and local layout refinements. The Library uses the shared menu action
+registry and the current 1200 × 800 shell. Its title style uses the retained
+canonical font-size/weight helpers. The workflow guide lives in
+`docs/agent/guides/experiment-library.md`.
+
+The merged source passed 795 GUI checks, 1,347 project checks, 10 native laptop
+Qt cases and 459 repository precommit tests. Processing checks passed 3,713
+cases initially; five cases passed on repeat with shorter temporary paths after
+the first run exceeded Windows path limits. A fresh live anonymous Library
+download again opened all 32 participants, enabled processing and reopened the
+installed project through the shared actions.
+
 ## Visible acceptance
 
-At 900 × 520 and 1280 × 900 in Light and Dark, open the Library from Welcome
+At the current 1200 × 800 application size in Light and Dark, open the Library from Welcome
 and an active project. Inspect loading, empty/offline/error, download, verification,
 setup, cancellation/retry and installed states. The dataset and preview stay in
 place during installation, and all actions and wrapped copy fit without page

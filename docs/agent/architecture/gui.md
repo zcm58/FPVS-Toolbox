@@ -27,19 +27,18 @@ Primary paths:
   open. The standalone updater reads the same preference without loading project
   settings. Appearance-aware page styles use `set_themed_stylesheet()`. Custom
   UI painters resolve shared tokens through `theme_color()`.
-- `src/Main_App/gui/shell_actions.py` owns shared Home, Settings and tool
-  action identities. Menus reuse that registry, with project validation and beta
-  acknowledgements retained by MainWindow.
-- `src/Main_App/gui/menu_bar.py`: File, View, Tools, and Help construction.
-  `file_menu.py` groups project, Settings, cache, and application actions.
-  View contains Home (Ctrl+1) and Experiment Library, including on Welcome.
-  Tools contains default and optional beta actions, and Help links to Documentation.
+- `src/Main_App/gui/menu_bar.py` builds File, View, and Tools.
+  `file_menu.py` groups project, Settings, cache, and application actions,
+  including About. View contains Home (Ctrl+1) and Experiment Library, including
+  on Welcome. Tools contains default and optional beta actions.
+- `shell_actions.py` owns shared Home, Settings and tool action identities.
+  Native menus reuse those actions, with project validation and beta notices
+  retained by MainWindow.
 - `experiment_library_page.py` presents the flat public-dataset browser. Its
-  `experiment_library_workflow.py` controller owns worker lifetimes and normal
-  guarded project handoff. `workers.experiment_library_worker` performs anonymous
-  discovery and verified installation through `projects.experiment_library`.
-  Existing managed installations remain reopenable when the public catalog is
-  unavailable. Download, verification and setup share one inline action area.
+  `experiment_library_workflow.py` controller owns workers and guarded project
+  opening. `workers.experiment_library_worker` performs anonymous discovery and
+  installation through `projects.experiment_library`. Download, verification
+  and setup share one inline action area. Installed receipts support offline opening.
 - `src/Main_App/gui/typography.py`: canonical font family, role sizes, font
   weights, monospace font, and QSS font helpers used by the main app,
   component layer, and migrated tool windows.
@@ -86,8 +85,7 @@ Primary paths:
   `processing_history_model.py` formats the local completion time and distinct
   successful participant count; absent, unavailable and incomplete history remain
   explicit. This is processing recency, not downstream analysis readiness. At
-  the 900 × 520 minimum verify long timestamps and counts wrap without hiding
-  Start Processing.
+  1200 × 800 verify long timestamps/counts wrap without hiding Start Processing.
 - `src/Main_App/gui/processing_workflows.py`: processing run start/stop,
   queue polling, worker completion/error, and finalization GUI orchestration
   used by `MainWindow` compatibility wrappers.
@@ -325,7 +323,7 @@ PyInstaller spec also collects this logo under the bundle's `assets/` directory.
 Visible smoke: restart from source and a rebuilt Windows package, inspect the
 top-left title-bar logo on Welcome, Home and Settings, and confirm no strip
 separates File/View/Tools from the project header. Toggle Debug Mode, Save and
-return Home; only the menu-row indicator should change. Repeat at 1280x900 and
+return Home; only the menu-row indicator should change. Repeat at 1200 × 800 and
 Windows 150% scaling. Registered logo/layout coverage remains CI-only locally.
 
 The Settings category list opens seven pages: **Processing**, **Protocol**, **Harmonics**,
@@ -356,12 +354,11 @@ setting controls new repair requests; turning it off keeps previously accepted
 signal repairs.
 Each section has its own vertical space within the
 supported workspace, including when raw-spectral details are expanded.
-Settings places its category list beside the selected form and keeps the
-headings and shared actions in view. The category content scrolls as needed.
-The ROI map has its own viewport so electrode targets keep their full size.
-`settings_navigation.py` moves a
-teal marker between categories over 150 ms using Studio's easing. The category
-and page update immediately. Programmatic navigation, hidden Settings pages,
+Settings uses the main workspace gutters and places its category list in a
+dedicated column beside the page content and shared actions. A shared header
+surface connects the Settings and category headings. `settings_navigation.py`
+moves a teal marker between categories over 150 ms using Studio's easing. The
+category and page update immediately. Programmatic navigation, hidden Settings pages,
 and a disabled animation preference snap the marker into place. The Processing
 card groups Guided setup with its parameters, and Protocol shows its status
 above the Timing and Trigger markers tabs. Tool shortcuts and validation
@@ -370,10 +367,8 @@ Nested Protocol and Experimental tabs stay unframed around their section cards.
 One shared Save/Cancel row applies the full Settings draft from every category.
 Invalid summed-BCA input reveals its sub-tab before focusing the affected field.
 
-Visible smoke: at 900 × 520 and Windows 125% and 150% scaling, open Settings
-from Home and from a tool shortcut in Light and Dark. Check that Home and
-Settings use the same window size and that the Settings footer stays visible.
-Click a category
+Visible smoke: at 1200 × 800 and Windows 125% and 150% scaling, open Settings
+from the shell and from a tool shortcut in Light and Dark. Click a category
 and use the arrow keys to switch quickly. Check that the title updates at once
 and the marker settles on the final selection. Repeat with Windows Animation
 effects turned off. Make an invalid edit and verify Save selects and focuses its
@@ -403,9 +398,10 @@ blocks navigation/close only while saving, reports transaction errors in place,
 and accepts only after the worker finishes. After success the normal Settings
 completion path retires the page. Nothing starts processing on save.
 
-Visible acceptance (not run locally): at 1280x900 open Settings > Processing >
-Guided setup for each supported hardware profile. Check all seven pages fit;
-review unchanged settings, use Back/page navigation, edit and Cancel, then edit
+Visible acceptance (pending locally): from the 1200 × 800 workspace, open
+Settings > Processing > Guided setup for each supported hardware profile.
+Check all seven pages fit, review unchanged settings, use Back/page navigation,
+edit and Cancel, then edit
 and Save pipeline. Reopen/restart to verify persistence. Check unsupported
 controls, hardware-change confirmation, invalid cutoffs, failed save recovery,
 advanced marker-map preservation and reprocessing guidance. Pending Settings
@@ -517,7 +513,7 @@ require one. Saving from another unchanged Settings tab leaves either
 unresolved form untouched; it does not turn a
 proposal into project provenance.
 
-Visible smoke for window setup: at 1280x900, create a project and verify
+Visible smoke for window setup: at 1200 × 800, create a project and verify
 Duration entry, use the default 6 Hz/every 5 protocol, enter 121 seconds at
 256 Hz and check the 120-second preview,
 change downsample, Save/reopen and Cancel/reopen. Import a Studio project and
@@ -547,13 +543,12 @@ Its profile choices and stable backend IDs are:
 
 The information button beside Method profile opens the shared `ToolInfoDialog`
 for the currently selected profile. Brief explanations and method-specific
-publication links live in `HARMONIC_METHOD_INFO` in `settings_panel.py`;
-publication names belong in that dialog, not the selector. References must be
+publication links live in `HARMONIC_METHOD_INFO` in `settings_harmonic_page.py`.
+Use the dialog for publication names. References must be
 checked against primary-source methods and describe any different thresholds,
 pooling, or response measures. Fixed-domain examples do not establish
 preregistration. Legacy's isolated-peak guard has no verified publication
-precedent. The source-review scope and evidence are recorded in the
-[methods checklist](../../user/reference/methods-reporting-checklist.md#harmonic-method-references).
+precedent. See the [comparison with published FPVS methods](statistics-tools.md#relationship-to-published-fpvs-statistics).
 These are presentation changes: persisted profile IDs, versions, defaults,
 fingerprints and calculations remain unchanged.
 
@@ -563,7 +558,7 @@ by mouse and keyboard. Check the matching title, brief explanation and only
 that method's references; follow a publication link in the browser. Resize the
 dialog down to its minimum, scroll to the last reference, and close with Close
 and Escape. Confirm Save/Cancel and draft values are unaffected by reading
-help. Repeat on the supported 1280x900 workspace and after moving monitors.
+help. Repeat on the 1200 × 800 workspace and after moving monitors.
 
 The card must expose only scientifically valid controls for the selected
 profile. Fixed mode chooses an exact Hz list, upper oddball-harmonic index, or
@@ -635,40 +630,54 @@ per app session. `shell_status.py` locks the menu during processing,
 processing-cache reset, and Scalp Maps generation, then restores its prior
 enabled state. The View > Home shortcut follows the same lock.
 
-Welcome and Home default to 960 × 520 with a 900 × 520 minimum. Settings
-shares the compact minimum. SNR Plots uses a 960 × 600 workspace. Other tools
-and the processing activity page use 1280 × 900. The window restores its prior
-size after expansion when it is still at the automatic size. An explicit larger
-size or maximized window persists. The stack size policies prevent hidden
-pages from increasing the compact minimum.
+The main window defaults to 1200 × 800 and uses that minimum for Welcome, Home,
+Settings, embedded tools, and Processing Activity. Navigation preserves the
+window's current size and maximized state. Stack size policies keep hidden
+pages from enlarging the shell. Standalone dialogs size to their content.
 
-`project_welcome.py` presents Import FPVS Studio Config as the primary
-action, with Open Existing Project and Create Manually beside it. Welcome and
-File trigger the same three project actions. Import still confirms hardware
-and requests a recordings folder through the supported configuration import
-workflow. Successful import goes directly to Home.
+`project_welcome.py` places two wide buttons directly on the Welcome background,
+with **Open Existing Project** as the primary action.
+**Create New Project** opens a chooser for **Import FPVS Studio Config** and
+**Create Project Manually**. The chooser closes before invoking either File
+action. Cancel and Escape return to Welcome. A Studio import confirms hardware,
+requests a recordings folder, and opens Home when it succeeds.
 
-Home uses a single form for recording selection, condition count, run readiness,
-Start Processing, and View Log. Run history below the form shows the last
-completed run and the current session's outcome when available. Open analysis
-from **Tools**, where each tool checks its project and inputs.
+Home groups the labeled recording picker, run readiness, Start Processing,
+and View Log in the processing column. Analysis shows persisted processing
+history and the current session's run outcome above one row of shortcuts to
+SNR Plots, Scalp Maps, and LORETA Visualizer. The shortcuts trigger their Tools
+menu actions, so the menu lock, beta policy, and project and output checks
+apply. History describes a completed run. Each tool checks whether its
+current inputs can be used.
 
-**Edit conditions** reveals the live rows and source controls in Home.
-The list scrolls inside the editor.
+Processing Activity puts progress above the run details and file table. Its
+post-processing and QC states keep phase labels and review instructions where
+they help the operator follow or decide the next step.
+
+The Conditions strip sits under the processing controls and shows the
+configured count. **Edit conditions** reveals the same live rows and source
+controls at full width, with Analysis out of view while editing. The list scrolls inside the editor.
 Closing it keeps the draft. Project load collapses the editor, and invalid
 Save opens it and focuses the first invalid field. Source-mapped projects
 show **View conditions** with their canonical catalog.
 
-For visible acceptance, start at 960 × 520 and repeat at 900 × 520. Import
-a sanitized Studio config from Welcome, confirm hardware and select the
-recordings folder, then check the project opens directly on Home. Verify
-manual setup and reopening are also reachable from Welcome. On Home,
-check keyboard navigation, long condition lists, invalid Save from
-Settings, and last-run controls. Confirm Scalp Maps and LORETA appear under
-**Tools > Beta Tools** after enabling Beta Tools and restarting. Open Settings
-and confirm the window keeps its size. Open a tool, then verify that returning
-to Settings or Home restores the size from before automatic expansion and
-respects a manual resize.
+For visible acceptance, launch at 1200 × 800 in Light and Dark. Tab through
+the Welcome actions and check visible focus. Cancel the existing-project
+picker, then dismiss Create New Project with Cancel and Escape. Open a
+disposable project and visit Home, Settings, each embedded tool, and Processing
+Activity. Check that the window size stays at 1200 × 800 and that the controls
+fit without page-level scrolling. Repeat navigation after enlarging and
+maximizing the window.
+
+Exercise both project creation methods with disposable fixtures. For Studio
+import, confirm hardware and select the recordings folder. On Home, check
+keyboard navigation, long condition lists, invalid Save from Settings, and
+last-run controls alongside the analysis shortcuts. Confirm Scalp Maps and
+LORETA appear after enabling Beta Tools and restarting.
+Check that the shortcuts use the same notices and output checks as Tools.
+Verify that the menu bar contains File, View, and Tools and that **File > About**
+opens the app information dialog. From Settings or a tool, verify that
+**View > Home** and **Ctrl+1** return to Home at the current window size.
 
 When the active project changes through create/open/import/path workflows, the
 main shell must return to Home and discard project-bound embedded page instances.
@@ -693,9 +702,6 @@ Rename the second condition to `2 - Objects`, confirm validation clears, and
 verify the usual `Faces` and `Objects` output names in a disposable run.
 Local Qt execution remains CI-only without explicit safe-visible approval.
 
-Embedded tools share the main window. SNR Plots uses a 960 × 600 minimum and
-the other tools use 1280 × 900.
-
 ## Visual Layout Rules
 
 Default to flat forms for setup and preferences. Use section headings and
@@ -709,8 +715,8 @@ cards, keep the parent page visually flat: no pane border, filled background,
 or rounded outer frame around the child cards. SNR Plots uses flat forms for
 plot selection, legend labels, and axis and QC options.
 
-New or substantially revised embedded tool pages must fit the supported
-1280x900 workspace without a page-level `QScrollArea`. If one coherent surface
+New or substantially revised embedded tool pages must fit the
+1200 × 800 workspace without a page-level `QScrollArea`. If one coherent surface
 cannot fit without clipping, split the workflow into purpose-based tabs or
 progressive pages and keep each page visually flat. Scrolling remains
 appropriate inside content-native widgets such as tables, log/text viewers,
@@ -987,7 +993,7 @@ rate and marker to check page selection. CI covers fixed logical workspaces
 and runs the Protocol geometry regression again with `QT_SCALE_FACTOR` values
 1.25, 1.5 and 2; this does not replace native Windows display verification.
 
-For Settings changes, open a project at 900 × 520 and visit all seven categories,
+For Settings changes, open a project at 1200 × 800 and visit all seven main tabs,
 all four Experimental sections, the three Preprocessing QC pages and both
 Post-processing QC pages. Confirm
 every information button opens a brief readable explanation and every label and threshold field is

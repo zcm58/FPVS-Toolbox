@@ -295,8 +295,7 @@ class KurtosisReviewDialog(ReviewDialog):
         self.root_layout.addLayout(options)
 
         explanation = QLabel(
-            "Interpolation repairs the electrode across the whole processed recording. "
-            "Select a row for conditions and evidence. Reasons are optional.",
+            "Interpolation repairs the electrode across the whole processed recording.",
             self,
         )
         explanation.setObjectName("kurtosis_review_fixed_repair_explanation")
@@ -384,22 +383,25 @@ class KurtosisReviewDialog(ReviewDialog):
         self.auto_checkbox.clicked.connect(self._discard_bulk_undo)
         self.auto_all_checkbox.clicked.connect(self._discard_bulk_undo)
 
-        review_actions = ActionRow(self, alignment=Qt.AlignmentFlag.AlignLeft)
-        self.inspect_button = review_actions.add_button(
-            make_action_button("Inspect signal", variant="secondary", parent=review_actions)
+        evidence_actions = ActionRow(self, alignment=Qt.AlignmentFlag.AlignLeft)
+        self.inspect_button = evidence_actions.add_button(
+            make_action_button("Inspect signal", variant="secondary", parent=evidence_actions)
         )
         self.inspect_button.setObjectName("kurtosis_inspect_signal")
         self.inspect_button.clicked.connect(self._inspect_signal)
-        self.support_button = review_actions.add_button(
-            make_action_button("Repair support", variant="secondary", parent=review_actions)
+        self.support_button = evidence_actions.add_button(
+            make_action_button("Repair support", variant="secondary", parent=evidence_actions)
         )
         self.support_button.setObjectName("kurtosis_repair_support")
         self.support_button.clicked.connect(self._inspect_repair_support)
-        self.next_button = review_actions.add_button(
-            make_action_button("Next undecided", variant="secondary", parent=review_actions)
+        evidence_actions.row_layout.addStretch(1)
+        self.next_button = evidence_actions.add_button(
+            make_action_button("Next undecided", variant="secondary", parent=evidence_actions)
         )
         self.next_button.setObjectName("kurtosis_next_undecided")
         self.next_button.clicked.connect(self._next_undecided)
+        self.root_layout.addWidget(evidence_actions)
+        review_actions = ActionRow(self, alignment=Qt.AlignmentFlag.AlignLeft)
         self.selected_decision = QComboBox(review_actions)
         self.selected_decision.setAccessibleName("Decision for selected undecided electrodes")
         self.selected_decision.addItem("Interpolate", KURTOSIS_DECISION_APPROVE)
@@ -417,6 +419,17 @@ class KurtosisReviewDialog(ReviewDialog):
         self.undo_button.setObjectName("kurtosis_undo_bulk")
         self.undo_button.setEnabled(False)
         self.undo_button.clicked.connect(self._undo_bulk_edit)
+        review_actions.row_layout.addStretch(1)
+        self.mark_all_button = review_actions.add_button(
+            make_action_button("Interpolate all undecided", variant="secondary", parent=review_actions)
+        )
+        self.mark_all_button.setObjectName("kurtosis_review_interpolate_all")
+        self.mark_all_button.setToolTip(
+            "Select interpolation only for visible undecided manual flags above the "
+            "configured threshold. Existing decisions, reasons and automatic policies "
+            "are preserved. Undo is available before Apply decisions."
+        )
+        self.mark_all_button.clicked.connect(self._mark_all_flagged)
         self.root_layout.addWidget(review_actions)
         self.scope_label = QLabel(self)
         self.scope_label.setObjectName("kurtosis_action_scope")
@@ -426,16 +439,6 @@ class KurtosisReviewDialog(ReviewDialog):
 
         actions = ActionRow(self)
         actions.setObjectName("kurtosis_review_actions")
-        self.mark_all_button = actions.add_button(
-            make_action_button("Interpolate all undecided", variant="secondary", parent=actions)
-        )
-        self.mark_all_button.setObjectName("kurtosis_review_interpolate_all")
-        self.mark_all_button.setToolTip(
-            "Select interpolation only for visible undecided manual flags above the "
-            "configured threshold. Existing decisions, reasons and automatic policies "
-            "are preserved. Undo is available before Apply decisions."
-        )
-        self.mark_all_button.clicked.connect(self._mark_all_flagged)
         self.cancel_button = actions.add_button(make_action_button("Cancel", variant="secondary", parent=actions))
         self.apply_button = actions.add_button(
             make_action_button("Apply decisions", variant="primary", parent=actions)
@@ -524,10 +527,9 @@ class KurtosisReviewDialog(ReviewDialog):
         self.selected_button.setEnabled(bool(rows))
         self.mark_all_button.setEnabled(bool(all_rows))
         self.scope_label.setText(
-            f"Selected action: {len(rows)} undecided electrode(s) across "
-            f"{len(recordings)} recording(s). All undecided: {len(all_rows)} electrode(s) "
-            f"across {len(all_recordings)} recording(s). 0 hidden rows affected. "
-            "Interpolation applies across every analyzed condition in each recording."
+            f"Undecided in selection: {len(rows)} electrodes / {len(recordings)} recordings. "
+            f"All undecided: {len(all_rows)} electrodes / {len(all_recordings)} recordings. "
+            "Bulk actions skip hidden rows."
         )
         current = self.table.currentRow()
         self.inspect_button.setEnabled(current >= 0 and self._project_root is not None)

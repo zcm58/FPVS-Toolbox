@@ -75,16 +75,18 @@ def build_protocol_page(self, tabs: QTabWidget) -> QWidget:
     self.protocol_tabs.addTab(markers_page, "Trigger markers")
 
     protocol_card = SectionCard(
-        "Project FPVS Protocol",
+        "Rates and analysis window",
         timing_page,
         object_name="settings_project_protocol_card",
     )
     protocol_form = make_form_layout()
     protocol_form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
     markers_card = SectionCard(
-        "Trigger markers", markers_page,
+        "Oddball codes", markers_page,
         object_name="settings_protocol_markers_card",
     )
+    self._protocol_markers_card = markers_card
+    self._protocol_markers_layout = markers_layout
     markers_form = make_form_layout()
     self._protocol_markers_form = markers_form
     markers_card.content_layout.addLayout(markers_form)
@@ -92,8 +94,8 @@ def build_protocol_page(self, tabs: QTabWidget) -> QWidget:
     self.protocol_trigger_maps_button.setObjectName("settings_trigger_maps")
     self.protocol_trigger_maps_button.setEnabled(self.project is not None)
     self.protocol_trigger_maps_button.clicked.connect(self._configure_trigger_maps)
-    markers_card.content_layout.addWidget(self.protocol_trigger_maps_button, 0, Qt.AlignLeft)
-    markers_layout.addWidget(markers_card, 1)
+    markers_card.header.add_action_widget(self.protocol_trigger_maps_button)
+    markers_layout.addWidget(markers_card, 1, Qt.AlignTop)
 
     if self.project is None:
         values = None
@@ -189,8 +191,8 @@ def build_protocol_page(self, tabs: QTabWidget) -> QWidget:
     )
     self.protocol_oddball_marker_code_edit.setPlaceholderText("55")
     self.protocol_oddball_marker_code_edit.setToolTip(
-        "The project-wide event code emitted for each oddball. It must differ "
-        "from every condition-onset code."
+        "Shared by all conditions unless you set per-condition codes. "
+        "It must differ from every condition-onset code. Default: 55."
     )
     markers_form.addRow(
         "Oddball marker code:",
@@ -207,6 +209,10 @@ def build_protocol_page(self, tabs: QTabWidget) -> QWidget:
         "Applies only to this project. Turn off to use the shared oddball marker code for every condition."
     )
     markers_card.content_layout.addWidget(self.protocol_condition_markers_check)
+    self.protocol_marker_code_help = QLabel("Every condition needs an oddball code.", markers_card)
+    self.protocol_marker_code_help.setObjectName("settings_protocol_oddball_marker_code_help")
+    self.protocol_marker_code_help.setWordWrap(True)
+    markers_card.content_layout.addWidget(self.protocol_marker_code_help)
     self.protocol_condition_markers_table = QTableWidget(0, 3, markers_card)
     self.protocol_condition_markers_table.setObjectName(
         "settings_protocol_condition_marker_codes"
@@ -238,22 +244,14 @@ def build_protocol_page(self, tabs: QTabWidget) -> QWidget:
     markers_card.content_layout.addWidget(self.protocol_recording_markers_row)
     self._recording_marker_codes = values.recording_oddball_marker_codes if values is not None else ()
     self.protocol_recording_markers_check.setChecked(bool(self._recording_marker_codes))
-    self.protocol_marker_code_help = QLabel(
-        "Oddball marker code: Event code emitted for each oddball in every "
-        "condition. Default: 55.",
-        markers_card,
-    )
-    self.protocol_marker_code_help.setObjectName(
-        "settings_protocol_oddball_marker_code_help"
-    )
-    self.protocol_marker_code_help.setWordWrap(True)
 
     self.protocol_resolved_oddball_rate_edit = QLineEdit(protocol_card)
     self.protocol_resolved_oddball_rate_edit.setObjectName(
         "settings_protocol_resolved_oddball_rate_hz"
     )
     self.protocol_resolved_oddball_rate_edit.setReadOnly(True)
-    protocol_form.addRow(
+    protocol_form.insertRow(
+        protocol_form.getWidgetPosition(self.protocol_analysis_window_mode_combo)[0],
         "Resolved oddball frequency:",
         self.protocol_resolved_oddball_rate_edit,
     )
@@ -282,7 +280,7 @@ def build_protocol_page(self, tabs: QTabWidget) -> QWidget:
         field.setMaximumWidth(440)
 
     protocol_card.content_layout.addLayout(protocol_form)
-    markers_card.content_layout.addWidget(self.protocol_marker_code_help)
+    markers_card.content_layout.addStretch()
     timing_layout.addWidget(protocol_card)
     timing_layout.addStretch(1)
 

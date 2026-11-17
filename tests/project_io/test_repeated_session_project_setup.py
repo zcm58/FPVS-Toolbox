@@ -266,7 +266,7 @@ def test_new_project_dispatches_preflight_before_creating_v22_project(
     )
 
     def fake_get_item(*args, **kwargs):
-        assert "confounded with visit/order" in args[2]
+        assert "confounds phase with visit order" in args[2]
         return project_manager.REPEATED_SESSION_PROJECT_STRUCTURE, True
 
     monkeypatch.setattr(project_manager.QInputDialog, "getItem", fake_get_item)

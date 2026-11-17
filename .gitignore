@@ -82,9 +82,6 @@ venv/
 # macOS Finder metadata
 .DS_Store
 
-# Static site output (MkDocs build artifact)
-site/
-
 # Local tool output folders
 3 - Statistical Analysis Results/
 # Private study outputs and the archived study-specific ACR workflow.

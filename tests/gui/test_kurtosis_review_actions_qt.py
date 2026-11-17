@@ -146,10 +146,12 @@ def test_bulk_button_preserves_existing_decisions_reasons_receipts_and_policy(qt
 
 def test_selected_action_handles_only_selected_pending_rows_and_counts_recordings(qtbot, dialog):
     _select(dialog, 0, 2, 3, 4, 5)
-    assert "2 undecided electrode(s) across 2 recording(s)" in dialog.scope_label.text()
-    assert "All undecided: 3 electrode(s) across 2 recording(s)" in dialog.scope_label.text()
-    assert "0 hidden rows affected" in dialog.scope_label.text()
-    assert "every analyzed condition" in dialog.scope_label.text()
+    assert "Undecided in selection: 2 electrodes / 2 recordings" in dialog.scope_label.text()
+    assert "All undecided: 3 electrodes / 2 recordings" in dialog.scope_label.text()
+    assert "Bulk actions skip hidden rows" in dialog.scope_label.text()
+    assert "whole processed recording" in dialog.findChild(
+        QLabel, "kurtosis_review_fixed_repair_explanation"
+    ).text()
     dialog.selected_decision.setCurrentIndex(1)  # Keep channel.
     qtbot.mouseClick(dialog.selected_button, Qt.MouseButton.LeftButton)
     assert [_decision(dialog, row).currentData() for row in range(6)] == [
@@ -215,7 +217,7 @@ def test_automatic_policy_toggle_restores_choices_and_immediately_updates_action
     assert not dialog.mark_all_button.isEnabled()
     assert not dialog.selected_button.isEnabled()
     assert dialog.table.currentRow() == 5
-    assert "All undecided: 0 electrode(s) across 0 recording(s)" in dialog.scope_label.text()
+    assert "All undecided: 0 electrodes / 0 recordings" in dialog.scope_label.text()
     qtbot.mouseClick(dialog.auto_all_checkbox, Qt.MouseButton.LeftButton,
                          pos=QPoint(8, dialog.auto_all_checkbox.height() // 2))
     assert _draft(dialog) == before
@@ -250,7 +252,8 @@ def test_repair_support_map_shows_only_retained_usable_donors_and_explicit_autho
     assert widget.channel_combo.count() == len(repairs)
     labels = " ".join(label.text() for label in widget.findChildren(QLabel))
     assert ("Confirmed successful repairs" if confirmed else "Proposed repair scenario") in labels
-    assert "not interpolation weights or proof" in labels
+    assert "Distances describe spatial support" in labels
+    assert "Interpolation weights and reconstruction accuracy need separate evidence" in labels
     for channel in repairs:
         widget.channel_combo.setCurrentText(channel)
         assert widget.map.selected == channel

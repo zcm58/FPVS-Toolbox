@@ -33,14 +33,6 @@ from Main_App.workers.project_processing_cache_worker import (
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())
 
-WINDOWS_FORBIDDEN_CONDITION_CHARS = set('<>:"/\\|?*')
-WINDOWS_FORBIDDEN_CONDITION_CHARS_TEXT = '< > : " / \\ | ? *'
-
-
-def _illegal_condition_chars(label: str) -> list[str]:
-    return sorted({ch for ch in label if ch in WINDOWS_FORBIDDEN_CONDITION_CHARS})
-
-
 def _return_to_welcome_if_no_project(host: Any) -> None:
     """Keep cancelled project creation on the project-less welcome screen."""
     if getattr(host, "currentProject", None) is not None:
@@ -677,7 +669,7 @@ def update_select_button_text(host: Any) -> None:
         if mode == "Single":
             btn_file = getattr(host, "btn_select_input_file", None)
             if btn_file and hasattr(btn_file, "setText"):
-                btn_file.setText("Select EEG File...")
+                btn_file.setText("Browse…")
             btn_generic = getattr(host, "btn_select_input", None)
             if btn_generic and hasattr(btn_generic, "setText"):
                 btn_generic.setText("Select EEG File...")
@@ -691,8 +683,10 @@ def update_select_button_text(host: Any) -> None:
                     else False
                 )
                 btn_folder.setText(
-                    "Edit Group Folders..." if has_groups else "Select Data Folder..."
+                    "Group folders…" if has_groups else "Browse…"
                 )
+                if hasattr(btn_folder, "setAccessibleName"):
+                    btn_folder.setAccessibleName("Edit group folders" if has_groups else "Choose EEG folder")
             btn_generic = getattr(host, "btn_select_input", None)
             if btn_generic and hasattr(btn_generic, "setText"):
                 btn_generic.setText("Select Data Folder...")

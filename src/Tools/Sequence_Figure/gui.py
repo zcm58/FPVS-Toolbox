@@ -133,7 +133,7 @@ class SequenceFigureWindow(QWidget):
             form.addRow("Condition label:", label_edit)
             condition_rows: list[PathPickerRow] = []
             for slot in range(DEFAULT_IMAGE_COUNT):
-                row = PathPickerRow("Choose Image", panel, placeholder=_image_placeholder(slot))
+                row = PathPickerRow("Browse…", panel, placeholder="No image selected")
                 row.line_edit.setAccessibleName(f"{_slot_label(slot)} image path")
                 row.button.setAccessibleName(_image_dialog_title(slot, condition=condition))
                 row.setObjectName(
@@ -157,17 +157,14 @@ class SequenceFigureWindow(QWidget):
         layout.addWidget(card, alignment=Qt.AlignTop)
 
     def _build_labels_card(self, layout: QHBoxLayout) -> None:
-        card = SectionCard("Timing and Styling", self, object_name="sequence_figure_labels")
+        card = SectionCard("Timing and appearance", self, object_name="sequence_figure_labels")
         form = make_form_layout()
         self.base_frequency_edit = QLineEdit("6", card)
         self.oddball_frequency_edit = QLineEdit("1.2", card)
         self.base_frequency_edit.setMaximumWidth(112)
         self.oddball_frequency_edit.setMaximumWidth(112)
-        self.basename_edit = QLineEdit("fpvs_sequence_figure", card)
-        self.basename_edit.setMaximumWidth(260)
         form.addRow("Presentation rate F (Hz):", self.base_frequency_edit)
         form.addRow("Oddball rate f (Hz):", self.oddball_frequency_edit)
-        form.addRow("Output basename:", self.basename_edit)
         self.grayscale_safe_check = QCheckBox("Grayscale-safe lines and frames", card)
         self.transparent_pdf_check = QCheckBox("Transparent PDF background", card)
         self.grayscale_safe_check.setObjectName("sequence_figure_grayscale_safe")
@@ -181,12 +178,15 @@ class SequenceFigureWindow(QWidget):
     def _build_output_card(self, layout: QVBoxLayout) -> None:
         card = SectionCard("Output", self, object_name="sequence_figure_output")
         form = make_form_layout()
-        self.output_row = PathPickerRow("Choose Folder", card, placeholder="Select output folder")
+        self.output_row = PathPickerRow("Browse…", card, placeholder="No folder selected")
         self.output_row.setObjectName("sequence_figure_output_row")
         self.output_row.line_edit.setAccessibleName("Figure output folder")
         self.output_row.button.setAccessibleName("Choose figure output folder")
         self.output_row.button.clicked.connect(self._select_output_folder)
-        form.addRow("Output Folder:", self.output_row)
+        form.addRow("Folder:", self.output_row)
+        self.basename_edit = QLineEdit("fpvs_sequence_figure", card)
+        self.basename_edit.setMaximumWidth(260)
+        form.addRow("File name:", self.basename_edit)
         card.content_layout.addLayout(form)
 
         self.export_btn = make_action_button(_EXPORT_BUTTON_TEXT, variant="primary", parent=card)
@@ -195,7 +195,7 @@ class SequenceFigureWindow(QWidget):
         self.open_btn.setEnabled(False)
         self.open_btn.clicked.connect(self._open_output_folder)
         self.action_row = make_action_row(
-            [self.export_btn, self.open_btn],
+            [self.open_btn, self.export_btn],
             alignment=Qt.AlignRight,
             parent=card,
         )
@@ -357,12 +357,6 @@ class SequenceFigureWindow(QWidget):
         if not self._output_folder:
             return
         open_path_in_file_manager(self._output_folder)
-
-
-def _image_placeholder(slot: int) -> str:
-    if slot == DEFAULT_IMAGE_COUNT - 1:
-        return "Select Oddball Image"
-    return f"Select base image {slot + 1}"
 
 
 def _slot_label(slot: int) -> str:

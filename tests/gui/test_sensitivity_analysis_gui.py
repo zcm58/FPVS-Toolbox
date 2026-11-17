@@ -83,7 +83,7 @@ def test_rm_anova_result_and_reset(qtbot) -> None:
 
     assert page.analysis_combo.currentIndex() == page.PAIRED_TEST
     assert page.sample_size_spin.value() == 24
-    assert page.result_banner.text() == "Set the assumptions and select Calculate."
+    assert page.result_banner.text() == "No result yet."
 
 
 def test_fpvs_design_inputs_derive_repeated_measurements(qtbot) -> None:
@@ -145,7 +145,7 @@ def test_result_affecting_inputs_clear_stale_output(qtbot) -> None:
         page.calculate()
         change()
         assert page.result_banner.text() == (
-            "Set the assumptions and select Calculate."
+            "No result yet."
         )
 
     rm_changes = (
@@ -167,7 +167,7 @@ def test_result_affecting_inputs_clear_stale_output(qtbot) -> None:
         page.calculate()
         change()
         assert page.result_banner.text() == (
-            "Set the assumptions and select Calculate."
+            "No result yet."
         )
 
 
@@ -183,7 +183,7 @@ def test_one_sided_choice_shows_directional_warning(qtbot) -> None:
     qtbot.mouseClick(page.calculate_button, Qt.LeftButton)
 
     assert page.assumption_guidance.isVisibleTo(page)
-    assert page.result_banner.text() != "Set the assumptions and select Calculate."
+    assert page.result_banner.text() != "No result yet."
 
 
 def test_calculation_error_clears_previous_result(qtbot) -> None:

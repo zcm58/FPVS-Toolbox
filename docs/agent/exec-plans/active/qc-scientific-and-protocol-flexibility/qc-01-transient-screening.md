@@ -161,10 +161,10 @@ channel inference under the changed sampling scope.
 
 ### Documentation and Verification
 
-The implementation documentation updates
+The implementation updated
 `docs/agent/architecture/preprocessing-contract.md`, the existing speedup plan,
 `docs/agent/quality/removed-electrode-detection-calibration.md`,
-`docs/user/reference/methods-reporting-checklist.md` and relevant QC help to
+the former methods-reporting checklist and relevant QC help to
 describe the accepted method and its calibration limits.
 
 Run the processing focused gate first:

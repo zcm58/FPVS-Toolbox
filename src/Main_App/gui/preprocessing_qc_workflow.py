@@ -16,9 +16,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
     QDialog,
-    QFormLayout,
     QHeaderView,
-    QHBoxLayout,
     QLabel,
     QLineEdit,
     QMessageBox,
@@ -28,7 +26,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from Main_App.gui.components import ActionRow, make_action_button
+from Main_App.gui.components import ActionRow, SubsectionHeaderLabel, make_action_button, make_form_layout
 from Main_App.gui.open_paths import open_path_in_file_manager
 from Main_App.gui.signal_review_model import (
     SignalReviewItem, episode_view_context, review_time_scope,
@@ -78,8 +76,8 @@ from Main_App.processing.kurtosis_review_scan import (
     scan_kurtosis_review,
 )
 from Main_App.processing.raw_channel_qc import (
-    BIOSEMI_SHARED_NOISE_HELP_URL,
     SEVERE_RAW_AMPLITUDE_HELP_TEXT,
+    SHARED_NOISE_HELP_URL,
 )
 from Main_App.processing.frequency_domain_qc import (
     mark_frequency_domain_outputs_stale,
@@ -640,7 +638,7 @@ def _set_amplitude_help_label(host: Any, attr_name: str, prefix: str = "") -> No
     label.setText(
         lead
         + SEVERE_RAW_AMPLITUDE_HELP_TEXT
-        + f' <a href="{BIOSEMI_SHARED_NOISE_HELP_URL}">'
+        + f' <a href="{SHARED_NOISE_HELP_URL}">'
         "BioSemi: referencing and shared noise</a>"
     )
     if hasattr(label, "setTextFormat"):
@@ -1171,10 +1169,8 @@ def _confirm_recording_not_started(
     ]
     _show_data_quality_notice(
         host,
-        "Some files do not contain recording data.",
-        'These files look like BioSemi recordings that were created, but no data '
-        'was actually recorded. The most likely reason is that the experiment '
-        'administrator forgot to click "Start Recording".',
+        "Some files have no recording samples.",
+        "Confirm the file list before continuing with the available recordings.",
         details="\n".join(
             " | ".join(row)
             if recording_mode
@@ -1186,27 +1182,21 @@ def _confirm_recording_not_started(
         host,
         step=None,
         title="Check Raw Files",
-        message="FPVS Toolbox found files that do not contain recording data.",
+        message="Files without samples cannot be processed.",
         busy=False,
         review_visible=True,
         review_title="Files to Exclude",
         progress_visible=False,
-        checklist=(
-            "Confirm files that contain no recording samples",
-            "Exclude empty files from processing",
-            "Keep the original raw files unchanged",
-        ),
     )
     _set_label(
         host,
         "processing_summary_label",
-        "It appears that the following files were created, but no data actually "
-        "exists inside the files.",
+        f"Empty recordings: {len(flagged)}",
     )
     _set_label(
         host,
         "processing_current_file_label",
-        'The most likely explanation is that the experiment administrator forgot to push "Start Recording" on BioSemi.',
+        "Exclusion applies to processing. The original files are kept.",
     )
     if recording_mode:
         _set_preflight_table(
@@ -1218,21 +1208,20 @@ def _confirm_recording_not_started(
                 "Visit",
                 "Group",
                 "File",
-                "Recommended action",
             ],
-            [(*row, "Exclude this recording") for row in detail_rows],
-            stretch_column=6,
+            detail_rows,
+            stretch_column=5,
         )
     else:
         _set_preflight_table(
             host,
-            ["PID", "Group", "File", "Recommended action"],
+            ["Participant", "Group", "File"],
             [
-                (participant_id, group, file_name, "Exclude from processing")
+                (participant_id, group, file_name)
                 for participant_id, _recording, _session, _visit, group, file_name
                 in detail_rows
             ],
-            stretch_column=3,
+            stretch_column=2,
         )
     choice = _await_preflight_choice(
         host,
@@ -1287,9 +1276,9 @@ def _run_scan_embedded(
         busy=True,
         review_visible=False,
         checklist=(
-            "Inspect 5-second windows with 50% overlap inside analyzed occurrences",
-            "Look for electrodes that appear physically disconnected",
-            "Screen exact on-bin condition spectra through the retained band",
+            "5-second transient windows with 50% overlap",
+            "Possible disconnected electrodes",
+            "On-bin condition spectra in the retained band",
         ),
     )
     host._preflight_qc_file_rows = {}
@@ -1545,9 +1534,8 @@ def _run_kurtosis_review_scan_embedded(
         step=_REVIEW_KURTOSIS_STEP,
         title="Review Kurtosis Findings",
         message=(
-            "FPVS Toolbox is preparing current kurtosis evidence from the exact "
-            "analyzed intervals. Prepared data can be reused after review to "
-            "continue processing from the interpolation step."
+            "Checking analyzed intervals for kurtosis flags. Eligible prepared "
+            "data can be reused after review."
         ),
         busy=True,
         review_visible=False,
@@ -1563,7 +1551,7 @@ def _run_kurtosis_review_scan_embedded(
         (
             "Experimental automatic interpolation is enabled for valid kurtosis flags."
             if params.get("kurtosis_auto_interpolate_all", False) else
-            "Checking whether any kurtosis-only electrode findings need review..."
+            "Checking which kurtosis-only flags need a decision."
         ),
     )
     _set_progress(host, 0, len(raw_file_infos))
@@ -1775,7 +1763,7 @@ def _review_kurtosis_findings(
             host,
             step=_REVIEW_KURTOSIS_STEP,
             title="Kurtosis Evidence Incomplete",
-            message="Processing cannot continue without current QC-16 evidence.",
+            message="Processing requires current kurtosis evidence for these recordings.",
             busy=False,
             review_visible=True,
             review_title="Recordings That Need Attention",
@@ -1883,7 +1871,7 @@ def _collect_retain_full_marker_evidence(
     layout.setContentsMargins(18, 18, 18, 18)
     layout.setSpacing(12)
 
-    title = QLabel(
+    title = SubsectionHeaderLabel(
         f"{item.participant_id} · {item.recording_id or item.path.name} · "
         f"{item.condition_label}, repetition {item.repetition_index + 1}",
         dialog,
@@ -1893,16 +1881,14 @@ def _collect_retain_full_marker_evidence(
     layout.addWidget(title)
 
     explanation = QLabel(
-        "Keep the planned analysis window only when independent evidence shows that "
-        "stimulation stayed continuous and correctly timed despite the marker finding. "
-        "Choose the evidence type and enter a note or a log/file reference.",
+        "Independent evidence must show continuous, phase-correct stimulation. "
+        "Add a note or reference to the supporting log or file.",
         dialog,
     )
     explanation.setWordWrap(True)
     layout.addWidget(explanation)
 
-    form = QFormLayout()
-    form.setSpacing(10)
+    form = make_form_layout()
     evidence_type = QComboBox(dialog)
     evidence_type.setObjectName("marker_evidence_type_combo")
     evidence_type.addItem("Select evidence type...", "")
@@ -1920,9 +1906,6 @@ def _collect_retain_full_marker_evidence(
 
     evidence_note = QPlainTextEdit(dialog)
     evidence_note.setObjectName("marker_evidence_note_edit")
-    evidence_note.setPlaceholderText(
-        "Briefly state what the evidence shows about continuous, phase-correct stimulation."
-    )
     evidence_note.setMaximumHeight(120)
     form.addRow("Evidence note", evidence_note)
     layout.addLayout(form)
@@ -1930,16 +1913,16 @@ def _collect_retain_full_marker_evidence(
     validation_label = QLabel("", dialog)
     validation_label.setObjectName("marker_evidence_validation_label")
     validation_label.setWordWrap(True)
+    validation_label.hide()
     layout.addWidget(validation_label)
 
     accepted: dict[str, object] = {}
-    actions = QHBoxLayout()
-    actions.addStretch(1)
-    back_button = make_action_button("Back", variant="secondary", parent=dialog)
+    actions = ActionRow(dialog)
+    back_button = make_action_button("Back", variant="secondary", parent=actions)
     save_button = make_action_button(
-        "Keep Window with This Evidence",
+        "Keep planned window",
         variant="primary",
-        parent=dialog,
+        parent=actions,
     )
 
     def _save() -> None:
@@ -1953,15 +1936,16 @@ def _collect_retain_full_marker_evidence(
             )
         except MarkerOccurrenceReviewError as exc:
             validation_label.setText(str(exc))
+            validation_label.show()
             return
         accepted.update(decision)
         dialog.accept()
 
     back_button.clicked.connect(dialog.reject)
     save_button.clicked.connect(_save)
-    actions.addWidget(back_button)
-    actions.addWidget(save_button)
-    layout.addLayout(actions)
+    actions.add_button(back_button)
+    actions.add_button(save_button)
+    layout.addWidget(actions)
 
     if dialog.exec() != QDialog.Accepted:
         return None
@@ -1990,9 +1974,8 @@ def _collect_verified_marker_span(
     layout.setContentsMargins(18, 18, 18, 18)
     layout.setSpacing(12)
     explanation = QLabel(
-        "Choose a window that passed the marker-spacing check. Each option uses "
-        "the required analysis duration within this repetition. Signal quality "
-        "will be checked in the following steps.",
+        "Each candidate has the required duration and passed the marker-spacing "
+        "check. Signal quality is checked separately.",
         dialog,
     )
     explanation.setWordWrap(True)
@@ -2000,6 +1983,7 @@ def _collect_verified_marker_span(
 
     span_combo = QComboBox(dialog)
     span_combo.setObjectName("marker_contiguous_span_combo")
+    span_combo.setAccessibleName("Verified analysis window")
     for index, (start, stop) in enumerate(item.contiguous_candidate_spans, start=1):
         start_s = float((start - item.first_samp) / item.sampling_rate_hz)
         stop_s = float((stop - item.first_samp) / item.sampling_rate_hz)
@@ -2017,10 +2001,9 @@ def _collect_verified_marker_span(
     layout.addWidget(span_combo)
 
     selected: dict[str, object] = {}
-    actions = QHBoxLayout()
-    actions.addStretch(1)
-    back_button = make_action_button("Back", variant="secondary", parent=dialog)
-    use_button = make_action_button("Use This Window", variant="primary", parent=dialog)
+    actions = ActionRow(dialog)
+    back_button = make_action_button("Back", variant="secondary", parent=actions)
+    use_button = make_action_button("Use this window", variant="primary", parent=actions)
 
     def _use() -> None:
         raw_span = span_combo.currentData()
@@ -2039,9 +2022,9 @@ def _collect_verified_marker_span(
 
     back_button.clicked.connect(dialog.reject)
     use_button.clicked.connect(_use)
-    actions.addWidget(back_button)
-    actions.addWidget(use_button)
-    layout.addLayout(actions)
+    actions.add_button(back_button)
+    actions.add_button(use_button)
+    layout.addWidget(actions)
 
     if dialog.exec() != QDialog.Accepted:
         return None
@@ -2061,35 +2044,32 @@ def _collect_marker_exclusion_reason(
     layout = QVBoxLayout(dialog)
     layout.setContentsMargins(18, 18, 18, 18)
     layout.setSpacing(12)
-    explanation = QLabel(
-        f"Exclude {item.condition_label}, repetition "
-        f"{item.repetition_index + 1}, from analysis. You may add a reason below.",
-        dialog,
+    context_label = SubsectionHeaderLabel(
+        f"{item.condition_label} · Repetition {item.repetition_index + 1}", dialog
     )
-    explanation.setWordWrap(True)
-    layout.addWidget(explanation)
+    context_label.setWordWrap(True)
+    layout.addWidget(context_label)
 
     reason_edit = QPlainTextEdit(dialog)
     reason_edit.setObjectName("marker_exclusion_reason_edit")
-    reason_edit.setPlaceholderText(
-        "Reason (optional)"
-    )
+    reason_edit.setPlaceholderText("Reason (optional)")
+    reason_edit.setAccessibleName("Reason for excluding this repetition (optional)")
     reason_edit.setMaximumHeight(120)
     layout.addWidget(reason_edit)
 
     validation_label = QLabel("", dialog)
     validation_label.setObjectName("marker_exclusion_reason_validation_label")
     validation_label.setWordWrap(True)
+    validation_label.hide()
     layout.addWidget(validation_label)
 
     accepted: dict[str, object] = {}
-    actions = QHBoxLayout()
-    actions.addStretch(1)
-    back_button = make_action_button("Back", variant="secondary", parent=dialog)
+    actions = ActionRow(dialog)
+    back_button = make_action_button("Back", variant="secondary", parent=actions)
     exclude_button = make_action_button(
-        "Exclude This Repetition",
+        "Exclude repetition",
         variant="primary",
-        parent=dialog,
+        parent=actions,
     )
 
     def _exclude() -> None:
@@ -2101,15 +2081,16 @@ def _collect_marker_exclusion_reason(
             )
         except MarkerOccurrenceReviewError as exc:
             validation_label.setText(str(exc))
+            validation_label.show()
             return
         accepted.update(decision)
         dialog.accept()
 
     back_button.clicked.connect(dialog.reject)
     exclude_button.clicked.connect(_exclude)
-    actions.addWidget(back_button)
-    actions.addWidget(exclude_button)
-    layout.addLayout(actions)
+    actions.add_button(back_button)
+    actions.add_button(exclude_button)
+    layout.addWidget(actions)
 
     if dialog.exec() != QDialog.Accepted:
         return None
@@ -2312,14 +2293,9 @@ def _review_removed_electrodes(
     existing_for_review = _filter_removed_map_for_participants(existing, participant_ids)
     auto_flagged = scan.suggested_removed_electrodes
     prompt = (
-        "FPVS Toolbox found electrode-level candidates that may need to be "
-        "treated as removed or unusable before preprocessing. Review FPVS "
-        "Toolbox's flags, remove any flags that are wrong, and add missed "
-        "removed electrodes in the Manual additions column."
+        "Confirm the flagged electrodes and enter any missed removals under Manual additions."
         if auto_flagged
-        else "No removed-electrode candidates were flagged. Review any saved "
-        "entries and add physically removed electrodes in Manual additions, "
-        "then save the confirmed list to continue."
+        else "No new flags. Review saved removals and add any missing ones under Manual additions."
     )
     if auto_flagged:
         _show_data_quality_notice(
@@ -2339,18 +2315,12 @@ def _review_removed_electrodes(
         review_visible=True,
         review_title="Removed Electrodes",
         progress_visible=False,
-        checklist=(
-            "Review all electrode-level removal candidates",
-            "Add any missing removed electrodes",
-            "Save the confirmed list into project settings",
-        ),
     )
     _set_label(host, "processing_summary_label", prompt)
     _set_label(
         host,
         "processing_current_file_label",
-        "Use the FPVS Toolbox flagged column only to accept or remove existing "
-        "flags. Put missed electrodes in Manual additions.",
+        "Saving updates the removed-electrode list for this project.",
     )
     rows = _removed_review_row_values(
         participant_ids,
@@ -2513,9 +2483,8 @@ def _review_removed_electrodes_by_recording(
         review_title="Removed Electrodes by Recording",
         progress_visible=False,
         checklist=(
-            "Confirm electrode decisions for each available recording",
-            "Choose participant-wide fallback or this-recording scope",
-            "Treat missing visits as coverage, not fabricated data",
+            "Check the participant fallback and any recording overrides",
+            "Missing visits appear for coverage only",
         ),
     )
     _set_label(
@@ -2525,10 +2494,8 @@ def _review_removed_electrodes_by_recording(
         "When every participant follows the same order, phase and order effects "
         "remain confounded."
         if auto_flagged
-        else "No removed-electrode candidates were flagged. Review the saved "
-        "entries for each recording and add physically removed electrodes if "
-        "needed, then save the confirmed list to continue. Session/phase-at-visit "
-        "and visit order are distinct; fixed order can confound them.",
+        else "No new flags. Review saved removals for each recording. "
+        "Fixed visit order can confound phase and visit effects.",
     )
     _set_label(
         host,
@@ -3107,7 +3074,7 @@ def _show_hard_exclusion_detail_dialog(
     layout.setContentsMargins(18, 18, 18, 18)
     layout.setSpacing(12)
 
-    title = QLabel(
+    title = SubsectionHeaderLabel(
         (
             f"{result.participant_id}"
             + (f" · {result.recording_id}" if result.recording_id else "")
@@ -3127,7 +3094,7 @@ def _show_hard_exclusion_detail_dialog(
     if _hard_candidate_reason(result) == "High raw signal amplitude":
         explanation.setText(
             SEVERE_RAW_AMPLITUDE_HELP_TEXT
-            + f' <a href="{BIOSEMI_SHARED_NOISE_HELP_URL}">'
+            + f' <a href="{SHARED_NOISE_HELP_URL}">'
             "BioSemi: referencing and shared noise</a>"
         )
         explanation.setTextFormat(Qt.RichText)
@@ -3141,12 +3108,11 @@ def _show_hard_exclusion_detail_dialog(
     details_edit.setMinimumHeight(300)
     layout.addWidget(details_edit, 1)
 
-    actions = QHBoxLayout()
-    actions.addStretch(1)
-    close_button = make_action_button("Close", variant="primary", parent=dialog)
+    actions = ActionRow(dialog)
+    close_button = make_action_button("Close", parent=actions)
     close_button.clicked.connect(dialog.accept)
-    actions.addWidget(close_button)
-    layout.addLayout(actions)
+    actions.add_button(close_button)
+    layout.addWidget(actions)
 
     dialog.exec()
 
@@ -3426,8 +3392,7 @@ def _confirm_condition_crop_exclusions(
         progress_visible=False,
         checklist=(
             "Compare the usable FFT crop with the project reference",
-            "Keep selected participant-condition pairs out of downstream analyses",
-            "Preserve raw data and generated workbooks for audit",
+            "Checked exclusions apply to downstream analysis",
         ),
     )
     _set_label(
@@ -3694,15 +3659,9 @@ def _confirm_hard_exclusions(
             if recording_mode
             else "Review participants that may need to be excluded."
         ),
-        (
-            "FPVS Toolbox found recording-level review flags. Review the "
-            "evidence, then choose whether to continue or explicitly exclude "
-            "the recording or participant."
-            if recording_mode
-            else "FPVS Toolbox found participant-level review flags. The next "
-            "screen lets you continue or explicitly add them to the manual "
-            "participant exclusion list."
-        ),
+        "Use the signal evidence to decide whether to exclude a recording or all visits."
+        if recording_mode
+        else "Review the signal evidence before adding a participant to the exclusion list.",
     )
     _begin_preflight_page(
         host,
@@ -3718,23 +3677,15 @@ def _confirm_hard_exclusions(
         ),
         progress_visible=False,
         checklist=(
-            "Review recording-level signal evidence"
+            "Use More info to inspect a recording's signal evidence"
             if recording_mode
-            else "Review participant-level signal evidence",
-            "Choose single-recording or participant-wide scope"
-            if recording_mode
-            else "Add confirmed cases to the participant exclusion list",
-            "Leave uncertain cases available if you want to inspect them later",
+            else "Use More info to inspect a participant's signal evidence",
         ),
     )
     _set_label(
         host,
         "processing_summary_label",
-        "FPVS Toolbox found recording-level review flags. These flags do not "
-        "exclude data automatically."
-        if recording_mode
-        else "FPVS Toolbox found participant-level review flags. These flags do "
-        "not exclude data automatically.",
+        "Only explicit exclusions are applied.",
     )
     amplitude_review = any(
         any(
@@ -3757,11 +3708,9 @@ def _confirm_hard_exclusions(
         _set_label(
             host,
             "processing_current_file_label",
-            "Session/phase-at-visit and visit order are distinct; fixed order can "
-            "confound them. Review scope for each candidate below."
+            "Fixed visit order can confound phase and visit effects."
             if recording_mode
-            else "Review the candidates below. You can add them to the manual "
-            "participant exclusion list or continue without changing the list.",
+            else "Confirmed exclusions are added to the manual participant exclusion list.",
         )
     if recording_mode:
         headers = (
@@ -4081,7 +4030,7 @@ def _remaining_review_rows(
                 f"P2P99 {_format_uv(_payload_float(finding, 'median_p2p_99_uv'))}."
                 f"{window_scope} "
                 f"{SEVERE_RAW_AMPLITUDE_HELP_TEXT} BioSemi help: "
-                f"{BIOSEMI_SHARED_NOISE_HELP_URL}",
+                f"{SHARED_NOISE_HELP_URL}",
                 kind="Amplitude", title=f"High raw amplitude ({severity})",
                 finding=finding,
             )
@@ -4490,7 +4439,7 @@ def _show_suspicious_remainder(
     # full-width evidence table give their space to the summary/detail view.
     container = host.processing_files_card
     panel = SignalReviewPanel(
-        review_items, container, amplitude_help_url=BIOSEMI_SHARED_NOISE_HELP_URL
+        review_items, container, amplitude_help_url=SHARED_NOISE_HELP_URL
     )
 
     def inspect_episode(episode: object) -> None:
@@ -4667,10 +4616,9 @@ def run_preprocessing_qc_workflow(
 
     _show_data_quality_notice(
         host,
-        "FPVS Toolbox will check your data before processing.",
-        "Recording and timing checks run before processing. Any experimental "
-        "checks you enabled in Settings run alongside them. You will confirm "
-        "changes to what gets processed.",
+        "Review recording quality before processing.",
+        "Required recording and timing checks run alongside any enabled experimental checks. "
+        "Confirm changes to which data enters processing.",
     )
     _begin_preflight_page(
         host,
@@ -4679,17 +4627,12 @@ def run_preprocessing_qc_workflow(
         message=_DATA_QUALITY_SCAN_WAIT_MESSAGE,
         busy=True,
         review_visible=False,
-        checklist=(
-            "Check whether each BDF contains real recording data",
-            "Find files created when recording was not started",
-            "Prepare the deeper signal-health scan",
-        ),
     )
     _set_label(host, "processing_summary_label", "Checking BDF headers...")
     _set_label(
         host,
         "processing_current_file_label",
-        "Looking for empty recordings before the deeper data quality scan.",
+        "Empty files are reviewed before the signal-health scan.",
     )
     header_only = scan_recording_not_started_files(raw_file_infos)
     if header_only and not _confirm_recording_not_started(

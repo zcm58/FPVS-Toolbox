@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
 
 from Main_App.gui.components import (
     ActionRow, AppDialog, StatusBanner, SubsectionHeaderLabel, SurfaceSize,
-    make_action_button,
+    make_action_button, make_form_layout,
 )
 from Main_App.gui.condition_exclusion_review_model import (
     evidence_text, needs_attention, reference_text, status_label,
@@ -98,7 +98,6 @@ class ParticipantConditionExclusionsDialog(AppDialog):
         list_panel.setMinimumWidth(520)
         list_layout = QVBoxLayout(list_panel)
         list_layout.setContentsMargins(0, 0, 0, 0)
-        list_layout.addWidget(SubsectionHeaderLabel("Conditions", list_panel))
         filters = QHBoxLayout()
         self.view_combo = QComboBox(list_panel)
         self.view_combo.setObjectName("condition_exclusion_view")
@@ -147,7 +146,7 @@ class ParticipantConditionExclusionsDialog(AppDialog):
         detail_panel.setMinimumWidth(330)
         detail_layout = QVBoxLayout(detail_panel)
         detail_layout.setContentsMargins(8, 0, 0, 0)
-        detail_layout.addWidget(SubsectionHeaderLabel("Selected condition", detail_panel))
+        detail_layout.addWidget(SubsectionHeaderLabel("Condition evidence", detail_panel))
         self.evidence_view = QPlainTextEdit(detail_panel)
         self.evidence_view.setObjectName("condition_exclusion_evidence")
         self.evidence_view.setAccessibleName("Condition status, guidance and full details")
@@ -221,10 +220,10 @@ class ParticipantConditionExclusionsDialog(AppDialog):
             self.table.setItem(row, self._exclude_column, exclude_item)
             if self._recording_aware:
                 page = QWidget(self.decision_stack)
-                page_layout = QVBoxLayout(page)
+                page_layout = make_form_layout()
                 page_layout.setContentsMargins(0, 4, 0, 0)
+                page.setLayout(page_layout)
                 label = QLabel("Exclusion scope", page)
-                page_layout.addWidget(label)
                 scope = QComboBox(page)
                 scope.setObjectName(f"condition_exclusion_scope_{row}")
                 scope.addItem("This recording", _SCOPE_RECORDING)
@@ -233,7 +232,7 @@ class ParticipantConditionExclusionsDialog(AppDialog):
                 scope.setCurrentIndex(max(0, scope.findData(selected_scope)))
                 scope.setToolTip("Apply to this recording, or this participant's condition across all visits.")
                 label.setBuddy(scope)
-                page_layout.addWidget(scope)
+                page_layout.addRow(label, scope)
                 self.decision_stack.addWidget(page)
                 self._scope_controls[row] = scope
 

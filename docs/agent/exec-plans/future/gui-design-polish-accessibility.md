@@ -305,8 +305,8 @@ inspection without adding visual noise:
    - choose/open/save/export/generate/run/cancel/copy/reset
    - folder/file/project/workbook/scalp map/report/log
 3. Update one surface at a time, preserving object names and signal wiring.
-4. Keep labels that are part of tests or user docs stable unless tests/docs are
-   updated in the same slice.
+4. Keep labels that are part of tests stable unless the tests are updated in
+   the same slice.
 5. Prefer plain, specific action labels over clever or promotional copy.
 
 ### Slice 5: FPVS Visual Identity Tokens
@@ -391,11 +391,9 @@ component contracts, or user-visible workflows:
 - `docs/agent/design-docs/FRONTEND.md` if frontend-skill translation rules
   change.
 - The nearest scoped `AGENTS.md` for tool-specific GUI ownership changes.
-- User docs only if labels, workflows, validation behavior, or visual outputs
-  change in a way users need to understand.
 
 For a pure style-token or copy pass that does not alter workflow semantics,
-state why no architecture/user docs were needed in the handoff.
+state why no architecture updates were needed in the handoff.
 
 ## Reporting Requirements
 

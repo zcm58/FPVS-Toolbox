@@ -113,9 +113,9 @@ the condition map. Brain Products event detection uses `initial_event=True` and
 Response and segment annotations cannot silently become condition codes.
 Reviewed marker plans and existing resampling/crop guards still apply.
 
-See the [user hardware guide](../../user/reference/brain-products.md) for format
-limits and primary sources. These software contracts do not qualify physical
-amplifier gain or stimulus latency.
+See the [Brain Products format references](hardware-pipeline-studio-roadmap.md#required-brain-products-support)
+and [acceptance scope](../exec-plans/active/brain-products-support.md#scope-and-acceptance).
+Physical amplifier gain and stimulus latency require separate qualification.
 
 
 This page documents the BDF loader contract for the active Main App processing

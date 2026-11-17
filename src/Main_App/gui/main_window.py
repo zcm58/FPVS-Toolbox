@@ -19,7 +19,6 @@ from PySide6.QtCore import QObject, QEvent, QSize, QThread, QTimer, Signal, Slot
 from PySide6.QtGui import QCloseEvent, QAction, QShowEvent  # noqa: F401
 from PySide6.QtWidgets import (
     QApplication,
-    QAbstractButton,
     QLineEdit,
     QMainWindow,
     QMessageBox,
@@ -73,10 +72,7 @@ from Main_App.gui.post_export_workflows import (
 from Main_App.gui.op_guard import OpGuard
 
 _WINDOW_TITLE = f"FPVS Toolbox v{FPVS_TOOLBOX_VERSION}"
-_COMPACT_MINIMUM = QSize(900, 520)
-_COMPACT_DEFAULT = QSize(960, 520)
-_SNR_WORKSPACE_MINIMUM = QSize(960, 600)
-_WORKSPACE_MINIMUM = QSize(1280, 900)
+_WINDOW_SIZE = QSize(1200, 800)
 
 
 class Processor(QObject):
@@ -93,49 +89,12 @@ class _QtEntryAdapter:
 
     def __init__(self, line_edit: QLineEdit) -> None:
         self._edit = line_edit
-        self._last_job_success: bool = False
 
     def get(self) -> str:  # type: ignore[override]
         return self._edit.text()
 
     def focus_set(self) -> None:  # type: ignore[override]
         self._edit.setFocus()
-
-    # ---------- enable/disable controls during a run ---------- #
-    def _set_controls_enabled(self, enabled: bool) -> None:
-        """
-        Disables common inputs while a run is active. No-ops if widgets missing.
-        """
-        self.busy = not enabled
-
-        def _safe_enable(name: str) -> None:
-            w = getattr(self, name, None)
-            if w and hasattr(w, "setEnabled"):
-                try:
-                    w.setEnabled(enabled)
-                except Exception:
-                    self.log(f"_set_controls_enabled: could not toggle {name}", level=logging.DEBUG)
-
-        # Common controls (exists-if-present).
-        # Note: we intentionally do NOT disable the main Start/Stop button here.
-        for n in (
-                "btn_select_input_file", "le_input_file",
-                "btn_select_input_folder", "le_input_folder",
-                "btn_add_event", "btn_add_row",
-                "btn_create_project", "btn_open_project",
-        ):
-            _safe_enable(n)
-
-        # Event-map row edits/buttons (query per-type; Qt doesn't accept tuple here)
-        for row in getattr(self, "event_rows", []):
-            try:
-                for child in row.findChildren(QLineEdit):
-                    child.setEnabled(enabled)
-                for child in row.findChildren(QAbstractButton):
-                    child.setEnabled(enabled)
-            except Exception:
-                # Be quiet but safe
-                self.log("_set_controls_enabled: child toggle failed", level=logging.DEBUG)
 
 
 class MainWindow(QMainWindow):
@@ -179,9 +138,8 @@ class MainWindow(QMainWindow):
         self._settings_page = None
         self.processor = Processor()
         self.setWindowTitle(_WINDOW_TITLE)
-        self.setMinimumSize(_COMPACT_MINIMUM)
-        self.resize(_COMPACT_DEFAULT)
-        self._compact_return_size: QSize | None = None
+        self.setMinimumSize(_WINDOW_SIZE)
+        self.resize(_WINDOW_SIZE)
         self.currentProject: Project | None = None
 
         # Build UI
@@ -219,16 +177,10 @@ class MainWindow(QMainWindow):
         # Build nav + menus
         select_projects_root(self)
         init_file_menu(self)
-        self.stacked.currentChanged.connect(self._sync_window_for_current_page)
-        self.workspace_stack.currentChanged.connect(self._sync_window_for_current_page)
-        self._sync_window_for_current_page()
+        self.stacked.currentChanged.connect(self._sync_menu_visibility)
+        self._sync_menu_visibility()
 
-        # The Welcome buttons use the same guarded project actions as File.
-        self.btn_import_project.clicked.connect(self.actionImportFpvsConfigProject.trigger)
-        if hasattr(self, "btn_create_project"):
-            self.btn_create_project.clicked.connect(self.actionCreateNewProject.trigger)
-        if hasattr(self, "btn_open_project"):
-            self.btn_open_project.clicked.connect(self.actionOpenExistingProject.trigger)
+        self.btn_open_project.clicked.connect(self.actionOpenExistingProject.trigger)
 
         # Default page and initial logs
         self.stacked.setCurrentIndex(0)
@@ -293,7 +245,6 @@ class MainWindow(QMainWindow):
         self._post_worker = None
         self._post_backlog: deque[tuple[str, dict, list[str]]] = deque()
         self._pending_finalize = False
-        self._op_guard = OpGuard()
         self._selected_bdf: str | None = None
         self._processing_notice = None
         self._event_row_return_in_progress = False
@@ -321,9 +272,6 @@ class MainWindow(QMainWindow):
         shell_status.finish_launch_reveal(self)
 
     # ---------------------------- logging --------------------------- #
-    def _emit_backend_log(self, level: int, message: str) -> None:
-        shell_status.emit_backend_log(self, logger, level, message)
-
     def log(self, message: str, level: int = logging.INFO) -> None:
         shell_status.log_message(self, logger, message, level)
 
@@ -332,35 +280,8 @@ class MainWindow(QMainWindow):
 
     # -------------------------- processing -------------------------- #
 
-    def _sync_window_for_current_page(self, _index: int = -1) -> None:
-        welcome = self.stacked.currentWidget() is self.landing_page
-        library = self.stacked.currentWidget() is getattr(self, "_experiment_library_page", None)
+    def _sync_menu_visibility(self) -> None:
         self.menuBar().setVisible(True)
-        page = self.workspace_stack.currentWidget()
-        if welcome or library or page is self.homeWidget or page is self._settings_page:
-            minimum = _COMPACT_MINIMUM
-        elif page is getattr(self, "_plot_generator_page", None):
-            minimum = _SNR_WORKSPACE_MINIMUM
-        else:
-            minimum = _WORKSPACE_MINIMUM
-        previous_minimum = self.minimumSize()
-        if previous_minimum == minimum:
-            return
-
-        if self.isMaximized() or self.isFullScreen():
-            self._compact_return_size = None
-            self.setMinimumSize(minimum)
-            return
-
-        current_size = self.size()
-        return_size = self._compact_return_size
-        if return_size is None or current_size != return_size.expandedTo(previous_minimum):
-            return_size = current_size
-        target_size = return_size.expandedTo(minimum)
-        self._compact_return_size = return_size if target_size != return_size else None
-        self.setMinimumSize(minimum)
-        if self.size() != target_size:
-            self.resize(target_size)
 
     def _set_project_title(self, name: str) -> None:
         self.setWindowTitle(f"{name} — {_WINDOW_TITLE}")
@@ -382,9 +303,6 @@ class MainWindow(QMainWindow):
 
     def _busy_stop(self) -> None:
         shell_status.busy_stop(self)
-
-    def _tick_busy(self) -> None:
-        shell_status.tick_busy(self)
 
     def _prepare_processing_activity(self, files: list[Path]) -> None:
         shell_status.prepare_processing_activity(self, files)
@@ -915,15 +833,6 @@ class MainWindow(QMainWindow):
     def _live_event_map_rows(self) -> list[QWidget]:
         return event_map.live_event_map_rows(self)
 
-    def _event_row_edits(self, row: QWidget) -> tuple[QLineEdit | None, QLineEdit | None]:
-        return event_map.event_row_edits(row)
-
-    def _ensure_event_row_registered(self, row: QWidget) -> None:
-        event_map.ensure_event_row_registered(self, row)
-
-    def _bind_event_map_row_widgets(self, row: QWidget) -> None:
-        event_map.bind_event_map_row_widgets(self, row)
-
     def _bind_existing_event_map_rows(self) -> None:
         event_map.bind_existing_event_map_rows(self)
 
@@ -933,20 +842,8 @@ class MainWindow(QMainWindow):
     def _event_row_id_edit(self, row: QWidget) -> QLineEdit | None:
         return event_map.event_row_id_edit(row)
 
-    def _resolve_event_map_row(self, widget: QWidget) -> QWidget | None:
-        return event_map.resolve_event_map_row(self, widget)
-
     def _event_map_scroll_area(self):
         return event_map.event_map_scroll_area(self)
-
-    def _focus_event_row_label(self, row: QWidget) -> None:
-        event_map.focus_event_row_label(self, row)
-
-    def _is_valid_event_map_id(self, id_edit: QLineEdit) -> bool:
-        return event_map.is_valid_event_map_id(id_edit)
-
-    def _handle_event_map_id_enter(self, id_edit: QLineEdit) -> bool:
-        return event_map.handle_event_map_id_enter(self, id_edit)
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
         handled = event_map.handle_event_filter(self, watched, event)

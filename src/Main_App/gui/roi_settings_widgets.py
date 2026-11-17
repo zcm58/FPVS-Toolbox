@@ -41,13 +41,13 @@ class ROIEditorSidePanel(QWidget):
         layout.setSpacing(6)
 
         list_header = QWidget(self)
-        list_header_layout = QVBoxLayout(list_header)
+        list_header_layout = QHBoxLayout(list_header)
         list_header_layout.setContentsMargins(0, 0, 0, 0)
         list_header_layout.setSpacing(4)
-        list_header_layout.addWidget(SubsectionHeaderLabel("Regions of interest", list_header))
+        list_header_layout.addWidget(SubsectionHeaderLabel("Regions of interest", list_header), 1)
         self.add_button = make_action_button("New ROI", compact=True, parent=list_header)
         self.add_button.setObjectName("settings_rois_add_roi")
-        list_header_layout.addWidget(self.add_button, alignment=Qt.AlignLeft)
+        list_header_layout.addWidget(self.add_button)
         layout.addWidget(list_header)
 
         self.roi_list = QListWidget(self)
@@ -82,15 +82,16 @@ class ROIEditorSidePanel(QWidget):
         )
         self.remove_button.setObjectName("settings_rois_remove_roi")
         list_actions.addWidget(self.remove_button)
-        layout.addLayout(list_actions)
-
         name_label = QLabel("ROI name:", self)
         self.name_edit = QLineEdit(self)
         self.name_edit.setObjectName("settings_rois_name")
-        self.name_edit.setPlaceholderText("ROI name")
         name_label.setBuddy(self.name_edit)
-        layout.addWidget(name_label)
-        layout.addWidget(self.name_edit)
+        name_row = QHBoxLayout()
+        name_row.setSpacing(8)
+        name_row.addWidget(name_label)
+        name_row.addWidget(self.name_edit, 1)
+        layout.addLayout(name_row)
+        layout.addLayout(list_actions)
         self.unmapped_pane = QWidget(self)
         self.unmapped_pane.setObjectName("settings_rois_unmapped_pane")
         unmapped_layout = QVBoxLayout(self.unmapped_pane)
@@ -136,9 +137,9 @@ def configure_roi_tab_order(
     chain = (
         side_panel.add_button,
         side_panel.roi_list,
+        side_panel.name_edit,
         side_panel.clear_button,
         side_panel.remove_button,
-        side_panel.name_edit,
         side_panel.unmapped_list,
         side_panel.remove_unmapped_button,
         *map_buttons,

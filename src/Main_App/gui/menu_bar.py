@@ -22,17 +22,7 @@ def build_menu_bar(parent: QMainWindow, actions: ShellActions) -> QMenuBar:
     parent.addAction(actions.home)
     view_menu.addAction(actions.home)
 
-    library_action = actions.addAction("Experiment Library…")
-    library_action.setObjectName("actionExperimentLibrary")
-
-    def show_library() -> None:
-        from Main_App.gui.experiment_library_workflow import show_experiment_library
-
-        if menu_bar.isVisible() and menu_bar.isEnabled():
-            show_experiment_library(parent)
-
-    library_action.triggered.connect(show_library)
-    view_menu.addAction(library_action)
+    view_menu.addAction(actions.library)
 
     tools_menu = menu_bar.addMenu("&Tools")
     tools_menu.setObjectName("toolsMenu")
@@ -46,10 +36,5 @@ def build_menu_bar(parent: QMainWindow, actions: ShellActions) -> QMenuBar:
         beta_menu = tools_menu.addMenu("Beta Tools")
         beta_menu.setObjectName("betaToolsMenu")
         beta_menu.addActions(actions.beta_tools)
-
-    help_menu = menu_bar.addMenu("&Help")
-    help_menu.setObjectName("helpMenu")
-    actions.documentation.setText("Documentation")
-    help_menu.addAction(actions.documentation)
 
     return menu_bar

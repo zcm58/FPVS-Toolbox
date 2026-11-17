@@ -29,7 +29,7 @@ the download. The simulated Red response is stronger than Green across the
 cohort, providing a known result for exploring SNR Plots, Scalp Maps and statistics.
 
 For experimental source visualization, enable Beta Tools in Settings and follow
-the [LORETA Visualizer guide](tools/loreta-visualizer.md). Its anatomy download
+the [LORETA Visualizer architecture](../../../src/Tools/LORETA_Visualizer/ARCHITECTURE.md). Its anatomy download
 and source preparation are additional operations.
 
 ## Attribution

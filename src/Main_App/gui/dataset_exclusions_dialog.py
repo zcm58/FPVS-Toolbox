@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
 
 from Main_App.gui.components import (
     ActionRow, AppDialog, StatusBanner, SubsectionHeaderLabel, SurfaceSize,
-    make_action_button,
+    make_action_button, make_form_layout,
 )
 from Main_App.processing.dataset_exclusions import DatasetExclusionRow, DatasetExclusionsSnapshot
 from Main_App.workers.dataset_exclusions import DatasetExclusionsWorker
@@ -98,11 +98,7 @@ class DatasetExclusionsDialog(AppDialog):
         QTimer.singleShot(0, self.reload)
 
     def _build_ui(self) -> None:
-        self.status = StatusBanner(
-            "Choose whether to include data, skip processing entirely, or exclude existing "
-            "processed data from analysis. Apply saves immediately. Condition-specific "
-            "exclusions remain in place and are shown in the selected row’s details.", self,
-        )
+        self.status = StatusBanner("Loading dataset exclusions…", self)
         self.root_layout.addWidget(self.status)
         search_row = QHBoxLayout()
         self.search = QLineEdit(self)
@@ -116,7 +112,7 @@ class DatasetExclusionsDialog(AppDialog):
         search_row.addWidget(self.reload_button)
         self.root_layout.addLayout(search_row)
         self.condition_notice = QLabel(
-            "Whole-participant and recording choices only. Condition-specific exclusions stay in place.", self,
+            "Participant exclusions apply to all their recordings. Condition exclusions stay in place.", self,
         )
         self.condition_notice.setWordWrap(True)
         self.root_layout.addWidget(self.condition_notice)
@@ -136,22 +132,22 @@ class DatasetExclusionsDialog(AppDialog):
         details = QWidget(splitter)
         detail_layout = QVBoxLayout(details)
         detail_layout.setContentsMargins(0, 0, 0, 0)
-        detail_layout.addWidget(SubsectionHeaderLabel("Selected participant / recording", details))
+        detail_layout.addWidget(SubsectionHeaderLabel("Exclusion details", details))
         self.details = QPlainTextEdit(details)
         self.details.setReadOnly(True)
         self.details.setMinimumHeight(90)
         detail_layout.addWidget(self.details, 1)
-        detail_layout.addWidget(QLabel("Direct scope for this row", details))
+        fields = make_form_layout()
         self.scope_combo = QComboBox(details)
         self.scope_combo.setObjectName("dataset_exclusions_scope")
         self.scope_combo.currentIndexChanged.connect(self._scope_changed)
-        detail_layout.addWidget(self.scope_combo)
-        detail_layout.addWidget(QLabel("Reason (optional)", details))
+        fields.addRow("Direct scope", self.scope_combo)
         self.reason_edit = QLineEdit(details)
         self.reason_edit.setObjectName("dataset_exclusions_reason")
         self.reason_edit.textEdited.connect(self._reason_changed)
         self.reason_edit.editingFinished.connect(self._filter_rows)
-        detail_layout.addWidget(self.reason_edit)
+        fields.addRow("Reason (optional)", self.reason_edit)
+        detail_layout.addLayout(fields)
         self.eligibility = QLabel(details)
         self.eligibility.setWordWrap(True)
         detail_layout.addWidget(self.eligibility)
@@ -260,10 +256,7 @@ class DatasetExclusionsDialog(AppDialog):
                 item.setToolTip(value)
                 self.table.setItem(index, column, item)
         self.status.set_variant("info")
-        self.status.set_text(
-            f"{len(self.snapshot.rows)} participant and recording entries. Changes save when you Apply. "
-            "Participant exclusions also apply to their recordings. Condition-specific exclusions remain in place."
-        )
+        self.status.set_text(f"{len(self.snapshot.rows)} participant and recording entries. Apply saves your changes.")
         self._refresh_scope_cells()
         if self.snapshot.rows:
             self.table.selectRow(0)

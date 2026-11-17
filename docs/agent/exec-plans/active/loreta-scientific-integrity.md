@@ -230,8 +230,8 @@ without qualifying new hardware, individual MRI or observed participant accuracy
   compatibility, cancellation, current selection/cohort provenance, partial
   rebuilds, final path containment and no GUI-thread numerical work.
 - Run `python .agents/scripts/verify.py --scope loreta --tier focused`, affected
-  GUI/project/export scopes, then `--scope repo --tier precommit`. Run strict
-  MkDocs, agent-doc links/owners and `git diff --check`. Inspect the final diff.
+  GUI/project/export scopes, then `--scope repo --tier precommit`. Check
+  agent-doc links and owners, run `git diff --check` and inspect the final diff.
 - Manual/CI smoke: visibly open an existing project, rebuild both methods,
   cancel/fail the second, verify only successful fresh results load; invalidate
   selection and verify old results do not auto-load; inspect historical import,

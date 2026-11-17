@@ -170,7 +170,6 @@ def _build_params_for_project(project):
             "FrequencyProtocolError": FrequencyProtocolError,
             "logger": logging.getLogger(__name__),
             "QLineEdit": object, "QMessageBox": messages,
-            "_illegal_condition_chars": lambda _label: (),
             "config": SimpleNamespace(DEFAULT_STIM_CHANNEL="Status"),
             "KURTOSIS_REVIEW_DECISIONS_BY_RECORDING_KEY": KURTOSIS_REVIEW_DECISIONS_BY_RECORDING_KEY,
             "MANUAL_REMOVED_ELECTRODES_ENABLED_KEY": MANUAL_REMOVED_ELECTRODES_ENABLED_KEY,

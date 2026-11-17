@@ -24,7 +24,6 @@ class ReviewDialog(AppDialog):
         message.setWindowTitle("Discard review choices?")
         message.setIcon(QMessageBox.Icon.Question)
         message.setText("Your changes to this review have not been applied.")
-        message.setInformativeText("Keep reviewing to preserve these choices, or discard them and close the review.")
         keep = message.addButton("Keep reviewing", QMessageBox.ButtonRole.RejectRole)
         discard = message.addButton("Discard choices", QMessageBox.ButtonRole.DestructiveRole)
         message.setDefaultButton(keep)

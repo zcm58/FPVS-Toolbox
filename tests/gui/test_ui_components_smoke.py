@@ -523,11 +523,11 @@ def test_post_processing_required_dialog_explains_scope_and_actions(qtbot) -> No
         StatusBanner,
         "post_processing_required_banner",
     ).text()
-    assert "If a condition is missing" in dialog.findChild(
+    assert "For a missing condition" in dialog.findChild(
         QLabel,
         "post_processing_required_explanation",
     ).text()
-    assert "reuses existing processed EEG data" in dialog.findChild(
+    assert "reuses processed EEG" in dialog.findChild(
         QLabel,
         "post_processing_required_explanation",
     ).text()

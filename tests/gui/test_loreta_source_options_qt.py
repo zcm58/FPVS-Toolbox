@@ -6,6 +6,7 @@ import sys
 import numpy as np
 from PySide6.QtWidgets import QComboBox, QLabel, QWidget
 
+from Main_App.gui.theme import build_fpvs_app_stylesheet
 from Tools.LORETA_Visualizer.gui import (
     DISPLAY_MODE_CORTICAL_SURFACE,
     DISPLAY_MODE_MRI_SLICES,
@@ -192,6 +193,33 @@ def test_metric_and_canonical_comparison_controls_preserve_source_selection(qtbo
     scale.setCurrentIndex(fixed_index)
     assert window.activation_min_spin.value() == -3e-10
     assert window.activation_max_spin.value() == 2e-10
+
+    # A 1200 × 800 MainWindow leaves this much room below the menu and margins.
+    window.setStyleSheet(build_fpvs_app_stylesheet())
+    window.resize(1156, 724)
+    monkeypatch.setattr(
+        window, "_activation_uses_opaque_cortical_mode",
+        lambda: window._display_mode == DISPLAY_MODE_SPLIT_HEMISPHERE,
+    )
+    for mode, mode_controls in (
+        (DISPLAY_MODE_TRANSPARENT_MESH, (window.transparency_slider, window.activation_opacity_slider)),
+        (DISPLAY_MODE_SPLIT_HEMISPHERE, (window.left_split_rotation_row, window.right_split_rotation_row)),
+    ):
+        window._display_mode = mode
+        window._sync_activation_render_mode_controls()
+        window.layout().activate()
+        assert window.minimumSizeHint().height() <= 724, mode
+        assert window.height() == 724, mode
+        for control in (
+            window.comparison_target_combo, window.comparison_view_combo,
+            window.export_figures_btn, window.reset_camera_btn, window.source_options_btn,
+            window.loreta_method_info_btn, window.viewport,
+            window.activation_min_spin, window.activation_max_spin,
+            *mode_controls,
+        ):
+            assert control.isVisibleTo(window)
+            assert window.rect().contains(control.mapTo(window, control.rect().topLeft()))
+            assert window.rect().contains(control.mapTo(window, control.rect().bottomRight()))
     assert window.close()
 
 
