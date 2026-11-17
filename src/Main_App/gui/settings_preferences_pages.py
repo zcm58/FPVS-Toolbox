@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QTabWidget,
     QCheckBox,
     QComboBox,
+    QFormLayout,
 )
 from Main_App.gui.components import (
     ActionRow,
@@ -24,7 +25,7 @@ from Main_App.gui.components import (
     make_action_button,
     make_form_layout,
 )
-from Main_App.gui.style_tokens import SECTION_GAP
+from Main_App.gui.style_tokens import SECTION_GAP, SECTION_HEADER_CONTENT_GAP
 from Main_App.settings.appearance import APPEARANCE_MODES
 from Main_App.processing.frequency_domain_qc import thresholds_summary_lines
 from Main_App.projects.preprocessing_settings import (
@@ -41,27 +42,44 @@ def build_application_page(
     tab = QWidget()
     tab.setObjectName("settings_application_tab")
     layout = QVBoxLayout(tab)
-    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setContentsMargins(0, SECTION_HEADER_CONTENT_GAP, 0, 0)
     layout.setSpacing(SECTION_GAP)
 
-    appearance_group = SectionCard("Appearance", tab, object_name="settings_appearance_card")
-    appearance_form = make_form_layout()
-    self.appearance_mode_combo = QComboBox(appearance_group)
+    preferences = make_form_layout()
+    preferences.setLabelAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+    preferences.setHorizontalSpacing(2 * SECTION_GAP)
+    preferences.setVerticalSpacing(SECTION_GAP)
+    preferences.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+
+    field_width = 128
+    self.appearance_mode_combo = QComboBox(tab)
     self.appearance_mode_combo.setObjectName("settings_appearance_mode")
     self.appearance_mode_combo.setToolTip("Auto follows your operating system's appearance.")
     self.appearance_mode_combo.addItems(APPEARANCE_MODES)
     self._initial_appearance_mode = self.manager.get_appearance_mode()
     self.appearance_mode_combo.setCurrentText(self._initial_appearance_mode)
-    appearance_form.addRow("Color mode", self.appearance_mode_combo)
-    appearance_group.content_layout.addLayout(appearance_form)
-    layout.addWidget(appearance_group)
+    self.appearance_mode_combo.setFixedWidth(field_width)
+    preferences.addRow("Appearance", self.appearance_mode_combo)
 
-    projects_group = SectionCard(
-        "Projects and cache",
-        tab,
-        object_name="settings_advanced_application_card",
+    self.alpha_edit = QLineEdit(self.manager.get("analysis", "alpha", "0.05"), tab)
+    self.alpha_edit.setFixedWidth(field_width)
+    self.alpha_edit.setToolTip(
+        "The significance threshold for Standard FPVS Screening. The default is 0.05."
     )
-    actions = ActionRow(projects_group, alignment=Qt.AlignLeft)
+    preferences.addRow("Screening alpha", self.alpha_edit)
+
+    self.debug_check = QCheckBox("Enabled", tab)
+    self.debug_check.setObjectName("settings_enable_debug")
+    self.debug_check.setAccessibleName("Enable debug logging")
+    self.debug_check.setChecked(self.manager.get("debug", "enabled", "False").lower() == "true")
+    self.debug_check.setToolTip("Restart FPVS Toolbox after changing debug logging.")
+    preferences.addRow("Debug logging", self.debug_check)
+    layout.addLayout(preferences)
+
+    layout.addSpacing(SECTION_HEADER_CONTENT_GAP)
+    layout.addWidget(SubsectionHeaderLabel("Projects and cache", tab))
+    actions = ActionRow(tab, alignment=Qt.AlignLeft)
+    actions.setObjectName("settings_application_maintenance_actions")
     self.btn_changeRoot = make_action_button("Change Projects Folder…", parent=actions)
     self.btn_changeRoot.setObjectName("settings_advanced_footer_change_root")
     self.btn_changeRoot.clicked.connect(change_projects_root)
@@ -74,29 +92,7 @@ def build_application_page(
     self.clear_toolbox_cache_button.setObjectName("settings_clear_toolbox_cache")
     self.clear_toolbox_cache_button.clicked.connect(self._clear_toolbox_cache)
     actions.add_button(self.clear_toolbox_cache_button)
-    actions.row_layout.addStretch(1)
-    projects_group.content_layout.addWidget(actions)
-    layout.addWidget(projects_group)
-
-    analysis_group = SectionCard(
-        "Analysis Defaults", tab, object_name="settings_stats_analysis_card",
-    )
-    analysis_form = make_form_layout()
-    self.alpha_edit = QLineEdit(self.manager.get("analysis", "alpha", "0.05"))
-    self.alpha_edit.setMaximumWidth(160)
-    alpha_label = QLabel("ANOVA alpha", analysis_group)
-    alpha_label.setBuddy(self.alpha_edit)
-    analysis_form.addRow(alpha_label, self.alpha_edit)
-    analysis_group.content_layout.addLayout(analysis_form)
-    layout.addWidget(analysis_group)
-
-    diagnostics_group = SectionCard("Diagnostics", tab)
-    self.debug_check = QCheckBox("Enable debug logging", diagnostics_group)
-    self.debug_check.setObjectName("settings_enable_debug")
-    self.debug_check.setChecked(self.manager.get("debug", "enabled", "False").lower() == "true")
-    self.debug_check.setToolTip("Restart FPVS Toolbox after changing debug logging.")
-    diagnostics_group.content_layout.addWidget(self.debug_check)
-    layout.addWidget(diagnostics_group)
+    layout.addWidget(actions, alignment=Qt.AlignLeft)
     layout.addStretch(1)
     tabs.addTab(tab, "Application")
 
@@ -107,12 +103,6 @@ def build_quality_control_page(self, tabs: QTabWidget) -> None:
     layout = QVBoxLayout(tab)
     layout.setContentsMargins(0, 0, 0, 0)
     layout.setSpacing(SECTION_GAP)
-    self._add_settings_scope(
-        layout,
-        "Manage exclusions for the current project and inspect the standard QC thresholds."
-        if self.project is not None else "Open a project to manage dataset exclusions.",
-    )
-
     if self.project is not None:
         qc_preproc = self._project_preprocessing()
         self._manual_excluded_participants = (
@@ -142,6 +132,7 @@ def build_quality_control_page(self, tabs: QTabWidget) -> None:
             )
         )
     else:
+        self._add_settings_scope(layout, "Open a project to manage dataset exclusions.")
         self._manual_excluded_participants = (
             normalize_manual_excluded_participants(
                 self.manager.get(
@@ -160,7 +151,6 @@ def build_quality_control_page(self, tabs: QTabWidget) -> None:
         tab,
         object_name="settings_advanced_processing_qc_card",
     )
-    qc_form = make_form_layout()
     self.dataset_exclusions_button = make_action_button(
         "Manage Dataset Exclusions…",
         compact=True,
@@ -176,14 +166,7 @@ def build_quality_control_page(self, tabs: QTabWidget) -> None:
     self.dataset_exclusions_button.clicked.connect(
         self._manage_dataset_exclusions
     )
-    qc_form.addRow(
-        QLabel(
-            "Dataset exclusions",
-            qc_group,
-        ),
-        self.dataset_exclusions_button,
-    )
-    qc_group.content_layout.addLayout(qc_form)
+    qc_group.content_layout.addWidget(self.dataset_exclusions_button, alignment=Qt.AlignLeft)
 
     self._add_frequency_domain_qc_settings(qc_group)
     layout.addWidget(qc_group)

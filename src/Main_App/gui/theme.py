@@ -326,14 +326,36 @@ def build_fpvs_app_stylesheet() -> str:
             border-color: {FOCUS_COLOR};
         }}
 
+        QFrame#settings_sidebar,
+        QFrame#settings_page_header {{
+            background: {SURFACE_BG};
+        }}
+
+        QFrame#settings_sidebar {{
+            border-right: 1px solid {BORDER_SOFT_COLOR};
+        }}
+
+        QLabel#settings_sidebar_title,
+        QLabel#settings_page_title {{
+            font-size: {css_font_size("project_title")};
+            font-weight: {css_font_weight("project_title")};
+        }}
+
+        QLabel#settings_sidebar_title {{
+            padding-left: 15px;
+        }}
+
         QListWidget#settings_navigation {{
-            background: {PAGE_BG};
+            background: transparent;
             border: none;
             outline: none;
+            font-size: {css_font_size("sidebar_item")};
+            font-weight: {css_font_weight("sidebar_item")};
         }}
 
         QListWidget#settings_navigation::item {{
-            padding: 6px 9px;
+            padding: 8px 4px 8px 16px;
+            margin: 1px 0;
             border: 1px solid transparent;
             border-radius: 6px;
         }}
@@ -344,7 +366,6 @@ def build_fpvs_app_stylesheet() -> str:
 
         QListWidget#settings_navigation::item:selected {{
             background: {ACCENT_SOFT_BG};
-            border-color: {ACCENT_COLOR};
             color: {TEXT_PRIMARY};
         }}
 

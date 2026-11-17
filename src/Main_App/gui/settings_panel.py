@@ -26,7 +26,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QHBoxLayout,
     QDialog,
-    QListWidget,
+    QFrame,
     QTabWidget,
     QGridLayout,
     QMessageBox,
@@ -42,7 +42,6 @@ from Main_App.processing.roi_presets import (
 from Main_App.gui.components import (
     ActionRow,
     StatusBanner,
-    SubsectionHeaderLabel,
     apply_font_role,
     make_action_button,
     make_form_layout,
@@ -65,6 +64,7 @@ from Main_App.gui.project_protocol import (
 )
 from Main_App.gui.recording_qc_identity import project_recording_coverage_rows
 from Main_App.gui.roi_settings_editor import ROISettingsEditor
+from Main_App.gui.settings_navigation import SettingsNavigation
 from Main_App.gui.style_tokens import PAGE_MARGIN, SECTION_GAP, SECTION_HEADER_CONTENT_GAP
 from Main_App.gui.theme import set_appearance_mode, set_themed_stylesheet
 from Main_App.gui.settings_feedback import (
@@ -323,7 +323,7 @@ class SettingsDialog(QDialog):
     def _build_ui(self) -> None:
         self.setWindowTitle("Settings[*]")
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setContentsMargins(8, 12, 8, 12)
         layout.setSpacing(10)
 
         self.tabs = QTabWidget()
@@ -337,30 +337,58 @@ class SettingsDialog(QDialog):
             "QTabWidget#settings_experimental_sections::pane {"
             " border: none; background: transparent; }"
         )
-        self.settings_navigation = QListWidget(self)
+        sidebar = QFrame(self)
+        sidebar.setObjectName("settings_sidebar")
+        sidebar.setMinimumWidth(148)
+        sidebar.setMaximumWidth(192)
+        heading_height = 36
+        heading_inset = 4
+        sidebar_layout = QVBoxLayout(sidebar)
+        sidebar_layout.setContentsMargins(8, heading_inset, 8, 12)
+        sidebar_layout.setSpacing(SECTION_GAP + heading_inset)
+
+        settings_heading = QLabel("Settings", sidebar)
+        settings_heading.setObjectName("settings_sidebar_title")
+        apply_font_role(settings_heading, "project_title")
+        settings_heading.setMinimumHeight(heading_height)
+        sidebar_layout.addWidget(settings_heading)
+
+        self.settings_navigation = SettingsNavigation(sidebar)
         self.settings_navigation.setObjectName("settings_navigation")
         self.settings_navigation.setAccessibleName("Settings categories")
         self.settings_navigation.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.settings_page_title = QLabel(self)
-        self.settings_page_title.setProperty("toolTitle", True)
-        apply_font_role(self.settings_page_title, "tool_title")
-        body = QGridLayout()
-        body.setContentsMargins(0, 0, 0, 0)
-        body.setHorizontalSpacing(SECTION_GAP)
-        body.setVerticalSpacing(SECTION_HEADER_CONTENT_GAP)
-        body.addWidget(SubsectionHeaderLabel("Settings", self), 0, 0)
-        body.addWidget(self.settings_page_title, 0, 1)
-        body.addWidget(self.settings_navigation, 1, 0)
-        body.addWidget(self.tabs, 1, 1)
-        body.setColumnStretch(1, 1)
-        body.setRowStretch(1, 1)
+        sidebar_layout.addWidget(self.settings_navigation, 1)
+
+        page_header = QFrame(self)
+        page_header.setObjectName("settings_page_header")
+        header_layout = QVBoxLayout(page_header)
+        header_layout.setContentsMargins(SECTION_GAP, heading_inset, SECTION_GAP, heading_inset)
+        self.settings_page_title = QLabel(page_header)
+        self.settings_page_title.setObjectName("settings_page_title")
+        apply_font_role(self.settings_page_title, "project_title")
+        self.settings_page_title.setMinimumHeight(heading_height)
+        header_layout.addWidget(self.settings_page_title)
+
+        content = QVBoxLayout()
+        content.setContentsMargins(SECTION_GAP, 0, 0, 0)
+        content.setSpacing(SECTION_HEADER_CONTENT_GAP)
+        content.addWidget(self.tabs, 1)
+        page = QVBoxLayout()
+        page.setSpacing(SECTION_HEADER_CONTENT_GAP)
+        page.addWidget(page_header)
+        page.addLayout(content, 1)
+
+        body = QHBoxLayout()
+        body.setSpacing(0)
+        body.addWidget(sidebar)
+        body.addLayout(page, 1)
         layout.addLayout(body, 1)
 
         self.settings_validation_status = StatusBanner("", self, variant="warning")
         self.settings_validation_status.setObjectName("settings_validation_status")
         self.settings_validation_status.label.setTextFormat(Qt.PlainText)
         self.settings_validation_status.hide()
-        layout.addWidget(self.settings_validation_status)
+        content.addWidget(self.settings_validation_status)
 
         preproc_tab = self._init_preproc_tab(self.tabs)
         self._preproc_tab_index = self.tabs.indexOf(preproc_tab)
@@ -377,11 +405,8 @@ class SettingsDialog(QDialog):
         self.settings_navigation.addItems(
             [self.tabs.tabText(index) for index in range(self.tabs.count())]
         )
-        self.settings_navigation.setFixedWidth(
-            max(144, self.settings_navigation.sizeHintForColumn(0) + 24)
-        )
         self.settings_navigation.currentRowChanged.connect(self.tabs.setCurrentIndex)
-        self._add_settings_footer(layout)
+        self._add_settings_footer(content)
         self._initial_protocol_editor_values = self._protocol_editor_values()
         self._initial_harmonic_settings_signature = (
             self._harmonic_settings_signature_from_preprocessing(
@@ -2481,7 +2506,7 @@ class SettingsDialog(QDialog):
     def _on_tab_changed(self, index: int) -> None:
         # Drafts may be incomplete while the user edits related fields/tabs.
         self._last_tab_index = index
-        self.settings_navigation.setCurrentRow(index)
+        self.settings_navigation.sync_current_row(index)
         self.settings_page_title.setText(self.tabs.tabText(index))
 
     # ------------------------------------------------------------------

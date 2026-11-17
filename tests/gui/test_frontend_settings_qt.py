@@ -7,12 +7,13 @@ from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
-from PySide6.QtCore import QPoint, QRect, Qt
+from PySide6.QtCore import QAbstractAnimation, QPoint, QRect, QRectF, Qt
 from PySide6.QtWidgets import (
     QAbstractButton,
     QAbstractScrollArea,
     QApplication,
     QComboBox,
+    QFrame,
     QLabel,
     QLineEdit,
     QMessageBox,
@@ -83,6 +84,95 @@ def test_settings_categories_support_keyboard_navigation_without_saving(panel, q
     assert panel.settings_page_title.text() == "Protocol"
     assert panel.has_unsaved_changes()
     assert Project.load(panel.project.project_root).preprocessing["low_pass"] == saved_low_pass
+
+
+def test_settings_category_rail_groups_navigation_and_aligns_the_headings(panel):
+    sidebar = panel.findChild(QFrame, "settings_sidebar")
+    assert sidebar is not None and sidebar.isVisibleTo(panel)
+    page_header = panel.findChild(QFrame, "settings_page_header")
+    assert page_header is not None and page_header.isVisibleTo(panel)
+    sidebar_bounds = QRect(sidebar.mapTo(panel, QPoint()), sidebar.size())
+    header_bounds = QRect(page_header.mapTo(panel, QPoint()), page_header.size())
+    assert header_bounds.top() == sidebar_bounds.top()
+    assert header_bounds.left() == sidebar_bounds.right() + 1
+    assert header_bounds.bottom() < panel.tabs.mapTo(panel, QPoint()).y()
+    navigation = panel.settings_navigation
+    title = panel.settings_page_title
+    assert title.parentWidget() is page_header
+    assert navigation.parentWidget() is sidebar
+    assert sidebar.rect().contains(navigation.geometry())
+    assert navigation.sizeHintForColumn(0) <= navigation.viewport().width()
+    assert title.objectName() == "settings_page_title"
+    assert sidebar.width() < panel.tabs.width()
+    assert sidebar.mapTo(panel, sidebar.rect().topRight()).x() < title.mapTo(panel, QPoint()).x()
+
+    panel.tabs.setCurrentIndex(panel.tabs.count() - 1)
+    assert title.text() == "Application"
+    heading = sidebar.findChild(QLabel, "settings_sidebar_title")
+    assert heading is not None
+    assert heading.mapTo(panel, QPoint()).y() == title.mapTo(panel, QPoint()).y()
+    assert heading.height() == title.height()
+    assert heading.fontMetrics().ascent() == title.fontMetrics().ascent()
+    assert heading.fontMetrics().height() == title.fontMetrics().height()
+    assert title.mapTo(panel, QPoint()).x() == panel.tabs.mapTo(panel, QPoint()).x()
+
+
+def test_settings_category_marker_retargets_and_snaps_when_hidden(panel, qtbot, monkeypatch):
+    from Main_App.gui import settings_navigation
+
+    monkeypatch.setattr(settings_navigation, "widget_animation_duration", lambda _widget, maximum: maximum)
+    navigation = panel.settings_navigation
+    animation = navigation._indicator_animation
+    navigation.setFocus()
+    qtbot.waitUntil(navigation.hasFocus)
+    qtbot.keyClick(navigation, Qt.Key.Key_Down)
+
+    assert animation.state() == QAbstractAnimation.State.Running
+    assert panel.tabs.currentIndex() == panel._protocol_tab_index
+    assert panel.settings_page_title.text() == "Protocol"
+    animation.setCurrentTime(animation.duration() // 3)
+    assert panel._preproc_tab_index < navigation._indicator_row < panel._protocol_tab_index
+
+    qtbot.keyClick(navigation, Qt.Key.Key_Down)
+    assert panel.tabs.currentIndex() == panel._harmonic_tab_index
+    assert panel.tabs.currentWidget().isVisibleTo(panel)
+    assert panel.settings_page_title.text() == "Harmonics"
+    assert navigation.hasFocus()
+    assert panel._preproc_tab_index < animation.startValue() < panel._harmonic_tab_index
+    assert animation.endValue() == panel._harmonic_tab_index
+    animation.setCurrentTime(animation.duration())
+    selected_row = QRectF(navigation.visualItemRect(navigation.currentItem()))
+    assert navigation._indicator_rect().center().y() == pytest.approx(selected_row.center().y())
+
+    navigation.setCurrentRow(panel._preproc_tab_index)
+    assert animation.state() == QAbstractAnimation.State.Running
+    panel.tabs.setCurrentIndex(panel._roi_tab_index)
+    assert animation.state() == QAbstractAnimation.State.Stopped
+    assert navigation.currentRow() == navigation._indicator_row == panel._roi_tab_index
+
+    navigation.setCurrentRow(panel._preproc_tab_index)
+    assert animation.state() == QAbstractAnimation.State.Running
+    navigation.hide()
+    assert animation.state() == QAbstractAnimation.State.Stopped
+    assert navigation.currentRow() == navigation._indicator_row == panel._preproc_tab_index
+    assert not panel.has_unsaved_changes()
+
+
+def test_settings_reduced_motion_keeps_keyboard_selection_immediate(panel, qtbot, monkeypatch):
+    from Main_App.gui import settings_navigation
+
+    monkeypatch.setattr(settings_navigation, "widget_animation_duration", lambda _widget, _maximum: 0)
+    navigation = panel.settings_navigation
+    navigation.setFocus()
+    qtbot.waitUntil(navigation.hasFocus)
+    qtbot.keyClick(navigation, Qt.Key.Key_End)
+
+    assert panel.tabs.currentIndex() == panel.tabs.count() - 1
+    assert panel.settings_page_title.text() == "Application"
+    assert navigation.currentRow() == navigation._indicator_row == panel.tabs.currentIndex()
+    assert navigation._indicator_animation.state() == QAbstractAnimation.State.Stopped
+    assert navigation.hasFocus()
+    assert not panel.has_unsaved_changes()
 
 
 def test_settings_invalid_draft_can_navigate_and_save_locates_field(panel, qtbot, monkeypatch):

@@ -47,7 +47,7 @@ from Main_App.gui.manual_participant_exclusions_dialog import (
 from Main_App.gui.manual_removed_electrodes_dialog import ManualRemovedElectrodesDialog
 from Main_App.gui.recording_qc_identity import QcRecordingIdentity
 from Main_App.gui import processing_inputs
-from Main_App.gui.components import ActionRow, SectionCard, ToolInfoDialog
+from Main_App.gui.components import ActionRow, SectionCard, SubsectionHeaderLabel, ToolInfoDialog
 from Main_App.gui.theme import apply_fpvs_theme
 from Main_App.processing.processing_controller import RawFileInfo
 import Main_App.gui.settings_panel as settings_panel
@@ -698,13 +698,10 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
     assert "Preprocessing Parameters" in cards
     assert "Project FPVS Protocol" in cards
     assert "Harmonic Selection and Summation" in cards
-    assert "Projects and cache" in cards
     assert "Processing QC" in cards
     assert "Experimental Removed-Electrode Detection" in cards
     assert "Experimental Summed-BCA Screening" in cards
-    assert "Diagnostics" in cards
     assert "Tool Visibility" not in cards
-    assert "Analysis Defaults" in cards
     assert "Quick Add" not in cards
     assert "Regions of Interest" not in cards
     assert [dlg.tabs.tabText(i) for i in range(dlg.tabs.count())] == [
@@ -782,8 +779,6 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
     assert dlg.fixed_harmonic_freqs_edit.isEnabled() is False
     assert dlg.fixed_harmonic_upper_index_edit.isEnabled() is True
     assert dlg.fixed_harmonic_upper_frequency_edit.isEnabled() is False
-    assert cards["Diagnostics"].isAncestorOf(dlg.debug_check)
-    assert not cards["Diagnostics"].isAncestorOf(dlg.beta_tools_check)
     detector_card = cards["Experimental Removed-Electrode Detection"]
     summed_bca_card = cards["Experimental Summed-BCA Screening"]
     assert detector_card.isAncestorOf(dlg.auto_detect_removed_electrodes_check)
@@ -873,19 +868,35 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
     application_tab = dlg.tabs.widget(application_tab_index)
     quality_control_tab = dlg.tabs.widget(quality_control_tab_index)
     experimental_tab = dlg.tabs.widget(experimental_tab_index)
-    assert not preproc_tab.isAncestorOf(cards["Projects and cache"])
     assert not preproc_tab.isAncestorOf(cards["Harmonic Selection and Summation"])
     assert not preproc_tab.isAncestorOf(dlg.experimental_ram_preload_check)
     assert protocol_tab.isAncestorOf(cards["Project FPVS Protocol"])
     assert protocol_tab.objectName() == "settings_protocol_tab"
     assert harmonics_tab.isAncestorOf(cards["Harmonic Selection and Summation"])
     assert harmonics_tab.objectName() == "settings_harmonics_tab"
-    assert application_tab.isAncestorOf(cards["Projects and cache"])
-    assert application_tab.isAncestorOf(cards["Diagnostics"])
-    assert application_tab.isAncestorOf(cards["Analysis Defaults"])
-    assert application_tab.isAncestorOf(dlg.alpha_edit)
-    assert cards["Projects and cache"].isAncestorOf(dlg.btn_changeRoot)
-    assert cards["Projects and cache"].isAncestorOf(dlg.clear_toolbox_cache_button)
+    assert not application_tab.findChildren(SectionCard)
+    assert [
+        heading.text() for heading in application_tab.findChildren(SubsectionHeaderLabel)
+    ] == ["Projects and cache"]
+    maintenance_actions = application_tab.findChild(
+        ActionRow, "settings_application_maintenance_actions"
+    )
+    assert maintenance_actions is not None
+    assert maintenance_actions.isAncestorOf(dlg.btn_changeRoot)
+    assert maintenance_actions.isAncestorOf(dlg.clear_toolbox_cache_button)
+    assert all(application_tab.isAncestorOf(control) for control in (
+        dlg.appearance_mode_combo, dlg.alpha_edit, dlg.debug_check,
+    ))
+    assert not application_tab.isAncestorOf(dlg.beta_tools_check)
+    assert any(
+        label.text() == "Screening alpha" and label.buddy() is dlg.alpha_edit
+        for label in application_tab.findChildren(QLabel)
+    )
+    assert dlg.debug_check.text() == "Enabled"
+    assert any(
+        label.text() == "Debug logging" and label.buddy() is dlg.debug_check
+        for label in application_tab.findChildren(QLabel)
+    )
     assert quality_control_tab.isAncestorOf(cards["Processing QC"])
     assert quality_control_tab.isAncestorOf(dlg.frequency_domain_qc_thresholds_label)
     assert experimental_tab.isAncestorOf(detector_card)

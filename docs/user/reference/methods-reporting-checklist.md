@@ -334,10 +334,10 @@ the final publication's supplementary methods could not be checked.
 
 ### Primary statistical model
 
-The standard contract is fixed at alpha 0.05, finite available observations,
-a participant random intercept, one-sided positive-response tests, two-sided
-model-derived contrasts, and Holm family-wise correction. These are not
-selectable analysis profiles.
+Report the nominal alpha recorded for the run. The default is 0.05.
+The standard contract fixes finite available observations, a participant
+random intercept, one-sided positive-response tests, two-sided model-derived
+contrasts, and Holm family-wise correction.
 
 For a single-group analysis, report:
 

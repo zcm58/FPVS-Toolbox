@@ -38,9 +38,9 @@ New projects start with these optional checks off; existing projects keep their
 saved choices and previous defaults. Basic timing, data and result-validity checks
 always run. Turning a check off does not clear explicit exclusions or undo completed
 condition repairs. Performance holds
-project-only RAM preloading, which is off by default. Use **Application > Analysis
-Defaults** for the Stats alpha; Application also contains debug, cache and
-projects-root controls.
+project-only RAM preloading, which is off by default. Set the significance
+threshold for Standard FPVS Screening under **Application > Screening alpha**. Application also contains debug logging
+and the project folder and cache actions.
 
 For the entire Toolbox interface, choose **File > Settings > Application** and
 set **Appearance** to **Light**, **Dark**, or **Auto**. Auto follows your

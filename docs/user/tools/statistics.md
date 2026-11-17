@@ -281,8 +281,8 @@ which answer different questions.
 
 ## Locked Standard Methods
 
-The screen fixes the main statistical choices so they cannot be changed after
-seeing the data:
+The screen fixes the models, test directions, and correction families used in
+each run.
 
 | Question | Standard method | Holm family |
 | --- | --- | --- |
@@ -293,7 +293,8 @@ seeing the data:
 | Direct Group A - Group B cells | Two-sided `LMM-derived model-estimated contrast` in every estimable Condition x ROI cell | `group_core_cells` |
 | Balanced ANOVA compatibility | Secondary ANOVA effects, only when exact balance requirements are met | `anova_compatibility_effects` |
 
-The nominal alpha is 0.05. Holm family-wise correction is applied separately
+The default nominal alpha is 0.05. Each run reads **Screening alpha** from
+**Settings > Application**. Holm family-wise correction is applied separately
 within each named family. A result in one family does not change which tests
 belong to another family.
 

@@ -323,9 +323,9 @@ The Settings category list opens seven pages: **Processing**, **Protocol**, **Ha
 four contain project processing values, the presentation/oddball protocol,
 harmonic selection/summation, and ROI definitions respectively. Quality Control
 contains Dataset Exclusions and read-only frequency-domain QC thresholds.
-Application groups **Change Projects Folder…** and cache controls under
-**Projects and cache**, the Stats alpha under **Analysis Defaults**, and debug
-logging under **Diagnostics**. Experimental separates
+Application presents **Appearance**, **Screening alpha**, and **Debug logging**
+in one form. **Projects and cache** groups **Change Projects Folder…** and
+**Clear Toolbox Cache…** below it. Experimental separates
 **Preprocessing QC**, **Post-processing QC**, **Performance** and **Beta Tools**.
 Preprocessing QC has flat **Signals**, **Electrodes** and **Raw-Spectral Review**
 pages. Signals groups raw signal checks and kurtosis screening with its dependent
@@ -345,19 +345,26 @@ setting controls new repair requests; turning it off keeps previously accepted
 signal repairs.
 Each section has its own vertical space within the
 supported workspace, including when raw-spectral details are expanded.
-Settings uses a native category list with an aligned page heading. The
-Processing card groups Guided setup with its parameters, and Protocol shows
-its status above the Timing and Trigger markers tabs. The existing
-page host preserves programmatic navigation for tool shortcuts and validation.
+Settings places its category list in a dedicated column beside the page
+content and shared actions. A shared header surface connects the Settings and
+category headings. `settings_navigation.py` moves a
+teal marker between categories over 150 ms using Studio's easing. The category
+and page update immediately. Programmatic navigation, hidden Settings pages,
+and a disabled animation preference snap the marker into place. The Processing
+card groups Guided setup with its parameters, and Protocol shows its status
+above the Timing and Trigger markers tabs. Tool shortcuts and validation
+continue to navigate through the existing page host.
 Nested Protocol and Experimental tabs stay unframed around their section cards.
 One shared Save/Cancel row applies the full Settings draft from every category.
 Invalid summed-BCA input reveals its sub-tab before focusing the affected field.
 
 Visible smoke: at 1280 × 900 and Windows 125% and 150% scaling, open Settings
-from the shell and from a tool shortcut. Use the keyboard to switch categories,
-make an invalid edit, and verify Save selects and focuses its field. Cancel and
-reopen to confirm the prior saved values. Check the Application actions and the
-embedded QC and Stats surfaces in the same workspace.
+from the shell and from a tool shortcut in Light and Dark. Click a category
+and use the arrow keys to switch quickly. Check that the title updates at once
+and the marker settles on the final selection. Repeat with Windows Animation
+effects turned off. Make an invalid edit and verify Save selects and focuses its
+field. Cancel and reopen to confirm the prior saved values. Check the
+Application actions and the embedded QC and Stats surfaces in the same workspace.
 
 **Processing > Guided setup** opens the optional seven-page processing wizard.
 It uses shared dialog/form components, a numbered page list, current-method
@@ -982,9 +989,9 @@ selected. For an older project with no saved detector choice,
 verify the prompt and warning fit, and saving another setting leaves the
 choice pending. Change values across several tabs, Save from a different tab,
 and reopen to confirm every edit persists; repeat with Cancel and confirm no
-draft is saved. Check Application > Analysis Defaults contains Stats alpha,
-Quality Control opens Dataset Exclusions and shows read-only thresholds, and
-Application contains debug, cache and projects-root controls. Toggle the >10
+draft is saved. Check Application contains Screening alpha, debug logging, and
+the project folder and cache actions. Verify Quality Control opens Dataset
+Exclusions and shows read-only thresholds. Toggle the >10
 review default under Experimental > Preprocessing QC > Signals, Save/reopen, and start a new
 kurtosis review: confirm its initial checkbox follows the saved default, can
 still be overridden for the current review, and saves decisions only after
