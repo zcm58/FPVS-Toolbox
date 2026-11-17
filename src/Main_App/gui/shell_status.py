@@ -457,7 +457,20 @@ def _place_start_button(host: Any, target: str) -> None:
         button.show()
 
 
+def ensure_processing_navigation_unlocked(host: Any) -> None:
+    actions = getattr(host, "shell_actions", None)
+    if actions is not None:
+        actions.setEnabled(True)
+    menu = getattr(host, "menuBar", lambda: None)()
+    if menu is not None:
+        menu.setEnabled(True)
+    host._processing_navigation_states = []
+
+
 def _set_processing_navigation_locked(host: Any, locked: bool) -> None:
+    actions = getattr(host, "shell_actions", None)
+    if actions is not None:
+        actions.setEnabled(not locked)
     states = getattr(host, "_processing_navigation_states", [])
     if locked:
         if states:

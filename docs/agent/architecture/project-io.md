@@ -78,9 +78,10 @@ Project-aware workflows should resolve paths from the active project root, not f
 
 Full FPVS Studio interoperability and multi-hardware/montage project support are
 future goals in the [shared roadmap](hardware-pipeline-studio-roadmap.md).
-The importer and acquisition-evidence adapter described here implement separate,
-bounded subsets. Neither establishes full compatibility with every Studio
-version, and external identities must still pass canonical project validation.
+The [config importer](#studio-config-handoff) and acquisition-evidence adapter
+implement separate, bounded subsets. A supported exchange format does not establish
+support for every experiment or recording. External identities must still pass
+canonical project validation.
 
 The Unicorn acquisition foundation adds a read-only
 `Main_App.io.studio_acquisition_evidence` adapter for Studio's candidate handoff:
@@ -245,6 +246,81 @@ Primary paths:
   It owns those implementations.
 - `src/Main_App/settings/settings_paths.py`
 - tool modules that import, export, or generate files under `src/Tools/`
+
+## Studio config handoff
+
+`Main_App.projects.studio_handoff` owns envelope and supported-semantic validation;
+`Main_App.projects.fpvs_config_import` creates the new Toolbox project and retains
+source provenance. Current files use `format="fpvs-handoff"`, strict integer
+`format_version=2` and `kind="setup"` or `"completed_session"`; application release
+provenance is separate in `producer`. Both document kinds use the same format.
+Historical `schema_version` values `1.0.0` through `1.15.0` remain readable through
+the compatibility boundary. Current files do not combine the two version fields.
+Roll out compatible Studio and Toolbox builds together: earlier Toolbox builds
+that accept only 1.x configs reject revision 2. The producer application version
+is provenance, not a minimum supported Toolbox release. Source verification does
+not establish a minimum published installer version.
+
+Unknown revisions and fields in the interpreted scientific contract fail
+explicitly. The documented `metadata` object permits descriptive extensions;
+retained authoring/acquisition evidence is not interpreted as EEG. Additional optional
+authoring features do not independently increment the handoff revision. Internal
+project, acquisition-evidence, method and fingerprint versions are unchanged.
+
+The supported scientific subset is deliberately narrower than Studio authoring:
+
+- FPVS Oddball and Cognitive Load FPVS share one global base/oddball protocol.
+  A per-condition base rate equal to the global rate is accepted; differing
+  condition rates fail with a specific unsupported-design error.
+- Conditions must share positive sequence and oddball-repeat counts. Their
+  product is the number of presentations; one fewer bounds the first-to-last
+  oddball marker window. This seeds Auto on the initial target grid; actual
+  source headers finalize the window before QC.
+- Explicit condition/default stream-duration overrides and masking/catch designs
+  require separate interpretation support and are rejected before project creation.
+- The imported names and condition/oddball marker codes pass Toolbox's canonical
+  validators. Legacy explicit `frequency_protocol` values remain supported;
+  declaring both protocol representations is invalid.
+
+Completed-session evidence does not replace the planned analysis target, certify
+complete EEG or supply an EEG sample-time mapping. Hardware selection and raw
+recording registration remain explicit Toolbox actions.
+When acquisition evidence is present, the importer verifies supported evidence
+and snapshot revisions, successful finalization, matching project/session/
+execution/participant identity and ordered run/condition identity. This
+transport-neutral identity check is separate from the Unicorn code-order adapter.
+
+The importer retains relevant source fields in the new project at
+`.fpvs_imports/studio/<source-sha256>.json`. The `tools.studio_import` receipt in
+`project.json` records its portable relative path, source filename/digest,
+producer/document kind and `recording_association="unreviewed"`. It does not copy
+stimulus assets, embedded task media or raw EEG. The configured Toolbox Projects
+Root owns the new project; retained provenance moves with that project.
+Project settings and provenance are prepared in a temporary child of that root
+and published together, so validation/write failure cannot expose a half-created
+imported project.
+
+`completed_session.manual_removed_electrodes` stays unbound source evidence with
+the exact Studio participant/session identity: null means unknown and `[]` means
+reviewed empty. A Studio label such as `007` is not automatically converted to a
+Toolbox participant such as `P007`. These declarations cannot become active
+participant/recording exclusions without reviewed identity association. The
+existing legacy top-level and participant-map electrode imports retain their
+manual-mode behavior.
+
+The GUI entry remains **New Project > Import FPVS Studio Config**. It asks for
+hardware and then the raw EEG folder. It does not import a Studio project folder,
+merge sessions into an existing project, or associate EEG files automatically.
+The completed-import message identifies the source participant/visit and recorded
+electrode choices that still require review against the selected recording.
+The selected supported config may describe one completed session; it is not a
+complete study migration. Guided processing setup operates on the resulting
+Toolbox project and does not bypass these boundaries.
+
+Paired producer fixtures and consumer tests establish source compatibility.
+Visible GUI acceptance, installed-release compatibility and physical recording
+qualification remain separate; see the
+[handoff plan](../exec-plans/active/studio-toolbox-handoff.md).
 
 ## Manifest transactions
 
@@ -659,32 +735,9 @@ FPVS Toolbox uses a strict hybrid settings model:
   target, including all configured sources during Single mode. Previously
   verified source grids remain relevant when processing a subset. Recording
   duration and observed marker counts never set this target.
-- FPVS Studio `.fpvsconfig` import is a project-shell helper under
-  `Main_App.projects.fpvs_config_import`. It accepts known config schemas
-  `1.0.0` through `1.8.0` for FPVS Oddball and Cognitive Load FPVS; unknown
-  schemas and other experiment categories fail explicitly. It imports `project.name`,
-  `conditions[].name`/`conditions[].trigger_code` into `project.json`
-  `event_map`, `triggers.oddball_trigger_code`, and current Studio
-  `protocol.base_hz`/`protocol.oddball_every_n` through the canonical
-  `FrequencyProtocol` validator. Legacy `frequency_protocol` payloads remain
-  supported; declaring both protocol shapes is an error. Current Studio
-  conditions must agree on positive sequence and oddball-repeat counts. Their
-  product is the number of presentations; one fewer bounds the first-to-last
-  oddball marker window. This explicit Studio schedule rule seeds Auto against
-  the initial target grid; source headers finalize it before QC. Completed
-  session summaries do not replace the bound or certify complete EEG data.
-  Legacy explicit analyzed-cycle declarations remain authoritative. No observed
-  participant span supplies the planned target implicitly. The importer also
-  reads optional per-participant manually removed electrode metadata
-  into `preprocessing.manual_removed_electrodes`. Supported Studio-side
-  scaffold shapes are a top-level PID-to-electrodes map such as
-  `manual_removed_electrodes` or participant entries carrying
-  `manual_removed_electrodes`, `removed_electrodes`, `excluded_electrodes`, or
-  `physically_removed_electrodes`. When this metadata is present, the imported
-  Toolbox project starts in manual removed-electrode mode. The importer then
-  prompts for the raw `.bdf` input folder. The GUI exposes this as an option in
-  the New Project flow from the landing page and File menu; it must not copy
-  Studio stimulus assets or runtime artifacts.
+- FPVS Studio imports follow the [shared handoff boundary](#studio-config-handoff).
+  Imported protocol values and source evidence remain separate from reviewed raw
+  registration; no observed participant span supplies the planned target implicitly.
 - The preprocessing runner may create a generated cache under the active project
   root at `.fpvs_cache/preprocessed/`. Cache keys include source file path,
   size, mtime, MNE version, loader profile, preprocessing settings, and the

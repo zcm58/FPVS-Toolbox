@@ -27,6 +27,9 @@ Primary paths:
   open. The standalone updater reads the same preference without loading project
   settings. Appearance-aware page styles use `set_themed_stylesheet()`. Custom
   UI painters resolve shared tokens through `theme_color()`.
+- `src/Main_App/gui/shell_actions.py` owns shared Home, Settings and tool
+  action identities. Menus reuse that registry, with project validation and beta
+  acknowledgements retained by MainWindow.
 - `src/Main_App/gui/menu_bar.py`: File, View, Tools, and Help construction.
   `file_menu.py` groups project, Settings, cache, and application actions.
   View contains Home (Ctrl+1) and Experiment Library, including on Welcome.

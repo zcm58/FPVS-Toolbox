@@ -1,31 +1,14 @@
 from __future__ import annotations
 
-from functools import partial
-
-from PySide6.QtCore import QUrl
-from PySide6.QtGui import QAction, QDesktopServices, QKeySequence
+from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import QMenuBar, QMainWindow
 
-# Role, label, and MainWindow opener, in menu order.
-DEFAULT_TOOL_SPECS = (
-    ("btn_free_harmonic_clustering", "Free Harmonic Clustering Analysis", "open_free_harmonic_clustering"),
-    ("btn_graphs", "SNR Plots", "open_plot_generator"),
-)
-
-BETA_TOOL_SPECS = (
-    ("btn_publication_maps", "Scalp Maps", "open_publication_maps"),
-    ("btn_data", "Standard FPVS Screening", "open_stats_analyzer"),
-    ("btn_sensitivity_analysis", "Sensitivity Analysis", "open_sensitivity_analysis"),
-    ("btn_loreta_visualizer", "LORETA Visualizer", "open_loreta_visualizer"),
-    ("btn_sequence_figure", "Sequence Figure", "open_sequence_figure"),
-    ("btn_individual_detectability", "Individual Detectability", "open_individual_detectability"),
-)
-
-DOCS_URL = "https://zcm58.github.io/FPVS-Toolbox/"
+from Main_App.gui.shell_actions import BETA_TOOL_SPECS as BETA_TOOL_SPECS
+from Main_App.gui.shell_actions import ShellActions
 
 
-def build_menu_bar(parent: QMainWindow) -> QMenuBar:
-    """Return the app-level File, View, Tools, and Help menus."""
+def build_menu_bar(parent: QMainWindow, actions: ShellActions) -> QMenuBar:
+    """Return the app-level menus using the shared command identities."""
     menu_bar = QMenuBar(parent)
     menu_bar.setObjectName("workspaceMenuBar")
     menu_bar.setNativeMenuBar(False)
@@ -35,54 +18,38 @@ def build_menu_bar(parent: QMainWindow) -> QMenuBar:
 
     view_menu = menu_bar.addMenu("&View")
     view_menu.setObjectName("viewMenu")
-    home_action = view_menu.addAction("Home")
-    home_action.setObjectName("btn_home")
-    home_action.setShortcut(QKeySequence("Ctrl+1"))
-    parent.addAction(home_action)
+    actions.home.setShortcut(QKeySequence("Ctrl+1"))
+    parent.addAction(actions.home)
+    view_menu.addAction(actions.home)
 
-    def show_home() -> None:
-        if menu_bar.isVisible() and menu_bar.isEnabled():
-            parent.show_home_page()
-
-    home_action.triggered.connect(show_home)
-
-    library_action = view_menu.addAction("Experiment Library…")
+    library_action = actions.addAction("Experiment Library…")
     library_action.setObjectName("actionExperimentLibrary")
 
     def show_library() -> None:
         from Main_App.gui.experiment_library_workflow import show_experiment_library
 
-        show_experiment_library(parent)
+        if menu_bar.isVisible() and menu_bar.isEnabled():
+            show_experiment_library(parent)
 
     library_action.triggered.connect(show_library)
+    view_menu.addAction(library_action)
 
     tools_menu = menu_bar.addMenu("&Tools")
     tools_menu.setObjectName("toolsMenu")
-    parent.tool_actions = {}
-    for role, text, opener_name in DEFAULT_TOOL_SPECS:
-        action = QAction(text, parent)
-        action.setObjectName(role)
-        action.triggered.connect(getattr(parent, opener_name))
-        tools_menu.addAction(action)
-        parent.tool_actions[role] = action
-
-    if parent.settings.beta_tools_enabled():
+    tools_menu.addActions(actions.default_tools)
+    parent.tool_actions = {
+        action.objectName(): action
+        for action in (*actions.default_tools, *actions.beta_tools)
+    }
+    if actions.beta_tools:
         tools_menu.addSeparator()
         beta_menu = tools_menu.addMenu("Beta Tools")
         beta_menu.setObjectName("betaToolsMenu")
-        for role, text, opener_name in BETA_TOOL_SPECS:
-            action = QAction(text, parent)
-            action.setObjectName(role)
-            action.triggered.connect(
-                partial(parent._open_beta_tool, role, getattr(parent, opener_name))
-            )
-            beta_menu.addAction(action)
-            parent.tool_actions[role] = action
+        beta_menu.addActions(actions.beta_tools)
 
     help_menu = menu_bar.addMenu("&Help")
     help_menu.setObjectName("helpMenu")
-    help_menu.addAction(
-        "Documentation", lambda: QDesktopServices.openUrl(QUrl(DOCS_URL)),
-    )
+    actions.documentation.setText("Documentation")
+    help_menu.addAction(actions.documentation)
 
     return menu_bar

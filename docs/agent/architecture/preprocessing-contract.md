@@ -388,6 +388,17 @@ kurtosis scan and process runner check that the exclusion remains configured;
 removing or changing its scope requires new preflight. Existing GUI review
 receipts and clean-occurrence fingerprints retain their prior behavior.
 
+An explicit user-authorized review outside the GUI may exclude an individual
+occurrence through `marker_integrity.build_authorized_marker_exclusion_decision`.
+Its `explicit_authorized_marker_review` receipt requires a named reviewer,
+non-default reason, UTC review time and evidence reference, bound to the current
+marker-plan/occurrence fingerprints and exact source, participant, recording and
+session scope. Supply the receipt through preflight's `marker_review_decisions`
+input. This authority can only exclude: it cannot retain a gap, supply bounds,
+pad or reconstruct an interval. Complete restarted occurrences keep their own
+unchanged automatic spans; runner validation rechecks the exclusion receipt.
+Existing GUI decisions and clean-occurrence fingerprints are unchanged.
+
 When valid `55_onbin` repetition crops exist for a condition, those repetitions
 must keep `N % N_step == 0` and metadata `N_mod_step == 0`. Do not downgrade
 the whole condition or any repetition to fixed-epoch fallback. Do not silently

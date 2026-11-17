@@ -2,12 +2,19 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
+from Main_App.io.atomic_write import atomic_write, rename_with_retry, replace_with_retry
+from Main_App.projects.studio_handoff import (
+    LEGACY_CONFIG_VERSIONS,
+    normalize_studio_handoff,
+)
 from Main_App.processing.removed_electrode_detection import (
     REMOVED_ELECTRODE_DETECTION_MODE_MANUAL,
     normalize_manual_removed_electrodes_map,
@@ -28,9 +35,8 @@ from Main_App.projects.preprocessing_settings import (
 )
 
 CONFIG_SUFFIX = ".fpvsconfig"
-SUPPORTED_CONFIG_VERSIONS = (
-    "1.0.0", "1.1.0", "1.2.0", "1.3.0", "1.4.0", "1.5.0", "1.6.0", "1.7.0", "1.8.0",
-)
+# Compatibility export for callers that inspect historical support.
+SUPPORTED_CONFIG_VERSIONS = LEGACY_CONFIG_VERSIONS
 WINDOWS_FORBIDDEN_PROJECT_CHARS = set('<>:"/\\|?*')
 _WINDOWS_RESERVED_NAMES = {
     "CON",
@@ -55,33 +61,31 @@ class FPVSConfigImport:
     manual_removed_electrodes: dict[str, list[str]]
     oddball_marker_code: int
     frequency_protocol: FrequencyProtocol | None
+    source_filename: str
+    source_sha256: str
+    provenance: dict[str, Any]
 
 
 def read_fpvs_config(path: Path) -> FPVSConfigImport:
-    """Read project title and condition trigger map from a Studio `.fpvsconfig`."""
+    """Validate a Studio handoff and resolve the supported processing subset."""
 
     config_path = Path(path)
     try:
-        payload = json.loads(config_path.read_text(encoding="utf-8"))
+        source_bytes = config_path.read_bytes()
+        payload = json.loads(
+            source_bytes.decode("utf-8-sig"), parse_constant=_reject_json_constant,
+        )
     except OSError as exc:
         raise FPVSConfigImportError(f"Unable to read FPVS config: {config_path}") from exc
-    except json.JSONDecodeError as exc:
+    except (ValueError, UnicodeError) as exc:
         raise FPVSConfigImportError(f"FPVS config is not valid JSON: {config_path}") from exc
     if not isinstance(payload, Mapping):
         raise FPVSConfigImportError("FPVS config must contain a JSON object.")
 
-    schema_version = payload.get("schema_version")
-    if schema_version not in SUPPORTED_CONFIG_VERSIONS:
-        raise FPVSConfigImportError(
-            "Unsupported FPVS config schema version: "
-            f"{schema_version!r}. Supported versions: {', '.join(SUPPORTED_CONFIG_VERSIONS)}."
-        )
-    category = payload.get("experiment_category", "fpvs_oddball")
-    if category not in ("fpvs_oddball", "cognitive_load_fpvs"):
-        raise FPVSConfigImportError(
-            f"Unsupported Studio experiment category for FPVS processing: {category!r}."
-        )
-
+    try:
+        payload = normalize_studio_handoff(payload)
+    except ValueError as exc:
+        raise FPVSConfigImportError(str(exc)) from exc
     project = payload.get("project")
     if not isinstance(project, Mapping):
         raise FPVSConfigImportError("FPVS config is missing a project object.")
@@ -134,6 +138,14 @@ def read_fpvs_config(path: Path) -> FPVSConfigImport:
         manual_removed_electrodes=manual_removed_electrodes,
         oddball_marker_code=oddball_marker_code,
         frequency_protocol=frequency_protocol,
+        source_filename=config_path.name,
+        source_sha256=hashlib.sha256(source_bytes).hexdigest(),
+        provenance={key: payload[key] for key in (
+            "format", "format_version", "schema_version", "kind", "producer", "metadata",
+            "experiment_category", "project", "conditions", "condition_defaults", "protocol",
+            "frequency_protocol", "session", "recording", "triggers", "toolbox",
+            "completed_session",
+        ) if key in payload},
     )
 
 
@@ -141,8 +153,20 @@ def create_project_from_fpvs_config(projects_root: Path, config_path: Path) -> P
     """Create and save a Toolbox project from the importable Studio config subset."""
 
     imported = read_fpvs_config(config_path)
-    project_root = _unique_project_root(Path(projects_root), imported.project_title)
-    project_root.mkdir(parents=True, exist_ok=False)
+    projects_root = Path(projects_root).resolve()
+    projects_root.mkdir(parents=True, exist_ok=True)
+    project_root = _unique_project_root(projects_root, imported.project_title)
+    # Publish only after settings and provenance both succeed. Staging is owned
+    # by this call and always stays below the selected Toolbox Projects Root.
+    with tempfile.TemporaryDirectory(prefix=".studio-import-", dir=projects_root) as staging:
+        staged_root = Path(staging) / "project"
+        staged_root.mkdir()
+        _create_imported_project(staged_root, imported)
+        rename_with_retry(staged_root, project_root)
+    return Project.load(project_root)
+
+
+def _create_imported_project(project_root: Path, imported: FPVSConfigImport) -> None:
     project = Project.load(
         project_root,
         manifest={"preprocessing": new_project_preprocessing_settings()},
@@ -168,8 +192,70 @@ def create_project_from_fpvs_config(projects_root: Path, config_path: Path) -> P
                 "manual_removed_electrodes": imported.manual_removed_electrodes,
             }
         )
-    project.save()
-    return project
+    _write_import_provenance(project, imported)
+    project.save(updated_tool_namespaces=("studio_import",))
+
+
+def _reject_json_constant(value: str) -> None:
+    raise ValueError(f"Non-finite JSON number: {value}")
+
+
+def _write_import_provenance(project: Project, imported: FPVSConfigImport) -> None:
+    relative_path = Path(".fpvs_imports") / "studio" / f"{imported.source_sha256}.json"
+    target = project.project_root / relative_path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    provenance = {
+        "source_filename": imported.source_filename,
+        "source_sha256": imported.source_sha256,
+        "handoff": imported.provenance,
+    }
+    with atomic_write(target, replace=replace_with_retry) as stream:
+        json.dump(provenance, stream, indent=2, ensure_ascii=False, allow_nan=False)
+        stream.write("\n")
+    completed = imported.provenance.get("completed_session")
+    receipt = {
+        "source_filename": imported.source_filename,
+        "source_sha256": imported.source_sha256,
+        "provenance_file": relative_path.as_posix(),
+        "producer": imported.provenance.get("producer"),
+        "kind": imported.provenance.get("kind") or (
+            "completed_session" if completed is not None else "setup"
+        ),
+        "recording_association": "unreviewed",
+    }
+    if isinstance(completed, Mapping):
+        # Studio identifiers are evidence, not canonical Toolbox registrations.
+        receipt["completed_session_review"] = {
+            key: completed[key] for key in (
+                "session_id", "execution_id", "participant_number",
+                "participant_session_number", "manual_removed_electrodes",
+            ) if key in completed
+        }
+    project.manifest.setdefault("tools", {})["studio_import"] = receipt
+
+
+def fpvs_config_import_message(project: Project) -> str:
+    """Explain the remaining recording/electrode review after project creation."""
+    message = f"Created project '{project.name}' with {len(project.event_map)} condition(s)."
+    receipt = project.manifest.get("tools", {}).get("studio_import", {})
+    if receipt.get("kind") != "completed_session":
+        return message
+    review = receipt.get("completed_session_review", {})
+    participant = review.get("participant_number")
+    visit = review.get("participant_session_number")
+    identity = f"Studio participant {participant}" if participant else "The Studio session"
+    if visit is not None:
+        identity += f", visit {visit}"
+    message += f"\n\n{identity}: confirm the matching EEG recording and participant/session identity."
+    electrodes = review.get("manual_removed_electrodes")
+    if electrodes:
+        message += (
+            f"\nRecorded removed electrodes: {', '.join(electrodes)}. "
+            "Apply these choices in Toolbox after confirming the recording."
+        )
+    elif electrodes == []:
+        message += "\nStudio recorded no removed electrodes; confirm this for the selected recording."
+    return message
 
 
 def _oddball_marker_code_from_config(payload: Mapping[str, Any]) -> int:

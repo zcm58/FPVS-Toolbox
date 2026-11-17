@@ -24,6 +24,18 @@ data; once that run starts, its normal output step replaces the participant
 outputs being recomputed. Windows may still retain its own filesystem cache,
 which this action does not control.
 
+### Importing an FPVS Studio Config
+
+Choose **File > New Project… > Import FPVS Studio Config** to import a setup
+config or a supported completed-session config. Use compatible builds of both
+apps for new-format Studio exports. Toolbox reports unsupported protocol
+features before creating the project.
+
+A completed-session config describes one session. Select the raw EEG folder
+separately and verify the participant and session identities. Toolbox retains
+the exported removed-electrode declarations as source evidence. Confirm the
+matching recording and enter applicable removals in Toolbox before processing.
+
 ### Settings
 
 Settings groups controls into **Processing**, **Protocol**, **Harmonics**,

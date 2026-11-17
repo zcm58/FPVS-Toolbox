@@ -11,6 +11,7 @@ if importlib.util.find_spec("PySide6") is None or importlib.util.find_spec("pyte
 
 from PySide6.QtCore import QSize, Signal, Qt
 from PySide6.QtGui import QAction, QColor, QIcon
+from PySide6.QtTest import QSignalSpy
 from PySide6.QtWidgets import (
     QApplication,
     QLabel,
@@ -480,7 +481,7 @@ def test_workspace_expands_and_restores_only_automatic_resizes(tmp_path: Path, q
     monkeypatch.setattr(win, "_frequency_domain_outputs_ready_for_tool", lambda _name: True)
     win.show_home_page()
     win.resize(930, 550)
-    settings = _menu_action(win, "fileMenu", "actionSettings")
+    settings = _menu_action(win, "fileMenu", "btn_settings")
     home = _menu_action(win, "viewMenu", "btn_home")
     snr = _menu_action(win, "toolsMenu", "btn_graphs")
 
@@ -567,6 +568,50 @@ def test_processing_activity_page_locks_navigation_and_reuses_start_button(
     assert win.processing_action_layout.indexOf(win.btn_start) < 0
     assert win.size() == QSize(960, 520)
     assert win.menuBar().isEnabled()
+
+
+def test_snr_plot_entries_share_action_availability(
+    tmp_path: Path,
+    qtbot,
+    monkeypatch,
+) -> None:
+    opened: list[str] = []
+    monkeypatch.setattr(
+        main_window_module.MainWindow,
+        "open_plot_generator",
+        lambda _window: opened.append("SNR Plots"),
+    )
+    win = _build_window(tmp_path, qtbot, monkeypatch)
+    win.stacked.setCurrentIndex(1)
+    qtbot.wait(20)
+    action = _menu_action(win, "toolsMenu", "btn_graphs")
+    assert action.actionGroup() is win.shell_actions
+    assert any(action is shared for shared in win.shell_actions.default_tools)
+    assert _menu_action(win, "fileMenu", "btn_settings") is win.shell_actions.settings
+
+    triggered = QSignalSpy(action.triggered)
+    action.trigger()
+    assert triggered.count() == len(opened) == 1
+    action.setEnabled(False)
+    action.trigger()
+    assert triggered.count() == len(opened) == 1
+    action.setEnabled(True)
+
+    disabled_action = _menu_action(win, "toolsMenu", "btn_free_harmonic_clustering")
+    disabled_action.setEnabled(False)
+    win._busy_start()
+    assert not action.isEnabled()
+    assert not win.shell_actions.home.isEnabled()
+    assert not _menu_action(win, "viewMenu", "actionExperimentLibrary").isEnabled()
+    action.trigger()
+    assert triggered.count() == len(opened) == 1
+
+    win._busy_stop()
+    assert action.isEnabled()
+    assert win.shell_actions.home.isEnabled()
+    assert not disabled_action.isEnabled()
+    action.trigger()
+    assert triggered.count() == len(opened) == 2
 
 
 def test_reset_project_processing_cache_action_requires_confirmation_and_is_scoped(
@@ -838,7 +883,7 @@ def test_workspace_settings_embeds_in_main_workspace(
     win.resize(900, 520)
     qtbot.wait(20)
 
-    _menu_action(win, "fileMenu", "actionSettings").trigger()
+    _menu_action(win, "fileMenu", "btn_settings").trigger()
     qtbot.wait(20)
 
     assert isinstance(win.workspace_stack.currentWidget(), EmbeddedSettingsPage)
