@@ -20,7 +20,6 @@ from PySide6.QtWidgets import (
 )
 
 from Main_App.gui.components import (
-    SectionCard,
     StatusBanner,
     SubsectionHeaderLabel,
     apply_font_role,
@@ -62,57 +61,6 @@ class _RequiredIntegerSpinBox(QSpinBox):
         if value == self.minimum():
             return ""
         return super().textFromValue(value)
-
-
-class _ResultSummary(QWidget):
-    """Compact, theme-driven presentation for the primary sensitivity result."""
-
-    def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self.setAttribute(Qt.WA_StyledBackground, True)
-        self.setProperty("statusVariant", "info")
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 14, 16, 14)
-        layout.setSpacing(2)
-
-        self.metric_label = QLabel("NOT YET CALCULATED", self)
-        self.metric_label.setProperty("eyebrow", True)
-        layout.addWidget(self.metric_label)
-
-        self.value_label = QLabel("—", self)
-        self.value_label.setProperty("resultValue", True)
-        apply_font_role(self.value_label, "result_value")
-        layout.addWidget(self.value_label)
-
-        self.context_label = QLabel(self)
-        self.context_label.setWordWrap(True)
-        layout.addWidget(self.context_label)
-        self.set_placeholder("Calculate")
-
-    def text(self) -> str:
-        return self._text
-
-    def set_placeholder(self, action: str) -> None:
-        self._text = f"Set the assumptions and select {action}."
-        self.metric_label.setText("NOT YET CALCULATED")
-        self.value_label.setText("—")
-        self.context_label.setText(self._text)
-        self.set_variant("info")
-
-    def set_result(self, metric: str, value: float) -> None:
-        formatted_value = f"{value:.2f}"
-        self._text = f"{metric} = {formatted_value}"
-        self.metric_label.setText(metric.upper())
-        self.value_label.setText(formatted_value)
-        self.context_label.setText("Minimum detectable standardized effect")
-        self.set_variant("info")
-
-    def set_variant(self, variant: str) -> None:
-        self.setProperty("statusVariant", variant)
-        self.style().unpolish(self)
-        self.style().polish(self)
-        self.update()
 
 
 class _CurrentPageStack(QStackedWidget):
@@ -179,43 +127,51 @@ class SensitivityAnalysisWindow(QWidget):
         sections = QGridLayout()
         sections.setContentsMargins(0, 0, 0, 0)
         sections.setHorizontalSpacing(16)
-        sections.setVerticalSpacing(16)
+        sections.setVerticalSpacing(8)
         sections.setColumnStretch(0, 1)
         sections.setColumnStretch(1, 1)
         page_layout.addLayout(sections, 1)
 
-        inputs_card = SectionCard(
-            "Study assumptions",
-            self,
-            object_name="sensitivity_inputs_card",
+        assumptions_header = make_action_row(parent=self, alignment=Qt.AlignLeft)
+        assumptions_header.row_layout.addWidget(
+            SubsectionHeaderLabel("Study assumptions", assumptions_header)
         )
-        inputs_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self.tool_info_button = make_info_button(
-            parent=inputs_card,
+            parent=assumptions_header,
             tooltip="About Sensitivity Analysis",
             object_name="sensitivity_analysis_tool_info_btn",
         )
         self.tool_info_button.clicked.connect(
             lambda: show_tool_info(self, SENSITIVITY_ANALYSIS_TOOL_INFO)
         )
-        inputs_card.header.add_action_widget(self.tool_info_button)
-        sections.addWidget(inputs_card, 0, 0)
-        self._build_inputs(inputs_card)
+        assumptions_header.add_button(self.tool_info_button)
+        sections.addWidget(assumptions_header, 0, 0)
+        sections.addWidget(SubsectionHeaderLabel("Sensitivity result", self), 0, 1)
 
-        results_card = SectionCard(
-            "Sensitivity result",
-            self,
-            object_name="sensitivity_results_card",
-        )
-        results_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        sections.addWidget(results_card, 0, 1)
-        self._build_results(results_card)
+        inputs = QWidget(self)
+        inputs.setObjectName("sensitivity_inputs")
+        inputs_layout = QVBoxLayout(inputs)
+        inputs_layout.setContentsMargins(0, 0, 0, 0)
+        inputs_layout.setSpacing(10)
+        sections.addWidget(inputs, 1, 0)
+        self._build_inputs(inputs, inputs_layout)
+        inputs_layout.addStretch(1)
 
-    def _build_inputs(self, card: SectionCard) -> None:
+        results = QWidget(self)
+        results.setObjectName("sensitivity_results")
+        results_layout = QVBoxLayout(results)
+        results_layout.setContentsMargins(0, 0, 0, 0)
+        results_layout.setSpacing(10)
+        sections.addWidget(results, 1, 1)
+        self._build_results(results, results_layout)
+        results_layout.addStretch(1)
+        sections.setRowStretch(1, 1)
+
+    def _build_inputs(self, panel: QWidget, layout: QVBoxLayout) -> None:
         common_form = make_form_layout()
-        card.content_layout.addLayout(common_form)
+        layout.addLayout(common_form)
 
-        self.analysis_combo = QComboBox(card.content)
+        self.analysis_combo = QComboBox(panel)
         self.analysis_combo.setObjectName("sensitivity_analysis_type")
         self.analysis_combo.addItems(
             [
@@ -231,7 +187,7 @@ class SensitivityAnalysisWindow(QWidget):
         self._expand_input(self.analysis_combo)
         common_form.addRow("Analysis:", self.analysis_combo)
 
-        self.sample_size_spin = QSpinBox(card.content)
+        self.sample_size_spin = QSpinBox(panel)
         self.sample_size_spin.setObjectName("sensitivity_sample_size")
         self.sample_size_spin.setRange(3, 100_000)
         self.sample_size_spin.setToolTip(
@@ -239,11 +195,11 @@ class SensitivityAnalysisWindow(QWidget):
             "required by the selected analysis, after exclusions."
         )
         self._expand_input(self.sample_size_spin)
-        self.sample_size_label = QLabel("Analyzable participants (N):", card.content)
+        self.sample_size_label = QLabel("Analyzable participants (N):", panel)
         self.sample_size_label.setBuddy(self.sample_size_spin)
         common_form.addRow(self.sample_size_label, self.sample_size_spin)
 
-        self.power_spin = QDoubleSpinBox(card.content)
+        self.power_spin = QDoubleSpinBox(panel)
         self.power_spin.setObjectName("sensitivity_power")
         self.power_spin.setDecimals(2)
         self.power_spin.setSingleStep(0.05)
@@ -252,7 +208,7 @@ class SensitivityAnalysisWindow(QWidget):
         self._expand_input(self.power_spin)
         common_form.addRow("Desired power:", self.power_spin)
 
-        self.alpha_spin = QDoubleSpinBox(card.content)
+        self.alpha_spin = QDoubleSpinBox(panel)
         self.alpha_spin.setObjectName("sensitivity_alpha")
         self.alpha_spin.setDecimals(3)
         self.alpha_spin.setSingleStep(0.01)
@@ -261,10 +217,10 @@ class SensitivityAnalysisWindow(QWidget):
         self._expand_input(self.alpha_spin)
         common_form.addRow("Alpha:", self.alpha_spin)
 
-        self.design_stack = _CurrentPageStack(card.content)
+        self.design_stack = _CurrentPageStack(panel)
         self.design_stack.setObjectName("sensitivity_design_stack")
         self.design_stack.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        card.content_layout.addWidget(self.design_stack)
+        layout.addWidget(self.design_stack)
 
         paired_panel = QWidget(self.design_stack)
         paired_form = make_form_layout()
@@ -470,104 +426,95 @@ class SensitivityAnalysisWindow(QWidget):
         lmm_layout.addWidget(lmm_scope)
         self.design_stack.addWidget(lmm_panel)
 
-        self.assumption_guidance = StatusBanner("", card.content, variant="info")
+        self.assumption_guidance = StatusBanner("", panel, variant="info")
         self.assumption_guidance.setObjectName("sensitivity_assumption_guidance")
         self.assumption_guidance.hide()
-        card.content_layout.addWidget(self.assumption_guidance)
+        layout.addWidget(self.assumption_guidance)
 
-        self.validation_banner = StatusBanner("", card.content, variant="error")
+        self.validation_banner = StatusBanner("", panel, variant="error")
         self.validation_banner.setObjectName("sensitivity_validation")
         self.validation_banner.hide()
-        card.content_layout.addWidget(self.validation_banner)
-        card.content_layout.addStretch(1)
+        layout.addWidget(self.validation_banner)
 
         self.calculate_button = make_action_button(
-            "Calculate", variant="primary", parent=card.content
+            "Calculate", variant="primary", parent=panel
         )
         self.calculate_button.setObjectName("sensitivity_calculate")
         self.reset_button = make_action_button(
-            "Reset Defaults", variant="secondary", parent=card.content
+            "Reset Defaults", variant="secondary", parent=panel
         )
         self.reset_button.setObjectName("sensitivity_reset")
         self.cancel_button = make_action_button(
-            "Cancel", variant="secondary", parent=card.content
+            "Cancel", variant="secondary", parent=panel
         )
         self.cancel_button.setObjectName("sensitivity_cancel")
         self.cancel_button.hide()
         actions = make_action_row(
             [self.reset_button, self.cancel_button, self.calculate_button],
-            parent=card.content,
+            parent=panel,
         )
-        card.content_layout.addWidget(actions)
+        layout.addWidget(actions)
 
     @staticmethod
     def _expand_input(widget: QWidget) -> None:
         widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
-    def _build_results(self, card: SectionCard) -> None:
-        self.simulation_status = StatusBanner("", card.content, variant="info")
+    def _build_results(self, panel: QWidget, layout: QVBoxLayout) -> None:
+        self.simulation_status = StatusBanner("", panel, variant="info")
         self.simulation_status.setObjectName("sensitivity_simulation_status")
         self.simulation_status.hide()
-        card.content_layout.addWidget(self.simulation_status)
+        layout.addWidget(self.simulation_status)
 
-        self.result_banner = _ResultSummary(card.content)
+        self.result_banner = QLabel(panel)
         self.result_banner.setObjectName("sensitivity_result")
-        card.content_layout.addWidget(self.result_banner)
+        self.result_banner.setWordWrap(True)
+        layout.addWidget(self.result_banner)
 
-        self.magnitude_label = QLabel("Conventional magnitude: —", card.content)
+        self.result_details = QWidget(panel)
+        details_layout = QVBoxLayout(self.result_details)
+        details_layout.setContentsMargins(0, 0, 0, 0)
+        details_layout.setSpacing(8)
+
+        self.magnitude_label = QLabel(self.result_details)
         self.magnitude_label.setObjectName("sensitivity_magnitude")
-        apply_font_role(self.magnitude_label, "update_title")
         self.magnitude_label.setWordWrap(True)
-        card.content_layout.addWidget(self.magnitude_label)
+        details_layout.addWidget(self.magnitude_label)
 
-        self.equivalent_label = QLabel("", card.content)
+        self.equivalent_label = QLabel(self.result_details)
         self.equivalent_label.setObjectName("sensitivity_equivalent")
         self.equivalent_label.setWordWrap(True)
         self.equivalent_label.hide()
-        card.content_layout.addWidget(self.equivalent_label)
+        details_layout.addWidget(self.equivalent_label)
 
-        self.plain_language_label = QLabel(
-            "An interpretation will appear after calculation.",
-            card.content,
-        )
+        self.plain_language_label = QLabel(self.result_details)
         self.plain_language_label.setObjectName("sensitivity_plain_language_result")
         self.plain_language_label.setWordWrap(True)
-        card.content_layout.addWidget(self.plain_language_label)
+        details_layout.addWidget(self.plain_language_label)
 
-        assumptions_heading = SubsectionHeaderLabel("Assumptions used", card.content)
-        card.content_layout.addWidget(assumptions_heading)
-
-        self.assumption_summary_label = QLabel(
-            "Current assumptions will appear after calculation.",
-            card.content,
-        )
+        details_layout.addWidget(SubsectionHeaderLabel("Assumptions used", self.result_details))
+        self.assumption_summary_label = QLabel(self.result_details)
         self.assumption_summary_label.setObjectName("sensitivity_assumption_summary")
         self.assumption_summary_label.setProperty("caption", True)
         self.assumption_summary_label.setWordWrap(True)
-        card.content_layout.addWidget(self.assumption_summary_label)
+        details_layout.addWidget(self.assumption_summary_label)
 
-        reporting_heading = SubsectionHeaderLabel("Reporting summary", card.content)
-        card.content_layout.addWidget(reporting_heading)
-
-        self.reporting_label = QLabel(
-            "A reporting-ready summary will appear after calculation.",
-            card.content,
-        )
+        details_layout.addWidget(SubsectionHeaderLabel("Reporting summary", self.result_details))
+        self.reporting_label = QLabel(self.result_details)
         self.reporting_label.setObjectName("sensitivity_reporting_text")
         self.reporting_label.setWordWrap(True)
         self.reporting_label.setTextInteractionFlags(
             Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard
         )
-        card.content_layout.addWidget(self.reporting_label)
+        details_layout.addWidget(self.reporting_label)
 
-        benchmark_heading = SubsectionHeaderLabel("Interpretation guide", card.content)
-        card.content_layout.addWidget(benchmark_heading)
-
-        self.benchmark_label = QLabel("", card.content)
+        details_layout.addWidget(SubsectionHeaderLabel("Interpretation guide", self.result_details))
+        self.benchmark_label = QLabel(self.result_details)
         self.benchmark_label.setObjectName("sensitivity_benchmarks")
         self.benchmark_label.setWordWrap(True)
-        card.content_layout.addWidget(self.benchmark_label)
-        card.content_layout.addStretch(1)
+        details_layout.addWidget(self.benchmark_label)
+
+        self.result_details.hide()
+        layout.addWidget(self.result_details)
 
     def _connect_signals(self) -> None:
         self.analysis_combo.currentIndexChanged.connect(self._set_analysis_type)
@@ -788,24 +735,17 @@ class SensitivityAnalysisWindow(QWidget):
 
     def _clear_result(self) -> None:
         self.validation_banner.hide()
-        self.result_banner.set_placeholder(self.calculate_button.text())
-        if self.analysis_combo.currentIndex() == self.LMM_SIMULATION:
-            self.magnitude_label.setText(
-                "Effect scale: standardized contrast in residual-SD units"
-            )
-        else:
-            self.magnitude_label.setText("Conventional magnitude: —")
+        self.result_banner.setText(
+            f"Set the assumptions and select {self.calculate_button.text()}."
+        )
+        apply_font_role(self.result_banner, "body")
+        self.result_details.hide()
+        self.magnitude_label.clear()
         self.equivalent_label.clear()
         self.equivalent_label.hide()
-        self.reporting_label.setText(
-            "A reporting-ready summary will appear after calculation."
-        )
-        self.plain_language_label.setText(
-            "An interpretation will appear after calculation."
-        )
-        self.assumption_summary_label.setText(
-            "Current assumptions will appear after calculation."
-        )
+        self.reporting_label.clear()
+        self.plain_language_label.clear()
+        self.assumption_summary_label.clear()
         if self._lmm_thread is None:
             self.simulation_status.hide()
 
@@ -987,7 +927,7 @@ class SensitivityAnalysisWindow(QWidget):
             "interaction": "condition × ROI difference-in-differences",
         }
         target_label = target_labels[result.target]
-        self.result_banner.set_result("Standardized contrast", result.effect_size)
+        self._show_result_metric("Standardized contrast", result.effect_size)
         self.magnitude_label.setText(
             f"Simulated effect: {target_label} in residual-SD units"
         )
@@ -1031,8 +971,13 @@ class SensitivityAnalysisWindow(QWidget):
             f"{result.workers_used} worker process(es)."
         )
 
+    def _show_result_metric(self, name: str, value: float) -> None:
+        self.result_banner.setText(f"{name} = {value:.2f}")
+        apply_font_role(self.result_banner, "update_title")
+        self.result_details.show()
+
     def _show_result(self, result: SensitivityResult) -> None:
-        self.result_banner.set_result(result.effect_metric, result.effect_size)
+        self._show_result_metric(result.effect_metric, result.effect_size)
         self.magnitude_label.setText(
             f"Conventional magnitude: {result.magnitude}"
         )

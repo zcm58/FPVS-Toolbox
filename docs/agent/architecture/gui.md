@@ -76,14 +76,15 @@ Primary paths:
 - `run_outcome_model.py` summarizes actual recording results; `run_outcome.py`
   presents the session-local last outcome and existing output/report/log actions.
   Completion retains the selected single BDF, while a missing file disables Start.
-- `processing_history_label.py` shows the saved run in Home's Analysis column.
+- `processing_history_label.py` shows the saved run below the Home processing form.
   A `workers.processing_history_worker` reads the opened project's bounded
   history off the UI thread; queued results are guarded by project root and request
   identity. Project opening/returning Home and processing completion refresh it.
   `processing_history_model.py` formats the local completion time and distinct
   successful participant count; absent, unavailable and incomplete history remain
   explicit. This is processing recency, not downstream analysis readiness. At
-  1280x900 verify long timestamps/counts wrap without hiding Start Processing.
+  the 900 × 520 minimum verify long timestamps and counts wrap without hiding
+  Start Processing.
 - `src/Main_App/gui/processing_workflows.py`: processing run start/stop,
   queue polling, worker completion/error, and finalization GUI orchestration
   used by `MainWindow` compatibility wrappers.
@@ -352,9 +353,10 @@ setting controls new repair requests; turning it off keeps previously accepted
 signal repairs.
 Each section has its own vertical space within the
 supported workspace, including when raw-spectral details are expanded.
-Settings places its category list in a dedicated column beside the page
-content and shared actions. A shared header surface connects the Settings and
-category headings. `settings_navigation.py` moves a
+Settings places its category list beside the selected form and keeps the
+headings and shared actions in view. The category content scrolls as needed.
+The ROI map has its own viewport so electrode targets keep their full size.
+`settings_navigation.py` moves a
 teal marker between categories over 150 ms using Studio's easing. The category
 and page update immediately. Programmatic navigation, hidden Settings pages,
 and a disabled animation preference snap the marker into place. The Processing
@@ -365,8 +367,10 @@ Nested Protocol and Experimental tabs stay unframed around their section cards.
 One shared Save/Cancel row applies the full Settings draft from every category.
 Invalid summed-BCA input reveals its sub-tab before focusing the affected field.
 
-Visible smoke: at 1280 × 900 and Windows 125% and 150% scaling, open Settings
-from the shell and from a tool shortcut in Light and Dark. Click a category
+Visible smoke: at 900 × 520 and Windows 125% and 150% scaling, open Settings
+from Home and from a tool shortcut in Light and Dark. Check that Home and
+Settings use the same window size and that the Settings footer stays visible.
+Click a category
 and use the arrow keys to switch quickly. Check that the title updates at once
 and the marker settles on the final selection. Repeat with Windows Animation
 effects turned off. Make an invalid edit and verify Save selects and focuses its
@@ -626,12 +630,12 @@ enabling `tools.enable_beta_tools` in Settings and restarting.
 `MainWindow._open_beta_tool` shows the beta notice once per registered tool
 per app session. `shell_status.py` locks the menu during processing,
 processing-cache reset, and Scalp Maps generation, then restores its prior
-enabled state. The Home shortcut follows the same lock.
+enabled state. The View > Home shortcut follows the same lock.
 
-Welcome and Home default to 960 × 520 with a 900 × 520 minimum. The other
-workspace pages use the existing 1280 × 900 minimum. The window follows the
-current stack page and restores a compact size after automatic expansion
-when the expanded window is still at the automatic size. An explicit larger
+Welcome and Home default to 960 × 520 with a 900 × 520 minimum. Settings
+shares the compact minimum. SNR Plots uses a 960 × 600 workspace. Other tools
+and the processing activity page use 1280 × 900. The window restores its prior
+size after expansion when it is still at the automatic size. An explicit larger
 size or maximized window persists. The stack size policies prevent hidden
 pages from increasing the compact minimum.
 
@@ -641,17 +645,13 @@ File trigger the same three project actions. Import still confirms hardware
 and requests a recordings folder through the supported configuration import
 workflow. Successful import goes directly to Home.
 
-Home groups recording selection, run readiness, Start Processing, and View
-Log in the processing column. Analysis shows persisted processing history,
-the current session's run outcome when available, and shortcuts to SNR
-Plots, Scalp Maps, and LORETA Visualizer. The shortcuts trigger their Tools
-menu actions, so the menu lock, beta policy, and project and output checks
-apply. History describes a completed run. Each tool checks whether its
-current inputs can be used.
+Home uses a single form for recording selection, condition count, run readiness,
+Start Processing, and View Log. Run history below the form shows the last
+completed run and the current session's outcome when available. Open analysis
+from **Tools**, where each tool checks its project and inputs.
 
-The Conditions strip sits under the processing controls and shows the
-configured count. **Edit conditions** reveals the same live rows and source
-controls at full width, with Analysis out of view while editing. The list scrolls inside the editor.
+**Edit conditions** reveals the live rows and source controls in Home.
+The list scrolls inside the editor.
 Closing it keeps the draft. Project load collapses the editor, and invalid
 Save opens it and focuses the first invalid field. Source-mapped projects
 show **View conditions** with their canonical catalog.
@@ -661,11 +661,11 @@ a sanitized Studio config from Welcome, confirm hardware and select the
 recordings folder, then check the project opens directly on Home. Verify
 manual setup and reopening are also reachable from Welcome. On Home,
 check keyboard navigation, long condition lists, invalid Save from
-Settings, and last-run controls alongside the analysis shortcuts. Confirm
-Scalp Maps and LORETA appear after enabling Beta Tools and restarting.
-Check that the shortcuts use the same notices and output checks as Tools.
-Open Settings or an analysis tool, then verify return via View > Home or
-Ctrl+1 restores automatic expansion and respects a manual resize.
+Settings, and last-run controls. Confirm Scalp Maps and LORETA appear under
+**Tools > Beta Tools** after enabling Beta Tools and restarting. Open Settings
+and confirm the window keeps its size. Open a tool, then verify that returning
+to Settings or Home restores the size from before automatic expansion and
+respects a manual resize.
 
 When the active project changes through create/open/import/path workflows, the
 main shell must return to Home and discard project-bound embedded page instances.
@@ -690,23 +690,21 @@ Rename the second condition to `2 - Objects`, confirm validation clears, and
 verify the usual `Faces` and `Objects` output names in a disposable run.
 Local Qt execution remains CI-only without explicit safe-visible approval.
 
-Embedded tools use a `1280x900` main-window minimum without individual
-pop-out windows.
+Embedded tools share the main window. SNR Plots uses a 960 × 600 minimum and
+the other tools use 1280 × 900.
 
 ## Visual Layout Rules
 
-Use cards as first-level subsection boundaries, not as wrappers around other
-cards. A `SectionCard` should usually represent one coherent subsection such as
-File I/O, Plot Parameters, Advanced settings, Log Output, Included Conditions,
-or Review. Do not place `SectionCard` widgets inside another visible card,
+Default to flat forms for setup and preferences. Use section headings and
+spacing to group a short set of controls. A `SectionCard` can frame a coherent
+review or data surface. Do not place `SectionCard` widgets inside another visible card,
 card-styled tab pane, bordered setup container, or other framed parent unless
 the user explicitly requests that nested-card look.
 
 When a screen needs tabs, splitters, or setup pages that contain subsection
 cards, keep the parent page visually flat: no pane border, filled background,
-or rounded outer frame around the child cards. The SNR Plot tool is the current
-reference pattern for embedded tool layout: dedicated subsection cards sit
-directly on the workspace background with normal spacing between them.
+or rounded outer frame around the child cards. SNR Plots uses flat forms for
+plot selection, legend labels, and axis and QC options.
 
 New or substantially revised embedded tool pages must fit the supported
 1280x900 workspace without a page-level `QScrollArea`. If one coherent surface
@@ -986,12 +984,12 @@ rate and marker to check page selection. CI covers fixed logical workspaces
 and runs the Protocol geometry regression again with `QT_SCALE_FACTOR` values
 1.25, 1.5 and 2; this does not replace native Windows display verification.
 
-For Settings changes, open a project at 1280x900 and visit all seven main tabs,
+For Settings changes, open a project at 900 × 520 and visit all seven categories,
 all four Experimental sections, the three Preprocessing QC pages and both
 Post-processing QC pages. Confirm
 every information button opens a brief readable explanation and every label and threshold field is
 readable without clipping, including all eight read-only Raw-Spectral Advanced rows,
-and the bottom action row remains visible. Repeat with the supported display
+by scrolling the category, and the bottom action row remains visible. Repeat with the supported display
 scaling settings on Windows and Linux. Confirm automatic detection has only
 Off and On choices, manual lists can be edited and enabled independently,
 and all five summed-BCA thresholds survive switching sub-tabs, Save, and
@@ -1006,7 +1004,7 @@ choice pending. Change values across several tabs, Save from a different tab,
 and reopen to confirm every edit persists; repeat with Cancel and confirm no
 draft is saved. Check Application contains Screening alpha, debug logging, and
 the project folder and cache actions. Verify Quality Control opens Dataset
-Exclusions and shows read-only thresholds. Toggle the >10
+Exclusions. Check summed-BCA thresholds under Experimental. Toggle the >10
 review default under Experimental > Preprocessing QC > Signals, Save/reopen, and start a new
 kurtosis review: confirm its initial checkbox follows the saved default, can
 still be overridden for the current review, and saves decisions only after

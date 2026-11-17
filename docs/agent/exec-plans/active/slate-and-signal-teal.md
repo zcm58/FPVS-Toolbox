@@ -77,13 +77,10 @@ contracts, project formats, and exported figures and tables.
 The [product spec](../../product-specs/fpvs-toolbox.md) prioritizes importing
 a Studio configuration, processing recordings, and opening tools from the
 results. Welcome exposes direct import, reopening, and manual creation.
-Home uses a 960 × 520 starting window. The left column groups input, run
-controls, and the condition count. The right column groups run history
-and analysis shortcuts that share the Tools menu actions. Editing conditions
-uses the full workspace width. Visible Windows checks passed 90 cases
-including Studio import, project switching, analysis action routing, and the
-full-width condition editor. Synthetic captures confirmed the default and
-900 × 520 minimum layouts.
+Home uses a 960 × 520 starting window and a 900 × 520 minimum. The form groups
+recording input, condition count, processing actions, and the last-run status.
+The condition editor opens inline. The Tools menu provides analysis entry
+points and applies each tool's output checks and beta policy.
 
 ## Compact Home follow-up
 
@@ -95,11 +92,13 @@ Opening the editor reveals the same draft rows and source controls. The
 condition list sizes to its contents and scrolls within the editor when
 space runs out.
 
-Home defaults to 960 × 660 and supports a 900 × 620 minimum. Settings,
-analysis tools, and the processing activity page keep their 1280 × 900
-minimum. The native title shows the current project.
+Settings shares Home's compact window size. The forms scroll within their
+categories when needed, while the navigation, current heading and Save/Cancel
+stay in view. The ROI map keeps 36 px targets in its own viewport. The native
+title shows the current project. SNR Plots uses a 960 × 600 minimum; larger tools
+and processing activity use 1280 × 900.
 
-Windows source verification on 2026-11-16 passed 150 visible Qt cases across
+Earlier Windows source verification on 2026-11-16 passed 150 visible Qt cases across
 the shell, condition editor, project switching, Settings, and the Scalp Maps
 navigation lock. The 900 × 620, 960 × 660, and 1280 × 900 captures confirmed
 that the run buttons stay visible and the conditions list uses the space

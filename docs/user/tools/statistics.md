@@ -446,6 +446,9 @@ reducing the analysis to significant/nonsignificant labels.
 
 ## Reading At a Glance
 
+The results pane opens when analysis starts. Select **Results and log** to
+show or hide the summary and run log.
+
 At a Glance answers the screening questions in this order:
 
 1. positive oddball-response evidence;

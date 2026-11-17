@@ -36,13 +36,13 @@ def test_defaults_and_paired_result_are_visible(qtbot) -> None:
     assert page.power_spin.value() == pytest.approx(0.80)
     assert page.alpha_spin.value() == pytest.approx(0.05)
     assert page.design_stack.currentIndex() == page.PAIRED_TEST
+    assert page.result_banner.text() == "Set the assumptions and select Calculate."
+    assert not page.result_details.isVisibleTo(page)
 
     qtbot.mouseClick(page.calculate_button, Qt.LeftButton)
 
     assert page.result_banner.text() == "Cohen's dz = 0.60"
-    assert page.result_banner.metric_label.text() == "COHEN'S DZ"
-    assert page.result_banner.value_label.text() == "0.60"
-    assert page.result_banner.property("statusVariant") == "info"
+    assert page.result_details.isVisibleTo(page)
     assert page.magnitude_label.text() == "Conventional magnitude: Medium"
     assert "this model reaches 80% power" in page.plain_language_label.text()
     assert "repeating the same study many times" in page.plain_language_label.text()
@@ -52,11 +52,14 @@ def test_defaults_and_paired_result_are_visible(qtbot) -> None:
     assert "two-sided paired/one-sample t-test" in page.assumption_summary_label.text()
     assert page.reporting_label.isVisibleTo(page)
     assert not page.equivalent_label.isVisibleTo(page)
+    for label in (page.plain_language_label, page.reporting_label):
+        qtbot.waitUntil(lambda label=label: label.height() >= label.heightForWidth(label.width()))
 
     page.sample_size_spin.setValue(30)
 
     assert page.result_banner.text() == "Set the assumptions and select Calculate."
-    assert "will appear after calculation" in page.plain_language_label.text()
+    assert not page.result_details.isVisibleTo(page)
+    assert page.reporting_label.text() == ""
 
 
 def test_rm_anova_result_and_reset(qtbot) -> None:
@@ -71,8 +74,6 @@ def test_rm_anova_result_and_reset(qtbot) -> None:
 
     assert page.design_stack.currentIndex() == page.RM_ANOVA
     assert page.result_banner.text() == "Cohen's f = 0.30"
-    assert page.result_banner.metric_label.text() == "COHEN'S F"
-    assert page.result_banner.value_label.text() == "0.30"
     assert page.magnitude_label.text() == "Conventional magnitude: Medium"
     assert page.equivalent_label.text() == "Equivalent eta-squared: 0.082"
     assert page.equivalent_label.isVisibleTo(page)
@@ -197,7 +198,8 @@ def test_calculation_error_clears_previous_result(qtbot) -> None:
     assert page.validation_banner.isVisibleTo(page)
     assert "at least 2" in page.validation_banner.text()
     assert page.result_banner.text() == "Set the assumptions and select Calculate."
-    assert "will appear after calculation" in page.reporting_label.text()
+    assert not page.result_details.isVisibleTo(page)
+    assert page.reporting_label.text() == ""
 
 
 def test_info_dialog_explains_repeated_measurement_derivation(qtbot) -> None:
@@ -256,7 +258,7 @@ def test_lmm_mode_exposes_supported_model_and_validation(qtbot) -> None:
     assert page.lmm_tabs.tabText(0) == "Design"
     assert page.lmm_tabs.tabText(1) == "Advanced"
     assert page.lmm_tabs.currentIndex() == 0
-    assert page.result_banner.context_label.text() == "Set the assumptions and select Run Simulation."
+    assert page.result_banner.text() == "Set the assumptions and select Run Simulation."
     assert page.lmm_design_panel.minimumHeight() == page.lmm_advanced_panel.minimumHeight()
     assert page.lmm_design_panel.minimumHeight() > 0
     assert page.lmm_design_panel.isAncestorOf(page.lmm_sample_size_spin)
@@ -331,7 +333,7 @@ def test_lmm_result_reports_simulation_uncertainty_without_cohen_labels(qtbot) -
     page._show_lmm_result(result)
 
     assert page.result_banner.text() == "Standardized contrast = 0.72"
-    assert page.result_banner.property("statusVariant") == "info"
+    assert page.result_details.isVisibleTo(page)
     assert "residual-SD units" in page.magnitude_label.text()
     assert "80.5%" in page.equivalent_label.text()
     assert "Monte Carlo interval" in page.equivalent_label.text()
@@ -417,16 +419,18 @@ def test_embedded_surface_fits_workspace_without_page_scrolling(qtbot, analysis_
     page.resize(1220, 780)
     page.analysis_combo.setCurrentIndex(analysis_type)
     qtbot.wait(30)
-    inputs = page.findChild(SectionCard, "sensitivity_inputs_card")
-    results = page.findChild(SectionCard, "sensitivity_results_card")
+    inputs = page.findChild(QWidget, "sensitivity_inputs")
+    results = page.findChild(QWidget, "sensitivity_results")
 
     assert page.width() == 1220
     assert page.height() == 780
     assert page.findChildren(QScrollArea) == []
-    for card in (inputs, results):
-        assert card is not None and card.width() >= 350
-        assert page.rect().contains(card.geometry())
-        assert card.minimumSizeHint().height() <= card.height()
+    assert page.findChildren(SectionCard) == []
+    for section in (inputs, results):
+        assert section is not None and section.width() >= 350
+        assert page.rect().contains(section.geometry())
+        assert section.minimumSizeHint().height() <= section.height()
+    assert not page.result_details.isVisibleTo(page)
     for button in (page.calculate_button, page.reset_button):
         assert button.isVisibleTo(page)
         assert page.rect().contains(button.mapTo(page, button.rect().bottomRight()))

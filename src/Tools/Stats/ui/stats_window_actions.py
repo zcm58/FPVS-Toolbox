@@ -57,20 +57,9 @@ class StatsWindowActionsMixin:
                 if repeated
                 else "Screening Results"
             )
-        if hasattr(self, "analysis_design_note"):
-            self.analysis_design_note.setText(
-                (
-                    "The paired workflow keeps one stable group per participant and "
-                    "one canonical recording per session. It uses complete observed "
-                    "pairs per declared outcome, with no imputation or fallback test."
-                )
-                if repeated
-                else (
-                    "Standard screening uses each finite selected observation without "
-                    "imputation. Balanced data also receive a secondary ANOVA "
-                    "compatibility check."
-                )
-            )
+        if hasattr(self, "analysis_design_form"):
+            self.analysis_design_form.setRowVisible(self.analysis_profile_value, repeated)
+            self.analysis_design_note.setVisible(repeated)
         self._sync_analysis_mode_ui()
         self._refresh_analysis_design_summary()
 

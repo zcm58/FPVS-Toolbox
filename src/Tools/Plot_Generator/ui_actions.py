@@ -37,7 +37,7 @@ def build_generation_action_row(owner, root_layout) -> None:
 
     owner.load_defaults_btn = make_action_button("Restore Plot Defaults")
     owner.load_defaults_btn.setObjectName("snr_restore_plot_defaults")
-    owner.load_defaults_btn.setToolTip("Restore the saved plot settings")
+    owner.load_defaults_btn.setToolTip("Reset folder selections and axis settings to their initial values")
     owner.load_defaults_btn.clicked.connect(owner._load_defaults)
     owner.open_output_btn = make_action_button("Open Plot Folder")
     owner.open_output_btn.setObjectName("snr_open_plot_folder")

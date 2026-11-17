@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QWidget,
 )
 
@@ -380,8 +381,11 @@ def test_settings_tabs_and_actions_fit_supported_workspace(panel, qtbot, tab):
         while ancestor is not None and ancestor is not panel:
             ancestors.append(ancestor)
             ancestor = ancestor.parentWidget()
-        # Lists and chip viewers intentionally scroll their own content.
-        if any(isinstance(parent, QAbstractScrollArea) for parent in ancestors):
+        # Qt's list and table internals do not need form-control bounds checks.
+        if any(
+            isinstance(parent, QAbstractScrollArea) and not isinstance(parent, QScrollArea)
+            for parent in ancestors
+        ):
             continue
         name = widget.objectName() or type(widget).__name__
         icon_only = (
@@ -408,8 +412,42 @@ def test_settings_tabs_and_actions_fit_supported_workspace(panel, qtbot, tab):
             )
             assert widget.width() >= minimum_width, name
         for ancestor in [*ancestors, panel]:
+            scroll = ancestor.parentWidget()
+            if isinstance(scroll, QScrollArea) and ancestor is scroll.viewport() and (
+                scroll.verticalScrollBar().maximum() or scroll.horizontalScrollBar().maximum()
+            ):
+                break
             bounds = QRect(widget.mapTo(ancestor, QPoint(0, 0)), widget.size())
             assert ancestor.rect().contains(bounds), (name, ancestor.objectName())
+
+
+def test_compact_settings_keep_navigation_and_actions_above_overflow(panel, qtbot):
+    panel.resize(900, 460)
+    qtbot.waitUntil(lambda: panel.size().toTuple() == (900, 460))
+    save = panel.findChild(QPushButton, "settings_footer_save")
+    cancel = panel.findChild(QPushButton, "settings_footer_cancel")
+    for index in range(panel.tabs.count()):
+        panel.tabs.setCurrentIndex(index)
+        QApplication.processEvents()
+        scroll = panel.tabs.currentWidget().findChild(QScrollArea, "settings_category_scroll")
+        assert scroll.isVisibleTo(panel)
+        assert scroll.horizontalScrollBar().maximum() == 0
+        assert not scroll.isAncestorOf(panel.settings_navigation)
+        assert not scroll.isAncestorOf(panel.settings_page_title)
+        for button in (save, cancel):
+            assert button.isVisibleTo(panel) and not scroll.isAncestorOf(button)
+            assert panel.rect().contains(QRect(button.mapTo(panel, QPoint()), button.size()))
+
+    panel.tabs.setCurrentIndex(panel._roi_tab_index)
+    map_scroll = panel.roi_editor.map_scroll
+    qtbot.waitUntil(lambda: map_scroll.verticalScrollBar().maximum() > 0)
+    electrode = panel.roi_editor.map_widget.electrode_buttons["Oz"]
+    electrode.setFocus()
+    qtbot.waitUntil(electrode.hasFocus)
+    viewport = map_scroll.viewport()
+    assert viewport.rect().contains(QRect(electrode.mapTo(viewport, QPoint()), electrode.size()))
+    assert electrode.width() >= 36 and electrode.height() >= 36
+    _capture(panel, "settings-compact-roi")
 
 
 def test_preprocessing_keyboard_focus_can_leave_invalid_field(panel, qtbot):

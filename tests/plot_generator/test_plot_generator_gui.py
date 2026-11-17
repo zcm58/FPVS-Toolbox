@@ -203,14 +203,14 @@ def test_five_conditions_fit_validate_and_freeze_at_supported_size(qtbot, tmp_pa
     window.out_edit.setText(str(tmp_path / "plots"))
     window.overlay_check.setChecked(True)
     window.overlay_count_spin.setValue(5)
-    window.resize(1280, 900)
+    window.resize(912, 520)
     window.show()
     qtbot.waitExposed(window)
     window.activateWindow()
     assert window._selected_overlay_conditions() == tuple(conditions)
     assert window.gen_btn.isEnabled()
     assert not window.findChildren(QScrollArea)
-    assert window.width() == 1280 and window.height() == 900
+    assert window.width() == 912 and window.height() == 520
     for control in (*window._overlay_condition_combos(), window.overlay_count_spin, window.gen_btn):
         assert control.isVisible()
         assert window.rect().contains(QRect(control.mapTo(window, QPoint()), control.size()))
@@ -227,7 +227,11 @@ def test_five_conditions_fit_validate_and_freeze_at_supported_size(qtbot, tmp_pa
     assert window.gen_btn.isEnabled()
 
     window.setup_tabs.setCurrentIndex(1)
-    for field in window._legend_fields.values():
+    for field in (*window._legend_fields.values(), window.gen_btn):
+        assert field.isVisible()
+        assert window.rect().contains(QRect(field.mapTo(window, QPoint()), field.size()))
+    window.setup_tabs.setCurrentWidget(window.advanced_box)
+    for field in (window.xmax_spin, window.ymax_spin, window.spectral_qc_check, window.gen_btn):
         assert field.isVisible()
         assert window.rect().contains(QRect(field.mapTo(window, QPoint()), field.size()))
     controls = [

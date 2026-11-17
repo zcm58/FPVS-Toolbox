@@ -61,10 +61,10 @@ value to the ROI.
 
 Enable **Overlay Comparison**, then choose how many conditions to compare.
 Select a different condition in each visible row. Each condition has its own
-color and peak-marker shape. **Plot setup** contains condition, ROI, and axis
-controls; **Legend labels** contains the optional curve and peak labels.
-Optional legend labels let you shorten long
-condition names without renaming the project conditions.
+color and peak-marker shape. **Plot setup** contains the folder, condition, and
+ROI controls. **Axes and QC** contains the axis labels, ranges, and spectral QC
+readout. Use **Legend labels** to shorten long condition names without renaming
+the project conditions.
 
 For three or more conditions, the legend sits below the axes and long labels
 wrap. The figure grows vertically to accommodate the legend while retaining
@@ -204,7 +204,7 @@ itself an inferential significance test.
    select two to five different conditions.
 6. For a multi-group project, select the groups to include; group overlay is
    required and enabled automatically.
-7. Adjust labels, ranges, colors, and optional spectral QC.
+7. Adjust colors in **Plot setup**. Use **Legend labels** or **Axes and QC** for optional figure settings.
 8. Select **Generate SNR Plots**, then use **Open Plot Folder** to review the
    matching PNG/PDF figures in `2 - SNR Plots`.
 

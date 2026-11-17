@@ -1,6 +1,7 @@
 """Widget assembly helpers for the Plot Generator GUI."""
 from __future__ import annotations
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -20,7 +21,6 @@ from PySide6.QtWidgets import (
 
 from Main_App.gui.components import (
     PathPickerRow,
-    SectionCard,
     SubsectionHeaderLabel,
     SurfaceSize,
     configure_window_surface,
@@ -47,19 +47,16 @@ class PlotGeneratorUiSectionsMixin:
     def _build_ui(self) -> None:
         configure_window_surface(
             self,
-            size=SurfaceSize(width=1180, height=760, min_width=980, min_height=680),
+            size=SurfaceSize(width=1180, height=760, min_width=890, min_height=500),
         )
 
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(8, 8, 8, 8)
         root_layout.setSpacing(8)
         build_snr_tool_header(self, root_layout)
-        file_box = SectionCard("Input and Output")
-        file_box.setObjectName("snr_input_output_card")
-        file_box.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum))
-        file_layout = file_box.content_layout
-        file_layout.setSpacing(6)
-        file_grid = QGridLayout()
+        file_box = QWidget()
+        file_box.setObjectName("snr_input_output")
+        file_grid = QGridLayout(file_box)
         file_grid.setContentsMargins(0, 0, 0, 0)
         file_grid.setHorizontalSpacing(12)
         file_grid.setVerticalSpacing(8)
@@ -118,13 +115,10 @@ class PlotGeneratorUiSectionsMixin:
         self.input_folder_btn.setFixedWidth(picker_button_width)
         self.output_folder_btn.setFixedWidth(picker_button_width)
 
-        file_layout.addLayout(file_grid)
-
-        self.params_box = SectionCard("Plot Parameters")
-        self.params_box.setSizePolicy(
-            QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        )
-        params_layout = self.params_box.content_layout
+        self.params_box = QWidget()
+        self.params_box.setObjectName("snr_plot_parameters")
+        params_layout = QVBoxLayout(self.params_box)
+        params_layout.setContentsMargins(0, 0, 0, 0)
         params_layout.setSpacing(8)
 
         self.condition_combo = QComboBox()
@@ -269,16 +263,15 @@ class PlotGeneratorUiSectionsMixin:
         overlay_layout = QHBoxLayout(self.overlay_row)
         overlay_layout.setContentsMargins(0, 0, 0, 0)
         overlay_layout.setSpacing(8)
-        overlay_layout.addStretch(1)
         overlay_layout.addWidget(self.overlay_check)
         build_overlay_count(self, overlay_layout)
         overlay_layout.addStretch(1)
 
         params_layout.addWidget(self.overlay_row)
 
-        self.legend_group = SectionCard("Legend labels (optional)")
-        self.legend_group.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum))
-        legend_layout = self.legend_group.content_layout
+        self.legend_group = QWidget()
+        legend_layout = QVBoxLayout(self.legend_group)
+        legend_layout.setContentsMargins(0, 0, 0, 0)
         legend_layout.setSpacing(6)
         self.legend_custom_check = QCheckBox("Custom legend labels")
         self.legend_custom_check.setChecked(True)
@@ -385,10 +378,11 @@ class PlotGeneratorUiSectionsMixin:
         self._syncing_legend_defaults = False
         build_extra_legend_fields(self, legend_form)
 
-        self.group_box = SectionCard("Group Options")
-        self.group_box.setMaximumHeight(180)
-        group_layout = self.group_box.content_layout
+        self.group_box = QWidget()
+        group_layout = QVBoxLayout(self.group_box)
+        group_layout.setContentsMargins(0, 0, 0, 0)
         group_layout.setSpacing(6)
+        group_layout.addWidget(SubsectionHeaderLabel("Project groups"))
         self.group_overlay_check = QCheckBox("Overlay groups on plots")
         self.group_overlay_check.setAccessibleName("Overlay project groups")
         self.group_overlay_check.toggled.connect(self._on_group_overlay_toggled)
@@ -400,9 +394,6 @@ class PlotGeneratorUiSectionsMixin:
         self.group_list.setMaximumHeight(80)
         group_layout.addWidget(self.group_list)
         self.group_box.setVisible(False)
-        # Added below the legend in the left column; hidden unless multi-group data is present.
-
-        params_layout.addStretch(1)
 
         self.title_edit = QLineEdit(self._defaults["title_snr"], self)
         self.title_edit.setObjectName("plot_generator_internal_figure_name")
@@ -473,12 +464,9 @@ class PlotGeneratorUiSectionsMixin:
         ranges_grid.setColumnStretch(1, 1)
         ranges_grid.setColumnStretch(3, 1)
 
-        self.advanced_box = SectionCard("Advanced")
-        self.advanced_box.setMinimumHeight(256)
-        self.advanced_box.setSizePolicy(
-            QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        )
-        advanced_layout = self.advanced_box.content_layout
+        self.advanced_box = QWidget()
+        advanced_layout = QVBoxLayout(self.advanced_box)
+        advanced_layout.setContentsMargins(0, 8, 0, 0)
         advanced_layout.setSpacing(6)
 
         advanced_form = make_form_layout()
@@ -497,55 +485,40 @@ class PlotGeneratorUiSectionsMixin:
         )
         self.spectral_qc_check.setEnabled(self._project is None)
         advanced_layout.addWidget(self.spectral_qc_check)
+        advanced_layout.addStretch(1)
 
         self.generation_log_dialog = SNRGenerationLogDialog("", self)
         self.log = self.generation_log_dialog.viewer
         self.log.setProperty("logSurface", True)
         self.log.setAccessibleName("SNR plot generation log")
 
-        left_column = QWidget()
-        left_column.setSizePolicy(
-            QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
-        )
-        left_layout = QVBoxLayout(left_column)
-        left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.setSpacing(8)
-        left_layout.addWidget(self.params_box, 1)
-        left_layout.addWidget(self.group_box)
+        setup_page = QWidget()
+        setup_layout = QVBoxLayout(setup_page)
+        setup_layout.setContentsMargins(0, 8, 0, 0)
+        setup_layout.setSpacing(16)
+        setup_layout.addWidget(file_box)
+        selection_layout = QHBoxLayout()
+        selection_layout.setSpacing(16)
+        selection_layout.addWidget(self.params_box, 3, Qt.AlignTop)
+        selection_layout.addWidget(self.group_box, 1, Qt.AlignTop)
+        setup_layout.addLayout(selection_layout)
+        setup_layout.addStretch(1)
 
-        right_column = QWidget()
-        right_column.setSizePolicy(
-            QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        )
-        right_layout = QVBoxLayout(right_column)
-        right_layout.setContentsMargins(0, 0, 0, 0)
-        right_layout.setSpacing(8)
-        right_layout.addWidget(self.advanced_box, 1)
-
-        content_widget = QWidget()
-        content_widget.setObjectName("snr_plot_content_columns")
-        content_widget.setSizePolicy(
-            QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
-        )
-        content_layout = QHBoxLayout(content_widget)
-        content_layout.setContentsMargins(0, 0, 0, 0)
-        content_layout.setSpacing(10)
-        content_layout.addWidget(left_column, 1)
-        content_layout.addWidget(right_column, 1)
-        root_layout.addWidget(file_box)
         self.setup_tabs = QTabWidget()
         self.setup_tabs.setObjectName("snr_setup_tabs")
-        self.setup_tabs.setAccessibleName("SNR plot setup and legend labels")
-        self.setup_tabs.addTab(content_widget, "Plot setup")
+        self.setup_tabs.setAccessibleName("SNR plot settings")
+        self.setup_tabs.setDocumentMode(True)
+        self.setup_tabs.addTab(setup_page, "Plot setup")
         legend_page = QWidget()
         legend_page_layout = QVBoxLayout(legend_page)
-        legend_page_layout.setContentsMargins(0, 0, 0, 0)
+        legend_page_layout.setContentsMargins(0, 8, 0, 0)
         legend_page_layout.addWidget(self.legend_group)
         legend_page_layout.addStretch(1)
         self.setup_tabs.addTab(legend_page, "Legend labels")
-        root_layout.addWidget(self.setup_tabs, 1)
-
+        self.setup_tabs.addTab(self.advanced_box, "Axes and QC")
+        root_layout.addWidget(self.setup_tabs)
         build_generation_action_row(self, root_layout)
+        root_layout.addStretch(1)
 
         self.folder_edit.textChanged.connect(self._check_required)
         self.out_edit.textChanged.connect(self._check_required)

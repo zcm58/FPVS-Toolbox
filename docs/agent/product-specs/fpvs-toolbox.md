@@ -17,8 +17,12 @@ runtime.
 2. Run the project's single-file or batch processing. The desktop stays
    responsive, and the project retains its settings and outputs for review
    and reruns.
-3. Inspect the processed response in SNR Plots and Scalp Maps. For eligible
-   projects, explore experimental source-space estimates in LORETA Visualizer.
+3. Open SNR Plots and Scalp Maps through the Tools menu to inspect the processed
+   response. For eligible projects, use the same menu to explore experimental
+   source-space estimates in LORETA Visualizer.
+
+Home centers on choosing recordings and running processing. Settings uses the
+same compact window as Home, with the category list and save actions in view.
 
 Manual project creation and recording setup remain supported for studies run
 outside Studio. Existing projects can reopen directly for processing or review.

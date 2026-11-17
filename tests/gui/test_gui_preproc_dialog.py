@@ -1220,7 +1220,9 @@ def test_protocol_sections_fit_scaled_workspaces_with_marker_tables(experimental
         "Timing", "Trigger markers",
     ]
     protocol_page = page.tabs.currentWidget()
-    assert not protocol_page.findChildren(QScrollArea)
+    assert [scroll.objectName() for scroll in protocol_page.findChildren(QScrollArea)] == [
+        "settings_category_scroll",
+    ]
     table = page.protocol_condition_markers_table
     assert table.rowCount() == 60
     assert sections.widget(0).isAncestorOf(page.protocol_resolved_oddball_rate_edit)
@@ -1699,7 +1701,9 @@ def test_embedded_visual_roi_editor_fits_the_supported_workspace(tmp_path, qtbot
     footer = page.findChild(QWidget, "settings_footer")
     assert win.size().width() == 1280
     assert win.size().height() == 900
-    assert roi_tab.findChildren(QScrollArea) == []
+    assert {scroll.objectName() for scroll in roi_tab.findChildren(QScrollArea)} == {
+        "settings_category_scroll", "settings_rois_map_scroll",
+    }
     assert roi_tab.findChild(SectionCard, "settings_rois_card") is None
     assert not roi_tab.isAncestorOf(page.btn_changeRoot)
     assert page.roi_editor.map_widget.minimumWidth() >= 600

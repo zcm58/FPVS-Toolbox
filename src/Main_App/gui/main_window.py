@@ -74,6 +74,7 @@ from Main_App.gui.op_guard import OpGuard
 _WINDOW_TITLE = f"FPVS Toolbox v{FPVS_TOOLBOX_VERSION}"
 _COMPACT_MINIMUM = QSize(900, 520)
 _COMPACT_DEFAULT = QSize(960, 520)
+_SNR_WORKSPACE_MINIMUM = QSize(960, 600)
 _WORKSPACE_MINIMUM = QSize(1280, 900)
 
 
@@ -333,24 +334,31 @@ class MainWindow(QMainWindow):
         welcome = self.stacked.currentWidget() is self.landing_page
         library = self.stacked.currentWidget() is getattr(self, "_experiment_library_page", None)
         self.menuBar().setVisible(True)
-        compact = welcome or library or self.workspace_stack.currentWidget() is self.homeWidget
-        minimum = _COMPACT_MINIMUM if compact else _WORKSPACE_MINIMUM
-        if self.minimumSize() == minimum:
+        page = self.workspace_stack.currentWidget()
+        if welcome or library or page is self.homeWidget or page is self._settings_page:
+            minimum = _COMPACT_MINIMUM
+        elif page is getattr(self, "_plot_generator_page", None):
+            minimum = _SNR_WORKSPACE_MINIMUM
+        else:
+            minimum = _WORKSPACE_MINIMUM
+        previous_minimum = self.minimumSize()
+        if previous_minimum == minimum:
             return
 
-        normal_window = not (self.isMaximized() or self.isFullScreen())
-        if compact:
-            return_size = self._compact_return_size
+        if self.isMaximized() or self.isFullScreen():
             self._compact_return_size = None
             self.setMinimumSize(minimum)
-            if normal_window and return_size is not None and self.size() == return_size.expandedTo(_WORKSPACE_MINIMUM):
-                self.resize(return_size)
             return
 
-        width, height = self.width(), self.height()
-        if normal_window and (width < minimum.width() or height < minimum.height()):
-            self._compact_return_size = self.size()
+        current_size = self.size()
+        return_size = self._compact_return_size
+        if return_size is None or current_size != return_size.expandedTo(previous_minimum):
+            return_size = current_size
+        target_size = return_size.expandedTo(minimum)
+        self._compact_return_size = return_size if target_size != return_size else None
         self.setMinimumSize(minimum)
+        if self.size() != target_size:
+            self.resize(target_size)
 
     def _set_project_title(self, name: str) -> None:
         self.setWindowTitle(f"{name} — {_WINDOW_TITLE}")

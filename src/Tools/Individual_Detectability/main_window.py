@@ -106,6 +106,10 @@ class IndividualDetectabilityWindow(QWidget):
         self.tabs.setStyleSheet(
             "QTabWidget#individual_detectability_tabs::pane {"
             " border: none; background: transparent; }"
+            "QGroupBox#individual_detectability_input,"
+            "QGroupBox#individual_detectability_output,"
+            "QGroupBox#individual_detectability_run {"
+            " border: none; background: transparent; }"
         )
         self.basic_tab = QWidget()
         self.advanced_tab = QWidget()
@@ -133,11 +137,16 @@ class IndividualDetectabilityWindow(QWidget):
         )
         self.basic_tab.setLayout(self.basic_grid)
 
-        self.basic_grid.addWidget(self._build_input_group(), 0, 0, 1, 2)
+        input_group = self._build_input_group()
+        self.basic_grid.addWidget(input_group, 0, 0, 1, 2)
         self.basic_grid.addWidget(self._build_conditions_group(), 1, 0)
         self.basic_grid.addWidget(self._build_participant_group(), 1, 1)
-        self.basic_grid.addWidget(self._build_output_group(), 2, 0)
-        self.basic_grid.addWidget(self._build_bottom_panel(), 2, 1)
+        output_group = self._build_output_group()
+        self.basic_grid.addWidget(output_group, 2, 0)
+        run_group = self._build_bottom_panel()
+        self.basic_grid.addWidget(run_group, 2, 1)
+        for group in (input_group, output_group, run_group):
+            group.shell_layout.setContentsMargins(0, 0, 0, 0)
 
     def _build_input_group(self) -> SectionCard:
         group = SectionCard("Input data", object_name="individual_detectability_input")

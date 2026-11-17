@@ -41,7 +41,6 @@ from .style_tokens import (
 from Main_App.gui.components import (
     ActionRow,
     BusySpinner,
-    SectionCard,
     SubsectionHeaderLabel,
     apply_font_role,
     make_action_button,
@@ -103,17 +102,24 @@ def init_ui(self) -> None:
     setup_layout.setContentsMargins(0, 0, 0, 0)
     setup_layout.setSpacing(SECTION_GAP)
 
-    overview = QHBoxLayout()
-    overview.setSpacing(SECTION_GAP)
-    setup_layout.addLayout(overview)
-    processing_column = QVBoxLayout()
-    processing_column.setSpacing(SECTION_GAP)
-    overview.addLayout(processing_column, 3)
+    workspace = QWidget(setup_panel)
+    workspace.setObjectName("home_workflow")
+    workspace.setMaximumWidth(760)
+    centered_layout = QHBoxLayout()
+    centered_layout.addStretch(1)
+    centered_layout.addWidget(workspace, 100)
+    centered_layout.addStretch(1)
+    setup_layout.addLayout(centered_layout, 1)
+    workflow_layout = QVBoxLayout(workspace)
+    workflow_layout.setContentsMargins(0, SECTION_GAP, 0, 0)
+    workflow_layout.setSpacing(SECTION_GAP)
 
-    grp_proc = SectionCard("Process recordings", setup_panel, object_name="processing_group")
-    grp_proc.header.setObjectName("processing_card_header")
-    proc_layout = grp_proc.content_layout
+    grp_proc = QWidget(workspace)
+    grp_proc.setObjectName("processing_group")
+    proc_layout = QVBoxLayout(grp_proc)
+    proc_layout.setContentsMargins(0, 0, 0, 0)
     proc_layout.setSpacing(10)
+    proc_layout.addWidget(SubsectionHeaderLabel("Process recordings", grp_proc))
 
     form = make_form_layout()
 
@@ -129,7 +135,7 @@ def init_ui(self) -> None:
     mode_layout.addWidget(self.rb_batch)
     mode_layout.addStretch(1)
 
-    form.addRow(mode_field)
+    form.addRow("Input mode", mode_field)
 
     self.lbl_single_file = QLabel("EEG recording", grp_proc)
     self.row_single_file = QWidget(grp_proc)
@@ -191,7 +197,7 @@ def init_ui(self) -> None:
         lambda checked: checked and self._on_mode_changed("batch")
     )
 
-    processing_column.addWidget(grp_proc)
+    workflow_layout.addWidget(grp_proc)
 
     self.row_single_file.setVisible(False)
     self.lbl_single_file.setVisible(False)
@@ -209,14 +215,13 @@ def init_ui(self) -> None:
     except Exception:
         pass
 
-    self.processing_readiness_label = QLabel(grp_proc)
+    self.processing_readiness_label = QLabel(workspace)
     self.processing_readiness_label.setObjectName("processing_readiness_label")
     self.processing_readiness_label.setWordWrap(True)
     self.processing_readiness_label.hide()
-    proc_layout.addWidget(self.processing_readiness_label)
 
     # Start Row
-    run_panel = ActionRow(grp_proc, alignment=Qt.AlignRight, spacing=10)
+    run_panel = ActionRow(workspace, alignment=Qt.AlignRight, spacing=10)
     run_panel.setObjectName("run_panel")
     self.run_panel = run_panel
     self.project_draft_status = QLabel(run_panel)
@@ -248,26 +253,34 @@ def init_ui(self) -> None:
 
     run_panel.add_button(self.btn_view_log)
     run_panel.add_button(self.btn_start)
-    proc_layout.addWidget(run_panel)
-
 
     # Conditions
-    grp_event = SectionCard("Conditions", setup_panel, object_name="event_map_group")
-    grp_event.header.setObjectName("event_map_card_header")
-    self.condition_summary_label = QLabel("None configured", grp_event.header)
+    grp_event = QWidget(workspace)
+    grp_event.setObjectName("event_map_group")
+    conditions_layout = QVBoxLayout(grp_event)
+    conditions_layout.setContentsMargins(0, 0, 0, 0)
+    conditions_layout.setSpacing(8)
+    conditions_bar = ActionRow(grp_event, alignment=Qt.AlignLeft)
+    conditions_bar.row_layout.addWidget(SubsectionHeaderLabel("Conditions", conditions_bar))
+    self.condition_summary_label = QLabel("None configured", conditions_bar)
     self.condition_summary_label.setObjectName("home_condition_summary")
     self.condition_summary_label.setTextFormat(Qt.PlainText)
-    grp_event.header.header_layout.insertWidget(1, self.condition_summary_label)
+    conditions_bar.row_layout.addWidget(self.condition_summary_label)
+    conditions_bar.row_layout.addStretch(1)
 
-    self.condition_editor_toggle = make_action_button("Edit conditions", compact=True, parent=grp_event)
+    self.condition_editor_toggle = make_action_button("Edit conditions", compact=True, parent=conditions_bar)
     self.condition_editor_toggle.setObjectName("home_condition_editor_toggle")
     self.condition_editor_toggle.setCheckable(True)
     self.condition_editor_toggle.setAccessibleDescription("Show or hide condition rows and source controls.")
-    grp_event.header.add_action_widget(self.condition_editor_toggle)
+    conditions_bar.add_button(self.condition_editor_toggle)
+    conditions_layout.addWidget(conditions_bar)
 
-    self.condition_editor_body = grp_event.content
+    self.condition_editor_body = QWidget(grp_event)
     self.condition_editor_body.setObjectName("home_condition_editor")
-    event_group_layout = grp_event.content_layout
+    event_group_layout = QVBoxLayout(self.condition_editor_body)
+    event_group_layout.setContentsMargins(0, 0, 0, 0)
+    event_group_layout.setSpacing(8)
+    conditions_layout.addWidget(self.condition_editor_body)
 
     self.btn_add_row = make_action_button(
         "+ Add Condition",
@@ -281,7 +294,7 @@ def init_ui(self) -> None:
     self.source_participants_button = make_action_button("Source participants…", compact=True, parent=grp_event)
     self.source_participants_button.setObjectName("home_source_participants")
     self.source_participants_button.clicked.connect(lambda: show_source_participants(self))
-    condition_actions = ActionRow(grp_event.content, alignment=Qt.AlignLeft)
+    condition_actions = ActionRow(self.condition_editor_body, alignment=Qt.AlignLeft)
     condition_actions.setObjectName("home_condition_actions")
     condition_actions.add_button(self.trigger_maps_button)
     condition_actions.add_button(self.source_participants_button)
@@ -332,28 +345,19 @@ def init_ui(self) -> None:
     self.condition_editor_body.hide()
     self.condition_editor_toggle.toggled.connect(self.condition_editor_body.setVisible)
     self.condition_editor_toggle.toggled.connect(lambda _checked: refresh_condition_editor_toggle(self))
-    processing_column.addWidget(grp_event)
-    processing_column.addStretch(1)
+    workflow_layout.addWidget(grp_event)
+    workflow_layout.addWidget(self.processing_readiness_label)
+    workflow_layout.addWidget(run_panel)
 
-    results = SectionCard("Analysis", setup_panel, object_name="home_analysis")
-    self.processing_history_label = ProcessingHistoryLabel(results)
-    results.content_layout.addWidget(self.processing_history_label)
-    self.last_run_panel = build_last_run_panel(self, results)
-    results.content_layout.addWidget(self.last_run_panel)
-    for role in ("btn_graphs", "btn_publication_maps", "btn_loreta_visualizer"):
-        action = self.tool_actions.get(role)
-        if action is not None:
-            button = make_action_button(action.text(), compact=True, parent=results)
-            button.setObjectName(f"home_{role}")
-            # QAction.trigger() can run even when its menu widget is locked.
-            button.clicked.connect(
-                lambda _checked, tool=action: tool.trigger() if menu.isEnabled() else None,
-            )
-            results.content_layout.addWidget(button, 0, Qt.AlignLeft)
-    overview.addWidget(results, 2, Qt.AlignTop)
-
-    self.condition_editor_toggle.toggled.connect(lambda opened: results.setVisible(not opened))
-    setup_layout.addStretch(1)
+    history_separator = QFrame(workspace)
+    history_separator.setObjectName("home_history_separator")
+    history_separator.setFrameShape(QFrame.HLine)
+    workflow_layout.addWidget(history_separator)
+    self.processing_history_label = ProcessingHistoryLabel(workspace)
+    workflow_layout.addWidget(self.processing_history_label)
+    self.last_run_panel = build_last_run_panel(self, workspace)
+    workflow_layout.addWidget(self.last_run_panel)
+    workflow_layout.addStretch(1)
 
     saved_pairs = self.settings.get_event_pairs()
     if saved_pairs:

@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
 from Main_App.gui.components import (
     ActionRow,
     PathPickerRow,
+    CardHeader,
     SectionCard,
     StatusBanner,
     SubsectionHeaderLabel,
@@ -81,8 +82,6 @@ from Tools.Publication_Maps.worker import PublicationMapsWorker
 logger = logging.getLogger(__name__)
 
 SCALP_MAPS_OUTPUT_FOLDER = "4 - Scalp Maps"
-SCALP_MAPS_TOP_ROW_MIN_HEIGHT = 340
-SCALP_MAPS_BOTTOM_ROW_MIN_HEIGHT = 240
 ALL_GROUPS_VALUE = "__all_canonical_groups__"
 ALL_GROUPS_LABEL = "All groups (separate outputs)"
 ALL_GROUPS_COMPARISON_LABEL = "All groups (comparison)"
@@ -166,7 +165,7 @@ class PublicationMapsWindow(QWidget):
         generation_layout.setContentsMargins(0, 8, 0, 0)
         generation_layout.setHorizontalSpacing(8)
         generation_layout.addWidget(self.selection_group, 0, 0)
-        generation_layout.addWidget(self.generation_group, 0, 1)
+        generation_layout.addWidget(self.generation_group, 0, 1, Qt.AlignTop)
         generation_layout.setColumnStretch(0, 1)
         generation_layout.setColumnStretch(1, 1)
 
@@ -176,7 +175,8 @@ class PublicationMapsWindow(QWidget):
         self.advanced_layout.setSpacing(8)
         self.advanced_layout.addWidget(self.input_group)
         self.advanced_layout.addWidget(self.advanced_output_group)
-        self.advanced_layout.addWidget(self.figure_layout_group, 1)
+        self.advanced_layout.addWidget(self.figure_layout_group)
+        self.advanced_layout.addStretch(1)
 
         self.workflow_tabs.addTab(generation_page, "Generate Maps")
         self.workflow_tabs.addTab(advanced_page, "Advanced Settings")
@@ -244,7 +244,6 @@ class PublicationMapsWindow(QWidget):
 
     def _build_conditions_group(self) -> SectionCard:
         group = SectionCard("Map selection", object_name="publication_maps_conditions")
-        group.setMinimumHeight(SCALP_MAPS_TOP_ROW_MIN_HEIGHT)
         group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
         self.conditions_list = QListWidget(group)
@@ -566,8 +565,7 @@ class PublicationMapsWindow(QWidget):
             "Figure layout",
             object_name="publication_maps_figure_layout",
         )
-        group.setMinimumHeight(SCALP_MAPS_BOTTOM_ROW_MIN_HEIGHT)
-        group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
 
         self.paired_figure_options_widget = QWidget(group)
         self.paired_figure_options_widget.setObjectName(
@@ -700,13 +698,14 @@ class PublicationMapsWindow(QWidget):
         self.group_comparison_widget.setVisible(False)
         return group
 
-    def _build_generation_group(self) -> SectionCard:
-        group = SectionCard(
-            "Generate scalp maps",
-            object_name="publication_maps_run",
-        )
-        group.setMinimumHeight(SCALP_MAPS_TOP_ROW_MIN_HEIGHT)
-        group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+    def _build_generation_group(self) -> QWidget:
+        group = QWidget()
+        group.setObjectName("publication_maps_run")
+        layout = QVBoxLayout(group)
+        layout.setContentsMargins(12, 8, 0, 0)
+        layout.setSpacing(8)
+        header = CardHeader("Map options", group)
+        layout.addWidget(header)
         self.scalp_maps_info_btn = make_info_button(
             parent=group,
             tooltip="About Scalp Maps",
@@ -715,13 +714,13 @@ class PublicationMapsWindow(QWidget):
         self.scalp_maps_info_btn.clicked.connect(
             lambda: show_tool_info(self, SCALP_MAPS_TOOL_INFO)
         )
-        group.header.add_action_widget(self.scalp_maps_info_btn)
+        header.add_action_widget(self.scalp_maps_info_btn)
 
         form = make_form_layout()
         form.addRow("Map types:", self._build_metric_selection(group))
-        group.content_layout.addLayout(form)
+        layout.addLayout(form)
         self.map_settings_section = self._build_map_settings_section(group)
-        group.content_layout.addWidget(self.map_settings_section)
+        layout.addWidget(self.map_settings_section)
 
         self.progress = QProgressBar(group)
         self.progress.setValue(0)
@@ -758,9 +757,8 @@ class PublicationMapsWindow(QWidget):
         row.add_button(self.cancel_btn)
         row.row_layout.addWidget(self.progress, 1)
 
-        group.content_layout.addStretch(1)
-        group.content_layout.addWidget(self.status_label)
-        group.content_layout.addWidget(row)
+        layout.addWidget(self.status_label)
+        layout.addWidget(row)
         return group
 
     def _apply_button_icons(self) -> None:

@@ -38,11 +38,7 @@ from Main_App.processing.project_processing_cache import ProjectProcessingCacheU
 import Main_App.gui.update_manager as update_manager
 from Tools.Individual_Detectability.main_window import IndividualDetectabilityWindow
 from Tools.Plot_Generator.plot_generator import PlotGeneratorWindow
-from Tools.Publication_Maps.gui import (
-    SCALP_MAPS_BOTTOM_ROW_MIN_HEIGHT,
-    SCALP_MAPS_TOP_ROW_MIN_HEIGHT,
-    PublicationMapsWindow,
-)
+from Tools.Publication_Maps.gui import PublicationMapsWindow
 from Tools.Publication_Maps.generation_outcome import PublicationMapsWorkerOutcome
 from Tools.Sensitivity_Analysis.gui import SensitivityAnalysisWindow
 from Tools.Stats import StatsWindow
@@ -209,11 +205,11 @@ def test_main_window_layout_smoke(tmp_path: Path, qtbot, monkeypatch) -> None:
     assert win.processing_history_label.objectName() == "project_processing_history"
     assert win.processing_history_label.isVisibleTo(win)
     assert win.processing_history_label.wordWrap()
-    analysis = win.findChild(SectionCard, "home_analysis")
-    processing = win.findChild(SectionCard, "processing_group")
-    assert analysis.isAncestorOf(win.processing_history_label)
-    assert processing.geometry().top() == analysis.geometry().top()
-    assert processing.geometry().right() < analysis.geometry().left()
+    workflow = win.findChild(QWidget, "home_workflow")
+    processing = win.findChild(QWidget, "processing_group")
+    assert workflow.isAncestorOf(win.processing_history_label)
+    assert win.homeWidget.findChildren(SectionCard) == []
+    assert workflow.width() <= 760
     assert win.lbl_single_file.buddy() is win.le_input_file
     assert win.lbl_input_folder.buddy() is win.le_input_folder
 
@@ -223,6 +219,7 @@ def test_main_window_layout_smoke(tmp_path: Path, qtbot, monkeypatch) -> None:
     assert run_panel.row_layout.indexOf(win.btn_view_log) >= 0
     assert run_panel.row_layout.indexOf(win.btn_start) >= 0
     assert run_panel.row_layout.indexOf(win.progress_bar) < 0
+    assert win.processing_history_label.geometry().top() > run_panel.geometry().bottom()
     assert win.findChild(QWidget, "processing_page") is win.processing_page
     assert win.workspace_stack.indexOf(win.processing_page) >= 0
     assert win.processing_page.isAncestorOf(win.progress_bar)
@@ -247,7 +244,7 @@ def test_main_window_layout_smoke(tmp_path: Path, qtbot, monkeypatch) -> None:
     assert win.condition_editor_toggle.text() == "Edit conditions"
     qtbot.mouseClick(win.condition_editor_toggle, Qt.LeftButton)
     assert win.condition_editor_body.isVisibleTo(win)
-    assert not analysis.isVisible()
+    assert win.processing_history_label.isVisibleTo(win)
 
     event_map_header = win.findChild(QWidget, "event_map_header")
     assert event_map_header is not None
@@ -273,8 +270,7 @@ def test_main_window_layout_smoke(tmp_path: Path, qtbot, monkeypatch) -> None:
     event_map_group = win.findChild(QWidget, "event_map_group")
     assert event_map_group is not None
     assert processing.geometry().bottom() < event_map_group.geometry().top()
-    assert event_map_group.header.isVisible()
-    assert event_map_group.header.title_label.text() == "Conditions"
+    assert any(label.text() == "Conditions" for label in event_map_group.findChildren(SubsectionHeaderLabel))
     event_rows = win._live_event_map_rows()
     assert event_rows
     assert event_rows[0].layout().contentsMargins().left() == 0
@@ -338,7 +334,7 @@ def test_main_window_layout_smoke(tmp_path: Path, qtbot, monkeypatch) -> None:
 
 
 @pytest.mark.parametrize("enable_beta", [False, True])
-def test_home_analysis_uses_the_same_tool_routes_and_navigation_lock(
+def test_home_analysis_entry_points_live_in_the_tools_menu(
     tmp_path: Path, qtbot, monkeypatch, enable_beta: bool,
 ) -> None:
     win = _build_window(tmp_path, qtbot, monkeypatch, enable_beta_tools=enable_beta)
@@ -346,11 +342,8 @@ def test_home_analysis_uses_the_same_tool_routes_and_navigation_lock(
     routes = ["btn_graphs"]
     if enable_beta:
         routes += ["btn_publication_maps", "btn_loreta_visualizer"]
-    panel = win.findChild(SectionCard, "home_analysis")
-    buttons = panel.findChildren(QPushButton)
-    assert [button.objectName() for button in buttons if button.isVisible()] == [
-        f"home_{role}" for role in routes
-    ]
+    for role in ("btn_graphs", "btn_publication_maps", "btn_loreta_visualizer"):
+        assert win.homeWidget.findChild(QPushButton, f"home_{role}") is None
 
     opened = []
     for role in routes:
@@ -359,12 +352,9 @@ def test_home_analysis_uses_the_same_tool_routes_and_navigation_lock(
     monkeypatch.setattr(win, "_frequency_domain_outputs_ready_for_tool", lambda _name: False)
     warnings = []
     monkeypatch.setattr(win, "_acknowledge_beta_tool_warning", warnings.append)
-    win.menuBar().setEnabled(False)
-    qtbot.mouseClick(panel.findChild(QPushButton, "home_btn_graphs"), Qt.LeftButton)
-    assert opened == []
-    win.menuBar().setEnabled(True)
     for role in routes:
-        qtbot.mouseClick(panel.findChild(QPushButton, f"home_{role}"), Qt.LeftButton)
+        menu_name = "toolsMenu" if role == "btn_graphs" else "betaToolsMenu"
+        _menu_action(win, menu_name, role).trigger()
     assert opened == routes
     assert warnings == routes[1:]
     assert win.workspace_stack.currentWidget() is win.homeWidget
@@ -487,19 +477,33 @@ def test_long_project_title_does_not_resize_home(tmp_path: Path, qtbot, monkeypa
 
 def test_workspace_expands_and_restores_only_automatic_resizes(tmp_path: Path, qtbot, monkeypatch) -> None:
     win = _build_window(tmp_path, qtbot, monkeypatch)
+    monkeypatch.setattr(win, "_frequency_domain_outputs_ready_for_tool", lambda _name: True)
     win.show_home_page()
-    win.resize(1010, 690)
+    win.resize(930, 550)
     settings = _menu_action(win, "fileMenu", "actionSettings")
     home = _menu_action(win, "viewMenu", "btn_home")
+    snr = _menu_action(win, "toolsMenu", "btn_graphs")
 
     settings.trigger()
+    assert win.minimumSize() == QSize(900, 520)
+    assert win.size() == QSize(930, 550)
+
+    snr.trigger()
+    assert win.minimumSize() == QSize(960, 600)
+    assert win.size() == QSize(960, 600)
+    win.open_stats_analyzer()
     assert win.minimumSize() == QSize(1280, 900)
     assert win.size() == QSize(1280, 900)
+    snr.trigger()
+    assert win.size() == QSize(960, 600)
+    settings.trigger()
+    assert win.minimumSize() == QSize(900, 520)
+    assert win.size() == QSize(930, 550)
     home.trigger()
-    assert win.size() == QSize(1010, 690)
+    assert win.size() == QSize(930, 550)
     assert win.workspace_stack.width() == win.width() - 2 * PAGE_MARGIN
 
-    settings.trigger()
+    snr.trigger()
     win.resize(1340, 940)
     home.trigger()
     assert win.minimumSize() == QSize(900, 520)
@@ -831,6 +835,7 @@ def test_workspace_settings_embeds_in_main_workspace(
 ) -> None:
     win = _build_window(tmp_path, qtbot, monkeypatch)
     win.stacked.setCurrentIndex(1)
+    win.resize(900, 520)
     qtbot.wait(20)
 
     _menu_action(win, "fileMenu", "actionSettings").trigger()
@@ -839,6 +844,7 @@ def test_workspace_settings_embeds_in_main_workspace(
     assert isinstance(win.workspace_stack.currentWidget(), EmbeddedSettingsPage)
     assert win.workspace_stack.currentWidget().objectName() == "embedded_settings_page"
     assert win._settings_page.parent() is win.workspace_stack
+    assert win.size() == QSize(900, 520)
 
     win._settings_page.reject()
     qtbot.wait(20)
@@ -1067,27 +1073,23 @@ def test_workspace_scalp_maps_embeds_in_main_workspace(
         SectionCard,
         "publication_maps_figure_layout",
     )
-    run_card = page.findChild(SectionCard, "publication_maps_run")
+    run_section = page.findChild(QWidget, "publication_maps_run")
     assert conditions_card is not None
     assert settings_section is not None
     assert not isinstance(settings_section, SectionCard)
     assert output_card is not None
     assert figure_layout_card is not None
-    assert run_card is not None
-    assert conditions_card.geometry().top() == run_card.geometry().top()
-    assert conditions_card.minimumHeight() == SCALP_MAPS_TOP_ROW_MIN_HEIGHT
-    assert run_card.isAncestorOf(settings_section)
-    assert figure_layout_card.minimumHeight() == SCALP_MAPS_BOTTOM_ROW_MIN_HEIGHT
-    assert run_card.minimumHeight() == SCALP_MAPS_TOP_ROW_MIN_HEIGHT
-    assert abs(conditions_card.geometry().bottom() - run_card.geometry().bottom()) <= 1
-    assert abs(conditions_card.geometry().width() - run_card.geometry().width()) <= 1
+    assert run_section is not None
+    assert not isinstance(run_section, SectionCard)
+    assert conditions_card.geometry().top() == run_section.geometry().top()
+    assert run_section.isAncestorOf(settings_section)
     assert [
         page.workflow_tabs.tabText(index)
         for index in range(page.workflow_tabs.count())
     ] == ["Generate Maps", "Advanced Settings"]
     assert page.workflow_tabs.currentIndex() == 0
     assert page.workflow_tabs.widget(0).isAncestorOf(conditions_card)
-    assert page.workflow_tabs.widget(0).isAncestorOf(run_card)
+    assert page.workflow_tabs.widget(0).isAncestorOf(run_section)
     assert page.workflow_tabs.widget(0).isAncestorOf(page.metric_bca_check)
     assert page.workflow_tabs.widget(0).isAncestorOf(settings_section)
     assert page.workflow_tabs.widget(1).isAncestorOf(output_card)

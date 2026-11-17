@@ -28,6 +28,7 @@ from Main_App.gui.components import (
     show_tool_info,
 )
 from Main_App.gui.open_paths import open_path_in_file_manager
+from Main_App.gui.theme import set_themed_stylesheet
 
 from .renderer import (
     DEFAULT_CONDITION_COUNT,
@@ -68,15 +69,23 @@ class SequenceFigureWindow(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(14, 14, 14, 14)
         layout.setSpacing(12)
+        set_themed_stylesheet(
+            self,
+            "QGroupBox#sequence_figure_images, QGroupBox#sequence_figure_labels, "
+            "QGroupBox#sequence_figure_output, QTabWidget#sequence_figure_condition_tabs::pane "
+            "{ border: none; background: transparent; }",
+        )
 
         setup_layout = QHBoxLayout()
-        setup_layout.setSpacing(12)
+        setup_layout.setSpacing(24)
         self._build_image_card(setup_layout)
         self._build_labels_card(setup_layout)
         setup_layout.setStretch(0, 3)
         setup_layout.setStretch(1, 2)
         layout.addLayout(setup_layout)
         self._build_output_card(layout)
+        for section in self.findChildren(SectionCard):
+            section.shell_layout.setContentsMargins(0, 0, 0, 0)
         layout.addStretch(1)
 
     def _build_image_card(self, layout: QHBoxLayout) -> None:
@@ -103,15 +112,19 @@ class SequenceFigureWindow(QWidget):
         self.condition_tabs.setObjectName("sequence_figure_condition_tabs")
         self.condition_tabs.setAccessibleName("Stimulus images by condition")
         self.condition_tabs.setElideMode(Qt.ElideRight)
+        self.condition_tabs.setDocumentMode(True)
+        self.condition_tabs.tabBar().setDrawBase(False)
         self.condition_panels: list[QWidget] = []
         self.condition_label_edits: list[QLineEdit] = []
         self.image_rows: list[list[PathPickerRow]] = []
         for condition in range(MAX_CONDITION_COUNT):
             panel = QWidget(self.condition_tabs)
             panel_layout = QVBoxLayout(panel)
+            panel_layout.setContentsMargins(0, 8, 0, 0)
             form = make_form_layout()
             label_edit = QLineEdit(f"Condition {condition + 1}", panel)
             label_edit.setMaxLength(MAX_CONDITION_LABEL_LENGTH)
+            label_edit.setMaximumWidth(320)
             label_edit.setObjectName(f"sequence_figure_condition_{condition + 1}_label_edit")
             label_edit.textChanged.connect(
                 lambda text, condition=condition: self._update_condition_tab_label(condition, text)
@@ -148,7 +161,10 @@ class SequenceFigureWindow(QWidget):
         form = make_form_layout()
         self.base_frequency_edit = QLineEdit("6", card)
         self.oddball_frequency_edit = QLineEdit("1.2", card)
+        self.base_frequency_edit.setMaximumWidth(112)
+        self.oddball_frequency_edit.setMaximumWidth(112)
         self.basename_edit = QLineEdit("fpvs_sequence_figure", card)
+        self.basename_edit.setMaximumWidth(260)
         form.addRow("Presentation rate F (Hz):", self.base_frequency_edit)
         form.addRow("Oddball rate f (Hz):", self.oddball_frequency_edit)
         form.addRow("Output basename:", self.basename_edit)
@@ -180,7 +196,7 @@ class SequenceFigureWindow(QWidget):
         self.open_btn.clicked.connect(self._open_output_folder)
         self.action_row = make_action_row(
             [self.export_btn, self.open_btn],
-            alignment=Qt.AlignLeft,
+            alignment=Qt.AlignRight,
             parent=card,
         )
         card.content_layout.addWidget(self.action_row)

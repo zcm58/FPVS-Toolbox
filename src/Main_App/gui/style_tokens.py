@@ -437,10 +437,16 @@ def build_main_page_stylesheet() -> str:
             color: {TEXT_SECONDARY};
         }}
 
-        #processing_status_separator {{
+        #processing_status_separator,
+        #home_history_separator {{
             color: {BORDER_SOFT_COLOR};
             background: {BORDER_SOFT_COLOR};
             max-height: 1px;
+        }}
+
+        #project_processing_history,
+        #home_condition_summary {{
+            color: {TEXT_SECONDARY};
         }}
 
         #processing_progress_bar {{

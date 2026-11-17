@@ -699,36 +699,29 @@ class StatsWindowUiMixin:
         file_grid.setColumnStretch(1, 1)
         file_layout.addLayout(file_grid)
 
-        self.analysis_design_group = SectionCard("Analysis Design")
+        self.analysis_design_group = QWidget()
         self.analysis_design_group.setObjectName("stats_analysis_design_group")
-        self.analysis_design_group.setSizePolicy(
-            QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        )
-        analysis_design_layout = self.analysis_design_group.content_layout
-        analysis_design_layout.setSpacing(7)
+        analysis_design_layout = QVBoxLayout(self.analysis_design_group)
+        analysis_design_layout.setContentsMargins(0, 0, 0, 0)
+        analysis_design_layout.setSpacing(6)
+        analysis_design_layout.addWidget(SubsectionHeaderLabel("Analysis design"))
 
-        self.analysis_mode_banner = StatusBanner(
-            "Single Group",
-            self.analysis_design_group,
-            variant="info",
-        )
-        self.analysis_mode_banner.setObjectName("stats_analysis_mode_banner")
-        self.analysis_mode_value = self.analysis_mode_banner.label
+        self.analysis_design_form = make_form_layout()
+        self.analysis_mode_value = QLabel("Single Group")
         self.analysis_mode_value.setObjectName("stats_analysis_mode_value")
-        analysis_design_layout.addWidget(self.analysis_mode_banner)
+        self.analysis_design_form.addRow("Mode:", self.analysis_mode_value)
 
-        analysis_design_form = make_form_layout()
         self.analysis_profile_value = QLabel("Standard FPVS Screening")
         self.analysis_profile_value.setObjectName("stats_analysis_profile_value")
         self.analysis_profile_value.setWordWrap(True)
         self.analysis_profile_value.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        analysis_design_form.addRow("Workflow:", self.analysis_profile_value)
+        self.analysis_design_form.addRow("Workflow:", self.analysis_profile_value)
 
         self.analysis_group_value = QLabel("One pooled group; scan to confirm participant N.")
         self.analysis_group_value.setObjectName("stats_analysis_group_value")
         self.analysis_group_value.setWordWrap(True)
         self.analysis_group_value.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        analysis_design_form.addRow("Groups:", self.analysis_group_value)
+        self.analysis_design_form.addRow("Groups:", self.analysis_group_value)
 
         self.analysis_coverage_value = QLabel(
             "Scan the data folder to preview available participant-condition "
@@ -737,13 +730,13 @@ class StatsWindowUiMixin:
         self.analysis_coverage_value.setObjectName("stats_analysis_coverage_value")
         self.analysis_coverage_value.setWordWrap(True)
         self.analysis_coverage_value.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        analysis_design_form.addRow("Data coverage:", self.analysis_coverage_value)
-        analysis_design_layout.addLayout(analysis_design_form)
+        self.analysis_design_form.addRow("Data coverage:", self.analysis_coverage_value)
+        analysis_design_layout.addLayout(self.analysis_design_form)
 
         self.analysis_design_note = QLabel(
-            "Standard screening uses each finite selected observation without "
-            "imputation. Balanced data also receive a secondary ANOVA "
-            "compatibility check."
+            "The paired workflow keeps one stable group per participant and "
+            "one canonical recording per session. It uses complete observed "
+            "pairs per declared outcome, with no imputation or fallback test."
         )
         self.analysis_design_note.setObjectName("stats_analysis_design_note")
         self.analysis_design_note.setWordWrap(True)
@@ -815,7 +808,6 @@ class StatsWindowUiMixin:
         self.setup_tabs = _make_flat_document_tabs("stats_setup_tabs")
         self.setup_tabs.addTab(basic_page, "Basic")
         self.setup_tabs.addTab(advanced_page, "Advanced")
-        self.setup_tabs.currentChanged.connect(self._sync_summary_output_visibility)
         setup_layout.addWidget(self.setup_tabs, 1)
 
         self.stats_processing_notice = SectionCard(
@@ -856,6 +848,12 @@ class StatsWindowUiMixin:
         run_action_layout.addStretch(1)
         run_action_layout.addWidget(self.analyze_single_btn)
         run_action_layout.addWidget(self.single_advanced_btn)
+        self.results_toggle_btn = make_action_button("Results and log")
+        self.results_toggle_btn.setObjectName("stats_toggle_results")
+        self.results_toggle_btn.setCheckable(True)
+        self.results_toggle_btn.setToolTip("Show or hide screening results and the run log")
+        self.results_toggle_btn.toggled.connect(output_container.setVisible)
+        run_action_layout.addWidget(self.results_toggle_btn)
         run_action_layout.addStretch(1)
         setup_layout.addWidget(self.run_action_bar)
 
@@ -869,13 +867,14 @@ class StatsWindowUiMixin:
         root_splitter.setSizes([620, 200])
         self.root_splitter = root_splitter
         self.summary_output_container = output_container
+        output_container.hide()
+        self.summary_text.textChanged.connect(self._reveal_written_summary)
 
         main_layout.addWidget(root_splitter, 1)
 
         # initialize export buttons
         self._update_export_buttons()
         self._populate_conditions_panel([])
-        self._sync_summary_output_visibility()
 
     # --------------------------- actions ---------------------------
 
@@ -917,17 +916,12 @@ class StatsWindowUiMixin:
         else:
             self.pipeline_phase_label.setText("Ready")
         if is_running:
+            self.results_toggle_btn.setChecked(True)
             self.pipeline_progress_bar.setRange(0, 0)
         elif self.pipeline_progress_bar.maximum() == 0:
             self.pipeline_progress_bar.setRange(0, 100)
             self.pipeline_progress_bar.setValue(0)
 
-    def _sync_summary_output_visibility(self, *_args) -> None:
-        """Keep the shared run controls and result tabs visible in either setup tab."""
-        output = getattr(self, "summary_output_container", None)
-        action_bar = getattr(self, "run_action_bar", None)
-        if output is None:
-            return
-        output.setVisible(True)
-        if action_bar is not None:
-            action_bar.setVisible(True)
+    def _reveal_written_summary(self) -> None:
+        if not self.summary_text.document().isEmpty():
+            self.results_toggle_btn.setChecked(True)
