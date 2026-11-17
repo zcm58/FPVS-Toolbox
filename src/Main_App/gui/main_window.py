@@ -331,8 +331,9 @@ class MainWindow(QMainWindow):
 
     def _sync_window_for_current_page(self, _index: int = -1) -> None:
         welcome = self.stacked.currentWidget() is self.landing_page
-        self.menuBar().setVisible(not welcome)
-        compact = welcome or self.workspace_stack.currentWidget() is self.homeWidget
+        library = self.stacked.currentWidget() is getattr(self, "_experiment_library_page", None)
+        self.menuBar().setVisible(True)
+        compact = welcome or library or self.workspace_stack.currentWidget() is self.homeWidget
         minimum = _COMPACT_MINIMUM if compact else _WORKSPACE_MINIMUM
         if self.minimumSize() == minimum:
             return

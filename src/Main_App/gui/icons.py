@@ -12,9 +12,9 @@ from Main_App.gui.style_tokens import ACCENT_COLOR
 
 
 def application_icon() -> QIcon:
-    """Load the Toolbox logo from the source checkout or PyInstaller bundle."""
+    """Load the signal-wave icon from the source checkout or PyInstaller bundle."""
     root = Path(sys._MEIPASS) if getattr(sys, "frozen", False) else Path(__file__).resolve().parents[3]
-    path = root / "assets" / "ToolBox_Icon.ico"
+    path = root / "assets" / "experiment_library" / "wave.svg"
     icon = QIcon(str(path))
     if icon.isNull():
         raise RuntimeError(f"Cannot load the FPVS Toolbox application icon: {path}")

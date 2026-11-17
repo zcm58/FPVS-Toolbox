@@ -50,6 +50,7 @@ nav:
   - Home: index.md
   - Installing and Updating: installing-and-updating.md
   - Getting Started:
+      - Experiment Library: experiment-library.md
       - Upgrading from v2.1.2: migration-v3.md
       - Version 3 Release Notes: release-notes-v3.md
   - Tools:

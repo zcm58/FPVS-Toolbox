@@ -59,6 +59,12 @@ All paths below are under `src/`. Active imports use purpose-based packages.
 | `Main_App/diagnostics/` | Runtime audit/event-time/log routing. Repo checks belong in scripts. [Diagnostics](docs/agent/architecture/diagnostics.md) |
 | `Main_App/Shared/`, `Main_App/Performance/` | Same-object compatibility aliases only; preserve historical imports, monkeypatches, and pickle lookups without adding implementations. [Legacy boundaries](docs/agent/architecture/legacy-boundaries.md) |
 
+`projects.public_datasets` owns the anonymous OpenFPVS dataset wire contract.
+`projects.experiment_library` validates immutable archives and installs portable
+projects atomically. Its local receipts support offline reopening while preserving
+local project edits. The GUI worker/controller opens the installed root through
+the existing project workflow. See the [Library guide](docs/user/experiment-library.md).
+
 `processing.harmonic_settings` and `processing.canonical_harmonics` own shared
 versioned harmonic settings and accepted selections; former Stats modules are
 compatibility exports. Processing, Stats, LORETA, and heavy export entry points

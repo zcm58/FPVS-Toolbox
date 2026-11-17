@@ -46,6 +46,16 @@ def build_menu_bar(parent: QMainWindow) -> QMenuBar:
 
     home_action.triggered.connect(show_home)
 
+    library_action = view_menu.addAction("Experiment Library…")
+    library_action.setObjectName("actionExperimentLibrary")
+
+    def show_library() -> None:
+        from Main_App.gui.experiment_library_workflow import show_experiment_library
+
+        show_experiment_library(parent)
+
+    library_action.triggered.connect(show_library)
+
     tools_menu = menu_bar.addMenu("&Tools")
     tools_menu.setObjectName("toolsMenu")
     parent.tool_actions = {}

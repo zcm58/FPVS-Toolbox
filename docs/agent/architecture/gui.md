@@ -29,8 +29,14 @@ Primary paths:
   UI painters resolve shared tokens through `theme_color()`.
 - `src/Main_App/gui/menu_bar.py`: File, View, Tools, and Help construction.
   `file_menu.py` groups project, Settings, cache, and application actions.
-  View contains Home (Ctrl+1), Tools contains default and optional beta actions,
-  and Help links to Documentation.
+  View contains Home (Ctrl+1) and Experiment Library, including on Welcome.
+  Tools contains default and optional beta actions, and Help links to Documentation.
+- `experiment_library_page.py` presents the flat public-dataset browser. Its
+  `experiment_library_workflow.py` controller owns worker lifetimes and normal
+  guarded project handoff. `workers.experiment_library_worker` performs anonymous
+  discovery and verified installation through `projects.experiment_library`.
+  Existing managed installations remain reopenable when the public catalog is
+  unavailable. Download, verification and setup share one inline action area.
 - `src/Main_App/gui/typography.py`: canonical font family, role sizes, font
   weights, monospace font, and QSS font helpers used by the main app,
   component layer, and migrated tool windows.

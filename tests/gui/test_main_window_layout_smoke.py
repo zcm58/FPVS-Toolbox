@@ -143,7 +143,7 @@ def test_welcome_prioritizes_studio_import_and_fits_minimum_window(tmp_path: Pat
     assert win.size() == QSize(960, 520)
     assert win.windowTitle() == f"FPVS Toolbox v{main_window_module.FPVS_TOOLBOX_VERSION}"
     assert not win.findChildren(QStatusBar)
-    assert win.menuBar().isHidden()
+    assert win.menuBar().isVisibleTo(win)
 
     title = win.landing_page.findChild(QLabel, "landing_title")
     instructions = win.landing_page.findChild(QLabel, "landing_subtitle")
@@ -189,7 +189,7 @@ def test_cancelled_project_creation_returns_to_welcome(
     assert calls == [workflow_name]
     assert win.currentProject is None
     assert win.stacked.currentWidget() is win.landing_page
-    assert win.menuBar().isHidden()
+    assert win.menuBar().isVisibleTo(win)
 
 
 def test_main_window_layout_smoke(tmp_path: Path, qtbot, monkeypatch) -> None:
@@ -334,7 +334,7 @@ def test_main_window_layout_smoke(tmp_path: Path, qtbot, monkeypatch) -> None:
     assert file_actions[1] is win.actionOpenExistingProject
     assert file_actions[6] is win.actionResetProjectProcessingCache
     assert file_actions[-1] is win.exit_action
-    assert [action.text() for action in _menu(win, "viewMenu").actions()] == ["Home"]
+    assert [action.text() for action in _menu(win, "viewMenu").actions()] == ["Home", "Experiment Library…"]
 
 
 @pytest.mark.parametrize("enable_beta", [False, True])
@@ -403,7 +403,7 @@ def test_main_window_has_toolbox_logo_and_no_toolbar_gap(tmp_path: Path, qtbot, 
     assert not win.findChildren(QToolBar)
     assert not win.windowIcon().isNull()
     actual_logo = win.windowIcon().pixmap(16, 16)
-    expected_logo = QIcon(str(Path(__file__).resolve().parents[2] / "assets" / "ToolBox_Icon.ico")).pixmap(16, 16)
+    expected_logo = QIcon(str(Path(__file__).resolve().parents[2] / "assets" / "experiment_library" / "wave.svg")).pixmap(16, 16)
     assert not actual_logo.isNull()
     assert actual_logo.toImage() == expected_logo.toImage()
 
@@ -415,7 +415,7 @@ def test_main_window_has_toolbox_logo_and_no_toolbar_gap(tmp_path: Path, qtbot, 
 
 def test_view_menu_returns_to_home(tmp_path: Path, qtbot, monkeypatch) -> None:
     win = _build_window(tmp_path, qtbot, monkeypatch)
-    assert win.menuBar().isHidden()
+    assert win.menuBar().isVisibleTo(win)
     win.open_settings_window()
     assert win.workspace_stack.currentWidget() is win._settings_page
     assert win.menuBar().isVisibleTo(win)
@@ -427,7 +427,7 @@ def test_view_menu_returns_to_home(tmp_path: Path, qtbot, monkeypatch) -> None:
     assert win.workspace_stack.currentWidget() is win.homeWidget
     assert win.menuBar().isVisibleTo(win)
     win.stacked.setCurrentWidget(win.landing_page)
-    assert win.menuBar().isHidden()
+    assert win.menuBar().isVisibleTo(win)
 
 
 def test_workspace_menu_paints_slate_and_readable_labels(
