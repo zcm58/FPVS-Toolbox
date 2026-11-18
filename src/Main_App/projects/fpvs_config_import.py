@@ -6,7 +6,7 @@ import hashlib
 import json
 import re
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -82,6 +82,20 @@ def read_fpvs_config(path: Path) -> FPVSConfigImport:
     if not isinstance(payload, Mapping):
         raise FPVSConfigImportError("FPVS config must contain a JSON object.")
 
+    if payload.get("format") == "fpvs-study-handoff":
+        from Main_App.projects.studio_cohort import validate_study_handoff
+
+        try:
+            setup, study = validate_study_handoff(payload)
+        except (KeyError, AttributeError, TypeError) as exc:
+            raise FPVSConfigImportError("Invalid visit or setup in the Studio study roster.") from exc
+        imported = _import_setup(setup, config_path, source_bytes)
+        return replace(imported, project_title=study["project_title"], provenance=dict(study))
+    return _import_setup(payload, config_path, source_bytes)
+
+
+def _import_setup(payload: Mapping[str, Any], config_path: Path, source_bytes: bytes) -> FPVSConfigImport:
+    """Apply the same scientific gates to historical configs and captured study setups."""
     try:
         payload = normalize_studio_handoff(payload)
     except ValueError as exc:
@@ -149,10 +163,12 @@ def read_fpvs_config(path: Path) -> FPVSConfigImport:
     )
 
 
-def create_project_from_fpvs_config(projects_root: Path, config_path: Path) -> Project:
+def create_project_from_fpvs_config(projects_root: Path, config_path: Path, imported: FPVSConfigImport | None = None) -> Project:
     """Create and save a Toolbox project from the importable Studio config subset."""
 
-    imported = read_fpvs_config(config_path)
+    imported = imported or read_fpvs_config(config_path)
+    if imported.provenance.get("format") == "fpvs-study-handoff":
+        raise FPVSConfigImportError("Review the study roster and select its recordings before creating a project.")
     projects_root = Path(projects_root).resolve()
     projects_root.mkdir(parents=True, exist_ok=True)
     project_root = _unique_project_root(projects_root, imported.project_title)

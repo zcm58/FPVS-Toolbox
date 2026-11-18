@@ -987,6 +987,17 @@ def load_project_dataset_index(dataset_path: str | Path) -> ProjectDatasetIndex:
             record.condition.casefold(),
         ) in excluded_recording_pairs
 
+    from Main_App.projects.studio_cohort import selected_recording_ids
+    selected = selected_recording_ids(manifest_view)
+    if selected is not None:
+        all_records = tuple(record for record in all_records if record.recording_id in selected)
+        recordings = {key: item for key, item in recordings.items() if key in selected}
+        people = {item.participant_id for item in recordings.values()}
+        visits = {item.session_id for item in recordings.values()}
+        source_ids = {item.source_id for item in recordings.values()}
+        participants = {key: item for key, item in participants.items() if key in people}
+        sessions = {key: item for key, item in sessions.items() if key in visits}
+        recording_sources = {key: item for key, item in recording_sources.items() if key in source_ids}
     records = tuple(
         record
         for record in all_records

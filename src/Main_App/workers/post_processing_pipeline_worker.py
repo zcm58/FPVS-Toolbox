@@ -1190,6 +1190,13 @@ class PostProcessingPipelineWorker(QObject):
                     self._selection_fingerprint,
                     archived_path=self._artifact_archives.get(step.name),
                 )
+                if step.name == "analysis_ready_full_audit":
+                    from Main_App.projects.studio_cohort import record_current_result
+                    try:
+                        record_current_result(project_root, target)
+                    except PIPELINE_STEP_EXCEPTIONS as exc:
+                        mark_artifact_failed(project_root, step.name, target, self._selection_fingerprint, str(exc))
+                        raise
             else:
                 mark_artifact_failed(
                     project_root,

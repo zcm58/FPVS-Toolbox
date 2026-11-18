@@ -495,8 +495,10 @@ def _raw_paths_for_project_open(project: Any) -> list[Path]:
     if getattr(project, "groups_locked", False):
         context = project_recording_context(project)
         if context.is_repeated_session:
+            from Main_App.projects.studio_cohort import selected_recording_ids
+            selected = selected_recording_ids(getattr(project, "manifest", None))
             return [recording.raw_file for recording in context.recordings
-                    if recording.raw_file.is_file()]
+                    if (selected is None or recording.recording_id in selected) and recording.raw_file.is_file()]
     return prepare_batch_files(project)
 
 
@@ -535,6 +537,11 @@ def load_project(
         raw_discovery_failed = True
         file_paths = []
     host.data_paths = [str(p) for p in file_paths]
+    study = getattr(project, "manifest", {}).get("tools", {}).get("studio_cohort", {})
+    if not study.get("current_result") and any(r.get("previous_result") for r in study.get("history", ())):
+        message = "Previous results cover the earlier cohort. Run Processing and analysis to produce a current result."
+        host.log(message)
+        host.statusBar().showMessage(message)
 
     context = project_group_context(project)
     sync_input_folder_display(host)

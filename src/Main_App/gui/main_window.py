@@ -899,6 +899,10 @@ class MainWindow(QMainWindow):
         processing_inputs.set_controls_enabled(self, enabled)
 
     def closeEvent(self, event: QCloseEvent) -> None:
+        if getattr(getattr(self, "_results_sharing_dialog", None), "thread", None) is not None:
+            QMessageBox.information(self, "Sharing study results", "Wait for the OpenFPVS transfer to finish before closing Toolbox.")
+            event.ignore()
+            return
         if getattr(self, "_qc_source_prefetch_bridge", None) is not None:
             QMessageBox.information(
                 self,

@@ -255,7 +255,9 @@ def normalize_project_recording_sources(
         if raw_folder is None or not str(raw_folder).strip():
             raise RecordingConfigurationError(f"Recording source '{source_id}' requires a nonblank raw_input_folder.")
         raw_input_folder = _resolve_project_path(root, raw_folder)
-        if raw_input_folder in used_folders:
+        reviewed = raw_info.get("reviewed_files_only") is True
+        previous = used_folders.get(raw_input_folder)
+        if previous and not (reviewed and sources[previous].get("reviewed_files_only")):
             raise RecordingConfigurationError(
                 f"Recording sources '{used_folders[raw_input_folder]}' and "
                 f"'{source_id}' use the same raw_input_folder '{raw_input_folder}'."
@@ -271,6 +273,8 @@ def normalize_project_recording_sources(
             "session_id": session_id,
             "raw_input_folder": raw_input_folder,
         }
+        if reviewed:
+            sources[source_id]["reviewed_files_only"] = True
         used_ids[source_key] = source_id
         used_folders[raw_input_folder] = source_id
         used_cells[cell] = source_id
@@ -363,7 +367,9 @@ def normalize_project_recordings(
         if not is_eeg_recording_file(raw_file):
             raise RecordingConfigurationError(f"Recording '{recording_id}' raw_file must be a supported EEG recording (.bdf, .vhdr, .bvrh): {raw_file}")
         source_root = Path(source["raw_input_folder"]).resolve(strict=False)
-        if raw_file.parent != source_root:
+        if raw_file.parent != source_root and not (
+            source.get("reviewed_files_only") and raw_file.is_relative_to(source_root)
+        ):
             raise RecordingConfigurationError(
                 f"Recording '{recording_id}' raw_file is outside its declared source "
                 f"'{source_id}' raw_input_folder: {raw_file}"

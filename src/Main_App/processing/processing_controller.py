@@ -11,6 +11,7 @@ from PySide6.QtWidgets import QFileDialog, QMessageBox
 
 from Main_App.io.file_filters import is_eeg_recording_file
 from Main_App.projects.grouping import project_group_context
+from Main_App.projects.studio_cohort import selected_recording_ids
 from Main_App.projects.recordings import (
     ProjectRecordingContext,
     RecordingConfigurationError,
@@ -156,6 +157,13 @@ def validate_repeated_recording_sources_for_processing(
 
     context = _recording_context(project)
     if not context.is_repeated_session:
+        return None
+    reviewed = selected_recording_ids(getattr(project, "manifest", None))
+    if reviewed is not None:
+        for info in discovered_files:
+            expected = raw_file_info_for_path(project, info.path)
+            if info != expected:
+                raise ValueError("Processing inputs disagree with the reviewed Studio roster.")
         return None
     source_files: dict[str, list[Path]] = {
         source.source_id: [] for source in context.sources
@@ -545,6 +553,17 @@ def raw_file_info_for_path(project: "Project", file_path: Path) -> RawFileInfo:
         raise ValueError(f"Selected file is not a supported EEG recording: {selected_path}")
 
     recording_context = _recording_context(project)
+    reviewed = selected_recording_ids(getattr(project, "manifest", None))
+    if reviewed is not None:
+        recording = recording_context.recording_for_raw_path(selected_path)
+        if recording.recording_id not in reviewed:
+            raise ValueError("This recording is outside the reviewed Studio cohort or version.")
+        state = project.manifest["tools"]["studio_cohort"]
+        row = next(r for r in state["visits"].values() if r.get("recording_id") == recording.recording_id)
+        stat = selected_path.stat()
+        if [stat.st_size, stat.st_mtime_ns] != row["file_identity"]:
+            raise ValueError(f"Recording {selected_path.name} changed after review. Review the study handoff again.")
+        return _recording_info_for_source_path(recording_context, recording_context.source(recording.source_id), selected_path)
     if recording_context.is_repeated_session:
         source = _recording_source_for_path(recording_context, selected_path)
         if source is None:
@@ -665,6 +684,9 @@ def _discover_recording_files(
     *,
     allow_unregistered: bool = False,
 ) -> List[RawFileInfo]:
+    reviewed = selected_recording_ids(getattr(project, "manifest", None))
+    if reviewed is not None:
+        return [raw_file_info_for_path(project, context.recording(key).raw_file) for key in sorted(reviewed)]
     if not context.sessions:
         raise ValueError(
             "Repeated-session project has no declared sessions."

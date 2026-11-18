@@ -20,6 +20,23 @@ def build_last_run_panel(host, parent: QWidget) -> QWidget:
     host.last_run_label.setWordWrap(True)
     host.last_run_label.setAccessibleName("Last processing outcome")
     layout.addWidget(host.last_run_label)
+    host.last_run_results_row = QWidget(panel)
+    results = QHBoxLayout(host.last_run_results_row)
+    results.setContentsMargins(0, 0, 0, 0)
+    host.last_run_excel_button = make_action_button("Open Excel Results", compact=True, parent=panel)
+    host.last_run_excel_button.clicked.connect(lambda: _open_batch_workbook(host))
+    results.addWidget(host.last_run_excel_button)
+    host.last_run_share_button = make_action_button("Share study results…", compact=True, parent=panel)
+    host.last_run_share_button.clicked.connect(lambda: _share_batch_results(host))
+    results.addWidget(host.last_run_share_button)
+    for action in (*host.shell_actions.default_tools, *host.shell_actions.beta_tools):
+        if action.objectName() in {"btn_graphs", "btn_publication_maps"}:
+            button = make_action_button(action.text(), compact=True, parent=panel)
+            button.setObjectName(f"last_run_{action.objectName()}")
+            button.clicked.connect(action.trigger)
+            results.addWidget(button)
+    results.addStretch(1)
+    layout.addWidget(host.last_run_results_row)
     actions = QHBoxLayout()
     for text, attr, issue in (("Open Output Folder", "last_run_output_button", False),
                               ("Review Issues", "last_run_issues_button", True)):
@@ -46,7 +63,47 @@ def present_last_run(host, *, success: bool, cancelled: bool = False) -> None:
     host.last_run_output_button.setEnabled(bool(folder) and Path(folder).is_dir())
     host.last_run_issues_button.setVisible(bool(reason or outcome.failed or outcome.excluded
                                                or outcome.interrupted or outcome.condition_warnings))
+    is_batch = getattr(host, "_processing_run_mode", "") == "Batch"
+    has_results = bool(outcome.completed or outcome.skipped)
+    host.last_run_results_row.setVisible(is_batch and has_results and not cancelled)
+    path = getattr(host, "_last_run_excel_path", "")
+    has_workbook = bool(path and Path(path).is_file())
+    host.last_run_excel_button.setEnabled(has_workbook)
+    project = getattr(host, "currentProject", None)
+    tools = getattr(project, "manifest", {}).get("tools", {})
+    cohort = tools.get("studio_cohort", {})
+    host.last_run_share_button.setVisible(bool(has_workbook and cohort.get("website_study")))
+    host.last_run_excel_button.setToolTip(
+        str(path) if has_workbook else "Available when the full-audit workbook is generated."
+    )
     panel.show()
+
+
+def _share_batch_results(host) -> None:
+    from Main_App.gui.reporting_dialog import open_results_sharing
+
+    open_results_sharing(host)
+
+
+def _open_batch_workbook(host) -> None:
+    from Main_App.processing.artifact_freshness import (
+        ANALYSIS_READY_FULL_AUDIT_ARTIFACT,
+        StalePostProcessingArtifactError,
+        require_current_artifact,
+    )
+
+    path = getattr(host, "_last_run_excel_path", "")
+    project = getattr(host, "currentProject", None)
+    if not path or project is None:
+        return
+    try:
+        require_current_artifact(project.project_root, ANALYSIS_READY_FULL_AUDIT_ARTIFACT, path)
+        if open_path_in_file_manager(path):
+            return
+        raise OSError("No application could open this workbook.")
+    except (OSError, ValueError, StalePostProcessingArtifactError) as exc:
+        host.log(f"Could not open full-audit Excel results: {exc}")
+        host.last_run_label.setText(f"Could not open Excel results: {exc}")
 
 
 def open_outcome_path(host, *, issue: bool) -> None:

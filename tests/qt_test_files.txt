@@ -33,6 +33,7 @@ tests/gui/test_sensitivity_analysis_gui.py
 tests/gui/test_settings_and_status.py
 tests/gui/test_sidebar_vector_icons.py
 tests/gui/test_signal_review_panel_qt.py
+tests/gui/test_studio_cohort_review_qt.py
 tests/gui/test_toolbox_cache_dialog_qt.py
 tests/gui/test_trigger_maps_dialog_qt.py
 tests/gui/test_ui_components_smoke.py

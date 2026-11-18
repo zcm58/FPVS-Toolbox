@@ -2145,6 +2145,8 @@ def record_processing_results(
             **_recording_identity_payload(state.info),
             "group_id": state.info.group,
             **raw_meta,
+            "native_sampling_rate_hz": (audit.get("source_analysis_span_plan") or {}).get("source_grid", {}).get("sfreq_hz"),
+            "analysis_sampling_rate_hz": (audit.get("realized_analysis_span_plan") or {}).get("target_grid", {}).get("sfreq_hz"),
             "processing_fingerprint_version": PROCESSING_FINGERPRINT_VERSION,
             "processing_fingerprint": plan.fingerprint,
             "preprocessing_qc_settings": dict(plan.preprocessing_qc_settings) or _preprocessing_qc_settings_snapshot({}),

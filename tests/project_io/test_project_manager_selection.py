@@ -15,7 +15,7 @@ from Main_App.projects.grouping import (
 )
 from Main_App.projects.fpvs_config_import import (
     CONFIG_SUFFIX, FPVSConfigImportError, create_project_from_fpvs_config,
-    fpvs_config_import_message,
+    fpvs_config_import_message, read_fpvs_config,
 )
 from Main_App.projects.hardware import confirm_hardware_selection
 from Main_App.projects.preprocessing_settings import new_project_preprocessing_settings
@@ -44,6 +44,8 @@ def workflow() -> dict:
         "confirm_hardware_selection": confirm_hardware_selection,
         "CONFIG_SUFFIX": CONFIG_SUFFIX, "FPVSConfigImportError": FPVSConfigImportError,
         "fpvs_config_import_message": fpvs_config_import_message,
+        "read_fpvs_config": read_fpvs_config,
+        "_run_source_registration_work": lambda _host, operation, _label: operation(),
         "choose_new_project_hardware": lambda _host, settings: settings,
         "logger": logging.getLogger("project_manager_test"),
         "FLAT_PROJECT_STRUCTURE": "flat", "REPEATED_SESSION_PROJECT_STRUCTURE": "repeated",
@@ -100,6 +102,7 @@ def test_studio_import_hardware_save_error_keeps_current_project(workflow, tmp_p
 
     imported_project = SimpleNamespace(preprocessing={}, update_preprocessing=lambda _settings: None, save=fail_save)
     workflow["create_project_from_fpvs_config"] = lambda *_: imported_project
+    workflow["read_fpvs_config"] = lambda _path: SimpleNamespace(provenance={})
     assert workflow["new_project_from_fpvs_config"](host) is None
     assert host.currentProject is current_project
     assert loaded == []

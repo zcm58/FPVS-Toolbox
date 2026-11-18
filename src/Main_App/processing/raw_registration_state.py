@@ -83,6 +83,7 @@ def _registered_ids(manifest: Mapping) -> tuple[str, ...]:
 def registration_tool_updates(
     project_root: str | Path,
     added_processing_ids: Sequence[str],
+    *, revised_cohort: bool = False,
 ) -> dict:
     """Return replacement tool namespaces; the append transaction owns the write."""
     from Main_App.processing.artifact_freshness import (
@@ -96,13 +97,13 @@ def registration_tool_updates(
     manifest = _read_manifest(root)
     if not manifest:
         raise ValueError("Raw registration requires an existing project manifest.")
-    if isinstance(added_processing_ids, (str, bytes)) or not added_processing_ids:
+    if isinstance(added_processing_ids, (str, bytes)) or (not added_processing_ids and not revised_cohort):
         raise ValueError("At least one new processing identity is required.")
     additions = list(added_processing_ids)
     if any(not isinstance(item, str) or not item or item != item.strip() for item in additions):
         raise ValueError("New processing identities must be nonblank canonical strings.")
     previous = _registered_ids(manifest)
-    identities = [*previous, *additions]
+    identities = additions if revised_cohort else [*previous, *additions]
     by_fold: dict[str, str] = {}
     for identity in identities:
         existing = by_fold.setdefault(identity.casefold(), identity)
@@ -116,8 +117,10 @@ def registration_tool_updates(
         "version": REGISTRATION_STATE_VERSION,
         "processing_ids": ids,
         "registration_fingerprint": _fingerprint(ids),
-        "completed": _mapping(_mapping(processing.get(REGISTRATION_STATE_KEY)).get("completed")),
+        "completed": {} if revised_cohort else _mapping(_mapping(processing.get(REGISTRATION_STATE_KEY)).get("completed")),
     }
+    if revised_cohort and not ids:
+        processing.pop(REGISTRATION_STATE_KEY)
     provenance = processing.get("full_fft_provenance")
     if isinstance(provenance, Mapping):
         processing["full_fft_provenance"] = {

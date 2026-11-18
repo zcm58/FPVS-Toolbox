@@ -142,6 +142,8 @@ tests = [
   "tests/project_io/test_studio_acquisition_evidence.py",
   "tests/project_io/test_studio_handoff.py",
   "tests/project_io/test_fpvs_config_import.py",
+  "tests/project_io/test_studio_cohort.py",
+  "tests/project_io/test_study_result_sharing.py",
   "tests/project_io/test_frequency_protocol.py",
   "tests/project_io/test_condition_trigger_maps.py",
   "tests/project_io/test_mapped_dataset_catalog.py",
@@ -173,7 +175,7 @@ tests = [
   "tests/project_io/test_settings_paths.py",
   "tests/settings/test_roi_preset_settings.py",
 ]
-include = ["src/Main_App/projects/**", "src/Main_App/io/**", "src/Main_App/Shared/settings_paths.py", "src/Main_App/settings/**", "src/Main_App/gui/project_workflows.py", "src/Main_App/gui/tool_workflows.py", "tests/project_io/**"]
+include = ["src/Main_App/projects/**", "src/Main_App/io/**", "src/Main_App/reporting/**", "src/Main_App/exports/reporting_csv.py", "src/Main_App/Shared/settings_paths.py", "src/Main_App/settings/**", "src/Main_App/gui/project_workflows.py", "src/Main_App/gui/tool_workflows.py", "src/Main_App/gui/reporting_dialog.py", "tests/project_io/**"]
 manual_smoke = []
 
 [scopes.processing]

@@ -38,14 +38,21 @@ download the lab-specific data and combine them manually in their external
 tools. Tutorials belong on the OpenFPVS website, with YouTube tutorials
 planned. Keep instructions needed to complete a desktop action beside it.
 
+**Share study results…** is available for a reviewed cohort with a verified
+OpenFPVS destination. An analyst connects the lab computer and explicitly
+shares the current full-audit release. The upload preserves canonical ROI
+values, the processed scope, reviewed exclusions and visits awaiting EEG.
+Offline retries use the same revision. [Reporting ownership and verification](../../../src/Main_App/reporting/AGENTS.md)
+
 ## Current source and evidence
 
 - **Studio configuration import.** **Import FPVS Studio Config…** creates a
   local project from the supported protocol and markers and retains their
   provenance. A cohort with one compatible protocol, hardware setup and
   recording per participant can already use one setup config, one EEG folder
-  and Batch. A completed-session config adds evidence for one visit. Neither
-  current format supplies the full study roster. [Accepted formats, scientific subset and recording review](../architecture/project-io.md#studio-config-handoff)
+  and Batch. A completed-session config adds evidence for one visit. A
+  whole-study export supplies the roster for an explicit review and can update
+  the same analysis project. [Accepted formats, scientific subset and recording review](../architecture/project-io.md#studio-config-handoff)
 - **OpenFPVS Library.** Published data-only projects can be downloaded without
   an account and reopened locally. Selecting a shared study or publishing a
   reviewed analysis snapshot from Toolbox are future desktop workflows.
@@ -95,7 +102,9 @@ The [desktop workflow guide](../architecture/gui-backend.md#toolbox-workflow-own
 owns the regression cases for repeated sessions, Sequence Figure, Individual
 Detectability and reprocessing preflight.
 
-## Future product goals
+<a id="future-product-goals"></a>
+
+## Cross-app workflow and release direction
 
 For the coordinated desktop changes, establish Studio's study lifecycle and
 export first, then verify Toolbox against that producer. Record additional
@@ -104,12 +113,14 @@ feature candidates after the two apps agree on the workflow.
 ### Whole-study handoff after collection
 
 After the last participant, the researcher marks collection complete in
-Studio and exports one file for the study. Studio will organize the completed
-project locally and update collection status for a linked OpenFPVS study.
+Studio and exports one file for the study. Studio organizes the completed
+project locally. Its separately authorized website connection owns linked
+collection status.
 Toolbox processing and release of analysis-ready outputs have their own
 completion state. Local import and processing remain available independently
 of an OpenFPVS connection.
 
+The maintained Studio and Toolbox sources implement this offline workflow.
 The analyst imports the file once to create one Toolbox project, then selects
 the raw EEG folder once. The recordings stay outside the handoff. Toolbox uses
 the participant and visit roster, protocol revisions and retained evidence
@@ -163,9 +174,10 @@ cohort after processing and the affected analyses run again. The analyst
 reruns official analyses externally. Reuse per-recording work
 where its inputs, settings and outputs still pass the existing checks.
 
-Today, confirming new raw recordings already stages them for processing
-and invalidates dependent outputs. The planned roster comparison and notice
-extend this to a revised Studio handoff. [Current registration and release rules](../architecture/project-io.md#multi-group-processing-foundation)
+Confirming new raw recordings stages them for processing and invalidates dependent
+outputs. Importing a revised Studio handoff compares both rosters before confirmation.
+After a roster change Toolbox shows a notice and retains the prior cohort's result.
+[Current registration and release rules](../architecture/project-io.md#multi-group-processing-foundation)
 
 Verify with a synthetic cohort containing a repeat visit, a missing EEG file
 and a protocol revision. The review must identify the affected visits before
@@ -178,11 +190,13 @@ configs across independently released apps. [Implementation and compatibility sc
 
 ### After Batch processing
 
-Show the number of files processed and provide a direct action to open the
-current Excel results. Offer **SNR Plots** and **Scalp Maps** as optional next
-steps using their existing access, beta and scientific eligibility checks.
-Today the run summary distinguishes completed, reused, excluded and failed
-recordings, with output-folder and issue-review actions. The
+The Last run panel counts completed, reused, excluded, failed and unfinished
+files separately. After Batch, **Open Excel Results** opens the full-audit
+workbook produced by the run after verifying its current selection fingerprint.
+**SNR Plots** and **Scalp Maps** reuse the Tools commands, including the Scalp
+Maps beta setting and scientific eligibility checks. Output-folder and
+issue-review actions remain available. **Share study results** opens the review
+for a linked Studio study with a full-audit workbook. The
 [full-audit workbook](../architecture/post-processing-export-contract.md#full-audit-analysis-ready-workbook)
 already supports external statistics when its release requirements are met.
 

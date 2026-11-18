@@ -689,6 +689,7 @@ def _start_post_processing_pipeline_after_processing(
 
     def _handle_finished(result: dict) -> None:
         pending_qc_report: dict | None = None
+        host._last_run_excel_path = ""
         try:
             source_maps_attempted, source_maps_succeeded = (
                 _post_processing_source_map_outcome(result)
@@ -704,6 +705,8 @@ def _start_post_processing_pipeline_after_processing(
                         continue
                     message = str(step.get("message") or "").strip()
                     path = str(step.get("path") or "").strip()
+                    if step.get("name") == "analysis_ready_full_audit" and step.get("ok"):
+                        host._last_run_excel_path = path
                     if not message and not path:
                         continue
                     level = (
@@ -1445,6 +1448,7 @@ def start_processing(host: Any, *, log: logging.Logger = logger) -> None:
                 level=logging.INFO,
             )
         host._last_run_outcome = None
+        host._last_run_excel_path = ""
         host._last_run_issue_report = ""
         panel = getattr(host, "last_run_panel", None)
         if panel is not None:

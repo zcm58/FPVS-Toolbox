@@ -315,7 +315,7 @@ existing legacy top-level and participant-map electrode imports retain their
 manual-mode behavior.
 
 From Welcome, use **Create New Project… → Import FPVS Studio Config…**. The
-same import is available from **File → Import FPVS Studio Config…**. It asks for
+same import is available from **File → Import FPVS Studio Config…**. For setup and completed-session files it asks for
 hardware and then the raw EEG folder. It does not import a Studio project folder,
 merge sessions into an existing project, or associate EEG files automatically.
 The completed-import message identifies the source participant/visit and recorded
@@ -323,9 +323,9 @@ electrode choices that still require review against the selected recording.
 Each current setup or completed-session import creates a new project. Batch
 processing can use all eligible recordings in the selected folder with one
 supported setup config. A completed-session config adds evidence for its
-named visit. The planned
+named visit. The
 [whole-study handoff](../product-specs/fpvs-toolbox.md#whole-study-handoff-after-collection)
-will add a cohort roster and a single recording review. Guided processing
+uses a separate versioned envelope and reviews the cohort in one operation. Guided processing
 setup operates on the project created by the current importer.
 
 Paired producer fixtures and consumer tests establish source compatibility.
@@ -333,7 +333,26 @@ Visible GUI acceptance, installed-release compatibility and physical recording
 qualification remain separate; see the
 [handoff plan](../exec-plans/active/studio-toolbox-handoff.md).
 
-### Planned whole-study revision import
+<a id="planned-whole-study-revision-import"></a>
+
+### Whole-study revision import
+
+`Main_App.projects.studio_cohort` reads `fpvs-study-handoff` revision 1,
+checks the roster digest and monotonic export sequence, and compares visits
+with the externally selected raw folder. `gui.studio_cohort_review` owns
+confirmation and exception resolution. **File → Review Studio Cohort…**
+reopens the saved evidence without asking for the source file. The
+`tools.studio_cohort` manifest namespace records the reviewed membership,
+version choice and older receipts. Canonical recording IDs identify
+processing inputs and downstream workbooks. Explicitly reviewed source
+folders can contain several visits. Filename-based registration retains its
+existing distinct group/visit-folder rules.
+
+Revisions preserve canonical groups, participant source identities, visit labels,
+recording-source assignments and recorded timing metadata. New participants in
+a project with multiple groups require an explicit group assignment. Batch and
+the dataset index use the reviewed selection. The repeated-session Stats reader
+also verifies the released workbook hash, roster, processing run and QC release.
 
 For a revised whole-study handoff, verify the stable Studio study identity
 against the source retained at first import. A matching title or protocol

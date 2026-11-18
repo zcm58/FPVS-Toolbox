@@ -35,7 +35,9 @@ Primary paths:
   Like Studio, it uses an ordinary Qt menu bar with NoFocus and no menu QSS
   overrides. `theme.py` retains the platform style before applying workspace
   Fusion, then applies it to the menu bar and its popups for native hover,
-  transitions and keyboard feedback.
+  transitions and keyboard feedback. With Qt’s Windows 11 default, use its
+  native WindowsVista menu style inside Fusion. Attaching Windows11 menus to
+  Fusion crashes during normal Windows startup on Qt 6.9.1.
   `file_menu.py` groups project, Settings, cache, and application actions,
   including About. View contains Home (Ctrl+1) and Experiment Library, including
   on Welcome. Tools contains default and optional beta actions.
@@ -660,9 +662,10 @@ requests a recordings folder, and opens Home when it succeeds.
 Home groups recording selection, readiness, Start Processing and View Log.
 Below the form it shows persisted processing history and the current session's
 run outcome, with **Open Output Folder** and **Review Issues** actions. Each
-tool checks its inputs through the existing Tools menu actions. The planned
+tool checks its inputs through the existing Tools menu actions. The
 [post-Batch actions](../product-specs/fpvs-toolbox.md#after-batch-processing)
-should reuse those commands and open the current, successfully exported workbook.
+reuse those commands. `run_outcome.py` opens the workbook reported by the
+post-processing worker after verifying its active artifact fingerprint.
 
 Processing Activity puts progress above the run details and file table. Its
 post-processing and QC states keep phase labels and review instructions where

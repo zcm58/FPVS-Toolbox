@@ -28,6 +28,7 @@ from Main_App.projects.fpvs_config_import import (
     FPVSConfigImportError,
     create_project_from_fpvs_config,
     fpvs_config_import_message,
+    read_fpvs_config,
 )
 from Main_App.projects.grouping import (
     GroupConfigurationError,
@@ -976,11 +977,19 @@ def new_project_from_fpvs_config(self, parent: QWidget | None = None) -> Project
     if not path:
         return None
 
+    try:
+        imported = _run_source_registration_work(parent, lambda: read_fpvs_config(Path(path)), "Reading Studio handoff…")
+        if imported.provenance.get("format") == "fpvs-study-handoff":
+            from Main_App.gui.studio_cohort_review import review_imported_study
+            return review_imported_study(self, parent, root, imported)
+    except (OSError, ValueError, RuntimeError) as exc:
+        QMessageBox.critical(parent, "Import Failed", str(exc))
+        return None
     hardware_settings = choose_new_project_hardware(parent, new_project_preprocessing_settings())
     if hardware_settings is None:
         return None
     try:
-        project = create_project_from_fpvs_config(root, Path(path))
+        project = create_project_from_fpvs_config(root, Path(path), imported)
         project.update_preprocessing(confirm_hardware_selection(
             project.preprocessing, hardware_settings["hardware_platform"], confirmed_change=True,
         ))
