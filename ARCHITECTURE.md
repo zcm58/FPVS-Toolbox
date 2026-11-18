@@ -14,33 +14,18 @@ processing pipeline; analysis and visualization tools consume its outputs.
 Windows installers are the release deliverable; shared source also supports
 CachyOS. Release tags and acceptance receipts define shipped behavior.
 
-Current acquisition routes cover confirmed ActiveTwo64, ActiveThree, Brain
-Products, and Unicorn within the format and qualification limits of the
-[loading contract](docs/agent/architecture/eeg-loading-contract.md#supported-project-routes).
-Production reads enter
-`Main_App.io.bids_import` / `bids_loader` through `io.load_utils`, producing
-MNE Raw and an immutable `io.recording_contract.RecordingContract`.
-`io.acquisition_metadata` resolves hardware defaults and qualified capabilities;
-`io.geometry_metadata` owns geometry identity. Numerical reference, filtering,
-resampling, interpolation, and QC stay in `processing`; they do not dispatch
-native readers or resolve manufacturers.
+Confirmed ActiveTwo64, ActiveThree, Brain Products and Unicorn recordings use
+project-local admission through `Main_App.io.load_utils`. The [loading contract](docs/agent/architecture/eeg-loading-contract.md#supported-project-routes)
+owns the supported formats, sample preservation and qualification limits.
+Numerical stages consume MNE Raw and an immutable recording contract.
+[Versioned method slots](docs/agent/architecture/pipeline-methods.md) have one
+production method each. Optional guided setup saves choices per project.
 
-BDF/BVCDF signal bytes are preserved. Unicorn permits only the reviewed
-unit-header correction, retains originals and its receipt, and stays at eight
-scalp channels, 250 Hz, average reference, with no interpolation or calibrated
-spatial QC. BVRF uses a labeled lossless FIF64 derivative, not standard raw
-EEG-BIDS. `io.pipeline_events` carries canonical sample events through preflight,
-processing, and cache reload. See the [loading contract](docs/agent/architecture/eeg-loading-contract.md).
-
-`processing.pipeline_plan` owns fixed versioned method slots and persisted
-selections; each slot currently has one production method. Implementations
-remain at their numerical owners and defaults preserve historical fingerprints.
-Optional guided setup uses `projects.pipeline_setup` for the detached draft,
-`gui.pipeline_setup_dialog` for worker-backed saving, and
-`gui.pipeline_setup_workflow` for launch guards. Alternative methods/selectors
-and complete Studio interoperability remain future work. See
-[method contracts](docs/agent/architecture/pipeline-methods.md) and the
-[current-state/future roadmap](docs/agent/architecture/hardware-pipeline-studio-roadmap.md).
+Studio exports protocol settings. Toolbox imports the supported subset into
+a new project and retains provenance. Operators choose the hardware and EEG
+recordings. The [handoff contract](docs/agent/architecture/project-io.md#studio-config-handoff)
+owns the consumer format and identity rules. The [roadmap](docs/agent/architecture/hardware-pipeline-studio-roadmap.md)
+tracks fuller interoperability and additional methods.
 
 ## Runtime Ownership
 
@@ -92,21 +77,6 @@ Tools under `src/Tools/` open through the Main App GUI. Read their scoped
 | Free Harmonic Clustering | GUI-neutral preparation/inference/exports with a thin project-bound workspace. Uses original FullFFT and processing-owned provenance, never the standard selected harmonic list or Summed BCA. [Tool architecture](src/Tools/Free_Harmonic_Clustering/ARCHITECTURE.md) |
 | LORETA Visualizer | Renderer/meshes/payload adapters consume prepared values. Existing L2-MNE/eLORETA calculations stay isolated in `source_producers/`; never bundle fsaverage. [Tool architecture](src/Tools/LORETA_Visualizer/ARCHITECTURE.md) |
 
-## Boundaries
-
-- Preserve locked preprocessing order, harmonic-selection profiles, fingerprints,
-  formats, and project workflows under root `AGENTS.md` and their focused contracts.
-- GUI code owns widgets/signals; long work runs in workers, which never touch
-  widgets. Prefer one portable implementation and isolate necessary OS behavior.
-- Project I/O uses the opened `Project.project_root`; downstream discovery uses
-  the public `Main_App.projects` index. See [Project I/O](docs/agent/architecture/project-io.md).
-- `Main_App/Legacy_App`, `Main_App/PySide6_App`, and `Tools/SourceLocalization`
-  are retired; do not recreate them or import quarantine implementations.
-  Preserve the ignored root `.fpvs_cache` MNE/fsaverage dependency cache.
-- `src/Standalone_Scripts/` is opt-in: no listing, search, reading, execution,
-  import, edits, or precedent without explicit scope/approval. Optional quarantine
-  and smoke directories need not exist; do not create them to satisfy a map.
-
 ## Repository Support
 
 | Path | Role |
@@ -119,11 +89,11 @@ Tools under `src/Tools/` open through the Main App GUI. Read their scoped
 | `docs/agent/` | [Agent knowledge base](docs/agent/README.md) for internal engineering guidance. |
 | `.github/workflows/` | Source and packaging CI. |
 
+Optional quarantine and smoke directories may be absent. Do not create them
+solely to satisfy an ownership map.
+
 ## Verification Strategy
 
-Run the relevant focused scope, then the lightweight repo precommit gate.
-The full suite and Qt execution remain in CI by default; local GUI changes need non-GUI
-checks and a documented visible smoke path. Never run local offscreen Qt.
-[Test selection](docs/agent/quality/test-selection.md) owns scope routing;
-[verification gates](docs/agent/quality/verification-gates.md) owns commands,
-documentation-only checks, CI behavior, and failure reporting.
+[Test selection](docs/agent/quality/test-selection.md#scope-map) routes each
+feature to its checks. [Verification gates](docs/agent/quality/verification-gates.md)
+owns commands, documentation-only checks, CI Qt execution and failure reporting.

@@ -730,13 +730,12 @@ cards, keep the parent page visually flat: no pane border, filled background,
 or rounded outer frame around the child cards. SNR Plots uses flat forms for
 plot selection, legend labels, and axis and QC options.
 
-New or substantially revised embedded tool pages must fit the
-1200 × 800 workspace without a page-level `QScrollArea`. If one coherent surface
-cannot fit without clipping, split the workflow into purpose-based tabs or
-progressive pages and keep each page visually flat. Scrolling remains
-appropriate inside content-native widgets such as tables, log/text viewers,
-and focused dialogs; this rule prevents the tool page itself from becoming a
-long document.
+New or substantially revised embedded tool pages must fit the 1280 × 900
+workspace without a page-level `QScrollArea`. Also check the page inside the
+main window at its 1200 × 800 minimum. Its controls must remain reachable
+without enlarging the shell or adding page-level scrolling. Split controls
+into purpose-based tabs or progressive pages when space is tight. Tables,
+log/text viewers and focused dialogs can scroll within their own bounds.
 
 Before adding a new card-like wrapper, ask whether it communicates a distinct
 top-level group. If it only exists to hold other cards or to make a tab page

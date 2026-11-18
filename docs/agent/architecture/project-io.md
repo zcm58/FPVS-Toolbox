@@ -84,12 +84,9 @@ project and runtime method selections and fingerprints non-default selections.
 
 Project-aware workflows should resolve paths from the active project root, not from the process current directory or a developer-machine path.
 
-Full FPVS Studio interoperability and multi-hardware/montage project support are
-future goals in the [shared roadmap](hardware-pipeline-studio-roadmap.md).
-The [config importer](#studio-config-handoff) and acquisition-evidence adapter
-implement separate, bounded subsets. A supported exchange format does not establish
-support for every experiment or recording. External identities must still pass
-canonical project validation.
+For current Studio import behavior, read the [config handoff](#studio-config-handoff).
+The [roadmap](hardware-pipeline-studio-roadmap.md) tracks additional experiment
+and hardware support.
 
 The Unicorn acquisition foundation adds a read-only
 `Main_App.io.studio_acquisition_evidence` adapter for Studio's candidate handoff:
@@ -316,7 +313,8 @@ participant/recording exclusions without reviewed identity association. The
 existing legacy top-level and participant-map electrode imports retain their
 manual-mode behavior.
 
-The GUI entry remains **New Project > Import FPVS Studio Config**. It asks for
+From Welcome, use **Create New Project… → Import FPVS Studio Config…**. The
+same import is available from **File → Import FPVS Studio Config…**. It asks for
 hardware and then the raw EEG folder. It does not import a Studio project folder,
 merge sessions into an existing project, or associate EEG files automatically.
 The completed-import message identifies the source participant/visit and recorded

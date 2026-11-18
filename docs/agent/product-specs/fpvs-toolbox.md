@@ -14,9 +14,10 @@ visual and interaction decisions across Studio and Toolbox.
 
 ## Workflow priority
 
-1. Bring a completed experiment from FPVS Studio into Toolbox. Import a
-   supported Studio configuration, select the corresponding EEG recordings, and
-   review the hardware, protocol, and recorded markers before processing.
+1. Create a Toolbox project from a supported Studio setup or completed-session
+   configuration, or enter the protocol manually for a study run elsewhere.
+   Select the corresponding EEG recordings and review the hardware, protocol
+   and recorded markers before processing.
 2. Run the project's single-file or batch processing. The desktop stays
    responsive, and the project retains its settings and outputs for review
    and reruns.
@@ -27,21 +28,21 @@ visual and interaction decisions across Studio and Toolbox.
 Home centers on choosing recordings and running processing. Settings uses the
 same compact window as Home, with the category list and save actions in view.
 
-Manual project creation and recording setup remain supported for studies run
-outside Studio. Welcome prioritizes reopening an existing project for processing
-or review. Studio import and manual setup are available under Create New Project.
-Relative usage frequency has yet to be measured.
+Welcome prioritizes **Open Existing Project…** for returning operators. Studio
+import and manual setup are both available under **Create New Project…**.
 
 ## Current source and evidence
 
-- **Studio configuration import.** Import FPVS Studio Config is available from
-  Welcome > Create New Project and from File. It imports the Toolbox-owned
-  project, protocol and marker subset of `.fpvsconfig` schemas 1.0.0–1.8.0
-  for FPVS Oddball and Cognitive Load FPVS, including optional removed-electrode
-  metadata. Users choose the hardware and recordings in Toolbox. The separate
-  acquisition-evidence adapter can compare ordered marker codes after reviewed
-  recording association. End-to-end receiver integration and qualification
-  remain open. [Studio roadmap](../architecture/hardware-pipeline-studio-roadmap.md)
+- **Studio configuration import.** **Import FPVS Studio Config…** is available
+  from project creation and the File menu. It creates a local project from the
+  supported protocol and marker settings and keeps the export's provenance.
+  A completed-session export can identify the Studio participant and visit.
+  The operator selects the hardware and recording folder and checks the
+  matching EEG and participant/session identity. [Accepted formats, scientific subset and recording review](../architecture/project-io.md#studio-config-handoff)
+- **OpenFPVS Library.** Published data-only projects can be downloaded without
+  an account and reopened locally. Selecting a shared study or publishing a
+  reviewed analysis snapshot from Toolbox are future desktop workflows.
+  [Current Library workflow](../guides/experiment-library.md) · [Platform ownership](../design-docs/DESIGN.md)
 - **Recording preparation.** Confirmed BioSemi ActiveTwo64, ActiveThree,
   Brain Products and Unicorn Hybrid Black have scoped software routes into the
   project-local BIDS adapter and shared MNE processing pipeline. The documented
@@ -83,16 +84,9 @@ and confirmation prompts, and project or beta access rules. An active operation
 keeps its existing navigation locks, progress, cancellation and retry behavior.
 Results belong to the project and inputs that started the operation.
 
-For repeated-session setup, compare the saved source and visit identities
-after reopening and verify that cancelling preflight leaves the proposed
-project uncreated. For a figure export, compare filenames, formats and
-destination and verify the current page's result-folder action after a project
-switch. Individual Detectability must reject stale managed inputs before any
-export and complete normally when all inputs are excluded. Expanding a
-reprocessing scope preserves existing marker reviews and prompts only for
-newly eligible recordings. Cancelling that review stops the launch before
-output preparation.
-[Desktop workflow guide](../architecture/gui-backend.md#toolbox-workflow-owners)
+The [desktop workflow guide](../architecture/gui-backend.md#toolbox-workflow-owners)
+owns the regression cases for repeated sessions, Sequence Figure, Individual
+Detectability and reprocessing preflight.
 
 ## Future product goals
 
