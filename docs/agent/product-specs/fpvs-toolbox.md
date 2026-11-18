@@ -202,6 +202,8 @@ already supports external statistics when its release requirements are met.
 
 ### Other goals
 
+- [Automatic error and crash reporting](../architecture/diagnostics.md#automatic-error-and-crash-reporting-planned)
+  through the shared FPVS-Studio-Feedback service, with a Toolbox diagnostics preference.
 - Modular acquisition hardware and montage support through explicit profiles.
 - A per-project pipeline editor for selecting, configuring, replacing, or
   omitting supported steps within resolved hardware/montage capabilities.
