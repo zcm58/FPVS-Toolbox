@@ -34,12 +34,12 @@ import and manual setup are both available under **Create New Project…**.
 
 ## Current source and evidence
 
-- **Studio configuration import.** **Import FPVS Studio Config…** is available
-  from project creation and the File menu. It creates a local project from the
-  supported protocol and marker settings and keeps the export's provenance.
-  A completed-session export can identify the Studio participant and visit.
-  The operator selects the hardware and recording folder and checks the
-  matching EEG and participant/session identity. [Accepted formats, scientific subset and recording review](../architecture/project-io.md#studio-config-handoff)
+- **Studio configuration import.** **Import FPVS Studio Config…** creates a
+  local project from the supported protocol and markers and retains their
+  provenance. A cohort with one compatible protocol, hardware setup and
+  recording per participant can already use one setup config, one EEG folder
+  and Batch. A completed-session config adds evidence for one visit. Neither
+  current format supplies the full study roster. [Accepted formats, scientific subset and recording review](../architecture/project-io.md#studio-config-handoff)
 - **OpenFPVS Library.** Published data-only projects can be downloaded without
   an account and reopened locally. Selecting a shared study or publishing a
   reviewed analysis snapshot from Toolbox are future desktop workflows.
@@ -90,6 +90,30 @@ owns the regression cases for repeated sessions, Sequence Figure, Individual
 Detectability and reprocessing preflight.
 
 ## Future product goals
+
+### Whole-study handoff after collection
+
+After the last participant, the researcher marks collection complete in
+Studio and exports one file for the study. Studio will organize the completed
+project locally and update collection status for a linked OpenFPVS study.
+Toolbox analysis has its own completion state. Local import and processing
+remain available independently of an OpenFPVS connection.
+
+The analyst imports the file once to create one Toolbox project, then selects
+the raw EEG folder once. The recordings stay outside the handoff. Toolbox uses
+the participant and visit roster, protocol revisions and retained evidence
+from each execution to propose recording matches. One review shows incomplete
+research attempts, visits without retained evidence, missing, extra or
+ambiguous recordings, and incompatible protocol or hardware changes.
+The analyst resolves the exceptions, then uses the existing Batch workflow
+for the cohort. Repeated visits retain distinct recording identities.
+
+Verify with a synthetic cohort containing a repeat visit, a missing EEG file
+and a protocol revision. The review must identify the affected visits before
+processing. Retain support for existing setup, completed-session and historical
+configs across independently released apps. [Implementation and compatibility scope](../architecture/hardware-pipeline-studio-roadmap.md#target-complete-fpvs-studio-compatibility)
+
+### Other goals
 
 - Modular acquisition hardware and montage support through explicit profiles.
 - A per-project pipeline editor for selecting, configuring, replacing, or

@@ -254,12 +254,13 @@ remain unchanged by acquisition refactoring.
 
 ## Target: complete FPVS Studio compatibility
 
-The product goal is full compatibility across FPVS Studio's supported
-experiment-to-analysis workflows, not only successful config parsing or updater
-parity. Establish the exact Studio source/release and schema versions being
-targeted before implementing an adapter. The current Toolbox tests specify its
-accepted subset; they are not evidence that every current Studio export or
-workflow is covered.
+The next cohort workflow is the [whole-study handoff after collection](../product-specs/fpvs-toolbox.md#whole-study-handoff-after-collection).
+Define a versioned study export and consumer together. Keep the recorded
+protocol revision and execution evidence for each visit. Compare the roster
+with recordings under the analyst's selected EEG folder using existing project
+registration and review. Identify the Studio and Toolbox versions tested for
+each format. Current readers accept the setup and completed-session formats
+described in [Project I/O](project-io.md#studio-config-handoff).
 
 Maintain a compatibility matrix covering:
 

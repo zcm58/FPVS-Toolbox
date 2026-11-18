@@ -320,9 +320,12 @@ hardware and then the raw EEG folder. It does not import a Studio project folder
 merge sessions into an existing project, or associate EEG files automatically.
 The completed-import message identifies the source participant/visit and recorded
 electrode choices that still require review against the selected recording.
-The selected supported config may describe one completed session; it is not a
-complete study migration. Guided processing setup operates on the resulting
-Toolbox project and does not bypass these boundaries.
+Each import creates a new project. Batch processing can use all eligible
+recordings in the selected folder with one supported setup config. A
+completed-session config adds evidence for its named visit. The planned
+[whole-study handoff](../product-specs/fpvs-toolbox.md#whole-study-handoff-after-collection)
+will add a cohort roster and a single recording review. Guided processing
+setup operates on the project created by the current importer.
 
 Paired producer fixtures and consumer tests establish source compatibility.
 Visible GUI acceptance, installed-release compatibility and physical recording
