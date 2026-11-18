@@ -320,9 +320,10 @@ hardware and then the raw EEG folder. It does not import a Studio project folder
 merge sessions into an existing project, or associate EEG files automatically.
 The completed-import message identifies the source participant/visit and recorded
 electrode choices that still require review against the selected recording.
-Each import creates a new project. Batch processing can use all eligible
-recordings in the selected folder with one supported setup config. A
-completed-session config adds evidence for its named visit. The planned
+Each current setup or completed-session import creates a new project. Batch
+processing can use all eligible recordings in the selected folder with one
+supported setup config. A completed-session config adds evidence for its
+named visit. The planned
 [whole-study handoff](../product-specs/fpvs-toolbox.md#whole-study-handoff-after-collection)
 will add a cohort roster and a single recording review. Guided processing
 setup operates on the project created by the current importer.
@@ -331,6 +332,24 @@ Paired producer fixtures and consumer tests establish source compatibility.
 Visible GUI acceptance, installed-release compatibility and physical recording
 qualification remain separate; see the
 [handoff plan](../exec-plans/active/studio-toolbox-handoff.md).
+
+### Planned whole-study revision import
+
+For a revised whole-study handoff, verify the stable Studio study identity
+against the source retained at first import. A matching title or protocol
+alone cannot establish that relationship. Keep the original roster and its
+receipts. Use the saved EEG location and reviewed recording identities to
+preview changes against the last accepted handoff and the last processed cohort.
+Carry forward a match or review only while its source evidence is still valid.
+
+Accept the revision into that same project after confirmation. Revalidate the
+preview against the current project before saving the accepted roster, reviewed
+changes and result status together. An identical revision leaves registrations,
+reviews and result status intact. Cancellation or an identity conflict leaves
+the existing project untouched. Follow the
+[registration and release rules](#multi-group-processing-foundation) for new
+inputs and the [product contract](../product-specs/fpvs-toolbox.md#whole-study-handoff-after-collection)
+for results tied to the prior cohort.
 
 ## Manifest transactions
 
