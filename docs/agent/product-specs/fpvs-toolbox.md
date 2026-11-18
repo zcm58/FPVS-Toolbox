@@ -105,6 +105,10 @@ the participant and visit roster, protocol revisions and retained evidence
 from each execution to propose recording matches. One review shows incomplete
 research attempts, visits without retained evidence, missing, extra or
 ambiguous recordings, and incompatible protocol or hardware changes.
+When Studio's protocol changed during collection, identify the affected
+conditions and which visits used each revision. Keep earlier visits tied to
+their original stimuli and settings. Flag incompatible revisions before any
+analysis combines those visits.
 The analyst resolves the exceptions, then uses the existing Batch workflow
 for the cohort. Repeated visits retain distinct recording identities.
 
