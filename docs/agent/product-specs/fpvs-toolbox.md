@@ -112,6 +112,11 @@ analysis combines those visits.
 The analyst resolves the exceptions, then uses the existing Batch workflow
 for the cohort. Repeated visits retain distinct recording identities.
 
+A Studio experiment saved as a new standalone study has its own source-study
+identity and opens in its own Toolbox analysis project, even if its protocol
+is identical to the original. Restoring an earlier protocol inside the
+original study preserves its identity and the revision recorded for each visit.
+
 **When the study grows after processing.** Toolbox identifies the existing
 analysis project for the same Studio study and previews the revision using
 the saved EEG folder. Show added participants, additional visits
