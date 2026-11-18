@@ -11,7 +11,7 @@ of Studio. See the [product scope](docs/agent/product-specs/fpvs-toolbox.md).
   checks and focused scopes. Run the relevant audit before broader inspection.
   Read [ARCHITECTURE.md](ARCHITECTURE.md) for package and public import owners
   and the [active plan](docs/agent/exec-plans/README.md) for a non-trivial refactor.
-- For desktop decisions use the [shared desktop direction](docs/agent/design-docs/DESIGN.md).
+- For desktop design and independent release planning, use the [shared desktop direction](docs/agent/design-docs/DESIGN.md).
   For Studio exports, start with the [Toolbox handoff contract](docs/agent/architecture/project-io.md#studio-config-handoff).
   Toolbox imports supported configurations; operators identify the corresponding
   EEG. The [roadmap](docs/agent/architecture/hardware-pipeline-studio-roadmap.md)

@@ -3,6 +3,7 @@
 The canonical OpenFPVS desktop experience spec is maintained in the private
 OpenFPVS repository. From the Toolbox repository root, maintainers can find it
 at `../OpenFPVS/DESKTOP_EXPERIENCE.md` in a sibling checkout.
+For release decisions, read [How to plan independent releases](https://github.com/zcm58/OpenFPVS-Website/blob/main/DESKTOP_EXPERIENCE.md#how-to-plan-independent-releases).
 
 Design for lab members doing routine work. Give new members guidance at the
 point of need and keep detailed controls and evidence available to experts.
