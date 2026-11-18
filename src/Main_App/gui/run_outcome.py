@@ -23,7 +23,7 @@ def build_last_run_panel(host, parent: QWidget) -> QWidget:
     host.last_run_results_row = QWidget(panel)
     results = QHBoxLayout(host.last_run_results_row)
     results.setContentsMargins(0, 0, 0, 0)
-    host.last_run_excel_button = make_action_button("Open Excel Results", compact=True, parent=panel)
+    host.last_run_excel_button = make_action_button("Open Excel results", variant="primary", compact=True, parent=panel)
     host.last_run_excel_button.clicked.connect(lambda: _open_batch_workbook(host))
     results.addWidget(host.last_run_excel_button)
     host.last_run_share_button = make_action_button("Share study results…", compact=True, parent=panel)

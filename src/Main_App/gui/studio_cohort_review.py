@@ -7,16 +7,21 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QFileDialog, QHeaderView, QInputDialog, QLabel, QListWidget, QListWidgetItem,
+    QCheckBox, QComboBox, QFileDialog, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QListWidget, QListWidgetItem,
     QMessageBox, QTableWidget, QTableWidgetItem,
 )
 
-from Main_App.gui.components import AppDialog, SurfaceSize, make_action_button, make_action_row
+from Main_App.gui.components import AppDialog, SubsectionHeaderLabel, SurfaceSize, make_action_button, make_action_row
 from Main_App.gui.hardware_selection import choose_new_project_hardware
 from Main_App.projects.preprocessing_settings import new_project_preprocessing_settings
 from Main_App.projects.studio_cohort import (
     NAMESPACE, commit_study_review, find_study_project, review_study, version_key,
 )
+
+
+def _trigger_codes(setup):
+    codes = setup.get("toolbox", {}).get("event_map", {})
+    return ", ".join(f"{name} {code}" for name, code in codes.items()) or "unavailable"
 
 
 class StudioCohortReview(AppDialog):
@@ -30,25 +35,44 @@ class StudioCohortReview(AppDialog):
         self.warnings = ()
         counts = Counter(row.status for row in review.rows)
         extras = sorted(set(review.files) - {p for r in review.rows for p in (*r.candidates, r.previous.get("raw_file"))})
-        status = " · ".join(f"{count} {name.replace('_', ' ')}" for name, count in sorted(counts.items()))
-        changes = ""
+        visit_count = len(review.rows)
+        counts_text = [f"{visit_count} {'visit' if visit_count == 1 else 'visits'}"]
+        counts_text.extend(f"{count} {name.replace('_', ' ')}" for name, count in sorted(counts.items()))
+        if review.omitted:
+            counts_text.append(f"{len(review.omitted)} omitted")
+        if extras:
+            counts_text.append(f"Extra EEG files: {len(extras)}")
         if review.prior:
             new = {r.visit["participant_number"] for r in review.rows if r.change == "new participant"}
             additional = sum(r.change == "additional visit" for r in review.rows)
-            changes = f" · {len(new)} new participants · {additional} additional visits"
-        self.summary = QLabel(f"{imported.project_title} — {len(review.rows)} visits · {status}"
-                              f" · {len(review.omitted)} omitted · {len(extras)} extra EEG files{changes}", self)
+            if new:
+                counts_text.append(f"New participants: {len(new)}")
+            if additional:
+                counts_text.append(f"Additional visits: {additional}")
+        title = SubsectionHeaderLabel(imported.project_title, self)
+        title.setTextFormat(Qt.PlainText)
+        title.setWordWrap(True)
+        self.root_layout.addWidget(title)
+        self.summary = QLabel(" · ".join(counts_text), self)
         self.summary.setWordWrap(True)
         self.root_layout.addWidget(self.summary)
         self.full = QCheckBox("Show full roster and extra files", self)
-        self.root_layout.addWidget(self.full, alignment=Qt.AlignLeft)
+        roster_actions = QHBoxLayout()
+        roster_actions.addWidget(self.full)
+        roster_actions.addStretch(1)
+        self.root_layout.addLayout(roster_actions)
         self.table = QTableWidget(0, 5, self)
-        self.table.setHorizontalHeaderLabels(["Participant", "Visit", "Experiment version", "Review", "Recording or decision"])
+        self.table.setHorizontalHeaderLabels(["Participant", "Visit", "Version", "Review", "Recording or decision"])
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.verticalHeader().hide()
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch)
+        self.table.setAccessibleName("Studio visit roster")
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeToContents)
+        for column, example in ((0, "Participant ID"), (1, "Visit"), (3, "Additional visit · Ambiguous")):
+            header.setSectionResizeMode(column, QHeaderView.Interactive)
+            header.resizeSection(column, self.fontMetrics().horizontalAdvance(example) + 20)
+        header.setSectionResizeMode(4, QHeaderView.Stretch)
         self.root_layout.addWidget(self.table, 1)
         self.clear_rows = {}
         self.full_only = []
@@ -60,22 +84,27 @@ class StudioCohortReview(AppDialog):
             key = v["visit_id"]
             version = version_key(v)
             reason = v.get("protocol_change_reason") or ""
-            versions[version] = (version[:8] + (" · " + reason if reason else ""))
-            information = row.problem or row.status.replace("_", " ")
-            if review.prior:
+            short_version = version if not v.get("protocol_version_id") else version[:8]
+            versions[version] = short_version + (" · " + reason if reason else "")
+            information = "Review required" if row.problem else row.status.replace("_", " ").capitalize()
+            if review.prior and row.change != "unchanged":
                 information = f"{row.change} · {information}"
-            index = self._row(v["participant_number"], v.get("participant_session_number"), versions[version], information)
+            index = self._row(v["participant_number"], v.get("participant_session_number"), short_version, information)
+            self.table.item(index, 2).setToolTip(version)
             setup = imported.provenance.get("setups", {}).get(v.get("setup_id"), {}) if hasattr(imported, "provenance") else {}
             conditions = [run.get("condition_name", "") for run in v.get("runs", ())]
-            code_map = setup.get("toolbox", {}).get("event_map", {})
-            self.details[index] = (
-                f"Execution {key} · {(v.get('recording') or {}).get('selected_backend') or 'Hardware unknown'} · "
-                f"{v.get('compiled_refresh_hz') or 'Unknown'} Hz. Conditions in order: {', '.join(conditions) or 'unavailable'}. "
-                f"Markers: {', '.join(f'{name} {code}' for name, code in code_map.items()) or 'unavailable'}."
-                + (f" Protocol change: {reason}." if reason else "")
-            )
+            hardware = (v.get("recording") or {}).get("selected_backend") or "Hardware unknown"
+            refresh = v.get("compiled_refresh_hz")
+            refresh_label = f"{refresh:g} Hz" if isinstance(refresh, (float, int)) else "Refresh rate unavailable"
+            self.details[index] = "\n".join(filter(None, (
+                row.problem, f"{hardware} · {refresh_label}",
+                f"Conditions in order: {', '.join(conditions) or 'unavailable'}. "
+                f"Trigger codes: {_trigger_codes(setup)}.",
+            )))
+            self.table.item(index, 1).setToolTip(f"Execution ID: {key}")
             choice = QComboBox(self.table)
-            choice.addItem("Choose…", None)
+            choice.setAccessibleName(f"Recording for {v['participant_number']}, visit {v.get('participant_session_number') or 'unknown'}")
+            choice.addItem("Choose a recording or defer…", None)
             choice.addItem("Awaiting EEG", ("awaiting_eeg", None))
             if not row.problem:
                 known = dict.fromkeys((*row.candidates, row.previous.get("raw_file")))
@@ -102,6 +131,7 @@ class StudioCohortReview(AppDialog):
             index = self._row(entry["participant_number"], entry.get("participant_session_number"),
                               version_key(entry)[:8], "Omitted from revision")
             choice = QComboBox(self.table)
+            choice.setAccessibleName(f"Decision for omitted visit {entry.get('participant_session_number')} of {entry['participant_number']}")
             choice.addItem("Resolve discrepancy…", None)
             choice.addItem("Retain previous membership", "retain")
             choice.addItem("Archive previous membership", "archive")
@@ -115,26 +145,31 @@ class StudioCohortReview(AppDialog):
             self.full_only.append(index)
         self.full.toggled.connect(self._show_full)
         self.full.setChecked(first_exception is None)
+        self.full.setVisible(bool(self.full_only and first_exception is not None))
         self._show_full(self.full.isChecked())
         detail = QLabel(self)
+        detail.setTextFormat(Qt.PlainText)
         detail.setWordWrap(True)
         self.root_layout.addWidget(detail)
         self.table.currentCellChanged.connect(lambda row, *_: detail.setText(self.details.get(row, "")))
         if first_exception is not None:
             self.table.setCurrentCell(first_exception, 4)
         self.versions = QListWidget(self)
-        self.versions.setMaximumHeight(66)
+        self.versions.setAccessibleName("Experiment versions to process")
         previous = review.prior.get("versions") or [next(iter(versions))]
         for key, label in versions.items():
             item = QListWidgetItem(label)
-            item.setToolTip(key)
+            item.setToolTip(f"{key}\n{label}" if label != key[:8] else key)
             item.setData(Qt.UserRole, key)
             item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
             item.setCheckState(Qt.Checked if key in previous else Qt.Unchecked)
             self.versions.addItem(item)
-        self.root_layout.addWidget(QLabel("Experiment versions to process together", self))
+        rows_height = self.versions.sizeHintForRow(0) * len(versions)
+        self.versions.setFixedHeight(min(66, rows_height + 2 * self.versions.frameWidth() + 4))
+        self.root_layout.addWidget(SubsectionHeaderLabel("Experiment versions to process", self))
         self.root_layout.addWidget(self.versions)
         self.feedback = QLabel(self)
+        self.feedback.setTextFormat(Qt.PlainText)
         self.feedback.setWordWrap(True)
         self.root_layout.addWidget(self.feedback)
         prior_results = [r for r in review.prior.get("history", ()) if r.get("previous_result")]
@@ -160,25 +195,35 @@ class StudioCohortReview(AppDialog):
                     self.feedback.setText(f"Could not open the archived workbook. {exc}")
             open_result.clicked.connect(open_previous)
             self.root_layout.addWidget(make_action_row((history, open_result), parent=self))
-        self.bulk = make_action_button(f"Confirm {len(self.clear_rows)} clear matches", parent=self)
-        self.bulk.setEnabled(bool(self.clear_rows))
+        count = len(self.clear_rows)
+        self.bulk = make_action_button(f"Confirm {count} clear {'match' if count == 1 else 'matches'}", parent=self)
+        self.bulk.setVisible(bool(count))
         self.bulk.clicked.connect(self._confirm_clear)
+        roster_actions.addWidget(self.bulk)
         cancel = make_action_button("Cancel", parent=self)
         cancel.clicked.connect(self.reject)
         save = make_action_button("Apply review", variant="primary", parent=self)
         save.clicked.connect(self._apply)
-        self.root_layout.addWidget(make_action_row((self.bulk, cancel, save), parent=self))
+        self.root_layout.addWidget(make_action_row((cancel, save), parent=self))
 
     def _row(self, *values):
         index = self.table.rowCount()
         self.table.insertRow(index)
         for col, value in enumerate(values):
-            self.table.setItem(index, col, QTableWidgetItem("" if value is None else str(value)))
+            item = QTableWidgetItem("" if value is None else str(value))
+            item.setToolTip(item.text())
+            self.table.setItem(index, col, item)
         return index
 
     def _show_full(self, visible):
         for index in self.full_only:
             self.table.setRowHidden(index, not visible)
+        current = self.table.currentRow()
+        if current >= 0 and self.table.isRowHidden(current):
+            for row in range(self.table.rowCount()):
+                if not self.table.isRowHidden(row):
+                    self.table.setCurrentCell(row, 4)
+                    break
 
     def _choose_recording(self, choice):
         if choice.currentData() != "choose_file":
@@ -207,7 +252,7 @@ class StudioCohortReview(AppDialog):
             if choice.currentData() is None:
                 choice.setCurrentIndex(choice.findText(name))
         self.bulk.setEnabled(False)
-        self.feedback.setText("Clear matches confirmed. Review remaining exceptions.")
+        self.feedback.setText("Clear matches confirmed.")
 
     def selected_versions(self):
         return [self.versions.item(i).data(Qt.UserRole) for i in range(self.versions.count())
@@ -215,8 +260,17 @@ class StudioCohortReview(AppDialog):
 
     def _apply(self):
         versions = self.selected_versions()
-        if not versions or any(not c.currentData() for c in (*self.decisions.values(), *self.omissions.values())):
-            self.feedback.setText("Choose a version, confirm each match or defer it, and resolve every omitted visit.")
+        if not versions:
+            self.feedback.setText("Select an experiment version to process.")
+            return
+        if any(not self.decisions[key].currentData() for key in self.clear_rows):
+            self.feedback.setText("Confirm the clear matches above, or review them in the full roster.")
+            return
+        if any(not c.currentData() for c in self.decisions.values()):
+            self.feedback.setText("Choose a recording or select Awaiting EEG for each remaining visit.")
+            return
+        if any(not c.currentData() for c in self.omissions.values()):
+            self.feedback.setText("Choose whether to retain or archive each omitted visit.")
             return
         if len(versions) > 1:
             details = []
@@ -226,22 +280,28 @@ class StudioCohortReview(AppDialog):
                 version = version_key(visit)
                 if version not in versions:
                     continue
-                affected.setdefault(version, []).append(
-                    f"{visit['participant_number']} visit {visit.get('participant_session_number') or '?'}")
+                decision, _ = self.decisions[visit["visit_id"]].currentData()
+                visit_label = f"{visit['participant_number']} visit {visit.get('participant_session_number') or '?'}"
+                if decision == "awaiting_eeg":
+                    visit_label += " (awaiting EEG)"
+                elif decision == "excluded":
+                    visit_label += " (excluded after QC)"
+                affected.setdefault(version, []).append(visit_label)
                 if not visit.get("setup_id"):
                     continue
                 setup = self.imported.provenance["setups"][visit["setup_id"]]
                 protocol = setup["protocol"]
-                details.append(f"{version_key(visit)[:8]} · {visit.get('protocol_change_reason') or 'No recorded reason'} · "
-                               f"{protocol['base_hz']} Hz, every {protocol['oddball_every_n']} · "
-                               f"{setup.get('toolbox', {}).get('event_map', {})}")
+                details.append(f"{version[:8]} · {visit.get('protocol_change_reason') or 'No recorded reason'}\n"
+                               f"{protocol['base_hz']} Hz, oddball every {protocol['oddball_every_n']} stimuli. "
+                               f"Trigger codes: {_trigger_codes(setup)}")
             scope = []
             for version, visits in affected.items():
                 extra = f" and {len(visits) - 4} more" if len(visits) > 4 else ""
-                scope.append(f"{version[:8]} · {len(visits)} visits: {', '.join(visits[:4])}{extra}")
-            risk = "Differences between experiment versions may make these results scientifically noncomparable."
+                scope.append(f"{version[:8]} ({len(visits)} {'visit' if len(visits) == 1 else 'visits'}): "
+                             f"{', '.join(visits[:4])}{extra}")
+            risk = "Results from different experiment versions may not be comparable."
             if QMessageBox.question(self, "Compare experiment versions",
-                                    "\n".join(dict.fromkeys(details)) + "\n" + "\n".join(scope) +
+                                    "\n\n".join(dict.fromkeys(details)) + "\n\n" + "\n".join(scope) +
                                     f"\n\n{risk} Continue to confirmation?",
                                     QMessageBox.Yes | QMessageBox.No, QMessageBox.No) != QMessageBox.Yes:
                 return

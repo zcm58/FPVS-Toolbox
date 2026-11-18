@@ -3,10 +3,10 @@
 from functools import partial
 from pathlib import Path
 
-from PySide6.QtCore import QThread, Signal
-from PySide6.QtWidgets import QDialogButtonBox, QLabel, QLineEdit
+from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QLineEdit
 
-from Main_App.gui.components import AppDialog, make_action_button, show_warning
+from Main_App.gui.components import AppDialog, SubsectionHeaderLabel, make_action_button, make_action_row, show_warning
 from Main_App.reporting.client import ReportingError, deliver_pending, enroll
 from Main_App.reporting.provenance import reporting_scope
 from Main_App.reporting.publish import publish_current
@@ -52,33 +52,44 @@ class ResultsSharingDialog(AppDialog):
         self.setMinimumWidth(460)
         self.project_root, self.scope = Path(project.project_root), scope
         self.thread = None
-        for text in (
-            f"OpenFPVS study {scope['study_id']}",
-            f"{scope['experiment_id']} · {scope['experiment_version']}",
-            "Sharing sends the released ROI results, processing details, electrode decisions and reviewed visit coverage to the study’s authorized readers. Each lab keeps its own dataset.",
-        ):
-            label = QLabel(text, self)
-            label.setWordWrap(True)
-            self.root_layout.addWidget(label)
+        project_name = SubsectionHeaderLabel(project.name, self)
+        project_name.setTextFormat(Qt.PlainText)
+        project_name.setWordWrap(True)
+        self.root_layout.addWidget(project_name)
+        destination = QLabel(f"Experiment: {scope['experiment_id']} · version {scope['experiment_version']}\n"
+                             f"OpenFPVS study: {scope['study_id']}", self)
+        destination.setTextFormat(Qt.PlainText)
+        destination.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard)
+        destination.setWordWrap(True)
+        self.root_layout.addWidget(destination)
+        contents = QLabel("Authorized study readers can see your lab’s ROI results, processing details, "
+                          "electrode decisions and reviewed visits. Each lab’s results are listed separately.", self)
+        contents.setWordWrap(True)
+        self.root_layout.addWidget(contents)
         self.code = QLineEdit(self)
         self.code.setEchoMode(QLineEdit.Password)
-        self.code.setPlaceholderText("Lab code")
         self.code.setAccessibleName("Lab code")
-        self.root_layout.addWidget(self.code)
+        code_label = QLabel("Lab code", self)
+        code_label.setBuddy(self.code)
         self.connect_button = make_action_button("Connect to study", parent=self)
-        self.publish_button = make_action_button("Share current results", parent=self)
+        connection = QHBoxLayout()
+        connection.addWidget(code_label)
+        connection.addWidget(self.code, 1)
+        connection.addWidget(self.connect_button)
+        self.root_layout.addLayout(connection)
+        self.publish_button = make_action_button("Share current results", variant="primary", parent=self)
         self.retry_button = make_action_button("Retry pending upload", parent=self)
-        for button in (self.connect_button, self.publish_button, self.retry_button):
-            self.root_layout.addWidget(button)
         self.connect_button.clicked.connect(self._connect)
         self.publish_button.clicked.connect(lambda: self._start(partial(publish_current, self.project_root)))
         self.retry_button.clicked.connect(lambda: self._start(partial(deliver_pending, self.project_root, retry=True)))
         self.status = QLabel("", self)
+        self.status.setTextFormat(Qt.PlainText)
         self.status.setWordWrap(True)
         self.root_layout.addWidget(self.status)
-        self.buttons = QDialogButtonBox(QDialogButtonBox.Close, parent=self)
-        self.buttons.rejected.connect(self.reject)
-        self.root_layout.addWidget(self.buttons)
+        self.close_button = make_action_button("Close", parent=self)
+        self.close_button.clicked.connect(self.reject)
+        self.root_layout.addWidget(make_action_row((self.retry_button, self.close_button, self.publish_button), parent=self))
+        self.code.setFocus()
 
     def _connect(self):
         code = self.code.text().strip()
@@ -106,7 +117,7 @@ class ResultsSharingDialog(AppDialog):
         self.thread.start()
 
     def _enable(self, enabled):
-        for control in (self.code, self.connect_button, self.publish_button, self.retry_button, self.buttons):
+        for control in (self.code, self.connect_button, self.publish_button, self.retry_button, self.close_button):
             control.setEnabled(enabled)
 
     def _released(self):
