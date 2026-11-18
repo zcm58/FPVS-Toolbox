@@ -1,9 +1,10 @@
 # FPVS Toolbox Product Scope
 
-FPVS Toolbox helps researchers turn recorded FPVS EEG into reproducible,
-project-owned results. The processing pipeline is the core product. Processing
-methods and parameters are saved per project, and analysis and visualization
-consume the processed results as optional next steps.
+FPVS Toolbox prepares recorded FPVS EEG for analysis. The processing pipeline
+produces project-owned, quality-controlled data and exports with the methods,
+parameters and exclusions needed to interpret them. The lab conducts its
+official statistical analysis in its chosen external software. Toolbox's
+existing screening, statistics, plots and maps support exploratory work and QC.
 
 FPVS Studio and FPVS Toolbox ship as separate desktop applications, each with
 its own package, installer and release version. Toolbox uses PySide6, ships a
@@ -22,15 +23,20 @@ handoff. A shared launcher is an option for future consideration only.
 2. Run the project's single-file or batch processing. The desktop stays
    responsive, and the project retains its settings and outputs for review
    and reruns.
-3. Open SNR Plots and Scalp Maps through the Tools menu to inspect the processed
-   response. For eligible projects, use the same menu to explore experimental
-   source-space estimates in LORETA Visualizer.
+3. Open the analysis-ready Excel results for external analysis. SNR Plots and
+   Scalp Maps offer optional checks of the processed response. Eligible projects
+   can also explore experimental source-space estimates in LORETA Visualizer.
 
 Home centers on choosing recordings and running processing. Settings uses the
 same compact window as Home, with the category list and save actions in view.
 
 Welcome prioritizes **Open Existing Project…** for returning operators. Studio
 import and manual setup are both available under **Create New Project…**.
+
+OpenFPVS lists study results separately for each contributing lab. Analysts
+download the lab-specific data and combine them manually in their external
+tools. Tutorials belong on the OpenFPVS website, with YouTube tutorials
+planned. Keep instructions needed to complete a desktop action beside it.
 
 ## Current source and evidence
 
@@ -91,13 +97,18 @@ Detectability and reprocessing preflight.
 
 ## Future product goals
 
+For the coordinated desktop changes, establish Studio's study lifecycle and
+export first, then verify Toolbox against that producer. Record additional
+feature candidates after the two apps agree on the workflow.
+
 ### Whole-study handoff after collection
 
 After the last participant, the researcher marks collection complete in
 Studio and exports one file for the study. Studio will organize the completed
 project locally and update collection status for a linked OpenFPVS study.
-Toolbox analysis has its own completion state. Local import and processing
-remain available independently of an OpenFPVS connection.
+Toolbox processing and release of analysis-ready outputs have their own
+completion state. Local import and processing remain available independently
+of an OpenFPVS connection.
 
 The analyst imports the file once to create one Toolbox project, then selects
 the raw EEG folder once. The recordings stay outside the handoff. Toolbox uses
@@ -106,7 +117,8 @@ from each execution to propose recording matches. One review shows incomplete
 research attempts, visits without retained evidence, missing, extra or
 ambiguous recordings, and incompatible protocol or hardware changes.
 When Studio's protocol changed during collection, identify the affected
-conditions and which visits used each revision. Keep earlier visits tied to
+conditions, the reason recorded for the change, and which visits used each
+revision. Keep earlier visits tied to
 their original stimuli and settings. Flag incompatible revisions before any
 analysis combines those visits.
 The analyst resolves the exceptions, then uses the existing Batch workflow
@@ -117,6 +129,20 @@ identity and opens in its own Toolbox analysis project, even if its protocol
 is identical to the original. Restoring an earlier protocol inside the
 original study preserves its identity and the revision recorded for each visit.
 
+**Review the cohort.** Open on exceptions and show counts for the full roster.
+For example, show 29 clear matches and one ambiguous visit, with the full
+roster one click away. Ask the analyst to confirm the clear matches once as a
+group. Resolve ambiguous matches individually. If one of 30 recordings is
+missing, the analyst can explicitly defer it and process the 29 eligible
+recordings. Retain the outstanding visit in the roster. Track deferral
+separately from an exclusion made after QC.
+
+**Choose an experiment version.** Default to one version for group analysis.
+Combining compatible versions requires an explicit override and two warnings,
+each requiring confirmation that the versions may be scientifically
+noncomparable. Identify the revisions, conditions and visits involved.
+Method-incompatible settings continue to block the affected analysis.
+
 **When the study grows after processing.** Toolbox identifies the existing
 analysis project for the same Studio study and previews the revision using
 the saved EEG folder. Show added participants, additional visits
@@ -124,13 +150,17 @@ and changed evidence. Retain recording matches and review decisions whose
 evidence still holds. The analyst reviews new or changed visits, then confirms
 the update in place. Cancelling leaves the project as it was. Importing the
 same revision again adds nothing and preserves completed reviews.
+If a revised handoff omits a previously processed visit, show that discrepancy
+and preserve the visit, its reviews and its results. Require an explicit
+resolution before changing cohort membership.
 
 Keep the original import roster and the full roster behind each completed
 analysis. For example, adding participant 21 leaves the previous result
 identified as the analysis of 20 participants. Tell the analyst it is outdated
 for the expanded cohort. The notice is dismissible and the earlier results and
-evidence remain available. Present results as current for the expanded cohort
-after processing and the affected analyses run again. Reuse per-recording work
+evidence remain available. Present Toolbox outputs as current for the expanded
+cohort after processing and the affected analyses run again. The analyst
+reruns official analyses externally. Reuse per-recording work
 where its inputs, settings and outputs still pass the existing checks.
 
 Today, confirming new raw recordings already stages them for processing
@@ -145,6 +175,16 @@ revision again. Verify one project contains each visit once, unchanged reviews
 survive, and the previous analysis still identifies its original cohort.
 Retain support for existing setup, completed-session and historical
 configs across independently released apps. [Implementation and compatibility scope](../architecture/hardware-pipeline-studio-roadmap.md#target-complete-fpvs-studio-compatibility)
+
+### After Batch processing
+
+Show the number of files processed and provide a direct action to open the
+current Excel results. Offer **SNR Plots** and **Scalp Maps** as optional next
+steps using their existing access, beta and scientific eligibility checks.
+Today the run summary distinguishes completed, reused, excluded and failed
+recordings, with output-folder and issue-review actions. The
+[full-audit workbook](../architecture/post-processing-export-contract.md#full-audit-analysis-ready-workbook)
+already supports external statistics when its release requirements are met.
 
 ### Other goals
 

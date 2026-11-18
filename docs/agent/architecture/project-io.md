@@ -341,6 +341,10 @@ alone cannot establish that relationship. Keep the original roster and its
 receipts. Use the saved EEG location and reviewed recording identities to
 preview changes against the last accepted handoff and the last processed cohort.
 Carry forward a match or review only while its source evidence is still valid.
+Keep an explicitly deferred missing recording in the roster with its status
+separate from a QC exclusion. When a revision omits a processed visit, retain
+its registration, review and prior results until the analyst explicitly
+resolves the discrepancy. Preserve the evidence behind any resulting decision.
 
 Accept the revision into that same project after confirmation. Revalidate the
 preview against the current project before saving the accepted roster, reviewed

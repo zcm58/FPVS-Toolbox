@@ -657,13 +657,12 @@ with **Open Existing Project** as the primary action.
 action. Cancel and Escape return to Welcome. A Studio import confirms hardware,
 requests a recordings folder, and opens Home when it succeeds.
 
-Home groups the labeled recording picker, run readiness, Start Processing,
-and View Log in the processing column. Analysis shows persisted processing
-history and the current session's run outcome above one row of shortcuts to
-SNR Plots, Scalp Maps, and LORETA Visualizer. The shortcuts trigger their Tools
-menu actions, so the menu lock, beta policy, and project and output checks
-apply. History describes a completed run. Each tool checks whether its
-current inputs can be used.
+Home groups recording selection, readiness, Start Processing and View Log.
+Below the form it shows persisted processing history and the current session's
+run outcome, with **Open Output Folder** and **Review Issues** actions. Each
+tool checks its inputs through the existing Tools menu actions. The planned
+[post-Batch actions](../product-specs/fpvs-toolbox.md#after-batch-processing)
+should reuse those commands and open the current, successfully exported workbook.
 
 Processing Activity puts progress above the run details and file table. Its
 post-processing and QC states keep phase labels and review instructions where

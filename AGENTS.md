@@ -1,7 +1,8 @@
 # FPVS Toolbox — Agent Rules
 
-FPVS Toolbox processes recorded FPVS EEG. Analysis and visualization consume
-its project-owned outputs. The maintained source runs on Windows 11 and CachyOS
+FPVS Toolbox prepares quality-controlled EEG data for external statistical
+analysis. Its screening, statistics and visualization tools support exploratory
+work. The maintained source runs on Windows 11 and CachyOS
 (Arch Linux). Toolbox has its own Windows installer and releases independently
 of Studio. See the [product scope](docs/agent/product-specs/fpvs-toolbox.md).
 
