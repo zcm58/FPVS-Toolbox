@@ -5,12 +5,13 @@ project-owned results. The processing pipeline is the core product. Processing
 methods and parameters are saved per project, and analysis and visualization
 consume the processed results as optional next steps.
 
-The desktop application uses PySide6 and ships as a Windows installer. Source
-development and execution also support CachyOS (Arch Linux) through the shared
-runtime.
+FPVS Studio and FPVS Toolbox ship as separate desktop applications, each with
+its own package, installer and release version. Toolbox uses PySide6, ships a
+Windows installer and also runs from source on CachyOS (Arch Linux).
 
-Use the [shared desktop direction](../design-docs/DESIGN.md) for audience,
-visual and interaction decisions across Studio and Toolbox.
+OpenFPVS provides shared services and [desktop design guidance](../design-docs/DESIGN.md).
+The apps exchange supported experiment configurations through a versioned
+handoff. A shared launcher is an option for future consideration only.
 
 ## Workflow priority
 

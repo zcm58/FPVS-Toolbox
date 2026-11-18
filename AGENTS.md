@@ -2,7 +2,8 @@
 
 FPVS Toolbox processes recorded FPVS EEG. Analysis and visualization consume
 its project-owned outputs. The maintained source runs on Windows 11 and CachyOS
-(Arch Linux) and ships through a Windows installer.
+(Arch Linux). Toolbox has its own Windows installer and releases independently
+of Studio. See the [product scope](docs/agent/product-specs/fpvs-toolbox.md).
 
 ## Find the owner
 

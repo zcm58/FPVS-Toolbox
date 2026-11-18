@@ -261,10 +261,11 @@ source provenance. Current files use `format="fpvs-handoff"`, strict integer
 provenance is separate in `producer`. Both document kinds use the same format.
 Historical `schema_version` values `1.0.0` through `1.15.0` remain readable through
 the compatibility boundary. Current files do not combine the two version fields.
-Roll out compatible Studio and Toolbox builds together: earlier Toolbox builds
-that accept only 1.x configs reject revision 2. The producer application version
-is provenance, not a minimum supported Toolbox release. Source verification does
-not establish a minimum published installer version.
+Studio and Toolbox release independently. Verify compatibility for the specific
+producer and consumer releases before recommending them for a handoff. Earlier
+Toolbox builds that accept only 1.x configs reject revision 2. The producer
+version records provenance. Establishing a minimum published Toolbox version
+requires evidence from the released installer.
 
 Unknown revisions and fields in the interpreted scientific contract fail
 explicitly. The documented `metadata` object permits descriptive extensions;
