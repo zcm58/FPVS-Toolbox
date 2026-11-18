@@ -108,9 +108,27 @@ ambiguous recordings, and incompatible protocol or hardware changes.
 The analyst resolves the exceptions, then uses the existing Batch workflow
 for the cohort. Repeated visits retain distinct recording identities.
 
+**When the study grows after processing.** Keep the original import roster.
+Compare a revision with the full roster used for the last processed cohort,
+including recordings reused during that run. Distinguish a new participant
+from an additional recording for someone already in the study. Show the
+analyst what was added and mark the earlier cohort results as outdated.
+Preserve the earlier roster, its results and their provenance for review.
+The analyst can dismiss the notice and continue other work. Present results
+as current for the expanded cohort only after processing and the affected
+analyses run again. Reuse per-recording work where its inputs, settings and
+outputs still pass the existing checks.
+
+Today, confirming new raw recordings already stages them for processing
+and invalidates dependent outputs. The planned roster comparison and notice
+extend this to a revised Studio handoff. [Current registration and release rules](../architecture/project-io.md#multi-group-processing-foundation)
+
 Verify with a synthetic cohort containing a repeat visit, a missing EEG file
 and a protocol revision. The review must identify the affected visits before
-processing. Retain support for existing setup, completed-session and historical
+processing. Add a new participant and a new visit for an existing participant
+after analysis. Verify the notice identifies both additions and earlier
+results remain historical when the expanded cohort's results become current.
+Retain support for existing setup, completed-session and historical
 configs across independently released apps. [Implementation and compatibility scope](../architecture/hardware-pipeline-studio-roadmap.md#target-complete-fpvs-studio-compatibility)
 
 ### Other goals
