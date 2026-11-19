@@ -8,6 +8,7 @@ from types import SimpleNamespace
 
 from PySide6.QtCore import QObject, Signal, Slot
 
+from Main_App.diagnostics.crash_reporting import report_failure
 from Main_App.io.result_outputs import result_output_snapshot
 from Main_App.exports.post_export_adapter import LegacyCtx, run_post_export
 
@@ -118,6 +119,8 @@ class PostProcessWorker(QObject):
             )
 
         except Exception as e:
+            if not self._cancelled:
+                report_failure(e, "export")
             logger.exception(
                 "pipeline_excel_export_failed",
                 extra={

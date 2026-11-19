@@ -66,6 +66,7 @@ from Main_App.gui.project_protocol import (
 )
 from Main_App.gui.recording_qc_identity import project_recording_coverage_rows
 from Main_App.gui.roi_settings_editor import ROISettingsEditor
+from Main_App.gui.diagnostics_preferences import build_diagnostics_page
 from Main_App.gui.settings_navigation import SettingsNavigation
 from Main_App.gui.style_tokens import SECTION_GAP, SECTION_HEADER_CONTENT_GAP
 from Main_App.gui.theme import set_appearance_mode, set_themed_stylesheet
@@ -398,6 +399,7 @@ class SettingsDialog(QDialog):
         experimental_tab = self._init_experimental_tab(self.tabs)
         self._experimental_tab_index = self.tabs.indexOf(experimental_tab)
         self._init_application_tab(self.tabs)
+        build_diagnostics_page(self.tabs)
         for card in self.tabs.findChildren(SectionCard):
             card.shell_layout.setContentsMargins(0, SECTION_HEADER_CONTENT_GAP, 0, 0)
         for index in range(self.tabs.count()):

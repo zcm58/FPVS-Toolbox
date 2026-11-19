@@ -79,6 +79,8 @@ class MpRunnerBridge(QObject):
         Launch the multiprocessing project run in a background thread and begin polling
         the inter-process queue for progress / completion messages.
         """
+        from Main_App.diagnostics.crash_reporting import report_failure, set_operation
+
         if self._running:
             logger.warning(
                 "MpRunnerBridge.start called while a run is already active; "
@@ -164,9 +166,11 @@ class MpRunnerBridge(QObject):
                 args=(params, self._q, self._cancel_event),
                 daemon=True,
             )
+            set_operation("processing")
             self._worker_thread.start()
 
         except Exception as exc:
+            report_failure(exc, "processing")
             logger.exception("mp_bridge_start_failed")
             self._q.put({"type": "done", "controller_error": f"Could not start processing: {exc}"})
 
@@ -300,6 +304,9 @@ class MpRunnerBridge(QObject):
                     )
 
         except Exception as exc:
+            from Main_App.diagnostics.crash_reporting import report_failure
+
+            report_failure(exc, "processing")
             logger.exception(
                 "MpRunnerBridge._poll encountered an unexpected error while reading "
                 "from the worker queue."
@@ -315,6 +322,8 @@ class MpRunnerBridge(QObject):
 
     def _finish(self, message: Dict[str, object]) -> None:
         """Deliver the authoritative snapshot once, after releasing bridge state."""
+        from Main_App.diagnostics.crash_reporting import set_operation
+
         if self._q is None:
             return
         results = list(message.get("results", self._results))
@@ -348,4 +357,5 @@ class MpRunnerBridge(QObject):
         self._cancel_event = None
         self._worker_thread = None
         self._q = None
+        set_operation("application")
         self.finished.emit(payload)

@@ -252,6 +252,9 @@ def export_with_post_process(
                 }
             )
     except Exception as err:
+        from Main_App.diagnostics.crash_reporting import report_failure
+
+        report_failure(err, "export")
         log.exception("Result export failed")
         host._last_job_success = host._run_had_successful_export
         host.gui_queue.put({"type": "error", "message": str(err)})

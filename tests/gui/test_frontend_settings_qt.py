@@ -7,12 +7,14 @@ from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
-from PySide6.QtCore import QAbstractAnimation, QPoint, QRect, QRectF, Qt
+from PySide6.QtCore import QAbstractAnimation, QPoint, QRect, QRectF, Qt, QTimer
 from PySide6.QtWidgets import (
     QAbstractButton,
     QAbstractScrollArea,
     QApplication,
+    QCheckBox,
     QComboBox,
+    QDialog,
     QFrame,
     QLabel,
     QLineEdit,
@@ -24,7 +26,8 @@ from PySide6.QtWidgets import (
 
 from Main_App.settings.settings_manager import SettingsManager
 from Main_App.gui.settings_panel import SettingsDialog
-from Main_App.gui.theme import apply_fpvs_theme
+from Main_App.gui.theme import apply_fpvs_theme, set_appearance_mode
+from Main_App.gui.typography import APP_FONT_FAMILY
 from Main_App.projects import Project
 from tests.gui.test_gui_preproc_dialog import _prep_project
 
@@ -279,7 +282,7 @@ def test_extracted_pages_keep_one_dialog_owner_and_initial_draft(tmp_path, qtbot
     ]
     assert [widget.tabs.tabText(index) for index in range(widget.tabs.count())] == [
         "Processing", "Protocol", "Harmonics", "ROIs", "Quality Control",
-        "Experimental", "Application",
+        "Experimental", "Application", "Diagnostics",
     ]
     assert not widget.has_unsaved_changes()
 
@@ -288,6 +291,95 @@ def test_extracted_pages_keep_one_dialog_owner_and_initial_draft(tmp_path, qtbot
     widget.btn_changeRoot.click()
     assert opened == [widget]
     assert not widget.has_unsaved_changes()
+
+
+def test_diagnostics_copy_and_preference_persist_immediately(tmp_path, qtbot, monkeypatch):
+    from Main_App.diagnostics import crash_reporting
+    from Main_App.diagnostics.crash_reporting import CrashReporter
+    from Main_App.diagnostics.crash_store import CrashStore
+
+    monkeypatch.setenv("FPVS_CONFIG_HOME", str(tmp_path / "config"))
+    monkeypatch.setattr(crash_reporting.faulthandler, "is_enabled", lambda: True)
+    store = CrashStore(tmp_path / "crashes")
+    reporter = CrashReporter(store, "3.0.0")
+    reporter.set_preference(True)
+    monkeypatch.setattr(crash_reporting, "_active", reporter)
+    manager = SettingsManager(str(tmp_path / "settings.ini"))
+    widget = SettingsDialog(manager)
+    qtbot.addWidget(widget)
+    apply_fpvs_theme(QApplication.instance())
+    widget.resize(1020, 790)
+    widget.show()
+    qtbot.waitExposed(widget)
+    widget.settings_navigation.setCurrentRow(widget.tabs.count() - 1)
+    page = widget.tabs.currentWidget()
+    assert widget.settings_page_title.text() == "Diagnostics"
+    assert any("operating system versions" in label.text() for label in page.findChildren(QLabel))
+    toggle = page.findChild(QCheckBox, "settings_automatic_crash_reporting")
+    assert toggle.isVisible() and toggle.isChecked()
+    toggle.click()
+    assert store.preference() is False
+    assert not widget.has_unsaved_changes()
+    toggle.click()
+    assert store.preference() is True
+    reporter.shutdown(clean=True)
+
+
+@pytest.mark.parametrize(("appearance", "action"), [("Dark", "enable"), ("Light", "decline"), ("Dark", "escape")])
+def test_diagnostics_discloses_before_default_capture(tmp_path, qtbot, monkeypatch, appearance, action):
+    from Main_App.diagnostics import crash_reporting
+    from Main_App.diagnostics.crash_reporting import CrashReporter
+    from Main_App.diagnostics.crash_store import CrashStore
+    from Main_App.gui.diagnostics_preferences import disclose_automatic_reporting
+
+    monkeypatch.setattr(crash_reporting.faulthandler, "is_enabled", lambda: True)
+    set_appearance_mode(QApplication.instance(), appearance)
+    reporter = CrashReporter(CrashStore(tmp_path / "crashes"), "3.0.0")
+    observed = []
+
+    def choose():
+        dialog = QApplication.activeModalWidget()
+        if not isinstance(dialog, QDialog) or dialog.objectName() != "automatic_reporting_disclosure":
+            return
+        labels = dialog.findChildren(QLabel)
+        enable = dialog.findChild(QPushButton, "automatic_reporting_enable")
+        decline = dialog.findChild(QPushButton, "automatic_reporting_decline")
+        observed.append(
+            (
+                reporter.preference(),
+                reporter._session,
+                "\n".join(label.text() for label in labels),
+                not dialog.windowIcon().isNull() and any(not label.pixmap().isNull() for label in labels),
+                set(label.font().family() for label in labels),
+                enable.isDefault() and enable.property("variant") == "primary",
+                all(label.height() >= label.heightForWidth(label.width()) for label in labels if label.wordWrap()),
+                all(button.height() >= 40 and button.width() >= button.sizeHint().width() for button in (enable, decline)),
+            )
+        )
+        if action == "enable":
+            qtbot.keyClick(enable, Qt.Key.Key_Return)
+        elif action == "decline":
+            decline.click()
+        else:
+            qtbot.keyClick(dialog, Qt.Key.Key_Escape)
+
+    timeout = QTimer()
+    timeout.setSingleShot(True)
+    timeout.timeout.connect(lambda: QApplication.activeModalWidget().close() if QApplication.activeModalWidget() else None)
+    timeout.start(3000)
+    QTimer.singleShot(25, choose)
+    disclose_automatic_reporting(reporter)
+    timeout.stop()
+    assert len(observed) == 1
+    preference, session, copy, has_logo, fonts, primary_default, labels_fit, buttons_fit = observed[0]
+    assert preference is None and session is None
+    assert "CPU and graphics models" in copy
+    assert "What stays local" in copy and "Turning it off deletes pending reports." in copy
+    assert has_logo and fonts == {APP_FONT_FAMILY}
+    assert primary_default and labels_fit and buttons_fit
+    assert reporter.preference() is (action == "enable")
+    assert (reporter._session is not None) is (action == "enable")
+    reporter.shutdown(clean=True)
 
 
 def test_settings_enter_on_shared_save_persists_draft(panel, qtbot):

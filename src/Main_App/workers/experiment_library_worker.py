@@ -9,6 +9,7 @@ from threading import Event
 
 from PySide6.QtCore import QObject, Signal, Slot
 
+from Main_App.diagnostics.crash_reporting import report_failure
 from Main_App.projects.experiment_library import (
     LibraryCancelled, LibraryError, PublicDataset, install_public_dataset,
     installed_dataset_path, list_installed_datasets, list_public_datasets,
@@ -63,6 +64,8 @@ class ExperimentCatalogWorker(QObject):
                     installed[(item.item_id, item.version)] = path
             self.result.emit(CatalogSnapshot(items, installed, " ".join(notices)))
         except Exception as exc:  # noqa: BLE001 - report failure and always end the QThread
+            if not isinstance(exc, LibraryError):
+                report_failure(exc, "project")
             logger.exception("experiment_library_catalog_failed")
             self.failed.emit(str(exc))
         finally:
@@ -96,6 +99,8 @@ class ExperimentInstallWorker(QObject):
         except LibraryCancelled:
             self.canceled.emit()
         except Exception as exc:  # noqa: BLE001 - report failure and always end the QThread
+            if not self.cancel_event.is_set() and not isinstance(exc, LibraryError):
+                report_failure(exc, "project")
             logger.exception("experiment_library_install_failed item=%s", self.item.item_id)
             self.failed.emit(str(exc))
         finally:

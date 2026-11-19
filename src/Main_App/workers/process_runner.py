@@ -22,6 +22,7 @@ import os
 import time
 import traceback
 from concurrent.futures import ProcessPoolExecutor, FIRST_COMPLETED, wait
+from concurrent.futures.process import BrokenProcessPool
 from dataclasses import dataclass, replace
 from multiprocessing import Queue, get_context, Event
 from pathlib import Path
@@ -30,11 +31,13 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, List, Mapping, Optional, 
 
 import Main_App.processing.preprocess as backend_preprocess
 from Main_App.diagnostics import log_router
+from Main_App.diagnostics.crash_reporting import report_failure
 from Main_App.io.atomic_write import atomic_write
 from Main_App.io.buffered_fif import save_raw_fif
 from Main_App.io.safe_file import regular_file_info
 from Main_App.processing.preflight_qc_pruning import safe_cache_directory
 from Main_App.processing.pipeline_plan import (
+    PipelineCancelled,
     PipelineExecutionError,
     pipeline_fingerprint_payload,
     resolve_pipeline_plan,
@@ -3049,6 +3052,8 @@ def run_project_parallel(
     try:
         metadata = _run_project_parallel(params, report, cancel_event)
     except BaseException as exc:
+        if progress_queue is not None and not isinstance(exc, PipelineCancelled):
+            report_failure(exc, "processing")
         controller_error = f"{type(exc).__name__}: {exc}"
         logger.exception("mp_run_controller_failed")
         if progress_queue is None:
@@ -3208,6 +3213,7 @@ def _run_project_parallel(
 
     # Batch-level stats for n_rejected (number of channels interpolated per file)
     total_rejected = 0
+    broken_pool_reported = False
     files_with_audit = 0
     cancelled = False
     shutdown_wait = True
@@ -3268,7 +3274,7 @@ def _run_project_parallel(
         return True
 
     def _record_future(fut: Any) -> None:
-        nonlocal completed, total_rejected, files_with_audit
+        nonlocal broken_pool_reported, completed, total_rejected, files_with_audit
         f = in_flight.pop(fut, None)
         index = in_flight_indices.pop(fut, None)
         if index is not None:
@@ -3276,6 +3282,11 @@ def _run_project_parallel(
         try:
             res = fut.result()
         except Exception as exc:
+            # A single process failure can fail every in-flight Future.
+            broken_pool = isinstance(exc, BrokenProcessPool)
+            if not broken_pool or not broken_pool_reported:
+                report_failure(exc, "processing")
+            broken_pool_reported = broken_pool_reported or broken_pool
             res = {
                 "status": "error",
                 "file": str(f) if f else "unknown",

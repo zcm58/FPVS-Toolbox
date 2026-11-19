@@ -29,11 +29,15 @@ Rules:
 - Keep Stats-specific diagnostics inside `src/Tools/Stats/` unless a Stats
   refactor explicitly scopes a move.
 
-## Automatic error and crash reporting (planned)
+## Automatic error and crash reporting
 
 The [shared OpenFPVS reporting contract](https://github.com/zcm58/FPVS-Studio-2.0/blob/master/docs/BUG_REPORTING.md#platform-automatic-error-and-crash-reporting)
 defines the payload, delivery limits, privacy controls and acceptance checks.
-Toolbox's current runtime logging and installer smoke diagnostics are local.
+`crash_reporting.py` owns the desktop lifecycle and fault hooks, `crash_store.py`
+owns the app-local outbox and session recovery, `crash_inventory.py` selects
+system facts, and `crash_delivery.py` owns the fixed-origin HTTP transport. The
+entry point activates disclosed capture before importing Qt and skips capture
+for packaged diagnostic commands and multiprocessing children.
 
 - Capture unexpected internal faults that interrupt an action at the desktop or
   worker boundary. Recover qualifying native crashes or unexplained unclean
@@ -61,8 +65,19 @@ Toolbox's current runtime logging and installer smoke diagnostics are local.
   Automatic submission requires no browser interaction. Manual feedback and
   explicit **Share study results…** remain separate workflows.
 
-Verify the target with synthetic desktop and worker faults, a native failure
-and next-launch recovery, an outage and replay, and repeated and disabled
-cases. Verify that replay reuses the private issue and that confirmed email
-delivery sends one notification. Check report contents, startup, GUI
-responsiveness and processing recovery on the supported Toolbox targets.
+The app-owned `support/automatic-crashes/` directory is under the Toolbox
+configuration home. The SQLite database holds redacted payloads, consent,
+revocation and retry state. A native fault trace temporarily holds Python
+function names and source filenames for the failing thread. Next-launch recovery
+reads a bounded excerpt, strips external source locations from the report, and
+removes the trace. Clean sessions and previous preference generations are
+excluded. When an externally enabled fault handler or abrupt termination leaves
+no usable trace, an eligible dead session is reported as an unclean shutdown.
+
+The non-Qt diagnostics tests cover the consent gate, report bounds, actual
+synthetic native failure and recovery, and fake service outage and retry. In a
+visible test profile, check the first-run disclosure, then change the preference
+from Settings > Diagnostics and reopen Settings. Confirm persistence immediately,
+including when other Settings edits are cancelled. Check disclosure wrapping
+and keyboard access at the supported window sizes. Installer builds, supported
+Linux desktops, and the staged issue and email flow need product acceptance.

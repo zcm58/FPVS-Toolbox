@@ -51,9 +51,8 @@ set_blas_threads_single_process()
 
 import multiprocessing as mp
 
-from PySide6.QtCore import QCoreApplication
-
-from config import FPVS_TOOLBOX_VERSION
+from Main_App.diagnostics.crash_reporting import set_operation, start_reporting
+from Main_App.updates.application import APP_VERSION
 
 
 def _configure_windows_dpi_awareness() -> None:
@@ -68,13 +67,6 @@ def _configure_windows_dpi_awareness() -> None:
         pass
 
 
-_configure_windows_dpi_awareness()
-
-QCoreApplication.setOrganizationName("MississippiStateUniversity")
-QCoreApplication.setOrganizationDomain("msstate.edu")
-QCoreApplication.setApplicationName("FPVS Toolbox")
-QCoreApplication.setApplicationVersion(FPVS_TOOLBOX_VERSION)
-
 from Main_App import (  # noqa: E402
     configure_logging,
     get_settings,
@@ -83,21 +75,47 @@ from Main_App import (  # noqa: E402
 
 
 def run_app() -> int:
-    settings = get_settings()
-    debug = settings.debug_enabled()
-    configure_logging(debug)
-    install_messagebox_logger(debug)
+    reporter = start_reporting(APP_VERSION)
+    operation = "startup"
+    try:
+        from PySide6.QtCore import QCoreApplication
 
-    from PySide6.QtWidgets import QApplication
-    from Main_App.gui.icons import application_icon
-    from Main_App.gui.main_window import MainWindow
+        _configure_windows_dpi_awareness()
+        QCoreApplication.setOrganizationName("MississippiStateUniversity")
+        QCoreApplication.setOrganizationDomain("msstate.edu")
+        QCoreApplication.setApplicationName("FPVS Toolbox")
+        QCoreApplication.setApplicationVersion(APP_VERSION)
 
-    app = QApplication([])
-    app.setWindowIcon(application_icon())
+        settings = get_settings()
+        debug = settings.debug_enabled()
+        configure_logging(debug)
+        install_messagebox_logger(debug)
 
-    window = MainWindow()
-    window.show()
-    return app.exec()
+        from PySide6.QtWidgets import QApplication
+        from Main_App.gui.diagnostics_preferences import disclose_automatic_reporting
+        from Main_App.gui.theme import set_appearance_mode
+
+        app = QApplication([])
+        if reporter is not None:
+            set_appearance_mode(app, settings.get_appearance_mode())
+            disclose_automatic_reporting(reporter)
+
+        from Main_App.gui.icons import application_icon
+        from Main_App.gui.main_window import MainWindow
+
+        app.setWindowIcon(application_icon())
+        window = MainWindow()
+        window.show()
+        operation = "application"
+        set_operation(operation)
+        return app.exec()
+    except BaseException as error:
+        if reporter is not None:
+            reporter.capture(error, operation, fatal=True, unhandled=True)
+        raise
+    finally:
+        if reporter is not None:
+            reporter.shutdown(clean=True)
 
 
 def main() -> None:
