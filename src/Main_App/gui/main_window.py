@@ -141,6 +141,7 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(_WINDOW_SIZE)
         self.resize(_WINDOW_SIZE)
         self.currentProject: Project | None = None
+        self.file_mode = SimpleNamespace(get=lambda: "Batch")
 
         # Build UI
         self.shell_actions = ShellActions(self)
@@ -234,7 +235,6 @@ class MainWindow(QMainWindow):
         # Flags/vars the mixin expects
         self.save_fif_var = SimpleNamespace(get=lambda: False)
         self.save_folder_path = SimpleNamespace(get=lambda: "", set=lambda v: None)
-        self.file_mode = SimpleNamespace(get=lambda: "Batch")
         self.file_type = SimpleNamespace(set=lambda v: None)
 
         # Legacy mixin uses Tk's .after(); we emulate it with QTimer
@@ -285,6 +285,10 @@ class MainWindow(QMainWindow):
 
     def _set_project_title(self, name: str) -> None:
         self.setWindowTitle(f"{name} — {_WINDOW_TITLE}")
+        self.lbl_currentProject.setText(f"Current Project: {name}")
+
+    def show_processing_log(self) -> None:
+        self.processing_log_dialog.open()
 
     def stop_processing(self) -> None:
         processing_workflows.stop_processing(self)
@@ -419,6 +423,7 @@ class MainWindow(QMainWindow):
 
     def edit_project_settings(self) -> None:
         project_workflows.edit_project_settings(self)
+        self._refresh_home_inputs()
 
     def reset_project_processing_cache(self) -> None:
         project_workflows.reset_project_processing_cache(self)
@@ -445,8 +450,18 @@ class MainWindow(QMainWindow):
         self.stacked.setCurrentIndex(1)
 
     def show_home_page(self) -> None:
+        self._refresh_home_inputs()
         refresh_processing_history(self)
         self._show_workspace_page(self.homeWidget)
+
+    def _refresh_home_inputs(self) -> None:
+        project = self.currentProject
+        if self.file_mode.get() == "Batch":
+            self.home_input_summary.refresh_batch(project)
+        folder = getattr(project, "subfolders", {}).get("excel")
+        destination = str(project.project_root / folder) if folder else ""
+        self.home_workbook_path.setText(destination or "No workbook folder configured")
+        self.home_workbook_path.setToolTip(destination)
 
     def _ensure_stats_page(self) -> PysideStatsWindow:
         project = getattr(self, "currentProject", None)
@@ -873,6 +888,7 @@ class MainWindow(QMainWindow):
     # ------------------------ project load hook --------------------- #
     def loadProject(self, project: Project) -> None:  # pragma: no cover - GUI stub
         project_workflows.load_project(self, project, _QtEntryAdapter)
+        self._on_mode_changed("batch")
 
     def saveProjectSettings(self) -> None:
         project_workflows.save_project_settings(self)
@@ -894,6 +910,13 @@ class MainWindow(QMainWindow):
     # --------------------------- mode + detect --------------------------- #
     def _on_mode_changed(self, mode: str) -> None:
         processing_inputs.on_mode_changed(self, mode)
+
+    def _toggle_processing_scope(self) -> None:
+        if self.file_mode.get() == "Single":
+            self._on_mode_changed("batch")
+            self._refresh_home_inputs()
+        else:
+            self.select_single_file()
 
     def _set_controls_enabled(self, enabled: bool) -> None:
         processing_inputs.set_controls_enabled(self, enabled)
@@ -1085,7 +1108,11 @@ class MainWindow(QMainWindow):
         processing_inputs.update_start_enabled(self)
 
     def select_single_file(self) -> None:
-        processing_inputs.select_single_file(self)
+        info = processing_inputs.select_single_file(self)
+        if info is not None:
+            if self.file_mode.get() != "Single":
+                self._on_mode_changed("single")
+            self.home_input_summary.show_single(self.currentProject, info)
 
 # ----------------------------------------------------------------------
 def main() -> None:

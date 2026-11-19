@@ -5,7 +5,7 @@ from pathlib import Path
 import sys
 
 from PySide6.QtCore import QByteArray, QPointF, QRect, QRectF, QSize, Qt
-from PySide6.QtGui import QColor, QIcon, QIconEngine, QPainter, QPixmap, QPen
+from PySide6.QtGui import QColor, QIcon, QIconEngine, QPainter, QPixmap, QPen, QPolygonF
 from PySide6.QtSvg import QSvgRenderer
 
 from Main_App.gui.style_tokens import ACCENT_COLOR
@@ -19,6 +19,21 @@ def application_icon() -> QIcon:
     if icon.isNull():
         raise RuntimeError(f"Cannot load the FPVS Toolbox application icon: {path}")
     return icon
+
+
+@lru_cache(maxsize=1)
+def processing_play_icon() -> QIcon:
+    """Draw Studio's filled green launch triangle for the Home action."""
+    pixels = QPixmap(48, 48)
+    pixels.fill(Qt.transparent)
+    painter = QPainter(pixels)
+    painter.setRenderHint(QPainter.Antialiasing, True)
+    painter.scale(2, 2)
+    painter.setPen(Qt.NoPen)
+    painter.setBrush(QColor("#22c55e"))
+    painter.drawPolygon(QPolygonF([QPointF(8, 5), QPointF(8, 19), QPointF(19, 12)]))
+    painter.end()
+    return QIcon(pixels)
 
 
 _SIDEBAR_ICON_PATHS = {

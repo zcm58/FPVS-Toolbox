@@ -68,7 +68,7 @@ Primary paths:
   the actual source/registration issue. No local Qt execution is required.
 - `condition_input_model.py` validates complete condition drafts for both Save
   and Start; `event_map.py` presents row errors without dropping entered values.
-  `project_drafts.py` tracks condition/mode and cached Settings changes at project
+  `project_drafts.py` tracks condition and cached Settings changes at project
   replacement and exit. Save must finish before leaving; an asynchronous save
   keeps the current project active. Ordinary workspace navigation preserves drafts.
 - `settings_panel.py` retains Settings state, validation, persistence and worker
@@ -93,8 +93,8 @@ Primary paths:
   history off the UI thread; queued results are guarded by project root and request
   identity. Project opening/returning Home and processing completion refresh it.
   `processing_history_model.py` formats the local completion time and distinct
-  successful participant count; absent, unavailable and incomplete history remain
-  explicit. This is processing recency, not downstream analysis readiness. At
+  successful participant count. Home hides absent history and identifies unavailable
+  or incomplete history. This is processing recency, not downstream analysis readiness. At
   1200 × 800 verify long timestamps/counts wrap without hiding Start Processing.
 - `src/Main_App/gui/processing_workflows.py`: processing run start/stop,
   queue polling, worker completion/error, and finalization GUI orchestration
@@ -291,8 +291,8 @@ Primary paths:
   wrappers. GUI log formatting and backend/IDE routing policy are delegated to
   `Main_App.diagnostics.log_router`.
 - `src/Main_App/gui/processing_log_dialog.py`: focused modal viewer for the
-  persistent Main App processing log. The home page keeps only a **View Log**
-  action so the Conditions editor can use the full remaining height.
+  persistent Main App processing log. **Tools > Processing Log** opens the
+  viewer, and a failed run with a recorded failure reason links to it from Home.
 - `src/Main_App/gui/roi_electrode_selector.py`: focused, settings-agnostic
   BioSemi64 map presentation. It owns the scalable nose-up map, accessible
   electrode controls, active-ROI styling, and color-ring visualization for
@@ -659,8 +659,21 @@ with **Open Existing Project** as the primary action.
 action. Cancel and Escape return to Welcome. A Studio import confirms hardware,
 requests a recordings folder, and opens Home when it succeeds.
 
-Home groups recording selection, readiness, Start Processing and View Log.
-Below the form it shows persisted processing history and the current session's
+Home shows **Current Project**, **Data Input Folder** and **Conditions** above a
+compact input summary and the centered **Start Processing** action. A project
+opens in folder scope. **Process a single file** opens the existing native
+picker and switches scope only after a valid selection. **Use the input folder**
+returns to batch. This choice is transient and does not modify saved project
+options or condition drafts. The existing Browse action retains the group-folder
+workflow for grouped projects.
+
+`home_input_summary.py` uses a worker and the canonical read-only discovery
+paths to count candidate files and group assignments. Project and scope changes
+invalidate stale results. The workbook location comes from the configured
+project subfolder. Previewing files does not register them, and processing start
+still performs its existing validation and registration review.
+
+Below the form Home shows available processing history and the current session's
 run outcome, with **Open Output Folder** and **Review Issues** actions. Each
 tool checks its inputs through the existing Tools menu actions. The
 [post-Batch actions](../product-specs/fpvs-toolbox.md#after-batch-processing)
@@ -678,8 +691,16 @@ Closing it keeps the draft. Project load collapses the editor, and invalid
 Save opens it and focuses the first invalid field. Source-mapped projects
 show **View conditions** with their canonical catalog.
 
-For visible acceptance, launch at 1200 × 800 in Light and Dark. Tab through
-the Welcome actions and check visible focus. Cancel the existing-project
+For visible acceptance, open an unprocessed grouped project at 1200 × 800 and
+1280 × 900 in Light and Dark. Confirm the Toolbox title-bar icon, current project
+name, matching Browse and Edit conditions widths, candidate count, group
+breakdown and workbook path, and centered green-play Start Processing button.
+Cancel the single-file picker, then select a recording and return to the folder.
+Check that the count refreshes when changing projects or input folders, and that
+Tools > Processing Log opens the same modal viewer. Check that Start Processing
+returns to the center of Home after a run or cancellation.
+
+Tab through the Welcome actions and check visible focus. Cancel the existing-project
 picker, then dismiss Create New Project with Cancel and Escape. Open a
 disposable project and visit Home, Settings, each embedded tool, and Processing
 Activity. Check that the window size stays at 1200 × 800 and that the controls

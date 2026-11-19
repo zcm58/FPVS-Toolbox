@@ -1305,10 +1305,6 @@ def loadProject(self, project: Project) -> None:
     self.currentProject = project
     self._set_project_title(project.name)
 
-    mode = project.options.get("mode", "batch").lower()
-    self.rb_single.setChecked(mode == "single")
-    self.rb_batch.setChecked(mode == "batch")
-
     for row in list(self.event_rows):
         row.setParent(None)
     self.event_rows.clear()

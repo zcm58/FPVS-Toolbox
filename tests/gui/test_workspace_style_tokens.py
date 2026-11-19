@@ -40,11 +40,11 @@ from Main_App.gui.style_tokens import (
 
 @pytest.mark.parametrize("frozen", [False, True])
 def test_application_icon_loads_from_checkout_or_bundle_independent_of_cwd(tmp_path, monkeypatch, frozen) -> None:
-    asset = Path(__file__).resolve().parents[2] / "assets" / "experiment_library" / "wave.svg"
+    asset = Path(__file__).resolve().parents[2] / "assets" / "ToolBox_Icon.ico"
     runtime = SimpleNamespace(frozen=frozen)
     if frozen:
         runtime._MEIPASS = str(tmp_path / "bundle")
-        bundled_asset = Path(runtime._MEIPASS) / "assets" / "experiment_library" / asset.name
+        bundled_asset = Path(runtime._MEIPASS) / "assets" / asset.name
         bundled_asset.parent.mkdir(parents=True)
         bundled_asset.write_bytes(asset.read_bytes())
         asset = bundled_asset

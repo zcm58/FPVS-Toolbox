@@ -323,8 +323,6 @@ def test_valid_project_activation_completes_even_if_recent_projects_cannot_save(
     host = SimpleNamespace(
         currentProject=previous, event_rows=[old_row],
         _set_project_title=lambda value: steps.append(("title", value)),
-        rb_single=SimpleNamespace(setChecked=lambda value: steps.append(("single", value))),
-        rb_batch=SimpleNamespace(setChecked=lambda value: steps.append(("batch", value))),
         log=lambda value: steps.append(("log", value)),
         _on_project_ready=lambda: steps.append(("ready", True)),
     )
@@ -367,9 +365,7 @@ def test_valid_project_activation_completes_even_if_recent_projects_cannot_save(
     assert project.options == manifest["options"]
     assert path.read_bytes() == before
     assert host.event_rows == [("Condition A", "10"), ("Condition B", "20")]
-    assert steps[:3] == [
-        ("title", "Valid study"), ("single", True), ("batch", False),
-    ]
+    assert steps[0] == ("title", "Valid study")
     assert steps[-1] == ("ready", True)
     assert steps.count(("ready", True)) == 1
     assert not workflow["_open_selected_project_guard"].is_active()

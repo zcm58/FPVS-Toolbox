@@ -38,6 +38,7 @@ class ShellActions(QActionGroup):
         self.library = self._add("actionExperimentLibrary", "Experiment Library…", show_library)
         self.settings = self._add("btn_settings", "Settings", host.open_settings_window)
         self.about = self._add("btn_help", "About…", host.show_about_dialog)
+        self.processing_log = self._add("actionProcessingLog", "Processing Log…", host.show_processing_log)
         self.default_tools = tuple(
             self._add(role, title, getattr(host, opener))
             for role, title, opener in _DEFAULT_TOOL_SPECS

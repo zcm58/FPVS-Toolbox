@@ -421,7 +421,8 @@ def build_main_page_stylesheet() -> str:
             background: {CONTENT_BG};
         }}
 
-        #processing_title {{
+        #processing_title,
+        #home_project_title {{
             color: {TEXT_PRIMARY};
             font-size: {css_font_size("project_title")};
             font-weight: {css_font_weight("project_title")};
@@ -438,14 +439,16 @@ def build_main_page_stylesheet() -> str:
         }}
 
         #processing_status_separator,
-        #home_history_separator {{
+        #home_summary_separator {{
             color: {BORDER_SOFT_COLOR};
             background: {BORDER_SOFT_COLOR};
             max-height: 1px;
         }}
 
         #project_processing_history,
-        #home_condition_summary {{
+        #home_condition_summary,
+        #home_recording_details,
+        #home_workbook_path {{
             color: {TEXT_SECONDARY};
         }}
 

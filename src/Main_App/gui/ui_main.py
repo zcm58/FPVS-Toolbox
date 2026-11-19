@@ -3,17 +3,15 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QPropertyAnimation, Qt
+from PySide6.QtCore import QPropertyAnimation, QSize, Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
-    QButtonGroup,
     QFrame,
     QHeaderView,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QProgressBar,
-    QRadioButton,
     QSizePolicy,
     QStackedWidget,
     QTableWidget,
@@ -22,7 +20,8 @@ from PySide6.QtWidgets import (
 )
 
 from Main_App.gui.event_map import ConditionRowsArea, refresh_condition_editor_toggle
-from Main_App.gui.icons import application_icon
+from Main_App.gui.home_input_summary import HomeInputSummary
+from Main_App.gui.icons import application_icon, processing_play_icon
 from Main_App.gui.menu_bar import build_menu_bar
 from Main_App.gui.processing_log_dialog import ProcessingLogDialog
 from Main_App.gui.project_welcome import build_project_welcome
@@ -44,7 +43,6 @@ from Main_App.gui.components import (
     SubsectionHeaderLabel,
     apply_font_role,
     make_action_button,
-    make_form_layout,
 )
 
 
@@ -113,30 +111,20 @@ def init_ui(self) -> None:
     workflow_layout.setContentsMargins(0, SECTION_GAP, 0, 0)
     workflow_layout.setSpacing(SECTION_GAP)
 
+    self.lbl_currentProject = QLabel("Current Project: None", workspace)
+    self.lbl_currentProject.setObjectName("home_project_title")
+    self.lbl_currentProject.setTextFormat(Qt.TextFormat.PlainText)
+    self.lbl_currentProject.setWordWrap(True)
+    apply_font_role(self.lbl_currentProject, "project_title")
+    workflow_layout.addWidget(self.lbl_currentProject)
+
     grp_proc = QWidget(workspace)
     grp_proc.setObjectName("processing_group")
     proc_layout = QVBoxLayout(grp_proc)
     proc_layout.setContentsMargins(0, 0, 0, 0)
-    proc_layout.setSpacing(10)
-    proc_layout.addWidget(SubsectionHeaderLabel("Process recordings", grp_proc))
+    proc_layout.setSpacing(8)
 
-    form = make_form_layout()
-
-    mode_field = QWidget(grp_proc)
-    mode_field.setObjectName("mode_field")
-    mode_layout = QHBoxLayout(mode_field)
-    mode_layout.setContentsMargins(0, 0, 0, 0)
-    mode_layout.setSpacing(14)
-
-    self.rb_single = QRadioButton("Single File", grp_proc)
-    self.rb_batch = QRadioButton("Batch Folder", grp_proc)
-    mode_layout.addWidget(self.rb_single)
-    mode_layout.addWidget(self.rb_batch)
-    mode_layout.addStretch(1)
-
-    form.addRow("Input mode", mode_field)
-
-    self.lbl_single_file = QLabel("EEG recording", grp_proc)
+    self.lbl_single_file = SubsectionHeaderLabel("Data Input File", grp_proc)
     self.row_single_file = QWidget(grp_proc)
     self.row_single_file.setObjectName("single_file_row")
     single_hl = QHBoxLayout(self.row_single_file)
@@ -158,10 +146,11 @@ def init_ui(self) -> None:
     single_hl.addWidget(self.le_input_file, 1)
     single_hl.addWidget(self.btn_select_input_file, 0)
 
-    form.addRow(self.lbl_single_file, self.row_single_file)
+    proc_layout.addWidget(self.lbl_single_file)
+    proc_layout.addWidget(self.row_single_file)
     self.lbl_single_file.setBuddy(self.le_input_file)
 
-    self.lbl_input_folder = QLabel("EEG folder", grp_proc)
+    self.lbl_input_folder = SubsectionHeaderLabel("Data Input Folder", grp_proc)
     self.row_input_folder = QWidget(grp_proc)
     self.row_input_folder.setObjectName("input_folder_row")
     folder_hl = QHBoxLayout(self.row_input_folder)
@@ -177,44 +166,26 @@ def init_ui(self) -> None:
         parent=self.row_input_folder,
     )
     self.btn_select_input_folder.setFixedWidth(BROWSE_BUTTON_WIDTH)
-    self.btn_select_input_folder.setAccessibleName("Choose EEG folder")
+    self.btn_select_input_folder.setAccessibleName("Choose data input folder")
     self.btn_select_input_folder.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
 
     folder_hl.addWidget(self.le_input_folder, 1)
     folder_hl.addWidget(self.btn_select_input_folder, 0)
 
-    form.addRow(self.lbl_input_folder, self.row_input_folder)
+    proc_layout.addWidget(self.lbl_input_folder)
+    proc_layout.addWidget(self.row_input_folder)
     self.lbl_input_folder.setBuddy(self.le_input_folder)
-    proc_layout.addLayout(form)
-
-    self.mode_group = QButtonGroup(self)
-    self.mode_group.setExclusive(True)
-    self.mode_group.addButton(self.rb_single)
-    self.mode_group.addButton(self.rb_batch)
-    self.rb_single.toggled.connect(
-        lambda checked: checked and self._on_mode_changed("single")
+    self.processing_scope_button = make_action_button(
+        "Process a single file…", variant="tertiary", compact=True, parent=grp_proc,
     )
-    self.rb_batch.toggled.connect(
-        lambda checked: checked and self._on_mode_changed("batch")
-    )
+    self.processing_scope_button.setObjectName("home_processing_scope")
+    self.processing_scope_button.clicked.connect(self._toggle_processing_scope)
+    proc_layout.addWidget(self.processing_scope_button, 0, Qt.AlignLeft)
 
     workflow_layout.addWidget(grp_proc)
 
-    self.row_single_file.setVisible(False)
-    self.lbl_single_file.setVisible(False)
-    self.row_input_folder.setVisible(False)
-    self.lbl_input_folder.setVisible(False)
-    try:
-        self.le_input_file.textChanged.connect(self._update_start_enabled)
-    except Exception:
-        pass
-
-    mode = self.settings.get("processing", "mode", "batch").lower()
-    (self.rb_batch if mode == "batch" else self.rb_single).setChecked(True)
-    try:
-        self._update_start_enabled()
-    except Exception:
-        pass
+    self.row_single_file.hide()
+    self.lbl_single_file.hide()
 
     self.processing_readiness_label = QLabel(workspace)
     self.processing_readiness_label.setObjectName("processing_readiness_label")
@@ -222,25 +193,16 @@ def init_ui(self) -> None:
     self.processing_readiness_label.hide()
 
     # Start Row
-    run_panel = ActionRow(workspace, alignment=Qt.AlignRight, spacing=10)
+    run_panel = ActionRow(workspace, alignment=Qt.AlignHCenter, spacing=10)
     run_panel.setObjectName("run_panel")
     self.run_panel = run_panel
-    self.project_draft_status = QLabel(run_panel)
+    self.project_draft_status = QLabel(workspace)
     self.project_draft_status.setObjectName("project_draft_status")
     self.project_draft_status.setAccessibleName("Project save status")
-    run_panel.row_layout.insertWidget(0, self.project_draft_status)
+    self.project_draft_status.hide()
 
     self.processing_log_dialog = ProcessingLogDialog(self)
     self.text_log = self.processing_log_dialog.viewer
-    self.btn_view_log = make_action_button(
-        "View Log",
-        variant="secondary",
-        parent=run_panel,
-    )
-    self.btn_view_log.setObjectName("processing_view_log_button")
-    self.btn_view_log.setAccessibleName("View processing log")
-    self.btn_view_log.clicked.connect(self.processing_log_dialog.open)
-
     self.btn_start = make_action_button(
         "Start Processing",
         variant="primary",
@@ -248,12 +210,13 @@ def init_ui(self) -> None:
     )
     self.btn_start.setMinimumSize(180, 38)
     self.btn_start.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+    self.btn_start.setIcon(processing_play_icon())
+    self.btn_start.setIconSize(QSize(20, 20))
 
     btn_h = max(38, self.btn_start.sizeHint().height())
     self.btn_start.setFixedHeight(btn_h)
 
-    run_panel.add_button(self.btn_view_log)
-    run_panel.add_button(self.btn_start)
+    run_panel.row_layout.addWidget(self.btn_start, 1, Qt.AlignHCenter)
 
     # Conditions
     grp_event = QWidget(workspace)
@@ -262,14 +225,17 @@ def init_ui(self) -> None:
     conditions_layout.setContentsMargins(0, 0, 0, 0)
     conditions_layout.setSpacing(8)
     conditions_bar = ActionRow(grp_event, alignment=Qt.AlignLeft)
-    conditions_bar.row_layout.addWidget(SubsectionHeaderLabel("Conditions", conditions_bar))
+    condition_heading = QVBoxLayout()
+    condition_heading.setSpacing(4)
+    condition_heading.addWidget(SubsectionHeaderLabel("Conditions", conditions_bar))
     self.condition_summary_label = QLabel("None configured", conditions_bar)
     self.condition_summary_label.setObjectName("home_condition_summary")
     self.condition_summary_label.setTextFormat(Qt.PlainText)
-    conditions_bar.row_layout.addWidget(self.condition_summary_label)
-    conditions_bar.row_layout.addStretch(1)
+    condition_heading.addWidget(self.condition_summary_label)
+    conditions_bar.row_layout.addLayout(condition_heading, 1)
 
-    self.condition_editor_toggle = make_action_button("Edit conditions", compact=True, parent=conditions_bar)
+    self.condition_editor_toggle = make_action_button("Edit conditions", parent=conditions_bar)
+    self.condition_editor_toggle.setFixedWidth(BROWSE_BUTTON_WIDTH)
     self.condition_editor_toggle.setObjectName("home_condition_editor_toggle")
     self.condition_editor_toggle.setCheckable(True)
     self.condition_editor_toggle.setAccessibleDescription("Show or hide condition rows and source controls.")
@@ -347,13 +313,32 @@ def init_ui(self) -> None:
     self.condition_editor_toggle.toggled.connect(self.condition_editor_body.setVisible)
     self.condition_editor_toggle.toggled.connect(lambda _checked: refresh_condition_editor_toggle(self))
     workflow_layout.addWidget(grp_event)
+    workflow_layout.addWidget(self.project_draft_status)
+
+    separator = QFrame(workspace)
+    separator.setObjectName("home_summary_separator")
+    separator.setFrameShape(QFrame.HLine)
+    workflow_layout.addWidget(separator)
+    summary = QHBoxLayout()
+    summary.setSpacing(SECTION_GAP)
+    self.home_input_summary = HomeInputSummary(workspace)
+    summary.addWidget(self.home_input_summary, 1, Qt.AlignTop)
+    workbook = QVBoxLayout()
+    workbook.setSpacing(4)
+    workbook.addWidget(SubsectionHeaderLabel("Workbook output", workspace))
+    self.home_workbook_path = QLabel(workspace)
+    self.home_workbook_path.setObjectName("home_workbook_path")
+    self.home_workbook_path.setTextFormat(Qt.TextFormat.PlainText)
+    self.home_workbook_path.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+    self.home_workbook_path.setWordWrap(True)
+    self.home_workbook_path.setAccessibleName("Workbook output folder")
+    workbook.addWidget(self.home_workbook_path)
+    workbook.addStretch(1)
+    summary.addLayout(workbook, 1)
+    workflow_layout.addLayout(summary)
     workflow_layout.addWidget(self.processing_readiness_label)
     workflow_layout.addWidget(run_panel)
 
-    history_separator = QFrame(workspace)
-    history_separator.setObjectName("home_history_separator")
-    history_separator.setFrameShape(QFrame.HLine)
-    workflow_layout.addWidget(history_separator)
     self.processing_history_label = ProcessingHistoryLabel(workspace)
     workflow_layout.addWidget(self.processing_history_label)
     self.last_run_panel = build_last_run_panel(self, workspace)

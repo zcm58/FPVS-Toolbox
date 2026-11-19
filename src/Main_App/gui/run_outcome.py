@@ -61,6 +61,7 @@ def present_last_run(host, *, success: bool, cancelled: bool = False) -> None:
     host.last_run_label.setToolTip(reason)
     folder = getattr(host, "_last_run_output_folder", "")
     host.last_run_output_button.setEnabled(bool(folder) and Path(folder).is_dir())
+    host.last_run_issues_button.setText("View Processing Log" if reason else "Review Issues")
     host.last_run_issues_button.setVisible(bool(reason or outcome.failed or outcome.excluded
                                                or outcome.interrupted or outcome.condition_warnings))
     is_batch = getattr(host, "_processing_run_mode", "") == "Batch"
@@ -119,4 +120,4 @@ def open_outcome_path(host, *, issue: bool) -> None:
             raise OSError("The saved output location is unavailable.")
     except OSError as exc:
         host.log(f"Could not open processing output: {exc}")
-        host.last_run_label.setText(f"Could not open the output location: {exc} Use View Log for details.")
+        host.last_run_label.setText(f"Could not open the output location: {exc} See Tools > Processing Log for details.")

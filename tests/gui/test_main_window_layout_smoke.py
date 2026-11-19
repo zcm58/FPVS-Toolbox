@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QDialog,
     QDialogButtonBox,
+    QFileDialog,
     QLabel,
     QLineEdit,
     QMenu,
@@ -38,6 +39,7 @@ from Main_App.gui.settings_panel import EmbeddedSettingsPage
 from Main_App.gui.style_tokens import PAGE_MARGIN
 from Main_App.processing.preflight_qc_cache import preflight_qc_cache_directory
 from Main_App.processing.project_processing_cache import ProjectProcessingCacheUsage
+from Main_App.projects import Project
 import Main_App.gui.update_manager as update_manager
 from Tools.Individual_Detectability.main_window import IndividualDetectabilityWindow
 from Tools.Plot_Generator.plot_generator import PlotGeneratorWindow
@@ -123,6 +125,8 @@ def test_tools_menu_contains_default_and_enabled_beta_tools(tmp_path: Path, qtbo
         "Free Harmonic Clustering Analysis", "SNR Plots",
     ]
     assert [action.objectName() for action in tools_actions[:2]] == DEFAULT_TOOL_ROLES
+    assert tools_actions[-2].isSeparator()
+    assert tools_actions[-1] is win.shell_actions.processing_log
     if beta_enabled:
         assert tools_actions[2].isSeparator()
         beta_menu = _menu(win, "betaToolsMenu")
@@ -130,7 +134,7 @@ def test_tools_menu_contains_default_and_enabled_beta_tools(tmp_path: Path, qtbo
         assert [action.objectName() for action in beta_menu.actions()] == BETA_TOOL_ROLES
         assert [action.text() for action in beta_menu.actions()] == BETA_TOOL_ACCESSIBLE_NAMES
     else:
-        assert len(tools_actions) == 2
+        assert len(tools_actions) == 4
         assert win.menuBar().findChild(QMenu, "betaToolsMenu") is None
 
 
@@ -275,7 +279,7 @@ def test_main_window_layout_smoke(tmp_path: Path, qtbot, monkeypatch) -> None:
     assert win.text_log is win.processing_log_dialog.viewer
     assert not win.homeWidget.isAncestorOf(win.text_log)
     assert win.processing_history_label.objectName() == "project_processing_history"
-    assert win.processing_history_label.isVisibleTo(win)
+    assert not win.processing_history_label.isVisibleTo(win)
     assert win.processing_history_label.wordWrap()
     workflow = win.findChild(QWidget, "home_workflow")
     processing = win.findChild(QWidget, "processing_group")
@@ -284,14 +288,16 @@ def test_main_window_layout_smoke(tmp_path: Path, qtbot, monkeypatch) -> None:
     assert workflow.width() <= 760
     assert win.lbl_single_file.buddy() is win.le_input_file
     assert win.lbl_input_folder.buddy() is win.le_input_folder
+    assert win.lbl_input_folder.text() == "Data Input Folder"
+    assert win.lbl_currentProject.text() == "Current Project: None"
 
     assert win.btn_start.text() == "Start Processing"
+    assert not win.btn_start.icon().isNull()
     run_panel = win.findChild(ActionRow, "run_panel")
     assert run_panel is not None
-    assert run_panel.row_layout.indexOf(win.btn_view_log) >= 0
     assert run_panel.row_layout.indexOf(win.btn_start) >= 0
     assert run_panel.row_layout.indexOf(win.progress_bar) < 0
-    assert win.processing_history_label.geometry().top() > run_panel.geometry().bottom()
+    assert abs(win.btn_start.geometry().center().x() - run_panel.rect().center().x()) <= 1
     assert win.findChild(QWidget, "processing_page") is win.processing_page
     assert win.workspace_stack.indexOf(win.processing_page) >= 0
     assert win.processing_page.isAncestorOf(win.progress_bar)
@@ -316,7 +322,7 @@ def test_main_window_layout_smoke(tmp_path: Path, qtbot, monkeypatch) -> None:
     assert win.condition_editor_toggle.text() == "Edit conditions"
     qtbot.mouseClick(win.condition_editor_toggle, Qt.LeftButton)
     assert win.condition_editor_body.isVisibleTo(win)
-    assert win.processing_history_label.isVisibleTo(win)
+    assert not win.processing_history_label.isVisibleTo(win)
 
     event_map_header = win.findChild(QWidget, "event_map_header")
     assert event_map_header is not None
@@ -333,13 +339,13 @@ def test_main_window_layout_smoke(tmp_path: Path, qtbot, monkeypatch) -> None:
     assert condition_header.font().bold()
     assert trigger_header.font().bold()
     assert win.findChild(QWidget, "log_group") is None
-    assert win.btn_view_log.text() == "View Log"
-    assert win.btn_view_log.accessibleName() == "View processing log"
+    assert win.findChild(QPushButton, "processing_view_log_button") is None
     assert not hasattr(win, "btn_detect")
     assert win.btn_select_input_file.text() == "Browse…"
     assert win.btn_select_input_folder.text() == "Browse…"
     assert win.btn_select_input_file.accessibleName() == "Choose EEG recording"
-    assert win.btn_select_input_folder.accessibleName() == "Choose EEG folder"
+    assert win.btn_select_input_folder.accessibleName() == "Choose data input folder"
+    assert win.btn_select_input_folder.width() == win.condition_editor_toggle.width()
     assert win.btn_add_row.text() == "+ Add Condition"
     event_map_group = win.findChild(QWidget, "event_map_group")
     assert event_map_group is not None
@@ -366,18 +372,6 @@ def test_main_window_layout_smoke(tmp_path: Path, qtbot, monkeypatch) -> None:
 
     assert hasattr(win, "row_single_file")
     assert hasattr(win, "row_input_folder")
-    active_row = win.row_single_file if win.rb_single.isChecked() else win.row_input_folder
-    inactive_row = win.row_input_folder if win.rb_single.isChecked() else win.row_single_file
-    assert active_row.isVisible()
-    assert not inactive_row.isVisible()
-
-    win.rb_single.setChecked(True)
-    qtbot.wait(20)
-    assert win.row_single_file.isVisible()
-    assert not win.row_input_folder.isVisible()
-
-    win.rb_batch.setChecked(True)
-    qtbot.wait(20)
     assert win.row_input_folder.isVisible()
     assert not win.row_single_file.isVisible()
 
@@ -433,6 +427,49 @@ def test_home_analysis_entry_points_live_in_the_tools_menu(
     assert win.workspace_stack.currentWidget() is win.homeWidget
 
 
+def test_home_previews_folder_and_switches_scope_only_after_file_selection(tmp_path, qtbot, monkeypatch):
+    win = _build_window(tmp_path, qtbot, monkeypatch)
+    root = tmp_path / "ACR"
+    raw = root / "raw"
+    raw.mkdir(parents=True)
+    first, second = raw / "P01.bdf", raw / "P02.bdf"
+    first.touch()
+    second.touch()
+    project = Project.load(root)
+    project.input_folder = raw
+    project.options["mode"] = "single"
+    project.event_map = {"Faces": 1}
+    project.save()
+    manifest_before = project.manifest_path.read_bytes()
+    win.loadProject(project)
+    win.show_home_page()
+
+    assert win.lbl_currentProject.text() == "Current Project: ACR"
+    assert win.file_mode.get() == "Batch"
+    assert win.le_input_folder.text() == str(raw)
+    assert win.home_workbook_path.text() == str(project.project_root / project.subfolders["excel"])
+    qtbot.waitUntil(lambda: win.home_input_summary.title.text() == "2 files found")
+
+    picks = iter([("", ""), (str(first), "")])
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *_args: next(picks))
+    qtbot.mouseClick(win.processing_scope_button, Qt.LeftButton)
+    assert win.file_mode.get() == "Batch"
+    assert win.row_input_folder.isVisible()
+
+    qtbot.mouseClick(win.processing_scope_button, Qt.LeftButton)
+    assert win.file_mode.get() == "Single"
+    assert win.row_single_file.isVisible()
+    assert win.le_input_file.text() == str(first)
+    assert not win.row_input_folder.isVisible()
+    assert not win.project_draft_status.isVisible()
+
+    qtbot.mouseClick(win.processing_scope_button, Qt.LeftButton)
+    assert win.file_mode.get() == "Batch"
+    assert win.row_input_folder.isVisible()
+    qtbot.waitUntil(lambda: win.home_input_summary.title.text() == "2 files found")
+    assert project.manifest_path.read_bytes() == manifest_before
+
+
 def test_home_processing_history_long_content_fits_minimum_window(
     tmp_path: Path, qtbot, monkeypatch,
 ) -> None:
@@ -444,6 +481,7 @@ def test_home_processing_history_long_content_fits_minimum_window(
         "Last completed processing: 31 Dec 2099, 23:59 Chatham Standard Time "
         "- 1,234,567 participants"
     )
+    history.show()
     qtbot.wait(20)
 
     assert win.size() == QSize(1200, 800)
@@ -466,7 +504,7 @@ def test_main_window_has_toolbox_logo_and_no_toolbar_gap(tmp_path: Path, qtbot, 
     assert not win.findChildren(QToolBar)
     assert not win.windowIcon().isNull()
     actual_logo = win.windowIcon().pixmap(16, 16)
-    expected_logo = QIcon(str(Path(__file__).resolve().parents[2] / "assets" / "experiment_library" / "wave.svg")).pixmap(16, 16)
+    expected_logo = QIcon(str(Path(__file__).resolve().parents[2] / "assets" / "ToolBox_Icon.ico")).pixmap(16, 16)
     assert not actual_logo.isNull()
     assert actual_logo.toImage() == expected_logo.toImage()
 
@@ -691,7 +729,7 @@ def test_processing_log_opens_in_focused_modal(
     win.stacked.setCurrentIndex(1)
     win.text_log.append("Visible processing detail")
 
-    qtbot.mouseClick(win.btn_view_log, Qt.LeftButton)
+    _menu_action(win, "toolsMenu", "actionProcessingLog").trigger()
     qtbot.waitUntil(win.processing_log_dialog.isVisible)
 
     assert win.processing_log_dialog.isModal()
@@ -724,6 +762,7 @@ def test_processing_activity_page_locks_navigation_and_reuses_start_button(
 
     assert win.workspace_stack.currentWidget() is win.processing_page
     assert win.processing_action_layout.indexOf(win.btn_start) >= 0
+    assert win.btn_start.icon().isNull()
     assert run_panel.row_layout.indexOf(win.btn_start) < 0
     assert win.processing_spinner.isVisible()
     assert win.size() == QSize(1200, 800)
@@ -737,6 +776,8 @@ def test_processing_activity_page_locks_navigation_and_reuses_start_button(
     assert win.workspace_stack.currentWidget() is win.homeWidget
     assert run_panel.row_layout.indexOf(win.btn_start) >= 0
     assert win.processing_action_layout.indexOf(win.btn_start) < 0
+    assert not win.btn_start.icon().isNull()
+    assert abs(win.btn_start.geometry().center().x() - run_panel.rect().center().x()) <= 1
     assert win.size() == QSize(1200, 800)
     assert win.menuBar().isEnabled()
 

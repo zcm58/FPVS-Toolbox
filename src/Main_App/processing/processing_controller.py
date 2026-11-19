@@ -1241,7 +1241,11 @@ def start_processing(self) -> None:
             )
         input_dir = raw_selection_start_folder(project)
 
-        batch_mode = bool(getattr(self, "rb_batch", None) and self.rb_batch.isChecked())
+        mode = getattr(self, "file_mode", None)
+        batch_mode = (
+            mode.get() == "Batch" if mode is not None
+            else bool(getattr(self, "rb_batch", None) and self.rb_batch.isChecked())
+        )
 
         try:
             logger.info(

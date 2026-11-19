@@ -40,5 +40,8 @@ def build_menu_bar(parent: QMainWindow, actions: ShellActions) -> QMenuBar:
         beta_menu.setObjectName("betaToolsMenu")
         beta_menu.addActions(actions.beta_tools)
 
+    tools_menu.addSeparator()
+    tools_menu.addAction(actions.processing_log)
+
     apply_native_menu_style(menu_bar)
     return menu_bar

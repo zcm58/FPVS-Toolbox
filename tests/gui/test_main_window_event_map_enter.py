@@ -164,7 +164,7 @@ def test_start_processing_requires_complete_event_map_entry(tmp_path, qtbot, mon
     row = _live_rows(win)[0]
     label_edit, id_edit = _row_fields(win, row)
 
-    assert win.rb_batch.isChecked()
+    assert win.file_mode.get() == "Batch"
     assert not win.btn_start.isEnabled()
 
     label_edit.setText("Cond A")
@@ -203,7 +203,7 @@ def test_single_mode_requires_event_map_and_bdf(tmp_path, qtbot, monkeypatch):
     bdf_path = tmp_path / "sample.bdf"
     bdf_path.touch()
 
-    win.rb_single.setChecked(True)
+    win._on_mode_changed("single")
     label_edit.setText("Cond A")
     _type_valid_id(id_edit, qtbot, "10")
     assert not win.btn_start.isEnabled()
@@ -439,7 +439,7 @@ def test_single_selection_survives_completion_and_missing_file_disables_start(tm
     monkeypatch.setattr(user_messages, "show_info", lambda *_: None)
     path = tmp_path / f"sample{extension}"
     path.touch()
-    win.rb_single.setChecked(True)
+    win._on_mode_changed("single")
     label, ident = _row_fields(win, _live_rows(win)[0])
     label.setText("Faces")
     ident.setText("1")

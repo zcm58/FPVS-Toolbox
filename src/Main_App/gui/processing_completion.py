@@ -16,6 +16,9 @@ def finalize_processing_host_state(host, success: bool) -> None:
     dialogs_suppressed = bool(getattr(host, "_suppress_completion_dialogs", False))
     cancelled = bool(getattr(host, "_processing_run_cancelled", False))
     refresh_processing_history(host)
+    refresh_inputs = getattr(host, "_refresh_home_inputs", None)
+    if callable(refresh_inputs):
+        refresh_inputs()
     present_last_run(host, success=success, cancelled=cancelled)
     if dialogs_suppressed and not success:
         host.log("--- Processing Run Cancelled by User ---")
@@ -60,7 +63,7 @@ def finalize_processing_host_state(host, success: bool) -> None:
         host.log("--- Processing Run Finished with ERRORS ---")
         user_messages.show_error(
             "Processing Error",
-            "An error occurred during processing. Please check the log for details.",
+            "An error occurred during processing. See Tools > Processing Log for details.",
             host,
         )
 

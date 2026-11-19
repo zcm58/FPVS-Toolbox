@@ -1,4 +1,4 @@
-"""Always-visible, asynchronous processing history on the project home page."""
+"""Asynchronous processing history on the project home page."""
 
 from __future__ import annotations
 
@@ -25,6 +25,7 @@ class ProcessingHistoryLabel(QLabel):
             "recordings are not counted. This does not indicate downstream analysis readiness."
         )
         apply_font_role(self, "caption")
+        self.hide()
         self._request_id = 0
         self._project_root: str | None = None
         self._worker: ProcessingHistoryWorker | None = None
@@ -43,9 +44,11 @@ class ProcessingHistoryLabel(QLabel):
         if root is None:
             self._worker = None
             self.setText("No project open")
+            self.hide()
             return
         if changed_project:
             self.setText("Last completed processing: Checking history…")
+            self.hide()
         worker = ProcessingHistoryWorker(root, self._request_id, load_processing_history)
         worker.signals.finished.connect(self._on_loaded, Qt.ConnectionType.QueuedConnection)
         self._worker = worker
@@ -59,6 +62,7 @@ class ProcessingHistoryLabel(QLabel):
         if not isinstance(status, ProcessingHistoryStatus):
             status = ProcessingHistoryStatus(state="unavailable")
         self.setText(format_processing_history(status))
+        self.setVisible(status.state != "missing")
         if self._reload_requested:
             self.refresh(project_root)
 

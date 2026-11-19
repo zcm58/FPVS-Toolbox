@@ -8,10 +8,8 @@ from Main_App.gui.event_map import condition_row_values
 
 
 def _condition_snapshot(host):
-    rows = tuple((label.strip(), ident.strip()) for label, ident in condition_row_values(host)
+    return tuple((label.strip(), ident.strip()) for label, ident in condition_row_values(host)
                  if label.strip() or ident.strip())
-    single = getattr(host, "rb_single", None)
-    return rows, "single" if single is not None and single.isChecked() else "batch"
 
 
 def remember_saved_setup(host) -> None:
@@ -25,8 +23,7 @@ def has_condition_changes(host) -> bool:
         return False
     baseline = getattr(host, "_condition_draft_baseline", None)
     if baseline is None:
-        baseline = (tuple((str(k), str(v)) for k, v in project.event_map.items()),
-                    project.options.get("mode", "batch"))
+        baseline = tuple((str(k), str(v)) for k, v in project.event_map.items())
     return _condition_snapshot(host) != baseline
 
 
@@ -39,7 +36,9 @@ def has_project_changes(host) -> bool:
 def refresh_dirty_indicator(host) -> None:
     label = getattr(host, "project_draft_status", None)
     if label is not None:
-        label.setText("Unsaved changes" if has_project_changes(host) else "")
+        dirty = has_project_changes(host)
+        label.setText("Unsaved changes" if dirty else "")
+        label.setVisible(dirty)
 
 
 def _save_work_is_active(host) -> bool:

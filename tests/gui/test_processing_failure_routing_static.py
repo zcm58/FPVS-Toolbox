@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+from collections import Counter
 from datetime import datetime
 import gc
 import json
@@ -1204,7 +1205,7 @@ def test_single_file_picker_stages_extra_file_without_confirming_or_saving(tmp_p
     select = _load_function("src/Main_App/gui/processing_inputs.py", "select_single_file", namespace)
     host = SimpleNamespace(currentProject=project, le_input_file=Mock(), log=Mock(), _update_start_enabled=Mock())
 
-    select(host)
+    assert select(host) is stage.return_value.files[0]
 
     stage.assert_called_once_with(project, selected_path=chosen)
     assert f"*{extension}" in namespace["QFileDialog"].getOpenFileName.call_args.args[3]
@@ -1212,6 +1213,35 @@ def test_single_file_picker_stages_extra_file_without_confirming_or_saving(tmp_p
     assert host._selected_bdf == str(chosen)
     host.le_input_file.setText.assert_called_once_with(str(chosen))
     assert not namespace["QMessageBox"].mock_calls
+
+
+@pytest.mark.parametrize(("locked", "mapped"), [(False, False), (True, False), (False, True)])
+def test_home_preview_uses_canonical_batch_candidates_and_group_labels(locked, mapped):
+    project = SimpleNamespace(
+        groups_locked=locked,
+        frequency_protocol=SimpleNamespace(condition_trigger_maps={} if mapped else None),
+    )
+    files = [SimpleNamespace(group=group) for group in ("control", "control", "training")]
+    batch = Mock(return_value=files)
+    stage = Mock(return_value=SimpleNamespace(files=files))
+    groups = [
+        SimpleNamespace(group_id="control", label="Control"),
+        SimpleNamespace(group_id="training", label="Training"),
+    ]
+    summarize = _load_function("src/Main_App/gui/home_input_summary.py", "summarize_batch", {
+        "Counter": Counter,
+        "prepare_batch_file_infos": batch,
+        "prepare_raw_registration_review": stage,
+        "project_group_context": lambda _: SimpleNamespace(groups=groups),
+    })
+
+    assert summarize(project) == ("3 files found", "2 in Control · 1 in Training")
+    if locked or mapped:
+        stage.assert_called_once_with(project)
+        batch.assert_not_called()
+    else:
+        batch.assert_called_once_with(project)
+        stage.assert_not_called()
 
 
 def _fhc_frequency_snapshot_method():
