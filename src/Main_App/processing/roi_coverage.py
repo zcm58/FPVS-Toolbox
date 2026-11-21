@@ -687,7 +687,9 @@ class RoiMembershipCoverage:
         return _fingerprint(self.canonical_payload())
 
     def to_payload(self) -> dict[str, object]:
-        return {**self.canonical_payload(), "fingerprint": self.fingerprint}
+        payload = self.canonical_payload()
+        payload["fingerprint"] = _fingerprint(payload)
+        return payload
 
     @classmethod
     def from_payload(cls, value: Mapping[str, Any]) -> "RoiMembershipCoverage":
@@ -773,7 +775,9 @@ class WholeScalpNormalizationCoverage:
         return _fingerprint(self.canonical_payload())
 
     def to_payload(self) -> dict[str, object]:
-        return {**self.canonical_payload(), "fingerprint": self.fingerprint}
+        payload = self.canonical_payload()
+        payload["fingerprint"] = _fingerprint(payload)
+        return payload
 
     @classmethod
     def from_payload(
@@ -856,7 +860,9 @@ class RecordingConditionRoiCoverage:
         return _fingerprint(self.canonical_payload())
 
     def to_payload(self) -> dict[str, object]:
-        return {**self.canonical_payload(), "fingerprint": self.fingerprint}
+        payload = self.canonical_payload()
+        payload["fingerprint"] = _fingerprint(payload)
+        return payload
 
     @classmethod
     def from_payload(
@@ -947,7 +953,9 @@ class RoiCoverageLedger:
         return _fingerprint(self.canonical_payload())
 
     def to_payload(self) -> dict[str, object]:
-        return {**self.canonical_payload(), "fingerprint": self.fingerprint}
+        payload = self.canonical_payload()
+        payload["fingerprint"] = _fingerprint(payload)
+        return payload
 
     def cell_for(
         self,
@@ -1178,7 +1186,9 @@ class FinalReleaseReceipt:
         return _fingerprint(self.canonical_payload())
 
     def to_payload(self) -> dict[str, object]:
-        return {**self.canonical_payload(), "fingerprint": self.fingerprint}
+        payload = self.canonical_payload()
+        payload["fingerprint"] = _fingerprint(payload)
+        return payload
 
     @classmethod
     def from_payload(cls, value: Mapping[str, Any]) -> "FinalReleaseReceipt":

@@ -81,6 +81,51 @@ def test_project_ceiling_applies_to_ordered_native_source_hashes(inputs, monkeyp
     assert cache._request_key({**inputs, "subjects": list(reversed(inputs["subjects"]))}) != key
 
 
+def test_native_source_hash_uses_same_declaration_bytes_and_still_rechecks(inputs, monkeypatch):
+    from Main_App.io.result_manifest import read_result_manifest
+    from Main_App.processing import provisional_harmonic_cache as cache
+
+    anchor = Path(inputs["subject_data"]["P1"]["Faces"])
+    declaration = read_result_manifest(anchor)
+    descriptor = declaration["condition_companion"]
+    companion = anchor.with_name(descriptor["path"])
+    expected = cache._file_identity(anchor), (None, (descriptor, cache._file_identity(companion)))
+    opened = []
+    original_open = Path.open
+
+    def observe_open(path, *args, **kwargs):
+        opened.append(path)
+        return original_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", observe_open)
+    assert cache._source_identity(anchor) == expected
+    assert opened == [anchor, companion, anchor]
+
+
+def test_final_native_rehash_rejects_same_stat_change_during_companion_read(inputs, monkeypatch):
+    from Main_App.processing import provisional_harmonic_cache as cache
+
+    anchor = Path(inputs["subject_data"]["P1"]["Faces"])
+    original_stat = anchor.stat()
+    original = anchor.read_bytes()
+    modified = original.replace(b" ", b"\t", 1)
+    assert modified != original and len(modified) == len(original)
+    stat = Path.stat
+    monkeypatch.setattr(Path, "stat", lambda path, *args, **kwargs: (
+        original_stat if path == anchor else stat(path, *args, **kwargs)
+    ))
+    read_identity = cache._file_identity
+
+    def edit_during_read(path):
+        if path != anchor:
+            anchor.write_bytes(modified)
+        return read_identity(path)
+
+    monkeypatch.setattr(cache, "_file_identity", edit_during_read)
+    with pytest.raises(ValueError, match="Processed result changed"):
+        cache._source_identity(anchor)
+
+
 def _bits(value):
     if isinstance(value, float):
         return struct.pack(">d", value)

@@ -213,6 +213,16 @@ def _kurtosis_scoring_data(
     )
 
 
+def _restored_kurtosis_sample_count(raw, target_plan) -> int | None:
+    """Size an in-bounds preview on the in-memory RawArray restored by the checkpoint reader."""
+    if type(raw) is not mne.io.RawArray or not raw.preload:
+        return None
+    spans = relative_spans_from_plan(target_plan)
+    if not spans or spans[-1][1] > raw.n_times:
+        return None
+    return sum(stop - start for start, stop in spans)
+
+
 def _kurtosis_filter_identity(
     raw: mne.io.BaseRaw,
     params: Dict[str, Any],
@@ -726,12 +736,15 @@ def _finish_preprocessing_at_kurtosis(
                     cached_evidence is not None, original_input_live_bytes,
                 )
             scoring_started = perf_counter()
-            data = _kurtosis_scoring_data(
-                raw,
-                picks=eeg_picks,
-                params=params,
-            )
             ch_names_pick = [raw.info["ch_names"][i] for i in eeg_picks]
+            restored_samples = (
+                _restored_kurtosis_sample_count(raw, realized_plan)
+                if cached_evidence is not None and checkpoint is not None else None
+            )
+            data = (
+                _kurtosis_scoring_data(raw, picks=eeg_picks, params=params)
+                if restored_samples is None else None
+            )
             calculation_started = perf_counter()
             evidence = cached_evidence if cached_evidence is not None else pipeline.execute(
                 "bad_channel_screening", evaluate_kurtosis_qc, data,
@@ -752,8 +765,8 @@ def _finish_preprocessing_at_kurtosis(
                 filename_for_log,
                 (calculation_started - scoring_started) * 1_000.0,
                 (perf_counter() - calculation_started) * 1_000.0,
-                data.shape[0],
-                data.shape[1],
+                len(eeg_picks),
+                data.shape[1] if data is not None else restored_samples,
             )
             if cached_evidence is None:
                 save_checkpoint(checkpoint, raw, params, evidence, orig_sfreq)
@@ -794,6 +807,16 @@ def _finish_preprocessing_at_kurtosis(
             params["_fpvs_kurtosis_user_rejected_channels"] = list(
                 decision_plan.user_rejected_channels
             )
+            if restored_samples is not None:
+                # The verified checkpoint supplies the statistic for every
+                # channel. Only pending channels contribute samples to the GUI.
+                pending = set(decision_plan.pending_review_channels)
+                preview_picks = [i for i in eeg_picks if raw.ch_names[i] in pending]
+                ch_names_pick = [raw.ch_names[i] for i in preview_picks]
+                data = (
+                    _kurtosis_scoring_data(raw, picks=preview_picks, params=params)
+                    if preview_picks else np.empty((0, restored_samples), dtype=np.float64)
+                )
             params["_fpvs_kurtosis_signal_preview"] = _kurtosis_signal_preview(
                 data,
                 ch_names_pick,

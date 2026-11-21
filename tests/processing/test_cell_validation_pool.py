@@ -112,10 +112,16 @@ def test_default_and_metadata_only_do_not_construct_threads_or_probe_memory(tmp_
 
 
 def test_credits_include_actual_small_metadata_but_never_load_dense_arrays(tmp_path, monkeypatch):
-    plan, _receipts = _fixture(tmp_path)
+    from Main_App.io import numpy_companion
+
+    plan, receipts = _fixture(tmp_path)
     monkeypatch.setattr(np, "load", lambda *_a, **_kw: pytest.fail("Budgeting may inspect headers only"))
     credit = pool.cell_validation_credit(plan.recordings[0].cells[0].expected_workbook)
     assert type(credit) is int and 32 * MIB < credit < 34 * MIB
+    descriptor = receipts[0]["workbook_write"]
+    largest = max(descriptor[key]["size_bytes"] for key in ("spectral_companion", "condition_companion") if key in descriptor)
+    monkeypatch.setattr(numpy_companion, "_MAX_BUFFER_BYTES", 0)
+    assert pool.cell_validation_credit(plan.recordings[0].cells[0].expected_workbook) == credit - 2 * largest
     assert pool.cell_validation_credit(tmp_path / "missing.fpvs") is None
     legacy = tmp_path / "legacy.xlsx"
     legacy.write_bytes(b"Unsupported budget domain; native reader retains authority")

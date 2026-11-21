@@ -579,6 +579,14 @@ same declaration and workbook/companion signatures, including size, modification
 and change times, device, and file ID. First reads still validate checksums and
 schema/grid; new scopes revalidate, and changed signatures invalidate reuse.
 
+During a checksum and schema check, readers can hold one archive of up to
+16 MiB per worker. NumPy reads the metadata and array headers from the bytes
+that passed SHA-256. Larger archives and memory-constrained workers stream
+the checksum and read the headers from the open file. Both paths reuse the
+ZIP directory opened by NumPy and check the source signatures after validation.
+The concurrent cell validator includes the largest eligible archive and a
+possible temporary copy in each job's RAM reservation.
+
 Pure frequency calculations additionally use bounded in-memory reuse, independent
 of workbook identity: `full_fft_grid_qc` retains at most eight exact text-header /
 oddball-rate results (32,768 labels per header), and `spectral_eligibility` retains

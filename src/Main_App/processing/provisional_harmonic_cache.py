@@ -13,6 +13,7 @@ from dataclasses import asdict, is_dataclass
 import hashlib
 import json
 import logging
+import os
 from pathlib import Path
 import struct
 from threading import RLock
@@ -162,13 +163,17 @@ def _source_identity(path: Path) -> tuple[object, ...]:
     from Main_App.io import condition_companion_identity, spectral_companion_identity
     from Main_App.io.result_manifest import is_result_manifest, read_result_manifest
 
-    anchor = _file_identity(path)
     if is_result_manifest(path):
-        declaration = read_result_manifest(path)
+        before = path.stat()
+        contents = path.read_bytes()
+        anchor = _checked_file_identity(path, before, hashlib.sha256(contents).hexdigest())
+        declaration = read_result_manifest(path, contents=contents)
+        del contents
         companions = (
             declaration["spectral_companion"], declaration["condition_companion"],
         )
     else:
+        anchor = _file_identity(path)
         companions = (spectral_companion_identity(path), condition_companion_identity(path))
     identities = []
     for descriptor in companions:
@@ -189,6 +194,10 @@ def _file_identity(path: Path) -> tuple[str, int, int, int, str]:
     before = path.stat()
     with path.open("rb") as stream:
         digest = hashlib.file_digest(stream, "sha256").hexdigest()
+    return _checked_file_identity(path, before, digest)
+
+
+def _checked_file_identity(path: Path, before: os.stat_result, digest: str) -> tuple[str, int, int, int, str]:
     after = path.stat()
     if (before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (
         after.st_size, after.st_mtime_ns, after.st_ctime_ns,

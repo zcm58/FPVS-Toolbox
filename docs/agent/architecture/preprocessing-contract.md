@@ -283,6 +283,11 @@ native policy disables checkpoint reuse. Filtering, resampling, analysis-span,
 evidence, approval and export contracts remain unchanged; no GUI-global native
 thread policy is changed by the background review.
 
+When a verified checkpoint restores an in-memory RawArray, its saved evidence
+covers every scored channel. The review preview reads samples only for channels
+with pending decisions. Its sample count and occurrence boundaries still come
+from the validated span plan, including when no channels need a preview.
+
 The loader and preprocessed-Raw cache must supply a validated canonical
 BioSemi64 runtime identity before raw QC or preprocessing continues. Cache
 identity includes the montage, mapping profile, geometry/coordinate

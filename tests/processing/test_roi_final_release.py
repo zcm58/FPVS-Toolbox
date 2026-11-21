@@ -113,6 +113,58 @@ def _outcomes(*cells: RecordingConditionCellOutcome) -> RecordingConditionOutcom
     )
 
 
+def test_outcome_serializes_each_cell_once_and_rehashes_changed_receipts(tmp_path, monkeypatch):
+    path = tmp_path / "faces.xlsx"
+    _write_source(path)
+    cell = _cell(path)
+    outcomes = _outcomes(cell)
+    calls = []
+    original = RecordingConditionCellOutcome.canonical_payload
+
+    def counted(instance):
+        calls.append(instance.cell_id)
+        return original(instance)
+
+    monkeypatch.setattr(RecordingConditionCellOutcome, "canonical_payload", counted)
+    first = outcomes.to_payload()
+    assert calls == [cell.cell_id]
+    assert first["fingerprint"] == outcomes.fingerprint
+    assert first["cells"][0]["fingerprint"] == cell.fingerprint
+    cell.export_receipt["value"] = -0.0
+    changed = outcomes.to_payload()
+    assert changed["fingerprint"] != first["fingerprint"]
+    cell.export_receipt["value"] = 0.0
+    assert outcomes.to_payload()["fingerprint"] != changed["fingerprint"]
+    cell.export_receipt["value"] = float("nan")
+    with pytest.raises(ValueError):
+        outcomes.to_payload()
+
+
+def test_roi_coverage_serializes_each_cell_once_and_rehashes_changed_decisions(tmp_path, monkeypatch):
+    path = tmp_path / "faces.xlsx"
+    _write_source(path)
+    cell = _cell(path)
+    coverage = build_pre_review_roi_coverage(
+        tmp_path, outcome_ledger=_outcomes(cell), processing_ledger=_processing_ledger(cell.processing_id),
+        roi_snapshot=_snapshot(), persist=False,
+    )
+    cell_calls = []
+    coverage_cell = coverage.cells[0]
+    cell_class = type(coverage_cell)
+    original_coverage = cell_class.canonical_payload
+
+    def counted_coverage(instance):
+        cell_calls.append(instance.cell_id)
+        return original_coverage(instance)
+
+    monkeypatch.setattr(cell_class, "canonical_payload", counted_coverage)
+    saved = coverage.to_payload()
+    assert cell_calls == [coverage_cell.cell_id]
+    assert saved["fingerprint"] == coverage.fingerprint
+    coverage.decision_payload["unicode"] = "é"
+    assert coverage.to_payload()["fingerprint"] != saved["fingerprint"]
+
+
 def _processing_ledger(*recordings: str, interpolated: tuple[str, ...] = ()) -> dict:
     outcome = build_preprocessing_outcome(
         processing_status="completed",

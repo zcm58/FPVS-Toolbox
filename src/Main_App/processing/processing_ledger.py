@@ -730,6 +730,8 @@ def _condition_labels_for_missing_outputs(
     state: ProcessingInputState,
     missing_outputs: Sequence[Any],
 ) -> list[str]:
+    if not missing_outputs:
+        return []
     missing = _resolved_path_strings(missing_outputs)
     labels: list[str] = []
     for index, output_path in enumerate(state.expected_outputs):

@@ -24,6 +24,7 @@ import pandas as pd
 
 from Main_App.io import xlsx_selected_reader as _xlsx
 from Main_App.io.condition_data_codec import decode_column, encode_column, json_text, validate_column_encoding
+from Main_App.io.numpy_companion import open_verified_npz
 
 CONDITION_COMPANION_VERSION = "numpy_condition_companion_v1"
 CONDITION_MANIFEST_SHEET = "Condition Data"
@@ -284,12 +285,11 @@ def _companion_payload(workbook: Path, descriptor: Mapping) -> _ConditionPayload
             cache.condition_payloads.popitem(last=False)
         return payload
     try:
-        with path.open("rb") as stream:
-            if hashlib.file_digest(stream, "sha256").hexdigest() != identity["sha256"]:
-                raise ConditionDataError(f"Condition companion checksum does not match: {path.name}")
-            stream.seek(0)
-            with np.load(stream, allow_pickle=False) as archive, zipfile.ZipFile(stream) as container:
-                specifications = _archive_schema(archive, container, identity)
+        with path.open("rb") as stream, open_verified_npz(
+            stream, signature.size_bytes, identity["sha256"],
+            ConditionDataError(f"Condition companion checksum does not match: {path.name}"),
+        ) as archive:
+            specifications = _archive_schema(archive, archive.zip, identity)
     except (OSError, ValueError, KeyError, TypeError, zipfile.BadZipFile) as exc:
         if isinstance(exc, ConditionDataError):
             raise

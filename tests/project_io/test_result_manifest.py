@@ -101,6 +101,17 @@ def test_failed_native_publication_preserves_previous_result(tmp_path, monkeypat
     pd.testing.assert_frame_equal(read_condition_sheet(path, sheet_name="BCA (uV)"), _frames()["BCA (uV)"])
 
 
+@pytest.mark.parametrize("data", [b"\xff", b"\xef\xbb\xbf{}", b"{\r\n!}", b"{}"])
+def test_already_read_manifest_bytes_keep_original_diagnostics(tmp_path, data):
+    path = tmp_path / "P1_A_Results.fpvs"
+    path.write_bytes(data)
+    with pytest.raises(ResultManifestError) as on_disk:
+        read_result_manifest(path)
+    with pytest.raises(ResultManifestError) as from_bytes:
+        read_result_manifest(path, contents=data)
+    assert str(from_bytes.value) == str(on_disk.value)
+
+
 def test_legacy_path_case_is_retained(tmp_path):
     path = tmp_path / "P1_A_Results.XLSX"
     path.touch()

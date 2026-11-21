@@ -24,7 +24,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 from openpyxl.styles import Alignment, Font, PatternFill
-from openpyxl.utils import get_column_letter
+from openpyxl.utils import get_column_letter, range_boundaries
 
 from Main_App.io import read_xlsx_sheet_selected_columns
 from Main_App.processing.frequency_domain_qc import load_frequency_domain_qc_state
@@ -829,8 +829,12 @@ def _append_record_rows(
             notes="; ".join(normalization_notes),
         )
 
-    for _, electrode_row in prepared.iterrows():
-        electrode = str(electrode_row["Electrode"])
+    for electrode, raw, rms, signed in zip(
+        prepared["Electrode"], prepared["Raw Summed BCA"],
+        prepared["RMS Normalized BCA"], prepared["Signed Mean Normalized BCA"],
+        strict=True,
+    ):
+        electrode = str(electrode)
         electrode_key = electrode.upper()
         electrode_notes = list(base_notes)
         electrode_excluded = base_excluded
@@ -858,18 +862,15 @@ def _append_record_rows(
                     "Automatic frequency-domain recording-electrode exclusion.",
                 )
             )
-        missing_columns = electrode_row.get("Missing Selected Harmonics", "")
-        if missing_columns:
-            electrode_notes.append("Non-finite selected BCA cell(s): " + str(missing_columns))
         electrode_rows.append(
             {
                 "PID": pid,
                 "Group": group,
                 "Condition": condition,
                 "Electrode": electrode,
-                "Raw Summed BCA": electrode_row["Raw Summed BCA"],
-                "RMS Normalized BCA": electrode_row["RMS Normalized BCA"],
-                "Signed Mean Normalized BCA": electrode_row["Signed Mean Normalized BCA"],
+                "Raw Summed BCA": raw,
+                "RMS Normalized BCA": rms,
+                "Signed Mean Normalized BCA": signed,
                 "Current Toolbox Exclusion": _yes_no(electrode_excluded),
                 "QC Flag": _yes_no(bool(electrode_notes)),
                 "QC Notes": "; ".join(_ordered_unique(electrode_notes)),
@@ -1050,22 +1051,22 @@ def _prepare_electrode_values(
         )
     notes: list[str] = []
 
-    missing_mask = numeric.isna()
     prepared = pd.DataFrame({"Electrode": numeric.index.astype(str)})
-    prepared["Missing Selected Harmonics"] = [
-        ", ".join(column for column in selected_columns if bool(mask[column])) for _, mask in missing_mask.iterrows()
-    ]
+    # Every validated row is finite and has the same (empty) missing-column
+    # label. Checking one row still rejects ambiguous duplicate column names.
+    missing = numeric.iloc[0].isna()
+    prepared["Missing Selected Harmonics"] = ", ".join(
+        column for column in selected_columns if bool(missing[column])
+    )
     prepared["Raw Summed BCA"] = numeric.sum(
         axis=1,
         min_count=len(selected_columns),
     ).to_numpy()
 
     source_count = len(numeric)
-    finite_counts = numeric.notna().sum(axis=0)
     vector_lengths = np.sqrt(np.square(numeric).sum(axis=0, min_count=1))
     valid_scales = (
         bool(normalization_available)
-        & finite_counts.eq(source_count)
         & np.isfinite(vector_lengths)
         & vector_lengths.gt(0.0)
     )
@@ -1078,14 +1079,9 @@ def _prepare_electrode_values(
 
     harmonic_scales: list[dict[str, object]] = []
     for selected_column in selected_columns:
-        finite_count = int(finite_counts[selected_column])
         vector_length = float(vector_lengths[selected_column])
         used = bool(valid_scales[selected_column])
         scale_notes: list[str] = []
-        if finite_count != source_count:
-            scale_notes.append(
-                f"Complete scalp coverage unavailable ({finite_count}/{source_count} finite electrodes)."
-            )
         if not math.isfinite(vector_length) or vector_length <= 0.0:
             scale_notes.append("Scalp vector length was zero or non-finite.")
         if not normalization_available:
@@ -1096,7 +1092,7 @@ def _prepare_electrode_values(
             {
                 "Selected Column": selected_column,
                 "Source Electrode Count": source_count,
-                "Finite Electrode Count": finite_count,
+                "Finite Electrode Count": source_count,
                 "Scalp Vector Length": vector_length,
                 "Used for RMS Normalization": used,
                 "QC Notes": "; ".join(scale_notes),
@@ -1929,10 +1925,12 @@ def _format_workbook(workbook: Any) -> None:
     alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
     for worksheet in workbook.worksheets:
         worksheet.freeze_panes = "A2"
-        if worksheet.max_row >= 1 and worksheet.max_column >= 1:
-            worksheet.auto_filter.ref = worksheet.dimensions
+        dimensions = worksheet.dimensions
+        worksheet.auto_filter.ref = dimensions
+        _, _, last_column, last_row = range_boundaries(dimensions)
         worksheet.sheet_view.showGridLines = False
-        headers = worksheet[1]
+        rows = worksheet.iter_rows(min_row=1, min_col=1, max_row=last_row, max_col=last_column)
+        headers = next(rows)
         widths = [len(str(cell.value or "")) for cell in headers]
         number_formats = []
         for cell in headers:
@@ -1953,10 +1951,7 @@ def _format_workbook(workbook: Any) -> None:
             else:
                 number_formats.append(None)
         styles = {}
-        for row_number, row in enumerate(
-            worksheet.iter_rows(min_row=2),
-            start=2,
-        ):
+        for row_number, row in enumerate(rows, start=2):
             striped = row_number % 2 == 0
             for column_index, cell in enumerate(row):
                 number_format = number_formats[column_index]

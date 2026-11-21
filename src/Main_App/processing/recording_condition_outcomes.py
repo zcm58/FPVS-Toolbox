@@ -184,7 +184,7 @@ class RecordingConditionCellOutcome:
 
     def to_payload(self) -> dict[str, object]:
         payload = self.canonical_payload()
-        payload["fingerprint"] = self.fingerprint
+        payload["fingerprint"] = _fingerprint(payload)
         return payload
 
     @classmethod
@@ -289,7 +289,7 @@ class RecordingConditionOutcomeLedger:
 
     def to_payload(self) -> dict[str, object]:
         payload = self.canonical_payload()
-        payload["fingerprint"] = self.fingerprint
+        payload["fingerprint"] = _fingerprint(payload)
         return payload
 
     @classmethod

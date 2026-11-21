@@ -267,6 +267,142 @@ reuse also verifies the installed numerical implementation. An older build's
 certificate requires fresh qualification under the new build on a primary
 miss.
 
+#### Pipeline-wide review following the source-map work
+
+The review followed the desktop Process path from recording admission through
+publication. The timed changes below use the internal-SSD MCCTR project with
+69 participants and 400 released participant-condition results.
+
+| Pipeline area | Finding and disposition |
+| --- | --- |
+| Registration, preflight and raw QC | The BDF adapter's header and runtime checks determine reader eligibility. Signal and spectral QC share condition samples. Preflight verifies its recording, settings and event-plan identity before reuse. |
+| FIR, downsampling and kurtosis | The recording pool already reuses FIR coefficients. On a validated kurtosis checkpoint hit, review was still gathering every retained channel. It now reads only channels with a pending signal preview. A cold miss still scores the complete channel set. |
+| Epochs, per-condition FFT and exports | The GUI passes reviewed occurrence spans to the recording worker. FullSNR already uses the computed FFT amplitudes. A single-object export builds the same interpolation grid twice. Reuse would also have to preserve the multi-object path for differing grids. |
+| Frequency review, group harmonics and QC release | The scientific release still checks its inputs. Several QC outcome and coverage serializers recursively rebuilt nested records just to hash them. Each now hashes the exact dictionary it is returning. An independent fingerprint request still rebuilds it from current values. |
+| Stats-ready and full-audit workbooks | The full audit now uses validated finite-value counts, iterates the prepared electrode columns directly and reuses each worksheet's bounds. The Stats-ready harmonic path still performs multiple full-spectrum provenance lookups. Combining them would need an intervening-change check. |
+| L2-MNE, eLORETA and publication | The paired source-map measurements above cover participant manifests and harmonic release reuse. Each method continues to check its source derivatives and its output receipt at publication. |
+
+**Kurtosis checkpoint reuse.** Sixteen resident worker processes replayed all
+69 verified MCCTR checkpoints with one native numerical thread per worker.
+Each worker kept the same recordings for two original and two updated runs
+per review state. With saved decisions, the cohort wall time for the review
+boundary fell from 1.483 to 0.284 seconds. Sample gathers fell from
+6,097,797,120 bytes to zero. With manual review pending for 62 participants,
+the same boundary fell from 1.344 to 0.335 seconds and gathered 356,352,000
+bytes. Pool startup and checkpoint preparation took 6.21 seconds before
+timing. The 552 participant executions matched in raw float64 bytes and
+state, QC evidence, decisions, preview samples and geometry, return values
+and progress/admission messages. These measurements isolate the work after
+checkpoint authentication.
+
+**QC release.** Four fresh worker runs in before/after/after/before order
+finalized the same MCCTR release, including both atomic ledger writes. Mean
+elapsed time fell from 2.128 to 1.770 seconds (16.8%). Serializing the four
+outcome, pre-review coverage, final coverage and release-receipt objects
+alone fell from a median 0.481 to 0.216 seconds. That operation calculated
+15,504 hashes before and 4,554 after. All four complete 28,712,201-byte
+ledgers matched the original file byte for byte. The 450 planned
+recording-condition cells include the 400 with released results.
+
+**Full-audit workbook.** Two integrated runs bracketed an unchanged-build
+run at the same private output path. They took 84.82 seconds after, 87.93
+seconds before, and 85.73 seconds after. The two updated runs averaged 85.27
+seconds, saving 2.66 seconds (3.02%) against the intervening baseline.
+The native desktop worker validated the signed release, built the tables,
+formatted the workbook and atomically replaced it. Its project-level archive
+and freshness update were outside this timer. All runs had fresh validation
+caches and read the same prepared MCCTR data on the internal SSD.
+
+An earlier quartet isolated the workbook changes. The two original
+exports took 88.94 and 88.23 seconds, and the two updated exports took 87.21
+and 118.46 seconds. In the slow run, the shared harmonic-selection read
+took 77.98 seconds compared with 46.42 on the other updated run. Across
+the quartet, building the 400 sets of audit rows fell from 13.01 to 10.82
+seconds (16.8%) and applying workbook formatting from 0.430 to 0.345
+seconds (19.7%). Whole-export times can vary more than those component gains.
+
+All seven exports matched on the complete worksheet XML and styles across
+13 sheets, 328,341 cells, and 101,934 numeric values. Twenty of the 21
+uncompressed package members matched byte for byte. The remaining member
+contains the workbook creation and modification times, which were verified
+against each run along with the ZIP entry times. The comparator detected both
+a one-ULP numerical change and a change to the style of one cell.
+
+**Next target for Stats-ready exports.** A separate trace of the normal
+Stats-ready writer recorded three checks of the same 400 FullFFT files. The
+writer, harmonic policy resolver and summed-BCA preparation each opened
+every anchor twice to verify its spectral and condition metadata. All
+three snapshots returned the same fingerprint. Together they opened the
+anchors 2,400 times, opened `.npz` archives 2,232 times and read the QC
+ledger nine times. A change here needs to detect a file or release that
+changes between checks. The trace measured read counts only.
+
+The focused processing suite passed 3,868 tests with seven skips. The Stats,
+publication maps, LORETA, pipeline methods and precommit suites also passed.
+
+#### Redundant disk reads in native results and QC
+
+The Process action writes native `.fpvs` manifests and uncompressed NumPy
+companions for standard participant-condition results. All 400 signed MCCTR
+results use this format. In 12 matched writer pairs across three MCCTR
+results, native publication averaged 0.243 seconds per result and an explicit
+Excel pointer workbook averaged 0.328 seconds. The native writer made 18
+named file opens per result, compared with 81 for Excel. Both writers
+reproduced both original NumPy archives byte for byte. Readback matched all
+ten original tables. This comparison measures the existing format choice.
+
+For the separate native **reader** change, small NumPy archives now make one
+sequential file read for the SHA-256 check and schema inspection. The bytes
+that passed the checksum supply the metadata and array headers, including
+the ZIP directory. Large archives retain the streamed checksum. The byte
+buffer lasts only through validation, and the cell pool budgets it per worker.
+
+The Stats-ready writer processed all 400 results, with 69 participants, six
+conditions, fresh application caches per run and the machine's 16-worker
+ceiling. The four counterbalanced runs took 139.68, 136.63, 134.17 and
+136.52 seconds (original, updated, updated, original). The means were
+138.10 and 135.40 seconds, a 1.95% elapsed-time reduction on the internal
+SSD. Each updated run requested 26,904,534,439 bytes from NumPy files,
+down from 29,591,031,386. Read calls fell from 861,512 to 43,629. The
+5,629 file opens and all required integrity checks still occurred. These
+counts measure application reads from file streams. The operating system's
+file cache determines how much traffic reaches the storage device.
+
+All seven exported Stats-ready workbooks matched across four sheets and 9,422
+cells, including all 2,481 numbers and all styles. The only differing ZIP
+member held save timestamps. Scientific provenance and cohort fingerprints
+matched on each of the three FullFFT checks. A deliberate one-ULP change
+and a changed cell style both failed the comparison.
+A final exact-source run during regression testing reproduced both read counts
+and took 153.00 seconds. The quiet timing comparison above excludes this run.
+
+The independent QC loader now decodes ROI coverage and processing entries
+from a single ledger snapshot. One uncached 450-cell MCCTR check read
+28,712,201 bytes, down from 57,424,402. The full context exceeds the existing
+retention limit. On an eligible 12-recording subset, a scoped cache hit went
+from three full ledger reads to two, with a SHA check on both sides of the
+copy. The returned QC evidence matched in both cohorts. The missing-output
+label step also skips 400 result-path resolutions for the 69 complete MCCTR
+recordings. Records with missing outputs still resolve their condition labels.
+
+The provisional harmonic cache parses the native declaration from the bytes
+used for its initial SHA. It still independently checks the file again after
+validating the companions. With 16 workers and 400 results, this reduced
+manifest opens from 1,200 to 800 and saved 340,298 bytes per pass. Both
+builds hashed all 5,053,537,880 bytes of companion data and returned the
+same 400 complete identities. Freshness checks at separate Stats-ready
+stages remain independent. On the local Windows SSD, an in-place edit with
+restored modification time could retain even the native file change timestamp.
+
+A remaining candidate in completed-output validation is the RAM estimate.
+It opens each archive to check its ZIP footer, then opens it again to inspect
+member headers. Sharing those opens would require testing concurrent replacement,
+the existing size limits and the serial fallback on low-memory machines.
+
+Verification passed the processing (3,873), project I/O (1,369), Stats (497),
+publication maps (138), LORETA (860) and precommit (440) test suites. Counts
+give passing cases per suite and can overlap.
+
 #### Forced full reprocessing across cache temperatures
 
 Both builds' full warm reprocess reused all 69 preprocessed FIF files.

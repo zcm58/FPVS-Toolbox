@@ -7,6 +7,7 @@ anchors remain supported; a present native anchor always takes precedence.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from io import BytesIO, TextIOWrapper
 import json
 import os
 from pathlib import Path
@@ -67,12 +68,15 @@ def _validate_manifest(value: object) -> dict:
     return result
 
 
-def read_result_manifest(path: str | Path) -> dict:
-    """Read only the declaration; shared companion readers validate its data."""
+def read_result_manifest(path: str | Path, *, contents: bytes | None = None) -> dict:
+    """Validate the declaration on disk or bytes already read for a content digest."""
 
     source = Path(path)
     try:
-        with source.open("r", encoding="utf-8") as stream:
+        with (
+            source.open("r", encoding="utf-8") if contents is None
+            else TextIOWrapper(BytesIO(contents), encoding="utf-8")
+        ) as stream:
             return _validate_manifest(json.load(stream))
     except (OSError, ValueError, TypeError) as exc:
         raise ResultManifestError(f"Cannot read FPVS results {source.name}: {exc}") from exc

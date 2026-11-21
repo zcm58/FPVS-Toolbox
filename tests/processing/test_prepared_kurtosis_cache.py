@@ -195,23 +195,69 @@ def test_prepared_checkpoint_exact_filtered_signal_events_evidence_and_metadata(
     assert prepared.raw._data.tobytes() == again.raw._data.tobytes()
 
 
+def test_restored_preview_size_preserves_invalid_and_out_of_bounds_span_handling(recording):
+    raw, _, _ = recording
+    spans = [[2, 8], [10, 16]]
+    plan = {"target_grid": {"n_times": raw.n_times}, "unique_relative_spans": spans, "unique_sample_count": 12}
+    assert preprocess._restored_kurtosis_sample_count(raw, plan) == 12
+    with pytest.raises(preprocess.AnalysisSpanPlanError, match="sample count is stale"):
+        preprocess._restored_kurtosis_sample_count(raw, {**plan, "unique_sample_count": 11})
+    longer = raw.n_times + 7
+    outside = {"target_grid": {"n_times": longer}, "unique_relative_spans": [[0, longer]],
+               "unique_sample_count": longer}
+    assert preprocess._restored_kurtosis_sample_count(raw, outside) is None
+    empty = {**plan, "unique_relative_spans": [], "unique_sample_count": 0}
+    assert preprocess._restored_kurtosis_sample_count(raw, empty) is None
+    with pytest.raises(preprocess.AnalysisSpanPlanError, match="union is empty"):
+        preprocess._kurtosis_scoring_data(raw, picks=[0], params={"_fpvs_realized_analysis_span_plan": empty})
+
+
 def test_scan_handoff_rebuilds_current_permissions_and_manual_receipts(recording, monkeypatch):
     raw, params, source = recording
     scanned = preprocess.prepare_kurtosis_review_evidence(raw, params, lambda *_: None)
     assert scanned["decision_plan"]["ready_for_interpolation"]
     monkeypatch.setattr(preprocess, "evaluate_kurtosis_qc", lambda *_a, **_k: pytest.fail("Repeated evidence"))
     manual = {**params, "kurtosis_auto_interpolate_all": False}
+    with monkeypatch.context() as reference:
+        reference.setattr(preprocess, "_restored_kurtosis_sample_count", lambda *_: None)
+        full = preprocess.prepare_kurtosis_review_evidence(raw, manual, lambda *_: None)
+    read_channels = []
+    collect = preprocess._kurtosis_scoring_data
+
+    def track_channels(restored, *, picks, params):
+        read_channels.append([restored.ch_names[i] for i in picks])
+        return collect(restored, picks=picks, params=params)
+
+    monkeypatch.setattr(preprocess, "_kurtosis_scoring_data", track_channels)
     pending = preprocess.prepare_kurtosis_review_evidence(raw, manual, lambda *_: None)
     assert not pending["decision_plan"]["ready_for_interpolation"]
     assert pending["evidence"] == scanned["evidence"]
     assert pending["signal_preview"]["channels"]
+    _assert_exact_state(pending, full)
+    assert read_channels == [list(pending["signal_preview"]["channels"])]
+    finish = preprocess._finish_preprocessing_at_kurtosis
+    with monkeypatch.context() as no_handle:
+        def finish_without_checkpoint(*args, **kwargs):
+            assert kwargs["cached_evidence"] is not None
+            return finish(*args, **{**kwargs, "checkpoint": None})
+
+        no_handle.setattr(preprocess, "_finish_preprocessing_at_kurtosis", finish_without_checkpoint)
+        no_handle.setattr(preprocess, "_restored_kurtosis_sample_count", lambda *_: pytest.fail("Missing handle"))
+        read_channels.clear()
+        standalone = preprocess.prepare_kurtosis_review_evidence(raw, manual, lambda *_: None)
+    assert len(read_channels) == 1 and len(read_channels[0]) > len(pending["signal_preview"]["channels"])
+    assert standalone["signal_preview"]["channels"] == pending["signal_preview"]["channels"]
     result, _ = preprocess.perform_preprocessing(raw.copy(), manual, lambda *_: None)
     assert result is None
     assert manual["_fpvs_kurtosis_checkpoint_status"] == "hit"
     channel = next(row["channel"] for row in pending["decision_plan"]["channel_decisions"] if row["state"] == "review_required")
     manual["_fpvs_kurtosis_review_decisions"] = {channel: _approval(pending["evidence"], channel, source)}
+    read_channels.clear()
     approved, _count, final = _run(raw, manual)
     assert final["_fpvs_interpolated_channels"] == [channel]
+    assert read_channels == []
+    clear = final["_fpvs_kurtosis_signal_preview"]
+    assert clear["channels"] == {} and clear["source_sample_count"] == full["signal_preview"]["source_sample_count"]
     assert approved is not None
     checkpoint = cache.load_checkpoint(_identity(raw, params))
     assert not any("decision" in key or "approved" in key for key in checkpoint.params)

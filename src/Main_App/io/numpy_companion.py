@@ -1,0 +1,51 @@
+"""Checksum a NumPy result archive before reading its declared arrays."""
+
+from contextlib import contextmanager
+import hashlib
+from io import BytesIO
+from typing import BinaryIO
+
+import numpy as np
+
+
+# A worker holds at most one such buffer during archive validation. Larger
+# spectra retain the streaming checksum path regardless of cohort size.
+_MAX_BUFFER_BYTES = 16 * 1024 * 1024
+
+
+def validation_buffer_bytes(size_bytes: int) -> int:
+    """Size of the optional in-memory archive during this validation."""
+    return size_bytes if 0 < size_bytes <= _MAX_BUFFER_BYTES else 0
+
+
+def _read_buffer(stream: BinaryIO, size_bytes: int, checksum_error: ValueError) -> BytesIO:
+    contents = stream.read(size_bytes + 1)
+    if len(contents) != size_bytes:
+        raise checksum_error
+    return BytesIO(contents)
+
+
+@contextmanager
+def open_verified_npz(stream: BinaryIO, size_bytes: int, expected_sha256: str, checksum_error: ValueError):
+    """Parse small archives from the same file bytes that passed the checksum."""
+    source = stream
+    try:
+        if validation_buffer_bytes(size_bytes):
+            try:
+                source = _read_buffer(stream, size_bytes, checksum_error)
+                digest = hashlib.file_digest(source, "sha256")
+            except MemoryError:
+                if source is not stream:
+                    source.close()
+                source = stream
+                stream.seek(0)
+        if source is stream:
+            digest = hashlib.file_digest(stream, "sha256")
+        if digest.hexdigest() != expected_sha256:
+            raise checksum_error
+        source.seek(0)
+        with np.load(source, allow_pickle=False) as archive:
+            yield archive
+    finally:
+        if source is not stream:
+            source.close()

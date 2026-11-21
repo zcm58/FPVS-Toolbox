@@ -20,6 +20,7 @@ import zipfile
 import numpy as np
 import psutil
 
+from Main_App.io.numpy_companion import validation_buffer_bytes
 from Main_App.io.result_manifest import RESULT_MANIFEST_VERSION, _validate_manifest
 from Main_App.workers.mp_env import compute_dynamic_worker_ceiling
 from Main_App.workers.review_resource_budget import probe_memory_snapshot
@@ -100,6 +101,7 @@ def cell_validation_credit(workbook_path: str | Path) -> int | None:
             return None
         manifest = _validate_manifest(value)
         materialized = 0
+        largest_buffer = 0
         for key in ("spectral_companion", "condition_companion"):
             descriptor = manifest[key]
             if descriptor is None:
@@ -108,12 +110,14 @@ def cell_validation_credit(workbook_path: str | Path) -> int | None:
             if path.resolve().parent != workbook.parent or path.stat().st_size != descriptor["size_bytes"]:
                 return None
             materialized += _metadata_bytes(path, spectral=key == "spectral_companion")
+            largest_buffer = max(largest_buffer, validation_buffer_bytes(descriptor["size_bytes"]))
         if before != _signature(workbook):
             return None
         # Headers/Unicode arrays, Python strings/JSON objects and detached
         # descriptors have materially greater overhead than their stored bytes.
-        # Dense FFT/metric values are not read by native identity validation.
-        return _BASE_CREDIT + 16 * materialized + 4 * len(data)
+        # The two archives validate sequentially. Allow for a transient copy
+        # of the larger byte buffer without allocating any dense numeric arrays.
+        return _BASE_CREDIT + 16 * materialized + 4 * len(data) + 2 * largest_buffer
     except (AttributeError, MemoryError, OSError, OverflowError, TypeError, ValueError, KeyError,
             EOFError, struct.error, zipfile.BadZipFile):
         return None

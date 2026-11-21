@@ -35,6 +35,24 @@ from Main_App.projects.project import Project
 from Main_App.workers import process_runner
 
 
+def test_complete_condition_outputs_need_no_label_path_lookups(tmp_path, monkeypatch):
+    paths = (tmp_path / "A" / "output.xlsx", tmp_path / "B" / "output.xlsx")
+    plan = SimpleNamespace(condition_labels=("Condition A", "Condition B"))
+    state = SimpleNamespace(expected_outputs=paths)
+    original_resolve = Path.resolve
+    resolves = []
+
+    def counted_resolve(path, *args, **kwargs):
+        resolves.append(path)
+        return original_resolve(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "resolve", counted_resolve)
+    labels = processing_ledger_module._condition_labels_for_missing_outputs
+    assert labels(plan, state, []) == []
+    assert resolves == []
+    assert labels(plan, state, [paths[1]]) == ["Condition B"]
+
+
 def _project_with_raw(tmp_path, *, preprocessing=None):
     manifest = (
         {"preprocessing": dict(preprocessing)}

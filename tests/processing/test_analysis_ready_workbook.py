@@ -80,6 +80,7 @@ def test_workbook_formatting_preserves_all_serialized_values_and_styles(tmp_path
         with pd.ExcelWriter(path, engine="openpyxl") as writer:
             for sheet_name, frame in frames.items():
                 frame.to_excel(writer, sheet_name=sheet_name, index=False)
+            writer.book.create_sheet("Offset").cell(row=3, column=4, value="sparse")
             formatter(writer.book)
 
     before, after = [load_workbook(path) for path in paths]
@@ -1002,6 +1003,35 @@ def test_full_audit_rejects_partial_selected_harmonic_sums() -> None:
             frame,
             selected_columns=["1.2000_Hz", "2.4000_Hz"],
             expected_scalp_channels=["O1", "O2"],
+            normalization_available=True,
+        )
+
+
+@pytest.mark.parametrize("available", [True, False])
+def test_full_audit_finite_counts_are_independent_of_normalization(available: bool) -> None:
+    frame = pd.DataFrame({"Electrode": ["O2", "O1"], "3.0000_Hz": [4.0, 3.0]})
+    prepared, notes, scales = export_module._prepare_electrode_values(
+        frame, selected_columns=["3.0000_Hz"], expected_scalp_channels=["O1", "O2"],
+        normalization_available=available,
+    )
+    assert notes == []
+    assert prepared["Electrode"].tolist() == ["O1", "O2"]
+    assert prepared["Missing Selected Harmonics"].tolist() == ["", ""]
+    assert prepared["Raw Summed BCA"].tolist() == [3.0, 4.0]
+    if available:
+        assert prepared["RMS Normalized BCA"].tolist() == [3.0 / 5.0, 4.0 / 5.0]
+    else:
+        assert prepared["RMS Normalized BCA"].isna().all()
+    assert scales[0]["Source Electrode Count"] == scales[0]["Finite Electrode Count"] == 2
+    assert scales[0]["Scalp Vector Length"] == 5.0
+    assert scales[0]["Used for RMS Normalization"] is available
+
+
+def test_full_audit_rejects_ambiguous_selected_columns() -> None:
+    frame = pd.DataFrame({"Electrode": ["O1"], "3.0000_Hz": [1.0]})
+    with pytest.raises(ValueError, match="truth value of a Series is ambiguous"):
+        export_module._prepare_electrode_values(
+            frame, selected_columns=["3.0000_Hz", "3.0000_Hz"], expected_scalp_channels=["O1"],
             normalization_available=True,
         )
 

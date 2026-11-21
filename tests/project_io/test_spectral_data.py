@@ -272,6 +272,61 @@ def test_verified_headers_survive_dense_eviction_without_reloading_arrays(tmp_pa
         )
 
 
+@pytest.mark.parametrize("mode", ["buffered", "above_limit", "memory_pressure", "buffer_view_failure"])
+def test_npz_validation_reads_small_archive_once_with_streaming_fallbacks(tmp_path, monkeypatch, mode):
+    from Main_App.io import numpy_companion
+
+    path = tmp_path / "result.npz"
+    bits = np.array([0x8000000000000000, 0x7FF8000000000001], dtype=np.uint64)
+    np.savez(path, values=bits.view(np.float64))
+    size = path.stat().st_size
+    expected = hashlib.sha256(path.read_bytes()).hexdigest()
+    monkeypatch.setattr(numpy_companion, "_MAX_BUFFER_BYTES", size - 1 if mode == "above_limit" else size)
+    if mode == "memory_pressure":
+        def allocation_failed(*_args):
+            raise MemoryError
+
+        monkeypatch.setattr(numpy_companion, "BytesIO", allocation_failed)
+    elif mode == "buffer_view_failure":
+        class FailingView(numpy_companion.BytesIO):
+            def getbuffer(self):
+                raise MemoryError
+
+        monkeypatch.setattr(numpy_companion, "BytesIO", FailingView)
+
+    class ObservedFile:
+        def __init__(self, stream):
+            self.stream = stream
+            self.bytes_read = 0
+
+        def __getattr__(self, name):
+            return getattr(self.stream, name)
+
+        def read(self, *args):
+            chunk = self.stream.read(*args)
+            self.bytes_read += len(chunk)
+            return chunk
+
+        def readinto(self, target):
+            count = self.stream.readinto(target)
+            self.bytes_read += count
+            return count
+
+    with path.open("rb") as stream:
+        observed = ObservedFile(stream)
+        with numpy_companion.open_verified_npz(observed, size, expected, ValueError("checksum")) as archive:
+            np.testing.assert_array_equal(archive["values"].view(np.uint64), bits)
+        if mode == "buffered":
+            assert observed.bytes_read == size
+        else:
+            assert observed.bytes_read > size
+        stream.seek(0)
+        with pytest.raises(ValueError, match="checksum"), numpy_companion.open_verified_npz(
+            stream, size, "0" * 64, ValueError("checksum"),
+        ):
+            pytest.fail("An archive with a wrong checksum reached a consumer")
+
+
 def test_evicted_numeric_read_rehashes_valid_inplace_archive_with_identical_signature(tmp_path, monkeypatch):
     """Windows creation-time stats cannot certify new body reads after eviction."""
     from Main_App.io import xlsx_selected_reader as xlsx
@@ -286,8 +341,9 @@ def test_evicted_numeric_read_rehashes_valid_inplace_archive_with_identical_sign
     original_digest = hashlib.file_digest
 
     def counted_digest(stream, *args, **kwargs):
-        digest_calls.append(Path(stream.name))
-        return original_digest(stream, *args, **kwargs)
+        digest = original_digest(stream, *args, **kwargs)
+        digest_calls.append(digest.hexdigest())
+        return digest
 
     monkeypatch.setattr(hashlib, "file_digest", counted_digest)
     with xlsx_read_cache_scope():
@@ -325,7 +381,8 @@ def test_evicted_numeric_read_rehashes_valid_inplace_archive_with_identical_sign
             read_xlsx_sheet_selected_columns(
                 paths[0], sheet_name=FFT, required_columns=["Electrode", "0.0000_Hz"],
             )
-        assert digest_calls.count(companion) == 2
+        assert len(digest_calls) == 7
+        assert digest_calls[-1] == hashlib.sha256(changed_bytes).hexdigest()
 
 
 def test_evicted_spectral_verification_rejects_changed_companion_and_is_bounded(tmp_path, monkeypatch):

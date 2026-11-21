@@ -3468,15 +3468,17 @@ def _load_independent_qc_context(project_root: Path) -> _IndependentQcContext:
     try:
         candidate_key = live_key()
         if Path(candidate_key[1]).stat().st_size <= _INDEPENDENT_QC_LEDGER_MAX_BYTES:
-            files = context.capture_validation_files([candidate_key[1]], hash_contents=True)
-            if all(identity is not None for _, identity in files):
-                key = candidate_key
-                cached = context.cached_validation("independent_qc_ledger", (key, files))
-                if cached is not context.CACHE_MISS:
-                    # Reject edits during detachment as well as initial validation.
-                    if live_key() == key and context.validation_files_unchanged(files):
-                        return cached
-                    key = None
+            cached = context.cached_validation("independent_qc_ledger", candidate_key)
+            if cached is context.CACHE_MISS:
+                files = context.capture_validation_files([candidate_key[1]], hash_contents=True)
+                if all(identity is not None for _, identity in files):
+                    key = candidate_key
+            else:
+                # The shared cache checked these exact bytes before detaching.
+                # Check again for edits or redirection during the copy.
+                files, value = cached
+                if live_key() == candidate_key and context.validation_files_unchanged(files):
+                    return value
     except (OSError, RuntimeError, MemoryError):
         # Missing/unreadable paths and cache-only allocation failures must retain
         # the uncached loader's diagnostics and error precedence.
@@ -3522,7 +3524,7 @@ def _load_independent_qc_context(project_root: Path) -> _IndependentQcContext:
             and live_key() == key
         ):
             context.remember_validation(
-                "independent_qc_ledger", (key, files), value, files=files,
+                "independent_qc_ledger", key, (files, value), files=files,
                 max_namespace_entries=1,
             )
     except (OSError, RuntimeError, MemoryError):
@@ -3540,16 +3542,12 @@ def _read_independent_qc_context(
         ROI_COVERAGE_STAGE_PRE_REVIEW,
         RoiCoverageGateError,
         _roi_coverage_from_ledger,
-        load_roi_coverage,
     )
 
     try:
-        coverage = (
-            load_roi_coverage(project_root, stage=ROI_COVERAGE_STAGE_PRE_REVIEW)
-            if ledger_snapshot is None
-            else _roi_coverage_from_ledger(
-                ledger_snapshot, stage=ROI_COVERAGE_STAGE_PRE_REVIEW,
-            )
+        ledger = load_ledger(project_root) if ledger_snapshot is None else ledger_snapshot
+        coverage = _roi_coverage_from_ledger(
+            ledger, stage=ROI_COVERAGE_STAGE_PRE_REVIEW,
         )
     except (OSError, TypeError, ValueError, RoiCoverageGateError) as exc:
         core = {
@@ -3578,7 +3576,6 @@ def _read_independent_qc_context(
             processing_entries={},
         )
 
-    ledger = load_ledger(project_root) if ledger_snapshot is None else ledger_snapshot
     raw_entries = ledger.get("entries")
     entries = raw_entries if isinstance(raw_entries, Mapping) else {}
     entry_by_identity = {

@@ -60,6 +60,53 @@ def _count_normalization(monkeypatch):
     return calls
 
 
+def test_ledger_reads_for_uncached_context_and_verified_cache_hit(ledger_project, monkeypatch):
+    expected = _bytes(ledger_project)
+    ledger_path = ledger_io.ledger_path(ledger_project)
+    original_open = Path.open
+    opens = []
+
+    def counted_open(path, *args, **kwargs):
+        if path == ledger_path:
+            opens.append(path)
+        return original_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", counted_open)
+    assert _bytes(ledger_project) == expected
+    assert len(opens) == 1
+    with context.post_processing_validation_scope():
+        assert _bytes(ledger_project) == expected
+        opens.clear()
+        assert _bytes(ledger_project) == expected
+        assert len(opens) == 2
+
+
+def test_uncached_context_uses_one_ledger_version_when_file_is_replaced(ledger_project, monkeypatch):
+    from Main_App.processing import roi_coverage
+
+    expected = _bytes(ledger_project)
+    replacement = ledger_io.load_ledger(ledger_project)
+    evidence = {"marker": "new version"}
+    replacement["entries"]["P01__visit_1"]["kurtosis_qc_evidence"] = {
+        **evidence, "fingerprint": qc._hash_payload(evidence),
+    }
+    updated = pickle.dumps(
+        qc._read_independent_qc_context(ledger_project, ledger_snapshot=replacement), protocol=5,
+    )
+    assert updated != expected
+    original_coverage = roi_coverage._roi_coverage_from_ledger
+
+    def replace_after_coverage(ledger, *, stage):
+        coverage = original_coverage(ledger, stage=stage)
+        ledger_io.save_ledger(ledger_project, replacement)
+        return coverage
+
+    with monkeypatch.context() as patched:
+        patched.setattr(roi_coverage, "_roi_coverage_from_ledger", replace_after_coverage)
+        assert _bytes(ledger_project) == expected
+    assert _bytes(ledger_project) == updated
+
+
 def test_current_context_reuses_exact_detached_evidence_only_in_scope(ledger_project, monkeypatch):
     root = ledger_project
     expected = _bytes(root)

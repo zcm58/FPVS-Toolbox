@@ -24,6 +24,7 @@ import numpy as np
 import pandas as pd
 
 from Main_App.io import xlsx_selected_reader as _xlsx
+from Main_App.io.numpy_companion import open_verified_npz
 
 SPECTRAL_COMPANION_VERSION = "numpy_spectral_companion_v1"
 SPECTRAL_MANIFEST_SHEET = "Spectral Data"
@@ -245,10 +246,10 @@ def _companion_payload(workbook: Path, descriptor: Mapping) -> _SpectralPayload:
         return cache.spectral_payloads[key]
     try:
         with path.open("rb") as stream:
-            if hashlib.file_digest(stream, "sha256").hexdigest() != identity["sha256"]:
-                raise SpectralDataError(f"Spectral companion checksum does not match: {path.name}")
-            stream.seek(0)
-            with np.load(stream, allow_pickle=False) as archive, zipfile.ZipFile(stream) as container:
+            with open_verified_npz(
+                stream, signature.size_bytes, identity["sha256"],
+                SpectralDataError(f"Spectral companion checksum does not match: {path.name}"),
+            ) as archive:
                 manifest = json.loads(str(archive["metadata_json"].item()))
                 if manifest.get("version") != SPECTRAL_COMPANION_VERSION or manifest.get("sheets") != identity["sheets"]:
                     raise SpectralDataError("Spectral archive disagrees with its workbook declaration.")
@@ -256,7 +257,7 @@ def _companion_payload(workbook: Path, descriptor: Mapping) -> _SpectralPayload:
                 for index, name in enumerate(identity["sheets"]):
                     labels = archive[f"sheet{index}_columns"]
                     rows = archive[f"sheet{index}_electrodes"]
-                    shape = _dense_shape(container, f"sheet{index}_values")
+                    shape = _dense_shape(archive.zip, f"sheet{index}_values")
                     if (labels.dtype.kind != "U" or rows.dtype.kind != "U" or labels.ndim != 1 or rows.ndim != 1
                             or len(labels) < 2 or labels[0] != "Electrode"
                             or shape != (len(rows), len(labels) - 1)
