@@ -191,11 +191,11 @@ def test_review_worker_preserves_explicit_pool_limit_and_signal_callbacks(worker
 
 
 @pytest.mark.parametrize("stale_limit,preprocessing_override,legacy_limit,expected", [
-    (1, 6, None, 6), (2, 0, None, 23), (None, 3, None, 3),
+    (1, 6, None, 6), (2, 0, None, 16), (None, 3, None, 3),
     (12, 0, 4, 4), (24, 3, 12, 3),
 ])
 def test_embedded_review_uses_current_project_ceiling(stale_limit, preprocessing_override, legacy_limit, expected):
-    from Main_App.workers.mp_env import compute_dynamic_worker_ceiling
+    from Main_App.workers.mp_env import compute_dynamic_worker_ceiling, project_worker_override
 
     tree = ast.parse(WORKFLOW.read_text(encoding="utf-8"))
     resolver = next(node for node in tree.body if getattr(node, "name", None) == "_review_worker_ceiling")
@@ -209,8 +209,9 @@ def test_embedded_review_uses_current_project_ceiling(stale_limit, preprocessing
     )
     namespace = {
         "host": host, "params": {"max_parallel_workers_override": preprocessing_override},
+        "project_worker_override": project_worker_override,
         "compute_dynamic_worker_ceiling": lambda requested: compute_dynamic_worker_ceiling(
-            requested, cpu_count=24,
+            requested, cpu_count=24, total_ram_bytes=127 * 1024**3,
         ),
     }
     module = ast.Module(body=[ast.ImportFrom(

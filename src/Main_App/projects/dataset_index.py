@@ -34,7 +34,8 @@ from .dataset_paths import (
 )
 from .dataset_scan import (
     casefold_set,
-    is_ignored_workbook_path,
+    is_ignored_workbook_path as is_ignored_workbook_path,
+    iter_index_directories,
     workbook_candidate_score,
     workbook_location,
 )
@@ -562,6 +563,10 @@ def list_result_files(folder: str | Path, *, recursive: bool = False) -> tuple[P
 
     root = Path(folder).expanduser()
     candidates = root.rglob("*") if recursive else root.glob("*")
+    return _sorted_result_files(candidates)
+
+
+def _sorted_result_files(candidates: Iterable[Path]) -> tuple[Path, ...]:
     return tuple(sorted(
         path for path in candidates
         if is_excel_workbook_file(path, suffixes=(".xlsx", RESULT_MANIFEST_SUFFIX))
@@ -692,12 +697,9 @@ def load_project_dataset_index(dataset_path: str | Path) -> ProjectDatasetIndex:
         workbook_paths: tuple[Path, ...] = ()
     else:
         try:
-            workbook_paths = tuple(
-                sorted(
-                    path
-                    for path in list_result_files(scan_root, recursive=True)
-                    if not is_ignored_workbook_path(path, scan_root)
-                )
+            workbook_paths = _sorted_result_files(
+                path for directory in iter_index_directories(scan_root)
+                for path in directory.glob("*")
             )
         except OSError as exc:
             raise DatasetIndexError(
@@ -709,6 +711,7 @@ def load_project_dataset_index(dataset_path: str | Path) -> ProjectDatasetIndex:
     repeated_session_project = bool(
         sessions or recording_sources or recordings
     )
+    recording_lookup = {recording_id.casefold(): recording_id for recording_id in recordings}
     participant_lookup = {
         participant_id.casefold(): participant_id
         for participant_id in participants
@@ -769,7 +772,7 @@ def load_project_dataset_index(dataset_path: str | Path) -> ProjectDatasetIndex:
             recording_id = _generated_recording_id(
                 path,
                 condition=filename_condition,
-                known_recording_ids=recordings,
+                recording_lookup=recording_lookup,
             )
             if recording_id is None:
                 diagnostics.append(
@@ -1056,7 +1059,7 @@ def _generated_recording_id(
     workbook_path: str | Path,
     *,
     condition: str,
-    known_recording_ids: Mapping[str, RecordingInfo],
+    recording_lookup: Mapping[str, str],
 ) -> str | None:
     """Match only an exact manifest recording ID in a generated filename."""
 
@@ -1070,11 +1073,7 @@ def _generated_recording_id(
     ):
         return None
     observed_id = stem[: -len(generated_suffix)].strip()
-    lookup = {
-        recording_id.casefold(): recording_id
-        for recording_id in known_recording_ids
-    }
-    return lookup.get(observed_id.casefold())
+    return recording_lookup.get(observed_id.casefold())
 
 
 def _participant_group_map(

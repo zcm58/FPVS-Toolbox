@@ -49,6 +49,38 @@ def _evidence():
     }
 
 
+def test_project_ceiling_applies_to_ordered_native_source_hashes(inputs, monkeypatch):
+    from Main_App.processing import provisional_harmonic_cache as cache
+    from Main_App.workers import cell_validation_pool
+
+    first = Path(inputs["subject_data"]["P1"]["Faces"])
+    second = first.with_name("P2_Faces_Results.fpvs")
+    second.write_bytes(first.read_bytes())
+    inputs.update(subjects=["P2", "P1"], conditions=["Missing", "Faces"])
+    inputs["subject_data"]["P2"] = {"Faces": str(second)}
+    manifest = inputs["project_root"] / "project.json"
+    data = json.loads(manifest.read_bytes())
+    data["preprocessing"] = {"max_parallel_workers_override": 2}
+    manifest.write_text(json.dumps(data))
+
+    calls = []
+
+    def collect(paths, validate, credit, *, max_workers):
+        calls.append((list(paths), max_workers))
+        assert all(credit(path) > 0 for path in paths)
+        # Finish reads in reverse order. The dispatcher's result contract is input order.
+        result = {path: validate(path) for path in reversed(paths)}
+        return [result[path] for path in paths]
+
+    with monkeypatch.context() as patch:
+        patch.setattr(cell_validation_pool, "ordered_cell_validation", collect)
+        patch.setattr("Main_App.workers.mp_env.compute_dynamic_worker_ceiling", lambda override: override)
+        key = cache._request_key(inputs)
+    assert calls == [([second, first], 2)]
+    assert cache._request_key(inputs) == key
+    assert cache._request_key({**inputs, "subjects": list(reversed(inputs["subjects"]))}) != key
+
+
 def _bits(value):
     if isinstance(value, float):
         return struct.pack(">d", value)

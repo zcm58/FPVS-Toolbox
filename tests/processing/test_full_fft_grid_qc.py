@@ -247,6 +247,39 @@ def test_full_fft_grid_audit_ignores_noncompleted_ledger_participants(
     assert {row.participant_id for row in audit.observations} == {"P1", "P2"}
 
 
+def test_incremental_grid_audit_never_reads_incomplete_or_current_recording_headers(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    from Main_App.processing import full_fft_grid_qc as grid
+
+    excel_root = _write_project(tmp_path)
+    for participant_id in ("P1", "P2", "P3"):
+        _write_full_fft_header(excel_root, participant_id, "Faces", oddball_cycles=144)
+    entries = {
+        "P1": {"status": "completed"},
+        "P2": {"status": "completed"},
+        "P3": {"status": "failed"},
+    }
+    save_ledger(tmp_path, {"schema_version": 1, "entries": entries})
+    inspected = []
+    original = grid._inspect_workbook_grid
+
+    def inspect(record, **kwargs):
+        inspected.append(record.participant_id)
+        return original(record, **kwargs)
+
+    monkeypatch.setattr(grid, "_inspect_workbook_grid", inspect)
+    audit = audit_project_full_fft_grids(tmp_path, superseded_recordings=("p2",))
+    assert inspected == ["P1"]
+    assert [row.participant_id for row in audit.observations] == ["P1"]
+
+    entries["P1"] = {"status": "failed"}
+    entries["P2"] = {"status": "stale"}
+    save_ledger(tmp_path, {"schema_version": 1, "entries": entries})
+    assert not audit_project_full_fft_grids(tmp_path).observations
+    assert inspected == ["P1"]
+
+
 def test_full_fft_grid_audit_ignores_frequency_excluded_participants(
     tmp_path: Path,
 ) -> None:

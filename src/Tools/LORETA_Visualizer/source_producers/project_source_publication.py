@@ -91,7 +91,10 @@ def source_project_cohort_snapshot(
     )
     return {
         "groups": [{"id": row.group_id, "label": row.label, "folder": row.folder_name} for row in context.groups],
-        "participants": [{"id": row.participant_id, "group_id": row.group_id} for row in context.participants],
+        "participants": [
+            {"id": row.participant_id, "group_id": row.group_id}
+            for row in sorted(context.participants, key=lambda row: row.participant_id.casefold())
+        ],
         "event_map": dict(getattr(project, "event_map", None) or {}),
         "include_flagged_subjects": bool(include_flagged_subjects),
         "excluded_subjects": list(selection.excluded_subjects),
@@ -111,8 +114,15 @@ def _validate_cohort_snapshot(root: Path, identity: Mapping[str, Any]) -> None:
     common = identity.get("common_inputs", {})
     if (root / "project.json").is_file():
         snapshot = common.get("cohort_snapshot")
-        if not isinstance(snapshot, dict) or snapshot != source_project_cohort_snapshot(
-            root, include_flagged_subjects=bool(snapshot.get("include_flagged_subjects", False)),
+        # Earlier receipts captured registration order. The numerical producers
+        # order participants by ledger ID; rewriting project.json may reorder
+        # its participant mapping without touching any member or assignment.
+        saved = snapshot.copy() if isinstance(snapshot, dict) else {}
+        rows = saved.get("participants")
+        if isinstance(rows, list) and all(isinstance(row, dict) and isinstance(row.get("id"), str) for row in rows):
+            saved["participants"] = sorted(rows, key=lambda row: row["id"].casefold())
+        if saved != source_project_cohort_snapshot(
+            root, include_flagged_subjects=bool(saved.get("include_flagged_subjects", False)),
         ):
             raise ValueError("Project groups, condition availability, or QC exclusions changed; rebuild source maps.")
 

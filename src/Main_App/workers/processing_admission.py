@@ -23,7 +23,13 @@ class ProcessingAdmission:
     """
 
     def __init__(self, files, settings, event_map, context):
-        self.estimates = tuple(build_processing_estimate(path, settings, event_map) for path in files)
+        from Main_App.workers.process_runner import _recording_job_settings
+
+        self.job_settings = tuple(_recording_job_settings(path, settings) for path in files)
+        self.estimates = tuple(
+            build_processing_estimate(path, settings, event_map)
+            for path, settings in zip(files, self.job_settings, strict=True)
+        )
         snapshot = self.snapshot()
         self.exclusive = tuple(
             estimate is None
@@ -39,6 +45,7 @@ class ProcessingAdmission:
         self.grant_status = context.Array("b", len(files), lock=False)
         self.cancel_event = context.Event()
         self.active = {}
+        self.final_tails = set()
         self.workers = {}
         self.requests = {}
         self.emergency_owner = None
@@ -73,11 +80,26 @@ class ProcessingAdmission:
                 self.workers[int(message["pid"])] = (float(message["created"]), index)
             elif message.get("type") == "request":
                 self.requests[index] = message.get("required_bytes")
+            elif message.get("type") == "tail":
+                # A finished Future can arrive ahead of its last queue message.
+                if index not in self.active:
+                    continue
+                estimate = self.estimates[index]
+                if self.exclusive[index] or estimate is None or index in self.final_tails:
+                    raise ReviewMemoryProbeError("Unexpected final processing phase.")
+                required = estimate.tail_bytes(*message["shape"])
+                if required <= 0 or required > self.active[index]:
+                    raise ReviewMemoryProbeError("Final processing phase exceeds its granted credit.")
+                self.active[index] = required
+                self.final_tails.add(index)
+                if self.emergency_owner == index:
+                    self.emergency_owner = None
             else:
                 raise ReviewMemoryProbeError("Invalid processing memory-control message.")
 
-    def fits(self, index=None, *, population=None, solo=False, granting=None, snapshot=None):
-        self.drain()
+    def fits(self, index=None, *, population=None, solo=False, granting=None, snapshot=None, owned_memory=None):
+        if owned_memory is None:
+            self.drain()
         snapshot = self.snapshot() if snapshot is None else snapshot
         population = self.population if population is None else population
         credits = dict(self.active)
@@ -93,31 +115,54 @@ class ProcessingAdmission:
         reserve = 0 if solo else max((
             self.estimates[item].emergency_extra_bytes
             for item in indices
-            if not self.exclusive[item] and item != self.solo_owner
+            if not self.exclusive[item] and item != self.solo_owner and item not in self.final_tails
         ), default=0)
         owner = granting[0] if granting is not None else self.emergency_owner
         if owner is not None:
             reserve = max(0, reserve - max(0, credits[owner] - self.credits[owner]))
-        active_owned, idle_owned = {}, []
-        for pid, (created, item) in tuple(self.workers.items()):
-            owned = probe_owned_memory(pid, created)
-            if owned.uss_bytes is None and owned.private_commit_bytes is None:
-                continue
-            if item in credits:
-                active_owned[item] = owned
-            else:
-                idle_owned.append(owned)
-        # A reused worker can already be running the next file while its new
-        # start message is still in transit. Until all active identities are
-        # known, no apparent idle process earns credit against an idle floor.
-        if len(active_owned) < len(credits):
-            idle_owned = []
+        active_owned, idle_owned = self._owned_memory() if owned_memory is None else owned_memory
         return memory_admission_fits(
             snapshot, active_credits=credits, active_owned=active_owned,
             idle_owned=idle_owned, worker_count=population,
             candidate_credit=0 if index is None else self.credits[index],
             emergency_reserve=reserve,
         )
+
+    def _owned_memory(self):
+        active_owned, idle_owned = {}, []
+        for pid, (created, item) in tuple(self.workers.items()):
+            # The final tail starts after source/cache work. Previous-phase
+            # allocations may still be resident: reserve the whole tail on top.
+            if item in self.final_tails:
+                continue
+            owned = probe_owned_memory(pid, created)
+            if owned.uss_bytes is None and owned.private_commit_bytes is None:
+                continue
+            if item in self.active:
+                active_owned[item] = owned
+            else:
+                idle_owned.append(owned)
+        # A reused worker can already be running the next file while its new
+        # start message is still in transit. Until all active identities are
+        # known, no apparent idle process earns credit against an idle floor.
+        if len(active_owned) < len(self.active):
+            idle_owned = []
+        return active_owned, idle_owned
+
+    def first_fitting(self, indices):
+        """Keep source order among jobs that fit; drain at exclusive boundaries."""
+        self.drain()
+        if self.requests:
+            return None
+        snapshot, owned = self.snapshot(), self._owned_memory()
+        for offset, index in enumerate(indices):
+            if self.exclusive[index] and (offset or self.active):
+                break
+            if self.fits(index, solo=self.solo_owner == index, snapshot=snapshot, owned_memory=owned):
+                return offset
+            if self.exclusive[index]:
+                break
+        return None
 
     def next_population(self, index, ceiling):
         """Choose only for an empty/drained pool; never resize active workers."""
@@ -137,6 +182,7 @@ class ProcessingAdmission:
 
     def completed(self, index):
         self.active.pop(index, None)
+        self.final_tails.discard(index)
         self.requests.pop(index, None)
         if self.emergency_owner == index:
             self.emergency_owner = None
@@ -242,7 +288,11 @@ class ProcessingWorkerAdmission:
     def before_tail(self, raw):
         if self.index is not None and not self.exclusive[self.index]:
             estimate = self.estimates[self.index]
-            self.request(estimate.tail_bytes(len(raw.ch_names), int(raw.n_times), float(raw.info["sfreq"])))
+            shape = (len(raw.ch_names), int(raw.n_times), float(raw.info["sfreq"]))
+            required = estimate.tail_bytes(*shape)
+            self.request(required)
+            self.events.put({"type": "tail", "index": self.index, "shape": shape})
+            self.credit = required
 
     def before_finish(self, raw):
         """Always guard repairs/cache publication, including disabled kurtosis."""

@@ -190,8 +190,10 @@ class FullFftGridAudit:
 
 def audit_project_full_fft_grids(
     project_root: str | Path,
+    *,
+    superseded_recordings: Sequence[str] = (),
 ) -> FullFftGridAudit:
-    """Inspect every managed FullFFT header, including already excluded pairs."""
+    """Inspect managed headers, omitting recordings undergoing current raw review."""
 
     root = Path(project_root).resolve(strict=False)
     dataset_index = load_project_dataset_index(root)
@@ -208,9 +210,11 @@ def audit_project_full_fft_grids(
         for record in dataset_index.workbooks
         if record.path.resolve(strict=False) in active_paths
     )
+    superseded = {identity.casefold() for identity in superseded_recordings}
     records = tuple(
         sorted(
-            (*active_records, *dataset_index.excluded_workbooks),
+            (record for record in (*active_records, *dataset_index.excluded_workbooks)
+             if (record.recording_id or record.participant_id).casefold() not in superseded),
             key=lambda record: (
                 record.group_label.casefold() if record.group_label else "",
                 record.participant_id.casefold(),
@@ -319,7 +323,7 @@ def _harmonic_active_workbook_paths(
         record.path.resolve(strict=False)
         for record in records
         if (
-            not completed_identities
+            not entries
             or (record.recording_id or record.participant_id).casefold()
             in completed_identities
         )

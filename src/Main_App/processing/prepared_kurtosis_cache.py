@@ -6,14 +6,16 @@ Unavailable, stale, or damaged artifacts are ordinary cache misses.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import hashlib
 import json
 import logging
+import math
 import os
 from pathlib import Path
 import tempfile
 import re
+from typing import NamedTuple
 
 import mne
 import numpy as np
@@ -38,6 +40,29 @@ _PREFIX_STATE_KEYS = (
 )
 
 
+class _BidsImportDiagnostics(NamedTuple):
+    identity_seconds: float
+    conversion_seconds: float
+    reused: bool
+
+
+def _import_diagnostics(metadata: object) -> _BidsImportDiagnostics | None:
+    # Only this producer schema declares the three fields as per-load diagnostics.
+    if not isinstance(metadata, dict) or metadata.get("version") != "bids_import_v1":
+        return None
+    if not all(isinstance(metadata.get(key), str) and metadata[key] for key in ("representation", "path")):
+        return None
+    identity_seconds = metadata.get("identity_seconds")
+    conversion_seconds = metadata.get("conversion_seconds")
+    reused = metadata.get("reused")
+    if type(reused) is not bool or not all(
+        type(value) is float and math.isfinite(value) and value >= 0
+        for value in (identity_seconds, conversion_seconds)
+    ):
+        return None
+    return _BidsImportDiagnostics(identity_seconds, conversion_seconds, reused)
+
+
 @dataclass(frozen=True)
 class CheckpointIdentity:
     project_root: Path
@@ -46,6 +71,7 @@ class CheckpointIdentity:
     source_stat: tuple[int, int, int]
     key: str
     source_sha256: str = ""
+    bids_import_diagnostics: _BidsImportDiagnostics | None = field(default=None, compare=False, repr=False)
 
 
 @dataclass(frozen=True)
@@ -138,8 +164,18 @@ def checkpoint_identity(raw, params: dict, preprocessing_fingerprint: str) -> Ch
             return None
         geometry = read_raw_eeg_geometry(raw)
         metadata_arrays = {}
+        source_state = raw_state(raw)
+        attributes = source_state["attributes"]
+        bids_metadata = attributes.get("_fpvs_bids_import")
+        diagnostics = _import_diagnostics(bids_metadata)
+        if diagnostics is not None:
+            # raw_state creates this attributes dictionary; the original Raw and
+            # the full state saved in the checkpoint retain their load provenance.
+            attributes["_fpvs_bids_import"] = {
+                key: value for key, value in bids_metadata.items() if key not in diagnostics._fields
+            }
         metadata_state = encode_state({
-            "raw": raw_state(raw),
+            "raw": source_state,
             "max_idx_keep": params.get("max_idx_keep"),
             "source_plan": params.get("_fpvs_source_analysis_span_plan"),
             "require_analysis_spans": params.get("_fpvs_require_analysis_spans", False),
@@ -165,8 +201,11 @@ def checkpoint_identity(raw, params: dict, preprocessing_fingerprint: str) -> Ch
             "source_metadata": metadata_identity,
             "current_samples_sha256": _sample_digest(raw, params),
         }
+        if diagnostics is not None:
+            # Keep unrecognized/incomplete provenance and older keys in separate namespaces.
+            identity["bids_import_diagnostics_policy"] = "current_load_v1"
         encoded = json.dumps(identity, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
-        return CheckpointIdentity(root, folder, source, before, hashlib.sha256(encoded).hexdigest(), digest)
+        return CheckpointIdentity(root, folder, source, before, hashlib.sha256(encoded).hexdigest(), digest, diagnostics)
     except (OSError, ValueError, TypeError, RuntimeError):
         logger.debug("prepared_kurtosis_cache_identity_unavailable", exc_info=True)
         return None
@@ -213,6 +252,12 @@ def load_checkpoint(identity: CheckpointIdentity | None, *, should_cancel=None) 
         if evidence.scoring_scope.analysis_span_fingerprint != state["params"]["_fpvs_realized_analysis_span_plan"]["fingerprint"]:
             raw.close()
             return None
+        if identity.bids_import_diagnostics is not None:
+            recorded = getattr(raw, "_fpvs_bids_import", None)
+            if _import_diagnostics(recorded) is None:
+                raw.close()
+                return None
+            raw._fpvs_bids_import = {**recorded, **identity.bids_import_diagnostics._asdict()}
         return PreparedCheckpoint(raw, state["params"], evidence, state["original_sfreq"])
     except Exception:  # Optional cache boundary: any decoding failure must recompute normally.
         # Cache decoding must never convert a damaged/unsupported artifact into

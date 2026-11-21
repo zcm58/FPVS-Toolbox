@@ -31,6 +31,7 @@ from Main_App.processing.preprocessing_outcome import (
     PROCESSING_STATUS_FAILED,
     PROCESSING_STATUS_LEGACY_UNKNOWN,
     PROCESSING_STATUS_PENDING,
+    PreprocessingOutcome,
     normalize_preprocessing_outcome,
 )
 from Main_App.processing.processing_ledger import (
@@ -513,8 +514,10 @@ _INTERPOLATION_STATUS_LABELS = {
 
 def _interpolation_burden_for_entry(
     entry: Mapping[str, Any],
+    outcome: PreprocessingOutcome | None = None,
 ) -> InterpolationBurden:
-    outcome = normalize_preprocessing_outcome(entry)
+    if outcome is None:
+        outcome = normalize_preprocessing_outcome(entry)
     geometry = entry.get("geometry")
     return build_interpolation_burden(
         outcome,
@@ -522,9 +525,9 @@ def _interpolation_burden_for_entry(
     )
 
 
-def _preprocessing_report_fields(entry: Mapping[str, Any]) -> dict[str, object]:
-    outcome = normalize_preprocessing_outcome(entry)
-    burden = _interpolation_burden_for_entry(entry)
+def _preprocessing_report_fields(
+    outcome: PreprocessingOutcome, burden: InterpolationBurden,
+) -> dict[str, object]:
     if outcome.interpolation_status == INTERPOLATION_STATUS_LEGACY_UNKNOWN:
         requested: object = "Not recorded"
         successful: object = "Not recorded"
@@ -925,7 +928,10 @@ def build_processing_qc_rows(
             cache_entry.get("kurtosis_bad_channels")
         )
         kurtosis_report = _kurtosis_report_fields(result, entry, cache_entry)
-        preprocessing_report = _preprocessing_report_fields(entry)
+        outcome = normalize_preprocessing_outcome(entry)
+        preprocessing_report = _preprocessing_report_fields(
+            outcome, _interpolation_burden_for_entry(entry, outcome),
+        )
         missing_condition_labels = _missing_condition_labels(plan, state, entry)
         successful_count = preprocessing_report["Successfully Interpolated Count"]
         fallback_count = max(
@@ -940,10 +946,19 @@ def build_processing_qc_rows(
                 )
             ),
         )
-        count = _count_from_result(
-            result,
-            fallback_count,
-        )
+        # A completed recording's audit count is carried into its ledger entry.
+        # Review candidates and successfully interpolated channels can differ.
+        recorded_count = _int_or_default(entry.get("n_rejected"), -1)
+        if (
+            result is None
+            and outcome.processing_status in {
+                PROCESSING_STATUS_COMPLETED, PROCESSING_STATUS_COMPLETED_MISSING_CONDITIONS,
+            }
+            and recorded_count >= 0
+        ):
+            count = recorded_count
+        else:
+            count = _count_from_result(result, fallback_count)
         row: dict[str, object] = {
                 "PID": state.participant_id,
                 "Manually Removed Electrodes": _join_channels(

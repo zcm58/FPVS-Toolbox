@@ -61,6 +61,21 @@ def test_cache_publication_is_covered_before_tail_barrier(case):
     assert phases["source_cache"] > phases["target_cache"]
 
 
+def test_unrelated_large_recording_metadata_cannot_force_exclusive_scheduling(case):
+    from Main_App.workers.process_runner import _recording_job_settings
+
+    path, settings, events, _ = case
+    oversized = "x" * (1024**2 + 1)
+    plans = settings["_fpvs_preflight_event_plans_by_file"]
+    plans["Other.bdf"] = {"unrelated": oversized}
+    settings["kurtosis_review_decisions_by_recording"] = {"Other": {"Cz": oversized}}
+    assert budget.build_processing_estimate(path, settings, events) is None
+    local = _recording_job_settings(path, settings)
+    assert budget.build_processing_estimate(path, local, events) is not None
+    local["unexpected_runtime_metadata"] = oversized
+    assert budget.build_processing_estimate(path, local, events) is None
+
+
 def test_storage_mode_does_not_assume_memmaps_are_nonresident(case):
     path, settings, event_map, _geometry = case
     settings["experimental_ram_preload"] = False

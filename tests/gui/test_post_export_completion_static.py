@@ -91,6 +91,25 @@ def test_old_unchanged_outputs_do_not_count_as_current_run_writes(tmp_path, work
     assert host._last_job_success is False
 
 
+def test_completed_export_skips_rescan_but_unconfirmed_run_still_observes_io_errors(
+    tmp_path, workflows, monkeypatch,
+):
+    host = _host(tmp_path)
+    host._run_had_successful_export = True
+    scan = Mock(side_effect=PermissionError("result tree became inaccessible"))
+    monkeypatch.setattr(Path, "rglob", scan)
+
+    workflows.refresh_run_excel_success_from_disk(host)
+    scan.assert_not_called()
+    assert host._last_job_success is True
+
+    host._run_had_successful_export = host._last_job_success = False
+    with pytest.raises(PermissionError, match="result tree became inaccessible"):
+        workflows.refresh_run_excel_success_from_disk(host)
+    scan.assert_called_once()
+    assert host._last_job_success is False
+
+
 def test_orphan_companions_do_not_mask_a_run_with_no_outputs(tmp_path, workflows):
     host = _host(tmp_path)
     (tmp_path / "P01.spectra.npz").write_bytes(b"incomplete export")

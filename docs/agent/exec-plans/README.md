@@ -41,7 +41,7 @@ Do not switch or merge branches because a dated plan names an old checkout.
 | Source trigger maps and identities | [Acceptance plan](active/source-trigger-maps-and-participant-identity.md): versioned maps, distinct source identities, processing integration and unified Home/Settings editor are implemented. Visible acceptance remains deferred; registered Qt coverage belongs in CI. |
 | Feature-specific manual acceptance | [Condition repair](active/condition-specific-interpolation.md), [FHC reporting](active/fhc-exploratory-reporting.md), [FHC maps](active/fhc-harmonic-cluster-maps.md), [Scalp Map layout](active/scalp-maps-repeated-session-figure-layout.md), [ROI editor](active/sssep-style-visual-roi-selector.md), [source PSD](active/hauk-source-psd.md), and [LORETA improvements](active/loreta-validated-improvements.md): implemented; preserve contracts and visible checks without repeating completed development. |
 | Timing investigations | [Original-rate epoching](active/original-rate-epoching-investigation.md) and [analysis-window scope](future/analysis-window-preprocessing-scope.md): investigations only; no authorization to change the locked processing order or numerical method. |
-| Technical debt | The bounded 2026-10-18 cleanup is complete. The [tracker](tech-debt-tracker.md) retains larger architectural review signals without calling them proven bugs. |
+| Technical debt | The [tracker](tech-debt-tracker.md) retains architectural review candidates. Implemented indexing and export optimizations have [source-level measurements](active/bitwise-pipeline-performance.md#dataset-indexing-and-spectral-exports). |
 
 ## Evidence discipline
 

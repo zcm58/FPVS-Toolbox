@@ -147,7 +147,7 @@ def test_preprocessing_workflow_runs_and_persists_the_fail_closed_review() -> No
     assert "project.update_preprocessing(updated_preprocessing)" in source
 
     event_plan_index = source.index(
-        'params["_fpvs_preflight_event_plans_by_file"] = existing_event_plans'
+        'params["_fpvs_preflight_event_plans_by_file"] = '
     )
     scan_index = source.index(
         "_run_kurtosis_review_scan_embedded(",

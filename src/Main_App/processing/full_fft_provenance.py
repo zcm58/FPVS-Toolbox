@@ -873,10 +873,18 @@ def _project_grid_identity(
     oddball_frequency_hz: float,
 ) -> _GridIdentity:
     common: _GridIdentity | None = None
+    common_header: tuple[str, ...] | None = None
     for relative in snapshot.source_paths:
         path = (project_root / Path(relative)).resolve(strict=False)
         try:
             header = _read_full_fft_header(path)
+            # Each reader still verifies its own workbook and companions. Only
+            # immutable text with exactly the same spelling and order can reuse
+            # the already validated identity for this project's oddball rate.
+            text_header = (tuple(header) if type(header) in (list, tuple)
+                           and all(type(label) is str for label in header) else None)
+            if common_header is not None and text_header == common_header:
+                continue
             current = _grid_identity(
                 header,
                 oddball_frequency_hz=oddball_frequency_hz,
@@ -892,6 +900,8 @@ def _project_grid_identity(
                 "All active processed workbooks must share one exact FullFFT grid; "
                 f"{relative} differs from the first workbook."
             )
+        if common_header is None:
+            common_header = text_header
     if common is None:  # pragma: no cover - guarded by the source snapshot
         raise FullFftProvenanceError("No FullFFT workbook was available.")
     return common

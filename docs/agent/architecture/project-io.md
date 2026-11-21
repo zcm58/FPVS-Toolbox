@@ -775,6 +775,23 @@ The processing contract is deliberately strict:
   before output cleanup. A skipped legacy cell stays
   `legacy_unknown`; existing workbook presence or the old `partial` warning
   cannot promote it to a verified final outcome.
+- In an incremental batch, QC-20 can carry a recording's previously reconciled
+  occurrence plan and the SHA-256 of each original export receipt. Reconciliation
+  verifies the original anchor and companions and preserves the producing run
+  ID. A new recording requires its own reviewed plan and export receipts.
+  Registration, frequency-domain QC, harmonic selection and source aggregation
+  evaluate the resulting full cohort.
+- Completed entries can store a settings fingerprint for that recording and
+  digests of the preflight decisions supplied for it. Changes to its filters,
+  montage, marker decisions, exclusions or channel choices invalidate reuse.
+  An older entry can recover this evidence from the project-local condition
+  interpolation run snapshot when the complete original processing fingerprint
+  reproduces and the original QC-20 outcomes validate. Reprocessing supplies
+  fresh evidence when those checks fail.
+- For a later condition repair on a retained recording, the new run snapshot
+  restores its original reviewed event spans and channel decisions only when
+  their stored digests match. If they cannot be verified, that recording needs
+  fresh review before its conditions can be repaired.
 - Missing per-file group routing and output-directory creation errors hard-fail;
   the exporter does not redirect a workbook to a parent folder.
 - The first current-run grouped workbook sets `groups_locked`,
@@ -829,6 +846,12 @@ diagnostics. It accepts the project root, configured Excel root, condition
 folder, or group folder without creating directories. Exact manifest
 participant IDs take precedence over legacy filename matching; canonical
 grouped copies take precedence over stale flat copies.
+
+Full index scans skip descendants of `.FIF Files` and `LORETA Results`
+(case-insensitive) before reading their contents. Errors confined to those
+subtrees are outside the scan. An explicitly selected file or scan root keeps
+its normal eligibility, and the public `list_result_files` listing stays unfiltered
+by folder name.
 
 For managed project scans, the shared index applies
 `manual_excluded_participant_conditions` only after canonical participant/group

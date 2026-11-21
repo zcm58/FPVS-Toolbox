@@ -184,8 +184,8 @@ Whole-cohort artifact validation may use ordered read-only threads through
 Its CPU/affinity and user ceiling comes from the current project configuration
 only after the reviewed run snapshot still binds that project and expected-plan fingerprint;
 missing/stale inputs retain serial validation and the existing Processing block.
-Live available RAM and Windows commit headroom account for background use;
-installed-RAM tiers do not impose a separate validation-thread cap.
+Automatic validation uses the shared RAM-tier worker ceiling. Live available
+RAM and Windows commit headroom account for background use.
 Every checksum and receipt check remains native. Per-record EEG repair still
 uses one normal process worker and completes shutdown before its plan/ledger/
 completion publication; validation threads cannot publish later recordings.
@@ -257,10 +257,10 @@ from scientific processing fingerprints and cache identity. Switching it does
 not change preprocessing order, rates, numerical methods, or exports. A cache
 hit skips BDF loading, so speed comparisons must use comparable cache misses.
 
-EEG scheduling uses `compute_dynamic_worker_ceiling` for usable CPU/affinity and
-the current project maximum: `0` is automatic and a positive value is an upper
-limit. This removes fixed installed-RAM tiers from memory-admitted EEG stages,
-without changing the legacy tier helper used by unrelated simulations. The GUI
+EEG scheduling uses `compute_dynamic_worker_ceiling` for usable CPU/affinity,
+the automatic RAM recommendation and the current project maximum.
+A setting of `0` selects the [RAM-tier default](workers-threading.md).
+A positive setting overrides the recommendation within the CPU and platform limits. The GUI
 resolves the current saved setting before each preflight, preparation and normal
 run; an earlier run's worker count is not a new project limit. Actual concurrent
 jobs depend on fresh physical RAM and Windows commit headroom, with background
@@ -306,11 +306,19 @@ findings. The grid identity is the sampling-rate-independent integer count of
 project-defined oddball cycles in the planned crop. The expected count and
 oddball rate come from the confirmed project frequency protocol; the review
 does not hard-code 1.2 Hz or 120 seconds or alter the locked shortest-common
-crop calculation. Incremental raw
-observations are compared with header-only observations from the active,
-completed processed-workbook cohort; the current raw plan replaces an older
-workbook observation for the same participant-condition. Ledger-incomplete and
-frequency-domain-excluded participants do not define the reference. When valid
+crop calculation. Incremental runs compare current raw observations with FullFFT
+headers from earlier completed recordings under the same confirmed protocol.
+Each selected recording supersedes all its older headers, including when its raw
+scan fails or finds only a technical header. A completed condition spectrum
+proves that the condition existed, even though its header does not store the
+original trigger count. The review can therefore flag a newly mismatching older
+recording. Existing exclusions and ledger-incomplete recordings cannot vote.
+When this review changes a previous recording's own crop decision, the extra
+preflight checks that recording alongside the raw files reviewed earlier in the
+same run. Its vote and published marker plans then cover both sets, including
+files originally reported as header-only. Unchanged inputs use the normal
+validated caches.
+Frequency-domain-excluded participants do not define the historical reference. When valid
 grids are tied, the review shows each cohort without guessing which one to
 preselect. Accepted manual
 removed-electrode, participant-condition, and participant-exclusion decisions
@@ -600,7 +608,7 @@ recording/participant decision review; continuing does not promote their
 channels to interpolation targets. Technical integrity failures and saved
 manual exclusions remain independent. Each review row begins unselected and
 must be explicitly kept or excluded; an exclusion can use recording or
-participant scope. Participant concurrency has a CPU/affinity and user ceiling,
+participant scope. Participant concurrency uses the shared RAM-tier or user ceiling,
 with fresh physical/Windows-commit admission before each file is submitted.
 Whole-file credits include condition buffers, event/marker work and retained
 evidence, rather than treating the bounded condition buffer as a full-file bound.
@@ -608,8 +616,8 @@ Active thread reservations are not offset by the shared parent process's memory.
 Unknown or over-host estimates run alone through the native chunked route;
 missing required host information reports a resource error. The GUI and backend
 share `preflight_worker_count` for the ceiling; actual admitted work can be lower.
-Simultaneous BDF reads remain
-capped at two, and simultaneous spectral evaluators at two. A
+Each admitted recording may perform its own BDF reads and spectral evaluations
+under the shared RAM-tier or explicit worker ceiling. A
 condition buffer larger than 256 MiB is filled in 10-second chunks into a
 temporary condition-only float64 memmap; no full-recording preflight memmap is
 created. The scheduler preserves deterministic result order and checks cancellation
@@ -760,6 +768,14 @@ The saved `Data_Quality_Check_Review_Flags.xlsx` workbook uses the canonical
 `PID`, `Group`, `Source File`, and `Flagged Item` columns so its group label is
 visible and `qc_summary_export` can merge its flags through the existing named
 columns.
+The Step 7 panel shows the recordings reviewed on this pass. Its saved workbook
+covers the project. It keeps ordinary preflight flags and additional signal
+diagnostics in their original two passes and in native recording order. An
+incremental scan replaces both sets for each reviewed recording, including
+recordings with no current flags. Other current recordings keep their findings.
+The project-local `.fpvs_processing/preflight_review_flags/rows_v1.json.gz`
+snapshot also supports regenerating the workbook. Projects without the
+snapshot can carry forward rows from the historical named-column workbook.
 
 The project preprocessing setting `manual_excluded_participants` stores
 participant IDs that should be skipped without removing their raw `.bdf` files
@@ -1084,6 +1100,13 @@ Kurtosis review and interpolation:
   source preloaded during interactive QC, avoiding BDF decoding at step 6;
   current file/sample hashing and numerical checkpoint checks still run. The
   runner's source loading, trigger positions, and data precision are unchanged.
+  For supported `bids_import_v1` provenance, the checkpoint key excludes the
+  import's two measured durations and its reuse flag. A hit reports those three
+  diagnostics from the current load. The key still binds the published paths,
+  acquisition metadata, geometry, canonical events, reviewed spans, native
+  numerical policy, original source bytes and loaded sample bytes. Other BIDS
+  fields retain their exact identity, including unknown fields. An older
+  checkpoint whose key included the import timings rebuilds once on use.
 - Kurtosis runs only when `reject_thresh` is truthy.
 - EEG picks exclude existing bads and exclude the stim channel when the stim
   channel exists and is not typed as EEG.

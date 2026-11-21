@@ -17,6 +17,8 @@ from pathlib import Path
 
 import psutil
 
+from Main_App.workers.linux_cgroup import cgroup_limits
+
 GIB = 1024**3
 WORKER_FLOOR_BYTES = GIB
 _MIB = 1024**2
@@ -73,6 +75,18 @@ def _power_two_ceiling(value: int) -> int:
     return 1 << (max(1, value) - 1).bit_length()
 
 
+def bdf_reader_peak_bytes(geometry: ReviewGeometry) -> int:
+    """Full float64 source/decoder bound shared by review and lazy preflight."""
+    for extent in (geometry.loaded_channels, geometry.source_n_times,
+                   geometry.packed_record_bytes, geometry.source_record_samples):
+        _positive_int(extent)
+    # MNE's nominal 10-MiB decoder batch is rounded up to whole BDF records.
+    records = math.ceil(10 * _MIB / geometry.packed_record_bytes)
+    decoder = math.ceil(records * geometry.packed_record_bytes * 28 / 3)
+    decoder += 8 * geometry.loaded_channels * geometry.source_record_samples * records
+    return 2 * 8 * geometry.loaded_channels * geometry.source_n_times + decoder
+
+
 def estimate_review_memory(
     geometry: ReviewGeometry, *, filter_enabled: bool = True,
     notch_enabled: bool = False, raw_qc_enabled: bool = True,
@@ -102,11 +116,7 @@ def estimate_review_memory(
     r0, r1, r2 = (8 * channels * samples for channels, samples in
                   ((g.loaded_channels, n0), (g.retained_channels, n0), (g.retained_channels, n2)))
     a2, a0 = 8 * g.scored_channels * n2, 8 * g.scored_channels * n0
-    # The native reader's nominal 10-MiB batch is rounded up to whole records.
-    packed_chunk = math.ceil(10 * _MIB / g.packed_record_bytes) * g.packed_record_bytes
-    decoder = math.ceil(packed_chunk * 28 / 3) + 8 * g.loaded_channels * g.source_record_samples * math.ceil(
-        10 * _MIB / g.packed_record_bytes)
-    components = {"load": 2 * r0 + decoder,
+    components = {"load": bdf_reader_peak_bytes(g),
                   "reference": 2 * r0 + 8 * n0,
                   "drop": r0 + r1}
     if filter_enabled or notch_enabled:
@@ -181,13 +191,21 @@ def _windows_commit_available() -> int | None:
 
 def probe_memory_snapshot() -> ReviewMemorySnapshot:
     memory = psutil.virtual_memory()
+    total, available = int(memory.total), max(0, int(memory.available))
     commit = None
     if os.name == "nt":
         try:
             commit = _windows_commit_available()
         except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
             logger.debug("review_commit_probe_unavailable", exc_info=True)
-    return ReviewMemorySnapshot(int(memory.total), max(0, int(memory.available)), commit, os.name == "nt")
+    else:
+        _, group_total, group_free = cgroup_limits()
+        if group_total is not None:
+            total = min(total, group_total)
+            available = min(available, total)
+        if group_free is not None:
+            available = min(available, group_free)
+    return ReviewMemorySnapshot(total, available, commit, os.name == "nt")
 
 
 def probe_owned_memory(pid: int, created: float) -> OwnedMemory:

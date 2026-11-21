@@ -358,6 +358,7 @@ def validate_inputs(host: Any) -> bool:
         event_map,
     )
     host._processing_pre_qc_plan = pre_qc_plan
+    host._published_review_flag_paths = set()
     qc_raw_file_infos = [
         state.info for state in pre_qc_plan.states if state.should_run_incremental
     ]
@@ -386,6 +387,10 @@ def validate_inputs(host: Any) -> bool:
     if qc_raw_file_infos and not qc_workflow(host, qc_raw_file_infos, params):
         return False
     host._processing_raw_file_infos = list(raw_file_infos)
+    if not qc_raw_file_infos:
+        # No review ran after validation, so the same click already checked
+        # every source, output and companion before asking for processing scope.
+        host._validated_unchanged_plan = pre_qc_plan
 
     debug_enabled = bool(host.settings.debug_enabled()) if hasattr(host, "settings") else False
     project_preproc = getattr(host.currentProject, "preprocessing", {}) or {}

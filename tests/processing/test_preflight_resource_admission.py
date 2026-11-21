@@ -21,6 +21,7 @@ GIB = 1024**3
 def test_preflight_uses_effective_affinity_instead_of_machine_logical_count(monkeypatch):
     from Main_App.workers import mp_env
 
+    monkeypatch.setattr(mp_env, "cgroup_limits", lambda: (None, None, None))
     monkeypatch.setattr(mp_env.os, "process_cpu_count", lambda: 24, raising=False)
     monkeypatch.setattr(mp_env.psutil, "Process", lambda: SimpleNamespace(cpu_affinity=lambda: [0, 1, 2, 3]))
     assert module.preflight_worker_count(30, 12) == 3
@@ -57,6 +58,39 @@ def _run(tmp_path, count, *, workers=6, cancel=None, progress=None):
     )
 
 
+@pytest.mark.parametrize("gib,cpus,workers", [
+    (8, 24, 2), (16, 24, 4), (32, 24, 4), (64, 24, 7),
+    (128, 24, 16), (192, 12, 11), (128, 4, 3),
+])
+def test_automatic_ram_tiers_reach_scanner_threads(monkeypatch, tmp_path, gib, cpus, workers):
+    from Main_App.workers import mp_env
+
+    monkeypatch.setattr(mp_env, "cgroup_limits", lambda: (None, None, None))
+    monkeypatch.setattr(mp_env.os, "process_cpu_count", lambda: cpus, raising=False)
+    monkeypatch.setattr(mp_env.psutil, "Process", lambda: SimpleNamespace(cpu_affinity=lambda: range(cpus)))
+    monkeypatch.setattr(mp_env.psutil, "virtual_memory", lambda: SimpleNamespace(total=gib * GIB))
+    monkeypatch.setattr(module, "probe_memory_snapshot", lambda: _snapshot(gib, gib - 2, gib - 2))
+    monkeypatch.setattr(module, "_preflight_memory_credit", lambda *a, **k: GIB // 8)
+    barrier = Barrier(workers, timeout=5)
+    pool_sizes = []
+    native_executor = module.ThreadPoolExecutor
+
+    def executor(**kwargs):
+        pool_sizes.append(kwargs["max_workers"])
+        return native_executor(**kwargs)
+
+    def scan(info, *args, **kwargs):
+        if int(info.subject_id[1:]) < workers:
+            barrier.wait()
+        return _result(info)
+
+    monkeypatch.setattr(module, "ThreadPoolExecutor", executor)
+    monkeypatch.setattr(module, "_scan_one_preflight_file", scan)
+    result = _run(tmp_path, workers + 1, workers=None)
+    assert pool_sizes == [workers]
+    assert [row.participant_id for row in result.results] == [f"P{i}" for i in range(workers + 1)]
+
+
 @pytest.mark.parametrize("total,available,expected", [(16, 10, 2), (32, 24, 5)])
 def test_live_memory_sizes_six_cpu_slots_without_a_ram_tier(monkeypatch, tmp_path, total, available, expected):
     lock, barrier = Lock(), Barrier(expected, timeout=3)
@@ -84,6 +118,20 @@ def test_live_memory_sizes_six_cpu_slots_without_a_ram_tier(monkeypatch, tmp_pat
     assert not result.cancelled and len(result.results) == 6
     assert peak == expected
     assert [row.participant_id for row in result.results] == [f"P{i}" for i in range(6)]
+
+
+def test_smaller_preflight_can_start_while_next_recording_needs_more_ram(monkeypatch, tmp_path):
+    barrier = Barrier(2, timeout=3)
+    sizes = {"P0": 4 * GIB, "P1": 8 * GIB, "P2": 3 * GIB}
+
+    def scan(info, *_args, **_kwargs):
+        if info.subject_id in {"P0", "P2"}:
+            barrier.wait()
+        return _result(info)
+
+    _install(monkeypatch, snapshot=_snapshot, credit=lambda info, *a, **k: sizes[info.subject_id], scan=scan)
+    result = _run(tmp_path, 3, workers=2)
+    assert [row.participant_id for row in result.results] == ["P0", "P1", "P2"]
 
 
 def test_windows_commit_can_reduce_admissions_with_physical_ram_available(monkeypatch, tmp_path):
@@ -245,3 +293,53 @@ def test_unknown_geometry_stays_exclusive_without_materializing_signal(monkeypat
     monkeypatch.setattr(module, "read_review_geometry", lambda *_: None)
     monkeypatch.setattr(module, "estimate_review_memory", lambda *_a, **_k: pytest.fail("Unknown route."))
     assert module._preflight_memory_credit(_infos(tmp_path, 1)[0], {}, signal_context=True) is None
+
+
+def test_condition_credit_keeps_decoder_overlapping_picks_and_spatial_scratch():
+    geometry = ReviewGeometry(67, 65, 64, 1_949_696, 2048.0, 256.0, 73 * 2048 * 3, 2048)
+    for interval in (128, 10_240, 15_361, 245_760, geometry.source_n_times):
+        samples = min(interval, geometry.source_n_times)
+        bounds = module._transient_window_bounds(samples, sfreq=geometry.source_rate_hz)
+        # Even every manual/advanced-indexed block (including a tail-aligned
+        # overlap) can be retained until the unique occurrence is assembled.
+        copied = sum(stop - start for start, stop, _ in bounds) * 8 * geometry.scored_channels
+        raw = geometry.scored_channels * 8 * samples
+        credit = module._condition_signal_array_bytes(geometry, interval)
+        assert credit >= module.bdf_reader_peak_bytes(geometry)
+        assert credit >= raw + module.bdf_reader_peak_bytes(replace(geometry, source_n_times=samples))
+        assert credit >= copied + 8 * raw
+    historical = module.estimate_review_memory(
+        replace(geometry, target_rate_hz=geometry.source_rate_hz),
+        filter_enabled=False, notch_enabled=False, raw_qc_enabled=True,
+    ).healthy_bytes
+    assert module._condition_signal_array_bytes(geometry, 245_760) < historical // 2
+
+
+def test_confirmed_signal_only_route_limits_only_the_waveform_credit(monkeypatch, tmp_path):
+    geometry = ReviewGeometry(67, 65, 64, 2_000_000, 2048.0, 256.0, 73 * 2048 * 3, 2048)
+    monkeypatch.setattr(module, "read_review_geometry", lambda *_: geometry)
+    monkeypatch.setattr(module.np, "__version__", "2.3.1")
+    monkeypatch.setattr(module, "plain_metadata_bytes", lambda _: 77)
+    protocol = FrequencyProtocol.from_recurrence(
+        6, 5, expected_analyzed_oddball_cycles=144, expected_analyzed_oddball_cycles_source="manual",
+    )
+    settings = {
+        "hardware_platform": "biosemi", "hardware_confirmed": True, "electrode_montage": "biosemi64",
+        "raw_spectral_screening": RawSpectralScreeningSettings(enabled=False).to_manifest(),
+        "frequency_protocol": protocol, "_fpvs_manual_removed_electrodes": ["Fp1", "Fz"],
+    }
+    info = _infos(tmp_path, 1)[0]
+    interval = protocol.expected_analyzed_samples(geometry.source_rate_hz)
+    windows = 2 * geometry.source_n_times // 5120 + 2 * (geometry.source_n_times // interval)
+    fixed = module._PREFLIGHT_THREAD_BYTES + 16 * 77 + 2048 * geometry.source_n_times + 4096 * 64 * windows
+    expected = fixed + module._condition_signal_array_bytes(geometry, interval)
+    assert module._preflight_memory_credit(info, settings, signal_context=True) == expected
+
+    review = module.estimate_review_memory(
+        replace(geometry, target_rate_hz=geometry.source_rate_hz),
+        filter_enabled=False, notch_enabled=False, raw_qc_enabled=True,
+    ).healthy_bytes
+    for unsupported in ({"hardware_confirmed": False}, {"hardware_platform": "unknown"}, {"electrode_montage": "custom"}):
+        assert module._preflight_memory_credit(info, {**settings, **unsupported}, signal_context=True) == fixed + review
+    monkeypatch.setattr(module.np, "__version__", "different")
+    assert module._preflight_memory_credit(info, settings, signal_context=True) == fixed + review

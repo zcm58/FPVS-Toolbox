@@ -24,6 +24,62 @@ from Main_App.workers import kurtosis_review_process as process_module
 GIB = 1024**3
 
 
+def test_review_admits_full_charge_without_querying_working_sets(monkeypatch):
+    from Main_App.workers.review_resource_budget import ReviewMemorySnapshot
+    monkeypatch.setattr(process_module, "probe_memory_snapshot", lambda: ReviewMemorySnapshot(128*GIB, 102*GIB, 100*GIB, True))
+    monkeypatch.setattr(process_module, "probe_owned_memory", lambda *_: pytest.fail("Unnecessary ownership probe"))
+    # Six active recordings, ten persistent worker slots and emergency reserve.
+    owners = {100+i: (float(i), i) for i in range(16)}
+    assert process_module._review_admission_fits(owners, dict.fromkeys(range(6), 5*GIB), 16, 5*GIB, 8*GIB)
+    # A stale identity cannot add an idle owner beyond the pool's population.
+    owners[123] = (1.0, 99)
+    assert not process_module._review_admission_fits(owners, dict.fromkeys(range(6), 5*GIB), 16, 5*GIB, 8*GIB)
+
+
+@pytest.mark.parametrize(("free_physical","free_commit","owned_physical","owned_commit","expected"), [
+    (4, 4, 1, 1, True),  # Exactly enough after the full ownership probes.
+    (3, 4, 1, 1, False),  # Physical pressure arose during the working-set query.
+    (4, 3, 1, 1, False),  # Windows commit pressure independently blocks admission.
+    (4, 4, None, 1, False),
+    (4, 4, 1, None, False),
+    (4, 4, -1, 1, False),
+])
+def test_review_reprobes_headroom_after_matched_ownership(monkeypatch, free_physical, free_commit, owned_physical,
+                                                        owned_commit, expected):
+    from Main_App.workers.review_resource_budget import OwnedMemory, ReviewMemorySnapshot
+    events = []
+    snapshots = iter((ReviewMemorySnapshot(8*GIB, 4*GIB, 4*GIB, True),
+                      ReviewMemorySnapshot(8*GIB, free_physical*GIB, free_commit*GIB, True)))
+    def headroom():
+        events.append("headroom")
+        return next(snapshots)
+    def owned(pid, created):
+        events.append((pid, created))
+        return OwnedMemory(None if owned_physical is None else owned_physical*GIB,
+                           None if owned_commit is None else owned_commit*GIB)
+    monkeypatch.setattr(process_module, "probe_memory_snapshot", headroom)
+    monkeypatch.setattr(process_module, "probe_owned_memory", owned)
+    # 2 GiB active + 1 GiB floor + 1 GiB reserve, plus the 1 GiB host margin.
+    assert process_module._review_admission_fits({123: (2.0, 0)}, {0: 2*GIB}, 1, 0, GIB) is expected
+    assert events == ["headroom", (123, 2.0), "headroom"]
+
+
+@pytest.mark.parametrize(("total","physical","commit","commit_required"), [
+    (8*GIB, 5*GIB, None, True),
+    (8*GIB, True, 5*GIB, True),
+    (8*GIB, 9*GIB, 5*GIB, True),
+    (8*GIB, 5*GIB, -1, True),
+    (8*GIB, 5*GIB, 5*GIB, None),
+    (float("nan"), 5*GIB, 5*GIB, True),
+])
+def test_corrupt_host_probe_never_allows_preparation(monkeypatch, total, physical, commit, commit_required):
+    from Main_App.workers.review_resource_budget import ReviewMemoryProbeError, ReviewMemorySnapshot
+    monkeypatch.setattr(process_module, "probe_memory_snapshot", lambda: ReviewMemorySnapshot(
+        total, physical, commit, commit_required))
+    with pytest.raises(ReviewMemoryProbeError):
+        process_module._review_admission_fits({}, {}, 1, GIB, 0)
+
+
 def _info(index: int, directory: Path) -> SimpleNamespace:
     return SimpleNamespace(
         path=directory / f"P{index}.bdf", subject_id=f"P{index}",
@@ -39,6 +95,78 @@ def _result(info: SimpleNamespace, *, evidence=None) -> KurtosisReviewFileResult
         session_label=info.session_label, visit_index=info.visit_index,
         status=KURTOSIS_REVIEW_FILE_STATUS_CLEAR, evidence=evidence,
     )
+
+
+def test_review_transport_keeps_only_this_recording_and_preserves_ambiguous_aliases(tmp_path):
+    from Main_App.processing.kurtosis_review_scan import _casefold_mapping_entry, _event_plan_for_path, _index_event_plans
+
+    info = _info(1, tmp_path)
+    other_visit = _info(2, tmp_path)
+    other_visit.subject_id = info.subject_id
+    paths = {str(info.path): {"scope": 1}, str(other_visit.path): {"scope": 2}}
+    fallback = {**paths, str(tmp_path / "unrelated.bdf"): {"large": True}}
+    qc = {info.recording_id: {"a": 1}, f" {info.recording_id.upper()} ": {"b": 2},
+          other_visit.recording_id: {"other_visit": True}}
+    settings = {"_fpvs_preflight_event_plans_by_file": fallback,
+                "_fpvs_kurtosis_checkpoint_should_cancel": lambda: False, "manual_excluded_participants": ["P3"]}
+    a, b = process_module._review_job_inputs([info, other_visit], settings, paths, qc)
+    assert a.event_plans == a.settings["_fpvs_preflight_event_plans_by_file"] == {str(info.path): {"scope": 1}}
+    assert b.event_plans == {str(other_visit.path): {"scope": 2}}
+    assert a.settings["manual_excluded_participants"] == ["P3"]
+    assert "_fpvs_kurtosis_checkpoint_should_cancel" not in a.settings
+    assert a.raw_channel_qc == {info.recording_id: {"a": 1}, f" {info.recording_id.upper()} ": {"b": 2}}
+    with pytest.raises(ValueError, match="duplicate case-insensitive"):
+        _casefold_mapping_entry(a.raw_channel_qc, info.recording_id, field_name="display")
+    paths[str(info.path.parent / "sub") + "/../" + info.path.name] = {"scope": 3}
+    a, = process_module._review_job_inputs([info], settings, paths, None)
+    assert a.raw_channel_qc is None
+    with pytest.raises(ValueError, match="duplicate reviewed"):
+        _event_plan_for_path(_index_event_plans(a.event_plans), info.path)
+    b, = process_module._review_job_inputs([other_visit], settings, None, {})
+    assert b.event_plans is None and b.raw_channel_qc == {}
+    assert b.settings["_fpvs_preflight_event_plans_by_file"] == {str(other_visit.path): {"scope": 2}}
+    assert len(fallback) == 3 and len(qc) == 3
+
+
+@pytest.mark.parametrize("fault", [None, "path", "fingerprint", "length", "rate", "origin", "events", "empty"])
+def test_scoped_preparation_reservation_requires_approved_bound(tmp_path, monkeypatch, fault):
+    import numpy as np
+
+    from Main_App.processing.preflight_qc_plan import plan_preflight_qc_events
+    from Main_App.projects import EXPECTED_CYCLES_SOURCE_MANUAL, FrequencyProtocol
+    from Main_App.workers.review_resource_budget import ReviewGeometry, estimate_review_memory
+
+    info = _info(1, tmp_path)
+    info.path.touch()
+    protocol = FrequencyProtocol.from_recurrence(
+        6, 3, expected_analyzed_oddball_cycles=4,
+        expected_analyzed_oddball_cycles_source=EXPECTED_CYCLES_SOURCE_MANUAL,
+    )
+    events = np.array([[0, 0, 1], [10, 0, 55], [16, 0, 55], [22, 0, 55], [28, 0, 55], [34, 0, 55]])
+    if fault == "origin":
+        events[:, 0] += 1
+    event_map = {"Faces": 1}
+    payload = plan_preflight_qc_events(
+        events=events, event_map=event_map, sfreq=12, n_times=1_000_000,
+        first_samp=1 if fault == "origin" else 0, frequency_protocol=protocol,
+    ).to_payload()
+    expected_count = payload["source_analysis_span_plan"]["unique_sample_count"]
+    if fault == "fingerprint":
+        payload["source_analysis_span_plan"]["unique_sample_count"] += 1
+    if fault == "events":
+        event_map = {"Faces": 2}
+    plans = {} if fault == "empty" else {str(tmp_path / "other.bdf" if fault == "path" else info.path): payload}
+    geometry = ReviewGeometry(67, 65, 64, 999_999 if fault == "length" else 1_000_000,
+                              13 if fault == "rate" else 12, 6, 67 * 12 * 3, 12)
+    settings = {"frequency_protocol": protocol, "high_pass": 1}
+    monkeypatch.setattr(process_module, "read_review_geometry", lambda *_a: geometry)
+    jobs = process_module._review_job_inputs([info], settings, plans, None)
+    selected = process_module._review_resource_plan([info], settings=settings, jobs=jobs, event_map=event_map)
+    expected = estimate_review_memory(geometry, raw_union_samples=expected_count if fault is None else None)
+    assert selected.estimates == (expected,)
+    assert selected.credits == (expected.healthy_bytes,)
+    assert not selected.exclusive[0]
+    assert expected.healthy_bytes + selected.emergency_bytes >= expected.fullrate_qc_bytes
 
 
 def _resource_model(monkeypatch, *, cpu: int, total: int, available: int, sizes: list[int]):
@@ -67,9 +195,11 @@ def test_worker_count_shares_main_cpu_ram_and_override_policy(monkeypatch, cpu, 
     assert process_module.review_process_worker_count(infos, override) == expected
 
 
-@pytest.mark.parametrize("total_gib", [16, 32])
-@pytest.mark.parametrize("requested,expected", [(None, 23), (12, 12), (2, 2)])
-def test_validated_dynamic_prep_ceiling_is_independent_of_static_ram_tier(
+@pytest.mark.parametrize("total_gib,requested,expected", [
+    (16, None, 4), (32, None, 4), (127, None, 16), (127, 16, 16),
+    (16, 12, 12), (32, 12, 12), (16, 2, 2), (32, 2, 2),
+])
+def test_validated_dynamic_prep_uses_ram_tier_or_project_override(
     monkeypatch, total_gib, requested, expected,
 ):
     from Main_App.workers import mp_env
@@ -77,6 +207,7 @@ def test_validated_dynamic_prep_ceiling_is_independent_of_static_ram_tier(
 
     infos = _resource_model(monkeypatch, cpu=24, total=total_gib * GIB,
                             available=12 * GIB, sizes=[20] * 30)
+    monkeypatch.setattr(mp_env, "cgroup_limits", lambda: (None, None, None))
     monkeypatch.setattr(mp_env.os, "process_cpu_count", lambda: 24, raising=False)
     monkeypatch.setattr(mp_env.psutil, "Process", lambda: SimpleNamespace(cpu_affinity=lambda: list(range(24))))
     geometry = ReviewGeometry(67, 65, 64, 2_097_152, 2048.0, 256.0, 454_656, 2048)

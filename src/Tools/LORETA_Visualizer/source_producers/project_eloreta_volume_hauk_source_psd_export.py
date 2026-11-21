@@ -55,7 +55,6 @@ from Tools.LORETA_Visualizer.source_producers.hauk_source_psd import (
     HaukSourcePsdResult,
     SOURCE_ORIENTATION_MODE_VECTOR_NORM,
     build_hauk_source_psd_frequency_plan,
-    compute_hauk_source_psd,
 )
 from Tools.LORETA_Visualizer.source_producers.project_eloreta_volume_export import (
     DEFAULT_MNE_FSAVERAGE_VOLUME_POS_MM,
@@ -84,19 +83,18 @@ from Tools.LORETA_Visualizer.source_producers.project_time_domain_inputs import 
     ProjectTimeDomainInputRecord,
     ProjectTimeDomainInputSet,
     load_project_time_domain_inputs,
-    load_project_time_domain_raw,
 )
+from Tools.LORETA_Visualizer.source_producers.source_psd_workers import source_psd_cells
+from Tools.LORETA_Visualizer.source_producers.native_psd_cells import certify_fresh
 from Tools.LORETA_Visualizer.source_producers.source_psd_cache import (
-    SourcePsdCacheKeyInputs,
     SourcePsdParticipantResult,
-    load_source_psd_cache_entry,
     source_psd_cache_scope,
     store_source_psd_cache_entry,
 )
 from Tools.LORETA_Visualizer.source_producers.source_validation_report import (
     write_project_source_validation_report,
 )
-from Tools.LORETA_Visualizer.source_producers.model_diagnostics import summarize_inverse_model, summarize_recorded_data_rank
+from Tools.LORETA_Visualizer.source_producers.model_diagnostics import summarize_inverse_model
 
 logger = logging.getLogger(__name__)
 
@@ -351,7 +349,7 @@ def write_project_eloreta_volume_hauk_source_psd_payloads(
     participant_data_rank_diagnostics: list[dict[str, Any]] = []
     source_count = len(model.forward_model.source_points)
 
-    for index, record in enumerate(project_inputs.records, start=1):
+    def before_record(index, record):
         if cancellation_callback is not None:
             cancellation_callback()
         _emit_progress(
@@ -361,56 +359,50 @@ def write_project_eloreta_volume_hauk_source_psd_payloads(
                 f"{record.participant_id} / {record.condition_label}..."
             ),
         )
-        key_inputs = SourcePsdCacheKeyInputs(
-            derivative_checksum_sha256=record.fif_sha256,
-            numerical_model_metadata=numerical_model_metadata,
-            method_metadata=method_metadata,
-            frequency_metadata=frequency_metadata,
-        )
-        lookup = load_source_psd_cache_entry(
-            project_root=root,
-            key_inputs=key_inputs,
-        )
-        if lookup.hit:
-            cache_hit_count += 1
-            rank_diagnostic = dict(lookup.result.metadata.get("source_ready_data_rank", {"participant_data_rank_status": "not_measured"}))
-            participant_values = _participant_values_from_cache(
-                lookup.result,
-                participant_id=record.participant_id,
-                expected_source_count=source_count,
-            )
-        else:
-            cache_miss_count += 1
-            with load_project_time_domain_raw(record) as raw:
-                rank_diagnostic = summarize_recorded_data_rank(raw, expected_info=model.info)
-                source_psd_result = compute_hauk_source_psd(
-                    averaged_raw=raw,
-                    inverse_operator=model.inverse_operator,
-                    config=source_psd_config,
-                    apply_inverse_func=apply_inverse_func,
+
+    with source_psd_cells(
+        project_inputs.records, project=project, root=root, model=model, config=source_psd_config,
+        numerical_metadata=numerical_model_metadata, method_metadata=method_metadata,
+        frequency_metadata=frequency_metadata, before_record=before_record,
+        cancellation_callback=cancellation_callback, apply_inverse_func=apply_inverse_func,
+        native_model=source_psd_model is None,
+    ) as cells:
+        for record, key_inputs, lookup, computed in cells:
+            if lookup.hit:
+                cache_hit_count += 1
+                rank_diagnostic = dict(lookup.result.metadata.get("source_ready_data_rank", {"participant_data_rank_status": "not_measured"}))
+                participant_values = _participant_values_from_cache(
+                    lookup.result,
+                    participant_id=record.participant_id,
+                    expected_source_count=source_count,
                 )
-            participant_values = _participant_values_from_source_psd(
-                source_psd_result,
-                participant_id=record.participant_id,
-                expected_source_count=source_count,
-            )
-            store_source_psd_cache_entry(
-                project_root=root,
-                key_inputs=key_inputs,
-                result=_cache_result(
-                    participant_values,
-                    record=record,
-                    source_psd_result=source_psd_result,
-                    source_ready_data_rank=rank_diagnostic,
-                ),
-            )
-        participant_data_rank_diagnostics.append({
-            "participant_id": record.participant_id,
-            "group_id": record.group_id,
-            "condition_id": record.condition_id,
-            "source_ready_data_rank": rank_diagnostic,
-        })
-        rows_by_condition[record.condition_id].append(participant_values)
+            else:
+                cache_miss_count += 1
+                rank_diagnostic, source_psd_result = computed
+                participant_values = _participant_values_from_source_psd(
+                    source_psd_result,
+                    participant_id=record.participant_id,
+                    expected_source_count=source_count,
+                )
+                written = store_source_psd_cache_entry(
+                    project_root=root,
+                    key_inputs=key_inputs,
+                    include_digests=bool(lookup.native_cell_key),
+                    result=_cache_result(
+                        participant_values,
+                        record=record,
+                        source_psd_result=source_psd_result,
+                        source_ready_data_rank=rank_diagnostic,
+                    ),
+                )
+                certify_fresh(root, lookup.native_cell_key, written)
+            participant_data_rank_diagnostics.append({
+                "participant_id": record.participant_id,
+                "group_id": record.group_id,
+                "condition_id": record.condition_id,
+                "source_ready_data_rank": rank_diagnostic,
+            })
+            rows_by_condition[record.condition_id].append(participant_values)
 
     prepared_conditions = _precomputed_conditions(
         input_plan,

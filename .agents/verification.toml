@@ -200,6 +200,7 @@ tests = [
   "tests/processing/test_qc_cache_maintenance_integration.py",
   "tests/processing/test_toolbox_cache.py",
   "tests/gui/test_preflight_reuse_static.py",
+  "tests/gui/test_incremental_crop_scope_static.py",
   "tests/processing/test_preflight_qc_reuse.py",
   "tests/processing/test_prepared_kurtosis_cache.py",
   "tests/processing/test_qc_source_prefetch.py",

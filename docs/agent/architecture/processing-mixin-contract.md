@@ -17,9 +17,12 @@ unless a future task explicitly changes behavior.
 
 The mixin prevents duplicate active processing threads, blocks processing while
 event detection is active, disables controls before starting, and schedules
-periodic queue polling with the compatibility host's `after()` hook. These
-legacy-shaped host APIs are not the active MainWindow interface and are not
-permission to restore a Tkinter GUI.
+periodic queue polling with the compatibility host's `after()` hook. The active
+window uses its own processing timer. Its callable `after()` and `after_cancel()`
+adapters, historical entry getters and optional completion-widget handling live
+in [`gui/processing_host_compat.py`](../../../src/Main_App/gui/processing_host_compat.py).
+Opening a project captures the eight preprocessing entry values. Each creates
+its backing text widget on first use. Event-map entries wrap their visible edits.
 
 ## Processing Order
 

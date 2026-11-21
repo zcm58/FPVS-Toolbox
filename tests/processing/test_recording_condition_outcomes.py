@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 import hashlib
 import json
 from pathlib import Path
@@ -16,6 +16,7 @@ from Main_App.processing.recording_condition_outcomes import (
     CELL_EXCLUDED,
     CELL_PARTIALLY_RETAINED,
     CELL_READY,
+    CELL_UNAVAILABLE,
     RecordingConditionOutcomeError,
     load_recording_condition_outcomes,
     reconcile_recording_condition_outputs,
@@ -82,6 +83,7 @@ class _Plan:
     geometry_identity: dict[str, object]
     recordings: tuple[_Recording, ...]
     fingerprint: str = "expected-plan-fingerprint"
+    retained_export_fingerprints: dict[str, dict[str, str]] = field(default_factory=dict)
 
 
 def _expected(
@@ -247,6 +249,30 @@ def test_missing_receipt_blocks_pre_review(tmp_path):
     assert outcomes.cells[0].reason_codes == ("current_export_receipt_missing",)
     with pytest.raises(RecordingConditionOutcomeError, match="P01__visit_1/Faces"):
         require_pre_review_readiness(outcomes)
+
+
+@pytest.mark.parametrize("status", ["written", "unavailable"])
+def test_prior_export_must_match_the_pinned_cell_and_validated_origin(tmp_path, status):
+    path = tmp_path / "Faces.fpvs"
+    current = _expected(path)
+    old = replace(current, run_id="previous-run", processing_fingerprint="previous-cohort")
+    receipt = _written_receipt(path, old, with_companion=True)
+    if status == "unavailable":
+        receipt.pop("fingerprint")
+        receipt.update(status="unavailable", reason="signal unavailable", evidence={"quality_check": "no signal"})
+        receipt = _fingerprinted_export_receipt(receipt)
+    def reconcile(plan, supplied):
+        return reconcile_recording_condition_outputs(plan, [supplied]).cells[0]
+    assert reconcile(current, receipt).status == CELL_BLOCKED
+    pinned = replace(current, retained_export_fingerprints={"P01__visit_1": {"Faces": receipt["fingerprint"]}})
+    result = reconcile(pinned, receipt)
+    assert result.status == (CELL_READY if status == "written" else CELL_UNAVAILABLE)
+    assert result.export_receipt == receipt
+    forged = {k: v for k, v in receipt.items() if k != "fingerprint"}
+    forged["unrelated"] = "resealed after publication"
+    assert reconcile(pinned, _fingerprinted_export_receipt(forged)).status == CELL_BLOCKED
+    other = replace(current, retained_export_fingerprints={"P01__visit_2": {"Faces": receipt["fingerprint"]}})
+    assert reconcile(other, receipt).status == CELL_BLOCKED
 
 
 @pytest.mark.parametrize("occurrence_count", [0, 1])

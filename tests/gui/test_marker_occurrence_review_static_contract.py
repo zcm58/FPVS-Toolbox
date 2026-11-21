@@ -46,6 +46,9 @@ def test_marker_review_rescans_only_affected_files_and_blocks_unresolved() -> No
     assert "affected_infos = [" in review
     assert "rescanned = _run_scan_embedded(" in review
     assert "affected_infos," in review
+    assert "superseded_recordings=tuple(_identity_id(info) for info in raw_file_infos)" in review
+    assert "rescanned.frequency_protocol_fingerprint != scan.frequency_protocol_fingerprint" in review
+    assert "project_grid_observations=rescanned.project_grid_observations" in review
     assert "collect_marker_occurrence_reviews(merged_scan)" in review
     assert "if unresolved:" in review
     assert 'params["_fpvs_marker_review_decisions_by_file"]' in review

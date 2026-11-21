@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Iterator
 
 _IGNORED_WORKBOOK_FOLDERS = frozenset({".fif files", "loreta results"})
 _CONDITION_PREFIX_PATTERN = re.compile(r"^\d+\s*[-_]*\s*")
@@ -82,6 +83,32 @@ def is_ignored_workbook_path(path: Path, scan_root: Path) -> bool:
         part.casefold() in _IGNORED_WORKBOOK_FOLDERS
         for part in relative_parts
     )
+
+
+def iter_index_directories(scan_root: Path) -> Iterator[Path]:
+    """Visit eligible directories with the fresh descent reads used by rglob('*')."""
+    yield scan_root
+    pending = [scan_root]
+    while pending:
+        directory = pending.pop()
+        try:
+            with os.scandir(directory) as scan:
+                entries = list(scan)
+        except OSError:
+            # Path.rglob suppresses directory enumeration failures.
+            continue
+        for entry in entries:
+            if entry.name.casefold() in _IGNORED_WORKBOOK_FOLDERS:
+                continue
+            try:
+                if not entry.is_dir(follow_symlinks=False):
+                    continue
+            except OSError:
+                continue
+            # List siblings in filesystem order before descending into them.
+            child = Path(entry.path)
+            yield child
+            pending.append(child)
 
 
 def casefold_set(values: Iterable[str] | None) -> set[str] | None:

@@ -318,9 +318,15 @@ def _validate_accounting(
         receipts = [cell.export_receipt for cell in marked_cells if cell.export_receipt is not None]
         # This is enrollment accounting, not a replacement for artifact release.
         # Normal source/release gates retain the complete workbook/companion checks.
-        reconciled = reconcile_recording_condition_outputs(
-            replace(plan, recordings=marked), receipts, validate_artifacts=False,
+        retained = {
+            row.processing_id: plan.retained_export_fingerprints[row.processing_id]
+            for row in marked if row.processing_id in plan.retained_export_fingerprints
+        }
+        marked_plan = replace(
+            plan, recordings=marked, retained_export_fingerprints=retained,
+            retained_from_plan=plan.retained_from_plan if retained else None,
         )
+        reconciled = reconcile_recording_condition_outputs(marked_plan, receipts, validate_artifacts=False)
         if reconciled.cells != marked_cells:
             raise RawRegistrationPendingError("Added recording outcomes no longer match their processing evidence.")
         require_pre_review_readiness(reconciled)

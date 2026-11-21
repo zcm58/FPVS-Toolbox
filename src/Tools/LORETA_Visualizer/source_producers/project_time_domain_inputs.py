@@ -15,7 +15,7 @@ import re
 from collections import Counter
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -105,6 +105,7 @@ class ProjectTimeDomainInputRecord:
     bad_channels: tuple[str, ...]
     reference_signature: tuple[object, ...]
     sidecar: Mapping[str, Any]
+    verified_fif_stat: tuple[int, ...] | None = field(default=None, repr=False, compare=False)
 
     @property
     def key(self) -> tuple[str | None, str, str]:
@@ -210,7 +211,10 @@ def load_project_time_domain_inputs(
         raise ProjectTimeDomainInputError(_missing_derivative_message(manifests_root))
 
     expected_participants = {(item.group_id, item.participant_id) for item in expected}
-    participant_manifests: dict[tuple[str | None, str], tuple[Path, Mapping[str, Any], str | None]] = {}
+    from Main_App.processing.retained_source_derivatives import RetainedSourceReader
+
+    retained_sources = RetainedSourceReader(root, expected_fingerprint)
+    participant_manifests: dict[tuple[str | None, str], tuple[Path, Mapping[str, Any], str | None, str]] = {}
     for manifest_path in sorted(manifests_root.rglob("*.json"), key=lambda path: str(path).casefold()):
         safe_manifest = _require_existing_project_file(
             root,
@@ -218,7 +222,7 @@ def load_project_time_domain_inputs(
             allowed_root=manifests_root,
             label="participant commit manifest",
         )
-        raw_manifest = _read_json_object(safe_manifest, label="participant commit manifest")
+        raw_manifest, manifest_sha256 = _read_signed_json_object(safe_manifest, label="participant commit manifest")
         participant_id = _identity(raw_manifest.get("participant_id"), "manifest participant_id")
         group_id = _optional_identity(raw_manifest.get("group_id"), "manifest group_id")
         participant_key = (group_id, participant_id)
@@ -236,7 +240,7 @@ def load_project_time_domain_inputs(
             declared_group_folder=raw_manifest.get("group_folder"),
             grouped=group_id is not None,
         )
-        participant_manifests[participant_key] = (safe_manifest, raw_manifest, group_folder)
+        participant_manifests[participant_key] = (safe_manifest, raw_manifest, group_folder, manifest_sha256)
 
     missing_participants = sorted(expected_participants - set(participant_manifests), key=str)
     if missing_participants:
@@ -247,7 +251,7 @@ def load_project_time_domain_inputs(
         )
 
     records_by_key: dict[tuple[str | None, str, str], ProjectTimeDomainInputRecord] = {}
-    for participant_key, (manifest_path, manifest, group_folder) in participant_manifests.items():
+    for participant_key, (manifest_path, manifest, group_folder, manifest_sha256) in participant_manifests.items():
         _validate_format(
             manifest,
             expected=SOURCE_TIME_DOMAIN_PARTICIPANT_MANIFEST_FORMAT,
@@ -285,6 +289,8 @@ def load_project_time_domain_inputs(
                 expected=expected_item,
                 expected_processing_fingerprint=expected_fingerprint,
                 expected_processing_fingerprint_version=expected_fingerprint_version,
+                retained_sources=retained_sources,
+                manifest_sha256=manifest_sha256,
             )
             if key in records_by_key:
                 raise ProjectTimeDomainInputError(f"Multiple artifacts match expected input {_format_key(key)}.")
@@ -332,6 +338,8 @@ def _validate_artifact(
     expected: ExpectedProjectTimeDomainInput,
     expected_processing_fingerprint: str,
     expected_processing_fingerprint_version: str,
+    retained_sources,
+    manifest_sha256: str,
 ) -> ProjectTimeDomainInputRecord:
     if artifact.get("complete") is not True:
         raise ProjectTimeDomainInputError(
@@ -371,10 +379,10 @@ def _validate_artifact(
     )
     fif_sha256 = _sha256_value(artifact.get("fif_sha256"), "artifact fif_sha256")
     sidecar_sha256 = _sha256_value(artifact.get("sidecar_sha256"), "artifact sidecar_sha256")
-    _verify_checksum(fif_path, fif_sha256, label="source-ready FIF")
-    _verify_checksum(sidecar_path, sidecar_sha256, label="source-ready sidecar")
-
-    sidecar = _read_json_object(sidecar_path, label="source-ready sidecar")
+    verified_fif_stat = _verify_checksum(fif_path, fif_sha256, label="source-ready FIF")
+    sidecar, actual_sidecar_sha256 = _read_signed_json_object(sidecar_path, label="source-ready sidecar")
+    if actual_sidecar_sha256 != sidecar_sha256:
+        raise ProjectTimeDomainInputError(f"source-ready sidecar checksum mismatch for {sidecar_path}.")
     _validate_format(sidecar, expected=SOURCE_TIME_DOMAIN_SIDECAR_FORMAT, label=f"sidecar {sidecar_path}")
     if sidecar.get("complete") is not True:
         raise ProjectTimeDomainInputError(f"Source-ready sidecar is not complete: {sidecar_path}.")
@@ -395,7 +403,11 @@ def _validate_artifact(
         processing.get("fingerprint_version"),
         "sidecar processing fingerprint_version",
     )
-    if fingerprint != expected_processing_fingerprint or fingerprint_version != expected_processing_fingerprint_version:
+    if fingerprint_version != expected_processing_fingerprint_version or (
+        fingerprint != expected_processing_fingerprint and not retained_sources.accepts(
+            expected, manifest_path, manifest_sha256, sidecar, fingerprint, fingerprint_version,
+        )
+    ):
         raise ProjectTimeDomainInputError(
             f"Stale source-ready derivative for {_format_key(expected.key)}: processing fingerprint "
             "does not match the current canonical processing plan. Reprocess this participant."
@@ -484,6 +496,7 @@ def _validate_artifact(
         fif_path=fif_path,
         sidecar_path=sidecar_path,
         fif_sha256=fif_sha256,
+        verified_fif_stat=verified_fif_stat,
         sidecar_sha256=sidecar_sha256,
         processing_fingerprint=fingerprint,
         processing_fingerprint_version=fingerprint_version,
@@ -755,22 +768,34 @@ def _project_relative_posix(root: Path, path: Path) -> PurePosixPath:
     return PurePosixPath(*path.resolve().relative_to(root.resolve()).parts)
 
 
-def _read_json_object(path: Path, *, label: str) -> Mapping[str, Any]:
+def _read_signed_json_object(path: Path, *, label: str) -> tuple[Mapping[str, Any], str]:
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        content = path.read_bytes()
+        payload = json.loads(content.decode("utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise ProjectTimeDomainInputError(f"Unable to read {label} {path}: {exc}") from exc
     if not isinstance(payload, Mapping):
         raise ProjectTimeDomainInputError(f"{label} must contain one JSON object: {path}.")
-    return payload
+    return payload, hashlib.sha256(content).hexdigest()
 
 
-def _verify_checksum(path: Path, expected: str, *, label: str) -> None:
+def input_file_identity(stat_result) -> tuple[int, ...]:
+    return (stat_result.st_dev, stat_result.st_ino, stat_result.st_size,
+            stat_result.st_mtime_ns, stat_result.st_ctime_ns)
+
+
+def _verify_checksum(path: Path, expected: str, *, label: str) -> tuple[int, ...] | None:
+    import os
+
     digest = hashlib.sha256()
     try:
         with path.open("rb") as handle:
+            before = input_file_identity(os.fstat(handle.fileno()))
+            path_before = input_file_identity(path.stat())
             for chunk in iter(lambda: handle.read(1024 * 1024), b""):
                 digest.update(chunk)
+            after = input_file_identity(os.fstat(handle.fileno()))
+            path_after = input_file_identity(path.stat())
     except OSError as exc:
         raise ProjectTimeDomainInputError(f"Unable to checksum {label} {path}: {exc}") from exc
     actual = digest.hexdigest()
@@ -778,6 +803,11 @@ def _verify_checksum(path: Path, expected: str, *, label: str) -> None:
         raise ProjectTimeDomainInputError(
             f"{label} checksum mismatch for {path}; the derivative is stale, corrupt, or incompletely published."
         )
+    # Windows reports a different ctime through a directory stat and an open
+    # handle on some Python versions. Compare each view to itself over the read.
+    if before == after and path_before == path_after and before[:4] == path_before[:4]:
+        return path_after
+    return None
 
 
 def _validate_format(payload: Mapping[str, Any], *, expected: str, label: str) -> None:

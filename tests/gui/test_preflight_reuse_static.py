@@ -71,7 +71,7 @@ def test_only_changed_condition_selection_or_source_repeats_scan(tmp_path, chang
         return rescanned
 
     namespace.update(
-        active_infos=infos, params=params, condition_review_identity=identity,
+        active_infos=infos, raw_file_infos=infos, header_only_paths=[], params=params, condition_review_identity=identity,
         host=object(), group_labels={}, initial_scan=initial,
         _run_scan_embedded=scan,
     )
@@ -84,7 +84,7 @@ def test_only_changed_condition_selection_or_source_repeats_scan(tmp_path, chang
 def test_required_rescan_failure_blocks_continuation(result):
     namespace = _reuse_namespace()
     namespace.update(
-        active_infos=[], params={}, condition_review_identity=None,
+        active_infos=[], raw_file_infos=[], header_only_paths=[], params={}, condition_review_identity=None,
         host=object(), group_labels={}, initial_scan=SimpleNamespace(cancelled=False),
         _run_scan_embedded=lambda *_args, **_kwargs: result,
     )

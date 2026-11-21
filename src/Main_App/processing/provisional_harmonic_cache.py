@@ -99,6 +99,9 @@ def _request_key_or_none(inputs: Mapping[str, Any]) -> str | None:
 
 
 def _request_key(inputs: Mapping[str, Any]) -> str:
+    from Main_App.io.result_manifest import is_result_manifest
+    from Main_App.workers.cell_validation_pool import ordered_cell_validation
+    from Main_App.workers.mp_env import compute_dynamic_worker_ceiling, project_worker_override
     from Tools.Stats.data.group_harmonic_cache import (
         GROUP_HARMONIC_METHOD_VERSION,
         REPEATED_SESSION_POOLING_METHOD_VERSION,
@@ -119,11 +122,23 @@ def _request_key(inputs: Mapping[str, Any]) -> str:
             "recordings", "sessions",
         )
     }
-    sources = []
-    for subject in inputs["subjects"]:
-        for condition in inputs["conditions"]:
-            path = inputs["subject_data"].get(subject, {}).get(condition)
-            sources.append((subject, condition, _source_identity(Path(path)) if path else None))
+    cells = [
+        (subject, condition, inputs["subject_data"].get(subject, {}).get(condition))
+        for subject in inputs["subjects"] for condition in inputs["conditions"]
+    ]
+    paths = [Path(path) for _, _, path in cells if path]
+    if len(paths) > 1 and all(is_result_manifest(path) for path in paths):
+        override = project_worker_override(manifest.get("preprocessing"), manifest.get("options"))
+        identities = iter(ordered_cell_validation(
+            paths, _source_identity, _source_hash_credit,
+            max_workers=compute_dynamic_worker_ceiling(override),
+        ))
+    else:
+        identities = map(_source_identity, paths)
+    sources = [
+        (subject, condition, next(identities) if path else None)
+        for subject, condition, path in cells
+    ]
     return _digest({
         "version": PROVISIONAL_HARMONIC_CACHE_VERSION,
         "harmonic_method": GROUP_HARMONIC_METHOD_VERSION,
@@ -134,6 +149,13 @@ def _request_key(inputs: Mapping[str, Any]) -> str:
         "inputs": {key: value for key, value in inputs.items() if key != "log_func"},
         "sources": sources,
     })
+
+
+def _source_hash_credit(path: Path) -> int | None:
+    # Companions are streamed through a fixed-size hash buffer. Only the JSON
+    # declaration is materialized; larger or unknown declarations run alone.
+    size = path.stat().st_size
+    return 4 * 1024**2 + 128 * size if 0 < size <= 1024**2 else None
 
 
 def _source_identity(path: Path) -> tuple[object, ...]:

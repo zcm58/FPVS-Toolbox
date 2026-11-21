@@ -116,7 +116,7 @@ def test_worker_uses_parallel_override_from_preprocessing(tmp_path, qtbot, monke
     monkeypatch.setattr(
         processing_workflows,
         "compute_dynamic_worker_ceiling",
-        lambda requested: compute_dynamic_worker_ceiling(requested, cpu_count=8),
+        lambda requested: compute_dynamic_worker_ceiling(requested, cpu_count=8, total_ram_bytes=128 * 1024**3),
     )
 
     captured: dict = {}

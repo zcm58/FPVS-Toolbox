@@ -136,6 +136,50 @@ def test_public_scheduler_preserves_source_order_and_worker_payloads(monkeypatch
     assert context.messages.closed and all(pool.closed for pool in pools)
 
 
+def test_budget_and_dispatch_use_the_same_recording_evidence(monkeypatch, tmp_path):
+    params, _, _, submissions, _ = _controller(monkeypatch, tmp_path, snapshot=lambda:
+        ReviewMemorySnapshot(32 * GIB, 24 * GIB, 24 * GIB, True))
+    files = params.data_files
+    plans_key = "_fpvs_preflight_event_plans_by_file"
+    decisions_key = "kurtosis_review_decisions_by_recording"
+    # Include a filename-only historical plan and an explicit repeated-recording ID.
+    params.settings.update({
+        plans_key: {str(files[0]): {"plan": 0}, files[1].name: {"plan": 1},
+                    str(files[2]): None, files[2].name: {"plan": 2}},
+        decisions_key: {" visit a ": {"Pz": "reviewed"}, "VISIT A": {"Pz": "older duplicate"},
+                        "p1": {"Fz": "rejected"}, "outside batch": {"X": "unrelated"}},
+        "_fpvs_recording_id_by_file": {str(files[0]): "Visit A"},
+        "_fpvs_processing_fingerprint": "project-wide",
+        "_fpvs_expected_plan_fingerprint": "expected-cells",
+    })
+    original = deepcopy(params.settings)
+    admitted = {}
+
+    def estimate(path, job, events):
+        admitted[path] = deepcopy(job)
+        return _estimate()
+
+    monkeypatch.setattr(admission_module, "build_processing_estimate", estimate)
+    assert runner.run_project_parallel(params)["status"] == "success"
+    assert params.settings == original
+    for path, submitted, _, _ in submissions:
+        assert submitted == admitted[path]
+        assert str(files[0]) not in submitted[plans_key] or path == files[0]
+        assert "outside batch" not in submitted[decisions_key]
+        baseline = runner._settings_for_file(path, original)
+        current = runner._settings_for_file(path, submitted)
+        for key in (plans_key, decisions_key):
+            baseline.pop(key)
+            current.pop(key)
+        assert baseline == current
+        if path == files[-1]:
+            for settings in (original, submitted):
+                with pytest.raises(RuntimeError, match="No reviewed preflight marker plan"):
+                    runner._preflight_event_plan_for_file(path, settings)
+        else:
+            assert runner._preflight_event_plan_for_file(path, original) == runner._preflight_event_plan_for_file(path, submitted)
+
+
 def test_unknown_middle_file_drains_and_runs_exclusively_then_pool_recovers(monkeypatch, tmp_path):
     def snapshot():
         return ReviewMemorySnapshot(32 * GIB, 24 * GIB, 24 * GIB, True)

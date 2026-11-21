@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from fractions import Fraction
 import hashlib
 import json
 from pathlib import Path
+import re
 from typing import TYPE_CHECKING, Any, Mapping, Sequence
 from uuid import uuid4
 
@@ -1020,6 +1021,8 @@ class ExpectedRecordingConditionPlan:
     protocol_fingerprint: str
     event_map: tuple[tuple[str, int], ...]
     recordings: tuple[ExpectedRecordingPlan, ...]
+    retained_export_fingerprints: Mapping[str, Mapping[str, str]] = field(default_factory=dict)
+    retained_from_plan: str | None = None
 
     def __post_init__(self) -> None:
         if self.version != EXPECTED_RECORDING_CONDITION_PLAN_VERSION:
@@ -1069,6 +1072,24 @@ class ExpectedRecordingConditionPlan:
                 "Expected plan requires at least one canonical recording."
             )
         processing_ids = [recording.processing_id.casefold() for recording in self.recordings]
+        if not isinstance(self.retained_export_fingerprints, Mapping):
+            raise ExpectedRecordingConditionPlanError("Retained export fingerprints must be an object.")
+        if self.retained_export_fingerprints or self.retained_from_plan is not None:
+            if (
+                not self.retained_export_fingerprints or not isinstance(self.retained_from_plan, str)
+                or not re.fullmatch(r"[0-9a-f]{64}", self.retained_from_plan)
+            ):
+                raise ExpectedRecordingConditionPlanError("Retained exports require a verified prior plan.")
+            known_cells = {
+                record.processing_id: {cell.condition_label for cell in record.cells}
+                for record in self.recordings
+            }
+            for recording_id, receipts in self.retained_export_fingerprints.items():
+                if (recording_id not in known_cells or not isinstance(receipts, Mapping)
+                        or not set(receipts) <= known_cells[recording_id]
+                        or any(not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest)
+                               for digest in receipts.values())):
+                    raise ExpectedRecordingConditionPlanError("Invalid retained recording or export fingerprints.")
         if len(processing_ids) != len(set(processing_ids)):
             raise ExpectedRecordingConditionPlanError(
                 "Expected plan contains duplicate canonical recording identities."
@@ -1110,6 +1131,9 @@ class ExpectedRecordingConditionPlan:
                 for label, code in self.event_map
             ],
             "recordings": [recording.to_payload() for recording in self.recordings],
+            **({"retained_from_plan": self.retained_from_plan,
+                "retained_export_fingerprints": {key: dict(value) for key, value in self.retained_export_fingerprints.items()}}
+               if self.retained_export_fingerprints else {}),
         }
 
     @property
@@ -1178,6 +1202,8 @@ class ExpectedRecordingConditionPlan:
                     ExpectedRecordingPlan.from_payload(item)
                     for item in raw_recordings
                 ),
+                retained_from_plan=value.get("retained_from_plan"),
+                retained_export_fingerprints=value.get("retained_export_fingerprints", {}),
             )
         except ExpectedRecordingConditionPlanError:
             raise
@@ -1781,6 +1807,7 @@ def build_expected_recording_condition_plan(
     frequency_protocol: FrequencyProtocol | Mapping[str, Any],
     approved_event_plans: Mapping[Any, Mapping[str, Any]],
     planning_settings: Mapping[str, Any] | None = None,
+    prior_ledger: Mapping[str, Any] | None = None,
     run_id: str | None = None,
     created_at: str | None = None,
 ) -> ExpectedRecordingConditionPlan:
@@ -1788,9 +1815,9 @@ def build_expected_recording_condition_plan(
 
     ``ProcessingInputState.info`` is the canonical identity emitted by raw-file
     discovery. Current run files require a fully reviewed QC-19 event plan.
-    Skipped entries without current occurrence evidence remain
-    ``legacy_unknown`` even when an older ledger called them complete or
-    partial; file presence never upgrades them to a final QC-20 outcome.
+    Skipped entries can carry a previously reconciled plan and the digests of
+    its original receipts. Without verified occurrence evidence they remain
+    ``legacy_unknown``, even when an older ledger called them complete or partial.
     """
 
     from Main_App.processing.processing_ledger import PROCESSING_FINGERPRINT_VERSION
@@ -2000,7 +2027,7 @@ def build_expected_recording_condition_plan(
             )
         )
 
-    return ExpectedRecordingConditionPlan(
+    expected = ExpectedRecordingConditionPlan(
         version=EXPECTED_RECORDING_CONDITION_PLAN_VERSION,
         run_id=(
             _required_plan_text(run_id, field_name="run_id")
@@ -2017,6 +2044,11 @@ def build_expected_recording_condition_plan(
         event_map=event_rows,
         recordings=tuple(recording_plans),
     )
+    if prior_ledger is not None and len(run_paths) < len(processing_plan.states):
+        from Main_App.processing.incremental_recording_plan import bind_retained_recordings
+
+        return bind_retained_recordings(expected, processing_plan, prior_ledger, exclusions)
+    return expected
 
 
 def save_expected_recording_condition_plan(

@@ -26,6 +26,11 @@ from Main_App.io.result_manifest import (
     result_manifest_path,
 )
 from Main_App.processing.interpolation_burden import build_interpolation_burden
+from Main_App.processing.recording_settings_receipt import (
+    recording_settings_match,
+    recording_settings_receipts,
+    recover_recording_settings,
+)
 from Main_App.processing.preprocessing_outcome import (
     INTERPOLATION_STATUSES,
     INTERPOLATION_STATUS_LEGACY_UNKNOWN,
@@ -181,6 +186,7 @@ class ProcessingInputState:
     status: str
     reason: str
     expected_outputs: tuple[Path, ...]
+    pre_qc_fingerprint: str | None = None
 
     @property
     def processing_id(self) -> str:
@@ -207,6 +213,7 @@ class ProcessingPlan:
     geometry_identity: Mapping[str, object] = field(default_factory=dict)
     preprocessing_qc_settings: Mapping[str, bool] = field(default_factory=dict)
     pipeline_settings_identity: str = ""
+    recording_settings: Mapping[str, dict] = field(default_factory=dict)
 
     @property
     def completed_count(self) -> int:
@@ -599,6 +606,15 @@ def _condition_companion_reuse_problem(
         workbook = outputs.get(name)
         if workbook is None:
             return "Condition companion does not match an expected condition workbook."
+        if workbook.suffix.casefold() == RESULT_MANIFEST_SUFFIX and artifact.get("sha256"):
+            # A well-formed replacement declaration may still point to the same
+            # arrays. Compare the published anchor as well as both companions.
+            try:
+                with workbook.open("rb") as stream:
+                    if hashlib.file_digest(stream, "sha256").hexdigest() != artifact["sha256"]:
+                        return f"Native result manifest changed: {workbook.name}"
+            except OSError:
+                return f"Native result manifest is unreadable: {workbook.name}"
         for key, label, reader in companion_readers:
             if key not in write:
                 continue
@@ -608,6 +624,38 @@ def _condition_companion_reuse_problem(
             except (OSError, ValueError):
                 return f"{label} companion is missing, corrupt, or changed: {workbook.name}"
     return None
+
+
+def _check_reusable_outputs(project: Any, states: list[ProcessingInputState], entries: Mapping, candidates: set[str]) -> None:
+    """Check independent recordings under the same memory-limited validation pool as release."""
+    if not candidates:
+        return
+    from Main_App.workers.cell_validation_pool import cell_validation_credit, ordered_cell_validation
+    from Main_App.workers.mp_env import compute_dynamic_worker_ceiling, project_worker_override
+
+    selected = [(index, state) for index, state in enumerate(states) if state.processing_id in candidates]
+    override = project_worker_override(getattr(project, "preprocessing", None), getattr(project, "options", None))
+
+    def validate(item):
+        _index, state = item
+        return _condition_companion_reuse_problem(entries[state.processing_id], state.expected_outputs)
+
+    def credit(item):
+        # Validation releases each condition before opening the next one.
+        _index, state = item
+        largest = 0
+        for path in state.expected_outputs:
+            if path.is_file():
+                estimate = cell_validation_credit(path)
+                if estimate is None:
+                    return None
+                largest = max(largest, estimate)
+        return largest or None
+
+    problems = ordered_cell_validation(selected, validate, credit, max_workers=compute_dynamic_worker_ceiling(override))
+    for (index, state), problem in zip(selected, problems, strict=True):
+        if problem:
+            states[index] = replace(state, status="missing_outputs", reason=problem)
 
 
 def _has_missing_condition_warning(entry: Mapping[str, Any]) -> bool:
@@ -805,6 +853,13 @@ def build_processing_fingerprint(
     settings: Mapping[str, Any],
     event_map: Mapping[str, int],
 ) -> str:
+    payload = _processing_fingerprint_payload(project, settings, event_map)
+    return hashlib.sha256(_canonical_json(payload).encode("utf-8")).hexdigest()
+
+
+def _processing_fingerprint_payload(
+    project: Any, settings: Mapping[str, Any], event_map: Mapping[str, int],
+) -> dict[str, Any]:
     project_preprocessing = pipeline_fingerprint_settings(getattr(project, "preprocessing", {}) or {})
     settings = pipeline_fingerprint_settings(settings)
     analysis = settings.get("analysis")
@@ -912,8 +967,7 @@ def build_processing_fingerprint(
             "recording_sources": getattr(project, "recording_sources", {}) or {},
             "recordings": getattr(project, "recordings", {}) or {},
         }
-    encoded = _canonical_json(payload).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
+    return payload
 
 
 def load_ledger(project_root: Path) -> dict[str, Any]:
@@ -1162,7 +1216,9 @@ def classify_processing_inputs(
     condition_labels = (tuple(item.label for item in project_conditions(project))
                         if mapped else tuple(str(label) for label in event_map.keys()))
     validate_condition_output_names(condition_labels)
-    fingerprint = build_processing_fingerprint(project, settings, event_map)
+    payload = _processing_fingerprint_payload(project, settings, event_map)
+    fingerprint = hashlib.sha256(_canonical_json(payload).encode("utf-8")).hexdigest()
+    scoped_settings = recording_settings_receipts(payload, files)
     from Main_App.processing.pipeline_settings_freshness import (
         pipeline_settings_requirement_enabled, project_pipeline_settings_identity,
     )
@@ -1187,7 +1243,16 @@ def classify_processing_inputs(
     if not isinstance(entries, Mapping):
         entries = {}
 
+    historical_settings = {}
+    if any(
+        isinstance(entry := entries.get(info.processing_id), Mapping)
+        and entry.get("status") in {"completed", "excluded"} and "recording_settings" not in entry
+        and entry.get("processing_fingerprint_version") == PROCESSING_FINGERPRINT_VERSION
+        and entry.get("processing_fingerprint") != fingerprint for info in files
+    ):
+        historical_settings = recover_recording_settings(project, ledger, files)
     states: list[ProcessingInputState] = []
+    validate_companions: set[str] = set()
     for info in files:
         participant_id = info.subject_id
         processing_id = info.processing_id
@@ -1207,6 +1272,10 @@ def classify_processing_inputs(
             continue
 
         entry_status = str(entry.get("status") or "incomplete")
+        original_settings = entry.get("recording_settings", historical_settings.get(processing_id))
+        settings_match = entry.get("processing_fingerprint") == fingerprint or recording_settings_match(
+            original_settings, scoped_settings[processing_id],
+        )
         if entry_status == "excluded":
             if (
                 entry.get("raw_file") != raw_meta["raw_file"]
@@ -1277,7 +1346,7 @@ def classify_processing_inputs(
                         )
                     )
                     continue
-                if entry.get("processing_fingerprint") != fingerprint:
+                if not settings_match:
                     states.append(
                         ProcessingInputState(
                             info=info,
@@ -1370,7 +1439,7 @@ def classify_processing_inputs(
             )
             continue
 
-        if entry.get("processing_fingerprint") != fingerprint:
+        if not settings_match:
             states.append(
                 ProcessingInputState(
                     info=info,
@@ -1414,7 +1483,7 @@ def classify_processing_inputs(
         source_derivative_problem = _source_derivative_reuse_problem(
             Path(project.project_root),
             entry,
-        ) or _condition_companion_reuse_problem(entry, expected_outputs)
+        )
         if source_derivative_problem:
             states.append(
                 ProcessingInputState(
@@ -1427,6 +1496,8 @@ def classify_processing_inputs(
             )
             continue
 
+        if entry.get("export_receipts"):
+            validate_companions.add(processing_id)
         missing_outputs = missing_outputs_now
         if missing_outputs:
             if (
@@ -1466,6 +1537,22 @@ def classify_processing_inputs(
                 expected_outputs=expected_outputs,
             )
         )
+    _check_reusable_outputs(project, states, entries, validate_companions)
+    from Main_App.processing.incremental_recording_plan import unverified_completed_recordings
+
+    unverified = unverified_completed_recordings(ledger, states)
+    for index, state in enumerate(states):
+        if state.processing_id in unverified:
+            states[index] = replace(state, status="missing_outputs", reason="Previous condition results need verified processing evidence.")
+            continue
+        if not state.should_run_incremental:
+            entry = entries[state.processing_id]
+            previous_fingerprint = entry.get("processing_fingerprint")
+            original_settings = entry.get("recording_settings", historical_settings.get(state.processing_id))
+            if recording_settings_match(original_settings, scoped_settings[state.processing_id]):
+                scoped_settings[state.processing_id] = original_settings
+            if previous_fingerprint and previous_fingerprint != fingerprint:
+                states[index] = replace(state, pre_qc_fingerprint=previous_fingerprint)
     return ProcessingPlan(
         states=tuple(states),
         fingerprint=fingerprint,
@@ -1475,6 +1562,7 @@ def classify_processing_inputs(
             settings, getattr(project, "experimental_qc_settings", None),
         ),
         pipeline_settings_identity=settings_identity,
+        recording_settings=scoped_settings,
     )
 
 
@@ -1499,15 +1587,17 @@ def with_processing_choice(plan: ProcessingPlan, choice: str) -> ProcessingPlan:
         geometry_identity=plan.geometry_identity,
         preprocessing_qc_settings=plan.preprocessing_qc_settings,
         pipeline_settings_identity=plan.pipeline_settings_identity,
+        recording_settings=plan.recording_settings,
     )
 
 
 def _state_still_matches_ledger(
     project: Any,
     state: ProcessingInputState,
+    entries: Mapping[str, Any] | None = None,
 ) -> bool:
-    ledger = load_ledger(Path(project.project_root))
-    entries = ledger.get("entries", {})
+    if entries is None:
+        entries = load_ledger(Path(project.project_root)).get("entries", {})
     if not isinstance(entries, Mapping):
         return False
     entry = entries.get(state.processing_id)
@@ -1554,6 +1644,8 @@ def carry_forward_pre_qc_completed_states(
     if pre_qc_plan is None:
         return current_plan
 
+    if not any(state.status == "changed_settings" for state in current_plan.states):
+        return current_plan
     current_entries = load_ledger(Path(project.project_root)).get("entries", {})
     pre_by_path: dict[Path, ProcessingInputState] = {}
     for state in pre_qc_plan.states:
@@ -1576,7 +1668,15 @@ def carry_forward_pre_qc_completed_states(
             and pre_qc.status in {"completed", "excluded"}
             and current.status == "changed_settings"
             and pre_qc.participant_id == current.participant_id
-            and _state_still_matches_ledger(project, current)
+            and isinstance(current_entries, Mapping)
+            and (
+                not pre_qc_plan.recording_settings
+                or current.processing_id in current_plan.recording_settings and recording_settings_match(
+                    pre_qc_plan.recording_settings.get(current.processing_id),
+                    current_plan.recording_settings[current.processing_id],
+                )
+            )
+            and _state_still_matches_ledger(project, current, current_entries)
             and not _authorized_recording_review_changed(
                 project, current.processing_id,
                 current_entries.get(current.processing_id, {}),
@@ -1589,6 +1689,7 @@ def carry_forward_pre_qc_completed_states(
                     status=pre_qc.status,
                     reason=pre_qc.reason,
                     expected_outputs=current.expected_outputs,
+                    pre_qc_fingerprint=pre_qc.pre_qc_fingerprint or pre_qc_plan.fingerprint,
                 )
             )
             changed = True
@@ -1605,6 +1706,7 @@ def carry_forward_pre_qc_completed_states(
         geometry_identity=current_plan.geometry_identity,
         preprocessing_qc_settings=current_plan.preprocessing_qc_settings,
         pipeline_settings_identity=current_plan.pipeline_settings_identity,
+        recording_settings=current_plan.recording_settings,
     )
 
 
@@ -1628,6 +1730,9 @@ def refresh_skipped_ledger_fingerprints(project: Any, plan: ProcessingPlan) -> i
         except (OSError, RuntimeError):
             run_files.add(path)
 
+    from Main_App.processing.retained_source_derivatives import STAMP, source_commit_stamp, verified_retained_sources
+
+    retained_sources = None
     changed = 0
     for state in plan.states:
         if state.status not in {"completed", "excluded"}:
@@ -1646,6 +1751,14 @@ def refresh_skipped_ledger_fingerprints(project: Any, plan: ProcessingPlan) -> i
             "processing_fingerprint": plan.fingerprint,
             "expected_outputs": [str(path) for path in state.expected_outputs],
         }
+        if entry.get("source_derivative_status") == "complete" and (
+            entry.get("processing_fingerprint") != plan.fingerprint or entry.get(STAMP)
+        ):
+            if retained_sources is None:
+                retained_sources = verified_retained_sources(ledger, plan.fingerprint, published=False)
+            stamp = source_commit_stamp(project_root, retained_sources.get(state.processing_id))
+            if stamp is not None:
+                updates[STAMP] = stamp
         if any(entry.get(key) != value for key, value in updates.items()):
             entry.update(updates)
             changed += 1
@@ -1981,6 +2094,7 @@ def record_processing_results(
     run_mode: str,
     user_choice: str,
     cancelled: bool,
+    validation_workers: int = 1,
 ) -> None:
     project_root = Path(project.project_root)
     ledger = load_ledger(project_root)
@@ -2350,7 +2464,11 @@ def record_processing_results(
 
     recording_condition_outcome_payload: dict[str, Any] | None = None
     try:
-        expected_plan = load_expected_recording_condition_plan(project_root)
+        raw_expected_plan = ledger.get(EXPECTED_RECORDING_CONDITION_PLAN_LEDGER_KEY)
+        expected_plan = (
+            ExpectedRecordingConditionPlan.from_payload(raw_expected_plan)
+            if raw_expected_plan is not None else None
+        )
         if expected_plan is not None:
             if expected_plan.processing_fingerprint != plan.fingerprint:
                 raise RecordingConditionOutcomeError(
@@ -2362,10 +2480,30 @@ def record_processing_results(
                 for result in results
                 for receipt in _export_receipts_payload(result)
             ]
+            for processing_id, pinned in expected_plan.retained_export_fingerprints.items():
+                entry = entries.get(processing_id)
+                if not isinstance(entry, Mapping):
+                    continue
+                if not entry.get("raw_file") or Path(entry["raw_file"]).resolve() in results_by_path:
+                    continue
+                current_export_receipts.extend(
+                    receipt for receipt in _export_receipts_payload(entry)
+                    if receipt.get("fingerprint")
+                    and pinned.get(receipt.get("condition_label")) == receipt["fingerprint"]
+                )
             outcomes = reconcile_recording_condition_outputs(
                 expected_plan,
                 current_export_receipts,
+                validation_workers=validation_workers,
             )
+            blocked_recordings = {cell.processing_id for cell in outcomes.cells if cell.status == "blocked"}
+            for path in successful_paths | excluded_paths:
+                processing_id = states_by_path[path].processing_id
+                if processing_id in plan.recording_settings and processing_id not in blocked_recordings:
+                    entries[processing_id]["recording_settings"] = plan.recording_settings[processing_id]
+            for processing_id in expected_plan.retained_export_fingerprints:
+                if processing_id not in blocked_recordings and processing_id in plan.recording_settings:
+                    entries[processing_id].setdefault("recording_settings", plan.recording_settings[processing_id])
             recording_condition_outcome_payload = outcomes.to_payload()
             recording_condition_outcome_payload["reconciliation_status"] = (
                 "complete"

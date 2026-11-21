@@ -63,6 +63,10 @@ from Main_App.gui import post_export_workflows
 from Main_App.gui import tool_workflows
 from Main_App.gui import shell_status
 from Main_App.gui.processing_completion import finalize_processing_host_state
+from Main_App.gui.processing_host_compat import (
+    ProcessingHostCompatibility,
+    QtEntryAdapter as _QtEntryAdapter,
+)
 from Main_App.gui.processing_history_label import refresh_processing_history
 from Main_App.gui.post_export_workflows import (
     excel_snapshot as _excel_snapshot,  # noqa: F401 - compatibility re-export
@@ -83,20 +87,7 @@ class Processor(QObject):
         self.progressChanged.emit(value)
 
 
-class _QtEntryAdapter:
-    """Provide Tk-like get/focus_set for QLineEdit or similar."""
-
-    def __init__(self, line_edit: QLineEdit) -> None:
-        self._edit = line_edit
-
-    def get(self) -> str:  # type: ignore[override]
-        return self._edit.text()
-
-    def focus_set(self) -> None:  # type: ignore[override]
-        self._edit.setFocus()
-
-
-class MainWindow(QMainWindow):
+class MainWindow(QMainWindow, ProcessingHostCompatibility):
     """Main application window implemented with PySide6.
 
     Notes
@@ -158,7 +149,7 @@ class MainWindow(QMainWindow):
             self.progress_bar.setTextVisible(True)
             if hasattr(self, "btn_start"):
                 self.progress_bar.setMinimumHeight(self.btn_start.minimumHeight())
-            # Legacy mixin compatibility: allow .set(value)
+            # The shared completion handler resets progress through set().
             self.progress_bar.set = self.progress_bar.setValue  # type: ignore[attr-defined]
 
         # Prevent spurious finalize/error dialogs until a run starts
@@ -229,15 +220,8 @@ class MainWindow(QMainWindow):
         self._project_processing_cache_workspace_was_enabled = True
         self._start_guard = OpGuard()
 
-        # Flags/vars the mixin expects
-        self.save_fif_var = SimpleNamespace(get=lambda: False)
         self.save_folder_path = SimpleNamespace(get=lambda: "", set=lambda v: None)
         self.file_mode = SimpleNamespace(get=lambda: "Batch")
-        self.file_type = SimpleNamespace(set=lambda v: None)
-
-        # Legacy mixin uses Tk's .after(); we emulate it with QTimer
-        self._after_timers: dict[int, QTimer] = {}
-        self._queue_job_id: int | None = None
         self.post_process = MethodType(MainWindow._export_with_post_process, self)
         self._post_thread = None
         self._post_worker = None
@@ -345,35 +329,6 @@ class MainWindow(QMainWindow):
             ),
             **kwargs,
         )
-
-    # ------------------------ Tk-style scheduling ------------------------ #
-    def after(self, delay_ms: int, callback: Callable[[], None]) -> int:
-        """Schedule a callback with QTimer.singleShot.
-        Returns a job id usable with after_cancel.
-        """
-        timer = QTimer(self)
-        timer.setSingleShot(True)
-        job_id = id(timer)
-
-        def _run_and_cleanup() -> None:
-            try:
-                callback()
-            finally:
-                # remove and delete timer
-                self._after_timers.pop(job_id, None)
-                timer.deleteLater()
-
-        timer.timeout.connect(_run_and_cleanup)
-        self._after_timers[job_id] = timer
-        timer.start(int(delay_ms))
-        return job_id
-
-    def after_cancel(self, job_id: int) -> None:
-        """Cancel a scheduled callback created by .after()."""
-        t = self._after_timers.pop(job_id, None)
-        if t:
-            t.stop()
-            t.deleteLater()
 
     # Validation lives in processing_inputs.
     def _validate_inputs(self) -> bool:
@@ -870,7 +825,7 @@ class MainWindow(QMainWindow):
 
     # ------------------------ project load hook --------------------- #
     def loadProject(self, project: Project) -> None:  # pragma: no cover - GUI stub
-        project_workflows.load_project(self, project, _QtEntryAdapter)
+        project_workflows.load_project(self, project)
 
     def saveProjectSettings(self) -> None:
         project_workflows.save_project_settings(self)

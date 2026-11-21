@@ -7,7 +7,7 @@ Process-based per-file runner.
 - Uses the shared loader and canonical Main App preprocessing surface.
 - Extracts events using the project's stim channel (e.g., "Status").
 - Suppresses any worker GUI popups.
-- Calls the existing post-export adapter (no Legacy edits).
+- Exports condition results through Main_App.exports.post_export_adapter.
 - Adds RAM-aware backpressure: staged submissions + system memory soft-cap.
 """
 
@@ -25,7 +25,6 @@ from concurrent.futures import ProcessPoolExecutor, FIRST_COMPLETED, wait
 from dataclasses import dataclass, replace
 from multiprocessing import Queue, get_context, Event
 from pathlib import Path
-from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Mapping, Optional, Tuple
 
 import Main_App.processing.preprocess as backend_preprocess
@@ -211,18 +210,22 @@ def _preflight_event_plan_for_file(
         raise RuntimeError(
             "Processing requires the reviewed preflight marker plan for every file."
         )
-    candidates = [str(file_path), file_path.name]
-    try:
-        candidates.insert(0, str(file_path.resolve()))
-    except (OSError, RuntimeError):
-        pass
-    for candidate in candidates:
+    for candidate in _event_plan_keys(file_path):
         value = plans.get(candidate)
         if isinstance(value, Mapping):
             return value
     raise RuntimeError(
         f"No reviewed preflight marker plan was supplied for {file_path.name}."
     )
+
+
+def _event_plan_keys(file_path: Path) -> list[str]:
+    candidates = [str(file_path), file_path.name]
+    try:
+        candidates.insert(0, str(file_path.resolve()))
+    except (OSError, RuntimeError):
+        pass
+    return candidates
 
 
 def _find_raw_events(
@@ -413,6 +416,27 @@ def _recording_mapping_payload(
             return {str(key): item for key, item in raw_payload.items()}
         return {}
     return {}
+
+
+def _recording_job_settings(file_path: Path, settings: Dict[str, object]) -> Dict[str, object]:
+    """Keep the full run identity and send only this recording's reviewed evidence."""
+    local = dict(settings)
+    plans = settings.get("_fpvs_preflight_event_plans_by_file")
+    if type(plans) is dict:
+        local["_fpvs_preflight_event_plans_by_file"] = {
+            key: plans[key] for key in _event_plan_keys(file_path) if key in plans
+        }
+    decisions = settings.get("kurtosis_review_decisions_by_recording")
+    if type(decisions) is dict and decisions and all(type(key) is str for key in decisions):
+        identity = _recording_id_for_file(file_path, settings) or _participant_id_for_file(file_path, settings)
+        lookup = identity.casefold()
+        matched = {}
+        for key, value in decisions.items():
+            if key.strip().casefold() == lookup:
+                matched[key] = value
+                break
+        local["kurtosis_review_decisions_by_recording"] = matched
+    return local
 
 
 def _session_id_for_file(
@@ -700,9 +724,12 @@ def _admitted_worker_init(native_initializer, *admission_args) -> None:
 
 
 def _process_admitted_file(file_path, settings, event_map, save_folder, project_root, index):
+    started_ns = time.monotonic_ns()
     if _WORKER_ADMISSION is not None:
         _WORKER_ADMISSION.start(index)
-    return _process_one_file(file_path, settings, event_map, save_folder, project_root)
+    result = _process_one_file(file_path, settings, event_map, save_folder, project_root)
+    result["_fpvs_worker_interval_ns"] = (started_ns, time.monotonic_ns())
+    return result
 
 
 def _memmap_path_for_file(file_path: Path) -> Path:
@@ -2580,13 +2607,13 @@ def _run_full_pipeline_for_file(
         )
         _record_timing("epochs", section_started)
 
-        # 6) Post-export (delegates to Legacy post_process via adapter)
+        # 6) Publish condition results through the shared exporter.
         stage = "export"
         section_started = time.perf_counter()
         export_timing_records: List[Dict[str, object]] = []
         ctx = LegacyCtx(
             preprocessed_data=epochs_dict,
-            save_folder_path=SimpleNamespace(get=lambda: str(save_folder)),
+            save_folder_path=save_folder,
             data_paths=[str(file_path)],
             settings=settings,
             log=_worker_log,
@@ -3201,6 +3228,7 @@ def _run_project_parallel(
     in_flight_indices: Dict[object, int] = {}
     remaining_indices = list(range(len(active_files)))
     peak_in_flight = 0
+    worker_intervals = []
     max_memory_percent = 0.0
     memory_limit_ratio = getattr(params, "memory_soft_limit_ratio", None)
     memory_check_interval = getattr(params, "memory_check_interval_s", 0.25)
@@ -3275,6 +3303,9 @@ def _run_project_parallel(
             admission.completed(index)
         try:
             res = fut.result()
+            interval = res.pop("_fpvs_worker_interval_ns", None)
+            if interval is not None:
+                worker_intervals.append(interval)
         except Exception as exc:
             res = {
                 "status": "error",
@@ -3362,9 +3393,11 @@ def _run_project_parallel(
                 growth_drain = True
                 logger.info("processing_pool_growth_drain workers=%d pending_files=%d", maxw, len(remaining))
                 return False
-            if admission.requests or not admission.fits(index, solo=admission.solo_owner == index):
+            offset = admission.first_fitting(remaining_indices)
+            if offset is None:
                 _memory_status(True)
                 return False
+            index = remaining_indices[offset]
 
             # Optional soft-cap on system RAM
             mem_ok, percent_used = _memory_ok(memory_limit_ratio)
@@ -3374,7 +3407,7 @@ def _run_project_parallel(
                 _memory_status(True)
                 return False
 
-            f = remaining[0]
+            f = remaining[offset]
             logger.debug(
                 "[MP STAGE] submit_file_start file=%s in_flight=%d remaining=%d",
                 f.name,
@@ -3385,14 +3418,14 @@ def _run_project_parallel(
             fut = pool.submit(
                 _process_admitted_file,
                 f,
-                params.settings,
+                admission.job_settings[index],
                 params.event_map,
                 params.save_folder,
                 params.project_root,
                 index,
             )
-            remaining.pop(0)
-            remaining_indices.pop(0)
+            remaining.pop(offset)
+            remaining_indices.pop(offset)
             in_flight[fut] = f
             in_flight_indices[fut] = index
             _memory_status(False)
@@ -3476,12 +3509,17 @@ def _run_project_parallel(
     _scavenge_stale_memmaps()
 
     elapsed_seconds = time.perf_counter() - run_started_at
-    logger.debug(
+    active = peak_active = 0
+    for _, delta in sorted(event for start, end in worker_intervals for event in ((start, 1), (end, -1))):
+        active += delta
+        peak_active = max(peak_active, active)
+    logger.info(
         (
             "mp_run_summary num_files=%d completed=%d "
             "max_workers_param=%s max_workers_used=%d "
             "peak_in_flight=%d max_memory_percent=%.2f "
-            "elapsed_seconds=%.3f cancelled=%s"
+            "elapsed_seconds=%.3f cancelled=%s worker_ceiling=%d peak_running=%d "
+            "timed_files=%d exclusive_files=%d"
         ),
         total,
         completed,
@@ -3491,6 +3529,10 @@ def _run_project_parallel(
         max_memory_percent,
         elapsed_seconds,
         cancelled,
+        worker_ceiling,
+        peak_active,
+        len(worker_intervals),
+        sum(admission.exclusive),
     )
 
     # Batch-level summary: average number of channels rejected per file.

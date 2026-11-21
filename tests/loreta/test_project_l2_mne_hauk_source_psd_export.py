@@ -1082,6 +1082,21 @@ def test_project_source_psd_export_confines_root_and_output(tmp_path: Path) -> N
     assert default_project_l2_mne_hauk_source_psd_output_dir(project.project_root).is_relative_to(project.project_root)
 
 
+def test_source_group_reduction_order_uses_ledger_order_after_registration(tmp_path):
+    from Tools.LORETA_Visualizer.source_producers.project_source_psd_inputs import build_project_hauk_source_psd_input_plan
+
+    project = _project_with_ledger(tmp_path, participants=("P3", "P1", "P2"),
+                                   group_id="controls", group_folder="Controls")
+    def plan():
+        return build_project_hauk_source_psd_input_plan(project, root=tmp_path, include_flagged_subjects=False)
+    before = plan()
+    project.participants = dict(sorted(project.participants.items()))
+    after = plan()
+    assert before.participants_by_condition == after.participants_by_condition == {"21": ("P1", "P2", "P3")}
+    assert before.groups[0].participants == after.groups[0].participants == ("P1", "P2", "P3")
+    assert before.expected_inputs == after.expected_inputs
+
+
 def _project_with_ledger(
     root: Path,
     *,

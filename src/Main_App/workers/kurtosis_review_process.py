@@ -56,9 +56,75 @@ class _ReviewResourcePlan:
     dynamic: bool = False
 
 
+@dataclass(frozen=True)
+class _ReviewJobInputs:
+    settings: dict[str, Any]
+    event_plans: Mapping[str, Any] | None
+    raw_channel_qc: Mapping[str, Any] | None
+
+
+def _review_job_inputs(infos, settings, explicit_plans, raw_qc):
+    from Main_App.processing.kurtosis_review_scan import _identity, _index_event_plans
+
+    common = dict(settings)
+    common.pop("_fpvs_kurtosis_checkpoint_should_cancel", None)
+    setting_key = "_fpvs_preflight_event_plans_by_file"
+    fallback = common.get(setting_key)
+    fallback_index = _index_event_plans(fallback) if isinstance(fallback, Mapping) else {}
+    explicit_index = fallback_index
+    if explicit_plans is not fallback and isinstance(explicit_plans, Mapping):
+        explicit_index = _index_event_plans(explicit_plans)
+    by_recording: dict[str, dict[str, Any]] = {}
+    if isinstance(raw_qc, Mapping):
+        for key, value in raw_qc.items():
+            by_recording.setdefault(str(key or "").strip().casefold(), {})[key] = value
+    jobs = []
+    for info in infos:
+        path, _, recording, *_ = _identity(info)
+        path_key = str(path.resolve()).casefold()
+        local = dict(common)
+        if isinstance(fallback, Mapping):
+            local[setting_key] = fallback_index.get(path_key, {})
+        # Preserve explicit/fallback precedence, absent display evidence, and all
+        # case or path aliases. The numerical owner reports missing/ambiguous keys.
+        plans = explicit_index.get(path_key, {}) if isinstance(explicit_plans, Mapping) else explicit_plans
+        qc = by_recording.get(recording.casefold(), {}) if isinstance(raw_qc, Mapping) else raw_qc
+        jobs.append(_ReviewJobInputs(local, plans, qc))
+    return jobs
+
+
+def _approved_raw_union(info, geometry, job: _ReviewJobInputs, event_map):
+    """Use the reviewed *upper* bound before exclusions; the scanner revalidates native events."""
+    from Main_App.processing.analysis_spans import relative_spans_from_plan, validate_source_analysis_span_context
+    from Main_App.processing.kurtosis_review_scan import _identity, _validate_review_request
+
+    try:
+        _, _, recording, *_ = _identity(info)
+        plans = (job.event_plans if job.event_plans is not None
+                 else job.settings.get("_fpvs_preflight_event_plans_by_file"))
+        if not isinstance(plans, Mapping) or len(plans) != 1:
+            return None
+        (source_path, event_plan), = plans.items()
+        if str(Path(source_path).resolve()).casefold() != str(Path(info.path).resolve()).casefold():
+            return None
+        canonical_map, protocol = _validate_review_request([info], job.settings, event_map, job.raw_channel_qc)
+        plan = validate_source_analysis_span_context(
+            event_plan_payload=event_plan, event_map=canonical_map, protocol=protocol, recording_id=recording,
+        )
+        grid = plan["source_grid"]
+        if (grid["n_times"] != geometry.source_n_times or grid["first_samp"] != 0
+                or grid["sfreq_hz"] != geometry.source_rate_hz):
+            return None
+        count = sum(stop - start for start, stop in relative_spans_from_plan(plan))
+        return count if 0 < count <= geometry.source_n_times else None
+    except (AttributeError, KeyError, OSError, OverflowError, RuntimeError, TypeError, ValueError):
+        return None
+
+
 def _review_resource_plan(
     raw_file_infos: Sequence[Any], max_workers: int | None = None,
-    *, settings: Mapping[str, Any] | None = None,
+    *, settings: Mapping[str, Any] | None = None, jobs: Sequence[_ReviewJobInputs] | None = None,
+    event_map: Mapping[str, int] | None = None,
 ) -> _ReviewResourcePlan:
     """Use geometry credits for validated settings; retain the legacy fallback.
 
@@ -93,16 +159,19 @@ def _review_resource_plan(
                 ) == REMOVED_ELECTRODE_DETECTION_MODE_AUTO
             except (TypeError, ValueError):
                 geometry_supported = False
-    for info in raw_file_infos:
+    for index, info in enumerate(raw_file_infos):
         estimate = None
         try:
             credit = max(_GIB, Path(info.path).stat().st_size * 24)
             if settings is not None and geometry_supported:
                 geometry = read_review_geometry(Path(info.path), settings)
                 if geometry is not None:
+                    raw_union = (_approved_raw_union(info, geometry, jobs[index], event_map)
+                                 if raw_qc_enabled and jobs is not None and event_map is not None else None)
                     estimate = estimate_review_memory(
                         geometry, filter_enabled=bool(settings.get("high_pass") or settings.get("low_pass")),
                         notch_enabled=bool(settings.get("line_noise_filter_enabled")), raw_qc_enabled=raw_qc_enabled,
+                        raw_union_samples=raw_union,
                     )
                     credit = estimate.healthy_bytes
         except (AttributeError, ImportError, OSError, OverflowError, RuntimeError, TypeError, ValueError):
@@ -135,6 +204,58 @@ def review_process_worker_count(
 ) -> int:
     """Return the dynamic ceiling or the legacy unvalidated-size snapshot."""
     return _review_resource_plan(raw_file_infos, max_workers, settings=settings).max_workers
+
+
+def _review_memory_snapshot():
+    try:
+        snapshot = probe_memory_snapshot()
+        if snapshot.commit_required and snapshot.commit_available_bytes is None:
+            raise ReviewMemoryProbeError("Windows commit headroom is unavailable; preparation admission stopped.")
+        if (type(snapshot.commit_required) is not bool
+                or type(snapshot.total_bytes) is not int or snapshot.total_bytes <= 0
+                or type(snapshot.physical_available_bytes) is not int
+                or not 0 <= snapshot.physical_available_bytes <= snapshot.total_bytes
+                or (snapshot.commit_available_bytes is not None and (
+                    type(snapshot.commit_available_bytes) is not int or snapshot.commit_available_bytes < 0))):
+            raise ReviewMemoryProbeError("Invalid preparation memory headroom; admission stopped.")
+    except ReviewMemoryProbeError:
+        raise
+    except (AttributeError, OSError, OverflowError, RuntimeError, TypeError, ValueError, psutil.Error) as exc:
+        raise ReviewMemoryProbeError("Live preparation memory availability could not be read.") from exc
+    return snapshot
+
+
+def _review_admission_fits(known_workers, credits, population, candidate_credit, emergency_reserve, *, snapshot=None):
+    # Worker-start messages and futures use different queues. Reject impossible
+    # owner counts even when no owned pages are needed to satisfy the bound.
+    idle_count = sum(index not in credits for _, index in known_workers.values())
+    if len(credits) + idle_count > population:
+        return False
+
+    def fits(headroom, active_owned, idle_owned):
+        try:
+            return memory_admission_fits(
+                headroom, active_credits=credits, active_owned=active_owned, idle_owned=idle_owned,
+                worker_count=population, candidate_credit=candidate_credit, emergency_reserve=emergency_reserve,
+            )
+        except (AttributeError, OSError, OverflowError, RuntimeError, TypeError, ValueError, psutil.Error):
+            return False
+
+    headroom = _review_memory_snapshot() if snapshot is None else snapshot
+    # This upper bound charges every active job, pool floor and reserve in
+    # full. Only a failed bound can benefit from enumerating owned pages.
+    if fits(headroom, {}, []):
+        return True
+    if not known_workers:
+        return False
+    active_owned, idle_owned = {}, []
+    for pid, (created, index) in known_workers.items():
+        owner = probe_owned_memory(pid, created)
+        if index in credits:
+            active_owned[index] = owner
+        else:
+            idle_owned.append(owner)
+    return fits(_review_memory_snapshot(), active_owned, idle_owned)
 
 
 def _emit_worker_message(message: dict[str, Any]) -> None:
@@ -279,15 +400,13 @@ def run_process_review(
                 configured_workers = 0
             if configured_workers > 0:
                 requested_workers = configured_workers
-    resource_plan = _review_resource_plan(infos, requested_workers, settings=settings)
+    jobs = _review_job_inputs(infos, settings, reviewed_event_plans_by_file, raw_channel_qc_by_recording)
+    resource_plan = _review_resource_plan(infos, requested_workers, settings=settings, jobs=jobs, event_map=event_map)
     worker_ceiling = worker_count = resource_plan.max_workers
     geometry_admission = resource_plan.dynamic and (
         any(estimate is not None for estimate in resource_plan.estimates)
         or any(resource_plan.exclusive)
     )
-    child_settings = dict(settings)
-    # This runtime callback is replaced by the child-owned cancellation event.
-    child_settings.pop("_fpvs_kurtosis_checkpoint_should_cancel", None)
     context = get_context("spawn")
     cancel_event = context.Event()
     messages = context.Queue(maxsize=256)
@@ -344,15 +463,6 @@ def run_process_review(
                 if message["type"] == "memory_request":
                     resource_requests[index] = message
 
-    def memory_snapshot():
-        try:
-            snapshot = probe_memory_snapshot()
-        except (AttributeError, OSError, OverflowError, RuntimeError, TypeError, ValueError, psutil.Error) as exc:
-            raise ReviewMemoryProbeError("Live preparation memory availability could not be read.") from exc
-        if snapshot.commit_required and snapshot.commit_available_bytes is None:
-            raise ReviewMemoryProbeError("Windows commit headroom is unavailable; preparation admission stopped.")
-        return snapshot
-
     def memory_wait(message: str | None) -> None:
         nonlocal memory_paused
         if message is None:
@@ -391,26 +501,10 @@ def run_process_review(
         if candidate_index is not None:
             indices.add(candidate_index)
         emergency_remaining = max(0, emergency_for(indices) - borrowed_bytes)
-        active_owned, idle_owned = {}, []
-        for pid, (created, index) in known_workers.items():
-            owner = probe_owned_memory(pid, created)
-            if index in credits:
-                active_owned[index] = owner
-            else:
-                idle_owned.append(owner)
-        snapshot = memory_snapshot() if snapshot is None else snapshot
-        try:
-            return memory_admission_fits(
-                snapshot, active_credits=credits, active_owned=active_owned,
-                # A completed future can precede its worker-start message on
-                # the separate control queue. Keep all pool floors reserved
-                # even before those persistent idle owners are identified.
-                idle_owned=idle_owned, worker_count=worker_count if population is None else population,
-                candidate_credit=candidate_credit,
-                emergency_reserve=emergency_remaining,
-            )
-        except (AttributeError, OSError, OverflowError, RuntimeError, TypeError, ValueError, psutil.Error):
-            return False
+        return _review_admission_fits(
+            known_workers, credits, worker_count if population is None else population,
+            candidate_credit, emergency_remaining, snapshot=snapshot,
+        )
 
     def grant_waiting_requests() -> None:
         nonlocal emergency_owner, reserved_credits, peak_reserved_credits
@@ -428,7 +522,7 @@ def run_process_review(
                 del resource_requests[index]
                 logger.error("review_scoring_uncovered_geometry index=%d requested_bytes=%s", index, required)
                 continue
-            snapshot = memory_snapshot()
+            snapshot = _review_memory_snapshot()
             if single_review_capacity_bytes(snapshot, required) > snapshot.total_bytes:
                 grant_status[index] = -2
                 grant_events[index].set()
@@ -489,7 +583,7 @@ def run_process_review(
             return
         growth_drain = False
         solo_owner = None
-        snapshot = memory_snapshot()
+        snapshot = _review_memory_snapshot()
         for index in tuple(pending_indices):
             estimate = resource_plan.estimates[index]
             if estimate is not None and single_review_capacity_bytes(snapshot, estimate.healthy_bytes) > snapshot.total_bytes:
@@ -510,7 +604,7 @@ def run_process_review(
             if (worker_count < min(worker_ceiling, len(pending_indices))
                     and any(ordinary_fits(index, worker_count + 1) for index in pending_indices)):
                 close_idle_pool()
-                snapshot = memory_snapshot()
+                snapshot = _review_memory_snapshot()
             elif any(ordinary_fits(index, worker_count) for index in pending_indices):
                 return
             elif worker_count == 1:
@@ -522,10 +616,10 @@ def run_process_review(
                     solo_owner = index
                     return
                 close_idle_pool()
-                snapshot = memory_snapshot()
+                snapshot = _review_memory_snapshot()
             else:
                 close_idle_pool()
-                snapshot = memory_snapshot()
+                snapshot = _review_memory_snapshot()
 
         for population in range(worker_ceiling, 0, -1):
             if any(ordinary_fits(index, population) for index in pending_indices):
@@ -599,8 +693,8 @@ def run_process_review(
             credit = resource_plan.credits[index]
             try:
                 future = pool.submit(
-                    _run_one_review, infos[index], child_settings, dict(event_map),
-                    reviewed_event_plans_by_file, raw_channel_qc_by_recording,
+                    _run_one_review, infos[index], jobs[index].settings, dict(event_map),
+                    jobs[index].event_plans, jobs[index].raw_channel_qc,
                     **({"job_index": index} if resource_plan.dynamic else {}),
                 )
             except Exception as exc:

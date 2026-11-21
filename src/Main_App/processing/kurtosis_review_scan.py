@@ -439,19 +439,24 @@ def _configured_channel_limit(settings: Mapping[str, Any]) -> int | None:
         raise KurtosisReviewScanError(str(exc)) from exc
 
 
-def _event_plan_for_path(
-    plans: Mapping[str, Any],
-    path: Path,
-) -> Mapping[str, Any]:
-    matches: list[Mapping[str, Any]] = []
-    target = str(path.resolve()).casefold()
+def _index_event_plans(plans: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
+    """Keep every valid alias so duplicate paths still fail the recording's review."""
+    indexed: dict[str, dict[str, Any]] = {}
     for raw_path, raw_plan in plans.items():
         try:
             candidate = str(Path(str(raw_path)).resolve()).casefold()
         except (OSError, RuntimeError, TypeError, ValueError):
             continue
-        if candidate == target and isinstance(raw_plan, Mapping):
-            matches.append(raw_plan)
+        if isinstance(raw_plan, Mapping):
+            indexed.setdefault(candidate, {})[raw_path] = raw_plan
+    return indexed
+
+
+def _event_plan_for_path(
+    indexed: Mapping[str, Mapping[str, Any]],
+    path: Path,
+) -> Mapping[str, Any]:
+    matches = tuple(indexed.get(str(path.resolve()).casefold(), {}).values())
     if len(matches) != 1:
         qualifier = "duplicate" if len(matches) > 1 else "no"
         raise KurtosisReviewScanError(f"There is {qualifier} reviewed event plan for {path.name}.")
@@ -1021,7 +1026,7 @@ def scan_kurtosis_review(
 
     raw_plans = (reviewed_event_plans_by_file if reviewed_event_plans_by_file is not None
                  else settings.get("_fpvs_preflight_event_plans_by_file"))
-    plans = raw_plans if isinstance(raw_plans, Mapping) else {}
+    plans = _index_event_plans(raw_plans) if isinstance(raw_plans, Mapping) else {}
     excluded_participants = {value.casefold() for value in normalize_manual_excluded_participants(settings.get("manual_excluded_participants"))}
     excluded_recordings = {value.casefold() for value in normalize_manual_excluded_recordings(settings.get("manual_excluded_recordings"))}
     participant_conditions = normalize_manual_excluded_participant_conditions(settings.get("manual_excluded_participant_conditions"))
@@ -1176,7 +1181,7 @@ def _scan_kurtosis_review_serial(
         if reviewed_event_plans_by_file is not None
         else settings.get("_fpvs_preflight_event_plans_by_file")
     )
-    plans = raw_plans if isinstance(raw_plans, Mapping) else {}
+    plans = _index_event_plans(raw_plans) if isinstance(raw_plans, Mapping) else {}
     excluded_participants = {
         value.casefold()
         for value in normalize_manual_excluded_participants(settings.get("manual_excluded_participants"))

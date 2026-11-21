@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from Main_App.workers.mp_env import compute_dynamic_worker_ceiling
+from Main_App.workers.mp_env import compute_dynamic_worker_ceiling, project_worker_override
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -17,8 +17,8 @@ def _review_resolver():
     tree = ast.parse(path.read_text(encoding="utf-8"))
     function = next(node for node in tree.body if isinstance(node, ast.FunctionDef)
                     and node.name == "_review_worker_ceiling")
-    namespace = {"compute_dynamic_worker_ceiling": lambda requested: compute_dynamic_worker_ceiling(
-        requested, cpu_count=24,
+    namespace = {"project_worker_override": project_worker_override, "compute_dynamic_worker_ceiling": lambda requested: compute_dynamic_worker_ceiling(
+        requested, cpu_count=24, total_ram_bytes=127 * 1024**3,
     )}
     module = ast.Module(body=[ast.ImportFrom(
         module="__future__", names=[ast.alias(name="annotations")], level=0,
@@ -29,7 +29,8 @@ def _review_resolver():
 
 @pytest.mark.parametrize("current,legacy,stale,expected", [
     (12, 2, 4, 12), (2, 12, 16, 2), (0, 12, 4, 12),
-    (0, "6", 4, 6), (0, None, 4, 23), (0, "invalid", 4, 23),
+    (0, "6", 4, 6), (0, None, 4, 16), (0, "invalid", 4, 16),
+    (16, None, 4, 16),
     (100, None, 4, 23),
 ])
 def test_review_uses_current_project_ceiling_instead_of_previous_gui_run(current, legacy, stale, expected):
@@ -37,7 +38,7 @@ def test_review_uses_current_project_ceiling_instead_of_previous_gui_run(current
     assert _review_resolver()(host, {"max_parallel_workers_override": current}) == expected
 
 
-def test_normal_and_startup_gui_use_dynamic_cpu_ceiling_without_ram_tiers():
+def test_normal_and_startup_gui_share_dynamic_worker_policy():
     for relative in ("main_window.py", "processing_workflows.py"):
         tree = ast.parse((ROOT / "src/Main_App/gui" / relative).read_text(encoding="utf-8"))
         calls = [node.func.id for node in ast.walk(tree) if isinstance(node, ast.Call)
@@ -73,5 +74,5 @@ def test_settings_save_does_not_prompt_for_obsolete_ram_tier_override():
     literals = [node.value for node in ast.walk(page) if isinstance(node, ast.Constant)
                 and isinstance(node.value, str)]
     assert "Parallel workers (0 = auto):" in literals
-    assert any("Automatic uses available CPUs" in value for value in literals)
+    assert any("RAM and available CPUs" in value for value in literals)
     assert not any("recommended for your RAM tier" in value for value in literals)

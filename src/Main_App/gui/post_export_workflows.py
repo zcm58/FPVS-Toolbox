@@ -155,16 +155,17 @@ def on_worker_error(host: Any, message: str) -> None:
 
 
 def refresh_run_excel_success_from_disk(host: Any) -> None:
+    if host._run_had_successful_export:
+        host._last_job_success = True
+        return
+
     output_root = host._run_excel_output_root or (
         host.save_folder_path.get()
         if hasattr(host.save_folder_path, "get")
         else str(getattr(host, "save_folder_path", "") or "")
     )
     after_snapshot = excel_snapshot(output_root)
-    if (
-        not host._run_had_successful_export
-        and excel_snapshot_has_changes(host._run_excel_snapshot_before, after_snapshot)
-    ):
+    if excel_snapshot_has_changes(host._run_excel_snapshot_before, after_snapshot):
         host._run_had_successful_export = True
     host._last_job_success = host._run_had_successful_export
 

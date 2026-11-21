@@ -377,27 +377,33 @@ def _blocked_cell(
     )
 
 
-def _validate_written_receipt(
+def _export_identity_problems(
     *,
     plan: ExpectedRecordingConditionPlan,
     recording: object,
     cell: object,
     receipt: Mapping[str, Any],
-    validate_artifacts: bool = True,
-) -> tuple[str, ...]:
+) -> list[str]:
     reasons: list[str] = []
     if not _receipt_is_current(receipt):
         reasons.append("export_receipt_fingerprint_mismatch")
     if receipt.get("version") != "recording_condition_export_receipt_v1":
         reasons.append("export_receipt_version_mismatch")
+    recording_id = str(getattr(recording, "processing_id"))
+    condition = str(getattr(cell, "condition_label"))
+    retained = getattr(plan, "retained_export_fingerprints", {}).get(recording_id, {}).get(condition)
     expected_identity = {
-        "run_id": plan.run_id,
-        "processing_fingerprint": plan.processing_fingerprint,
         "processing_fingerprint_version": plan.processing_fingerprint_version,
-        "recording_id": str(getattr(recording, "processing_id")),
-        "condition_label": str(getattr(cell, "condition_label")),
+        "recording_id": recording_id,
+        "condition_label": condition,
         "protocol_fingerprint": plan.protocol_fingerprint,
     }
+    # A carried export keeps its producing run and project settings fingerprint.
+    # The new plan pins that entire, previously reconciled receipt for this cell.
+    if not retained or receipt.get("fingerprint") != retained:
+        expected_identity.update(run_id=plan.run_id, processing_fingerprint=plan.processing_fingerprint)
+    elif not receipt.get("run_id") or not receipt.get("processing_fingerprint"):
+        reasons.append("retained_export_origin_missing")
     if getattr(cell, "canonical_condition_id", None) is not None:
         expected_identity.update({
             "canonical_condition_id": cell.canonical_condition_id,
@@ -407,6 +413,18 @@ def _validate_written_receipt(
     for key, expected in expected_identity.items():
         if str(receipt.get(key) or "") != str(expected):
             reasons.append(f"{key}_mismatch")
+    return reasons
+
+
+def _validate_written_receipt(
+    *,
+    plan: ExpectedRecordingConditionPlan,
+    recording: object,
+    cell: object,
+    receipt: Mapping[str, Any],
+    validate_artifacts: bool = True,
+) -> tuple[str, ...]:
+    reasons = _export_identity_problems(plan=plan, recording=recording, cell=cell, receipt=receipt)
     from Main_App.io.hardware_identity import geometry_matches_configuration
 
     if not geometry_matches_configuration(receipt.get("geometry"), plan.geometry_identity):
@@ -428,7 +446,11 @@ def _validate_written_receipt(
             reasons.append("workbook_schema_not_validated")
         if validate_artifacts:
             recorded_artifact = workbook_write.get("artifact")
-            actual_artifact = _artifact_identity(expected_path)
+            try:
+                actual_artifact = _artifact_identity(expected_path)
+            except OSError:
+                actual_artifact = None
+                reasons.append("workbook_artifact_unreadable")
             if not isinstance(recorded_artifact, Mapping) or actual_artifact != dict(
                 recorded_artifact
             ):
@@ -550,15 +572,12 @@ def _reconcile_cell(
     if receipt.get("status") == "unavailable":
         reason = str(receipt.get("reason") or "").strip()
         evidence = receipt.get("evidence")
-        if (
-            not _receipt_is_current(receipt)
-            or not reason
-            or not isinstance(evidence, Mapping)
-        ):
+        problems = _export_identity_problems(plan=plan, recording=recording, cell=cell, receipt=receipt)
+        if problems or not reason or not isinstance(evidence, Mapping):
             return _blocked_cell(
                 recording=recording,
                 cell=cell,
-                reasons=("unavailable_receipt_invalid",),
+                reasons=("unavailable_receipt_invalid", *problems),
                 receipt=receipt,
             )
         return RecordingConditionCellOutcome(

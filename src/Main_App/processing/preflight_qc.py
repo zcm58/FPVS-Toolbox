@@ -77,6 +77,8 @@ from Main_App.workers.mp_env import compute_dynamic_worker_ceiling
 from Main_App.workers.processing_resource_budget import plain_metadata_bytes
 from Main_App.workers.review_resource_budget import (
     ReviewMemoryProbeError,
+    ReviewGeometry,
+    bdf_reader_peak_bytes,
     estimate_review_memory,
     memory_admission_fits,
     probe_memory_snapshot,
@@ -374,7 +376,9 @@ class PreflightConditionCropObservation:
     group_id: str | None
     condition_label: str
     condition_id: int
-    repetition_count: int
+    # A completed spectrum establishes that the condition exists; its header has
+    # no trigger count. Zero is reserved for a confirmed absent raw condition.
+    repetition_count: int | None
     oddball_cycles: int | None
     duration_s: float | None
     issue: str | None
@@ -458,7 +462,7 @@ class PreflightConditionCropGridAudit:
             observation
             for observation in self.observations
             if not observation.already_excluded
-            and observation.repetition_count > 0
+            and observation.repetition_count != 0
             and (
                 observation.issue is not None
                 or (
@@ -506,7 +510,8 @@ class PreflightConditionCropGridAudit:
         active = tuple(
             observation
             for observation in self.observations
-            if observation.participant_pair_key not in excluded_pairs
+            if not observation.already_excluded
+            and observation.participant_pair_key not in excluded_pairs
             and (
                 observation.recording_pair_key is None
                 or observation.recording_pair_key not in excluded_recording_pairs
@@ -576,7 +581,7 @@ def build_preflight_condition_crop_grid_audit(
                 excluded_recording_pair_keys=excluded_recording_pair_keys,
             )
         )
-    current_pairs = {observation.pair_key for observation in observations}
+    scanned_recordings = {result.identity_id.casefold() for result in scan.results}
     for project_observation in scan.project_grid_observations:
         if (
             project_observation.participant_id.casefold()
@@ -586,32 +591,24 @@ def build_preflight_condition_crop_grid_audit(
                 and project_observation.recording_id.casefold()
                 in excluded_recording_keys
             )
-            or project_observation.pair_key in current_pairs
+            # A currently inspected recording owns all of its condition evidence.
+            # A missing/invalid new plan cannot be filled from its stale workbook.
+            or project_observation.pair_key[0] in scanned_recordings
         ):
             continue
         observations.append(
-            PreflightConditionCropObservation(
-                path=project_observation.path,
-                participant_id=project_observation.participant_id,
-                group_id=project_observation.group_id,
-                condition_label=project_observation.condition_label,
-                condition_id=project_observation.condition_id,
-                repetition_count=project_observation.repetition_count,
-                oddball_cycles=project_observation.oddball_cycles,
-                duration_s=project_observation.duration_s,
-                issue=project_observation.issue,
+            replace(
+                project_observation,
+                repetition_count=None,
                 already_excluded=(
-                    project_observation.participant_pair_key in excluded_pair_keys
+                    project_observation.already_excluded
+                    or project_observation.participant_pair_key in excluded_pair_keys
                     or (
                         project_observation.recording_pair_key is not None
                         and project_observation.recording_pair_key
                         in excluded_recording_pair_keys
                     )
                 ),
-                recording_id=project_observation.recording_id,
-                session_id=project_observation.session_id,
-                session_label=project_observation.session_label,
-                visit_index=project_observation.visit_index,
             )
         )
     observations.sort(
@@ -1606,7 +1603,7 @@ def _aggregate_condition_spectral_qc(
 
 
 def preflight_worker_count(total: int, max_workers: int | None) -> int:
-    """Share the CPU/request ceiling; live memory admission sizes actual work."""
+    """Use the shared RAM-tier or requested ceiling for independent recordings."""
     if total <= 1:
         return 1
     try:
@@ -1619,19 +1616,45 @@ def preflight_worker_count(total: int, max_workers: int | None) -> int:
 _PREFLIGHT_THREAD_BYTES = 64 * 1024**2
 
 
+def _condition_signal_array_bytes(geometry: ReviewGeometry, interval: int) -> int:
+    """Bound one locked occurrence on the lazy, spectral-off BioSemi64 route."""
+    samples = min(geometry.source_n_times, interval)
+    channels = geometry.scored_channels
+    row = 8 * samples
+    occurrence = channels * row
+    window = min(samples, max(1, round(PREFLIGHT_QC_TRANSIENT_WINDOW_DURATION_S * geometry.source_rate_hz)))
+    hop = min(window, max(1, round(PREFLIGHT_QC_TRANSIENT_WINDOW_HOP_S * geometry.source_rate_hz)))
+    windows = 1 + (samples - window + hop - 1) // hop
+    block = 8 * channels * window
+
+    # Keep the complete BDF reader bound for the initial import/open/events.
+    # A (possibly disk-backed) full occurrence may already be resident during
+    # a lazy get_data call. Whole-record chunks do not survive in this phase.
+    full_reader = bdf_reader_peak_bytes(geometry)
+    window_reader = bdf_reader_peak_bytes(replace(geometry, source_n_times=samples))
+    reading = max(full_reader, occurrence + window_reader)
+
+    # The original occurrence, every advanced-indexed channel block (including
+    # the tail-aligned overlap), and the unique assembled occurrence may coexist.
+    # Reserve six more occurrence arrays for normalization, donor gathers,
+    # nonfinite NumPy reductions and masks. Equality checks can make two indexed
+    # block copies plus temporary masks. One-dimensional donor/row temporaries
+    # and the native small-array metric path receive a separate allowance.
+    scoring = 8 * occurrence + windows * block + 8 * block + 64 * row + 64 * 1024**2
+    return max(reading, scoring)
+
+
 def _preflight_memory_credit(
     info: RawFileInfo, settings: Mapping[str, Any], *, signal_context: bool,
     event_map: Mapping[str, int] | None = None,
 ) -> int | None:
     """Reserve a complete file, including retained evidence, without EEG reads.
 
-    The 256-MiB condition buffer is not a whole-file bound: aggregate channel
-    metrics can touch a full disk-backed condition and spectral peak evidence
-    can grow with every eligible bin. Use the full recording as the interval
-    upper bound, the existing native array/decoder bound, plus conservative
-    event/marker and per-bin Python/evidence allowances. This intentionally
-    over-reserves; an unsupported or over-host estimate runs alone instead of
-    declaring the native chunked calculation impossible.
+    Aggregate channel metrics can touch an entire disk-backed condition.
+    Marker and window evidence are bounded from the full recording, and
+    enabled spectral evidence is reserved for all eligible bins. On characterized
+    BioSemi64 signal-only scans, raw access is lazy and each scoring call owns
+    one protocol-locked occurrence. Other routes retain the full array estimate.
     """
     try:
         metadata = 16 * plain_metadata_bytes((settings, event_map))
@@ -1650,9 +1673,17 @@ def _preflight_memory_credit(
             return None
         # Preflight scores source-rate data, regardless of downstream resampling.
         geometry = replace(geometry, target_rate_hz=geometry.source_rate_hz)
-        arrays = estimate_review_memory(
-            geometry, filter_enabled=False, notch_enabled=False, raw_qc_enabled=True,
-        ).healthy_bytes
+        spectral = normalize_raw_spectral_screening_settings(settings.get("raw_spectral_screening")).enabled
+        if (not spectral and settings.get("hardware_platform") == "biosemi"
+                and settings.get("hardware_confirmed") is True
+                and settings.get("electrode_montage") == "biosemi64"
+                and geometry.retained_channels == geometry.scored_channels + 1
+                and 0 < geometry.scored_channels <= 64 and np.__version__ == "2.3.1"):
+            arrays = _condition_signal_array_bytes(geometry, interval)
+        else:
+            arrays = estimate_review_memory(
+                geometry, filter_enabled=False, notch_enabled=False, raw_qc_enabled=True,
+            ).healthy_bytes
         samples, channels = geometry.source_n_times, geometry.scored_channels
         # Every sample may be an event/marker. Retain array, plan, and serialized
         # evidence allowance, rather than assuming a typical sparse trigger train.
@@ -1664,7 +1695,7 @@ def _preflight_memory_credit(
         hop = max(1, int(round(PREFLIGHT_QC_TRANSIENT_WINDOW_HOP_S * geometry.source_rate_hz)))
         windows = 2 * samples // hop + 2 * occurrences
         evidence += 4096 * channels * windows
-        if normalize_raw_spectral_screening_settings(settings.get("raw_spectral_screening")).enabled:
+        if spectral:
             _lower, upper = resolve_preflight_spectral_bounds(settings, source_sfreq=geometry.source_rate_hz)
             bins = occurrences * min(interval // 2 + 1,
                                      math.ceil(interval * upper / geometry.source_rate_hz) + 32)
@@ -2470,24 +2501,25 @@ def _scan_preprocessing_qc_parallel(
     should_cancel: CancelCallback | None,
 ) -> PreflightQcScan:
     total = len(pending_infos)
-    submitted = 0
+    remaining = dict(enumerate(pending_infos, start=1))
     completed = 0
     indexed_results: dict[int, PreflightQcFileResult | None] = {}
     futures: dict[Future[PreflightQcFileResult | None], tuple[int, RawFileInfo, int, bool]] = {}
     credits: dict[int, int | None] = {}
     waiting = False
 
-    def _submit_next(executor: ThreadPoolExecutor) -> None:
-        nonlocal submitted, waiting
-        while submitted < total and len(futures) < max_workers:
+    signal_context = project_root is not None and _has_condition_context(qc_settings, event_map)
+
+    def _next_admissible() -> tuple[int, RawFileInfo, int, bool] | None:
+        if any(item[3] for item in futures.values()):
+            return None
+        active = {item[0]: item[2] for item in futures.values()}
+        for position, (index, info) in enumerate(remaining.items()):
             if should_cancel and should_cancel():
-                return
-            index = submitted + 1
-            info = pending_infos[submitted]
+                return None
             if index not in credits:
                 credits[index] = _preflight_memory_credit(
-                    info, qc_settings, signal_context=bool(project_root is not None and _has_condition_context(qc_settings, event_map)),
-                    event_map=event_map,
+                    info, qc_settings, signal_context=signal_context, event_map=event_map,
                 )
             try:
                 snapshot = probe_memory_snapshot()
@@ -2501,23 +2533,35 @@ def _scan_preprocessing_qc_parallel(
             credit = credits[index]
             exclusive = credit is None or credit + margin > snapshot.total_bytes
             if exclusive:
+                if position or futures:
+                    break  # Drain every earlier recording before an exclusive reader.
                 credit = _PREFLIGHT_THREAD_BYTES
             if credit + margin > snapshot.total_bytes:
                 raise ReviewMemoryProbeError("Preflight cannot fit its minimum scheduling reserve within host physical memory.")
-            active = {item[0]: item[2] for item in futures.values()}
-            fits = not ((exclusive and futures) or any(item[3] for item in futures.values()))
             # Threads share the parent. Its USS includes unrelated allocations,
             # so retain full active credits and never add back parent memory.
-            fits = fits and memory_admission_fits(
+            if memory_admission_fits(
                 snapshot, active_credits=active, active_owned={}, idle_owned=(),
                 worker_count=len(futures), candidate_credit=credit, worker_floor_bytes=0,
-            )
-            if not fits:
+            ):
+                return index, info, credit, exclusive
+            if exclusive:
+                break
+        return None
+
+    def _submit_next(executor: ThreadPoolExecutor) -> None:
+        nonlocal waiting
+        while remaining and len(futures) < max_workers:
+            candidate = _next_admissible()
+            if candidate is None:
+                if should_cancel and should_cancel():
+                    return
                 if not waiting and progress:
                     progress("Waiting for preflight memory headroom", completed, total)
                 waiting = True
                 return
             waiting = False
+            index, info, credit, exclusive = candidate
             file_path = Path(info.path)
             if progress:
                 progress(f"Planning {file_path.name}", completed, total)
@@ -2543,14 +2587,14 @@ def _scan_preprocessing_qc_parallel(
                 credit,
                 exclusive,
             )
-            submitted += 1
+            del remaining[index]
 
     with ThreadPoolExecutor(
         max_workers=max_workers,
         thread_name_prefix="fpvs_preflight_qc",
     ) as executor:
         _submit_next(executor)
-        while futures or submitted < total:
+        while futures or remaining:
             if should_cancel and should_cancel():
                 for future in futures:
                     future.cancel()
@@ -2652,11 +2696,11 @@ def scan_preprocessing_qc(
         else None
     )
     resolved_project_root = Path(project_root) if project_root is not None else None
-    io_semaphore = threading.BoundedSemaphore(PREFLIGHT_QC_MAX_IO_READERS)
-    spectral_semaphore = threading.BoundedSemaphore(
-        PREFLIGHT_QC_MAX_SPECTRAL_WORKERS
-    )
     worker_count = preflight_worker_count(total, max_workers)
+    # Each admitted file owns its reader and spectral buffers. Its complete
+    # memory reservation includes both stages, even when all files overlap.
+    io_semaphore = threading.BoundedSemaphore(worker_count)
+    spectral_semaphore = threading.BoundedSemaphore(worker_count)
     if worker_count <= 1 and not (resolved_project_root is not None and _has_condition_context(qc_settings, resolved_event_map)):
         scan = _scan_preprocessing_qc_serial(
             pending_infos,

@@ -396,22 +396,28 @@ def read_spectral_sheet_selected_columns(
     if sheet_name not in payload.columns:
         raise SpectralDataError(f"Spectral companion has no sheet named {sheet_name!r}.")
     columns = payload.columns[sheet_name]
-    positions = {column: index for index, column in enumerate(columns)}
     requested = _xlsx._unique_requested_columns(required_columns)
-    missing = [column for column in requested if column not in positions]
-    if require_all and missing:
-        raise _xlsx.MissingXlsxColumnsError(sheet_name, missing)
-    if included_electrodes_upper is not None and electrode_column != "Electrode":
-        raise _xlsx.MissingXlsxColumnsError(sheet_name, [electrode_column])
     rows = payload.electrodes[sheet_name]
-    mask = slice(None) if included_electrodes_upper is None else np.asarray([
-        str(label).upper().strip() in included_electrodes_upper for label in rows
-    ])
-    needs_values = any(column != "Electrode" and column in positions for column in requested)
-    values = _sheet_values(workbook, payload, sheet_name) if needs_values else None
-    data = {column: (rows[mask].copy() if column == "Electrode" else values[mask, positions[column] - 1].copy())
-            for column in requested if column in positions}
-    frame = pd.DataFrame(data)
+    if included_electrodes_upper is None and tuple(requested) == columns:
+        # Detach the complete float64 block once and keep each column contiguous.
+        values = _sheet_values(workbook, payload, sheet_name)
+        frame = pd.DataFrame(values.copy(order="F"), columns=columns[1:], copy=False)
+        frame.insert(0, "Electrode", rows)
+    else:
+        positions = {column: index for index, column in enumerate(columns)}
+        missing = [column for column in requested if column not in positions]
+        if require_all and missing:
+            raise _xlsx.MissingXlsxColumnsError(sheet_name, missing)
+        if included_electrodes_upper is not None and electrode_column != "Electrode":
+            raise _xlsx.MissingXlsxColumnsError(sheet_name, [electrode_column])
+        mask = slice(None) if included_electrodes_upper is None else np.asarray([
+            str(label).upper().strip() in included_electrodes_upper for label in rows
+        ])
+        needs_values = any(column != "Electrode" and column in positions for column in requested)
+        values = _sheet_values(workbook, payload, sheet_name) if needs_values else None
+        data = {column: (rows[mask].copy() if column == "Electrode" else values[mask, positions[column] - 1].copy())
+                for column in requested if column in positions}
+        frame = pd.DataFrame(data)
     frame.attrs["spectral_metadata"] = deepcopy(payload.metadata)
     _xlsx._add_timing_detail(timing_details, "spectral_companion", started)
     return frame

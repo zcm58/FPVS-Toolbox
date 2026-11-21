@@ -48,12 +48,18 @@ def _json_value(value):
 def build_condition_interpolation_run_snapshot(settings, event_map, plan, save_folder) -> dict:
     """Capture plain reviewed run inputs without doing GUI-thread file I/O."""
     records = []
+    run_paths = set(plan.run_files)
     for state in plan.states:
         info = _json_value(asdict(state.info))
-        records.append({
+        record = {
             "info": info, "processing_id": state.processing_id,
             "expected_outputs": [str(path) for path in state.expected_outputs],
-        })
+        }
+        if state.info.path not in run_paths:
+            review = plan.recording_settings.get(state.processing_id, {}).get("review")
+            if review:
+                record["retained_review"] = dict(review)
+        records.append(record)
     return {
         "version": SNAPSHOT_VERSION,
         "settings": _json_value(settings), "event_map": dict(event_map),
@@ -69,12 +75,28 @@ def persist_condition_interpolation_run_snapshot(project_root, snapshot) -> None
     payload["project_root"] = str(root)
     payload["project_processing_identity"] = project_processing_identity(root)
     payload["save_folder"] = str(Path(payload["save_folder"]).resolve())
+    previous_settings = {}
+    if any(record.get("retained_review") for record in payload["records"]):
+        from Main_App.processing.recording_settings_receipt import restore_retained_reviews
+
+        try:
+            previous = json.loads(_snapshot_path(root).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            previous = {}
+        if isinstance(previous, Mapping) and previous.get("version") == SNAPSHOT_VERSION and previous.get("project_root") == str(root):
+            previous_settings = previous.get("settings", {})
     for record in payload["records"]:
         source = Path(record["info"]["path"]).resolve()
         stat = source.stat()
         record["raw_file_identity"] = {
             "raw_file": str(source), "raw_size": stat.st_size, "raw_mtime_ns": stat.st_mtime_ns,
         }
+        if record.get("retained_review"):
+            missing = restore_retained_reviews(
+                payload["settings"], previous_settings if isinstance(previous_settings, Mapping) else {}, record,
+            )
+            if missing:
+                record["missing_retained_review_inputs"] = missing
     # Fail before publishing if any transient value cannot be stored losslessly.
     json.dumps(payload, allow_nan=False)
     atomic_json(_snapshot_path(root), payload)
@@ -129,6 +151,10 @@ def _run_recording(root, snapshot, record, requests, *, log_func):
 
     settings = deepcopy(snapshot["settings"])
     identity = record["processing_id"]
+    if record.get("missing_retained_review_inputs"):
+        raise ConditionInterpolationProcessingRequired(
+            f"Original reviewed inputs for {identity} could not be verified. Reprocess this recording before repairing its conditions."
+        )
     info = record["info"]
     source = str(Path(info["path"]).resolve())
     settings["condition_electrode_interpolation_requests"] = requests
@@ -276,9 +302,19 @@ def execute_pending_condition_interpolations(project_root, *, log_func=None) -> 
             replace(cell, expected_workbook=str(result_manifest_path(cell.expected_workbook)))
             if cell.condition_label in conditions else cell for cell in recording.cells
         ))
-        expected = replace(expected, recordings=tuple(
-            updated_recording if row is recording else row for row in expected.recordings
-        ))
+        retained = dict(expected.retained_export_fingerprints)
+        if recording.processing_id in retained:
+            # Repaired conditions require a new receipt from this run. Other
+            # conditions retain their original, independently verified exports.
+            retained[recording.processing_id] = {
+                label: digest for label, digest in retained[recording.processing_id].items()
+                if label not in conditions
+            }
+        expected = replace(
+            expected,
+            recordings=tuple(updated_recording if row is recording else row for row in expected.recordings),
+            retained_export_fingerprints=retained,
+        )
         save_expected_recording_condition_plan(root, expected)
         snapshot["settings"]["_fpvs_expected_plan_run_id"] = expected.run_id
         snapshot["settings"]["_fpvs_processing_fingerprint"] = expected.processing_fingerprint

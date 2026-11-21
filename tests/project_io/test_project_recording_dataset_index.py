@@ -107,7 +107,7 @@ def test_repeated_dataset_index_keeps_two_sessions_for_one_participant(
         excel_root,
         condition="Faces",
         group_folder="Birth Control",
-        recording_id="rec_p01_luteal",
+        recording_id="REC_P01_LUTEAL",
     )
     follicular = _workbook(
         excel_root,

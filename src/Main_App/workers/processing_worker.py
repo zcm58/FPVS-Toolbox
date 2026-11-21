@@ -4,7 +4,6 @@ import logging
 from pathlib import Path
 import time
 from typing import Any, Dict, List, Optional, Callable
-from types import SimpleNamespace
 
 from PySide6.QtCore import QObject, Signal, Slot
 
@@ -53,17 +52,14 @@ class PostProcessWorker(QObject):
 
         try:
             started_at = time.perf_counter()
-            # Ensure adapter-compatible save_folder_path (must expose .get())
             sf = self._save_folder
             folder_getter = getattr(sf, "get", None)
             if callable(folder_getter):
-                save_folder_value = str(folder_getter())  # e.g., a QLineEdit-like object already providing .get()
+                save_folder_value = str(folder_getter())
             elif sf is None:
                 save_folder_value = ""
             else:
                 save_folder_value = str(Path(sf))
-            save_folder_obj = SimpleNamespace(get=lambda value=save_folder_value: value)
-
             output_root = Path(save_folder_value).resolve() if save_folder_value else None
 
             before_snapshot = result_output_snapshot(output_root)
@@ -71,7 +67,7 @@ class PostProcessWorker(QObject):
             export_receipts: list[dict[str, Any]] = []
             ctx = LegacyCtx(
                 preprocessed_data=self._epochs or {},
-                save_folder_path=save_folder_obj,
+                save_folder_path=save_folder_value,
                 data_paths=self._data_paths,
                 settings=self._settings,
                 log=self._log,

@@ -53,11 +53,8 @@ def _normalize_save_folder(save_folder_path: Any) -> Any:
     return SimpleNamespace(get=lambda r=root: str(r))
 
 
-def _build_legacy_shim(ctx: LegacyCtx) -> Any:
-    """
-    Build minimal 'self' object expected by Legacy post_process.
-    Ensures legacy code receives a stable, data-only context.
-    """
+def _build_export_host(ctx: LegacyCtx) -> Any:
+    """Adapt the worker payload to the shared exporter's data-only interface."""
     log = ctx.log or (lambda _m: None)
 
     if isinstance(ctx.settings, dict):
@@ -78,26 +75,18 @@ def _build_legacy_shim(ctx: LegacyCtx) -> Any:
         export_receipts=ctx.export_receipts,
     )
 
-    # Exporting preprocessed FIF files is no longer supported, but legacy
-    # branches still expect these attributes to exist.
+    # Preserve the disabled-FIF contract for callers with older settings.
     settings_dict["save_preprocessed_fif"] = False
     settings_dict["save_condition_fif"] = False
     shim.save_fif_var = SimpleNamespace(get=lambda: False)
     shim.save_condition_fif = False
-    save_pref = False
-
-    # Other common knobs
-    if not hasattr(shim, "file_mode"):
-        shim.file_mode = SimpleNamespace(get=lambda: "Batch")
-    if not hasattr(shim, "file_type"):
-        shim.file_type = SimpleNamespace(set=lambda _v: None)
 
     try:
         first_data = shim.data_paths[0] if shim.data_paths else None
         logger.debug(
             "post_export_build_shim",
             extra={
-                "save_pref": save_pref,
+                "save_pref": False,
                 "save_folder": shim.save_folder_path.get(),
                 "n_labels": len(ctx.preprocessed_data or {}),
                 "first_data_path": first_data,
@@ -113,9 +102,7 @@ def _build_legacy_shim(ctx: LegacyCtx) -> Any:
 
 
 def run_post_export(ctx: LegacyCtx, labels: List[str]) -> int:
-    """
-    Execute post-processing exports through the shared migration bridge.
-    """
+    """Export the selected conditions through Main_App.exports.post_process."""
     try:
         logger.info(
             "post_export_start",
@@ -128,7 +115,7 @@ def run_post_export(ctx: LegacyCtx, labels: List[str]) -> int:
     except Exception:
         logger.debug("post_export_start_logging_failed")
 
-    shim = _build_legacy_shim(ctx)
+    shim = _build_export_host(ctx)
 
     try:
         save_root_str = shim.save_folder_path.get()

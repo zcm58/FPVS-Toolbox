@@ -75,6 +75,39 @@ def _contents(folder):
     return {path.relative_to(folder): path.read_bytes() for path in folder.rglob("*") if path.is_file()}
 
 
+def test_participant_registration_order_is_portable_across_publication_and_discovery(tmp_path):
+    root = _project(tmp_path)
+    file = root / "project.json"
+    data = json.loads(file.read_bytes())
+    data["groups"] = {key: {"label": key.title(), "raw_input_folder": str(root / key)}
+                      for key in ("first", "second")}
+    people = {"P2": {"group_id": "first"}, "P1": {"group_id": "second"}}
+    file.write_text(json.dumps({**data, "participants": people}), encoding="utf-8")
+    artifact = "l2_mne_source_psd"
+    identity = _identity(root, artifact)
+    snapshot = identity["common_inputs"]["cohort_snapshot"]
+    assert [row["id"] for row in snapshot["participants"]] == ["P1", "P2"]
+    # Previously issued identities retained the registration order.
+    snapshot["participants"].reverse()
+    historical_order = list(snapshot["participants"])
+    file.write_text(json.dumps({**data, "participants": dict(reversed(people.items()))}), encoding="utf-8")
+    target = canonical_artifact_path(root, artifact)
+    with publication.stage_source_bundle(root, target, artifact) as staged:
+        result = staged.publish(_write_bundle(staged.output_dir, artifact), identity=identity)
+    receipt = target / publication.SOURCE_BUNDLE_RECEIPT
+    signed = receipt.read_bytes()
+    assert json.loads(signed)["common_inputs"]["cohort_snapshot"]["participants"] == historical_order
+    assert publication.current_source_manifest_paths(root) == (result.manifest_path,)
+    assert receipt.read_bytes() == signed
+    for invalid in (historical_order[:-1], historical_order + historical_order[:1],
+                    [{"id": "p2", "group_id": "first"}, historical_order[1]],
+                    [{"id": "P2", "group_id": "second"}, historical_order[1]]):
+        with pytest.raises(ValueError, match="Project groups, condition availability, or QC exclusions changed"):
+            publication._validate_cohort_snapshot(root, {"common_inputs": {"cohort_snapshot": {**snapshot, "participants": invalid}}})
+    file.write_text(json.dumps({**data, "groups":dict(reversed(data["groups"].items())), "participants":people}), encoding="utf-8")
+    assert publication.current_source_manifest_paths(root) == ()
+
+
 def test_publish_rebases_all_paths_and_validates_complete_receipt(tmp_path):
     root = _project(tmp_path)
     result = _publish(root)

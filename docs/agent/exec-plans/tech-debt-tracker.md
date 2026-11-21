@@ -1,7 +1,6 @@
 # Technical Debt Tracker
 
-No implementation-ready items are currently tracked. This is not a claim that
-the application has no debt; the bounded 2026-10-18 cleanup is complete.
+The five backend performance items are implemented. The [performance measurements](active/bitwise-pipeline-performance.md#dataset-indexing-and-spectral-exports) record their scope and parity checks.
 
 Large QC, Stats, source and worker modules remain review candidates. Size,
 broad-exception counts and absence of direct calls do not prove a bug or dead

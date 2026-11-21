@@ -24,6 +24,7 @@ from Main_App.io import (
     write_spectral_companion,
     xlsx_read_cache_scope,
 )
+from Main_App.io.result_manifest import write_result_manifest
 
 FFT = "FullFFT Amplitude (uV)"
 SNR = "FullSNR"
@@ -80,6 +81,40 @@ def test_shared_reader_routes_exact_columns_and_electrode_filter(tmp_path: Path)
         read_xlsx_sheet_selected_columns(path, sheet_name=FFT, required_columns=["missing"])
     empty = read_xlsx_sheet_selected_columns(path, sheet_name=FFT, required_columns=["missing"], require_all=False)
     assert empty.empty and empty.columns.tolist() == []
+
+
+@pytest.mark.parametrize("order", ["C", "F"])
+def test_native_full_sheet_preserves_bits_column_layout_and_cache_isolation(tmp_path, order):
+    bits = np.array([
+        [0x0000000000000001, 0x8000000000000000, 0x7FF80000000000AB],
+        [0x7FF0000000000000, 0xFFF0000000000000, 0x0000000000000000],
+    ], dtype=np.uint64, order=order)
+    labels = ["B", "A", "C"]
+    electrodes = ["PO8", "Fp1"]
+    values = bits.view(np.float64)
+    source = pd.DataFrame(values, columns=labels, copy=False)
+    source.insert(0, "Electrode", electrodes)
+    metadata = {"details": {"units": ["uV"]}}
+    path = tmp_path / "recording.fpvs"
+    descriptor = write_spectral_companion(path, {FFT: source}, metadata=metadata)
+    write_result_manifest(path, sheet_names=[FFT], spectral_companion=descriptor, condition_companion=None)
+
+    # The original reader assembled contiguous columns from the verified array.
+    expected = pd.DataFrame({"Electrode": electrodes, **{
+        name: values[:, index].copy() for index, name in enumerate(labels)
+    }})
+    with xlsx_read_cache_scope():
+        first = read_spectral_sheet(path)
+        first.iloc[0, 0] = "mutated label"
+        first.iloc[0, 1] = 99.0
+        first.attrs["spectral_metadata"]["details"]["units"].append("mutated metadata")
+        reread = read_spectral_sheet(path)
+    pd.testing.assert_frame_equal(reread, expected, check_exact=True)
+    assert reread.attrs["spectral_metadata"] == metadata
+    for index, column in enumerate(labels):
+        actual = reread[column].to_numpy()
+        np.testing.assert_array_equal(actual.view(np.uint64), bits[:, index])
+        assert actual.strides == expected[column].to_numpy().strides
 
 
 def test_legacy_workbook_without_manifest_uses_physical_sheet(tmp_path: Path) -> None:
@@ -360,6 +395,8 @@ def test_metadata_and_selected_reads_load_only_requested_dense_sheet(tmp_path, m
         assert spectral_companion_identity(path) == descriptor
         assert validate_spectral_companion(path, descriptor) == descriptor
         assert read_xlsx_sheet_header(path, sheet_name=FFT) == _frames()[FFT].columns.tolist()
+        electrodes = read_xlsx_sheet_selected_columns(path, sheet_name=FFT, required_columns=["Electrode"])
+        assert electrodes["Electrode"].tolist() == ["Fp1", "O1", "PO8"]
         assert loaded == []
         selected = read_xlsx_sheet_selected_columns(path, sheet_name=FFT, required_columns=["1.0000_Hz"])
         np.testing.assert_array_equal(

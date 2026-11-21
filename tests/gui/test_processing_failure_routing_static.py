@@ -16,6 +16,7 @@ from unittest.mock import Mock
 import pytest
 
 from Main_App.gui.condition_input_model import validate_condition_rows
+from Main_App.gui.processing_host_compat import reset_compatibility_host_data
 from Main_App.gui.run_outcome_model import summarize_run
 from Main_App.io.file_filters import EEG_RECORDING_FILTER, is_eeg_recording_file
 
@@ -110,6 +111,7 @@ def test_save_and_leave_waits_for_work_started_during_settings_save(monkeypatch,
 
 
 def _load_function(relative_path, name, namespace, *, class_name=None, outer_function=None):
+    namespace.setdefault("reset_compatibility_host_data", reset_compatibility_host_data)
     namespace.setdefault("present_last_run", Mock())
     namespace.setdefault("refresh_processing_history", Mock())
     namespace.setdefault("remember_saved_setup", Mock())
@@ -423,6 +425,72 @@ def test_suppressed_completion_dialogs_do_not_label_success_as_cancelled():
     )
     finalize(host, True)
     presenter.assert_called_once_with(host, success=True, cancelled=False)
+
+
+def test_old_host_widget_updates_surround_the_data_reset():
+    host = SimpleNamespace(
+        preprocessed_data={"Faces": object()}, _processing_summary_reported=True,
+        log=Mock(), _set_controls_enabled=Mock(), progress_bar=Mock(),
+    )
+    observed = []
+    host.remaining_time_var = SimpleNamespace(
+        set=lambda value: observed.append(("time", value, list(host.preprocessed_data))),
+    )
+    host.log_text = Mock()
+
+    def ready_widget_exists():
+        observed.append(("ready", list(host.preprocessed_data)))
+        return True
+
+    host.log_text.winfo_exists.side_effect = ready_widget_exists
+    finalize = _load_function(
+        "src/Main_App/gui/processing_completion.py", "finalize_processing_host_state",
+        {"user_messages": Mock(), "gc": gc, "datetime": datetime},
+    )
+    finalize(host, True)
+    assert observed == [("time", "", ["Faces"]), ("ready", [])]
+    assert [call.kwargs for call in host.log_text.configure.call_args_list] == [
+        {"state": "normal"}, {"state": "disabled"},
+    ]
+    assert host.log_text.insert.call_args.args[1].endswith("[GUI]: Ready for next file selection...\n")
+    host.log_text.see.assert_called_once_with("end")
+
+
+def test_compatibility_timers_and_fields_are_lazy_and_per_host(monkeypatch):
+    from Main_App.gui.processing_host_compat import ProcessingHostCompatibility
+
+    first, second = ProcessingHostCompatibility(), ProcessingHostCompatibility()
+    assert vars(first) == vars(second) == {}
+    assert first.save_fif_var.get() is False
+    assert first.file_type.set("ignored") is None
+    assert first.save_fif_var is not second.save_fif_var
+    assert first._queue_job_id is None
+    timers = []
+
+    def fake_timer(parent):
+        assert parent is first
+        timer = Mock()
+        timers.append(timer)
+        return timer
+
+    monkeypatch.setitem(sys.modules, "PySide6.QtCore", SimpleNamespace(QTimer=fake_timer))
+    callback = Mock()
+    job = first.after(20, callback)
+    timer = timers[-1]
+    assert first._after_timers == {job: timer}
+    assert "_after_timers" not in vars(second)
+    timer.setSingleShot.assert_called_once_with(True)
+    timer.start.assert_called_once_with(20)
+    timer.timeout.connect.call_args.args[0]()
+    callback.assert_called_once_with()
+    timer.deleteLater.assert_called_once_with()
+    assert first._after_timers == {}
+    job = first.after(10, callback)
+    first.after_cancel(job)
+    first.after_cancel(job)
+    timers[-1].stop.assert_called_once_with()
+    timers[-1].deleteLater.assert_called_once_with()
+    assert first._after_timers == {}
 
 
 @pytest.mark.parametrize(
@@ -1002,13 +1070,18 @@ def test_project_open_keeps_existing_strict_discovery_for_other_projects(tmp_pat
     assert manifest_path.read_bytes() == before
 
 
-def test_project_open_discovery_failure_keeps_context_and_reports_actual_cause(tmp_path):
+@pytest.mark.parametrize("custom_factory", [False, True])
+def test_project_open_discovery_failure_keeps_context_and_reports_actual_cause(tmp_path, monkeypatch, custom_factory):
+    from Main_App.gui.processing_host_compat import QtEntryAdapter
+
     project, manifest_path, _extra = _registered_open_project(tmp_path)
     project.input_folder = Path(project.input_folder)
     before = manifest_path.read_bytes()
     messages = Mock()
     loaded = Mock(side_effect=lambda host, current: setattr(host, "currentProject", current))
     error = "Processed project recording assignments are locked; P99.bdf is not registered"
+    line_edit = Mock(side_effect=lambda value: SimpleNamespace(text=lambda: value, setFocus=Mock()))
+    monkeypatch.setitem(sys.modules, "PySide6.QtWidgets", SimpleNamespace(QLineEdit=line_edit))
     namespace = {
         "_load_project": loaded,
         "_raw_paths_for_project_open": Mock(side_effect=ValueError(error)),
@@ -1017,12 +1090,25 @@ def test_project_open_discovery_failure_keeps_context_and_reports_actual_cause(t
         "project_group_context": lambda _project: SimpleNamespace(has_group_metadata=False, groups=()),
         "sync_input_folder_display": Mock(),
         "normalize_preprocessing_settings": lambda settings: settings,
-        "QLineEdit": lambda value: SimpleNamespace(text=lambda: value),
+        "QLineEdit": line_edit, "QtEntryAdapter": QtEntryAdapter,
     }
-    load = _load_function("src/Main_App/gui/project_workflows.py", "load_project", namespace)
+    workflow_path = "src/Main_App/gui/project_workflows.py"
+    load = _load_function(workflow_path, "load_project", namespace)
     host = SimpleNamespace(log=Mock(), data_paths=["stale_previous_project.bdf"])
 
-    load(host, project, lambda edit: edit)
+    if custom_factory:
+        make_adapter = Mock(side_effect=QtEntryAdapter)
+        load(host, project, make_adapter)
+        assert make_adapter.call_count == line_edit.call_count == 8
+    else:
+        # Use MainWindow's actual entry point to catch accidental eager allocation.
+        load_window = _load_function(
+            "src/Main_App/gui/main_window.py", "loadProject",
+            {"project_workflows": SimpleNamespace(load_project=load)},
+            class_name="MainWindow",
+        )
+        load_window(host, project)
+        line_edit.assert_not_called()
 
     loaded.assert_called_once_with(host, project)
     assert host.currentProject is project
@@ -1033,7 +1119,14 @@ def test_project_open_discovery_failure_keeps_context_and_reports_actual_cause(t
     assert any(error in message for message in logged)
     assert not any("no .bdf files found" in message.lower() for message in logged)
     assert host.save_folder_path.get() == str(tmp_path / "excel")
-    assert hasattr(host, "max_bad_channels_alert_entry")
+    entry = host.max_bad_channels_alert_entry
+    value = project.preprocessing.get("max_bad_chans")
+    assert entry.get() == (str(value) if value is not None else "")
+    entry.focus_set()
+    entry._edit.setFocus.assert_called_once_with()
+    assert line_edit.call_count == (8 if custom_factory else 1)
+    entry._edit.text = lambda: "updated"
+    assert entry.get() == "updated"
     namespace["sync_input_folder_display"].assert_called_once_with(host)
     assert manifest_path.read_bytes() == before
 

@@ -3,11 +3,15 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+import logging
 import os
 import sys
 from typing import Optional
 
 import psutil
+
+from Main_App.workers.linux_cgroup import cgroup_limits
 
 # Legacy ceiling for callers without live memory admission.
 
@@ -16,14 +20,42 @@ _WINDOWS_PROCESS_POOL_MAX_WORKERS = 61
 _worker_threadpool_limit = None
 
 
+def project_worker_override(
+    preprocessing: Mapping | None, options: Mapping | None = None,
+) -> int | None:
+    """Resolve the saved preprocessing limit, then the older project option."""
+    preprocessing = preprocessing or {}
+    value = next((preprocessing[key] for key in (
+        "max_parallel_workers_override", "max_parallel_workers", "max_workers",
+    ) if key in preprocessing), None)
+    legacy = (options or {}).get("max_workers")
+    for name, candidate in (("max_parallel_workers_override", value), ("max_workers", legacy)):
+        if candidate is None:
+            continue
+        try:
+            workers = int(candidate)
+        except (TypeError, ValueError, OverflowError):
+            logging.getLogger(__name__).warning("Invalid %s worker limit: %r", name, candidate)
+            continue
+        if workers > 0:
+            return workers
+    return None
+
+
 def compute_dynamic_worker_ceiling(
     project_max_workers: int | None = None, *, cpu_count: int | None = None,
+    total_ram_bytes: int | None = None,
 ) -> int:
-    """Bound memory-admitted EEG stages by usable CPUs and a user ceiling.
+    """Choose a RAM-tier default or explicit override within available CPUs.
 
     This is a population ceiling, not permission to start that many jobs. Each
     caller must separately admit work against fresh RAM and commit headroom.
     """
+    # When both inputs are supplied the caller has already resolved the usable
+    # CPU and RAM envelope (also useful for a deterministic policy preview).
+    quota_cpus, quota_memory, _ = (
+        cgroup_limits() if cpu_count is None or total_ram_bytes is None else (None, None, None)
+    )
     if cpu_count is None:
         usable = []
         try:
@@ -46,13 +78,25 @@ def compute_dynamic_worker_ceiling(
             except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
                 cpu_count = 1
     available = cpu_count if type(cpu_count) is int and cpu_count > 0 else 1
+    if quota_cpus is not None:
+        available = min(available, quota_cpus)
     ceiling = max(1, available - 1)
     # ProcessPoolExecutor's documented Windows limit also bounds shared EEG
     # ceilings used by threads, so a later process stage can use the same value.
     if sys.platform == "win32":
         ceiling = min(ceiling, _WINDOWS_PROCESS_POOL_MAX_WORKERS)
     if project_max_workers is None or type(project_max_workers) is int and project_max_workers == 0:
-        return ceiling
+        if total_ram_bytes is None:
+            try:
+                total_ram_bytes = int(psutil.virtual_memory().total)
+            except (AttributeError, OSError, OverflowError, RuntimeError, TypeError, ValueError, psutil.Error):
+                return 1
+        if quota_memory is not None:
+            total_ram_bytes = min(total_ram_bytes, quota_memory)
+        if total_ram_bytes <= 0:
+            return 1
+        _, tier_cap, _ = get_ram_tier_recommendation(total_ram_bytes)
+        return min(ceiling, tier_cap) if tier_cap is not None else ceiling
     if type(project_max_workers) is not int or project_max_workers < 1:
         return 1
     return min(ceiling, project_max_workers)

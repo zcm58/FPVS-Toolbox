@@ -47,6 +47,7 @@ from Main_App.projects.preprocessing_settings import (
 from Main_App.processing.raw_channel_qc import RAW_CHANNEL_QC_EXCLUSION_REASON
 from Main_App.workers.mp_env import (
     compute_dynamic_worker_ceiling,
+    project_worker_override,
 )
 
 logger = logging.getLogger(__name__)
@@ -1215,14 +1216,18 @@ def _freeze_expected_processing_matrix(
             "Current reviewed marker plans are missing. Run pre-processing QC "
             "again before processing these files."
         )
+    project_root = Path(host.currentProject.project_root)
+    retained_inputs = {}
+    if len(plan.run_files) < len(plan.states):
+        retained_inputs["prior_ledger"] = load_ledger(project_root)
     expected_plan = build_expected_recording_condition_plan(
         processing_plan=plan,
         event_map=event_map,
         frequency_protocol=settings.get("frequency_protocol"),
         approved_event_plans=raw_event_plans,
         planning_settings=settings,
+        **retained_inputs,
     )
-    project_root = Path(host.currentProject.project_root)
     save_expected_recording_condition_plan(project_root, expected_plan)
     settings["_fpvs_expected_plan_run_id"] = expected_plan.run_id
     settings["_fpvs_expected_plan_fingerprint"] = expected_plan.fingerprint
@@ -1304,6 +1309,7 @@ def _run_additional_preflight_for_chosen_scope(
     host: Any,
     plan: ProcessingPlan,
     settings: dict[str, Any],
+    event_map: Mapping[str, int],
 ) -> bool:
     missing_infos = _additional_preflight_infos_for_chosen_scope(plan, settings)
     if not missing_infos:
@@ -1326,14 +1332,18 @@ def _run_additional_preflight_for_chosen_scope(
         )
     except (AttributeError, TypeError, RuntimeError):
         pass
-    return bool(
-        qc_workflow(
-            host,
-            missing_infos,
-            settings,
-            preserve_existing_plans=True,
+    settings["event_id_map"] = dict(event_map)
+    try:
+        return bool(
+            qc_workflow(
+                host,
+                missing_infos,
+                settings,
+                preserve_existing_plans=True,
+            )
         )
-    )
+    finally:
+        settings.pop("event_id_map", None)
 
 
 def start_processing(host: Any, *, log: logging.Logger = logger) -> None:
@@ -1382,39 +1392,10 @@ def start_processing(host: Any, *, log: logging.Logger = logger) -> None:
             normalized_preproc = normalize_preprocessing_settings(
                 getattr(host.currentProject, "preprocessing", {})
             )
-            raw_override = normalized_preproc.get("max_parallel_workers_override")
-            if raw_override is not None:
-                try:
-                    override_value = int(raw_override)
-                except (TypeError, ValueError):
-                    log.warning(
-                        "Preprocessing max_parallel_workers_override must be an integer; received %r",
-                        raw_override,
-                    )
-                else:
-                    if override_value > 0:
-                        project_max_workers = override_value
-                        override_source = "preprocessing.max_parallel_workers_override"
-
-            if project_max_workers is None:
-                raw_override = opts.get("max_workers")
-                if raw_override is not None:
-                    try:
-                        override_value = int(raw_override)
-                    except (TypeError, ValueError):
-                        log.warning(
-                            "Project max_workers override must be an integer; received %r",
-                            raw_override,
-                        )
-                    else:
-                        if override_value > 0:
-                            project_max_workers = override_value
-                            override_source = "options.max_workers"
-                        else:
-                            log.warning(
-                                "Project max_workers override must be positive; received %r",
-                                raw_override,
-                            )
+            project_max_workers = project_worker_override(normalized_preproc, opts)
+            if project_max_workers is not None:
+                override_source = ("preprocessing.max_parallel_workers_override"
+                                   if normalized_preproc["max_parallel_workers_override"] > 0 else "options.max_workers")
 
         effective_max_workers = compute_dynamic_worker_ceiling(project_max_workers)
         if (
@@ -1422,7 +1403,7 @@ def start_processing(host: Any, *, log: logging.Logger = logger) -> None:
             and effective_max_workers != project_max_workers
         ):
             log.warning(
-                "Clamped EEG worker ceiling from %s to %s using available CPUs",
+                "Clamped EEG worker ceiling from %s to %s using the process CPU and platform limits",
                 project_max_workers,
                 effective_max_workers,
             )
@@ -1451,6 +1432,7 @@ def start_processing(host: Any, *, log: logging.Logger = logger) -> None:
         if host._processing_timer.isActive():
             host._processing_timer.stop()
 
+        host._validated_unchanged_plan = None
         if not host._validate_inputs():
             _reset_failed_start(host)
             return
@@ -1458,17 +1440,15 @@ def start_processing(host: Any, *, log: logging.Logger = logger) -> None:
         settings = host.validated_params.copy()
         event_map = settings.pop("event_id_map", {})
         raw_file_infos = list(getattr(host, "_processing_raw_file_infos", []) or [])
-        plan = classify_processing_inputs(
-            host.currentProject,
-            raw_file_infos,
-            settings,
-            event_map,
-        )
-        plan = carry_forward_pre_qc_completed_states(
-            host.currentProject,
-            getattr(host, "_processing_pre_qc_plan", None),
-            plan,
-        )
+        plan = host._validated_unchanged_plan
+        host._validated_unchanged_plan = None
+        if plan is None:
+            plan = classify_processing_inputs(
+                host.currentProject, raw_file_infos, settings, event_map,
+            )
+            plan = carry_forward_pre_qc_completed_states(
+                host.currentProject, getattr(host, "_processing_pre_qc_plan", None), plan,
+            )
         chosen_plan = _choose_processing_plan(host, plan, is_single_ui=is_single_ui)
         if chosen_plan is None:
             _reset_failed_start(host)
@@ -1476,26 +1456,36 @@ def start_processing(host: Any, *, log: logging.Logger = logger) -> None:
         if not chosen_plan.run_files:
             host.log("No new or changed files need processing.", level=logging.INFO)
             _reset_failed_start(host)
+            if not is_single_ui and chosen_plan.completed_count:
+                from Main_App.processing.artifact_freshness import published_artifacts_need_rebuild
+                from Main_App.processing.frequency_domain_qc import is_frequency_domain_output_stale
+
+                root = host.currentProject.project_root
+                if is_frequency_domain_output_stale(root) or published_artifacts_need_rebuild(root):
+                    resume_post_processing(host)
             return
-        if not _run_additional_preflight_for_chosen_scope(
-            host,
-            chosen_plan,
-            settings,
-        ):
-            _reset_failed_start(host)
-            return
-        refreshed_plan = classify_processing_inputs(
-            host.currentProject,
-            raw_file_infos,
-            settings,
-            event_map,
-        )
-        refreshed_plan = carry_forward_pre_qc_completed_states(
-            host.currentProject,
-            getattr(host, "_processing_pre_qc_plan", None),
-            refreshed_plan,
-        )
-        chosen_plan = with_processing_choice(refreshed_plan, chosen_plan.choice)
+        missing = _additional_preflight_infos_for_chosen_scope(chosen_plan, settings)
+        reviewed_paths: set[Path] = set()
+        while True:
+            if missing:
+                paths = {Path(info.path).resolve() for info in missing}
+                if paths & reviewed_paths:
+                    # Repeating a review with the same unresolved input cannot
+                    # advance it. The mandatory freeze below reports the exact
+                    # missing plan before any output cleanup or worker launch.
+                    break
+                if not _run_additional_preflight_for_chosen_scope(host, chosen_plan, settings, event_map):
+                    _reset_failed_start(host)
+                    return
+                reviewed_paths.update(paths)
+            refreshed_plan = classify_processing_inputs(host.currentProject, raw_file_infos, settings, event_map)
+            refreshed_plan = carry_forward_pre_qc_completed_states(
+                host.currentProject, getattr(host, "_processing_pre_qc_plan", None), refreshed_plan,
+            )
+            chosen_plan = with_processing_choice(refreshed_plan, chosen_plan.choice)
+            missing = _additional_preflight_infos_for_chosen_scope(chosen_plan, settings)
+            if not missing:
+                break
         host.validated_params = dict(settings)
         if not _prepare_excel_outputs_for_plan(
             host,
@@ -1861,6 +1851,7 @@ def on_processing_finished(host: Any, payload: dict | None = None) -> None:
                 run_mode=str(getattr(host, "_processing_run_mode", "Batch")),
                 user_choice=str(getattr(host, "_processing_user_choice", "incremental")),
                 cancelled=cancelled,
+                validation_workers=getattr(host, "max_workers", 1),
             )
         except Exception as exc:
             logger.exception("Failed to update processing ledger.")

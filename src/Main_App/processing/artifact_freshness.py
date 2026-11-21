@@ -528,6 +528,20 @@ def mark_artifact_failed(
         return _record_from_payload(str(artifact_id), record)
 
 
+def published_artifacts_need_rebuild(project_root: str | Path) -> bool:
+    """Check products this project previously published when no raw work is pending."""
+    registry = load_artifact_freshness_registry(project_root)
+    root = Path(project_root).resolve()
+    for item in registry.artifacts.values():
+        if not item.built_from_selection_fingerprint:
+            continue
+        if item.status != ARTIFACT_STATUS_CURRENT or item.built_from_selection_fingerprint != registry.selection_fingerprint:
+            return True
+        if not _assert_project_artifact_path(root, item.path).exists():
+            return True
+    return False
+
+
 def selection_dependent_artifacts_are_current(
     project_root: str | Path,
     selection_fingerprint: str,

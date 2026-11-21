@@ -8,9 +8,6 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from openpyxl import Workbook
-from openpyxl.styles import Alignment, Font
-from openpyxl.utils import get_column_letter
 from PySide6.QtCore import QEventLoop, QObject, QThread, Signal, Slot, Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -89,7 +86,7 @@ from Main_App.processing.removed_electrode_detection import (
 )
 from Main_App.projects.grouping import project_group_context
 from Main_App.workers.qc_source_prefetch_worker import QcSourcePrefetchWorker
-from Main_App.workers.mp_env import compute_dynamic_worker_ceiling
+from Main_App.workers.mp_env import compute_dynamic_worker_ceiling, project_worker_override
 from Main_App.projects.preprocessing_settings import (
     KURTOSIS_REVIEW_DECISIONS_BY_RECORDING_KEY,
     MANUAL_REMOVED_ELECTRODES_ENABLED_KEY,
@@ -155,6 +152,7 @@ class _PreflightQcWorker(QObject):
         max_workers: int,
         project_root: Path | None = None,
         event_map: Mapping[str, int] | None = None,
+        superseded_recordings: Sequence[str] | None = None,
     ) -> None:
         super().__init__()
         self._raw_file_infos = list(raw_file_infos)
@@ -163,6 +161,10 @@ class _PreflightQcWorker(QObject):
         self._max_workers = max(1, int(max_workers))
         self._project_root = Path(project_root) if project_root is not None else None
         self._event_map = dict(event_map or {})
+        self._superseded_recordings = (
+            tuple(superseded_recordings) if superseded_recordings is not None
+            else tuple(_identity_id(info) for info in raw_file_infos)
+        )
         self._cancelled = False
 
     def cancel(self) -> None:
@@ -182,8 +184,15 @@ class _PreflightQcWorker(QObject):
             )
             if self._project_root is not None and not self._cancelled:
                 project_grid_audit = audit_project_full_fft_grids(
-                    self._project_root
+                    self._project_root,
+                    superseded_recordings=self._superseded_recordings,
                 )
+                if (
+                    (scan.frequency_protocol_fingerprint or project_grid_audit.observations)
+                    and scan.frequency_protocol_fingerprint
+                    != project_grid_audit.frequency_protocol_fingerprint
+                ):
+                    raise ValueError("The raw crop review and saved project must use the same confirmed frequency protocol. Restart processing.")
                 event_ids = {
                     str(label).strip().casefold(): int(condition_id)
                     for label, condition_id in self._event_map.items()
@@ -205,7 +214,7 @@ class _PreflightQcWorker(QObject):
                             group_id=observation.group_id,
                             condition_label=observation.condition,
                             condition_id=source_onset(observation),
-                            repetition_count=0,
+                            repetition_count=None,
                             oddball_cycles=observation.oddball_cycles,
                             duration_s=observation.duration_s,
                             issue=observation.issue,
@@ -1250,6 +1259,7 @@ def _run_scan_embedded(
     *,
     skip_paths: Sequence[Path],
     group_labels: Mapping[str, str],
+    superseded_recordings: Sequence[str] | None = None,
 ) -> PreflightQcScan | None:
     skip_keys = {_path_key(Path(path)) for path in skip_paths}
     remaining = [
@@ -1314,12 +1324,13 @@ def _run_scan_embedded(
 
     thread = QThread(host)
     worker = _PreflightQcWorker(
-        remaining,
+        raw_file_infos,
         params,
         skip_paths,
         max_workers=worker_count,
         project_root=project_root,
         event_map=event_map,
+        superseded_recordings=superseded_recordings,
     )
     worker.moveToThread(thread)
     result_holder: dict[str, Any] = {}
@@ -1497,17 +1508,8 @@ def _finish_qc_source_prefetch(host: Any, bridge: _QcSourcePrefetchBridge | None
 
 def _review_worker_ceiling(host: Any, params: Mapping[str, Any]) -> int:
     """Resolve current project settings instead of a previous GUI run's cap."""
-    try:
-        requested = int(params.get("max_parallel_workers_override", 0) or 0)
-    except (TypeError, ValueError, OverflowError):
-        requested = 0
-    if requested <= 0:
-        options = getattr(getattr(host, "currentProject", None), "options", {}) or {}
-        try:
-            requested = int(options.get("max_workers", 0) or 0)
-        except (TypeError, ValueError, OverflowError):
-            requested = 0
-    return compute_dynamic_worker_ceiling(requested if requested > 0 else None)
+    options = getattr(getattr(host, "currentProject", None), "options", None)
+    return compute_dynamic_worker_ceiling(project_worker_override(params, options))
 
 
 def _run_kurtosis_review_scan_embedded(
@@ -2239,10 +2241,13 @@ def _review_marker_occurrences(
         params,
         skip_paths=(),
         group_labels=group_labels,
+        superseded_recordings=tuple(_identity_id(info) for info in raw_file_infos),
     )
     if rescanned is None or rescanned.cancelled:
         return None
     try:
+        if rescanned.frequency_protocol_fingerprint != scan.frequency_protocol_fingerprint:
+            raise MarkerOccurrenceReviewError("The frequency protocol changed during marker review. Restart processing.")
         merged_results = merge_rescanned_results(
             scan.results,
             rescanned.results,
@@ -2251,10 +2256,7 @@ def _review_marker_occurrences(
         merged_scan = replace(
             scan,
             results=merged_results,
-            project_grid_observations=(
-                rescanned.project_grid_observations
-                or scan.project_grid_observations
-            ),
+            project_grid_observations=rescanned.project_grid_observations,
         )
         unresolved = collect_marker_occurrence_reviews(merged_scan)
     except MarkerOccurrenceReviewError as exc:
@@ -3225,7 +3227,7 @@ def _checked_condition_crop_pairs(
 ) -> set[tuple[str, str]]:
     table = getattr(host, "processing_files_table", None)
     if table is None:
-        return {candidate.pair_key for candidate in candidates if candidate.repetition_count > 0}
+        return {candidate.pair_key for candidate in candidates if candidate.repetition_count != 0}
     checked: set[tuple[str, str]] = set()
     recording_mode = _recording_aware(candidates)
     check_column = 10 if recording_mode else _CONDITION_EXCLUSION_CHECK_COLUMN
@@ -3245,7 +3247,7 @@ def _checked_condition_crop_scopes(
     table = getattr(host, "processing_files_table", None)
     if table is None:
         return set(), {
-            candidate.pair_key for candidate in candidates if candidate.repetition_count > 0
+            candidate.pair_key for candidate in candidates if candidate.repetition_count != 0
         }
     participant_pairs: set[tuple[str, str]] = set()
     recording_pairs: set[tuple[str, str]] = set()
@@ -3858,51 +3860,58 @@ def _quality_check_dir(host: Any) -> Path:
     return root / QUALITY_CHECK_FOLDER
 
 
-def _style_preflight_review_sheet(worksheet: Any) -> None:
-    center = Alignment(horizontal="center", vertical="center", wrap_text=True)
-    for row in worksheet.iter_rows():
-        for cell in row:
-            cell.alignment = center
-    for cell in worksheet[1]:
-        cell.font = Font(bold=True)
-    if worksheet.max_row >= 1 and worksheet.max_column >= 1:
-        worksheet.auto_filter.ref = worksheet.dimensions
-    worksheet.freeze_panes = "A2"
-    for column_index, column_cells in enumerate(worksheet.columns, start=1):
-        max_length = max(len(str(cell.value or "")) for cell in column_cells)
-        worksheet.column_dimensions[get_column_letter(column_index)].width = min(
-            max(max_length + 2, 12),
-            80,
-        )
-
-
 def _write_preflight_review_flags(
-    host: Any,
-    rows: Sequence[tuple[str, ...]],
+    host: Any, rows: Sequence[tuple[str, ...]], *, reviewed_files=None,
+    first_pass_count: int = 0, group_labels: Mapping[str, str] | None = None,
 ) -> Path:
-    target = _quality_check_dir(host).resolve() / _DATA_QUALITY_REVIEW_FLAGS_FILENAME
-    target.parent.mkdir(parents=True, exist_ok=True)
-
-    workbook = Workbook()
-    worksheet = workbook.active
-    worksheet.title = "Review Flags"
-    worksheet.append(
-        (
-            "Participant",
-            "Recording",
-            "Session / phase-at-visit",
-            "Visit",
-            "Group",
-            "Source File",
-            "Flagged Item",
-        )
-        if rows and len(rows[0]) == 7
-        else ("PID", "Group", "Source File", "Flagged Item")
+    from Main_App.processing.preflight_review_flags import (
+        FLAT_COLUMNS, VISIT_COLUMNS, publish_project_review_flags, write_review_sheet,
     )
-    for row in rows:
-        worksheet.append(row)
-    _style_preflight_review_sheet(worksheet)
-    workbook.save(target)
+
+    target = _quality_check_dir(host).resolve() / _DATA_QUALITY_REVIEW_FLAGS_FILENAME
+    if reviewed_files is None:
+        write_review_sheet(target, VISIT_COLUMNS if rows and len(rows[0]) == 7 else FLAT_COLUMNS, rows)
+        return target
+
+    from Main_App.processing.processing_controller import prepare_batch_file_infos
+    from Main_App.processing.processing_ledger import raw_file_metadata
+
+    project = host.currentProject
+    plan = getattr(host, "_processing_pre_qc_plan", None)
+    file_mode = getattr(host, "file_mode", None)
+    retained = None
+    if file_mode is not None and file_mode.get() == "Single":
+        try:
+            files = prepare_batch_file_infos(project)
+        except (RuntimeError, ValueError) as exc:
+            raise OSError(f"Could not discover recordings for the project review flags: {exc}") from exc
+    else:
+        files = [state.info for state in plan.states] if plan is not None else list(reviewed_files)
+        if plan is not None:
+            retained = {Path(state.info.path).resolve() for state in plan.states if not state.should_run_incremental}
+            # Choosing full processing can review the remaining files in a second pass of this click.
+            retained.update(getattr(host, "_published_review_flag_paths", ()))
+    by_path = {Path(info.path).resolve(): info for info in files}
+    refreshed = {Path(info.path).resolve(): info for info in reviewed_files}
+    by_path.update(refreshed)
+    repeated = _recording_aware(list(by_path.values()))
+    sources = []
+    for info in by_path.values():
+        prefix = [info.subject_id]
+        if repeated:
+            prefix.extend((info.recording_id or "Not registered", _session_label(info), _visit_label(info)))
+        try:
+            group_name = _group_display_name(info.group, group_labels or {})
+        except RuntimeError as exc:
+            raise OSError(str(exc)) from exc
+        prefix.extend((group_name, Path(info.path).name))
+        sources.append((tuple(prefix), raw_file_metadata(info.path)))
+    publish_project_review_flags(
+        target, Path(project.project_root), sources, set(refreshed), rows, first_pass_count,
+        VISIT_COLUMNS if repeated else FLAT_COLUMNS, retained,
+    )
+    if hasattr(host, "_published_review_flag_paths"):
+        host._published_review_flag_paths.update(refreshed)
     return target
 
 
@@ -3912,6 +3921,7 @@ def _remaining_review_rows(
     group_labels: Mapping[str, str] | None = None,
     *,
     review_items: list[SignalReviewItem] | None = None,
+    preflight_rows: list[tuple[str, ...]] | None = None,
     review_diagnostics_by_file: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> list[tuple[str, ...]]:
     labels = group_labels or {}
@@ -4340,6 +4350,8 @@ def _remaining_review_rows(
                 "Experimental raw-spectral review: Not evaluated. " + detail,
                 kind="Assessment status", title="Raw-spectral review not evaluated",
             )
+    if preflight_rows is not None:
+        preflight_rows.extend(rows)
     # These extra cues never enter the detector's exclusion/interpolation state.
     # Include them even when the original scan/kurtosis gate has no findings.
     diagnostics_by_file = review_diagnostics_by_file or {}
@@ -4399,22 +4411,30 @@ def _show_suspicious_remainder(
     *,
     signal_params: Mapping[str, Any] | None = None,
     kurtosis_scan: KurtosisReviewScan | None = None,
+    reviewed_files=None,
 ) -> bool:
     review_items: list[SignalReviewItem] = []
+    preflight_rows = []
     rows = _remaining_review_rows(
-        scan, accepted_hard_exclusions, group_labels, review_items=review_items,
+        scan, accepted_hard_exclusions, group_labels, review_items=review_items, preflight_rows=preflight_rows,
         review_diagnostics_by_file={
             str(result.path): result.review_diagnostics
             for result in getattr(kurtosis_scan, "results", ())
         },
     )
-    if not rows:
+    if not rows and reviewed_files is None:
         return True
 
     report_path: Path | None = None
     report_message = ""
     try:
-        report_path = _write_preflight_review_flags(host, rows)
+        if reviewed_files is None:
+            report_path = _write_preflight_review_flags(host, rows)
+        else:
+            report_path = _write_preflight_review_flags(
+                host, rows, reviewed_files=reviewed_files, first_pass_count=len(preflight_rows),
+                group_labels=group_labels,
+            )
         report_message = f"Review flags saved to: {report_path}"
         try:
             host.log(report_message, level=logging.DEBUG)
@@ -4423,6 +4443,13 @@ def _show_suspicious_remainder(
     except OSError as exc:
         logger.exception("Failed to save data quality review flags workbook.")
         report_message = f"Could not save review flags workbook: {exc}"
+        if not rows:
+            try:
+                host.log(report_message, level=logging.WARNING)
+            except (AttributeError, TypeError, RuntimeError):
+                pass
+    if not rows:
+        return True
 
     _begin_preflight_page(
         host,
@@ -4578,6 +4605,31 @@ def _condition_review_scan_identity(
     )
 
 
+def _extended_review_inputs(
+    raw_file_infos: Sequence[Any],
+    registered_infos: Sequence[Any],
+    prior_keys: Sequence[str],
+) -> list[Any]:
+    """Keep all raw votes from this click when an older recording needs review."""
+    selected = {_path_key(Path(info.path)) for info in raw_file_infos}
+    by_path = {
+        _path_key(Path(info.path)): info for info in (*registered_infos, *raw_file_infos)
+    }
+    by_identity: dict[str, list[str]] = {}
+    for path, info in by_path.items():
+        by_identity.setdefault(_identity_id(info).casefold(), []).append(path)
+    for value in prior_keys:
+        key = str(value).strip()
+        path = _path_key(Path(key))
+        if path not in by_path:
+            matches = by_identity.get(key.casefold(), [])
+            if not key or len(matches) != 1:
+                raise ValueError("An earlier reviewed recording is no longer registered unambiguously. Restart processing.")
+            path = matches[0]
+        selected.add(path)
+    return [info for key, info in by_path.items() if key in selected]
+
+
 def run_preprocessing_qc_workflow(
     host: Any,
     raw_file_infos: Sequence[Any],
@@ -4590,16 +4642,9 @@ def run_preprocessing_qc_workflow(
     if not raw_file_infos:
         return True
 
-    existing_event_plans: dict[str, Any] = {}
-    existing_header_exclusions: list[str] = []
     if preserve_existing_plans:
         raw_existing_plans = params.get("_fpvs_preflight_event_plans_by_file")
-        if isinstance(raw_existing_plans, Mapping):
-            existing_event_plans = {
-                str(key): dict(value)
-                for key, value in raw_existing_plans.items()
-                if isinstance(value, Mapping)
-            }
+        prior_paths = list(raw_existing_plans) if isinstance(raw_existing_plans, Mapping) else []
         raw_existing_headers = params.get(
             "_fpvs_preflight_recording_not_started_files",
             (),
@@ -4607,11 +4652,19 @@ def run_preprocessing_qc_workflow(
         if isinstance(raw_existing_headers, str):
             raw_existing_headers = (raw_existing_headers,)
         if isinstance(raw_existing_headers, Sequence):
-            existing_header_exclusions = [
-                str(value) for value in raw_existing_headers if str(value).strip()
-            ]
-    else:
-        params.pop("_fpvs_preflight_event_plans_by_file", None)
+            prior_paths.extend(str(value) for value in raw_existing_headers if str(value).strip())
+        try:
+            raw_file_infos = _extended_review_inputs(
+                raw_file_infos,
+                getattr(host, "_processing_raw_file_infos", ()),
+                prior_paths,
+            )
+        except (OSError, ValueError) as exc:
+            _show_marker_review_error(host, str(exc))
+            return False
+    # Every selected source is checked via the same guarded caches. A previous
+    # technical exclusion cannot mask a recording that has since gained data.
+    params.pop("_fpvs_preflight_event_plans_by_file", None)
     group_labels = _project_group_labels(host)
 
     _show_data_quality_notice(
@@ -4641,11 +4694,9 @@ def run_preprocessing_qc_workflow(
         group_labels,
     ):
         return False
-    params["_fpvs_preflight_recording_not_started_files"] = sorted(
-        set(existing_header_exclusions).union(_path_strings(header_only)),
-        key=str.casefold,
-    )
+    params["_fpvs_preflight_recording_not_started_files"] = sorted(_path_strings(header_only), key=str.casefold)
     header_only_keys = {_path_key(item.path) for item in header_only}
+    header_only_paths = [item.path for item in header_only]
     active_infos = [
         info
         for info in raw_file_infos
@@ -4655,9 +4706,9 @@ def run_preprocessing_qc_workflow(
     condition_review_identity = _condition_review_scan_identity(active_infos, params)
     scan = _run_scan_embedded(
         host,
-        active_infos,
+        raw_file_infos,
         params,
-        skip_paths=[item.path for item in header_only],
+        skip_paths=header_only_paths,
         group_labels=group_labels,
     )
     if scan is None or scan.cancelled:
@@ -4667,7 +4718,7 @@ def run_preprocessing_qc_workflow(
     try:
         scan = _review_marker_occurrences(
             host,
-            active_infos,
+            raw_file_infos,
             params,
             scan,
             group_labels,
@@ -4694,9 +4745,9 @@ def run_preprocessing_qc_workflow(
         ):
             scan = _run_scan_embedded(
                 host,
-                active_infos,
+                raw_file_infos,
                 params,
-                skip_paths=(),
+                skip_paths=header_only_paths,
                 group_labels=group_labels,
             )
             if scan is None or scan.cancelled:
@@ -4724,8 +4775,7 @@ def run_preprocessing_qc_workflow(
         _refresh_qc_source_prefetch_exclusions(prefetch, params)
         try:
             current_event_plans = canonical_event_plans_by_file(scan)
-            existing_event_plans.update(current_event_plans)
-            params["_fpvs_preflight_event_plans_by_file"] = existing_event_plans
+            params["_fpvs_preflight_event_plans_by_file"] = current_event_plans
             display_only_raw_qc = _raw_channel_qc_by_recording(scan)
         except (MarkerOccurrenceReviewError, ValueError) as exc:
             _show_marker_review_error(host, str(exc))
@@ -4760,6 +4810,7 @@ def run_preprocessing_qc_workflow(
             group_labels,
             signal_params=params,
             kurtosis_scan=kurtosis_scan,
+            reviewed_files=raw_file_infos,
         ):
             return False
         return True

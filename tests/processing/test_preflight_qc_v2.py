@@ -1075,7 +1075,7 @@ def test_preflight_worker_count_respects_resource_and_request_limits(
     from Main_App.workers.mp_env import compute_dynamic_worker_ceiling
 
     monkeypatch.setattr(preflight_qc, "compute_dynamic_worker_ceiling", lambda requested:
-                        compute_dynamic_worker_ceiling(requested, cpu_count=cpu_count or 0))
+                        compute_dynamic_worker_ceiling(requested, cpu_count=cpu_count or 0, total_ram_bytes=ram_gib * 1024**3))
 
     assert preflight_qc.preflight_worker_count(total, requested) == expected
 
@@ -1095,12 +1095,12 @@ def test_preflight_cpu_ceiling_does_not_probe_memory(
 
     monkeypatch.setattr(preflight_qc, "probe_memory_snapshot", lambda: pytest.fail("Admission alone probes memory."))
     monkeypatch.setattr(preflight_qc, "compute_dynamic_worker_ceiling", lambda requested:
-                        compute_dynamic_worker_ceiling(requested, cpu_count=8))
+                        compute_dynamic_worker_ceiling(requested, cpu_count=8, total_ram_bytes=128 * 1024**3))
 
     assert preflight_qc.preflight_worker_count(total, requested) == expected
 
 
-def test_preflight_delegates_cpu_request_and_auto_without_a_ram_tier(monkeypatch):
+def test_preflight_delegates_project_setting_to_shared_worker_policy(monkeypatch):
     calls = []
 
     def recorded(requested):
@@ -1124,8 +1124,8 @@ def test_v2_caps_worker_and_bdf_read_concurrency(monkeypatch, tmp_path: Path) ->
     maximum_spectra = 0
     read_calls = 0
     spectral_calls = 0
-    first_reads = threading.Barrier(2)
-    first_spectra = threading.Barrier(2)
+    first_reads = threading.Barrier(3)
+    first_spectra = threading.Barrier(3)
     original_spectral_qc = preflight_qc.evaluate_condition_spectral_qc_v2
     original_executor = preflight_qc.ThreadPoolExecutor
     executor_sizes = []
@@ -1147,12 +1147,12 @@ def test_v2_caps_worker_and_bdf_read_concurrency(monkeypatch, tmp_path: Path) ->
         with lock:
             active_reads += 1
             read_calls += 1
-            first_pair = read_calls <= 2
+            first_wave = read_calls <= 3
             maximum_reads = max(maximum_reads, active_reads)
         try:
             # Cache publication can delay arrivals beyond the synthetic read
-            # duration. Coordinate the first pair instead of relying on luck.
-            if first_pair:
+            # duration. Coordinate the first wave instead of relying on luck.
+            if first_wave:
                 first_reads.wait(timeout=5)
             time.sleep(0.03)
         finally:
@@ -1164,10 +1164,10 @@ def test_v2_caps_worker_and_bdf_read_concurrency(monkeypatch, tmp_path: Path) ->
         with lock:
             active_spectra += 1
             spectral_calls += 1
-            first_pair = spectral_calls <= 2
+            first_wave = spectral_calls <= 3
             maximum_spectra = max(maximum_spectra, active_spectra)
         try:
-            if first_pair:
+            if first_wave:
                 first_spectra.wait(timeout=5)
             time.sleep(0.03)
             return original_spectral_qc(*args, **kwargs)
@@ -1199,8 +1199,8 @@ def test_v2_caps_worker_and_bdf_read_concurrency(monkeypatch, tmp_path: Path) ->
     assert scan.cancelled is False
     assert executor_sizes == [10]
     assert preflight_qc.preflight_worker_count(20, 99) == 20
-    assert 1 < maximum_reads <= 2
-    assert 1 < maximum_spectra <= 2
+    assert 3 <= maximum_reads <= executor_sizes[0]
+    assert 3 <= maximum_spectra <= executor_sizes[0]
     assert [result.participant_id for result in scan.results] == [
         f"P{index + 1:02d}" for index in range(10)
     ]

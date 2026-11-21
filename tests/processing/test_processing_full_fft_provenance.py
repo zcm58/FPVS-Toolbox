@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+from types import SimpleNamespace
 
 import numpy as np
 from openpyxl import Workbook
@@ -33,6 +34,70 @@ from Main_App.io.eeg_geometry import (
 )
 from Main_App.processing.processing_ledger import PROCESSING_FINGERPRINT_VERSION
 from Main_App.projects import FrequencyProtocol, Project
+
+
+def test_common_text_grid_reads_all_sources_and_parses_every_changed_or_non_text_header(tmp_path, monkeypatch):
+    grid = ["Electrode", "0_Hz", "0.6_Hz", "1.2_Hz", "1.8_Hz"]
+    class Text(str):
+        pass
+
+    headers = [grid.copy(), tuple(grid), [*grid, "QC"], [Text(label) for label in grid],
+               [*grid, 7], grid.copy()]
+    paths = [f"record-{i}.fpvs" for i in range(len(headers))]
+    reads = []
+    parsed = []
+    canonical = full_fft_provenance._grid_identity
+
+    def read(path):
+        reads.append(path.name)
+        return headers[len(reads) - 1]
+
+    def parse(header, **kwargs):
+        parsed.append(header)
+        return canonical(header, **kwargs)
+
+    monkeypatch.setattr(full_fft_provenance, "_read_full_fft_header", read)
+    monkeypatch.setattr(full_fft_provenance, "_grid_identity", parse)
+    actual = full_fft_provenance._project_grid_identity(tmp_path, SimpleNamespace(source_paths=paths), oddball_frequency_hz=1.2)
+    assert actual == canonical(grid, oddball_frequency_hz=1.2)
+    assert reads == paths
+    assert [id(header) for header in parsed] == [id(headers[index]) for index in (0, 2, 3, 4)]
+
+
+@pytest.mark.parametrize("problem", ["mismatch", "missing_electrode", "duplicate", "unreadable"])
+def test_grid_reuse_preserves_first_invalid_source_and_exact_diagnostic(tmp_path, monkeypatch, problem):
+    valid = ["Electrode", "0_Hz", "0.6_Hz", "1.2_Hz"]
+    failures = {
+        "mismatch": ["Electrode", "0_Hz", "1.2_Hz"],
+        "missing_electrode": ["0_Hz", "0.6_Hz", "1.2_Hz"],
+        "duplicate": [*valid, "1.2_Hz"],
+    }
+    paths = ["first.xlsx", "same.fpvs", "bad.fpvs", "never-read.xlsx"]
+    reads = []
+
+    def read(path):
+        reads.append(path.name)
+        if path.name != "bad.fpvs":
+            return valid.copy()
+        if problem == "unreadable":
+            raise OSError("companion could not be read")
+        return failures[problem]
+
+    monkeypatch.setattr(full_fft_provenance, "_read_full_fft_header", read)
+    with pytest.raises(FullFftProvenanceError) as failure:
+        full_fft_provenance._project_grid_identity(tmp_path, SimpleNamespace(source_paths=paths), oddball_frequency_hz=1.2)
+    assert reads == paths[:3]
+    if problem == "mismatch":
+        expected = "All active processed workbooks must share one exact FullFFT grid; bad.fpvs differs from the first workbook."
+    else:
+        if problem == "unreadable":
+            reason = "companion could not be read"
+        else:
+            with pytest.raises(FullFftProvenanceError) as canonical:
+                full_fft_provenance._grid_identity(failures[problem], oddball_frequency_hz=1.2)
+            reason = str(canonical.value)
+        expected = f"Could not inspect {full_fft_provenance.FULL_FFT_SHEET_NAME!r} in bad.fpvs: {reason}"
+    assert str(failure.value) == expected
 
 
 @pytest.fixture(autouse=True)

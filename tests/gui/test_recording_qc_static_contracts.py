@@ -40,7 +40,7 @@ def test_recording_qc_surfaces_disclose_visit_identity_and_fixed_order_risk() ->
     )
 
     assert "Session / phase-at-visit" in workflow_source
-    assert "fixed order can" in workflow_source
+    assert "Fixed visit order can confound phase and visit effects." in workflow_source
     assert "Participant (all visits)" in workflow_source
     assert "Session / phase-at-visit" in removed_source
     assert "Session / phase-at-visit" in exclusion_source
@@ -101,4 +101,5 @@ def test_reprocessing_scope_extends_existing_reviewed_marker_plans() -> None:
     assert "_additional_preflight_infos_for_chosen_scope" in processing_source
     assert "preserve_existing_plans=True" in processing_source
     assert "preserve_existing_plans: bool = False" in qc_source
-    assert "existing_event_plans.update(current_event_plans)" in qc_source
+    assert "_extended_review_inputs(" in qc_source
+    assert 'params["_fpvs_preflight_event_plans_by_file"] = current_event_plans' in qc_source

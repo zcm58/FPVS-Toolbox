@@ -225,6 +225,44 @@ def test_metric_replacement_cannot_override_static_eligibility(tmp_path, monkeyp
     assert not list(tmp_path.rglob("*.fpvs"))
 
 
+@pytest.mark.parametrize("registered", [False, True])
+def test_metric_audit_labels_follow_target_and_channel_order(tmp_path, monkeypatch, registered):
+    class AuditBin(int):
+        def __str__(self):
+            return f"{int(self):07d}"
+
+    epochs = _epochs()
+    other = epochs.copy().rename_channels({"Oz": "O1"})
+    other._data[:] = np.random.default_rng(14).normal(size=other._data.shape) * 1e-6
+    epochs.add_channels([other])
+    app = _app(tmp_path, epochs)
+    results = []
+
+    def record_metrics(*args, **kwargs):
+        metric = compute_qc14_standard_metrics(*args, **kwargs)
+        if registered and len(results) % 2 == 0:
+            padded_bins = tuple(map(AuditBin, metric.candidate_bin_indices))
+            metric = replace(metric, candidate_bin_indices=padded_bins)
+        results.append(metric)
+        return metric
+
+    if registered:
+        app.settings["processing_pipeline"] = _select(monkeypatch, {"target_metrics": record_metrics})
+    else:
+        monkeypatch.setattr(export_module, "compute_qc14_standard_metrics", record_metrics)
+    export_module.post_process(app, ["Faces"])
+    anchor = app.export_receipts[0]["path"]
+    eligibility = read_condition_sheet(anchor, sheet_name="Spectral Eligibility")
+    qc = read_condition_sheet(anchor, sheet_name="Spectral Metric QC")
+    assert qc["Electrode"].tolist() == [name for name in epochs.ch_names for _ in range(len(eligibility))]
+    assert qc["Target Frequency Exact (Hz)"].tolist() == eligibility["Target Frequency Exact (Hz)"].tolist() * 2
+    for column, attribute in (
+        ("Noise Candidate FFT Bins", "candidate_bin_indices"),
+        ("Noise Retained FFT Bins", "retained_bin_indices"),
+    ):
+        assert qc[column].tolist() == [",".join(map(str, getattr(metric, attribute))) for metric in results]
+
+
 def test_selected_repetition_method_reaches_source_derivative(tmp_path, monkeypatch):
     config = _select(monkeypatch, {
         "repetition_average": lambda data: np.mean(data, axis=0, dtype=np.float64) * 2,

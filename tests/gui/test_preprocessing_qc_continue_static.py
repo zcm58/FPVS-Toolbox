@@ -18,6 +18,9 @@ WORKFLOW = (
 
 def _review_namespace():
     names = {
+        "_write_preflight_review_flags",
+        "_group_display_name",
+        "_recording_aware",
         "_show_clear_preflight_step",
         "_review_marker_occurrences",
         "_confirm_condition_crop_exclusions",
@@ -65,6 +68,30 @@ def _review_namespace():
     }
     exec(compile(ast.fix_missing_locations(module), str(WORKFLOW), "exec"), namespace)
     return namespace, calls
+
+
+def test_additional_review_in_same_click_keeps_newly_reviewed_flags(tmp_path):
+    from openpyxl import load_workbook
+    from Main_App.processing.processing_controller import RawFileInfo
+
+    namespace, _ = _review_namespace()
+    namespace.update(Path=Path, _quality_check_dir=lambda host: tmp_path,
+                     _DATA_QUALITY_REVIEW_FLAGS_FILENAME="flags.xlsx")
+    files = [RawFileInfo(tmp_path / f"{pid}.bdf", pid) for pid in ("P1", "P2")]
+    for info in files:
+        info.path.write_bytes(b"input")
+    host = SimpleNamespace(
+        currentProject=SimpleNamespace(project_root=tmp_path), _published_review_flag_paths=set(),
+        _processing_pre_qc_plan=SimpleNamespace(states=[
+            SimpleNamespace(info=info, should_run_incremental=info == files[0]) for info in files
+        ]),
+    )
+    rows = [(info.subject_id, "Single group", info.path.name, "flag") for info in files]
+    for info, row in zip(files, rows, strict=True):
+        target = namespace["_write_preflight_review_flags"](host, [row], reviewed_files=[info], first_pass_count=1)
+    book = load_workbook(target)
+    assert list(book.active.values)[1:] == rows
+    book.close()
 
 
 @pytest.mark.parametrize("step", [2, 3, 5])

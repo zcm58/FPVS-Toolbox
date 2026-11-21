@@ -13,6 +13,7 @@ from PySide6.QtWidgets import QLineEdit, QMessageBox
 from Main_App.processing.processing_controller import prepare_batch_files
 from Main_App.processing.project_processing_cache import ProjectProcessingCacheUsage
 from Main_App.gui import shell_status
+from Main_App.gui.processing_host_compat import QtEntryAdapter
 from Main_App.gui.project_drafts import confirm_project_draft_exit, remember_saved_setup
 from Main_App.gui.event_map import validated_event_map
 from Main_App.projects.project_manager import (
@@ -503,7 +504,7 @@ def _raw_paths_for_project_open(project: Any) -> list[Path]:
 def load_project(
     host: Any,
     project: Any,
-    entry_adapter_factory: Callable[[QLineEdit], Any],
+    entry_adapter_factory: Callable[[QLineEdit], Any] | None = None,
 ) -> None:
     _load_project(host, project)
     condition_editor_toggle = getattr(host, "condition_editor_toggle", None)
@@ -587,10 +588,11 @@ def load_project(
         )
         host.save_folder_path = None
 
-    # Build ephemeral entry adapters for legacy helpers that expect .get().
     def make_entry(value: str | float | int | None):
-        edit = QLineEdit(str(value) if value is not None else "")
-        return entry_adapter_factory(edit)
+        text = str(value) if value is not None else ""
+        if entry_adapter_factory is not None:
+            return entry_adapter_factory(QLineEdit(text))
+        return QtEntryAdapter(text)
 
     p = normalize_preprocessing_settings(host.currentProject.preprocessing)
     host.low_pass_entry = make_entry(p.get("low_pass"))

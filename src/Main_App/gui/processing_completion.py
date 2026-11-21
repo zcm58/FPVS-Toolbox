@@ -6,6 +6,7 @@ import gc
 from datetime import datetime
 
 from Main_App.gui import user_messages
+from Main_App.gui.processing_host_compat import reset_compatibility_host_data
 from Main_App.gui.run_outcome import present_last_run
 from Main_App.gui.processing_history_label import refresh_processing_history
 
@@ -80,21 +81,7 @@ def finalize_processing_host_state(host, success: bool) -> None:
     host._target_progress = 0.0
     host._start_time = None
     host._processed_count = 0
-    if hasattr(host, "remaining_time_var") and host.remaining_time_var is not None:
-        host.remaining_time_var.set("")
-    host.preprocessed_data = {}
-
-    log_text = getattr(host, "log_text", None)
-    winfo_exists = getattr(log_text, "winfo_exists", None)
-    if callable(winfo_exists) and winfo_exists():
-        log_text.configure(state="normal")
-        ready_msg = (
-            f"{datetime.now().strftime('%H:%M:%S.%f')[:-3]} [GUI]: "
-            "Ready for next file selection...\n"
-        )
-        log_text.insert("end", ready_msg)
-        log_text.see("end")
-        log_text.configure(state="disabled")
+    reset_compatibility_host_data(host)
 
     host.processing_thread = None
     host._queue_job_id = None

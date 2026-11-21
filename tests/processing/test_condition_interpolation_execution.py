@@ -2,7 +2,7 @@
 
 from copy import deepcopy
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 import json
 from threading import Event
 from types import SimpleNamespace
@@ -122,6 +122,44 @@ def test_missing_snapshot_requires_normal_processing_and_keeps_request(tmp_path)
     assert state_api.load_condition_interpolation_state(tmp_path)["pending"]
 
 
+def test_incremental_snapshot_preserves_only_verified_original_reviews(tmp_path):
+    from pathlib import Path
+
+    from Main_App.processing.processing_controller import RawFileInfo
+    from Main_App.processing.recording_settings_receipt import recording_settings_receipts
+
+    _raw, source, _decision, _report = _project(tmp_path)
+    old_path = Path(source["raw_file"])
+    new_path = tmp_path / "P02.bdf"
+    new_path.write_bytes(b"second recording")
+    old_info = RawFileInfo(old_path, "P01")
+    key = "_fpvs_preflight_event_plans_by_file"
+    old_review = {"reviewed_spans": [7, 23]}
+    new_review = {"reviewed_spans": [11, 27]}
+    old_settings = {key: {str(old_path): old_review}}
+    receipt = recording_settings_receipts({"settings": old_settings, "project_preprocessing": {}}, [old_info])["P01"]
+    record = {"processing_id": "P01", "info": {"path": str(old_path), "subject_id": "P01"}}
+    base = {"version": executor.SNAPSHOT_VERSION, "settings": old_settings, "event_map": {"Faces": 1},
+            "save_folder": str(tmp_path / "outputs"), "processing_fingerprint": "first", "records": [record]}
+    executor.persist_condition_interpolation_run_snapshot(tmp_path, base)
+    next_snapshot = {**base, "settings": {key: {str(new_path): new_review}}, "processing_fingerprint": "second",
+                     "records": [{**record, "retained_review": receipt["review"]},
+                                 {"processing_id": "P02", "info": {"path": str(new_path), "subject_id": "P02"}}]}
+    executor.persist_condition_interpolation_run_snapshot(tmp_path, next_snapshot)
+    restored = executor._load_snapshot(tmp_path)
+    assert restored["settings"][key] == {str(old_path): old_review, str(new_path): new_review}
+    assert "missing_retained_review_inputs" not in restored["records"][0]
+
+    base["settings"] = {key: {str(old_path): new_review}}
+    executor.persist_condition_interpolation_run_snapshot(tmp_path, base)
+    executor.persist_condition_interpolation_run_snapshot(tmp_path, next_snapshot)
+    restored = executor._load_snapshot(tmp_path)
+    assert str(old_path) not in restored["settings"][key]
+    assert restored["records"][0]["missing_retained_review_inputs"] == [key]
+    with pytest.raises(executor.ConditionInterpolationProcessingRequired, match="P01"):
+        executor._run_recording(tmp_path, restored, restored["records"][0], {}, log_func=lambda _: None)
+
+
 def test_snapshot_preserves_exact_review_inputs_and_rejects_changed_filter(tmp_path):
     _raw, source, _decision, _report = _project(tmp_path)
     settings = {"high_pass": 0.10000000000000003, "reviewed_marker_samples": [101, 1807]}
@@ -190,6 +228,7 @@ class _Plan:
     run_id: str = "run-1"
     processing_fingerprint: str = "processing-1"
     processing_fingerprint_version: str = "version-1"
+    retained_export_fingerprints: dict = field(default_factory=dict)
 
 
 @pytest.mark.parametrize("concurrent_review", [None, "new_recording", "same_recording"])
@@ -439,12 +478,12 @@ def test_recording_repair_respects_terminal_cleanup_after_successful_file(
 
 
 @pytest.mark.parametrize("override,option,expected", [
-    (12, 2, 12), (0, 2, 2), (1, 12, 1), (0, 20, 20), (0, None, 23),
+    (12, 2, 12), (0, 2, 2), (1, 12, 1), (0, 20, 20), (0, None, 16),
 ])
 def test_validation_ceiling_comes_only_from_still_bound_native_snapshot(
     tmp_path, monkeypatch, override, option, expected,
 ):
-    from Main_App.workers import cell_validation_pool, review_resource_budget
+    from Main_App.workers import cell_validation_pool, mp_env, review_resource_budget
     from Main_App.workers.review_resource_budget import ReviewMemorySnapshot
 
     _raw, source, _decision, _report = _project(tmp_path)
@@ -459,6 +498,8 @@ def test_validation_ceiling_comes_only_from_still_bound_native_snapshot(
         "records": [{"processing_id": "P01", "info": {"path": source["raw_file"]}}],
     })
     monkeypatch.setattr(cell_validation_pool, "_usable_cpus", lambda: 24)
+    monkeypatch.setattr(mp_env, "cgroup_limits", lambda: (None, None, None))
+    monkeypatch.setattr(mp_env.psutil, "virtual_memory", lambda: SimpleNamespace(total=128 * 1024**3))
     monkeypatch.setattr(review_resource_budget, "probe_memory_snapshot", lambda: ReviewMemorySnapshot(
         128 * 1024**3, 112 * 1024**3, 112 * 1024**3, True,
     ))

@@ -598,6 +598,56 @@ def test_preflight_crop_grid_audit_uses_existing_project_grids_as_reference(
     assert [row.participant_id for row in audit.review_candidates] == ["P4"]
 
 
+@pytest.mark.parametrize("retained_old,new_cycles,reference,reviewed", [
+    (65, 144, 144, ()),
+    (65, 21, 144, ("N1", "N2", "N3", "N4")),
+    (2, 21, 21, ("P1", "P2")),
+    (4, 21, None, ("N1", "N2", "N3", "N4", "P1", "P2", "P3", "P4")),
+])
+def test_incremental_crop_vote_with_65_previous_and_four_new(
+    tmp_path, retained_old, new_cycles, reference, reviewed,
+):
+    history = tuple(
+        PreflightConditionCropObservation(
+            path=tmp_path / f"P{index}_Faces_Results.fpvs",
+            participant_id=f"P{index}", group_id="control", condition_label="Faces", condition_id=1,
+            repetition_count=None, oddball_cycles=144, duration_s=120., issue=None,
+            already_excluded=index > retained_old,
+        )
+        for index in range(1, 66)
+    )
+    current = tuple(
+        _condition_crop_result(tmp_path, f"N{index}", "Faces", oddball_cycles=new_cycles)
+        for index in range(1, 5)
+    )
+    audit = build_preflight_condition_crop_grid_audit(PreflightQcScan(
+        results=current, project_grid_observations=history, oddball_frequency_hz=1.2,
+    ))
+    assert len(audit.observations) == 69 and audit.reference_total == retained_old + 4
+    assert audit.reference_oddball_cycles == reference
+    assert sorted(row.participant_id for row in audit.review_candidates) == sorted(reviewed)
+    assert all(row.repetition_count != 0 for row in audit.review_candidates)
+    assert {row.participant_id for row in audit.recommended_exclusions} == (set(reviewed) if reference else set())
+    if reference:
+        assert audit.is_compatible_with_exclusions({rid: ["Faces"] for rid in reviewed})
+    else:
+        assert audit.has_unresolved_grid_conflict and not audit.is_compatible_with_exclusions({})
+
+
+def test_failed_new_raw_never_votes_through_a_stale_completed_workbook(tmp_path):
+    failed = replace(_condition_crop_result(tmp_path, "P1", "Faces", oddball_cycles=144),
+                     condition_qc={}, load_error="Current source cannot be loaded")
+    old = PreflightConditionCropObservation(
+        path=tmp_path / "P1_Faces_Results.fpvs", participant_id="P1", group_id="control",
+        condition_label="Faces", condition_id=1, repetition_count=None, oddball_cycles=144,
+        duration_s=120., issue=None,
+    )
+    audit = build_preflight_condition_crop_grid_audit(PreflightQcScan(
+        results=(failed,), project_grid_observations=(old,), oddball_frequency_hz=1.2,
+    ))
+    assert audit.observations == () and not audit.reference_total
+
+
 def test_preflight_current_raw_grid_replaces_existing_pair_observation(
     tmp_path: Path,
 ) -> None:

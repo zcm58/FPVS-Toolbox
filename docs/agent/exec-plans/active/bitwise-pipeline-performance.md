@@ -2,6 +2,11 @@
 
 ## Status
 
+The November 2026 MCCTR qualification used the Windows source GUI and private
+study data. The [five-change benchmark](#goal-for-the-five-optimizations) and
+[incremental benchmark](#goal-for-incremental-mcctr-processing) record
+separate acceptance criteria and measured click-to-completion times.
+
 Reviewed 2026-10-18: implementation is integrated, source CI passed, and the
 exact published v3 installer passed automated native lifecycle acceptance.
 Bounded two-recording comparisons and archived prepared-FHC replay passed.
@@ -10,6 +15,185 @@ user's direction; human visible acceptance remains unclaimed. The
 [v3 ledger](v3-release-readiness.md#3-qualify-processing-and-project-compatibility)
 owns current evidence and deferrals. Dated implementation records below retain
 their original measurement scope and do not reopen completed CI/release gates.
+
+### Dataset indexing and spectral exports
+
+#### Goal for the five optimizations
+
+Measure the combined effect of the five changes below from the real GUI's
+Process button through final output publication. Verify the scientific results
+against the same project processed by the build without those five changes.
+This goal covers both cold and warm processing. The incremental 65-to-69
+participant workflow has its own acceptance criteria.
+
+- [x] Implement and individually verify all five changes in the table below.
+- [x] Compare cold GUI runs on the same internal SSD with the same worker
+  policy, inputs and scientific settings. The first pair completed in 49m 57s
+  before and 39m 28s after. All 400 native result manifests and 800 companions
+  matched byte for byte. Workbook values, QC decisions and source maps matched.
+- [x] Compare the cache-seeded warm GUI runs. Both builds reused all 71
+  preflights and all 69 preprocessed recordings, rebuilt all 69 kurtosis
+  checkpoints, and missed all 400 participant-condition source spectra for
+  each source method. Click-to-ready time fell from 35m 53s to 35m 03s
+  (50.10 seconds, 2.33%). The 400 condition exports, published group results,
+  source maps and 938 private cache checks matched between builds.
+- [x] Record click-to-ready, stage, review and CPU measurements. See below.
+- [x] Report the limit on attributing the cold saving. The two runs spent
+  15.55 s and 118.80 s waiting on measured preflight choices, and host CPU
+  utilization averaged 35.39% and 48.93%. A matched-control cold repeat
+  remains an optional follow-up for stronger attribution.
+
+| GUI stage | Cold before | Cold after | Cache-seeded before | Cache-seeded after |
+| --- | ---: | ---: | ---: | ---: |
+| Preflight | 4m 09s | 4m 02s | 18s | 15s |
+| Kurtosis preparation and review scan | 11m 20s | 10m 05s | 11m 56s | 11m 54s |
+| Recording workers | 12m 46s | 10m 20s | 1m 51s | 1m 20s |
+| Downstream workers | 20m 24s | 11m 29s | 20m 26s | 20m 14s |
+| **Process click to ready** | **49m 57s** | **39m 28s** | **35m 53s** | **35m 03s** |
+
+All four real GUI runs used the internal SSD and a 16-worker ceiling.
+Mean workstation CPU use was 35.39% before and 48.93% after on the cold pair.
+The cold preflight prompt waited 15.55s before and 118.80s after. These host
+and operator differences limit causal attribution of the observed 21.0% cold
+reduction. CPU use on the warm pair averaged 22.95% before and 23.43% after.
+
+Windows source comparisons on 2026-11-20 used synthetic inputs and the existing
+checkout at `1ed0bdf2`. Each measurement covers the named operation.
+
+| Change | Before and after | What the comparison checked |
+| --- | --- | --- |
+| Build the recording-ID lookup once per scan | 800 filenames and 200 recording IDs required 160,000 case-fold operations before and 200 after. Matching took 11.96 ms and 1.89 ms respectively. | Exact recording IDs, including mixed case. |
+| Reuse frequency and candidate-bin labels | At 64 channels and 50 targets, each of the two formatting operations runs 50 times per FFT input, down from 3,200. | Four paired exports produced identical native manifests, both NumPy companions and 3,200 ordered QC rows per export. Registered replacement methods retain their own candidate-bin text. |
+| Reuse confirmed export success | Finalization skips one recursive snapshot. With 256 existing result anchors its median time fell from 41.1 ms to under 0.01 ms over 11 paired trials. | Unconfirmed runs still distinguish new, overwritten and unchanged outputs and retain filesystem errors. |
+| Assemble complete spectral sheets from one detached matrix | A cached complete read of 64 electrodes × 8,192 bins took 36.67 ms before and 8.03 ms after over 21 paired trials. | Float bits, column layout, electrode order, metadata and isolation from caller edits. |
+| Prune ignored directories below the selected scan root | With one eligible and 24 ignored workbooks, directory enumerations fell from 56 to 4. Included folders retain both the initial listing and the later enumeration for descent. | Ordered records and diagnostics, direct file and root selections, native sibling precedence, NTFS junctions and errors in included folders. |
+
+The two skipped directory scans no longer surface errors observable only by
+those scans. Companion verification, processing receipts and scientific
+calculations retain their existing checks.
+
+#### Goal for incremental MCCTR processing
+
+Measure three real GUI workflows using the same scientific settings and the
+RAM-tier worker policy. A completed 65-recording project gains four recordings,
+a completed 69-recording project runs again without changes, and a full cold
+69-recording run supplies the reference.
+
+- [x] Verify the 65 original recordings keep their original export receipts and
+  byte-identical results when their inputs and approved decisions still apply.
+  Record every original that requires new work and why.
+- [x] Compare all 400 eligible condition results, cohort QC decisions, harmonic
+  selections and source maps to the full cold reference. Check exclusions and
+  unavailable conditions separately.
+- [x] On the unchanged repeat, measure click-to-ready time and count actual
+  recording jobs, checkpoint rebuilds and regenerated outputs.
+- [x] Qualify source-spectrum reuse for the 376 original cells per method,
+  then measure its effect in a real GUI addition with valid prior evidence.
+
+The historical cold and warm preparation keys differed on all 69 recordings.
+Reconstructing the original headers isolated the BIDS identity-check clock as
+the only differing input on MCCTR. On P1, the revised key reused the prepared
+recording in 1.57s after a 16.12s cold preparation. Its 15,841,280 float64
+samples, events, evidence and five authorized channel decisions matched the
+uncached calculation exactly. This timing covers one recording's preparation.
+In a separate real GUI launch with the worker override set to Auto, the
+128 GB workstation selected 16 and recorded 16 concurrent preflight threads.
+
+The initial 65-person GUI project published 376 condition manifests identical
+to the matching files in the full cold 69-person reference. Its group harmonic
+Z scores changed with cohort size, while the selected frequencies stayed at
+1.2, 2.4, 3.6, 4.8 and 7.2 Hz. Across L2-MNE and eLORETA, all 752 original
+participant-condition results matched the cold 69-person reference for all
+4,512 typed source vectors, frequency and channel order and rank diagnostics.
+These are direct numerical comparisons. Reuse across cohorts additionally
+requires matching the actual input waveform, numerical model and runtime.
+
+The first 65-to-69 GUI attempt dispatched exactly four recordings. Five of
+seven downstream steps succeeded. Both source producers correctly rejected an
+unchanged recording whose signed preprocessing identity belonged to the prior
+plan. Step 7 also replaced the project review workbook with the 1,625 new
+flags. Its corrected project writer reproduced all 22,619 ordered review
+rows and workbook styles from the archived 65-person and four-person reports.
+The visible review still presents only the four current recordings. All 400
+condition manifests matched the cold reference byte for byte. The QC summary
+overcounted removed electrodes for 45 retained participants because its
+fallback included kurtosis candidates the user had rejected. The ledger
+retained their original counts. The corrected source reader authenticated all
+65 retained recordings and accepted all six original P1 condition FIFs in a
+native replay. The subsequent GUI run from the original 65-person state
+tested both source methods and the corrected project workbooks.
+
+In the original build, adding four classified the 65 completed recordings as
+changed. The GUI prepared all 69 recordings for kurtosis in 602.51s and ran
+all 69 processing jobs in 83.24s, with 65 preprocessed FIF hits and four new
+files. The original and full-cold reviews returned the same 250 channel
+decisions. The six previously excluded recordings kept their no-output
+status, with different provenance for those decisions. Both source methods
+computed their results and failed the final publication check because the
+live project and the saved manifest listed identical participants in
+different orders. A native replay reproduced this failure and verified that
+the corrected check accepts a reordered list and rejects changed membership.
+Participant averaging already uses sorted ledger IDs.
+
+On the immediately following click with no new data, the original build
+again prepared all 69 recordings (599.72s), dispatched 58 recording jobs
+and then stopped at frequency-domain review. The 11 skipped recordings
+still had condition outputs, but the new plan required 63 new export
+receipts. The benchmark records time to both failure states separately from
+times to a successful, fully published project.
+
+The corrected GUI published all seven downstream products after adding the
+four recordings in 24m 02.26s. Exactly four recording workers produced the
+24 new condition outputs. Both source methods recalculated all 400
+participant-condition spectra and published group maps. Clicking Process again
+on the same 69-record project took 24.60s, including 23.38s to validate the
+existing project. It launched no preflight, preparation, recording or
+downstream jobs. The project manifest and processing ledger matched their
+pre-click SHA-256 values.
+
+With cross-cohort source reuse enabled, the same four-recording addition took
+22m 06.37s from the Process click through all seven downstream products,
+1m 55.89s (8.04%) faster than the successful 24m 02.26s run. Each source
+method reused 376 participant-condition spectra and calculated the 24 new
+ones. Capturing the reuse evidence cost 9.00s in the separate initial-65
+source-stage comparison and saved 124.36s across both source stages on
+expansion. The final unchanged click took 24.42s, including 23.43s in
+validation, and launched zero processing jobs. These timings use the
+Windows source-launched GUI on the internal SSD with a 16-worker ceiling.
+Independent readback of the final archive matched the full cold 69 for all
+400 native manifests, 800 companions, 400 source time series, 800 source
+spectra, and the scientific content of all 72 source maps and the Stats/QC
+workbooks. All 376 original export receipts were preserved. Published maps
+carry the new run's provenance and observed cache counts.
+
+Compared with full cold 69, the corrected incremental run retained all 376
+original export receipts. All 400 native manifests and 800 companions matched
+byte for byte. All 400 source FIFs and 800 source PSDs matched scientifically,
+as did the 72 published group maps, their participant vectors and masks,
+the Stats workbooks, the 75-row QC summary and all 22,619 review flags.
+The independently verified run-specific references belong to each project's
+own processing ledger. The original build's 65 reprocessed participants
+produced numerical differences in all 376 original condition outputs.
+
+One further group-stage target is repeated verification of immutable
+condition companions. In a real 400-condition read, two consecutive
+harmonic-request constructions each performed 800 full SHA-256 checks over
+5,053,537,880 bytes. They took 11.26s and 16.25s. The selection code can
+construct the request four times. Sharing an already validated request
+within a calculation and rebuilding it at publication could avoid two
+passes (10.11 GB of logical reads). This remains a follow-up. A separate
+identity-cache prototype returned identical request and selection metadata,
+but a file generation check could miss edits by an open writer. It remains
+outside production. These measurements cover request construction only.
+
+Both builds' full warm reprocess reused all 69 preprocessed FIF files.
+Their ordinary cache writer uses MNE's single-precision default, while the
+cold calculation uses float64. A native replay on P1 reproduced the warm
+samples with single precision and all 5,898,624 cold FFT bins with double
+precision. All 400 condition exports differed across temperatures on both
+builds, with identical selected harmonics. The warm processing ledger also
+lost the per-recording kurtosis evidence and decision plan for all 69 inputs.
+The prepared checkpoint sample arrays remained identical across temperatures.
 
 ### Adaptive QC-16 process preparation (2026-10-13)
 

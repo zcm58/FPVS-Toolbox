@@ -28,6 +28,73 @@ from Main_App.processing.qc_summary_export import (
 from Main_App.projects.project import Project
 
 
+@pytest.mark.parametrize("historical", [False, True])
+def test_incremental_review_flags_reproduce_full_two_pass_report(tmp_path, historical):
+    from Main_App.processing.preflight_review_flags import FLAT_COLUMNS, publish_project_review_flags, write_review_sheet
+
+    target = tmp_path / "Quality Check" / DATA_QUALITY_REVIEW_FLAGS_FILENAME
+    ids = ("P1", "P2", "P3")
+    sources = [((pid, "Single group", pid + ".bdf"), {"raw_file": str(tmp_path / (pid + ".bdf"))}) for pid in ids]
+    paths = [Path(info["raw_file"]) for _, info in sources]
+    first = [(*prefix, "High-amplitude channel review: Pz") for prefix, _ in sources]
+    second = [(*prefix, "Additional signal diagnostics unavailable: incomplete interval") for prefix, _ in sources]
+    initial = [first[0], first[2], second[0], second[2]]
+    if historical:
+        write_review_sheet(target, FLAT_COLUMNS, initial)
+    else:
+        publish_project_review_flags(target, tmp_path, sources[::2], set(paths[::2]), initial, 2, FLAT_COLUMNS)
+        target.unlink()  # The per-record snapshot can restore a missing public workbook.
+    publish_project_review_flags(target, tmp_path, sources, {paths[1]}, [first[1], second[1]], 1, FLAT_COLUMNS)
+    with target.open("rb") as stream:
+        book = load_workbook(stream)
+        assert list(book.active.values) == [FLAT_COLUMNS, *first, *second]
+        assert book.active.freeze_panes == "A2"
+        assert book.active.auto_filter.ref == "A1:D7"
+        book.close()
+
+
+def test_review_flags_clear_reassessed_visit_and_omit_stale_or_unregistered_sources(tmp_path):
+    from Main_App.processing.preflight_review_flags import VISIT_COLUMNS, publish_project_review_flags
+
+    target = tmp_path / "flags.xlsx"
+    sources = [
+        (("P", str(i), "Visit", str(i), "Group", f"{i}.bdf"), {"raw_file": str(tmp_path / f"{i}.bdf"), "raw_size": 10})
+        for i in range(1, 5)
+    ]
+    paths = [Path(info["raw_file"]) for _, info in sources]
+    rows = [(*prefix, "review") for prefix, _ in sources]
+    publish_project_review_flags(target, tmp_path, sources, set(paths), rows, len(rows), VISIT_COLUMNS)
+    sources[2][1]["raw_size"] = 12
+    publish_project_review_flags(target, tmp_path, sources[:3], {paths[1]}, [], 0, VISIT_COLUMNS)
+    book = load_workbook(target)
+    assert list(book.active.values) == [VISIT_COLUMNS, rows[0]]
+    book.close()
+    publish_project_review_flags(target, tmp_path, sources[:1], {paths[0]}, [], 0, VISIT_COLUMNS)
+    book = load_workbook(target)
+    assert list(book.active.values) == [VISIT_COLUMNS]
+    book.close()
+
+
+def test_corrupt_snapshot_preserves_public_flags_until_complete_refresh(tmp_path):
+    from Main_App.processing.preflight_review_flags import FLAT_COLUMNS, publish_project_review_flags
+
+    target = tmp_path / "flags.xlsx"
+    paths = [tmp_path / "P1.bdf", tmp_path / "P2.bdf"]
+    sources = [((path.stem, "Group", path.name), {"raw_file": str(path)}) for path in paths]
+    rows = [(*prefix, "review") for prefix, _ in sources]
+    publish_project_review_flags(target, tmp_path, sources, set(paths), rows, len(rows), FLAT_COLUMNS)
+    original = target.read_bytes()
+    snapshot = tmp_path / ".fpvs_processing" / "preflight_review_flags" / "rows_v1.json.gz"
+    snapshot.write_bytes(b"interrupted snapshot")
+    with pytest.raises(OSError):
+        publish_project_review_flags(target, tmp_path, sources, {paths[0]}, [], 0, FLAT_COLUMNS)
+    assert target.read_bytes() == original
+    publish_project_review_flags(target, tmp_path, sources, set(paths), rows, len(rows), FLAT_COLUMNS)
+    book = load_workbook(target)
+    assert list(book.active.values) == [FLAT_COLUMNS, *rows]
+    book.close()
+
+
 def _project_with_raws(tmp_path: Path):
     project = Project.load(tmp_path / "project")
     raw_dir = tmp_path / "raw"
@@ -469,6 +536,55 @@ def test_processing_qc_summary_uses_ledger_for_skipped_completed_participant(tmp
         ledger["entries"]["P01"]["removed_electrode_agreement_status"] == "partial"
     )
     assert ledger["entries"]["P01"]["interpolated_channels"] == ["FT7", "P9", "Oz"]
+
+
+@pytest.mark.parametrize("audited_count", [0, 2])
+def test_incremental_summary_replays_completed_audit_count_with_distinct_review_sets(
+    tmp_path: Path, audited_count: int,
+) -> None:
+    project, infos = _project_with_raws(tmp_path)
+    plan = classify_processing_inputs(project, infos[:1], _settings(), project.event_map)
+    _write_expected_output_for_first_participant(plan)
+    candidates = ["Fp1", "Fp2"][:audited_count]
+    removed = ["O2", "F8"][:audited_count]
+    result = {
+        "status": "ok",
+        "file": str(infos[0].path),
+        "geometry": biosemi64_geometry_identity(),
+        "audit": {
+            "n_rejected": audited_count,
+            "raw_qc_bad_channels": removed,
+            "raw_qc_manual_removed_channels": removed,
+            "kurtosis_bad_channels": candidates,
+            "kurtosis_user_rejected_channels": candidates,
+            "interpolation_status": "succeeded" if removed else "not_needed",
+            "interpolation_requested_channels": removed,
+            "interpolated_channels": removed,
+        },
+    }
+    record_processing_results(
+        project, plan, [result], run_mode="Batch", user_choice="incremental", cancelled=False,
+    )
+
+    original = build_processing_qc_rows(project, plan, [result])
+    retained = build_processing_qc_rows(project, plan, [])
+    assert original[0]["Total Number of Electrodes removed/rejected"] == audited_count
+    assert retained == original
+
+
+def test_legacy_completed_summary_keeps_fallback_when_audit_outcome_is_unknown(tmp_path: Path) -> None:
+    project, infos = _project_with_raws(tmp_path)
+    plan = classify_processing_inputs(project, infos[:1], _settings(), project.event_map)
+    ledger = project.project_root / ".fpvs_processing" / "processing_ledger.json"
+    ledger.parent.mkdir(parents=True, exist_ok=True)
+    ledger.write_text(json.dumps({"schema_version": 1, "entries": {"P01": {
+        "participant_id": "P01", "status": "completed", "n_rejected": 0,
+        "raw_qc_bad_channels": ["O2"], "kurtosis_bad_channels": ["Fp1"],
+    }}}), encoding="utf-8")
+
+    row = build_processing_qc_rows(project, plan, [])[0]
+    assert row["Preprocessing Status"] == "Not recorded (legacy result)"
+    assert row["Total Number of Electrodes removed/rejected"] == 2
 
 
 def test_processing_qc_summary_merges_saved_preflight_review_flags(

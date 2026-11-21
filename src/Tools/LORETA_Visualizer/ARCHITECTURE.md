@@ -345,7 +345,15 @@ Main App processing publishes one signed,
 repetition-averaged EEG Raw FIF per participant/condition plus provenance and a
 participant commit manifest. Project orchestration derives one explicit
 available-case cohort for each group-condition cell, and the read-only adapter
-strictly validates every retained participant/condition input. Before either
+strictly validates every retained participant/condition input. For an incremental
+cohort, an older signed derivative also requires the processing ledger's
+per-recording manifest pin and reconciled original condition receipt. The input
+set records the current cohort and each derivative records its original release.
+Source release checks compare participant identities and group assignments
+independently of registration order. The reducer uses the existing ledger
+order. Checks before publication and under the project lock still require the
+same ordered groups, condition availability and QC choices.
+Before either
 inverse runs, the adapter selects the exact sample count `N` supported by a
 unique modal number of participants. Nonmodal participant-condition derivatives are recorded as
 condition-specific omissions with their actual and canonical `N`, duration,
@@ -379,6 +387,25 @@ sources; that Raw closes even if computation fails. A warm result therefore
 avoids EEG allocation while remaining tied to exactly the bytes whose finite
 samples were accepted when the result was computed.
 
+The two native Hauk producers first check the current v2 participant cache.
+When a cohort changes, a freshly computed cell can also be found through
+`.fpvs_processing/source_psd_cache/native_cells_v1`. Its receipt binds the
+original signed FIF, channel order, grid, method and complete inverse to the
+six stored numerical vectors and measured rank. The computing process
+identifies its library binaries, thread counts, CPU features, implementations
+and versions. Fixed input files shared with the coordinator are hashed once
+per file generation. A worker-only numerical library is hashed in that worker.
+An OpenMP library with no reported version requires its actual binary and
+thread count.
+
+An admitted cell is written under the current v2 key. The producer uses the
+current participant list, condition availability, QC eligibility and accepted
+harmonics to regenerate every public summary and source-build receipt. An
+older entry without a native-cell receipt remains eligible for its original
+v2 key. Changed scientific inputs, missing implementation evidence (including
+a package without readable implementation files), an invalid receipt or an
+injected numerical callable use the existing computation path.
+
 `source_model_cache.py` reuses native inverse resources only in the current
 process, with an LRU bound of two models. L2 and eLORETA use separate method
 identities. The signature includes numerical preparation parameters (including
@@ -390,11 +417,13 @@ also enters participant result keys, preventing old scientific results from
 surviving a dependency, geometry, or template change. Surface orientation modes
 share compatible inverse preparation but retain distinct participant method keys.
 
-Native resources are never pickled or persisted. The cache keeps a private deep
-copy and supplies independent mutable resources to callers before estimator
+The in-process model cache keeps a private deep copy of native resources and
+supplies independent mutable resources to callers before estimator
 closures are created. This trades memory for avoiding repeated forward/inverse
 solves; retained native resources are bounded to two entries, in addition to
-caller-owned working copies. A new process or cache eviction rebuilds the model.
+caller-owned working copies. Worker identity streams the native structure and
+ordered numerical buffers into a digest. The on-disk participant cache stores
+results, rank and receipts. A new process or cache eviction rebuilds the model.
 Warm runs still hash templates/derivatives, validate headers, copy native
 resources, and regenerate output summaries; they do not promise zero I/O.
 Synthetic tests exercise preparation call counts, eviction, mutation isolation,
@@ -833,7 +862,14 @@ the required complex periodic-Hann sensor coefficients, preserves them through
 `apply_inverse(..., pick_ori="vector")`, and obtains an orientation-invariant
 amplitude with `sqrt(sum(abs(Cxyz)^2))`. Both then sum corresponding positions
 across the canonical harmonic plan in their own source spaces and apply the
-Toolbox neighboring-bin z-score. Only compact method-specific participant
+Toolbox neighboring-bin z-score. Independent source-PSD cache misses use a
+reusable process pool, capped by the project's RAM/CPU worker policy and
+available physical and commit memory for the validated sample and source
+geometry. Each worker retains one private inverse model and uses the parent
+process's numerical library thread counts. The parent validates cache hits,
+publishes results and assembles conditions in the original participant order.
+Repeated derivative keys wait for their preceding result to be published.
+Only compact method-specific participant
 results are cached; source amplitudes are reproducible from the durable
 time-domain derivative and are not retained in full by default. Cache keys omit
 harmonic-cache bookkeeping fields (source label, save time, and saved cache ID)

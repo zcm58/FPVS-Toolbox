@@ -106,6 +106,62 @@ def _assert_exact_state(left, right):
         assert arrays_left[key].tobytes() == arrays_right[key].tobytes()
 
 
+def test_current_import_diagnostics_reuse_exact_science_and_keep_original_receipt(recording, monkeypatch):
+    raw, params, source = recording
+    first_import = {
+        "version": "bids_import_v1", "representation": "raw_eeg_bids", "path": str(source),
+        "dataset_root": str(source.parent), "identity_seconds": 1.5, "conversion_seconds": 2.0,
+        "reused": False, "future_scientific_provenance": {"channel_domain": "scalp"},
+    }
+    latest_import = {**first_import, "identity_seconds": 0.25, "conversion_seconds": 0.0, "reused": True}
+    raw._fpvs_bids_import = deepcopy(first_import)
+    first, _, cold_settings = _run(raw, params)
+    original = _identity(raw, params)
+    assert cold_settings["_fpvs_kurtosis_checkpoint_status"] == "miss"
+    assert raw._fpvs_bids_import == first._fpvs_bids_import == first_import
+    manifest = original.folder / "latest.json"
+    initial_receipt = manifest.read_bytes()
+    current = raw.copy()
+    current._fpvs_bids_import = deepcopy(latest_import)
+    expected, count, expected_settings = _run(current, {**params, "enable_kurtosis_checkpoint_cache": False})
+    monkeypatch.setattr(preprocess, "evaluate_kurtosis_qc", lambda *_a, **_k: pytest.fail("Repeated evidence"))
+    assert _identity(current, params).key == original.key
+    reused, warm_count, warm_settings = _run(current, params)
+    assert warm_settings["_fpvs_kurtosis_checkpoint_status"] == "hit" and warm_count == count
+    assert current._fpvs_bids_import == reused._fpvs_bids_import == latest_import
+    assert reused._data.dtype == expected._data.dtype and reused._data.tobytes() == expected._data.tobytes()
+    _assert_exact_state(raw_state(reused), raw_state(expected))
+    for key in ("_fpvs_kurtosis_qc_evidence", "_fpvs_kurtosis_decision_plan", "_fpvs_realized_analysis_span_plan"):
+        assert expected_settings[key] == warm_settings[key] == cold_settings[key]
+    assert manifest.read_bytes() == initial_receipt
+    from_first_load = cache.load_checkpoint(original)
+    assert from_first_load.raw._fpvs_bids_import == raw._fpvs_bids_import == first_import
+    from_first_load.raw.close()
+
+
+def test_import_science_and_unknown_or_incomplete_diagnostics_keep_their_exact_identity(recording):
+    raw, params, source = recording
+    known = {"version": "bids_import_v1", "representation": "raw_eeg_bids", "path": str(source),
+             "identity_seconds": 1., "conversion_seconds": 0., "reused": True}
+    raw._fpvs_bids_import = known
+    valid = _identity(raw, params)
+    assert valid is not None and valid.bids_import_diagnostics is not None
+    for change in ({"path": str(source.with_suffix(".fif"))}, {"representation": "another_format"},
+                   {"acquisition_metadata": {"variant": 2}}):
+        raw._fpvs_bids_import = {**known, **change}
+        assert _identity(raw, params).key != valid.key
+    for change in ({"version": "future_import_v2"}, {"reused": 1}, {"conversion_seconds": -2.},
+                   {"identity_seconds": None}, {"path": ""}):
+        raw._fpvs_bids_import = {**known, **change}
+        malformed = _identity(raw, params)
+        assert malformed.bids_import_diagnostics is None and malformed.key != valid.key
+        raw._fpvs_bids_import = {**raw._fpvs_bids_import, "conversion_seconds": -3.}
+        assert _identity(raw, params).key != malformed.key
+    raw._fpvs_bids_import = {k: v for k, v in known.items() if k not in valid.bids_import_diagnostics._fields}
+    missing = _identity(raw, params)
+    assert missing.bids_import_diagnostics is None and missing.key != valid.key
+
+
 @pytest.mark.parametrize("rate", [100., 80.])
 def test_prepared_checkpoint_exact_filtered_signal_events_evidence_and_metadata(recording, monkeypatch, rate):
     raw, params, _source = recording

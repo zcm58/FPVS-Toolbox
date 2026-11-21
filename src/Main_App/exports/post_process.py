@@ -663,18 +663,20 @@ def _attempt_legacy_55_onbin_crop(
 
 def post_process(app: Any, condition_labels_present: List[str]) -> None:
     """
-    Calculates metrics (FFT, SNR, Z-score, BCA) and saves results to Excel.
-    Handles single-file processing (FPVSApp) and per-participant averaged results (AdvancedAnalysis).
+    Calculate FFT, SNR, Z-score and BCA metrics for the supplied conditions.
 
-    This is pipeline-sensitive export code. Targeted refactor edits are allowed,
-    but must not change metric calculation, processing order, output formats,
-    filenames, sheet names, or export behavior.
+    Standard recording results use native .fpvs manifests and NumPy companions.
+    Per-participant recipe outputs use their configured workbook names.
     """
     # Resolve every slot before any output folder or artifact is published.
     pipeline_plan = resolve_pipeline_plan(getattr(app, "settings", None) or {})
     pipeline_identity = {} if pipeline_plan.is_legacy_default else {"processing_pipeline": pipeline_plan.to_config()}
     custom_occurrence_aggregation = any(
         method.stage_id == "occurrence_average" and method.implementation is not None
+        for method in pipeline_plan.methods
+    )
+    custom_target_metrics = any(
+        method.stage_id == "target_metrics" and method.implementation is not None
         for method in pipeline_plan.methods
     )
     pipeline_plan.validate_capabilities(resolve_recording_contract(
@@ -724,11 +726,11 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
 
     # --- PID Determination ---
     pid = "UnknownPID"
-    # For Advanced Analysis, 'pid_for_group' on the context now holds the participant_pid
+    # Recipe exports can supply the participant ID directly.
     if hasattr(app, "pid_for_group") and app.pid_for_group:
         pid = app.pid_for_group  # This should be "P1", "P2", etc.
         app.log(f"Using PID from context: {pid}")
-    elif app.data_paths:  # Fallback for original FPVSApp single-file processing
+    elif app.data_paths:
         try:
             first_file_path = app.data_paths[0]
             first_file_basename = os.path.basename(first_file_path)
@@ -824,7 +826,7 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
             # pid is already the participant_pid, e.g., "P1"
             excel_filename = f"{pid}_{filename_condition_part}{excel_final_suffix}"  # e.g., "P1_Average_A.xlsx"
         else:
-            # Original FPVSApp single-file processing path
+            # Standard per-recording condition output.
             raw_condition_label = cond_label_from_keys
             sanitized_condition_label = condition_output_folder_name(raw_condition_label)
 
@@ -1372,6 +1374,13 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                         "Spectral eligibility was not resolved for this FFT input."
                     )
                 eligibility_fingerprint = condition_eligibility.fingerprint
+                target_labels = [
+                    (
+                        f"{item.target.frequency_hz.numerator}/{item.target.frequency_hz.denominator}",
+                        ",".join(map(str, item.noise_candidate_bin_indices)),
+                    )
+                    for item in condition_eligibility.targets
+                ]
                 for chan_idx in range(final_num_channels):
                     channel_amplitudes = fft_amplitudes[chan_idx, :]
                     for freq_idx, availability in enumerate(
@@ -1417,6 +1426,10 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                             metrics_z[chan_idx, freq_idx] = metric_result.local_z
                         if metric_result.bca is not None:
                             metrics_bca[chan_idx, freq_idx] = metric_result.bca
+                        frequency_label, candidate_bins_label = target_labels[freq_idx]
+                        if custom_target_metrics:
+                            # Equal bin indices from a registered method can have distinct text.
+                            candidate_bins_label = ",".join(str(value) for value in metric_result.candidate_bin_indices)
                         spectral_metric_qc_rows.append(
                             {
                                 "Source File": source_file_name,
@@ -1435,15 +1448,9 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                                     is not None
                                     else ""
                                 ),
-                                "Target Frequency Exact (Hz)": (
-                                    f"{availability.target.frequency_hz.numerator}/"
-                                    f"{availability.target.frequency_hz.denominator}"
-                                ),
+                                "Target Frequency Exact (Hz)": frequency_label,
                                 "Target FFT Bin": availability.target_bin_index,
-                                "Noise Candidate FFT Bins": ",".join(
-                                    str(value)
-                                    for value in metric_result.candidate_bin_indices
-                                ),
+                                "Noise Candidate FFT Bins": candidate_bins_label,
                                 "Noise Retained FFT Bins": ",".join(
                                     str(value)
                                     for value in metric_result.retained_bin_indices

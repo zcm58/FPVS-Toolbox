@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -142,6 +143,92 @@ def test_flat_result_listing_preserves_arbitrary_names_and_folder_boundaries(tmp
 
     assert list_result_files(tmp_path) == (legacy, native)
     assert set(list_result_files(tmp_path, recursive=True)) == {legacy, native, nested}
+
+
+@pytest.mark.parametrize("managed", [False, True])
+def test_full_index_prunes_ignored_directories_only_below_its_scan_root(tmp_path, monkeypatch, managed):
+    root = tmp_path / "Project"
+    excel = _write_project(root, groups={}, participants={}) if managed else root
+    kept = _workbook(excel, "Faces", None, "P01_Faces_Results.fpvs")
+    hidden = _workbook(excel, "Faces", "lOrEtA rEsUlTs", "P02_Faces_Results.xlsx")
+    other = _workbook(excel, ".fIf FiLeS", "Faces", "P03_Faces_Results.fpvs")
+    assert set(list_result_files(excel, recursive=True)) == {kept, hidden, other}
+    assert [r.path for r in load_project_dataset_index(hidden).workbooks] == [hidden]
+    assert [r.path for r in load_project_dataset_index(hidden.parent).workbooks] == [hidden]
+
+    visited = []
+    original_scandir, original_is_file = os.scandir, Path.is_file
+
+    def checked_scandir(directory):
+        visited.append(Path(directory))
+        return original_scandir(directory)
+
+    def checked_is_file(candidate, **kwargs):
+        assert candidate not in (hidden, other)
+        return original_is_file(candidate, **kwargs)
+
+    monkeypatch.setattr(os, "scandir", checked_scandir)
+    monkeypatch.setattr(Path, "is_file", checked_is_file)
+    assert [r.path for r in load_project_dataset_index(root).workbooks] == [kept]
+    assert visited == [excel, kept.parent]
+
+
+@pytest.mark.parametrize("public_listing", [True, False])
+def test_recursive_discovery_sees_directory_added_between_listing_and_descent(
+    tmp_path, monkeypatch, public_listing,
+):
+    first = tmp_path / "P01_Results.xlsx"
+    first.touch()
+    added = tmp_path / "New condition" / "P02_Results.xlsx"
+    original = Path.is_file
+
+    def publish_while_checking_first(path, **kwargs):
+        if path == first:
+            added.parent.mkdir(exist_ok=True)
+            added.touch()
+        return original(path, **kwargs)
+
+    monkeypatch.setattr(Path, "is_file", publish_while_checking_first)
+    if public_listing:
+        paths = list_result_files(tmp_path, recursive=True)
+    else:
+        paths = [record.path for record in load_project_dataset_index(tmp_path).workbooks]
+    assert set(paths) == {first, added}
+
+
+def test_full_index_preserves_candidate_stat_errors_in_included_directories(tmp_path, monkeypatch):
+    for condition in ("Faces", "Words", "Scenes"):
+        _workbook(tmp_path, condition, None, "P01_Results.xlsx")
+        _workbook(tmp_path, condition, "Group", "P02_Results.xlsx")
+    paths = [p for p in tmp_path.rglob("*") if p.suffix == ".xlsx"]
+    probes = []
+    original = Path.is_file
+
+    def denied(candidate):
+        if candidate.suffix == ".xlsx":
+            probes.append(candidate)
+            if candidate == paths[-1]:
+                raise PermissionError("inaccessible result anchor")
+        return original(candidate)
+
+    monkeypatch.setattr(Path, "is_file", denied)
+    with pytest.raises(DatasetIndexError, match="Unable to scan.*inaccessible result anchor"):
+        load_project_dataset_index(tmp_path)
+    assert probes == paths
+
+
+def test_full_index_keeps_file_links_and_does_not_descend_directory_symlinks(tmp_path):
+    excel = tmp_path / "Excel"
+    hidden = _workbook(excel, "LORETA Results", None, "P01_Faces_Results.xlsx")
+    outside = _workbook(tmp_path, "Other", None, "P02_Faces_Results.xlsx")
+    included = excel / "Faces" / hidden.name
+    included.parent.mkdir()
+    try:
+        included.symlink_to(hidden)
+        (excel / "Linked folder").symlink_to(outside.parent, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"Host cannot create symbolic links: {exc}")
+    assert [r.path for r in load_project_dataset_index(excel).workbooks] == [hidden]
 
 
 def test_project_dataset_index_assigns_groups_only_from_project_manifest(

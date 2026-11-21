@@ -918,6 +918,466 @@ def _registration_receipts(plan):
     return receipts
 
 
+def _incremental_fixture(tmp_path, layout, *, source_spans=False):
+    """Publish one real native cell, then register a second recording."""
+    from Main_App.projects.project import Project
+
+    project = Project.load(tmp_path)
+    event_map = {"Condition A": 1}
+    project.event_map = event_map
+    project.save()
+    infos = []
+    for visit in (1, 2):
+        raw = tmp_path / f"P{visit:02d}.bdf"
+        raw.write_bytes(f"recording {visit}".encode())
+        if layout == "repeated":
+            info = RawFileInfo(raw, "P01", "controls", f"rec_{visit}", f"v{visit}", f"Visit {visit}", visit, "recorder")
+        else:
+            info = RawFileInfo(raw, f"P{visit:02d}", "controls" if layout == "grouped" else None)
+        infos.append(info)
+    matrix = _processing_plan(tmp_path, event_map=event_map, infos=tuple(infos), statuses=("completed", "new"))
+    states = []
+    for state in matrix.states:
+        directory = tmp_path / "1 - Excel Data Files" / "Condition A"
+        if state.info.group:
+            directory = directory / "Controls"
+        directory.mkdir(parents=True, exist_ok=True)
+        anchor = directory / f"{state.info.output_stem}_Condition A_Results.fpvs"
+        states.append(replace(state, expected_outputs=(anchor,)))
+    matrix = replace(matrix, states=tuple(states), pipeline_settings_identity="b" * 64)
+    first = replace(matrix, states=(replace(states[0], status="new"),))
+    markers = _approved_event_plan(event_map=event_map, events=[[0, 0, 1], [10, 0, 55], [20, 0, 55], [30, 0, 55]])
+    old = build_expected_recording_condition_plan(
+        processing_plan=first, event_map=event_map, frequency_protocol=_protocol(),
+        approved_event_plans={states[0].processing_id: markers}, run_id="initial-publication",
+    )
+    save_expected_recording_condition_plan(tmp_path, old)
+    _publish_incremental_record(project, first, old, states[0], source_spans=source_spans)
+    from Main_App.processing.processing_ledger import load_ledger
+    from Main_App.processing.recording_condition_outcomes import load_recording_condition_outcomes
+
+    initial = load_recording_condition_outcomes(load_ledger(tmp_path))
+    assert initial.is_pre_review_ready
+    return project, matrix, old, markers
+
+
+def _publish_incremental_record(project, matrix, expected, state, *, source_spans=False):
+    import pandas as pd
+    from Main_App.exports.post_process import _fingerprinted_export_receipt
+    from Main_App.exports.post_process_excel import write_results_workbook
+    from Main_App.processing.processing_ledger import record_processing_results
+
+    anchor = state.expected_outputs[0]
+    content = write_results_workbook(str(anchor), {
+        "FullFFT Amplitude (uV)": pd.DataFrame({"Electrode": ["Oz"], "0.0000_Hz": [2.0]}),
+        "BCA (uV)": pd.DataFrame({"Electrode": ["Oz"], "0.3000_Hz": [0.5]}),
+    })
+    candidates = _registration_receipts(expected)
+    row = next(dict(value) for value in candidates if value["recording_id"] == state.processing_id)
+    row.pop("fingerprint")
+    row["workbook_write"] = content
+    if source_spans:
+        row.update(participant_id=state.participant_id, source_analysis_span_plan_fingerprint="1" * 64,
+                   target_analysis_span_plan_fingerprint="2" * 64)
+    receipt = _fingerprinted_export_receipt(row)
+    record_processing_results(
+        project, matrix, [{"file": str(state.info.path), "status": "ok", "geometry": matrix.geometry_identity,
+                           "export_receipts": [receipt]}],
+        run_mode="Batch", user_choice="incremental", cancelled=False,
+    )
+
+
+def test_retained_source_requires_unchanged_original_and_matching_released_cell(tmp_path):
+    import copy
+    import hashlib
+    from Main_App.processing.processing_ledger import (
+        SOURCE_READY_TIME_DOMAIN_RELATIVE_ROOT, load_ledger, refresh_skipped_ledger_fingerprints,
+    )
+    from Main_App.processing.retained_source_derivatives import STAMP, RetainedSourceReader
+    from Tools.LORETA_Visualizer.source_producers.project_time_domain_inputs import ExpectedProjectTimeDomainInput
+
+    project, matrix, old, markers = _incremental_fixture(tmp_path, "flat", source_spans=True)
+    previous, added = matrix.states
+    matrix = replace(matrix, fingerprint="new-cohort", states=(
+        replace(previous, pre_qc_fingerprint=old.processing_fingerprint), added,
+    ))
+    manifest = tmp_path / SOURCE_READY_TIME_DOMAIN_RELATIVE_ROOT / "manifests" / "P01.json"
+    manifest.parent.mkdir(parents=True)
+    manifest.write_bytes(b'{"participant_id":"P01"}')
+    relative = manifest.relative_to(tmp_path).as_posix()
+    digest = hashlib.sha256(manifest.read_bytes()).hexdigest()
+    prior = load_ledger(tmp_path)
+    prior["entries"][previous.processing_id].update(
+        source_derivative_status="complete", source_derivative_manifest=relative, source_derivative_outputs=[relative]
+    )
+    save_ledger(tmp_path, prior)
+    current = build_expected_recording_condition_plan(
+        processing_plan=matrix, frequency_protocol=_protocol(), event_map=project.event_map,
+        approved_event_plans={added.processing_id: markers}, prior_ledger=prior, run_id="add-participant",
+    )
+    save_expected_recording_condition_plan(tmp_path, current)
+    assert refresh_skipped_ledger_fingerprints(project, matrix) == 1
+    assert not RetainedSourceReader(tmp_path, matrix.fingerprint).bindings
+    _publish_incremental_record(project, matrix, current, added)
+    released = load_ledger(tmp_path)
+    entry = released["entries"][previous.processing_id]
+    assert STAMP not in released["entries"][added.processing_id]
+    assert entry[STAMP]["manifest_sha256"] == digest
+    recording = current.recordings[0]
+    cell = ExpectedProjectTimeDomainInput(participant_id=previous.participant_id, condition_id="1",
+                                         condition_label="Condition A", group_id=None, group_folder=None)
+    origin = entry["export_receipts"][0]
+    sidecar = {
+        "source_signature": recording.raw_file_identity, "geometry": entry["geometry"],
+        "processing": {"provenance": {
+            "geometry": origin["geometry"], "processing_fingerprint": old.processing_fingerprint,
+            "processing_fingerprint_version": old.processing_fingerprint_version,
+            "source_analysis_span_plan": {"fingerprint": "1" * 64},
+            "realized_analysis_span_plan": {"fingerprint": "2" * 64},
+        }},
+    }
+    def accepts(expected=cell, signature=digest, payload=sidecar):
+        return RetainedSourceReader(tmp_path, matrix.fingerprint).accepts(
+            expected, manifest, signature, payload, old.processing_fingerprint, old.processing_fingerprint_version)
+
+    assert accepts()
+    assert not accepts(replace(cell, participant_id=added.participant_id))
+    assert not accepts(replace(cell, group_id="another-group"))
+    assert not accepts(replace(cell, condition_id="2"))
+    assert not accepts(signature="a" * 64)
+    assert not accepts(payload={**sidecar, "source_signature": {**recording.raw_file_identity, "raw_mtime_ns": 0}})
+    assert not accepts(payload={**sidecar, "geometry": {}})
+    for key in ("source_analysis_span_plan", "realized_analysis_span_plan"):
+        altered = copy.deepcopy(sidecar)
+        altered["processing"]["provenance"][key]["fingerprint"] = "f" * 64
+        assert not accepts(payload=altered)
+    for key in ("original_exports_sha256", "recording_id", "plan_fingerprint", "processing_fingerprint"):
+        altered = copy.deepcopy(released)
+        altered["entries"][previous.processing_id][STAMP][key] = "different"
+        save_ledger(tmp_path, altered)
+        assert not accepts()
+    unstamped = copy.deepcopy(released)
+    del unstamped["entries"][previous.processing_id][STAMP]
+    save_ledger(tmp_path, unstamped)
+    assert not accepts()
+    changed_outcome = copy.deepcopy(released)
+    changed_outcome["recording_condition_outcomes"]["fingerprint"] = "0" * 64
+    save_ledger(tmp_path, changed_outcome)
+    assert not accepts()
+
+
+@pytest.mark.parametrize("layout", ["flat", "grouped", "repeated"])
+def test_incremental_addition_retains_verified_science_and_original_publication(tmp_path, layout):
+    from Main_App.processing.processing_ledger import load_ledger
+    from Main_App.processing.recording_condition_outcomes import load_recording_condition_outcomes
+
+    project, matrix, old, markers = _incremental_fixture(tmp_path, layout)
+    previous, added = matrix.states
+    anchor = previous.expected_outputs[0]
+    published = {file: (file.read_bytes(), file.stat().st_mtime_ns) for file in anchor.parent.glob(anchor.stem + ".*")}
+    prior_ledger = load_ledger(tmp_path)
+    prior_receipt = prior_ledger["entries"][previous.processing_id]["export_receipts"][0]
+    current = build_expected_recording_condition_plan(
+        processing_plan=matrix, frequency_protocol=_protocol(), event_map=project.event_map,
+        approved_event_plans={added.processing_id: markers}, prior_ledger=prior_ledger, run_id="incremental-addition",
+    )
+    save_expected_recording_condition_plan(tmp_path, current)
+    _publish_incremental_record(project, matrix, current, added)
+    ledger = load_ledger(tmp_path)
+    outcome = load_recording_condition_outcomes(ledger)
+    assert outcome.expected_plan_run_id == current.run_id
+    assert outcome.is_pre_review_ready, [(cell.processing_id, cell.reason_codes) for cell in outcome.cells]
+    assert [(cell.processing_id, cell.contributor_count) for cell in outcome.cells] == [
+        (previous.processing_id, 1), (added.processing_id, 1)]
+    assert outcome.cells[0].export_receipt == prior_receipt
+    assert outcome.cells[1].export_receipt["run_id"] == current.run_id
+    assert ledger["entries"][previous.processing_id]["export_receipts"][0] == prior_receipt
+    assert prior_receipt["run_id"] == old.run_id
+    assert {file: (file.read_bytes(), file.stat().st_mtime_ns) for file in published} == published
+
+
+@pytest.mark.parametrize("damage", [
+    "anchor_same_size_and_mtime", "missing_spectral_companion", "missing_condition_companion",
+    "source_changed", "output_route_changed", "missing_prior_evidence", "invalid_prior_fingerprint",
+    "failed_previous_recording", "unreadable_anchor",
+])
+def test_incremental_does_not_upgrade_unproven_skipped_cell(tmp_path, monkeypatch, damage):
+    import os
+    from Main_App.io.result_manifest import read_result_manifest
+    from Main_App.processing.processing_ledger import load_ledger
+    from Main_App.processing.recording_condition_outcomes import RecordingConditionOutcomeError, load_recording_condition_outcomes
+
+    project, matrix, _old, markers = _incremental_fixture(tmp_path, "grouped")
+    previous, added = matrix.states
+    prior = load_ledger(tmp_path)
+    anchor = previous.expected_outputs[0]
+    if damage == "anchor_same_size_and_mtime":
+        original_stat = anchor.stat()
+        original = anchor.read_bytes()
+        # Reordering native JSON keys preserves all declarations, path, size
+        # and mtime; the original byte-level publication digest still matters.
+        declaration = json.loads(original)
+        modified = json.dumps(dict(reversed(declaration.items())), ensure_ascii=False, separators=(",", ":")).encode()
+        assert modified != original and len(modified) == len(original)
+        anchor.write_bytes(modified)
+        os.utime(anchor, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns))
+        assert read_result_manifest(anchor) == declaration
+    elif damage in {"missing_spectral_companion", "missing_condition_companion"}:
+        companion = read_result_manifest(anchor)[damage.removeprefix("missing_")]
+        (anchor.parent / companion["path"]).unlink()
+    elif damage == "source_changed":
+        previous.info.path.write_bytes(b"replacement EEG acquisition")
+    elif damage == "output_route_changed":
+        replacement = anchor.parent / "other-group" / anchor.name
+        matrix = replace(matrix, states=(replace(previous, expected_outputs=(replacement,)), added))
+    elif damage == "missing_prior_evidence":
+        prior.pop(EXPECTED_RECORDING_CONDITION_PLAN_LEDGER_KEY)
+        prior.pop("recording_condition_outcomes")
+    elif damage == "invalid_prior_fingerprint":
+        prior["recording_condition_outcomes"]["fingerprint"] = "0" * 64
+    elif damage == "failed_previous_recording":
+        prior["entries"][previous.processing_id]["status"] = "failed"
+    else:
+        original_open = Path.open
+        def checked_open(path, mode="r", *args, **kwargs):
+            if path == anchor and "r" in mode:
+                raise PermissionError(str(path))
+            return original_open(path, mode, *args, **kwargs)
+        monkeypatch.setattr(Path, "open", checked_open)
+    save_ledger(tmp_path, prior)
+    try:
+        current = build_expected_recording_condition_plan(
+            processing_plan=matrix, frequency_protocol=_protocol(), event_map=project.event_map,
+            approved_event_plans={added.processing_id: markers}, prior_ledger=prior, run_id="incremental-addition",
+        )
+        save_expected_recording_condition_plan(tmp_path, current)
+        _publish_incremental_record(project, matrix, current, added)
+        final = load_recording_condition_outcomes(load_ledger(tmp_path))
+    except (ExpectedRecordingConditionPlanError, RecordingConditionOutcomeError, PermissionError):
+        return
+    assert not final.is_pre_review_ready
+    blocked = next(cell for cell in final.cells if cell.processing_id == previous.processing_id)
+    assert blocked.status not in {"ready", "partially_retained"}
+
+
+def test_successive_incremental_additions_keep_the_origin_of_each_export(tmp_path):
+    from Main_App.processing.processing_ledger import load_ledger
+    from Main_App.processing.recording_condition_outcomes import load_recording_condition_outcomes
+
+    project, matrix, first, markers = _incremental_fixture(tmp_path, "repeated")
+    old, second = matrix.states
+    def append_one(plan, added, run_id):
+        previous_ledger = load_ledger(tmp_path)
+        expected = build_expected_recording_condition_plan(
+            processing_plan=plan, frequency_protocol=_protocol(), event_map=project.event_map,
+            approved_event_plans={added.processing_id: markers}, prior_ledger=previous_ledger, run_id=run_id,
+        )
+        save_expected_recording_condition_plan(tmp_path, expected)
+        _publish_incremental_record(project, plan, expected, added)
+        outcome = load_recording_condition_outcomes(load_ledger(tmp_path))
+        assert outcome.is_pre_review_ready
+        return outcome
+    middle = append_one(matrix, second, "add-visit-two")
+    third_path = tmp_path / "third.bdf"
+    third_path.write_bytes(b"third acquisition")
+    info = replace(second.info, path=third_path, recording_id="rec_3", session_id="v3", session_label="Visit 3", visit_index=3)
+    third = replace(second, info=info, expected_outputs=(second.expected_outputs[0].with_name(f"{info.output_stem}_Condition A_Results.fpvs"),))
+    extended = replace(matrix, states=(old, replace(second, status="completed"), third))
+    final = append_one(extended, third, "add-visit-three")
+    assert [cell.export_receipt["run_id"] for cell in final.cells] == [first.run_id, "add-visit-two", "add-visit-three"]
+    assert [cell.export_receipt for cell in final.cells[:2]] == [cell.export_receipt for cell in middle.cells]
+
+
+def test_new_explicit_condition_exclusion_cannot_reuse_previous_written_cell(tmp_path):
+    from Main_App.processing.processing_ledger import load_ledger
+    from Main_App.processing.recording_condition_outcomes import CELL_BLOCKED, CELL_EXCLUDED, load_recording_condition_outcomes
+
+    project, matrix, _old, markers = _incremental_fixture(tmp_path, "flat")
+    previous, added = matrix.states
+    current = build_expected_recording_condition_plan(
+        processing_plan=matrix, frequency_protocol=_protocol(), event_map=project.event_map,
+        approved_event_plans={added.processing_id: markers}, prior_ledger=load_ledger(tmp_path),
+        planning_settings={"manual_excluded_participant_conditions": {previous.processing_id: ["Condition A"]}},
+        run_id="new-condition-exclusion",
+    )
+    save_expected_recording_condition_plan(tmp_path, current)
+    _publish_incremental_record(project, matrix, current, added)
+    outcome = load_recording_condition_outcomes(load_ledger(tmp_path))
+    cell = next(row for row in outcome.cells if row.processing_id == previous.processing_id)
+    assert cell.status in {CELL_EXCLUDED, CELL_BLOCKED} and cell.contributor_count == 0
+    assert cell.export_receipt is None
+    if cell.status == CELL_BLOCKED:
+        assert not outcome.is_pre_review_ready
+
+
+@pytest.mark.parametrize("result_kind", ["omitted", "failed", "unrelated_prior_receipt"])
+def test_incremental_no_old_receipt_substitutes_for_new_required_output(tmp_path, result_kind):
+    from Main_App.processing.processing_ledger import load_ledger, record_processing_results
+    from Main_App.processing.recording_condition_outcomes import CELL_READY, load_recording_condition_outcomes
+
+    project, matrix, _old, markers = _incremental_fixture(tmp_path, "flat")
+    previous, added = matrix.states
+    prior = load_ledger(tmp_path)
+    expected = build_expected_recording_condition_plan(
+        processing_plan=matrix, frequency_protocol=_protocol(), event_map=project.event_map,
+        approved_event_plans={added.processing_id: markers}, prior_ledger=prior, run_id="addition-needs-evidence",
+    )
+    save_expected_recording_condition_plan(tmp_path, expected)
+    results = []
+    if result_kind == "failed":
+        results.append({"file": str(added.info.path), "status": "error", "error": "read failed"})
+    if result_kind == "unrelated_prior_receipt":
+        original = prior["entries"][previous.processing_id]["export_receipts"][0]
+        results.append({"file": str(added.info.path), "status": "ok", "geometry": matrix.geometry_identity,
+                        "export_receipts": [original]})
+    record_processing_results(project, matrix, results, run_mode="Batch", user_choice="incremental", cancelled=False)
+    ledger = load_ledger(tmp_path)
+    from Main_App.processing.recording_condition_outcomes import RecordingConditionOutcomeError
+    try:
+        outcome = load_recording_condition_outcomes(ledger)
+    except RecordingConditionOutcomeError:
+        # A cross-wired duplicate may invalidate the entire submitted envelope.
+        assert result_kind == "unrelated_prior_receipt"
+        return
+    assert not outcome.is_pre_review_ready
+    assert next(cell for cell in outcome.cells if cell.processing_id == added.processing_id).status != CELL_READY
+    if result_kind != "unrelated_prior_receipt":
+        assert next(cell for cell in outcome.cells if cell.processing_id == previous.processing_id).status == CELL_READY
+
+
+def test_registering_one_more_raw_accepts_its_subset_after_incremental_release(tmp_path):
+    from Main_App.processing.processing_controller import (
+        commit_raw_registration_review, prepare_raw_registration_review, register_participants,
+    )
+    from Main_App.processing.processing_ledger import load_ledger
+    from Main_App.processing.raw_registration_state import RawRegistrationPendingError, require_registered_raw_processing_complete
+    from Main_App.processing.recording_condition_outcomes import load_recording_condition_outcomes
+
+    project, matrix, first, markers = _incremental_fixture(tmp_path, "flat")
+    previous, added = matrix.states
+    project.input_folder = tmp_path
+    project.frequency_protocol = _protocol()
+    project.save()
+    register_participants(project, [previous.info])
+    proposal = prepare_raw_registration_review(project, selected_path=added.info.path)
+    assert proposal.review_rows
+    commit_raw_registration_review(project, proposal)
+    with pytest.raises(RawRegistrationPendingError):
+        require_registered_raw_processing_complete(tmp_path)
+    current = build_expected_recording_condition_plan(
+        processing_plan=matrix, frequency_protocol=_protocol(), event_map=project.event_map,
+        approved_event_plans={added.processing_id: markers}, prior_ledger=load_ledger(tmp_path), run_id="post-registration",
+    )
+    assert current.retained_from_plan == first.fingerprint
+    assert previous.processing_id in current.retained_export_fingerprints
+    assert added.processing_id not in current.retained_export_fingerprints
+    save_expected_recording_condition_plan(tmp_path, current)
+    _publish_incremental_record(project, matrix, current, added)
+    require_registered_raw_processing_complete(tmp_path)
+    ledger = load_ledger(tmp_path)
+    outcomes = load_recording_condition_outcomes(ledger)
+    original_cell, new_cell = outcomes.cells
+    forged = replace(new_cell, export_receipt=original_cell.export_receipt)
+    wrong_origin = replace(outcomes, cells=(original_cell, forged)).to_payload()
+    with pytest.raises(RawRegistrationPendingError):
+        require_registered_raw_processing_complete(tmp_path, ledger={**ledger, "recording_condition_outcomes": wrong_origin})
+
+
+def test_older_gui_settings_require_exact_original_run_and_reviewed_outputs(tmp_path):
+    from Main_App.processing.condition_interpolation_executor import (
+        build_condition_interpolation_run_snapshot, persist_condition_interpolation_run_snapshot,
+    )
+    from Main_App.processing.processing_ledger import classify_processing_inputs, load_ledger, with_processing_choice
+    from Main_App.projects.project import Project
+
+    project = Project.load(tmp_path)
+    project.frequency_protocol = _protocol()
+    project.event_map = {"Condition A": 1}
+    project.save()
+    source = tmp_path / "P01.bdf"
+    source.write_bytes(b"first recording")
+    info = RawFileInfo(source, "P01")
+    markers = _approved_event_plan(event_map=project.event_map, events=[[0, 0, 1], [10, 0, 55], [20, 0, 55], [30, 0, 55]])
+    basic = {"high_pass": 0.1, "manual_removed_electrodes": dict(project.preprocessing["manual_removed_electrodes"])}
+    reviewed = {**basic, "_fpvs_preflight_event_plans_by_file": {str(source): markers}}
+    plan = with_processing_choice(classify_processing_inputs(project, [info], reviewed, project.event_map), "incremental")
+    expected = build_expected_recording_condition_plan(
+        processing_plan=plan, event_map=project.event_map, frequency_protocol=_protocol(),
+        approved_event_plans={str(source): markers},
+    )
+    save_expected_recording_condition_plan(tmp_path, expected)
+    run_settings = {**reviewed, "_fpvs_expected_plan_run_id": expected.run_id}
+    snapshot = build_condition_interpolation_run_snapshot(run_settings, project.event_map, plan, tmp_path / "outputs")
+    persist_condition_interpolation_run_snapshot(tmp_path, snapshot)
+    plan.states[0].expected_outputs[0].parent.mkdir(parents=True, exist_ok=True)
+    _publish_incremental_record(project, plan, expected, plan.states[0])
+    ledger = load_ledger(tmp_path)
+    del ledger["entries"]["P01"]["recording_settings"]
+    save_ledger(tmp_path, ledger)
+
+    def classify():
+        return classify_processing_inputs(project, [info], basic, project.event_map).states[0].status
+
+    assert classify() == "completed"
+    project.update_preprocessing({**project.preprocessing, "manual_removed_electrodes": {"P02": ["P7"]}})
+    assert classify() == "completed"
+    snapshot["settings"]["high_pass"] = 0.9
+    persist_condition_interpolation_run_snapshot(tmp_path, snapshot)
+    assert classify() == "changed_settings"
+
+
+def test_classification_binds_owned_review_settings_across_addition_and_no_change(tmp_path):
+    from Main_App.processing.processing_ledger import classify_processing_inputs, load_ledger
+    from Main_App.processing.recording_condition_outcomes import load_recording_condition_outcomes
+    from Main_App.projects.project import Project
+
+    project = Project.load(tmp_path)
+    project.input_folder = tmp_path / "raw"
+    project.input_folder.mkdir()
+    project.event_map = {"Condition A": 1}
+    project.save()
+    raw = project.input_folder / "P01.bdf"
+    raw.write_bytes(b"original EEG")
+    original = RawFileInfo(raw, "P01")
+    markers = _approved_event_plan(event_map=project.event_map, events=[[0, 0, 1], [10, 0, 55], [20, 0, 55], [30, 0, 55]])
+    settings = {"high_pass": 0.1, "low_pass": 50.0, "downsample": 256}
+    reviewed = {**settings, "_fpvs_preflight_event_plans_by_file": {raw.name: markers},
+                "_fpvs_removed_electrode_review_by_pid": {"P01": {"manual": []}}}
+    def classify(config, *files):
+        return classify_processing_inputs(project, list(files), config, project.event_map)
+    first = classify(reviewed, original)
+    expected = build_expected_recording_condition_plan(
+        processing_plan=first, event_map=project.event_map, frequency_protocol=_protocol(),
+        approved_event_plans={str(raw): markers}, run_id="original-reviewed",
+    )
+    first.states[0].expected_outputs[0].parent.mkdir(parents=True, exist_ok=True)
+    save_expected_recording_condition_plan(tmp_path, expected)
+    _publish_incremental_record(project, first, expected, first.states[0])
+    assert load_recording_condition_outcomes(load_ledger(tmp_path)).is_pre_review_ready
+    assert classify(settings, original).incremental_files == ()
+
+    added_path = project.input_folder / "P02.bdf"
+    added_path.write_bytes(b"new EEG")
+    added = RawFileInfo(added_path, "P02")
+    project.update_preprocessing({**project.preprocessing, "manual_removed_electrodes": {"P02": ["P9"]},
+                                  "manual_excluded_participant_conditions": {"P02": ["Condition A"]}})
+    project.save()
+    review_added = {**settings, "_fpvs_preflight_event_plans_by_file": {str(added_path): markers}}
+    assert classify(review_added, original, added).incremental_files == (added_path,)
+    reviews = {
+        "global filter": {"high_pass": 0.3},
+        "original channel decision": {"manual_removed_electrodes": {"P01": ["P7"]}},
+        "original condition exclusion": {"manual_excluded_participant_conditions": {"P01": ["Condition A"]}},
+        "original reviewed electrodes": {"_fpvs_removed_electrode_review_by_pid": {"P01": {"manual": ["P7"]}}},
+        "original filename-bound marker": {"_fpvs_preflight_event_plans_by_file": {raw.name: {**markers, "first_samp": 1}}},
+        "original absolute-path marker": {"_fpvs_preflight_event_plans_by_file": {str(raw): {**markers, "first_samp": 1}}},
+    }
+    for label, change in reviews.items():
+        assert raw in classify({**review_added, **change}, original, added).incremental_files, label
+    first.states[0].expected_outputs[0].unlink()
+    assert raw in classify(settings, original, added).incremental_files
+
+
 @pytest.mark.parametrize("repeated", [False, True])
 @pytest.mark.parametrize("exclude", [False, True])
 def test_registration_gate_accepts_current_accounting_without_mutating_history(tmp_path, monkeypatch, repeated, exclude):

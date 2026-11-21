@@ -25,24 +25,35 @@ Memory-admitted EEG preflight, QC preparation, normal processing and condition-c
 validation use `Main_App.workers.mp_env.compute_dynamic_worker_ceiling`. The ceiling
 respects usable process CPUs and affinity, leaves one logical CPU available where
 possible, and applies a positive project worker setting as an upper limit. Zero
-means automatic. It has no installed-RAM tier or fixed twenty-worker cap. Windows
-additionally respects `ProcessPoolExecutor`'s supported 61-worker maximum, including
-shared ceilings supplied to EEG thread stages; this is a runtime limit rather than
-a RAM recommendation. Other platforms retain their CPU/user ceiling. The
-ceiling does not grant permission to allocate or run that many jobs. Each stage
-separately checks fresh physical availability and, on Windows, actual commit
-headroom, including background use. Estimates, host reserves and process floors
+selects the automatic RAM recommendation. Below 12, 40, 80 and 140 GiB the
+defaults are respectively 2, 4, 7 and 16 workers. At 140 GiB and above, usable
+CPU capacity sets the default. An explicit positive setting may raise or lower
+the RAM recommendation within the CPU and platform limits. Windows additionally
+respects the 61-worker maximum supported by `ProcessPoolExecutor`. Linux
+includes the process's cgroup CPU quota and memory limit across its visible
+ancestors. Each stage separately checks current physical availability and, on
+Windows, commit headroom. Linux admission also checks remaining cgroup memory.
+Estimates, host reserves and process floors
 determine admitted concurrency. Unsupported routes retain exclusive native work.
 These checks cannot prevent another application allocating after a snapshot.
 
-The older `compute_effective_max_workers` and `get_ram_tier_recommendation` APIs
-retain their tier behavior for Sensitivity Analysis and historical callers without
-live admission. This EEG migration does not change their simulation policy.
+The shared RAM recommendations also serve `compute_effective_max_workers`.
+That older API retains its twenty-worker ceiling for Sensitivity Analysis and
+historical callers without live admission.
 The GUI resolves current project ceilings for preflight, preparation and normal
 runs rather than reusing a previous run's worker count. Saved canonical and legacy
 worker settings remain compatible; a positive value is a ceiling, not a guaranteed
 number of active workers. RAM preload remains an explicit setting and is not
 silently changed to disk loading when headroom falls.
+
+Preflight reserves marker and diagnostic-window evidence across the entire
+recording. For a confirmed BioSemi64 BDF with characterized source geometry,
+NumPy 2.3.1 and raw spectral screening disabled, waveform admission uses the
+larger of the native BDF reader peak and a single protocol-locked occurrence's
+working set. This includes the resident condition buffer, overlapping channel
+selections, reconstruction of unique samples, and spatial and nonfinite-value
+scratch. Other supported routes use the full-recording estimate. Each
+reservation still has to fit the current physical and commit limits.
 
 Common long-running work:
 
@@ -65,6 +76,10 @@ Common long-running work:
   reads; an empty queue falls back to native serial work rather than waiting
   permanently or inventing a capacity failure. This is conservative admission,
   not protection against arbitrary concurrent external allocations.
+- Frequency-QC provisional harmonic evidence uses the same ordered reader pool
+  to hash independent native results. Its credit covers the JSON declaration
+  and the fixed-size companion hash buffer. It reads companion bytes directly.
+  Historical workbooks use the existing serial identity check.
 - Plot generation and export.
 - Statistics pipeline runs.
 - File scanning over project folders.
@@ -101,14 +116,26 @@ Common long-running work:
   GUI-neutral `review_resource_budget` module obtains source-bound ordinary
   BDF geometry using the existing validated lazy loader and bounds loading,
   referencing, drops, filtering, resampling, raw AUTO QC, checkpoint restoration
-  and target-rate kurtosis allocations. Raw removed-electrode AUTO and
+  and target-rate kurtosis allocations. Each preparation job receives the approved
+  path-plan and display-QC entries for its recording, preserving ambiguous
+  aliases for native validation. For AUTO raw-electrode screening the parent
+  bounds the source-rate scratch arrays by the union of all approved intervals
+  **before condition exclusions**. It verifies the canonical plan fingerprint,
+  recording-specific protocol and event mapping, source sample rate, origin and
+  length against the admitted BDF header. Missing or inconsistent plans retain
+  the full-recording credit. The worker verifies the actual events and grid
+  before screening. The original full-rate scoring reserve and its live grant
+  remain available for all RAM tiers. Raw removed-electrode AUTO and
   automatic kurtosis interpolation are distinct settings. Unknown/annotation/
   unpinned routes retain the exclusive legacy source-size fallback. No signal
   arrays or cross-run geometry cache are retained by the scheduler.
   Before admissions, the first-fit queue refreshes OS physical availability
-  and Windows CommitLimit-minus-CommitTotal. Only matching-process unique
-  resident pages offset physical reservations; private committed bytes offset
-  the commit reservation separately. Shared RSS and pagefile-free bytes cannot
+  and Windows CommitLimit-minus-CommitTotal. When both budgets cover all
+  reservations and pool floors in full, admission skips process working-set
+  queries. Otherwise the queue queries known owners and refreshes host headroom
+  before deciding. Only matching-process unique resident pages offset physical
+  reservations; private committed bytes offset the commit reservation separately.
+  Shared RSS and pagefile-free bytes cannot
   be substituted. Missing ownership probes earn no memory credit. Worker floors
   cover every pool slot, including idle or not-yet-identified processes, with a
   separate host margin. Thus background
@@ -186,9 +213,12 @@ Common long-running work:
   a larger useful population, including partial recovery below the CPU ceiling.
   Current jobs, phase grants and cancellation continue through that drain; the
   population is chosen again from fresh headroom after all owners finish.
-  Scheduling changes must preserve source order, cancellation and the existing
-  per-file numerical route. A preparation-only estimate must not be presented as
-  a bound for the later epochs and export stages.
+  The scheduler keeps source order among recordings that fit. An exclusive
+  recording waits for its predecessors to finish before starting. Each admitted
+  job receives its own event plan and recording-specific kurtosis decision.
+  The full project review and processing fingerprint stay with the coordinator.
+  This keeps the estimator's 256 MiB metadata budget and one-million-object
+  limit independent of cohort size for those two mappings.
   `processing_resource_budget` characterizes the native common-grid BDF route
   on CPython 3.13 with MNE 1.9.0, NumPy 2.3.1, SciPy 1.16.0 and pandas 2.3.0.
   Other runtime versions, custom metadata or unsupported geometries use one
@@ -198,16 +228,20 @@ Common long-running work:
   files validate actual shape at an unconditional finish barrier, including
   disabled kurtosis and warm preparation checkpoints. Source-rate fallback must
   obtain its complete credit before repairs and cache publication; the later
-  tail barrier also protects epochs and exports. Only control metadata crosses
-  the admission queue, and these callbacks do not enter scientific settings.
-- EEG preflight uses its CPU/user ceiling with fresh whole-file memory credits
+  tail barrier accounts for the measured shape through epochs and export.
+  After the source phase ends, the scheduler can admit more recordings using
+  the smaller tail reservation. Resident memory from that process remains
+  charged against available system memory. The run summary reports the pool
+  size, peak submitted files, and peak overlap of timed worker executions.
+- EEG preflight uses the shared worker ceiling with fresh whole-file memory credits
   before submissions. Active thread credits are retained in full because the
   parent also owns unrelated allocations; parent RSS/USS is not reclaimed as
   per-job credit. Unknown or over-host estimates run exclusively through the
   native chunked route, and unavailable required host information reports an
-  actionable resource error. The existing two-reader and two-spectral-evaluator
-  semaphores remain independent limits. Results and errors retain canonical
-  order even when files complete out of order.
+  actionable resource error. Each admitted recording can independently read its
+  BDF and evaluate its spectrum within that same reservation. The coordinator
+  can start a smaller recording while a larger one waits for memory. Exclusive
+  recordings form queue boundaries. Results retain their canonical order.
 - Each persistent processing pool worker owns one bounded prepared-FIR cache
   for that batch. The initializer creates it after configuring numerical thread
   limits. A per-file context is always reset on return or exception; only
@@ -431,6 +465,6 @@ Worker-setting visible/manual smoke: save `0` and a positive maximum in Settings
 neither should show the obsolete RAM-tier override prompt. Verify the field explains
 that live memory can reduce active concurrency. Change the saved maximum between
 runs and confirm preflight, preparation and normal-run logs use the current
-CPU-bounded ceiling rather than the preceding run's value. Do not infer actual
+RAM-tier or explicit CPU-bounded ceiling. Do not infer actual
 concurrency from the ceiling alone. This path is not executed locally by the
 non-Qt checks.

@@ -20,6 +20,7 @@ from Main_App.processing.artifact_freshness import (
     mark_artifact_failed,
     mark_selection_derivatives_stale,
     preserve_artifact_for_rebuild,
+    published_artifacts_need_rebuild,
     require_current_artifact,
     selection_dependent_artifacts_are_current,
     selection_fingerprint_from_metadata,
@@ -336,6 +337,7 @@ def test_all_selection_dependent_artifacts_must_match_active_fingerprint(
         mark_artifact_current(root, artifact_id, target, "active")
 
     assert selection_dependent_artifacts_are_current(root, "active") is True
+    assert not published_artifacts_need_rebuild(root)
     assert selection_dependent_artifacts_are_current(root, "other") is False
 
 
@@ -364,6 +366,7 @@ def test_selection_dependents_are_not_current_when_recorded_target_is_missing(
     missing.unlink()
 
     assert selection_dependent_artifacts_are_current(root, "active") is False
+    assert published_artifacts_need_rebuild(root)
 
 
 def test_successful_rebuild_archives_old_file_inside_project(tmp_path: Path) -> None:

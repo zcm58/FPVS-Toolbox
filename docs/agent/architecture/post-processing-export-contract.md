@@ -6,6 +6,8 @@ order unless a task explicitly changes the corresponding method contract.
 
 `Main_App.exports.post_process` and `Main_App.exports.post_process_excel` own
 the implementations; `post_export_adapter` translates worker/process payloads.
+Its public `LegacyCtx` carries data, output paths, settings, logs and receipts.
+Workers call the shared exporter with the disabled-FIF compatibility flags.
 Historical `Main_App.Shared` modules are same-object compatibility aliases.
 Publication-style imports remain lightweight and do not eagerly import workbook
 generation or Stats dependencies.
@@ -45,6 +47,9 @@ change checks for current-run writes. Companion archives, temporary files and
 metadata sidecars alone do not establish a completed result. Completion and
 missing-output messages refer to result files rather than assuming Excel;
 scientific readiness and export-receipt validation remain separate checks.
+Once the run has recorded a successful export, finalization uses that outcome
+and skips the last directory scan. If success is still undecided, finalization
+checks the output tree for new or overwritten results and retains its I/O errors.
 
 Reading a BCA Method Audit may reuse exact frequency-column parsing within that
 single call: at most 256 built-in string tokens of at most 128 characters each.
@@ -317,6 +322,16 @@ The input adapter accepts the writer's historical `55_onbin` and current
 sample-count, on-bin divisibility, fingerprint, reference, channel, unit and
 artifact-integrity checks; accepting the current tag adds no recropping or
 resampling.
+
+When an incremental release adds recordings, the processing ledger pins each
+eligible skipped participant's existing source commit manifest and original
+condition export receipts before advancing the cohort fingerprint. The source
+reader checks that pin against the newly reconciled condition outcomes, raw
+recording identity, geometry and source/target span evidence. Each accepted
+FIF and sidecar keeps its original publication identity. The source-map export
+records the current cohort identity. A missing pin, changed receipt, changed
+source commit or newly processed recording requires the standard current
+publication.
 
 Downstream source-map orchestration may mark a completed participant as
 source-ineligible when any canonical condition is missing or the processing

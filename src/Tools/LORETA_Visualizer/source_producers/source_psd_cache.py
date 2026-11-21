@@ -269,6 +269,8 @@ class SourcePsdCacheWriteResult:
 
     cache_key: str
     paths: SourcePsdCachePaths
+    metadata_sha256: str = field(default="", repr=False, compare=False)
+    arrays_sha256: str = field(default="", repr=False, compare=False)
 
 
 @dataclass(frozen=True)
@@ -280,6 +282,7 @@ class SourcePsdCacheLookup:
     paths: SourcePsdCachePaths
     result: SourcePsdParticipantResult | None = None
     detail: str = ""
+    native_cell_key: str = field(default="", repr=False, compare=False)
 
     @property
     def hit(self) -> bool:
@@ -333,6 +336,7 @@ def store_source_psd_cache_entry(
     project_root: str | Path,
     key_inputs: SourcePsdCacheKeyInputs,
     result: SourcePsdParticipantResult,
+    include_digests: bool = False,
 ) -> SourcePsdCacheWriteResult:
     """Atomically store compact arrays followed by their integrity metadata."""
     if not isinstance(key_inputs, SourcePsdCacheKeyInputs):
@@ -368,13 +372,16 @@ def store_source_psd_cache_entry(
             },
             "result_metadata": dict(result.metadata),
         }
-        _write_bytes(metadata_tmp, _canonical_json_bytes(metadata))
+        metadata_bytes = _canonical_json_bytes(metadata)
+        _write_bytes(metadata_tmp, metadata_bytes)
         os.replace(arrays_tmp, paths.arrays_path)
         os.replace(metadata_tmp, paths.metadata_path)
     finally:
         arrays_tmp.unlink(missing_ok=True)
         metadata_tmp.unlink(missing_ok=True)
-    return SourcePsdCacheWriteResult(cache_key=cache_key, paths=paths)
+    if include_digests:
+        return SourcePsdCacheWriteResult(cache_key, paths, hashlib.sha256(metadata_bytes).hexdigest(), arrays_checksum)
+    return SourcePsdCacheWriteResult(cache_key, paths)
 
 
 def load_source_psd_cache_entry(
@@ -485,6 +492,7 @@ def _load_source_psd_cache_paths(
     *,
     cache_key: str,
     legacy: bool = False,
+    metadata: dict[str, Any] | None = None,
 ) -> SourcePsdCacheLookup:
     stored_key = paths.metadata_path.stem
     arrays_exists = paths.arrays_path.is_file()
@@ -495,7 +503,8 @@ def _load_source_psd_cache_paths(
         return _miss(cache_key, paths, CACHE_STATUS_MISS_PARTIAL, "Only one final cache file exists.")
 
     try:
-        metadata = json.loads(paths.metadata_path.read_text(encoding="utf-8"))
+        if metadata is None:
+            metadata = json.loads(paths.metadata_path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         return _miss(cache_key, paths, CACHE_STATUS_MISS_METADATA_UNREADABLE, str(exc))
     if not isinstance(metadata, dict) or metadata.get("format") != SOURCE_PSD_CACHE_FORMAT:

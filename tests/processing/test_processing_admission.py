@@ -186,6 +186,42 @@ def test_stale_worker_identity_does_not_earn_memory_credit(setup):
     assert not state.fits()  # probe_owned_memory returns no matching ownership
 
 
+def test_first_fit_skips_a_large_file_without_crossing_exclusive_work(setup):
+    _, build = setup
+    state = build([Estimate(2 * GIB), Estimate(7 * GIB), Estimate(GIB), None, Estimate(GIB)])
+    state.reset_pool(3)
+    state.submitted(0)
+    assert state.first_fitting([1, 2, 3, 4]) == 1
+    assert state.first_fitting([1, 3, 4]) is None
+    state.completed(0)
+    state.reset_pool(1)
+    assert state.first_fitting([1, 3, 4]) == 0
+
+
+def test_final_tail_releases_prefix_and_keeps_resident_memory_charged(monkeypatch, setup):
+    snapshot, build = setup
+    state = build([Estimate(5 * GIB, 2 * GIB), Estimate(3 * GIB)])
+    state.reset_pool(2)
+    state.submitted(0)
+    state.workers[123] = (100.0, 0)
+    snapshot[0] = ReviewMemorySnapshot(16 * GIB, 9 * GIB, 9 * GIB, True)
+    monkeypatch.setattr(admission, "probe_owned_memory", lambda *_: OwnedMemory(GIB, GIB))
+    assert not state.fits(1)
+    monkeypatch.setattr(Estimate, "tail_bytes", lambda _, *shape: 2 * GIB)
+    child = admission.ProcessingWorkerAdmission(*state.initializer_args())
+    child.index, child.credit = 0, 5 * GIB
+    child.before_tail(SimpleNamespace(ch_names=["Cz"], n_times=250, info={"sfreq": 250.}))
+    state.drain()
+    assert state.active[0] == child.credit == 2 * GIB and state.final_tails == {0}
+    assert state.fits(1)
+    snapshot[0] = ReviewMemorySnapshot(16 * GIB, 7 * GIB, 7 * GIB, True)
+    assert not state.fits(1)  # credit left from the prefix cannot subsidize another file
+    state.completed(0)
+    state.events.put({"type": "tail", "index": 0, "shape": (1, 250, 250.)})
+    state.drain()
+    assert not state.active and not state.final_tails
+
+
 def test_delayed_reused_worker_start_reserves_unresolved_floors(monkeypatch, setup):
     snapshot, build = setup
     state = build([Estimate()] * 4)

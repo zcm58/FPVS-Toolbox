@@ -79,9 +79,9 @@ def build_preprocessing_page(self, tabs: QTabWidget) -> QWidget:
         edit = QLineEdit(self.group_preproc)
         if i == 8:
             edit.setToolTip(
-                "An upper limit for EEG processing. Automatic uses available CPUs; "
-                "live RAM and Windows commit headroom determine how many jobs run. "
-                "A positive value can lower the limit."
+                "Automatic chooses a worker limit from RAM and available CPUs. "
+                "Enter a positive value to override the RAM recommendation. "
+                "Available CPUs and memory still limit concurrent jobs."
             )
         edit.setAccessibleName(label_text.rstrip(":"))
         lbl.setBuddy(edit)
