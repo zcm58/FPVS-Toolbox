@@ -7,23 +7,27 @@ from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
-from PySide6.QtCore import QAbstractAnimation, QPoint, QRect, QRectF, Qt
+from PySide6.QtCore import QAbstractAnimation, QPoint, QRect, QRectF, Qt, QTimer
 from PySide6.QtWidgets import (
     QAbstractButton,
     QAbstractScrollArea,
     QApplication,
+    QCheckBox,
     QComboBox,
+    QDialog,
     QFrame,
     QLabel,
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QWidget,
 )
 
 from Main_App.settings.settings_manager import SettingsManager
 from Main_App.gui.settings_panel import SettingsDialog
-from Main_App.gui.theme import apply_fpvs_theme
+from Main_App.gui.theme import apply_fpvs_theme, set_appearance_mode
+from Main_App.gui.typography import APP_FONT_FAMILY
 from Main_App.projects import Project
 from tests.gui.test_gui_preproc_dialog import _prep_project
 
@@ -278,7 +282,7 @@ def test_extracted_pages_keep_one_dialog_owner_and_initial_draft(tmp_path, qtbot
     ]
     assert [widget.tabs.tabText(index) for index in range(widget.tabs.count())] == [
         "Processing", "Protocol", "Harmonics", "ROIs", "Quality Control",
-        "Experimental", "Application",
+        "Experimental", "Application", "Diagnostics",
     ]
     assert not widget.has_unsaved_changes()
 
@@ -287,6 +291,95 @@ def test_extracted_pages_keep_one_dialog_owner_and_initial_draft(tmp_path, qtbot
     widget.btn_changeRoot.click()
     assert opened == [widget]
     assert not widget.has_unsaved_changes()
+
+
+def test_diagnostics_copy_and_preference_persist_immediately(tmp_path, qtbot, monkeypatch):
+    from Main_App.diagnostics import crash_reporting
+    from Main_App.diagnostics.crash_reporting import CrashReporter
+    from Main_App.diagnostics.crash_store import CrashStore
+
+    monkeypatch.setenv("FPVS_CONFIG_HOME", str(tmp_path / "config"))
+    monkeypatch.setattr(crash_reporting.faulthandler, "is_enabled", lambda: True)
+    store = CrashStore(tmp_path / "crashes")
+    reporter = CrashReporter(store, "3.0.0")
+    reporter.set_preference(True)
+    monkeypatch.setattr(crash_reporting, "_active", reporter)
+    manager = SettingsManager(str(tmp_path / "settings.ini"))
+    widget = SettingsDialog(manager)
+    qtbot.addWidget(widget)
+    apply_fpvs_theme(QApplication.instance())
+    widget.resize(1020, 790)
+    widget.show()
+    qtbot.waitExposed(widget)
+    widget.settings_navigation.setCurrentRow(widget.tabs.count() - 1)
+    page = widget.tabs.currentWidget()
+    assert widget.settings_page_title.text() == "Diagnostics"
+    assert any("operating system versions" in label.text() for label in page.findChildren(QLabel))
+    toggle = page.findChild(QCheckBox, "settings_automatic_crash_reporting")
+    assert toggle.isVisible() and toggle.isChecked()
+    toggle.click()
+    assert store.preference() is False
+    assert not widget.has_unsaved_changes()
+    toggle.click()
+    assert store.preference() is True
+    reporter.shutdown(clean=True)
+
+
+@pytest.mark.parametrize(("appearance", "action"), [("Dark", "enable"), ("Light", "decline"), ("Dark", "escape")])
+def test_diagnostics_discloses_before_default_capture(tmp_path, qtbot, monkeypatch, appearance, action):
+    from Main_App.diagnostics import crash_reporting
+    from Main_App.diagnostics.crash_reporting import CrashReporter
+    from Main_App.diagnostics.crash_store import CrashStore
+    from Main_App.gui.diagnostics_preferences import disclose_automatic_reporting
+
+    monkeypatch.setattr(crash_reporting.faulthandler, "is_enabled", lambda: True)
+    set_appearance_mode(QApplication.instance(), appearance)
+    reporter = CrashReporter(CrashStore(tmp_path / "crashes"), "3.0.0")
+    observed = []
+
+    def choose():
+        dialog = QApplication.activeModalWidget()
+        if not isinstance(dialog, QDialog) or dialog.objectName() != "automatic_reporting_disclosure":
+            return
+        labels = dialog.findChildren(QLabel)
+        enable = dialog.findChild(QPushButton, "automatic_reporting_enable")
+        decline = dialog.findChild(QPushButton, "automatic_reporting_decline")
+        observed.append(
+            (
+                reporter.preference(),
+                reporter._session,
+                "\n".join(label.text() for label in labels),
+                not dialog.windowIcon().isNull() and any(not label.pixmap().isNull() for label in labels),
+                set(label.font().family() for label in labels),
+                enable.isDefault() and enable.property("variant") == "primary",
+                all(label.height() >= label.heightForWidth(label.width()) for label in labels if label.wordWrap()),
+                all(button.height() >= 40 and button.width() >= button.sizeHint().width() for button in (enable, decline)),
+            )
+        )
+        if action == "enable":
+            qtbot.keyClick(enable, Qt.Key.Key_Return)
+        elif action == "decline":
+            decline.click()
+        else:
+            qtbot.keyClick(dialog, Qt.Key.Key_Escape)
+
+    timeout = QTimer()
+    timeout.setSingleShot(True)
+    timeout.timeout.connect(lambda: QApplication.activeModalWidget().close() if QApplication.activeModalWidget() else None)
+    timeout.start(3000)
+    QTimer.singleShot(25, choose)
+    disclose_automatic_reporting(reporter)
+    timeout.stop()
+    assert len(observed) == 1
+    preference, session, copy, has_logo, fonts, primary_default, labels_fit, buttons_fit = observed[0]
+    assert preference is None and session is None
+    assert "CPU and graphics models" in copy
+    assert "What stays local" in copy and "Turning it off deletes pending reports." in copy
+    assert has_logo and fonts == {APP_FONT_FAMILY}
+    assert primary_default and labels_fit and buttons_fit
+    assert reporter.preference() is (action == "enable")
+    assert (reporter._session is not None) is (action == "enable")
+    reporter.shutdown(clean=True)
 
 
 def test_settings_enter_on_shared_save_persists_draft(panel, qtbot):
@@ -380,8 +473,11 @@ def test_settings_tabs_and_actions_fit_supported_workspace(panel, qtbot, tab):
         while ancestor is not None and ancestor is not panel:
             ancestors.append(ancestor)
             ancestor = ancestor.parentWidget()
-        # Lists and chip viewers intentionally scroll their own content.
-        if any(isinstance(parent, QAbstractScrollArea) for parent in ancestors):
+        # Qt's list and table internals do not need form-control bounds checks.
+        if any(
+            isinstance(parent, QAbstractScrollArea) and not isinstance(parent, QScrollArea)
+            for parent in ancestors
+        ):
             continue
         name = widget.objectName() or type(widget).__name__
         icon_only = (
@@ -408,8 +504,42 @@ def test_settings_tabs_and_actions_fit_supported_workspace(panel, qtbot, tab):
             )
             assert widget.width() >= minimum_width, name
         for ancestor in [*ancestors, panel]:
+            scroll = ancestor.parentWidget()
+            if isinstance(scroll, QScrollArea) and ancestor is scroll.viewport() and (
+                scroll.verticalScrollBar().maximum() or scroll.horizontalScrollBar().maximum()
+            ):
+                break
             bounds = QRect(widget.mapTo(ancestor, QPoint(0, 0)), widget.size())
             assert ancestor.rect().contains(bounds), (name, ancestor.objectName())
+
+
+def test_compact_settings_keep_navigation_and_actions_above_overflow(panel, qtbot):
+    panel.resize(900, 460)
+    qtbot.waitUntil(lambda: panel.size().toTuple() == (900, 460))
+    save = panel.findChild(QPushButton, "settings_footer_save")
+    cancel = panel.findChild(QPushButton, "settings_footer_cancel")
+    for index in range(panel.tabs.count()):
+        panel.tabs.setCurrentIndex(index)
+        QApplication.processEvents()
+        scroll = panel.tabs.currentWidget().findChild(QScrollArea, "settings_category_scroll")
+        assert scroll.isVisibleTo(panel)
+        assert scroll.horizontalScrollBar().maximum() == 0
+        assert not scroll.isAncestorOf(panel.settings_navigation)
+        assert not scroll.isAncestorOf(panel.settings_page_title)
+        for button in (save, cancel):
+            assert button.isVisibleTo(panel) and not scroll.isAncestorOf(button)
+            assert panel.rect().contains(QRect(button.mapTo(panel, QPoint()), button.size()))
+
+    panel.tabs.setCurrentIndex(panel._roi_tab_index)
+    map_scroll = panel.roi_editor.map_scroll
+    qtbot.waitUntil(lambda: map_scroll.verticalScrollBar().maximum() > 0)
+    electrode = panel.roi_editor.map_widget.electrode_buttons["Oz"]
+    electrode.setFocus()
+    qtbot.waitUntil(electrode.hasFocus)
+    viewport = map_scroll.viewport()
+    assert viewport.rect().contains(QRect(electrode.mapTo(viewport, QPoint()), electrode.size()))
+    assert electrode.width() >= 36 and electrode.height() >= 36
+    _capture(panel, "settings-compact-roi")
 
 
 def test_preprocessing_keyboard_focus_can_leave_invalid_field(panel, qtbot):

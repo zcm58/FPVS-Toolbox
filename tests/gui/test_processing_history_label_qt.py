@@ -50,14 +50,14 @@ def _label(qtbot):
     ],
     ids=["no-completed-run", "unavailable-history", "completed-run", "unknown-participant-count"],
 )
-def test_history_status_remains_visible(qtbot, monkeypatch, tmp_path: Path, status) -> None:
+def test_history_visibility_matches_status(qtbot, monkeypatch, tmp_path: Path, status) -> None:
     monkeypatch.setattr(label_module, "load_processing_history", lambda _root: status)
     label = _label(qtbot)
 
     label.refresh(tmp_path)
     qtbot.waitUntil(lambda: label.text() == format_processing_history(status))
 
-    assert label.isVisible()
+    assert label.isVisible() is (status.state != "missing")
     assert label.wordWrap()
     assert label.objectName() == "project_processing_history"
     interface = QAccessible.queryAccessibleInterface(label)
@@ -85,7 +85,7 @@ def test_loading_history_keeps_event_loop_responsive(qtbot, monkeypatch, tmp_pat
     label.refresh(tmp_path)
     try:
         qtbot.waitUntil(entered.is_set)
-        assert label.isVisible()
+        assert label.isHidden()
         assert "Checking" in label.text()
         heartbeat = []
         QTimer.singleShot(0, lambda: heartbeat.append(True))
@@ -143,7 +143,7 @@ def test_old_project_and_old_request_results_do_not_replace_current_history(
     label.refresh(None)
     label._on_loaded(str(second), second_request, _completed(99))
     assert label.text() == "No project open"
-    assert label.isVisible()
+    assert label.isHidden()
 
 
 def test_reopened_home_loads_saved_history_again(qtbot, monkeypatch, tmp_path: Path) -> None:

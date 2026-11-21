@@ -9,6 +9,7 @@ from typing import Any
 from Main_App.diagnostics import log_router
 
 from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QGraphicsOpacityEffect,
@@ -17,6 +18,8 @@ from PySide6.QtWidgets import (
     QTableWidgetItem,
     QWidget,
 )
+
+from Main_App.gui.icons import processing_play_icon
 
 
 PROCESSING_ACTIVITY_MESSAGE = "Toolbox may respond slowly while recordings are processing."
@@ -412,6 +415,7 @@ def _place_start_button(host: Any, target: str) -> None:
         layout = getattr(host, "processing_action_layout", None)
         if slot is not None and layout is not None:
             button.setParent(slot)
+            button.setIcon(QIcon())
             button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             width = max(176, min(button.sizeHint().width(), 260))
             button.setMinimumWidth(width)
@@ -432,13 +436,27 @@ def _place_start_button(host: Any, target: str) -> None:
     layout = getattr(run_panel, "row_layout", None)
     if run_panel is not None and layout is not None:
         button.setParent(run_panel)
+        button.setIcon(processing_play_icon())
         button.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         button.setMinimumWidth(180)
-        layout.addWidget(button)
+        layout.addWidget(button, 1, Qt.AlignHCenter)
         button.show()
 
 
+def ensure_processing_navigation_unlocked(host: Any) -> None:
+    actions = getattr(host, "shell_actions", None)
+    if actions is not None:
+        actions.setEnabled(True)
+    menu = getattr(host, "menuBar", lambda: None)()
+    if menu is not None:
+        menu.setEnabled(True)
+    host._processing_navigation_states = []
+
+
 def _set_processing_navigation_locked(host: Any, locked: bool) -> None:
+    actions = getattr(host, "shell_actions", None)
+    if actions is not None:
+        actions.setEnabled(not locked)
     states = getattr(host, "_processing_navigation_states", [])
     if locked:
         if states:

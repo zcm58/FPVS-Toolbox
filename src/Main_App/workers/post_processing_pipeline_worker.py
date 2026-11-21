@@ -14,6 +14,9 @@ from typing import Any
 
 from PySide6.QtCore import QObject, Signal, Slot
 
+from Main_App.diagnostics.crash_reporting import report_failure
+from Main_App.processing.pipeline_plan import PipelineCancelled
+
 logger = logging.getLogger(__name__)
 
 PIPELINE_STEP_EXCEPTIONS = (
@@ -313,6 +316,8 @@ class PostProcessingPipelineWorker(QObject):
                     steps.extend(self._run_source_maps(project_root))
         except Exception as exc:  # noqa: BLE001 - every stage failure must release the owning QThread
             requires_processing = isinstance(exc, processing_required_errors)
+            if not requires_processing and not isinstance(exc, PipelineCancelled):
+                report_failure(exc, "processing")
             logger.exception("post_processing_pipeline_failed")
             steps.append(
                 PostProcessingStepResult(
@@ -1190,6 +1195,13 @@ class PostProcessingPipelineWorker(QObject):
                     self._selection_fingerprint,
                     archived_path=self._artifact_archives.get(step.name),
                 )
+                if step.name == "analysis_ready_full_audit":
+                    from Main_App.projects.studio_cohort import record_current_result
+                    try:
+                        record_current_result(project_root, target)
+                    except PIPELINE_STEP_EXCEPTIONS as exc:
+                        mark_artifact_failed(project_root, step.name, target, self._selection_fingerprint, str(exc))
+                        raise
             else:
                 mark_artifact_failed(
                     project_root,

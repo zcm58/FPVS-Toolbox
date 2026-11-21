@@ -49,6 +49,7 @@ manual_smoke = []
 [scopes.gui]
 audits = ["gui"]
 tests = [
+  "tests/gui/test_experiment_library_workflow_static.py",
   "tests/gui/test_settings_page_ownership_static.py",
   "tests/gui/test_trigger_maps_model.py",
   "tests/gui/test_pipeline_setup_workflow_static.py",
@@ -97,8 +98,8 @@ manual_smoke = [
   "Run processing with native .fpvs results only and confirm Processing Complete reports result files saved to the existing project output folder without a no-Excel warning. Exercise the queued post-export worker as well as batch completion; confirm native writes/overwrites mark the run successful, an unchanged old result alone does not count as a new batch write, and an actual empty-output run still reports no result files. Repeat with a historical Excel output. Preserve the prior-run and failure messages. Qt execution is CI-only unless a safe visible environment is explicitly approved.",
   "In a visible 1200x800 session, open Settings > Protocol. Enable condition-specific oddball markers and verify the bounded table fits, lists conditions by onset code, and only oddball cells are editable. Assign onsets 1..5 to 51..55, save and reopen, and confirm each value persists. Switch off and confirm the shared code resumes; cancel a draft change and verify it is not saved. Reopen another project and confirm its shared code is unchanged. Enable recording-specific trigger schemas and open Configure recording schemas. Assign one recording the project condition markers and another shared code 55; use selected-row bulk assignment, cancel a draft, then apply and save. Reopen Settings and verify both explicit assignments persist. Change the condition template and confirm existing recording assignments remain unchanged. Verify custom saved marker maps remain intact and newly registered recordings stay unassigned until reviewed. Exercise a repeated-session project and confirm separate canonical recording IDs per visit. Disable recording-specific mode explicitly and confirm the project template resumes. Start fresh QC on mapped recordings and check each condition uses the correct recording marker code in Technical details. For a genuinely absent marker, confirm the unavailable-crop explanation points to trigger settings and does not claim the recording is short. GUI execution is CI-only locally.",
   "Start in Welcome at 1200x800. Open a disposable project, visit Home, Settings, every embedded tool, and Processing Activity, and confirm navigation keeps the main window size. Check controls and actions fit without page-level scrolling. Repeat navigation at a larger manually chosen size and when maximized. Focused dialogs may use their own sizes.",
-  "At 1200x800, check Welcome in Light and Dark. Verify both buttons show keyboard focus. Open Existing Project opens the picker. Cancel the picker, then use Cancel and Escape in Create New Project. Open an existing project and exercise both creation routes on disposable fixtures. For Studio import, confirm hardware and choose the recordings folder. Verify Home shows the condition count and Start Processing. Open Edit conditions and check that long condition lists scroll within the editor. Close and reopen it to verify drafts survive. Try saving an invalid condition from Settings and confirm Home reveals and focuses the error. View Log should still open the retained log. With Beta Tools disabled, confirm only SNR Plots appears under Home Analysis, while Tools also lists Free Harmonic Clustering. Enable Beta Tools and restart, then check that Home adds Scalp Maps and LORETA Visualizer through the same menu actions. Verify all six beta tools are listed under Tools > Beta Tools. Verify each beta tool shows the shared warning before its first display in that app session, does not repeat for that same tool, and the two default tools show no beta warning.",
-  "Verify the single Slate menu bar, File action groups and complete long labels. Use Alt, arrows and Escape to navigate menus. Open Settings from File and a tool from Tools. Verify View > Home and Ctrl+1 return to Home at the current window size. On a disposable project, exercise Import/Open/Create Manually/Save, Settings, cache-reset confirmation/cancellation, Check for Updates, About and Exit with existing guards. Confirm menus are hidden on Welcome, disabled during processing/cache reset and restored afterward. Toggle Beta Tools, save and restart; verify Beta Tools appear only when enabled, each tool uses its existing project/stale-output guards, and beta warnings appear once per role. Qt remains CI-only unless a safe visible environment is explicitly approved.",
+  "At 1200x800, check Welcome and Home in Light and Dark. Verify both Welcome buttons show keyboard focus. Cancel the existing-project picker and dismiss Create New Project with Cancel and Escape. Exercise both creation routes with disposable fixtures. For Studio import, confirm hardware and choose the recordings folder. Verify the Current Project heading, native Toolbox icon, matched Browse and Edit conditions widths, folder-first scope, file count and group breakdown, workbook destination, and centered green-play Start Processing. Cancel the single-file picker, select a file, and return to the folder. Switch projects and check that the count and project heading update. Check that Tools > Processing Log opens the retained log. Open Edit conditions and verify long lists scroll within the editor. Close and reopen it to verify drafts survive. Try saving an invalid condition from Settings and confirm Home reveals and focuses the error. Check that Start Processing returns to the center of Home after processing or cancellation.",
+  "Verify the native menu bar, File action groups and complete long labels in Light and Dark. Move across File/View/Tools without clicking: hover must be visible without opening menus; blank space and leaving must clear it. Use Alt, arrows and Escape to navigate menus. Open Settings from File and a tool from Tools. Verify View > Home and Ctrl+1 return to Home at the current window size. On a disposable project, exercise Import/Open/Create Manually/Save, Settings, cache-reset confirmation/cancellation, Check for Updates, About and Exit with existing guards. Confirm View > Experiment Library is available on Welcome, menus disable during processing/cache reset and restore afterward. Toggle Beta Tools, save and restart; verify the native Beta Tools popup appears only when enabled, each tool uses its existing project/stale-output guards, and beta warnings appear once per role. Qt remains CI-only unless a safe visible environment is explicitly approved.",
 ]
 
 
@@ -123,6 +124,7 @@ manual_smoke = ["Use File > Check for Updates in a visible Main App window: canc
 [scopes.project-io]
 audits = ["paths"]
 tests = [
+  "tests/project_io/test_experiment_library.py",
   "tests/project_io/test_shared_workbook_primitives.py",
   "tests/project_io/test_acquisition_profiles.py",
   "tests/test_brain_products_reader.py",
@@ -138,7 +140,10 @@ tests = [
   "tests/project_io/test_unicorn_raw.py",
   "tests/project_io/test_unicorn_raw_failure_paths.py",
   "tests/project_io/test_studio_acquisition_evidence.py",
+  "tests/project_io/test_studio_handoff.py",
   "tests/project_io/test_fpvs_config_import.py",
+  "tests/project_io/test_studio_cohort.py",
+  "tests/project_io/test_study_result_sharing.py",
   "tests/project_io/test_frequency_protocol.py",
   "tests/project_io/test_condition_trigger_maps.py",
   "tests/project_io/test_mapped_dataset_catalog.py",
@@ -170,7 +175,7 @@ tests = [
   "tests/project_io/test_settings_paths.py",
   "tests/settings/test_roi_preset_settings.py",
 ]
-include = ["src/Main_App/projects/**", "src/Main_App/io/**", "src/Main_App/Shared/settings_paths.py", "src/Main_App/settings/**", "src/Main_App/gui/project_workflows.py", "src/Main_App/gui/tool_workflows.py", "tests/project_io/**"]
+include = ["src/Main_App/projects/**", "src/Main_App/io/**", "src/Main_App/reporting/**", "src/Main_App/exports/reporting_csv.py", "src/Main_App/Shared/settings_paths.py", "src/Main_App/settings/**", "src/Main_App/gui/project_workflows.py", "src/Main_App/gui/tool_workflows.py", "src/Main_App/gui/reporting_dialog.py", "tests/project_io/**"]
 manual_smoke = []
 
 [scopes.processing]

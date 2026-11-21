@@ -179,6 +179,30 @@ def test_project_adapter_loads_canonical_audit_and_writes_results(
     assert "Repeated Session Long" in sheets
 
 
+def test_revised_studio_cohort_cannot_reuse_an_older_valid_full_audit(tmp_path: Path) -> None:
+    from Main_App.projects import load_project_dataset_index
+
+    root = _write_project(tmp_path / "Project")
+    source = root / "previous-release.xlsx"
+    with pd.ExcelWriter(source, engine="openpyxl") as writer:
+        _audit_rows().to_excel(writer, sheet_name=ROI_LONG_SHEET, index=False)
+    path = root / "project.json"
+    manifest = json.loads(path.read_bytes())
+    manifest["tools"] = {"studio_cohort": {
+        "roster_revision": "revised", "versions": ["new"], "visits": {
+            key: {"decision": "matched", "recording_id": key,
+                  "protocol_version_id": "old" if key.startswith("C2") else "new"}
+            for key in manifest["recordings"]
+        },
+    }}
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    index = load_project_dataset_index(root)
+    assert "C2" not in index.participants
+    assert all(record.participant_id != "C2" for record in index.recordings.values())
+    with pytest.raises(ValueError, match="Run Processing and analysis for the reviewed cohort"):
+        load_repeated_session_project_data(root, analysis_ready_workbook=source)
+
+
 def test_project_adapter_rejects_legacy_full_audit_shape(tmp_path: Path) -> None:
     project_root = _write_project(tmp_path / "Project")
     source = project_root / "legacy-audit.xlsx"

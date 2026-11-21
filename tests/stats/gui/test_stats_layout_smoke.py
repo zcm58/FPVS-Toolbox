@@ -101,7 +101,6 @@ def test_stats_window_layout_smoke(qtbot, tmp_path, app):
     }
     for title in [
         "Input data",
-        "Analysis Design",
         "Included Conditions",
         "Manual Exclusions",
         "Standard FPVS Screening",
@@ -146,7 +145,6 @@ def test_stats_window_layout_smoke(qtbot, tmp_path, app):
         assert page.verticalScrollBarPolicy() == Qt.ScrollBarAsNeeded
     for title in [
         "Input data",
-        "Analysis Design",
         "Included Conditions",
         "Manual Exclusions",
     ]:
@@ -211,10 +209,17 @@ def test_stats_window_layout_smoke(qtbot, tmp_path, app):
     assert "Settings > Harmonics" in window.recalculate_harmonics_btn.toolTip()
 
     assert window.analysis_design_group.objectName() == "stats_analysis_design_group"
+    assert not isinstance(window.analysis_design_group, SectionCard)
+    assert basic_page.isAncestorOf(window.analysis_design_group)
+    design_heading = window.analysis_design_group.findChild(SubsectionHeaderLabel)
+    assert design_heading is not None
+    assert design_heading.text() == "Analysis design"
     assert window.analysis_mode_value.objectName() == "stats_analysis_mode_value"
     assert window.analysis_mode_value.text() == "Single Group"
     assert window.analysis_profile_value.objectName() == "stats_analysis_profile_value"
     assert window.analysis_profile_value.text() == "Standard FPVS Screening"
+    assert window.analysis_profile_value.isHidden()
+    assert window.analysis_design_note.isHidden()
     assert window.analysis_group_value.objectName() == "stats_analysis_group_value"
     assert window.analysis_coverage_value.objectName() == "stats_analysis_coverage_value"
 
@@ -292,6 +297,10 @@ def test_stats_window_layout_smoke(qtbot, tmp_path, app):
     assert window.log_text.objectName() == "stats_run_log_text"
     assert not hasattr(window, "reporting_summary_text")
     assert window.findChild(QWidget, "stats_methods_checks_text") is None
+    assert not window.summary_output_container.isVisible()
+    assert root_splitter.sizes()[1] == 0
+    assert window.results_toggle_btn.isVisible()
+    window.results_toggle_btn.click()
     assert window.summary_output_container.isVisible()
     assert window.summary_text.isVisible()
     assert not window.log_text.isVisible()
@@ -306,6 +315,8 @@ def test_stats_window_layout_smoke(qtbot, tmp_path, app):
     qtbot.wait(20)
     assert window.summary_output_container.isVisible()
     assert window.run_action_bar.isVisible()
+    window.results_toggle_btn.click()
+    assert not window.summary_output_container.isVisible()
     setup_tabs.setCurrentIndex(0)
 
     assert window.analyze_single_btn.text() == "Run Standard Screening"
@@ -353,6 +364,7 @@ def test_stats_window_layout_smoke(qtbot, tmp_path, app):
     assert window.pipeline_phase_label.text() == "Resampling sensitivity"
     assert window.pipeline_progress_bar.value() == 50
     window.set_pipeline_running(True, phase="Fitting models", cancellable=False)
+    assert window.summary_output_container.isVisible()
     assert not window.cancel_analysis_btn.isEnabled()
     window.set_pipeline_running(True, phase="Resampling", cancellable=True)
     assert window.cancel_analysis_btn.isEnabled()

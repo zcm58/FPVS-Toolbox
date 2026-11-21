@@ -601,6 +601,8 @@ def test_new_project_from_fpvs_config_creates_project_directly(tmp_path, monkeyp
     )
 
     monkeypatch.setattr(project_manager, "ensure_projects_root", lambda parent: projects_root)
+    monkeypatch.setattr(project_manager, "_run_source_registration_work",
+                        lambda _parent, operation, _label: operation())
     monkeypatch.setattr(
         project_manager.QFileDialog,
         "getOpenFileName",

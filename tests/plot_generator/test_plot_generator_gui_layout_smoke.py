@@ -3,7 +3,6 @@ from pathlib import Path
 from PySide6.QtCore import QPoint
 from PySide6.QtWidgets import QLabel, QScrollArea, QWidget
 
-from Main_App.gui.typography import FONT_ROLES
 from Tools.Plot_Generator.gui import PlotGeneratorWindow
 from Tools.Plot_Generator import selection_state as plot_selection_state
 from Tools.Plot_Generator import session_selection as plot_session_selection
@@ -33,7 +32,8 @@ def test_plot_generator_gui_layout_smoke(qtbot, monkeypatch, tmp_path):
     window.show()
     qtbot.waitExposed(window)
 
-    assert window.minimumWidth() >= 980
+    assert window.minimumWidth() <= 912
+    assert window.minimumHeight() <= 520
     assert window.width() > window.height()
     assert window.folder_edit is not None
     assert window.out_edit is not None
@@ -44,21 +44,7 @@ def test_plot_generator_gui_layout_smoke(qtbot, monkeypatch, tmp_path):
     assert window.findChildren(QScrollArea) == []
     assert isinstance(window.folder_edit.parentWidget(), PathPickerRow)
     assert isinstance(window.out_edit.parentWidget(), PathPickerRow)
-    section_titles = [
-        card.header.title_label.text() for card in window.findChildren(SectionCard)
-    ]
-    assert "Progress" not in section_titles
-    assert "Input and Output" in section_titles
-    assert window.legend_group.header.isHidden()
-    assert "Log Output" not in section_titles
-    assert len(window.findChildren(SectionCard)) >= 5
-    assert window.params_box.header.title_label.font().bold()
-    header_font = window.params_box.header.title_label.font()
-    header_spec = FONT_ROLES["subsection_header"]
-    assert (
-        header_font.pointSize() == header_spec.point_size
-        or header_font.pixelSize() == header_spec.css_size_px
-    )
+    assert window.findChildren(SectionCard) == []
     assert window.findChild(QLabel, "snr_plots_title").text() == "SNR Plots"
     assert window.findChild(QLabel, "snr_plots_eyebrow") is None
     assert window.findChild(QLabel, "snr_plots_subtitle") is None
@@ -121,10 +107,17 @@ def test_plot_generator_gui_layout_smoke(qtbot, monkeypatch, tmp_path):
     assert "Condition B" in subsection_titles
     assert "ROI" in subsection_titles
     assert "Axis Ranges" in subsection_titles
-    assert window.axis_ranges_label.isVisible()
+    assert not window.axis_ranges_label.isVisible()
     assert not window.legend_group.isVisible()
     assert window.setup_tabs.tabText(0) == "Plot setup"
     assert window.setup_tabs.tabText(1) == "Legend labels"
+    assert window.setup_tabs.tabText(2) == "Axes and QC"
+    assert window.setup_tabs.currentIndex() == 0
+    window.setup_tabs.setCurrentWidget(window.advanced_box)
+    assert window.axis_ranges_label.isVisible()
+    assert window.spectral_qc_check.isVisible()
+    assert not window.condition_combo.isVisible()
+    window.setup_tabs.setCurrentIndex(0)
     assert window.legend_condition_a_label.buddy() is window.legend_condition_a_edit
     assert window.legend_condition_b_label.buddy() is window.legend_condition_b_edit
     assert window.legend_a_peaks_label.buddy() is window.legend_a_peaks_edit
@@ -147,20 +140,12 @@ def test_plot_generator_gui_layout_smoke(qtbot, monkeypatch, tmp_path):
     assert window.log.accessibleName() == "SNR plot generation log"
     assert window.view_log_btn.accessibleName() == "View SNR plot generation log"
     assert window.generation_log_dialog.isHidden()
-    assert window.advanced_box.height() >= 250
-    params_top = window.params_box.mapTo(window, QPoint(0, 0)).y()
-    advanced_top = window.advanced_box.mapTo(window, QPoint(0, 0)).y()
-    assert abs(params_top - advanced_top) <= 2
-    params_bottom = params_top + window.params_box.height()
-    advanced_bottom = advanced_top + window.advanced_box.height()
-    assert abs(params_bottom - advanced_bottom) <= 2
-    input_output_card = window.findChild(SectionCard, "snr_input_output_card")
-    assert input_output_card is not None
-    left_layout = window.params_box.parentWidget().layout()
-    assert left_layout.indexOf(window.params_box) < left_layout.indexOf(window.group_box)
-    columns = window.findChild(QWidget, "snr_plot_content_columns")
-    assert columns is not None
-    assert window.setup_tabs.widget(0) is columns
+    setup_page = window.setup_tabs.widget(0)
+    input_output = window.findChild(QWidget, "snr_input_output")
+    assert input_output is not None
+    assert setup_page.isAncestorOf(input_output)
+    assert setup_page.isAncestorOf(window.params_box)
+    assert setup_page.isAncestorOf(window.group_box)
     assert not window.group_box.isVisible()
     legend_label_widths = {
         label.width()

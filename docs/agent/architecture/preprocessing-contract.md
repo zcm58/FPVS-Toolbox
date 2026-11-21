@@ -336,6 +336,15 @@ for the current raw-file metadata and processing fingerprint keep their prior
 QC decisions. If preflight QC adds participant-specific project metadata for
 new files, the GUI carries forward still-valid completed states and refreshes
 only skipped ledger fingerprint metadata so later runs do not rescan old files.
+
+When the user chooses a reprocessing scope,
+`processing_ledger.additional_preflight_infos_for_chosen_scope` returns the
+chosen recordings that still need QC-19 marker review, in plan order. It
+honors participant, recording and header exclusions and recognizes existing
+plans keyed by processing ID or resolved raw path. The GUI passes the returned
+recordings to its existing review with `preserve_existing_plans=True`.
+Cancelling stops the launch before output preparation.
+
 Settings provides a separate processed-workbook FullFFT-grid review for already
 completed files. It reads workbook headers on a worker thread, uses the same
 active harmonic-selection cohort and strict-majority oddball-cycle identity,
@@ -395,6 +404,17 @@ cannot approve, pad or reconstruct an analysis interval. The expected ledger,
 kurtosis scan and process runner check that the exclusion remains configured;
 removing or changing its scope requires new preflight. Existing GUI review
 receipts and clean-occurrence fingerprints retain their prior behavior.
+
+An explicit user-authorized review outside the GUI may exclude an individual
+occurrence through `marker_integrity.build_authorized_marker_exclusion_decision`.
+Its `explicit_authorized_marker_review` receipt requires a named reviewer,
+non-default reason, UTC review time and evidence reference, bound to the current
+marker-plan/occurrence fingerprints and exact source, participant, recording and
+session scope. Supply the receipt through preflight's `marker_review_decisions`
+input. This authority can only exclude: it cannot retain a gap, supply bounds,
+pad or reconstruct an interval. Complete restarted occurrences keep their own
+unchanged automatic spans; runner validation rechecks the exclusion receipt.
+Existing GUI decisions and clean-occurrence fingerprints are unchanged.
 
 When valid `55_onbin` repetition crops exist for a condition, those repetitions
 must keep `N % N_step == 0` and metadata `N_mod_step == 0`. Do not downgrade

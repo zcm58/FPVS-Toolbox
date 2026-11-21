@@ -278,9 +278,10 @@ Visible smoke for export decisions: generate the same condition/ROI twice;
 verify Keep both preserves the original PNG/PDF pair, Replace changes only the
 approved pair, Cancel changes neither, and collision-free runs do not prompt.
 Repeat with All Conditions, group overlays, and session comparison. Cancel
-during preflight/rendering and verify controls unlock after worker exit. At
-1280x900, select two, three, and five overlay conditions and confirm setup,
-legend labels, and the generation actions fit without page-level scrolling.
+during preflight/rendering and verify controls unlock after worker exit. In the
+960×600 Toolbox window, select two, three, and five overlay conditions and confirm
+Plot setup, Legend labels, Axes and QC, and the generation actions fit without
+page-level scrolling.
 Choose a duplicate condition; confirm the reason and Fix setup action fit,
 focus the conflicting selector, and disappear after correction. Change the
 condition count and verify hidden rows do not enter the request. Generate a

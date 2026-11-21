@@ -38,6 +38,7 @@ from Main_App.gui.components import (
     make_info_button,
     show_tool_info,
 )
+from Main_App.gui.theme import set_themed_stylesheet
 from Tools.Free_Harmonic_Clustering.tool_info import (
     FREE_HARMONIC_CLUSTERING_TOOL_INFO,
     HARMONIC_SELECTION_TOOL_INFO,
@@ -192,6 +193,12 @@ class FreeHarmonicClusteringPage(QWidget):
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(0, 0, 0, 0)
         root_layout.setSpacing(8)
+        set_themed_stylesheet(
+            self,
+            "QTabWidget#free_harmonic_result_tabs::pane, QGroupBox#free_harmonic_plan_card, "
+            "QGroupBox#free_harmonic_harmonics_card, QGroupBox#free_harmonic_results_card "
+            "{ border: none; background: transparent; }",
+        )
 
         header = QWidget(self)
         header_layout = QHBoxLayout(header)
@@ -232,6 +239,8 @@ class FreeHarmonicClusteringPage(QWidget):
         workspace_layout.addStretch(1)
         self.result_tabs = QTabWidget(self)
         self.result_tabs.setObjectName("free_harmonic_result_tabs")
+        self.result_tabs.setDocumentMode(True)
+        self.result_tabs.tabBar().setDrawBase(False)
         self.result_tabs.addTab(self.workspace, "Setup")
         self.result_tabs.addTab(self.results_panel, "Results")
         self.result_tabs.setTabEnabled(1, False)
@@ -388,6 +397,7 @@ class FreeHarmonicClusteringPage(QWidget):
             content,
             object_name="free_harmonic_harmonics_card",
         )
+        self.harmonics_card.shell_layout.setContentsMargins(0, 0, 0, 0)
         self.harmonics_card.set_compact()
         cards_layout.addWidget(self.harmonics_card, 2, Qt.AlignTop)
         harmonics_form = make_form_layout()
@@ -457,6 +467,7 @@ class FreeHarmonicClusteringPage(QWidget):
         # new runs use one explicit family plan on the visible setup surface.
         self.comparison_card.hide()
         self.plan_card = SectionCard("Analysis families", content, object_name="free_harmonic_plan_card")
+        self.plan_card.shell_layout.setContentsMargins(0, 0, 0, 0)
         cards_layout.insertWidget(0, self.plan_card, 3)
         self.plan_context_label = QLabel("Loading project design...", self.plan_card.content)
         self.plan_context_label.setWordWrap(True)
@@ -584,6 +595,7 @@ class FreeHarmonicClusteringPage(QWidget):
             self.results_panel,
             object_name="free_harmonic_results_card",
         )
+        results_card.shell_layout.setContentsMargins(0, 0, 0, 0)
         results_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         results_card.header.hide()
         layout.addWidget(results_card, 1)

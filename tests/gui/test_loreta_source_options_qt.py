@@ -180,8 +180,17 @@ def test_metric_and_canonical_comparison_controls_preserve_source_selection(qtbo
     assert "paired conditions" in window.compare_groups_check.toolTip()
     window.comparison_view_combo.setCurrentIndex(window.comparison_view_combo.findData("difference"))
     assert window._comparison_view == "difference"
+    scale = window.activation_scale_combo
+    automatic_index = scale.currentIndex()
+    fixed_index = scale.findData(gui.SCALE_FIXED)
+    assert not window.activation_range_controls.isVisible()
+    scale.setCurrentIndex(fixed_index)
+    assert window.activation_range_controls.isVisible()
     window.activation_min_spin.setValue(-3e-10)
     window.activation_max_spin.setValue(2e-10)
+    scale.setCurrentIndex(automatic_index)
+    assert not window.activation_range_controls.isVisible()
+    scale.setCurrentIndex(fixed_index)
     assert window.activation_min_spin.value() == -3e-10
     assert window.activation_max_spin.value() == 2e-10
 

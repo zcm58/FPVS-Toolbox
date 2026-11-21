@@ -1,0 +1,68 @@
+{
+  "version": 1,
+  "stem": "synthetic-correlations",
+  "data": "example_points.csv",
+  "data_sha256": "02933519c487d71cff9ac8818ee4d99e958e5282855b97231af2f55b59edcbf3",
+  "header": "Illustrative condition · Synthetic ROI",
+  "y_label": "Synthetic baseline-corrected\namplitude (µV)",
+  "slope_unit": "µV/score unit",
+  "provenance": {
+    "purpose": "Synthetic style demonstration, not experimental results.",
+    "generation_seed": 20261104,
+    "sample": "24 synthetic participants, all retained in every panel.",
+    "response": "One artificial response used in all panels; no EEG/harmonic selection.",
+    "scores": "Three artificial score vectors, no clinical interpretation.",
+    "multiplicity": "All three predeclared demonstration comparisons form one BH family.",
+    "exclusions": "None."
+  },
+  "panels": [
+    {
+      "id": "a",
+      "label": "Synthetic score A",
+      "x_label": "Synthetic score A\n(arbitrary score units)",
+      "n": 24,
+      "r2_fraction": 0.16,
+      "spearman": {
+        "rho": -0.7000531108679318,
+        "p": 0.00023,
+        "p_method": "Synthetic demonstration only. Two-sided Monte Carlo permutation of average tied ranks, 99,999 shuffles, plus-one p, NumPy PCG64 seed 20261104.",
+        "family_size": 3,
+        "correction_id": "benjamini_hochberg",
+        "correction_method": "Benjamini-Hochberg across all three synthetic correlations.",
+        "q": 0.00034500000000000004
+      }
+    },
+    {
+      "id": "b",
+      "label": "Synthetic score B",
+      "x_label": "Synthetic score B\n(arbitrary score units)",
+      "n": 24,
+      "r2_fraction": 0.85,
+      "spearman": {
+        "rho": 0.7049209744694177,
+        "p": 0.00018,
+        "p_method": "Synthetic demonstration only. Two-sided Monte Carlo permutation of average tied ranks, 99,999 shuffles, plus-one p, NumPy PCG64 seed 20261105.",
+        "family_size": 3,
+        "correction_id": "benjamini_hochberg",
+        "correction_method": "Benjamini-Hochberg across all three synthetic correlations.",
+        "q": 0.00034500000000000004
+      }
+    },
+    {
+      "id": "c",
+      "label": "Synthetic score C",
+      "x_label": "Synthetic score C\n(arbitrary score units)",
+      "n": 24,
+      "r2_fraction": 0.56,
+      "spearman": {
+        "rho": 0.2935169544161183,
+        "p": 0.16583,
+        "p_method": "Synthetic demonstration only. Two-sided Monte Carlo permutation of average tied ranks, 99,999 shuffles, plus-one p, NumPy PCG64 seed 20261106.",
+        "family_size": 3,
+        "correction_id": "benjamini_hochberg",
+        "correction_method": "Benjamini-Hochberg across all three synthetic correlations.",
+        "q": 0.16583
+      }
+    }
+  ]
+}

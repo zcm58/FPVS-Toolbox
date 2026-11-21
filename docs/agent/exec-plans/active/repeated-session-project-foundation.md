@@ -7,6 +7,10 @@ release's visible import, processing, and export acceptance remains pending in
 the [v3 ledger](v3-release-readiness.md#3-qualify-processing-and-project-compatibility).
 Retain this plan while those checks and its registration workflow need review.
 
+The [repeated-session setup owner](../../architecture/project-io.md#repeated-session-setup)
+now handles manifest preparation. The project manager still runs preflight and
+publishes the accepted project.
+
 ## Confirmed Recording Additions (2026-09-08)
 
 Follow-up baseline: `5e49aed8` on `codex/postprocessing-qc-v3`. The user has

@@ -185,6 +185,7 @@ def _recordings_lock_fingerprint(
         ],
         "recording_sources": [
             {
+                **({"reviewed_files_only": True} if info.get("reviewed_files_only") else {}),
                 "source_id": source_id,
                 "group_id": str(info["group_id"]),
                 "session_id": str(info["session_id"]),
@@ -1267,6 +1268,7 @@ class Project:
             }
             data["recording_sources"] = {
                 source_id: {
+                    **({"reviewed_files_only": True} if info.get("reviewed_files_only") else {}),
                     "group_id": str(info["group_id"]),
                     "session_id": str(info["session_id"]),
                     "raw_input_folder": _relativize(

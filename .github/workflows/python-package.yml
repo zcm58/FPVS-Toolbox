@@ -73,6 +73,15 @@ jobs:
         if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
     - name: Verify Qt runtime imports
       run: python -c "from PySide6 import QtCore, QtGui, QtTest, QtWidgets"
+    - name: Verify desktop workflow entry points
+      timeout-minutes: 5
+      run: >-
+        python -m pytest --allow-qt-tests
+        tests/sequence_figure/test_sequence_figure_gui_qt.py
+        tests/project_io/test_repeated_session_project_setup_qt.py
+        tests/gui/test_individual_detectability_gui_smoke.py
+        tests/gui/test_recording_qc_static_contracts.py::test_additional_preflight_uses_current_settings_and_propagates_review_choice
+        tests/gui/test_marker_occurrence_panel_qt.py::test_marker_panel_emits_only_the_explicit_choice -q
     - name: Verify processing bridge failure recovery and restart
       run: python -m pytest --allow-qt-tests tests/processing/test_mp_runner_bridge_full_pipeline_smoke.py -q
     - name: Verify LORETA slice navigation and preview lifecycle

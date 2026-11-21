@@ -57,7 +57,7 @@ def refresh_preprocessing_feedback(panel) -> None:
 
 
 class SettingsDraftTracker:
-    """Compare editable values, excluding selection-only controls in the ROI editor."""
+    """Compare draft-edited values and leave independently saved settings out."""
 
     def __init__(self, panel) -> None:
         self.panel = panel
@@ -65,6 +65,8 @@ class SettingsDraftTracker:
         for kind in (QLineEdit, QComboBox, QCheckBox):
             for control in panel.findChildren(kind):
                 if panel.roi_editor.isAncestorOf(control):
+                    continue
+                if control.objectName() == "settings_automatic_crash_reporting":
                     continue
                 if isinstance(control, QLineEdit) and control.isReadOnly():
                     continue

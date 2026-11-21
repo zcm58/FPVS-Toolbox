@@ -9,12 +9,14 @@ import pytest
 if importlib.util.find_spec("PySide6") is None or importlib.util.find_spec("pytestqt") is None:
     pytest.skip("PySide6 or pytest-qt not available", allow_module_level=True)
 
-from PySide6.QtCore import QSize, Signal, Qt
-from PySide6.QtGui import QAction, QColor, QIcon
+from PySide6.QtCore import QPoint, QSize, Signal, Qt
+from PySide6.QtGui import QAction, QIcon
+from PySide6.QtTest import QSignalSpy, QTest
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
     QDialogButtonBox,
+    QFileDialog,
     QLabel,
     QLineEdit,
     QMenu,
@@ -34,17 +36,14 @@ from Main_App.gui.components import SectionCard
 from Main_App.gui.components import SubsectionHeaderLabel
 from Main_App.gui.processing_log_dialog import ProcessingLogDialog
 from Main_App.gui.settings_panel import EmbeddedSettingsPage
-from Main_App.gui.style_tokens import HEADER_BG, PAGE_MARGIN
+from Main_App.gui.style_tokens import PAGE_MARGIN
 from Main_App.processing.preflight_qc_cache import preflight_qc_cache_directory
 from Main_App.processing.project_processing_cache import ProjectProcessingCacheUsage
+from Main_App.projects import Project
 import Main_App.gui.update_manager as update_manager
 from Tools.Individual_Detectability.main_window import IndividualDetectabilityWindow
 from Tools.Plot_Generator.plot_generator import PlotGeneratorWindow
-from Tools.Publication_Maps.gui import (
-    SCALP_MAPS_BOTTOM_ROW_MIN_HEIGHT,
-    SCALP_MAPS_TOP_ROW_MIN_HEIGHT,
-    PublicationMapsWindow,
-)
+from Tools.Publication_Maps.gui import PublicationMapsWindow
 from Tools.Publication_Maps.generation_outcome import PublicationMapsWorkerOutcome
 from Tools.Sensitivity_Analysis.gui import SensitivityAnalysisWindow
 from Tools.Stats import StatsWindow
@@ -126,6 +125,8 @@ def test_tools_menu_contains_default_and_enabled_beta_tools(tmp_path: Path, qtbo
         "Free Harmonic Clustering Analysis", "SNR Plots",
     ]
     assert [action.objectName() for action in tools_actions[:2]] == DEFAULT_TOOL_ROLES
+    assert tools_actions[-2].isSeparator()
+    assert tools_actions[-1] is win.shell_actions.processing_log
     if beta_enabled:
         assert tools_actions[2].isSeparator()
         beta_menu = _menu(win, "betaToolsMenu")
@@ -133,7 +134,7 @@ def test_tools_menu_contains_default_and_enabled_beta_tools(tmp_path: Path, qtbo
         assert [action.objectName() for action in beta_menu.actions()] == BETA_TOOL_ROLES
         assert [action.text() for action in beta_menu.actions()] == BETA_TOOL_ACCESSIBLE_NAMES
     else:
-        assert len(tools_actions) == 2
+        assert len(tools_actions) == 4
         assert win.menuBar().findChild(QMenu, "betaToolsMenu") is None
 
 
@@ -147,7 +148,7 @@ def test_welcome_prioritizes_opening_a_project_and_fits_minimum_window(
     assert win.size() == QSize(1200, 800)
     assert win.windowTitle() == f"FPVS Toolbox v{main_window_module.FPVS_TOOLBOX_VERSION}"
     assert not win.findChildren(QStatusBar)
-    assert win.menuBar().isHidden()
+    assert win.menuBar().isVisibleTo(win)
 
     title = win.landing_page.findChild(QLabel, "landing_title")
     icon = win.landing_page.findChild(QLabel, "welcomeAppIcon")
@@ -237,7 +238,7 @@ def test_cancelled_project_creation_returns_to_welcome(
     assert project_creation_calls == [(workflow_name, None)]
     assert win.currentProject is None
     assert win.stacked.currentWidget() is win.landing_page
-    assert win.menuBar().isHidden()
+    assert win.menuBar().isVisibleTo(win)
 
 
 @pytest.mark.parametrize("dismiss_with_escape", [False, True], ids=["cancel", "escape"])
@@ -278,22 +279,25 @@ def test_main_window_layout_smoke(tmp_path: Path, qtbot, monkeypatch) -> None:
     assert win.text_log is win.processing_log_dialog.viewer
     assert not win.homeWidget.isAncestorOf(win.text_log)
     assert win.processing_history_label.objectName() == "project_processing_history"
-    assert win.processing_history_label.isVisibleTo(win)
+    assert not win.processing_history_label.isVisibleTo(win)
     assert win.processing_history_label.wordWrap()
-    analysis = win.findChild(SectionCard, "home_analysis")
-    processing = win.findChild(SectionCard, "processing_group")
-    assert analysis.isAncestorOf(win.processing_history_label)
-    assert processing.geometry().top() == analysis.geometry().top()
-    assert processing.geometry().right() < analysis.geometry().left()
+    workflow = win.findChild(QWidget, "home_workflow")
+    processing = win.findChild(QWidget, "processing_group")
+    assert workflow.isAncestorOf(win.processing_history_label)
+    assert win.homeWidget.findChildren(SectionCard) == []
+    assert workflow.width() <= 760
     assert win.lbl_single_file.buddy() is win.le_input_file
     assert win.lbl_input_folder.buddy() is win.le_input_folder
+    assert win.lbl_input_folder.text() == "Data Input Folder"
+    assert win.lbl_currentProject.text() == "Current Project: None"
 
     assert win.btn_start.text() == "Start Processing"
+    assert not win.btn_start.icon().isNull()
     run_panel = win.findChild(ActionRow, "run_panel")
     assert run_panel is not None
-    assert run_panel.row_layout.indexOf(win.btn_view_log) >= 0
     assert run_panel.row_layout.indexOf(win.btn_start) >= 0
     assert run_panel.row_layout.indexOf(win.progress_bar) < 0
+    assert abs(win.btn_start.geometry().center().x() - run_panel.rect().center().x()) <= 1
     assert win.findChild(QWidget, "processing_page") is win.processing_page
     assert win.workspace_stack.indexOf(win.processing_page) >= 0
     assert win.processing_page.isAncestorOf(win.progress_bar)
@@ -318,7 +322,7 @@ def test_main_window_layout_smoke(tmp_path: Path, qtbot, monkeypatch) -> None:
     assert win.condition_editor_toggle.text() == "Edit conditions"
     qtbot.mouseClick(win.condition_editor_toggle, Qt.LeftButton)
     assert win.condition_editor_body.isVisibleTo(win)
-    assert not analysis.isVisible()
+    assert not win.processing_history_label.isVisibleTo(win)
 
     event_map_header = win.findChild(QWidget, "event_map_header")
     assert event_map_header is not None
@@ -335,19 +339,18 @@ def test_main_window_layout_smoke(tmp_path: Path, qtbot, monkeypatch) -> None:
     assert condition_header.font().bold()
     assert trigger_header.font().bold()
     assert win.findChild(QWidget, "log_group") is None
-    assert win.btn_view_log.text() == "View Log"
-    assert win.btn_view_log.accessibleName() == "View processing log"
+    assert win.findChild(QPushButton, "processing_view_log_button") is None
     assert not hasattr(win, "btn_detect")
     assert win.btn_select_input_file.text() == "Browse…"
     assert win.btn_select_input_folder.text() == "Browse…"
     assert win.btn_select_input_file.accessibleName() == "Choose EEG recording"
-    assert win.btn_select_input_folder.accessibleName() == "Choose EEG folder"
+    assert win.btn_select_input_folder.accessibleName() == "Choose data input folder"
+    assert win.btn_select_input_folder.width() == win.condition_editor_toggle.width()
     assert win.btn_add_row.text() == "+ Add Condition"
     event_map_group = win.findChild(QWidget, "event_map_group")
     assert event_map_group is not None
     assert processing.geometry().bottom() < event_map_group.geometry().top()
-    assert event_map_group.header.isVisible()
-    assert event_map_group.header.title_label.text() == "Conditions"
+    assert any(label.text() == "Conditions" for label in event_map_group.findChildren(SubsectionHeaderLabel))
     event_rows = win._live_event_map_rows()
     assert event_rows
     assert event_rows[0].layout().contentsMargins().left() == 0
@@ -369,18 +372,6 @@ def test_main_window_layout_smoke(tmp_path: Path, qtbot, monkeypatch) -> None:
 
     assert hasattr(win, "row_single_file")
     assert hasattr(win, "row_input_folder")
-    active_row = win.row_single_file if win.rb_single.isChecked() else win.row_input_folder
-    inactive_row = win.row_input_folder if win.rb_single.isChecked() else win.row_single_file
-    assert active_row.isVisible()
-    assert not inactive_row.isVisible()
-
-    win.rb_single.setChecked(True)
-    qtbot.wait(20)
-    assert win.row_single_file.isVisible()
-    assert not win.row_input_folder.isVisible()
-
-    win.rb_batch.setChecked(True)
-    qtbot.wait(20)
     assert win.row_input_folder.isVisible()
     assert not win.row_single_file.isVisible()
 
@@ -406,11 +397,11 @@ def test_main_window_layout_smoke(tmp_path: Path, qtbot, monkeypatch) -> None:
     assert file_actions[1] is win.actionOpenExistingProject
     assert file_actions[6] is win.actionResetProjectProcessingCache
     assert file_actions[-1] is win.exit_action
-    assert [action.text() for action in _menu(win, "viewMenu").actions()] == ["Home"]
+    assert [action.text() for action in _menu(win, "viewMenu").actions()] == ["Home", "Experiment Library…"]
 
 
 @pytest.mark.parametrize("enable_beta", [False, True])
-def test_home_analysis_uses_the_same_tool_routes_and_navigation_lock(
+def test_home_analysis_entry_points_live_in_the_tools_menu(
     tmp_path: Path, qtbot, monkeypatch, enable_beta: bool,
 ) -> None:
     win = _build_window(tmp_path, qtbot, monkeypatch, enable_beta_tools=enable_beta)
@@ -418,11 +409,8 @@ def test_home_analysis_uses_the_same_tool_routes_and_navigation_lock(
     routes = ["btn_graphs"]
     if enable_beta:
         routes += ["btn_publication_maps", "btn_loreta_visualizer"]
-    panel = win.findChild(SectionCard, "home_analysis")
-    buttons = panel.findChildren(QPushButton)
-    assert [button.objectName() for button in buttons if button.isVisible()] == [
-        f"home_{role}" for role in routes
-    ]
+    for role in ("btn_graphs", "btn_publication_maps", "btn_loreta_visualizer"):
+        assert win.homeWidget.findChild(QPushButton, f"home_{role}") is None
 
     opened = []
     for role in routes:
@@ -431,15 +419,55 @@ def test_home_analysis_uses_the_same_tool_routes_and_navigation_lock(
     monkeypatch.setattr(win, "_frequency_domain_outputs_ready_for_tool", lambda _name: False)
     warnings = []
     monkeypatch.setattr(win, "_acknowledge_beta_tool_warning", warnings.append)
-    win.menuBar().setEnabled(False)
-    qtbot.mouseClick(panel.findChild(QPushButton, "home_btn_graphs"), Qt.LeftButton)
-    assert opened == []
-    win.menuBar().setEnabled(True)
     for role in routes:
-        qtbot.mouseClick(panel.findChild(QPushButton, f"home_{role}"), Qt.LeftButton)
+        menu_name = "toolsMenu" if role == "btn_graphs" else "betaToolsMenu"
+        _menu_action(win, menu_name, role).trigger()
     assert opened == routes
     assert warnings == routes[1:]
     assert win.workspace_stack.currentWidget() is win.homeWidget
+
+
+def test_home_previews_folder_and_switches_scope_only_after_file_selection(tmp_path, qtbot, monkeypatch):
+    win = _build_window(tmp_path, qtbot, monkeypatch)
+    root = tmp_path / "ACR"
+    raw = root / "raw"
+    raw.mkdir(parents=True)
+    first, second = raw / "P01.bdf", raw / "P02.bdf"
+    first.touch()
+    second.touch()
+    project = Project.load(root)
+    project.input_folder = raw
+    project.options["mode"] = "single"
+    project.event_map = {"Faces": 1}
+    project.save()
+    manifest_before = project.manifest_path.read_bytes()
+    win.loadProject(project)
+    win.show_home_page()
+
+    assert win.lbl_currentProject.text() == "Current Project: ACR"
+    assert win.file_mode.get() == "Batch"
+    assert win.le_input_folder.text() == str(raw)
+    assert win.home_workbook_path.text() == str(project.project_root / project.subfolders["excel"])
+    qtbot.waitUntil(lambda: win.home_input_summary.title.text() == "2 files found")
+
+    picks = iter([("", ""), (str(first), "")])
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *_args: next(picks))
+    qtbot.mouseClick(win.processing_scope_button, Qt.LeftButton)
+    assert win.file_mode.get() == "Batch"
+    assert win.row_input_folder.isVisible()
+
+    qtbot.mouseClick(win.processing_scope_button, Qt.LeftButton)
+    assert win.file_mode.get() == "Single"
+    assert win.row_single_file.isVisible()
+    assert win.le_input_file.text() == str(first)
+    assert not win.row_input_folder.isVisible()
+    assert not win.project_draft_status.isVisible()
+
+    qtbot.mouseClick(win.processing_scope_button, Qt.LeftButton)
+    assert win.file_mode.get() == "Batch"
+    assert win.row_input_folder.isVisible()
+    qtbot.waitUntil(lambda: win.home_input_summary.title.text() == "2 files found")
+    assert project.manifest_path.read_bytes() == manifest_before
 
 
 def test_home_processing_history_long_content_fits_minimum_window(
@@ -453,6 +481,7 @@ def test_home_processing_history_long_content_fits_minimum_window(
         "Last completed processing: 31 Dec 2099, 23:59 Chatham Standard Time "
         "- 1,234,567 participants"
     )
+    history.show()
     qtbot.wait(20)
 
     assert win.size() == QSize(1200, 800)
@@ -487,7 +516,7 @@ def test_main_window_has_toolbox_logo_and_no_toolbar_gap(tmp_path: Path, qtbot, 
 
 def test_view_menu_returns_to_home(tmp_path: Path, qtbot, monkeypatch) -> None:
     win = _build_window(tmp_path, qtbot, monkeypatch)
-    assert win.menuBar().isHidden()
+    assert win.menuBar().isVisibleTo(win)
     win.open_settings_window()
     assert win.workspace_stack.currentWidget() is win._settings_page
     assert win.menuBar().isVisibleTo(win)
@@ -499,10 +528,21 @@ def test_view_menu_returns_to_home(tmp_path: Path, qtbot, monkeypatch) -> None:
     assert win.workspace_stack.currentWidget() is win.homeWidget
     assert win.menuBar().isVisibleTo(win)
     win.stacked.setCurrentWidget(win.landing_page)
-    assert win.menuBar().isHidden()
+    assert win.menuBar().isVisibleTo(win)
 
 
-def test_workspace_menu_paints_slate_and_readable_labels(
+def _activate_menu_window(win, qtbot) -> None:
+    win.raise_()
+    win.activateWindow()
+    qtbot.waitExposed(win)
+    qtbot.waitUntil(win.isActiveWindow)
+
+
+def _menu_action_image(bar, action):
+    return bar.grab(bar.actionGeometry(action)).toImage()
+
+
+def test_workspace_menu_keeps_native_style_and_readable_labels(
     tmp_path: Path, qtbot, monkeypatch,
 ) -> None:
     app = QApplication.instance()
@@ -514,24 +554,118 @@ def test_workspace_menu_paints_slate_and_readable_labels(
     try:
         win = _build_window(tmp_path, qtbot, monkeypatch, appearance_mode="Light")
         win.show_home_page()
-        qtbot.waitUntil(win.menuBar().isVisible)
+        _activate_menu_window(win, qtbot)
         bar = win.menuBar()
-        menu_image = bar.grab().toImage()
-        slate = QColor(HEADER_BG)
-        assert menu_image.pixelColor(menu_image.width() - 20, 5) == slate
+        assert bar.isVisibleTo(win)
+        assert bar.focusPolicy() == Qt.FocusPolicy.NoFocus
+        QTest.mouseMove(win.stacked, QPoint(20, 20), delay=10)
         for action in bar.actions():
-            image = bar.grab(bar.actionGeometry(action)).toImage()
-            assert any(
-                image.pixelColor(x, y).lightness() > 150
+            image = _menu_action_image(bar, action)
+            levels = [
+                image.pixelColor(x, y).lightness()
                 for y in range(image.height())
                 for x in range(image.width())
-            ), action.text()
+            ]
+            assert max(levels) - min(levels) > 60, action.text()
     finally:
         app.setStyleSheet("")
         app.setStyle(previous_style)
         app.setPalette(previous_palette)
         app.setFont(previous_font)
         app.setStyleSheet(previous_stylesheet)
+
+
+@pytest.mark.parametrize("appearance_mode", ["Light", "Dark"])
+def test_workspace_menu_mouse_hover_is_visible_without_opening_or_triggering(
+    tmp_path: Path, qtbot, monkeypatch, appearance_mode: str,
+) -> None:
+    win = _build_window(tmp_path, qtbot, monkeypatch, appearance_mode=appearance_mode)
+    _activate_menu_window(win, qtbot)
+    bar = win.menuBar()
+    actions = bar.actions()
+    triggered = QSignalSpy(bar.triggered)
+    opened = [QSignalSpy(action.menu().aboutToShow) for action in actions]
+
+    blank = QPoint(bar.width() - 12, bar.height() // 2)
+    QTest.mouseMove(bar, blank, delay=10)
+    qtbot.wait(40)
+    idle_images = [_menu_action_image(bar, action) for action in actions]
+    for index, action in enumerate(actions):
+        QTest.mouseMove(bar, bar.actionGeometry(action).center(), delay=10)
+        qtbot.waitUntil(lambda: _menu_action_image(bar, action) != idle_images[index])
+        if index:
+            qtbot.waitUntil(lambda: _menu_action_image(bar, actions[index - 1]) == idle_images[index - 1])
+        assert not any(candidate.menu().isVisible() for candidate in actions)
+
+    assert triggered.count() == 0
+    assert all(spy.count() == 0 for spy in opened)
+    QTest.mouseMove(bar, blank, delay=10)
+    qtbot.waitUntil(lambda: all(
+        _menu_action_image(bar, action) == image
+        for action, image in zip(actions, idle_images)
+    ))
+
+    QTest.mouseMove(bar, bar.actionGeometry(actions[0]).center(), delay=10)
+    qtbot.waitUntil(lambda: _menu_action_image(bar, actions[0]) != idle_images[0])
+    QTest.mouseMove(win.stacked, QPoint(20, 20), delay=10)
+    qtbot.waitUntil(lambda: _menu_action_image(bar, actions[0]) == idle_images[0])
+
+
+def test_workspace_menu_popup_and_keyboard_keep_native_navigation(
+    tmp_path: Path, qtbot, monkeypatch,
+) -> None:
+    win = _build_window(tmp_path, qtbot, monkeypatch)
+    _activate_menu_window(win, qtbot)
+    bar = win.menuBar()
+    file_action, view_action, _tools_action = bar.actions()
+    file_menu, view_menu = file_action.menu(), view_action.menu()
+    triggered = QSignalSpy(bar.triggered)
+    try:
+        QTest.mouseMove(win.stacked, QPoint(20, 20), delay=10)
+        idle_file = _menu_action_image(bar, file_action)
+        QTest.mouseClick(bar, Qt.MouseButton.LeftButton, pos=bar.actionGeometry(file_action).center())
+        qtbot.waitUntil(file_menu.isVisible)
+        QTest.mouseMove(file_menu, file_menu.actionGeometry(file_menu.actions()[0]).center(), delay=10)
+        assert bar.activeAction() is file_action
+        assert _menu_action_image(bar, file_action) != idle_file
+
+        qtbot.keyClick(file_menu, Qt.Key.Key_Right)
+        qtbot.waitUntil(view_menu.isVisible)
+        assert not file_menu.isVisible()
+        assert bar.activeAction() is view_action
+        qtbot.keyClick(view_menu, Qt.Key.Key_Escape)
+        qtbot.waitUntil(lambda: not view_menu.isVisible())
+        qtbot.keyClick(bar, Qt.Key.Key_Escape)
+
+        qtbot.keyClick(win, Qt.Key.Key_F, Qt.KeyboardModifier.AltModifier)
+        qtbot.waitUntil(file_menu.isVisible)
+        assert bar.activeAction() is file_action
+        qtbot.keyClick(file_menu, Qt.Key.Key_Escape)
+        qtbot.waitUntil(lambda: not file_menu.isVisible())
+        assert triggered.count() == 0
+    finally:
+        file_menu.hide()
+        view_menu.hide()
+
+
+@pytest.mark.parametrize("disable_bar", [False, True], ids=["disabled-action", "disabled-bar"])
+def test_workspace_menu_disabled_controls_ignore_pointer_and_do_not_open(
+    tmp_path: Path, qtbot, monkeypatch, disable_bar: bool,
+) -> None:
+    win = _build_window(tmp_path, qtbot, monkeypatch)
+    _activate_menu_window(win, qtbot)
+    bar = win.menuBar()
+    action = bar.actions()[0]
+    triggered = QSignalSpy(bar.triggered)
+    (bar if disable_bar else action).setEnabled(False)
+    QTest.mouseMove(win.stacked, QPoint(20, 20), delay=10)
+    idle_image = _menu_action_image(bar, action)
+    QTest.mouseMove(bar, bar.actionGeometry(action).center(), delay=10)
+    QTest.mouseClick(bar, Qt.MouseButton.LeftButton, pos=bar.actionGeometry(action).center())
+    qtbot.wait(80)
+    assert _menu_action_image(bar, action) == idle_image
+    assert not action.menu().isVisible()
+    assert triggered.count() == 0
 
 
 def test_tool_navigation_guard_keeps_home_size(tmp_path: Path, qtbot, monkeypatch) -> None:
@@ -564,7 +698,7 @@ def test_workspace_navigation_keeps_window_size(tmp_path: Path, qtbot, monkeypat
     size = QSize(width, height)
     win.show_home_page()
     assert win.size() == size
-    settings = _menu_action(win, "fileMenu", "actionSettings")
+    settings = _menu_action(win, "fileMenu", "btn_settings")
     home = _menu_action(win, "viewMenu", "btn_home")
 
     settings.trigger()
@@ -595,7 +729,7 @@ def test_processing_log_opens_in_focused_modal(
     win.stacked.setCurrentIndex(1)
     win.text_log.append("Visible processing detail")
 
-    qtbot.mouseClick(win.btn_view_log, Qt.LeftButton)
+    _menu_action(win, "toolsMenu", "actionProcessingLog").trigger()
     qtbot.waitUntil(win.processing_log_dialog.isVisible)
 
     assert win.processing_log_dialog.isModal()
@@ -628,6 +762,7 @@ def test_processing_activity_page_locks_navigation_and_reuses_start_button(
 
     assert win.workspace_stack.currentWidget() is win.processing_page
     assert win.processing_action_layout.indexOf(win.btn_start) >= 0
+    assert win.btn_start.icon().isNull()
     assert run_panel.row_layout.indexOf(win.btn_start) < 0
     assert win.processing_spinner.isVisible()
     assert win.size() == QSize(1200, 800)
@@ -641,8 +776,54 @@ def test_processing_activity_page_locks_navigation_and_reuses_start_button(
     assert win.workspace_stack.currentWidget() is win.homeWidget
     assert run_panel.row_layout.indexOf(win.btn_start) >= 0
     assert win.processing_action_layout.indexOf(win.btn_start) < 0
+    assert not win.btn_start.icon().isNull()
+    assert abs(win.btn_start.geometry().center().x() - run_panel.rect().center().x()) <= 1
     assert win.size() == QSize(1200, 800)
     assert win.menuBar().isEnabled()
+
+
+def test_snr_plot_entries_share_action_availability(
+    tmp_path: Path,
+    qtbot,
+    monkeypatch,
+) -> None:
+    opened: list[str] = []
+    monkeypatch.setattr(
+        main_window_module.MainWindow,
+        "open_plot_generator",
+        lambda _window: opened.append("SNR Plots"),
+    )
+    win = _build_window(tmp_path, qtbot, monkeypatch)
+    win.stacked.setCurrentIndex(1)
+    qtbot.wait(20)
+    action = _menu_action(win, "toolsMenu", "btn_graphs")
+    assert action.actionGroup() is win.shell_actions
+    assert any(action is shared for shared in win.shell_actions.default_tools)
+    assert _menu_action(win, "fileMenu", "btn_settings") is win.shell_actions.settings
+
+    triggered = QSignalSpy(action.triggered)
+    action.trigger()
+    assert triggered.count() == len(opened) == 1
+    action.setEnabled(False)
+    action.trigger()
+    assert triggered.count() == len(opened) == 1
+    action.setEnabled(True)
+
+    disabled_action = _menu_action(win, "toolsMenu", "btn_free_harmonic_clustering")
+    disabled_action.setEnabled(False)
+    win._busy_start()
+    assert not action.isEnabled()
+    assert not win.shell_actions.home.isEnabled()
+    assert not _menu_action(win, "viewMenu", "actionExperimentLibrary").isEnabled()
+    action.trigger()
+    assert triggered.count() == len(opened) == 1
+
+    win._busy_stop()
+    assert action.isEnabled()
+    assert win.shell_actions.home.isEnabled()
+    assert not disabled_action.isEnabled()
+    action.trigger()
+    assert triggered.count() == len(opened) == 2
 
 
 def test_reset_project_processing_cache_action_requires_confirmation_and_is_scoped(
@@ -912,14 +1093,16 @@ def test_workspace_settings_embeds_in_main_workspace(
 ) -> None:
     win = _build_window(tmp_path, qtbot, monkeypatch)
     win.stacked.setCurrentIndex(1)
+    win.resize(win.minimumSize())
     qtbot.wait(20)
 
-    _menu_action(win, "fileMenu", "actionSettings").trigger()
+    _menu_action(win, "fileMenu", "btn_settings").trigger()
     qtbot.wait(20)
 
     assert isinstance(win.workspace_stack.currentWidget(), EmbeddedSettingsPage)
     assert win.workspace_stack.currentWidget().objectName() == "embedded_settings_page"
     assert win._settings_page.parent() is win.workspace_stack
+    assert win.size() == QSize(1200, 800)
 
     win._settings_page.reject()
     qtbot.wait(20)
@@ -1148,27 +1331,23 @@ def test_workspace_scalp_maps_embeds_in_main_workspace(
         SectionCard,
         "publication_maps_figure_layout",
     )
-    run_card = page.findChild(SectionCard, "publication_maps_run")
+    run_section = page.findChild(QWidget, "publication_maps_run")
     assert conditions_card is not None
     assert settings_section is not None
     assert not isinstance(settings_section, SectionCard)
     assert output_card is not None
     assert figure_layout_card is not None
-    assert run_card is not None
-    assert conditions_card.geometry().top() == run_card.geometry().top()
-    assert conditions_card.minimumHeight() == SCALP_MAPS_TOP_ROW_MIN_HEIGHT
-    assert run_card.isAncestorOf(settings_section)
-    assert figure_layout_card.minimumHeight() == SCALP_MAPS_BOTTOM_ROW_MIN_HEIGHT
-    assert run_card.minimumHeight() == SCALP_MAPS_TOP_ROW_MIN_HEIGHT
-    assert abs(conditions_card.geometry().bottom() - run_card.geometry().bottom()) <= 1
-    assert conditions_card.width() < run_card.width()
+    assert run_section is not None
+    assert not isinstance(run_section, SectionCard)
+    assert conditions_card.geometry().top() == run_section.geometry().top()
+    assert run_section.isAncestorOf(settings_section)
     assert [
         page.workflow_tabs.tabText(index)
         for index in range(page.workflow_tabs.count())
     ] == ["Generate Maps", "Advanced Settings"]
     assert page.workflow_tabs.currentIndex() == 0
     assert page.workflow_tabs.widget(0).isAncestorOf(conditions_card)
-    assert page.workflow_tabs.widget(0).isAncestorOf(run_card)
+    assert page.workflow_tabs.widget(0).isAncestorOf(run_section)
     assert page.workflow_tabs.widget(0).isAncestorOf(page.metric_bca_check)
     assert page.workflow_tabs.widget(0).isAncestorOf(settings_section)
     assert page.workflow_tabs.widget(1).isAncestorOf(output_card)

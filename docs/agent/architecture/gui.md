@@ -2,6 +2,10 @@
 
 The active desktop UI is PySide6.
 
+For the path from a user action to its backend and back, see
+[Desktop workflows and backend ownership](gui-backend.md). It traces the
+Studio and Toolbox workflows and records where to test their behavior.
+
 Primary paths:
 
 - `src/Main_App/gui/`: canonical active import surface for main-window,
@@ -28,9 +32,23 @@ Primary paths:
   settings. Appearance-aware page styles use `set_themed_stylesheet()`. Custom
   UI painters resolve shared tokens through `theme_color()`.
 - `src/Main_App/gui/menu_bar.py` builds File, View, and Tools.
+  Like Studio, it uses an ordinary Qt menu bar with NoFocus and no menu QSS
+  overrides. `theme.py` retains the platform style before applying workspace
+  Fusion, then applies it to the menu bar and its popups for native hover,
+  transitions and keyboard feedback. With Qt’s Windows 11 default, use its
+  native WindowsVista menu style inside Fusion. Attaching Windows11 menus to
+  Fusion crashes during normal Windows startup on Qt 6.9.1.
   `file_menu.py` groups project, Settings, cache, and application actions,
-  including About. View contains Home (Ctrl+1), and Tools contains default
-  and optional beta actions.
+  including About. View contains Home (Ctrl+1) and Experiment Library, including
+  on Welcome. Tools contains default and optional beta actions.
+- `shell_actions.py` owns shared Home, Settings and tool action identities.
+  Native menus reuse those actions, with project validation and beta notices
+  retained by MainWindow.
+- `experiment_library_page.py` presents the flat public-dataset browser. Its
+  `experiment_library_workflow.py` controller owns workers and guarded project
+  opening. `workers.experiment_library_worker` performs anonymous discovery and
+  installation through `projects.experiment_library`. Download, verification
+  and setup share one inline action area. Installed receipts support offline opening.
 - `src/Main_App/gui/typography.py`: canonical font family, role sizes, font
   weights, monospace font, and QSS font helpers used by the main app,
   component layer, and migrated tool windows.
@@ -50,7 +68,7 @@ Primary paths:
   the actual source/registration issue. No local Qt execution is required.
 - `condition_input_model.py` validates complete condition drafts for both Save
   and Start; `event_map.py` presents row errors without dropping entered values.
-  `project_drafts.py` tracks condition/mode and cached Settings changes at project
+  `project_drafts.py` tracks condition and cached Settings changes at project
   replacement and exit. Save must finish before leaving; an asynchronous save
   keeps the current project active. Ordinary workspace navigation preserves drafts.
 - `settings_panel.py` retains Settings state, validation, persistence and worker
@@ -70,13 +88,13 @@ Primary paths:
 - `run_outcome_model.py` summarizes actual recording results; `run_outcome.py`
   presents the session-local last outcome and existing output/report/log actions.
   Completion retains the selected single BDF, while a missing file disables Start.
-- `processing_history_label.py` shows the saved run in Home's Analysis column.
+- `processing_history_label.py` shows the saved run below the Home processing form.
   A `workers.processing_history_worker` reads the opened project's bounded
   history off the UI thread; queued results are guarded by project root and request
   identity. Project opening/returning Home and processing completion refresh it.
   `processing_history_model.py` formats the local completion time and distinct
-  successful participant count; absent, unavailable and incomplete history remain
-  explicit. This is processing recency, not downstream analysis readiness. At
+  successful participant count. Home hides absent history and identifies unavailable
+  or incomplete history. This is processing recency, not downstream analysis readiness. At
   1200 × 800 verify long timestamps/counts wrap without hiding Start Processing.
 - `src/Main_App/gui/processing_workflows.py`: processing run start/stop,
   queue polling, worker completion/error, and finalization GUI orchestration
@@ -273,8 +291,8 @@ Primary paths:
   wrappers. GUI log formatting and backend/IDE routing policy are delegated to
   `Main_App.diagnostics.log_router`.
 - `src/Main_App/gui/processing_log_dialog.py`: focused modal viewer for the
-  persistent Main App processing log. The home page keeps only a **View Log**
-  action so the Conditions editor can use the full remaining height.
+  persistent Main App processing log. **Tools > Processing Log** opens the
+  viewer, and a failed run with a recorded failure reason links to it from Home.
 - `src/Main_App/gui/roi_electrode_selector.py`: focused, settings-agnostic
   BioSemi64 map presentation. It owns the scalable nose-up map, accessible
   electrode controls, active-ROI styling, and color-ring visualization for
@@ -620,7 +638,14 @@ enabling `tools.enable_beta_tools` in Settings and restarting.
 `MainWindow._open_beta_tool` shows the beta notice once per registered tool
 per app session. `shell_status.py` locks the menu during processing,
 processing-cache reset, and Scalp Maps generation, then restores its prior
-enabled state. The Home shortcut follows the same lock.
+enabled state. The View > Home shortcut follows the same lock.
+
+At 1200 × 800 in Light and Dark, move across File, View and Tools without
+clicking: each title highlights without opening a menu. Blank space and leaving
+clear hover. Open a menu and move into its popup, then use Alt, arrows and
+Escape: the selected item and open title remain clear. Processing-disabled
+menus must accept no commands. Registered main-window Qt smoke covers these
+states; run locally only in an approved visible session.
 
 The main window defaults to 1200 × 800 and uses that minimum for Welcome, Home,
 Settings, embedded tools, and Processing Activity. Navigation preserves the
@@ -634,13 +659,26 @@ with **Open Existing Project** as the primary action.
 action. Cancel and Escape return to Welcome. A Studio import confirms hardware,
 requests a recordings folder, and opens Home when it succeeds.
 
-Home groups the labeled recording picker, run readiness, Start Processing,
-and View Log in the processing column. Analysis shows persisted processing
-history and the current session's run outcome above one row of shortcuts to
-SNR Plots, Scalp Maps, and LORETA Visualizer. The shortcuts trigger their Tools
-menu actions, so the menu lock, beta policy, and project and output checks
-apply. History describes a completed run. Each tool checks whether its
-current inputs can be used.
+Home shows **Current Project**, **Data Input Folder** and **Conditions** above a
+compact input summary and the centered **Start Processing** action. A project
+opens in folder scope. **Process a single file** opens the existing native
+picker and switches scope only after a valid selection. **Use the input folder**
+returns to batch. This choice is transient and does not modify saved project
+options or condition drafts. The existing Browse action retains the group-folder
+workflow for grouped projects.
+
+`home_input_summary.py` uses a worker and the canonical read-only discovery
+paths to count candidate files and group assignments. Project and scope changes
+invalidate stale results. The workbook location comes from the configured
+project subfolder. Previewing files does not register them, and processing start
+still performs its existing validation and registration review.
+
+Below the form Home shows available processing history and the current session's
+run outcome, with **Open Output Folder** and **Review Issues** actions. Each
+tool checks its inputs through the existing Tools menu actions. The
+[post-Batch actions](../product-specs/fpvs-toolbox.md#after-batch-processing)
+reuse those commands. `run_outcome.py` opens the workbook reported by the
+post-processing worker after verifying its active artifact fingerprint.
 
 Processing Activity puts progress above the run details and file table. Its
 post-processing and QC states keep phase labels and review instructions where
@@ -653,8 +691,16 @@ Closing it keeps the draft. Project load collapses the editor, and invalid
 Save opens it and focuses the first invalid field. Source-mapped projects
 show **View conditions** with their canonical catalog.
 
-For visible acceptance, launch at 1200 × 800 in Light and Dark. Tab through
-the Welcome actions and check visible focus. Cancel the existing-project
+For visible acceptance, open an unprocessed grouped project at 1200 × 800 and
+1280 × 900 in Light and Dark. Confirm the Toolbox title-bar icon, current project
+name, matching Browse and Edit conditions widths, candidate count, group
+breakdown and workbook path, and centered green-play Start Processing button.
+Cancel the single-file picker, then select a recording and return to the folder.
+Check that the count refreshes when changing projects or input folders, and that
+Tools > Processing Log opens the same modal viewer. Check that Start Processing
+returns to the center of Home after a run or cancellation.
+
+Tab through the Welcome actions and check visible focus. Cancel the existing-project
 picker, then dismiss Create New Project with Cancel and Escape. Open a
 disposable project and visit Home, Settings, each embedded tool, and Processing
 Activity. Check that the window size stays at 1200 × 800 and that the controls
@@ -696,26 +742,23 @@ Local Qt execution remains CI-only without explicit safe-visible approval.
 
 ## Visual Layout Rules
 
-Use cards as first-level subsection boundaries, not as wrappers around other
-cards. A `SectionCard` should usually represent one coherent subsection such as
-File I/O, Plot Parameters, Advanced settings, Log Output, Included Conditions,
-or Review. Do not place `SectionCard` widgets inside another visible card,
+Default to flat forms for setup and preferences. Use section headings and
+spacing to group a short set of controls. A `SectionCard` can frame a coherent
+review or data surface. Do not place `SectionCard` widgets inside another visible card,
 card-styled tab pane, bordered setup container, or other framed parent unless
 the user explicitly requests that nested-card look.
 
 When a screen needs tabs, splitters, or setup pages that contain subsection
 cards, keep the parent page visually flat: no pane border, filled background,
-or rounded outer frame around the child cards. The SNR Plot tool is the current
-reference pattern for embedded tool layout: dedicated subsection cards sit
-directly on the workspace background with normal spacing between them.
+or rounded outer frame around the child cards. SNR Plots uses flat forms for
+plot selection, legend labels, and axis and QC options.
 
-New or substantially revised embedded tool pages must fit the
-1200 × 800 workspace without a page-level `QScrollArea`. If one coherent surface
-cannot fit without clipping, split the workflow into purpose-based tabs or
-progressive pages and keep each page visually flat. Scrolling remains
-appropriate inside content-native widgets such as tables, log/text viewers,
-and focused dialogs; this rule prevents the tool page itself from becoming a
-long document.
+New or substantially revised embedded tool pages must fit the 1280 × 900
+workspace without a page-level `QScrollArea`. Also check the page inside the
+main window at its 1200 × 800 minimum. Its controls must remain reachable
+without enlarging the shell or adding page-level scrolling. Split controls
+into purpose-based tabs or progressive pages when space is tight. Tables,
+log/text viewers and focused dialogs can scroll within their own bounds.
 
 Before adding a new card-like wrapper, ask whether it communicates a distinct
 top-level group. If it only exists to hold other cards or to make a tab page
@@ -837,7 +880,11 @@ are true:
 5. It does not import retired paths, start workers, touch project state, access
    the filesystem at import time, or create windows as an import side effect.
 
-The main app shell is the visual source of truth. Shared component defaults should mirror the main window's current-project shell, card, form, status, and action-button styling through `set_appearance_mode()` in `src/Main_App/gui/theme.py` and the tokens in `src/Main_App/gui/style_tokens.py`.
+The main app shell provides the local implementation reference for existing
+cards, forms, status feedback and action buttons. Reuse `set_appearance_mode()`
+in `src/Main_App/gui/theme.py` and the tokens in `src/Main_App/gui/style_tokens.py`.
+Use the [shared desktop direction](../design-docs/DESIGN.md) to guide visual and
+interaction changes.
 
 `src/Main_App/gui/main_window.py` has been appropriately refactored and downsized into the shell/coordinator for the main window. Do not choose it as a future refactor target just to reduce size. Further `main_window.py` refactors require explicit user direction and a concrete clarity or feature-maintenance benefit.
 
@@ -992,7 +1039,7 @@ all four Experimental sections, the three Preprocessing QC pages and both
 Post-processing QC pages. Confirm
 every information button opens a brief readable explanation and every label and threshold field is
 readable without clipping, including all eight read-only Raw-Spectral Advanced rows,
-and the bottom action row remains visible. Repeat with the supported display
+by scrolling the category, and the bottom action row remains visible. Repeat with the supported display
 scaling settings on Windows and Linux. Confirm automatic detection has only
 Off and On choices, manual lists can be edited and enabled independently,
 and all five summed-BCA thresholds survive switching sub-tabs, Save, and
@@ -1007,7 +1054,7 @@ choice pending. Change values across several tabs, Save from a different tab,
 and reopen to confirm every edit persists; repeat with Cancel and confirm no
 draft is saved. Check Application contains Screening alpha, debug logging, and
 the project folder and cache actions. Verify Quality Control opens Dataset
-Exclusions and shows read-only thresholds. Toggle the >10
+Exclusions. Check summed-BCA thresholds under Experimental. Toggle the >10
 review default under Experimental > Preprocessing QC > Signals, Save/reopen, and start a new
 kurtosis review: confirm its initial checkbox follows the saved default, can
 still be overridden for the current review, and saves decisions only after

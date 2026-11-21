@@ -11,7 +11,7 @@ import pytest
 
 from Main_App import gui
 from Main_App.processing.preflight_qc import PreflightQcScan
-from Main_App.projects.preprocessing_settings import normalize_manual_excluded_participants, normalize_manual_excluded_recordings
+from Main_App.processing.processing_ledger import additional_preflight_infos_for_chosen_scope
 
 
 class _Signal:
@@ -32,8 +32,7 @@ def _native_functions(monkeypatch):
     module.Mapping = Mapping
     module.Sequence = Sequence
     module.PreflightQcScan = PreflightQcScan
-    module.normalize_manual_excluded_participants = normalize_manual_excluded_participants
-    module.normalize_manual_excluded_recordings = normalize_manual_excluded_recordings
+    module.additional_preflight_infos_for_chosen_scope = additional_preflight_infos_for_chosen_scope
     module.logging = logging
     module.QObject = object
     module.Signal = _Signal
@@ -44,8 +43,7 @@ def _native_functions(monkeypatch):
     for name, functions in {
         "preprocessing_qc_workflow": {"_path_key", "_identity_id", "_extended_review_inputs",
                                       "_PreflightQcWorker", "run_preprocessing_qc_workflow"},
-        "processing_workflows": {"_event_plan_matches_state", "_additional_preflight_infos_for_chosen_scope",
-                                 "_run_additional_preflight_for_chosen_scope"},
+        "processing_workflows": {"_run_additional_preflight_for_chosen_scope"},
     }.items():
         file = root / (name + ".py")
         tree = ast.parse(file.read_text(encoding="utf-8"))

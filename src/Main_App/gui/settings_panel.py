@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QDialog,
     QFrame,
+    QScrollArea,
     QTabWidget,
     QGridLayout,
     QMessageBox,
@@ -41,6 +42,7 @@ from Main_App.processing.roi_presets import (
 )
 from Main_App.gui.components import (
     ActionRow,
+    SectionCard,
     StatusBanner,
     apply_font_role,
     make_action_button,
@@ -64,6 +66,7 @@ from Main_App.gui.project_protocol import (
 )
 from Main_App.gui.recording_qc_identity import project_recording_coverage_rows
 from Main_App.gui.roi_settings_editor import ROISettingsEditor
+from Main_App.gui.diagnostics_preferences import build_diagnostics_page
 from Main_App.gui.settings_navigation import SettingsNavigation
 from Main_App.gui.style_tokens import SECTION_GAP, SECTION_HEADER_CONTENT_GAP
 from Main_App.gui.theme import set_appearance_mode, set_themed_stylesheet
@@ -330,11 +333,12 @@ class SettingsDialog(QDialog):
             "QTabWidget#settings_protocol_sections::pane, "
             "QTabWidget#settings_experimental_sections::pane {"
             " border: none; background: transparent; }"
+            "QTabWidget#settings_tabs QGroupBox { border: none; background: transparent; }"
         )
         sidebar = QFrame(self)
         sidebar.setObjectName("settings_sidebar")
         sidebar.setMinimumWidth(148)
-        sidebar.setMaximumWidth(192)
+        sidebar.setMaximumWidth(160)
         heading_height = 36
         heading_inset = 4
         sidebar_layout = QVBoxLayout(sidebar)
@@ -395,6 +399,26 @@ class SettingsDialog(QDialog):
         experimental_tab = self._init_experimental_tab(self.tabs)
         self._experimental_tab_index = self.tabs.indexOf(experimental_tab)
         self._init_application_tab(self.tabs)
+        build_diagnostics_page(self.tabs)
+        for card in self.tabs.findChildren(SectionCard):
+            card.shell_layout.setContentsMargins(0, SECTION_HEADER_CONTENT_GAP, 0, 0)
+        for index in range(self.tabs.count()):
+            category = self.tabs.widget(index)
+            content_widget = QWidget()
+            content_widget.setLayout(category.layout())
+            scroll = QScrollArea(category)
+            scroll.setObjectName("settings_category_scroll")
+            scroll.setAccessibleName(f"{self.tabs.tabText(index)} settings")
+            scroll.setFrameShape(QFrame.NoFrame)
+            scroll.setFocusPolicy(Qt.NoFocus)
+            scroll.setWidgetResizable(True)
+            scroll.setWidget(content_widget)
+            scroll.viewport().setAutoFillBackground(False)
+            content_widget.setAutoFillBackground(False)
+            category_layout = QVBoxLayout(category)
+            category_layout.setContentsMargins(0, 0, 0, 0)
+            category_layout.addWidget(scroll)
+        QApplication.instance().focusChanged.connect(self._reveal_focused_setting)
         self.tabs.tabBar().hide()
         self.settings_navigation.addItems(
             [self.tabs.tabText(index) for index in range(self.tabs.count())]
@@ -415,6 +439,16 @@ class SettingsDialog(QDialog):
         )
         self.tabs.currentChanged.connect(self._on_tab_changed)
         self._on_tab_changed(self.tabs.currentIndex())
+
+    @Slot(QWidget, QWidget)
+    def _reveal_focused_setting(self, _previous, field) -> None:
+        if field is None or not self.tabs.isAncestorOf(field):
+            return
+        parent = field.parentWidget()
+        while parent is not self.tabs:
+            if isinstance(parent, QScrollArea):
+                parent.ensureWidgetVisible(field, 8, 8)
+            parent = parent.parentWidget()
 
     def _add_settings_footer(
         self,

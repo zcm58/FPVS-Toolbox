@@ -9,8 +9,12 @@ and qualified ROI coverage rather than adding local hardware detection or
 silently intersecting electrode sets. Import compatibility alone does not
 qualify the existing detectability method for a new recording context.
 
-Managed input selection belongs to `project_coverage.py`; `worker.py` binds
-the request before source prevalidation or output writes. Use the public
+Managed input selection belongs to `project_coverage.py`. The Qt-free
+`export_run.run_detectability_export` binds the request, prevalidates all
+selected conditions in managed runs, then writes metadata, logs and figures.
+`worker.py` adapts its callbacks, return value and exceptions to the desktop
+signals. All-excluded runs complete successfully with an explanatory log.
+Use the public
 project dataset index for participant/recording/condition identity and the
 current processing-owned FullFFT provenance and QC-20/QC-21 final release.
 Final coverage may retain source evidence for an explicitly excluded cell;

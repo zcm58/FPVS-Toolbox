@@ -82,6 +82,15 @@ line style and verify legibility in grayscale.
   appearance unless the scientific transformation is explicitly scoped and
   documented.
 
+## Correlation Plot Template
+
+Use the [correlation figure recipe](correlation-figures.md) and its runnable,
+synthetic example for combined or individual score/response scatterplots.
+It preserves in-panel statistics, linear R squared on the fitted line, and
+explicit 600-dpi PDF graphical layers alongside vector text. The recipe keeps
+Spearman inference distinct from OLS/Pearson statistics and does not select
+associations or redefine testing families.
+
 ## Verification
 
 For figure-output changes, run the shared figure contract and then the affected

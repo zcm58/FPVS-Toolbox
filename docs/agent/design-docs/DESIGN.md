@@ -1,23 +1,25 @@
 # Design
 
-Design guidance lives in:
+The canonical OpenFPVS desktop experience spec is maintained in the private
+OpenFPVS repository. From the Toolbox repository root, maintainers can find it
+at `../OpenFPVS/DESKTOP_EXPERIENCE.md` in a sibling checkout.
+For release decisions, read [How to plan independent releases](https://github.com/zcm58/OpenFPVS-Website/blob/main/DESKTOP_EXPERIENCE.md#how-to-plan-independent-releases).
 
-- `docs/agent/design-docs/`
-- `docs/agent/architecture/gui.md`
-- `docs/agent/product-specs/`
+Design for lab members doing routine work. Give new members guidance at the
+point of need and keep detailed controls and evidence available to experts.
+Use FPVS Studio as the reference for layout and interaction. Apply the
+OpenFPVS **Slate & Signal Teal** desktop palette through the existing Toolbox
+theme. Preserve the scientific palettes used for data and publication figures.
+When a Toolbox surface changes, match the Studio pattern where it fits the
+processing task and preserve existing behavior unless explicitly revised.
+The [product scope](../product-specs/fpvs-toolbox.md) and
+[GUI architecture](../architecture/gui.md) document the local contracts.
 
-For GUI work, preserve existing workflows unless the task explicitly changes
-behavior. Prefer quiet, task-focused PySide6 interfaces over decorative layouts.
+Keep informational notices dismissible so the analyst can continue other
+work. Block the affected action when its inputs are invalid, execution would
+be unsafe, or continuing would likely lose work. Explain what needs attention.
 
-Installed design skills can help critique hierarchy, spacing, labels, and
-interaction clarity, but they do not set this repo's design system. Repo rules
-override them:
-
-- PySide6 is the only active UI toolkit.
-- `SectionCard` frames top-level subsections; do not add nested card layouts.
-- Subsection headings use `Main_App.gui.components.SubsectionHeaderLabel`.
-- Shared font, color, spacing, and component changes belong in
-  `Main_App.gui.components`, `theme.py`, `typography.py`, or existing widget
-  owners, not per-surface ad hoc QSS.
-- Desktop FPVS workflows are utilitarian and data-focused; do not introduce
-  landing-page, mobile-app, or web-dashboard patterns into the app shell.
+[Frontend](FRONTEND.md) maps these decisions to Toolbox theme and component
+owners. The private umbrella's `INTEGRATION_PLAN.md` owns cross-app direction
+and acceptance. Its `PROJECT_REPORTING.md` owns sharing and approved access.
+Toolbox owns its import, offline processing and scientific output contracts.

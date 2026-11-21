@@ -24,6 +24,7 @@ from Main_App.processing.processing_ledger import (
     MISSING_EXPECTED_OUTPUTS_WARNING,
     PROCESSING_FINGERPRINT_VERSION,
     ProcessingPlan,
+    additional_preflight_infos_for_chosen_scope,
     build_expected_recording_condition_plan,
     carry_forward_pre_qc_completed_states,
     classify_processing_inputs,
@@ -39,11 +40,7 @@ from Main_App.processing.processing_ledger import (
 )
 from Main_App.processing.qc_summary_export import export_processing_qc_summary
 from Main_App.projects.grouping import project_group_context
-from Main_App.projects.preprocessing_settings import (
-    normalize_manual_excluded_participants,
-    normalize_manual_excluded_recordings,
-    normalize_preprocessing_settings,
-)
+from Main_App.projects.preprocessing_settings import normalize_preprocessing_settings
 from Main_App.processing.raw_channel_qc import RAW_CHANNEL_QC_EXCLUSION_REASON
 from Main_App.workers.mp_env import (
     compute_dynamic_worker_ceiling,
@@ -693,6 +690,7 @@ def _start_post_processing_pipeline_after_processing(
 
     def _handle_finished(result: dict) -> None:
         pending_qc_report: dict | None = None
+        host._last_run_excel_path = ""
         try:
             source_maps_attempted, source_maps_succeeded = (
                 _post_processing_source_map_outcome(result)
@@ -708,6 +706,8 @@ def _start_post_processing_pipeline_after_processing(
                         continue
                     message = str(step.get("message") or "").strip()
                     path = str(step.get("path") or "").strip()
+                    if step.get("name") == "analysis_ready_full_audit" and step.get("ok"):
+                        host._last_run_excel_path = path
                     if not message and not path:
                         continue
                     level = (
@@ -1233,85 +1233,13 @@ def _freeze_expected_processing_matrix(
     settings["_fpvs_expected_plan_fingerprint"] = expected_plan.fingerprint
 
 
-def _event_plan_matches_state(
-    state: Any,
-    event_plans: Mapping[Any, Any],
-) -> bool:
-    processing_key = str(state.processing_id).casefold()
-    raw_path = Path(state.info.path).resolve(strict=False)
-    for raw_key, raw_plan in event_plans.items():
-        key_text = str(raw_key).strip()
-        if key_text.casefold() == processing_key and isinstance(raw_plan, Mapping):
-            return True
-        try:
-            path_match = Path(key_text).expanduser().resolve(strict=False) == raw_path
-        except (OSError, RuntimeError, TypeError, ValueError):
-            path_match = False
-        if path_match and isinstance(raw_plan, Mapping):
-            return True
-    return False
-
-
-def _additional_preflight_infos_for_chosen_scope(
-    plan: ProcessingPlan,
-    settings: Mapping[str, Any],
-) -> tuple[Any, ...]:
-    """Return chosen run files that have no current QC-19 marker plan."""
-
-    raw_event_plans = settings.get("_fpvs_preflight_event_plans_by_file")
-    event_plans = raw_event_plans if isinstance(raw_event_plans, Mapping) else {}
-    excluded_participants = {
-        value.casefold()
-        for value in normalize_manual_excluded_participants(
-            settings.get("manual_excluded_participants")
-        )
-    }
-    excluded_recordings = {
-        value.casefold()
-        for value in normalize_manual_excluded_recordings(
-            settings.get("manual_excluded_recordings")
-        )
-    }
-    raw_header_exclusions = settings.get(
-        "_fpvs_preflight_recording_not_started_files",
-        (),
-    )
-    if isinstance(raw_header_exclusions, str):
-        raw_header_exclusions = (raw_header_exclusions,)
-    header_exclusions: set[Path] = set()
-    if isinstance(raw_header_exclusions, (list, tuple, set, frozenset)):
-        for raw_path in raw_header_exclusions:
-            try:
-                header_exclusions.add(
-                    Path(str(raw_path)).expanduser().resolve(strict=False)
-                )
-            except (OSError, RuntimeError, TypeError, ValueError):
-                continue
-    run_paths = {Path(path).resolve(strict=False) for path in plan.run_files}
-    missing: list[Any] = []
-    for state in plan.states:
-        raw_path = Path(state.info.path).resolve(strict=False)
-        if raw_path not in run_paths:
-            continue
-        explicitly_excluded = (
-            state.status == "excluded"
-            or state.participant_id.casefold() in excluded_participants
-            or state.processing_id.casefold() in excluded_recordings
-            or raw_path in header_exclusions
-        )
-        if explicitly_excluded or _event_plan_matches_state(state, event_plans):
-            continue
-        missing.append(state.info)
-    return tuple(missing)
-
-
 def _run_additional_preflight_for_chosen_scope(
     host: Any,
     plan: ProcessingPlan,
     settings: dict[str, Any],
     event_map: Mapping[str, int],
 ) -> bool:
-    missing_infos = _additional_preflight_infos_for_chosen_scope(plan, settings)
+    missing_infos = additional_preflight_infos_for_chosen_scope(plan, settings)
     if not missing_infos:
         return True
     from Main_App.gui import processing_inputs
@@ -1464,7 +1392,7 @@ def start_processing(host: Any, *, log: logging.Logger = logger) -> None:
                 if is_frequency_domain_output_stale(root) or published_artifacts_need_rebuild(root):
                     resume_post_processing(host)
             return
-        missing = _additional_preflight_infos_for_chosen_scope(chosen_plan, settings)
+        missing = additional_preflight_infos_for_chosen_scope(chosen_plan, settings)
         reviewed_paths: set[Path] = set()
         while True:
             if missing:
@@ -1483,7 +1411,7 @@ def start_processing(host: Any, *, log: logging.Logger = logger) -> None:
                 host.currentProject, getattr(host, "_processing_pre_qc_plan", None), refreshed_plan,
             )
             chosen_plan = with_processing_choice(refreshed_plan, chosen_plan.choice)
-            missing = _additional_preflight_infos_for_chosen_scope(chosen_plan, settings)
+            missing = additional_preflight_infos_for_chosen_scope(chosen_plan, settings)
             if not missing:
                 break
         host.validated_params = dict(settings)
@@ -1510,6 +1438,7 @@ def start_processing(host: Any, *, log: logging.Logger = logger) -> None:
                 level=logging.INFO,
             )
         host._last_run_outcome = None
+        host._last_run_excel_path = ""
         host._last_run_issue_report = ""
         panel = getattr(host, "last_run_panel", None)
         if panel is not None:

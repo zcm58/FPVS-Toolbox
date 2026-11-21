@@ -24,6 +24,21 @@ def init_file_menu(self) -> None:
     action_import.triggered.connect(lambda: import_fpvs_config_project(self))
     self.actionImportFpvsConfigProject = action_import
     file_menu.addAction(action_import)
+    from Main_App.gui.studio_cohort_review import reopen_study_review
+    review = QAction("Review Studio Cohort…", self)
+    review.triggered.connect(lambda: reopen_study_review(self))
+    file_menu.addAction(review)
+    from Main_App.gui.reporting_dialog import open_results_sharing
+    share = QAction("Share study results…", self)
+    share.triggered.connect(lambda: open_results_sharing(self))
+    file_menu.addAction(share)
+    file_menu.aboutToShow.connect(lambda: share.setVisible(bool(
+        getattr(getattr(self, "currentProject", None), "manifest", {})
+        .get("tools", {}).get("studio_cohort", {}).get("website_study")
+    )))
+    file_menu.aboutToShow.connect(lambda: review.setVisible(
+        bool(getattr(getattr(self, "currentProject", None), "manifest", {}).get("tools", {}).get("studio_cohort"))
+    ))
 
     action_open = QAction("Open Existing Project…", self)
     action_open.triggered.connect(self.open_existing_project)
@@ -41,10 +56,7 @@ def init_file_menu(self) -> None:
 
     file_menu.addSeparator()
 
-    action_settings = QAction("Settings", self)
-    action_settings.setObjectName("actionSettings")
-    action_settings.triggered.connect(self.open_settings_window)
-    file_menu.addAction(action_settings)
+    file_menu.addAction(self.shell_actions.settings)
 
     action_reset_cache = QAction("Reset Project Processing Cache...", self)
     action_reset_cache.setObjectName("actionResetProjectProcessingCache")
@@ -61,9 +73,7 @@ def init_file_menu(self) -> None:
     action_check.triggered.connect(self.check_for_updates)
     file_menu.addAction(action_check)
 
-    about_action = QAction("About…", self)
-    about_action.triggered.connect(self.show_about_dialog)
-    file_menu.addAction(about_action)
+    file_menu.addAction(self.shell_actions.about)
 
     file_menu.addSeparator()
 

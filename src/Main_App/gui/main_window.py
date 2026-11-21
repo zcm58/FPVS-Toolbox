@@ -54,6 +54,7 @@ from Main_App.gui import update_manager
 from Main_App.gui import event_map
 from Main_App.gui.file_menu import init_file_menu
 from Main_App.gui.settings_panel import EmbeddedSettingsPage
+from Main_App.gui.shell_actions import ShellActions
 from Main_App.gui.ui_main import init_ui
 from Main_App.gui import project_workflows
 from Main_App.gui import project_drafts
@@ -131,8 +132,10 @@ class MainWindow(QMainWindow, ProcessingHostCompatibility):
         self.setMinimumSize(_WINDOW_SIZE)
         self.resize(_WINDOW_SIZE)
         self.currentProject: Project | None = None
+        self.file_mode = SimpleNamespace(get=lambda: "Batch")
 
         # Build UI
+        self.shell_actions = ShellActions(self)
         init_ui(self)
         self._bind_existing_event_map_rows()
         shell_status.init_launch_reveal_state(self)
@@ -221,7 +224,6 @@ class MainWindow(QMainWindow, ProcessingHostCompatibility):
         self._start_guard = OpGuard()
 
         self.save_folder_path = SimpleNamespace(get=lambda: "", set=lambda v: None)
-        self.file_mode = SimpleNamespace(get=lambda: "Batch")
         self.post_process = MethodType(MainWindow._export_with_post_process, self)
         self._post_thread = None
         self._post_worker = None
@@ -263,10 +265,14 @@ class MainWindow(QMainWindow, ProcessingHostCompatibility):
     # -------------------------- processing -------------------------- #
 
     def _sync_menu_visibility(self) -> None:
-        self.menuBar().setVisible(self.stacked.currentWidget() is not self.landing_page)
+        self.menuBar().setVisible(True)
 
     def _set_project_title(self, name: str) -> None:
         self.setWindowTitle(f"{name} — {_WINDOW_TITLE}")
+        self.lbl_currentProject.setText(f"Current Project: {name}")
+
+    def show_processing_log(self) -> None:
+        self.processing_log_dialog.open()
 
     def stop_processing(self) -> None:
         processing_workflows.stop_processing(self)
@@ -372,6 +378,7 @@ class MainWindow(QMainWindow, ProcessingHostCompatibility):
 
     def edit_project_settings(self) -> None:
         project_workflows.edit_project_settings(self)
+        self._refresh_home_inputs()
 
     def reset_project_processing_cache(self) -> None:
         project_workflows.reset_project_processing_cache(self)
@@ -398,8 +405,18 @@ class MainWindow(QMainWindow, ProcessingHostCompatibility):
         self.stacked.setCurrentIndex(1)
 
     def show_home_page(self) -> None:
+        self._refresh_home_inputs()
         refresh_processing_history(self)
         self._show_workspace_page(self.homeWidget)
+
+    def _refresh_home_inputs(self) -> None:
+        project = self.currentProject
+        if self.file_mode.get() == "Batch":
+            self.home_input_summary.refresh_batch(project)
+        folder = getattr(project, "subfolders", {}).get("excel")
+        destination = str(project.project_root / folder) if folder else ""
+        self.home_workbook_path.setText(destination or "No workbook folder configured")
+        self.home_workbook_path.setToolTip(destination)
 
     def _ensure_stats_page(self) -> PysideStatsWindow:
         project = getattr(self, "currentProject", None)
@@ -826,6 +843,7 @@ class MainWindow(QMainWindow, ProcessingHostCompatibility):
     # ------------------------ project load hook --------------------- #
     def loadProject(self, project: Project) -> None:  # pragma: no cover - GUI stub
         project_workflows.load_project(self, project)
+        self._on_mode_changed("batch")
 
     def saveProjectSettings(self) -> None:
         project_workflows.save_project_settings(self)
@@ -848,10 +866,21 @@ class MainWindow(QMainWindow, ProcessingHostCompatibility):
     def _on_mode_changed(self, mode: str) -> None:
         processing_inputs.on_mode_changed(self, mode)
 
+    def _toggle_processing_scope(self) -> None:
+        if self.file_mode.get() == "Single":
+            self._on_mode_changed("batch")
+            self._refresh_home_inputs()
+        else:
+            self.select_single_file()
+
     def _set_controls_enabled(self, enabled: bool) -> None:
         processing_inputs.set_controls_enabled(self, enabled)
 
     def closeEvent(self, event: QCloseEvent) -> None:
+        if getattr(getattr(self, "_results_sharing_dialog", None), "thread", None) is not None:
+            QMessageBox.information(self, "Sharing study results", "Wait for the OpenFPVS transfer to finish before closing Toolbox.")
+            event.ignore()
+            return
         if getattr(self, "_qc_source_prefetch_bridge", None) is not None:
             QMessageBox.information(
                 self,
@@ -1034,7 +1063,11 @@ class MainWindow(QMainWindow, ProcessingHostCompatibility):
         processing_inputs.update_start_enabled(self)
 
     def select_single_file(self) -> None:
-        processing_inputs.select_single_file(self)
+        info = processing_inputs.select_single_file(self)
+        if info is not None:
+            if self.file_mode.get() != "Single":
+                self._on_mode_changed("single")
+            self.home_input_summary.show_single(self.currentProject, info)
 
 # ----------------------------------------------------------------------
 def main() -> None:

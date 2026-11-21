@@ -1,69 +1,47 @@
 from __future__ import annotations
 
-from functools import partial
-
-from PySide6.QtGui import QAction, QKeySequence
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import QMenuBar, QMainWindow
 
-# Role, label, and MainWindow opener, in menu order.
-DEFAULT_TOOL_SPECS = (
-    ("btn_free_harmonic_clustering", "Free Harmonic Clustering Analysis", "open_free_harmonic_clustering"),
-    ("btn_graphs", "SNR Plots", "open_plot_generator"),
-)
-
-BETA_TOOL_SPECS = (
-    ("btn_publication_maps", "Scalp Maps", "open_publication_maps"),
-    ("btn_data", "Standard FPVS Screening", "open_stats_analyzer"),
-    ("btn_sensitivity_analysis", "Sensitivity Analysis", "open_sensitivity_analysis"),
-    ("btn_loreta_visualizer", "LORETA Visualizer", "open_loreta_visualizer"),
-    ("btn_sequence_figure", "Sequence Figure", "open_sequence_figure"),
-    ("btn_individual_detectability", "Individual Detectability", "open_individual_detectability"),
-)
+from Main_App.gui.shell_actions import BETA_TOOL_SPECS as BETA_TOOL_SPECS
+from Main_App.gui.shell_actions import ShellActions
+from Main_App.gui.theme import apply_native_menu_style
 
 
-def build_menu_bar(parent: QMainWindow) -> QMenuBar:
-    """Return the app-level File, View, and Tools menus."""
+def build_menu_bar(parent: QMainWindow, actions: ShellActions) -> QMenuBar:
+    """Return the app-level menus using the shared command identities."""
     menu_bar = QMenuBar(parent)
     menu_bar.setObjectName("workspaceMenuBar")
     menu_bar.setNativeMenuBar(False)
+    menu_bar.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
     file_menu = menu_bar.addMenu("&File")
     file_menu.setObjectName("fileMenu")
 
     view_menu = menu_bar.addMenu("&View")
     view_menu.setObjectName("viewMenu")
-    home_action = view_menu.addAction("Home")
-    home_action.setObjectName("btn_home")
-    home_action.setShortcut(QKeySequence("Ctrl+1"))
-    parent.addAction(home_action)
+    actions.home.setShortcut(QKeySequence("Ctrl+1"))
+    parent.addAction(actions.home)
+    view_menu.addAction(actions.home)
 
-    def show_home() -> None:
-        if menu_bar.isVisible() and menu_bar.isEnabled():
-            parent.show_home_page()
-
-    home_action.triggered.connect(show_home)
+    view_menu.addAction(actions.library)
 
     tools_menu = menu_bar.addMenu("&Tools")
     tools_menu.setObjectName("toolsMenu")
-    parent.tool_actions = {}
-    for role, text, opener_name in DEFAULT_TOOL_SPECS:
-        action = QAction(text, parent)
-        action.setObjectName(role)
-        action.triggered.connect(getattr(parent, opener_name))
-        tools_menu.addAction(action)
-        parent.tool_actions[role] = action
-
-    if parent.settings.beta_tools_enabled():
+    tools_menu.addActions(actions.default_tools)
+    parent.tool_actions = {
+        action.objectName(): action
+        for action in (*actions.default_tools, *actions.beta_tools)
+    }
+    if actions.beta_tools:
         tools_menu.addSeparator()
         beta_menu = tools_menu.addMenu("Beta Tools")
         beta_menu.setObjectName("betaToolsMenu")
-        for role, text, opener_name in BETA_TOOL_SPECS:
-            action = QAction(text, parent)
-            action.setObjectName(role)
-            action.triggered.connect(
-                partial(parent._open_beta_tool, role, getattr(parent, opener_name))
-            )
-            beta_menu.addAction(action)
-            parent.tool_actions[role] = action
+        beta_menu.addActions(actions.beta_tools)
 
+    tools_menu.addSeparator()
+    tools_menu.addAction(actions.processing_log)
+
+    apply_native_menu_style(menu_bar)
     return menu_bar

@@ -431,8 +431,8 @@ def test_scalp_maps_tabs_fit_supported_workspace_without_page_scroll(
         card.objectName() for card in generation_page.findChildren(SectionCard)
     } == {
         "publication_maps_conditions",
-        "publication_maps_run",
     }
+    assert not isinstance(page.generation_group, SectionCard)
     assert {
         card.objectName() for card in advanced_page.findChildren(SectionCard)
     } == {

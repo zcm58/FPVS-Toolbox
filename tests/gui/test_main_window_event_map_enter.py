@@ -164,7 +164,7 @@ def test_start_processing_requires_complete_event_map_entry(tmp_path, qtbot, mon
     row = _live_rows(win)[0]
     label_edit, id_edit = _row_fields(win, row)
 
-    assert win.rb_batch.isChecked()
+    assert win.file_mode.get() == "Batch"
     assert not win.btn_start.isEnabled()
 
     label_edit.setText("Cond A")
@@ -203,7 +203,7 @@ def test_single_mode_requires_event_map_and_bdf(tmp_path, qtbot, monkeypatch):
     bdf_path = tmp_path / "sample.bdf"
     bdf_path.touch()
 
-    win.rb_single.setChecked(True)
+    win._on_mode_changed("single")
     label_edit.setText("Cond A")
     _type_valid_id(id_edit, qtbot, "10")
     assert not win.btn_start.isEnabled()
@@ -439,7 +439,7 @@ def test_single_selection_survives_completion_and_missing_file_disables_start(tm
     monkeypatch.setattr(user_messages, "show_info", lambda *_: None)
     path = tmp_path / f"sample{extension}"
     path.touch()
-    win.rb_single.setChecked(True)
+    win._on_mode_changed("single")
     label, ident = _row_fields(win, _live_rows(win)[0])
     label.setText("Faces")
     ident.setText("1")
@@ -512,3 +512,73 @@ def test_unsafe_condition_name_blocks_start_and_save_with_inline_label_error(
         assert project.event_map == {"1 - Faces": 1}
     finally:
         win.currentProject = None
+
+
+@pytest.mark.parametrize("beta", [False, True])
+def test_batch_result_actions_open_current_workbook_and_route_to_tools(tmp_path, qtbot, monkeypatch, beta):
+    from openpyxl import Workbook
+
+    from Main_App.gui import reporting_dialog, run_outcome
+    from Main_App.gui.run_outcome_model import RunOutcome
+    from Main_App.processing.artifact_freshness import (
+        ANALYSIS_READY_FULL_AUDIT_ARTIFACT,
+        activate_selection_freshness,
+        canonical_artifact_path,
+        mark_artifact_current,
+    )
+
+    opened = []
+    tool_calls = []
+    sharing = []
+    monkeypatch.setattr(main_window_module.SettingsManager, "beta_tools_enabled", lambda self: beta)
+    monkeypatch.setattr(reporting_dialog, "open_results_sharing", sharing.append)
+    monkeypatch.setattr(main_window_module.MainWindow, "open_publication_maps",
+                        lambda self: tool_calls.append("scalp"))
+    monkeypatch.setattr(QMessageBox, "warning", lambda *args: QMessageBox.StandardButton.Ok)
+    monkeypatch.setattr(run_outcome, "open_path_in_file_manager",
+                        lambda path: opened.append(Path(path)) or True)
+    monkeypatch.setattr(main_window_module.MainWindow, "open_plot_generator",
+                        lambda self: tool_calls.append("snr"))
+    win = _build_window(tmp_path, qtbot, monkeypatch, open_editor=False)
+    win.show_home_page()
+    win.resize(1280, 900)
+    root = tmp_path / "study"
+    root.mkdir()
+    (root / "project.json").write_text("{}", encoding="utf-8")
+    win.currentProject = SimpleNamespace(project_root=root, manifest={})
+    win._processing_run_mode = "Batch"
+    win._last_run_outcome = RunOutcome(completed=3, skipped=2)
+    target = canonical_artifact_path(root, ANALYSIS_READY_FULL_AUDIT_ARTIFACT)
+    target.parent.mkdir(parents=True)
+    Workbook().save(target)
+    activate_selection_freshness(root, {"selection_fingerprint": "first"})
+    mark_artifact_current(root, ANALYSIS_READY_FULL_AUDIT_ARTIFACT, target, "first")
+    win._last_run_excel_path = str(target)
+    run_outcome.present_last_run(win, success=True)
+    QApplication.processEvents()
+    assert "3 completed" in win.last_run_label.text() and "2 reused" in win.last_run_label.text()
+    assert win.last_run_excel_button.isVisible() and win.last_run_excel_button.isEnabled()
+    assert win.homeWidget.rect().contains(
+        win.last_run_excel_button.mapTo(win.homeWidget, win.last_run_excel_button.rect().bottomRight())
+    )
+    assert not win.last_run_share_button.isVisible()
+    win.currentProject.manifest["tools"] = {"studio_cohort": {"website_study": {"project_id": "test"}}}
+    run_outcome.present_last_run(win, success=True)
+    assert win.last_run_share_button.isVisible()
+    win.last_run_share_button.click()
+    assert sharing == [win]
+    win.last_run_excel_button.click()
+    assert opened == [target]
+    win.findChild(QPushButton, "last_run_btn_graphs").click()
+    assert tool_calls == ["snr"]
+    scalp = win.findChild(QPushButton, "last_run_btn_publication_maps")
+    assert (scalp is not None) == beta
+    if beta:
+        assert win.homeWidget.rect().contains(scalp.mapTo(win.homeWidget, scalp.rect().bottomRight()))
+        scalp.click()
+        assert tool_calls == ["snr", "scalp"]
+        assert "btn_publication_maps" in win._acknowledged_beta_tools
+    activate_selection_freshness(root, {"selection_fingerprint": "second"})
+    win.last_run_excel_button.click()
+    assert opened == [target] and "Could not open Excel results" in win.last_run_label.text()
+    win.currentProject = None

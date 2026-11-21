@@ -1,17 +1,10 @@
 # Source Instructions
 
-Inherit root [AGENTS.md](../AGENTS.md), including scientific, platform, path,
-retirement, and verification rules. Start with the
-[agent index](../docs/agent/agent-index.md); read a tool's scoped `AGENTS.md`
-before editing it. Do not scan unrelated source to reconfirm a passing audit.
+Follow [root rules](../AGENTS.md) and the matching tool's scoped `AGENTS.md`.
+Use the [architecture map](../ARCHITECTURE.md) for canonical imports.
 
-- Use the canonical owners in [ARCHITECTURE.md](../ARCHITECTURE.md).
-  `Shared` and `Performance` hold compatibility aliases, not implementations.
-- Keep new features modular; prefer files under 500 lines. Do not add functions
-  to `Main_App/gui/main_window.py` or refactor its shell without explicit scope.
-- Preserve existing GUI workflows unless the task calls for a change. Use
-  PySide6 and shared `gui/components`; no Tkinter/CustomTkinter/CTkMessagebox.
-- Before hardware, montage, pipeline-composition, or Studio work, read the
-  [current-state/future roadmap](../docs/agent/architecture/hardware-pipeline-studio-roadmap.md)
-  and matching active plan. Acquisition metadata belongs upstream of numerical
-  processing; software support does not establish physical qualification.
+- Keep new features modular and prefer files under 500 lines. Adding functions
+  to `Main_App/gui/main_window.py` or refactoring its shell requires explicit scope.
+- For Studio import, follow the [project handoff contract](../docs/agent/architecture/project-io.md#studio-config-handoff).
+  For hardware or method extensions, read the [roadmap](../docs/agent/architecture/hardware-pipeline-studio-roadmap.md)
+  and [matching plan](../docs/agent/exec-plans/README.md).

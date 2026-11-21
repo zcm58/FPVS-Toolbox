@@ -7,8 +7,10 @@ from collections.abc import Sequence
 
 from PySide6.QtCore import QSignalBlocker, Qt, Signal
 from PySide6.QtWidgets import (
+    QFrame,
     QLabel,
     QListWidgetItem,
+    QScrollArea,
     QSizePolicy,
     QSplitter,
     QVBoxLayout,
@@ -74,8 +76,18 @@ class ROISettingsEditor(QWidget):
         map_layout = QVBoxLayout(self.map_pane)
         map_layout.setContentsMargins(0, 0, 4, 0)
         map_layout.setSpacing(0)
-        self.map_widget = ElectrodeMapWidget(self._canonical_electrodes, self.map_pane)
-        map_layout.addWidget(self.map_widget, 1)
+        self.map_scroll = QScrollArea(self.map_pane)
+        self.map_scroll.setObjectName("settings_rois_map_scroll")
+        self.map_scroll.setAccessibleName("Scalp map viewport")
+        self.map_scroll.setFrameShape(QFrame.NoFrame)
+        self.map_scroll.setFocusPolicy(Qt.NoFocus)
+        self.map_scroll.setWidgetResizable(True)
+        self.map_scroll.setMinimumSize(280, 240)
+        self.map_widget = ElectrodeMapWidget(self._canonical_electrodes, self.map_scroll)
+        self.map_scroll.setWidget(self.map_widget)
+        self.map_scroll.viewport().setAutoFillBackground(False)
+        self.map_widget.setAutoFillBackground(False)
+        map_layout.addWidget(self.map_scroll, 1)
 
         self.roi_pane = ROIEditorSidePanel(self.splitter)
         self.roi_list = self.roi_pane.roi_list

@@ -2000,7 +2000,14 @@ class LoretaVisualizerWindow(QWidget):
         scale_row.addWidget(self.activation_scale_max_label, 0)
         color_layout.addLayout(scale_row)
 
-        range_label = make_field_label("Color range", color_section)
+        self.activation_range_controls = QWidget(color_section)
+        self.activation_range_controls.setObjectName("loreta_fixed_color_limits")
+        range_layout = QVBoxLayout(self.activation_range_controls)
+        range_layout.setContentsMargins(0, 0, 0, 0)
+        range_layout.setSpacing(4)
+        range_label = make_field_label("Color range", self.activation_range_controls)
+        range_layout.addWidget(range_label)
+
         range_row = QHBoxLayout()
         range_row.setContentsMargins(0, 0, 0, 0)
         range_row.setSpacing(6)
@@ -2017,11 +2024,11 @@ class LoretaVisualizerWindow(QWidget):
         self.activation_max_spin.setValue(DEFAULT_SCALAR_MAX)
         self.activation_max_spin.valueChanged.connect(self._on_activation_range_changed)
         range_label.setBuddy(self.activation_min_spin)
-        range_row.addWidget(range_label, 0)
         range_row.addWidget(self.activation_min_spin)
         range_row.addWidget(make_field_label("to", color_section), 0)
         range_row.addWidget(self.activation_max_spin)
-        color_layout.addLayout(range_row)
+        range_layout.addLayout(range_row)
+        color_layout.addWidget(self.activation_range_controls)
 
         view_section, view_layout = add_control_section()
 
@@ -2799,7 +2806,9 @@ class LoretaVisualizerWindow(QWidget):
 
     def _sync_activation_range_enabled(self) -> None:
         renderer_available = self.renderer is not None
-        manual_enabled = renderer_available and self.activation_scale_combo.currentData() == SCALE_FIXED
+        manual_limits = self.activation_scale_combo.currentData() == SCALE_FIXED
+        self.activation_range_controls.setVisible(manual_limits)
+        manual_enabled = renderer_available and manual_limits
         self.activation_min_spin.setEnabled(manual_enabled)
         self.activation_max_spin.setEnabled(manual_enabled)
 

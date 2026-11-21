@@ -496,8 +496,10 @@ def _raw_paths_for_project_open(project: Any) -> list[Path]:
     if getattr(project, "groups_locked", False):
         context = project_recording_context(project)
         if context.is_repeated_session:
+            from Main_App.projects.studio_cohort import selected_recording_ids
+            selected = selected_recording_ids(getattr(project, "manifest", None))
             return [recording.raw_file for recording in context.recordings
-                    if recording.raw_file.is_file()]
+                    if (selected is None or recording.recording_id in selected) and recording.raw_file.is_file()]
     return prepare_batch_files(project)
 
 
@@ -536,6 +538,11 @@ def load_project(
         raw_discovery_failed = True
         file_paths = []
     host.data_paths = [str(p) for p in file_paths]
+    study = getattr(project, "manifest", {}).get("tools", {}).get("studio_cohort", {})
+    if not study.get("current_result") and any(r.get("previous_result") for r in study.get("history", ())):
+        message = "Previous results cover the earlier cohort. Run Processing and analysis to produce a current result."
+        host.log(message)
+        host.statusBar().showMessage(message)
 
     context = project_group_context(project)
     sync_input_folder_display(host)
@@ -617,16 +624,12 @@ def save_project_settings(host: Any) -> bool:
         return False
     project = host.currentProject
     old_map = dict(project.event_map or {})
-    old_opts = dict(project.options or {})
-    opts = dict(old_opts)
-    single = getattr(host, "rb_single", None)
-    opts["mode"] = "single" if single is not None and single.isChecked() else "batch"
-    project.event_map, project.options = mapping, opts
+    project.event_map = mapping
     try:
-        if mapping != old_map or opts != old_opts:
+        if mapping != old_map:
             project.save()
     except Exception as exc:
-        project.event_map, project.options = old_map, old_opts
+        project.event_map = old_map
         QMessageBox.critical(host, "Save Error", str(exc))
         return False
     remember_saved_setup(host)
@@ -654,11 +657,6 @@ def sync_input_folder_display(host: Any) -> None:
     if isinstance(line_edit, QLineEdit):
         line_edit.setText(folder_text)
         line_edit.setToolTip(tooltip)
-    button = getattr(host, "btn_select_input_folder", None)
-    if button and hasattr(button, "setText"):
-        button.setText(
-            "Edit Group Folders..." if has_groups else "Select Data Folder..."
-        )
 
 
 def update_select_button_text(host: Any) -> None:
@@ -684,11 +682,9 @@ def update_select_button_text(host: Any) -> None:
                     if project is not None
                     else False
                 )
-                btn_folder.setText(
-                    "Group folders…" if has_groups else "Browse…"
-                )
+                btn_folder.setText("Browse…")
                 if hasattr(btn_folder, "setAccessibleName"):
-                    btn_folder.setAccessibleName("Edit group folders" if has_groups else "Choose EEG folder")
+                    btn_folder.setAccessibleName("Edit group folders" if has_groups else "Choose data input folder")
             btn_generic = getattr(host, "btn_select_input", None)
             if btn_generic and hasattr(btn_generic, "setText"):
                 btn_generic.setText("Select Data Folder...")

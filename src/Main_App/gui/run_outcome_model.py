@@ -32,7 +32,7 @@ class RunOutcome:
         if self.condition_warnings:
             counts += f" · {self.condition_warnings} with missing conditions"
         readiness = " Analysis outputs are not ready." if failure_reason else ""
-        return f"Last run: {state}. {counts}.{readiness}"
+        return f"Last run: {state}. Files: {counts}.{readiness}"
 
 
 def summarize_run(

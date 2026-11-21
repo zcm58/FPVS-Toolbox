@@ -68,7 +68,10 @@ def show_pipeline_setup(settings) -> None:
         requires_reprocessing = saved and dialog.requires_reprocessing_saved
     except ValueError as exc:
         show_error(settings, "Guided setup unavailable", str(exc))
-    except Exception:  # GUI boundary: report unexpected construction failures and release navigation ownership.
+    except Exception as error:  # GUI boundary: report unexpected construction failures and release navigation ownership.
+        from Main_App.diagnostics.crash_reporting import report_failure
+
+        report_failure(error, "project")
         logger.exception("pipeline_setup_dialog_failed")
         show_error(settings, "Guided setup unavailable", "Could not open guided setup. Reopen Settings and try again.")
     finally:

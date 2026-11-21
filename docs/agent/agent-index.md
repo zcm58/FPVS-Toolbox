@@ -1,10 +1,9 @@
 # Agent Index
 
-Choose the task row, run its first check, then read only the relevant contract.
-Do not rescan broad folders to reconfirm passing invariants. Root
-[AGENTS.md](../../AGENTS.md) owns rules; [ARCHITECTURE.md](../../ARCHITECTURE.md)
-owns the package map. Exclude `src/Standalone_Scripts/**` from all routine
-inspection and execution unless explicitly scoped or approved.
+Choose the task row and run its first check. [Root rules](../../AGENTS.md)
+govern inspection and scientific protections. [ARCHITECTURE.md](../../ARCHITECTURE.md)
+maps package ownership. For desktop experience decisions, start with the
+[shared design guide](design-docs/DESIGN.md).
 
 ## First Commands
 
@@ -29,15 +28,19 @@ only to explicitly web-scoped work, not the PySide6 desktop GUI.
 | Task | Skill | Focused contract |
 | --- | --- | --- |
 | PySide6 widgets, menus, workers, orchestration, status | `pyside6-gui-cleanup` | [GUI](architecture/gui.md), [threading](architecture/workers-threading.md) |
+| Separating a desktop action from project, processing or tool code | `pyside6-gui-cleanup`; start with the owning feature scope | [Workflow owners and regression checks](architecture/gui-backend.md) |
 | Updater/downloads/installers | `project-path-audit`; GUI skill for changed surfaces | [Updater](architecture/updater.md) |
+| Public Experiment Library | `pyside6-gui-cleanup` + `project-path-audit`; `gui` and `project-io` scopes | [Implementation and acceptance](exec-plans/active/public-experiment-library.md), [workflow guide](guides/experiment-library.md) |
 | Package ownership/retired boundaries | `legacy-boundary-review` | [Target layout](architecture/main-app-target-layout.md), [legacy](architecture/legacy-boundaries.md) |
 | Preprocessing entry points/order | `legacy-boundary-review`; GUI skill for orchestration | [Preprocessing](architecture/preprocessing-contract.md) |
 | Removed-electrode or kurtosis calibration | `legacy-boundary-review` | [Removed electrodes](quality/removed-electrode-detection-calibration.md), [kurtosis](quality/kurtosis-screening-calibration.md) |
 | Recording loading/memmaps | `legacy-boundary-review` + `project-path-audit` | [Loading](architecture/eeg-loading-contract.md) |
-| Hardware/montages, pipeline methods, Studio | `project-path-audit`; processing/GUI skills as affected | [Roadmap](architecture/hardware-pipeline-studio-roadmap.md), [methods](architecture/pipeline-methods.md), [Project I/O](architecture/project-io.md) |
+| Hardware/montages, pipeline methods | `project-path-audit`; processing/GUI skills as affected | [Roadmap](architecture/hardware-pipeline-studio-roadmap.md), [methods](architecture/pipeline-methods.md) |
+| Import a Studio configuration or check recording association | `project-path-audit`; `project-io` scope | [Current handoff and evidence limits](architecture/project-io.md#studio-config-handoff), [paired-fixture plan](exec-plans/active/studio-toolbox-handoff.md) |
 | Post-processing/FFT crop/export | `legacy-boundary-review` | [Exports](architecture/post-processing-export-contract.md), [crop](architecture/fft-crop-method.md) |
 | Manifests, project roots, dialogs/imports | `project-path-audit` | [Project I/O](architecture/project-io.md) |
 | Publication figures | `project-path-audit` | [Figure standard](quality/figure-generation.md) |
+| Correlation figure templates | `project-path-audit` | [Correlation recipe and runnable example](quality/correlation-figures.md) |
 | Stats | `pyside6-gui-cleanup` for GUI changes; focused Stats tests | [Statistics/tools](architecture/statistics-tools.md), scoped `src/Tools/Stats/AGENTS.md` |
 | Free Harmonic Clustering | `project-path-audit` | [Scoped rules](../../src/Tools/Free_Harmonic_Clustering/AGENTS.md), [architecture](../../src/Tools/Free_Harmonic_Clustering/ARCHITECTURE.md) |
 | LORETA Visualizer | `legacy-boundary-review` | [Scoped rules](../../src/Tools/LORETA_Visualizer/AGENTS.md), [architecture](../../src/Tools/LORETA_Visualizer/ARCHITECTURE.md) |
@@ -47,38 +50,13 @@ only to explicitly web-scoped work, not the PySide6 desktop GUI.
 | Generated files/caches | `cleanup-generated-files` | [Cleanup](quality/garbage-collection.md), [debt](exec-plans/tech-debt-tracker.md) |
 | Pressure-testing a plan | `grillme` | Inspect locally answerable questions first; ask one question at a time |
 
-## Execution Plans
+## Plans and verification
 
-Read the matching active plan before changing its area. The
-[plan index](exec-plans/README.md) owns status and remaining acceptance.
-Future plans are read only when scoping that work; completed implementation
-history is not routine context. Installer evidence belongs to the
-[v3 release ledger](exec-plans/active/v3-release-readiness.md), not later source.
-
-| Area | Plan / verification route |
-| --- | --- |
-| BIDS/shared processing | [BIDS](exec-plans/active/bids-shared-pipeline.md), [multi-hardware](exec-plans/active/multi-hardware-bids.md); `project-io` and `processing` as affected |
-| Fixed method slots/selections/cache identity | [Modular methods](exec-plans/active/modular-processing-methods.md); `pipeline-methods` |
-| Guided setup/draft/save workflow | [Guided setup](exec-plans/active/guided-pipeline-setup.md); `pipeline-setup` and `gui` |
-| Hardware/Studio extensions | [Roadmap](architecture/hardware-pipeline-studio-roadmap.md), then the matching plan; physical qualification stays separate |
-
-## Test Selection
-
-```console
-python .agents/scripts/verify.py --scope <scope> --tier focused
-python .agents/scripts/verify.py --scope repo --tier precommit
-```
-
-Run the affected focused scope first. Precommit runs all invariants, changed
-Python lint/compile checks, bounded repo tests, and changed non-Qt tests; it
-does not infer feature scopes or run the full suite. The executable registry is
-`.agents/verification.toml`; the complete [scope map](quality/test-selection.md#scope-map)
-includes `pipeline-setup`. See [verification gates](quality/verification-gates.md)
-for docs-only checks and failure reporting.
-
-Qt runs in CI unless the user explicitly approves a safe visible environment.
-Never set `QT_QPA_PLATFORM=offscreen` or run ad-hoc offscreen Qt locally.
-GUI changes need non-GUI checks and a documented visible/manual smoke path.
+Read the [active plan index](exec-plans/README.md) for remaining implementation
+or acceptance and the [release ledger](exec-plans/active/v3-release-readiness.md)
+for installer evidence. Use the [scope map](quality/test-selection.md#scope-map)
+for focused checks and [verification gates](quality/verification-gates.md)
+for the precommit command, CI and documentation-only changes.
 
 ## Manual Diagnostics
 

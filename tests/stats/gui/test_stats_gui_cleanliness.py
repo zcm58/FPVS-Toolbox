@@ -61,7 +61,7 @@ def test_stats_gui_cleanliness_layout_and_copy(qtbot, tmp_path):
         window.results_tabs.tabText(index)
         for index in range(window.results_tabs.count())
     ] == ["At a glance", "Run log"]
-    assert window.summary_text.isVisible()
+    assert not window.summary_text.isVisible()
     assert not hasattr(window, "reporting_summary_text")
     assert window.findChild(QWidget, "stats_methods_checks_text") is None
     assert not window.log_text.isVisible()
@@ -74,6 +74,7 @@ def test_stats_gui_cleanliness_layout_and_copy(qtbot, tmp_path):
     assert window.le_folder.displayed_text() != long_path
 
     window.summary_text.setPlainText("Summary content")
+    assert window.summary_text.isVisible()
     window.log_text.setPlainText("Log content")
 
     clipboard = QGuiApplication.clipboard()

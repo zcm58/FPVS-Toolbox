@@ -15,6 +15,7 @@ from Main_App.exports.analysis_ready_workbook import (
     default_analysis_ready_workbook_path,
 )
 from Main_App.projects import ProjectDatasetIndex, load_project_dataset_index
+from Main_App.projects.studio_cohort import require_current_study_result
 from Tools.Stats.analysis.repeated_session_analysis import (
     RepeatedSessionAnalysisResult,
     RepeatedSessionOutcome,
@@ -309,14 +310,15 @@ def load_repeated_session_project_data(
 
     root = Path(project_root).expanduser().resolve(strict=False)
     index = load_project_dataset_index(root)
-    index.require_recording_assignments()
-    index.require_session_assignments()
-    contract = repeated_session_contract_from_index(index, alpha=alpha)
     source = (
         Path(analysis_ready_workbook).expanduser().resolve(strict=False)
         if analysis_ready_workbook is not None
         else default_analysis_ready_workbook_path(root)
     )
+    require_current_study_result(root, source, index.manifest)
+    index.require_recording_assignments()
+    index.require_session_assignments()
+    contract = repeated_session_contract_from_index(index, alpha=alpha)
     if not source.is_file():
         raise FileNotFoundError(
             "The repeated-session analysis-ready workbook does not exist. Run "

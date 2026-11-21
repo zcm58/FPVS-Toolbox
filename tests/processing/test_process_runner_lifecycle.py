@@ -1,6 +1,7 @@
 """Fault injection at the public controller boundary, without Qt or EEG I/O."""
 
 from concurrent.futures import Future
+from concurrent.futures.process import BrokenProcessPool
 from queue import Queue
 from threading import Event
 
@@ -37,6 +38,8 @@ class Executor:
 def run(monkeypatch, tmp_path):
     params = runner.RunParams(tmp_path, [tmp_path / f"p{i}.bdf" for i in range(3)], {}, {}, tmp_path, 2)
     monkeypatch.setattr(runner, "_memory_ok", lambda _: (True, 20.0))
+    monkeypatch.setattr(runner, "compute_dynamic_worker_ceiling", lambda requested: requested)
+    monkeypatch.setattr(runner.ProcessingAdmission, "fits", lambda *args, **kwargs: True)
     monkeypatch.setattr(runner, "_scavenge_stale_memmaps", lambda: None)
 
     def invoke(pool=None, cancel_event=None):
@@ -90,16 +93,19 @@ def test_submit_failure_preserves_completed_futures_and_unsubmitted_files(run, f
     assert pool.shutdown_calls == [{"wait": False, "cancel_futures": True}]
 
 
-def test_worker_failure_keeps_other_results_and_completes_once(run):
+def test_worker_failure_keeps_other_results_and_completes_once(monkeypatch, run):
     _, invoke = run
     pool = Executor()
     submit = pool.submit
+    incidents = []
+    monkeypatch.setattr(runner, "report_failure", lambda error, operation: incidents.append((error, operation)))
+    failure = RuntimeError("worker failed")
 
     def failing_file(function, path, *args):
         future = submit(function, path, *args)
         if len(pool.submitted) == 1:
             future = Future()
-            future.set_exception(RuntimeError("worker failed"))
+            future.set_exception(failure)
         return future
 
     pool.submit = failing_file
@@ -109,6 +115,26 @@ def test_worker_failure_keeps_other_results_and_completes_once(run):
     assert len(outcome["results"]) == 2
     assert outcome["errors"][0]["error"] == "worker failed"
     assert outcome["interrupted_files"] == []
+    assert incidents == [(failure, "processing")]
+
+
+def test_one_broken_pool_reports_one_incident(monkeypatch, run):
+    _, invoke = run
+    pool = Executor(pending=True)
+    submit = pool.submit
+    incidents = []
+    monkeypatch.setattr(runner, "report_failure", lambda error, operation: incidents.append((error, operation)))
+
+    def fail_in_flight(*args):
+        future = submit(*args)
+        future.set_exception(BrokenProcessPool("one pool unexpectedly stopped"))
+        return future
+
+    pool.submit = fail_in_flight
+    outcome = invoke(pool)
+    assert len(outcome["errors"]) == 3
+    assert len(incidents) == 1
+    assert isinstance(incidents[0][0], BrokenProcessPool)
 
 
 def test_cancel_retains_completed_results_and_identifies_interrupted_files(monkeypatch, run):

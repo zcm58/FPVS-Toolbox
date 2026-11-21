@@ -67,7 +67,7 @@ def build_preprocessing_page(self, tabs: QTabWidget) -> QWidget:
     ]
     # Keep the established field indices while placing acquisition and
     # reference controls before filtering, resampling, and execution limits.
-    positions = ((4, 2), (4, 0), (6, 0), (7, 0), (3, 0), (3, 2), (6, 2), (7, 2), (8, 0))
+    positions = ((5, 2), (5, 0), (7, 0), (8, 0), (4, 0), (4, 2), (7, 2), (8, 2), (9, 0))
     self.preproc_edits: list[QLineEdit] = []
     self.preproc_error_labels: list[QLabel] = []
     self._preproc_field_containers = []
@@ -152,7 +152,7 @@ def build_preprocessing_page(self, tabs: QTabWidget) -> QWidget:
         "mains frequency and its first two harmonics. Components already removed "
         "by the FIR low-pass are skipped."
     )
-    line_noise_row = 5
+    line_noise_row = 6
     self.line_noise_filter_enabled_check = QCheckBox(
         "Remove mains line noise",
         self.group_preproc,
@@ -200,6 +200,7 @@ def build_preprocessing_page(self, tabs: QTabWidget) -> QWidget:
         "Do not select a template merely because it has the same channel count."
     )
     montage_label = QLabel("Electrode montage:", self.group_preproc)
+    montage_label.setWordWrap(True)
     montage_label.setToolTip(montage_tooltip)
     self.electrode_montage_combo = QComboBox(self.group_preproc)
     self.electrode_montage_combo.setObjectName(
@@ -219,15 +220,18 @@ def build_preprocessing_page(self, tabs: QTabWidget) -> QWidget:
     )
     self.electrode_montage_combo.setCurrentIndex(max(0, montage_index))
     self.electrode_montage_combo.setEnabled(False)
+    self.electrode_montage_combo.setMaximumWidth(480)
     grid.addWidget(montage_label, montage_row, 0)
-    grid.addWidget(self.electrode_montage_combo, montage_row, 1)
+    grid.addWidget(self.electrode_montage_combo, montage_row, 1, 1, 3)
 
     mapping_label = QLabel("Channel mapping profile:", self.group_preproc)
+    mapping_label.setWordWrap(True)
     self.electrode_mapping_profile_combo = QComboBox(self.group_preproc)
     self.electrode_mapping_profile_combo.setSizeAdjustPolicy(
         QComboBox.AdjustToMinimumContentsLengthWithIcon
     )
     self.electrode_mapping_profile_combo.setMinimumContentsLength(24)
+    self.electrode_mapping_profile_combo.setMaximumWidth(480)
     self.electrode_mapping_profile_combo.setObjectName(
         "settings_electrode_mapping_profile"
     )
@@ -248,8 +252,8 @@ def build_preprocessing_page(self, tabs: QTabWidget) -> QWidget:
         "electrode_montage": self.electrode_montage_combo.currentData(),
         "electrode_mapping_profile": self.electrode_mapping_profile_combo.currentData(),
     }
-    grid.addWidget(mapping_label, montage_row, 2)
-    grid.addWidget(self.electrode_mapping_profile_combo, montage_row, 3)
+    grid.addWidget(mapping_label, montage_row + 1, 0)
+    grid.addWidget(self.electrode_mapping_profile_combo, montage_row + 1, 1, 1, 3)
 
     build_hardware_controls(self, grid, 0, project_pp or {})
     field_order = (

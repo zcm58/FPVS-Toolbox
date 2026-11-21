@@ -2,6 +2,10 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock
+
+import pytest
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -94,12 +98,41 @@ def test_expected_matrix_is_frozen_before_generated_outputs_are_changed() -> Non
     assert "save_expected_recording_condition_plan" in workflow_source
 
 
-def test_reprocessing_scope_extends_existing_reviewed_marker_plans() -> None:
-    processing_source = _source("src/Main_App/gui/processing_workflows.py")
+def test_qc_workflow_can_extend_previously_approved_marker_plans() -> None:
     qc_source = _source("src/Main_App/gui/preprocessing_qc_workflow.py")
-
-    assert "_additional_preflight_infos_for_chosen_scope" in processing_source
-    assert "preserve_existing_plans=True" in processing_source
     assert "preserve_existing_plans: bool = False" in qc_source
     assert "_extended_review_inputs(" in qc_source
     assert 'params["_fpvs_preflight_event_plans_by_file"] = current_event_plans' in qc_source
+
+
+@pytest.mark.parametrize("accepted", [False, True])
+def test_additional_preflight_uses_current_settings_and_propagates_review_choice(tmp_path, accepted):
+    from Main_App.gui.processing_workflows import _run_additional_preflight_for_chosen_scope
+    from Main_App.processing.processing_controller import RawFileInfo
+    from Main_App.processing.processing_ledger import ProcessingInputState, ProcessingPlan
+
+    reviewed = RawFileInfo(tmp_path / "P1.bdf", "P1")
+    new = RawFileInfo(tmp_path / "P2.bdf", "P2")
+    states = tuple(ProcessingInputState(info, info.subject_id, "new", "", ()) for info in (reviewed, new))
+    plan = ProcessingPlan(states, "fingerprint", ("Faces",))
+    approvals = {reviewed.processing_id: {"reviewed": True}}
+    settings = {"_fpvs_preflight_event_plans_by_file": approvals}
+    event_map = {"Faces": 1}
+
+    def review_with_current_events(_host, _infos, params, **_kwargs):
+        assert params["event_id_map"] == event_map
+        return accepted
+
+    review = Mock(side_effect=review_with_current_events)
+    host = SimpleNamespace(run_preprocessing_qc_workflow=review, log=Mock())
+
+    assert _run_additional_preflight_for_chosen_scope(host, plan, settings, event_map) is accepted
+    review.assert_called_once_with(host, (new,), settings, preserve_existing_plans=True)
+    assert review.call_args.args[2] is settings
+    assert "event_id_map" not in settings
+    assert settings["_fpvs_preflight_event_plans_by_file"] == {reviewed.processing_id: {"reviewed": True}}
+
+    approvals[new.processing_id] = {"reviewed": True}
+    review.reset_mock()
+    assert _run_additional_preflight_for_chosen_scope(host, plan, settings, event_map) is True
+    review.assert_not_called()

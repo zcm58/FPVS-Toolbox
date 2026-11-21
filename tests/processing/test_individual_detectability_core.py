@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
+from Tools.Individual_Detectability import export_run
 from Tools.Individual_Detectability.core import (
     ConditionInfo,
     DetectabilitySettings,
@@ -169,25 +171,37 @@ def test_worker_forces_png_export_with_pdf(tmp_path: Path, monkeypatch) -> None:
         return (1, 1)
 
     monkeypatch.setattr(
-        "Tools.Individual_Detectability.worker.generate_condition_figure",
+        export_run, "generate_condition_figure",
         fake_generate_condition_figure,
     )
 
     worker = IndividualDetectabilityWorker(request)
-    worker._run()
+    log, status, progress, finished, errors = [], [], [], [], []
+    worker.log.connect(log.append)
+    worker.status.connect(status.append)
+    worker.progress.connect(progress.append)
+    worker.finished.connect(finished.append)
+    worker.error.connect(errors.append)
+    worker.run()
 
+    assert errors == []
+    assert finished == [str(request.output_root)]
+    assert progress == [100, 100]
+    assert status == [*log, "Individual detectability export complete."]
+    assert (request.output_root / "individual_detectability_custom_harmonics_log.txt").read_text().splitlines() == log
     assert seen["export_png"] is True
     assert (tmp_path / "out" / "CondA" / "cond_a_grid_custom_harmonics.pdf").exists()
     assert (tmp_path / "out" / "CondA" / "cond_a_grid_custom_harmonics.png").exists()
-    assert (tmp_path / "out" / "individual_detectability_custom_harmonics_metadata.json").exists()
+    metadata = json.loads((request.output_root / "individual_detectability_custom_harmonics_metadata.json").read_text())
+    assert metadata["selected_harmonics_hz"] == [1.2, 2.4]
+    assert metadata["exploratory"] is True
+    assert metadata["harmonic_selection_fingerprint"] in log
 
 
-def test_worker_loads_processing_harmonics_before_generating_figures(
+def test_export_loads_processing_harmonics_before_generating_figures(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    from Tools.Individual_Detectability import worker as worker_mod
-
     cond_dir = tmp_path / "CondA"
     cond_dir.mkdir()
     file_p1 = cond_dir / "P1_CondA_Results.xlsx"
@@ -268,30 +282,33 @@ def test_worker_loads_processing_harmonics_before_generating_figures(
         )[1],
     )
     monkeypatch.setattr(
-        worker_mod,
+        export_run,
         "load_managed_project_coverage",
         lambda root: ManagedProjectCoverage(coverage_by_workbook, frozenset()),
     )
     monkeypatch.setattr(
-        worker_mod,
+        export_run,
         "prevalidate_managed_conditions",
         lambda conditions, settings, coverage: prevalidation_calls.append(
             (conditions, settings, coverage)
         ),
     )
     monkeypatch.setattr(
-        worker_mod,
+        export_run,
         "load_project_processing_harmonics",
         fake_load_project_processing_harmonics,
     )
     monkeypatch.setattr(
-        "Tools.Individual_Detectability.worker.generate_condition_figure",
+        export_run, "generate_condition_figure",
         fake_generate_condition_figure,
     )
 
-    worker = IndividualDetectabilityWorker(request)
-    worker._run()
+    log = []
+    output = export_run.run_detectability_export(
+        request, log=log.append, status=log.append, progress=lambda _percent: None,
+    )
 
+    assert output == request.output_root
     assert captured["project_root"] == tmp_path
     assert provenance_calls == [(tmp_path, dataset_index)]
     assert seen_settings["source"] == CANONICAL_HARMONIC_SOURCE
@@ -305,7 +322,11 @@ def test_worker_loads_processing_harmonics_before_generating_figures(
     assert prevalidation_calls[0][2] == coverage_by_workbook
     metadata = tmp_path / "out" / "individual_detectability_metadata.json"
     assert metadata.exists()
-    assert "FPVS Toolbox significant harmonics" in metadata.read_text(encoding="utf-8")
+    payload = json.loads(metadata.read_text(encoding="utf-8"))
+    assert payload["harmonic_selection_fingerprint"] == "FPVS Toolbox significant harmonics | selected: 1.2, 2.4 Hz"
+    assert payload["harmonic_selection_fingerprint"] in log
+    assert (output / "CondA" / "cond_a_grid.pdf").is_file()
+    assert (output / "CondA" / "cond_a_grid.png").is_file()
 
 
 def test_managed_custom_detectability_rejects_legacy_geometry(
@@ -347,15 +368,21 @@ def test_managed_custom_detectability_rejects_legacy_geometry(
         "Main_App.processing.full_fft_provenance.require_current_project_full_fft_provenance",
         reject_geometry,
     )
+    def unexpected_harmonic_selection(_frequencies):
+        raise AssertionError("Harmonics resolved before project admission")
+    monkeypatch.setattr(export_run, "custom_harmonic_selection", unexpected_harmonic_selection)
 
     worker = IndividualDetectabilityWorker(request)
     errors: list[str] = []
+    finished: list[str] = []
     worker.error.connect(errors.append)
+    worker.finished.connect(finished.append)
     worker.run()
 
     assert errors == [
         "Legacy or unknown geometry cannot be analyzed; reprocess the EEG."
     ]
+    assert finished == []
     assert not request.output_root.exists()
 
 

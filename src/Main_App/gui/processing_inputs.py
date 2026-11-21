@@ -34,6 +34,7 @@ from Main_App.gui.participant_review import (
 from Main_App.gui.event_map import validated_event_map
 from Main_App.gui.project_drafts import refresh_dirty_indicator
 from Main_App.processing.processing_controller import (
+    RawFileInfo,
     participant_review_rows,
     commit_raw_registration_review,
     prepare_batch_file_infos,
@@ -841,7 +842,7 @@ def build_validated_params(host: Any) -> dict | None:
 
 def on_mode_changed(host: Any, mode: str) -> None:
     """
-    Adapter for UI radio buttons (wired in ui_main.py).
+    Apply the current Home processing scope.
     Keeps legacy-compatible mode string and toggles any present selectors.
     """
     mode_norm = (mode or "").strip().lower()
@@ -900,6 +901,10 @@ def on_mode_changed(host: Any, mode: str) -> None:
         except Exception:
             pass
 
+    host.processing_scope_button.setText(
+        "Use the input folder" if is_single else "Process a single file…"
+    )
+
     host._sync_input_folder_display()
     host.update_select_button_text()
 
@@ -936,6 +941,7 @@ def set_controls_enabled(host: Any, enabled: bool) -> None:
     for n in (
             "btn_select_input_file", "le_input_file",
             "btn_select_input_folder", "le_input_folder",
+            "processing_scope_button",
             "btn_add_event", "btn_add_row",
             "condition_editor_toggle",
             "btn_create_project", "btn_open_project",
@@ -1014,8 +1020,8 @@ def selected_single_file(host: Any) -> str:
     return str(paths[0]) if paths else ""
 
 
-def select_single_file(host: Any) -> None:
-    """Windows-native file dialog to pick one .bdf under the project's input folder."""
+def select_single_file(host: Any) -> RawFileInfo | None:
+    """Use the native picker and return the recording accepted for this project."""
     if not getattr(host, "currentProject", None):
         QMessageBox.warning(host, "No Project", "Please open or create a project first.")
         return
@@ -1062,3 +1068,4 @@ def select_single_file(host: Any) -> None:
     host.data_paths = [str(info.path)]
     host.log(f"Single-file selected: {info.path.name}")
     host._update_start_enabled()
+    return info

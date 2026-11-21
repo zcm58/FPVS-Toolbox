@@ -2,9 +2,10 @@
 
 ## Scope and acceptance
 
-Show one always-visible, wrapping Home line with the last recorded completed
+Show one wrapping Home line with the last recorded completed
 data-processing time and distinct successfully processed participant count.
-Keep missing history/counts explicit; never infer recency from output file dates
+Hide the line when no completed run is recorded and show unavailable counts
+explicitly. Never infer recency from output file dates
 or participant count from recording count. Existing processing and analysis
 readiness behavior stays unchanged.
 

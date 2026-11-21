@@ -421,7 +421,8 @@ def build_main_page_stylesheet() -> str:
             background: {CONTENT_BG};
         }}
 
-        #processing_title {{
+        #processing_title,
+        #home_project_title {{
             color: {TEXT_PRIMARY};
             font-size: {css_font_size("project_title")};
             font-weight: {css_font_weight("project_title")};
@@ -437,10 +438,18 @@ def build_main_page_stylesheet() -> str:
             color: {TEXT_SECONDARY};
         }}
 
-        #processing_status_separator {{
+        #processing_status_separator,
+        #home_summary_separator {{
             color: {BORDER_SOFT_COLOR};
             background: {BORDER_SOFT_COLOR};
             max-height: 1px;
+        }}
+
+        #project_processing_history,
+        #home_condition_summary,
+        #home_recording_details,
+        #home_workbook_path {{
+            color: {TEXT_SECONDARY};
         }}
 
         #processing_progress_bar {{
@@ -525,40 +534,11 @@ def build_main_page_stylesheet() -> str:
 
 
 def build_workspace_chrome_stylesheet() -> str:
-    """Style the main menu in Slate and Signal Teal."""
+    """Style shell status while leaving menus to the native Qt style."""
     return f"""
-        QMenuBar#workspaceMenuBar {{
-            background-color: {HEADER_BG};
-            color: {CHROME_TEXT};
-            border: none;
-            padding: 2px 8px;
-            spacing: 2px;
-        }}
-
-        QMenuBar#workspaceMenuBar::item {{
-            background-color: {HEADER_BG};
-            color: {CHROME_TEXT};
-            border: 1px solid transparent;
-            border-radius: 4px;
-            padding: 4px 10px;
-        }}
-
-        QMenuBar#workspaceMenuBar::item:selected:enabled {{
-            background-color: {CHROME_HOVER};
-            border-color: {SIGNAL_COLOR};
-        }}
-
-        QMenuBar#workspaceMenuBar::item:pressed:enabled {{
-            background-color: {CHROME_ACTIVE};
-        }}
-
-        QMenuBar#workspaceMenuBar::item:disabled {{
-            color: {CHROME_MUTED_TEXT};
-        }}
-
         QLabel#workspaceDebugLabel {{
             background: transparent;
-            color: #F9D293;
+            color: {TEXT_SECONDARY};
             font-weight: {css_font_weight("caption")};
             padding: 0 10px;
         }}

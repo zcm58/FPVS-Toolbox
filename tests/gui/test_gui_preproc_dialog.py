@@ -721,8 +721,10 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
     )
     processing_grid = dlg.group_preproc.content_layout
     hardware_row = processing_grid.getItemPosition(processing_grid.indexOf(dlg.hardware_platform_combo))[0]
+    mapping_row = processing_grid.getItemPosition(processing_grid.indexOf(dlg.electrode_mapping_profile_combo))[0]
+    reference_row = processing_grid.getItemPosition(processing_grid.indexOf(dlg._preproc_field_containers[4]))[0]
     filter_row = processing_grid.getItemPosition(processing_grid.indexOf(dlg._preproc_field_containers[0]))[0]
-    assert hardware_row < filter_row
+    assert hardware_row < mapping_row < reference_row < filter_row
     assert dlg.line_noise_filter_enabled_check.text() == "Remove mains line noise"
     assert dlg.line_noise_filter_enabled_check.isChecked() is True
     assert dlg.line_noise_frequency_combo.currentData() == 60
@@ -1226,7 +1228,9 @@ def test_protocol_sections_fit_scaled_workspaces_with_marker_tables(experimental
         "Timing", "Trigger markers",
     ]
     protocol_page = page.tabs.currentWidget()
-    assert not protocol_page.findChildren(QScrollArea)
+    assert [scroll.objectName() for scroll in protocol_page.findChildren(QScrollArea)] == [
+        "settings_category_scroll",
+    ]
     table = page.protocol_condition_markers_table
     assert table.rowCount() == 60
     assert sections.widget(0).isAncestorOf(page.protocol_resolved_oddball_rate_edit)
@@ -1706,7 +1710,9 @@ def test_embedded_visual_roi_editor_fits_the_supported_workspace(tmp_path, qtbot
     footer = page.findChild(QWidget, "settings_footer")
     assert win.size().width() == 1200
     assert win.size().height() == 800
-    assert roi_tab.findChildren(QScrollArea) == []
+    assert {scroll.objectName() for scroll in roi_tab.findChildren(QScrollArea)} == {
+        "settings_category_scroll", "settings_rois_map_scroll",
+    }
     assert roi_tab.findChild(SectionCard, "settings_rois_card") is None
     assert not roi_tab.isAncestorOf(page.btn_changeRoot)
     assert page.roi_editor.map_widget.minimumWidth() >= 600
@@ -1717,7 +1723,7 @@ def test_embedded_visual_roi_editor_fits_the_supported_workspace(tmp_path, qtbot
     )
     assert page.roi_editor.unmapped_pane.isVisibleTo(roi_tab)
     assert page.roi_editor.status.isVisibleTo(roi_tab)
-    for widget in (page.roi_editor.map_widget, page.roi_editor.roi_pane):
+    for widget in (page.roi_editor.map_scroll, page.roi_editor.roi_pane):
         assert widget is not None
         assert roi_tab.rect().contains(widget.mapTo(roi_tab, widget.rect().topLeft()))
         assert roi_tab.rect().contains(widget.mapTo(roi_tab, widget.rect().bottomRight()))

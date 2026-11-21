@@ -9,7 +9,7 @@ from typing import Literal, Optional
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QPalette
-from PySide6.QtWidgets import QApplication, QWidget
+from PySide6.QtWidgets import QApplication, QMenu, QMenuBar, QStyleFactory, QWidget
 
 from Main_App.gui.style_tokens import (
     ACCENT_COLOR,
@@ -73,15 +73,6 @@ def build_fpvs_app_stylesheet() -> str:
 
         QWidget[fpvsSurface="true"] {{
             background: {PAGE_BG};
-        }}
-
-        QMenu {{
-            background-color: {SURFACE_BG};
-            border: 1px solid {BORDER_SOFT_COLOR};
-        }}
-
-        QMenu::item:disabled {{
-            color: {TEXT_MUTED};
         }}
 
         QGroupBox {{
@@ -460,11 +451,36 @@ def _apply_fusion_palette(app: QApplication, *, dark: bool) -> None:
 
 def apply_fusion_light_palette(app: QApplication) -> None:
     """Apply a deterministic Fusion + light palette regardless of OS theme."""
+    _platform_menu_style_name(app)
     app.setStyle("Fusion")
     _apply_fusion_palette(app, dark=False)
 
 
+def _platform_menu_style_name(app: QApplication) -> str:
+    """Record the platform style before the workspace switches to Fusion."""
+    name = app.property("fpvsPlatformMenuStyleName")
+    if name is None:
+        name = app.style().objectName()
+        if name.casefold() == "windows11":
+            # Qt 6.9's Windows 11 style crashes on menus inside a Fusion workspace.
+            name = "windowsvista"
+        app.setProperty("fpvsPlatformMenuStyleName", name)
+    return name
+
+
+def apply_native_menu_style(menu_bar: QMenuBar) -> None:
+    """Give every menu a native style for the lifetime of that widget."""
+    name = _platform_menu_style_name(QApplication.instance())
+    for menu in (menu_bar, *menu_bar.findChildren(QMenu)):
+        style = QStyleFactory.create(name)
+        if style is None:
+            raise RuntimeError(f"Cannot create the platform menu style: {name}")
+        style.setParent(menu)
+        menu.setStyle(style)
+
+
 def _apply_app_appearance(app: QApplication) -> None:
+    _platform_menu_style_name(app)
     # Qt wraps the base style when app QSS is active. Keep the actual
     # wrapper so we can detect a caller switching styles without resetting Fusion.
     if app.style() is not getattr(app, "_fpvs_fusion_style", None):
@@ -529,7 +545,7 @@ def apply_material_light_theme(
     try:
         from qt_material import apply_stylesheet as qt_material_apply_stylesheet  # type: ignore[import]
     except Exception:  # pragma: no cover - optional dependency import guard
-        # qt_material not available in this environment – fall back to Fusion.
+        # qt_material not available in this environment â€“ fall back to Fusion.
         logger.warning(
             "qt_material is not installed or failed to import; "
             "falling back to Fusion light palette."
