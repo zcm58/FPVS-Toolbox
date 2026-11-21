@@ -166,6 +166,7 @@ tests = [
   "tests/project_io/test_repeated_recording_preflight.py",
   "tests/project_io/test_repeated_session_project_setup.py",
   "tests/project_io/test_main_app_xlsx_selected_reader.py",
+  "tests/project_io/test_io_package_imports.py",
   "tests/project_io/test_spectral_data.py",
   "tests/project_io/test_buffered_fif_exact.py",
   "tests/project_io/test_bdf_preload_exact.py",

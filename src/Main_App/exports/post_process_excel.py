@@ -449,6 +449,7 @@ def write_results_workbook(
         schema_validation = write_result_manifest(
             destination, sheet_names=list(frames),
             spectral_companion=spectral_companion, condition_companion=condition_companion,
+            _publishing_own_companions=True,
         )
         artifact = _artifact_identity(destination)
         if artifact is None:
@@ -521,7 +522,7 @@ def write_results_workbook(
             if spectral_companion is not None:
                 validate_spectral_companion(destination, spectral_companion)
             if condition_companion is not None:
-                validate_condition_companion(destination, condition_companion)
+                validate_condition_companion(destination, condition_companion, for_publication=True)
     finally:
         _log_excel_timing(
             "workbook_write_total", workbook_started,

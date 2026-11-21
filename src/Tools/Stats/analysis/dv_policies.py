@@ -126,8 +126,7 @@ def _source_workbook_identities(
 ) -> tuple:
     """Freeze current source identity so in-process DV cache cannot outlive files."""
 
-    from Main_App.io.condition_data import condition_companion_identity
-    from Main_App.io.spectral_data import spectral_companion_identity
+    from Main_App.io.result_manifest import result_companion_identities
 
     identities: list[tuple[object, ...]] = []
     for subject in subjects:
@@ -145,11 +144,8 @@ def _source_workbook_identities(
             else:
                 size_bytes = int(stat.st_size)
                 mtime_ns = int(stat.st_mtime_ns)
-            companion = (
-                spectral_companion_identity(path) if size_bytes is not None else None
-            )
-            condition_companion = (
-                condition_companion_identity(path) if size_bytes is not None else None
+            companion, condition_companion = (
+                result_companion_identities(path) if size_bytes is not None else (None, None)
             )
             identities.append(
                 (

@@ -15,6 +15,7 @@ import tempfile
 
 RESULT_MANIFEST_SUFFIX = ".fpvs"
 RESULT_MANIFEST_VERSION = "fpvs_result_manifest_v1"
+_MAX_REUSED_MANIFEST_CHARS = 16 * 1024
 
 
 class ResultManifestError(ValueError):
@@ -71,20 +72,50 @@ def _validate_manifest(value: object) -> dict:
 def read_result_manifest(path: str | Path, *, contents: bytes | None = None) -> dict:
     """Validate the declaration on disk or bytes already read for a content digest."""
 
-    source = Path(path)
+    return _read_declaration(Path(path), contents=contents)[1]
+
+
+def _read_declaration(
+    source: Path, *, contents: bytes | None = None,
+    previous: tuple[str | None, dict] | None = None,
+) -> tuple[str | None, dict]:
     try:
         with (
             source.open("r", encoding="utf-8") if contents is None
             else TextIOWrapper(BytesIO(contents), encoding="utf-8")
         ) as stream:
-            return _validate_manifest(json.load(stream))
+            text = stream.read()
+        if previous is not None and text == previous[0]:
+            return previous
+        manifest = _validate_manifest(json.loads(text))
+        return (text if len(text) <= _MAX_REUSED_MANIFEST_CHARS else None), manifest
     except (OSError, ValueError, TypeError) as exc:
         raise ResultManifestError(f"Cannot read FPVS results {source.name}: {exc}") from exc
+
+
+def result_companion_identities(path: str | Path) -> tuple[dict | None, dict | None]:
+    """Validate spectral then condition identity at their original read boundaries."""
+    from Main_App.io import condition_data, spectral_data
+
+    source = Path(path)
+    if not is_result_manifest(source):
+        return spectral_data.spectral_companion_identity(source), condition_data.condition_companion_identity(source)
+
+    first = _read_declaration(source)
+    spectral = spectral_data._identity_from_descriptor(source, first[1]["spectral_companion"])
+    # A publisher may replace the anchor, edit it in place with restored stat
+    # fields, or remove read access while the spectral archive is validated.
+    # Reopen the live path. Only identical input to the JSON parser may reuse
+    # its result. A file handle held across validation would block Windows rename.
+    _, current = _read_declaration(source, previous=first)
+    condition = condition_data._identity_from_descriptor(source, current["condition_companion"])
+    return spectral, condition
 
 
 def write_result_manifest(
     path: str | Path, *, sheet_names: Sequence[str],
     spectral_companion: Mapping | None, condition_companion: Mapping | None,
+    _publishing_own_companions: bool = False,
 ) -> dict:
     """Validate companions then atomically publish their native declaration."""
 
@@ -99,12 +130,10 @@ def write_result_manifest(
         "spectral_companion": spectral_companion,
         "condition_companion": condition_companion,
     })
-    for key, validator in (
-        ("spectral_companion", validate_spectral_companion),
-        ("condition_companion", validate_condition_companion),
-    ):
-        if manifest[key] is not None:
-            validator(target, manifest[key])
+    if manifest["spectral_companion"] is not None:
+        validate_spectral_companion(target, manifest["spectral_companion"])
+    if manifest["condition_companion"] is not None:
+        validate_condition_companion(target, manifest["condition_companion"], for_publication=_publishing_own_companions)
     temporary: Path | None = None
     try:
         with tempfile.NamedTemporaryFile(

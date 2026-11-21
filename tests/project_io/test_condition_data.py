@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import struct
 import zipfile
 
 import numpy as np
@@ -381,3 +382,218 @@ def test_repeated_mixed_cells_use_uncompressed_dictionary_without_type_coalescin
         assert archive["sheet0_dictionary0"].shape == (7,)
         assert archive["sheet0_block0"].shape == (7000, 1)
     assert descriptor["size_bytes"] < 40000
+
+
+@pytest.mark.parametrize("buffering", ["small", "oversized", "allocation_failure"])
+def test_full_validation_has_bounded_archives_and_skips_discarded_frames(tmp_path, monkeypatch, buffering):
+    from Main_App.io import condition_data, numpy_companion
+
+    workbook = tmp_path / "recording.xlsx"
+    frames = _frames()
+    descriptor = _write(workbook, frames)
+    companion = tmp_path / descriptor["path"]
+    if buffering == "oversized":
+        monkeypatch.setattr(numpy_companion, "_MAX_BUFFER_BYTES", 1)
+    elif buffering == "allocation_failure":
+        def refuse_buffer(*_args):
+            raise MemoryError
+        monkeypatch.setattr(numpy_companion, "_read_buffer", refuse_buffer)
+
+    opens = []
+    loads = []
+    original_open, original_load = Path.open, np.load
+    original_shared = condition_data.open_replaceable_companion
+
+    def count_open(path, *args, **kwargs):
+        if path == companion:
+            opens.append(path)
+        return original_open(path, *args, **kwargs)
+
+    def count_load(*args, **kwargs):
+        loads.append(None)
+        return original_load(*args, **kwargs)
+
+    def count_shared_open(path):
+        if os.name == "nt":
+            opens.append(path)  # Windows uses a delete-sharing native opener.
+        return original_shared(path)
+
+    monkeypatch.setattr(Path, "open", count_open)
+    monkeypatch.setattr(np, "load", count_load)
+    monkeypatch.setattr(condition_data, "open_replaceable_companion", count_shared_open)
+    with monkeypatch.context() as validation:
+        validation.setattr(condition_data.pd, "DataFrame", lambda *a, **kw: pytest.fail("Discarded DataFrame"))
+        assert validate_condition_companion(workbook, descriptor, for_publication=True) == descriptor
+    assert len(opens) == 2
+    assert len(loads) == 1 + len(frames)
+
+
+def test_scoped_full_validation_retains_exact_detached_columns_after_same_stat_edit(tmp_path, monkeypatch):
+    from Main_App.io import condition_data, xlsx_selected_reader as xlsx
+
+    workbook = tmp_path / "recording.xlsx"
+    frames = _frames()
+    descriptor = _write(workbook, frames)
+    companion = tmp_path / descriptor["path"]
+    with xlsx_read_cache_scope():
+        assert validate_condition_companion(workbook, descriptor, for_publication=True) == descriptor
+        payload, = xlsx._ACTIVE_XLSX_READ_CACHE.get().condition_payloads.values()
+        for name, frame in frames.items():
+            assert list(payload.columns[name]) == list(frame.columns)
+        existing_signature = xlsx._workbook_signature_or_none
+        monkeypatch.setattr(xlsx, "_workbook_signature_or_none", lambda path: (
+            payload.companion_signature if path == companion else existing_signature(path)
+        ))
+        with companion.open("r+b") as stream:
+            stream.write(b"bad!")
+        monkeypatch.setattr(condition_data, "open_replaceable_companion", lambda *a: pytest.fail("Unexpected reopen"))
+        assert validate_condition_companion(workbook, descriptor, for_publication=True) == descriptor
+        detached = read_condition_sheet(workbook, sheet_name=BCA)
+        detached.iloc[0, 1] = 12
+        for name, expected in frames.items():
+            pd.testing.assert_frame_equal(read_condition_sheet(workbook, sheet_name=name), expected)
+    with pytest.raises(ConditionDataError, match="checksum"):
+        validate_condition_companion(workbook, descriptor, for_publication=True)
+
+
+@pytest.mark.parametrize("damage", ["data", "directory"])
+def test_full_validation_rechecks_restored_stat_corruption_with_live_column_error(tmp_path, monkeypatch, damage):
+    from Main_App.io import condition_data, xlsx_selected_reader as xlsx
+
+    workbook = tmp_path / "recording.fpvs"
+    descriptor = write_condition_companion(workbook, _frames())
+    companion = tmp_path / descriptor["path"]
+    signature = xlsx._workbook_signature_or_none(companion)
+    existing_signature = xlsx._workbook_signature_or_none
+    monkeypatch.setattr(xlsx, "_workbook_signature_or_none", lambda path: (
+        signature if path == companion else existing_signature(path)
+    ))
+    data = bytearray(companion.read_bytes())
+    with zipfile.ZipFile(companion) as archive:
+        info = archive.getinfo("sheet1_block1.npy")
+        central_directory = archive.start_dir
+    if damage == "data":
+        filename_length, extra_length = struct.unpack_from("<HH", data, info.header_offset + 26)
+        last_byte = info.header_offset + 30 + filename_length + extra_length + info.file_size - 1
+        data[last_byte] ^= 1
+        error = "Bad CRC-32.*sheet1_block1"
+    else:
+        data[central_directory] ^= 1
+        error = "Bad magic number for central directory"
+    original_decode = condition_data.decode_column
+
+    def change_after_snapshot(*args, **kwargs):
+        monkeypatch.setattr(condition_data, "decode_column", original_decode)
+        companion.write_bytes(data)
+        return original_decode(*args, **kwargs)
+
+    monkeypatch.setattr(condition_data, "decode_column", change_after_snapshot)
+    with pytest.raises(ConditionDataError, match=f"Cannot read condition columns .*{error}"):
+        validate_condition_companion(workbook, descriptor, for_publication=True)
+
+
+@pytest.mark.parametrize("target", ["workbook", "companion"])
+def test_full_validation_allows_and_detects_replacement_during_decode(tmp_path, monkeypatch, target):
+    from Main_App.io import condition_data
+
+    workbook = tmp_path / "recording.xlsx"
+    descriptor = _write(workbook)
+    path = workbook if target == "workbook" else tmp_path / descriptor["path"]
+    replacement = tmp_path / "replacement"
+    replacement.write_bytes(path.read_bytes())
+    original_decode = condition_data.decode_column
+
+    def replace_during_decode(*args, **kwargs):
+        monkeypatch.setattr(condition_data, "decode_column", original_decode)
+        if os.name == "nt" and target == "companion":
+            # MoveFileEx cannot overwrite an open destination. Delete sharing
+            # lets another process rename that destination and replace its path.
+            path.rename(tmp_path / "previous.npz")
+        os.replace(replacement, path)
+        return original_decode(*args, **kwargs)
+
+    monkeypatch.setattr(condition_data, "decode_column", replace_during_decode)
+    with pytest.raises(ConditionDataError, match="Condition data changed while its columns were read"):
+        validate_condition_companion(workbook, descriptor, for_publication=True)
+    assert validate_condition_companion(workbook, descriptor, for_publication=True) == descriptor
+
+
+@pytest.mark.parametrize("denied", [False, True])
+def test_unavailable_shared_handle_uses_ordinary_access_diagnostics(tmp_path, monkeypatch, denied):
+    from Main_App.io import condition_data
+
+    workbook = tmp_path / "recording.fpvs"
+    descriptor = write_condition_companion(workbook, _frames())
+    companion = tmp_path / descriptor["path"]
+    original_open = Path.open
+    shared_failed = False
+
+    def unsupported(_path):
+        nonlocal shared_failed
+        shared_failed = True
+        raise OSError("unavailable shared opener")
+
+    def ordinary_open(path, *args, **kwargs):
+        if shared_failed and path == companion and denied:
+            raise PermissionError("column read denied")
+        return original_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(condition_data, "open_replaceable_companion", unsupported)
+    monkeypatch.setattr(Path, "open", ordinary_open)
+    if denied:
+        with pytest.raises(ConditionDataError, match=r"Cannot read condition columns .*column read denied"):
+            validate_condition_companion(workbook, descriptor, for_publication=True)
+    else:
+        assert validate_condition_companion(workbook, descriptor, for_publication=True) == descriptor
+    assert shared_failed
+
+
+def test_independent_validation_reopens_and_observes_denial_on_the_second_sheet(tmp_path, monkeypatch):
+    from Main_App.io import condition_data
+
+    workbook = tmp_path / "independent.fpvs"
+    descriptor = write_condition_companion(workbook, _frames())
+    companion = tmp_path / descriptor["path"]
+    opens = 0
+    original_open = Path.open
+
+    def revoke_for_second_sheet(path, *args, **kwargs):
+        nonlocal opens
+        if path == companion:
+            opens += 1
+            if opens == 3:  # The checksum and the first sheet each opened successfully.
+                raise PermissionError("second sheet denied")
+        return original_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(condition_data, "open_replaceable_companion", lambda *a: pytest.fail("Unexpected handle reuse"))
+    monkeypatch.setattr(Path, "open", revoke_for_second_sheet)
+    with pytest.raises(ConditionDataError, match=r"Cannot read condition columns .*second sheet denied"):
+        validate_condition_companion(workbook, descriptor)
+    assert opens == 3
+
+
+@pytest.mark.parametrize("suffix", [".fpvs", ".xlsx"])
+def test_only_producer_publication_shares_the_live_companion(tmp_path, monkeypatch, suffix):
+    from Main_App.exports.post_process_excel import write_results_workbook
+    from Main_App.io import condition_data
+    from Main_App.io.result_manifest import write_result_manifest
+
+    workbook = tmp_path / f"result{suffix}"
+    frame = _frames()[BCA]
+    opens = []
+    original = condition_data.open_replaceable_companion
+
+    def record(path):
+        opens.append(path)
+        return original(path)
+
+    monkeypatch.setattr(condition_data, "open_replaceable_companion", record)
+    receipt = write_results_workbook(str(workbook), {BCA: frame})
+    descriptor = receipt["condition_companion"]
+    assert opens == [tmp_path / descriptor["path"]]
+    pd.testing.assert_frame_equal(read_condition_sheet(workbook, sheet_name=BCA), frame)
+    opens.clear()
+    if suffix == ".fpvs":
+        write_result_manifest(workbook, sheet_names=[BCA], spectral_companion=None, condition_companion=descriptor)
+    assert validate_condition_companion(workbook, descriptor) == descriptor
+    assert not opens

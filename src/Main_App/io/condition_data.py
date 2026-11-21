@@ -7,6 +7,7 @@ manifest selects a companion. Historical report sheets retain XLSX readers.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from contextlib import ExitStack, contextmanager, nullcontext
 from copy import deepcopy
 from dataclasses import dataclass
 import hashlib
@@ -24,7 +25,7 @@ import pandas as pd
 
 from Main_App.io import xlsx_selected_reader as _xlsx
 from Main_App.io.condition_data_codec import decode_column, encode_column, json_text, validate_column_encoding
-from Main_App.io.numpy_companion import open_verified_npz
+from Main_App.io.numpy_companion import open_replaceable_companion, open_verified_npz
 
 CONDITION_COMPANION_VERSION = "numpy_condition_companion_v1"
 CONDITION_MANIFEST_SHEET = "Condition Data"
@@ -308,9 +309,12 @@ def _companion_payload(workbook: Path, descriptor: Mapping) -> _ConditionPayload
     return payload
 
 
-def _payload_columns(workbook: Path, payload: _ConditionPayload, sheet_name: str, columns: Sequence[str]) -> pd.DataFrame:
+def _read_payload_columns(
+    workbook: Path, payload: _ConditionPayload, sheet_name: str, columns: Sequence[str],
+    *, shared_stream=None, validate_only: bool = False,
+) -> None:
     specification = payload.specifications[sheet_name]
-    cached = payload.columns.setdefault(sheet_name, {})
+    cached = payload.columns.get(sheet_name, {})
     needed = [column for column in columns if column not in cached]
     path = workbook.parent.resolve() / payload.descriptor["path"]
     if needed:
@@ -318,7 +322,13 @@ def _payload_columns(workbook: Path, payload: _ConditionPayload, sheet_name: str
             if _xlsx._workbook_signature_or_none(path) != payload.companion_signature:
                 raise ConditionDataError("Condition data changed before its columns were read; retry the operation.")
             encodings = dict(zip(specification["columns"], specification["encodings"], strict=True))
-            with path.open("rb") as stream, np.load(stream, allow_pickle=False) as archive:
+            with ExitStack() as handles:
+                stream = shared_stream
+                if stream is None:
+                    stream = handles.enter_context(path.open("rb"))
+                else:
+                    stream.seek(0)
+                archive = handles.enter_context(np.load(stream, allow_pickle=False))
                 blocks, decoded = {}, {}
                 for column in needed:
                     encoding = encodings[column]
@@ -326,35 +336,75 @@ def _payload_columns(workbook: Path, payload: _ConditionPayload, sheet_name: str
                     if key not in blocks:
                         blocks[key] = archive[key]
                     dictionary = archive[encoding["dictionary"]] if "dictionary" in encoding else None
-                    decoded[column] = decode_column(blocks[key][:, encoding["column"]], {
+                    value = decode_column(blocks[key][:, encoding["column"]], {
                         "encoding": encoding["encoding"], "dtype": encoding["dtype"],
-                    }, specification["rows"], dictionary)
+                    }, specification["rows"], dictionary, validate_only=validate_only)
+                    if not validate_only:
+                        decoded[column] = value
             if (
                 _xlsx._workbook_signature_or_none(path) != payload.companion_signature
                 or _xlsx._workbook_signature_or_none(workbook) != payload.workbook_signature
             ):
                 raise ConditionDataError("Condition data changed while its columns were read; retry the operation.")
-            cached.update(decoded)
+            if not validate_only:
+                payload.columns.setdefault(sheet_name, {}).update(decoded)
         except (OSError, ValueError, KeyError, TypeError, IndexError, zipfile.BadZipFile) as exc:
             if isinstance(exc, ConditionDataError):
                 raise
             raise ConditionDataError(f"Cannot read condition columns in {path.name}: {exc}") from exc
+
+
+def _payload_columns(workbook: Path, payload: _ConditionPayload, sheet_name: str, columns: Sequence[str]) -> pd.DataFrame:
+    _read_payload_columns(workbook, payload, sheet_name, columns)
+    cached = payload.columns.get(sheet_name, {})
     return pd.DataFrame({column: cached[column] for column in columns}).copy(deep=True)
 
 
-def validate_condition_companion(workbook_path: str | Path, descriptor: Mapping) -> dict:
-    """Validate all stored cells, relative to the intended workbook directory."""
+@contextmanager
+def _live_column_stream(workbook: Path, payload: _ConditionPayload):
+    path = workbook.parent.resolve() / payload.descriptor["path"]
+    signature = payload.companion_signature
+    with ExitStack() as handles:
+        shared_stream = None
+        try:
+            stream = handles.enter_context(open_replaceable_companion(path))
+            stat = os.fstat(stream.fileno())
+            if (stat.st_ino and (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns)
+                    == (signature.device_id, signature.file_id, signature.size_bytes, signature.mtime_ns)):
+                shared_stream = stream
+        except (AttributeError, ImportError, OSError):
+            pass  # The ordinary per-sheet reader owns access diagnostics.
+        if shared_stream is None:
+            handles.close()
+        yield shared_stream
+
+
+def validate_condition_companion(
+    workbook_path: str | Path, descriptor: Mapping, *, for_publication: bool = False,
+) -> dict:
+    """Validate every cell, sharing a live handle only for the producer's own publication."""
 
     workbook = Path(workbook_path)
     payload = _companion_payload(workbook, descriptor)
-    for name, specification in payload.specifications.items():
-        _payload_columns(workbook, payload, name, specification["columns"])
+    pending = [(name, sheet["columns"]) for name, sheet in payload.specifications.items()
+               if len(payload.columns.get(name, {})) != len(sheet["columns"])]
+    if pending:
+        # Scoped readers keep the decoded columns and their defensive-copy contract.
+        validate_only = _xlsx._ACTIVE_XLSX_READ_CACHE.get() is None
+        with (_live_column_stream(workbook, payload) if for_publication else nullcontext()) as stream:
+            for name, columns in pending:
+                # Reparse the live ZIP directory for each sheet: an in-place edit
+                # can preserve the file signature while changing a member's CRC.
+                _read_payload_columns(workbook, payload, name, columns, shared_stream=stream, validate_only=validate_only)
     return deepcopy(payload.descriptor)
 
 
 def condition_companion_identity(workbook_path: str | Path) -> dict | None:
     workbook = Path(workbook_path)
-    descriptor = _read_manifest(workbook)
+    return _identity_from_descriptor(workbook, _read_manifest(workbook))
+
+
+def _identity_from_descriptor(workbook: Path, descriptor: dict | None) -> dict | None:
     return None if descriptor is None else deepcopy(_companion_payload(workbook, descriptor).descriptor)
 
 

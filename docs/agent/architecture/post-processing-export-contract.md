@@ -581,6 +581,11 @@ same declaration and workbook/companion signatures, including size, modification
 and change times, device, and file ID. First reads still validate checksums and
 schema/grid; new scopes revalidate, and changed signatures invalidate reuse.
 
+Selected native spectral reads gather the requested frequency columns and
+electrode rows into one detached float64 block. They preserve requested
+column order, raw floating-point bits, row labels and detached metadata.
+Callers may edit the returned table inside an active cache scope.
+
 During a checksum and schema check, readers can hold one archive of up to
 16 MiB per worker. NumPy reads the metadata and array headers from the bytes
 that passed SHA-256. Larger archives and memory-constrained workers stream
@@ -588,6 +593,23 @@ the checksum and read the headers from the open file. Both paths reuse the
 ZIP directory opened by NumPy and check the source signatures after validation.
 The concurrent cell validator includes the largest eligible archive and a
 possible temporary copy in each job's RAM reservation.
+
+Full compact validation checks the schema and checksum before decoding the
+sheet data. During publication, a second unbuffered handle can serve all sheets when its file
+identity matches the verified companion. Each sheet reopens the ZIP directory
+on that handle, reads its declared members and checks the live file signatures.
+The Windows handle includes delete sharing so another process can rename the
+open file. Windows can still refuse a direct overwrite of an open destination.
+The OS grants read access at open time, so a later permission change takes
+effect on the next open. Independent validation of an existing archive and
+publication without a supported shared handle use the normal per-sheet access
+checks.
+
+Paired native identity checks in Stats and FullFFT observe the result
+declaration before spectral validation and again before condition validation.
+Identical UTF-8 text of up to 16,384 characters can share one JSON parse and
+schema check across the two observations. Each companion retains its own
+validation, and a changed declaration is parsed at the second observation.
 
 Pure frequency calculations additionally use bounded in-memory reuse, independent
 of workbook identity: `full_fft_grid_qc` retains at most eight exact text-header /

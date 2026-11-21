@@ -1229,8 +1229,7 @@ def _workbook_signature(
     file_path: str | None,
     validated: WorkbookSignature | None = None,
 ) -> WorkbookSignature:
-    from Main_App.io.condition_data import condition_companion_identity
-    from Main_App.io.spectral_data import spectral_companion_identity
+    from Main_App.io.result_manifest import result_companion_identities
 
     if not file_path:
         return WorkbookSignature(
@@ -1265,8 +1264,7 @@ def _workbook_signature(
         and validated.mtime_ns == stat.st_mtime_ns
     ):
         return validated
-    companion = spectral_companion_identity(path)
-    condition_companion = condition_companion_identity(path)
+    companion, condition_companion = result_companion_identities(path)
     return WorkbookSignature(
         subject=str(subject),
         condition=str(condition),

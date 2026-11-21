@@ -357,7 +357,10 @@ def spectral_companion_identity(workbook_path: str | Path) -> dict | None:
     """Return validated identity; only undeclared legacy workbooks return None."""
 
     workbook = Path(workbook_path)
-    descriptor = _read_manifest(workbook)
+    return _identity_from_descriptor(workbook, _read_manifest(workbook))
+
+
+def _identity_from_descriptor(workbook: Path, descriptor: dict | None) -> dict | None:
     if descriptor is None:
         return None
     _verified_headers(workbook, descriptor)
@@ -405,8 +408,11 @@ def read_spectral_sheet_selected_columns(
         frame = pd.DataFrame(values.copy(order="F"), columns=columns[1:], copy=False)
         frame.insert(0, "Electrode", rows)
     else:
-        positions = {column: index for index, column in enumerate(columns)}
-        missing = [column for column in requested if column not in positions]
+        positions = dict.fromkeys(requested, -1)
+        for index, label in enumerate(columns):
+            if label in positions:
+                positions[label] = index
+        missing = [column for column, index in positions.items() if index < 0]
         if require_all and missing:
             raise _xlsx.MissingXlsxColumnsError(sheet_name, missing)
         if included_electrodes_upper is not None and electrode_column != "Electrode":
@@ -414,11 +420,21 @@ def read_spectral_sheet_selected_columns(
         mask = slice(None) if included_electrodes_upper is None else np.asarray([
             str(label).upper().strip() in included_electrodes_upper for label in rows
         ])
-        needs_values = any(column != "Electrode" and column in positions for column in requested)
-        values = _sheet_values(workbook, payload, sheet_name) if needs_values else None
-        data = {column: (rows[mask].copy() if column == "Electrode" else values[mask, positions[column] - 1].copy())
-                for column in requested if column in positions}
-        frame = pd.DataFrame(data)
+        selected = [column for column, index in positions.items() if index >= 0]
+        numeric = [column for column in selected if column != "Electrode"]
+        if numeric:
+            values = _sheet_values(workbook, payload, sheet_name)
+            indices = [positions[column] - 1 for column in numeric]
+            # Gather directly into the detached block pandas will return.
+            if included_electrodes_upper is None:
+                block = values.T[indices]
+            else:
+                block = values.T[np.ix_(indices, np.arange(len(rows))[mask])]
+            frame = pd.DataFrame(block.T, columns=numeric, copy=False)
+        else:
+            frame = pd.DataFrame()
+        if "Electrode" in selected:
+            frame.insert(selected.index("Electrode"), "Electrode", rows[mask])
     frame.attrs["spectral_metadata"] = deepcopy(payload.metadata)
     _xlsx._add_timing_detail(timing_details, "spectral_companion", started)
     return frame

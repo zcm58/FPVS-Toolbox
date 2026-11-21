@@ -49,6 +49,10 @@ GUI and backend owners and the regression checks for their shared behavior.
 | `Main_App/diagnostics/` | Runtime audit/event-time/log routing. Repo checks belong in scripts. [Diagnostics](docs/agent/architecture/diagnostics.md) |
 | `Main_App/Shared/`, `Main_App/Performance/` | Same-object compatibility aliases only; preserve historical imports, monkeypatches, and pickle lookups without adding implementations. [Legacy boundaries](docs/agent/architecture/legacy-boundaries.md) |
 
+`Main_App.io` resolves public names from their canonical modules on first
+access. Resource paths, recording filename filters and result path helpers can
+run in a fresh process without importing the EEG and table-reading libraries.
+
 `projects.public_datasets` owns the anonymous OpenFPVS dataset wire contract.
 `projects.experiment_library` validates immutable archives and installs portable
 projects atomically. Its local receipts support offline reopening while preserving

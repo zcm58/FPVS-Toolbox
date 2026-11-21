@@ -117,6 +117,46 @@ def test_native_full_sheet_preserves_bits_column_layout_and_cache_isolation(tmp_
         assert actual.strides == expected[column].to_numpy().strides
 
 
+@pytest.mark.parametrize("electrodes", [None, {"PO8", "FP1"}, set()])
+@pytest.mark.parametrize("requested", [["C", "absent", "Electrode", "B", "C"], ["B"], ["Electrode"]])
+def test_native_spectral_subset_preserves_bits_order_and_isolation(tmp_path, electrodes, requested):
+    labels = ["Fp1", "O1", "PO8"]
+    bits = np.array([
+        [0x8000000000000000, 0x7FF80000000000AB],
+        [0x7FF0000000000000, 0x0000000000000001],
+        [0x7FF8000000000012, 0xFFF0000000000000],
+    ], dtype=np.uint64)
+    original = pd.DataFrame(bits.view(np.float64), columns=["B", "C"])
+    original.insert(0, "Electrode", labels)
+    path = tmp_path / "recording.fpvs"
+    descriptor = write_spectral_companion(path, {FFT: original}, metadata={"units": ["uV"]})
+    write_result_manifest(path, sheet_names=[FFT], spectral_companion=descriptor, condition_companion=None)
+    selected = [name for name in dict.fromkeys(requested) if name in original]
+    indices = [i for i, label in enumerate(labels) if electrodes is None or label.upper() in electrodes]
+    expected = original.loc[indices, selected].reset_index(drop=True)
+
+    def read():
+        return read_xlsx_sheet_selected_columns(
+            path, sheet_name=FFT, required_columns=requested, require_all=False,
+            included_electrodes_upper=electrodes,
+        )
+
+    with xlsx_read_cache_scope():
+        first = read()
+        if len(first):
+            for name in selected:
+                first.loc[0, name] = "changed" if name == "Electrode" else 123.0
+        first.attrs["spectral_metadata"]["units"].append("changed")
+        actual = read()
+    pd.testing.assert_frame_equal(actual, expected, check_exact=True)
+    assert actual.attrs["spectral_metadata"]["units"] == ["uV"]
+    for name in selected:
+        if name != "Electrode":
+            values = actual[name].to_numpy()
+            np.testing.assert_array_equal(values.view(np.uint64), expected[name].to_numpy().view(np.uint64))
+            assert values.flags.c_contiguous
+
+
 def test_legacy_workbook_without_manifest_uses_physical_sheet(tmp_path: Path) -> None:
     path = tmp_path / "legacy.xlsx"
     original = pd.DataFrame({"Electrode": ["O1"], "1.2000_Hz": [1.25]})

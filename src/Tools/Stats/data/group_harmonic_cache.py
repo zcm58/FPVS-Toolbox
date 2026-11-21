@@ -526,8 +526,7 @@ def _workbook_fingerprint(
     file_path: str | None,
     recording_assignment: Mapping[str, object] | None = None,
 ) -> WorkbookFingerprint:
-    from Main_App.io.condition_data import condition_companion_identity
-    from Main_App.io.spectral_data import spectral_companion_identity
+    from Main_App.io.result_manifest import result_companion_identities
 
     identity = _workbook_recording_identity(subject, recording_assignment)
     if not file_path:
@@ -556,14 +555,15 @@ def _workbook_fingerprint(
             None,
             **identity,
         )
+    spectral, condition_identity = result_companion_identities(resolved)
     return WorkbookFingerprint(
         str(subject),
         str(condition),
         path_value,
         int(stat.st_size),
         int(stat.st_mtime_ns),
-        spectral_companion=spectral_companion_identity(resolved),
-        condition_companion=condition_companion_identity(resolved),
+        spectral_companion=spectral,
+        condition_companion=condition_identity,
         **identity,
     )
 

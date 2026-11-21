@@ -1,4 +1,5 @@
 from pathlib import Path
+import os
 import shutil
 
 import numpy as np
@@ -116,3 +117,68 @@ def test_legacy_path_case_is_retained(tmp_path):
     path = tmp_path / "P1_A_Results.XLSX"
     path.touch()
     assert resolve_result_path(path) == path
+
+
+def test_native_identity_pair_validates_stable_declaration_once(tmp_path, monkeypatch):
+    from Main_App.io import condition_data, result_manifest, spectral_data
+
+    path = tmp_path / "stable.fpvs"
+    _write(path)
+    expected = spectral_data.spectral_companion_identity(path), condition_data.condition_companion_identity(path)
+    validate = result_manifest._validate_manifest
+    calls = []
+
+    def counted(value):
+        calls.append(value)
+        return validate(value)
+
+    monkeypatch.setattr(result_manifest, "_validate_manifest", counted)
+    assert result_manifest.result_companion_identities(path) == expected
+    assert len(calls) == 1
+    monkeypatch.setattr(result_manifest, "_MAX_REUSED_MANIFEST_CHARS", 1)
+    assert result_manifest.result_companion_identities(path) == expected
+    assert len(calls) == 3
+
+
+@pytest.mark.parametrize("edit", ["replace", "same_size_and_mtime", "malformed", "missing"])
+def test_native_identity_pair_observes_current_condition_after_spectral_check(tmp_path, monkeypatch, edit):
+    from Main_App.io import condition_data, result_manifest, spectral_data
+
+    path = tmp_path / "first" / "result.fpvs"
+    other = tmp_path / "second" / path.name
+    old = _write(path)
+    changed_frames = _frames()
+    changed_frames["BCA (uV)"].iloc[0, 1] = 6.0
+    new = _write(other, changed_frames)
+    changed_companion = new["condition_companion"]["path"]
+    shutil.copyfile(other.parent / changed_companion, path.parent / changed_companion)
+    assert old["condition_companion"] != new["condition_companion"]
+    updated = other.read_bytes()
+    assert len(updated) == path.stat().st_size
+    verify_spectral = spectral_data._identity_from_descriptor
+
+    def edit_after_spectral(workbook, descriptor):
+        spectral = verify_spectral(workbook, descriptor)
+        if edit == "replace":
+            os.replace(other, path)
+        elif edit == "same_size_and_mtime":
+            before = path.stat()
+            path.write_bytes(updated)
+            os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns))
+        elif edit == "malformed":
+            path.write_bytes(b"\xff")
+        else:
+            path.unlink()
+        return spectral
+
+    monkeypatch.setattr(spectral_data, "_identity_from_descriptor", edit_after_spectral)
+    if edit in {"replace", "same_size_and_mtime"}:
+        assert result_manifest.result_companion_identities(path) == (
+            old["spectral_companion"], new["condition_companion"],
+        )
+    else:
+        with pytest.raises(ResultManifestError) as actual:
+            result_manifest.result_companion_identities(path)
+        with pytest.raises(ResultManifestError) as expected:
+            condition_data.condition_companion_identity(path)
+        assert str(actual.value) == str(expected.value)

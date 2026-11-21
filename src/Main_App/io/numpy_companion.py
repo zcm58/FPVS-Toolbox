@@ -3,6 +3,8 @@
 from contextlib import contextmanager
 import hashlib
 from io import BytesIO
+import os
+from pathlib import Path
 from typing import BinaryIO
 
 import numpy as np
@@ -49,3 +51,25 @@ def open_verified_npz(stream: BinaryIO, size_bytes: int, expected_sha256: str, c
     finally:
         if source is not stream:
             source.close()
+
+
+def open_replaceable_companion(path: Path) -> BinaryIO:
+    """Read live bytes while another process can still rename or replace the file."""
+    # An unbuffered handle cannot serve stale read-ahead across sheet boundaries.
+    if os.name != "nt":
+        return path.open("rb", buffering=0)
+
+    def opener(name: str, flags: int) -> int:
+        import _winapi
+        import msvcrt
+
+        # FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE. Ordinary
+        # Python open() on Windows denies rename until the last reader closes.
+        handle = _winapi.CreateFile(name, _winapi.GENERIC_READ, 7, 0, _winapi.OPEN_EXISTING, 0, 0)
+        try:
+            return msvcrt.open_osfhandle(handle, flags | os.O_BINARY)
+        except BaseException:
+            _winapi.CloseHandle(handle)
+            raise
+
+    return open(path, "rb", buffering=0, opener=opener)

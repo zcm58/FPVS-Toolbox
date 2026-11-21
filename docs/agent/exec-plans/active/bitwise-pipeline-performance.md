@@ -443,19 +443,108 @@ matched byte for byte after normalizing its creation and modification times
 Timing covered validation through workbook write. Raw EEG processing and
 project-wide archival occur outside this worker.
 
-The next native writer target is full-cell validation of the compact condition
-archive. The writer opens it again for each of the eight MCCTR sheets and
-constructs a DataFrame for each one solely to validate its decoded columns.
-A shared checksummed snapshot could remove those reopens. Any implementation
-needs to preserve column decoding, mutation detection and error order, as well
-as memory limits for large archives. A separate Stats candidate is the pair
-of companion identity checks that each read the same native result manifest.
-
 The focused processing (3,891), project I/O (1,369), Stats (497), publication
 maps (138), LORETA (860) and repository precommit (248) suites passed.
 These counts overlap. Path regressions cover missing targets, embedded NULs
 and fallback after a failed direct lookup. The real 64-link chain test is
 Linux-specific. The Windows replay also exercised a directory junction.
+
+#### Native companion publication and memory use
+
+The baseline for this pass is `5862ada6`. The MCCTR replay used the same
+internal-SSD project with 69 participants and 400 native results.
+The compact writer previously opened the metrics archive anew for each
+of eight sheets and built a detached DataFrame that it immediately discarded.
+It now verifies the schema and checksum, then validates the live columns
+using one additional unbuffered read handle. Per-sheet ZIP directory, member
+CRC and path checks still run. An active reader cache still owns detached
+values. Unscoped publication can discard each decoded column after validation.
+
+Across 400 results, writer-owned archive opens fell from 3,600 to 800.
+Both builds read 954,838,024 bytes and validated all 24,780,400 compact cells.
+Independent validation of existing results retained all 3,600 opens.
+Validation on 16 resident processes took 6.259 seconds before and 4.128
+seconds after. Including pool startup and shutdown, it took 9.446 and 5.621 seconds.
+The standalone median traced validation peak fell from 2,189,438 to 1,651,937
+bytes. For a 19.23 MB streaming fixture it fell from 76,887,320 to 19,790,731
+bytes. The complete native writer, including the unchanged spectral encoder,
+averaged 216.88 and 207.37 ms per result over 24 publications per build in
+four counterbalanced batches. On three representative results all 48
+publications matched the signed native anchor and both NumPy archives byte
+for byte, including readback of all ten tables. Three compatibility Excel
+publications matched every workbook package member after normalizing save
+timestamps. The 400-result compact readback reproduced the cohort digest
+`fec2cfbf2f0c0ae80378e305f68b799a75a25269d570edb3165422a5e0564b8c`.
+
+For paired identity checks, a 16-worker MCCTR replay performed 400 complete
+declaration decodes and schema validations, down from 800. It retained 800
+independent manifest observations (680,596 bytes) and verified all
+5,053,537,880 companion bytes. The full 373,598-byte fingerprint list matched.
+Reopening the live declaration preserves replacement and access errors and
+detects edits made with restored timestamps while spectral validation runs.
+The full Stats-ready export took 123.06, 125.08, 123.23 and 124.46 seconds
+in baseline, candidate, candidate and baseline order. Mean elapsed time was
+123.76 seconds before and 124.15 seconds after. The 0.40-second difference
+fell within run-to-run variation. The four sheets, all 9,422 cells, formatting
+and the FullFFT/cohort fingerprints matched. Normalizing only the workbook
+save timestamps reproduced the signed package digest
+`f2ea671f691a918127406bb26441013461f1782bf21da1dac2e0d1e4b0a4e8f4`.
+The final source with explicit publication-only handle reuse reproduced the
+same workbook and counters. That run overlapped regression testing and its
+165.01 seconds are excluded from the quiet timing means.
+
+For spectral subsets the public reader now gathers floats into one detached
+block and indexes only the requested labels. All 1,200 returned tables
+matched across three selections per result with a 16-worker verification
+pool. Comparisons covered raw float64 bytes, labels, row and column order,
+dtypes and metadata. A fresh read still matched after mutating a returned
+table and its nested metadata.
+
+Six cohort-spanning results were also replayed individually, with the dense
+array already in the regular reader cache. Across three measurements per
+selection and result, median incremental traced heap during the public read
+fell as follows. The numbers measure transient allocations for a single call.
+
+| Spectral selection | Before | After | Reduction |
+| --- | ---: | ---: | ---: |
+| Eight frequencies, all channels | 998,433 B | 155,133 B | 84.5% |
+| Every other frequency in reverse order, all channels | 11,068,277 B | 5,583,482 B | 49.6% |
+| Every other frequency, alternating channels | 7,134,510 B | 3,615,591 B | 49.3% |
+
+Opening the I/O package for resource lookup, recording filename filtering
+and native result path resolution previously loaded the scientific readers.
+Six fresh processes per build ran these operations in counterbalanced order.
+Median private resident memory added by the three helpers fell from 92.87
+to 1.77 MiB, and newly imported modules from 1,293 to 30. Median time fell
+from 0.816 to 0.013 seconds. The three helper results and all 62 exported
+names, their order, canonical object identities and pickle output matched.
+This measures a fresh process performing lightweight operations. A process
+that subsequently requests numerical or EEG work loads the relevant readers.
+
+The final verification passed 3,891 processing, 1,398 project I/O, 497 Stats,
+138 publication-map and 860 LORETA tests. The repository precommit gate
+passed 195 tests. These scopes overlap. The measurements above cover the
+affected processing and export operations on existing MCCTR results.
+
+##### Next targets by implementation risk
+
+1. The synchronous Settings Save handler asks four change checks whether the
+   project has processed outputs. Each can parse the same processing ledger
+   before comparing the settings. Four reads of the signed MCCTR ledger
+   would consume 114,848,804 bytes on the GUI thread. Measure the visible
+   save, check cheap settings differences first, and preserve prompt and
+   invalidation order when sharing a lookup.
+2. A metadata-only native declaration reader still imports the spectral and
+   condition modules to validate their descriptors. Parsing one MCCTR
+   declaration in a fresh process added 494 modules, including NumPy and
+   pandas, and 37,863,424 bytes of private memory after path lookup. Lightweight
+   schema validators could extend the path-helper savings. Keep existing
+   exception identities and historical pickle paths.
+3. Spectral encoding and publication peak at approximately 19.33 MB per
+   representative MCCTR result, compared with 1.65 MB for compact validation.
+   Writing one spectral matrix at a time could reduce the whole writer's
+   peak. This needs exact NPZ member order, numeric memory order and atomic
+   publication checks before it is safe to change.
 
 #### Forced full reprocessing across cache temperatures
 

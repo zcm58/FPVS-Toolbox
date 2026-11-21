@@ -87,16 +87,23 @@ def validate_column_encoding(dtype: np.dtype, specification: dict) -> None:
         raise ValueError("Unsupported condition-table column encoding.")
 
 
-def decode_column(values: np.ndarray, specification: dict, rows: int, dictionary: np.ndarray | None = None) -> np.ndarray | pd.Series:
+def decode_column(
+    values: np.ndarray, specification: dict, rows: int, dictionary: np.ndarray | None = None,
+    *, validate_only: bool = False,
+) -> np.ndarray | pd.Series | None:
     if values.ndim != 1 or len(values) != rows:
         raise ValueError("Invalid condition-table column dimensions.")
     validate_column_encoding(values.dtype, specification)
     if specification["encoding"] == "native":
-        return values.copy()
+        return None if validate_only else values.copy()
     if dictionary is None or dictionary.dtype.kind != "U" or dictionary.ndim != 1:
         raise ValueError("Invalid condition-table value dictionary.")
     if len(values) and (values.min() < 0 or values.max() >= len(dictionary)):
         raise ValueError("Invalid condition-table dictionary code.")
+    if validate_only and specification["dtype"] == "object":
+        for value in dictionary:
+            _decode_scalar(value)
+        return None
     choices = np.asarray([_decode_scalar(value) for value in dictionary], dtype=object)
     restored = choices[values]
     return restored if specification["dtype"] == "object" else pd.Series(restored, dtype=specification["dtype"])

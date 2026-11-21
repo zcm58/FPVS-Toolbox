@@ -639,14 +639,9 @@ def _source_snapshot(
     )
 
     source_rows: list[dict[str, object]] = []
-    from Main_App.io.condition_data import (
-        ConditionDataError,
-        condition_companion_identity,
-    )
-    from Main_App.io.spectral_data import (
-        SpectralDataError,
-        spectral_companion_identity,
-    )
+    from Main_App.io.condition_data import ConditionDataError
+    from Main_App.io.result_manifest import result_companion_identities
+    from Main_App.io.spectral_data import SpectralDataError
 
     for record in active_records:
         resolved, relative = _manifest_relative_path(project_root, record.path)
@@ -667,19 +662,17 @@ def _source_snapshot(
                 "mtime_ns": int(stat.st_mtime_ns),
             }
         try:
-            companion = spectral_companion_identity(resolved)
+            companion, condition_companion = result_companion_identities(resolved)
         except SpectralDataError as exc:
             raise FullFftProvenanceError(
                 f"FullFFT spectral companion is invalid for {relative}: {exc}"
             ) from exc
-        if companion is not None:
-            row["spectral_companion"] = companion
-        try:
-            condition_companion = condition_companion_identity(resolved)
         except ConditionDataError as exc:
             raise FullFftProvenanceError(
                 f"Condition metrics companion is invalid for {relative}: {exc}"
             ) from exc
+        if companion is not None:
+            row["spectral_companion"] = companion
         if condition_companion is not None:
             row["condition_companion"] = condition_companion
         if repeated_session:
