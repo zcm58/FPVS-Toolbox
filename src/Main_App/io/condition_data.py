@@ -24,21 +24,15 @@ import numpy as np
 import pandas as pd
 
 from Main_App.io import xlsx_selected_reader as _xlsx
+from Main_App.io.companion_schema import (
+    CONDITION_COMPANION_VERSION, CONDITION_DATA_SHEET_NAMES, ConditionDataError, condition_descriptor as _descriptor,
+)
 from Main_App.io.condition_data_codec import decode_column, encode_column, json_text, validate_column_encoding
 from Main_App.io.numpy_companion import open_replaceable_companion, open_verified_npz
 
-CONDITION_COMPANION_VERSION = "numpy_condition_companion_v1"
 CONDITION_MANIFEST_SHEET = "Condition Data"
-CONDITION_DATA_SHEET_NAMES = (
-    "FFT Amplitude (uV)", "SNR", "Z Score", "BCA (uV)",
-    "Spectral Eligibility", "Spectral Metric QC", "FFT and neighbors", "FFT Metadata",
-)
 _MAX_CACHED_COMPANIONS = 4
 _MAX_CACHED_VERIFICATIONS = 256
-
-
-class ConditionDataError(ValueError):
-    """A declared condition companion is missing, invalid, or changed."""
 
 
 @dataclass(frozen=True)
@@ -48,33 +42,6 @@ class _ConditionPayload:
     columns: dict[str, dict[str, np.ndarray | pd.Series]]
     workbook_signature: object
     companion_signature: object
-
-
-def _descriptor(value: Mapping) -> dict:
-    if not isinstance(value, Mapping) or value.get("version") != CONDITION_COMPANION_VERSION:
-        raise ConditionDataError("Condition companion version is missing or unsupported.")
-    if set(value) != {"version", "path", "size_bytes", "sha256", "sheets"}:
-        raise ConditionDataError("Condition companion declaration has invalid fields.")
-    name = value.get("path")
-    if (
-        not isinstance(name, str) or not name or name in {".", ".."}
-        or any(char in name for char in ("/", "\\", ":", "\x00"))
-        or Path(name).name != name or Path(name).suffix.lower() != ".npz"
-    ):
-        raise ConditionDataError("Condition companion path must be a local .npz basename.")
-    size, digest, sheets = value.get("size_bytes"), value.get("sha256"), value.get("sheets")
-    if isinstance(size, bool) or not isinstance(size, int) or size <= 0:
-        raise ConditionDataError("Condition companion size is invalid.")
-    if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
-        raise ConditionDataError("Condition companion SHA-256 is invalid.")
-    if (
-        not isinstance(sheets, list) or not sheets
-        or any(not isinstance(sheet, str) or sheet not in CONDITION_DATA_SHEET_NAMES for sheet in sheets)
-        or len(set(sheets)) != len(sheets)
-    ):
-        raise ConditionDataError("Condition companion sheet declaration is invalid.")
-    return {"version": CONDITION_COMPANION_VERSION, "path": name, "size_bytes": size,
-            "sha256": digest, "sheets": list(sheets)}
 
 
 def write_condition_companion(workbook_path: str | Path, frames: Mapping[str, pd.DataFrame]) -> dict:

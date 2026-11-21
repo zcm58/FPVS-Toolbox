@@ -541,6 +541,11 @@ FullSNR values. Labels, electrode order, exact FullFFT frequencies, fs/N, units,
 protocol, eligibility fingerprint, and retained-occurrence metadata are saved.
 FullSNR is never reconstructed from the averaged FullFFT array.
 
+The writer encodes one spectral matrix at a time. The NPZ retains NumPy's
+original member order, array storage order and ZIP64 headers. The writer
+flushes the completed file and computes its SHA-256 before publishing its
+content-based filename.
+
 The companion is named `<workbook stem>.spectra.<20-character SHA prefix>.npz`.
 Its `Spectral Data` workbook sheet has `Field`/`Value` columns with JSON-encoded
 version, local basename, byte size, full SHA-256, and ordered spectral sheet
@@ -605,6 +610,9 @@ effect on the next open. Independent validation of an existing archive and
 publication without a supported shared handle use the normal per-sheet access
 checks.
 
+Reading the declaration alone uses the standard-library validators in
+`Main_App.io.companion_schema`. The array readers use those same validators
+and continue to expose the historical spectral and condition error types.
 Paired native identity checks in Stats and FullFFT observe the result
 declaration before spectral validation and again before condition validation.
 Identical UTF-8 text of up to 16,384 characters can share one JSON parse and

@@ -526,25 +526,70 @@ The final verification passed 3,891 processing, 1,398 project I/O, 497 Stats,
 passed 195 tests. These scopes overlap. The measurements above cover the
 affected processing and export operations on existing MCCTR results.
 
-##### Next targets by implementation risk
+#### Settings Save, native metadata and spectral publication
 
-1. The synchronous Settings Save handler asks four change checks whether the
-   project has processed outputs. Each can parse the same processing ledger
-   before comparing the settings. Four reads of the signed MCCTR ledger
-   would consume 114,848,804 bytes on the GUI thread. Measure the visible
-   save, check cheap settings differences first, and preserve prompt and
-   invalidation order when sharing a lookup.
-2. A metadata-only native declaration reader still imports the spectral and
-   condition modules to validate their descriptors. Parsing one MCCTR
-   declaration in a fresh process added 494 modules, including NumPy and
-   pandas, and 37,863,424 bytes of private memory after path lookup. Lightweight
-   schema validators could extend the path-helper savings. Keep existing
-   exception identities and historical pickle paths.
-3. Spectral encoding and publication peak at approximately 19.33 MB per
-   representative MCCTR result, compared with 1.65 MB for compact validation.
-   Writing one spectral matrix at a time could reduce the whole writer's
-   peak. This needs exact NPZ member order, numeric memory order and atomic
-   publication checks before it is safe to change.
+The baseline was `f6be05bd`. Timings below measure the individual workflows
+on Windows with the internal-SSD MCCTR data. Windows managed its file cache.
+
+| Visible Settings Save | Before | After | Processing ledger reads |
+| --- | ---: | ---: | ---: |
+| Unchanged draft | 1.023 s | 0.450 s | 4 → 0 |
+| Application preference only | 1.023 s | 0.460 s | 4 → 0 |
+
+Each timing is the median of three clicks per build in counterbalanced
+order on the native Windows embedded page. The timed interval began at
+mouse input and ended when the Save handler returned. The host recorded
+the return to Home. Each run opened a fresh project and settings copy with
+the original 28,712,201-byte ledger and a project-local input folder.
+The saved project, preferences and ledger matched byte for byte. Changing a
+post-processing QC option reduced ledger reads from four to one and retained
+the prompt, saved setting and stale-output marker. A fixed clock allowed a
+byte comparison of that marker. Sixteen transaction scenarios covered
+unrelated changes, affected settings, prompts and recalculation handoff.
+By user choice an unrelated save also skips a malformed processing ledger.
+Nine additional visible Settings tests passed on both builds. The native
+Windows pytest-qt event loop logged the same `0x8001010d` diagnostic on
+each build, and both test processes exited successfully.
+
+For a fresh process that had already resolved the result path, median time
+to read the first MCCTR declaration fell from 230.09 to 0.54 ms. Reading
+all 400 declarations serially, including the first, took 275.87 and 45.25 ms
+across six fresh processes per build. Newly imported modules fell from 469
+to one. The increase in private resident memory fell from 36,165,632 to
+24,576 bytes. All 340,298 declaration bytes reproduced the same corpus
+digest, `bf1a9e8dbd97f23106486a6f410bdf8ffda2534ec006ec4c59d8c2d62b4857ee`.
+Checks included 124 valid and invalid cases and 18 exception pickle comparisons.
+
+The spectral writer now releases each converted FullFFT or FullSNR matrix
+after writing it. A 16-worker replay reconstructed the original native
+publications from the signed MCCTR tables using the processing writer's
+normal matrix layout. Both builds reproduced all 400 anchors, 400 spectral
+archives and 400 condition archives byte for byte. The 5,053,878,178 bytes
+produced the same ordered name, size and SHA-256 digest,
+`b1ad9b2c85d11af530ef9cf094c55f51977d202e659e4366646d594cdc0eeefc`.
+Separate archive tests compared ZIP members, array order, special floating
+point values, exceptions on invalid input and atomic cleanup after write failures.
+Three Excel compatibility exports also reproduced every workbook
+member after normalizing the two save timestamps.
+
+Across three representative MCCTR results the median incremental traced peak
+of a complete native publication fell from 19,347,335 to 16,036,784 bytes.
+On a wider 64-channel fixture with 30,721 bins in each of two matrices, the
+spectral writer's peak fell from 50,170,898 to 31,735,250 bytes. All
+3,932,288 values and the complete 34,411,820-byte archive matched. These are
+allocations inside one writer call. They exclude its caller's existing
+arrays and the rest of the running application.
+
+With the regression suites idle, four counterbalanced batches made 24 native
+publications per build. Mean complete writer time was 195.80 ms before and
+195.26 ms after, within the variation between batches. The spectral encoding
+and publication step alone averaged 108.79 and 113.21 ms. The measured
+writer benefit is the smaller peak allocation.
+
+The local focused gates passed 3,891 processing, 1,419 project I/O and
+808 GUI-scope tests. Repository precommit passed 334 tests. These counts
+overlap. The source and project checks exercised the affected operations on
+already processed recordings.
 
 #### Forced full reprocessing across cache temperatures
 

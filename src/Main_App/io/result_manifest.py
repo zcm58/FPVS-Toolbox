@@ -42,9 +42,7 @@ def resolve_result_path(path: str | Path) -> Path:
 
 
 def _validate_manifest(value: object) -> dict:
-    # Import lazily: companion readers also use this declaration adapter.
-    from Main_App.io.condition_data import _descriptor as condition_descriptor
-    from Main_App.io.spectral_data import _descriptor as spectral_descriptor
+    from Main_App.io.companion_schema import condition_descriptor, spectral_descriptor
 
     if not isinstance(value, Mapping) or set(value) != {
         "version", "sheet_names", "spectral_companion", "condition_companion",

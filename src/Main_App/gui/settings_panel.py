@@ -722,14 +722,11 @@ class SettingsDialog(QDialog):
     def _protocol_save_requested(self) -> bool:
         if self._trigger_maps_payload != self._initial_trigger_maps_payload:
             return True
-        initial = getattr(
-            self,
-            "_initial_protocol_editor_values",
-            self._protocol_editor_values(),
-        )
+        current = self._protocol_editor_values()
+        initial = getattr(self, "_initial_protocol_editor_values", current)
         return protocol_settings_save_requested(
             initial,
-            self._protocol_editor_values(),
+            current,
             protocol_tab_active=(
                 self.tabs.currentIndex() == self._protocol_tab_index
             ),
@@ -1113,11 +1110,11 @@ class SettingsDialog(QDialog):
             )
         )
 
-    def _harmonic_settings_changed_after_processing(
+    def _harmonic_settings_changed(
         self,
         validated_preproc: Dict[str, Any],
     ) -> bool:
-        if self.project is None or not self._project_has_processed_outputs():
+        if self.project is None:
             return False
         initial = getattr(self, "_initial_harmonic_settings_signature", None)
         current = self._harmonic_settings_signature_from_preprocessing(validated_preproc)
@@ -1133,28 +1130,18 @@ class SettingsDialog(QDialog):
             self._roi_settings_signature(roi_pairs_override),
         )
 
-    def _frequency_analysis_settings_changed_after_processing(self) -> bool:
-        if self.project is None or not self._project_has_processed_outputs():
-            return False
+    def _frequency_analysis_changes(self) -> tuple[bool, bool]:
+        """Compare the editor to its baseline for frequency QC and protocol changes."""
         initial = getattr(self, "_initial_frequency_analysis_signature", None)
-        return (
-            initial is not None
-            and self._frequency_analysis_settings_signature() != initial
-        )
+        if self.project is None or initial is None:
+            return False, False
+        current = self._frequency_analysis_settings_signature()
+        return current != initial, current[0] != initial[0]
 
-    def _project_protocol_changed_after_processing(self) -> bool:
-        if self.project is None or not self._project_has_processed_outputs():
-            return False
-        initial = getattr(self, "_initial_frequency_analysis_signature", None)
-        return (
-            initial is not None
-            and self._project_protocol_signature() != initial[0]
-        )
-
-    def _experimental_qc_changes_after_processing(
+    def _experimental_qc_changes(
         self, settings: ExperimentalQcSettings | None,
     ) -> tuple[bool, bool]:
-        if self.project is None or settings is None or not self._project_has_processed_outputs():
+        if self.project is None or settings is None:
             return False, False
         previous = self.project.experimental_qc_settings
         preprocessing_changed = (
@@ -1484,7 +1471,9 @@ class SettingsDialog(QDialog):
         validated_preproc = self._validated_preproc_payload()
         if validated_preproc is None:
             return
-        if self._project_protocol_changed_after_processing():
+        has_processed_outputs = self._project_has_processed_outputs()
+        frequency_analysis_changed, protocol_changed = self._frequency_analysis_changes()
+        if protocol_changed and has_processed_outputs:
             QMessageBox.warning(
                 self,
                 "Project Reprocessing Required",
@@ -1494,9 +1483,7 @@ class SettingsDialog(QDialog):
                 "protocol.",
             )
             return
-        frequency_analysis_changed = (
-            self._frequency_analysis_settings_changed_after_processing()
-        )
+        frequency_analysis_changed = frequency_analysis_changed and has_processed_outputs
         self._capture_harmonic_settings_rollback()
         if not self._save_project_preprocessing_for_harmonic_recalculation(validated_preproc):
             self._restore_harmonic_settings_after_cancel()
@@ -2802,21 +2789,16 @@ class SettingsDialog(QDialog):
             return
         if not self._confirm_parallel_worker_override(validated_preproc):
             return
-        harmonic_settings_changed = self._harmonic_settings_changed_after_processing(
-            validated_preproc
-        )
-        frequency_analysis_changed = (
-            self._frequency_analysis_settings_changed_after_processing()
-        )
-        protocol_changed_after_processing = (
-            self._project_protocol_changed_after_processing()
-        )
-        preprocessing_qc_changed, postprocessing_qc_changed = (
-            self._experimental_qc_changes_after_processing(validated_experimental_qc)
-        )
-        frequency_analysis_changed = (
-            frequency_analysis_changed or preprocessing_qc_changed or postprocessing_qc_changed
-        )
+        harmonic_settings_changed = self._harmonic_settings_changed(validated_preproc)
+        frequency_analysis_changed, protocol_changed_after_processing = self._frequency_analysis_changes()
+        preprocessing_qc_changed, postprocessing_qc_changed = self._experimental_qc_changes(validated_experimental_qc)
+        frequency_analysis_changed = frequency_analysis_changed or preprocessing_qc_changed or postprocessing_qc_changed
+        # Only affected outputs can trigger a prompt or invalidation. Share this
+        # observation within the current Save, before any modal or persistence.
+        if (harmonic_settings_changed or frequency_analysis_changed) and not self._project_has_processed_outputs():
+            harmonic_settings_changed = frequency_analysis_changed = False
+            protocol_changed_after_processing = False
+            preprocessing_qc_changed = postprocessing_qc_changed = False
         recalculate_harmonics_after_save = False
         if harmonic_settings_changed and not (protocol_changed_after_processing or preprocessing_qc_changed):
             recalculate_harmonics_after_save = (

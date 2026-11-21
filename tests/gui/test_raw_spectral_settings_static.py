@@ -102,7 +102,7 @@ def _experimental_panel(switches, *, has_project=True):
     methods = [node for node in owner.body if isinstance(node, ast.FunctionDef)
                and node.name in {"_experimental_qc_settings_from_editor",
                                  "_refresh_experimental_qc_dependencies",
-                                 "_experimental_qc_changes_after_processing"}]
+                                 "_experimental_qc_changes"}]
     namespace = {"ExperimentalQcSettings": ExperimentalQcSettings,
                  "SummedBcaScreeningSettings": SummedBcaScreeningSettings}
     exec(compile(ast.Module(body=methods, type_ignores=[]), "settings-methods", "exec"), namespace)
@@ -115,7 +115,6 @@ def _experimental_panel(switches, *, has_project=True):
     )
     panel = SimpleNamespace(
         project=SimpleNamespace(experimental_qc_settings=settings) if has_project else None,
-        _project_has_processed_outputs=lambda: True,
         condition_specific_interpolation_enabled_check=_Check(True),
         kurtosis_auto_interpolate_all_check=_Check(True),
         kurtosis_review_auto_interpolate_extreme_check=_Check(True),
@@ -180,6 +179,4 @@ def test_qc_settings_route_preprocessing_and_postprocessing_refresh_separately(d
     switches[disabled] = False
     panel, _ = _experimental_panel(switches)
     settings = panel._experimental_qc_settings_from_editor()
-    assert panel._experimental_qc_changes_after_processing(settings) == expected
-    panel._project_has_processed_outputs = lambda: False
-    assert panel._experimental_qc_changes_after_processing(settings) == (False, False)
+    assert panel._experimental_qc_changes(settings) == expected

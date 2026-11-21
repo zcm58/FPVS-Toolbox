@@ -71,10 +71,9 @@ def _visual_panel(tmp_path, saved_pairs):
     for name in (
         "_roi_settings_signature", "_harmonic_settings_signature_from_settings",
         "_harmonic_settings_signature_from_preprocessing",
-        "_harmonic_settings_changed_after_processing",
+        "_harmonic_settings_changed",
         "_frequency_analysis_settings_signature",
-        "_frequency_analysis_settings_changed_after_processing",
-        "_project_protocol_changed_after_processing",
+        "_frequency_analysis_changes",
     ):
         setattr(panel, name, _method(name).__get__(panel))
 
@@ -117,9 +116,8 @@ def test_visual_draft_injection_uses_raw_saved_constructor_baselines(
 
     assert panel._initial_harmonic_settings_signature[-1] == raw_signature
     assert panel._initial_frequency_analysis_signature[1] == raw_signature
-    assert panel._harmonic_settings_changed_after_processing(preprocessing) is changed
-    assert panel._frequency_analysis_settings_changed_after_processing() is changed
-    assert not panel._project_protocol_changed_after_processing()
+    assert panel._harmonic_settings_changed(preprocessing) is changed
+    assert panel._frequency_analysis_changes() == (changed, False)
     assert {"LOT", "ROT", "Central"} <= {
         name for name, _electrodes in panel.roi_editor.get_pairs()
     }
@@ -184,8 +182,7 @@ def _panel():
     )
     for name in (
         "_roi_settings_signature", "_frequency_analysis_settings_signature",
-        "_frequency_analysis_settings_changed_after_processing",
-        "_project_protocol_changed_after_processing",
+        "_frequency_analysis_changes",
     ):
         setattr(panel, name, _method(name).__get__(panel))
     panel._initial_frequency_analysis_signature = (
@@ -202,10 +199,9 @@ def _panel():
 ])
 def test_roi_edits_require_frequency_qc_but_not_raw_reprocessing(pairs):
     panel = _panel()
-    assert not panel._frequency_analysis_settings_changed_after_processing()
+    assert panel._frequency_analysis_changes() == (False, False)
     panel.roi_editor.get_pairs.return_value = pairs
-    assert panel._frequency_analysis_settings_changed_after_processing()
-    assert not panel._project_protocol_changed_after_processing()
+    assert panel._frequency_analysis_changes() == (True, False)
 
 
 def test_equivalent_roi_text_does_not_invalidate_and_protocol_change_still_does():
@@ -213,10 +209,9 @@ def test_equivalent_roi_text_does_not_invalidate_and_protocol_change_still_does(
     panel.roi_editor.get_pairs.return_value = [
         (" ROT ", ["o2", " po8 "]), ("Test ROI", ["f8", "t8"]),
     ]
-    assert not panel._frequency_analysis_settings_changed_after_processing()
+    assert panel._frequency_analysis_changes() == (False, False)
     panel._project_protocol_signature.return_value = (3.0, 0.3, 144, 55)
-    assert panel._frequency_analysis_settings_changed_after_processing()
-    assert panel._project_protocol_changed_after_processing()
+    assert panel._frequency_analysis_changes() == (True, True)
 
 
 def test_recalculate_after_roi_removal_resumes_qc_and_commits_saved_roi_edit():
@@ -239,6 +234,27 @@ def test_recalculate_after_roi_removal_resumes_qc_and_commits_saved_roi_edit():
     panel._resume_frequency_domain_post_processing.assert_called_once()
     panel._start_full_fft_grid_review.assert_not_called()
     panel._restore_harmonic_settings_after_cancel.assert_not_called()
+
+
+def test_recalculate_rechecks_outputs_after_persisting_its_inputs():
+    panel = _panel()
+    panel._project_has_processed_outputs.side_effect = [True, False]
+    panel._validated_preproc_payload = lambda: {}
+    panel._capture_harmonic_settings_rollback = Mock()
+    panel._restore_harmonic_settings_after_cancel = Mock()
+    panel._save_project_preprocessing_for_harmonic_recalculation = Mock(return_value=True)
+    panel._save_analysis_inputs_for_harmonic_recalculation = Mock(return_value=True)
+    panel._start_full_fft_grid_review = Mock()
+    method = _method("_on_recalculate_harmonics_clicked")
+    messages = SimpleNamespace(information=Mock())
+    method.__globals__["QMessageBox"] = messages
+
+    method(panel)
+
+    panel._save_analysis_inputs_for_harmonic_recalculation.assert_called_once()
+    panel._restore_harmonic_settings_after_cancel.assert_called_once()
+    assert messages.information.call_args.args[1] == "No Processed Data"
+    panel._start_full_fft_grid_review.assert_not_called()
 
 
 def test_unchanged_rois_keep_the_harmonic_only_recalculation_path():

@@ -376,6 +376,11 @@ continue to navigate through the existing page host.
 Nested Protocol and Experimental tabs stay unframed around their section cards.
 One shared Save/Cancel row applies the full Settings draft from every category.
 Invalid summed-BCA input reveals its sub-tab before focusing the affected field.
+Save compares harmonic, protocol, ROI and QC choices with the editor's original
+values before checking for processed results. An unchanged or unrelated draft
+skips the processing ledger. A draft affecting downstream results uses one
+fresh lookup for its prompts and invalidation decisions. Explicit harmonic
+recalculation checks again after saving its inputs.
 
 Visible smoke: at 1200 × 800 and Windows 125% and 150% scaling, open Settings
 from the shell and from a tool shortcut in Light and Dark. Click a category

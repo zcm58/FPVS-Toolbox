@@ -6,7 +6,7 @@ Legacy workbooks continue using their physical spectral worksheets.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
 import hashlib
@@ -14,7 +14,6 @@ import json
 import math
 import os
 from pathlib import Path
-import re
 import tempfile
 from time import perf_counter
 from xml.etree.ElementTree import ParseError
@@ -24,18 +23,15 @@ import numpy as np
 import pandas as pd
 
 from Main_App.io import xlsx_selected_reader as _xlsx
+from Main_App.io.companion_schema import (
+    SPECTRAL_COMPANION_VERSION, SPECTRAL_SHEET_NAMES, SpectralDataError, spectral_descriptor as _descriptor,
+)
 from Main_App.io.numpy_companion import open_verified_npz
 
-SPECTRAL_COMPANION_VERSION = "numpy_spectral_companion_v1"
 SPECTRAL_MANIFEST_SHEET = "Spectral Data"
-SPECTRAL_SHEET_NAMES = ("FullFFT Amplitude (uV)", "FullSNR")
 _MAX_CACHED_COMPANIONS = 4
 _MAX_CACHED_VERIFICATIONS = 256
 _MAX_CACHED_HEADER_LABELS = 262_144
-
-
-class SpectralDataError(ValueError):
-    """A declared spectral companion is missing, invalid, or changed."""
 
 
 @dataclass(frozen=True)
@@ -61,52 +57,10 @@ def _json_text(value) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False, default=_json_default)
 
 
-def _descriptor(value: Mapping) -> dict:
-    if not isinstance(value, Mapping) or value.get("version") != SPECTRAL_COMPANION_VERSION:
-        raise SpectralDataError("Spectral companion version is missing or unsupported.")
-    name = value.get("path")
-    if (
-        not isinstance(name, str)
-        or not name
-        or name in {".", ".."}
-        or any(char in name for char in ("/", "\\", ":", "\x00"))
-        or Path(name).name != name
-        or Path(name).suffix.lower() != ".npz"
-    ):
-        raise SpectralDataError("Spectral companion path must be a local .npz basename.")
-    size = value.get("size_bytes")
-    digest = value.get("sha256")
-    sheets = value.get("sheets")
-    if isinstance(size, bool) or not isinstance(size, int) or size <= 0:
-        raise SpectralDataError("Spectral companion size is invalid.")
-    if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
-        raise SpectralDataError("Spectral companion SHA-256 is invalid.")
-    if (
-        not isinstance(sheets, list)
-        or not sheets
-        or any(not isinstance(sheet, str) for sheet in sheets)
-        or sheets[0] != SPECTRAL_SHEET_NAMES[0]
-        or len(set(sheets)) != len(sheets)
-        or any(sheet not in SPECTRAL_SHEET_NAMES for sheet in sheets)
-    ):
-        raise SpectralDataError("Spectral companion sheet declaration is invalid.")
-    return {"version": SPECTRAL_COMPANION_VERSION, "path": name, "size_bytes": size,
-            "sha256": digest, "sheets": list(sheets)}
-
-
-def write_spectral_companion(
-    workbook_path: str | Path,
-    frames: Mapping[str, pd.DataFrame],
-    *,
-    metadata: Mapping | None = None,
-) -> dict:
-    """Atomically publish immutable float64 arrays beside their workbook."""
-
-    workbook = Path(workbook_path)
-    if SPECTRAL_SHEET_NAMES[0] not in frames or any(name not in SPECTRAL_SHEET_NAMES for name in frames):
-        raise SpectralDataError("Spectral frames must contain FullFFT and optionally FullSNR.")
-    sheets = [name for name in SPECTRAL_SHEET_NAMES if name in frames]
-    arrays: dict[str, np.ndarray] = {}
+def _spectral_arrays(
+    frames: Mapping[str, pd.DataFrame], sheets: list[str], metadata: Mapping | None,
+) -> Iterator[tuple[str, np.ndarray]]:
+    """Yield the ordered NPZ members and release each sheet before converting the next."""
     for index, name in enumerate(sheets):
         frame = frames[name]
         columns = [str(column) for column in frame.columns]
@@ -121,27 +75,77 @@ def write_spectral_companion(
             values = frame.iloc[:, 1:].to_numpy(dtype=np.float64, copy=True)
         except (TypeError, ValueError) as exc:
             raise SpectralDataError(f"{name} contains nonnumeric spectral values.") from exc
-        arrays[f"sheet{index}_columns"] = np.asarray(columns, dtype=np.str_)
-        arrays[f"sheet{index}_electrodes"] = electrodes
-        arrays[f"sheet{index}_values"] = values
+        if index == 0:
+            fullfft_width = values.shape[1]
+        yield f"sheet{index}_columns", np.asarray(columns, dtype=np.str_)
+        yield f"sheet{index}_electrodes", electrodes
+        yield f"sheet{index}_values", values
+        del values
     details = dict(metadata or {})
     frequency_grid = details.pop("frequencies_hz", None)
     if frequency_grid is None and "sampling_frequency_hz" in details and "fft_sample_count" in details:
         frequency_grid = np.fft.rfftfreq(int(details["fft_sample_count"]), 1.0 / float(details["sampling_frequency_hz"]))
     if frequency_grid is not None:
         grid = np.asarray(frequency_grid, dtype=np.float64)
-        if grid.ndim != 1 or len(grid) != arrays["sheet0_values"].shape[1] or not np.isfinite(grid).all():
+        if grid.ndim != 1 or len(grid) != fullfft_width or not np.isfinite(grid).all():
             raise SpectralDataError("Exact FullFFT frequencies do not match its spectral columns.")
-        arrays["fullfft_frequencies_hz"] = grid
-    arrays["metadata_json"] = np.asarray(_json_text({
+    metadata_json = np.asarray(_json_text({
         "version": SPECTRAL_COMPANION_VERSION, "sheets": sheets, "metadata": details,
         "has_exact_fullfft_frequencies": frequency_grid is not None,
     }), dtype=np.str_)
+    if frequency_grid is not None:
+        yield "fullfft_frequencies_hz", grid
+    yield "metadata_json", metadata_json
+
+
+def write_spectral_companion(
+    workbook_path: str | Path,
+    frames: Mapping[str, pd.DataFrame],
+    *,
+    metadata: Mapping | None = None,
+) -> dict:
+    """Atomically publish immutable float64 arrays beside their workbook."""
+
+    workbook = Path(workbook_path)
+    if SPECTRAL_SHEET_NAMES[0] not in frames or any(name not in SPECTRAL_SHEET_NAMES for name in frames):
+        raise SpectralDataError("Spectral frames must contain FullFFT and optionally FullSNR.")
+    sheets = [name for name in SPECTRAL_SHEET_NAMES if name in frames]
+    input_error = None
+
+    def validated_arrays():
+        nonlocal input_error
+        try:
+            yield from _spectral_arrays(frames, sheets, metadata)
+        except Exception as exc:
+            # A later ZIP close failure must not replace the original input error.
+            input_error = exc
+            raise
+
+    arrays = validated_arrays()
+    try:
+        return _publish_spectral_archive(workbook, sheets, arrays)
+    except Exception as exc:
+        archive_error = exc
+    if input_error is not None:
+        raise input_error
+    # A write can fail before validation finishes. Invalid inputs historically
+    # take priority, even when the destination is unavailable or out of space.
+    for _key, array in arrays:
+        del array
+    raise archive_error
+
+
+def _publish_spectral_archive(workbook: Path, sheets: list[str], arrays: Iterator[tuple[str, np.ndarray]]) -> dict:
     temporary: Path | None = None
     try:
         with tempfile.NamedTemporaryFile(mode="w+b", prefix=f".{workbook.stem}.spectra.", suffix=".tmp", dir=workbook.parent, delete=False) as stream:
             temporary = Path(stream.name)
-            np.savez(stream, **arrays)
+            # Match np.savez's member order, NPY encoding and ZIP64 local headers.
+            with zipfile.ZipFile(stream, "w", compression=zipfile.ZIP_STORED) as archive:
+                for key, array in arrays:
+                    with archive.open(f"{key}.npy", "w", force_zip64=True) as member:
+                        np.lib.format.write_array(member, array, allow_pickle=False)
+                    del array
             stream.flush()
             os.fsync(stream.fileno())
             stream.seek(0)

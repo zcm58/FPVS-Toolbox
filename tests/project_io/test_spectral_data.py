@@ -253,6 +253,78 @@ def test_same_inputs_reuse_immutable_companion_and_changed_values_create_new_one
     assert not list(tmp_path.glob("*.tmp"))
 
 
+@pytest.mark.parametrize("layout", ["C", "F", "strided", "mixed"])
+@pytest.mark.parametrize("sheets", [[FFT], [FFT, SNR]])
+def test_spectral_publication_matches_numpy_savez_byte_for_byte(tmp_path, layout, sheets):
+    from io import BytesIO
+    from Main_App.io.spectral_data import SPECTRAL_COMPANION_VERSION
+
+    bits = np.resize(np.array([0x8000000000000000, 1, 0x7FF800000000003D, 0xFFF0000000000000],
+                              dtype=np.uint64), (6, 10))
+    values = bits.view(np.float64)
+    values = values[::-2, ::2] if layout == "strided" else values[:3, :5].copy(order="F" if layout == "F" else "C")
+    frames, expected = {}, {}
+    for index, sheet in enumerate(sheets):
+        frame = pd.DataFrame(values, columns=list("ABCDE"), copy=False)
+        if layout == "mixed":
+            frame["B"] = pd.array([1, None, -4], dtype="Int64")
+        frame.insert(0, "Electrode", ["O1", "Fp1", "PO8"])
+        frames[sheet] = frame
+        expected[f"sheet{index}_columns"] = np.asarray(frame.columns.tolist(), dtype=np.str_)
+        expected[f"sheet{index}_electrodes"] = np.asarray(frame["Electrode"].tolist(), dtype=np.str_)
+        expected[f"sheet{index}_values"] = frame.iloc[:, 1:].to_numpy(dtype=np.float64, copy=True)
+    grid = np.arange(10, dtype=np.float64)[::2]
+    expected["fullfft_frequencies_hz"] = grid
+    expected["metadata_json"] = np.asarray(json.dumps({
+        "version": SPECTRAL_COMPANION_VERSION, "sheets": sheets, "metadata": {"units": "µV"},
+        "has_exact_fullfft_frequencies": True,
+    }, sort_keys=True, separators=(",", ":")), dtype=np.str_)
+    reference = BytesIO()
+    np.savez(reference, **expected)
+
+    descriptor = write_spectral_companion(tmp_path / "recording.fpvs", frames, metadata={"units": "µV", "frequencies_hz": grid})
+    assert (tmp_path / descriptor["path"]).read_bytes() == reference.getvalue()
+    assert descriptor["sha256"] == hashlib.sha256(reference.getvalue()).hexdigest()
+
+
+@pytest.mark.parametrize("failure", ["new_temp", "write_member", "close_archive", "invalid_path"])
+@pytest.mark.parametrize("invalid", [None, "second_sheet", "grid"])
+def test_spectral_write_failure_cleans_up_and_preserves_input_error_priority(tmp_path, monkeypatch, failure, invalid):
+    from Main_App.io import spectral_data
+
+    target = tmp_path / "recording.fpvs"
+    frames = _frames()
+    first = write_spectral_companion(target, frames)
+    prior = tmp_path / first["path"]
+    if invalid == "second_sheet":
+        frames[SNR].iloc[0, 0] = ""
+    metadata = {"frequencies_hz": [1]} if invalid == "grid" else {}
+
+    def fail(*args, **kwargs):
+        raise OSError("spectral publication interrupted")
+
+    if failure == "new_temp":
+        monkeypatch.setattr(spectral_data.tempfile, "NamedTemporaryFile", fail)
+    elif failure == "write_member":
+        monkeypatch.setattr(np.lib.format, "write_array", fail)
+    elif failure == "close_archive":
+        monkeypatch.setattr(zipfile.ZipFile, "_write_end_record", fail)
+    else:
+        target = tmp_path / "invalid\x00name.fpvs"
+    error, message = {
+        None: (ValueError, "null") if failure == "invalid_path" else (OSError, "spectral publication interrupted"),
+        "second_sheet": (SpectralDataError, "FullSNR electrode labels must be nonempty and unique"),
+        "grid": (SpectralDataError, "Exact FullFFT frequencies do not match its spectral columns"),
+    }[invalid]
+    with pytest.raises(error, match=message) as caught:
+        write_spectral_companion(target, frames, metadata=metadata)
+    if invalid:
+        assert caught.value.__context__ is None
+
+    assert list(tmp_path.iterdir()) == [prior]
+    assert hashlib.sha256(prior.read_bytes()).hexdigest() == first["sha256"]
+
+
 def test_512_hz_120_second_fft_exceeds_excel_width_without_losing_bins(tmp_path: Path) -> None:
     fs, samples = 512.0, 61_440
     grid = np.fft.rfftfreq(samples, 1.0 / fs)

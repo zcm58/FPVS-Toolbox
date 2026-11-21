@@ -1429,7 +1429,6 @@ def test_harmonic_setting_change_after_processing_prompts_recalculation(
 def test_selection_derivative_signature_tracks_analysis_and_roi_inputs(
     tmp_path,
     qtbot,
-    monkeypatch,
 ):
     os.environ["XDG_CONFIG_HOME"] = str(tmp_path)
     project = _prep_project(tmp_path)
@@ -1442,25 +1441,23 @@ def test_selection_derivative_signature_tracks_analysis_and_roi_inputs(
     win.settings.save()
     dlg = SettingsDialog(win.settings, win, project)
     qtbot.addWidget(dlg)
-    monkeypatch.setattr(dlg, "_project_has_processed_outputs", lambda: True)
     validated = dlg._validated_preproc_payload()
     assert validated is not None
-    assert dlg._harmonic_settings_changed_after_processing(validated) is False
+    assert dlg._harmonic_settings_changed(validated) is False
 
     original_base = dlg.base_freq_edit.text()
     dlg.base_freq_edit.setText("5.88")
-    assert dlg._harmonic_settings_changed_after_processing(validated) is False
-    assert dlg._project_protocol_changed_after_processing() is True
+    assert dlg._harmonic_settings_changed(validated) is False
+    assert dlg._frequency_analysis_changes() == (True, True)
     dlg.base_freq_edit.setText(original_base)
-    assert dlg._project_protocol_changed_after_processing() is False
+    assert dlg._frequency_analysis_changes() == (False, False)
 
     assert not hasattr(dlg, "bca_limit_edit")
 
     roi_pairs = dlg.roi_editor.get_pairs()
     dlg.roi_editor.set_pairs([*roi_pairs, ("Audit ROI", ["OZ"])])
-    assert dlg._harmonic_settings_changed_after_processing(validated) is True
-    assert dlg._frequency_analysis_settings_changed_after_processing() is True
-    assert dlg._project_protocol_changed_after_processing() is False
+    assert dlg._harmonic_settings_changed(validated) is True
+    assert dlg._frequency_analysis_changes() == (True, False)
 
 
 @pytest.mark.parametrize("rebuild_now", [True, False])
@@ -1505,7 +1502,6 @@ def test_saving_roi_removal_invalidates_qc_and_preserves_deletion(
 def test_injected_default_rois_are_compared_with_the_raw_saved_signature(
     tmp_path,
     qtbot,
-    monkeypatch,
 ):
     os.environ["XDG_CONFIG_HOME"] = str(tmp_path)
     project = _prep_project(tmp_path)
@@ -1519,7 +1515,6 @@ def test_injected_default_rois_are_compared_with_the_raw_saved_signature(
 
     dlg = SettingsDialog(win.settings, win, project)
     qtbot.addWidget(dlg)
-    monkeypatch.setattr(dlg, "_project_has_processed_outputs", lambda: True)
     validated = dlg._validated_preproc_payload()
     assert validated is not None
 
@@ -1528,7 +1523,7 @@ def test_injected_default_rois_are_compared_with_the_raw_saved_signature(
         ("Custom only", ["O1"]),
         *_DEFAULT_ROI_PAIRS,
     ]
-    assert dlg._harmonic_settings_changed_after_processing(validated) is True
+    assert dlg._harmonic_settings_changed(validated) is True
 
 
 def test_settings_save_refreshes_cached_stats_and_plot_roi_consumers(
@@ -2729,9 +2724,10 @@ def test_failed_project_save_keeps_settings_draft_and_processing_state(
     previous_cache = copy.deepcopy(dlg._project_cache)
     manifest_bytes = (project.project_root / "project.json").read_bytes()
     dlg.preproc_edits[0].setText("40")
-    monkeypatch.setattr(dlg, "_harmonic_settings_changed_after_processing",
+    monkeypatch.setattr(dlg, "_harmonic_settings_changed",
                         lambda _payload: recalculate)
-    monkeypatch.setattr(dlg, "_project_protocol_changed_after_processing", lambda: False)
+    monkeypatch.setattr(dlg, "_project_has_processed_outputs", lambda: True)
+    monkeypatch.setattr(dlg, "_frequency_analysis_changes", lambda: (False, False))
     monkeypatch.setattr(dlg, "_ask_recalculate_harmonics_after_settings_change", lambda: True)
     monkeypatch.setattr(dlg, "_mark_harmonic_derivatives_stale", lambda: None)
     errors = []

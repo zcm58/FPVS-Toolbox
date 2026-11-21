@@ -37,7 +37,7 @@ def _panel(tmp_path):
         "_save", "_restore_failed_project_settings_save",
         "_capture_harmonic_settings_rollback", "_clear_harmonic_settings_rollback",
         "_restore_harmonic_settings_after_cancel",
-        "_experimental_qc_changes_after_processing", "_mark_frequency_analysis_outputs_stale",
+        "_experimental_qc_changes", "_mark_frequency_analysis_outputs_stale",
         "_trigger_protocol_is_current", "_save_project_with_trigger_guard",
     }
     tree = ast.parse(SOURCE.read_text(encoding="utf-8"))
@@ -81,9 +81,8 @@ def _panel(tmp_path):
         _validated_preproc_payload=lambda: payload,
         _validate_roi_draft=lambda: True,
         _confirm_parallel_worker_override=lambda _payload: True,
-        _harmonic_settings_changed_after_processing=lambda _payload: False,
-        _frequency_analysis_settings_changed_after_processing=lambda: False,
-        _project_protocol_changed_after_processing=lambda: False,
+        _harmonic_settings_changed=lambda _payload: False,
+        _frequency_analysis_changes=lambda: (False, False),
         _project_has_processed_outputs=lambda: True,
         _ask_recalculate_harmonics_after_settings_change=lambda: True,
         _current_roi_montage=lambda: "biosemi64",
@@ -143,7 +142,7 @@ def test_failed_project_save_restores_live_state_without_retry(
     tmp_path, monkeypatch, error_type, recalculate,
 ):
     panel, messages = _panel(tmp_path)
-    panel._harmonic_settings_changed_after_processing = lambda _payload: recalculate
+    panel._harmonic_settings_changed = lambda _payload: recalculate
     project = panel.project
     previous_project = copy.deepcopy(vars(project))
     previous_config = copy.deepcopy(panel.manager.config)
@@ -172,7 +171,7 @@ def test_failed_project_save_restores_live_state_without_retry(
     )
 
     # A subsequent successful save must still commit the same retained draft.
-    panel._harmonic_settings_changed_after_processing = lambda _payload: False
+    panel._harmonic_settings_changed = lambda _payload: False
     panel._save()
     assert Project.load(project.project_root).preprocessing["low_pass"] == 45.0
     assert project.frequency_protocol.is_ready
@@ -215,11 +214,10 @@ def test_failed_application_save_invalidates_only_committed_frequency_inputs(
     previous_protocol = panel.project.frequency_protocol
     panel._validated_preproc_payload = lambda: dict(panel.project.preprocessing)
     panel._protocol_save_requested = lambda: protocol_changed
-    panel._project_protocol_changed_after_processing = lambda: protocol_changed
     # The ROI draft changes the frequency signature, but remains application
     # state and must be rolled back when its settings file cannot be written.
     assert panel.roi_editor.get_pairs() != panel.manager.get_roi_pairs()
-    panel._frequency_analysis_settings_changed_after_processing = lambda: True
+    panel._frequency_analysis_changes = lambda: (True, protocol_changed)
     monkeypatch.setattr(
         panel.manager, "save", Mock(side_effect=OSError("Synthetic application write failure")),
     )
@@ -245,7 +243,7 @@ def test_failed_application_save_restores_config_and_retains_committed_project(
     if not using_project:
         panel.project = None
         panel._protocol_save_requested = lambda: False
-    panel._harmonic_settings_changed_after_processing = lambda _payload: (
+    panel._harmonic_settings_changed = lambda _payload: (
         using_project and recalculate
     )
     panel.appearance_mode_combo.currentText.return_value = "Dark"
@@ -275,7 +273,7 @@ def test_failed_application_save_restores_config_and_retains_committed_project(
         if recalculate:
             panel._mark_harmonic_derivatives_stale.assert_called_once()
 
-    panel._harmonic_settings_changed_after_processing = lambda _payload: False
+    panel._harmonic_settings_changed = lambda _payload: False
     panel._save()
     assert panel.manager.get("analysis", "alpha") == "0.025"
     assert SettingsManager(panel.manager.ini_path).get_appearance_mode() == "Dark"
@@ -294,3 +292,76 @@ def test_cancelled_harmonic_save_reapplies_previous_persisted_appearance(tmp_pat
 
     assert SettingsManager(panel.manager.ini_path).get_appearance_mode() == "Auto"
     panel._apply_saved_appearance.assert_called_once_with("Dark")
+
+
+def test_save_observes_processed_outputs_once_and_refreshes_on_next_save(tmp_path):
+    panel, messages = _panel(tmp_path)
+    panel._project_has_processed_outputs = Mock(side_effect=[False, True])
+    panel._harmonic_settings_changed = lambda _payload: True
+    panel._frequency_analysis_changes = lambda: (True, True)
+    settings = panel.project.experimental_qc_settings
+    panel._validated_experimental_qc_settings = lambda: replace(
+        settings, raw_signal_screening_enabled=not settings.raw_signal_screening_enabled,
+    )
+    panel._ask_recalculate_harmonics_after_settings_change = Mock()
+
+    panel._save()
+    assert panel._project_has_processed_outputs.call_count == 1
+    assert panel.accept.call_count == 1
+    messages.warning.assert_not_called()
+    panel._mark_harmonic_derivatives_stale.assert_not_called()
+    assert not is_frequency_domain_output_stale(panel.project.project_root)
+
+    panel._save()
+    assert panel._project_has_processed_outputs.call_count == 2
+    assert panel.accept.call_count == 2
+    assert messages.warning.call_args.args[1] == "Project Reprocessing Required"
+    panel._mark_harmonic_derivatives_stale.assert_called_once()
+    panel._ask_recalculate_harmonics_after_settings_change.assert_not_called()
+    assert is_frequency_domain_output_stale(panel.project.project_root)
+
+
+def test_unrelated_save_skips_ledger_and_required_check_still_fails_before_writes(tmp_path):
+    from Main_App.processing.processing_ledger import ledger_path, load_ledger
+
+    panel, _ = _panel(tmp_path)
+    path = ledger_path(panel.project.project_root)
+    path.parent.mkdir(exist_ok=True)
+    path.write_bytes(b"\xff")
+    panel._project_has_processed_outputs = Mock(side_effect=lambda: load_ledger(panel.project.project_root))
+    panel.appearance_mode_combo.currentText.return_value = "Dark"
+    panel._save()
+    panel._project_has_processed_outputs.assert_not_called()
+    assert SettingsManager(panel.manager.ini_path).get_appearance_mode() == "Dark"
+    before = panel.project.manifest_path.read_bytes(), Path(panel.manager.ini_path).read_bytes()
+
+    panel._harmonic_settings_changed = lambda _payload: True
+    panel._ask_recalculate_harmonics_after_settings_change = Mock()
+    with pytest.raises(UnicodeDecodeError):
+        panel._save()
+    panel._project_has_processed_outputs.assert_called_once()
+    panel._ask_recalculate_harmonics_after_settings_change.assert_not_called()
+    assert (panel.project.manifest_path.read_bytes(), Path(panel.manager.ini_path).read_bytes()) == before
+
+
+def test_protocol_changed_during_recalculation_prompt_cannot_be_overwritten(tmp_path):
+    panel, messages = _panel(tmp_path)
+    panel._harmonic_settings_changed = lambda _payload: True
+    external = Project.load(panel.project.project_root)
+    external.update_frequency_protocol(FrequencyProtocol.from_recurrence(
+        6, 5, expected_analyzed_oddball_cycles=120, expected_analyzed_oddball_cycles_source="manual",
+    ))
+    original_ini = Path(panel.manager.ini_path).read_bytes()
+
+    def change_on_disk_while_prompt_is_open():
+        external.save()
+        return True
+
+    panel._ask_recalculate_harmonics_after_settings_change = change_on_disk_while_prompt_is_open
+    panel._save()
+
+    assert Project.load(panel.project.project_root).frequency_protocol == external.frequency_protocol
+    assert Path(panel.manager.ini_path).read_bytes() == original_ini
+    assert messages.warning.call_args.args[1] == "Invalid Settings"
+    assert "Reopen Settings" in messages.warning.call_args.args[2]
+    panel.accept.assert_not_called()
