@@ -14,7 +14,7 @@ import math
 import os
 from pathlib import Path
 import struct
-from typing import Any
+from typing import Any, BinaryIO
 import zipfile
 
 import numpy as np
@@ -39,20 +39,15 @@ def _signature(path: Path) -> tuple:
     return value.st_size, value.st_mtime_ns, value.st_ctime_ns, value.st_dev, value.st_ino
 
 
-def _metadata_bytes(path: Path, *, spectral: bool) -> int:
-    """Bound central directory and materialized metadata before opening arrays."""
-    before = _signature(path)
-    if not 22 <= before[0] <= _MAX_COMPANION:
-        raise ValueError("Uncharacterized companion size")
-    with path.open("rb") as stream:
-        stream.seek(-22, os.SEEK_END)
-        tail = stream.read(22)
-    marker, disk, start_disk, disk_count, count, size, offset, comment = struct.unpack("<4s4H2LH", tail)
+def _bounded_metadata_bytes(source: BinaryIO, size_bytes: int, *, spectral: bool) -> int:
+    """Check the directory bound before ZipFile allocates its member table."""
+    source.seek(-22, os.SEEK_END)
+    marker, disk, start_disk, disk_count, count, size, offset, comment = struct.unpack("<4s4H2LH", source.read(22))
     if (marker != b"PK\x05\x06" or disk or start_disk or comment or disk_count != count
-            or not 0 < count <= _MAX_MEMBERS or size > _MIB or offset + size != before[0] - 22):
+            or not 0 < count <= _MAX_MEMBERS or size > _MIB or offset + size != size_bytes - 22):
         raise ValueError("Uncharacterized ZIP directory")
     materialized = 0
-    with zipfile.ZipFile(path) as archive:
+    with zipfile.ZipFile(source) as archive:
         members = archive.infolist()
         if len(members) != count or len({item.filename for item in members}) != count:
             raise ValueError("Uncharacterized ZIP members")
@@ -80,6 +75,15 @@ def _metadata_bytes(path: Path, *, spectral: bool) -> int:
             materialized += member.file_size
             if materialized > _MAX_MATERIALIZED:
                 raise ValueError("Unbounded metadata workspace")
+    return materialized
+
+
+def _metadata_bytes(path: Path, *, expected_size: int, spectral: bool) -> int:
+    before = _signature(path)
+    if before[0] != expected_size or not 22 <= expected_size <= _MAX_COMPANION:
+        raise ValueError("Uncharacterized companion size")
+    with path.open("rb") as source:
+        materialized = _bounded_metadata_bytes(source, expected_size, spectral=spectral)
     if before != _signature(path):
         raise ValueError("Companion changed while budgeting")
     return materialized
@@ -107,9 +111,9 @@ def cell_validation_credit(workbook_path: str | Path) -> int | None:
             if descriptor is None:
                 continue
             path = workbook.parent / descriptor["path"]
-            if path.resolve().parent != workbook.parent or path.stat().st_size != descriptor["size_bytes"]:
+            if path.resolve().parent != workbook.parent:
                 return None
-            materialized += _metadata_bytes(path, spectral=key == "spectral_companion")
+            materialized += _metadata_bytes(path, expected_size=descriptor["size_bytes"], spectral=key == "spectral_companion")
             largest_buffer = max(largest_buffer, validation_buffer_bytes(descriptor["size_bytes"]))
         if before != _signature(workbook):
             return None

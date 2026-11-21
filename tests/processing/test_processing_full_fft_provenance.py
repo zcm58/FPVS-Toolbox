@@ -517,6 +517,56 @@ def test_completion_timestamp_refresh_does_not_invalidate_full_fft(
     assert manifest_path.read_bytes() == before
 
 
+@pytest.mark.parametrize("reuse_index", [False, True])
+def test_current_protocol_read_uses_only_a_fresh_index_manifest(tmp_path, monkeypatch, reuse_index):
+    root = _managed_full_fft_project(tmp_path)
+    written = write_project_full_fft_provenance(root, base_frequency_hz=6.0, oddball_frequency_hz=1.2)
+    index = full_fft_provenance.load_project_dataset_index(root) if reuse_index else None
+    reads = []
+    read_manifest = full_fft_provenance._read_manifest
+
+    def counted_read(path):
+        reads.append(path)
+        return read_manifest(path)
+
+    monkeypatch.setattr(full_fft_provenance, "_read_manifest", counted_read)
+    assert require_current_project_full_fft_provenance(root, dataset_index=index) == written
+    assert reads == [root] * (2 if reuse_index else 1)
+
+    # Change the protocol *after* the saved record is read, even when the
+    # caller supplied an index that still contains the original protocol.
+    saved_record = full_fft_provenance._saved_full_fft_provenance
+
+    def change_after_read(path):
+        record = saved_record(path)
+        manifest = read_manifest(path)
+        manifest["frequency_protocol"] = FrequencyProtocol.from_recurrence(
+            6, 5, expected_analyzed_oddball_cycles=120,
+            expected_analyzed_oddball_cycles_source="manual",
+        ).to_manifest()
+        (root / "project.json").write_text(json.dumps(manifest), encoding="utf-8")
+        return record
+
+    monkeypatch.setattr(full_fft_provenance, "_saved_full_fft_provenance", change_after_read)
+    with pytest.raises(FullFftProvenanceStaleError, match="project frequency protocol changed"):
+        require_current_project_full_fft_provenance(root, dataset_index=index)
+
+
+def test_invalid_current_protocol_precedes_failed_index_diagnostic(tmp_path, monkeypatch):
+    root = _managed_full_fft_project(tmp_path)
+    write_project_full_fft_provenance(root, base_frequency_hz=6.0, oddball_frequency_hz=1.2)
+    manifest = full_fft_provenance._read_manifest(root)
+    del manifest["frequency_protocol"]
+    (root / "project.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+    def broken_index(_root):
+        raise ValueError("broken dataset index")
+
+    monkeypatch.setattr(full_fft_provenance, "load_project_dataset_index", broken_index)
+    with pytest.raises(FullFftProvenanceStaleError, match="project has no frequency protocol"):
+        require_current_project_full_fft_provenance(root)
+
+
 def test_snr_settings_save_preserves_newly_completed_full_fft(
     tmp_path: Path,
 ) -> None:

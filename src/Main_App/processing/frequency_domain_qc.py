@@ -303,10 +303,7 @@ def run_frequency_domain_qc_review(
     )
 
     require_no_pending_condition_interpolation(project_root)
-    screening_settings = _experimental_summed_bca_settings(project, project_root)
-    interpolation_enabled = screening_settings.enabled and normalize_experimental_qc_settings(
-        _read_manifest(project_root / "project.json").get("experimental_qc")
-    ).condition_specific_interpolation_enabled
+    screening_settings, interpolation_enabled = _frequency_review_settings(project, project_root)
     thresholds = FrequencyDomainQcThresholds.from_settings(screening_settings)
     from Main_App.processing.harmonic_selection_qc import (
         resolve_processing_harmonic_selection_inputs,
@@ -3257,27 +3254,26 @@ def _filter_subject_data(
     }
 
 
-def _experimental_summed_bca_settings(
+def _frequency_review_settings(
     project: Any,
     project_root: Path,
-) -> SummedBcaScreeningSettings:
-    raw_settings = getattr(project, "experimental_qc_settings", None)
-    manifest_path = project_root / "project.json"
+) -> tuple[SummedBcaScreeningSettings, bool]:
+    manifest = _read_manifest(project_root / "project.json")
+    raw_settings = manifest.get("experimental_qc", getattr(project, "experimental_qc_settings", None))
     try:
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        manifest = None
-    if isinstance(manifest, Mapping) and "experimental_qc" in manifest:
-        raw_settings = manifest.get("experimental_qc")
-    try:
-        return normalize_experimental_qc_settings(
-            raw_settings
-        ).summed_bca_screening
+        settings = normalize_experimental_qc_settings(raw_settings)
     except (TypeError, ValueError) as exc:
         raise RuntimeError(
             "The project experimental summed-BCA settings are invalid. Correct "
             "them in Settings before frequency-domain review."
         ) from exc
+    # Older manifests use the in-memory screening choice, but interpolation
+    # has always required the project setting or its manifest default.
+    screening = settings.summed_bca_screening
+    interpolation_enabled = screening.enabled and (
+        settings if "experimental_qc" in manifest else normalize_experimental_qc_settings(None)
+    ).condition_specific_interpolation_enabled
+    return screening, interpolation_enabled
 
 
 def _project_protocol_review_metadata(
@@ -3444,9 +3440,10 @@ def _independent_qc_context_fits_cache(value: _IndependentQcContext) -> bool:
     return fits((value.source_identity, value.cells, value.processing_entries))
 
 
-def _load_independent_qc_context(project_root: Path) -> _IndependentQcContext:
+def _load_independent_qc_context(project_root: Path, *, identity_only: bool = False) -> _IndependentQcContext:
     """Reuse only current ledger-derived evidence inside one validation operation.
 
+    Identity-only callers receive the source identity with empty evidence maps.
     Review decisions and workbook validation remain at their original call sites.
     Every hit rehashes the ledger; live path resolution also detects a retargeted
     project/ledger link, which resolved file snapshots alone cannot detect.
@@ -3454,8 +3451,11 @@ def _load_independent_qc_context(project_root: Path) -> _IndependentQcContext:
     from Main_App.processing import post_processing_context as context
     from Main_App.processing.processing_ledger import ledger_path
 
+    def requested_fields(value: _IndependentQcContext) -> _IndependentQcContext:
+        return _IndependentQcContext(value.source_identity, {}, {}) if identity_only else value
+
     if not context.validation_scope_active():
-        return _read_independent_qc_context(project_root)
+        return requested_fields(_read_independent_qc_context(project_root))
 
     def live_key() -> tuple[str, str]:
         return (
@@ -3473,12 +3473,18 @@ def _load_independent_qc_context(project_root: Path) -> _IndependentQcContext:
                 files = context.capture_validation_files([candidate_key[1]], hash_contents=True)
                 if all(identity is not None for _, identity in files):
                     key = candidate_key
+                    if identity_only:
+                        identity = context.cached_validation("independent_qc_identity", (key, files))
+                        if identity is not context.CACHE_MISS:
+                            if live_key() == key and context.validation_files_unchanged(files):
+                                return _IndependentQcContext(identity, {}, {})
+                            key = None
             else:
                 # The shared cache checked these exact bytes before detaching.
                 # Check again for edits or redirection during the copy.
                 files, value = cached
                 if live_key() == candidate_key and context.validation_files_unchanged(files):
-                    return value
+                    return requested_fields(value)
     except (OSError, RuntimeError, MemoryError):
         # Missing/unreadable paths and cache-only allocation failures must retain
         # the uncached loader's diagnostics and error precedence.
@@ -3514,22 +3520,27 @@ def _load_independent_qc_context(project_root: Path) -> _IndependentQcContext:
     )
     if ledger_snapshot is not None and value.source_identity.get("status") != "current":
         # The original loader owns warnings and precedence for invalid inputs.
-        return _read_independent_qc_context(project_root)
+        return requested_fields(_read_independent_qc_context(project_root))
     if key is None:
-        return value
+        return requested_fields(value)
+    result = requested_fields(value)
     try:
-        if (
-            value.source_identity.get("status") == "current"
-            and _independent_qc_context_fits_cache(value)
-            and live_key() == key
-        ):
-            context.remember_validation(
-                "independent_qc_ledger", key, (files, value), files=files,
-                max_namespace_entries=1,
-            )
+        if value.source_identity.get("status") == "current" and live_key() == key:
+            if _independent_qc_context_fits_cache(value):
+                context.remember_validation(
+                    "independent_qc_ledger", key, (files, value), files=files,
+                    max_namespace_entries=1,
+                )
+            elif identity_only and _independent_qc_context_fits_cache(result):
+                # Only the digest of the exact bytes decoded above can select
+                # this projection. Hits check those bytes again after detaching.
+                context.remember_validation(
+                    "independent_qc_identity", (key, files), result.source_identity,
+                    files=(), max_namespace_entries=1,
+                )
     except (OSError, RuntimeError, MemoryError):
         pass
-    return value
+    return result
 
 
 def _read_independent_qc_context(
@@ -3933,9 +3944,13 @@ def _source_workbooks_are_current(
         if not path.is_absolute():
             path = project_root / path
         try:
-            stat = path.resolve(strict=True).stat()
-        except OSError:
-            return False
+            stat = path.stat()
+        except (OSError, ValueError):
+            # Resolve components individually when the OS cannot follow the whole path.
+            try:
+                stat = path.resolve(strict=True).stat()
+            except OSError:
+                return False
         if row.get("size_bytes") != int(stat.st_size):
             return False
         if row.get("mtime_ns") != int(stat.st_mtime_ns):
@@ -4000,7 +4015,7 @@ def _validated_review_evidence_from_state(
     ):
         return None
     saved_independent = payload.get("independent_qc_source")
-    current_independent = _load_independent_qc_context(project_root).source_identity
+    current_independent = _load_independent_qc_context(project_root, identity_only=True).source_identity
     if not isinstance(saved_independent, Mapping) or dict(saved_independent) != (
         current_independent
     ):

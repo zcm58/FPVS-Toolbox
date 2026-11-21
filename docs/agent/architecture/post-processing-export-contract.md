@@ -232,8 +232,10 @@ Publishing artifact-freshness bookkeeping alone does not invalidate scientific
 selection. Public final-release gates remain mandatory.
 
 The independent frequency-QC context reuses only successful `current` evidence
-derived from the processing ledger. The scope retains at most one such context,
-with an 8 MiB Python-container admission cap and a 32 MiB snapshot-read cap.
+derived from the processing ledger. A scope retains at most one full context
+and one source identity for reviews whose full context exceeds the limit.
+Each has an 8 MiB Python-container admission cap and a 32 MiB ledger-read cap.
+Only the saved-review identity comparison may consume the smaller entry.
 Canonical project and live ledger paths plus content SHA-256 identify reuse;
 hits return detached values and recheck the ledger after detachment. Missing,
 corrupt, invalid, oversized or changed inputs use the uncached diagnostics.

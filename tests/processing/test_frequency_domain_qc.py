@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import errno
 import json
+import sys
 from dataclasses import replace
+from pathlib import Path
+from types import SimpleNamespace
 
 import pandas as pd
 import pytest
@@ -35,6 +39,120 @@ from Main_App.projects.preprocessing_settings import (
     HARMONIC_SELECTION_PROFILE_VERSION,
 )
 from Tools.Stats.analysis.dv_policy_settings import FIXED_PREDEFINED_POLICY_NAME
+
+
+@pytest.mark.parametrize("manifest_settings,enabled,interpolate", [
+    ({"summed_bca_screening": {"enabled": True}, "condition_specific_interpolation_enabled": True}, True, True),
+    ({"summed_bca_screening": {"enabled": False}, "condition_specific_interpolation_enabled": True}, False, False),
+    (None, True, False),
+])
+def test_review_settings_share_one_manifest_read_and_keep_legacy_defaults(
+    tmp_path, monkeypatch, manifest_settings, enabled, interpolate,
+):
+    manifest = {"experimental_qc": manifest_settings} if manifest_settings is not None else {}
+    path = tmp_path / "project.json"
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    project = SimpleNamespace(experimental_qc_settings={
+        "summed_bca_screening": {"enabled": True}, "condition_specific_interpolation_enabled": True,
+    })
+    read = Path.read_text
+    reads = []
+
+    def counted_read(source, *args, **kwargs):
+        reads.append(source)
+        return read(source, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", counted_read)
+    settings, interpolation_enabled = frequency_qc._frequency_review_settings(project, tmp_path)
+    assert (settings.enabled, interpolation_enabled) == (enabled, interpolate)
+    assert reads == [path]
+
+
+@pytest.mark.parametrize("linked", [False, True])
+def test_review_source_freshness_stats_relative_and_absolute_targets(tmp_path, monkeypatch, linked):
+    target = tmp_path / "result.fpvs"
+    target.write_bytes(b"before")
+    path = target
+    if linked:
+        path = tmp_path / "linked.fpvs"
+        try:
+            path.symlink_to(target)
+        except OSError as exc:
+            pytest.skip(f"Symlinks unavailable on this host: {exc}")
+    source_stat = target.stat()
+    rows = [{"path": value, "size_bytes": source_stat.st_size, "mtime_ns": source_stat.st_mtime_ns}
+            for value in (str(path), path.name)]
+
+    resolutions = []
+    resolve = Path.resolve
+
+    def counted_resolve(source, *, strict=False):
+        resolutions.append((source, strict))
+        return resolve(source, strict=strict)
+
+    monkeypatch.setattr(Path, "resolve", counted_resolve)
+    assert frequency_qc._source_workbooks_are_current(tmp_path, rows)
+    target.write_bytes(b"changed size")
+    assert not frequency_qc._source_workbooks_are_current(tmp_path, rows)
+    assert resolutions == []
+    target.unlink()
+    assert not frequency_qc._source_workbooks_are_current(tmp_path, rows)
+    assert resolutions == [(path, True)]
+
+
+@pytest.mark.parametrize("lookup_errno", [errno.ELOOP, errno.ENOTDIR])
+def test_review_source_freshness_resolves_after_direct_lookup_error(tmp_path, monkeypatch, lookup_errno):
+    target = tmp_path / "result.fpvs"
+    target.write_bytes(b"result")
+    source_stat = target.stat()
+    subdir = tmp_path / "dir"
+    subdir.mkdir()
+    path = subdir / ".." / target.name
+    rows = [{"path": str(path), "size_bytes": source_stat.st_size, "mtime_ns": source_stat.st_mtime_ns}]
+    stat = Path.stat
+
+    def direct_stat(source, *args, **kwargs):
+        if source == path:
+            raise OSError(lookup_errno, "Direct lookup failed")
+        return stat(source, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "stat", direct_stat)
+    assert frequency_qc._source_workbooks_are_current(tmp_path, rows)
+    target.unlink()
+    assert not frequency_qc._source_workbooks_are_current(tmp_path, rows)
+
+
+def test_review_source_freshness_preserves_platform_handling_of_embedded_nul(tmp_path):
+    path = tmp_path / "invalid\0file.fpvs"
+    rows = [{"path": str(path), "size_bytes": 0, "mtime_ns": 0}]
+    try:
+        path.resolve(strict=True).stat()
+    except OSError:
+        assert not frequency_qc._source_workbooks_are_current(tmp_path, rows)
+    except ValueError as exc:
+        with pytest.raises(ValueError) as observed:
+            frequency_qc._source_workbooks_are_current(tmp_path, rows)
+        assert observed.value.args == exc.args
+    else:
+        pytest.fail("Unexpected successful filesystem lookup for a path containing NUL")
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Exercises the Linux kernel symlink traversal limit")
+def test_review_source_freshness_follows_long_linux_symlink_chain(tmp_path):
+    target = tmp_path / "result.fpvs"
+    target.write_bytes(b"result")
+    source_stat = target.stat()
+    path = target
+    for index in range(64):
+        link = tmp_path / f"link-{index}"
+        link.symlink_to(path.name)
+        path = link
+
+    with pytest.raises(OSError) as direct_lookup:
+        path.stat()
+    assert direct_lookup.value.errno == errno.ELOOP
+    rows = [{"path": path.name, "size_bytes": source_stat.st_size, "mtime_ns": source_stat.st_mtime_ns}]
+    assert frequency_qc._source_workbooks_are_current(tmp_path, rows)
 
 
 @pytest.fixture(autouse=True)
@@ -753,7 +871,7 @@ def test_condition_exclusion_survives_review_resume_and_is_reported_as_excluded(
         },
         processing_entries={},
     )
-    monkeypatch.setattr(frequency_qc, "_load_independent_qc_context", lambda _root: context)
+    monkeypatch.setattr(frequency_qc, "_load_independent_qc_context", lambda _root, **_options: context)
     report = run_frequency_domain_qc_review(project)
     apply_frequency_domain_qc_decision(
         project.project_root, report,

@@ -1,7 +1,9 @@
 """Native outcome bytes and independent live-admission/lifecycle controls."""
 from copy import deepcopy
 from dataclasses import replace
+import io
 import os
+from pathlib import Path
 from threading import Event, Lock, current_thread, main_thread
 import time
 
@@ -126,6 +128,87 @@ def test_credits_include_actual_small_metadata_but_never_load_dense_arrays(tmp_p
     legacy = tmp_path / "legacy.xlsx"
     legacy.write_bytes(b"Unsupported budget domain; native reader retains authority")
     assert pool.cell_validation_credit(legacy) is None
+
+
+def test_credit_opens_each_companion_once(tmp_path, monkeypatch):
+    plan, receipts = _fixture(tmp_path)
+    path = plan.recordings[0].cells[0].expected_workbook
+    descriptor = receipts[0]["workbook_write"]
+    companions = [tmp_path / descriptor[key]["path"] for key in ("spectral_companion", "condition_companion") if key in descriptor]
+    expected = pool.cell_validation_credit(path)
+    opened = []
+    original = io.open
+
+    def observed(file, *args, **kwargs):
+        if isinstance(file, (str, Path)) and Path(file) in companions:
+            opened.append(Path(file))
+        return original(file, *args, **kwargs)
+
+    monkeypatch.setattr(io, "open", observed)
+    assert expected is not None and pool.cell_validation_credit(path) == expected
+    assert opened == companions
+
+
+def test_credit_rejects_companion_replacement_before_final_signature(tmp_path, monkeypatch):
+    plan, receipts = _fixture(tmp_path)
+    path = plan.recordings[0].cells[0].expected_workbook
+    companion = tmp_path / receipts[0]["workbook_write"]["spectral_companion"]["path"]
+    replacement = tmp_path / "replacement.npz"
+    replacement.write_bytes(companion.read_bytes())
+    previous = companion.stat()
+    os.utime(replacement, ns=(previous.st_atime_ns, previous.st_mtime_ns))
+    original = pool._signature
+    signatures = 0
+
+    def replaced(target):
+        nonlocal signatures
+        if target == companion:
+            signatures += 1
+            if signatures == 2:
+                os.replace(replacement, target)
+        return original(target)
+
+    monkeypatch.setattr(pool, "_signature", replaced)
+    assert pool.cell_validation_credit(path) is None
+    assert signatures == 2
+
+
+def test_credit_rejects_in_place_footer_edit_between_bound_and_zip_reader(tmp_path, monkeypatch):
+    plan, receipts = _fixture(tmp_path)
+    path = plan.recordings[0].cells[0].expected_workbook
+    companion = tmp_path / receipts[0]["workbook_write"]["spectral_companion"]["path"]
+    original_signature = pool._signature
+    stamp = original_signature(companion)
+    original_zip = pool.zipfile.ZipFile
+
+    def corrupt_footer(source):
+        assert Path(source.name) == companion
+        previous = companion.stat()
+        with companion.open("r+b") as stream:
+            stream.seek(-22, os.SEEK_END)
+            stream.write(b"BAD!")
+        os.utime(companion, ns=(previous.st_atime_ns, previous.st_mtime_ns))
+        return original_zip(source)
+
+    # Model filesystems where an in-place rewrite can preserve the stat tuple.
+    monkeypatch.setattr(pool, "_signature", lambda target: stamp if target == companion else original_signature(target))
+    monkeypatch.setattr(pool.zipfile, "ZipFile", corrupt_footer)
+    assert pool.cell_validation_credit(path) is None
+
+
+def test_credit_declines_unbounded_directory_before_constructing_zip(tmp_path, monkeypatch):
+    plan, receipts = _fixture(tmp_path)
+    companion = tmp_path / receipts[0]["workbook_write"]["spectral_companion"]["path"]
+    with companion.open("r+b") as stream:
+        # The end record stores its directory size ten bytes before EOF.
+        stream.seek(-10, os.SEEK_END)
+        stream.write((2 * MIB).to_bytes(4, "little"))
+
+    def unexpected_zip(*_args):
+        pytest.fail("An unbounded directory reached ZipFile")
+
+    monkeypatch.setattr(pool.zipfile, "ZipFile", unexpected_zip)
+    assert pool.cell_validation_credit(plan.recordings[0].cells[0].expected_workbook) is None
 
 
 def test_unbounded_npy_shape_is_not_granted_a_small_credit(tmp_path):

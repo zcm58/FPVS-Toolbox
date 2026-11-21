@@ -155,8 +155,9 @@ def _same_rate(left: float, right: float) -> bool:
     )
 
 
-def _current_project_frequency_protocol(project_root: Path):
-    manifest = _read_manifest(project_root)
+def _current_project_frequency_protocol(project_root: Path, *, manifest: Mapping | None = None):
+    if manifest is None:
+        manifest = _read_manifest(project_root)
     raw_protocol = manifest.get("frequency_protocol")
     if raw_protocol is None:
         raise FullFftProvenanceError(
@@ -1303,20 +1304,35 @@ def _saved_full_fft_provenance(root: Path) -> FullFftProvenance:
     return _record_from_metadata(root, metadata)
 
 
+def _validated_current_protocol(root: Path, manifest: Mapping | None = None):
+    try:
+        return _current_project_frequency_protocol(root, manifest=manifest)
+    except FullFftProvenanceError as exc:
+        raise FullFftProvenanceStaleError(
+            "Neutral FullFFT provenance cannot be validated because the current "
+            f"project frequency protocol is unavailable: {exc}"
+        ) from exc
+
+
 def _require_current_full_fft_record(
     root: Path,
     record: FullFftProvenance,
     *,
     dataset_index: ProjectDatasetIndex | None,
 ) -> FullFftProvenance:
-    try:
-        protocol = _current_project_frequency_protocol(root)
-    except FullFftProvenanceError as exc:
-        raise FullFftProvenanceStaleError(
-            "Neutral FullFFT provenance cannot be validated because the current "
-            f"project frequency protocol is unavailable: {exc}"
-        ) from exc
-    index = _load_dataset_index(root, dataset_index)
+    if dataset_index is None:
+        try:
+            index = _load_dataset_index(root, None)
+        except FullFftProvenanceError:
+            # Retain the original protocol diagnostic when both checks fail.
+            _validated_current_protocol(root)
+            raise
+        # Index discovery has freshly read project.json after the saved record.
+        protocol = _validated_current_protocol(root, index.manifest if index.project_root == root else None)
+    else:
+        # A caller-supplied index can predate a protocol edit.
+        protocol = _validated_current_protocol(root)
+        index = _load_dataset_index(root, dataset_index)
     try:
         current = _source_snapshot(root, index)
     except FullFftProvenanceError:

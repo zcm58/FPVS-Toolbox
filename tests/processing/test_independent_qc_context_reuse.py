@@ -132,13 +132,73 @@ def test_current_context_reuses_exact_detached_evidence_only_in_scope(ledger_pro
     assert len(calls) == 4
 
 
-def test_ledger_bytes_invalidate_even_when_all_stat_fields_match(ledger_project, monkeypatch):
+def test_large_context_reuses_only_its_detached_source_identity(ledger_project, monkeypatch):
     root = ledger_project
-    path = ledger_io.ledger_path(root)
-    expected = _bytes(root)
+    expected = qc._read_independent_qc_context(root)
+    # The 450-cell MCCTR case can retain the source identity but exceeds the
+    # full-context cap. Model its admission boundary with this small fixture.
+    monkeypatch.setattr(qc, "_INDEPENDENT_QC_CACHE_MAX_BYTES", 4096)
+    assert not qc._independent_qc_context_fits_cache(expected)
+    assert qc._independent_qc_context_fits_cache(qc._IndependentQcContext(expected.source_identity, {}, {}))
     calls = _count_normalization(monkeypatch)
     with context.post_processing_validation_scope():
-        assert _bytes(root) == expected
+        first = qc._load_independent_qc_context(root, identity_only=True).source_identity
+        assert first == expected.source_identity
+        first["processing_entries"].clear()
+        assert qc._load_independent_qc_context(root, identity_only=True).source_identity == expected.source_identity
+        assert len(calls) == 1
+        full = qc._load_independent_qc_context(root)
+        assert full == expected and full.cells
+        assert len(calls) == 2
+    assert qc._load_independent_qc_context(root, identity_only=True).source_identity == expected.source_identity
+    assert len(calls) == 3
+
+
+def test_identity_hit_rejects_edit_during_detachment(ledger_project, monkeypatch):
+    root = ledger_project
+    monkeypatch.setattr(qc, "_INDEPENDENT_QC_CACHE_MAX_BYTES", 4096)
+    original_copy = context.deepcopy
+    replacement = ledger_io.load_ledger(root)
+    del replacement["entries"]["P01__visit_1"]["interpolation_burden"]
+    expected = qc._read_independent_qc_context(root, ledger_snapshot=replacement).source_identity
+    with context.post_processing_validation_scope():
+        first = qc._load_independent_qc_context(root, identity_only=True).source_identity
+        assert first != expected
+
+        def edit_during_copy(value):
+            ledger_io.save_ledger(root, replacement)
+            return original_copy(value)
+
+        monkeypatch.setattr(context, "deepcopy", edit_during_copy)
+        assert qc._load_independent_qc_context(root, identity_only=True).source_identity == expected
+
+
+def test_small_context_can_serve_full_qc_after_an_identity_check(ledger_project, monkeypatch):
+    expected = qc._read_independent_qc_context(ledger_project)
+    calls = _count_normalization(monkeypatch)
+    with context.post_processing_validation_scope():
+        result = qc._load_independent_qc_context(ledger_project, identity_only=True)
+        assert result.source_identity == expected.source_identity
+        assert result.cells == {} and result.processing_entries == {}
+        assert qc._load_independent_qc_context(ledger_project) == expected
+        assert qc._load_independent_qc_context(ledger_project, identity_only=True) == result
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("identity_only", [False, True])
+def test_ledger_bytes_invalidate_even_when_all_stat_fields_match(ledger_project, monkeypatch, identity_only):
+    root = ledger_project
+    path = ledger_io.ledger_path(root)
+    if identity_only:
+        monkeypatch.setattr(qc, "_INDEPENDENT_QC_CACHE_MAX_BYTES", 4096)
+
+    def read():
+        return pickle.dumps(qc._load_independent_qc_context(root, identity_only=identity_only), protocol=5)
+
+    expected = read()
+    calls = _count_normalization(monkeypatch)
+    with context.post_processing_validation_scope():
+        assert read() == expected
         old_stat = path.stat()
         original_stat = Path.stat
         data = path.read_bytes().replace(b"\n", b" ", 1)
@@ -149,7 +209,7 @@ def test_ledger_bytes_invalidate_even_when_all_stat_fields_match(ledger_project,
                 old_stat if self == path else original_stat(self, *a, **kw)
             ),
         )
-        assert _bytes(root) == expected
+        assert read() == expected
         assert len(calls) == 2
 
 

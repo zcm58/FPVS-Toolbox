@@ -394,14 +394,68 @@ same 400 complete identities. Freshness checks at separate Stats-ready
 stages remain independent. On the local Windows SSD, an in-place edit with
 restored modification time could retain even the native file change timestamp.
 
-A remaining candidate in completed-output validation is the RAM estimate.
-It opens each archive to check its ZIP footer, then opens it again to inspect
-member headers. Sharing those opens would require testing concurrent replacement,
-the existing size limits and the serial fallback on low-memory machines.
-
 Verification passed the processing (3,873), project I/O (1,369), Stats (497),
 publication maps (138), LORETA (860) and precommit (440) test suites. Counts
 give passing cases per suite and can overlap.
+
+#### Completed-output validation and repeated review checks
+
+The memory estimate for completed-output validation now reads the ZIP footer
+and NumPy member headers through one file handle. It compares the declared
+size to the initial file signature and checks the signature again after
+reading. Damaged or changing inputs still use the serial validation path.
+On the signed MCCTR project, all 450 memory estimates matched the previous
+build. Reconciliation returned the same 400 ready and 50 excluded cells.
+The entire 2,319,282-byte serialized outcome matched the signed result.
+Archive opens during reconciliation fell from 2,400 to 1,600 and file status
+queries from 4,400 to 3,600. One paired run took 11.47 and 11.04 seconds.
+Both runs used a ceiling of 16. Eight distinct threads executed the cell
+validator in each run, including the caller handling serial fallbacks.
+
+The saved frequency-review check can now retain the independent QC source
+identity for a cohort whose full ledger-derived context exceeds the cache
+limit. It keys the identity to the exact ledger bytes and live path, and
+checks the content again after copying. The nine checks in one MCCTR
+Stats-ready export decode and validate the 28,712,201-byte ledger once.
+The full export still performs all 36 ledger reads. Each of the nine
+checks still examines all 400 source files for changes. Existing files with
+ordinary paths now need only their target's size and modification time.
+Frequency review also reads its two settings from one project manifest.
+Fresh FullFFT index discovery supplies the current protocol from the manifest
+it just loaded. A caller-supplied index still requires a fresh protocol read.
+
+The internal-SSD Stats-ready writer comparison used the pushed build
+`ce734202`, 69 participants, six conditions and 400 native results. Each run
+started a new process and application cache with a 16-worker ceiling. Windows
+managed its own file cache. The baseline, candidate, candidate and baseline
+runs took 136.22, 124.12, 124.16 and 135.16 seconds. Mean export time fell
+from 135.69 to 124.14 seconds (11.55 seconds or 8.51%). After the final
+small-cohort and exceptional-path checks were in place and regression tests
+had finished, the exact final source took 123.38 seconds, followed immediately
+by a 134.20-second baseline (10.83 seconds or 8.07% less elapsed time).
+A 145.28-second final-source run overlapped regression testing and contributes
+only to the output and read-count checks. Manifest reads fell
+from 73 to 70, saving 25,332,711 bytes of application reads per export.
+The four sheets, 9,422 cells, 2,481 numeric values, styles and all three
+FullFFT provenance checks matched across all seven exports. The XLSX package
+matched byte for byte after normalizing its creation and modification times
+(SHA-256 `f2ea671f691a918127406bb26441013461f1782bf21da1dac2e0d1e4b0a4e8f4`).
+Timing covered validation through workbook write. Raw EEG processing and
+project-wide archival occur outside this worker.
+
+The next native writer target is full-cell validation of the compact condition
+archive. The writer opens it again for each of the eight MCCTR sheets and
+constructs a DataFrame for each one solely to validate its decoded columns.
+A shared checksummed snapshot could remove those reopens. Any implementation
+needs to preserve column decoding, mutation detection and error order, as well
+as memory limits for large archives. A separate Stats candidate is the pair
+of companion identity checks that each read the same native result manifest.
+
+The focused processing (3,891), project I/O (1,369), Stats (497), publication
+maps (138), LORETA (860) and repository precommit (248) suites passed.
+These counts overlap. Path regressions cover missing targets, embedded NULs
+and fallback after a failed direct lookup. The real 64-link chain test is
+Linux-specific. The Windows replay also exercised a directory junction.
 
 #### Forced full reprocessing across cache temperatures
 
