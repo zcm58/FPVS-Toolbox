@@ -587,6 +587,7 @@ def _group_significant_selection_cache_key(
     participant_group_ids: Mapping[str, str] | None = None,
     declared_group_ids: Sequence[str] | None = None,
     project_processing_signature_hash: str | None = None,
+    cache_request: GroupHarmonicCacheRequest | None = None,
     recording_assignments: Mapping[str, Mapping[str, object]] | None = None,
     declared_session_ids: Sequence[str] | None = None,
     oddball_frequency_hz: float | None = None,
@@ -603,11 +604,13 @@ def _group_significant_selection_cache_key(
 ) -> GroupSignificantSelectionCacheKey:
     subject_key = tuple(str(subject) for subject in subjects)
     condition_key = tuple(str(condition) for condition in conditions)
+    validated = _validated_workbook_signatures(cache_request)
     workbook_signatures = tuple(
         _workbook_signature(
             subject=subject,
             condition=condition,
             file_path=subject_data.get(subject, {}).get(condition),
+            validated=validated.get((subject, condition)),
         )
         for subject in subject_key
         for condition in condition_key
@@ -1182,11 +1185,49 @@ def _pooling_cells_from_metadata(value: object) -> tuple[HarmonicPoolingCell, ..
     return tuple(cells)
 
 
+def _validated_workbook_signatures(
+    request: GroupHarmonicCacheRequest | None,
+) -> dict[tuple[str, str], WorkbookSignature]:
+    """Project this calculation's validated manifest rows into memory-key form."""
+    # Warning callbacks run between request construction and memory-key lookup.
+    # Keep the independent read if caller code ran at that boundary.
+    if request is None or request.ledger_warnings:
+        return {}
+    rows = request.fingerprint.get("source_workbooks")
+    if not isinstance(rows, list):
+        return {}
+    signatures = {}
+    for row in rows:
+        # Blank paths and failed stat calls keep the normal missing-file path.
+        if not isinstance(row, dict) or not row.get("path"):
+            continue
+        if row.get("size_bytes") is None or row.get("mtime_ns") is None:
+            continue
+        subject, condition = row["subject"], row["condition"]
+        signatures[subject, condition] = WorkbookSignature(
+            subject=subject,
+            condition=condition,
+            path=str(request.project_root / row["path"]),
+            size_bytes=row["size_bytes"],
+            mtime_ns=row["mtime_ns"],
+            spectral_companion_json=_companion_signature_json(row.get("spectral_companion")),
+            condition_companion_json=_companion_signature_json(row.get("condition_companion")),
+        )
+    return signatures
+
+
+def _companion_signature_json(companion: object) -> str | None:
+    if companion is None:
+        return None
+    return json.dumps(companion, sort_keys=True, separators=(",", ":"))
+
+
 def _workbook_signature(
     *,
     subject: str,
     condition: str,
     file_path: str | None,
+    validated: WorkbookSignature | None = None,
 ) -> WorkbookSignature:
     from Main_App.io.condition_data import condition_companion_identity
     from Main_App.io.spectral_data import spectral_companion_identity
@@ -1214,6 +1255,16 @@ def _workbook_signature(
             size_bytes=None,
             mtime_ns=None,
         )
+    # A link to an anchor can have distinct companions beside its lexical
+    # path. Only reuse the project reader's resolved-path evidence when both
+    # lookups address the same path, with the same current stat.
+    if (
+        validated is not None
+        and validated.path == resolved == str(path.absolute())
+        and validated.size_bytes == stat.st_size
+        and validated.mtime_ns == stat.st_mtime_ns
+    ):
+        return validated
     companion = spectral_companion_identity(path)
     condition_companion = condition_companion_identity(path)
     return WorkbookSignature(
@@ -1222,16 +1273,8 @@ def _workbook_signature(
         path=resolved,
         size_bytes=int(stat.st_size),
         mtime_ns=int(stat.st_mtime_ns),
-        spectral_companion_json=(
-            json.dumps(companion, sort_keys=True, separators=(",", ":"))
-            if companion is not None
-            else None
-        ),
-        condition_companion_json=(
-            json.dumps(condition_companion, sort_keys=True, separators=(",", ":"))
-            if condition_companion is not None
-            else None
-        ),
+        spectral_companion_json=_companion_signature_json(companion),
+        condition_companion_json=_companion_signature_json(condition_companion),
     )
 
 
@@ -1247,6 +1290,7 @@ def build_group_significant_harmonic_selection(
     max_freq: float | None = None,
     project_root: str | Path | None = None,
     force_recalculate: bool = False,
+    _on_cache_request: Callable[[GroupHarmonicCacheRequest], None] | None = None,
     participant_group_ids: Mapping[str, str] | None = None,
     declared_group_ids: Sequence[str] | None = None,
     recording_assignments: Mapping[str, Mapping[str, object]] | None = None,
@@ -1375,6 +1419,10 @@ def build_group_significant_harmonic_selection(
         declared_session_ids=declared_session_ids,
         oddball_frequency_hz=oddball_frequency_hz,
     )
+    # The processing owner records this request and revalidates at publication.
+    # Other callers keep their independent verification when building the key.
+    if cache_request is not None and _on_cache_request is not None:
+        _on_cache_request(cache_request)
     _log_project_cache_warnings(cache_request, log_func)
     cache_key = _group_significant_selection_cache_key(
         subjects=subjects,
@@ -1402,6 +1450,7 @@ def build_group_significant_harmonic_selection(
             if cache_request is not None
             else None
         ),
+        cache_request=cache_request if _on_cache_request is not None else None,
     )
     if force_recalculate:
         log_func(

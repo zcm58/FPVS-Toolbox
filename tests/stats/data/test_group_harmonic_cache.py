@@ -119,6 +119,140 @@ def _multi_request(
     )
 
 
+def test_memory_key_reuses_exact_managed_identities_in_caller_order(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from Main_App.io import condition_data, spectral_data
+    from Tools.Stats.analysis import dv_policy_group_significant as policy
+
+    root = tmp_path / "Study"
+    _write_manifest(root)
+    workbook = root / "S2_Face.xlsx"
+    descriptor = _write_companion_workbook(workbook)
+    external = tmp_path / "S1_Object.xlsx"
+    _write_cache_workbook(external)
+    monkeypatch.chdir(tmp_path)
+    subjects = ["S2", "S1"]
+    conditions = ["Object", "Face"]
+    subject_data = {
+        "S1": {"Object": str(external), "Face": str(root / "absent.xlsx")},
+        "S2": {"Face": str(workbook.relative_to(tmp_path))},
+    }
+    request = _multi_request(
+        root, subjects=subjects, conditions=conditions, subject_data=subject_data,
+    )
+    assert request is not None
+    kwargs = dict(
+        subjects=subjects, conditions=conditions, subject_data=subject_data,
+        rois={}, base_frequency_hz=6.0, max_freq=8.4,
+        settings=normalize_dv_policy({"name": GROUP_SIGNIFICANT_POLICY_NAME}),
+    )
+    independent = policy._group_significant_selection_cache_key(**kwargs)
+    assert [(row.subject, row.condition) for row in independent.workbooks] == [
+        ("S2", "Object"), ("S2", "Face"), ("S1", "Object"), ("S1", "Face"),
+    ]
+    assert json.loads(independent.workbooks[1].spectral_companion_json) == descriptor
+    for module, name in (
+        (condition_data, "condition_companion_identity"),
+        (spectral_data, "spectral_companion_identity"),
+    ):
+        monkeypatch.setattr(module, name, lambda _path: pytest.fail("redundant companion read"))
+
+    assert policy._group_significant_selection_cache_key(
+        **kwargs, cache_request=request,
+    ) == independent
+
+
+def test_memory_key_revalidates_changed_anchor_and_lexical_companion_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import os
+
+    from Main_App.io import spectral_data
+    from Tools.Stats.analysis import dv_policy_group_significant as policy
+
+    root = tmp_path / "Study"
+    _write_manifest(root)
+    workbook = root / "S1_Face.xlsx"
+    _write_companion_workbook(workbook)
+    request = _request(root, workbook)
+    assert request is not None
+    validated = policy._validated_workbook_signatures(request)["S1", "Face"]
+    alias = root / "subdir" / ".." / workbook.name
+    (root / "subdir").mkdir()
+    calls = []
+    reader = spectral_data.spectral_companion_identity
+
+    def observe(path):
+        calls.append(path)
+        return reader(path)
+
+    monkeypatch.setattr(spectral_data, "spectral_companion_identity", observe)
+    assert policy._workbook_signature(
+        subject="S1", condition="Face", file_path=str(alias), validated=validated,
+    ) == validated
+    assert calls == [alias]
+
+    stamp = workbook.stat()
+    os.utime(workbook, ns=(stamp.st_atime_ns, stamp.st_mtime_ns + 2_000_000_000))
+    after = policy._workbook_signature(
+        subject="S1", condition="Face", file_path=str(workbook), validated=validated,
+    )
+    assert after.mtime_ns != validated.mtime_ns
+    assert calls == [alias, workbook]
+
+
+def test_memory_key_checks_companions_beside_symlinked_anchor(tmp_path: Path) -> None:
+    from Main_App.io.spectral_data import SpectralDataError
+    from Tools.Stats.analysis import dv_policy_group_significant as policy
+
+    root = tmp_path / "Study"
+    _write_manifest(root)
+    workbook = root / "S1_Face.xlsx"
+    _write_companion_workbook(workbook)
+    alias = tmp_path / workbook.name
+    try:
+        alias.symlink_to(workbook)
+    except OSError as exc:
+        pytest.skip(f"File symlinks are unavailable: {exc}")
+    request = _request(root, alias)
+    assert request is not None
+    validated = policy._validated_workbook_signatures(request)["S1", "Face"]
+    with pytest.raises(SpectralDataError, match="missing or has changed"):
+        policy._workbook_signature(
+            subject="S1", condition="Face", file_path=str(alias), validated=validated,
+        )
+
+
+def test_processing_warning_callback_can_invalidate_a_validated_companion(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from Main_App.io.spectral_data import SpectralDataError
+    from Tools.Stats.analysis import dv_policy_group_significant as policy
+
+    _write_manifest(tmp_path)
+    workbook = tmp_path / "S1_Face.xlsx"
+    descriptor = _write_companion_workbook(workbook)
+    companion = tmp_path / descriptor["path"]
+    monkeypatch.setattr(cache_mod, "_processing_ledger_warnings", lambda *_: ("check ledger",))
+    requests = []
+
+    def change_companion(message):
+        if message == "Warning: check ledger":
+            companion.unlink()
+
+    with pytest.raises(SpectralDataError, match="missing or has changed"):
+        policy.build_group_significant_harmonic_selection(
+            subjects=["S1"], conditions=["Face"], subject_data={"S1": {"Face": str(workbook)}},
+            rois={}, base_frequency_hz=6.0, project_root=tmp_path,
+            log_func=change_companion, _on_cache_request=requests.append,
+            settings=normalize_dv_policy({"name": GROUP_SIGNIFICANT_POLICY_NAME}),
+        )
+    assert len(requests) == 1
+    row, = requests[0].fingerprint["source_workbooks"]
+    assert row["spectral_companion"] == descriptor
+
+
 def _write_frequency_domain_qc_state(
     project_root: Path,
     *,

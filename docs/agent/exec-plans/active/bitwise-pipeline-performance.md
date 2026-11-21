@@ -175,16 +175,37 @@ The independently verified run-specific references belong to each project's
 own processing ledger. The original build's 65 reprocessed participants
 produced numerical differences in all 376 original condition outputs.
 
-One further group-stage target is repeated verification of immutable
-condition companions. In a real 400-condition read, two consecutive
-harmonic-request constructions each performed 800 full SHA-256 checks over
-5,053,537,880 bytes. They took 11.26s and 16.25s. The selection code can
-construct the request four times. Sharing an already validated request
-within a calculation and rebuilding it at publication could avoid two
-passes (10.11 GB of logical reads). This remains a follow-up. A separate
-identity-cache prototype returned identical request and selection metadata,
-but a file generation check could miss edits by an open writer. It remains
-outside production. These measurements cover request construction only.
+#### Group harmonic validation
+
+The first 400-condition audit found each request hashed 800 companions
+covering 5,053,537,880 bytes. Two consecutive builds took 11.26s and 16.25s.
+The processing worker now uses the request built after frequency-domain
+exclusions for its in-memory key, saved-selection lookup and canonical
+metadata. It builds a fresh request before publishing the staged workbook
+and active selection. An intervening manifest change triggers a retry under
+the project lock. The provisional and standalone selection paths keep their
+independent workbook checks.
+
+On the internal SSD, each MCCTR stage run verified 1,600 fewer companion
+digests and read 10,107,075,760 fewer bytes for hashing. Both builds emitted
+the same processing-version warning, so the subsequent independent check
+for the memory key remained active. Forced recalculation across the 400
+participant-condition spectra, including workbook and manifest publication,
+took 241.36s before and 199.87s after (41.48s saved, 17.19%). Every score,
+mask, selected frequency and input/selection fingerprint matched. Only the
+generated save and packaging timestamps differed.
+
+Revalidating a saved selection, from stage entry through publication, took
+136.30s before and 100.50s after. Running the builds in reverse order gave
+133.07s before and 98.99s after. Across the two pairs the mean fell from
+134.68s to 99.74s (34.94s saved, 25.94%). For both saved pairs and the
+forced pair, the complete project JSON serialized to identical bytes after
+substituting the verified save timestamps. Workbook members and scientific
+cells also matched after accounting for those timestamps and workbook
+creation times. These measurements cover the harmonic stage of MCCTR
+processing on the 128 GB workstation.
+
+#### Forced full reprocessing across cache temperatures
 
 Both builds' full warm reprocess reused all 69 preprocessed FIF files.
 Their ordinary cache writer uses MNE's single-precision default, while the

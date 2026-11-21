@@ -456,6 +456,7 @@ tests = [
   "tests/stats/analysis/test_summary_utils_mixed_model.py",
   "tests/stats/analysis/test_summary_utils_posthoc_directions.py",
   "tests/stats/controller/test_native_pipeline_controller.py",
+  "tests/stats/data/test_group_harmonic_cache.py",
   "tests/stats/data/test_stats_project_context.py",
   "tests/stats/io/test_stats_ready_export.py",
   "tests/stats/io/test_repeated_session_export.py",

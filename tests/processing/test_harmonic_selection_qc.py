@@ -263,7 +263,15 @@ def test_processing_harmonic_selection_qc_writes_quality_check_workbook_and_cach
         lambda: {"Posterior": ["O1", "O2"], "Central": ["FZ"]},
     )
 
+    from Tools.Stats.data import group_harmonic_cache
+
+    workbook_fingerprints = Mock(wraps=group_harmonic_cache._workbook_fingerprint)
+    monkeypatch.setattr(group_harmonic_cache, "_workbook_fingerprint", workbook_fingerprints)
     report = harmonic_selection_qc.run_processing_harmonic_selection_qc(project)
+    # Each pass validates both subjects: once for selection and once at publication.
+    assert [call.kwargs["subject"] for call in workbook_fingerprints.call_args_list] == [
+        "S1", "S2", "S1", "S2",
+    ]
 
     assert report.workbook_path == project_root / "Quality Check" / "Harmonic_Selection_Summary.xlsx"
     assert report.workbook_path.exists()
@@ -313,6 +321,157 @@ def test_processing_harmonic_selection_qc_writes_quality_check_workbook_and_cach
     loaded = harmonic_selection_qc.load_processing_harmonic_selection(project)
     assert loaded.selected_harmonics_hz == pytest.approx([1.2, 2.4, 3.6, 4.8, 7.2])
     assert loaded.selection_cache_source == "saved_processing_metadata"
+
+
+@pytest.fixture
+def managed_harmonic_project(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[Project, Path]:
+    from Main_App.io.spectral_data import spectral_manifest_frame, write_spectral_companion
+
+    manifest_path = tmp_path / "project.json"
+    manifest_path.write_text(json.dumps({
+        "schema_version": "2.1.0", "subfolders": {"excel": "1 - Excel Data Files"},
+        "event_map": {"Faces": 1}, "preprocessing": {},
+    }), encoding="utf-8")
+    workbook = tmp_path / "1 - Excel Data Files" / "Faces" / "S1_Faces_Results.xlsx"
+    workbook.parent.mkdir(parents=True)
+    _write_group_policy_workbook(workbook, scale=1)
+    fft_sheet = "FullFFT Amplitude (uV)"
+    descriptor = write_spectral_companion(workbook, {fft_sheet: pd.read_excel(workbook, sheet_name=fft_sheet)})
+    companion = workbook.parent / descriptor["path"]
+    with pd.ExcelWriter(workbook, engine="openpyxl", mode="a") as writer:
+        spectral_manifest_frame(descriptor).to_excel(writer, sheet_name="Spectral Data", index=False)
+    monkeypatch.setattr(harmonic_selection_qc, "load_rois_from_settings", lambda: {"Posterior": ["O1", "O2"]})
+    return Project.load(tmp_path), companion
+
+
+@pytest.mark.parametrize(("change", "expected_error"), [
+    ("spectral_companion", "checksum"),
+    ("release", "inputs changed"),
+    ("profile", "inputs changed"),
+    ("saved_group_entry", "could not be saved"),
+    ("manifest_write", "injected manifest write failure"),
+])
+def test_group_selection_rechecks_inputs_before_replacing_published_results(
+    managed_harmonic_project: tuple[Project, Path],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    change: str,
+    expected_error: str,
+) -> None:
+    from Main_App.io.xlsx_selected_reader import xlsx_read_cache_scope
+
+    project, companion = managed_harmonic_project
+    manifest_path = tmp_path / "project.json"
+
+    def accepted_record():
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        return manifest["tools"]["processing"]["harmonic_selection"]
+
+    previous = harmonic_selection_qc.run_processing_harmonic_selection_qc(project)
+    previous_workbook = previous.workbook_path.read_bytes()
+    previous_record = accepted_record()
+    write_workbook = harmonic_selection_qc.write_harmonic_selection_workbook
+    written_paths = []
+
+    def change_after_write(path, metadata):
+        written = write_workbook(path, metadata)
+        written_paths.append(written)
+        if change == "spectral_companion":
+            stat = companion.stat()
+            with companion.open("r+b") as stream:
+                byte = stream.read(1)[0]
+                stream.seek(0)
+                stream.write(bytes([byte ^ 1]))
+            os.utime(companion, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+            assert companion.stat().st_size == stat.st_size
+            assert companion.stat().st_mtime_ns == stat.st_mtime_ns
+        elif change == "release":
+            outcomes, coverage, _ = harmonic_selection_qc._current_final_release_context(tmp_path)
+            monkeypatch.setattr(
+                harmonic_selection_qc, "_current_final_release_context",
+                lambda _root: (outcomes, coverage, SimpleNamespace(fingerprint="new-release")),
+            )
+        elif change == "profile":
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["preprocessing"]["harmonic_selection_profile"] = HARMONIC_PROFILE_SIGNIFICANT_ONLY_ID
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+        elif change == "saved_group_entry":
+            assert clear_cached_group_harmonic_selections(tmp_path) == 1
+        else:
+            from zipfile import ZipFile
+            from Main_App.projects import manifest_store
+
+            # Both spreadsheets are valid and differ even on a fast same-second run.
+            with ZipFile(written, "a") as archive:
+                archive.comment = b"second publication"
+            assert written.read_bytes() != previous_workbook
+            monkeypatch.setattr(harmonic_selection_qc, "_now_utc_iso", lambda: "2030-01-01T00:00:00Z")
+
+            def reject_manifest_write(_temporary, _target):
+                raise PermissionError("injected manifest write failure")
+
+            monkeypatch.setattr(manifest_store, "_replace_manifest", reject_manifest_write)
+        return written
+
+    monkeypatch.setattr(harmonic_selection_qc, "write_harmonic_selection_workbook", change_after_write)
+    with xlsx_read_cache_scope(), pytest.raises((RuntimeError, ValueError, PermissionError), match=expected_error):
+        harmonic_selection_qc.run_processing_harmonic_selection_qc(project, force_recalculate=True)
+
+    assert len(written_paths) == 1
+    assert written_paths[0].is_relative_to(tmp_path)
+    assert written_paths[0] != previous.workbook_path
+    assert not written_paths[0].exists()
+    assert previous.workbook_path.read_bytes() == previous_workbook
+    assert accepted_record() == previous_record
+
+
+@pytest.mark.parametrize("edit", ["event_map", "name"])
+def test_group_publication_rechecks_concurrent_manifest_edit(
+    managed_harmonic_project: tuple[Project, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    edit: str,
+) -> None:
+    project, _ = managed_harmonic_project
+    manifest_path = project.project_root / "project.json"
+    first = harmonic_selection_qc.run_processing_harmonic_selection_qc(project)
+    previous_bytes = first.workbook_path.read_bytes()
+    previous_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    edited_value = {"Faces": 2} if edit == "event_map" else "Updated display name"
+    build_request = harmonic_selection_qc._processing_cache_request
+    publication_keys = []
+
+    def edit_after_request(inputs):
+        request = build_request(inputs)
+        if not publication_keys:
+            # A cooperating writer finishes after the request read the original
+            # manifest and before the publisher acquires its manifest lock.
+            from Main_App.projects import project_manifest_transaction
+
+            with project_manifest_transaction(manifest_path) as transaction:
+                current = json.loads(manifest_path.read_text(encoding="utf-8"))
+                current[edit] = edited_value
+                transaction.write(current)
+        publication_keys.append(request.cache_key)
+        return request
+
+    monkeypatch.setattr(harmonic_selection_qc, "_processing_cache_request", edit_after_request)
+    if edit == "event_map":
+        with pytest.raises(RuntimeError, match="inputs changed"):
+            harmonic_selection_qc.run_processing_harmonic_selection_qc(project, force_recalculate=True)
+        assert first.workbook_path.read_bytes() == previous_bytes
+    else:
+        result = harmonic_selection_qc.run_processing_harmonic_selection_qc(project, force_recalculate=True)
+        assert result.selection_metadata["selection_fingerprint"] == first.selection_metadata["selection_fingerprint"]
+
+    assert len(publication_keys) == 2
+    assert (publication_keys[0] == publication_keys[1]) == (edit == "name")
+    published = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert published[edit] == edited_value
+    if edit == "event_map":
+        assert published["tools"]["processing"] == previous_manifest["tools"]["processing"]
 
 
 def test_processing_harmonic_selection_survives_project_event_order_reload(

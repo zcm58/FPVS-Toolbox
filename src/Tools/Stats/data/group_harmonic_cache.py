@@ -112,6 +112,14 @@ class GroupHarmonicCacheRequest:
     project_processing_signature_hash: str
     ledger_warnings: tuple[str, ...] = ()
 
+    def matches_scientific_inputs(self, other: GroupHarmonicCacheRequest) -> bool:
+        """Apply the same ordering and workflow compatibility as durable lookup."""
+        return self.project_root == other.project_root and (
+            self.cache_key == other.cache_key
+            or _fingerprint_without_workflow_state(self.fingerprint)
+            == _fingerprint_without_workflow_state(other.fingerprint)
+        )
+
 
 @dataclass(frozen=True)
 class GroupHarmonicCacheHit:

@@ -326,6 +326,11 @@ Rules:
   processing. Recalculation reads existing FullFFT/BCA workbooks and resumes
   selection-dependent exports; it never requires EEG preprocessing or FFT
   regeneration.
+- Within one processing-time adaptive selection, the memory-cache key and
+  canonical metadata can use the workbook identities verified after frequency
+  exclusions. Before publishing, Toolbox independently verifies the companions,
+  current settings, reviewed release and saved selection. A changed input
+  leaves the previous accepted selection and QC workbook available.
 - Processing completion and explicit Settings recalculation must verify that
   the exact current fingerprint was persisted to `project.json` before
   reporting success. An in-memory selection alone is insufficient because

@@ -7,12 +7,16 @@ import hashlib
 import json
 import logging
 import math
+import shutil
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any, Callable, Mapping, Sequence
 
 
+from Main_App.io.atomic_write import replace_with_retry
+from Main_App.io.xlsx_selected_reader import xlsx_read_cache_scope
 from Main_App.projects import (
     project_manifest_transaction,
     ProjectDatasetIndex,
@@ -269,7 +273,12 @@ def run_processing_harmonic_selection_qc(
         if spectral_eligibility_fingerprint
         else None
     )
+    calculation_request: GroupHarmonicCacheRequest | None = None
     if settings.name == GROUP_SIGNIFICANT_POLICY_NAME:
+        def capture_request(request: GroupHarmonicCacheRequest) -> None:
+            nonlocal calculation_request
+            calculation_request = request
+
         expected_scalp_channels_by_subject_condition = {
             (cell.recording_id, cell.condition_label): tuple(
                 cell.source_evidence.expected_scalp_channels
@@ -289,6 +298,7 @@ def run_processing_harmonic_selection_qc(
             max_freq=max_frequency_hz,
             project_root=project_root,
             force_recalculate=force_recalculate,
+            _on_cache_request=capture_request,
             participant_group_ids=(
                 inputs.participant_group_ids
                 if _inputs_are_repeated(inputs)
@@ -331,7 +341,7 @@ def run_processing_harmonic_selection_qc(
                 "was left unchanged."
             )
         metadata = selection.to_metadata()
-        _require_persisted_group_harmonic_selection(inputs)
+        _require_persisted_group_harmonic_selection(calculation_request)
     else:
         dv_metadata: dict[str, object] = {}
         fixed_data = _prepare_fixed_predefined_bca_data(
@@ -359,14 +369,11 @@ def run_processing_harmonic_selection_qc(
         inputs,
         metadata,
         final_release_metadata=release_metadata,
+        cache_request=calculation_request,
     )
-    qc_folder = project_root / QUALITY_CHECK_FOLDER
-    qc_folder.mkdir(parents=True, exist_ok=True)
-    workbook_path = write_harmonic_selection_workbook(
-        qc_folder / HARMONIC_SELECTION_QC_WORKBOOK_NAME,
-        metadata,
+    workbook_path = _publish_harmonic_selection_workbook(
+        project, inputs, metadata, calculation_request, release_metadata,
     )
-    _persist_processing_harmonic_selection(inputs, metadata)
     return ProcessingHarmonicSelectionReport(
         workbook_path=workbook_path,
         selection_metadata=metadata,
@@ -374,26 +381,69 @@ def run_processing_harmonic_selection_qc(
     )
 
 
-def _require_persisted_group_harmonic_selection(
+def _publish_harmonic_selection_workbook(
+    project: Any,
     inputs: ProcessingHarmonicSelectionInputs,
+    metadata: Mapping[str, object],
+    calculation_request: GroupHarmonicCacheRequest | None,
+    release_metadata: Mapping[str, object],
+) -> Path:
+    """Verify the finished calculation before replacing the workbook and active record."""
+    project_root = inputs.project_root
+    qc_folder = project_root / QUALITY_CHECK_FOLDER
+    qc_folder.mkdir(parents=True, exist_ok=True)
+    workbook_path = qc_folder / HARMONIC_SELECTION_QC_WORKBOOK_NAME
+    with TemporaryDirectory(prefix=".harmonics-", dir=qc_folder) as staging:
+        staged = write_harmonic_selection_workbook(
+            Path(staging) / workbook_path.name, metadata,
+        )
+        # Reopen the companions at publication, even if this worker has a
+        # cached header for a file with the same size and modification time.
+        manifest_path = project_root / "project.json"
+        manifest_snapshot = capture_validation_files([manifest_path], hash_contents=True)
+        with xlsx_read_cache_scope():
+            current_request = _processing_cache_request(inputs)
+            with project_manifest_transaction(manifest_path):
+                # A project writer may have changed the cohort while its
+                # companions were being read. Only that race requires a retry.
+                if not validation_files_unchanged(manifest_snapshot):
+                    with xlsx_read_cache_scope():
+                        current_request = _processing_cache_request(inputs)
+                current_release = _current_final_release_metadata(project_root)
+                if calculation_request is not None:
+                    if (
+                        not calculation_request.matches_scientific_inputs(current_request)
+                        or current_release != release_metadata
+                        or _harmonic_selection_settings(project) != inputs.settings
+                    ):
+                        raise RuntimeError(
+                            "Harmonic selection inputs changed during calculation. "
+                            "Recalculate harmonics with the current project inputs."
+                        )
+                    _require_persisted_group_harmonic_selection(current_request)
+                input_fingerprint = _processing_selection_input_fingerprint(
+                    inputs, cache_request=current_request, final_release_metadata=current_release,
+                )
+                backup = Path(staging) / "previous.xlsx"
+                if workbook_path.exists():
+                    shutil.copy2(workbook_path, backup)
+                replace_with_retry(staged, workbook_path)
+                try:
+                    _persist_processing_harmonic_selection(
+                        inputs, metadata, input_fingerprint=input_fingerprint,
+                    )
+                except Exception:  # Restore the last accepted workbook on any manifest write or readback failure.
+                    if backup.exists():
+                        replace_with_retry(backup, workbook_path)
+                    else:
+                        workbook_path.unlink(missing_ok=True)
+                    raise
+    return workbook_path
+
+
+def _require_persisted_group_harmonic_selection(
+    cache_request: GroupHarmonicCacheRequest | None,
 ) -> None:
-    cache_request = build_group_harmonic_cache_request(
-        project_root=inputs.project_root,
-        subjects=inputs.subjects,
-        conditions=inputs.conditions,
-        subject_data=inputs.subject_data,
-        base_frequency_hz=inputs.base_frequency_hz,
-        max_freq_hz=inputs.max_frequency_hz,
-        settings=inputs.settings,
-        rois=inputs.rois,
-        recording_assignments=(
-            inputs.recording_assignments if _inputs_are_repeated(inputs) else None
-        ),
-        declared_session_ids=(
-            inputs.declared_session_ids if _inputs_are_repeated(inputs) else None
-        ),
-        oddball_frequency_hz=_require_canonical_oddball_frequency(inputs),
-    )
     lookup = lookup_cached_group_harmonic_selection(cache_request)
     if lookup.hit is not None:
         return
@@ -410,6 +460,7 @@ def _canonical_selection_metadata(
     metadata: Mapping[str, object],
     *,
     final_release_metadata: Mapping[str, object] | None = None,
+    cache_request: GroupHarmonicCacheRequest | None = None,
 ) -> dict[str, object]:
     """Return one portable metadata payload shared by every policy profile."""
 
@@ -457,7 +508,7 @@ def _canonical_selection_metadata(
             ],
             }
         )
-    request = _processing_cache_request(inputs)
+    request = cache_request or _processing_cache_request(inputs)
     sources = request.fingerprint.get("source_workbooks")
     if isinstance(sources, list):
         # Cache request paths are rebased to the active project root. Reusing
@@ -527,6 +578,7 @@ def _processing_selection_input_fingerprint(
     inputs: ProcessingHarmonicSelectionInputs,
     *,
     cache_request: GroupHarmonicCacheRequest | None = None,
+    final_release_metadata: Mapping[str, object] | None = None,
 ) -> str:
     request = cache_request or _processing_cache_request(inputs)
     upstream_identity = copy.deepcopy(request.fingerprint)
@@ -551,7 +603,10 @@ def _processing_selection_input_fingerprint(
             "eligible_harmonic_orders": list(
                 getattr(inputs, "eligible_harmonic_orders", ()) or ()
             ),
-            "final_release": _current_final_release_metadata(inputs.project_root),
+            "final_release": (
+                final_release_metadata if final_release_metadata is not None
+                else _current_final_release_metadata(inputs.project_root)
+            ),
         }
     )
 
@@ -572,6 +627,8 @@ def _portable_source_workbook_fingerprints(
 def _persist_processing_harmonic_selection(
     inputs: ProcessingHarmonicSelectionInputs,
     metadata: Mapping[str, object],
+    *,
+    input_fingerprint: str | None = None,
 ) -> str:
     """Atomically publish the canonical selection after QC export succeeds."""
 
@@ -581,7 +638,8 @@ def _persist_processing_harmonic_selection(
             "Harmonic selection was calculated but its canonical fingerprint "
             "could not be validated, so it was not accepted for downstream use."
         )
-    input_fingerprint = _processing_selection_input_fingerprint(inputs)
+    if input_fingerprint is None:
+        input_fingerprint = _processing_selection_input_fingerprint(inputs)
     saved_at = _now_utc_iso()
     active: dict[str, object] = {
         "schema_version": PROCESSING_HARMONIC_SELECTION_SCHEMA_VERSION,
