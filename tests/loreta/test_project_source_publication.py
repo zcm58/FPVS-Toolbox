@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import json
 import hashlib
+import os
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -298,3 +301,64 @@ def test_changed_input_bytes_cannot_be_published_or_discovered_as_current(tmp_pa
         _publish(root, inputs=[row])
         (root / row["fif"]).write_bytes(b"changed input")
         assert publication.current_source_manifest_paths(root) == ()
+
+
+def test_shared_participant_manifest_is_hashed_once_per_independent_pass(tmp_path, monkeypatch):
+    root = _project(tmp_path)
+    manifest = root / "participant.json"
+    manifest.write_bytes(b"original")
+    records = []
+    for condition in ("B", "A"):
+        fif = root / f"{condition}.fif"
+        sidecar = root / f"{condition}.json"
+        fif.write_bytes(condition.encode())
+        sidecar.write_bytes(b"{}")
+        records.append(SimpleNamespace(
+            participant_id="P1", group_id=None, condition_id=condition, manifest_path=manifest,
+            fif_path=fif, fif_sha256=publication._digest(fif),
+            sidecar_path=sidecar, sidecar_sha256=publication._digest(sidecar),
+        ))
+    counts = Counter()
+    real_digest = publication._digest
+
+    def count_digest(path):
+        counts[path] += 1
+        return real_digest(path)
+
+    monkeypatch.setattr(publication, "_digest", count_digest)
+    identity = publication.source_bundle_identity(
+        project_inputs=SimpleNamespace(project_root=root, records=records, processing_fingerprint="p",
+                                       processing_fingerprint_version="v1", sfreq_hz=256, n_times=512),
+        harmonic_metadata={"selected_harmonics_hz": [1.2], "selection_fingerprint": "selection-a"},
+        include_flagged_subjects=False, method_id="l2_mne_source_psd", method_options={},
+        cohort_snapshot=publication.source_project_cohort_snapshot(root, include_flagged_subjects=False),
+    )
+    rows = identity["common_inputs"]["inputs"]
+    assert [row["condition_id"] for row in rows] == ["A", "B"]
+    assert all(row["participant_manifest"] == manifest.name for row in rows)
+    assert all(row["participant_manifest_sha256"] == real_digest(manifest) for row in rows)
+    assert counts == {manifest: 1}
+
+    publication._validate_input_files(root, identity)
+    assert counts == {manifest: 2, **{path: 1 for row in records for path in (row.fif_path, row.sidecar_path)}}
+    rows[1]["participant_manifest_sha256"] = "0" * 64
+    with pytest.raises(ValueError, match="input changed"):
+        publication._validate_input_files(root, identity)
+    assert counts[manifest] == 3
+
+    rows[1]["participant_manifest_sha256"] = real_digest(manifest)
+    rows[1]["participant_manifest"] = "../outside.json"
+    with pytest.raises(ValueError, match="active project root"):
+        publication._validate_input_files(root, identity)
+    rows[1]["participant_manifest"] = manifest.name
+    original_stat = manifest.stat()
+
+    def change_commit_during_derivative_check(path):
+        if path == records[0].sidecar_path:
+            manifest.write_bytes(b"modified")
+            os.utime(manifest, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns))
+        return real_digest(path)
+
+    monkeypatch.setattr(publication, "_digest", change_commit_during_derivative_check)
+    with pytest.raises(ValueError, match="input changed"):
+        publication._validate_input_files(root, identity)

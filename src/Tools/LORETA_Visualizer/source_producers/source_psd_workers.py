@@ -24,7 +24,7 @@ from Tools.LORETA_Visualizer.source_producers.source_psd_cache import (
     CACHE_STATUS_HIT,
     CACHE_STATUS_MISS_NOT_FOUND,
     SourcePsdCacheKeyInputs,
-    load_source_psd_cache_entry,
+    _load_prepared_source_psd_entry,
     store_source_psd_cache_entry,
 )
 
@@ -158,10 +158,11 @@ def source_psd_cells(
                         key = SourcePsdCacheKeyInputs(
                             record.fif_sha256, numerical_metadata, method_metadata, frequency_metadata,
                         )
-                        digest = key.cache_key
+                        prepared = key._prepare()
+                        digest = prepared.digest
                         if digest in keys:
                             break  # Commit the previous same-key result before looking up this record.
-                        lookup = load_source_psd_cache_entry(project_root=root, key_inputs=key)
+                        lookup = _load_prepared_source_psd_entry(project_root=root, prepared=prepared)
                     except Exception as error:
                         lookup_error = error
                         break

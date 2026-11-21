@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 from dataclasses import replace
 
@@ -135,6 +136,43 @@ def test_cache_key_ignores_selection_provenance_but_keeps_numerical_inputs() -> 
         **common,
     )
     assert changed.cache_key != first.cache_key
+
+
+def test_lookup_encodes_requested_key_once_and_checks_stored_bytes_on_each_call(tmp_path, monkeypatch):
+    inputs = _key_inputs()
+    inputs.method_metadata.update({"label": "cortical µV", "limits": [-0.0, 1e-30]})
+    expected_payload = json.dumps(
+        inputs.canonical_payload(), sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False,
+    ).encode("utf-8")
+    expected = hashlib.sha256(expected_payload).hexdigest()
+    written = store_source_psd_cache_entry(project_root=tmp_path, key_inputs=inputs, result=_participant_result())
+    assert inputs._prepare().payload == expected_payload
+    assert written.cache_key == expected
+    calls = []
+    original = SourcePsdCacheKeyInputs.canonical_payload
+
+    def count_payload(key):
+        calls.append(key)
+        return original(key)
+
+    monkeypatch.setattr(SourcePsdCacheKeyInputs, "canonical_payload", count_payload)
+    assert load_source_psd_cache_entry(project_root=tmp_path, key_inputs=inputs).hit
+    assert calls == [inputs]
+    inputs.method_metadata["limits"][0] = 0.0
+    changed = load_source_psd_cache_entry(project_root=tmp_path, key_inputs=inputs)
+    assert changed.cache_key != expected and changed.status == CACHE_STATUS_MISS_NOT_FOUND
+    inputs.method_metadata["limits"][0] = -0.0
+
+    path = written.paths.metadata_path
+    stat = path.stat()
+    before = path.read_bytes()
+    after = before.replace(b'"method":"MNE"', b'"method":"mne"')
+    assert before != after and len(before) == len(after)
+    path.write_bytes(after)
+    os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+    corrupt = load_source_psd_cache_entry(project_root=tmp_path, key_inputs=inputs)
+    assert corrupt.cache_key == expected and corrupt.status == CACHE_STATUS_MISS_KEY
+    assert calls == [inputs, inputs, inputs]
 
 
 def test_legacy_selection_fingerprint_keys_reuse_verified_arrays_without_writing(tmp_path):

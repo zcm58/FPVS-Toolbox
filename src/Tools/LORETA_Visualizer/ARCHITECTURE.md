@@ -181,6 +181,16 @@ freshness and input/output integrity in a GUI worker; explicit historical import
 remain readable but do not establish current provenance. Partial rebuilds load
 only their successful methods; old failed siblings are preserved on disk.
 
+The processing worker verifies each participant manifest once per publication
+check, comparing every condition's declared checksum. Each method still checks
+its own inputs before publishing. When both source methods run together on
+native results, the second can reuse the first method's validated QC release
+after rechecking the project, processing ledger, current review decisions,
+raw registration and the bytes of every released result and companion.
+Publication of the first method can update the derived artifact registry
+between those checks. A changed dependency or an unsupported layout takes
+the ordinary validation path. This reuse ends when the two methods finish.
+
 `source_producers/source_validity.py` owns `complete_valid_source_support_v1`.
 Undefined participant source Z is NaN in memory and JSON null on disk, with
 explicit `source_validity` indices/counts. Summaries and statistics use the

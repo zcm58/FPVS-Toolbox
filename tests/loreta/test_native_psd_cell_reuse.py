@@ -2,7 +2,9 @@
 
 import importlib
 import json
+import os
 from copy import deepcopy
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
@@ -68,7 +70,25 @@ def test_real_producer_release_and_negative_aliases(
 
     roster.append("P02")
     worker_calls.clear()
-    reused, warm_rank, warm_vals = release()
+    origin = primary / (first_key + ".json")
+    opened = []
+    original_find = native_psd_cells.find_native
+    original_open = Path.open
+
+    def counted_open(path, *args, **kwargs):
+        if path == origin:
+            opened.append(path)
+        return original_open(path, *args, **kwargs)
+
+    def count_origin_reads(*args):
+        with monkeypatch.context() as reads:
+            reads.setattr(Path, "open", counted_open)
+            return original_find(*args)
+
+    with monkeypatch.context() as incremental:
+        incremental.setattr(native_psd_cells, "find_native", count_origin_reads)
+        reused, warm_rank, warm_vals = release()
+    assert opened == [origin]
     assert reused.cache_hit_count == 1 and reused.cache_miss_count == 0 and not worker_calls
     assert warm_rank == rank and warm_vals == values and len(list(primary.glob("*.json"))) == 2
 
@@ -93,10 +113,13 @@ def test_real_producer_release_and_negative_aliases(
     roster.append("P04")
     worker_calls.clear()
     alias.write_bytes(first_alias)
-    origin = primary / (first_key + ".json")
+    stat = origin.stat()
     altered = json.loads(origin.read_bytes())
-    altered["result_metadata"]["source_ready_data_rank"]["unprojected"]["rank"] += 1
-    origin.write_text(json.dumps(altered), encoding="utf-8")
+    altered["result_metadata"]["source_ready_data_rank"]["unprojected"]["rank"] ^= 1
+    changed = json.dumps(altered, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    assert len(changed) == stat.st_size
+    origin.write_bytes(changed)
+    os.utime(origin, ns=(stat.st_atime_ns, stat.st_mtime_ns))
     assert release()[0].cache_miss_count == 1 and worker_calls
 
     # A new kernel setting or foreign runtime can never use the preceding native receipt.

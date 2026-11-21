@@ -34,9 +34,9 @@ _ACTIVE_READS: ContextVar[OrderedDict | None] = ContextVar(
 
 
 @contextmanager
-def post_processing_validation_scope() -> Iterator[None]:
-    """Share nested reads and discard them on completion, failure or cancellation."""
-    if _ACTIVE_READS.get() is not None:
+def post_processing_validation_scope(*, fresh: bool = False) -> Iterator[None]:
+    """Share nested reads unless the caller needs an independent validation pass."""
+    if not fresh and _ACTIVE_READS.get() is not None:
         yield
         return
     token = _ACTIVE_READS.set(OrderedDict())

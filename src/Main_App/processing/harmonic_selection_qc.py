@@ -12,7 +12,7 @@ from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any, Callable, Mapping, Sequence
+from typing import TYPE_CHECKING, Any, Callable, Mapping, Sequence
 
 
 from Main_App.io.atomic_write import replace_with_retry
@@ -23,6 +23,7 @@ from Main_App.projects import (
     normalize_frequency_protocol,
 )
 from Main_App.processing.processing_ledger import load_ledger
+from Main_App.processing.source_harmonic_validation import current_source_harmonic_validation
 from Main_App.processing.post_processing_context import (
     CACHE_MISS,
     cached_validation,
@@ -70,6 +71,9 @@ from Tools.Stats.io.harmonic_selection_export import (
     HARMONIC_SELECTION_QC_WORKBOOK_NAME,
     write_harmonic_selection_workbook,
 )
+
+if TYPE_CHECKING:
+    from Main_App.processing.source_release_files import NativeReleaseFiles
 
 logger = logging.getLogger(__name__)
 
@@ -760,7 +764,25 @@ def load_processing_harmonic_selection(
     # Re-scan canonical identity even on a hit: new, omitted, or regrouped
     # sources must never disappear behind the run-scoped optimization.
     index = load_project_dataset_index(root)
-    release = _current_final_release_context(root)
+    source_pair = current_source_harmonic_validation()
+    verified_files = None
+    if source_pair is None:
+        release = _current_final_release_context(root)
+    else:
+        from Main_App.processing.roi_coverage import require_project_final_release
+
+        release = require_project_final_release(root, source_validation=source_pair)
+        if source_pair.files is not None:
+            anchors = source_pair.files.anchors
+            if all(record.path in anchors for record in (*index.workbooks, *index.excluded_workbooks)):
+                verified_files = source_pair.files
+        if verified_files is None and source_pair.reads > 1:
+            # Historical or relocated inputs can point to different files than
+            # those in the active index. Validate this consumer independently.
+            from Main_App.processing.post_processing_context import post_processing_validation_scope
+
+            with post_processing_validation_scope(fresh=True), xlsx_read_cache_scope():
+                return _load_processing_harmonic_selection_uncached(project, log_func=log_func)
     cache_key = _selection_validation_key(project, index, release)
     cached = cached_validation("processing_selection", cache_key)
     if cached is not CACHE_MISS:
@@ -772,7 +794,7 @@ def load_processing_harmonic_selection(
 
     manifest_files = capture_validation_files([root / "project.json"], hash_contents=True)
     ledger_files = capture_validation_files([ledger_path(root)], hash_contents=True)
-    source_files = _selection_validation_sources(index)
+    source_files = _selection_validation_sources(index, verified_files)
     messages: list[str] = []
 
     def _log(message: str) -> None:
@@ -792,27 +814,11 @@ def load_processing_harmonic_selection(
 
 
 def _selection_validation_key(project: Any, index: ProjectDatasetIndex, release: tuple) -> str:
-    from Main_App.processing.artifact_freshness import ARTIFACT_FRESHNESS_MANIFEST_PATH
+    from Main_App.processing.artifact_freshness import manifest_without_artifact_freshness
     from Main_App.processing.roi_coverage import _dataset_index_identity_payload
 
-    manifest = copy.deepcopy(dict(index.manifest or {}))
-    # Only derived-artifact publication is irrelevant. Preserve every other
-    # manifest value, including the exact accepted metadata and QC decisions.
-    parents = []
-    node = manifest
-    for field_name in ARTIFACT_FRESHNESS_MANIFEST_PATH[:-1]:
-        child = node.get(field_name)
-        if not isinstance(child, dict):
-            break
-        parents.append((node, field_name))
-        node = child
-    else:
-        node.pop(ARTIFACT_FRESHNESS_MANIFEST_PATH[-1], None)
-        for parent, field_name in reversed(parents):
-            if not parent[field_name]:
-                parent.pop(field_name)
     identity = {
-        "manifest": manifest,
+        "manifest": manifest_without_artifact_freshness(index.manifest or {}),
         "dataset": _dataset_index_identity_payload(index),
         "rois": list((load_rois_from_settings() or {}).items()),
         "policy": _dv_policy_payload(_harmonic_selection_settings(project)),
@@ -825,12 +831,16 @@ def _selection_validation_key(project: Any, index: ProjectDatasetIndex, release:
     ).hexdigest()
 
 
-def _selection_validation_sources(index: ProjectDatasetIndex) -> tuple:
+def _selection_validation_sources(
+    index: ProjectDatasetIndex, verified_files: NativeReleaseFiles | None = None,
+) -> tuple:
     from Main_App.io.condition_data import condition_companion_identity
     from Main_App.io.spectral_data import spectral_companion_identity
 
     paths = [record.path for record in index.workbooks]
     workbook_files = capture_validation_files(paths, hash_contents=True)
+    if verified_files is not None:
+        return (*workbook_files, *capture_validation_files(verified_files.companion_paths))
     companion_paths = []
     for path in paths:
         for reader in (condition_companion_identity, spectral_companion_identity):

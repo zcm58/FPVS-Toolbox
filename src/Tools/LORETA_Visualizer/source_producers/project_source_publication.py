@@ -61,6 +61,14 @@ def _digest(path: Path) -> str:
         return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
+def _participant_manifest_digest(root: Path, path: Path, digests: dict[str, str]) -> str:
+    manifest = _inside(root, path)
+    key = str(manifest)
+    if key not in digests:
+        digests[key] = _digest(manifest)
+    return digests[key]
+
+
 def _identity_digest(value: object) -> str:
     encoded = json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
     return hashlib.sha256(encoded).hexdigest()
@@ -130,10 +138,18 @@ def _validate_cohort_snapshot(root: Path, identity: Mapping[str, Any]) -> None:
 def _validate_input_files(root: Path, identity: Mapping[str, Any]) -> None:
     _validate_cohort_snapshot(root, identity)
     common = identity.get("common_inputs", {})
-    for row in common.get("inputs", []):
-        for key in ("fif", "sidecar", "participant_manifest"):
+    records = common.get("inputs", [])
+    for row in records:
+        for key in ("fif", "sidecar"):
             if _digest(_inside(root, root / row[key])) != row[f"{key}_sha256"]:
                 raise ValueError("A source-ready input changed after source calculation.")
+    # Verify the shared commits after the potentially long derivative reads.
+    # Every row must agree with the bytes read in this verification pass.
+    manifest_digests: dict[str, str] = {}
+    for row in records:
+        digest = _participant_manifest_digest(root, root / row["participant_manifest"], manifest_digests)
+        if digest != row["participant_manifest_sha256"]:
+            raise ValueError("A source-ready input changed after source calculation.")
 
 
 def source_bundle_identity(
@@ -148,6 +164,7 @@ def source_bundle_identity(
 ) -> dict[str, Any]:
     """Describe validated inputs without recomputing any scientific quantities."""
     root = Path(project_inputs.project_root).resolve()
+    manifest_digests: dict[str, str] = {}
     records = [
         {
             "participant_id": row.participant_id,
@@ -158,7 +175,7 @@ def source_bundle_identity(
             "sidecar": row.sidecar_path.relative_to(root).as_posix(),
             "sidecar_sha256": row.sidecar_sha256,
             "participant_manifest": row.manifest_path.relative_to(root).as_posix(),
-            "participant_manifest_sha256": _digest(row.manifest_path),
+            "participant_manifest_sha256": _participant_manifest_digest(root, row.manifest_path, manifest_digests),
         }
         for row in project_inputs.records
     ]

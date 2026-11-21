@@ -919,7 +919,9 @@ class PostProcessingPipelineWorker(QObject):
         completed_before_source_maps = POST_PROCESSING_PHASE_COUNT - len(SOURCE_OUTPUT_MODES)
         from Tools.LORETA_Visualizer.source_producers.source_psd_cache import source_psd_cache_scope
 
-        with source_psd_cache_scope():
+        from Main_App.processing.source_harmonic_validation import source_harmonic_validation_scope
+
+        with source_psd_cache_scope(), source_harmonic_validation_scope(self._project):
             for index, mode in enumerate(SOURCE_OUTPUT_MODES, start=1):
                 phase_id = _SOURCE_PHASE_BY_MODE[mode]
                 phase_message = _SOURCE_PHASE_MESSAGE_BY_MODE[mode]

@@ -361,6 +361,8 @@ def test_source_psd_exporters_are_loaded_through_separate_expected_seams() -> No
 def _pipeline_without_qt(tmp_path, *, failed_step="", review_error="", repeated_session=False):
     """Run the production orchestration with exporter/signal doubles and no Qt."""
 
+    from Main_App.processing.pipeline_plan import PipelineCancelled
+
     tree = _worker_tree()
     methods = (
         "run", "_record_failed_frequency_outputs", "_emit_phase_progress",
@@ -386,6 +388,7 @@ def _pipeline_without_qt(tmp_path, *, failed_step="", review_error="", repeated_
     namespace = {
         "__name__": __name__, "Path": Path, "ExitStack": ExitStack,
         "dataclass": dataclass, "logging": logging,
+        "PipelineCancelled": PipelineCancelled, "report_failure": Mock(),
     }
     exec(compile(ast.fix_missing_locations(module), str(WORKER_PATH), "exec"), namespace)
     step_result = namespace["PostProcessingStepResult"]

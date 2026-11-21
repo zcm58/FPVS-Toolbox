@@ -28,6 +28,25 @@ ARTIFACT_FRESHNESS_MANIFEST_PATH = (
     "artifact_freshness",
 )
 
+
+def manifest_without_artifact_freshness(manifest: Mapping) -> dict:
+    """Preserve every project field except the derived publication registry."""
+    result = dict(manifest)
+    node = result
+    parents = []
+    for field in ARTIFACT_FRESHNESS_MANIFEST_PATH[:-1]:
+        child = node.get(field)
+        if not isinstance(child, Mapping):
+            return result
+        parents.append((node, field))
+        node[field] = dict(child)
+        node = node[field]
+    node.pop(ARTIFACT_FRESHNESS_MANIFEST_PATH[-1], None)
+    for parent, field in reversed(parents):
+        if not parent[field]:
+            parent.pop(field)
+    return result
+
 HARMONIC_SELECTION_SUMMARY_ARTIFACT = "harmonic_selection_summary"
 STATS_READY_SUMMED_BCA_ARTIFACT = "stats_ready_summed_bca"
 ANALYSIS_READY_FULL_AUDIT_ARTIFACT = "analysis_ready_full_audit"

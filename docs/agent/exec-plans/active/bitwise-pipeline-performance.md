@@ -205,6 +205,68 @@ cells also matched after accounting for those timestamps and workbook
 creation times. These measurements cover the harmonic stage of MCCTR
 processing on the 128 GB workstation.
 
+#### Paired source-map publication on MCCTR
+
+The paired source-stage benchmark starts inside the desktop processing
+worker and ends after both methods publish. Each run used a fresh Python
+process, the same project path on the internal SSD, 69 participants, 400
+eligible participant-condition cells and the workstation's 16-worker ceiling.
+All 400 participant PSDs for each method were available in the primary
+cache. The harmonic-validation cache started empty and both methods rebuilt
+their group maps and statistics.
+
+Each publication pass now hashes a shared participant manifest once and
+checks the digest declared by every condition. The two producers can also
+share validated QC evidence after independently checking the native results,
+the spectral and condition companions, and the live project state. A primary
+PSD lookup prepares the canonical scientific key once and compares its bytes
+with the stored key. The on-disk key format and the verification of the
+numerical arrays are unchanged.
+
+| Elapsed seconds | Before | Manifest and QC changes | With cache-key change |
+| --- | ---: | ---: | ---: |
+| L2-MNE | 159.40 | 154.01 | 143.50 |
+| eLORETA | 133.79 | 132.32 | 121.87 |
+| Both stages, including publication | 293.23 | 286.37 | 265.41 |
+
+This three-run comparison saved 27.82 seconds overall (9.49%). The full
+harmonic check inside L2-MNE fell from 62.86 to 54.93 seconds and eLORETA's
+fell from 21.61 to 4.78 seconds. Participant-manifest checksum reads fell
+from 1,600 to 276 across the four verification passes. The new integrity
+check read 400 native result files and 800 companions at each method. Bytes
+observed through the coordinator's streaming digest increased from 26.09
+to 28.32 GB. These counters measure bytes supplied to the hashing API.
+The two timing differences come from consecutive individual runs.
+
+Across all 800 hits, preparing the requested key once reduced serialization
+from 2,400 passes to 800, saving 606,109,600 bytes of serialization. A
+separate alternating-order lookup benchmark used eight real cells per method:
+L2-MNE primary lookup took 0.2833 seconds before and 0.1861 after, and
+eLORETA took 0.2357 and 0.1496. Reading a qualified cross-cohort origin
+took 0.2568 and 0.1577 seconds for L2-MNE and 0.2503 and 0.1517 for
+eLORETA. Those figures cover the eight lookups together. Numerical runtime
+qualification initially read 20 implementation files (48,922,550 bytes).
+Repeated checks reopened zero implementation files for content.
+
+Independent readback matched all 800 primary numerical archives and their
+800 metadata files byte for byte. All 4,800 typed arrays, the 800 rank
+records, all 72 published maps, their masks, p-values and participant exports
+matched exactly. All 84 publication files verified against their own release
+receipts. Four publication files matched byte for byte across releases.
+The others carried new run identifiers, timestamps, or checksums derived
+from those fields.
+
+As a negative control, a writer changed a spectral companion while keeping
+its handle open and restoring the original size and modification time. Its
+file identity also stayed the same. Both builds rejected the affected
+condition with the same QC release error before the second method could
+publish.
+
+Existing primary entries retain their keys across the update. Cross-cohort
+reuse also verifies the installed numerical implementation. An older build's
+certificate requires fresh qualification under the new build on a primary
+miss.
+
 #### Forced full reprocessing across cache temperatures
 
 Both builds' full warm reprocess reused all 69 preprocessed FIF files.

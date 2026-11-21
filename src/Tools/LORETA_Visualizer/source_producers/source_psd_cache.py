@@ -116,6 +116,14 @@ def _without_selection_provenance(normalized: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+@dataclass(frozen=True, slots=True)
+class _PreparedCacheKey:
+    """The exact request bytes and their v2 digest for one lookup."""
+
+    digest: str
+    payload: bytes
+
+
 @dataclass(frozen=True)
 class SourcePsdCacheKeyInputs:
     """Scientific inputs whose canonical JSON defines one cache key."""
@@ -161,7 +169,11 @@ class SourcePsdCacheKeyInputs:
     @property
     def cache_key(self) -> str:
         """Return a stable SHA256 over canonical scientific metadata."""
-        return hashlib.sha256(_canonical_json_bytes(self.canonical_payload())).hexdigest()
+        return self._prepare().digest
+
+    def _prepare(self) -> _PreparedCacheKey:
+        payload = _canonical_json_bytes(self.canonical_payload())
+        return _PreparedCacheKey(hashlib.sha256(payload).hexdigest(), payload)
 
 
 @dataclass(frozen=True)
@@ -392,9 +404,13 @@ def load_source_psd_cache_entry(
     """Load a valid compact result or return a diagnostic cache miss."""
     if not isinstance(key_inputs, SourcePsdCacheKeyInputs):
         raise TypeError("key_inputs must be SourcePsdCacheKeyInputs.")
-    cache_key = key_inputs.cache_key
+    return _load_prepared_source_psd_entry(project_root=project_root, prepared=key_inputs._prepare())
+
+
+def _load_prepared_source_psd_entry(*, project_root: str | Path, prepared: _PreparedCacheKey) -> SourcePsdCacheLookup:
+    cache_key = prepared.digest
     paths = source_psd_cache_paths(project_root, cache_key)
-    lookup = _load_source_psd_cache_paths(key_inputs, paths, cache_key=cache_key)
+    lookup = _load_source_psd_cache_paths(prepared, paths)
     if lookup.status != CACHE_STATUS_MISS_NOT_FOUND:
         return lookup
     # A corrupt current entry remains a miss, rather than being concealed by
@@ -411,9 +427,7 @@ def load_source_psd_cache_entry(
             legacy_paths = source_psd_cache_paths(project_root, legacy_key)
         except (OSError, ValueError):
             continue  # An unrelated redirected legacy entry is never trusted.
-        candidate = _load_source_psd_cache_paths(
-            key_inputs, legacy_paths, cache_key=cache_key, legacy=True
-        )
+        candidate = _load_source_psd_cache_paths(prepared, legacy_paths, legacy=True)
         if candidate.hit:
             return candidate
     return lookup
@@ -487,13 +501,13 @@ def _build_legacy_source_psd_index(root: Path) -> dict[str, tuple[str, ...]]:
 
 
 def _load_source_psd_cache_paths(
-    key_inputs: SourcePsdCacheKeyInputs,
+    prepared: _PreparedCacheKey,
     paths: SourcePsdCachePaths,
     *,
-    cache_key: str,
     legacy: bool = False,
     metadata: dict[str, Any] | None = None,
 ) -> SourcePsdCacheLookup:
+    cache_key = prepared.digest
     stored_key = paths.metadata_path.stem
     arrays_exists = paths.arrays_path.is_file()
     metadata_exists = paths.metadata_path.is_file()
@@ -516,10 +530,9 @@ def _load_source_psd_cache_paths(
     else:
         try:
             stored_key_payload = _canonical_json_bytes(metadata.get("key_payload"))
-            requested_key_payload = _canonical_json_bytes(key_inputs.canonical_payload())
         except (TypeError, ValueError) as exc:
             return _miss(cache_key, paths, CACHE_STATUS_MISS_KEY, str(exc))
-        payload_matches = stored_key_payload == requested_key_payload
+        payload_matches = stored_key_payload == prepared.payload
     if not payload_matches:
         return _miss(cache_key, paths, CACHE_STATUS_MISS_KEY, "Stored scientific key payload mismatch.")
     if metadata.get("arrays_file") != paths.arrays_path.name:

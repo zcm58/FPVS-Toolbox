@@ -1,4 +1,5 @@
 from concurrent.futures import Future
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -38,15 +39,15 @@ def test_source_cell_order_duplicate_cache_and_first_error(monkeypatch):
             future.set_result((17, 0.5, 1.5, ({}, record.fif_sha256)))
             return future
 
-    def lookup(*, project_root, key_inputs):
-        if key_inputs.derivative_checksum_sha256 == third.fif_sha256:
+    def lookup(*, project_root, prepared):
+        if json.loads(prepared.payload)["derivative_checksum_sha256"] == third.fif_sha256:
             raise ValueError("unreadable third source")
-        return SimpleNamespace(hit=key_inputs.cache_key in stored)
+        return SimpleNamespace(hit=prepared.digest in stored)
 
     monkeypatch.setattr(workers, "compute_dynamic_worker_ceiling", lambda requested: requested)
     monkeypatch.setattr(workers, "_batch_capacity", lambda ceiling, *args: ceiling)
     monkeypatch.setattr(workers, "ProcessPoolExecutor", FakePool)
-    monkeypatch.setattr(workers, "load_source_psd_cache_entry", lookup)
+    monkeypatch.setattr(workers, "_load_prepared_source_psd_entry", lookup)
     seen = []
     with _cells([first, second, first, third], lambda index, _record: callbacks.append(index)) as cells:
         with pytest.raises(ValueError, match="unreadable third"):

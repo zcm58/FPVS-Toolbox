@@ -319,14 +319,15 @@ def find_native(context, record, code):
         if payload.pop("format") != SOURCE_PSD_CACHE_KEY_FORMAT:
             return None
         key = SourcePsdCacheKeyInputs(**payload)
+        prepared = key._prepare()
         if (
-            key.cache_key != receipt["primary"]
+            prepared.digest != receipt["primary"]
             or origin["arrays_sha256"] != receipt["arrays_sha256"]
             or key.derivative_checksum_sha256 != record.fif_sha256
             or base_digest(key.numerical_model_metadata, key.method_metadata, key.frequency_metadata) != context.base
         ):
             return None
-        lookup = _load_source_psd_cache_paths(key, paths, cache_key=key.cache_key, metadata=origin)
+        lookup = _load_source_psd_cache_paths(prepared, paths, metadata=origin)
         if lookup.hit and complete_result(
             lookup.result, record, context.frequencies, context.source_count, key.method_metadata
         ):

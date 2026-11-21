@@ -9,7 +9,10 @@ import json
 import math
 from pathlib import Path
 import re
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from Main_App.processing.source_harmonic_validation import SourceHarmonicValidation
 
 from Main_App.io import (
     BIOSEMI64_CHANNELS,
@@ -2144,6 +2147,8 @@ def require_current_final_release(
 
 def require_project_final_release(
     project_root: str | Path,
+    *,
+    source_validation: SourceHarmonicValidation | None = None,
 ) -> tuple[
     RecordingConditionOutcomeLedger,
     RoiCoverageLedger,
@@ -2156,10 +2161,14 @@ def require_project_final_release(
     )
 
     decisions = resolve_frequency_qc_coverage_decisions(project_root)
-    outcomes, coverage, receipt = require_current_final_release(
-        project_root,
-        expected_decision_fingerprint=decisions.decision_fingerprint,
-    )
+    if source_validation is None:
+        outcomes, coverage, receipt = require_current_final_release(
+            project_root, expected_decision_fingerprint=decisions.decision_fingerprint,
+        )
+    else:
+        outcomes, coverage, receipt = source_validation.current_release(
+            _resolved_project_root(project_root), expected_decision_fingerprint=decisions.decision_fingerprint,
+        )
     current_decision_payload = _decision_payload(decisions)
     if current_decision_payload != dict(coverage.decision_payload):
         raise RoiCoverageGateError(
