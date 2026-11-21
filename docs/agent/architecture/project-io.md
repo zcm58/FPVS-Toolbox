@@ -231,6 +231,10 @@ recording identity remains unchanged. Regression coverage lives in
 
 Dense spectral companion validation checks checksums and every array's dtype,
 shape, and truncation from its header without materializing dense values.
+Within a post-processing run, each freshly hashed, immutable spectral or
+condition archive can reuse a successful schema check for the same version,
+ordered sheet declaration, size and SHA-256. The bounded cache holds only
+those identifiers. Streamed archives undergo the full schema check each time.
 Metadata-only reads allocate no dense arrays; sheet values load lazily only
 when requested, with the validated file signature checked again. Companion
 formats and the existing export schema remain unchanged.

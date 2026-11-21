@@ -283,6 +283,12 @@ native policy disables checkpoint reuse. Filtering, resampling, analysis-span,
 evidence, approval and export contracts remain unchanged; no GUI-global native
 thread policy is changed by the background review.
 
+A warm checkpoint can decode the same in-memory bytes that passed SHA-256
+when its size fits both the existing job reservation and live memory headroom
+at the project's worker ceiling. Large archives and memory-constrained jobs
+stream through the original reader. Source identity, geometry, cancellation
+and QC evidence are checked on both paths.
+
 When a verified checkpoint restores an in-memory RawArray, its saved evidence
 covers every scored channel. The review preview reads samples only for channels
 with pending decisions. Its sample count and occurrence boundaries still come

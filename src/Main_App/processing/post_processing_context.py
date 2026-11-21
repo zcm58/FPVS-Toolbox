@@ -16,6 +16,8 @@ import hashlib
 from pathlib import Path
 from typing import Any
 
+from Main_App.io.companion_schema import companion_schema_receipt_scope
+
 
 FileSnapshot = tuple[tuple[str, tuple[int | str, ...] | None], ...]
 CACHE_MISS = object()
@@ -41,7 +43,8 @@ def post_processing_validation_scope(*, fresh: bool = False) -> Iterator[None]:
         return
     token = _ACTIVE_READS.set(OrderedDict())
     try:
-        yield
+        with companion_schema_receipt_scope():
+            yield
     finally:
         _ACTIVE_READS.reset(token)
 

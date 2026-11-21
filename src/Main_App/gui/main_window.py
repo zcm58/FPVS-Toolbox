@@ -6,6 +6,7 @@ from __future__ import annotations
 import logging
 import queue
 import sys
+from importlib import import_module as _import_module
 from pathlib import Path
 from Main_App.exports.post_process import post_process as _shared_post_process
 from Main_App.gui.theme import set_appearance_mode
@@ -43,12 +44,6 @@ from Main_App.projects.project_manager import select_projects_root
 from Main_App.workers.mp_env import (
     compute_dynamic_worker_ceiling,
 )
-from Tools.Individual_Detectability.main_window import IndividualDetectabilityWindow
-from Tools.Plot_Generator.plot_generator import PlotGeneratorWindow
-from Tools.Publication_Maps.gui import PublicationMapsWindow
-from Tools.Sensitivity_Analysis.gui import SensitivityAnalysisWindow
-from Tools.Sequence_Figure.gui import SequenceFigureWindow
-from Tools.Stats import StatsWindow as PysideStatsWindow
 from config import FPVS_TOOLBOX_VERSION
 from Main_App.gui import update_manager
 from Main_App.gui import event_map
@@ -77,6 +72,33 @@ from Main_App.gui.op_guard import OpGuard
 
 _WINDOW_TITLE = f"FPVS Toolbox v{FPVS_TOOLBOX_VERSION}"
 _WINDOW_SIZE = QSize(1200, 800)
+
+_TOOL_WINDOWS = {
+    "IndividualDetectabilityWindow": ("Tools.Individual_Detectability.main_window", "IndividualDetectabilityWindow"),
+    "PlotGeneratorWindow": ("Tools.Plot_Generator.plot_generator", "PlotGeneratorWindow"),
+    "PublicationMapsWindow": ("Tools.Publication_Maps.gui", "PublicationMapsWindow"),
+    "SensitivityAnalysisWindow": ("Tools.Sensitivity_Analysis.gui", "SensitivityAnalysisWindow"),
+    "SequenceFigureWindow": ("Tools.Sequence_Figure.gui", "SequenceFigureWindow"),
+    "PysideStatsWindow": ("Tools.Stats", "StatsWindow"),
+}
+
+
+def _tool_window(name: str) -> type[QWidget]:
+    # Use the public module binding so existing launch overrides still apply.
+    if name not in globals():
+        owner, symbol = _TOOL_WINDOWS[name]
+        globals()[name] = getattr(_import_module(owner), symbol)
+    return globals()[name]
+
+
+def __getattr__(name: str):
+    if name in _TOOL_WINDOWS:
+        return _tool_window(name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def __dir__() -> list[str]:
+    return sorted(globals().keys() | _TOOL_WINDOWS.keys())
 
 
 class Processor(QObject):
@@ -418,7 +440,7 @@ class MainWindow(QMainWindow, ProcessingHostCompatibility):
         self.home_workbook_path.setText(destination or "No workbook folder configured")
         self.home_workbook_path.setToolTip(destination)
 
-    def _ensure_stats_page(self) -> PysideStatsWindow:
+    def _ensure_stats_page(self) -> QWidget:
         project = getattr(self, "currentProject", None)
         project_root = Path(project.project_root).resolve() if project is not None else None
         page = getattr(self, "_stats_page", None)
@@ -427,7 +449,7 @@ class MainWindow(QMainWindow, ProcessingHostCompatibility):
             if page is not None:
                 self.workspace_stack.removeWidget(page)
                 page.deleteLater()
-            page = PysideStatsWindow(parent=self)
+            page = _tool_window("PysideStatsWindow")(parent=self)
             page.setObjectName("embedded_stats_page")
             self.workspace_stack.addWidget(page)
             self._stats_page = page
@@ -440,10 +462,10 @@ class MainWindow(QMainWindow, ProcessingHostCompatibility):
             return
         self._show_workspace_page(self._ensure_stats_page())
 
-    def _ensure_sensitivity_analysis_page(self) -> SensitivityAnalysisWindow:
+    def _ensure_sensitivity_analysis_page(self) -> QWidget:
         page = getattr(self, "_sensitivity_analysis_page", None)
         if page is None:
-            page = SensitivityAnalysisWindow(parent=self.workspace_stack)
+            page = _tool_window("SensitivityAnalysisWindow")(parent=self.workspace_stack)
             page.setObjectName("embedded_sensitivity_analysis_page")
             self.workspace_stack.addWidget(page)
             self._sensitivity_analysis_page = page
@@ -546,14 +568,14 @@ class MainWindow(QMainWindow, ProcessingHostCompatibility):
             page.refresh_lmm_seed()
         self._show_workspace_page(page)
 
-    def _ensure_individual_detectability_page(self) -> IndividualDetectabilityWindow:
+    def _ensure_individual_detectability_page(self) -> QWidget:
         page = getattr(self, "_individual_detectability_page", None)
         if page is None:
             project_root = None
             project = getattr(self, "currentProject", None)
             if project is not None and hasattr(project, "project_root"):
                 project_root = str(project.project_root)
-            page = IndividualDetectabilityWindow(
+            page = _tool_window("IndividualDetectabilityWindow")(
                 parent=self.workspace_stack,
                 project_root=project_root,
                 embedded=True,
@@ -568,14 +590,14 @@ class MainWindow(QMainWindow, ProcessingHostCompatibility):
             return
         self._show_workspace_page(self._ensure_individual_detectability_page())
 
-    def _ensure_sequence_figure_page(self) -> SequenceFigureWindow:
+    def _ensure_sequence_figure_page(self) -> QWidget:
         page = getattr(self, "_sequence_figure_page", None)
         project_root = None
         project = getattr(self, "currentProject", None)
         if project is not None and hasattr(project, "project_root"):
             project_root = str(project.project_root)
         if page is None:
-            page = SequenceFigureWindow(
+            page = _tool_window("SequenceFigureWindow")(
                 parent=self.workspace_stack,
                 project_root=project_root,
             )
@@ -589,10 +611,10 @@ class MainWindow(QMainWindow, ProcessingHostCompatibility):
     def open_sequence_figure(self) -> None:
         self._show_workspace_page(self._ensure_sequence_figure_page())
 
-    def _ensure_plot_generator_page(self) -> PlotGeneratorWindow:
+    def _ensure_plot_generator_page(self) -> QWidget:
         page = getattr(self, "_plot_generator_page", None)
         if page is None:
-            page = PlotGeneratorWindow(parent=self)
+            page = _tool_window("PlotGeneratorWindow")(parent=self)
             page.setObjectName("embedded_plot_generator_page")
             page.post_processing_required.connect(
                 self.request_post_processing_rebuild
@@ -601,14 +623,14 @@ class MainWindow(QMainWindow, ProcessingHostCompatibility):
             self._plot_generator_page = page
         return page
 
-    def _ensure_publication_maps_page(self) -> PublicationMapsWindow:
+    def _ensure_publication_maps_page(self) -> QWidget:
         page = getattr(self, "_publication_maps_page", None)
         if page is None:
             project_root = None
             project = getattr(self, "currentProject", None)
             if project is not None and hasattr(project, "project_root"):
                 project_root = str(project.project_root)
-            page = PublicationMapsWindow(
+            page = _tool_window("PublicationMapsWindow")(
                 parent=self,
                 project_root=project_root,
                 embedded=True,
@@ -877,6 +899,11 @@ class MainWindow(QMainWindow, ProcessingHostCompatibility):
         processing_inputs.set_controls_enabled(self, enabled)
 
     def closeEvent(self, event: QCloseEvent) -> None:
+        input_check = getattr(self, "_processing_input_check", None)
+        if input_check is not None:
+            input_check.reject()
+            event.ignore()
+            return
         if getattr(getattr(self, "_results_sharing_dialog", None), "thread", None) is not None:
             QMessageBox.information(self, "Sharing study results", "Wait for the OpenFPVS transfer to finish before closing Toolbox.")
             event.ignore()
@@ -1075,6 +1102,9 @@ def main() -> None:
     win = MainWindow()
     win.show()
     app.exec()
+
+
+__all__ = [name for name in __dir__() if not name.startswith("_")]
 
 
 if __name__ == "__main__":

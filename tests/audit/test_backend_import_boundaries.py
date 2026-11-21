@@ -78,3 +78,32 @@ else:
         capture_output=True, text=True, timeout=30,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_shell_defers_optional_window_modules_and_keeps_public_exports():
+    code = '''
+import importlib
+import sys
+sys.path.insert(0, "src")
+from Main_App.gui import main_window as shell
+owners = {
+    "IndividualDetectabilityWindow": ("Tools.Individual_Detectability.main_window", "IndividualDetectabilityWindow"),
+    "PlotGeneratorWindow": ("Tools.Plot_Generator.plot_generator", "PlotGeneratorWindow"),
+    "PublicationMapsWindow": ("Tools.Publication_Maps.gui", "PublicationMapsWindow"),
+    "SensitivityAnalysisWindow": ("Tools.Sensitivity_Analysis.gui", "SensitivityAnalysisWindow"),
+    "SequenceFigureWindow": ("Tools.Sequence_Figure.gui", "SequenceFigureWindow"),
+    "PysideStatsWindow": ("Tools.Stats.ui.stats_window", "StatsWindow"),
+}
+assert owners.keys() <= set(dir(shell))
+assert owners.keys() <= set(shell.__all__)
+assert not any(owner in sys.modules for owner, _ in owners.values())
+for name, (owner, member) in owners.items():
+    window = getattr(shell, name)
+    assert window is getattr(importlib.import_module(owner), member)
+    assert shell._tool_window(name) is window
+'''
+    result = subprocess.run(
+        [sys.executable, "-c", code], cwd=repo_root(),
+        capture_output=True, text=True, timeout=60,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr

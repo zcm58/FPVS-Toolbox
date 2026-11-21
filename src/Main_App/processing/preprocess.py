@@ -1713,7 +1713,11 @@ def perform_preprocessing(
 
         checkpoint = checkpoint_identity(raw, params, fingerprint_in)
         checkpoint_cancel = params.get("_fpvs_kurtosis_checkpoint_should_cancel")
-        cached = load_checkpoint(checkpoint, should_cancel=checkpoint_cancel)
+        cached = None
+        if checkpoint is not None:
+            cached = load_checkpoint(checkpoint, should_cancel=checkpoint_cancel,
+                                     source_sample_bytes=raw._data.nbytes if raw.preload else 0,
+                                     settings=params)
         if callable(checkpoint_cancel) and checkpoint_cancel():
             raise RuntimeError("Kurtosis preparation cancelled.")
         if cached is not None:

@@ -191,6 +191,13 @@ def visible_probe(projects: Path, checkpoint: Callable[[str], None]) -> dict[str
                 if pages and not pages[-1].isVisible():
                     raise RuntimeError(f"Packaged tool page is not visible: {TOOL_PAGE_FACTORIES[next_page - 1][0]}")
                 if next_page == len(TOOL_PAGE_FACTORIES):
+                    page_count = window.workspace_stack.count()
+                    for (label, factory), original in zip(TOOL_PAGE_FACTORIES, pages, strict=True):
+                        checkpoint(f"Reopen tool: {label}")
+                        if show_tool_page(window, factory) is not original:
+                            raise RuntimeError(f"Reopening {label} replaced its project page.")
+                    if window.workspace_stack.count() != page_count:
+                        raise RuntimeError("Reopening tool pages added duplicate widgets.")
                     finish()
                     return
                 label, factory = TOOL_PAGE_FACTORIES[next_page]

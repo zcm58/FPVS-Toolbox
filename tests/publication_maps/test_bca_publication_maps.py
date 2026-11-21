@@ -57,6 +57,38 @@ from Tools.Publication_Maps.worker import PublicationMapsWorker
 from Tools.Stats.analysis.canonical_harmonics import CanonicalHarmonicSelectionError
 
 
+@pytest.mark.parametrize("series", [
+    pd.Series([], dtype="float64"),
+    pd.Series([np.nan, np.inf, -np.inf]),
+    pd.Series(np.array([0x7ff0000000000001, 0xfff8000000000009], dtype="uint64").view("float64")),
+    pd.Series([-0.0]),
+    pd.Series([1e16, np.nextafter(0.0, 1.0), -1e16, np.nan, -0.0, np.inf]),
+    pd.Series(np.random.default_rng(9).normal(size=513))[::2],
+    pd.Series([2.5, np.nan, -1.25], dtype="float32"),
+    pd.Series([0, 13, -7], dtype="int64"),
+    pd.Series([1, None, -3], dtype="Int64"),
+    pd.Series([0.5, None, -0.25], dtype="Float64"),
+    pd.Series(["3.5", "invalid", None, "1e-311"], dtype="object"),
+])
+def test_metric_reducers_match_pandas_bit_for_bit(series: pd.Series) -> None:
+    numeric = pd.to_numeric(series, errors="coerce")
+    finite = numeric[np.isfinite(numeric)]
+    count = len(finite)
+    expected_sum = float(finite.sum()) if count else float("nan")
+    expected_mean = float(finite.mean()) if count else float("nan")
+    expected_z = expected_sum / np.sqrt(float(count)) if count else float("nan")
+    observed = [
+        publication_map_metrics._safe_sum(series),
+        publication_map_metrics._safe_mean(series),
+        publication_map_metrics._safe_normalized_sum(series, harmonic_count=count),
+        publication_map_metrics._safe_normalized_sum(series, harmonic_count=count + 1),
+    ]
+    assert publication_map_metrics._finite_count(series) == count
+    assert np.array(observed).tobytes() == np.array(
+        [expected_sum, expected_mean, expected_z, float("nan")],
+    ).tobytes()
+
+
 @pytest.fixture(autouse=True)
 def _stable_processing_harmonic_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(

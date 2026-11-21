@@ -44,7 +44,7 @@ from Main_App.processing.processing_controller import (
     register_participants,
     validate_repeated_recording_sources_for_processing,
 )
-from Main_App.processing.processing_ledger import classify_processing_inputs
+from Main_App.gui.processing_input_check import check_processing_inputs
 from Main_App.processing.fft_multinotch import (
     FFT_MULTINOTCH_COMPONENT_COUNT,
     FFT_MULTINOTCH_HALF_WIDTH_HZ,
@@ -352,12 +352,14 @@ def validate_inputs(host: Any) -> bool:
     if not _resolve_analysis_window_for_processing(host, window_sources, params):
         return False
     planning_settings, event_map = _planning_settings_from_params(params)
-    pre_qc_plan = classify_processing_inputs(
-        host.currentProject,
+    pre_qc_plan = check_processing_inputs(
+        host,
         raw_file_infos,
         planning_settings,
         event_map,
     )
+    if pre_qc_plan is None:
+        return False
     host._processing_pre_qc_plan = pre_qc_plan
     host._published_review_flag_paths = set()
     qc_raw_file_infos = [

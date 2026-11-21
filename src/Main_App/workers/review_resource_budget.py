@@ -18,6 +18,7 @@ from pathlib import Path
 import psutil
 
 from Main_App.workers.linux_cgroup import cgroup_limits
+from Main_App.workers.mp_env import compute_dynamic_worker_ceiling, project_worker_override
 
 GIB = 1024**3
 WORKER_FLOOR_BYTES = GIB
@@ -73,6 +74,26 @@ def _positive_int(value: int) -> int:
 
 def _power_two_ceiling(value: int) -> int:
     return 1 << (max(1, value) - 1).bit_length()
+
+
+def admitted_checkpoint_snapshot(size_bytes: int, source_sample_bytes: int, settings: Mapping | None) -> int:
+    """Fit two snapshot-sized buffers into already reserved reference-stage scratch."""
+    # The ordinary reference-stage credit includes two complete source arrays.
+    # The first remains live here. The other can cover the snapshot plus the
+    # decoded stored NPZ, or a transient buffer copy. Leave decoder overhead.
+    if not 0 < size_bytes <= min(512 * _MIB, (source_sample_bytes - 17 * _MIB) // 2):
+        return 0
+    try:
+        snapshot = probe_memory_snapshot()
+        workers = compute_dynamic_worker_ceiling(project_worker_override(settings), total_ram_bytes=snapshot.total_bytes)
+        if snapshot.total_bytes > 0 and memory_admission_fits(
+            snapshot, active_credits={}, active_owned={}, idle_owned=(), worker_count=workers,
+            worker_floor_bytes=0, candidate_credit=2 * size_bytes * workers,
+        ):
+            return size_bytes
+    except (AttributeError, MemoryError, OSError, OverflowError, RuntimeError, TypeError, ValueError, psutil.Error):
+        logger.debug("checkpoint_snapshot_probe_unavailable", exc_info=True)
+    return 0
 
 
 def bdf_reader_peak_bytes(geometry: ReviewGeometry) -> int:

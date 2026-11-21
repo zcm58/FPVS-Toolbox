@@ -591,6 +591,64 @@ The local focused gates passed 3,891 processing, 1,419 project I/O and
 overlap. The source and project checks exercised the affected operations on
 already processed recordings.
 
+#### Desktop startup, Process input checks and result reuse
+
+The reference was `168ddd80`. The Windows source-launch comparison used a
+fresh interpreter and empty settings directory for each of three runs per
+build. Median time to the first native Welcome paint fell from 2.70 s to
+2.02 s. Six optional tool modules now load when their tools first open. At
+the same focus state the 1200 × 800 Welcome image matched byte for byte.
+All eight embedded pages opened, retained their original class and object
+name, reopened with the same widget instance, and closed on both builds.
+First opening Scalp Maps took 0.64 s in the candidate and 0.09 s in the
+reference in that page traversal. Subsequent visits reuse the page.
+
+On the signed internal-SSD MCCTR project, three native Process clicks per
+build produced the same 145,221-byte classification plan. The longest gap in
+the GUI timer was 8.05–9.58 s before and 0.118–0.123 s after. The candidate
+also reproduced both plans after a controlled QC change and final scope
+refresh. Cancellation returned control without starting a processing worker.
+These timings measure UI responsiveness with the project's 16-worker ceiling.
+
+The normal Scalp Maps worker read 400 native results across all six MCCTR
+conditions and rendered all three metrics. Both builds produced identical
+384,000-row input tables, 1,152-row grand-average tables, cohort and QC
+evidence, and 18 PNGs and 18 PDFs. The test fixed the PDF creation clock.
+One complete run took 286.74 s before and 259.89 s after, with concurrent
+validation work on the host. Its aggregation step alone took 20.95 s and
+2.41 s. Three counterbalanced replays per build on the same in-memory
+table gave aggregation medians of 24.31 s and 3.55 s during the regression
+suite. The exact comparison includes signed zeros and NaN representations.
+
+With the host otherwise quiet, the complete Stats-ready export took
+126.84 s before and 98.84 s after. The three FullFFT checks together
+took 48.71 s and 39.10 s. Across the export, repeated spectral array
+header checks fell from 4,116 to 800. Condition archive header checks
+fell from 202,283 to 29,200. Each build still performed 4,829 archive
+checksums covering 26,877,464,039 bytes. The four-sheet workbook
+(9,422 cells, 74,488 bytes) matched exactly with its file timestamps
+fixed. Its SHA-256 was
+`2c9cc93646aee7d070ae12e88dd7b01c5726e21e546670bc9f71ce0e61cbe085`.
+One-ULP and formatting changes both failed the comparison.
+
+Sixteen resident processes replayed all 69 prepared kurtosis checkpoints.
+Both builds restored the same 1,130,571,520 float64 samples, raw metadata, parameters,
+event geometry and QC evidence. Their combined SHA-256 was
+`b298e4f875dd1564a7d65fe6716b2861860ca3a94b43a372567fdb6a78ed82b2`.
+Application reads from those archives fell from 18,174,543,918 to
+9,087,366,972 bytes. With a warm Windows file cache, four quiet rounds per
+build had median times of 2.836 s and 2.998 s. This trades 0.162 s on
+cached reads for 8.46 GiB less archive I/O. Physical device reads depend
+on the operating system's cache.
+
+A final run with all five changes reproduced the reference Stats-ready
+workbook, both Scalp Maps tables and all 36 figures. The rebuilt Windows
+executable passed the dependency and scientific workflow probes, opened and
+reopened all eight tool pages in native Qt, and closed its workers and window.
+Focused verification passed 3,908 processing tests, 1,429 project I/O tests,
+808 GUI-scope tests, 497 Stats tests and 149 Scalp Maps tests. Repository
+precommit passed 446 tests. These scopes overlap.
+
 #### Forced full reprocessing across cache temperatures
 
 Both builds' full warm reprocess reused all 69 preprocessed FIF files.

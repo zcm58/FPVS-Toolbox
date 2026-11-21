@@ -9,15 +9,19 @@ from typing import BinaryIO
 
 import numpy as np
 
+from Main_App.io.companion_schema import checked_schema
+
 
 # A worker holds at most one such buffer during archive validation. Larger
 # spectra retain the streaming checksum path regardless of cohort size.
 _MAX_BUFFER_BYTES = 16 * 1024 * 1024
 
 
-def validation_buffer_bytes(size_bytes: int) -> int:
+def validation_buffer_bytes(size_bytes: int, *, limit: int | None = None) -> int:
     """Size of the optional in-memory archive during this validation."""
-    return size_bytes if 0 < size_bytes <= _MAX_BUFFER_BYTES else 0
+    if limit is None:
+        limit = _MAX_BUFFER_BYTES
+    return size_bytes if 0 < size_bytes <= limit else 0
 
 
 def _read_buffer(stream: BinaryIO, size_bytes: int, checksum_error: ValueError) -> BytesIO:
@@ -28,11 +32,33 @@ def _read_buffer(stream: BinaryIO, size_bytes: int, checksum_error: ValueError) 
 
 
 @contextmanager
-def open_verified_npz(stream: BinaryIO, size_bytes: int, expected_sha256: str, checksum_error: ValueError):
-    """Parse small archives from the same file bytes that passed the checksum."""
+def open_verified_npz(stream: BinaryIO, size_bytes: int, expected_sha256: str, checksum_error: ValueError,
+                      *, buffer_limit: int | None = None):
+    """Parse admitted archives from the same file bytes that passed the checksum."""
+    with open_verified_npz_with_buffer_status(
+        stream, size_bytes, expected_sha256, checksum_error, buffer_limit,
+    ) as (archive, _):
+        yield archive
+
+
+@contextmanager
+def open_verified_schema(stream: BinaryIO, identity: dict, checksum_error: ValueError):
+    """Expose a prior schema check only for freshly hashed, immutable input."""
+    with open_verified_npz_with_buffer_status(
+        stream, identity["size_bytes"], identity["sha256"], checksum_error,
+    ) as (archive, immutable):
+        with checked_schema(identity, immutable=immutable) as previously_checked:
+            yield archive, previously_checked
+
+
+@contextmanager
+def open_verified_npz_with_buffer_status(
+    stream: BinaryIO, size_bytes: int, expected_sha256: str, checksum_error: ValueError, buffer_limit: int | None = None,
+):
+    """Yield the validated NPZ and whether its reads use the verified memory snapshot."""
     source = stream
     try:
-        if validation_buffer_bytes(size_bytes):
+        if validation_buffer_bytes(size_bytes, limit=buffer_limit):
             try:
                 source = _read_buffer(stream, size_bytes, checksum_error)
                 digest = hashlib.file_digest(source, "sha256")
@@ -47,7 +73,7 @@ def open_verified_npz(stream: BinaryIO, size_bytes: int, expected_sha256: str, c
             raise checksum_error
         source.seek(0)
         with np.load(source, allow_pickle=False) as archive:
-            yield archive
+            yield archive, source is not stream
     finally:
         if source is not stream:
             source.close()

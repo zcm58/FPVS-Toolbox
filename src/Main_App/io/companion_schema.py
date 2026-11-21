@@ -1,6 +1,9 @@
-"""Declaration-only validation shared by native manifests and array readers."""
+"""Lightweight companion declarations and content-based schema validation scope."""
 
-from collections.abc import Mapping
+from collections import OrderedDict
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 import re
 
@@ -11,6 +14,40 @@ CONDITION_DATA_SHEET_NAMES = (
     "FFT Amplitude (uV)", "SNR", "Z Score", "BCA (uV)",
     "Spectral Eligibility", "Spectral Metric QC", "FFT and neighbors", "FFT Metadata",
 )
+
+
+# Store only successful checks of immutable archive bytes, never paths, arrays
+# or decoded schemas. The limit accommodates both companions of 512 results.
+_MAX_SCHEMA_RECEIPTS = 1024
+_SCHEMA_RECEIPTS: ContextVar[OrderedDict | None] = ContextVar("companion_schema_receipts", default=None)
+
+
+@contextmanager
+def companion_schema_receipt_scope() -> Iterator[None]:
+    """Share proofs of content across independent reads in one operation."""
+    if _SCHEMA_RECEIPTS.get() is not None:
+        yield
+        return
+    token = _SCHEMA_RECEIPTS.set(OrderedDict())
+    try:
+        yield
+    finally:
+        _SCHEMA_RECEIPTS.reset(token)
+
+
+@contextmanager
+def checked_schema(identity: dict, *, immutable: bool) -> Iterator[bool]:
+    """Called only after the current bytes independently pass SHA-256."""
+    receipts = _SCHEMA_RECEIPTS.get() if immutable else None
+    if receipts is None:
+        yield False
+        return
+    key = (identity["version"], tuple(identity["sheets"]), identity["size_bytes"], identity["sha256"])
+    yield key in receipts
+    receipts[key] = None
+    receipts.move_to_end(key)
+    if len(receipts) > _MAX_SCHEMA_RECEIPTS:
+        receipts.popitem(last=False)
 
 
 class SpectralDataError(ValueError):

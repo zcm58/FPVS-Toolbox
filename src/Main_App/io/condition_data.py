@@ -28,7 +28,7 @@ from Main_App.io.companion_schema import (
     CONDITION_COMPANION_VERSION, CONDITION_DATA_SHEET_NAMES, ConditionDataError, condition_descriptor as _descriptor,
 )
 from Main_App.io.condition_data_codec import decode_column, encode_column, json_text, validate_column_encoding
-from Main_App.io.numpy_companion import open_replaceable_companion, open_verified_npz
+from Main_App.io.numpy_companion import open_replaceable_companion, open_verified_schema
 
 CONDITION_MANIFEST_SHEET = "Condition Data"
 _MAX_CACHED_COMPANIONS = 4
@@ -163,7 +163,7 @@ def _array_header(container, key: str) -> tuple[tuple, np.dtype]:
     return shape, dtype
 
 
-def _archive_schema(archive, container, identity: dict) -> dict[str, dict]:
+def _archive_schema(archive, container, identity: dict, *, previously_checked: bool = False) -> dict[str, dict]:
     metadata_array = archive["metadata_json"]
     if metadata_array.dtype.kind != "U" or metadata_array.shape != ():
         raise ConditionDataError("Invalid condition archive metadata.")
@@ -173,6 +173,8 @@ def _archive_schema(archive, container, identity: dict) -> dict[str, dict]:
     specifications = metadata.get("sheets")
     if not isinstance(specifications, list) or len(specifications) != len(identity["sheets"]):
         raise ConditionDataError("Condition archive disagrees with its workbook declaration.")
+    if previously_checked:
+        return {specification["name"]: specification for specification in specifications}
     sheets, expected_keys, used_columns = {}, {"metadata_json"}, {}
     for sheet_index, (name, specification) in enumerate(zip(identity["sheets"], specifications, strict=True)):
         if not isinstance(specification, dict) or specification.get("name") != name:
@@ -253,11 +255,11 @@ def _companion_payload(workbook: Path, descriptor: Mapping) -> _ConditionPayload
             cache.condition_payloads.popitem(last=False)
         return payload
     try:
-        with path.open("rb") as stream, open_verified_npz(
-            stream, signature.size_bytes, identity["sha256"],
+        with path.open("rb") as stream, open_verified_schema(
+            stream, identity,
             ConditionDataError(f"Condition companion checksum does not match: {path.name}"),
-        ) as archive:
-            specifications = _archive_schema(archive, archive.zip, identity)
+        ) as (archive, previously_checked):
+            specifications = _archive_schema(archive, archive.zip, identity, previously_checked=previously_checked)
     except (OSError, ValueError, KeyError, TypeError, zipfile.BadZipFile) as exc:
         if isinstance(exc, ConditionDataError):
             raise

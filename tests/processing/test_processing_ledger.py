@@ -76,6 +76,27 @@ def _add_raw_file(raw_dir: Path, participant_id: str) -> RawFileInfo:
     return RawFileInfo(raw_file.resolve(), participant_id)
 
 
+def test_cancel_input_check_stops_before_reading_the_next_recording(tmp_path, monkeypatch):
+    from concurrent.futures import CancelledError
+    from threading import Event
+
+    project, first = _project_with_raw(tmp_path)
+    second = _add_raw_file(first.path.parent, "P02")
+    cancel_event = Event()
+    original = processing_ledger_module.raw_file_metadata
+    reads = []
+
+    def read_and_cancel(path):
+        reads.append(path)
+        cancel_event.set()
+        return original(path)
+
+    monkeypatch.setattr(processing_ledger_module, "raw_file_metadata", read_and_cancel)
+    with pytest.raises(CancelledError):
+        classify_processing_inputs(project, [first, second], _settings(), project.event_map, cancel_event=cancel_event)
+    assert reads == [first.path]
+
+
 def _settings() -> dict[str, object]:
     return {
         "high_pass": 0.1,

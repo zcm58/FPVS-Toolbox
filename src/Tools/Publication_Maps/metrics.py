@@ -1062,26 +1062,41 @@ def _map_label(metric: PublicationMetric) -> str:
     return "BCA significant-harmonic sum"
 
 
+def _numeric_values(values: pd.Series) -> np.ndarray | pd.Series:
+    # Exported metric values are already float64. Keep pandas' coercion and
+    # null handling for historical workbooks and extension dtypes.
+    if values.dtype == np.dtype(np.float64):
+        return values.to_numpy(copy=False)
+    return pd.to_numeric(values, errors="coerce")
+
+
+def _finite_values(values: pd.Series) -> np.ndarray | pd.Series:
+    numeric = _numeric_values(values)
+    return numeric[np.isfinite(numeric)]
+
+
 def _safe_sum(values: pd.Series) -> float:
-    numeric = pd.to_numeric(values, errors="coerce")
-    finite = numeric[np.isfinite(numeric)]
+    finite = _finite_values(values)
     return float(finite.sum()) if len(finite) else float("nan")
 
 
 def _safe_normalized_sum(values: pd.Series, *, harmonic_count: int) -> float:
-    numeric = pd.to_numeric(values, errors="coerce")
-    finite = numeric[np.isfinite(numeric)]
+    finite = _finite_values(values)
     if harmonic_count <= 0 or len(finite) != harmonic_count:
         return float("nan")
     return float(finite.sum() / np.sqrt(float(harmonic_count)))
 
 
 def _safe_mean(values: pd.Series) -> float:
-    numeric = pd.to_numeric(values, errors="coerce")
-    finite = numeric[np.isfinite(numeric)]
-    return float(finite.mean()) if len(finite) else float("nan")
+    finite = _finite_values(values)
+    if not len(finite):
+        return float("nan")
+    if isinstance(finite, np.ndarray):
+        # pandas' float64 mean sums in source order and divides by a float64 count.
+        return float(finite.sum() / np.float64(len(finite)))
+    return float(finite.mean())
 
 
 def _finite_count(values: pd.Series) -> int:
-    numeric = pd.to_numeric(values, errors="coerce")
+    numeric = _numeric_values(values)
     return int(np.isfinite(numeric).sum())

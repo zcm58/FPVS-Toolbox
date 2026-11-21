@@ -5,6 +5,7 @@ from dataclasses import dataclass, FrozenInstanceError
 from datetime import datetime, timezone
 import json
 import hashlib
+import os
 import struct
 import zipfile
 
@@ -343,6 +344,149 @@ def test_cache_retains_latest_settings_only_and_preserves_unowned_files(recordin
     assert len(list(identity.folder.glob("*.npz"))) == 2
     assert unrelated.read_bytes() == b"keep"
     assert cache.load_checkpoint(identity) is None
+
+
+@pytest.mark.parametrize("mode", [
+    "snapshot", "buffer_pressure", "read_error", "decoder_pressure", "compressed", "compressed_buffer_pressure",
+])
+def test_admitted_checkpoint_and_streaming_fallback_restore_identical_bits(recording, monkeypatch, mode):
+    from Main_App.io import numpy_companion
+
+    raw, params, _ = recording
+    if mode.startswith("compressed"):
+        monkeypatch.setattr(cache.np, "savez", np.savez_compressed)
+    _run(raw, params)
+    identity = _identity(raw, params)
+    pointer = identity.folder / "latest.json"
+    receipt = pointer.read_bytes()
+    reference = cache.load_checkpoint(identity)
+    original_buffer = numpy_companion._read_buffer
+    original_restore = cache.restore_raw
+    buffers, restorations, disk_hashes = [], [], []
+    file_digest = hashlib.file_digest
+
+    def digest(stream, algorithm):
+        if getattr(stream, "name", None):
+            disk_hashes.append(True)
+        return file_digest(stream, algorithm)
+
+    def buffer(*args):
+        buffers.append(True)
+        if mode in ("buffer_pressure", "compressed_buffer_pressure"):
+            args[0].read(7)
+            raise MemoryError
+        if mode == "read_error":
+            args[0].read(7)
+            raise OSError("Large read unavailable")
+        return original_buffer(*args)
+
+    def restore(*args):
+        restorations.append(True)
+        if mode == "decoder_pressure" and len(restorations) == 1:
+            raise MemoryError
+        return original_restore(*args)
+
+    monkeypatch.setattr(cache, "admitted_checkpoint_snapshot", lambda size, *_: size)
+    monkeypatch.setattr(numpy_companion, "_read_buffer", buffer)
+    monkeypatch.setattr(cache, "restore_raw", restore)
+    monkeypatch.setattr(hashlib, "file_digest", digest)
+    actual = cache.load_checkpoint(identity)
+    assert len(buffers) == 1 and len(restorations) == (2 if mode == "decoder_pressure" else 1)
+    assert len(disk_hashes) == (0 if mode == "snapshot" else 1)
+    assert actual.raw._data.tobytes() == reference.raw._data.tobytes()
+    _assert_exact_state(raw_state(actual.raw), raw_state(reference.raw))
+    _assert_exact_state((actual.evidence, actual.params, actual.original_sfreq),
+                        (reference.evidence, reference.params, reference.original_sfreq))
+    assert actual.raw._data.flags.writeable
+    assert pointer.read_bytes() == receipt
+
+
+def test_bad_checksum_is_rejected_before_parsing_any_snapshot(recording, monkeypatch):
+    raw, params, _ = recording
+    _run(raw, params)
+    identity = _identity(raw, params)
+    path = next(identity.folder.glob("*.npz"))
+    with path.open("r+b") as stream:
+        stream.seek(-1, 2)
+        value = stream.read(1)[0]
+        stream.seek(-1, 2)
+        stream.write(bytes([value ^ 1]))
+    monkeypatch.setattr(cache, "admitted_checkpoint_snapshot", lambda size, *_: size)
+    monkeypatch.setattr(cache.np, "load", lambda *_a, **_k: pytest.fail("Unverified checkpoint parsed"))
+    assert cache.load_checkpoint(identity) is None
+
+
+def test_lazy_input_with_existing_identity_uses_streaming_checkpoint(recording, monkeypatch, tmp_path):
+    raw, params, _ = recording
+    expected, count, _ = _run(raw, params)
+    identity = _identity(raw, params)
+    path = tmp_path / "lazy_raw.fif"
+    raw.save(path, fmt="double", verbose=False)
+    with mne.io.read_raw_fif(path, preload=False, verbose=False) as lazy:
+        assert not lazy.preload
+        assert _identity(lazy, params) is None
+        monkeypatch.setattr(preprocess, "checkpoint_identity", lambda *_: identity)
+        sizes = []
+
+        def observe(_size, source_bytes, _workers):
+            sizes.append(source_bytes)
+            return 0
+
+        monkeypatch.setattr(cache, "admitted_checkpoint_snapshot", observe)
+        actual, actual_count, settings = _run(lazy, params)
+    assert sizes == [0]
+    assert settings["_fpvs_kurtosis_checkpoint_status"] == "hit"
+    assert count == actual_count and expected._data.tobytes() == actual._data.tobytes()
+    _assert_exact_state(raw_state(expected), raw_state(actual))
+
+
+@pytest.mark.parametrize("touch_only", [True, False])
+def test_in_place_archive_change_during_snapshot_rechecks_current_bytes(recording, monkeypatch, touch_only):
+    from Main_App.io import numpy_companion
+
+    raw, params, _ = recording
+    _run(raw, params)
+    identity = _identity(raw, params)
+    path = next(identity.folder.glob("*.npz"))
+    read_buffer = numpy_companion._read_buffer
+
+    def mutate_after_read(*args):
+        buffer = read_buffer(*args)
+        if touch_only:
+            stat = path.stat()
+            os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
+        else:
+            with path.open("ab") as handle:
+                handle.write(b"changed in place")
+        return buffer
+
+    monkeypatch.setattr(cache, "admitted_checkpoint_snapshot", lambda size, *_: size)
+    monkeypatch.setattr(numpy_companion, "_read_buffer", mutate_after_read)
+    assert (cache.load_checkpoint(identity) is not None) == touch_only
+
+
+@pytest.mark.parametrize("gib", [8, 16, 32, 64, 128, 256])
+def test_checkpoint_snapshot_respects_job_slack_and_ram_tier(gib, monkeypatch):
+    from Main_App.workers import review_resource_budget as budget
+    from Main_App.workers.mp_env import compute_dynamic_worker_ceiling
+
+    host = gib * budget.GIB
+    size = 100 * 1024**2
+    source = 4 * size
+    expected_workers = compute_dynamic_worker_ceiling(total_ram_bytes=host)
+    margin = max(budget.GIB, host // 16)
+    minimum = 2 * size * expected_workers + margin
+
+    def probe(free, commit):
+        return lambda: budget.ReviewMemorySnapshot(host, free, commit, True)
+
+    monkeypatch.setattr(budget, "probe_memory_snapshot", probe(minimum, minimum))
+    assert budget.admitted_checkpoint_snapshot(size, source, None) == size
+    assert budget.admitted_checkpoint_snapshot(size, 2 * size, None) == 0
+    assert budget.admitted_checkpoint_snapshot(budget.GIB, 4 * budget.GIB, None) == 0
+    for free, commit in ((minimum - 1, host), (host, minimum - 1), (host, None)):
+        monkeypatch.setattr(budget, "probe_memory_snapshot", probe(free, commit))
+        assert budget.admitted_checkpoint_snapshot(size, source, None) == 0
 
 
 def test_cancelled_write_keeps_previous_complete_checkpoint_and_cleans_temporary_files(recording, monkeypatch):

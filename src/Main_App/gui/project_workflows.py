@@ -508,6 +508,9 @@ def load_project(
     project: Any,
     entry_adapter_factory: Callable[[QLineEdit], Any] | None = None,
 ) -> None:
+    input_check = getattr(host, "_processing_input_check", None)
+    if input_check is not None:
+        input_check.reject()
     _load_project(host, project)
     condition_editor_toggle = getattr(host, "condition_editor_toggle", None)
     if condition_editor_toggle is not None:

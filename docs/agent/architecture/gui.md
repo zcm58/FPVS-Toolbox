@@ -2,6 +2,11 @@
 
 The active desktop UI is PySide6.
 
+The main window resolves optional tool window classes on first use. The
+six deferred exports keep their public class identities and the page factories
+continue to own project binding and widget reuse. The native packaged smoke
+opens and reopens the embedded pages before shutting down their workers.
+
 For the path from a user action to its backend and back, see
 [Desktop workflows and backend ownership](gui-backend.md). It traces the
 Studio and Toolbox workflows and records where to test their behavior.

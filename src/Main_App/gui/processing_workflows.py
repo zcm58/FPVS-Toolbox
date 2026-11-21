@@ -10,12 +10,14 @@ from typing import Any, Callable, Mapping
 
 from PySide6.QtCore import QObject, QThread, QTimer, Slot
 from PySide6.QtWidgets import QDialog, QMessageBox
+from shiboken6 import isValid
 from Main_App.gui.run_outcome_model import summarize_run
 from Main_App.gui.run_outcome import present_last_run
 
 from Main_App.diagnostics.audit import format_audit_summary, write_audit_json
 from Main_App.gui import shell_status
 from Main_App.gui.post_export_workflows import excel_snapshot
+from Main_App.gui.processing_input_check import check_processing_inputs
 from Main_App.io.load_utils import (
     BDF_RECORDING_NOT_STARTED_REASON,
     format_bdf_recording_not_started_message,
@@ -26,8 +28,6 @@ from Main_App.processing.processing_ledger import (
     ProcessingPlan,
     additional_preflight_infos_for_chosen_scope,
     build_expected_recording_condition_plan,
-    carry_forward_pre_qc_completed_states,
-    classify_processing_inputs,
     clean_downstream_outputs_for_reprocess_all,
     clean_managed_excel_root,
     clean_participant_outputs,
@@ -1143,6 +1143,10 @@ def _prepare_excel_outputs_for_plan(
 
 def stop_processing(host: Any) -> None:
     """Cooperatively request cancellation for a process-mode run."""
+    input_check = getattr(host, "_processing_input_check", None)
+    if input_check is not None:
+        input_check.reject()
+        return
     if not getattr(host, "_run_active", False):
         host.log("Stop requested but no processing run is active.", level=logging.INFO)
         return
@@ -1371,12 +1375,12 @@ def start_processing(host: Any, *, log: logging.Logger = logger) -> None:
         plan = host._validated_unchanged_plan
         host._validated_unchanged_plan = None
         if plan is None:
-            plan = classify_processing_inputs(
-                host.currentProject, raw_file_infos, settings, event_map,
+            plan = check_processing_inputs(
+                host, raw_file_infos, settings, event_map, pre_qc_plan=getattr(host, "_processing_pre_qc_plan", None),
             )
-            plan = carry_forward_pre_qc_completed_states(
-                host.currentProject, getattr(host, "_processing_pre_qc_plan", None), plan,
-            )
+            if plan is None:
+                _reset_failed_start(host)
+                return
         chosen_plan = _choose_processing_plan(host, plan, is_single_ui=is_single_ui)
         if chosen_plan is None:
             _reset_failed_start(host)
@@ -1406,10 +1410,12 @@ def start_processing(host: Any, *, log: logging.Logger = logger) -> None:
                     _reset_failed_start(host)
                     return
                 reviewed_paths.update(paths)
-            refreshed_plan = classify_processing_inputs(host.currentProject, raw_file_infos, settings, event_map)
-            refreshed_plan = carry_forward_pre_qc_completed_states(
-                host.currentProject, getattr(host, "_processing_pre_qc_plan", None), refreshed_plan,
+            refreshed_plan = check_processing_inputs(
+                host, raw_file_infos, settings, event_map, pre_qc_plan=getattr(host, "_processing_pre_qc_plan", None),
             )
+            if refreshed_plan is None:
+                _reset_failed_start(host)
+                return
             chosen_plan = with_processing_choice(refreshed_plan, chosen_plan.choice)
             missing = additional_preflight_infos_for_chosen_scope(chosen_plan, settings)
             if not missing:
@@ -1572,6 +1578,9 @@ def start_processing(host: Any, *, log: logging.Logger = logger) -> None:
 
 
 def _reset_failed_start(host: Any) -> None:
+    if isinstance(host, QObject) and not isValid(host):
+        # A forced teardown can destroy the window during a modal input check.
+        return
     try:
         if hasattr(host, "_busy_stop"):
             host._busy_stop()

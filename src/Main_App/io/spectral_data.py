@@ -26,7 +26,7 @@ from Main_App.io import xlsx_selected_reader as _xlsx
 from Main_App.io.companion_schema import (
     SPECTRAL_COMPANION_VERSION, SPECTRAL_SHEET_NAMES, SpectralDataError, spectral_descriptor as _descriptor,
 )
-from Main_App.io.numpy_companion import open_verified_npz
+from Main_App.io.numpy_companion import open_verified_schema
 
 SPECTRAL_MANIFEST_SHEET = "Spectral Data"
 _MAX_CACHED_COMPANIONS = 4
@@ -250,10 +250,10 @@ def _companion_payload(workbook: Path, descriptor: Mapping) -> _SpectralPayload:
         return cache.spectral_payloads[key]
     try:
         with path.open("rb") as stream:
-            with open_verified_npz(
-                stream, signature.size_bytes, identity["sha256"],
+            with open_verified_schema(
+                stream, identity,
                 SpectralDataError(f"Spectral companion checksum does not match: {path.name}"),
-            ) as archive:
+            ) as (archive, previously_checked):
                 manifest = json.loads(str(archive["metadata_json"].item()))
                 if manifest.get("version") != SPECTRAL_COMPANION_VERSION or manifest.get("sheets") != identity["sheets"]:
                     raise SpectralDataError("Spectral archive disagrees with its workbook declaration.")
@@ -261,12 +261,13 @@ def _companion_payload(workbook: Path, descriptor: Mapping) -> _SpectralPayload:
                 for index, name in enumerate(identity["sheets"]):
                     labels = archive[f"sheet{index}_columns"]
                     rows = archive[f"sheet{index}_electrodes"]
-                    shape = _dense_shape(archive.zip, f"sheet{index}_values")
-                    if (labels.dtype.kind != "U" or rows.dtype.kind != "U" or labels.ndim != 1 or rows.ndim != 1
-                            or len(labels) < 2 or labels[0] != "Electrode"
-                            or shape != (len(rows), len(labels) - 1)
-                            or len(set(labels)) != len(labels) or len(set(rows)) != len(rows)):
-                        raise SpectralDataError(f"Invalid spectral array dimensions or types for {name}.")
+                    if not previously_checked:
+                        shape = _dense_shape(archive.zip, f"sheet{index}_values")
+                        if (labels.dtype.kind != "U" or rows.dtype.kind != "U" or labels.ndim != 1 or rows.ndim != 1
+                                or len(labels) < 2 or labels[0] != "Electrode"
+                                or shape != (len(rows), len(labels) - 1)
+                                or len(set(labels)) != len(labels) or len(set(rows)) != len(rows)):
+                            raise SpectralDataError(f"Invalid spectral array dimensions or types for {name}.")
                     columns[name], electrodes[name] = tuple(labels.tolist()), rows
                     rows.setflags(write=False)
                 metadata = manifest.get("metadata")

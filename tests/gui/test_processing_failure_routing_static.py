@@ -1180,7 +1180,7 @@ def _registration_validation_harness(tmp_path, *, mode="Batch", additions=True):
         "participant_review_rows": Mock(), "register_participants": Mock(),
         "review_participants_for_processing": Mock(),
         "_planning_settings_from_params": lambda params: (params, params["event_id_map"]),
-        "classify_processing_inputs": Mock(side_effect=lambda *_: timeline.append("plan") or SimpleNamespace(states=[])),
+        "check_processing_inputs": Mock(side_effect=lambda *_: timeline.append("plan") or SimpleNamespace(states=[])),
         "PREPROCESSING_CANONICAL_KEYS": (), "OPTIONAL_PREPROCESSING_KEYS": ("processing_pipeline",),
         "FFT_MULTINOTCH_METHOD_VERSION": "unchanged",
         "FFT_MULTINOTCH_HALF_WIDTH_HZ": 1, "FFT_MULTINOTCH_COMPONENT_COUNT": 1,
@@ -1200,7 +1200,9 @@ def test_processing_confirms_additions_once_before_planning_exact_selected_files
     host.review_recording_additions_for_processing.assert_called_once_with(host, proposal.review_rows)
     namespace["commit_raw_registration_review"].assert_called_once_with(host.currentProject, proposal)
     assert namespace["validate_repeated_recording_sources_for_processing"].call_args.args[1] == proposal.source_files
-    assert namespace["classify_processing_inputs"].call_args.args[1] == list(proposal.files)
+    namespace["check_processing_inputs"].assert_called_once_with(
+        host, list(proposal.files), host.validated_params, {"Faces": 1},
+    )
     assert host.data_paths == [str(info.path) for info in proposal.files]
     assert host._processing_raw_file_infos == list(proposal.files)
     namespace["participant_review_rows"].assert_not_called()
@@ -1225,7 +1227,7 @@ def test_addition_review_cancel_or_failure_never_plans_or_saves_through_generic_
     assert validate(host) is False
 
     assert "plan" not in timeline
-    namespace["classify_processing_inputs"].assert_not_called()
+    namespace["check_processing_inputs"].assert_not_called()
     namespace["register_participants"].assert_not_called()
     namespace["participant_review_rows"].assert_not_called()
     host.run_preprocessing_qc_workflow.assert_not_called()
@@ -1252,7 +1254,7 @@ def test_addition_source_conflict_stops_before_confirmation_or_registration(tmp_
 
     host.review_recording_additions_for_processing.assert_not_called()
     namespace["commit_raw_registration_review"].assert_not_called()
-    namespace["classify_processing_inputs"].assert_not_called()
+    namespace["check_processing_inputs"].assert_not_called()
     assert "Stable group assignment conflict" in namespace["QMessageBox"].critical.call_args.args[2]
     assert manifest.read_bytes() == before
 

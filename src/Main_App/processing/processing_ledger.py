@@ -8,9 +8,11 @@ import logging
 import os
 import re
 import time
+from concurrent.futures import CancelledError
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
+from threading import Event
 from typing import TYPE_CHECKING, Any, Iterable, Mapping, Sequence
 
 from Main_App.io.geometry_metadata import (
@@ -582,6 +584,7 @@ def _source_derivative_reuse_problem(
 
 def _condition_companion_reuse_problem(
     entry: Mapping[str, Any], expected_outputs: Sequence[Path],
+    cancel_event: Event | None = None,
 ) -> str | None:
     """Require recorded arrays, resolving beside the current condition workbooks."""
     from Main_App.io.condition_data import condition_companion_identity
@@ -593,6 +596,7 @@ def _condition_companion_reuse_problem(
     )
     outputs = {path.name: path for path in expected_outputs}
     for receipt in _export_receipts_payload(entry):
+        _check_cancelled(cancel_event)
         write = receipt.get("workbook_write")
         if not isinstance(write, Mapping) or not any(
             key in write for key, _label, _reader in companion_readers
@@ -626,7 +630,18 @@ def _condition_companion_reuse_problem(
     return None
 
 
-def _check_reusable_outputs(project: Any, states: list[ProcessingInputState], entries: Mapping, candidates: set[str]) -> None:
+def _check_cancelled(cancel_event: Event | None) -> None:
+    if cancel_event is not None and cancel_event.is_set():
+        raise CancelledError
+
+
+def _check_reusable_outputs(
+    project: Any,
+    states: list[ProcessingInputState],
+    entries: Mapping,
+    candidates: set[str],
+    cancel_event: Event | None,
+) -> None:
     """Check independent recordings under the same memory-limited validation pool as release."""
     if not candidates:
         return
@@ -637,14 +652,16 @@ def _check_reusable_outputs(project: Any, states: list[ProcessingInputState], en
     override = project_worker_override(getattr(project, "preprocessing", None), getattr(project, "options", None))
 
     def validate(item):
+        _check_cancelled(cancel_event)
         _index, state = item
-        return _condition_companion_reuse_problem(entries[state.processing_id], state.expected_outputs)
+        return _condition_companion_reuse_problem(entries[state.processing_id], state.expected_outputs, cancel_event)
 
     def credit(item):
         # Validation releases each condition before opening the next one.
         _index, state = item
         largest = 0
         for path in state.expected_outputs:
+            _check_cancelled(cancel_event)
             if path.is_file():
                 estimate = cell_validation_credit(path)
                 if estimate is None:
@@ -1211,8 +1228,11 @@ def classify_processing_inputs(
     files: Sequence[RawFileInfo],
     settings: Mapping[str, Any],
     event_map: Mapping[str, int],
+    *,
+    cancel_event: Event | None = None,
 ) -> ProcessingPlan:
     from Main_App.projects.condition_trigger_maps import project_conditions
+    _check_cancelled(cancel_event)
     raw_protocol = settings.get("frequency_protocol")
     mapped = raw_protocol is not None and normalize_frequency_protocol(raw_protocol).condition_trigger_maps is not None
     condition_labels = (tuple(item.label for item in project_conditions(project))
@@ -1256,6 +1276,7 @@ def classify_processing_inputs(
     states: list[ProcessingInputState] = []
     validate_companions: set[str] = set()
     for info in files:
+        _check_cancelled(cancel_event)
         participant_id = info.subject_id
         processing_id = info.processing_id
         expected_outputs = _expected_excel_paths(project, info, condition_labels)
@@ -1539,7 +1560,8 @@ def classify_processing_inputs(
                 expected_outputs=expected_outputs,
             )
         )
-    _check_reusable_outputs(project, states, entries, validate_companions)
+    _check_reusable_outputs(project, states, entries, validate_companions, cancel_event)
+    _check_cancelled(cancel_event)
     from Main_App.processing.incremental_recording_plan import unverified_completed_recordings
 
     unverified = unverified_completed_recordings(ledger, states)
@@ -1669,6 +1691,7 @@ def _state_still_matches_ledger(
     project: Any,
     state: ProcessingInputState,
     entries: Mapping[str, Any] | None = None,
+    cancel_event: Event | None = None,
 ) -> bool:
     if entries is None:
         entries = load_ledger(Path(project.project_root)).get("entries", {})
@@ -1692,7 +1715,7 @@ def _state_still_matches_ledger(
 
     if _source_derivative_reuse_problem(Path(project.project_root), entry):
         return False
-    if _condition_companion_reuse_problem(entry, state.expected_outputs):
+    if _condition_companion_reuse_problem(entry, state.expected_outputs, cancel_event):
         return False
 
     present_outputs = [path for path in state.expected_outputs if path.exists()]
@@ -1706,6 +1729,8 @@ def carry_forward_pre_qc_completed_states(
     project: Any,
     pre_qc_plan: ProcessingPlan | None,
     current_plan: ProcessingPlan,
+    *,
+    cancel_event: Event | None = None,
 ) -> ProcessingPlan:
     """Keep completed pre-QC states when QC metadata updates only new files.
 
@@ -1731,6 +1756,7 @@ def carry_forward_pre_qc_completed_states(
     states: list[ProcessingInputState] = []
     changed = False
     for current in current_plan.states:
+        _check_cancelled(cancel_event)
         try:
             key = current.info.path.resolve()
         except (OSError, RuntimeError):
@@ -1750,7 +1776,7 @@ def carry_forward_pre_qc_completed_states(
                     current_plan.recording_settings[current.processing_id],
                 )
             )
-            and _state_still_matches_ledger(project, current, current_entries)
+            and _state_still_matches_ledger(project, current, current_entries, cancel_event)
             and not _authorized_recording_review_changed(
                 project, current.processing_id,
                 current_entries.get(current.processing_id, {}),

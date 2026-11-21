@@ -69,6 +69,13 @@ cancellation. See the preflight section of the processing contract for the
 exclusion and lookup rules. [Processing contract](preprocessing-contract.md)
 [Plan owner](../../../src/Main_App/processing/processing_ledger.py) · [Plan tests](../../../tests/processing/test_expected_processing_ledger.py) · [GUI handoff tests](../../../tests/gui/test_recording_qc_static_contracts.py)
 
+The Process action runs pre-review classification, post-review classification
+and the final scope refresh in a background thread. The ledger owner uses the
+project's worker ceiling for recording checks. The desktop keeps its event loop
+available, offers cancellation on longer checks and discards the result if the
+project changes. Only a completed check for the current project can continue
+to the next prompt or launch processing.
+
 ## Verification for a port
 
 1. Start with the public entry point. For a Qt-free module, add its normal

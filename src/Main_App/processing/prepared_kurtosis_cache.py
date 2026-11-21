@@ -15,19 +15,21 @@ import os
 from pathlib import Path
 import tempfile
 import re
-from typing import NamedTuple
+from typing import BinaryIO, NamedTuple
 
 import mne
 import numpy as np
 import scipy
 from threadpoolctl import threadpool_info
 
+from Main_App.io.numpy_companion import open_verified_npz_with_buffer_status
 from Main_App.io.recorded_eeg_geometry import read_raw_eeg_geometry
 from Main_App.processing.kurtosis_qc import (
     CURRENT_KURTOSIS_CORROBORATOR_REGISTRY, KURTOSIS_AUTHORITY_POLICY_VERSION,
     KURTOSIS_QC_METHOD_VERSION, KurtosisQCEvidence,
 )
 from Main_App.processing.prepared_raw_codec import decode_state, encode_state, raw_state, restore_raw
+from Main_App.workers.review_resource_budget import admitted_checkpoint_snapshot
 
 logger = logging.getLogger(__name__)
 CHECKPOINT_VERSION = "prepared_kurtosis_float64_v2_native_threads"
@@ -211,7 +213,43 @@ def checkpoint_identity(raw, params: dict, preprocessing_fingerprint: str) -> Ch
         return None
 
 
-def load_checkpoint(identity: CheckpointIdentity | None, *, should_cancel=None) -> PreparedCheckpoint | None:
+class _CheckpointNeedsStreaming(Exception):
+    """Retry the archived bytes with the original streaming validator."""
+
+
+class _CheckpointChecksumMismatch(ValueError):
+    """The pointer references other bytes."""
+
+
+def _read_checkpoint(stream: BinaryIO, identity: CheckpointIdentity, size_bytes: int, digest: str, buffer_limit: int):
+    before = os.fstat(stream.fileno()) if buffer_limit else None
+    checksum_error = _CheckpointChecksumMismatch("Checkpoint checksum mismatch.")
+    with open_verified_npz_with_buffer_status(
+        stream, size_bytes, digest, checksum_error, buffer_limit,
+    ) as (archive, buffered):
+        # Historical compressed archives can expand beyond the admitted
+        # scratch. Release the snapshot before running their normal decoder.
+        if buffered and sum(member.file_size for member in archive.zip.infolist()) > size_bytes:
+            raise _CheckpointNeedsStreaming
+        metadata = json.loads(str(archive["metadata_json"].item()))
+        if metadata["version"] != CHECKPOINT_VERSION or metadata["key"] != identity.key:
+            return None
+        state = decode_state(metadata["state"], archive)
+        evidence = state["evidence"]
+        if not isinstance(evidence, KurtosisQCEvidence) or evidence.fingerprint != metadata["evidence_fingerprint"]:
+            return None
+        samples = archive["samples"]
+        if buffered and before is not None:
+            after = os.fstat(stream.fileno())
+            if (before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (
+                after.st_size, after.st_mtime_ns, after.st_ctime_ns,
+            ):
+                raise _CheckpointNeedsStreaming
+        return restore_raw(samples, state["raw"]), state
+
+
+def load_checkpoint(identity: CheckpointIdentity | None, *, should_cancel=None,
+                    source_sample_bytes: int = 0, settings: dict | None = None) -> PreparedCheckpoint | None:
     if identity is None or (should_cancel and should_cancel()):
         return None
     raw = None
@@ -228,21 +266,25 @@ def load_checkpoint(identity: CheckpointIdentity | None, *, should_cancel=None) 
         if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest) or name != f"{identity.key}.{digest[:20]}.npz":
             return None
         path = identity.folder / name
-        if path.resolve().parent != identity.folder.resolve() or path.stat().st_size != manifest["size_bytes"]:
+        if path.resolve().parent != identity.folder.resolve():
             return None
+        size_bytes = path.stat().st_size
+        if size_bytes != manifest["size_bytes"]:
+            return None
+        buffer_limit = admitted_checkpoint_snapshot(size_bytes, source_sample_bytes, settings)
         with path.open("rb") as stream:
-            if hashlib.file_digest(stream, "sha256").hexdigest() != digest:
-                return None
-            stream.seek(0)
-            with np.load(stream, allow_pickle=False) as archive:
-                metadata = json.loads(str(archive["metadata_json"].item()))
-                if metadata["version"] != CHECKPOINT_VERSION or metadata["key"] != identity.key:
-                    return None
-                state = decode_state(metadata["state"], archive)
-                evidence = state["evidence"]
-                if not isinstance(evidence, KurtosisQCEvidence) or evidence.fingerprint != metadata["evidence_fingerprint"]:
-                    return None
-                raw = restore_raw(archive["samples"], state["raw"])
+            for limit in ((buffer_limit, 0) if buffer_limit else (0,)):
+                try:
+                    restored = _read_checkpoint(stream, identity, size_bytes, digest, limit)
+                    break
+                except (MemoryError, OSError, _CheckpointNeedsStreaming):
+                    if not limit:
+                        raise
+                    stream.seek(0)
+        if restored is None:
+            return None
+        raw, state = restored
+        evidence = state["evidence"]
         if _stat(identity.source) != identity.source_stat or (should_cancel and should_cancel()):
             raw.close()
             return None
@@ -259,6 +301,8 @@ def load_checkpoint(identity: CheckpointIdentity | None, *, should_cancel=None) 
                 return None
             raw._fpvs_bids_import = {**recorded, **identity.bids_import_diagnostics._asdict()}
         return PreparedCheckpoint(raw, state["params"], evidence, state["original_sfreq"])
+    except _CheckpointChecksumMismatch:
+        return None
     except Exception:  # Optional cache boundary: any decoding failure must recompute normally.
         # Cache decoding must never convert a damaged/unsupported artifact into
         # processing failure or skip the ordinary scientific validation path.

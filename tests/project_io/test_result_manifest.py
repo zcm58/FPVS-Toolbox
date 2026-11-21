@@ -140,6 +140,116 @@ def test_native_identity_pair_validates_stable_declaration_once(tmp_path, monkey
     assert len(calls) == 3
 
 
+@pytest.mark.parametrize("read_mode", ["buffered", "streamed", "memory_pressure"])
+def test_fresh_identity_passes_rehash_both_companions_and_reuse_only_verified_schemas(tmp_path, monkeypatch, read_mode):
+    from collections import Counter
+    import hashlib
+
+    from Main_App.io import condition_data, numpy_companion, result_manifest, spectral_data
+    from Main_App.processing.post_processing_context import post_processing_validation_scope
+
+    path = tmp_path / "result.fpvs"
+    written = _write(path)
+    expected = written["spectral_companion"], written["condition_companion"]
+    counts = Counter()
+
+    def count(owner, name):
+        original = getattr(owner, name)
+
+        def tracked(*args, **kwargs):
+            counts[name] += 1
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(owner, name, tracked)
+
+    count(hashlib, "file_digest")
+    count(spectral_data, "_dense_shape")
+    count(condition_data, "_array_header")
+    if read_mode == "streamed":
+        monkeypatch.setattr(numpy_companion, "_MAX_BUFFER_BYTES", 0)
+
+    with post_processing_validation_scope():
+        assert result_manifest.result_companion_identities(path) == expected
+        first = counts.copy()
+        assert first["file_digest"] == 2 and first["_dense_shape"] > 0 and first["_array_header"] > 0
+        if read_mode == "memory_pressure":
+            def no_buffer(*args):
+                raise MemoryError
+
+            monkeypatch.setattr(numpy_companion, "_read_buffer", no_buffer)
+        with post_processing_validation_scope(fresh=True):
+            assert result_manifest.result_companion_identities(path) == expected
+        assert counts["file_digest"] == 4
+        for name in ("_dense_shape", "_array_header"):
+            assert counts[name] == first[name] * (1 if read_mode == "buffered" else 2)
+    counts.clear()
+    with post_processing_validation_scope():
+        assert result_manifest.result_companion_identities(path) == expected
+        assert counts == first
+
+
+@pytest.mark.parametrize("kind", ["spectral", "condition"])
+@pytest.mark.parametrize("damage", ["same_size_and_mtime", "missing", "new_sheet_declaration"])
+def test_schema_receipt_checks_live_companion_and_exact_declaration(tmp_path, kind, damage):
+    from Main_App.io import condition_data, spectral_data
+    from Main_App.processing.post_processing_context import post_processing_validation_scope
+
+    path = tmp_path / "result.fpvs"
+    descriptor = _write(path)[f"{kind}_companion"]
+    module = spectral_data if kind == "spectral" else condition_data
+    validate = module._identity_from_descriptor
+    error = module.SpectralDataError if kind == "spectral" else module.ConditionDataError
+    with post_processing_validation_scope():
+        assert validate(path, descriptor) == descriptor
+        companion = path.parent / descriptor["path"]
+        if damage == "same_size_and_mtime":
+            before = companion.stat()
+            data = bytearray(companion.read_bytes())
+            data[-1] ^= 1
+            companion.write_bytes(data)
+            os.utime(companion, ns=(before.st_atime_ns, before.st_mtime_ns))
+        elif damage == "missing":
+            companion.unlink()
+        elif kind == "condition":
+            descriptor = dict(descriptor, sheets=["SNR"])
+        else:
+            descriptor = dict(descriptor, sheets=descriptor["sheets"][:1])
+        with pytest.raises(error) as scoped:
+            validate(path, descriptor)
+    with pytest.raises(error) as independent:
+        validate(path, descriptor)
+    assert str(scoped.value) == str(independent.value)
+
+
+def test_schema_receipts_evict_and_skip_failed_validations(tmp_path, monkeypatch):
+    from Main_App.io import companion_schema, result_manifest, spectral_data
+    from Main_App.processing.post_processing_context import post_processing_validation_scope
+
+    path = tmp_path / "result.fpvs"
+    written = _write(path)
+    descriptor = written["spectral_companion"]
+    monkeypatch.setattr(companion_schema, "_MAX_SCHEMA_RECEIPTS", 1)
+    original = spectral_data._dense_shape
+    reads = []
+
+    def fail_first(container, key):
+        reads.append(key)
+        if len(reads) == 1:
+            raise OSError("interrupted spectral schema read")
+        return original(container, key)
+
+    monkeypatch.setattr(spectral_data, "_dense_shape", fail_first)
+    with post_processing_validation_scope():
+        with pytest.raises(spectral_data.SpectralDataError, match="interrupted spectral schema read"):
+            result_manifest.result_companion_identities(path)
+        expected = descriptor, written["condition_companion"]
+        assert result_manifest.result_companion_identities(path) == expected
+        assert len(reads) == 1 + len(descriptor["sheets"])
+        # The condition companion took the only slot. Spectra validate again.
+        assert result_manifest.result_companion_identities(path) == expected
+        assert len(reads) == 1 + 2 * len(descriptor["sheets"])
+
+
 @pytest.mark.parametrize("edit", ["replace", "same_size_and_mtime", "malformed", "missing"])
 def test_native_identity_pair_observes_current_condition_after_spectral_check(tmp_path, monkeypatch, edit):
     from Main_App.io import condition_data, result_manifest, spectral_data
