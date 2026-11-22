@@ -56,6 +56,32 @@ including `pipeline-methods` and `pipeline-setup`. Additional obligations:
 - LORETA rendering must not absorb source calculations. Retirement cleanup
   must preserve supported processing and compatibility contracts.
 
+## Performance and output parity
+
+- Identify what makes each expensive result stale. For changes to reuse or
+  invalidation, exercise unchanged, added and changed inputs through the normal
+  entry point. For example, adding four recordings to 65 completed ones should
+  preprocess the four additions when the original inputs, settings and QC decisions
+  are unchanged. Recalculate group products whose inputs changed and retain the
+  integrity checks that establish reuse is safe.
+- Compare baseline and candidate on the same representative inputs, settings,
+  worker policy and cache state. Compare scientific outputs bit for bit wherever
+  their contract is unchanged. Count
+  expensive work where it happens, including work dispatched to other workers.
+  Recording IDs processed, bytes read and outputs rewritten can expose duplicate
+  work even when timings are noisy. For a reuse bug, cover the expected work
+  and the changed-input case in a regression test.
+- Measure elapsed time for the affected workflow and responsiveness for affected
+  GUI actions, including any first use to which work moves. Compare the relevant
+  cold, warm and incremental cases separately. Repeat timings when variation
+  could explain a difference.
+- If choosing a less efficient design, name the faster or leaner alternative,
+  quantify the cost and explain the concrete architectural, integrity or resource
+  benefit. If any affected processing path slows down or a GUI action becomes
+  less responsive, fix the regression or present those measurements and obtain
+  the user's explicit approval before keeping, committing or pushing it. An
+  improvement elsewhere, such as fewer disk reads, can support that request.
+
 ## Documentation-only Changes
 
 For instructions, ownership maps, or roadmap edits without runtime changes:

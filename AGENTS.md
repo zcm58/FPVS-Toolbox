@@ -27,6 +27,13 @@ of Studio. See the [product scope](docs/agent/product-specs/fpvs-toolbox.md).
   the smallest scoped change that preserves workflows, processing, formats
   and exports. Keep paths and behavior portable with Python, `pathlib` and
   PySide6. Isolate packaging and system integration. Use structured logging.
+- Preserve scientific outputs bit for bit unless changing them is explicitly in
+  scope. Choose the most efficient viable design that meets the workflow,
+  integrity and resource constraints.
+  Justify extra work against a concrete alternative. Any regression in processing
+  speed or GUI responsiveness requires the user's explicit approval for that
+  specific tradeoff before accepting or committing the change.
+  [Performance and output parity](docs/agent/quality/verification-gates.md#performance-and-output-parity)
 - `src/Standalone_Scripts/**` is opt-in. Do not list, search, read, run,
   import, edit or use it as precedent unless the user scopes that directory
   or approves access. Only then read its instructions. Exclude its tests
