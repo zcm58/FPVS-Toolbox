@@ -28,6 +28,7 @@ from Main_App.io import (
     write_condition_companion,
     xlsx_read_cache_scope,
 )
+from Main_App.io.result_manifest import write_result_manifest
 
 BCA = "BCA (uV)"
 ELIGIBILITY = "Spectral Eligibility"
@@ -97,6 +98,37 @@ def test_shared_reader_routes_selection_and_preserves_column_order(tmp_path: Pat
     assert omitted.empty and omitted.columns.tolist() == []
     with pytest.raises(MissingXlsxColumnsError):
         read_condition_sheet_selected_columns(path, sheet_name=ELIGIBILITY, required_columns=["eligible"], included_electrodes_upper={"O1"})
+
+
+@pytest.mark.parametrize("included", [None, {"FP1", "PO8"}, set()])
+def test_native_selected_columns_are_exact_and_detached(tmp_path: Path, included) -> None:
+    path = tmp_path / "recording.fpvs"
+    source = _frames()[BCA].assign(
+        Electrode=pd.Series([" Fp1 ", "O1", "PO8"], dtype="string"),
+        nullable=pd.Series([1, pd.NA, 3], dtype="Int64"),
+    )
+    descriptor = write_condition_companion(path, {BCA: source})
+    write_result_manifest(path, sheet_names=[BCA], spectral_companion=None, condition_companion=descriptor)
+    columns = ["3.6000_Hz", "nullable", "2.4000_Hz"]
+    expected = source[columns] if included is None else source.loc[
+        source["Electrode"].str.upper().str.strip().isin(included), columns
+    ].reset_index(drop=True)
+
+    with xlsx_read_cache_scope():
+        for _ in range(2):
+            result = read_xlsx_sheet_selected_columns(
+                path, sheet_name=BCA, required_columns=columns, included_electrodes_upper=included,
+            )
+            pd.testing.assert_frame_equal(result, expected, check_exact=True)
+            for column in ("3.6000_Hz", "2.4000_Hz"):
+                np.testing.assert_array_equal(
+                    result[column].to_numpy().view(np.uint64), expected[column].to_numpy().view(np.uint64),
+                )
+            if len(result):
+                result.loc[0, "nullable"] = 99
+                result.loc[0, "3.6000_Hz"] = 99
+
+        pd.testing.assert_frame_equal(read_condition_sheet(path, sheet_name=BCA), source, check_exact=True)
 
 
 def test_legacy_and_undeclared_sheets_retain_excel_fallback(tmp_path: Path) -> None:

@@ -18,6 +18,49 @@ their original measurement scope and do not reopen completed CI/release gates.
 
 ### Dataset indexing and spectral exports
 
+#### Follow-up performance audit
+
+- [x] Compare the current Toolbox source with the application code at
+  `6ee3506d` using identical synthetic inputs and cache state.
+- [x] Verify exact scientific parity and changed-input behavior. Count
+  repeated work and measure first and repeated use where applicable.
+- [x] Run focused and repository precommit gates. Record any GUI or installed
+  acceptance that remains separate from the local source checks.
+
+| Windows source action | Before and after | Parity and work counts |
+| --- | --- | --- |
+| Read compact result tables | 64 electrodes and 50 harmonics took 10.14 → 9.51 ms with fresh application caches and 4.41 → 3.16 ms with a warm cache. Selecting 12 harmonics and 16 electrodes took 11.73 → 10.59 ms and 6.06 → 4.52 ms. A warm 3,200-row audit read took 1.45 → 1.21 ms. | Fifteen paired rounds per case with a warm OS file cache. Selected reads removed three explicit DataFrame copies. Values, float bits, nullable dtypes, row and column order, and detached results matched. Forty mixed-dtype comparisons also passed with pandas copy-on-write enabled and disabled. |
+| Prepare Standard Screening input | Median repeated preparation for 65 participants, four conditions and three ROIs took 184.9 → 34.0 ms across nine paired trials with other tests running. The 12-, 69- and 128-participant cases also improved. | Removed 759 per-row pandas objects and reduced case-fold visits from 53,875 to 5,299. Analysis frames and diagnostics matched on 120 paired cases, including sparse, mixed-case and nullable inputs. |
+| Finish post-processing with completed repairs | The completion callback for a 69-recording project took 754.69 → 0.67 ms with four completed repairs across six conditions. The same callback without completed repairs took 34.05 → 0.27 ms. | Nine paired callback replays without Qt. The worker publishes and validates as before. Completion skips a redundant scan of 24 native results and 48 companions (82,263,072 bytes) plus a second manifest write. Scientific files and the event trace matched. The manifest keeps the worker's original publication timestamp and any newer stale state. |
+| Plan marker windows and verify review receipts | Full preflight medians across eight paired runs were 21.84 → 19.82 ms for 30 clean blocks, 228.09 → 58.39 ms with 15 unresolved blocks, and 276.97 → 100.90 ms with 15 persisted exclusions. Independent worker validation for 15 receipts took 282.79 → 78.89 ms. | Complete marker-plan serializations across preflight and validation fell from 33 to two. Candidate windows check their boundaries against the sorted anomalous intervals. Serialized plans and fingerprints matched. Validation still rejects receipts bound to changed evidence. |
+| Prepare kurtosis review evidence | Across eight paired runs, a 64-channel, 128-cycle single-span review took 74.04 → 71.23 ms. A 1,024-cycle review took 394.17 → 385.41 ms. | The single-span reader avoids one 8 MiB or 64 MiB allocation and copy by reusing the detached array supplied by MNE. Prepared signal samples and serialized evidence, decisions and previews matched. |
+
+In a separate synthetic Scalp Maps replay using 48 native results, 12 selected
+harmonics and three metrics, result construction took 5.15 s on both first calls
+and 5.57 → 5.50 s at the repeated median. The replay supplied fixed release
+and harmonic-selection receipts and used the live result reader. Its 110,592
+input rows, 384 grand-average rows, diagnostics and result identities matched.
+The difference in total construction time was small. The replay ended before
+figure rendering.
+
+The earlier first-open Scalp Maps measurement reflects eager plotting imports.
+A follow-up import probe attributed approximately 160 ms to `matplotlib.pyplot`
+before generation. In a separate 64 MiB buffered kurtosis checkpoint probe,
+`hashlib.file_digest` used 384 bytes of traced scratch. That measurement
+started after buffer creation.
+
+The visible Windows smoke uses a disposable project at 1200 × 800. Complete
+post-processing after a condition-electrode repair, return to Home, and open a
+downstream analysis tool. Repeat with an optional workbook export failure
+and confirm the accepted native results still open. The local callback replay
+and non-window GUI checks cover the same success and failure routing.
+
+Windows source gates passed 3,913 processing tests (nine skips), 1,432
+project-I/O tests (15 skips), 498 Stats tests (one skip), 809 GUI-scope tests
+and 396 repository precommit tests (one skip). The direct Scalp Maps metric
+reader checks passed eight tests. These counts overlap. Visible Qt and
+installed-build validation remain separate from these source checks.
+
 #### Goal for the five optimizations
 
 Measure the combined effect of the five changes below from the real GUI's

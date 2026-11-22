@@ -214,6 +214,8 @@ def plan_preflight_qc_events(
             "Locked FFT crop required for preflight QC but no valid N_step is "
             f"available: {details}. Fixed-duration fallback is disabled."
         )
+    marker_payload = marker_plan.to_payload()
+    marker_plan_fingerprint = marker_payload["fingerprint"]
     decisions = marker_review_decisions or {}
     approved_by_key: dict[str, ApprovedOccurrenceSpan] = {}
     unresolved_payloads: list[Mapping[str, Any]] = []
@@ -222,7 +224,7 @@ def plan_preflight_qc_events(
             raw_decision = decisions.get(occurrence.occurrence_key)
             if raw_decision is None:
                 approved = approve_configured_condition_exclusion(
-                    occurrence, marker_plan_fingerprint=marker_plan.fingerprint,
+                    occurrence, marker_plan_fingerprint=marker_plan_fingerprint,
                     review_scope=marker_review_scope or {},
                     settings=condition_exclusion_settings or {},
                 )
@@ -234,7 +236,7 @@ def plan_preflight_qc_events(
             approved = apply_marker_review_decision(
                 occurrence,
                 MarkerReviewDecision.from_payload(raw_decision),
-                marker_plan_fingerprint=marker_plan.fingerprint,
+                marker_plan_fingerprint=marker_plan_fingerprint,
                 review_scope=marker_review_scope or {},
                 condition_exclusion_settings=condition_exclusion_settings,
             )
@@ -310,7 +312,7 @@ def plan_preflight_qc_events(
         spans=tuple(planned_spans),
         condition_event_map=canonical_condition_event_map(event_map),
         warnings=tuple(dict.fromkeys(warnings)),
-        marker_integrity_plan=marker_plan.to_payload(),
+        marker_integrity_plan=marker_payload,
         approved_occurrences=tuple(
             approved.to_payload()
             for approved in approved_by_key.values()

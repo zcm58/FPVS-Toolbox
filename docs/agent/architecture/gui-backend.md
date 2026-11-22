@@ -76,6 +76,11 @@ available, offers cancellation on longer checks and discards the result if the
 project changes. Only a completed check for the current project can continue
 to the next prompt or launch processing.
 
+The post-processing worker validates frequency-domain freshness when publishing
+FullFFT provenance. After the worker completes the required steps, the desktop
+reads the latest tool metadata once for its in-memory project. A newer
+invalidation recorded during the run survives that refresh.
+
 ## Verification for a port
 
 1. Start with the public entry point. For a Qt-free module, add its normal

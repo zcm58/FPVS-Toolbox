@@ -726,16 +726,9 @@ def _start_post_processing_pipeline_after_processing(
                 )
                 return
             if frequency_domain_outputs_ready:
+                # The worker marks outputs current before publishing FullFFT
+                # provenance. Read back its metadata without republishing it.
                 _sync_project_tools_metadata_from_disk(project)
-                try:
-                    from Main_App.processing.frequency_domain_qc import (
-                        mark_frequency_domain_outputs_current,
-                    )
-
-                    mark_frequency_domain_outputs_current(project.project_root)
-                    _sync_project_tools_metadata_from_disk(project)
-                except Exception:
-                    logger.debug("frequency_domain_qc_mark_current_failed", exc_info=True)
             if result.get("ok"):
                 from Main_App.processing.hardware_capabilities import spatial_tool_unavailable_reason
 

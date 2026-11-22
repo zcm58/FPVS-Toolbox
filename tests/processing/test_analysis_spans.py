@@ -337,6 +337,44 @@ def test_kurtosis_input_uses_only_realized_target_samples() -> None:
     )
 
 
+@pytest.mark.parametrize("storage", ["ram", "memmap", "lazy"])
+def test_one_kurtosis_span_matches_concatenated_mne_samples(storage, tmp_path) -> None:
+    raw = mne.io.RawArray(
+        np.asfortranarray(np.arange(60, dtype=float).reshape(2, 30)),
+        mne.create_info(["Cz", "Pz"], sfreq=6.0, ch_types="eeg"),
+        first_samp=50,
+        verbose=False,
+    )
+    raw._data[1, 5] = -0.0
+    if storage != "ram":
+        path = tmp_path / "scoring_raw.fif"
+        raw.save(path, fmt="double", verbose=False)
+        raw.close()
+        preload = str(tmp_path / "scoring.dat") if storage == "memmap" else False
+        raw = mne.io.read_raw_fif(path, preload=preload, verbose=False)
+        if storage == "memmap":
+            assert isinstance(raw._data, np.memmap)
+        else:
+            assert not raw.preload
+
+    with raw:
+        params = {"_fpvs_realized_analysis_span_plan": {
+            "target_grid": {"n_times": raw.n_times},
+            "unique_relative_spans": [[5, 17]],
+            "unique_sample_count": 12,
+        }}
+        picks = [1, 0]
+        baseline = np.concatenate([raw.get_data(picks=picks, start=5, stop=17)], axis=1)
+        result = _kurtosis_scoring_data(raw, picks=picks, params=params)
+        assert result.shape == baseline.shape and result.dtype == baseline.dtype
+        assert result.flags.c_contiguous and result.strides == baseline.strides
+        assert result.tobytes() == baseline.tobytes()
+        if raw.preload:
+            assert not np.shares_memory(result, raw._data)
+        result[:] = np.nan
+        assert raw.get_data(picks=picks, start=5, stop=17).tobytes() == baseline.tobytes()
+
+
 def test_actual_raw_resample_keeps_v3_window_at_nonzero_origin() -> None:
     protocol = FrequencyProtocol.from_recurrence(
         4,

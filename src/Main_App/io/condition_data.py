@@ -285,8 +285,8 @@ def _read_payload_columns(
     specification = payload.specifications[sheet_name]
     cached = payload.columns.get(sheet_name, {})
     needed = [column for column in columns if column not in cached]
-    path = workbook.parent.resolve() / payload.descriptor["path"]
     if needed:
+        path = workbook.parent.resolve() / payload.descriptor["path"]
         try:
             if _xlsx._workbook_signature_or_none(path) != payload.companion_signature:
                 raise ConditionDataError("Condition data changed before its columns were read; retry the operation.")
@@ -326,7 +326,7 @@ def _read_payload_columns(
 def _payload_columns(workbook: Path, payload: _ConditionPayload, sheet_name: str, columns: Sequence[str]) -> pd.DataFrame:
     _read_payload_columns(workbook, payload, sheet_name, columns)
     cached = payload.columns.get(sheet_name, {})
-    return pd.DataFrame({column: cached[column] for column in columns}).copy(deep=True)
+    return pd.DataFrame({column: cached[column] for column in columns}, copy=True)
 
 
 @contextmanager
@@ -415,17 +415,23 @@ def read_condition_sheet_selected_columns(
     if require_all and missing:
         raise _xlsx.MissingXlsxColumnsError(sheet_name, missing)
     columns = [column for column in requested if column in available]
-    read_columns = list(columns)
-    if included_electrodes_upper is not None:
+    if included_electrodes_upper is None:
+        result = _payload_columns(workbook, payload, sheet_name, columns)
+    else:
         if electrode_column not in available:
             raise _xlsx.MissingXlsxColumnsError(sheet_name, [electrode_column])
-        if electrode_column not in read_columns:
-            read_columns.append(electrode_column)
-    frame = _payload_columns(workbook, payload, sheet_name, read_columns)
-    if included_electrodes_upper is not None:
-        mask = frame[electrode_column].astype(str).str.upper().str.strip().isin(included_electrodes_upper)
-        frame = frame.loc[mask]
-    result = frame.loc[:, columns].reset_index(drop=True).copy(deep=True) if columns else pd.DataFrame()
+        read_columns = columns if electrode_column in columns else [*columns, electrode_column]
+        _read_payload_columns(workbook, payload, sheet_name, read_columns)
+        cached = payload.columns[sheet_name]
+        electrodes = pd.Series(cached[electrode_column], copy=False)
+        mask = electrodes.astype(str).str.upper().str.strip().isin(included_electrodes_upper).to_numpy()
+        # Filter decoded arrays before constructing the detached result. Series
+        # supply their extension arrays so pandas preserves nullable dtypes.
+        selected = {}
+        for column in columns:
+            values = cached[column]
+            selected[column] = (values.array if isinstance(values, pd.Series) else values)[mask]
+        result = pd.DataFrame(selected)
     _xlsx._add_timing_detail(timing_details, "condition_companion", started)
     return result
 

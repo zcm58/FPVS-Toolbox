@@ -9,6 +9,7 @@ the apparent Condition coverage.
 
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
 from enum import Enum
 from typing import Iterable, Mapping, Sequence
@@ -300,55 +301,67 @@ def audit_analysis_design(
     group_map = _normalized_group_map(canonical_group_ids)
     assignment_rows: list[dict[str, object]] = []
     missing_group_participants: list[str] = []
-    assigned_group_by_participant: dict[str, str | None] = {}
+    participant_assignments: list[tuple[str, str, str | None]] = []
     for participant in participants:
-        group_id = group_map.get(participant.casefold(), "")
-        assigned = not _is_unknown_group_id(group_id)
-        if not assigned:
+        participant_key = participant.casefold()
+        group_id = group_map.get(participant_key)
+        if _is_unknown_group_id(group_id):
             missing_group_participants.append(participant)
-        assigned_group_by_participant[participant.casefold()] = (
-            group_id if assigned else None
-        )
+            group_id = None
+        participant_assignments.append((participant, participant_key, group_id))
         assignment_rows.append(
             {
                 "participant_id": participant,
-                "group_id": group_id if assigned else None,
-                "assignment_status": "assigned" if assigned else "missing_or_unknown",
+                "group_id": group_id,
+                "assignment_status": "assigned" if group_id is not None else "missing_or_unknown",
             }
         )
     group_assignments = pd.DataFrame(assignment_rows)
 
+    selected_subject_keys = selected[subject_col].str.casefold()
+    selected_condition_keys = selected[condition_col].str.casefold()
+    finite_dv = selected["_finite_dv"]
+    # Use the same mixed-frame values as iterrows for the original DV shown
+    # in missingness reports, without allocating a Series for every cell.
+    original_dv = selected.values[:, selected.columns.get_loc(dv_col)]
     lookup = {
-        (
-            str(row[subject_col]).casefold(),
-            str(row[condition_col]).casefold(),
-            str(row[roi_col]).casefold(),
-        ): row
-        for _, row in selected.iterrows()
+        (participant, condition, roi): (finite, value)
+        for participant, condition, roi, finite, value in zip(
+            selected_subject_keys,
+            selected_condition_keys,
+            selected[roi_col].str.casefold(),
+            finite_dv,
+            original_dv,
+            strict=True,
+        )
     }
+    assigned_group_sizes = Counter(
+        group_id
+        for _, _, group_id in participant_assignments
+        if group_id is not None
+    )
+    model_group_sizes = assigned_group_sizes if require_groups else {None: len(participants)}
     coverage_rows: list[dict[str, object]] = []
     missing_rows: list[dict[str, object]] = []
+    model_cell_rows: list[dict[str, object]] = []
     condition_complete: dict[str, bool] = {}
+    condition_structurally_observed: dict[str, bool] = {}
     for condition in conditions:
+        condition_key = condition.casefold()
         all_rois_complete = True
+        condition_observed = bool(model_group_sizes)
         for roi in rois:
+            roi_key = roi.casefold()
             n_present = 0
             n_finite = 0
-            for participant in participants:
-                row = lookup.get(
-                    (
-                        participant.casefold(),
-                        condition.casefold(),
-                        roi.casefold(),
-                    )
-                )
-                if row is None:
+            finite_by_group: Counter[str | None] = Counter()
+            for participant, participant_key, group_id in participant_assignments:
+                observation = lookup.get((participant_key, condition_key, roi_key))
+                if observation is None:
                     missing_rows.append(
                         {
                             "participant_id": participant,
-                            "group_id": assigned_group_by_participant[
-                                participant.casefold()
-                            ],
+                            "group_id": group_id,
                             "condition": condition,
                             "roi": roi,
                             "missingness_type": "missing_row",
@@ -357,19 +370,20 @@ def audit_analysis_design(
                     )
                     continue
                 n_present += 1
-                if bool(row["_finite_dv"]):
+                finite, value = observation
+                if finite:
                     n_finite += 1
+                    if require_groups:
+                        finite_by_group[group_id] += 1
                 else:
                     missing_rows.append(
                         {
                             "participant_id": participant,
-                            "group_id": assigned_group_by_participant[
-                                participant.casefold()
-                            ],
+                            "group_id": group_id,
                             "condition": condition,
                             "roi": roi,
                             "missingness_type": "nonfinite_value",
-                            "observed_value": row[dv_col],
+                            "observed_value": value,
                         }
                     )
             complete = (
@@ -389,78 +403,29 @@ def audit_analysis_design(
                     "cell_complete": complete,
                 }
             )
-        condition_complete[condition] = all_rois_complete
-
-    complete_conditions = tuple(
-        condition for condition in conditions if condition_complete[condition]
-    )
-    coverage = pd.DataFrame(coverage_rows)
-    coverage["condition_complete"] = coverage["condition"].map(
-        condition_complete
-    )
-
-    assigned_groups: list[str] = []
-    seen_group_keys: set[str] = set()
-    for participant in participants:
-        group_id = assigned_group_by_participant[participant.casefold()]
-        if group_id is None or group_id.casefold() in seen_group_keys:
-            continue
-        seen_group_keys.add(group_id.casefold())
-        assigned_groups.append(group_id)
-
-    model_cell_rows: list[dict[str, object]] = []
-    condition_structurally_observed: dict[str, bool] = {}
-    model_groups: tuple[str | None, ...] = (
-        tuple(assigned_groups) if require_groups else (None,)
-    )
-    for condition in conditions:
-        condition_observed = bool(model_groups)
-        for roi in rois:
-            for group_id in model_groups:
-                eligible_participants = [
-                    participant
-                    for participant in participants
-                    if group_id is None
-                    or (
-                        assigned_group_by_participant[
-                            participant.casefold()
-                        ]
-                        is not None
-                        and assigned_group_by_participant[
-                            participant.casefold()
-                        ].casefold()
-                        == group_id.casefold()
-                    )
-                ]
-                n_finite = 0
-                for participant in eligible_participants:
-                    row = lookup.get(
-                        (
-                            participant.casefold(),
-                            condition.casefold(),
-                            roi.casefold(),
-                        )
-                    )
-                    if row is not None and bool(row["_finite_dv"]):
-                        n_finite += 1
-                observed = n_finite > 0
+            for group_id, n_eligible in model_group_sizes.items():
+                n_model_finite = finite_by_group[group_id] if require_groups else n_finite
+                observed = n_model_finite > 0
                 condition_observed = condition_observed and observed
                 model_cell_rows.append(
                     {
                         "group_id": group_id,
                         "condition": condition,
                         "roi": roi,
-                        "n_eligible_participants": len(
-                            eligible_participants
-                        ),
-                        "n_finite_values": n_finite,
-                        "n_missing_or_nonfinite": (
-                            len(eligible_participants) - n_finite
-                        ),
+                        "n_eligible_participants": n_eligible,
+                        "n_finite_values": n_model_finite,
+                        "n_missing_or_nonfinite": n_eligible - n_model_finite,
                         "structurally_observed": observed,
                     }
                 )
+        condition_complete[condition] = all_rois_complete
         condition_structurally_observed[condition] = condition_observed
+
+    complete_conditions = tuple(
+        condition for condition in conditions if condition_complete[condition]
+    )
+    coverage = pd.DataFrame(coverage_rows)
+    coverage["condition_complete"] = coverage["condition"].map(condition_complete)
     model_cell_coverage = pd.DataFrame(
         model_cell_rows,
         columns=[
@@ -525,12 +490,10 @@ def audit_analysis_design(
         ],
     )
 
-    primary = selected[
-        selected[condition_col].str.casefold().isin(
-            {value.casefold() for value in retained_conditions}
-        )
-        & selected["_finite_dv"]
-    ].copy()
+    retained_finite = finite_dv & selected_condition_keys.isin(
+        {value.casefold() for value in retained_conditions}
+    )
+    primary = selected[retained_finite].copy()
     primary[dv_col] = primary["_numeric_dv"].astype(float)
     primary = primary.drop(columns=["_numeric_dv", "_finite_dv"])
     if group_map:
@@ -551,28 +514,15 @@ def audit_analysis_design(
         if participant.casefold() in contributing_keys
     )
     participant_coverage_rows: list[dict[str, object]] = []
-    for participant in participants:
-        participant_rows = selected[
-            selected[subject_col].str.casefold().eq(
-                participant.casefold()
-            )
-        ]
-        retained_rows = participant_rows[
-            participant_rows[condition_col].str.casefold().isin(
-                {
-                    condition.casefold()
-                    for condition in retained_conditions
-                }
-            )
-        ]
-        finite_selected = int(participant_rows["_finite_dv"].sum())
-        finite_retained = int(retained_rows["_finite_dv"].sum())
+    finite_selected_counts = selected_subject_keys[finite_dv].value_counts(sort=False).to_dict()
+    finite_retained_counts = selected_subject_keys[retained_finite].value_counts(sort=False).to_dict()
+    for participant, participant_key, group_id in participant_assignments:
+        finite_selected = int(finite_selected_counts.get(participant_key, 0))
+        finite_retained = int(finite_retained_counts.get(participant_key, 0))
         participant_coverage_rows.append(
             {
                 "participant_id": participant,
-                "group_id": assigned_group_by_participant[
-                    participant.casefold()
-                ],
+                "group_id": group_id,
                 "n_requested_cells": len(conditions) * len(rois),
                 "n_finite_requested_cells": finite_selected,
                 "n_retained_cells": (
@@ -584,7 +534,7 @@ def audit_analysis_design(
                     - finite_retained
                 ),
                 "contributes_to_primary": (
-                    participant.casefold() in contributing_keys
+                    participant_key in contributing_keys
                 ),
             }
         )
@@ -632,7 +582,7 @@ def audit_analysis_design(
             "Canonical group assignment is missing or unknown for: "
             + ", ".join(missing_group_participants)
         )
-    elif require_groups and len(assigned_groups) < 2:
+    elif require_groups and len(assigned_group_sizes) < 2:
         status = DesignStatus.BLOCKED
         status_code = "insufficient_groups"
         message = (

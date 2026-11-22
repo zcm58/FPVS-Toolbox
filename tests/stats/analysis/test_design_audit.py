@@ -249,6 +249,58 @@ def test_available_case_multigroup_excludes_structurally_empty_condition() -> No
     assert empty_cells["structurally_observed"].eq(False).all()
 
 
+def test_sparse_model_and_participant_coverage_match_the_frozen_cohort() -> None:
+    data = pd.DataFrame(
+        [
+            ("p2", "Shared", "Left", 3.0),
+            ("P1", "shared", "left", -0.0),
+            ("p3", "Shared", "LEFT", 4.0),
+            ("p2", "shared", "RIGHT", 6.0),
+            ("P1", "shared", "Right", 2.0),
+            ("p2", "optional", "left", 7.0),
+            ("P1", "optional", "left", "unreadable"),
+            ("P3", "optional", "left", 1.0),
+            ("p2", "optional", "right", 8.0),
+        ],
+        columns=["participant", "condition", "roi", "value"],
+        index=[4, 4, 9, 1, 9, 1, 1, 2, 2],
+    )
+
+    result = audit_analysis_design(
+        data,
+        dv_col="value",
+        subject_col="participant",
+        condition_col="condition",
+        roi_col="roi",
+        frozen_participants=("P2", "P1", "P3"),
+        selected_conditions=("Shared", "Optional"),
+        selected_rois=("Left", "Right"),
+        canonical_group_ids={"p1": "Control", "p2": "Case", "p3": "control"},
+        require_groups=True,
+        analysis_scope="available_case",
+    )
+
+    assert result.retained_conditions == ("Shared",)
+    assert result.excluded_conditions == ("Optional",)
+    assert list(result.model_cell_coverage.itertuples(index=False, name=None)) == [
+        ("Case", "Shared", "Left", 1, 1, 0, True),
+        ("Control", "Shared", "Left", 2, 2, 0, True),
+        ("Case", "Shared", "Right", 1, 1, 0, True),
+        ("Control", "Shared", "Right", 2, 1, 1, True),
+        ("Case", "Optional", "Left", 1, 1, 0, True),
+        ("Control", "Optional", "Left", 2, 1, 1, True),
+        ("Case", "Optional", "Right", 1, 1, 0, True),
+        ("Control", "Optional", "Right", 2, 0, 2, False),
+    ]
+    assert result.participant_coverage["n_finite_requested_cells"].tolist() == [4, 2, 2]
+    assert result.participant_coverage["n_finite_retained_cells"].tolist() == [2, 2, 1]
+    assert result.missing_observations.query("missingness_type == 'nonfinite_value'")[
+        "observed_value"
+    ].tolist() == ["unreadable"]
+    zero = result.primary_data.query("participant == 'P1' and roi == 'left'")["value"].iloc[0]
+    assert zero == 0.0 and np.signbit(zero)
+
+
 def test_factor_cell_coverage_exposes_structural_missingness_inputs() -> None:
     data = pd.DataFrame(
         {

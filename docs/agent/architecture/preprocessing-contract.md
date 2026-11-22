@@ -416,6 +416,11 @@ kurtosis scan and process runner check that the exclusion remains configured;
 removing or changing its scope requires new preflight. Existing GUI review
 receipts and clean-occurrence fingerprints retain their prior behavior.
 
+Preflight computes the marker-plan fingerprint once for the full recording
+and uses it for every current receipt and the serialized plan. Runner
+validation rebuilds that plan from the current events and independently
+computes one fingerprint before verifying the supplied receipts.
+
 An explicit user-authorized review outside the GUI may exclude an individual
 occurrence through `marker_integrity.build_authorized_marker_exclusion_decision`.
 Its `explicit_authorized_marker_review` receipt requires a named reviewer,

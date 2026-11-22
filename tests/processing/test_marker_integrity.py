@@ -566,6 +566,18 @@ def test_verified_contiguous_span_must_match_declared_exact_length() -> None:
     assert approved.disposition == MARKER_DECISION_USE_CONTIGUOUS
 
 
+def test_contiguous_candidates_exclude_only_spans_that_cross_bad_intervals() -> None:
+    # The early marker at 31 creates an invalid interval starting at 30.
+    # A span ending at 30 remains valid, as do the spans after the gap to 42.
+    plan = _plan([6, 12, 18, 24, 30, 31, 42, 48, 54], cycles=2)
+    occurrence = plan.occurrences[0]
+
+    assert occurrence.review_reasons == ("early_or_extra_marker", "missing_marker_gap")
+    assert occurrence.contiguous_candidate_spans == (
+        (6, 18), (12, 24), (18, 30), (42, 54),
+    )
+
+
 def test_exclusion_records_no_analysis_span() -> None:
     plan = _plan([10, 16])
     occurrence = plan.occurrences[0]
@@ -678,6 +690,35 @@ def test_marker_plan_payload_carries_its_predecision_fingerprint() -> None:
 
     assert payload["fingerprint"] == plan.fingerprint
     assert len(str(payload["fingerprint"])) == 64
+
+
+def test_preflight_and_validation_build_marker_identity_once_per_recording(monkeypatch) -> None:
+    identity_payload = MarkerIntegrityPlan._identity_payload
+    identity_calls = []
+
+    def counted(plan):
+        identity_calls.append(plan)
+        return identity_payload(plan)
+
+    monkeypatch.setattr(MarkerIntegrityPlan, "_identity_payload", counted)
+    protocol = _protocol()
+    events = _events([10, 16, 28, 34, 40])
+    events = np.concatenate([events, events + [60, 0, 0]])
+    event_map = {"Faces": 1}
+    settings = {"manual_excluded_participant_conditions": {"P01": ["Faces"]}}
+    planned = plan_preflight_qc_events(
+        events=events, event_map=event_map, sfreq=12, n_times=120,
+        frequency_protocol=protocol, marker_review_scope=_review_scope(),
+        condition_exclusion_settings=settings,
+    )
+    assert len(identity_calls) == 1
+
+    approved = validate_approved_event_plan(
+        event_plan_payload=planned.to_payload(), events=events, event_map=event_map,
+        sampling_rate_hz=12, n_times=120, protocol=protocol,
+    )
+    assert len(approved) == 2 and all(span.is_excluded for span in approved)
+    assert len(identity_calls) == 2
 
 
 def test_preflight_applies_only_a_receipt_bound_to_its_current_plan() -> None:

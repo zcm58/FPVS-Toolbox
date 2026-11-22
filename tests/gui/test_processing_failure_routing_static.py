@@ -818,26 +818,38 @@ def test_worker_finished_delivers_explicit_failure_to_completion_callback():
     assert any("not ready" in call.args[0] for call in host.log.call_args_list)
 
 
-@pytest.mark.parametrize("selection_resume", [False, True])
+@pytest.mark.parametrize(("selection_resume", "newer_stale"), [
+    (False, False), (False, True), (True, False),
+])
 def test_worker_finished_reports_required_audit_failure_without_invalidating_qc(
-    monkeypatch, tmp_path, selection_resume,
+    monkeypatch, tmp_path, selection_resume, newer_stale,
 ):
+    from Main_App.processing import frequency_domain_qc
+
+    manifest_path = tmp_path / "project.json"
+    manifest_path.write_text('{"tools": {}}', encoding="utf-8")
+    frequency_domain_qc.mark_frequency_domain_outputs_stale(tmp_path, reason="Running")
+    frequency_domain_qc.mark_frequency_domain_outputs_current(tmp_path)
+    if newer_stale:
+        frequency_domain_qc.mark_frequency_domain_outputs_stale(tmp_path, reason="New QC decisions")
+    published_manifest = manifest_path.read_bytes()
+    project = SimpleNamespace(project_root=tmp_path, manifest={})
     reason = "Repeated-session Stats requires the full-audit analysis-ready workbook. Export failed."
     host = SimpleNamespace(log=Mock())
     namespace = _post_processing_namespace()
     finalized_reasons = []
-    mark_current = Mock()
-    qc_module = ModuleType("Main_App.processing.frequency_domain_qc")
-    qc_module.mark_frequency_domain_outputs_current = mark_current
-    monkeypatch.setitem(sys.modules, qc_module.__name__, qc_module)
+    mark_current = Mock(wraps=frequency_domain_qc.mark_frequency_domain_outputs_current)
+    monkeypatch.setattr(frequency_domain_qc, "mark_frequency_domain_outputs_current", mark_current)
     namespace.update({
-        "host": host, "project": SimpleNamespace(project_root=tmp_path), "logging": logging,
+        "host": host, "project": project, "logging": logging, "Path": Path,
         "provisional_cache": Mock(), "action_button": None,
         "_post_processing_source_map_outcome": lambda _: (False, False),
-        "_sync_project_tools_metadata_from_disk": Mock(),
         "on_finished": lambda: finalized_reasons.append(host._post_processing_failure_reason),
         "QTimer": SimpleNamespace(singleShot=lambda _delay, callback: callback()),
     })
+    _load_function(
+        "src/Main_App/gui/processing_workflows.py", "_sync_project_tools_metadata_from_disk", namespace,
+    )
     handler = _load_function(
         "src/Main_App/gui/processing_workflows.py", "_handle_finished", namespace,
         outer_function="_start_post_processing_pipeline_after_processing",
@@ -856,13 +868,15 @@ def test_worker_finished_reports_required_audit_failure_without_invalidating_qc(
     })
 
     assert finalized_reasons == [reason]
+    mark_current.assert_not_called()
+    assert manifest_path.read_bytes() == published_manifest
     messages = [call.args[0] for call in host.log.call_args_list]
     if selection_resume:
-        mark_current.assert_not_called()
-        namespace["_sync_project_tools_metadata_from_disk"].assert_not_called()
+        assert project.manifest == {}
         assert any(f"outputs are not ready: {reason}" in message for message in messages)
     else:
-        mark_current.assert_called_once_with(tmp_path)
+        assert project.manifest["tools"] == json.loads(published_manifest)["tools"]
+        assert project.manifest["tools"]["frequency_domain_qc"]["downstream_outputs_stale"] is newer_stale
         assert any(f"Post-processing is incomplete: {reason}" in message for message in messages)
         assert any("Accepted frequency-domain data remain available" in message for message in messages)
     assert not any("Stats outputs are ready" in message or "optional" in message for message in messages)

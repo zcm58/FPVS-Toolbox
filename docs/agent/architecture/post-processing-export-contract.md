@@ -644,7 +644,10 @@ is the explicit report-writer option. Stats-ready and full-audit long/wide
 Excel exports retain their existing writers and remain user-facing outputs.
 
 Compact reads validate the compact archive and load requested tables/columns
-without materializing dense spectra or unrelated audit rows. Old workbook-only
+without materializing dense spectra or unrelated audit rows. The reader
+applies any electrode filter to the decoded columns before assembling the
+result. The returned table owns its values and preserves column order and
+dtypes, including nullable audit columns. Old workbook-only
 or dense-only companion exports retain Excel compatibility for their compact
 tables. New caches, current-run receipts, final QC release, neutral provenance,
 and publication source identities include `condition_companion`; a missing or

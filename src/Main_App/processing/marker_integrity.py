@@ -297,14 +297,7 @@ class MarkerIntegrityPlan:
 
     @property
     def fingerprint(self) -> str:
-        payload = self._identity_payload()
-        encoded = json.dumps(
-            payload,
-            separators=(",", ":"),
-            sort_keys=True,
-            ensure_ascii=False,
-        ).encode("utf-8")
-        return hashlib.sha256(encoded).hexdigest()
+        return _marker_payload_fingerprint(self._identity_payload())
 
     def _identity_payload(self) -> dict[str, Any]:
         payload = {
@@ -322,7 +315,7 @@ class MarkerIntegrityPlan:
 
     def to_payload(self) -> dict[str, Any]:
         payload = self._identity_payload()
-        payload["fingerprint"] = self.fingerprint
+        payload["fingerprint"] = _marker_payload_fingerprint(payload)
         return payload
 
 
@@ -463,7 +456,7 @@ class ApprovedOccurrenceSpan:
             )
         except (KeyError, TypeError, ValueError) as exc:
             raise MarkerIntegrityError("Approved occurrence span is malformed.") from exc
-        expected = _occurrence_fingerprint(
+        expected = _marker_payload_fingerprint(
             {
                 "condition_code": parsed.condition_code,
                 "repetition_index": parsed.repetition_index,
@@ -479,7 +472,7 @@ class ApprovedOccurrenceSpan:
         return parsed
 
 
-def _occurrence_fingerprint(payload: Mapping[str, Any]) -> str:
+def _marker_payload_fingerprint(payload: Mapping[str, Any]) -> str:
     encoded = json.dumps(
         payload,
         separators=(",", ":"),
@@ -556,24 +549,29 @@ def _deduplicate_exact_samples(
 
 def _contiguous_candidate_spans(
     samples: Sequence[int],
-    intervals: Sequence[MarkerIntervalFinding],
+    flagged_interval_indices: Sequence[int],
     *,
     expected_samples: int,
 ) -> tuple[tuple[int, int], ...]:
-    sample_to_index = {int(sample): index for index, sample in enumerate(samples)}
+    if len(samples) < 2 or samples[-1] - samples[0] < expected_samples:
+        return ()
+    sample_to_index = {sample: index for index, sample in enumerate(samples)}
     candidates: list[tuple[int, int]] = []
-    for start_index, raw_start in enumerate(samples):
-        start = int(raw_start)
-        stop = start + int(expected_samples)
+    for start_index, start in enumerate(samples):
+        stop = start + expected_samples
+        if stop > samples[-1]:
+            break
         stop_index = sample_to_index.get(stop)
         if stop_index is None or stop_index <= start_index:
             continue
-        used_intervals = intervals[start_index:stop_index]
-        if any(
-            item.early_or_extra_marker or item.missing_marker_gap
-            for item in used_intervals
-        ):
-            continue
+        if flagged_interval_indices:
+            # The interval at stop_index starts outside the candidate span.
+            next_flag = bisect_left(flagged_interval_indices, start_index)
+            if (
+                next_flag < len(flagged_interval_indices)
+                and flagged_interval_indices[next_flag] < stop_index
+            ):
+                continue
         candidates.append((start, stop))
     return tuple(candidates)
 
@@ -649,6 +647,7 @@ def build_marker_integrity_plan(
         if code in marker_samples_by_code:
             marker_samples_by_code[code].append(int(row[0]))
     expected_interval_samples = sample_rate / protocol.oddball_rate_hz
+    protocol_fingerprint = protocol.fingerprint
     repetition_counts: dict[int, int] = defaultdict(int)
     occurrences: list[MarkerOccurrencePlan] = []
     for index, onset_row in enumerate(onset_rows):
@@ -692,9 +691,17 @@ def build_marker_integrity_plan(
         reasons: list[str] = []
         if len(retained_samples) < 2:
             reasons.append("insufficient_project_oddball_markers")
-        if any(item.early_or_extra_marker for item in intervals):
+        flagged_interval_indices: list[int] = []
+        has_early_marker = has_missing_marker = False
+        for interval_index, interval in enumerate(intervals):
+            early, missing = interval.early_or_extra_marker, interval.missing_marker_gap
+            if early or missing:
+                flagged_interval_indices.append(interval_index)
+                has_early_marker |= early
+                has_missing_marker |= missing
+        if has_early_marker:
             reasons.append("early_or_extra_marker")
-        if any(item.missing_marker_gap for item in intervals):
+        if has_missing_marker:
             reasons.append("missing_marker_gap")
         if len(retained_samples) >= 2 and available_span < expected_samples:
             reasons.append("shorter_than_expected_analyzed_cycles")
@@ -707,13 +714,13 @@ def build_marker_integrity_plan(
         )
         contiguous_candidates = _contiguous_candidate_spans(
             retained_samples,
-            intervals,
+            flagged_interval_indices,
             expected_samples=expected_samples,
         )
         status = MARKER_STATUS_REVIEW_REQUIRED if reasons else MARKER_STATUS_READY
         base_payload = {
             "method_version": MARKER_INTEGRITY_METHOD_VERSION,
-            "protocol_fingerprint": protocol.fingerprint,
+            "protocol_fingerprint": protocol_fingerprint,
             "condition_code": condition_code,
             "repetition_index": repetition_index,
             "onset_sample": onset_sample,
@@ -761,7 +768,7 @@ def build_marker_integrity_plan(
                 contiguous_candidate_spans=contiguous_candidates,
                 status=status,
                 review_reasons=tuple(reasons),
-                fingerprint=_occurrence_fingerprint(base_payload),
+                fingerprint=_marker_payload_fingerprint(base_payload),
                 canonical_condition_id=canonical_condition_id,
                 trigger_map_fingerprint=trigger_map_fingerprint,
             )
@@ -773,7 +780,7 @@ def build_marker_integrity_plan(
         first_samp=sample_origin,
         event_count=len(normalized),
         event_digest=_event_digest(normalized),
-        protocol_fingerprint=protocol.fingerprint,
+        protocol_fingerprint=protocol_fingerprint,
         occurrences=tuple(occurrences),
         recording_id=recording_identity,
     )
@@ -1230,7 +1237,7 @@ def _approved_span(
         stop_sample=stop,
         marker_plan_fingerprint=occurrence.fingerprint,
         decision_payload=decision_payload,
-        fingerprint=_occurrence_fingerprint(payload),
+        fingerprint=_marker_payload_fingerprint(payload),
     )
 
 
@@ -1294,7 +1301,8 @@ def validate_approved_event_plan(
         protocol=protocol,
         recording_id=recording_identity,
     )
-    if planned_fingerprint != rebuilt_plan.fingerprint:
+    rebuilt_fingerprint = rebuilt_plan.fingerprint
+    if planned_fingerprint != rebuilt_fingerprint:
         raise MarkerIntegrityError(
             "Preflight marker-plan evidence fingerprint is stale or invalid."
         )
@@ -1387,7 +1395,7 @@ def validate_approved_event_plan(
             _validate_marker_review_receipt(
                 rebuilt_occurrence,
                 reviewed_decision,
-                marker_plan_fingerprint=rebuilt_plan.fingerprint,
+                marker_plan_fingerprint=rebuilt_fingerprint,
                 review_scope={
                     "source_file_path": reviewed_decision.source_file_path,
                     "participant_id": reviewed_decision.participant_id,

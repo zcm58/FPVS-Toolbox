@@ -207,6 +207,9 @@ def _kurtosis_scoring_data(
     spans = relative_spans_from_plan(target_plan)
     if not spans:
         raise AnalysisSpanPlanError("Kurtosis analysis-span union is empty.")
+    if len(spans) == 1:
+        start, stop = spans[0]
+        return raw.get_data(picks=picks, start=start, stop=stop)
     return np.concatenate(
         [raw.get_data(picks=picks, start=start, stop=stop) for start, stop in spans],
         axis=1,
