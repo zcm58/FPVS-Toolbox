@@ -1,4 +1,4 @@
-"""Exact, isolated acceleration of MNE's integer-ratio Status windows.
+"""Exact, isolated acceleration of MNE's downsampled Status windows.
 
 The characterized Raw.resample bodies remain unchanged apart from their local
 stim-helper lookup. No MNE, NumPy, class or module global is patched.
@@ -32,6 +32,11 @@ _NUMPY_NAMES = (
 )
 _NUMPY_OPERATIONS = {name: getattr(np, name) for name in _NUMPY_NAMES}
 _ABSENT = object()
+_INTEGER_WINDOW_WIDTHS = {0.5: 2, 0.25: 4, 0.125: 8, 0.0625: 16}
+_MIN_VARIABLE_WINDOW_COUNT = 32
+_VARIABLE_WINDOW_BLOCK_SIZE = 8192
+_MAX_VARIABLE_WINDOW_WIDTH = 32
+_MIN_VARIABLE_WINDOW_RATIO = 1 / _MAX_VARIABLE_WINDOW_WIDTH
 
 
 def _closure_values(function):
@@ -105,6 +110,27 @@ def _select_integer_windows(stim_data, sample_picks, width):
     return selected
 
 
+def _select_variable_windows(stim_data, sample_picks, stop_picks):
+    # A window without a marker keeps the bit pattern of its first sample.
+    selected = stim_data[:, sample_picks]
+    for start in range(0, sample_picks.size, _VARIABLE_WINDOW_BLOCK_SIZE):
+        block = slice(start, start + _VARIABLE_WINDOW_BLOCK_SIZE)
+        starts = sample_picks[block]
+        source_start, source_stop = starts[0], stop_picks[block][-1]
+        for stim_num, stim in enumerate(stim_data):
+            indices = stim[source_start:source_stop].nonzero()[0]
+            if not indices.size:
+                continue
+            indices += source_start
+            windows = starts.searchsorted(indices, side="right")
+            windows -= 1
+            first = windows[1:] != windows[:-1]
+            target = selected[stim_num, block]
+            target[windows[0]] = stim[indices[0]]
+            target[windows[1:][first]] = stim[indices[1:][first]]
+    return selected
+
+
 def _stim_windows_exact(stim_data, up, down, *, original):
     if not _supported_runtime() or not _numpy_dependencies_valid():
         return original(stim_data, up, down)
@@ -122,36 +148,55 @@ def _stim_windows_exact(stim_data, up, down, *, original):
     windows = zip(sample_picks, stop_picks)
     try:
         width = None
-        if _numpy_dependencies_valid() and type(ratio) in (float, np.float64):
-            for supported_ratio, supported_width in ((.5, 2), (.25, 4), (.125, 8), (.0625, 16)):
-                if ratio == supported_ratio:
-                    width = supported_width
-                    break
+        variable_windows = False
+        if type(ratio) in (float, np.float64):
+            width = _INTEGER_WINDOW_WIDTHS.get(ratio)
+            variable_windows = (
+                _MIN_VARIABLE_WINDOW_RATIO <= ratio < 1.0
+                and resampled_n_samples >= _MIN_VARIABLE_WINDOW_COUNT
+            )
+        integer_windows = width is not None and n_samples % width == 0
         if (
-            width is not None
+            (integer_windows or variable_windows)
+            and _numpy_dependencies_valid()
             and type(stim_data) is np.ndarray
             and stim_data.dtype == np.dtype(np.float64)
             and stim_data.flags.c_contiguous
-            and n_samples > 0 and n_samples % width == 0
+            and n_samples > 0
             and type(stim_resampled) is np.ndarray
             and stim_resampled.dtype == np.dtype(np.float64)
-            and stim_resampled.shape == (n_stim_channels, n_samples // width)
+            and stim_resampled.shape == (n_stim_channels, resampled_n_samples)
             and stim_resampled.flags.writeable
             and type(sample_picks) is np.ndarray and type(stop_picks) is np.ndarray
             and sample_picks.dtype.kind == stop_picks.dtype.kind == "i"
             and sample_picks.dtype.itemsize == stop_picks.dtype.itemsize == 8
-            and sample_picks.shape == stop_picks.shape == (n_samples // width,)
-            and sample_picks[0] == 0 and sample_picks[-1] == n_samples - width
+            and sample_picks.shape == stop_picks.shape == (resampled_n_samples,)
+            and resampled_n_samples > 0
+            and sample_picks[0] == 0
             and stop_picks[-1] == n_samples
-            and (sample_picks[1:] != sample_picks[:-1] + width).nonzero()[0].size == 0
-            and (stop_picks[:-1] != sample_picks[1:]).nonzero()[0].size == 0
-            and (~np.isfinite(stim_data)).nonzero()[0].size == 0
+            and (stop_picks[:-1] == sample_picks[1:]).all()
         ):
-            # Complete every optional mask/index/value allocation before the
-            # first output write. Failure resumes the original loop below.
-            selected = _select_integer_windows(stim_data, sample_picks, width)
-            stim_resampled[...] = selected
-            return stim_resampled
+            selected = None
+            if integer_windows:
+                if (
+                    resampled_n_samples == n_samples // width
+                    and sample_picks[-1] == n_samples - width
+                    and (sample_picks[1:] == sample_picks[:-1] + width).all()
+                    and np.isfinite(stim_data).all()
+                ):
+                    selected = _select_integer_windows(stim_data, sample_picks, width)
+            else:
+                # Bound optional marker indices even when most samples are
+                # nonzero. The verified original window edges govern mapping.
+                window_widths = stop_picks - sample_picks
+                valid_widths = window_widths.min() > 0 and window_widths.max() <= _MAX_VARIABLE_WINDOW_WIDTH
+                del window_widths
+                if valid_widths and np.isfinite(stim_data).all():
+                    selected = _select_variable_windows(stim_data, sample_picks, stop_picks)
+            if selected is not None:
+                # Allocation failure leaves the original output untouched.
+                stim_resampled[...] = selected
+                return stim_resampled
     except MemoryError:
         # Retain the existing prefix arrays when optional masks cannot allocate.
         pass

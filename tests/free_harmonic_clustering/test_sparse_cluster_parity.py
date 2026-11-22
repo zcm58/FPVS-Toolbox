@@ -134,24 +134,25 @@ def test_groups_and_union_call_order_match_frozen_baseline(harmonics, density, l
 
 
 @pytest.mark.parametrize("node_count", [0, 1, 2, 31, 32, 33, 128])
-def test_sparse_guard_boundary_and_dense_fallback(monkeypatch, node_count) -> None:
+def test_precomputed_active_nodes_avoid_repeated_array_scans(monkeypatch, node_count) -> None:
     active = np.zeros((64, 2), dtype=bool)
     active.reshape(-1)[:node_count] = True
-    expected = _baseline_groups(active, spatial_edges=_edges())
-    original_any = np.any
+    edges = _edges()
+    expected = _baseline_groups(active, spatial_edges=edges)
+    active_nodes = np.flatnonzero(active.reshape(-1))
+    original_flatnonzero = np.flatnonzero
     calls = []
 
-    def tracked_any(values, *args, **kwargs):
-        calls.append((values.shape, kwargs.get("axis")))
-        return original_any(values, *args, **kwargs)
+    def tracked_flatnonzero(values):
+        calls.append(values.shape)
+        return original_flatnonzero(values)
 
-    edges = _edges()
-    monkeypatch.setattr(analysis.np, "any", tracked_any)
+    monkeypatch.setattr(analysis.np, "flatnonzero", tracked_flatnonzero)
     actual = analysis._union_find_active_node_groups(
-        active, spatial_edges=edges, active_nodes=np.flatnonzero(active.reshape(-1))
+        active, spatial_edges=edges, active_nodes=active_nodes
     )
     _assert_exact(expected, actual)
-    assert calls == ([((64, 2), 1)] if node_count < 32 else [])
+    assert calls == []
 
 
 @pytest.mark.parametrize("shape", [(0, 0), (0, 2), (2, 0), (1, 1)])

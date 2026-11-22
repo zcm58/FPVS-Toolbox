@@ -427,12 +427,9 @@ def _format_exclusion_reason(result: dict) -> str:
     return message or reason.replace("_", " ")
 
 
-def _run_failed_results_from_ledger(host: Any, plan: ProcessingPlan) -> list[dict]:
-    try:
-        ledger = load_ledger(Path(host.currentProject.project_root))
-    except (AttributeError, OSError, TypeError, ValueError):
-        logger.exception("Failed to load processing ledger for failed-run summary.")
-        return []
+def _run_failed_results_from_ledger(
+    ledger: Mapping[str, Any], plan: ProcessingPlan,
+) -> list[dict]:
     entries = ledger.get("entries")
     if not isinstance(entries, dict):
         return []
@@ -476,12 +473,9 @@ def _string_list(value: Any) -> list[str]:
     return []
 
 
-def _run_condition_warning_results_from_ledger(host: Any, plan: ProcessingPlan) -> list[dict]:
-    try:
-        ledger = load_ledger(Path(host.currentProject.project_root))
-    except (AttributeError, OSError, TypeError, ValueError):
-        logger.exception("Failed to load processing ledger for condition-warning summary.")
-        return []
+def _run_condition_warning_results_from_ledger(
+    ledger: Mapping[str, Any], plan: ProcessingPlan,
+) -> list[dict]:
     entries = ledger.get("entries")
     if not isinstance(entries, dict):
         return []
@@ -1792,11 +1786,14 @@ def on_processing_finished(host: Any, payload: dict | None = None) -> None:
             host.log(f"Processing ledger update failed: {exc}", level=logging.WARNING)
         else:
             ledger_update_succeeded = True
-            failed_run_results = _run_failed_results_from_ledger(host, plan)
-            condition_warning_results = _run_condition_warning_results_from_ledger(
-                host,
-                plan,
-            )
+            try:
+                ledger = load_ledger(Path(host.currentProject.project_root))
+            except (AttributeError, OSError, TypeError, ValueError):
+                logger.exception("Failed to load processing ledger for run summaries.")
+                ledger = None
+            if ledger is not None:
+                failed_run_results = _run_failed_results_from_ledger(ledger, plan)
+                condition_warning_results = _run_condition_warning_results_from_ledger(ledger, plan)
             if failed_run_results:
                 host.log(
                     f"{len(failed_run_results)} file(s) did not produce a complete final "
@@ -1828,6 +1825,7 @@ def on_processing_finished(host: Any, payload: dict | None = None) -> None:
                     host.currentProject,
                     plan,
                     [*results, *error_results, *excluded_results],
+                    ledger=ledger,
                 )
                 host._last_run_issue_report = str(qc_summary_path)
                 host.log(

@@ -28,6 +28,7 @@ from Main_App.io import (
     write_condition_companion,
     xlsx_read_cache_scope,
 )
+from Main_App.io.condition_data_codec import encode_column
 from Main_App.io.result_manifest import write_result_manifest
 
 BCA = "BCA (uV)"
@@ -57,6 +58,24 @@ def _write(path: Path, frames=None) -> dict:
         pd.DataFrame({"Condition data": ["Stored in companion"]}).to_excel(writer, sheet_name=BCA, index=False)
         pd.DataFrame({"Note": ["legacy report"]}).to_excel(writer, sheet_name="Report", index=False)
     return descriptor
+
+
+def test_compact_text_dictionary_preserves_scalar_types_and_first_occurrence() -> None:
+    class SensorLabel(str):
+        pass
+
+    series = pd.Series(
+        ["O1", np.str_("O1"), "PO8", "O1", SensorLabel("O1"), True, 1, None, np.nan, pd.NA, "", -0.0, 0.0],
+        dtype=object,
+    )
+    codes, encoding = encode_column(series)
+    np.testing.assert_array_equal(codes, np.array([0, 0, 1, 0, 2, 3, 4, 5, 6, 7, 8, 9, 10], dtype=np.int32))
+    assert codes.dtype == np.dtype(np.int32)
+    assert encoding["dictionary"].tolist() == [
+        '["value","O1"]', '["value","PO8"]', '["value","O1"]', '["value",true]', '["value",1]',
+        '["value",null]', '["float","nan"]', '["missing"]', '["value",""]',
+        '["float","-0x0.0p+0"]', '["float","0x0.0p+0"]',
+    ]
 
 
 def test_lossless_uncompressed_metrics_and_mixed_metadata(tmp_path: Path) -> None:

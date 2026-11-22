@@ -105,6 +105,52 @@ def test_optional_allocation_failure_retains_original(monkeypatch):
     assert guarded._stim_windows_exact(data, 1, 2, original=ORIGINAL_HELPER).tobytes() == expected.tobytes()
 
 
+@pytest.mark.parametrize("scratch_failure", [False, True])
+def test_variable_window_selection_preserves_first_markers_and_empty_window_signs(monkeypatch, scratch_failure):
+    length, count = 40003, 10241
+    data = np.zeros((3, length))
+    data[0, ::2] = -0.0
+    data[1, ::3] = -0.0
+    data[2, 1::2] = 8.0
+    starts = (np.arange(count) / (count / length)).astype(int)
+    edge = guarded._VARIABLE_WINDOW_BLOCK_SIZE
+    data[0, starts[edge - 1] + 1:starts[edge] + 2] = 13.0
+    data[0, starts[edge] + 2] = 21.0
+    data[1, -1] = 12.0
+    expected = ORIGINAL_HELPER(data, count, length)
+    before = data.tobytes()
+    native = guarded._select_variable_windows
+    calls = []
+
+    def observed(*args):
+        calls.append(True)
+        if scratch_failure:
+            raise MemoryError("optional variable-window scratch unavailable")
+        return native(*args)
+
+    monkeypatch.setattr(guarded, "_select_variable_windows", observed)
+    actual = guarded._stim_windows_exact(data, count, length, original=ORIGINAL_HELPER)
+    assert calls == [True]
+    assert actual.tobytes() == expected.tobytes()
+    assert data.tobytes() == before
+
+
+def test_wide_windows_skip_optional_admission_and_match_original(monkeypatch):
+    data = np.zeros(8193)
+    data[9::269] = 55.0
+    native = guarded._numpy_dependencies_valid
+    calls = []
+
+    def observed():
+        calls.append(True)
+        return native()
+
+    monkeypatch.setattr(guarded, "_numpy_dependencies_valid", observed)
+    result = guarded._stim_windows_exact(data, 1, 64, original=ORIGINAL_HELPER)
+    assert calls == [True]
+    assert result.tobytes() == ORIGINAL_HELPER(data, 1, 64).tobytes()
+
+
 def _raw(length=8192, *, first_samp=13, sfreq=512.):
     data = np.random.default_rng(615).normal(scale=500e-6, size=(4, length))
     data[2:] = 0.
@@ -172,6 +218,18 @@ def test_public_resample_full_arrays_info_offsets_events_and_warnings_are_exact(
 def test_public_multisegment_resampling_is_exact():
     raw = mne.concatenate_raws([_raw(2048, first_samp=0), _raw(2049, first_samp=700)])
     kwargs = {"npad": 0, "window": "boxcar", "verbose": False}
+    assert _run_public(raw.copy(), 256., optimized=True, **kwargs) == _run_public(
+        raw.copy(), 256., optimized=False, **kwargs,
+    )
+
+
+@pytest.mark.parametrize("events_supplied", [False, True])
+def test_public_noninteger_rate_preserves_all_arrays_events_and_warnings(events_supplied):
+    raw = _raw(40003, sfreq=1000.)
+    raw.set_annotations(mne.Annotations([0.21], [.01], ["audit"]), emit_warning=False)
+    kwargs = {"npad": "auto", "window": "hann", "verbose": False}
+    if events_supplied:
+        kwargs["events"] = np.array([[33, 0, 17], [113, 0, 1], [713, 0, 21]], dtype=int)
     assert _run_public(raw.copy(), 256., optimized=True, **kwargs) == _run_public(
         raw.copy(), 256., optimized=False, **kwargs,
     )

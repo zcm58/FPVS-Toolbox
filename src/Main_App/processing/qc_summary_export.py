@@ -695,10 +695,13 @@ def build_processing_qc_rows(
     project: Any,
     plan: ProcessingPlan,
     results: Sequence[Mapping[str, Any]],
+    *,
+    ledger: Mapping[str, Any] | None = None,
 ) -> list[dict[str, object]]:
     """Build participant rows from the final ledger plus current run details."""
 
-    ledger = load_ledger(Path(project.project_root))
+    if ledger is None:
+        ledger = load_ledger(Path(project.project_root))
     results_by_path = _result_by_path(results)
     review_flags = _review_flags_by_identity(project)
     cache_index: _PreprocessedCacheQcIndex | None = None
@@ -1029,10 +1032,9 @@ def build_processing_qc_rows(
 
 
 def _interpolation_burden_summary_rows(
-    project: Any,
+    ledger: Mapping[str, Any],
     plan: ProcessingPlan,
 ) -> list[tuple[str, object]]:
-    ledger = load_ledger(Path(project.project_root))
     burdens = [
         _interpolation_burden_for_entry(
             _entry_for_pid(ledger, state.processing_id)
@@ -1086,10 +1088,14 @@ def export_processing_qc_summary(
     project: Any,
     plan: ProcessingPlan,
     results: Sequence[Mapping[str, Any]],
+    *,
+    ledger: Mapping[str, Any] | None = None,
 ) -> Path:
     """Write the preprocessing QC report under the project Quality Check folder."""
 
-    rows = build_processing_qc_rows(project, plan, results)
+    if ledger is None:
+        ledger = load_ledger(Path(project.project_root))
+    rows = build_processing_qc_rows(project, plan, results, ledger=ledger)
     target = _quality_check_root(project).resolve() / QC_SUMMARY_FILENAME
     target.parent.mkdir(parents=True, exist_ok=True)
 
@@ -1125,7 +1131,7 @@ def export_processing_qc_summary(
 
     burden_sheet = workbook.create_sheet(INTERPOLATION_BURDEN_SUMMARY_SHEET)
     burden_sheet.append(["Metric", "Value"])
-    for metric, value in _interpolation_burden_summary_rows(project, plan):
+    for metric, value in _interpolation_burden_summary_rows(ledger, plan):
         burden_sheet.append([metric, value])
     burden_sheet.freeze_panes = "A2"
     burden_sheet.auto_filter.ref = burden_sheet.dimensions

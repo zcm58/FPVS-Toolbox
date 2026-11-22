@@ -869,6 +869,9 @@ included in the final processed dataset. It also includes an exclusion reason
 column for excluded or failed participants.
 This export is generated from the current per-file results plus the processing
 ledger so incremental runs can include participants completed in earlier runs.
+The desktop reads one fresh ledger snapshot after result accounting and shares
+it across the completion warnings and both QC workbook sheets. Standalone
+exports read the ledger once per report.
 
 For repeated projects, the summary has one row per recording and adds
 Recording ID, Session ID and label, Visit Index, and Group. The v2.1 sheet name
@@ -1091,12 +1094,15 @@ Downsampling:
   window helper through isolated copies of the characterized `Raw.resample`
   wrapper/body. On CPython 3.13 / MNE 1.9.0 / NumPy 2.3.1, finite native
   contiguous float64 data with exact factors of 2, 4, 8 or 16 select the
-  same first nonzero value in each verified integer-width window, preserving an all-zero
-  window's first zero sign. The complete original conversion, NumPy
-  dispatcher, allocation and window-setup prefix is retained; only the
-  verified Python window loop uses native boolean ndarray argmax and indexed
-  copying. All optional indices and selected rows finish allocating before
-  the first output write. The 2048-to-256 Hz production path uses width 8.
+  same first nonzero value in each verified integer-width window, preserving
+  an all-zero window's first zero sign. Downsampling ratios down to 1:32
+  can also accelerate at least 32 contiguous windows with widths from one
+  to 32 input samples, using the original MNE window edges. That path scans
+  nonzero samples in blocks of up to 8,192 windows and maps each first marker
+  back to its output window. The original conversion, NumPy dispatcher,
+  allocation and window-setup prefix supplies both paths. All optional
+  indices and selected rows finish allocating before the first output write.
+  The 2048-to-256 Hz production path uses width 8.
   Runtime, code, typed defaults, forwarding, NumPy
   dependencies, builtin bindings, closure state and the current bound method
   are checked before mutation, including globals absent at construction.

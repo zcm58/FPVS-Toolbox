@@ -54,11 +54,11 @@ Array order is participant x sensor x harmonic at the public numerical
 boundary. Flattening is sensor-major (`sensor * H + harmonic`) so the combined
 graph is `spatial_adjacency kron I_H OR I_S kron complete_harmonic_adjacency`.
 
-Connected-component extraction skips empty sensors and edges only when the
-existing active-node count proves that more than half of the sensors are empty.
-The remaining union calls keep their original order; dense masks use the
-original scan loops. This is a local allocation/scan shortcut with no retained
-cache and no changes to cluster membership, mass sums, permutations or progress.
+Connected-component extraction groups active harmonics by sensor from the
+flattened active nodes. For each active sensor, it searches the sorted spatial
+edge table for that sensor's edges and intersects harmonic sets across active
+neighbors. Union calls and mass sums keep their original order for sparse and
+dense maps. The active sets live only for one component extraction.
 
 ## Modules
 

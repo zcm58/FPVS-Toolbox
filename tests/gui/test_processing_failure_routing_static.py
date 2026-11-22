@@ -365,33 +365,47 @@ def test_many_file_errors_keep_batch_running_until_one_finished_payload():
 
 
 def test_completion_preserves_failure_details_and_shows_one_summary(tmp_path):
+    from Main_App.processing.processing_ledger import (
+        MISSING_EXPECTED_OUTPUTS_WARNING,
+        load_ledger,
+        save_ledger,
+    )
+
     error = {"file": str(tmp_path / "p1.bdf"), "status": "error", "stage": "preprocess", "error": "Bad receipt"}
-    ledger_error = {"file": error["file"], "status": "failed", "reason": "incomplete"}
+    snapshot = {"schema_version": 1, "entries": {"p1": {"status": "failed", "failure_reason": "incomplete"}}}
     summary = Mock()
-    record = Mock()
+    record = Mock(side_effect=lambda *_args, **_kwargs: save_ledger(tmp_path, snapshot))
+    reader = Mock(wraps=load_ledger)
     report = Mock(return_value=tmp_path / "qc.xlsx")
     namespace = {
         "Path": Path, "logging": logging, "logger": logging.getLogger(__name__),
         "record_processing_results": record, "export_processing_qc_summary": report,
-        "_run_failed_results_from_ledger": lambda *_: [ledger_error],
-        "_run_condition_warning_results_from_ledger": lambda *_: [],
+        "load_ledger": reader, "MISSING_EXPECTED_OUTPUTS_WARNING": MISSING_EXPECTED_OUTPUTS_WARNING,
         "_format_exclusion_reason": lambda result: result.get("error", "incomplete"),
         "_show_exclusion_summary_popup": summary,
         "_show_condition_warning_popup": Mock(),
     }
-    finished = _load_function(
-        "src/Main_App/gui/processing_workflows.py", "on_processing_finished", namespace,
+    source = "src/Main_App/gui/processing_workflows.py"
+    _load_function(source, "_run_failed_results_from_ledger", namespace)
+    _load_function(source, "_run_condition_warning_results_from_ledger", namespace)
+    finished = _load_function(source, "on_processing_finished", namespace)
+    path = Path(error["file"])
+    state = SimpleNamespace(
+        status="new", processing_id="p1", info=SimpleNamespace(path=path),
     )
     finalized = []
     host = SimpleNamespace(
         settings=SimpleNamespace(debug_enabled=lambda: False), validated_params={},
-        log=Mock(), _processing_plan=SimpleNamespace(run_files=(), states=()), currentProject=object(), _busy_stop=Mock(),
+        log=Mock(), _processing_plan=SimpleNamespace(run_files=(path,), states=(state,)),
+        currentProject=SimpleNamespace(project_root=tmp_path), _busy_stop=Mock(),
     )
     host._finalize_processing = lambda *args, **kwargs: finalized.append(host._processing_summary_reported)
     finished(host, {"results": [], "errors": [error], "cancelled": False})
 
     assert record.call_args.args[2] == [error]
+    reader.assert_called_once_with(tmp_path)
     assert report.call_args.args[2] == [error]
+    assert report.call_args.kwargs["ledger"] == snapshot
     summary.assert_called_once_with(host, [error])
     assert finalized == [True]
     assert not host._processing_summary_reported
@@ -527,6 +541,7 @@ def test_completion_does_not_report_an_entirely_failed_batch_as_success(
     namespace = {
         "Path": Path, "logging": logging, "logger": logging.getLogger(__name__),
         "record_processing_results": Mock(),
+        "load_ledger": Mock(return_value={}),
         "export_processing_qc_summary": Mock(return_value=tmp_path / "qc.xlsx"),
         "_run_failed_results_from_ledger": lambda *_: ledger_failures,
         "_run_condition_warning_results_from_ledger": lambda *_: [],
@@ -543,7 +558,8 @@ def test_completion_does_not_report_an_entirely_failed_batch_as_success(
     )
     host = SimpleNamespace(
         settings=SimpleNamespace(debug_enabled=lambda: False), validated_params={},
-        log=Mock(), _processing_plan=SimpleNamespace(run_files=(), states=()), currentProject=object(),
+        log=Mock(), _processing_plan=SimpleNamespace(run_files=(), states=()),
+        currentProject=SimpleNamespace(project_root=tmp_path),
         _busy_stop=Mock(), _finalize_processing=Mock(),
     )
     controller_error = "Pool shutdown failed" if case == "controller_failure_after_success" else ""

@@ -637,6 +637,9 @@ the dense companion. It stores already-calculated FFT amplitude, BCA, SNR, Z,
 Spectral Eligibility, Spectral Metric QC, FFT and neighbors, and FFT Metadata.
 Numerical blocks preserve their original values and types without pickle;
 text/mixed metadata retain explicit types and missing-value distinctions.
+The writer encodes repeated plain-text values only at their first appearance
+in each dictionary. The saved codes and dictionary order retain distinctions
+between scalar types, signed zeros and missing values.
 
 Default per-condition Excel tabs are notices, with no automatic numerical
 copies or large audit tables. `write_results_workbook(include_condition_excel=True)`

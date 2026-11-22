@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 
@@ -153,7 +154,9 @@ def test_disabled_raw_signal_screen_is_not_reported_as_passed(tmp_path):
         assert row["Raw Baseline Median STD (uV)"] == "None"
 
 
-def test_processing_qc_summary_rows_and_formatting(tmp_path: Path) -> None:
+def test_processing_qc_summary_rows_and_formatting(tmp_path: Path, monkeypatch) -> None:
+    from Main_App.processing import qc_summary_export
+
     project, infos = _project_with_raws(tmp_path)
     plan = classify_processing_inputs(project, infos, _settings(), project.event_map)
     _write_expected_output_for_first_participant(plan)
@@ -308,7 +311,10 @@ def test_processing_qc_summary_rows_and_formatting(tmp_path: Path) -> None:
         },
     ]
 
+    ledger_reader = Mock(wraps=qc_summary_export.load_ledger)
+    monkeypatch.setattr(qc_summary_export, "load_ledger", ledger_reader)
     output = export_processing_qc_summary(project, plan, results)
+    ledger_reader.assert_called_once_with(project.project_root)
     assert output == (project.project_root / QUALITY_CHECK_FOLDER / QC_SUMMARY_FILENAME)
     assert output.exists()
 

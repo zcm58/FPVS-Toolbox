@@ -15,11 +15,13 @@ authors' unpublished adjacency matrix.
 
 from __future__ import annotations
 
+from bisect import bisect_left
+from collections import defaultdict
 from dataclasses import dataclass
 import hashlib
 import math
 from time import perf_counter
-from typing import Callable, Iterable, Literal, Sequence
+from typing import Callable, Literal, Sequence
 import warnings
 
 import numpy as np
@@ -910,11 +912,15 @@ def _union_find_active_node_groups(
     spatial_edges: Sequence[tuple[int, int]],
     active_nodes: np.ndarray | None = None,
 ) -> tuple[list[int], ...]:
+    """Find connected groups using validated edge and flattened-node order."""
     sensor_count, harmonic_count = active.shape
     node_count = sensor_count * harmonic_count
+    nodes = np.flatnonzero(active.reshape(-1)) if active_nodes is None else active_nodes
+    if not nodes.size:
+        return ()
+    node_indices = nodes.tolist()
     parent = np.full(node_count, -1, dtype=np.int64)
     rank = np.zeros(node_count, dtype=np.uint8)
-    nodes = np.flatnonzero(active.reshape(-1)) if active_nodes is None else active_nodes
     parent[nodes] = nodes
 
     def find(node: int) -> int:
@@ -938,42 +944,35 @@ def _union_find_active_node_groups(
         if rank[left_root] == rank[right_root]:
             rank[left_root] += 1
 
-    sensors: Iterable[int] = range(sensor_count)
-    edges: Iterable[tuple[int, int]] = spatial_edges
-    if nodes.size * 2 < sensor_count:
-        # This bound guarantees that at least half the sensors are empty.
-        # Skip only empty work, retaining sensor/edge/union and mass-sum order.
-        # Dense maps keep the original loops without per-edge guard overhead.
-        active_sensors = np.any(active, axis=1)
-        sensors = map(int, np.flatnonzero(active_sensors))
-        edges = (
-            (left, right)
-            for left, right in spatial_edges
-            if active_sensors[left] and active_sensors[right]
-        )
+    # Active nodes arrive in sensor-major order. Sort the harmonics that
+    # connect to preserve the original union order and subsequent mass sums.
+    active_harmonics: dict[int, set[int]] = defaultdict(set)
+    for node in node_indices:
+        sensor, harmonic = divmod(node, harmonic_count)
+        active_harmonics[sensor].add(harmonic)
 
-    # Complete free-harmonic connectivity within each sensor.
-    for sensor in sensors:
-        harmonics = np.flatnonzero(active[sensor])
-        if harmonics.size > 1:
-            first = sensor * harmonic_count + int(harmonics[0])
-            for harmonic in harmonics[1:]:
-                union(first, sensor * harmonic_count + int(harmonic))
+    for sensor, harmonics in active_harmonics.items():
+        if len(harmonics) > 1:
+            first, *others = sorted(harmonics)
+            origin = sensor * harmonic_count
+            for harmonic in others:
+                union(origin + first, origin + harmonic)
 
-    # Spatial connectivity is restricted to equal harmonic indices.
-    for left_sensor, right_sensor in edges:
-        shared_harmonics = np.flatnonzero(np.logical_and(active[left_sensor], active[right_sensor]))
-        for harmonic in shared_harmonics:
-            harmonic_index = int(harmonic)
-            union(
-                left_sensor * harmonic_count + harmonic_index,
-                right_sensor * harmonic_count + harmonic_index,
-            )
+    # Validated edge tables are ordered by left sensor, then right sensor.
+    for left_sensor, left_harmonics in active_harmonics.items():
+        start = bisect_left(spatial_edges, (left_sensor, 0))
+        stop = bisect_left(spatial_edges, (left_sensor + 1, 0), lo=start)
+        for _, right_sensor in spatial_edges[start:stop]:
+            right_harmonics = active_harmonics.get(right_sensor)
+            if right_harmonics:
+                left_origin = left_sensor * harmonic_count
+                right_origin = right_sensor * harmonic_count
+                for harmonic in sorted(left_harmonics & right_harmonics):
+                    union(left_origin + harmonic, right_origin + harmonic)
 
     grouped: dict[int, list[int]] = {}
-    for node in nodes:
-        node_index = int(node)
-        grouped.setdefault(find(node_index), []).append(node_index)
+    for node in node_indices:
+        grouped.setdefault(find(node), []).append(node)
     return tuple(grouped.values())
 
 

@@ -45,6 +45,25 @@ def _decode_scalar(text):
     raise ValueError("Invalid condition-table scalar encoding.")
 
 
+def _encode_text_and_object(series: pd.Series, codes: np.ndarray) -> list[str]:
+    dictionary, positions = [], {}
+    for index, value in enumerate(series):
+        if type(value) is str:
+            # Repeated audit labels only need a scalar record on first use.
+            key = ("value", value, str)
+            scalar = None
+        else:
+            scalar = _encode_scalar(value)
+            key = (*scalar, type(scalar[-1]))
+        position = positions.get(key)
+        if position is None:
+            position = len(dictionary)
+            positions[key] = position
+            dictionary.append(json_text(["value", value] if scalar is None else scalar))
+        codes[index] = position
+    return dictionary
+
+
 def encode_column(series: pd.Series) -> tuple[np.ndarray, dict]:
     """Keep numerical arrays native; encode mixed audit cells explicitly."""
 
@@ -52,20 +71,23 @@ def encode_column(series: pd.Series) -> tuple[np.ndarray, dict]:
     if isinstance(dtype, np.dtype) and dtype.kind in "biuf":
         values = series.to_numpy(copy=True)
         return values, {"encoding": "native", "dtype": dtype.str}
-    if pd.api.types.is_object_dtype(dtype) or str(dtype) in _MIXED_DTYPES:
-        dictionary, positions, codes = [], {}, np.empty(len(series), dtype=np.int32)
+    dtype_name = str(dtype)
+    if dtype_name not in _MIXED_DTYPES:
+        raise ValueError(f"Unsupported condition-table column dtype: {dtype}.")
+    codes = np.empty(len(series), dtype=np.int32)
+    if dtype_name in {"object", "string"}:
+        dictionary = _encode_text_and_object(series, codes)
+    else:
+        dictionary, positions = [], {}
         for index, value in enumerate(series):
             scalar = _encode_scalar(value)
-            # Include Python type: True and 1 must never share a dictionary
-            # entry, nor may None, NaN, and pandas.NA be coalesced.
             key = (*scalar, type(scalar[-1]))
             if key not in positions:
                 positions[key] = len(dictionary)
                 dictionary.append(json_text(scalar))
             codes[index] = positions[key]
-        return codes, {"encoding": "dictionary_json", "dtype": str(dtype),
-                       "dictionary": np.asarray(dictionary, dtype=np.str_)}
-    raise ValueError(f"Unsupported condition-table column dtype: {dtype}.")
+    return codes, {"encoding": "dictionary_json", "dtype": dtype_name,
+                   "dictionary": np.asarray(dictionary, dtype=np.str_)}
 
 
 def validate_column_encoding(dtype: np.dtype, specification: dict) -> None:

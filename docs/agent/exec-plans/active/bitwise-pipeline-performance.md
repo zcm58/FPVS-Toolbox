@@ -61,6 +61,37 @@ and 396 repository precommit tests (one skip). The direct Scalp Maps metric
 reader checks passed eight tests. These counts overlap. Visible Qt and
 installed-build validation remain separate from these source checks.
 
+#### Second performance audit
+
+- [x] Compare against `c27a3b0a` with the same inputs, settings and cache state.
+- [x] Complete the focused and repository gates and record verification scope.
+
+| Windows source action | Before and after | Parity and work counts |
+| --- | --- | --- |
+| Publish compact spectral and audit results | In twelve alternating pairs, one 64-channel FFT input with 3,200 audit rows took 75.02 → 67.43 ms for initial publication and 74.60 → 67.75 ms for a repeated publication. Three FFT inputs and 9,600 audit rows took 193.54 → 151.37 ms and 192.69 → 141.84 ms. | Scalar encodes for three inputs fell from 98,188 to 64. The manifest and both NPZ archives matched byte for byte. All 20 stable XLSX members matched. Repeated mixed-object and nullable fallback probes preserved codes and dictionary bytes. |
+| Finish preprocessing and write its QC report | Across seven paired callback replays, an initial 12-recording batch took 66.81 → 64.64 ms, and adding four recordings to 65 retained took 655.55 → 614.81 ms. | Each callback keeps the pre-write accounting read and reduces four post-write ledger reads to one. The incremental case read 9,405,445 → 3,709,426 ledger bytes. The final ledger, workbook with clocks fixed, logs, GUI delivery trace and result bytes matched. The replay used real accounting and report export with simulated Qt delivery. |
+| Preprocess and downsample recordings | Across eight paired runs, 32-channel Brain Products 1000→256 Hz with FIR took 898.95 → 820.42 ms. A cropped 32-channel BioSemi 512→256 Hz recording without FIR took 152.85 → 72.40 ms. Exact-divisible 512→256 Hz and wide 4096→64 Hz controls stayed within 0.3 ms of baseline. | For 30,720 output windows, the variable-width implementation replaces 30,720 Python nonzero calls per Status channel with four bounded scans. Processed samples, event arrays, acquisition metadata, settings, warnings and logs matched. |
+| Run Free Harmonic Clustering inference | In seven paired replays of 10,000 assignments, median paired inference took 861 → 491 ms and independent inference took 1,924 → 1,282 ms. First calls after equalizing imports took 386 → 206 ms and 1,968 → 1,275 ms. | The paired case reduced NumPy active-index scans from 67,498 to 20,002. T-map and null arrays, cluster masses and p-values, assignment digests, warnings and progress matched exactly. Dense stress probes up to 256 harmonics preserved the same results and also improved. |
+
+The fresh-interpreter BrainVision worker replay used six pairs with warm OS
+source files and empty worker/output caches. Median first-action time took
+1.025 → 1.005 s. The native manifest and both companions matched byte for
+byte across all 12 temporary projects. A trace of the 120,000-input Status
+helper measured a peak of 0.80 → 0.99 MB with sparse pulses and 0.80 → 1.39 MB
+with dense pulses, within the existing resampling budget for the fixture.
+
+The visible completion smoke uses a disposable incremental project with one
+incomplete recording and one partial-condition success. Confirm Home reports
+the two outcomes separately and that both QC workbook sheets describe the
+same final cohort.
+
+Windows source verification passed 3,918 processing tests (nine skips), 1,433
+project-I/O tests (15 skips), 370 Free Harmonic Clustering tests, 809 GUI-scope
+tests and 778 repository precommit tests (one skip). The FHC scope includes
+the deterministic 24×199 null smoke. These checks used synthetic recordings,
+source tests and callback replay. Visible Qt, installed-build acceptance and
+formal FHC release calibration remain separate.
+
 #### Goal for the five optimizations
 
 Measure the combined effect of the five changes below from the real GUI's
