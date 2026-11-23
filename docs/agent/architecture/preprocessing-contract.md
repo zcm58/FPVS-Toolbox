@@ -699,9 +699,11 @@ this raw-processing reset and retain their normal fingerprint invalidation.
 and `src/Main_App/processing/preflight_qc_cache.py` owns the GUI-neutral cache
 primitive. `raw_channel_qc.py` and `raw_spectral_qc.py` retain their existing v1
 APIs alongside their versioned condition-aware evaluators. Current raw-spectral
-review is project-owned, experimental, On by default, and review-only. Off is
-recorded as `not_performed_disabled` and cannot reuse an earlier flag as current
-evidence. The v3 evaluator classifies peaks only by the canonical project FFT-bin
+review is project-owned, experimental, and review-only. It starts off in new
+projects. Existing projects preserve their saved choice, with On as the legacy
+default for missing settings. Off is recorded as `not_performed_disabled`.
+Only current enabled evidence can contribute flags.
+The v3 evaluator classifies peaks only by the canonical project FFT-bin
 grid from `spectral_eligibility.py`; the historical 0.08-Hz approximation remains
 legacy provenance. It records the legacy Hann-spectrum score (which omits Hann
 coherent-gain correction), local mean ratio, local standardized score, analyzed

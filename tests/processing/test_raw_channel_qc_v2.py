@@ -103,6 +103,29 @@ def _review_window(start: int, stop: int) -> RawChannelBlockMetrics:
     )
 
 
+@pytest.mark.parametrize("samples, window_kind", [(17, "short"), (20, "regular")])
+def test_lone_window_reuses_metrics_for_exact_occurrence(monkeypatch, samples, window_kind):
+    calls = []
+    measure = raw_channel_qc._v2_metric_rows
+
+    def counted_measure(data, channels):
+        calls.append(data.shape)
+        return measure(data, channels)
+
+    monkeypatch.setattr(raw_channel_qc, "_v2_metric_rows", counted_measure)
+    block = _block("faces", 0, 100, _noise(samples, 9), final=True, window_kind=window_kind)
+    result = evaluate_condition_raw_channel_qc_v2(
+        (block,), CHANNELS, SETTINGS, filename="p01.bdf", sfreq=4.0,
+        block_duration_s=5.0, window_hop_s=2.5,
+    )
+
+    assert calls == [block.data.shape]
+    assert result.conditions[0].channel_metrics == tuple(
+        item.lowest_variance_block.metrics for item in result.transient_extrema
+    )
+    assert not result.transient_amplitude_review_findings
+
+
 def test_condition_qc_examines_every_block_and_includes_final_partial() -> None:
     first = _noise(20, 1)
     middle = _noise(20, 2)

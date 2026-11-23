@@ -88,16 +88,22 @@ def test_snapshot_reuses_payload_but_keeps_two_fresh_integrity_boundaries(
     workbook = tmp_path / "P01.xlsx"
     spectral, _frames = _spectral_workbook(workbook)
     condition = _add_condition_companion(workbook)
+    archive_names = {descriptor["sha256"]: descriptor["path"] for descriptor in (spectral, condition)}
+    with np.load(workbook.parent / spectral["path"], allow_pickle=False) as archive:
+        spectral_members = set(archive.files)
     hashes, dense_spectral_reads = Counter(), Counter()
     original_digest = hashlib.file_digest
     original_getitem = np.lib.npyio.NpzFile.__getitem__
 
     def digest(stream, *args, **kwargs):
-        hashes[Path(stream.name).name] += 1
-        return original_digest(stream, *args, **kwargs)
+        # A small archive can be hashed from an unnamed in-memory buffer.
+        result = original_digest(stream, *args, **kwargs)
+        checksum = result.hexdigest()
+        hashes[archive_names.get(checksum, checksum)] += 1
+        return result
 
     def read_array(archive, key):
-        if Path(archive.zip.filename).name == spectral["path"] and key.endswith("_values"):
+        if key.endswith("_values") and set(archive.files) == spectral_members:
             dense_spectral_reads[key] += 1
         return original_getitem(archive, key)
 

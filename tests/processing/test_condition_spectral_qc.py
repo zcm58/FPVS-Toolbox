@@ -84,6 +84,32 @@ def test_v2_scans_above_30_hz_through_caller_upper_bound() -> None:
     assert through_peak.amplitude_upper_frequency_hz == pytest.approx(51.2)
 
 
+def test_v2_checks_peak_neighbors_outside_both_scan_bounds(monkeypatch) -> None:
+    settings = _settings(mains_hz=50, low_pass_hz=14.0)
+    settings["high_pass"] = 10.0
+
+    def amplitudes_by_batch(_data, *, amplitude_last_bin, **_kwargs):
+        amplitudes = np.ones((1, amplitude_last_bin + 1), dtype=np.float64)
+        # At 0.1-Hz spacing, bins 100..140 are eligible. Stronger outside
+        # neighbors block the edge bins, retaining the adjacent plateau peaks.
+        amplitudes[0, 99:102] = (251.0, 250.0, 250.0)
+        amplitudes[0, 139:142] = (250.0, 250.0, 251.0)
+        yield 0, amplitudes
+
+    monkeypatch.setattr(
+        raw_spectral_qc, "_iter_condition_spectral_amplitude_batches", amplitudes_by_batch,
+    )
+    monkeypatch.setattr(raw_spectral_qc, "compute_noise_stats_for_bin", lambda *_args, **_kwargs: (2.0, 1.0))
+    result = evaluate_condition_spectral_qc_v2(
+        _condition_data(n_channels=1),
+        sfreq=256.0,
+        settings=settings,
+        effective_upper_frequency_hz=14.0,
+    )
+
+    assert [peak.fft_bin for peak in result.unexpected_off_harmonic_flags] == [101, 139]
+
+
 def test_v2_uses_one_fft_and_exact_22_candidate_20_retained_noise_contract(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

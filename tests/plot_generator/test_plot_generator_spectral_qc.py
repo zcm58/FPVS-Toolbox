@@ -231,23 +231,24 @@ def test_malformed_unselected_qc_electrode_does_not_block_roi_plot_data(
     )
 
 
-def test_spectral_qc_inner_scan_honors_cooperative_cancellation():
+@pytest.mark.parametrize(("cancel_at", "checked_cells"), [(2, 0), (7, 9)])
+def test_spectral_qc_inner_scan_honors_cooperative_cancellation(cancel_at, checked_cells):
     checkpoint_calls = 0
 
     def cancellation_checkpoint() -> bool:
         nonlocal checkpoint_calls
         checkpoint_calls += 1
-        return checkpoint_calls >= 2
+        return checkpoint_calls >= cancel_at
 
     result = flag_spectral_qc_electrode_outliers(
         condition="Cond",
         freqs=[1.0, 1.1, 1.2],
         subject_snr_data={
-            pid: {"OZ": [1.0, 1.0, 1.0]}
+            pid: {"O1": [1.0, 1.0, 1.0], "OZ": [1.0, 1.0, 1.0]}
             for pid in ("P01", "P02", "P03")
         },
         subject_fft_data={
-            pid: {"OZ": [0.5, 0.5, 0.5]}
+            pid: {"O1": [0.5, 0.5, 0.5], "OZ": [0.5, 0.5, 0.5]}
             for pid in ("P01", "P02", "P03")
         },
         source_workbooks={},
@@ -257,8 +258,8 @@ def test_spectral_qc_inner_scan_honors_cooperative_cancellation():
         cancellation_checkpoint=cancellation_checkpoint,
     )
 
-    assert checkpoint_calls == 2
-    assert result.checked_cells == 0
+    assert checkpoint_calls == cancel_at
+    assert result.checked_cells == checked_cells
     assert result.flagged_cells == 0
 
 

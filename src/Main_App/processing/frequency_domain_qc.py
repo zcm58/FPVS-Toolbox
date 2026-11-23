@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import math
 import sys
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -1997,6 +1998,8 @@ def _collect_summed_bca_flags(
     )
 
     columns = [f"{float(freq):.4f}_Hz" for freq in selected_harmonics]
+    rounded_harmonics = tuple(round(float(freq), 4) for freq in selected_harmonics)
+    harmonic_columns = tuple(zip(rounded_harmonics, columns))
     flags: list[dict[str, object]] = []
     integrity_failures: list[dict[str, object]] = []
     unavailable_by_method: list[dict[str, object]] = []
@@ -2035,49 +2038,36 @@ def _collect_summed_bca_flags(
                 file_path=file_path,
                 recording_assignments=recording_assignments,
             )
+            cell_exclusions = (
+                excluded_electrodes_by_subject_condition or {}
+            ).get(
+                (_normalize_recording_id(subject), str(condition)),
+                frozenset(),
+            )
             for row_offset, row in frame.iterrows():
                 electrode = _normalize_electrode(row.get("Electrode"))
-                if not electrode:
-                    continue
-                cell_exclusions = (
-                    excluded_electrodes_by_subject_condition or {}
-                ).get(
-                    (_normalize_recording_id(subject), str(condition)),
-                    frozenset(),
-                )
-                if electrode in cell_exclusions:
+                if not electrode or electrode in cell_exclusions:
                     continue
                 finite_values: list[float] = []
                 score_unavailable = False
-                for harmonic_hz, column in zip(selected_harmonics, columns):
+                for harmonic_hz, column in harmonic_columns:
                     method_evidence = audit_rows.get((electrode, column), ())
-                    method_state, reason_codes = _bca_method_state(
-                        method_evidence
-                    )
+                    method_state, reason_codes = _bca_method_state(method_evidence)
+                    if method_state == "method_computable":
+                        value, _ = _finite_bca_value(row.get(column))
+                        if value is not None:
+                            finite_values.append(value)
+                            continue
+
+                    score_unavailable = True
+                    worksheet_row = int(row_offset) + 2
                     diagnostic = {
                         **identity,
                         "electrode": electrode,
-                        "worksheet_row": int(row_offset) + 2,
-                        "harmonic_hz": round(float(harmonic_hz), 4),
+                        "worksheet_row": worksheet_row,
+                        "harmonic_hz": harmonic_hz,
                         "harmonic_column": column,
                     }
-                    if method_state == "technical_integrity_failed":
-                        _append_unique_diagnostic(
-                            integrity_failures,
-                            {
-                                **diagnostic,
-                                "failure_type": "spectral_metric_input_nonfinite",
-                                "value_category": _source_bca_value_category(
-                                    file_path=file_path,
-                                    worksheet_row=int(row_offset) + 2,
-                                    harmonic_column=column,
-                                    fallback_value=row.get(column),
-                                ),
-                                "reason_codes": list(reason_codes),
-                            },
-                        )
-                        score_unavailable = True
-                        continue
                     if method_state == "unavailable_by_method":
                         _append_unique_diagnostic(
                             unavailable_by_method,
@@ -2087,32 +2077,32 @@ def _collect_summed_bca_flags(
                                 "reason_codes": list(reason_codes),
                             },
                         )
-                        score_unavailable = True
                         continue
 
-                    value, _ = _finite_bca_value(row.get(column))
-                    if value is None:
-                        _append_unique_diagnostic(
-                            integrity_failures,
-                            {
-                                **diagnostic,
-                                "failure_type": "invalid_selected_bca_cell",
-                                "value_category": _source_bca_value_category(
-                                    file_path=file_path,
-                                    worksheet_row=int(row_offset) + 2,
-                                    harmonic_column=column,
-                                    fallback_value=row.get(column),
-                                ),
-                                "reason_codes": [],
-                            },
-                        )
-                        score_unavailable = True
-                        continue
-                    finite_values.append(value)
+                    method_failed = method_state == "technical_integrity_failed"
+                    _append_unique_diagnostic(
+                        integrity_failures,
+                        {
+                            **diagnostic,
+                            "failure_type": (
+                                "spectral_metric_input_nonfinite" if method_failed
+                                else "invalid_selected_bca_cell"
+                            ),
+                            "value_category": _source_bca_value_category(
+                                file_path=file_path,
+                                worksheet_row=worksheet_row,
+                                harmonic_column=column,
+                                fallback_value=row.get(column),
+                            ),
+                            "reason_codes": list(reason_codes) if method_failed else [],
+                        },
+                    )
 
                 if score_unavailable:
                     continue
-                value = float(pd.Series(finite_values, dtype=float).sum())
+                # The finite gate makes pandas' NaN filtering unnecessary.
+                # Preserve its contiguous float64 reduction in harmonic order.
+                value = float(np.asarray(finite_values, dtype=np.float64).sum())
                 if not np.isfinite(value):
                     _append_unique_diagnostic(
                         integrity_failures,
@@ -2144,9 +2134,7 @@ def _collect_summed_bca_flags(
                     "abs_summed_bca_uv": float(abs_value),
                     "severity": severity,
                     "band_crossed": severity,
-                    "selected_harmonics_hz": [
-                        round(float(freq), 4) for freq in selected_harmonics
-                    ],
+                    "selected_harmonics_hz": list(rounded_harmonics),
                     "selected_harmonic_count": len(selected_harmonics),
                     "selection_fingerprint": str(
                         (selected_harmonics_metadata or {}).get(
@@ -2359,13 +2347,11 @@ def _finite_bca_value(value: object) -> tuple[float | None, str]:
         numeric = float(value)
     except (TypeError, ValueError, OverflowError):
         return None, "text"
-    if np.isnan(numeric):
+    if math.isfinite(numeric):
+        return numeric, "finite"
+    if math.isnan(numeric):
         return None, "nan"
-    if np.isposinf(numeric):
-        return None, "positive_infinity"
-    if np.isneginf(numeric):
-        return None, "negative_infinity"
-    return numeric, "finite"
+    return None, "positive_infinity" if numeric > 0 else "negative_infinity"
 
 
 def _bca_value_category(value: object) -> str:

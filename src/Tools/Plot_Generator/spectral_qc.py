@@ -363,6 +363,7 @@ def flag_spectral_qc_electrode_outliers(
 
     records: list[SpectralQcRecord] = []
     checked_cells = 0
+    expected_frequencies: list[bool] = []
     electrode_names = sorted(
         {
             electrode
@@ -374,12 +375,12 @@ def flag_spectral_qc_electrode_outliers(
     for electrode in electrode_names:
         if cancellation_checkpoint is not None and cancellation_checkpoint():
             break
-        pids = [
-            pid
-            for pid, electrode_values in subject_snr_data.items()
-            if electrode in electrode_values and electrode in subject_fft_data.get(pid, {})
-        ]
-        if len(pids) < thresholds.min_subjects:
+        participant_series = []
+        for pid, snr_electrodes in subject_snr_data.items():
+            fft_electrodes = subject_fft_data.get(pid, {})
+            if electrode in snr_electrodes and electrode in fft_electrodes:
+                participant_series.append((pid, fft_electrodes[electrode], snr_electrodes[electrode]))
+        if len(participant_series) < thresholds.min_subjects:
             continue
 
         for freq_index, freq in enumerate(freqs):
@@ -390,33 +391,35 @@ def flag_spectral_qc_electrode_outliers(
                     checked_cells=checked_cells,
                     flagged_cells=len(records),
                 )
-            if is_expected_frequency(
-                float(freq),
-                oddball_freq=oddball_freq,
-                base_freq=base_freq,
-                tolerance_hz=thresholds.expected_frequency_tolerance_hz,
-            ):
+            # The harmonic rule is shared across electrodes. Evaluate bins in
+            # their original order so cancellation stops at the same boundary.
+            if freq_index == len(expected_frequencies):
+                expected_frequencies.append(is_expected_frequency(
+                    float(freq),
+                    oddball_freq=oddball_freq,
+                    base_freq=base_freq,
+                    tolerance_hz=thresholds.expected_frequency_tolerance_hz,
+                ))
+            if expected_frequencies[freq_index]:
                 continue
 
-            fft_pairs: list[tuple[str, float]] = []
-            for pid in pids:
-                fft_values = subject_fft_data.get(pid, {}).get(electrode, [])
+            fft_pairs: list[tuple[str, float, Sequence[float]]] = []
+            for pid, fft_values, snr_values in participant_series:
                 if freq_index >= len(fft_values):
                     continue
                 value = float(fft_values[freq_index])
                 if math.isfinite(value):
-                    fft_pairs.append((pid, value))
+                    fft_pairs.append((pid, value, snr_values))
             if len(fft_pairs) < thresholds.min_subjects:
                 continue
 
-            fft_array = np.asarray([value for _, value in fft_pairs], dtype=float)
+            fft_array = np.asarray([value for _, value, _ in fft_pairs], dtype=float)
             median, robust_scale = _robust_stats(fft_array)
 
-            for pid, fft_value in fft_pairs:
-                electrode_snr = subject_snr_data.get(pid, {}).get(electrode, [])
-                if freq_index >= len(electrode_snr):
+            for pid, fft_value, snr_values in fft_pairs:
+                if freq_index >= len(snr_values):
                     continue
-                snr_value = float(electrode_snr[freq_index])
+                snr_value = float(snr_values[freq_index])
                 if not math.isfinite(snr_value):
                     continue
                 checked_cells += 1

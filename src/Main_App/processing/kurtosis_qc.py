@@ -1,16 +1,18 @@
 """Versioned kurtosis evidence and interpolation-decision authority.
 
 This module owns the GUI-neutral QC-16 contract.  It deliberately separates
-the numerical screen from corroboration, review, and interpolation.  The
-initial eligible-corroborator registry is empty, so a current kurtosis finding
-cannot authorize interpolation without an explicit, current GUI receipt.
+the numerical screen from corroboration, review, and interpolation. The
+current eligible-corroborator registry is empty. A kurtosis finding may
+authorize interpolation through a current GUI receipt or an enabled
+experimental auto-all policy for valid findings.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
+from functools import cache
 import hashlib
 import json
 import math
@@ -1259,6 +1261,25 @@ def validate_kurtosis_review_decision(
 ) -> KurtosisReviewDecision:
     """Validate one explicit GUI receipt against current recording evidence."""
 
+    return _validate_kurtosis_review_decision(
+        decision,
+        evidence=evidence,
+        evidence_fingerprint=lambda: evidence.fingerprint,
+        channel_evidence=channel_evidence,
+        review_scope=review_scope,
+        kurtosis_auto_interpolate_all=kurtosis_auto_interpolate_all,
+    )
+
+
+def _validate_kurtosis_review_decision(
+    decision: KurtosisReviewDecision | Mapping[str, Any],
+    *,
+    evidence: KurtosisQCEvidence,
+    evidence_fingerprint: Callable[[], str],
+    channel_evidence: KurtosisChannelEvidence,
+    review_scope: Mapping[str, Any],
+    kurtosis_auto_interpolate_all: bool,
+) -> KurtosisReviewDecision:
     receipt = KurtosisReviewDecision.from_payload(
         decision.to_payload()
         if isinstance(decision, KurtosisReviewDecision)
@@ -1271,7 +1292,8 @@ def validate_kurtosis_review_decision(
     if not receipt.reason:
         raise KurtosisQCError("Kurtosis review decision requires a reason.")
     _validate_utc_time(receipt.reviewed_at_utc)
-    _validate_review_authority(receipt, channel_evidence.to_payload(), kurtosis_auto_interpolate_all=kurtosis_auto_interpolate_all)
+    channel_payload = channel_evidence.to_payload()
+    _validate_review_authority(receipt, channel_payload, kurtosis_auto_interpolate_all=kurtosis_auto_interpolate_all)
     if receipt.reviewer_identity_status == KURTOSIS_REVIEWER_IDENTITY_STATUS_NOT_COLLECTED:
         if _normalized_optional_text(receipt.reviewer_identity) is not None:
             raise KurtosisQCError("Reviewer identity cannot be stored when it was not collected.")
@@ -1287,9 +1309,9 @@ def validate_kurtosis_review_decision(
         raise KurtosisQCError("Kurtosis review method is stale.")
     if receipt.reviewed_registry_version != evidence.corroborator_registry_version:
         raise KurtosisQCError("Kurtosis review corroborator registry is stale.")
-    if receipt.reviewed_evidence_fingerprint != evidence.fingerprint:
+    if receipt.reviewed_evidence_fingerprint != evidence_fingerprint():
         raise KurtosisQCError("Kurtosis review evidence changed; review again.")
-    if receipt.reviewed_channel_evidence_fingerprint != channel_evidence.fingerprint:
+    if receipt.reviewed_channel_evidence_fingerprint != channel_payload["fingerprint"]:
         raise KurtosisQCError("Kurtosis channel evidence changed; review again.")
     if receipt.reviewed_analysis_span_fingerprint != evidence.scoring_scope.analysis_span_fingerprint:
         raise KurtosisQCError("Kurtosis review analyzed intervals changed; review again.")
@@ -1747,6 +1769,12 @@ def build_kurtosis_decision_plan(
     rows: list[KurtosisChannelDecision] = []
     used_decisions: set[str] = set()
     blocking: list[str] = []
+
+    @cache
+    def evidence_fingerprint() -> str:
+        # All channel receipts in this plan bind to the same current evidence.
+        return evidence.fingerprint
+
     if evidence.status == EVIDENCE_STATUS_UNAVAILABLE:
         blocking.append("kurtosis_evidence_unavailable")
     for channel in retained:
@@ -1783,8 +1811,9 @@ def build_kurtosis_decision_plan(
                                   else getattr(explicit, "reviewer_state", None))
             if (explicit_authority == KURTOSIS_REVIEWER_STATE_AUTHORIZED_REVIEW
                     and not (channel_evidence.exceeds_threshold and eligible)):
-                receipt = validate_kurtosis_review_decision(
-                    explicit, evidence=evidence, channel_evidence=channel_evidence,
+                receipt = _validate_kurtosis_review_decision(
+                    explicit, evidence=evidence, evidence_fingerprint=evidence_fingerprint,
+                    channel_evidence=channel_evidence,
                     review_scope=scope, kurtosis_auto_interpolate_all=kurtosis_auto_interpolate_all,
                 )
                 used_decisions.add(channel)
@@ -1809,15 +1838,17 @@ def build_kurtosis_decision_plan(
                 if channel in decisions:
                     # Keep any current receipt for audit, but the selected
                     # project policy is the authority while this option is on.
-                    receipt = validate_kurtosis_review_decision(
-                        decisions[channel], evidence=evidence, channel_evidence=channel_evidence,
+                    receipt = _validate_kurtosis_review_decision(
+                        decisions[channel], evidence=evidence, evidence_fingerprint=evidence_fingerprint,
+                        channel_evidence=channel_evidence,
                         review_scope=scope, kurtosis_auto_interpolate_all=True,
                     )
                     used_decisions.add(channel)
             elif channel in decisions:
-                receipt = validate_kurtosis_review_decision(
+                receipt = _validate_kurtosis_review_decision(
                     decisions[channel],
                     evidence=evidence,
+                    evidence_fingerprint=evidence_fingerprint,
                     channel_evidence=channel_evidence,
                     review_scope=scope,
                     kurtosis_auto_interpolate_all=kurtosis_auto_interpolate_all,
@@ -1869,7 +1900,7 @@ def build_kurtosis_decision_plan(
         authority_policy_version=evidence.authority_policy_version,
         registry_version=registry.version,
         registry_fingerprint=registry.fingerprint,
-        evidence_fingerprint=evidence.fingerprint,
+        evidence_fingerprint=evidence_fingerprint(),
         ready_for_interpolation=not blocking,
         blocking_reasons=tuple(blocking),
         channel_decisions=tuple(rows),

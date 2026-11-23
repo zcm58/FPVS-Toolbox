@@ -232,6 +232,42 @@ def test_audit_optimization_preserves_complete_flags_and_finite_gates(
     assert observed.flags
 
 
+def test_summed_bca_keeps_harmonic_order_at_review_thresholds(tmp_path, monkeypatch):
+    from Main_App import io
+
+    path = tmp_path / "P1_C1.xlsx"
+    path.touch()
+    harmonics = (1.2, 2.4, 3.6, 4.8)
+    bca = pd.DataFrame(
+        [
+            ["O1", 1e16, 9.0, -1e16, 2.0],
+            ["O2", 1e16, -9.0, -1e16, -243.0],
+        ],
+        columns=["Electrode", *(f"{frequency:.4f}_Hz" for frequency in harmonics)],
+    )
+
+    def reader(_path, *, sheet_name, required_columns):
+        if sheet_name != "BCA (uV)":
+            raise ValueError("No optional audit table.")
+        return bca.loc[:, required_columns]
+
+    monkeypatch.setattr(io, "read_xlsx_sheet_selected_columns", reader)
+    inspection = qc._collect_summed_bca_flags(
+        subjects=["P1"],
+        conditions=["C1"],
+        subject_data={"P1": {"C1": str(path)}},
+        selected_harmonics=harmonics,
+        thresholds=qc.FrequencyDomainQcThresholds(),
+        log_func=lambda _message: None,
+    )
+
+    flag, = inspection.flags
+    assert flag["electrode"] == "O2"
+    assert flag["summed_bca_uv"] == -251.0
+    assert flag["severity"] == "extreme"
+    assert inspection.technical_integrity_failures == ()
+
+
 @pytest.mark.parametrize("frame", list(_frames()))
 def test_frequency_token_reuse_matches_frozen_parser_and_untouched_frame(frame):
     assert _capture_parser(qc._read_bca_method_audit_rows, frame) == (

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from collections.abc import Callable, Iterable
+from math import isfinite
 from typing import Any, Mapping, Sequence
 
 import numpy as np
@@ -1081,19 +1082,14 @@ def _spatial_neighbor_map_from_positions(
     neighbors: dict[str, tuple[str, ...]] = {}
     max_neighbors = max(config.spatial_min_neighbors, config.spatial_neighbor_count)
     for row_index, channel in enumerate(pos_names):
-        ordered_indices = [
-            int(index)
-            for index in np.argsort(distances[row_index])
-            if np.isfinite(distances[row_index, index])
-        ]
-        local = [
-            pos_names[index]
-            for index in ordered_indices
-            if float(distances[row_index, index]) <= radius
-        ][:max_neighbors]
+        row = distances[row_index]
+        ordered_indices = np.argsort(row)
+        ordered_distances = row[ordered_indices]
+        finite = np.isfinite(ordered_distances)
+        local = ordered_indices[finite & (ordered_distances <= radius)][:max_neighbors]
         if len(local) < config.spatial_min_neighbors:
-            local = [pos_names[index] for index in ordered_indices[: config.spatial_min_neighbors]]
-        neighbors[channel] = tuple(local[:max_neighbors])
+            local = ordered_indices[finite][:config.spatial_min_neighbors]
+        neighbors[channel] = tuple(pos_names[index] for index in local[:max_neighbors])
     return neighbors
 
 
@@ -1102,11 +1098,25 @@ def _zscore_rows(data: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     # Preserve the existing median and reduction order. Ordinary finite
     # float64 rows do not need nanstd's extra sample copy and NaN masks.
     if (centered.dtype == np.dtype(np.float64)
+            and centered.shape[1] > 0
             and centered.strides[1] == centered.itemsize
             and bool(np.isfinite(centered).all())):
-        scale = np.std(centered, axis=1)
-    else:
-        scale = np.nanstd(centered, axis=1)
+        row_bytes = centered.shape[1] * centered.itemsize
+        rows_per_batch = max(1, (8 * 1024 * 1024) // row_bytes)
+        if len(centered) <= rows_per_batch:
+            scale = np.std(centered, axis=1)
+        else:
+            # Each row still uses the same contiguous NumPy reduction. Hold
+            # the standard-deviation scratch space to one group of rows.
+            scale = np.empty(len(centered), dtype=centered.dtype)
+            for start in range(0, len(centered), rows_per_batch):
+                stop = start + rows_per_batch
+                scale[start:stop] = np.std(centered[start:stop], axis=1)
+        safe_scale = np.where(scale > 0.0, scale, np.nan)
+        np.divide(centered, safe_scale[:, None], out=centered)
+        return centered, scale
+
+    scale = np.nanstd(centered, axis=1)
     safe_scale = np.where(scale > 0.0, scale, np.nan)
     return centered / safe_scale[:, None], scale
 
@@ -2652,7 +2662,10 @@ def _evaluate_condition_raw_channel_qc_v2(
     transient_high: set[str] = set()
     transient_rare: set[str] = set()
 
-    def finalize_current() -> None:
+    def finalize_current(
+        last_window_rows: tuple[RawChannelMetricSet, ...],
+        last_window_classification: _V2Classification,
+    ) -> None:
         nonlocal current_key
         if current_key is None:
             return
@@ -2669,8 +2682,18 @@ def _evaluate_condition_raw_channel_qc_v2(
                     occurrence_start=current_start,
                     occurrence_stop=current_stop,
                 )
-        aggregate_rows = _v2_metric_rows(aggregate_data, scalp_names)
-        aggregate_classification = _classify_v2_metrics(aggregate_rows, config)
+        # A finite lone window has already scored exactly the aggregate data.
+        # Keep the original computation for invalid metrics and its diagnostics.
+        if len(current_chunks) == 1 and all(
+            isfinite(row.std_uv) and isfinite(row.p2p_99_uv)
+            and isfinite(row.p2p_999_uv) and isfinite(row.full_p2p_uv)
+            for row in last_window_rows
+        ):
+            aggregate_rows = last_window_rows
+            aggregate_classification = last_window_classification
+        else:
+            aggregate_rows = _v2_metric_rows(aggregate_data, scalp_names)
+            aggregate_classification = _classify_v2_metrics(aggregate_rows, config)
         spatial_outliers: tuple[str, ...] = ()
         if config.auto_detect_removed_electrodes and config.spatial_qc_enabled:
             donor_exclusions = _ordered_channel_union(
@@ -2866,7 +2889,7 @@ def _evaluate_condition_raw_channel_qc_v2(
         current_stop = max(current_stop, stop_sample)
 
         if block.is_final:
-            finalize_current()
+            finalize_current(block_metric_rows, classification)
 
     if current_key is not None:
         raise ValueError(f"condition occurrence {current_key!r} ended without a final block")

@@ -148,6 +148,47 @@ def test_spatial_arrays_scales_and_scores_preserve_every_float_bit(kind, n_sampl
     assert data.tobytes() == before
 
 
+def test_large_spatial_normalization_uses_bounded_row_batches(monkeypatch):
+    rng = np.random.default_rng(712)
+    data = rng.normal(0.0, 30e-6, (64, 33_001))
+    data[0, ::97] = -0.0
+    data[1] = 0.0
+    data.flags.writeable = False
+    expected = _baseline_zscore_rows(data)
+    real_std = np.std
+    batch_sizes = []
+
+    def measured_std(array, **kwargs):
+        batch_sizes.append(array.nbytes)
+        return real_std(array, **kwargs)
+
+    monkeypatch.setattr(qc.np, "std", measured_std)
+    actual = qc._zscore_rows(data)
+
+    assert len(batch_sizes) > 1
+    assert max(batch_sizes) <= 8 * 1024 * 1024
+    assert sum(batch_sizes) == data.nbytes
+    assert tuple(value.tobytes() for value in actual) == tuple(
+        value.tobytes() for value in expected
+    )
+
+
+@pytest.mark.parametrize(
+    "radius_factor, expected", [(1.01, ("AF3", "AF7", "F1")), (0.1, ("AF3", "AF7"))],
+)
+def test_neighbor_order_at_tied_distances_and_fallback(radius_factor, expected):
+    positions = {
+        "Fp1": (0, 0, 0), "AF3": (0, 1, 0), "AF7": (-1, 0, 0),
+        "F1": (1, 0, 0), "F3": (0, -1, 0),
+    }
+    config = replace(
+        qc.RawChannelQCConfig(), spatial_neighbor_count=3, spatial_min_neighbors=2,
+        spatial_neighbor_distance_factor=radius_factor,
+    )
+    actual = qc._spatial_neighbor_map_from_positions(positions, tuple(positions), config=config)
+    assert actual["Fp1"] == expected
+
+
 @pytest.mark.parametrize("overlap", [False, True])
 @pytest.mark.parametrize("manual_removed", [(), ("Fp1", "AF7")])
 def test_spatial_enabled_condition_payload_matches_frozen_baseline(

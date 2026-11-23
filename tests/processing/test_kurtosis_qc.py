@@ -500,6 +500,36 @@ def test_current_gui_receipt_approves_or_rejects_candidate(
     assert plan.ready_for_interpolation
 
 
+def test_kurtosis_plan_hashes_current_evidence_once_for_multiple_receipts(tmp_path, monkeypatch) -> None:
+    data = _data(channel_count=64)
+    data[1, :] = data[0, :]
+    evidence = _evidence(data=data)
+    first, second = BIOSEMI64_CHANNELS[:2]
+    assert {first, second} <= set(evidence.candidate_channels)
+    path = tmp_path / "recording.bdf"
+    receipts = {
+        first: _receipt(evidence, first, path),
+        second: _receipt(evidence, second, path, decision=KURTOSIS_DECISION_REJECT),
+    }
+    original_fingerprint = qc_module.KurtosisQCEvidence.fingerprint.fget
+    fingerprint_calls = 0
+
+    def count_fingerprint(current):
+        nonlocal fingerprint_calls
+        fingerprint_calls += 1
+        return original_fingerprint(current)
+
+    monkeypatch.setattr(qc_module.KurtosisQCEvidence, "fingerprint", property(count_fingerprint))
+    plan = build_kurtosis_decision_plan(evidence, review_decisions=receipts, review_scope=_scope(path))
+    assert first in plan.user_approved_channels
+    assert second in plan.user_rejected_channels
+    assert fingerprint_calls == 1
+
+    changed = replace(evidence, processing_provenance_fingerprint="f" * 64)
+    with pytest.raises(KurtosisQCError, match="evidence changed"):
+        build_kurtosis_decision_plan(changed, review_decisions=receipts, review_scope=_scope(path))
+
+
 def test_gui_receipt_builder_binds_cached_evidence_and_scope(tmp_path) -> None:
     evidence = _evidence()
     candidate = evidence.candidate_channels[0]

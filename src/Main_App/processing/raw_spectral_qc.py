@@ -989,24 +989,29 @@ def _iter_condition_spectral_amplitude_batches(
         n_amplitude_bins=amplitude_last_bin + 1,
     )
     amplitude_scale = 2.0e6 / n_samples
+    centered_buffer = None
+    spectrum_buffer = None
     for batch_start in range(0, n_channels, batch_size):
         _check_condition_spectral_cancelled(should_cancel)
         batch_stop = min(n_channels, batch_start + batch_size)
-        centered = (
-            array[batch_start:batch_stop]
-            - np.median(
-                array[batch_start:batch_stop],
-                axis=1,
-                keepdims=True,
+        batch = array[batch_start:batch_stop]
+        if centered_buffer is None:
+            centered_buffer = np.empty_like(batch)
+            spectrum_buffer = np.empty(
+                (len(batch), n_samples // 2 + 1), dtype=np.complex128,
             )
-        )
-        # Only newly allocated scratch is changed. Keep the same elementwise
-        # operations and FFT while avoiding second window/amplitude arrays.
+        centered = centered_buffer[:len(batch)]
+        # Partition a private copy for the median, then use the original
+        # sample order to populate the centered signal in the same buffer.
+        np.copyto(centered, batch)
+        median = np.median(centered, axis=1, keepdims=True, overwrite_input=True)
+        np.subtract(batch, median, out=centered)
+        # The private buffers are overwritten for each batch. Only the
+        # detached magnitude array is yielded to the caller.
         centered *= window
-        spectra = np.fft.rfft(centered, axis=1)
+        spectra = np.fft.rfft(centered, axis=1, out=spectrum_buffer[:len(batch)])
         amplitudes_uv = np.abs(spectra[:, : amplitude_last_bin + 1])
         amplitudes_uv *= amplitude_scale
-        del spectra, centered
         _check_condition_spectral_cancelled(should_cancel)
         yield batch_start, amplitudes_uv
 
@@ -1234,6 +1239,12 @@ def _evaluate_condition_spectral_qc_v2(
         )
 
     grouped: dict[int, list[tuple[str, float, float, float]]] = {}
+    first_candidate = int(candidate_indices[0])
+    last_candidate = int(candidate_indices[-1])
+    # On this ordered FFT grid, the eligible frequency and neighborhood
+    # bounds select one contiguous range. Inspect neighbors only for bins
+    # whose amplitude can pass the locked threshold.
+    candidate_slice = slice(first_candidate, last_candidate + 1)
     for batch_start, batch_amplitudes_uv in _iter_condition_spectral_amplitude_batches(
         array,
         window=window,
@@ -1242,13 +1253,15 @@ def _evaluate_condition_spectral_qc_v2(
     ):
         for batch_row, row in enumerate(batch_amplitudes_uv):
             channel_name = names[batch_start + batch_row]
-            indices = candidate_indices[
-                (
-                    row[candidate_indices]
-                    >= thresholds.min_legacy_hann_spectrum_score
-                )
-                & (row[candidate_indices] >= row[candidate_indices - 1])
-                & (row[candidate_indices] >= row[candidate_indices + 1])
+            above_threshold = (
+                np.flatnonzero(row[candidate_slice] >= thresholds.min_legacy_hann_spectrum_score)
+                + first_candidate
+            )
+            if not above_threshold.size:
+                continue
+            indices = above_threshold[
+                (row[above_threshold] >= row[above_threshold - 1])
+                & (row[above_threshold] >= row[above_threshold + 1])
             ]
             for fft_bin_value in indices:
                 fft_bin = int(fft_bin_value)
@@ -1293,7 +1306,7 @@ def _evaluate_condition_spectral_qc_v2(
         effective_notch_centers_hz=effective_notches,
         thresholds=thresholds,
     )
-    evaluated_upper = float(frequencies[int(candidate_indices[-1])])
+    evaluated_upper = float(frequencies[last_candidate])
     amplitude_upper = float(frequencies[-1])
     if unexpected:
         message = (

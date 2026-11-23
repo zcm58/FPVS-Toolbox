@@ -159,7 +159,53 @@ beyond QC-02 and the existing freshness contracts.
 | Wave 4: frequency and ROI finalization | Complete | One project-filter/Nyquist-derived resolver supplies harmonic eligibility and complete +/-10-bin support; notch collisions are structured unavailable values. Recording-aware review, fixed-ROI coverage, and QC-20/QC-21 final release ordering are implemented. |
 | Wave 5: integration and handoff | Complete | The full local suite passed (2,514 passed, 3 skipped), and all applicable non-path audits passed. CI-only Qt execution and visible/manual smoke paths remain release verification. |
 
-## Outstanding Empirical Evidence
+## Published Evidence and Calibration Limits
+
+- **Raw signal and electrode screens (QC-01, QC-04, QC-05, QC-08, QC-09).**
+  PREP evaluates windowed channel deviations, correlation and RANSAC-based
+  spatial prediction. Autoreject estimates trial-level peak-to-peak thresholds
+  by cross-validation. These studies support checking local time windows and
+  spatial agreement. Toolbox's five-second windows with 50% overlap, percentile
+  and donor-agreement thresholds, and disconnected-electrode nominations need
+  participant-split calibration. Earlier in-lab detector rates refer to the
+  earlier method and dataset. [PREP](https://doi.org/10.3389/fninf.2015.00016)
+  · [Autoreject](https://pubmed.ncbi.nlm.nih.gov/28645840/)
+- **Kurtosis (QC-16).** Toolbox requires finite channel input across the union
+  of analyzed intervals and uses bias-corrected excess kurtosis, floor-based
+  trimming across channels, and a trimmed
+  population SD. EEGLAB's implementation uses different trim indexing and
+  sample SD. The Toolbox score is a standardized channel deviation, and the
+  optional `|score| > 10` and auto-all repair rules need FPVS validation against
+  independently reviewed whole-recording channel decisions. The corroborator
+  registry remains empty. [EEGLAB implementation](https://raw.githubusercontent.com/sccn/eeglab/develop/functions/sigprocfunc/rejkurt.m)
+  · [Kumaravel et al.](https://doi.org/10.3390/s22197314)
+- **Raw and plot spectral screens (QC-18 and SNR Plot).** Published FPVS
+  calculations compare tagged frequencies with nearby bins. The raw screen
+  reports a legacy Hann magnitude without coherent-gain correction and uses
+  provisional thresholds. The plot screen's off-harmonic peaks are review
+  prompts with cohort-relative and absolute gates. Physiological rhythms and
+  interference can both appear away from stimulation harmonics. Current
+  screening thresholds need independent validation across protocols.
+  [Volfart et al., methods 2.5](https://dial.uclouvain.be/pr/boreal/object/boreal%3A252817/datastream/PDF_01/view)
+  · [Keil et al., frequency-domain reporting guidelines](https://doi.org/10.1111/psyp.14052)
+- **Summed BCA and Stats DV (QC-17 and Stats).** Baseline-corrected harmonic
+  sums quantify the size of the response at the selected stimulation bins.
+  Measured amplitudes depend on the stimulation rate and included harmonics.
+  The 10, 50, and 250 µV electrode bands and the separate finite-DV envelope
+  remain review heuristics. Independent-samples simulations show that
+  automatic outcome-based removal can bias inference. Keep artifact evidence
+  and explicit decisions separate from the observed response size.
+  [Retter et al.](https://doi.org/10.1162/jocn_a_01763)
+  · [Retter and Schiltz](https://pubmed.ncbi.nlm.nih.gov/40527617/)
+  · [Bakker and Wicherts](https://pubmed.ncbi.nlm.nih.gov/24773354/)
+- **Interpolation burden (QC-07).** Volfart et al. report interpolating fewer
+  than 5% of electrodes per participant under their study protocol. The
+  Toolbox review boundary serves as an operational prompt. Empirical
+  evaluation needs to check which electrodes were repaired, their ROI roles,
+  repair success and the effect on the study's measured responses.
+  [Volfart et al., methods 2.4](https://dial.uclouvain.be/pr/boreal/object/boreal%3A252817/datastream/PDF_01/view)
+
+### Outstanding Empirical Evidence
 
 - **QC-01:** participant-split calibration and external validation of transient thresholds.
 - **QC-04:** rerun the current detector method on the in-lab dataset, then seek external validation.

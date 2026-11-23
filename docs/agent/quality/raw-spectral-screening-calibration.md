@@ -4,9 +4,10 @@ The current raw-spectral screen is an experimental, review-only method. Its
 locked v1 defaults are a 0.5-Hz lower boundary, Legacy Hann-spectrum score 250,
 local-mean ratio 25, local standardized score 12, and a widespread label at
 75% and at least 48 BioSemi64 scalp channels. The fixed neighborhood uses
-+/-12 FFT bins, removes the target and immediate neighbors, and trims one
-finite minimum and maximum. Do not describe these values as validated artifact
-cutoffs or the standardized score as a normal-theory z statistic.
++/-12 FFT bins, removes the target and immediate neighbors, and trims the
+positions of the finite minimum and maximum. In a flat neighborhood the two
+positions coincide, leaving 21 of the 22 candidates. These are
+provisional review thresholds. The standardized score is descriptive.
 
 Before changing the claims, authority, scaling, or values, calibrate a new
 method version on annotated BioSemi64 FPVS recordings spanning presentation and
