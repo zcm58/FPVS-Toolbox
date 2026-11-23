@@ -227,6 +227,36 @@ def test_output_is_deterministic_across_input_row_order() -> None:
     assert_frame_equal(first.metadata, shuffled.metadata)
 
 
+def test_group_omission_preserves_sorted_reduction_with_nonfinite_values() -> None:
+    data = _group_frame(
+        [1e18, 1.0, -1e18, 2.0, 3.0, 4.0, 0.0, 0.0, np.inf],
+        [0.25, 0.5, 0.75, 1.0],
+    )
+    data.loc[data["participant"].eq("A7"), "value"] = -0.0
+    result = run_two_group_leave_one_out_stability(
+        data,
+        dv_col="value",
+        subject_col="participant",
+        group_col="group_id",
+        condition_col="condition",
+        roi_col="roi",
+        analysis_scope="available_case",
+    )
+
+    for row in result.details.itertuples(index=False):
+        retained = data[
+            ~data["participant"].eq(row.omitted_participant)
+            & np.isfinite(data["value"])
+        ]
+        values_a = retained.loc[retained["group_id"].eq("anxious"), "value"]
+        values_b = retained.loc[retained["group_id"].eq("non_anxious"), "value"]
+        expected = np.sort(values_a.to_numpy(), kind="stable").mean() - np.sort(
+            values_b.to_numpy(), kind="stable"
+        ).mean()
+        assert np.float64(row.estimate_after_omission).tobytes() == expected.tobytes()
+        assert row.omitted_participant_had_finite_value == (row.omitted_participant != "A9")
+
+
 def test_tiny_n_and_zero_variance_have_explicit_non_estimable_statuses() -> None:
     tiny = _one_sample_frame({"P1": 1.0})
     zero_variance = _one_sample_frame({"P1": 1.0, "P2": 1.0, "P3": 1.0})

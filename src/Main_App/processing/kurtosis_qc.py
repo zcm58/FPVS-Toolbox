@@ -618,8 +618,10 @@ def evaluate_kurtosis_qc(
     canonical_channels = _canonical_channels(supplied_channels, field_name="channel_names")
     if len(supplied_channels) != array.shape[0]:
         raise KurtosisQCError("channel_names count does not match the data rows.")
-    source_index = {name: index for index, name in enumerate(supplied_channels)}
-    array = array[np.asarray([source_index[name] for name in canonical_channels], dtype=int)]
+    # Preserve the aligned, contiguous row layout of the established SciPy reduction.
+    if supplied_channels != canonical_channels or not (array.flags.c_contiguous and array.flags.aligned):
+        source_index = {name: index for index, name in enumerate(supplied_channels)}
+        array = array[np.asarray([source_index[name] for name in canonical_channels], dtype=int)]
 
     scope = scoring_scope_from_realized_plan(
         realized_analysis_span_plan,
@@ -725,15 +727,17 @@ def evaluate_kurtosis_qc(
         population_sd=reference_sd,
         minimum_scale=KURTOSIS_MIN_REFERENCE_SCALE,
     )
+    registry_fingerprint = registry.fingerprint
+    reference_fingerprint = reference.fingerprint
     evidence_context = {
         "method_version": KURTOSIS_QC_METHOD_VERSION,
         "authority_policy_version": KURTOSIS_AUTHORITY_POLICY_VERSION,
         "corroborator_registry_version": registry.version,
-        "corroborator_registry_fingerprint": registry.fingerprint,
+        "corroborator_registry_fingerprint": registry_fingerprint,
         "threshold": threshold_value,
         "analysis_span_fingerprint": scope.analysis_span_fingerprint,
         "processing_provenance_fingerprint": processing_provenance_fingerprint,
-        "reference_fingerprint": reference.fingerprint,
+        "reference_fingerprint": reference_fingerprint,
     }
     context_fingerprint = _fingerprint(evidence_context)
     channel_rows: list[KurtosisChannelEvidence] = []
@@ -768,7 +772,7 @@ def evaluate_kurtosis_qc(
                 input_finite=bool(input_finite[index]),
                 validity=validity,
                 validity_reason=validity_reason,
-                reference_fingerprint=reference.fingerprint,
+                reference_fingerprint=reference_fingerprint,
                 evidence_context_fingerprint=context_fingerprint,
             )
         )
@@ -790,7 +794,7 @@ def evaluate_kurtosis_qc(
         ),
         authority_policy_version=KURTOSIS_AUTHORITY_POLICY_VERSION,
         corroborator_registry_version=registry.version,
-        corroborator_registry_fingerprint=registry.fingerprint,
+        corroborator_registry_fingerprint=registry_fingerprint,
         threshold=threshold_value,
         scoring_scope=scope,
         filter_identity=normalized_filter,

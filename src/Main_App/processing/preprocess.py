@@ -827,7 +827,7 @@ def _finish_preprocessing_at_kurtosis(
                 raw=raw,
                 params=params,
                 checkpoint=checkpoint,
-                evidence_fingerprint=evidence.fingerprint,
+                evidence_fingerprint=decision_plan.evidence_fingerprint,
             )
             log_func(
                 f"Kurtosis evidence for {filename_for_log}: "

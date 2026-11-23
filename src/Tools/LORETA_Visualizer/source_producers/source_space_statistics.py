@@ -332,9 +332,16 @@ def permutation_max_cluster_masses(
     values = np.asarray(matrix, dtype=float)
     support = np.ones(values.shape[1], dtype=bool) if valid_source_mask is None else np.asarray(valid_source_mask, dtype=bool)
     masses: list[float] = []
-    for signs in sign_flip_vectors(values.shape[0], permutation_count=permutation_count, seed=seed):
-        signed = values[:, support] * signs[:, np.newaxis]
-        t_values = np.full(values.shape[1], np.nan)
+    sign_vectors = sign_flip_vectors(values.shape[0], permutation_count=permutation_count, seed=seed)
+    if not len(sign_vectors):
+        return np.asarray(masses, dtype=float)
+    supported_values = values if support.shape == (values.shape[1],) and support.all() else values[:, support]
+    # Preserve the column-major layout of boolean column selection so the
+    # one-sample t calculations reduce participants in the same order.
+    signed = np.empty(supported_values.shape, dtype=float, order="F")
+    t_values = np.full(values.shape[1], np.nan)
+    for signs in sign_vectors:
+        np.multiply(supported_values, signs[:, np.newaxis], out=signed)
         t_values[support] = one_sample_t_values(signed)
         clusters = signed_cluster_components(t_values, threshold=threshold, adjacency=adjacency, tail=tail)
         if clusters:

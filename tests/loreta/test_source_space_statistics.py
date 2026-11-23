@@ -8,9 +8,13 @@ from scipy import stats
 
 from Tools.LORETA_Visualizer.source_producers.source_space_statistics import (
     adjacency_from_triangular_faces,
-    compute_source_space_cluster_permutation_mask,
     cluster_inference_metadata,
+    cluster_mass_value,
+    compute_source_space_cluster_permutation_mask,
+    one_sample_t_values,
+    permutation_max_cluster_masses,
     sign_flip_vectors,
+    signed_cluster_components,
 )
 
 
@@ -118,6 +122,37 @@ def test_sampled_sign_flips_are_deterministic_and_use_plus_one() -> None:
     assert np.array_equal(result.mask, again.mask)
     assert result.minimum_attainable_p == 1 / 21
     assert cluster_inference_metadata(result)["cluster_p_value_estimator"] == "monte_carlo_plus_one"
+
+
+@pytest.mark.parametrize("omit_sources", [False, True])
+def test_null_masses_match_individual_sign_flips_bit_for_bit(omit_sources: bool) -> None:
+    matrix = np.random.default_rng(7).standard_normal((17, 68))
+    support = np.ones(matrix.shape[1], dtype=bool)
+    if omit_sources:
+        support[::4] = False
+        matrix[:, ~support] = np.nan
+    adjacency = tuple(
+        {neighbor for neighbor in (i - 1, i + 1) if 0 <= neighbor < matrix.shape[1]}
+        for i in range(matrix.shape[1])
+    )
+    threshold, tail, count, seed = 0.9, "two-sided", 32, 42
+    expected = []
+    for signs in sign_flip_vectors(matrix.shape[0], permutation_count=count, seed=seed):
+        signed = matrix[:, support] * signs[:, None]
+        t_values = np.full(matrix.shape[1], np.nan)
+        t_values[support] = one_sample_t_values(signed)
+        clusters = signed_cluster_components(t_values, threshold=threshold, adjacency=adjacency, tail=tail)
+        expected.append(max(
+            (cluster_mass_value(t_values, indices, tail=direction) for direction, indices in clusters),
+            default=0.0,
+        ))
+
+    masses = permutation_max_cluster_masses(
+        matrix, adjacency=adjacency, threshold=threshold, tail=tail,
+        permutation_count=count, seed=seed, valid_source_mask=support,
+    )
+
+    assert masses.tobytes() == np.asarray(expected, dtype=float).tobytes()
 
 
 @pytest.mark.parametrize("tail", ["positive", "two-sided"])

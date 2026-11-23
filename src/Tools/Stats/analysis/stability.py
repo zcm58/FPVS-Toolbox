@@ -228,9 +228,27 @@ def _cell_rows(
     ]
 
 
-def _finite_values(frame: pd.DataFrame) -> np.ndarray:
-    values = frame["_stability_value"].to_numpy(dtype=float)
-    return np.sort(values[np.isfinite(values)], kind="stable")
+@dataclass(frozen=True)
+class _SortedCell:
+    values: np.ndarray
+    participants: pd.Series
+
+    @classmethod
+    def from_rows(cls, frame: pd.DataFrame, subject_col: str) -> _SortedCell:
+        values = frame["_stability_value"].to_numpy(dtype=float)
+        finite_indices = np.flatnonzero(np.isfinite(values))
+        # Deleting from this stable sort preserves the exact reduction order
+        # of filtering first and independently sorting every omission.
+        ordered_indices = finite_indices[
+            np.argsort(values[finite_indices], kind="stable")
+        ]
+        return cls(values[ordered_indices], frame[subject_col].iloc[ordered_indices])
+
+    def without(self, participant: object) -> tuple[np.ndarray, bool]:
+        omitted = self.participants.eq(participant).to_numpy(dtype=bool)
+        if omitted.any():
+            return self.values[~omitted], True
+        return self.values, False
 
 
 def _one_sample_statistics(
@@ -601,42 +619,30 @@ def run_one_sample_leave_one_out_stability(
     )
     prepared.frame["_stability_condition"] = prepared.frame[condition_col]
     prepared.frame["_stability_roi"] = prepared.frame[roi_col]
+    sorted_cells: dict[tuple[object, object], _SortedCell] = {}
     full_by_cell: dict[tuple[object, object], dict[str, object]] = {}
     for condition, roi in prepared.cells:
-        full_cell = _cell_rows(
+        cell = _cell_rows(
             prepared.frame,
             condition=condition,
             roi=roi,
             condition_col=condition_col,
             roi_col=roi_col,
         )
+        sorted_cell = _SortedCell.from_rows(cell, subject_col)
+        sorted_cells[(condition, roi)] = sorted_cell
         full_by_cell[(condition, roi)] = _one_sample_statistics(
-            _finite_values(full_cell),
+            sorted_cell.values,
             null_value=numeric_null,
             alpha=numeric_alpha,
         )
 
     rows: list[dict[str, object]] = []
     for omitted in prepared.participants:
-        remaining = prepared.frame[~prepared.frame[subject_col].eq(omitted)]
-        omitted_rows = prepared.frame[prepared.frame[subject_col].eq(omitted)]
         for condition, roi in prepared.cells:
-            remaining_cell = _cell_rows(
-                remaining,
-                condition=condition,
-                roi=roi,
-                condition_col=condition_col,
-                roi_col=roi_col,
-            )
-            omitted_cell = _cell_rows(
-                omitted_rows,
-                condition=condition,
-                roi=roi,
-                condition_col=condition_col,
-                roi_col=roi_col,
-            )
+            values, omitted_finite = sorted_cells[(condition, roi)].without(omitted)
             omitted_stats = _one_sample_statistics(
-                _finite_values(remaining_cell),
+                values,
                 null_value=numeric_null,
                 alpha=numeric_alpha,
             )
@@ -650,13 +656,7 @@ def run_one_sample_leave_one_out_stability(
                     "roi": roi,
                     "omitted_participant": omitted,
                     "omitted_group": pd.NA,
-                    "omitted_participant_had_finite_value": bool(
-                        np.isfinite(
-                            omitted_cell["_stability_value"].to_numpy(
-                                dtype=float
-                            )
-                        ).any()
-                    ),
+                    "omitted_participant_had_finite_value": omitted_finite,
                     "estimand": f"cell mean minus {numeric_null:g}",
                     "null_value": numeric_null,
                     "full_estimate": full["estimate"],
@@ -822,54 +822,37 @@ def run_two_group_leave_one_out_stability(
         .to_dict()
     )
 
-    def cell_statistics(frame: pd.DataFrame, condition: object, roi: object):
+    sorted_cells: dict[tuple[object, object], tuple[_SortedCell, _SortedCell]] = {}
+    full_by_cell: dict[tuple[object, object], dict[str, object]] = {}
+    group_a_key, group_b_key = group_a.casefold(), group_b.casefold()
+    for condition, roi in prepared.cells:
         cell = _cell_rows(
-            frame,
+            prepared.frame,
             condition=condition,
             roi=roi,
             condition_col=condition_col,
             roi_col=roi_col,
         )
-        values_a = _finite_values(
-            cell[
-                cell["_stability_group"].str.casefold().eq(
-                    group_a.casefold()
-                )
-            ]
-        )
-        values_b = _finite_values(
-            cell[
-                cell["_stability_group"].str.casefold().eq(
-                    group_b.casefold()
-                )
-            ]
-        )
-        return _welch_statistics(
-            values_a,
-            values_b,
+        groups = cell["_stability_group"].str.casefold()
+        cell_a = _SortedCell.from_rows(cell[groups.eq(group_a_key)], subject_col)
+        cell_b = _SortedCell.from_rows(cell[groups.eq(group_b_key)], subject_col)
+        sorted_cells[(condition, roi)] = (cell_a, cell_b)
+        full_by_cell[(condition, roi)] = _welch_statistics(
+            cell_a.values,
+            cell_b.values,
             alpha=numeric_alpha,
         )
 
-    full_by_cell = {
-        (condition, roi): cell_statistics(
-            prepared.frame,
-            condition,
-            roi,
-        )
-        for condition, roi in prepared.cells
-    }
     rows: list[dict[str, object]] = []
     for omitted in prepared.participants:
-        remaining = prepared.frame[~prepared.frame[subject_col].eq(omitted)]
-        omitted_rows = prepared.frame[prepared.frame[subject_col].eq(omitted)]
         for condition, roi in prepared.cells:
-            omitted_stats = cell_statistics(remaining, condition, roi)
-            omitted_cell = _cell_rows(
-                omitted_rows,
-                condition=condition,
-                roi=roi,
-                condition_col=condition_col,
-                roi_col=roi_col,
+            cell_a, cell_b = sorted_cells[(condition, roi)]
+            values_a, omitted_finite_a = cell_a.without(omitted)
+            values_b, omitted_finite_b = cell_b.without(omitted)
+            omitted_stats = _welch_statistics(
+                values_a,
+                values_b,
+                alpha=numeric_alpha,
             )
             full = full_by_cell[(condition, roi)]
             delta = float(omitted_stats["estimate"]) - float(full["estimate"])
@@ -884,13 +867,7 @@ def run_two_group_leave_one_out_stability(
                     "contrast": f"{group_a} - {group_b}",
                     "omitted_participant": omitted,
                     "omitted_group": participant_groups[omitted],
-                    "omitted_participant_had_finite_value": bool(
-                        np.isfinite(
-                            omitted_cell["_stability_value"].to_numpy(
-                                dtype=float
-                            )
-                        ).any()
-                    ),
+                    "omitted_participant_had_finite_value": omitted_finite_a or omitted_finite_b,
                     "estimand": f"cell mean difference: {group_a} minus {group_b}",
                     "full_estimate": full["estimate"],
                     "estimate_after_omission": omitted_stats["estimate"],

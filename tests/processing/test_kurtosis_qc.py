@@ -288,6 +288,31 @@ def test_evidence_preserves_signed_statistics_reference_and_scope() -> None:
     assert evidence.to_payload()["fingerprint"] == evidence.fingerprint
 
 
+@pytest.mark.parametrize("nonfinite", [False, True])
+def test_canonical_buffer_matches_reordered_and_strided_inputs(nonfinite: bool) -> None:
+    data = _data(channel_count=64, sample_count=4_101)
+    channels = tuple(BIOSEMI64_CHANNELS)
+    data[1, 100] = -0.0
+    if nonfinite:
+        data[2, 17] = np.nan
+        data[3, 19] = np.inf
+    original = data.tobytes()
+    expected = _evidence(data=data).to_payload()
+
+    reversed_rows = _evidence(
+        data=data[::-1].copy(), channel_names=channels[::-1], geometry_channels=channels,
+    )
+    strided = np.empty((data.shape[0], 2 * data.shape[1]))[:, ::2]
+    strided[:] = data
+    unaligned = np.ndarray(data.shape, dtype=data.dtype, buffer=bytearray(data.nbytes + 1), offset=1)
+    unaligned[:] = data
+    assert reversed_rows.to_payload() == expected
+    assert _evidence(data=np.asfortranarray(data)).to_payload() == expected
+    assert _evidence(data=strided).to_payload() == expected
+    assert _evidence(data=unaligned).to_payload() == expected
+    assert data.tobytes() == original
+
+
 @pytest.mark.parametrize("threshold", [0, -1, float("nan"), float("inf"), True, "bad"])
 def test_threshold_must_be_positive_and_finite(threshold) -> None:
     data = _data()
