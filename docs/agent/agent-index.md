@@ -17,6 +17,7 @@ that interpreter. See [development](guides/development.md) for shell setup.
 | Retired import paths | `python .agents/skills/legacy-boundary-review/scripts/audit_protected_edits.py` |
 | New local path literals | `python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py` |
 | Stats structure or reporting legibility | `python .agents/scripts/audit/agent_audit.py --check stats-structure` or `--check stats-reporting-legibility` |
+| Study analysis from FPVS data | Check the source export, analysis grain and participant coverage with [fpvs-analysis](../../.agents/skills/fpvs-analysis/SKILL.md). |
 | Generated-file cleanup | `python .agents/scripts/audit/agent_audit.py --check garbage-collection` |
 | Feature verification | `python .agents/scripts/verify.py --scope <scope> --tier focused`; select a [scope](quality/test-selection.md#scope-map). |
 
@@ -42,6 +43,7 @@ only to explicitly web-scoped work, not the PySide6 desktop GUI.
 | Publication figures | `project-path-audit` | [Figure standard](quality/figure-generation.md) |
 | Correlation figure templates | `project-path-audit` | [Correlation recipe and runnable example](quality/correlation-figures.md) |
 | Stats | `pyside6-gui-cleanup` for GUI changes; focused Stats tests | [Statistics/tools](architecture/statistics-tools.md), scoped `src/Tools/Stats/AGENTS.md` |
+| Agent-run FPVS study analysis | [fpvs-analysis](../../.agents/skills/fpvs-analysis/SKILL.md), [group comparisons](../../.agents/skills/fpvs-group-comparisons/SKILL.md), [repeated measures and mixed models](../../.agents/skills/fpvs-repeated-measures/SKILL.md) | [Full-audit export](architecture/post-processing-export-contract.md#full-audit-analysis-ready-workbook), [published examples](../../.agents/skills/fpvs-analysis/references/published-methods.md) |
 | Free Harmonic Clustering | `project-path-audit` | [Scoped rules](../../src/Tools/Free_Harmonic_Clustering/AGENTS.md), [architecture](../../src/Tools/Free_Harmonic_Clustering/ARCHITECTURE.md) |
 | LORETA Visualizer | `loreta` verification scope, `legacy-boundary-review` for retired interfaces | [Scoped rules](../../src/Tools/LORETA_Visualizer/AGENTS.md), [architecture](../../src/Tools/LORETA_Visualizer/ARCHITECTURE.md) |
 | Scalp Maps / Sequence Figure | `pyside6-gui-cleanup` + `project-path-audit` | [Scalp Maps](../../src/Tools/Publication_Maps/AGENTS.md), [Sequence Figure](../../src/Tools/Sequence_Figure/AGENTS.md) |
