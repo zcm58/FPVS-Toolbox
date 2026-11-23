@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import sys
 
 from PIL import Image
@@ -90,7 +91,8 @@ def test_publication_table_style_is_gui_neutral() -> None:
     assert table_font_size_px("body") == TABLE_BODY_FONT_SIZE_PX == 14
 
 
-def test_publication_table_export_retains_svg_and_600_dpi_png(tmp_path) -> None:
+@pytest.fixture
+def export_publication_table(tmp_path, monkeypatch):
     exporter_path = (
         repo_root()
         / ".agents"
@@ -102,24 +104,30 @@ def test_publication_table_export_retains_svg_and_600_dpi_png(tmp_path) -> None:
     spec = importlib.util.spec_from_file_location("publication_table_export_test", exporter_path)
     assert spec is not None and spec.loader is not None
     exporter = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = exporter
+    monkeypatch.setitem(sys.modules, spec.name, exporter)
     spec.loader.exec_module(exporter)
 
-    project_root = tmp_path / "project"
-    project_root.mkdir()
     source = tmp_path / "source.csv"
     source.write_text("Condition,Mean\nFaces,1.25\nWords,2.50\n", encoding="utf-8")
 
-    result = exporter.main(
-        [
+    def export(project_root):
+        return exporter.main([
             "--project-root",
             str(project_root),
             "--input",
             str(source),
             "--output-name",
             "summary",
-        ]
-    )
+        ])
+
+    return export
+
+
+def test_publication_table_export_retains_svg_and_600_dpi_png(tmp_path, export_publication_table) -> None:
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+
+    result = export_publication_table(project_root)
 
     output_dir = project_root / "9 - Tables"
     svg_path = output_dir / "summary.svg"
@@ -133,3 +141,42 @@ def test_publication_table_export_retains_svg_and_600_dpi_png(tmp_path) -> None:
         assert dpi is not None
         assert dpi[0] == pytest.approx(600, abs=1)
         assert dpi[1] == pytest.approx(600, abs=1)
+
+
+def test_publication_table_export_rejects_redirected_table_directory(tmp_path, export_publication_table) -> None:
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    output_dir = project_root / "9 - Tables"
+    try:
+        output_dir.symlink_to(outside, target_is_directory=True)
+    except OSError as exc:
+        if getattr(exc, "winerror", None) == 1314:
+            pytest.skip("Windows directory symlink privileges unavailable")
+        raise
+
+    with pytest.raises(SystemExit, match="Publication table directory must stay"):
+        export_publication_table(project_root)
+
+    assert list(outside.iterdir()) == []
+
+
+def test_publication_table_export_rejects_linked_output_before_writing(tmp_path, export_publication_table) -> None:
+    project_root = tmp_path / "project"
+    output_dir = project_root / "9 - Tables"
+    output_dir.mkdir(parents=True)
+    outside = tmp_path / "existing.png"
+    outside.write_bytes(b"outside content")
+    png_path = output_dir / "summary.png"
+    os.link(outside, png_path)
+    svg_path = output_dir / "summary.svg"
+    svg_path.write_bytes(b"previous SVG")
+
+    with pytest.raises(OSError, match="Refusing a linked or non-regular file"):
+        export_publication_table(project_root)
+
+    assert outside.read_bytes() == b"outside content"
+    assert png_path.samefile(outside)
+    assert svg_path.read_bytes() == b"previous SVG"
+    assert not (output_dir / "summary.html").exists()

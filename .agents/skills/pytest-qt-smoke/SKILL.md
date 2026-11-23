@@ -1,41 +1,39 @@
 ---
 name: pytest-qt-smoke
-description: Use when defining CI-only pytest-qt smoke coverage for changed PySide6 widgets, dialogs, signals, controller bindings, worker signals, enabled states, tooltips, status text, or non-blocking UI behavior.
+description: Use when defining CI-only pytest-qt smoke coverage for a changed FPVS Toolbox desktop workflow or shared PySide6 component.
 ---
 
 # Pytest-Qt Smoke
 
-## Overview
+## Define focused coverage
 
-Use this workflow when a GUI change needs lightweight coverage definitions.
-PySide6/pytest-qt execution is CI-only by default. Run it locally only when the
-user explicitly approves a safe visible GUI environment.
+- Read the owning tool's scoped `AGENTS.md` and the nearest existing smoke
+  coverage. Test one changed user action or component contract through its
+  normal entry point. Assert the visible state, accessible controls, emitted
+  signals, or failure/cancellation behavior that matters to the task.
+- Use existing Qt fixtures, lightweight test inputs, and fake work at the
+  backend boundary. Wait for the relevant signal or state. Keep real file
+  operations inside `tmp_path` and backend assertions runnable without Qt.
+- Register each Qt-dependent test module in
+  [tests/qt_test_files.txt](../../../tests/qt_test_files.txt). The registry
+  guards imports before collection. Include new tests in their owning scope
+  or existing CI workflow where needed.
 
-## Workflow
+## Verify locally and in CI
 
-1. Let `.agents/scripts/verify.py` select `.venv1` or `.venv` for local checks.
-2. Read `AGENTS.md`, `ARCHITECTURE.md`, `docs/agent/agent-index.md`, and the nearest existing pytest-qt tests in `tests/`.
-3. Add or update the smallest practical pytest-qt smoke test when useful for
-   future CI or manual GUI verification.
-4. Register the test in `tests/qt_test_files.txt` and leave execution to the
-   configured CI Qt job. Do not set `QT_QPA_PLATFORM=offscreen` locally.
-5. Use fake controllers, lightweight payloads, or signals instead of real processing.
-6. Assert visible labels, enabled states, checked states, tooltips, status text, or emitted signals.
-7. Avoid real file I/O unless using `tmp_path`.
-8. Avoid depending on protected legacy internals.
-9. Keep the test deterministic and focused on the changed behavior.
+Run non-GUI checks with the smallest affected
+[focused scope](../../../docs/agent/quality/test-selection.md#scope-map), using
+`gui` for shared desktop workflows. Use `--list` to preview selected commands.
+After registry changes, run `python .agents/scripts/verify.py --check-config`.
 
-## Checks
+The configured [CI Qt job](../../../.github/workflows/python-package.yml) runs
+registered widget tests. Local Qt execution requires explicit user approval for
+a safe visible environment. Never run offscreen Qt locally, including through
+`QT_QPA_PLATFORM=offscreen`. The
+[verification gates](../../../docs/agent/quality/verification-gates.md#command-boundaries)
+own this distinction.
 
-- Confirm the test would have failed for the original bug when practical by
-  inspecting the assertion and changed code path.
-- Confirm the test does not start real long-running processing.
-- Verify locally with `python .agents/scripts/verify.py --scope gui --tier
-  focused` and the visible/manual smoke path.
-
-## Response Requirements
-
-- Name the smoke test added or updated.
-- State what GUI behavior it proves.
-- Include verification commands and results.
-- Name the CI Qt coverage and include visible/manual smoke steps used locally.
+Record a visible smoke path in the applicable verification scope. Include the
+starting state, the user action, and its expected result. For layout changes,
+cover the relevant 1200 × 800 shell and 1280 × 900 workspace checks. Report
+which tests ran, which are defined for CI, and any pending visible checks.

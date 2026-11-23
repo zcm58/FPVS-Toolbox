@@ -1,4 +1,4 @@
 interface:
   display_name: "Legacy Boundary Review"
-  short_description: "Check refactors against protected legacy module boundaries."
-  default_prompt: "Use this skill before refactors that may touch protected legacy code or need legacy public APIs."
+  short_description: "Check retired imports and active compatibility aliases."
+  default_prompt: "Use $legacy-boundary-review to verify retired packages stay absent and compatibility imports still resolve."

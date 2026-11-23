@@ -1,69 +1,42 @@
 ---
 name: publication-table-export
-description: Create FPVS Toolbox publication-ready table assets from small tabular data. Use when a user asks to generate manuscript, poster, supplement, Great Tables-style, table-only, PNG, or SVG tables that should follow the GUI-neutral publication-table style and be saved under a project root in `9 - Tables`.
+description: Export small FPVS Toolbox manuscript, poster, or supplement tables as styled SVG and PNG assets under the project root in 9 - Tables.
 ---
 
 # Publication Table Export
 
-## Purpose
+Use the active FPVS project root, or the existing project directory
+supplied by the user. The helper takes the root explicitly and publishes
+under its local `9 - Tables` directory.
+[Project I/O](../../../docs/agent/architecture/project-io.md)
 
-Create table-only publication assets that match the FPVS Toolbox publication-table style and save them under a project root in `9 - Tables`.
+## Prepare and export
 
-Use the bundled script for final assets:
+Use a small UTF-8 CSV or TSV with one header row and rows in reading
+order. Prefer verified source values. Preserve units, missing data,
+inequalities such as `< 0.001`, and meaningful numeric precision. Keep
+table numbers, titles, captions, and methods outside the assets by default.
 
-Use the active `.venv1` or `.venv` described in
-`docs/agent/guides/development.md`:
-
-```console
-python .agents/skills/publication-table-export/scripts/export_publication_table.py --project-root "<project-root>" --input ".codex-tmp/table.csv" --output-name "semantic_categories_harmonics"
-```
-
-## Workflow
-
-1. Identify the project root.
-   - Use the active FPVS project root when available.
-   - If the user only gives manuscript values, ask only if the project root is genuinely unknown.
-   - The script creates `<project root>/9 - Tables` and never writes final assets elsewhere.
-
-2. Build a small source table.
-   - Prefer source workbook values over prose.
-   - Keep rows in manuscript reading order.
-   - Preserve p-value text exactly when formatting matters, such as `< 0.001`.
-   - Use CSV or TSV. Use one header row.
-
-3. Export table-only assets.
-   - Do not embed table number, title, caption, description, source note, or methods text unless explicitly requested.
-   - Generate both SVG and 600-DPI PNG by default.
-   - Keep SVG text as vector text.
-   - Use preview HTML only for inspection; the final publication assets are the PNG/SVG.
-
-4. Verify outputs.
-   - Confirm files exist under `<project root>/9 - Tables`.
-   - Confirm PNG dimensions and DPI metadata.
-   - Confirm SVG does not contain embedded caption/title text.
-   - Run the path audit when adding or changing path behavior:
+Run the exporter with the [repo interpreter](../../../docs/agent/guides/development.md).
 
 ```console
-python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
+python .agents/skills/publication-table-export/scripts/export_publication_table.py --project-root "<project-root>" --input "<table.csv>" --output-name "<table-stem>"
 ```
 
-## Styling Contract
+- Use `--delimiter tab` for TSV. Select or reorder fields with
+  `--columns` and specify display headers with `--labels-json`.
+- Default assets are SVG with editable text and 600-DPI PNG, with HTML for
+  preview. The exporter sanitizes the stem. Choose a new stem when existing
+  assets should remain.
+- Set `--width-in` for the intended minimum width. The default is 4.25
+  inches, and content can expand the table. Inspect readability at the
+  intended placement before adjusting `--font-scale` or the width.
+- Keep typography, striping, and colors with `Main_App.exports.table_style`.
+  [Figure generation standard](../../../docs/agent/quality/figure-generation.md#retained-toolbox-profiles)
 
-- Use the GUI-neutral `Main_App.exports.table_style` contract. Publication
-  table assets must not import `Main_App.gui.typography` or
-  `Main_App.gui.style_tokens`.
-- Body and header roles preserve the established table typography through
-  `table_font_size_px(...)` and `table_font_weight(...)`.
-- Header and alternating rows use the shared table surface colors; borders and
-  text use the shared table border/text colors.
-- Use 600 DPI PNG unless the user requests another value.
-- Use 6.5 inches for broad tables. Use a narrower explicit width for compact tables.
+## Verify the assets
 
-## Script Notes
-
-- `--project-root` is required and must resolve to an existing directory.
-- `--output-name` is sanitized to a filename stem.
-- `--columns` optionally selects/reorders columns from the source file.
-- `--labels-json` optionally maps source column names to display labels.
-- `--width-in` controls total table width.
-- `--font-scale` scales the shared typography roles for dense or large tables.
+Confirm the SVG and PNG resolve under `9 - Tables`. Check the table
+against the source for row and column order, displayed values, and clipped
+labels. Verify the PNG dimensions and DPI and the SVG text. Deliver the
+SVG and PNG with the HTML only when it is useful as a preview.

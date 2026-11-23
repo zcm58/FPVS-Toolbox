@@ -14,8 +14,7 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-MANIFEST_PATH = REPO_ROOT / "docs" / "agent" / "architecture" / "protected-paths.txt"
-ACTIVE_SOURCE_LOCALIZATION = "src/Tools/SourceLocalization"
+RETIRED_SOURCE_LOCALIZATION = "src/Tools/SourceLocalization"
 AGENT_INDEX = REPO_ROOT / "docs" / "agent" / "agent-index.md"
 ARCHITECTURE_MAP = REPO_ROOT / "ARCHITECTURE.md"
 EXEC_PLANS_README = REPO_ROOT / "docs" / "agent" / "exec-plans" / "README.md"
@@ -48,23 +47,25 @@ CUSTOMTK_IMPORT_RE = re.compile(
     r"^\s*(?:import\s+(?:customtkinter|CTkMessagebox)\b|from\s+(?:customtkinter|CTkMessagebox)\s+import\b)"
 )
 PRINT_RE = re.compile(r"^\s*print\s*\(")
-WINDOWS_USER_PATH_RE = r"[A-Za-z]:\\" + r"Users\\" + r"[^\\\s]+"
+WINDOWS_USER_PATH_RE = r"[A-Za-z]:\\{1,2}" + r"Users\\{1,2}" + r"[^\\\s]+"
 MACOS_USER_PATH_RE = "/" + "Users/" + r"[^/\s]+"
 LINUX_USER_PATH_RE = "/" + "home/" + r"[^/\s]+"
 LOCAL_PATH_RE = re.compile(
     f"(?:{WINDOWS_USER_PATH_RE}|{MACOS_USER_PATH_RE}|{LINUX_USER_PATH_RE})"
 )
 ACTIVE_SOURCE_LOCALIZATION_REF_RE = re.compile(
-    r"(?:Tools\.SourceLocalization|src[/\\]Tools[/\\]SourceLocalization)"
+    r"(?:Tools\.SourceLocalization|src[/\\]Tools[/\\]SourceLocalization"
+    r"|^\s*from\s+Tools\s+import\s+\(?\s*SourceLocalization\b)"
 )
 
 CURRENT_CODE_EXCLUDES = (
     "src/quarantine/",
     "src/Standalone_Scripts/",
+    "tests/standalone_scripts/",
 )
-RETIRED_PATH_PREFIXES = (
-    "src/Main_App/Legacy_App/",
-    "src/Main_App/PySide6_App/",
+RETIRED_MAIN_APP_PATHS = (
+    "src/Main_App/Legacy_App",
+    "src/Main_App/PySide6_App",
 )
 
 PRODUCTION_EXCLUDES = CURRENT_CODE_EXCLUDES + (
@@ -260,26 +261,6 @@ def _read_text(path: str) -> list[str]:
         return absolute.read_text(encoding="utf-8", errors="replace").splitlines()
 
 
-def _load_manifest() -> dict[str, list[str]]:
-    if not MANIFEST_PATH.exists():
-        raise RuntimeError(f"missing path manifest: {_repo_path(MANIFEST_PATH)}")
-
-    sections: dict[str, list[str]] = {}
-    current: str | None = None
-    for raw_line in MANIFEST_PATH.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#"):
-            continue
-        if line.startswith("[") and line.endswith("]"):
-            current = line[1:-1].strip()
-            sections.setdefault(current, [])
-            continue
-        if current is None:
-            raise RuntimeError(f"manifest entry outside a section: {raw_line!r}")
-        sections[current].append(line)
-    return sections
-
-
 def _matches_any(path: str, patterns: list[str]) -> bool:
     return any(fnmatch.fnmatch(path, pattern) for pattern in patterns)
 
@@ -441,32 +422,21 @@ def _print_increase_allowed(path: str) -> bool:
     return baseline_count > 0 and current_count <= baseline_count
 
 
-def check_protected_edits() -> list[Issue]:
-    protected = _load_manifest().get("protected", [])
+def _check_retired_import_paths(check: str, roots: tuple[str, ...]) -> list[Issue]:
     issues: list[Issue] = []
-    changed = {_normalize(path) for path in _changed_files()}
-    has_migration_context = bool(
-        {
-            "docs/agent/architecture/legacy-boundaries.md",
-            "AGENTS.md",
-        }
-        & changed
-        or any(path.startswith("docs/agent/exec-plans/active/") for path in changed)
-    )
-    for path in _changed_files():
-        normalized = _normalize(path)
-        if normalized.endswith("/AGENTS.md"):
-            continue
-        if _matches_any(normalized, protected) and not has_migration_context:
-            issues.append(
-                Issue(
-                    "protected",
-                    normalized,
-                    None,
-                    "retired/protected legacy path changed without plan/doc context; boundary cleanup must preserve the processing pipeline",
+    for root in roots:
+        for path in (root, f"{root}.py"):
+            # A directory or a same-named module can revive the import.
+            # Check the path itself so dangling links are reported as well.
+            if os.path.lexists(REPO_ROOT / path):
+                issues.append(
+                    Issue(check, path, None, "retired import path exists; remove it from the active source tree")
                 )
-            )
     return issues
+
+
+def check_retired_main_app_absent() -> list[Issue]:
+    return _check_retired_import_paths("protected", RETIRED_MAIN_APP_PATHS)
 
 
 def check_agent_harness() -> list[Issue]:
@@ -599,63 +569,18 @@ def check_agent_harness() -> list[Issue]:
                     "missing structured docs knowledge-base path",
                 )
             )
-    for path in _tracked_and_untracked_files():
-        normalized = _normalize(path)
-        absolute = REPO_ROOT / normalized
-        if absolute.exists() and normalized.startswith(RETIRED_PATH_PREFIXES):
-            issues.append(
-                Issue(
-                    "agent-harness",
-                    normalized,
-                    None,
-                    "retired Legacy_App path exists; use purpose-based Main_App packages instead",
-                )
-            )
     return issues
 
 
-def check_source_localization_quarantine() -> list[Issue]:
-    issues: list[Issue] = []
-    active_prefix = f"{ACTIVE_SOURCE_LOCALIZATION}/"
-
-    for path in _tracked_and_untracked_files():
-        normalized = _normalize(path)
-        if normalized.startswith(active_prefix):
-            issues.append(
-                Issue(
-                    "source-localization",
-                    normalized,
-                    None,
-                    "active SourceLocalization files are not allowed; the feature is removed from active runtime",
-                )
-            )
-
-    active_path = REPO_ROOT / ACTIVE_SOURCE_LOCALIZATION
-    if not active_path.exists():
-        return issues
-
-    for file_path in active_path.rglob("*"):
-        if not file_path.is_file():
-            continue
-        parts = set(file_path.parts)
-        if "__pycache__" in parts or file_path.suffix in {".pyc", ".pyo"}:
-            continue
-        issues.append(
-            Issue(
-                "source-localization",
-                _repo_path(file_path),
-                None,
-                "non-cache file found in active SourceLocalization; remove it unless restoring the feature explicitly",
-            )
-        )
-    return issues
+def check_source_localization_absent() -> list[Issue]:
+    return _check_retired_import_paths("source-localization", (RETIRED_SOURCE_LOCALIZATION,))
 
 
 def check_gui_imports() -> list[Issue]:
     issues: list[Issue] = []
     for path in _tracked_and_untracked_files():
         normalized = _normalize(path)
-        if not _is_python(normalized):
+        if normalized.startswith(CURRENT_CODE_EXCLUDES) or not _is_python(normalized):
             continue
         absolute = REPO_ROOT / normalized
         if not absolute.exists():
@@ -689,7 +614,7 @@ def check_added_paths() -> list[Issue]:
     text_extensions = {".py", ".md", ".toml", ".yml", ".yaml", ".txt"}
     for path in _changed_files():
         normalized = _normalize(path)
-        if Path(normalized).suffix not in text_extensions:
+        if normalized.startswith(CURRENT_CODE_EXCLUDES) or Path(normalized).suffix not in text_extensions:
             continue
         for line_no, line in _added_lines(normalized):
             if LOCAL_PATH_RE.search(line):
@@ -708,7 +633,7 @@ def check_added_source_localization_refs() -> list[Issue]:
     issues: list[Issue] = []
     for path in _changed_files():
         normalized = _normalize(path)
-        if normalized == ".agents/scripts/audit/agent_audit.py":
+        if normalized == ".agents/scripts/audit/agent_audit.py" or normalized.startswith(CURRENT_CODE_EXCLUDES):
             continue
         if not _is_python(normalized):
             continue
@@ -716,7 +641,7 @@ def check_added_source_localization_refs() -> list[Issue]:
             if ACTIVE_SOURCE_LOCALIZATION_REF_RE.search(line):
                 issues.append(
                     Issue(
-                        "source-localization",
+                        "source-localization-refs",
                         normalized,
                         line_no,
                         "new active SourceLocalization reference detected; the feature is removed from active runtime",
@@ -893,6 +818,8 @@ def check_garbage_collection() -> list[Issue]:
 
     for path in _tracked_and_untracked_files():
         normalized = _normalize(path)
+        if normalized.startswith(CURRENT_CODE_EXCLUDES):
+            continue
         if _matches_any(normalized, list(GARBAGE_PATH_PATTERNS)):
             issues.append(
                 Issue(
@@ -905,7 +832,7 @@ def check_garbage_collection() -> list[Issue]:
 
     for path in _changed_files():
         normalized = _normalize(path)
-        if normalized == ".agents/scripts/audit/agent_audit.py":
+        if normalized == ".agents/scripts/audit/agent_audit.py" or normalized.startswith(CURRENT_CODE_EXCLUDES):
             continue
         if not (_is_python(normalized) or Path(normalized).suffix in {".md", ".txt"}):
             continue
@@ -943,8 +870,8 @@ def check_garbage_collection() -> list[Issue]:
 CHECKS = {
     "agent-harness": check_agent_harness,
     "garbage-collection": check_garbage_collection,
-    "protected": check_protected_edits,
-    "source-localization": check_source_localization_quarantine,
+    "protected": check_retired_main_app_absent,
+    "source-localization": check_source_localization_absent,
     "source-localization-refs": check_added_source_localization_refs,
     "gui": check_gui_imports,
     "paths": check_added_paths,

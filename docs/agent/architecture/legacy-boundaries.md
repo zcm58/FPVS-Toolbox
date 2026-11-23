@@ -1,23 +1,22 @@
 # Legacy Boundaries
 
-Retired Main App legacy paths:
+Keep these retired import roots absent from the source tree.
 
 - `src/Main_App/Legacy_App/**`
 - `src/Main_App/PySide6_App/**`
+- `src/Tools/SourceLocalization/**`
 
-The historical `Legacy_App` and `PySide6_App` packages have been retired. Do not recreate these
-directories; active Main App behavior belongs in purpose-based packages such as
+Git history preserves the migration code. Removing remnants from a checkout is
+ordinary cleanup. Reintroducing any retired package or same-named module
+requires explicit restoration scope and updated ownership and verification.
+Active Main App behavior belongs in purpose-based packages such as
 `Main_App.processing`, `Main_App.io`, `Main_App.projects`, `Main_App.exports`,
 `Main_App.workers`, `Main_App.diagnostics`, and `Main_App.gui`.
 
-The historical `Tools.SourceLocalization` package is removed from active runtime,
-not a protected black box:
+### Source localization
 
-- `src/Tools/SourceLocalization/**` must stay empty of source files.
-- The app must not add GUI actions, settings, tests, imports, or quarantine-tree dependencies for this removed feature.
 - The current `src/Tools/LORETA_Visualizer/**` is a separate active tool.
-  It must not consult, copy, import, or inherit
-  design decisions from the removed Source Localization/eLORETA code.
+  Its scoped contracts govern the active L2-MNE and eLORETA methods.
 - In that separate tool, renderer and payload helpers display or adapt prepared
   values only. Existing calculations belong in its isolated `source_producers/`
   package, including the normal Hauk-informed L2-MNE source-PSD path and
@@ -27,25 +26,24 @@ not a protected black box:
   automatic installs belong in the ignored repository-root `.fpvs_cache`
   directory, never in active source, docs, package data, or quarantine paths.
 
-Rules:
+### Compatibility
 
-- Do not add files under `src/Main_App/Legacy_App/**` or `src/Main_App/PySide6_App/**`.
-- Prefer thin adapters or caller-side normalization in purpose-based Main App packages.
-- When old behavior already has a current-app replacement, use that replacement rather than adding compatibility paths.
-- Do not revive Source Localization/eLORETA imports, tests, settings, or UI behavior unless the user explicitly asks to restore that feature.
-- Do not treat LORETA Visualizer work as permission to change preprocessing,
-  Stats methods, project manifests, BDF loading, diagnostics, or active
-  project I/O.
-- Keep compatibility exports in `src/Main_App/__init__.py` stable unless the task is specifically about imports.
+- Use the canonical runtime owners for new calls. Put any needed adapters or
+  caller-side normalization in active packages.
+- Keep the same-object `Main_App.Shared.*` and `Main_App.Performance.*` aliases
+  and the top-level `Main_App` compatibility exports. They support existing
+  imports, monkeypatches, and pickle lookups.
+- Keep the retired Source Localization implementation and optional quarantine
+  outside active runtime. Scope LORETA work to its current [tool rules](../../../src/Tools/LORETA_Visualizer/AGENTS.md).
 
-Useful checks:
+### Verification
 
 ```console
 python .agents/skills/legacy-boundary-review/scripts/audit_protected_edits.py
-python .agents/scripts/audit/agent_audit.py --check protected
-python .agents/scripts/audit/agent_audit.py --check source-localization
-python .agents/scripts/audit/agent_audit.py --check source-localization-refs
-git diff --name-only
+python .agents/scripts/verify.py --scope legacy-boundary --tier focused
 ```
 
-Run the skill-local script before manually scanning protected or quarantined paths.
+The wrapper checks the current checkout for the retired import paths and scans
+added Python lines for retired Source Localization references. Pass
+`--base-ref <revision>` to the wrapper for a committed comparison. The focused
+scope also verifies the live compatibility imports.

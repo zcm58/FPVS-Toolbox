@@ -4,13 +4,20 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..\..\..\..")).Path
+$repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "../../../..")).Path
+$separator = [System.IO.Path]::DirectorySeparatorChar
+$repoPrefix = "$repoRoot$separator"
+$pathComparison = [System.StringComparison]::Ordinal
+$gitPathspec = ":(literal)"
+if ($separator -eq '\') {
+    $pathComparison = [System.StringComparison]::OrdinalIgnoreCase
+    $gitPathspec = ":(icase,literal)"
+}
+$preservedDirNames = @(".git", ".venv", ".venv1", ".fpvs_cache", ".idea")
 $preservedRelPaths = @(
-    ".venv",
-    ".venv1",
-    ".fpvs_cache",
-    ".idea",
-    "src\quarantine"
+    "src/quarantine",
+    "src/Standalone_Scripts",
+    "tests/standalone_scripts"
 )
 
 $rootTargets = @(
@@ -29,52 +36,78 @@ $rootTargets = @(
     "test_tmp_processing_output.txt",
     "test_tmp",
     "__pycache__",
-    "src\fsaverage",
-    "src\quarantine\Tools\LORETA\fsaverage",
-    "src\fpvs_cache"
+    "src/fsaverage",
+    "src/quarantine/Tools/LORETA/fsaverage",
+    "src/fpvs_cache"
 )
+
+function Test-ProjectDirectory {
+    param([string]$Directory)
+    return Test-Path -LiteralPath (Join-Path $Directory "project.json")
+}
+
+function Test-PreservedDirectory {
+    param([System.IO.DirectoryInfo]$Directory)
+    return ($preservedDirNames -contains $Directory.Name) -or
+        (Test-ProjectDirectory -Directory $Directory.FullName) -or
+        (Test-Path -LiteralPath (Join-Path $Directory.FullName "pyvenv.cfg")) -or
+        (Test-Path -LiteralPath (Join-Path $Directory.FullName ".git"))
+}
+
+function Test-RedirectedItem {
+    param([System.IO.FileSystemInfo]$Item)
+    return [bool]($Item.Attributes -band [System.IO.FileAttributes]::ReparsePoint)
+}
 
 function Resolve-RepoPath {
     param([string]$RelativePath)
 
-    $candidate = Join-Path $repoRoot $RelativePath
-    if (-not (Test-Path -LiteralPath $candidate)) {
-        return $null
+    $candidate = [System.IO.Path]::GetFullPath((Join-Path $repoRoot $RelativePath))
+    if (-not $candidate.StartsWith($repoPrefix, $pathComparison)) {
+        throw "Refusing path outside repository: $candidate"
     }
 
-    $resolved = (Resolve-Path -LiteralPath $candidate).Path
-    if (-not $resolved.StartsWith($repoRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
-        throw "Refusing path outside repository: $resolved"
+    $current = $repoRoot
+    foreach ($part in $RelativePath.Split('/')) {
+        $current = Join-Path $current $part
+        if (-not (Test-Path -LiteralPath $current)) {
+            return $null
+        }
+        $item = Get-Item -LiteralPath $current -Force
+        if ((Test-RedirectedItem -Item $item) -or ($item.PSIsContainer -and (Test-PreservedDirectory -Directory $item))) {
+            Write-Warning "Skipping protected or redirected path: $RelativePath"
+            return $null
+        }
     }
 
-    return $resolved
+    return $candidate
 }
 
-function Remove-Target {
-    param(
-        [string]$RelativePath,
-        [string]$FullPath
-    )
-
-    if ($preservedRelPaths -contains $RelativePath) {
-        throw "Refusing preserved path: $RelativePath"
+function Test-SafeTargetTree {
+    param([System.IO.FileSystemInfo]$Item)
+    if (Test-RedirectedItem -Item $Item) {
+        return $false
     }
-
-    if ($DryRun) {
-        Write-Output "DRY-RUN $RelativePath"
-        return
+    if (-not $Item.PSIsContainer) {
+        return $true
     }
-
-    Remove-Item -LiteralPath $FullPath -Recurse -Force
-    Write-Output "REMOVED $RelativePath"
+    if (Test-PreservedDirectory -Directory $Item) {
+        return $false
+    }
+    foreach ($child in Get-ChildItem -LiteralPath $Item.FullName -Force) {
+        if (-not (Test-SafeTargetTree -Item $child)) {
+            return $false
+        }
+    }
+    return $true
 }
 
 function Test-SkippedTraversalPath {
     param([string]$RelativePath)
 
     foreach ($skipped in ($preservedRelPaths + $rootTargets)) {
-        if ($RelativePath.Equals($skipped, [System.StringComparison]::OrdinalIgnoreCase) -or
-            $RelativePath.StartsWith("$skipped\", [System.StringComparison]::OrdinalIgnoreCase)) {
+        if ($RelativePath.Equals($skipped, $pathComparison) -or
+            $RelativePath.StartsWith("$skipped/", $pathComparison)) {
             return $true
         }
     }
@@ -86,14 +119,15 @@ function Get-PycacheDirs {
     param([string]$Directory)
 
     foreach ($child in Get-ChildItem -LiteralPath $Directory -Force -Directory -ErrorAction Stop) {
-        $relative = $child.FullName.Substring($repoRoot.Length + 1)
-
-        if (Test-SkippedTraversalPath -RelativePath $relative) {
+        $relative = $child.FullName.Substring($repoPrefix.Length).Replace($separator, '/')
+        if ((Test-SkippedTraversalPath -RelativePath $relative) -or
+            (Test-RedirectedItem -Item $child) -or
+            (Test-PreservedDirectory -Directory $child)) {
             continue
         }
 
         if ($child.Name -eq "__pycache__") {
-            $child
+            $relative
             continue
         }
 
@@ -101,14 +135,36 @@ function Get-PycacheDirs {
     }
 }
 
-foreach ($target in $rootTargets) {
-    $resolved = Resolve-RepoPath -RelativePath $target
-    if ($null -ne $resolved) {
-        Remove-Target -RelativePath $target -FullPath $resolved
-    }
+if (Test-ProjectDirectory -Directory $repoRoot) {
+    throw "Refusing repository cleanup at an FPVS project root: $repoRoot"
 }
 
-foreach ($dir in Get-PycacheDirs -Directory $repoRoot) {
-    $relative = $dir.FullName.Substring($repoRoot.Length + 1)
-    Remove-Target -RelativePath $relative -FullPath $dir.FullName
+$candidates = $rootTargets + @(Get-PycacheDirs -Directory $repoRoot)
+$approved = @(foreach ($target in $candidates) {
+    $fullPath = Resolve-RepoPath -RelativePath $target
+    if ($null -eq $fullPath) {
+        continue
+    }
+    $tracked = @(& git -C $repoRoot ls-files --cached -- "$gitPathspec$target")
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not check whether the cleanup target contains tracked data: $target"
+    }
+    if ($tracked.Count -gt 0 -or -not (Test-SafeTargetTree -Item (Get-Item -LiteralPath $fullPath -Force))) {
+        Write-Warning "Skipping target containing tracked, protected, or redirected data: $target"
+        continue
+    }
+    $target
+})
+
+foreach ($target in $approved) {
+    $fullPath = Resolve-RepoPath -RelativePath $target
+    if ($null -eq $fullPath) {
+        continue
+    }
+    if ($DryRun) {
+        Write-Output "DRY-RUN $target"
+        continue
+    }
+    Remove-Item -LiteralPath $fullPath -Recurse -Force
+    Write-Output "REMOVED $target"
 }

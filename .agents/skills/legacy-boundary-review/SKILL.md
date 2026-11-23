@@ -1,51 +1,32 @@
 ---
 name: legacy-boundary-review
-description: Use before refactors that may touch retired src/Main_App/Legacy_App/** references, removed/dead feature boundaries, or code that must consume historical behavior through public APIs or adapters only.
+description: Use for retired Main App or Source Localization boundaries, compatibility aliases, and refactors that preserve historical behavior through current public APIs or thin adapters.
 ---
 
 # Legacy Boundary Review
 
-## Overview
-
-Use this workflow when a task is near retired `Legacy_App` references or when it is unclear whether a change consumes historical behavior. The default outcome is to preserve processing behavior exactly while moving callers or small responsibilities toward clearer current-app modules.
-
 ## Workflow
 
-1. Use the active `.venv1` or `.venv` described in `docs/agent/guides/development.md`.
-2. Run `python .agents/skills/legacy-boundary-review/scripts/audit_protected_edits.py` before broad manual inspection.
-3. Read only the focused docs or files needed by the task or by script failures.
-4. Identify whether the requested behavior crosses a retired-path, historical-boundary, or removed-feature path:
-   - `src/Main_App/Legacy_App/**` is retired and must not be recreated
-   - `src/Main_App/PySide6_App/**` is retired and must not be recreated
-   - the historical Source Localization/eLORETA package is removed; `src/Tools/SourceLocalization/**` should stay empty of source files
-   - the separate current `src/Tools/LORETA_Visualizer/` owns prepared-payload rendering and isolated `source_producers/`; use its scoped contracts rather than retired code
-   - `src/quarantine/**`, when present, is ignored quarantine, not active runtime
-   - `Main_App.Shared` and `Main_App.Performance` are same-object compatibility aliases; active implementations and imports belong in purpose-based packages
-5. Inspect existing public APIs, imports, adapters, and tests before proposing new boundaries.
-6. Prefer a thin adapter, caller-side normalization, or current-app module when that preserves behavior.
-7. Do not recreate retired package paths; if historical behavior is needed, use existing current-app APIs or a focused adapter outside the retired path.
-8. Preserve behavior, processing order, data formats, exports, and user workflows from historical code.
-9. After changes, rerun `python .agents/skills/legacy-boundary-review/scripts/audit_protected_edits.py`.
+1. Select the existing `.venv1` or `.venv` per the [development guide](../../../docs/agent/guides/development.md#local-environment). Run the wrapper before broad inspection and again after edits.
 
-## Checks
+   ```console
+   python .agents/skills/legacy-boundary-review/scripts/audit_protected_edits.py
+   ```
 
-- Use `python .agents/skills/legacy-boundary-review/scripts/audit_protected_edits.py` instead of manually scanning all protected paths.
-- Confirm the retired Source Localization package was not revived; preserve the
-  current Visualizer/source-producer boundary.
-- Confirm any adapter has focused tests around the boundary behavior.
-- Confirm compatibility exports in `src/Main_App/__init__.py` are not changed accidentally.
-- Confirm retired `Legacy_App` and `PySide6_App` paths were not recreated.
+   The wrapper checks retired Main App files, the retired Source Localization tree, and newly added Source Localization references. For committed changes, pass `--base-ref <revision>` or set `FPVS_AGENT_AUDIT_BASE_REF`. The default comparison for new references is `HEAD`.
 
-For hardware, montage, pipeline-stage, or FPVS Studio changes, first read the
-[shared roadmap](../../../docs/agent/architecture/hardware-pipeline-studio-roadmap.md).
-Modularity is a target for explicit versioned capabilities, not permission to
-reorder locked BioSemi processing or enable unqualified spatial methods. Keep
-existing compatibility aliases and historical project behavior while extending
-the canonical owners.
+2. Read the [legacy contract](../../../docs/agent/architecture/legacy-boundaries.md) and the relevant [canonical owner](../../../ARCHITECTURE.md). Use current public APIs and tests to understand historical behavior. When needed, keep adapters and caller-side normalization in the current purpose-based packages. Preserve processing order, exact scientific outputs, formats, exports, and workflows.
+3. Keep `src/Main_App/Legacy_App/`, `src/Main_App/PySide6_App/`, and `src/Tools/SourceLocalization/` retired. Leave absent directories absent. Restoration requires explicit scope under the [root rules](../../../AGENTS.md). Leave the optional ignored `src/quarantine/` outside active runtime.
+4. Preserve the `Main_App.Shared.*` and `Main_App.Performance.*` compatibility submodules as aliases to the same canonical module objects. New runtime calls use the canonical owners. Retain historical pickle lookups, logger names, resource roots, and the separate public wrappers in `src/Main_App/__init__.py` where required by their contracts. Use the [legacy-boundary focused scope](../../../docs/agent/quality/test-selection.md#scope-map) to check module identity and pickle compatibility when reviewing owner or alias changes.
+
+   ```console
+   python .agents/scripts/verify.py --scope legacy-boundary --tier focused
+   ```
+
+5. For [LORETA Visualizer](../../../src/Tools/LORETA_Visualizer/AGENTS.md), use the active implementation and contracts. The current L2-MNE and eLORETA producers live in `source_producers/`, while the renderer and adapters consume prepared payloads. Keep retired Source Localization code and quarantine out of the review.
+6. For hardware, montage, pipeline-stage, or FPVS Studio changes, read the [shared roadmap](../../../docs/agent/architecture/hardware-pipeline-studio-roadmap.md). Preserve the locked BioSemi order and use only qualified spatial methods.
 
 ## Response Requirements
 
-- State which protected paths were evaluated.
-- State whether retired `Legacy_App` or `PySide6_App` paths were affected and why the processing pipeline is unchanged.
-- List adapter or caller-side files changed.
-- Include verification commands and results.
+- State the boundaries checked, any ownership or adapter changes, and the evidence for processing and output parity where applicable.
+- Report the verification commands and results.

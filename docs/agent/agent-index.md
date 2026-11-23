@@ -14,8 +14,8 @@ that interpreter. See [development](guides/development.md) for shell setup.
 | --- | --- |
 | General invariants | `python .agents/scripts/audit/agent_audit.py` |
 | GUI imports/toolkit boundaries | `python .agents/skills/pyside6-gui-cleanup/scripts/audit_gui_imports.py` |
-| Retired/protected paths | `python .agents/skills/legacy-boundary-review/scripts/audit_protected_edits.py` |
-| Project paths, file I/O, exports | `python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py` |
+| Retired import paths | `python .agents/skills/legacy-boundary-review/scripts/audit_protected_edits.py` |
+| New local path literals | `python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py` |
 | Stats structure or reporting legibility | `python .agents/scripts/audit/agent_audit.py --check stats-structure` or `--check stats-reporting-legibility` |
 | Generated-file cleanup | `python .agents/scripts/audit/agent_audit.py --check garbage-collection` |
 | Feature verification | `python .agents/scripts/verify.py --scope <scope> --tier focused`; select a [scope](quality/test-selection.md#scope-map). |
@@ -25,29 +25,30 @@ that interpreter. See [development](guides/development.md) for shell setup.
 Repo-local skills take precedence for this repo. Web/frontend skills apply
 only to explicitly web-scoped work, not the PySide6 desktop GUI.
 
-| Task | Skill | Focused contract |
+| Task | Skill or verification scope | Focused contract |
 | --- | --- | --- |
 | PySide6 widgets, menus, workers, orchestration, status | `pyside6-gui-cleanup` | [GUI](architecture/gui.md), [threading](architecture/workers-threading.md) |
 | Separating a desktop action from project, processing or tool code | `pyside6-gui-cleanup`; start with the owning feature scope | [Workflow owners and regression checks](architecture/gui-backend.md) |
 | Updater/downloads/installers | `project-path-audit`; GUI skill for changed surfaces | [Updater](architecture/updater.md) |
 | Public Experiment Library | `pyside6-gui-cleanup` + `project-path-audit`; `gui` and `project-io` scopes | [Implementation and acceptance](exec-plans/active/public-experiment-library.md), [workflow guide](guides/experiment-library.md) |
 | Package ownership/retired boundaries | `legacy-boundary-review` | [Target layout](architecture/main-app-target-layout.md), [legacy](architecture/legacy-boundaries.md) |
-| Preprocessing entry points/order | `legacy-boundary-review`; GUI skill for orchestration | [Preprocessing](architecture/preprocessing-contract.md) |
-| Removed-electrode or kurtosis calibration | `legacy-boundary-review` | [Removed electrodes](quality/removed-electrode-detection-calibration.md), [kurtosis](quality/kurtosis-screening-calibration.md) |
-| Recording loading/memmaps | `legacy-boundary-review` + `project-path-audit` | [Loading](architecture/eeg-loading-contract.md) |
-| Hardware/montages, pipeline methods | `project-path-audit`; processing/GUI skills as affected | [Roadmap](architecture/hardware-pipeline-studio-roadmap.md), [methods](architecture/pipeline-methods.md) |
+| Preprocessing entry points/order | `legacy-boundary-review` for historical interfaces, `pyside6-gui-cleanup` for desktop orchestration | [Preprocessing](architecture/preprocessing-contract.md) |
+| Removed-electrode or kurtosis calibration | `processing` verification scope | [Removed electrodes](quality/removed-electrode-detection-calibration.md), [kurtosis](quality/kurtosis-screening-calibration.md) |
+| Recording loading/memmaps | `project-path-audit` for admission and storage paths | [Loading](architecture/eeg-loading-contract.md) |
+| Hardware/montages, pipeline methods | `project-path-audit` for admission, `pyside6-gui-cleanup` for desktop setup | [Roadmap](architecture/hardware-pipeline-studio-roadmap.md), [methods](architecture/pipeline-methods.md) |
 | Import a Studio configuration or check recording association | `project-path-audit`; `project-io` scope | [Current handoff and evidence limits](architecture/project-io.md#studio-config-handoff), [paired-fixture plan](exec-plans/active/studio-toolbox-handoff.md) |
-| Post-processing/FFT crop/export | `legacy-boundary-review` | [Exports](architecture/post-processing-export-contract.md), [crop](architecture/fft-crop-method.md) |
+| Post-processing/FFT crop/export | `processing` verification scope, `project-path-audit` for export destinations | [Exports](architecture/post-processing-export-contract.md), [crop](architecture/fft-crop-method.md) |
 | Manifests, project roots, dialogs/imports | `project-path-audit` | [Project I/O](architecture/project-io.md) |
 | Publication figures | `project-path-audit` | [Figure standard](quality/figure-generation.md) |
 | Correlation figure templates | `project-path-audit` | [Correlation recipe and runnable example](quality/correlation-figures.md) |
 | Stats | `pyside6-gui-cleanup` for GUI changes; focused Stats tests | [Statistics/tools](architecture/statistics-tools.md), scoped `src/Tools/Stats/AGENTS.md` |
 | Free Harmonic Clustering | `project-path-audit` | [Scoped rules](../../src/Tools/Free_Harmonic_Clustering/AGENTS.md), [architecture](../../src/Tools/Free_Harmonic_Clustering/ARCHITECTURE.md) |
-| LORETA Visualizer | `legacy-boundary-review` | [Scoped rules](../../src/Tools/LORETA_Visualizer/AGENTS.md), [architecture](../../src/Tools/LORETA_Visualizer/ARCHITECTURE.md) |
+| LORETA Visualizer | `loreta` verification scope, `legacy-boundary-review` for retired interfaces | [Scoped rules](../../src/Tools/LORETA_Visualizer/AGENTS.md), [architecture](../../src/Tools/LORETA_Visualizer/ARCHITECTURE.md) |
 | Scalp Maps / Sequence Figure | `pyside6-gui-cleanup` + `project-path-audit` | [Scalp Maps](../../src/Tools/Publication_Maps/AGENTS.md), [Sequence Figure](../../src/Tools/Sequence_Figure/AGENTS.md) |
 | Publication tables | `publication-table-export` + `project-path-audit` | [Skill](../../.agents/skills/publication-table-export/SKILL.md) |
 | Qt smoke definitions | `pytest-qt-smoke` | [Test selection](quality/test-selection.md); execution is CI-only by default |
 | Generated files/caches | `cleanup-generated-files` | [Cleanup](quality/garbage-collection.md), [debt](exec-plans/tech-debt-tracker.md) |
+| Explicit browser UI work | `frontend-design` for design, `emil-design-eng` for interaction polish, `web-design-guidelines` for review | Use the web property's owning repository and verification |
 | Pressure-testing a plan | `grillme` | Inspect locally answerable questions first; ask one question at a time |
 
 ## Plans and verification

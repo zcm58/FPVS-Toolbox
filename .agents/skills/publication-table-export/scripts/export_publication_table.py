@@ -29,6 +29,7 @@ from Main_App.exports.table_style import (  # noqa: E402
     table_font_size_px,
     table_font_weight,
 )
+from Main_App.io.safe_file import regular_file_info  # noqa: E402
 
 
 TABLES_DIR_NAME = "9 - Tables"
@@ -57,7 +58,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     table_rows = [[str(row.get(column, "")) for column in columns] for row in rows]
 
     output_dir = project_root / TABLES_DIR_NAME
-    output_dir.mkdir(parents=True, exist_ok=True)
+    if output_dir.resolve() != output_dir:
+        raise SystemExit(f"Publication table directory must stay at {output_dir}.")
     output_stem = _sanitize_stem(args.output_name)
     svg_path = output_dir / f"{output_stem}.svg"
     png_path = output_dir / f"{output_stem}.png"
@@ -65,6 +67,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     geometry = _geometry(labels, table_rows, args.width_in, args.font_scale)
     svg_text = _build_svg(labels, table_rows, geometry, font_scale=args.font_scale)
+    output_dir.mkdir(exist_ok=True)
+    for path in (svg_path, png_path, html_path):
+        regular_file_info(path)
     svg_path.write_text(svg_text, encoding="utf-8")
     _write_png(png_path, labels, table_rows, geometry, dpi=args.dpi, font_scale=args.font_scale)
     html_path.write_text(_build_html(svg_text), encoding="utf-8")
@@ -83,7 +88,7 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     parser.add_argument("--columns", help="Comma-separated source columns to select and order.")
     parser.add_argument("--labels-json", help='JSON object mapping source column names to display labels, e.g. {"z":"Z score"}.')
     parser.add_argument("--delimiter", default=",", help="Input delimiter. Use \"tab\" for TSV.")
-    parser.add_argument("--width-in", type=float, default=DEFAULT_WIDTH_IN, help="Total table width in inches.")
+    parser.add_argument("--width-in", type=float, default=DEFAULT_WIDTH_IN, help="Minimum table width in inches.")
     parser.add_argument("--dpi", type=int, default=DEFAULT_DPI, help="PNG DPI metadata and raster scale.")
     parser.add_argument("--font-scale", type=float, default=1.0, help="Multiplier for shared toolbox typography sizes.")
     return parser.parse_args(argv)
@@ -131,8 +136,8 @@ def _geometry(labels: list[str], rows: list[list[str]], width_in: float, font_sc
     if width_in <= 0:
         raise SystemExit("--width-in must be positive.")
     target_width = round(width_in * SVG_PX_PER_IN)
-    header_font = _load_font("figure_axis_label", bold=True, scale=font_scale)
-    body_font = _load_font("figure_tick", bold=False, scale=font_scale)
+    header_font = _load_font("header", bold=True, scale=font_scale)
+    body_font = _load_font("body", bold=False, scale=font_scale)
     desired_widths = []
     for index, label in enumerate(labels):
         values = [row[index] for row in rows]

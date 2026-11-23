@@ -8,9 +8,8 @@ work from compounding into technical debt.
 - Prefer existing shared owners and canonical import surfaces over new
   hand-rolled helpers.
 - Keep generated caches, temporary output, and local probe artifacts out of git.
-- Preserve repository-root `.fpvs_cache/` when it contains MNE/fsaverage
-  template data. It is an ignored local dependency cache for LORETA Visualizer,
-  not routine cleanup clutter.
+- Preserve repository-root `.fpvs_cache/` during routine cleanup. It can hold
+  the ignored MNE/fsaverage dependency used by LORETA Visualizer.
 - Do not leave unresolved inline debt markers in changed files. Record real debt
   in `docs/agent/exec-plans/tech-debt-tracker.md` or an active execution plan.
 - Avoid broad exception handlers in production additions unless the boundary is
@@ -26,16 +25,16 @@ Run:
 python .agents/scripts/audit/agent_audit.py --check garbage-collection
 ```
 
-The check is intentionally low-noise. It currently catches:
+The check looks for a small set of patterns.
 
-- visible cache/build/temp artifacts;
-- new unresolved inline debt markers in changed Python or Markdown files;
-- new broad `except Exception:` handlers in production code additions.
-- retired `fsaverage` MRI template caches if they reappear in active source or quarantine.
+- Git-visible paths that match generated cache and temporary artifact patterns.
+- New unresolved inline debt markers in changed Python or Markdown files.
+- New broad `except Exception:` handlers in production code additions.
 
-Do not interpret this as permission to delete the root `.fpvs_cache/` MNE cache.
-The prohibited case is bundled template data in tracked active source or
-quarantine paths, not the ignored local dependency cache.
+For user-requested deletion, use the
+[cleanup skill](../../../.agents/skills/cleanup-generated-files/SKILL.md) to
+preview its named generated targets, including retired bundled template caches.
+Keep fsaverage template data outside tracked source and distribution contents.
 
 When a recurring cleanup rule becomes stable and low-noise, add it to
 `.agents/scripts/audit/agent_audit.py` instead of relying on manual review.

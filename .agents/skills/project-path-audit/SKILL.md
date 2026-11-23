@@ -1,49 +1,73 @@
 ---
 name: project-path-audit
-description: Use when reviewing file I/O, project manifests, export/import paths, Windows/POSIX path behavior, QFileDialog behavior, generated files, hard-coded path cleanup, or active project-root discipline.
+description: Audit FPVS Toolbox project roots, persisted paths, import and export destinations, managed file writes, and file picker behavior.
 ---
 
 # Project Path Audit
 
-## Overview
+## First check
 
-Use this workflow for file dialogs, manifests, imports, exports, generated outputs, and any change that might read or write outside the active project root.
+Run the path audit with the [repo interpreter](../../../docs/agent/guides/development.md) before broad inspection.
 
-## Workflow
+```console
+python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
+```
 
-1. Use the active `.venv1` or `.venv` described in `docs/agent/guides/development.md`.
-2. Run `python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py` before broad manual inspection.
-3. Read only the focused docs or files needed by the task or by script failures.
-4. Identify the active project root source for the workflow before changing path logic.
-5. Find hard-coded absolute paths, home-directory assumptions, and current-working-directory assumptions in the touched workflow.
-6. Use `pathlib` or an equivalent platform abstraction; do not encode Windows
-   or POSIX separators in shared path logic.
-7. Replace unsafe joins with project-root-relative path construction.
-8. Ensure user-selected paths cannot silently escape the intended project boundary when the workflow requires project-local outputs.
-9. Handle `QFileDialog` Cancel without exceptions or stale state.
-10. Preserve existing output formats, filenames, sheet names, and folder layout unless explicitly requested.
-11. Cover missing, invalid, permission-denied, repeated-operation, and existing-file cases when they are realistic for the workflow.
-12. Use `tmp_path` for tests and avoid depending on developer-machine paths.
+The wrapper selects the central `paths` check. It scans added lines and
+eligible untracked files for local path literals. Pass `--base-ref <revision>`
+or set `FPVS_AGENT_AUDIT_BASE_REF` to include committed changes. The default
+comparison is `HEAD`. Inspect the affected workflow for dynamic paths,
+containment, portable serialization, and cancellation even when the check
+passes. [Verification gates](../../../docs/agent/quality/verification-gates.md#ci-change-detection)
 
-For Studio or hardware import work, read the
-[shared roadmap](../../../docs/agent/architecture/hardware-pipeline-studio-roadmap.md)
-and `docs/agent/architecture/project-io.md`. Inspect the actual versioned Studio
-contract before extending adapters; do not infer compatibility from a file
-extension or invent interchange fields. Preserve canonical participant,
-recording, session, condition, and group identity plus source timing/units and
-device provenance. New adapters must use shared project/I/O owners, reject
-unsupported semantics explicitly, and preserve historical inputs.
+## Follow the workflow owner
 
-## Checks
+- Anchor managed project I/O in the runtime `Project.project_root`. It comes
+  from the opened project directory. For tools with the standard fallback,
+  `Main_App.projects.resolve_active_project_root` checks the explicit root,
+  `FPVS_PROJECT_ROOT`, then the current project. Preserve stricter tool-specific
+  entry points and avoid using the process working directory as a fallback.
+  [Project I/O](../../../docs/agent/architecture/project-io.md)
+- Identify the destination before changing a join. Project-managed artifacts
+  follow their configured root and containment rules. Preserve supported
+  external raw/result roots and explicit export destinations. App settings,
+  updater staging, and app caches follow their respective owners. Preserve
+  existing formats, filenames, sheets, and layout.
+  [Settings storage](../../../docs/agent/architecture/project-io.md#settings-storage) ·
+  [Cache maintenance](../../../docs/agent/architecture/cache-maintenance.md) ·
+  [Updater](../../../docs/agent/architecture/updater.md)
+- Use `Main_App.projects.load_project_dataset_index` for processed records and
+  canonical identities. The index takes group assignments from project metadata
+  and checks output folders against those assignments. Keep the NumPy companion
+  references in native `.fpvs` manifests as validated sibling basenames and
+  retain historical XLSX discovery.
+  [Multi-group foundation](../../../docs/agent/architecture/project-io.md#multi-group-processing-foundation) ·
+  [Native results](../../../docs/agent/architecture/post-processing-export-contract.md#native-condition-results)
+- Verify resolved containment for project-local writes or cleanup, including
+  symlink or junction targets where relevant. Use `pathlib` for runtime joins
+  and the format owner's rules for persisted relative paths. Hold
+  `project_manifest_transaction` across project manifest read, validation,
+  update, and publish. Reuse the owning safe-file or atomic-write boundary.
+  [Manifest transactions](../../../docs/agent/architecture/project-io.md#manifest-transactions)
+- For Studio or hardware imports, check the actual versioned producer contract
+  and the Toolbox support limits. Preserve source and recording identity,
+  timing, units, provenance, and historical inputs.
+  [Studio handoff](../../../docs/agent/architecture/project-io.md#studio-config-handoff) ·
+  [Hardware roadmap](../../../docs/agent/architecture/hardware-pipeline-studio-roadmap.md)
 
-- Use `python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py` instead of manually scanning all paths.
-- Confirm generated files land under the intended project root.
-- Confirm dialog Cancel leaves the UI in a valid state.
-- Run targeted project/file I/O tests before broader tests.
+## Verify the affected boundary
 
-## Response Requirements
+For runtime project I/O changes, start with the focused scope.
 
-- State the project-root source used by the workflow.
-- List any hard-coded paths removed or retained.
-- State tests or manual path smoke steps.
-- Include verification commands and results.
+```console
+python .agents/scripts/verify.py --scope project-io --tier focused
+```
+
+Use isolated project fixtures for relevant cases such as copied roots,
+Windows and Linux path forms, external destinations, denied access, or
+replacement of existing files. For picker changes, verify Cancel preserves
+the previous state and document a visible smoke path. Qt execution stays in
+CI unless the user approves a safe visible local session.
+[Test selection](../../../docs/agent/quality/test-selection.md)
+
+Report the workflow's root and destination, path findings, and checks run.

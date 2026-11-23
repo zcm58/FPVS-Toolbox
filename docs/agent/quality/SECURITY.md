@@ -8,5 +8,6 @@ Security and privacy boundaries:
 - Do not log sensitive local data beyond existing project diagnostics.
 - Keep generated outputs and manifests compatible with existing project layout.
 
-Use `.agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py` for
-path-discipline checks.
+Use `.agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py` to check
+new local path literals. The [project path skill](../../../.agents/skills/project-path-audit/SKILL.md)
+routes ownership and containment checks for the affected workflow.

@@ -1,4 +1,4 @@
 interface:
   display_name: "Pytest-Qt Smoke"
-  short_description: "Add focused pytest-qt smoke tests for changed PySide6 UI behavior."
-  default_prompt: "Use this skill when a PySide6 GUI change needs a small pytest-qt smoke test."
+  short_description: "Cover changed PySide6 workflows with CI smoke tests."
+  default_prompt: "Use $pytest-qt-smoke to add CI coverage for the changed PySide6 workflow."

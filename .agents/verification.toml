@@ -32,7 +32,7 @@ include = ["src/Main_App/**", "src/Tools/Stats/**", "src/Tools/LORETA_Visualizer
 manual_smoke = ["In a visible Main App session, start processing, cancel, and restart. Verify a controller failure clears the running state, preserves completed file results, reports failure, and does not start downstream processing. Local Qt execution remains disabled; run registered Qt coverage in CI."]
 
 [scopes.repo]
-audits = ["agent-harness", "garbage-collection"]
+audits = ["agent-harness", "garbage-collection", "protected"]
 tests = [
   "tests/audit/test_verification_driver.py",
   "tests/audit/test_qt_test_registry.py",

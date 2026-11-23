@@ -2,16 +2,14 @@
 
 Use `$legacy-boundary-review`.
 
-Goal: keep retired or historical legacy behavior from re-entering active runtime while preserving the processing pipeline during any boundary cleanup.
+Keep retired import roots absent and preserve active compatibility during
+ownership changes.
 
 Checks:
 
 ```console
 python .agents/skills/legacy-boundary-review/scripts/audit_protected_edits.py
-python .agents/scripts/audit/agent_audit.py --check protected
-python .agents/scripts/audit/agent_audit.py --check source-localization
-python .agents/scripts/audit/agent_audit.py --check source-localization-refs
-git diff --name-only
+python .agents/scripts/verify.py --scope legacy-boundary --tier focused
 ```
 
 Requirements:

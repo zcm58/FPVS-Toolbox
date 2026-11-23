@@ -1,43 +1,40 @@
 ---
 name: cleanup-generated-files
-description: Clean generated build artifacts, Python/tool caches, test scratch folders, and deprecated local data caches in FPVS Toolbox Repo. Use when the user asks to clean repo clutter, remove temp/cache files, clear build output, reclaim disk space, or delete stale generated folders such as build, site, __pycache__, .mypy_cache, .ruff_cache, .codex-tmp, test_tmp, retired bundled fsaverage template caches, or src/fpvs_cache. Preserve the root .fpvs_cache MNE/fsaverage cache unless the user explicitly requests cache removal.
+description: Remove requested generated build, test, or tool artifacts from the FPVS Toolbox checkout while preserving project data and the local MNE/fsaverage dependency cache.
 ---
 
 # Cleanup Generated Files
 
-## Workflow
+## Preview the requested scope
 
-1. State the cleanup scope before deleting anything.
-2. Preserve `.venv1/`, `.venv/`, `.idea/`, root `.fpvs_cache/`, source files, docs, tests, and packaging scripts unless the user explicitly names them. Preserve `src/quarantine/` if it exists; its absence is valid. The retired bundled `fsaverage` MRI template is the only approved quarantine data-cache exception.
-3. Run a dry run first. Use Windows PowerShell or `pwsh` on Windows 11, and
-   PowerShell 7 (`pwsh`) on CachyOS:
+Use PowerShell on Windows or `pwsh` on CachyOS. The helper previews known
+checkout-generated build, cache, and scratch targets. It skips tracked content,
+linked paths, environments, project directories, and opt-in trees.
 
 ```powershell
 & ./.agents/skills/cleanup-generated-files/scripts/cleanup_generated_files.ps1 -DryRun
 ```
 
-4. If the user asked for deletion and the dry-run targets match the request, run:
+Read the preview before deleting. Run the helper without `-DryRun` when
+the user requested removal and every listed target is within scope. For a
+narrower request, remove only the verified targets from the preview.
 
 ```powershell
 & ./.agents/skills/cleanup-generated-files/scripts/cleanup_generated_files.ps1
 ```
 
-5. Verify with:
+Verify that the selected targets are gone and check `git status --short`.
+Report skipped targets or access errors. If a file is locked, retry only
+the authorized target after the lock clears.
 
-```powershell
-git status --short --ignored
-```
+## Preserve dependencies and project data
 
-## Guardrails
-
-- Delete only ignored/generated artifacts or user-approved local data caches.
-- The retired `Tools.SourceLocalization` package must not return to runtime.
-  Preserve current `Tools.LORETA_Visualizer` source and its isolated producers;
-  they are not cleanup targets. Do not keep bundled `fsaverage` MRI template
-  data in tracked source or quarantine paths.
-- Preserve root `.fpvs_cache/` when it contains MNE/fsaverage template data for local LORETA Visualizer use.
-- Do not remove `src/quarantine/` when it exists; it is optional historical
-  reference material, not a required directory.
-- Do not remove virtual environments unless the user explicitly identifies the stale environment.
-- If deletion fails with permission errors, rerun the same script with escalation rather than broadening the command.
-- Report any remaining permission-protected folders instead of silently skipping them.
+- Keep the checkout's root `.fpvs_cache/` for MNE/fsaverage, along with
+  environments and IDE state, during routine cleanup. The retired bundled
+  fsaverage directories and `src/fpvs_cache/` are distinct cleanup targets.
+  Preserve active source and the rest of quarantine.
+  [Garbage collection](../../../docs/agent/quality/garbage-collection.md)
+- For Toolbox application or project caches, use the owning cache-maintenance
+  workflow. It preserves recordings, exports, companions, project settings,
+  review decisions, ledgers, and anatomical templates.
+  [Cache maintenance](../../../docs/agent/architecture/cache-maintenance.md)

@@ -120,12 +120,81 @@ def test_parse_args_accepts_explicit_base_ref():
     "path",
     (
         "C:" + r"\Users\developer\project\file.py",
+        "C:" + r"\\Users\\developer\\project\\file.py",
         "/" + "Users/developer/project/file.py",
         "/" + "home/developer/project/file.py",
     ),
 )
 def test_local_path_pattern_covers_supported_development_hosts(path):
     assert agent_audit.LOCAL_PATH_RE.search(path)
+
+
+@pytest.mark.parametrize(
+    ("check", "retired_path"),
+    (
+        ("protected", "src/Main_App/Legacy_App"),
+        ("protected", "src/Main_App/PySide6_App.py"),
+        ("source-localization", "src/Tools/" + "Source" + "Localization"),
+    ),
+)
+def test_retirement_guard_allows_removal_without_git_context(tmp_path, monkeypatch, check, retired_path):
+    def unexpected_git_call(*args):
+        pytest.fail(f"The retirement guard queried Git: {args}")
+
+    monkeypatch.setattr(agent_audit, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(agent_audit, "_git_lines", unexpected_git_call)
+    check_retired = agent_audit.CHECKS[check]
+    target = tmp_path / retired_path
+    target.parent.mkdir(parents=True)
+    if target.suffix == ".py":
+        target.touch()
+    else:
+        target.mkdir()
+
+    assert [issue.path for issue in check_retired()] == [retired_path]
+
+    if target.is_dir():
+        target.rmdir()
+    else:
+        target.unlink()
+    assert check_retired() == []
+
+
+def test_code_audits_skip_opt_in_and_quarantine(tmp_path, monkeypatch):
+    active_path = "src/Tools/example.py"
+    paths = (
+        "src/Standalone_Scripts/example.py",
+        "tests/standalone_scripts/test_example.py",
+        "src/quarantine/example.py",
+        active_path,
+    )
+    for path in paths:
+        target = tmp_path / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.touch()
+    monkeypatch.setattr(agent_audit, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(agent_audit, "_changed_files", lambda: paths)
+    monkeypatch.setattr(agent_audit, "_tracked_and_untracked_files", lambda: paths)
+
+    def added_lines(path):
+        assert path == active_path
+        return [
+            (1, "path = '" + "C:" + r"\\Users\\developer\\example.py" + "'"),
+            (2, "from Tools import " + "Source" + "Localization"),
+        ]
+
+    def read_text(path):
+        assert path == active_path
+        return ["from PySide6.QtWidgets import QAction"]
+
+    monkeypatch.setattr(agent_audit, "_added_lines", added_lines)
+    monkeypatch.setattr(agent_audit, "_read_text", read_text)
+    assert [(issue.path, issue.line) for issue in agent_audit.check_added_paths()] == [(active_path, 1)]
+    assert [(issue.path, issue.line) for issue in agent_audit.check_added_source_localization_refs()] == [
+        (active_path, 2),
+    ]
+    assert [(issue.path, issue.line) for issue in agent_audit.check_gui_imports()] == [(active_path, 1)]
+    assert agent_audit.check_garbage_collection() == []
 
 
 @pytest.mark.parametrize(
