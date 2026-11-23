@@ -579,8 +579,10 @@ def test_metadata_and_selected_reads_load_only_requested_dense_sheet(tmp_path, m
         assert loaded == ["sheet0_values", "sheet1_values"]
 
 
-@pytest.mark.parametrize("failure", ["wrong_shape", "wrong_dtype", "truncated"])
-def test_header_read_rejects_invalid_unrequested_dense_sheet(tmp_path, failure):
+@pytest.mark.parametrize(
+    "failure", ["wrong_shape", "wrong_dtype", "truncated", "duplicate_column", "duplicate_electrode"],
+)
+def test_header_read_rejects_invalid_unrequested_spectral_sheet(tmp_path, failure):
     import io
 
     path = tmp_path / "recording.xlsx"
@@ -592,9 +594,17 @@ def test_header_read_rejects_invalid_unrequested_dense_sheet(tmp_path, failure):
     if failure == "truncated":
         members[key] = members[key][:-8]
     else:
+        if failure == "duplicate_column":
+            key, array = "sheet1_columns.npy", np.asarray(["Electrode", "Aµ", "Aµ"])
+        elif failure == "duplicate_electrode":
+            key, array = "sheet1_electrodes.npy", np.asarray(["Fp1", "Ó1", "Ó1"])
+        else:
+            array = np.zeros(
+                (1, 2) if failure == "wrong_shape" else (3, 2),
+                dtype=np.float32 if failure == "wrong_dtype" else np.float64,
+            )
         buffer = io.BytesIO()
-        np.save(buffer, np.zeros((1, 2) if failure == "wrong_shape" else (3, 2),
-                                 dtype=np.float32 if failure == "wrong_dtype" else np.float64))
+        np.save(buffer, array)
         members[key] = buffer.getvalue()
     with zipfile.ZipFile(companion, "w", compression=zipfile.ZIP_STORED) as target:
         for name, data in members.items():

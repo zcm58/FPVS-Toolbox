@@ -307,33 +307,33 @@ class SpectralEligibilityResult:
             ),
             "Applied Notch Method Version": self.applied_notch.method_version,
         }
-        rows: list[dict[str, object]] = []
-        for item in self.targets:
-            rows.append(
-                {
-                    **common,
-                    "Oddball Harmonic Order": item.target.oddball_harmonic_order,
-                    "Presentation Harmonic Order": (
-                        item.target.presentation_harmonic_order
-                        if item.target.presentation_harmonic_order is not None
-                        else ""
-                    ),
-                    "Target Frequency Exact (Hz)": _fraction_text(
-                        item.target.frequency_hz
-                    ),
-                    "Target Frequency (Hz)": float(item.target.frequency_hz),
-                    "Target FFT Bin": item.target_bin_index,
-                    "Noise Candidate FFT Bins": ",".join(
-                        str(value) for value in item.noise_candidate_bin_indices
-                    ),
-                    "Target Amplitude Status": item.target_amplitude_status,
-                    "BCA Available": item.bca_available,
-                    "SNR Available": item.snr_available,
-                    "Local Z Available": item.local_z_available,
-                    "Unavailable Reasons": ";".join(item.reason_codes),
-                }
-            )
-        return rows
+        return _target_export_rows(self.targets, common)
+
+
+def _target_export_rows(
+    targets: Sequence[SpectralTargetAvailability], common: Mapping[str, object],
+) -> list[dict[str, object]]:
+    return [
+        {
+            **common,
+            "Oddball Harmonic Order": item.target.oddball_harmonic_order,
+            "Presentation Harmonic Order": (
+                item.target.presentation_harmonic_order
+                if item.target.presentation_harmonic_order is not None
+                else ""
+            ),
+            "Target Frequency Exact (Hz)": _fraction_text(item.target.frequency_hz),
+            "Target Frequency (Hz)": float(item.target.frequency_hz),
+            "Target FFT Bin": item.target_bin_index,
+            "Noise Candidate FFT Bins": ",".join(map(str, item.noise_candidate_bin_indices)),
+            "Target Amplitude Status": item.target_amplitude_status,
+            "BCA Available": item.bca_available,
+            "SNR Available": item.snr_available,
+            "Local Z Available": item.local_z_available,
+            "Unavailable Reasons": ";".join(item.reason_codes),
+        }
+        for item in targets
+    ]
 
 
 def spectral_eligibility_from_rows(
@@ -460,7 +460,8 @@ def _require_exported_target_rows_match(
     result: SpectralEligibilityResult,
 ) -> None:
     expected_rows = {
-        int(row["Oddball Harmonic Order"]): row for row in result.to_rows()
+        int(row["Oddball Harmonic Order"]): row
+        for row in _target_export_rows(result.targets, {})
     }
     actual_rows: dict[int, Mapping[str, Any]] = {}
     for row in rows:

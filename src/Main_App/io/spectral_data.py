@@ -265,10 +265,16 @@ def _companion_payload(workbook: Path, descriptor: Mapping) -> _SpectralPayload:
                         shape = _dense_shape(archive.zip, f"sheet{index}_values")
                         if (labels.dtype.kind != "U" or rows.dtype.kind != "U" or labels.ndim != 1 or rows.ndim != 1
                                 or len(labels) < 2 or labels[0] != "Electrode"
-                                or shape != (len(rows), len(labels) - 1)
-                                or len(set(labels)) != len(labels) or len(set(rows)) != len(rows)):
+                                or shape != (len(rows), len(labels) - 1)):
                             raise SpectralDataError(f"Invalid spectral array dimensions or types for {name}.")
-                    columns[name], electrodes[name] = tuple(labels.tolist()), rows
+                    # Check the decoded labels we retain, avoiding a separate
+                    # iteration that boxes every frequency as a NumPy scalar.
+                    header = tuple(labels.tolist())
+                    if not previously_checked and (
+                        len(set(header)) != len(header) or len(set(rows.tolist())) != len(rows)
+                    ):
+                        raise SpectralDataError(f"Invalid spectral array dimensions or types for {name}.")
+                    columns[name], electrodes[name] = header, rows
                     rows.setflags(write=False)
                 metadata = manifest.get("metadata")
                 if not isinstance(metadata, dict):

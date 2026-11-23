@@ -61,23 +61,24 @@ def _compute_snr_matrix_for_amplitudes(
             continue
 
         noise_sum[:, dest] += source
-        noise_min[:, dest] = np.minimum(noise_min[:, dest], source)
-        noise_max[:, dest] = np.maximum(noise_max[:, dest], source)
+        min_slice = noise_min[:, dest]
+        max_slice = noise_max[:, dest]
+        np.minimum(min_slice, source, out=min_slice)
+        np.maximum(max_slice, source, out=max_slice)
         counts[dest] += 1
 
-    means = np.zeros((num_channels, num_bins), dtype=amplitudes.dtype)
+    # Convert the sum to the trimmed mean without changing the arithmetic
+    # order. Bins with too few neighbors are excluded from the final ratio.
     enough_bins = counts >= 4
-    means[:, enough_bins] = (
-        noise_sum[:, enough_bins]
-        - noise_min[:, enough_bins]
-        - noise_max[:, enough_bins]
-    ) / (counts[enough_bins] - 2)
+    np.subtract(noise_sum, noise_min, out=noise_sum, where=enough_bins)
+    np.subtract(noise_sum, noise_max, out=noise_sum, where=enough_bins)
+    np.divide(noise_sum, counts - 2, out=noise_sum, where=enough_bins)
 
     return np.divide(
         amplitudes,
-        means,
+        noise_sum,
         out=np.zeros_like(amplitudes),
-        where=means > 1e-12,
+        where=enough_bins & (noise_sum > 1e-12),
     )
 
 

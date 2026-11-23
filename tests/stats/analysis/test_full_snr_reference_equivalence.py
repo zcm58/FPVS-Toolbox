@@ -110,6 +110,17 @@ def test_compute_full_snr_from_amplitudes_reuses_precomputed_fft_values() -> Non
     np.testing.assert_allclose(from_amplitudes, from_data, rtol=1e-12, atol=1e-12)
 
 
+def test_full_snr_keeps_undercovered_bins_zero_next_to_estimated_bins() -> None:
+    amplitudes = np.array([[10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0]])
+    original_bytes = amplitudes.tobytes()
+    expected = np.array([[0.0, 0.0, 30.0 / 55.0, 1.0, 2.0, 0.0, 0.0]])
+
+    actual = compute_full_snr_from_amplitudes(amplitudes, window_size=4)
+
+    assert actual.tobytes() == expected.tobytes()
+    assert amplitudes.tobytes() == original_bytes
+
+
 def test_compute_full_snr_df_matches_legacy_reference_values() -> None:
     rng = np.random.default_rng(12345)
     data_uv = rng.normal(size=(3, 128))
