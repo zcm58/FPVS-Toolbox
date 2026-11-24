@@ -32,7 +32,7 @@ def _worker_without_qt(monkeypatch, tmp_path):
                  "run_processing_harmonic_selection_qc": select}
     exec(compile(ast.Module(body=[run], type_ignores=[]), str(WORKER_PATH), "exec"), namespace)
     downstream = ModuleType("Main_App.workers.post_processing_pipeline_worker")
-    downstream.POST_PROCESSING_PHASE_COUNT = 5
+    downstream.POST_PROCESSING_PHASE_COUNT = 3
     downstream.run_postprocessing_from_selection = Mock()
     monkeypatch.setitem(sys.modules, downstream.__name__, downstream)
     worker = SimpleNamespace(

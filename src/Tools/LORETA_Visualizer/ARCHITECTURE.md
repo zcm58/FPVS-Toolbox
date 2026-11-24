@@ -92,19 +92,17 @@ invalidate otherwise complete source-PSD inputs. Existing valid signed
 FIF/JSON derivatives can therefore be reused to rebuild source maps after an
 orientation-method update; sensor preprocessing need not be repeated solely to
 regenerate the maps. The canonical L2-MNE and eLORETA Hauk source-PSD output
-directories are selection-dependent artifacts: a changed accepted list marks
-both stale, archives any preceding directory during replacement, and rebuilds
-them from the durable time-domain derivatives in the selection-only resume.
+directories are selection-dependent artifacts. A changed accepted list marks
+both stale. On-demand generation in LORETA rebuilds them from the durable
+time-domain derivatives and archives any preceding directory during replacement.
 
 Project-source orchestration is currently participant-keyed and is therefore
 not valid for a project with multiple recording IDs per participant. The Main
 App post-processing worker detects repeated-session mode through the canonical
-`Main_App.projects.project_recording_context` API and treats the legacy
-LORETA Stats-ready workbook plus both automatic source-map producers as
-successful, non-applicable skips. It must not invoke those consumers, delete a
-preceding source artifact, or mark a nonexistent replacement current. The
-recording-aware source-ready derivatives remain durable inputs for a future
-recording-aware producer. Single-session orchestration remains unchanged.
+`Main_App.projects.project_recording_context` API and skips the participant-keyed
+Stats-ready workbook. LORETA independently checks project-source eligibility.
+The recording-aware source-ready derivatives remain durable inputs for a
+future recording-aware producer.
 The direct compact-workbook adapter enforces this same boundary before reading
 Stats-ready or metric workbooks. It checks the canonical dataset-index recording
 mode and distinct recording IDs per participant before exclusions can hide
@@ -495,14 +493,12 @@ compact rebuild summaries, but source-estimation math still belongs only to
   crowding the side panel. The method selector groups loaded manifests by
   source method, keeps condition/summary selection method-local, and restricts
   Hauk-style L2-MNE payloads to cortical surface displays and non-cortical
-  volume payloads to 3D volume overlay and MRI-slice displays. After Main App
-  post-processing attempts source generation, an
-  already-cached visualizer page reloads any successfully written current
-  source-map manifest even when its sibling method failed. If neither current
-  manifest survives the attempted rebuild, the page clears only a previously
-  project-loaded map and warns that no current result is available; a manually
-  imported payload is preserved. This reconciliation never starts source
-  estimation and does not instantiate the page when it has not been opened.
+  volume payloads to 3D volume overlay and MRI-slice displays. Workbook release
+  signals a cached page to revalidate its managed source maps the next time
+  it is shown. A project switch requests cancellation and retires the old page
+  after its workers finish.
+- `source_build_progress.py`: in-view build stages, animated participant-condition
+  counts, and cancellation. It follows the desktop motion preference.
 - `comparison_selection.py`: metric/operand selection, raw manifest identities
   and bundle freshness for producer-prepared descriptive comparisons. GUI workers
   adapt A/B/A−B mappings; matched-cohort summaries stay in `source_producers`.
@@ -918,13 +914,14 @@ perform a second source filter. Both MRI slices and 3D contours interpolate the
 retained values for display only, and neither adds tested locations or changes
 saved payload values.
 
-On first open, if no current time-domain source manifest exists, the GUI may
-start one background rebuild that generates default cortical-normal L2-MNE and
-vector-norm eLORETA outputs. If one current method is already available, the GUI
-loads that valid partial result instead of automatically rebuilding only because
-the sibling is absent. Manual and post-processing rebuilds use the two-method
-batch; Source Map Options exposes only the L2 orientation choice because the
-corrected eLORETA vector norm is fixed. One method may report a method-specific
+LORETA checks for current time-domain manifests off the UI thread on first
+activation and after a new processing or harmonic release. If none is current
+and the project is eligible, the tool starts a cancellable background build
+with default cortical-normal L2-MNE and vector-norm eLORETA. If one current
+method is available, the GUI loads the valid partial result. Source Map Options
+can rebuild both methods and choose the L2 orientation. The build surface shows
+activity before participant totals are known, then reports completed
+participant-condition cells for each method. One method may report a method-specific
 failure without relabeling or discarding a successfully generated sibling
 result. The Method selector remains a display selector over loaded manifests,
 not a numerical method editor.

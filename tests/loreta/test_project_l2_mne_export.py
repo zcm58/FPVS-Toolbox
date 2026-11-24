@@ -811,6 +811,7 @@ def test_project_source_export_worker_rebuilds_both_source_psd_methods_by_defaul
     tmp_path,
     monkeypatch,
 ) -> None:
+    from Main_App.processing.source_harmonic_validation import current_source_harmonic_validation
     from Tools.LORETA_Visualizer.source_producers import (
         project_eloreta_volume_hauk_source_psd_export,
     )
@@ -819,9 +820,14 @@ def test_project_source_export_worker_rebuilds_both_source_psd_methods_by_defaul
     project = SimpleNamespace(project_root=tmp_path)
     l2_calls: list[dict[str, object]] = []
     eloreta_calls: list[dict[str, object]] = []
+    validation_scopes = []
 
     def fake_source_psd_export(**kwargs):
         l2_calls.append(kwargs)
+        validation_scopes.append(current_source_harmonic_validation())
+        kwargs["completed_cell_callback"](0, 2)
+        kwargs["completed_cell_callback"](1, 2)
+        kwargs["completed_cell_callback"](2, 2)
         kwargs["progress_callback"]("L2 source PSD done")
         return _fake_source_export_result(
             tmp_path / "source_psd",
@@ -831,6 +837,9 @@ def test_project_source_export_worker_rebuilds_both_source_psd_methods_by_defaul
 
     def fake_eloreta_source_psd_export(**kwargs):
         eloreta_calls.append(kwargs)
+        validation_scopes.append(current_source_harmonic_validation())
+        kwargs["completed_cell_callback"](0, 3)
+        kwargs["completed_cell_callback"](3, 3)
         kwargs["progress_callback"]("eLORETA source PSD done")
         return _fake_source_export_result(
             tmp_path / "eloreta_source_psd",
@@ -859,9 +868,11 @@ def test_project_source_export_worker_rebuilds_both_source_psd_methods_by_defaul
         project=project,
     )
     progress_messages: list[str] = []
+    stages: list[tuple[str, int, int]] = []
     exported: list[object] = []
     failed: list[str] = []
     worker.progress.connect(progress_messages.append)
+    worker.build_stage.connect(lambda *args: stages.append(args))
     worker.exported.connect(exported.append)
     worker.failed.connect(failed.append)
 
@@ -870,6 +881,9 @@ def test_project_source_export_worker_rebuilds_both_source_psd_methods_by_defaul
     assert failed == []
     assert len(l2_calls) == 1
     assert len(eloreta_calls) == 1
+    assert validation_scopes[0] is not None
+    assert validation_scopes[0] is validation_scopes[1]
+    assert current_source_harmonic_validation() is None
     for call in (l2_calls[0], eloreta_calls[0]):
         assert call["project"] is project
         assert call["project_root"] == tmp_path
@@ -898,6 +912,13 @@ def test_project_source_export_worker_rebuilds_both_source_psd_methods_by_defaul
     )
     assert "L2 source PSD done" in progress_messages
     assert "eLORETA source PSD done" in progress_messages
+    assert [(completed, total) for _stage, completed, total in stages] == [
+        (0, 0), (0, 2), (1, 2), (2, 2), (0, 0), (0, 3), (3, 3), (0, 0),
+    ]
+    assert "method 1 of 2" in stages[0][0]
+    assert stages[3][0].startswith("Summarizing and saving")
+    assert "method 2 of 2" in stages[4][0]
+    assert stages[-1][0] == "Loading prepared source maps…"
 
 
 def test_project_source_export_worker_reports_partial_batch_failure(tmp_path, monkeypatch) -> None:
@@ -960,6 +981,26 @@ def test_project_source_export_worker_reports_partial_batch_failure(tmp_path, mo
         "Hauk-informed time-domain eLORETA volume source maps (2/2)" in message
         for message in progress_messages
     )
+
+
+def test_loreta_worker_does_not_start_an_inverse_for_repeated_sessions(tmp_path, monkeypatch) -> None:
+    worker = ProjectSourceMapExportWorker(
+        project_root=tmp_path,
+        export_modes=PROJECT_SOURCE_EXPORT_DEFAULT_MODES,
+        include_flagged_subjects=False,
+        zscore_model=PROJECT_ZSCORE_MODEL_PARTICIPANT_FIRST,
+        project=SimpleNamespace(project_root=tmp_path, sessions={"visit1": {"visit_index": 1}}),
+    )
+    calls, failures, finished = [], [], []
+    monkeypatch.setattr(worker, "_run_export_mode", lambda *args: calls.append(args))
+    worker.failed.connect(failures.append)
+    worker.finished.connect(lambda: finished.append(True))
+
+    worker.run()
+
+    assert calls == []
+    assert failures == ["Source maps currently support single-session projects."]
+    assert finished == [True]
 
 
 def test_loreta_stats_ready_workbook_path_uses_source_map_prerequisite_location(tmp_path) -> None:

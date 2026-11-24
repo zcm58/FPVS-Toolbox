@@ -62,14 +62,7 @@ _POST_PROCESSING_QC_TITLE = "Reviewing Frequency-Domain QC"
 _POST_PROCESSING_QC_MESSAGE = (
     "FPVS Toolbox is checking summed BCA values before final harmonic selection."
 )
-_POST_PROCESSING_SOURCE_MAPS_TITLE = "Generating Source Maps"
-_POST_PROCESSING_SOURCE_MAPS_MESSAGE = (
-    "Generating source-space maps for 3D visualization of oddball responses."
-)
 _POST_PROCESSING_PROGRESS_SETTLE_MS = 250
-_POST_PROCESSING_SOURCE_STEP_NAMES = frozenset(
-    {"l2_mne_source_psd", "eloreta_volume_source_psd"}
-)
 _POST_PROCESSING_FREQUENCY_DOMAIN_STEP_NAMES = frozenset(
     {
         "frequency_domain_qc",
@@ -90,23 +83,13 @@ _POST_PROCESSING_PHASE_STATES = {
         _POST_PROCESSING_OUTPUTS_TITLE,
         _POST_PROCESSING_OUTPUTS_MESSAGE,
     ),
-    "l2_mne_source_maps": (
-        4,
-        "Generating L2-MNE Source Maps",
-        "FPVS Toolbox is generating L2-MNE source maps for 3D visualization.",
-    ),
-    "eloreta_source_maps": (
-        5,
-        "Generating eLORETA Source Maps",
-        "FPVS Toolbox is generating eLORETA source maps for 3D visualization.",
-    ),
     "post_processing_complete": (
-        5,
+        3,
         "Post-Processing Complete",
         "FPVS Toolbox has finished preparing downstream analysis outputs.",
     ),
     "post_processing_failed": (
-        5,
+        3,
         "Post-processing Incomplete",
         "Downstream analysis outputs are not ready. Review the reported failure.",
     ),
@@ -165,8 +148,6 @@ def _post_processing_display_state(message: str) -> tuple[str, str]:
     lowered = text.lower()
     if _post_processing_message_mentions_frequency_domain_qc(lowered):
         return _POST_PROCESSING_QC_TITLE, _POST_PROCESSING_QC_MESSAGE
-    if _post_processing_message_mentions_source_maps(lowered):
-        return _POST_PROCESSING_SOURCE_MAPS_TITLE, _POST_PROCESSING_SOURCE_MAPS_MESSAGE
     if _post_processing_message_mentions_harmonic_selection(lowered):
         return _POST_PROCESSING_HARMONICS_TITLE, _POST_PROCESSING_HARMONICS_MESSAGE
     if _post_processing_message_mentions_stats_ready(lowered):
@@ -191,24 +172,6 @@ def _post_processing_phase_display_state(
         )
     phase_index, title, default_message = phase_state
     return title, str(message).strip() or default_message, phase_index
-
-
-def _post_processing_message_mentions_source_maps(lowered: str) -> bool:
-    source_map_terms = (
-        "source map",
-        "source-map",
-        "loreta",
-        "eloreta",
-        "l2-mne",
-        "inverse model",
-        "cluster mask",
-        "source-space",
-        "source json",
-        "source-validation",
-        "participant source-map",
-        "participant fullfft workbooks",
-    )
-    return any(term in lowered for term in source_map_terms)
 
 
 def _post_processing_message_mentions_frequency_domain_qc(lowered: str) -> bool:
@@ -261,22 +224,11 @@ def _sync_project_tools_metadata_from_disk(project: Any) -> None:
         manifest["tools"] = tools
 
 
-def _post_processing_source_map_outcome(result: object) -> tuple[bool, bool]:
-    """Return whether source steps ran and whether at least one succeeded."""
-
-    if not isinstance(result, dict):
-        return False, False
-    steps = result.get("steps")
-    if not isinstance(steps, list):
-        return False, False
-
-    source_steps = [
-        step
-        for step in steps
-        if isinstance(step, dict)
-        and str(step.get("name") or "") in _POST_PROCESSING_SOURCE_STEP_NAMES
-    ]
-    return bool(source_steps), any(bool(step.get("ok")) for step in source_steps)
+def mark_cached_loreta_source_maps_stale(host: Any) -> None:
+    """Schedule a freshness check for the next activation of an existing page."""
+    page = getattr(host, "_loreta_visualizer_page", None)
+    if page is not None:
+        page.mark_project_source_maps_stale()
 
 
 def _post_processing_frequency_domain_outputs_ready(result: object) -> bool:
@@ -328,26 +280,6 @@ def _post_processing_failure_reason(result: object) -> str:
                     if reason:
                         return reason
     return "Required post-processing steps did not complete. Review the processing log."
-
-
-def _refresh_cached_loreta_source_maps(
-    host: Any,
-    *,
-    invalidate_if_missing: bool = False,
-) -> bool:
-    """Reload generated manifests when the embedded LORETA page already exists."""
-
-    page = getattr(host, "_loreta_visualizer_page", None)
-    reload_maps = getattr(page, "reload_project_source_maps_from_disk", None)
-    if not callable(reload_maps):
-        return False
-    try:
-        if invalidate_if_missing:
-            return bool(reload_maps(invalidate_if_missing=True))
-        return bool(reload_maps())
-    except (OSError, RuntimeError, TypeError, ValueError):
-        logger.warning("loreta_cached_page_refresh_failed", exc_info=True)
-        return False
 
 
 def _format_timing_summary(result: dict) -> str | None:
@@ -686,9 +618,6 @@ def _start_post_processing_pipeline_after_processing(
         pending_qc_report: dict | None = None
         host._last_run_excel_path = ""
         try:
-            source_maps_attempted, source_maps_succeeded = (
-                _post_processing_source_map_outcome(result)
-            )
             frequency_domain_outputs_ready = (
                 _post_processing_frequency_domain_outputs_ready(result)
             )
@@ -724,29 +653,7 @@ def _start_post_processing_pipeline_after_processing(
                 # provenance. Read back its metadata without republishing it.
                 _sync_project_tools_metadata_from_disk(project)
             if result.get("ok"):
-                from Main_App.processing.hardware_capabilities import spatial_tool_unavailable_reason
-
-                source_limitation = spatial_tool_unavailable_reason(project, "LORETA Visualizer")
-                if source_limitation:
-                    host.log(
-                        "Post-processing finished: harmonics and compatible analysis-ready "
-                        "workbooks are prepared. Automatic source-map generation was skipped "
-                        "because this montage has no qualified source model.",
-                        level=logging.INFO,
-                    )
-                elif result.get("has_warnings"):
-                    host.log(
-                        "Post-processing completed with usable LORETA outputs and "
-                        "source-cohort warnings. Review the logged participant omissions.",
-                        level=logging.WARNING,
-                    )
-                else:
-                    host.log(
-                        "Post-processing pipeline finished: harmonics, standard Stats-ready "
-                        "Summed BCA, the full-audit analysis-ready workbook, and LORETA "
-                        "source-map generation steps completed.",
-                        level=logging.INFO,
-                    )
+                host.log("Post-processing finished. Analysis outputs are ready.", level=logging.INFO)
             elif frequency_domain_outputs_ready and host._post_processing_failure_reason:
                 host.log(
                     f"Post-processing is incomplete: {host._post_processing_failure_reason} "
@@ -766,19 +673,6 @@ def _start_post_processing_pipeline_after_processing(
                     f"are not ready: {host._post_processing_failure_reason}",
                     level=logging.WARNING,
                 )
-            if source_maps_attempted:
-                source_maps_reloaded = _refresh_cached_loreta_source_maps(
-                    host,
-                    invalidate_if_missing=True,
-                )
-                if (
-                    source_maps_succeeded
-                    and not result.get("ok")
-                    and source_maps_reloaded
-                ):
-                    logger.info(
-                        "loreta_cached_page_refreshed_after_partial_pipeline_success"
-                    )
         finally:
             if action_button is not None:
                 action_button.setToolTip(previous_action_tooltip)
@@ -788,6 +682,7 @@ def _start_post_processing_pipeline_after_processing(
             host._post_processing_pipeline_bridge = None
             if bridge is not None:
                 bridge.deleteLater()
+            mark_cached_loreta_source_maps_stale(host)
             if pending_qc_report is not None:
                 _handle_frequency_domain_qc_review(
                     host,
@@ -822,7 +717,7 @@ def _start_post_processing_pipeline_after_processing(
     worker.finished.connect(bridge.handle_finished)
     thread.finished.connect(thread.deleteLater)
     host.log(
-        "Processing finished; preparing harmonics, analysis-ready workbooks, and LORETA source maps...",
+        "Preparing harmonics and analysis workbooks.",
         level=logging.INFO,
     )
     if action_button is not None:
@@ -1376,11 +1271,15 @@ def start_processing(host: Any, *, log: logging.Logger = logger) -> None:
             host.log("No new or changed files need processing.", level=logging.INFO)
             _reset_failed_start(host)
             if not is_single_ui and chosen_plan.completed_count:
-                from Main_App.processing.artifact_freshness import published_artifacts_need_rebuild
+                from Main_App.processing.artifact_freshness import published_workbooks_need_rebuild
                 from Main_App.processing.frequency_domain_qc import is_frequency_domain_output_stale
+                from Main_App.projects import project_recording_context
 
-                root = host.currentProject.project_root
-                if is_frequency_domain_output_stale(root) or published_artifacts_need_rebuild(root):
+                project = host.currentProject
+                root = project.project_root
+                if is_frequency_domain_output_stale(root) or published_workbooks_need_rebuild(
+                    root, repeated_session=project_recording_context(project).is_repeated_session
+                ):
                     resume_post_processing(host)
             return
         missing = additional_preflight_infos_for_chosen_scope(chosen_plan, settings)

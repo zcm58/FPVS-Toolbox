@@ -147,9 +147,12 @@ def _worker(exporter, cancellation=None):
 
     worker = SimpleNamespace(
         _export_modes=(PROJECT_SOURCE_EXPORT_HAUK_SOURCE_PSD, PROJECT_SOURCE_EXPORT_ELORETA_SOURCE_PSD),
+        _project=None,
         cancellation=cancellation or SourceBuildCancellation(),
         _run_export_mode=exporter,
+        _report_cells=lambda *_args: None,
         progress=signal("progress"),
+        build_stage=signal("build_stage"),
         exported=signal("exported"),
         failed=signal("failed"),
         cancelled=signal("cancelled"),
@@ -161,7 +164,7 @@ def _worker(exporter, cancellation=None):
 def test_cancelled_worker_preserves_successful_first_method_and_finishes():
     completed = object()
 
-    def exporter(mode):
+    def exporter(mode, _completed_cell_callback):
         if mode == PROJECT_SOURCE_EXPORT_HAUK_SOURCE_PSD:
             return completed
         raise SourceBuildCancelled()
@@ -169,7 +172,9 @@ def test_cancelled_worker_preserves_successful_first_method_and_finishes():
     worker, events = _worker(exporter)
     ProjectSourceMapExportWorker.run(worker)
 
-    assert [name for name, _ in events] == ["progress", "progress", "exported", "cancelled", "finished"]
+    assert [name for name, _ in events] == [
+        "progress", "build_stage", "progress", "build_stage", "exported", "cancelled", "finished",
+    ]
     result = next(args[0] for name, args in events if name == "exported")
     assert result.results == (completed,)
     assert result.failures == ()

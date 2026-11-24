@@ -396,6 +396,14 @@ def _retire_widget(widget: Any, *, workspace: Any, seen: set[int]) -> None:
             except RuntimeError:
                 pass
 
+    retire = getattr(widget, "retire_from_workspace", None)
+    if callable(retire):
+        try:
+            retire()
+        except RuntimeError:
+            pass
+        return
+
     closer = getattr(widget, "close", None)
     if callable(closer):
         try:
@@ -411,10 +419,17 @@ def _retire_widget(widget: Any, *, workspace: Any, seen: set[int]) -> None:
             pass
 
 
-def reset_project_context_workspace(host: Any) -> bool:
+def reset_project_context_workspace(host: Any, *, _retire_loreta: bool = True) -> bool:
     """Discard project-bound embedded pages after the active project changes."""
     workspace = getattr(host, "workspace_stack", None)
     seen: set[int] = set()
+
+    if _retire_loreta:
+        # The old page keeps its own workers alive while a new project can
+        # open a fresh LORETA page immediately.
+        loreta_page = getattr(host, "_loreta_visualizer_page", None)
+        host._loreta_visualizer_page = None
+        _retire_widget(loreta_page, workspace=workspace, seen=seen)
 
     publication_maps_page = getattr(host, "_publication_maps_page", None)
     has_active_generation = getattr(
@@ -440,7 +455,7 @@ def reset_project_context_workspace(host: Any) -> bool:
 
                 def finish_deferred_reset() -> None:
                     host._publication_maps_context_reset_pending = False
-                    reset_project_context_workspace(host)
+                    reset_project_context_workspace(host, _retire_loreta=False)
 
                 connector(finish_deferred_reset)
             else:
@@ -468,7 +483,6 @@ def reset_project_context_workspace(host: Any) -> bool:
         "_individual_detectability_page",
         "_plot_generator_page",
         "_publication_maps_page",
-        "_loreta_visualizer_page",
     ):
         widget = getattr(host, attr_name, None)
         if attr_name == "_free_harmonic_clustering_page" and widget is not None:

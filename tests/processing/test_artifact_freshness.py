@@ -10,6 +10,7 @@ from Main_App.processing.artifact_freshness import (
     ARTIFACT_STATUS_CURRENT,
     ARTIFACT_STATUS_FAILED,
     ARTIFACT_STATUS_STALE,
+    L2_MNE_SOURCE_PSD_ARTIFACT,
     SELECTION_DEPENDENT_ARTIFACTS,
     STATS_READY_SUMMED_BCA_ARTIFACT,
     activate_selection_freshness,
@@ -20,9 +21,10 @@ from Main_App.processing.artifact_freshness import (
     mark_artifact_failed,
     mark_selection_derivatives_stale,
     preserve_artifact_for_rebuild,
-    published_artifacts_need_rebuild,
+    published_workbooks_need_rebuild,
     require_current_artifact,
     selection_dependent_artifacts_are_current,
+    selection_dependent_workbooks_are_current,
     selection_fingerprint_from_metadata,
 )
 
@@ -337,7 +339,7 @@ def test_all_selection_dependent_artifacts_must_match_active_fingerprint(
         mark_artifact_current(root, artifact_id, target, "active")
 
     assert selection_dependent_artifacts_are_current(root, "active") is True
-    assert not published_artifacts_need_rebuild(root)
+    assert not published_workbooks_need_rebuild(root, repeated_session=False)
     assert selection_dependent_artifacts_are_current(root, "other") is False
 
 
@@ -366,7 +368,24 @@ def test_selection_dependents_are_not_current_when_recorded_target_is_missing(
     missing.unlink()
 
     assert selection_dependent_artifacts_are_current(root, "active") is False
-    assert published_artifacts_need_rebuild(root)
+    assert published_workbooks_need_rebuild(root, repeated_session=False)
+    assert not published_workbooks_need_rebuild(root, repeated_session=True)
+
+
+def test_previously_published_source_maps_do_not_require_a_workbook_rebuild(tmp_path: Path) -> None:
+    root = _project(tmp_path)
+    activate_selection_freshness(root, {"selection_fingerprint": "active"}, selection_summary_path=_summary(root))
+    for artifact_id in (STATS_READY_SUMMED_BCA_ARTIFACT, ANALYSIS_READY_FULL_AUDIT_ARTIFACT):
+        target = canonical_artifact_path(root, artifact_id)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("current", encoding="utf-8")
+        mark_artifact_current(root, artifact_id, target, "active")
+    source_target = canonical_artifact_path(root, L2_MNE_SOURCE_PSD_ARTIFACT)
+    mark_artifact_failed(root, L2_MNE_SOURCE_PSD_ARTIFACT, source_target, "active", "Source maps unavailable")
+
+    assert not published_workbooks_need_rebuild(root, repeated_session=False)
+    assert selection_dependent_workbooks_are_current(root, "active", repeated_session=False)
+    assert not selection_dependent_artifacts_are_current(root, "active")
 
 
 def test_successful_rebuild_archives_old_file_inside_project(tmp_path: Path) -> None:

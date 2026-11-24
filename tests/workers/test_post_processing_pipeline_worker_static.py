@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import ast
-from contextlib import ExitStack, contextmanager
+from contextlib import ExitStack
 from dataclasses import dataclass
 import json
 import logging
@@ -29,52 +29,7 @@ def _class_method(tree: ast.Module, method_name: str) -> ast.FunctionDef:
     return next(node for node in worker_class.body if isinstance(node, ast.FunctionDef) and node.name == method_name)
 
 
-def test_default_source_modes_are_time_domain_l2_then_eloreta() -> None:
-    tree = _worker_tree()
-    modes_assignment = next(
-        node
-        for node in tree.body
-        if isinstance(node, ast.Assign)
-        and any(isinstance(target, ast.Name) and target.id == "SOURCE_OUTPUT_MODES" for target in node.targets)
-    )
-
-    assert isinstance(modes_assignment.value, ast.Tuple)
-    assert [element.value for element in modes_assignment.value.elts if isinstance(element, ast.Constant)] == [
-        "l2_mne_source_psd",
-        "eloreta_volume_source_psd",
-    ]
-
-
-def test_source_psd_modes_are_the_fourth_and_fifth_phases_with_time_domain_status() -> None:
-    tree = _worker_tree()
-    phase_count_assignment = next(
-        node
-        for node in tree.body
-        if isinstance(node, ast.Assign)
-        and any(isinstance(target, ast.Name) and target.id == "POST_PROCESSING_PHASE_COUNT" for target in node.targets)
-    )
-    phase_map_assignment = next(
-        node
-        for node in tree.body
-        if isinstance(node, ast.Assign)
-        and any(isinstance(target, ast.Name) and target.id == "_SOURCE_PHASE_BY_MODE" for target in node.targets)
-    )
-    source_maps_method = _class_method(tree, "_run_source_maps")
-    status_text = {
-        node.value
-        for node in ast.walk(source_maps_method)
-        if isinstance(node, ast.Constant) and isinstance(node.value, str)
-    }
-
-    assert ast.unparse(phase_count_assignment.value) == "3 + len(SOURCE_OUTPUT_MODES)"
-    assert ast.literal_eval(phase_map_assignment.value) == {
-        "l2_mne_source_psd": "l2_mne_source_maps",
-        "eloreta_volume_source_psd": "eloreta_source_maps",
-    }
-    assert any("Hauk-informed time-domain source-space maps" in message for message in status_text)
-
-
-def test_stats_audit_and_source_steps_keep_their_pipeline_order() -> None:
+def test_stats_ready_export_precedes_full_audit() -> None:
     tree = _worker_tree()
     run_method = _class_method(tree, "run")
     try_node = next(node for node in run_method.body if isinstance(node, ast.Try))
@@ -90,26 +45,20 @@ def test_stats_audit_and_source_steps_keep_their_pipeline_order() -> None:
 
     stats_index = statement_call_index("_run_stats_ready_export")
     audit_index = statement_call_index("_run_analysis_ready_export")
-    source_index = statement_call_index("_run_source_maps")
-
-    assert stats_index < audit_index < source_index
+    assert stats_index < audit_index
 
 
-def test_participant_keyed_loreta_steps_have_a_canonical_repeated_session_gate() -> None:
+def test_participant_keyed_workbook_has_a_canonical_repeated_session_gate() -> None:
     tree = _worker_tree()
     gate_method = _class_method(tree, "_is_repeated_session_project")
     stats_method = _class_method(tree, "_run_stats_ready_export")
-    source_method = _class_method(tree, "_run_source_maps")
 
     gate_source = ast.unparse(gate_method)
     stats_source = ast.unparse(stats_method)
-    source_source = ast.unparse(source_method)
     assert "from Main_App.projects import project_recording_context" in gate_source
     assert "project_recording_context(self._project).is_repeated_session" in gate_source
     assert "if self._is_repeated_session_project()" in stats_source
-    assert "if self._is_repeated_session_project()" in source_source
     assert "_REPEATED_SESSION_STATS_READY_SKIP_MESSAGE" in stats_source
-    assert "_REPEATED_SESSION_SOURCE_SKIP_MESSAGE" in source_source
 
 
 def test_post_processing_run_bounds_xlsx_cache_with_exit_stack() -> None:
@@ -163,24 +112,6 @@ def test_post_processing_run_bounds_xlsx_cache_with_exit_stack() -> None:
         and statement.value.func.attr == "_run_frequency_domain_qc_review"
     )
     assert enter_index < qc_index
-    normal_close_index = min(
-        statement.lineno
-        for statement in ast.walk(try_node)
-        if _is_named_method_call(statement, "cache_stack", "close")
-    )
-    source_maps_index = next(
-        statement.lineno
-        for statement in ast.walk(try_node)
-        if isinstance(statement, ast.Expr)
-        and isinstance(statement.value, ast.Call)
-        and isinstance(statement.value.func, ast.Attribute)
-        and statement.value.func.attr == "extend"
-        and statement.value.args
-        and isinstance(statement.value.args[0], ast.Call)
-        and isinstance(statement.value.args[0].func, ast.Attribute)
-        and statement.value.args[0].func.attr == "_run_source_maps"
-    )
-    assert normal_close_index < source_maps_index
     assert any(isinstance(node, ast.Return) for node in ast.walk(try_node))
     assert try_node.handlers
     assert any(
@@ -308,56 +239,6 @@ def _is_named_method_call(
     )
 
 
-def test_source_psd_exporters_are_loaded_through_separate_expected_seams() -> None:
-    tree = _worker_tree()
-    expected_loaders = {
-        "_load_source_psd_export_api": (
-            "Tools.LORETA_Visualizer.source_producers.project_l2_mne_hauk_source_psd_export",
-            {
-                "default_project_l2_mne_hauk_source_psd_output_dir",
-                "write_project_l2_mne_hauk_source_psd_payloads",
-            },
-        ),
-        "_load_eloreta_source_psd_export_api": (
-            "Tools.LORETA_Visualizer.source_producers.project_eloreta_volume_hauk_source_psd_export",
-            {
-                "default_project_eloreta_volume_hauk_source_psd_output_dir",
-                "write_project_eloreta_volume_hauk_source_psd_payloads",
-            },
-        ),
-    }
-    for loader_name, (module_name, imported_names) in expected_loaders.items():
-        loader = next(
-            node
-            for node in tree.body
-            if isinstance(node, ast.FunctionDef) and node.name == loader_name
-        )
-        import_node = next(node for node in loader.body if isinstance(node, ast.ImportFrom))
-        assert import_node.module == module_name
-        assert {alias.name for alias in import_node.names} == imported_names
-
-    source_mode_method = _class_method(tree, "_run_source_map_mode")
-    writer_calls = [
-        node
-        for node in ast.walk(source_mode_method)
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "write_payloads"
-    ]
-    assert len(writer_calls) == 2
-    for writer_call in writer_calls:
-        assert {keyword.arg for keyword in writer_call.keywords} == {
-            "project",
-            "project_root",
-            "include_flagged_subjects",
-            "allow_fetch_fsaverage",
-            "progress_callback",
-            "build_batch_id",
-        }
-
-    source_text = WORKER_PATH.read_text(encoding="utf-8")
-    assert "project_l2_mne_hauk_zscore_export" not in source_text
-    assert "project_eloreta_volume_export" not in source_text
-
-
 def _pipeline_without_qt(tmp_path, *, failed_step="", review_error="", repeated_session=False):
     """Run the production orchestration with exporter/signal doubles and no Qt."""
 
@@ -437,13 +318,23 @@ def _pipeline_without_qt(tmp_path, *, failed_step="", review_error="", repeated_
     for name in methods:
         setattr(worker, name, MethodType(namespace[name], worker))
 
-    def source_maps(_root):
-        worker._emit_phase_progress("l2_mne_source_maps", 4, "Source maps")
-        worker._emit_phase_progress("eloreta_source_maps", 5, "Source maps")
-        return [result("l2_mne_source_psd"), result("eloreta_volume_source_psd")]
-
-    worker._run_source_maps = source_maps
     return worker
+
+
+@pytest.mark.parametrize("selection_resume", [False, True])
+def test_workbook_release_does_not_import_source_map_producers(tmp_path, monkeypatch, selection_resume):
+    worker = _pipeline_without_qt(tmp_path)
+    worker._resume_from_selection = selection_resume
+    monkeypatch.setitem(sys.modules, "Tools.LORETA_Visualizer.source_producers", None)
+
+    worker.run()
+
+    result = worker.finished.emit.call_args.args[0]
+    assert result["ok"] is True
+    assert [step["name"] for step in result["steps"]][-2:] == [
+        "stats_ready_summed_bca", "analysis_ready_full_audit",
+    ]
+    assert worker.phase_progress.emit.call_args.args[:3] == ("post_processing_complete", 3, 3)
 
 
 def test_prerequisite_failure_persists_reason_and_never_reports_completion(tmp_path):
@@ -466,7 +357,7 @@ def test_prerequisite_failure_persists_reason_and_never_reports_completion(tmp_p
 
 
 @pytest.mark.parametrize("outcome", ["complete", "review_pause", "review_error"])
-def test_validation_scope_ends_before_sources_and_on_every_review_exit(tmp_path, outcome):
+def test_validation_scope_closes_when_post_processing_releases_workbooks_or_pauses(tmp_path, outcome):
     from Main_App.processing.post_processing_context import (
         CACHE_MISS, cached_validation, remember_validation, validation_scope_active,
     )
@@ -483,69 +374,19 @@ def test_validation_scope_ends_before_sources_and_on_every_review_exit(tmp_path,
         return {"review_required": outcome == "review_pause"}
 
     original_export = worker._run_stats_ready_export
-    original_sources = worker._run_source_maps
 
     def export(*args):
         assert cached_validation("test", "review") == {"current": True}
         stages.append("export")
         return original_export(*args)
 
-    def sources(*args):
-        assert not validation_scope_active()
-        assert cached_validation("test", "review") is CACHE_MISS
-        stages.append("sources")
-        return original_sources(*args)
-
     worker._run_frequency_domain_qc_review = review
     worker._run_stats_ready_export = export
-    worker._run_source_maps = sources
     worker.run()
 
-    assert stages == (["review", "export", "sources"] if outcome == "complete" else ["review"])
+    assert stages == (["review", "export"] if outcome == "complete" else ["review"])
     assert not validation_scope_active()
     assert cached_validation("test", "review") is CACHE_MISS
-
-
-@pytest.mark.parametrize("fail_second_mode", [False, True])
-def test_source_modes_share_one_compatibility_scope_and_release_it(tmp_path, monkeypatch, fail_second_mode):
-    from Tools.LORETA_Visualizer.source_producers import source_psd_cache
-
-    worker = _pipeline_without_qt(tmp_path)
-    namespace = worker.run.__func__.__globals__
-    method = _class_method(_worker_tree(), "_run_source_maps")
-    module = ast.Module(body=[method], type_ignores=[])
-    exec(compile(ast.fix_missing_locations(module), str(WORKER_PATH), "exec"), namespace)
-    worker._is_repeated_session_project = lambda: False
-    worker._pipeline_steps = []
-    worker._emit_progress = Mock()
-    state = {"entries": 0, "active": False}
-    modes = []
-
-    @contextmanager
-    def scope():
-        state.update(entries=state["entries"] + 1, active=True)
-        try:
-            yield
-        finally:
-            state["active"] = False
-
-    def export(_root, mode):
-        assert state["active"]
-        modes.append(mode)
-        if fail_second_mode and len(modes) == 2:
-            raise ValueError("Second source export failed")
-        return mode
-
-    monkeypatch.setattr(source_psd_cache, "source_psd_cache_scope", scope)
-    worker._run_source_map_mode = export
-    run_sources = MethodType(namespace["_run_source_maps"], worker)
-    if fail_second_mode:
-        with pytest.raises(ValueError, match="Second source export failed"):
-            run_sources(tmp_path)
-    else:
-        assert run_sources(tmp_path) == ["l2_mne_source_psd", "eloreta_volume_source_psd"]
-    assert modes == ["l2_mne_source_psd", "eloreta_volume_source_psd"]
-    assert state == {"entries": 1, "active": False}
 
 
 @pytest.mark.parametrize("failed_step", ["full_fft_provenance", "harmonic_selection", "stats_ready_summed_bca"])
@@ -566,32 +407,12 @@ def test_required_output_failure_preserves_progress_and_upstream_independence(tm
     assert manifest["tools"]["processing"]["full_fft_provenance"]["status"] == "current"
 
 
-def test_brain_products_source_maps_skip_before_models_and_leave_no_fresh_artifact(tmp_path):
-    worker = _pipeline_without_qt(tmp_path)
-    worker._pipeline_steps = []
-    namespace = worker.run.__func__.__globals__
-    methods = [_class_method(_worker_tree(), name) for name in ("_run_source_maps", "_run_source_map_mode")]
-    exec(compile(ast.fix_missing_locations(ast.Module(body=methods, type_ignores=[])), str(WORKER_PATH), "exec"), namespace)
-    worker._project.preprocessing = {"hardware_platform": "brain_products", "hardware_confirmed": True}
-    worker._artifact_targets = {mode: tmp_path / mode for mode in namespace["SOURCE_OUTPUT_MODES"]}
-    worker._artifact_archives = dict(worker._artifact_targets)
-    worker._run_source_map_mode = Mock(side_effect=AssertionError("Unqualified source model must not run"))
-    steps = MethodType(namespace["_run_source_maps"], worker)(tmp_path)
-    assert len(steps) == len(namespace["SOURCE_OUTPUT_MODES"])
-    assert all(step.ok and "BioSemi64" in step.message and not step.path for step in steps)
-    worker._run_source_map_mode.assert_not_called()
-    assert not worker._artifact_targets
-    assert not worker._artifact_archives
-    direct = MethodType(namespace["_run_source_map_mode"], worker)(tmp_path, "l2_mne_source_psd")
-    assert direct.ok and "Brain Products" in direct.message and not direct.path
-
-
 @pytest.mark.parametrize("failed_step", ["full_fft_provenance", "harmonic_selection"])
 def test_failed_prerequisite_stops_consumers_and_emits_one_root_failure(tmp_path, failed_step):
     worker = _pipeline_without_qt(tmp_path, failed_step=failed_step)
     for name in (
         "_run_harmonic_selection", "_run_stats_ready_export",
-        "_run_analysis_ready_export", "_run_source_maps",
+        "_run_analysis_ready_export",
     ):
         setattr(worker, name, Mock(wraps=getattr(worker, name)))
 
@@ -610,31 +431,29 @@ def test_failed_prerequisite_stops_consumers_and_emits_one_root_failure(tmp_path
     assert [step["name"] for step in payload["steps"]] == expected_steps
     worker._run_stats_ready_export.assert_not_called()
     worker._run_analysis_ready_export.assert_not_called()
-    worker._run_source_maps.assert_not_called()
     worker._activate_artifact_freshness.assert_not_called()
     assert worker._dataset_index is None
     assert worker._harmonic_selection_metadata is None
 
 
 @pytest.mark.parametrize("failed_step", ["stats_ready_summed_bca", "analysis_ready_full_audit"])
-def test_failed_sibling_export_still_runs_source_maps(tmp_path, failed_step):
+def test_failed_workbook_export_does_not_suppress_its_sibling(tmp_path, failed_step):
     worker = _pipeline_without_qt(tmp_path, failed_step=failed_step)
-    worker._run_source_maps = Mock(wraps=worker._run_source_maps)
 
     worker.run()
 
-    worker._run_source_maps.assert_called_once_with(tmp_path.resolve())
     worker.finished.emit.assert_called_once()
     payload = worker.finished.emit.call_args.args[0]
     assert payload["ok"] is False
-    assert {step["name"] for step in payload["steps"] if step["ok"]}.issuperset(
-        {"full_fft_provenance", "harmonic_selection", "l2_mne_source_psd", "eloreta_volume_source_psd"}
-    )
+    workbook_ids = {"stats_ready_summed_bca", "analysis_ready_full_audit"}
+    assert {step["name"] for step in payload["steps"]} == {
+        "frequency_domain_qc", "full_fft_provenance", "harmonic_selection", *workbook_ids,
+    }
+    assert {step["name"] for step in payload["steps"] if not step["ok"]} == {failed_step}
 
 
-@pytest.mark.parametrize("failed_step", ["analysis_ready_full_audit", "l2_mne_source_psd", "eloreta_volume_source_psd"])
-def test_optional_export_failure_leaves_frequency_outputs_current(tmp_path, failed_step):
-    worker = _pipeline_without_qt(tmp_path, failed_step=failed_step)
+def test_optional_export_failure_leaves_frequency_outputs_current(tmp_path):
+    worker = _pipeline_without_qt(tmp_path, failed_step="analysis_ready_full_audit")
 
     worker.run()
 
@@ -642,7 +461,7 @@ def test_optional_export_failure_leaves_frequency_outputs_current(tmp_path, fail
     phase, completed, total, _message = worker.phase_progress.emit.call_args.args
     assert payload["ok"] is False
     assert payload["failure_reason"] == ""
-    assert (phase, completed, total) == ("post_processing_complete", 5, 5)
+    assert (phase, completed, total) == ("post_processing_complete", 3, 3)
     manifest = json.loads((tmp_path / "project.json").read_text(encoding="utf-8"))
     assert not manifest["tools"].get("frequency_domain_qc", {}).get("downstream_outputs_stale")
 
@@ -675,7 +494,7 @@ def test_full_audit_failure_is_required_only_for_repeated_stats(
         assert "incomplete" in message
         assert "optional" not in message
     else:
-        assert (phase, completed, total) == ("post_processing_complete", 5, 5)
+        assert (phase, completed, total) == ("post_processing_complete", 3, 3)
         assert "optional" in message
     if selection_resume:
         worker._run_frequency_domain_qc_review.assert_not_called()
@@ -684,20 +503,6 @@ def test_full_audit_failure_is_required_only_for_repeated_stats(
     assert (tmp_path / "project.json").read_bytes() == before
     assert worker._dataset_index is None
     assert worker._harmonic_selection_metadata is None
-
-
-def test_exception_after_core_outputs_does_not_report_a_required_output_failure(tmp_path):
-    worker = _pipeline_without_qt(tmp_path)
-    worker._run_source_maps = Mock(side_effect=RuntimeError("Optional source export failed"))
-
-    worker.run()
-
-    payload = worker.finished.emit.call_args.args[0]
-    phase, completed, total, _message = worker.phase_progress.emit.call_args.args
-    assert payload["ok"] is False
-    assert payload["failure_reason"] == ""
-    assert payload["steps"][-1]["message"] == "Optional source export failed"
-    assert (phase, completed, total) == ("post_processing_complete", 5, 5)
 
 
 @pytest.mark.parametrize("error_type", [MemoryError, AttributeError, IndexError])
@@ -711,7 +516,6 @@ def test_unexpected_stage_error_still_finishes_and_releases_caches(
     worker._resume_from_selection = selection_resume
     failed_stage = "_run_stats_ready_export" if selection_resume else "_run_frequency_domain_qc_review"
     setattr(worker, failed_stage, Mock(side_effect=error_type("Injected stage failure")))
-    worker._run_source_maps = Mock()
 
     worker.run()
 
@@ -720,7 +524,6 @@ def test_unexpected_stage_error_still_finishes_and_releases_caches(
     assert payload["ok"] is False
     assert payload["failure_reason"] == "Injected stage failure"
     assert payload["steps"][-1]["message"] == "Injected stage failure"
-    worker._run_source_maps.assert_not_called()
     assert not validation_scope_active()
     assert worker._dataset_index is None
     assert worker._harmonic_selection_metadata is None

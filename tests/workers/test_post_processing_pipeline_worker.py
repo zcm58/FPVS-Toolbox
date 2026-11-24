@@ -9,8 +9,11 @@ import pytest
 
 import Main_App.workers.post_processing_pipeline_worker as worker_module
 from Main_App.processing.artifact_freshness import (
+    ANALYSIS_READY_FULL_AUDIT_ARTIFACT,
     ARTIFACT_STATUS_CURRENT,
     ARTIFACT_STATUS_STALE,
+    ELORETA_VOLUME_SOURCE_PSD_ARTIFACT,
+    L2_MNE_SOURCE_PSD_ARTIFACT,
     SELECTION_DEPENDENT_ARTIFACTS,
     STATS_READY_SUMMED_BCA_ARTIFACT,
     activate_selection_freshness,
@@ -107,19 +110,6 @@ class _RecordingWorker(PostProcessingPipelineWorker):
             "FullFFT provenance ok" if ok else "FullFFT provenance blocked",
         )
 
-    def _run_source_maps(self, project_root: Path) -> list[PostProcessingStepResult]:
-        self.calls.append(f"source:{project_root.name}")
-        return super()._run_source_maps(project_root)
-
-    def _run_source_map_mode(
-        self,
-        project_root: Path,
-        mode: str,
-    ) -> PostProcessingStepResult:
-        self.calls.append(f"source_mode:{mode}:{project_root.name}")
-        assert mode in {"l2_mne_source_psd", "eloreta_volume_source_psd"}
-        return PostProcessingStepResult(mode, True, f"{mode} ok", f"{mode}.json")
-
 
 class _StatsFailureWorker(_RecordingWorker):
     def _run_stats_ready_export(self, project_root: Path) -> PostProcessingStepResult:
@@ -162,24 +152,6 @@ def test_condition_repair_restarts_qc_instead_of_reusing_accepted_selection(tmp_
     assert results[-1]["requires_frequency_domain_qc_review"] is True
 
 
-class _CohortWarningWorker(_RecordingWorker):
-    def _run_source_map_mode(
-        self,
-        project_root: Path,
-        mode: str,
-    ) -> PostProcessingStepResult:
-        result = super()._run_source_map_mode(project_root, mode)
-        if mode != "l2_mne_source_psd":
-            return result
-        return PostProcessingStepResult(
-            result.name,
-            result.ok,
-            "P09 was omitted from every source condition.",
-            result.path,
-            warning=True,
-        )
-
-
 class _RepeatedSessionRecordingWorker(_RecordingWorker):
     def _run_stats_ready_export(self, project_root: Path) -> PostProcessingStepResult:
         self.calls.append(f"stats:{project_root.name}")
@@ -189,299 +161,7 @@ class _RepeatedSessionRecordingWorker(_RecordingWorker):
         )
 
 
-@pytest.mark.parametrize(
-    ("mode", "loader_name", "output_folder"),
-    (
-        ("l2_mne_source_psd", "_load_source_psd_export_api", "l2"),
-        (
-            "eloreta_volume_source_psd",
-            "_load_eloreta_source_psd_export_api",
-            "eloreta",
-        ),
-    ),
-)
-def test_each_source_map_step_remains_successful_when_source_participants_are_omitted(
-    tmp_path,
-    monkeypatch,
-    mode: str,
-    loader_name: str,
-    output_folder: str,
-) -> None:
-    project = _Project(tmp_path)
-    worker = PostProcessingPipelineWorker(project)
-    output_dir = tmp_path / output_folder
-    manifest_path = output_dir / "manifest.json"
-
-    def _write_payloads(**_kwargs):
-        return SimpleNamespace(
-            manifest_path=manifest_path,
-            included_participants=("P01", "P02"),
-            source_ineligible_participants=(
-                SimpleNamespace(participant_id="P09"),
-            ),
-        )
-
-    monkeypatch.setattr(
-        worker_module,
-        loader_name,
-        lambda: (lambda _root: output_dir, _write_payloads),
-    )
-
-    result = worker._run_source_map_mode(tmp_path, mode)
-
-    assert result.ok is True
-    assert result.warning is True
-    assert "generated from 2 source-eligible participant(s)" in result.message
-    assert "P09" in result.message
-    assert result.as_dict()["warning"] is True
-
-
-@pytest.mark.parametrize(
-    ("mode", "loader_name", "output_folder"),
-    (
-        ("l2_mne_source_psd", "_load_source_psd_export_api", "l2"),
-        (
-            "eloreta_volume_source_psd",
-            "_load_eloreta_source_psd_export_api",
-            "eloreta",
-        ),
-    ),
-)
-def test_each_source_map_step_reports_condition_specific_omissions_as_warnings(
-    tmp_path,
-    monkeypatch,
-    mode: str,
-    loader_name: str,
-    output_folder: str,
-) -> None:
-    worker = PostProcessingPipelineWorker(_Project(tmp_path))
-    output_dir = tmp_path / output_folder
-
-    def _write_payloads(**_kwargs):
-        return SimpleNamespace(
-            manifest_path=output_dir / "manifest.json",
-            included_participants=("P01", "P02"),
-            source_ineligible_participants=(),
-            source_condition_omissions=(
-                SimpleNamespace(
-                    participant_id="P01",
-                    condition_id="22",
-                    reason_code="noncanonical_source_sample_count",
-                ),
-            ),
-        )
-
-    monkeypatch.setattr(
-        worker_module,
-        loader_name,
-        lambda: (lambda _root: output_dir, _write_payloads),
-    )
-
-    result = worker._run_source_map_mode(tmp_path, mode)
-
-    assert result.ok is True
-    assert result.warning is True
-    assert "1 incompatible or unavailable participant-condition" in result.message
-
-
-@pytest.mark.parametrize(
-    "failing_mode",
-    ("l2_mne_source_psd", "eloreta_volume_source_psd"),
-)
-def test_source_map_modes_run_independently_after_a_partial_failure(
-    tmp_path,
-    monkeypatch,
-    failing_mode: str,
-) -> None:
-    worker = PostProcessingPipelineWorker(_Project(tmp_path))
-    calls: list[str] = []
-
-    def _writer(mode: str):
-        def write_payloads(**_kwargs):
-            calls.append(mode)
-            if mode == failing_mode:
-                raise RuntimeError(f"{mode} failed intentionally")
-            return SimpleNamespace(
-                manifest_path=tmp_path / mode / "manifest.json",
-                included_participants=("P01", "P02"),
-                source_ineligible_participants=(),
-            )
-
-        return write_payloads
-
-    monkeypatch.setattr(
-        worker_module,
-        "_load_source_psd_export_api",
-        lambda: (
-            lambda _root: tmp_path / "l2_mne_source_psd",
-            _writer("l2_mne_source_psd"),
-        ),
-    )
-    monkeypatch.setattr(
-        worker_module,
-        "_load_eloreta_source_psd_export_api",
-        lambda: (
-            lambda _root: tmp_path / "eloreta_volume_source_psd",
-            _writer("eloreta_volume_source_psd"),
-        ),
-    )
-
-    results = worker._run_source_maps(tmp_path)
-
-    assert calls == ["l2_mne_source_psd", "eloreta_volume_source_psd"]
-    assert [result.name for result in results] == calls
-    assert [result.ok for result in results] == [
-        mode != failing_mode for mode in calls
-    ]
-    assert failing_mode in next(result.message for result in results if not result.ok)
-
-
-def test_failed_source_exporter_is_not_preceded_by_pipeline_deletion(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _write_resume_project(tmp_path)
-    summary = tmp_path / "Quality Check" / "Harmonic_Selection_Summary.xlsx"
-    activate_selection_freshness(
-        tmp_path,
-        {"selection_fingerprint": "old-selection"},
-        selection_summary_path=summary,
-    )
-    artifact_id = "l2_mne_source_psd"
-    output_dir = canonical_artifact_path(tmp_path, artifact_id)
-    output_dir.mkdir(parents=True)
-    (output_dir / "old.json").write_text("old", encoding="utf-8")
-    mark_artifact_current(
-        tmp_path,
-        artifact_id,
-        output_dir,
-        "old-selection",
-    )
-
-    worker = PostProcessingPipelineWorker(_Project(tmp_path))
-    worker._harmonic_selection_metadata = {  # noqa: SLF001
-        "selection_fingerprint": "new-selection"
-    }
-    worker._previous_selection_fingerprint = "old-selection"  # noqa: SLF001
-    worker._activate_artifact_freshness(  # noqa: SLF001
-        tmp_path,
-        selection_summary_path=summary,
-    )
-
-    def _fail_after_partial_write(**_kwargs):
-        assert (output_dir / "old.json").read_text(encoding="utf-8") == "old"
-        raise RuntimeError("source rebuild failed intentionally")
-
-    monkeypatch.setattr(
-        worker_module,
-        "_load_source_psd_export_api",
-        lambda: (lambda _root: output_dir, _fail_after_partial_write),
-    )
-
-    step = worker._record_artifact_freshness(  # noqa: SLF001
-        worker._run_source_map_mode(tmp_path, artifact_id)  # noqa: SLF001
-    )
-
-    assert step.ok is False
-    assert (output_dir / "old.json").read_text(encoding="utf-8") == "old"
-    assert not (output_dir / "partial.json").exists()
-    record = load_artifact_freshness_registry(tmp_path).artifacts[artifact_id]
-    assert record.status == ARTIFACT_STATUS_STALE
-    assert record.built_from_selection_fingerprint == "old-selection"
-
-
-def test_pipeline_does_not_repeat_exporter_freshness_publication(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from Main_App.processing import artifact_freshness as freshness_module
-
-    _write_resume_project(tmp_path)
-    summary = tmp_path / "Quality Check" / "Harmonic_Selection_Summary.xlsx"
-    activate_selection_freshness(
-        tmp_path,
-        {"selection_fingerprint": "old-selection"},
-        selection_summary_path=summary,
-    )
-    artifact_id = "l2_mne_source_psd"
-    output_dir = canonical_artifact_path(tmp_path, artifact_id)
-    output_dir.mkdir(parents=True)
-    (output_dir / "old.json").write_text("old", encoding="utf-8")
-    mark_artifact_current(tmp_path, artifact_id, output_dir, "old-selection")
-
-    worker = PostProcessingPipelineWorker(_Project(tmp_path))
-    worker._harmonic_selection_metadata = {  # noqa: SLF001
-        "selection_fingerprint": "new-selection"
-    }
-    worker._previous_selection_fingerprint = "old-selection"  # noqa: SLF001
-    worker._activate_artifact_freshness(  # noqa: SLF001
-        tmp_path,
-        selection_summary_path=summary,
-    )
-
-    def _write_replacement(**_kwargs):
-        assert (output_dir / "old.json").is_file()
-        manifest = output_dir / "manifest.json"
-        manifest.write_text("new", encoding="utf-8")
-        return SimpleNamespace(
-            manifest_path=manifest,
-            included_participants=("P01",),
-            source_ineligible_participants=(),
-            source_condition_omissions=(),
-        )
-
-    monkeypatch.setattr(
-        worker_module,
-        "_load_source_psd_export_api",
-        lambda: (lambda _root: output_dir, _write_replacement),
-    )
-    source_step = worker._run_source_map_mode(  # noqa: SLF001
-        tmp_path,
-        artifact_id,
-    )
-    monkeypatch.setattr(
-        freshness_module,
-        "mark_artifact_current",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            PermissionError("project.json is locked")
-        ),
-    )
-
-    recorded = worker._record_artifact_freshness(source_step)  # noqa: SLF001
-
-    assert recorded is source_step
-    assert recorded.ok is True
-    assert (output_dir / "manifest.json").read_text(encoding="utf-8") == "new"
-
-
-def test_pipeline_reports_success_with_source_cohort_warnings(tmp_path) -> None:
-    worker = _CohortWarningWorker(_Project(tmp_path))
-    phase_progress: list[tuple[str, int, int, str]] = []
-    finished: list[dict] = []
-    worker.phase_progress.connect(
-        lambda phase_id, completed, total, message: phase_progress.append(
-            (phase_id, completed, total, message)
-        )
-    )
-    worker.finished.connect(finished.append)
-
-    worker.run()
-
-    assert finished[0]["ok"] is True
-    assert finished[0]["has_warnings"] is True
-    source_steps = finished[0]["steps"][-2:]
-    assert [step["warning"] for step in source_steps] == [True, False]
-    assert source_steps[0]["name"] == "l2_mne_source_psd"
-    assert source_steps[1]["name"] == "eloreta_volume_source_psd"
-    assert phase_progress[-1] == (
-        "post_processing_complete",
-        5,
-        5,
-        "Post-processing is complete with source-cohort warnings.",
-    )
-
-
-def test_repeated_session_pipeline_successfully_skips_participant_keyed_loreta(
+def test_repeated_session_pipeline_releases_recording_aware_workbook(
     tmp_path: Path,
 ) -> None:
     worker = _RepeatedSessionRecordingWorker(_repeated_project(tmp_path))
@@ -507,28 +187,21 @@ def test_repeated_session_pipeline_successfully_skips_participant_keyed_loreta(
         "harmonics",
         f"stats:{tmp_path.name}",
         f"audit:{tmp_path.name}",
-        f"source:{tmp_path.name}",
     ]
     steps = {step["name"]: step for step in finished[0]["steps"]}
     assert steps["stats_ready_summed_bca"]["ok"] is True
     assert "Skipped the legacy LORETA Stats-ready workbook" in steps[
         "stats_ready_summed_bca"
     ]["message"]
-    for mode in ("l2_mne_source_psd", "eloreta_volume_source_psd"):
-        assert steps[mode]["ok"] is True
-        assert "not recording-aware" in steps[mode]["message"]
+    assert set(steps) == {
+        "frequency_domain_qc", "full_fft_provenance", "harmonic_selection",
+        "stats_ready_summed_bca", "analysis_ready_full_audit",
+    }
     assert any("legacy LORETA Stats-ready workbook" in message for message in progress)
-    assert any("Automatic LORETA project-source generation" in message for message in progress)
-    source_phase_messages = [
-        message
-        for phase_id, _completed, _total, message in phase_progress
-        if phase_id in {"l2_mne_source_maps", "eloreta_source_maps"}
-    ]
-    assert source_phase_messages
-    assert all("not recording-aware" in message for message in source_phase_messages)
+    assert phase_progress[-1][:3] == ("post_processing_complete", 3, 3)
 
 
-def test_repeated_session_loreta_skips_preserve_existing_artifacts(
+def test_repeated_session_skip_preserves_existing_stats_ready_workbook(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -538,16 +211,7 @@ def test_repeated_session_loreta_skips_preserve_existing_artifacts(
     stats_target = canonical_artifact_path(tmp_path, "stats_ready_summed_bca")
     stats_target.parent.mkdir(parents=True)
     stats_target.write_text("legacy stats", encoding="utf-8")
-    source_targets = {
-        mode: canonical_artifact_path(tmp_path, mode)
-        for mode in ("l2_mne_source_psd", "eloreta_volume_source_psd")
-    }
-    for mode, target in source_targets.items():
-        target.mkdir(parents=True)
-        (target / "existing.json").write_text(mode, encoding="utf-8")
-    worker._artifact_targets.update(  # noqa: SLF001
-        {"stats_ready_summed_bca": stats_target, **source_targets}
-    )
+    worker._artifact_targets["stats_ready_summed_bca"] = stats_target
 
     def _unexpected_call(*_args, **_kwargs):
         raise AssertionError("Participant-keyed LORETA code must not run.")
@@ -557,26 +221,12 @@ def test_repeated_session_loreta_skips_preserve_existing_artifacts(
         "write_loreta_stats_ready_workbook",
         _unexpected_call,
     )
-    monkeypatch.setattr(
-        worker_module,
-        "_load_source_psd_export_api",
-        _unexpected_call,
-    )
-    monkeypatch.setattr(
-        worker_module,
-        "_load_eloreta_source_psd_export_api",
-        _unexpected_call,
-    )
 
     stats_result = worker._run_stats_ready_export(tmp_path)  # noqa: SLF001
-    source_results = worker._run_source_maps(tmp_path)  # noqa: SLF001
 
     assert stats_result.ok is True
     assert stats_result.path == ""
-    assert all(result.ok and not result.path for result in source_results)
     assert stats_target.read_text(encoding="utf-8") == "legacy stats"
-    for mode, target in source_targets.items():
-        assert (target / "existing.json").read_text(encoding="utf-8") == mode
     assert worker._artifact_targets == {}  # noqa: SLF001
 
 
@@ -603,30 +253,22 @@ def test_post_processing_pipeline_runs_steps_in_order(tmp_path) -> None:
         "harmonics",
         f"stats:{tmp_path.name}",
         f"audit:{tmp_path.name}",
-        f"source:{tmp_path.name}",
-        f"source_mode:l2_mne_source_psd:{tmp_path.name}",
-        f"source_mode:eloreta_volume_source_psd:{tmp_path.name}",
     ]
     assert progress == [
         "qc done",
         "harmonics done",
         "stats ready done",
         "full audit ready done",
-        "Generating Hauk-informed time-domain source-space maps for 3D visualization of oddball responses.",
     ]
     assert [message for message, _level in logs] == progress
     assert [event[:3] for event in phase_progress] == [
-        ("frequency_domain_qc", 0, 5),
-        ("frequency_domain_qc", 1, 5),
-        ("harmonic_selection", 1, 5),
-        ("harmonic_selection", 2, 5),
-        ("stats_ready_export", 2, 5),
-        ("stats_ready_export", 3, 5),
-        ("l2_mne_source_maps", 3, 5),
-        ("l2_mne_source_maps", 4, 5),
-        ("eloreta_source_maps", 4, 5),
-        ("eloreta_source_maps", 5, 5),
-        ("post_processing_complete", 5, 5),
+        ("frequency_domain_qc", 0, 3),
+        ("frequency_domain_qc", 1, 3),
+        ("harmonic_selection", 1, 3),
+        ("harmonic_selection", 2, 3),
+        ("stats_ready_export", 2, 3),
+        ("stats_ready_export", 3, 3),
+        ("post_processing_complete", 3, 3),
     ]
     assert all(message for _phase_id, _completed, _total, message in phase_progress)
     assert finished and finished[0]["ok"] is True
@@ -637,8 +279,6 @@ def test_post_processing_pipeline_runs_steps_in_order(tmp_path) -> None:
         "harmonic_selection",
         "stats_ready_summed_bca",
         "analysis_ready_full_audit",
-        "l2_mne_source_psd",
-        "eloreta_volume_source_psd",
     ]
     assert worker._dataset_index is None
 
@@ -804,7 +444,7 @@ def test_base_post_processing_steps_reuse_one_dataset_index(
         "Preparing frequency-domain QC findings...",
         "Checking electrode findings...",
     ]
-    assert all(update[:3] == ("frequency_domain_qc", 0, 5) for update in phase_updates)
+    assert all(update[:3] == ("frequency_domain_qc", 0, 3) for update in phase_updates)
     timings = [record.message for record in caplog.records if "post_processing_qc_timing" in record.message]
     assert len(timings) == 5
     assert all("completed=True" in message and "elapsed_ms=" in message for message in timings)
@@ -821,7 +461,7 @@ def test_qc_stage_logs_elapsed_time_and_preserves_failure(tmp_path, caplog):
     assert "completed=False" in caplog.text
 
 
-def test_post_processing_pipeline_runs_source_psd_when_stats_ready_fails(tmp_path) -> None:
+def test_post_processing_pipeline_runs_full_audit_when_stats_ready_fails(tmp_path) -> None:
     worker = _StatsFailureWorker(_Project(tmp_path))
     phase_progress: list[tuple[str, int, int]] = []
     finished: list[dict] = []
@@ -839,9 +479,6 @@ def test_post_processing_pipeline_runs_source_psd_when_stats_ready_fails(tmp_pat
         "harmonics",
         f"stats:{tmp_path.name}",
         f"audit:{tmp_path.name}",
-        f"source:{tmp_path.name}",
-        f"source_mode:l2_mne_source_psd:{tmp_path.name}",
-        f"source_mode:eloreta_volume_source_psd:{tmp_path.name}",
     ]
     assert finished and finished[0]["ok"] is False
     assert finished[0]["failure_reason"] == "stats failed"
@@ -851,20 +488,14 @@ def test_post_processing_pipeline_runs_source_psd_when_stats_ready_fails(tmp_pat
         "harmonic_selection",
         "stats_ready_summed_bca",
         "analysis_ready_full_audit",
-        "l2_mne_source_psd",
-        "eloreta_volume_source_psd",
     ]
-    assert phase_progress[-6:] == [
-        ("stats_ready_export", 2, 5),
-        ("l2_mne_source_maps", 2, 5),
-        ("l2_mne_source_maps", 2, 5),
-        ("eloreta_source_maps", 2, 5),
-        ("eloreta_source_maps", 2, 5),
-        ("post_processing_failed", 2, 5),
+    assert phase_progress[-2:] == [
+        ("stats_ready_export", 2, 3),
+        ("post_processing_failed", 2, 3),
     ]
 
 
-def test_post_processing_pipeline_runs_source_psd_when_full_audit_export_fails(
+def test_post_processing_pipeline_retains_stats_ready_when_full_audit_fails(
     tmp_path,
 ) -> None:
     worker = _AuditFailureWorker(_Project(tmp_path))
@@ -880,9 +511,6 @@ def test_post_processing_pipeline_runs_source_psd_when_full_audit_export_fails(
         "harmonics",
         f"stats:{tmp_path.name}",
         f"audit:{tmp_path.name}",
-        f"source:{tmp_path.name}",
-        f"source_mode:l2_mne_source_psd:{tmp_path.name}",
-        f"source_mode:eloreta_volume_source_psd:{tmp_path.name}",
     ]
     assert finished and finished[0]["ok"] is False
     assert [step["name"] for step in finished[0]["steps"]] == [
@@ -891,8 +519,6 @@ def test_post_processing_pipeline_runs_source_psd_when_full_audit_export_fails(
         "harmonic_selection",
         "stats_ready_summed_bca",
         "analysis_ready_full_audit",
-        "l2_mne_source_psd",
-        "eloreta_volume_source_psd",
     ]
 
 
@@ -909,36 +535,24 @@ def test_post_processing_pipeline_reports_qc_progress_before_review_pause(tmp_pa
 
     assert worker.calls == ["qc"]
     assert phase_progress == [
-        ("frequency_domain_qc", 0, 5),
-        ("frequency_domain_qc", 1, 5),
+        ("frequency_domain_qc", 0, 3),
+        ("frequency_domain_qc", 1, 3),
     ]
     assert finished[0]["requires_frequency_domain_qc_review"] is True
 
 
-def test_post_processing_pipeline_invalidates_stale_outputs_inside_project(tmp_path) -> None:
+def test_post_processing_pipeline_removes_stale_workbook_inside_project(tmp_path) -> None:
     worker = PostProcessingPipelineWorker(_Project(tmp_path))
     stats_ready = tmp_path / "3 - Statistical Analysis Results" / "Stats_Ready_Summed_BCA.xlsx"
-    source_dir = tmp_path / "6 - Source Localization" / "L2-MNE Surface Beta"
-    source_file = source_dir / "old_manifest.json"
     stats_ready.parent.mkdir(parents=True)
-    source_dir.mkdir(parents=True)
     stats_ready.write_text("stale stats", encoding="utf-8")
-    source_file.write_text("stale source", encoding="utf-8")
 
     worker._delete_file_if_present(
         stats_ready,
         project_root=tmp_path,
         label="Stats-ready Summed BCA workbook",
     )
-    worker._clear_output_dir(
-        source_dir,
-        project_root=tmp_path,
-        label="L2-MNE surface source maps",
-    )
-
     assert not stats_ready.exists()
-    assert not source_file.exists()
-    assert source_dir.exists()
 
 
 def test_post_processing_pipeline_refuses_to_touch_outputs_outside_project(tmp_path) -> None:
@@ -975,19 +589,13 @@ class _SelectionResumeWorker(PostProcessingPipelineWorker):
         self.calls.append(artifact_id)
         target = canonical_artifact_path(self._project.project_root, artifact_id)
         self._artifact_targets[artifact_id] = target
-        if target.suffix:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(artifact_id, encoding="utf-8")
-            result_path = target
-        else:
-            target.mkdir(parents=True, exist_ok=True)
-            result_path = target / "manifest.json"
-            result_path.write_text(artifact_id, encoding="utf-8")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(artifact_id, encoding="utf-8")
         return PostProcessingStepResult(
             artifact_id,
             True,
             f"{artifact_id} rebuilt",
-            str(result_path),
+            str(target),
         )
 
     def _run_stats_ready_export(self, _project_root: Path) -> PostProcessingStepResult:
@@ -995,16 +603,6 @@ class _SelectionResumeWorker(PostProcessingPipelineWorker):
 
     def _run_analysis_ready_export(self, _project_root: Path) -> PostProcessingStepResult:
         return self._publish("analysis_ready_full_audit")
-
-    def _run_source_map_mode(
-        self,
-        _project_root: Path,
-        mode: str,
-    ) -> PostProcessingStepResult:
-        result = self._publish(mode)
-        # Production exporters own source freshness in their publication commit.
-        mark_artifact_current(_project_root, mode, canonical_artifact_path(_project_root, mode), self._selection_fingerprint)
-        return result
 
 
 def _write_resume_project(root: Path) -> None:
@@ -1017,7 +615,7 @@ def _write_resume_project(root: Path) -> None:
     summary.write_text("accepted selection", encoding="utf-8")
 
 
-def test_selection_resume_rebuilds_only_selection_dependent_artifacts(
+def test_selection_resume_rebuilds_workbooks_and_invalidates_preserved_source_maps(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -1028,6 +626,14 @@ def test_selection_resume_rebuilds_only_selection_dependent_artifacts(
     full_fft_source.parent.mkdir()
     raw_source.write_text("raw EEG remains untouched", encoding="utf-8")
     full_fft_source.write_text("FullFFT remains untouched", encoding="utf-8")
+    source_ready = tmp_path / "6 - Source Localization" / "Source-Ready Time Domain v1" / "P01-epo.fif"
+    source_ready.parent.mkdir(parents=True)
+    source_ready.write_bytes(b"source-ready derivative")
+    source_artifact_ids = (L2_MNE_SOURCE_PSD_ARTIFACT, ELORETA_VOLUME_SOURCE_PSD_ARTIFACT)
+    for artifact_id in source_artifact_ids:
+        target = canonical_artifact_path(tmp_path, artifact_id)
+        target.mkdir(parents=True)
+        (target / "manifest.json").write_bytes(b"preceding publication")
     from Main_App import projects as projects_module
 
     monkeypatch.setattr(
@@ -1049,22 +655,30 @@ def test_selection_resume_rebuilds_only_selection_dependent_artifacts(
 
     worker.run()
 
-    assert worker.calls == list(SELECTION_DEPENDENT_ARTIFACTS)
+    workbook_ids = [STATS_READY_SUMMED_BCA_ARTIFACT, ANALYSIS_READY_FULL_AUDIT_ARTIFACT]
+    assert worker.calls == workbook_ids
     assert finished[-1]["ok"] is True
     assert finished[-1]["selection_changed"] is True
     registry = load_artifact_freshness_registry(tmp_path)
     assert registry.selection_fingerprint == "new-selection"
     assert all(
         registry.artifacts[artifact_id].status == ARTIFACT_STATUS_CURRENT
-        for artifact_id in SELECTION_DEPENDENT_ARTIFACTS
+        for artifact_id in workbook_ids
     )
+    for artifact_id in source_artifact_ids:
+        assert registry.artifacts[artifact_id].status == ARTIFACT_STATUS_STALE
+        target = canonical_artifact_path(tmp_path, artifact_id)
+        assert (target / "manifest.json").read_bytes() == b"preceding publication"
+    assert source_ready.read_bytes() == b"source-ready derivative"
     assert raw_source.read_text(encoding="utf-8") == "raw EEG remains untouched"
     assert full_fft_source.read_text(encoding="utf-8") == "FullFFT remains untouched"
 
 
-def test_selection_resume_skips_rebuild_when_fingerprint_and_artifacts_are_current(
+@pytest.mark.parametrize("repeated_session", [False, True])
+def test_selection_resume_skips_rebuild_with_current_workbooks_and_unbuilt_maps(
     tmp_path,
     monkeypatch,
+    repeated_session,
 ) -> None:
     _write_resume_project(tmp_path)
     metadata = {
@@ -1078,13 +692,13 @@ def test_selection_resume_skips_rebuild_when_fingerprint_and_artifacts_are_curre
             tmp_path / "Quality Check" / "Harmonic_Selection_Summary.xlsx"
         ),
     )
-    for artifact_id in SELECTION_DEPENDENT_ARTIFACTS:
+    workbook_ids = [ANALYSIS_READY_FULL_AUDIT_ARTIFACT]
+    if not repeated_session:
+        workbook_ids.append(STATS_READY_SUMMED_BCA_ARTIFACT)
+    for artifact_id in workbook_ids:
         target = canonical_artifact_path(tmp_path, artifact_id)
-        if target.suffix:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text("current", encoding="utf-8")
-        else:
-            target.mkdir(parents=True, exist_ok=True)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("current", encoding="utf-8")
         mark_artifact_current(
             tmp_path,
             artifact_id,
@@ -1098,8 +712,9 @@ def test_selection_resume_skips_rebuild_when_fingerprint_and_artifacts_are_curre
         "load_project_dataset_index",
         lambda root: SimpleNamespace(project_root=Path(root)),
     )
+    project = _repeated_project(tmp_path) if repeated_session else _Project(tmp_path)
     worker = _SelectionResumeWorker(
-        _Project(tmp_path),
+        project,
         resume_from_selection=True,
         selection_metadata=metadata,
         previous_selection_fingerprint="same-selection",

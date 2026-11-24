@@ -129,7 +129,9 @@ Multi-group projects must create separate group-by-condition summaries and clust
 - Every retained source input remains strict: missing/corrupt derivatives,
   mixed fingerprints, invalid groups, incompatible channels/bins, or zero
   prepared group-condition maps still stop generation.
-- Source generation depends on frequency QC/harmonic selection and valid time-domain derivatives, not on successful Stats-ready workbook creation alone.
+- Source generation depends on accepted frequency-domain QC, selected harmonics
+  and valid time-domain derivatives. Workbook release finishes independently.
+  LORETA validates existing bundles and prepares maps on demand.
 - Older projects may later receive an explicit backfill action from a valid preprocessed-Raw cache. In this phase, missing derivatives prompt normal reprocessing; amplitude workbooks are never an implicit fallback.
 - Projects that already contain valid signed source-ready FIF/JSON derivatives
   do not need sensor reprocessing for these orientation changes. Rebuild the
@@ -154,7 +156,10 @@ Multi-group projects must create separate group-by-condition summaries and clust
    under `6 - Source Localization/eLORETA Hauk Source PSD Beta`, while reusing
    only the shared signed-FIF/cohort/bin/statistical contracts and retaining the
    prior method ID as historical/legacy.
-8. Make normal builds generate and load both source-PSD methods while retaining legacy prepared-output import and explicit labeling.
+8. Generate both source-PSD methods in LORETA's on-demand worker when no
+   current bundle exists. Keep explicit legacy import and use the
+   [desktop smoke path](../../quality/loreta-validation.md) for build
+   progress, cancellation and cache-reuse acceptance.
 9. Update focused architecture/user method reporting and run processing, project-I/O, LORETA, GUI non-Qt, protected-boundary, and precommit verification.
 
 ## Verification and Acceptance

@@ -93,7 +93,7 @@ class ProcessingHarmonicSelectionWorker(QObject):
                 and (resolved_project_root / "project.json").is_file()
             ):
                 _record_status(
-                    "Rebuilding selection-dependent outputs without rerunning EEG preprocessing or FFT export."
+                    "Checking workbook exports for the accepted harmonic selection."
                 )
                 downstream_result = run_postprocessing_from_selection(
                     self._project,

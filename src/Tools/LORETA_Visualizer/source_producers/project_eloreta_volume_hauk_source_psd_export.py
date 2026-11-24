@@ -213,6 +213,7 @@ def write_project_eloreta_volume_hauk_source_psd_payloads(
     cluster_permutation_seed: int = DEFAULT_CLUSTER_PERMUTATION_SEED,
     progress_callback: ProgressCallback | None = None,
     cancellation_callback: Callable[[], None] | None = None,
+    completed_cell_callback: Callable[[int, int], None] | None = None,
     build_batch_id: str | None = None,
 ) -> ProjectELORETAVolumeHaukSourcePsdExportResult:
     """Build time-domain eLORETA participant and group volume maps."""
@@ -365,7 +366,7 @@ def write_project_eloreta_volume_hauk_source_psd_payloads(
         numerical_metadata=numerical_model_metadata, method_metadata=method_metadata,
         frequency_metadata=frequency_metadata, before_record=before_record,
         cancellation_callback=cancellation_callback, apply_inverse_func=apply_inverse_func,
-        native_model=source_psd_model is None,
+        native_model=source_psd_model is None, completed_cell_callback=completed_cell_callback,
     ) as cells:
         for record, key_inputs, lookup, computed in cells:
             if lookup.hit:

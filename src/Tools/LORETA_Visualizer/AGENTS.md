@@ -194,8 +194,10 @@ renderers continue to consume prepared payloads only.
 - When a project has no current source-PSD manifest, the normal background
   rebuild generates both the time-domain L2-MNE and eLORETA methods. If one
   current method already exists, the GUI loads that valid partial result rather
-  than automatically rebuilding solely because its sibling is absent. Normal
-  manual and post-processing rebuilds still target both methods. Existing
+  than automatically rebuilding solely because its sibling is absent. LORETA
+  builds on activation or by explicit request. Workbook release preserves
+  signed inputs and invalidates changed source artifacts without building
+  maps. Existing
   amplitude-derived L2-MNE/eLORETA manifests remain viewable with explicit
   legacy/exploratory labeling. Source Map Options exposes one normal rebuild
   action plus the L2 cortical-orientation choice; it does not expose eLORETA

@@ -5,10 +5,8 @@ from Main_App.gui import shell_status
 from Main_App.gui.processing_workflows import (
     _PostProcessingPipelineBridge,
     _post_processing_frequency_domain_outputs_ready,
-    _post_processing_source_map_outcome,
     _post_processing_display_state,
     _post_processing_phase_display_state,
-    _refresh_cached_loreta_source_maps,
 )
 from Main_App.gui.style_tokens import build_main_page_stylesheet
 
@@ -68,15 +66,6 @@ def test_post_processing_perf_progress_is_user_facing_harmonic_text() -> None:
     assert "[PERF]" not in message
 
 
-def test_post_processing_fullfft_source_progress_is_user_facing_source_map_text() -> None:
-    title, message = _post_processing_display_state(
-        "Reading participant FullFFT workbooks and selected harmonics..."
-    )
-
-    assert title == "Generating Source Maps"
-    assert message == "Generating source-space maps for 3D visualization of oddball responses."
-
-
 def test_structured_post_processing_phase_avoids_log_keyword_misclassification() -> None:
     title, message, phase_index = _post_processing_phase_display_state(
         "stats_ready_export",
@@ -111,12 +100,12 @@ def test_post_processing_activity_hides_file_rows_and_restarts_progress() -> Non
     shell_status.update_post_processing_progress(
         host,
         completed_units=1,
-        total_units=5,
+        total_units=3,
         phase_index=2,
     )
 
-    assert progress_bar.value == 20
-    assert host.processing_step_label.text == "Post-processing phase 2 of 5"
+    assert progress_bar.value == 33
+    assert host.processing_step_label.text == "Post-processing phase 2 of 3"
 
 
 def test_post_processing_qc_resume_preserves_completed_qc_milestone() -> None:
@@ -130,17 +119,17 @@ def test_post_processing_qc_resume_preserves_completed_qc_milestone() -> None:
         _progress_anim=_FakeAnimation(),
     )
 
-    shell_status.prepare_post_processing_activity(host, initial_progress_pct=20)
+    shell_status.prepare_post_processing_activity(host, initial_progress_pct=33)
     shell_status.update_post_processing_progress(
         host,
         completed_units=0,
-        total_units=5,
+        total_units=3,
         phase_index=1,
         minimum_completed_units=1,
     )
 
-    assert progress_bar.value == 20
-    assert host.processing_step_label.text == "Post-processing phase 1 of 5"
+    assert progress_bar.value == 33
+    assert host.processing_step_label.text == "Post-processing phase 1 of 3"
 
 
 def test_post_processing_bridge_forwards_structured_phase_progress() -> None:
@@ -153,54 +142,9 @@ def test_post_processing_bridge_forwards_structured_phase_progress() -> None:
         parent=None,
     )
 
-    bridge.handle_phase_progress("harmonic_selection", 1, 5, "Identifying harmonics")
+    bridge.handle_phase_progress("harmonic_selection", 1, 3, "Identifying harmonics")
 
-    assert received == [("harmonic_selection", 1, 5, "Identifying harmonics")]
-
-
-def test_post_processing_refreshes_only_an_existing_loreta_page() -> None:
-    calls: list[str] = []
-    page = SimpleNamespace(
-        reload_project_source_maps_from_disk=lambda: calls.append("reload") or True
-    )
-
-    assert _refresh_cached_loreta_source_maps(SimpleNamespace()) is False
-    assert (
-        _refresh_cached_loreta_source_maps(
-            SimpleNamespace(_loreta_visualizer_page=page)
-        )
-        is True
-    )
-    assert calls == ["reload"]
-
-
-def test_partial_source_map_success_is_detected_independently_of_pipeline_failure() -> None:
-    result = {
-        "ok": False,
-        "steps": [
-            {"name": "stats_ready_summed_bca", "ok": False},
-            {"name": "l2_mne_source_psd", "ok": True},
-            {"name": "eloreta_volume_source_psd", "ok": False},
-        ],
-    }
-
-    assert _post_processing_source_map_outcome(result) == (True, True)
-
-
-def test_frequency_domain_readiness_ignores_optional_loreta_failures() -> None:
-    result = {
-        "ok": False,
-        "steps": [
-            {"name": "frequency_domain_qc", "ok": True},
-            {"name": "harmonic_selection", "ok": True},
-            {"name": "stats_ready_summed_bca", "ok": True},
-            {"name": "full_fft_provenance", "ok": True},
-            {"name": "l2_mne_source_psd", "ok": False},
-            {"name": "eloreta_volume_source_psd", "ok": False},
-        ],
-    }
-
-    assert _post_processing_frequency_domain_outputs_ready(result) is True
+    assert received == [("harmonic_selection", 1, 3, "Identifying harmonics")]
 
 
 def test_frequency_domain_readiness_does_not_hide_core_outputs_when_full_audit_fails() -> None:
@@ -212,8 +156,6 @@ def test_frequency_domain_readiness_does_not_hide_core_outputs_when_full_audit_f
             {"name": "stats_ready_summed_bca", "ok": True},
             {"name": "analysis_ready_full_audit", "ok": False},
             {"name": "full_fft_provenance", "ok": True},
-            {"name": "l2_mne_source_psd", "ok": True},
-            {"name": "eloreta_volume_source_psd", "ok": True},
         ],
     }
 
@@ -227,7 +169,6 @@ def test_frequency_domain_readiness_requires_every_core_step() -> None:
             {"name": "frequency_domain_qc", "ok": True},
             {"name": "harmonic_selection", "ok": True},
             {"name": "stats_ready_summed_bca", "ok": False},
-            {"name": "l2_mne_source_psd", "ok": True},
         ],
     }
 
@@ -246,40 +187,6 @@ def test_frequency_domain_readiness_requires_neutral_full_fft_provenance() -> No
     }
 
     assert _post_processing_frequency_domain_outputs_ready(result) is False
-
-
-def test_source_map_refresh_can_request_pipeline_only_missing_map_invalidation() -> None:
-    calls: list[bool] = []
-    page = SimpleNamespace(
-        reload_project_source_maps_from_disk=lambda *, invalidate_if_missing=False: (
-            calls.append(invalidate_if_missing) or True
-        )
-    )
-
-    assert (
-        _refresh_cached_loreta_source_maps(
-            SimpleNamespace(_loreta_visualizer_page=page),
-            invalidate_if_missing=True,
-        )
-        is True
-    )
-    assert calls == [True]
-
-
-def test_post_processing_loreta_refresh_failure_does_not_break_completion() -> None:
-    def _raise_deleted_page() -> bool:
-        raise RuntimeError("wrapped C/C++ object has been deleted")
-
-    page = SimpleNamespace(
-        reload_project_source_maps_from_disk=_raise_deleted_page,
-    )
-
-    assert (
-        _refresh_cached_loreta_source_maps(
-            SimpleNamespace(_loreta_visualizer_page=page)
-        )
-        is False
-    )
 
 
 def test_processing_progress_bar_style_removes_inset_frame() -> None:

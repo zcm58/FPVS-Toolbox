@@ -117,9 +117,9 @@ def _model_size(info, inverse, config):
 def source_psd_cells(
     records, *, project, root, model, config, numerical_metadata, method_metadata,
     frequency_metadata, before_record, cancellation_callback=None, compute_source_psd_func=None, apply_inverse_func=None,
-    native_model=False,
+    native_model=False, completed_cell_callback=None,
 ):
-    """Yield ordered cache lookups and numerical results; writes remain with the caller."""
+    """Yield ordered results and report progress after the caller accepts each cell."""
     requested = project_worker_override(getattr(project, "preprocessing", None), getattr(project, "options", None))
     ceiling = compute_dynamic_worker_ceiling(requested)
     if compute_source_psd_func is not None or apply_inverse_func is not None:
@@ -141,7 +141,10 @@ def source_psd_cells(
         keys = set()
         futures = {}
         lookup_error = None
-        while index < len(records):
+        total = len(records)
+        if completed_cell_callback is not None:
+            completed_cell_callback(0, total)
+        while index < total:
             window = records[index:index + pool_ceiling]
             if len(window) > 1 and model_size is None:
                 try:
@@ -240,6 +243,8 @@ def source_psd_cells(
             yield record, key, lookup, result
             keys.remove(digest)
             index += 1
+            if completed_cell_callback is not None:
+                completed_cell_callback(index, total)
         if pool is not None:
             active = peak = 0
             for _, delta in sorted(intervals):

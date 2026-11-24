@@ -259,20 +259,16 @@ Common long-running work:
   orchestrates downstream analysis prep in a background `QThread`. The full
   order is frequency-domain QC acceptance, neutral FullFFT provenance,
   harmonic selection, the standard Stats-ready Summed BCA export, the additive
-  full-audit analysis-ready export, and both canonical Hauk source-PSD map
-  producers. The spreadsheet exports and maps are
-  sibling consumers of one accepted canonical included-harmonic list; one
-  failure must be reported without relabeling an old artifact as current. This
-  worker is orchestration only;
-  harmonic selection, standard Summed BCA export, full-audit workbook
-  generation, and source-estimation logic remain owned by their processing,
-  Stats, `Main_App.exports`, and LORETA source-producer modules.
+  full-audit analysis-ready export. This worker is orchestration only. Harmonic
+  selection, standard Summed BCA export and full-audit workbook generation
+  remain owned by their processing, Stats and `Main_App.exports` modules.
+  LORETA checks for current source-map bundles on activation and prepares them
+  in its own cancellable worker when needed. Both workflows use the accepted
+  canonical included-harmonic list.
   For a canonical repeated-session project, the participant-keyed legacy
-  Stats-ready workbook and both LORETA project-source producers are not
-  applicable: the worker emits explicit successful skip steps and phase
-  progress without invoking them or touching existing artifacts. The
-  recording-aware full-audit export still runs. Single-session behavior keeps
-  the full order above.
+  Stats-ready workbook is non-applicable. The worker emits a successful skip
+  step without touching an existing artifact. The recording-aware full-audit
+  export still runs.
 - After accepted frequency-domain QC is marked current, the full pipeline
   writes or revalidates processing-owned neutral FullFFT provenance before it
   attempts harmonic selection or any selection-derived export. That
@@ -285,8 +281,7 @@ Common long-running work:
   mismatch reports the saved and requested mapping before ROI/report work.
   Failed neutral provenance stops harmonic selection and its consumers; failed
   harmonic selection stops its dependent exports. The original failure remains
-  the recovery reason, while successful prerequisites retain the existing
-  independence between spreadsheet and source-map exports.
+  the recovery reason.
 - Accepting the summed-BCA review starts `FrequencyDomainQcDecisionWorker`
   through `gui/frequency_domain_qc_handoff.py`. Report/provenance generation,
   decision persistence, and the tools-metadata reread run on that worker, never
@@ -316,14 +311,14 @@ Common long-running work:
   independently, while a failed rebuild restores the preceding artifact and
   records `failed` for the newly required fingerprint.
 - Downstream post-processing starts only after the processing ledger update
-  succeeds. A ledger-write failure skips source generation so the exporter
-  cannot infer a participant cohort from stale or partial state.
+  succeeds. The LORETA source producers also require current ledger and
+  selection inputs.
 - `PostProcessingPipelineWorker` retains its text progress signal for logging
   and also emits structured phase progress as `(phase_id, completed_units,
   total_units, user_message)`. The main-thread GUI bridge uses that contract to
   replace completed per-file rows with downstream progress across frequency-
-  domain QC, harmonic selection, Stats-ready export, and Hauk source-PSD map
-  generation; numeric progress must not be inferred from free-form log messages.
+  domain QC, harmonic selection and workbook export. Numeric progress comes
+  from the structured phase signal.
 - Within frequency-domain QC, output readiness, ROI coverage, dataset indexing,
   and report generation emit step-1 status messages and INFO timing records.
   The report's friendly substage messages use structured phase progress; technical
@@ -346,16 +341,13 @@ Common long-running work:
   progress must not be inferred from its free-form status messages. After
   selection is accepted, the worker resumes publication with the exact
   selection metadata. This resume begins after harmonic selection, rebuilds
-  the Stats-ready and full-audit workbooks plus both Hauk source-PSD map
-  directories, and never loads BDFs, preprocesses EEG, or regenerates FFT
-  workbooks. Source-map calculation reuses the durable source-ready FIF
-  derivatives. If the fingerprint is unchanged and every dependent target
-  still exists with a current matching record, it may finish as a no-op. A
+  the applicable Stats-ready and full-audit workbooks from existing processed
+  data. If the fingerprint is unchanged and every applicable workbook still
+  exists with a current matching record, it may finish as a no-op. A
   standard selection-only rebuild leaves neutral FullFFT provenance unchanged
   because its source/cohort inputs did not change.
-  Repeated-session resumes rebuild only recording-aware applicable outputs;
-  the participant-keyed Stats-ready and LORETA steps remain explicit
-  non-applicable successes.
+  Repeated-session resumes rebuild the recording-aware full-audit workbook and
+  explicitly skip the participant-keyed Stats-ready workbook.
 - A confirmed Save-triggered harmonic rebuild shows the shared post-processing
   activity page while the embedded Settings page remains alive and guarded in
   the background. The FullFFT-grid audit uses indeterminate progress, then the

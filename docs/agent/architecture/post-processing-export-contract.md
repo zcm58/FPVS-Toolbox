@@ -183,15 +183,14 @@ derivatives are:
 - `6 - Source Localization/L2-MNE Hauk Source PSD Beta/`; and
 - `6 - Source Localization/eLORETA Hauk Source PSD Beta/`.
 
-The accepted-selection/all-current shortcut leaves current outputs intact when
-the fingerprint matches. A normal full run regenerates exports; pending repair
-also overrides that shortcut. Accepting a different fingerprint first marks all
-four derivatives stale, then resumes the normal post-processing pipeline after
-harmonic selection. A continuation without pending repair reads
-the immutable processed workbooks and their existing BCA columns; it never
-loads raw EEG, filters, epochs, recomputes FFTs, or rewrites participant-
-condition workbooks. The source-map rebuild reuses durable source-ready time-
-domain derivatives rather than raw EEG or participant FFT generation. Before
+The accepted-selection shortcut leaves applicable workbooks intact when they
+are current for the matching fingerprint. Workbook repair uses workbook
+freshness. A normal full run or pending repair regenerates the workbook exports.
+Accepting a different fingerprint first marks all four derivatives stale, then
+resumes workbook publication after harmonic selection. A continuation without
+pending repair reads the immutable processed workbooks and their existing BCA
+columns. The source-map rebuild reuses durable source-ready time-
+domain derivatives when LORETA is opened or the user requests a rebuild. Before
 replacement, an existing canonical file or directory is
 moved beneath project-local `.fpvs_processing/stale_artifacts/`. Successful
 publication marks the replacement current. A failed publication removes a
@@ -335,31 +334,29 @@ records the current cohort identity. A missing pin, changed receipt, changed
 source commit or newly processed recording requires the standard current
 publication.
 
-Downstream source-map orchestration may mark a completed participant as
-source-ineligible when any canonical condition is missing or the processing
-ledger explicitly records an incomplete source derivative. That omission is
-complete-case across all source conditions and must be reported separately
-from general project/QC exclusions. The retained manifest set remains strict;
-missing or corrupt artifacts recorded as complete are not skipped.
+Source-map orchestration applies the LORETA available-case policy to signed
+derivatives. An explicitly missing or excluded condition is omitted from its
+cohort, while an eligible participant may still contribute to other conditions.
+Source-only omissions are reported separately from general project/QC
+exclusions. The retained manifest set remains strict about missing or corrupt
+artifacts recorded as complete.
 
 The current L2-MNE cortical and eLORETA volume source-PSD exporters consume the
 same retained FIF/cohort/harmonic/bin contract and apply the same FPVS
 neighboring-bin z-score algorithm. They remain independent numerical
 consumers: eLORETA applies its own volume inverse and computes its own source
 power, participant z-score, cache, and volume-cluster arrays rather than reusing
-L2-MNE values. Normal manual and post-processing rebuilds target both methods.
+L2-MNE values. LORETA's on-demand and manual rebuilds target both methods.
 Neither current exporter reads FullFFT amplitude workbooks or uses them as a
 fallback; legacy amplitude-derived manifests remain importable only under
 their existing method identities.
 
-Those project-source exporters and the legacy LORETA Stats-ready workbook are
-currently participant-keyed. For canonical repeated-session projects, the
-post-processing worker reports them as successful, non-applicable skips rather
-than passing recording-keyed ledger/index data into an overwriting shape.
-Skipping occurs before artifact replacement, so existing files and
-recording-aware source-ready derivatives are not deleted or relabeled as
-current. The recording-aware full-audit workbook remains the downstream Stats
-input. Single-session publication and freshness behavior is unchanged.
+The project-source exporters and standard Stats-ready workbook are currently
+participant-keyed. For canonical repeated-session projects, the workbook
+worker reports the standard Stats-ready export as non-applicable and produces
+the recording-aware full-audit workbook for downstream Stats. LORETA separately
+checks project-source build eligibility. Existing source artifacts and
+recording-aware source-ready derivatives retain their identities.
 
 This is a sibling generated output, not an alternate `post_process()` entry
 point. It must reuse the already-validated exact `55_onbin` crop metadata and

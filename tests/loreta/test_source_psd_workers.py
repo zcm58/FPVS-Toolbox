@@ -11,12 +11,13 @@ def _record(number):
     return SimpleNamespace(fif_sha256=f"{number:064x}", channel_names=("Cz",), n_times=4096)
 
 
-def _cells(records, callback):
+def _cells(records, callback, *, completed_cell_callback=None):
     return workers.source_psd_cells(
         records, project=SimpleNamespace(preprocessing={"max_parallel_workers_override": 16}), root="unused",
         model=SimpleNamespace(forward_model=SimpleNamespace(source_points=(0,)), info={}, inverse_operator={}),
         config=SimpleNamespace(source_orientation_mode="cortical_normal"), numerical_metadata={"model": 1},
         method_metadata={"method": 1}, frequency_metadata={"bins": [1]}, before_record=callback,
+        completed_cell_callback=completed_cell_callback,
     )
 
 
@@ -25,6 +26,7 @@ def test_source_cell_order_duplicate_cache_and_first_error(monkeypatch):
     stored = set()
     submitted = []
     callbacks = []
+    completed = []
 
     class FakePool:
         def __init__(self, **kwargs):
@@ -49,7 +51,14 @@ def test_source_cell_order_duplicate_cache_and_first_error(monkeypatch):
     monkeypatch.setattr(workers, "ProcessPoolExecutor", FakePool)
     monkeypatch.setattr(workers, "_load_prepared_source_psd_entry", lookup)
     seen = []
-    with _cells([first, second, first, third], lambda index, _record: callbacks.append(index)) as cells:
+
+    def cell_completed(count, total):
+        completed.append((count, total, len(seen)))
+
+    with _cells(
+        [first, second, first, third], lambda index, _record: callbacks.append(index),
+        completed_cell_callback=cell_completed,
+    ) as cells:
         with pytest.raises(ValueError, match="unreadable third"):
             for record, key, lookup_result, computed in cells:
                 seen.append((record.fif_sha256, lookup_result.hit))
@@ -57,6 +66,7 @@ def test_source_cell_order_duplicate_cache_and_first_error(monkeypatch):
                     assert computed[1] == record.fif_sha256
                     stored.add(key.cache_key)
     assert callbacks == [1, 2, 3, 4]
+    assert completed == [(0, 4, 0), (1, 4, 1), (2, 4, 2), (3, 4, 3)]
     assert submitted == [first.fif_sha256, second.fif_sha256]
     assert seen == [(first.fif_sha256, False), (second.fif_sha256, False), (first.fif_sha256, True)]
 

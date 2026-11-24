@@ -1049,11 +1049,11 @@ def test_processing_activity_switches_to_post_processing_phase_progress(
     main_window_module.shell_status.update_post_processing_progress(
         win,
         completed_units=1,
-        total_units=5,
+        total_units=3,
         phase_index=2,
     )
-    qtbot.waitUntil(lambda: win.progress_bar.value() == 20, timeout=1_000)
-    assert win.processing_step_label.text() == "Post-processing phase 2 of 5"
+    qtbot.waitUntil(lambda: win.progress_bar.value() == 33, timeout=1_000)
+    assert win.processing_step_label.text() == "Post-processing phase 2 of 3"
 
     win._prepare_processing_activity(files)
     assert not win.processing_files_card.isHidden()

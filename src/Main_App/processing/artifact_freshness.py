@@ -547,12 +547,26 @@ def mark_artifact_failed(
         return _record_from_payload(str(artifact_id), record)
 
 
-def published_artifacts_need_rebuild(project_root: str | Path) -> bool:
-    """Check products this project previously published when no raw work is pending."""
+def _workbook_artifact_ids(repeated_session: bool) -> tuple[str, ...]:
+    if repeated_session:
+        return (ANALYSIS_READY_FULL_AUDIT_ARTIFACT,)
+    return (STATS_READY_SUMMED_BCA_ARTIFACT, ANALYSIS_READY_FULL_AUDIT_ARTIFACT)
+
+
+def published_workbooks_need_rebuild(
+    project_root: str | Path,
+    *,
+    repeated_session: bool,
+) -> bool:
+    """Check previously published workbooks applicable to this recording mode."""
     registry = load_artifact_freshness_registry(project_root)
     root = Path(project_root).resolve()
-    for item in registry.artifacts.values():
-        if not item.built_from_selection_fingerprint:
+    for artifact_id in (
+        HARMONIC_SELECTION_SUMMARY_ARTIFACT,
+        *_workbook_artifact_ids(repeated_session),
+    ):
+        item = registry.artifacts.get(artifact_id)
+        if item is None or not item.built_from_selection_fingerprint:
             continue
         if item.status != ARTIFACT_STATUS_CURRENT or item.built_from_selection_fingerprint != registry.selection_fingerprint:
             return True
@@ -564,13 +578,15 @@ def published_artifacts_need_rebuild(project_root: str | Path) -> bool:
 def selection_dependent_artifacts_are_current(
     project_root: str | Path,
     selection_fingerprint: str,
+    *,
+    artifact_ids: tuple[str, ...] = SELECTION_DEPENDENT_ARTIFACTS,
 ) -> bool:
-    """Return whether every canonical dependent is current for this selection."""
+    """Return whether the canonical dependents in scope match this selection."""
 
     registry = load_artifact_freshness_registry(project_root)
     if registry.selection_fingerprint != str(selection_fingerprint):
         return False
-    for artifact_id in SELECTION_DEPENDENT_ARTIFACTS:
+    for artifact_id in artifact_ids:
         record = registry.artifacts.get(artifact_id)
         if (
             record is None
@@ -589,6 +605,20 @@ def selection_dependent_artifacts_are_current(
         if not target.exists():
             return False
     return True
+
+
+def selection_dependent_workbooks_are_current(
+    project_root: str | Path,
+    selection_fingerprint: str,
+    *,
+    repeated_session: bool,
+) -> bool:
+    """Check every applicable workbook before skipping a selection-only export."""
+    return selection_dependent_artifacts_are_current(
+        project_root,
+        selection_fingerprint,
+        artifact_ids=_workbook_artifact_ids(repeated_session),
+    )
 
 
 def require_current_artifact(
@@ -957,8 +987,10 @@ __all__ = [
     "mark_artifact_failed",
     "mark_selection_derivatives_stale",
     "preserve_artifact_for_rebuild",
+    "published_workbooks_need_rebuild",
     "require_current_artifact",
     "restore_preserved_artifact",
     "selection_dependent_artifacts_are_current",
+    "selection_dependent_workbooks_are_current",
     "selection_fingerprint_from_metadata",
 ]

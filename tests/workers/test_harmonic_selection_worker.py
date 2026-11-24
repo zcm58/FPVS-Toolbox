@@ -76,7 +76,7 @@ def test_settings_worker_forces_transactional_harmonic_recalculation(
         kwargs["phase_progress_callback"](
             "stats_ready_export",
             3,
-            5,
+            3,
             "Preparing analysis files.",
         )
         return {"ok": True, "steps": []}
@@ -114,9 +114,9 @@ def test_settings_worker_forces_transactional_harmonic_recalculation(
         for phase_id, completed, total, _message in phase_updates
     ]
     assert observed_phases == [
-        ("harmonic_selection", 1, 5),
-        ("harmonic_selection", 2, 5),
-        ("stats_ready_export", 3, 5),
+        ("harmonic_selection", 1, 3),
+        ("harmonic_selection", 2, 3),
+        ("stats_ready_export", 3, 3),
     ]
     assert "harmonic_recalculation_started" in caplog.text
     assert "harmonic_recalculation_progress" in caplog.text

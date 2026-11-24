@@ -4,9 +4,10 @@ from types import SimpleNamespace
 import sys
 
 import numpy as np
-from PySide6.QtWidgets import QComboBox, QLabel, QWidget
+from PySide6.QtWidgets import QComboBox, QLabel, QProgressBar, QPushButton, QVBoxLayout, QWidget
 
 from Main_App.gui.theme import build_fpvs_app_stylesheet
+from Tools.LORETA_Visualizer import source_build_progress
 from Tools.LORETA_Visualizer.gui import (
     DISPLAY_MODE_CORTICAL_SURFACE,
     DISPLAY_MODE_MRI_SLICES,
@@ -24,6 +25,61 @@ from Tools.LORETA_Visualizer.source_payloads import (
     SOURCE_KIND_VOLUME_POINTS,
     make_source_payload,
 )
+
+
+def test_source_build_progress_animates_completed_inputs_and_cancels(qtbot, monkeypatch):
+    monkeypatch.setattr(source_build_progress, "widget_animation_duration", lambda *_args: 80)
+    window = QWidget()
+    window.setStyleSheet(build_fpvs_app_stylesheet())
+    panel = source_build_progress.SourceBuildProgress(window)
+    QVBoxLayout(window).addWidget(panel)
+    qtbot.addWidget(window)
+    window.show()
+    assert panel.isHidden()
+
+    panel.begin()
+    bar = panel.findChild(QProgressBar, "loretaSourceBuildBar")
+    stage = panel.findChild(QLabel, "loretaSourceBuildStage")
+    cancel = panel.findChild(QPushButton, "loretaCancelSourceBuild")
+    assert bar.isVisible()
+    assert bar.maximum() == 0
+    assert cancel.isEnabled()
+
+    panel.set_stage("Building L2-MNE · method 1 of 2", 0, 3)
+    panel.set_stage("Building L2-MNE · method 1 of 2", 2, 3)
+    assert "2 of 3 participant-condition inputs complete" in stage.text()
+    assert bar.maximum() == 3
+    qtbot.waitUntil(lambda: bar.value() == 2)
+
+    with qtbot.waitSignal(panel.cancel_requested):
+        cancel.click()
+    panel.cancelling()
+    assert "current step" in stage.text()
+    assert not cancel.isEnabled()
+    assert not bar.isVisible()
+
+    panel.hide()
+    panel.begin()
+    assert cancel.isEnabled()
+    assert bar.maximum() == 0
+
+
+def test_source_build_progress_uses_static_feedback_when_animations_are_disabled(qtbot, monkeypatch):
+    monkeypatch.setattr(source_build_progress, "widget_animation_duration", lambda *_args: 0)
+    window = QWidget()
+    panel = source_build_progress.SourceBuildProgress(window)
+    QVBoxLayout(window).addWidget(panel)
+    qtbot.addWidget(window)
+    window.show()
+
+    panel.begin()
+    bar = panel.findChild(QProgressBar, "loretaSourceBuildBar")
+    stage = panel.findChild(QLabel, "loretaSourceBuildStage")
+    assert not bar.isVisible()
+    assert stage.isVisible()
+    panel.set_stage("Building L2-MNE", 1, 3)
+    assert bar.isVisible()
+    assert bar.value() == 1
 
 
 def test_scientific_color_range_keeps_small_values_through_edit_and_step(qtbot):
@@ -220,6 +276,19 @@ def test_metric_and_canonical_comparison_controls_preserve_source_selection(qtbo
             assert control.isVisibleTo(window)
             assert window.rect().contains(control.mapTo(window, control.rect().topLeft()))
             assert window.rect().contains(control.mapTo(window, control.rect().bottomRight()))
+
+    progress = window._source_build_progress
+    window.mesh_status.hide()
+    progress.begin()
+    progress.set_stage("Summarizing and saving eLORETA volume maps · method 2 of 2", 200, 200)
+    for width, height in ((1156, 724), (1236, 824)):
+        window.resize(width, height)
+        window.layout().activate()
+        assert window.minimumSizeHint().height() <= height
+        assert progress.isVisibleTo(window)
+        cancel = progress.findChild(QPushButton, "loretaCancelSourceBuild")
+        assert window.rect().contains(cancel.mapTo(window, cancel.rect().bottomRight()))
+        assert window.rect().contains(window.source_options_btn.mapTo(window, window.source_options_btn.rect().bottomRight()))
     assert window.close()
 
 

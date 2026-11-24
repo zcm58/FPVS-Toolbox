@@ -591,6 +591,7 @@ def _post_processing_namespace():
     exec(compile(ast.Module(body=assignments, type_ignores=[]), path, "exec"), namespace)
     _load_function(path, "_post_processing_frequency_domain_outputs_ready", namespace)
     _load_function(path, "_post_processing_failure_reason", namespace)
+    _load_function(path, "mark_cached_loreta_source_maps_stale", namespace)
     return namespace
 
 
@@ -612,7 +613,7 @@ def test_post_processing_optional_failure_keeps_core_outputs_usable():
         "steps": [
             {"name": name, "ok": True}
             for name in namespace["_POST_PROCESSING_FREQUENCY_DOMAIN_STEP_NAMES"]
-        ] + [{"name": "eloreta_volume_source_psd", "ok": False, "message": "Source export failed"}],
+        ] + [{"name": "analysis_ready_full_audit", "ok": False, "message": "Full-audit export failed"}],
     }
 
     assert namespace["_post_processing_failure_reason"](result) == ""
@@ -814,7 +815,6 @@ def test_worker_finished_delivers_explicit_failure_to_completion_callback():
         "host": host, "project": object(), "logging": logging,
         "provisional_cache": cache,
         "action_button": action_button, "previous_action_tooltip": "Original action",
-        "_post_processing_source_map_outcome": lambda _: (False, False),
         "on_finished": lambda: finalized_reasons.append(host._post_processing_failure_reason),
         "QTimer": SimpleNamespace(singleShot=lambda _delay, callback: callback()),
     })
@@ -859,7 +859,6 @@ def test_worker_finished_reports_required_audit_failure_without_invalidating_qc(
     namespace.update({
         "host": host, "project": project, "logging": logging, "Path": Path,
         "provisional_cache": Mock(), "action_button": None,
-        "_post_processing_source_map_outcome": lambda _: (False, False),
         "on_finished": lambda: finalized_reasons.append(host._post_processing_failure_reason),
         "QTimer": SimpleNamespace(singleShot=lambda _delay, callback: callback()),
     })
@@ -911,7 +910,7 @@ def test_failed_post_processing_phase_does_not_say_complete():
 
     assert title == "Post-processing Incomplete"
     assert message == "P9 needs a condition decision."
-    assert phase == 5
+    assert phase == 3
 
 
 def test_canceled_processing_does_not_show_post_processing_error_dialog():

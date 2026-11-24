@@ -59,6 +59,11 @@ class _ActivePublicationMapsWidget(_FakeWidget):
         self.generation_idle.emit()
 
 
+class _WorkingLoretaWidget(_FakeWidget):
+    def retire_from_workspace(self) -> None:
+        self.shutdown_calls += 1
+
+
 def test_project_context_reset_discards_embedded_pages_and_returns_home() -> None:
     workspace = _FakeWorkspace()
     settings_page = _FakeWidget()
@@ -125,3 +130,26 @@ def test_project_context_reset_waits_for_active_scalp_maps_worker() -> None:
     assert publication_maps_page in workspace.removed
     assert other_page in workspace.removed
     assert home_calls == ["home"]
+
+
+def test_project_reset_detaches_loreta_while_its_workers_drain() -> None:
+    workspace = _FakeWorkspace()
+    old_loreta_page = _WorkingLoretaWidget()
+    publication_maps_page = _ActivePublicationMapsWidget()
+    host = SimpleNamespace(
+        workspace_stack=workspace,
+        _loreta_visualizer_page=old_loreta_page,
+        _publication_maps_page=publication_maps_page,
+    )
+
+    assert project_workflows.reset_project_context_workspace(host) is False
+    assert host._loreta_visualizer_page is None
+    assert workspace.removed == [old_loreta_page]
+    assert old_loreta_page.shutdown_calls == 1
+    assert old_loreta_page.deleted == 0
+
+    new_loreta_page = _WorkingLoretaWidget()
+    host._loreta_visualizer_page = new_loreta_page
+    publication_maps_page.finish()
+    assert host._loreta_visualizer_page is new_loreta_page
+    assert workspace.removed == [old_loreta_page, publication_maps_page]

@@ -241,13 +241,20 @@ Run only in an approved visible environment on Windows 11 or CachyOS:
    must never appear. Same-context intermediate drag frames are allowed without
    moving the pointer backward. Export is disabled while a preview renders. Check that MRI
    figure labels/colorbar remain inside both matching 600-dpi PNG/PDF files.
-5. Rebuild source maps and observe real stage messages. Use Options → Cancel
-   rebuild. An existing published method must remain intact if cancelled before
-   publication; completed sibling methods stay usable. Close during a build or
-   preview and verify the page waits for worker completion without freezing.
-   Change accepted harmonics or participant group/QC eligibility; old results
-   must not load as current. A failed sibling must not reappear after partial
-   success. Historical explicit import must show unverified current provenance.
+5. Process a supported project with no current source maps and confirm the
+   workbook is ready before opening LORETA. On first open, verify the inline
+   progress area reports the current method and counts completed participant-
+   condition inputs. Check the controls fit at both the 1200×800 shell minimum
+   and the 1280×900 workspace. With system animation effects disabled, check
+   that stage text and completed counts still update. Select **Cancel build**
+   and wait for the current step to finish. Verify that completed methods remain
+   usable and that **Options → Rebuild source maps** allows a fresh attempt.
+   Reopen with current maps and verify they load without the build animation.
+   Close during a build or preview and verify the page waits for worker
+   completion without freezing. Change accepted harmonics or group/QC
+   eligibility and verify the next open checks freshness. A failed sibling
+   must not reappear after partial success. Historical explicit import must
+   show unverified current provenance.
 6. Rebuild an exact small-cohort fixture and inspect version 2 estimator/count/
    minimum-p metadata and report covariance/input provenance. Load historical
    output separately and verify its saved mask remains unchanged.

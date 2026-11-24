@@ -220,6 +220,7 @@ def write_project_l2_mne_hauk_source_psd_payloads(
     cluster_permutation_seed: int = DEFAULT_CLUSTER_PERMUTATION_SEED,
     progress_callback: ProgressCallback | None = None,
     cancellation_callback: Callable[[], None] | None = None,
+    completed_cell_callback: Callable[[int, int], None] | None = None,
     build_batch_id: str | None = None,
 ) -> ProjectL2MNEHaukSourcePsdExportResult:
     """Write time-domain-first participant and group source-PSD payloads.
@@ -382,7 +383,7 @@ def write_project_l2_mne_hauk_source_psd_payloads(
         numerical_metadata=numerical_model_metadata, method_metadata=method_metadata,
         frequency_metadata=frequency_metadata, before_record=before_record,
         cancellation_callback=cancellation_callback, compute_source_psd_func=compute_source_psd_func,
-        native_model=source_psd_model is None,
+        native_model=source_psd_model is None, completed_cell_callback=completed_cell_callback,
     ) as cells:
         for record, key_inputs, lookup, computed in cells:
             if lookup.hit:

@@ -47,6 +47,7 @@ def test_partial_success_imports_only_returned_manifest_and_retains_warning(tmp_
     new.write_text("{}")
     imports, statuses = [], []
     window = SimpleNamespace(
+        _closing_requested=False, _source_build_is_obsolete=False,
         _include_flagged_subjects=True, _selected_source_method_id="l2",
         _set_source_export_status=lambda text, *, variant: statuses.append((text, variant)),
         _import_prepared_source_manifests=lambda paths, **kwargs: imports.append(paths),
@@ -88,6 +89,46 @@ def test_current_discovery_invalidates_project_maps_if_no_bundle_is_current(tmp_
     )
     _method("_on_project_source_discovery_completed")(window, ((tmp_path, False, True, 2), ()))
     assert invalidations == [tmp_path]
+
+
+def test_automatic_discovery_defers_when_tool_is_hidden_before_build_can_start(tmp_path):
+    window = SimpleNamespace(
+        _closing_requested=False, _source_discovery_request_id=1,
+        _auto_project_zscore_attempted=True,
+        _refresh_project_root=lambda: tmp_path,
+        isVisible=lambda: False,
+    )
+    _method("_on_project_source_discovery_completed")(window, ((tmp_path, True, False, 1), ()))
+    assert not window._auto_project_zscore_attempted
+
+
+def test_reopen_keeps_method_condition_and_metric_choices_for_the_reloaded_maps(tmp_path):
+    calls = []
+    window = SimpleNamespace(
+        _closing_requested=False, _auto_project_zscore_attempted=False,
+        isVisible=lambda: True, renderer=object(), _fsaverage_dir=tmp_path,
+        _source_export_thread=None, _refresh_project_root=lambda: tmp_path,
+        _selected_source_method_id="eloreta", _selected_condition_id="positive",
+        _selected_metric="amplitude",
+        _start_project_source_discovery=lambda root, **kwargs: calls.append((root, kwargs)),
+    )
+
+    def clear_previous_maps():
+        window._selected_source_method_id = "l2"
+        window._selected_condition_id = ""
+        window._selected_metric = "zscore"
+
+    window._clear_loaded_project_source_maps = clear_previous_maps
+    _method("_ensure_default_project_zscore_maps")(window)
+    assert (window._selected_source_method_id, window._selected_condition_id, window._selected_metric) == (
+        "eloreta", "positive", "amplitude",
+    )
+    assert calls == [(tmp_path, {"automatic": True})]
+
+
+def test_superseded_build_completion_cannot_load_previous_maps():
+    window = SimpleNamespace(_closing_requested=False, _source_build_is_obsolete=True)
+    _method("_on_project_source_maps_exported")(window, None)
 
 
 def test_discovery_failure_emits_actionable_status_and_always_finishes(tmp_path):

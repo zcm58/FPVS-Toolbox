@@ -196,7 +196,7 @@ def test_postprocessing_action_cannot_offer_stop_and_restores_help_before_handof
         progress=signal(), phase_progress=signal(), log_message=signal(), finished=signal(),
     )
     module.PostProcessingPipelineWorker = Mock(return_value=worker)
-    module.POST_PROCESSING_PHASE_COUNT = 5
+    module.POST_PROCESSING_PHASE_COUNT = 3
     monkeypatch.setitem(sys.modules, module.__name__, module)
     monkeypatch.setattr(frequency_domain_qc, "mark_frequency_domain_outputs_current", Mock())
     button = _ActionButton()
@@ -215,7 +215,10 @@ def test_postprocessing_action_cannot_offer_stop_and_restores_help_before_handof
     )
     bridge_factory = Mock(return_value=bridge)
     project = SimpleNamespace(project_root=Path("project"))
-    host = SimpleNamespace(currentProject=project, btn_start=button, log=Mock())
+    page = SimpleNamespace(mark_project_source_maps_stale=Mock(), reload_project_source_maps_from_disk=Mock())
+    host = SimpleNamespace(
+        currentProject=project, btn_start=button, log=Mock(), _loreta_visualizer_page=page,
+    )
     cache, finish, review = Mock(), Mock(), Mock()
     delayed = []
     namespace = {
@@ -223,9 +226,11 @@ def test_postprocessing_action_cannot_offer_stop_and_restores_help_before_handof
         "shell_status": SimpleNamespace(prepare_post_processing_activity=Mock()),
         "_PostProcessingPipelineBridge": bridge_factory, "logging": logging,
         "logger": logging.getLogger(__name__),
-        "_post_processing_source_map_outcome": lambda _: (False, False),
         "_post_processing_frequency_domain_outputs_ready": lambda _: outcome in {"complete", "optional_failure"},
         "_post_processing_failure_reason": lambda _: "Incomplete inputs" if outcome == "required_failure" else "",
+        "mark_cached_loreta_source_maps_stale": _load_function(
+            "src/Main_App/gui/processing_workflows.py", "mark_cached_loreta_source_maps_stale", {},
+        ),
         "_sync_project_tools_metadata_from_disk": Mock(),
         "_handle_frequency_domain_qc_review": review,
         "QTimer": SimpleNamespace(singleShot=lambda _delay, callback: delayed.append(callback)),
@@ -254,12 +259,15 @@ def test_postprocessing_action_cannot_offer_stop_and_restores_help_before_handof
         thread.deleteLater.assert_called_once()
         review.assert_not_called()
         finish.assert_not_called()  # False return hands recovery back to the caller.
+        page.mark_project_source_maps_stale.assert_not_called()
         return
     result = {"ok": outcome == "complete", "steps": []}
     if outcome == "review":
         result.update(requires_frequency_domain_qc_review=True, frequency_domain_qc_report={"flags": []})
     bridge_factory.call_args.kwargs["finished_callback"](result)
 
+    page.mark_project_source_maps_stale.assert_called_once_with()
+    page.reload_project_source_maps_from_disk.assert_not_called()
     assert button.tooltip == "Original action help"
     assert button.enabled is False  # Only the existing handoff/finalizer may unlock it.
     assert host._post_processing_pipeline_thread is None

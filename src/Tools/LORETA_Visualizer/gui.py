@@ -8,8 +8,10 @@ import logging
 import os
 import re
 from dataclasses import dataclass, replace
+from functools import partial
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Callable
 
 import numpy as np
 from PySide6.QtCore import QObject, QThread, QTimer, Qt, Signal, Slot
@@ -96,6 +98,7 @@ from Tools.LORETA_Visualizer.scalar_fields import (
     scalar_colors,
 )
 from Tools.LORETA_Visualizer.scalar_range_control import ScientificDoubleSpinBox
+from Tools.LORETA_Visualizer.source_build_progress import SourceBuildProgress
 from Tools.LORETA_Visualizer.source_producers.hauk_source_psd import (
     SOURCE_ORIENTATION_MODE_CORTICAL_NORMAL,
     SOURCE_ORIENTATION_MODE_LEGACY_MNE_PSD_POWER_NORM,
@@ -146,6 +149,13 @@ PROJECT_SOURCE_EXPORT_DEFAULT_MODES = (
     PROJECT_SOURCE_EXPORT_HAUK_SOURCE_PSD,
     PROJECT_SOURCE_EXPORT_ELORETA_SOURCE_PSD,
 )
+_REPEATED_SESSION_SOURCE_LIMITATION = "Source maps currently support single-session projects."
+PROJECT_SOURCE_EXPORT_PROGRESS_LABELS = {
+    PROJECT_SOURCE_EXPORT_HAUK_SOURCE_PSD: "L2-MNE cortical maps",
+    PROJECT_SOURCE_EXPORT_ELORETA_SOURCE_PSD: "eLORETA volume maps",
+    PROJECT_SOURCE_EXPORT_HAUK_ZSCORE: "legacy L2-MNE maps",
+    PROJECT_SOURCE_EXPORT_ELORETA_VOLUME: "legacy eLORETA maps",
+}
 LORETA_SUMMARY_REPORT_STATUS = "FPVS Toolbox is preparing the LORETA summary report."
 LORETA_SOURCE_MAP_BUILD_STATUS = "Generating source-space maps for 3D visualization of oddball responses."
 CLUSTER_MASK_SIGNIFICANT_STATUS_TEMPLATE = (
@@ -500,6 +510,7 @@ class ProjectSourceMapExportWorker(QObject):
     """Write project beta source maps without touching widgets."""
 
     progress = Signal(str)
+    build_stage = Signal(str, int, int)
     exported = Signal(object)
     failed = Signal(str)
     cancelled = Signal()
@@ -531,22 +542,36 @@ class ProjectSourceMapExportWorker(QObject):
         failures: list[ProjectSourceMapExportFailure] = []
         was_cancelled = False
         try:
-            for index, export_mode in enumerate(self._export_modes, start=1):
-                if self.cancellation.requested:
-                    was_cancelled = True
-                    break
-                self.progress.emit(
-                    f"Building {_source_export_mode_label(export_mode)} ({index}/{len(self._export_modes)})..."
-                )
-                try:
-                    results.append(self._run_export_mode(export_mode))
-                except SourceBuildCancelled:
-                    was_cancelled = True
-                    break
-                except (OSError, RuntimeError, ValueError, ImportError, ModuleNotFoundError) as exc:
-                    failures.append(ProjectSourceMapExportFailure(export_mode=export_mode, message=str(exc)))
-                    self.progress.emit(f"{_source_export_mode_label(export_mode)} failed: {exc}")
+            from Main_App.processing.source_harmonic_validation import source_harmonic_validation_scope
+            from Main_App.projects import project_recording_context
+            from Tools.LORETA_Visualizer.source_producers.source_psd_cache import source_psd_cache_scope
+
+            if self._project is not None and project_recording_context(self._project).is_repeated_session:
+                self.failed.emit(_REPEATED_SESSION_SOURCE_LIMITATION)
+                return
+            with source_psd_cache_scope(), source_harmonic_validation_scope(self._project):
+                for index, export_mode in enumerate(self._export_modes, start=1):
+                    if self.cancellation.requested:
+                        was_cancelled = True
+                        break
+                    self.progress.emit(
+                        f"Building {_source_export_mode_label(export_mode)} ({index}/{len(self._export_modes)})..."
+                    )
+                    method = PROJECT_SOURCE_EXPORT_PROGRESS_LABELS.get(export_mode, "source maps")
+                    if len(self._export_modes) > 1:
+                        method += f" · method {index} of {len(self._export_modes)}"
+                    self.build_stage.emit(f"Preparing {method}", 0, 0)
+                    try:
+                        results.append(self._run_export_mode(export_mode, partial(self._report_cells, method)))
+                    except SourceBuildCancelled:
+                        was_cancelled = True
+                        break
+                    except (OSError, RuntimeError, ValueError, ImportError, ModuleNotFoundError) as exc:
+                        failures.append(ProjectSourceMapExportFailure(export_mode=export_mode, message=str(exc)))
+                        self.progress.emit(f"{_source_export_mode_label(export_mode)} failed: {exc}")
             if results:
+                if not was_cancelled:
+                    self.build_stage.emit("Loading prepared source maps…", 0, 0)
                 self.exported.emit(
                     ProjectSourceMapExportBatchResult(
                         requested_modes=self._export_modes,
@@ -561,10 +586,16 @@ class ProjectSourceMapExportWorker(QObject):
                 self.failed.emit(failure_text or "No project source-map exporters ran.")
             if was_cancelled:
                 self.cancelled.emit()
+        except (OSError, RuntimeError, ValueError, ImportError) as exc:
+            self.failed.emit(str(exc))
         finally:
             self.finished.emit()
 
-    def _run_export_mode(self, export_mode: str) -> object:
+    def _report_cells(self, method: str, completed: int, total: int) -> None:
+        stage = "Summarizing and saving" if completed == total else "Building"
+        self.build_stage.emit(f"{stage} {method}", completed, total)
+
+    def _run_export_mode(self, export_mode: str, completed_cell_callback: Callable[[int, int], None]) -> object:
         if export_mode == PROJECT_SOURCE_EXPORT_HAUK_SOURCE_PSD:
             from Tools.LORETA_Visualizer.source_producers.project_l2_mne_hauk_source_psd_export import (
                 write_project_l2_mne_hauk_source_psd_payloads,
@@ -584,6 +615,7 @@ class ProjectSourceMapExportWorker(QObject):
                 source_orientation_mode=self._l2_source_orientation_mode,
                 allow_fetch_fsaverage=True,
                 progress_callback=self.progress.emit,
+                completed_cell_callback=completed_cell_callback,
                 cancellation_callback=self.cancellation.check,
                 build_batch_id=self._build_batch_id,
             )
@@ -605,6 +637,7 @@ class ProjectSourceMapExportWorker(QObject):
                 include_flagged_subjects=self._include_flagged_subjects,
                 allow_fetch_fsaverage=True,
                 progress_callback=self.progress.emit,
+                completed_cell_callback=completed_cell_callback,
                 cancellation_callback=self.cancellation.check,
                 build_batch_id=self._build_batch_id,
             )
@@ -1750,6 +1783,7 @@ class LoretaVisualizerWindow(QWidget):
         self._project_source_maps_loaded = False
         self._selected_source_method_id = SOURCE_METHOD_L2_MNE_SOURCE_PSD
         self._auto_project_zscore_attempted = False
+        self._source_build_is_obsolete = False
         self._include_flagged_subjects = False
         self._l2_source_orientation_mode = SOURCE_ORIENTATION_MODE_CORTICAL_NORMAL
         self._zscore_display_threshold = DEFAULT_CORTICAL_PAINT_Z_THRESHOLD
@@ -1781,6 +1815,9 @@ class LoretaVisualizerWindow(QWidget):
         self.viewport_layout = QVBoxLayout(self.viewport)
         self.viewport_layout.setContentsMargins(0, 0, 0, 0)
         self.viewport_layout.setSpacing(0)
+        self._source_build_progress = SourceBuildProgress(self.viewport)
+        self._source_build_progress.cancel_requested.connect(self._cancel_source_map_build)
+        self.viewport_layout.addWidget(self._source_build_progress, 0)
         body.addWidget(self.viewport, 1)
 
         body.addWidget(self._build_controls(), 0)
@@ -3645,11 +3682,42 @@ class LoretaVisualizerWindow(QWidget):
     def _build_project_zscore_source_maps(self) -> None:
         self._build_project_source_maps_for_modes(PROJECT_SOURCE_EXPORT_DEFAULT_MODES)
 
+    def showEvent(self, event) -> None:  # noqa: N802, ANN001
+        super().showEvent(event)
+        self._ensure_default_project_zscore_maps()
+
+    def mark_project_source_maps_stale(self) -> None:
+        """Recheck managed maps when LORETA is next shown."""
+        if self._closing_requested:
+            return
+        self._auto_project_zscore_attempted = False
+        self._source_discovery_request_id += 1
+        self._source_discovery_pending = None
+        if self._source_export_worker is not None:
+            self._source_build_is_obsolete = True
+            self._cancel_source_map_build()
+
     def _ensure_default_project_zscore_maps(self) -> None:
+        if (
+            self._closing_requested
+            or self._auto_project_zscore_attempted
+            or not self.isVisible()
+            or self.renderer is None
+            or self._fsaverage_dir is None
+            or self._source_export_thread is not None
+        ):
+            return
         project_root = self._refresh_project_root()
-        if self._auto_project_zscore_attempted or project_root is None or self.renderer is None:
+        if project_root is None:
             return
         self._auto_project_zscore_attempted = True
+        selected_method = self._selected_source_method_id
+        selected_condition = self._selected_condition_id
+        selected_metric = self._selected_metric
+        self._clear_loaded_project_source_maps()
+        self._selected_source_method_id = selected_method
+        self._selected_condition_id = selected_condition
+        self._selected_metric = selected_metric
         self._start_project_source_discovery(project_root, automatic=True)
 
     def reload_project_source_maps_from_disk(self, *, invalidate_if_missing: bool = False) -> bool:
@@ -3701,6 +3769,9 @@ class LoretaVisualizerWindow(QWidget):
         if (self._closing_requested or request_id != self._source_discovery_request_id
                 or root != self._refresh_project_root()):
             return
+        if automatic and not self.isVisible():
+            self._auto_project_zscore_attempted = False
+            return
         if paths:
             self._source_build_warning = None
             self._import_prepared_source_manifests(paths, preferred_source_method_id=self._selected_source_method_id)
@@ -3724,23 +3795,13 @@ class LoretaVisualizerWindow(QWidget):
         self,
         project_root: Path | None,
     ) -> None:
-        """Clear only project-loaded maps after a pipeline leaves no manifest."""
+        """Clear only managed maps when a disk reload finds no current bundle."""
 
-        cleared_project_map = bool(
-            getattr(self, "_project_source_maps_loaded", False)
-        )
-        if cleared_project_map:
-            self._project_source_maps_loaded = False
-            self._selected_condition_id = ""
-            self._source_activation_payload = None
-            self._current_activation_payload = None
-            self._replace_manifest_conditions(())
-            self._clear_activation_payload()
-
-        message = "Source-map regeneration did not produce a usable project manifest."
+        cleared_project_map = self._clear_loaded_project_source_maps()
+        message = "No current source maps are available."
         if cleared_project_map:
             message += " The previously loaded project map was cleared."
-        message += " Review the processing log for details."
+        message += " Open Source Map Options to rebuild."
         self._set_source_export_status(message, variant="warning")
         logger.warning(
             "loreta_project_source_maps_invalidated_after_pipeline",
@@ -3749,6 +3810,17 @@ class LoretaVisualizerWindow(QWidget):
                 "cleared_project_map": cleared_project_map,
             },
         )
+
+    def _clear_loaded_project_source_maps(self) -> bool:
+        if not self._project_source_maps_loaded:
+            return False
+        self._project_source_maps_loaded = False
+        self._selected_condition_id = ""
+        self._source_activation_payload = None
+        self._current_activation_payload = None
+        self._replace_manifest_conditions(())
+        self._clear_activation_payload()
+        return True
 
     def _build_project_source_maps_for_modes(
         self,
@@ -3835,6 +3907,7 @@ class LoretaVisualizerWindow(QWidget):
         )
 
         self._source_build_warning = None
+        self._source_build_is_obsolete = False
         self._source_discovery_request_id += 1  # Ignore a preceding disk scan.
         self._source_discovery_pending = None
         thread = QThread(self)
@@ -3848,7 +3921,7 @@ class LoretaVisualizerWindow(QWidget):
         )
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
-        worker.progress.connect(self._on_project_source_maps_progress)
+        worker.build_stage.connect(self._on_project_source_maps_progress)
         worker.exported.connect(self._on_project_source_maps_exported)
         worker.failed.connect(self._on_project_source_maps_failed)
         worker.cancelled.connect(self._on_project_source_maps_cancelled)
@@ -3858,6 +3931,8 @@ class LoretaVisualizerWindow(QWidget):
         thread.finished.connect(self._project_source_export_finished)
         self._source_export_thread = thread
         self._source_export_worker = worker
+        self.mesh_status.hide()
+        self._source_build_progress.begin()
         self._sync_project_source_button()
         thread.start()
 
@@ -3968,22 +4043,32 @@ class LoretaVisualizerWindow(QWidget):
         self._sync_project_source_button()
         self._finish_deferred_close()
 
-    @Slot(str)
-    def _on_project_source_maps_progress(self, message: str) -> None:
-        self._set_source_export_status(message, variant="info")
+    @Slot(str, int, int)
+    def _on_project_source_maps_progress(self, stage: str, completed: int, total: int) -> None:
+        worker = self._source_export_worker
+        if (worker is not None and not self._closing_requested and not self._source_build_is_obsolete
+                and not worker.cancellation.requested):
+            self._source_build_progress.set_stage(stage, completed, total)
 
     def _cancel_source_map_build(self) -> None:
         if self._source_export_worker is not None:
             self._source_export_worker.cancellation.request()
-            self._set_source_export_status("Cancelling after the current source-build step...", variant="info")
+            self._source_build_progress.cancelling()
 
     @Slot()
     def _on_project_source_maps_cancelled(self) -> None:
-        self._source_build_warning = "Source-map rebuild cancelled; completed methods were retained."
+        if self._closing_requested or self._source_build_is_obsolete:
+            return
+        self._source_build_warning = (
+            "Source-map build cancelled. Any completed methods are still available. "
+            "Open Options to rebuild."
+        )
         self._set_source_export_status(self._source_build_warning, variant="warning")
 
     @Slot(object)
     def _on_project_source_maps_exported(self, result: object) -> None:
+        if self._closing_requested or self._source_build_is_obsolete:
+            return
         export_results = result.results if isinstance(result, ProjectSourceMapExportBatchResult) else (result,)
         failures = result.failures if isinstance(result, ProjectSourceMapExportBatchResult) else ()
         valid_manifest_paths: list[Path] = []
@@ -4155,6 +4240,11 @@ class LoretaVisualizerWindow(QWidget):
 
     @Slot(str)
     def _on_project_source_maps_failed(self, message: str) -> None:
+        if self._closing_requested or self._source_build_is_obsolete:
+            return
+        if message == _REPEATED_SESSION_SOURCE_LIMITATION:
+            self._set_source_export_status(message, variant="warning")
+            return
         logger.warning(
             "loreta_project_source_maps_export_failed",
             extra={
@@ -4163,13 +4253,19 @@ class LoretaVisualizerWindow(QWidget):
                 "zscore_model": PROJECT_ZSCORE_MODEL_PARTICIPANT_FIRST,
             },
         )
-        self._set_source_export_status(_project_source_export_failure_text(message), variant="warning")
+        self._set_source_export_status(
+            f"{_project_source_export_failure_text(message)}\nOpen Options to rebuild.", variant="warning"
+        )
 
     @Slot()
     def _project_source_export_finished(self) -> None:
         self._source_export_thread = None
         self._source_export_worker = None
+        self._source_build_progress.hide()
+        if not self._closing_requested:
+            self.mesh_status.show()
         self._sync_project_source_button()
+        self._ensure_default_project_zscore_maps()
         self._finish_deferred_close()
 
     def _set_source_export_status(self, message: str, *, variant: str) -> None:
@@ -4976,6 +5072,11 @@ class LoretaVisualizerWindow(QWidget):
             getattr(self, "_comparison_figure_thread", None),
         )):
             self.close()
+
+    def retire_from_workspace(self) -> None:
+        """Delete this detached page after its last worker drains."""
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        self.close()
 
     def closeEvent(self, event) -> None:  # noqa: N802, ANN001
         self._mri_preview_resize_timer.stop()

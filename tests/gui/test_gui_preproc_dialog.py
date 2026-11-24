@@ -1952,8 +1952,8 @@ def test_embedded_settings_harmonic_save_uses_post_processing_activity_page(
     grid_worker.finished.emit(audit)
     harmonic_worker.phase_progress.emit(
         "stats_ready_export",
+        2,
         3,
-        5,
         "FPVS Toolbox is rebuilding analysis files.",
     )
 
@@ -1961,8 +1961,8 @@ def test_embedded_settings_harmonic_save_uses_post_processing_activity_page(
     assert win.processing_message_label.text() == (
         "FPVS Toolbox is rebuilding analysis files."
     )
-    assert win.processing_step_label.text() == "Post-processing phase 3 of 5"
-    qtbot.waitUntil(lambda: win.progress_bar.value() == 60, timeout=1_000)
+    assert win.processing_step_label.text() == "Post-processing phase 3 of 3"
+    qtbot.waitUntil(lambda: win.progress_bar.value() == 67, timeout=1_000)
 
     harmonic_worker.finished.emit(
         {

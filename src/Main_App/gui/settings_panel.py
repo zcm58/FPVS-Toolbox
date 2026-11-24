@@ -2249,6 +2249,10 @@ class SettingsDialog(QDialog):
         def _handle_finished(result: object) -> None:
             nonlocal activity_return_home
             payload = result if isinstance(result, dict) else {}
+            if payload.get("ok") or payload.get("selection_recalculated"):
+                from Main_App.gui.processing_workflows import mark_cached_loreta_source_maps_stale
+
+                mark_cached_loreta_source_maps_stale(owner)
             if payload.get("ok"):
                 activity_return_home = bool(accept_on_success)
                 self._clear_harmonic_settings_rollback()

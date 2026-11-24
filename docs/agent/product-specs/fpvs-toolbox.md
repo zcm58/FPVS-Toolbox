@@ -73,8 +73,9 @@ Offline retries use the same revision. [Reporting ownership and verification](..
   by default. Scalp Maps and LORETA Visualizer require the Beta Tools setting,
   save and restart, and the first-open notice in each session. Current LORETA
   generation requires eligible source-ready derivatives and current harmonics.
-  Automatic generation is limited to single-session inputs, and the estimates
-  are exploratory. [Desktop tools](../architecture/gui.md) ·
+  Analysis workbooks finish independently. On first open, LORETA prepares any
+  required source maps for eligible single-session projects and shows build
+  progress. The estimates are exploratory. [Desktop tools](../architecture/gui.md) ·
   [LORETA architecture](../../../src/Tools/LORETA_Visualizer/ARCHITECTURE.md)
 
 Source tests and synthetic examples establish software behavior within their

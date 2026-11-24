@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from uuid import uuid4
-
 from collections.abc import Callable, Mapping
 from contextlib import ExitStack, contextmanager, nullcontext
 import logging
@@ -28,11 +26,7 @@ PIPELINE_STEP_EXCEPTIONS = (
     KeyError,
     TypeError,
 )
-SOURCE_OUTPUT_MODES = (
-    "l2_mne_source_psd",
-    "eloreta_volume_source_psd",
-)
-POST_PROCESSING_PHASE_COUNT = 3 + len(SOURCE_OUTPUT_MODES)
+POST_PROCESSING_PHASE_COUNT = 3
 
 _PHASE_FREQUENCY_DOMAIN_QC = "frequency_domain_qc"
 _PHASE_HARMONIC_SELECTION = "harmonic_selection"
@@ -47,33 +41,12 @@ _REQUIRED_OUTPUT_STEP_NAMES = frozenset(
         "stats_ready_summed_bca",
     }
 )
-_SOURCE_PHASE_BY_MODE = {
-    "l2_mne_source_psd": "l2_mne_source_maps",
-    "eloreta_volume_source_psd": "eloreta_source_maps",
-}
-_SOURCE_PHASE_MESSAGE_BY_MODE = {
-    "l2_mne_source_psd": (
-        "Generating Hauk-informed time-domain L2-MNE source maps for 3D visualization of oddball responses."
-    ),
-    "eloreta_volume_source_psd": (
-        "Generating Hauk-informed time-domain eLORETA volume maps for 3D visualization of oddball responses."
-    ),
-}
-
 _REPEATED_SESSION_STATS_READY_SKIP_MESSAGE = (
     "Skipped the legacy LORETA Stats-ready workbook for this repeated-session "
     "project. Repeated-session analysis uses the recording-aware full-audit "
     "workbook; the legacy LORETA workbook is participant-keyed and cannot "
     "represent multiple recordings safely."
 )
-_REPEATED_SESSION_SOURCE_SKIP_MESSAGE = (
-    "Automatic LORETA project-source generation was skipped for this "
-    "repeated-session project because the current project-source producers "
-    "are participant-keyed and are not recording-aware. Source-ready "
-    "derivatives were left unchanged."
-)
-
-
 @dataclass(frozen=True)
 class PostProcessingStepResult:
     """Serializable summary for one post-processing pipeline step."""
@@ -310,10 +283,6 @@ class PostProcessingPipelineWorker(QObject):
                         3,
                         stats_message,
                     )
-                    cache_stack.close()
-                    # These exports share an accepted selection; a failure in
-                    # one sibling must not suppress the other consumers.
-                    steps.extend(self._run_source_maps(project_root))
         except Exception as exc:  # noqa: BLE001 - every stage failure must release the owning QThread
             requires_processing = isinstance(exc, processing_required_errors)
             if not requires_processing and not isinstance(exc, PipelineCancelled):
@@ -346,7 +315,7 @@ class PostProcessingPipelineWorker(QObject):
             if failure_reason
             else "Post-processing is complete."
             if ok and not has_warnings
-            else "Post-processing is complete with source-cohort warnings."
+            else "Post-processing is complete with warnings."
             if ok
             else "Core post-processing is complete with optional export warnings; review the processing log for details."
         )
@@ -371,7 +340,7 @@ class PostProcessingPipelineWorker(QObject):
         steps: list[PostProcessingStepResult],
         cache_stack: ExitStack,
     ) -> None:
-        """Rebuild only derivatives of an already accepted harmonic selection."""
+        """Rebuild workbook exports for an already accepted harmonic selection."""
 
         if self._harmonic_selection_metadata is None:
             raise RuntimeError(
@@ -394,17 +363,18 @@ class PostProcessingPipelineWorker(QObject):
             and self._project_manifest_exists(project_root)
         ):
             from Main_App.processing.artifact_freshness import (
-                selection_dependent_artifacts_are_current,
+                selection_dependent_workbooks_are_current,
             )
 
-            if selection_dependent_artifacts_are_current(
+            if selection_dependent_workbooks_are_current(
                 project_root,
                 self._selection_fingerprint,
+                repeated_session=self._requires_recording_aware_export,
             ):
                 message = (
-                    "The harmonic selection is unchanged and every dependent "
-                    "post-processing artifact is already current."
+                    "The harmonic selection is unchanged and its workbook exports are current."
                 )
+                cache_stack.close()
                 self._emit_progress(message)
                 self._emit_phase_progress(
                     _PHASE_COMPLETE,
@@ -446,11 +416,6 @@ class PostProcessingPipelineWorker(QObject):
             stats_message,
         )
         cache_stack.close()
-        # The time-domain source maps use durable source-ready derivatives and
-        # the accepted harmonic list. Rebuild them after a selection change
-        # without returning to raw EEG preprocessing or participant FFT export.
-        steps.extend(self._run_source_maps(project_root))
-
         ok = all(step.ok for step in steps)
         has_warnings = any(step.warning for step in steps)
         failure_reason = _required_output_failure_reason(
@@ -866,235 +831,6 @@ class PostProcessingPipelineWorker(QObject):
             str(project_root / "project.json"),
         )
 
-    def _run_source_maps(self, project_root: Path) -> list[PostProcessingStepResult]:
-        from Main_App.processing.hardware_capabilities import spatial_tool_unavailable_reason
-
-        unavailable_reason = spatial_tool_unavailable_reason(self._project, "LORETA Visualizer")
-        if unavailable_reason:
-            self._emit_progress(unavailable_reason)
-            completed_before = POST_PROCESSING_PHASE_COUNT - len(SOURCE_OUTPUT_MODES)
-            steps = []
-            for index, mode in enumerate(SOURCE_OUTPUT_MODES, start=1):
-                self._artifact_targets.pop(mode, None)
-                self._artifact_archives.pop(mode, None)
-                self._emit_phase_progress(
-                    _SOURCE_PHASE_BY_MODE[mode], completed_before + index, unavailable_reason,
-                )
-                steps.append(PostProcessingStepResult(mode, True, unavailable_reason))
-            return steps
-
-        if self._is_repeated_session_project():
-            self._emit_progress(_REPEATED_SESSION_SOURCE_SKIP_MESSAGE)
-            steps: list[PostProcessingStepResult] = []
-            completed_before_source_maps = POST_PROCESSING_PHASE_COUNT - len(
-                SOURCE_OUTPUT_MODES
-            )
-            for index, mode in enumerate(SOURCE_OUTPUT_MODES, start=1):
-                self._artifact_targets.pop(mode, None)
-                self._artifact_archives.pop(mode, None)
-                phase_id = _SOURCE_PHASE_BY_MODE[mode]
-                self._emit_phase_progress(
-                    phase_id,
-                    completed_before_source_maps + index - 1,
-                    _REPEATED_SESSION_SOURCE_SKIP_MESSAGE,
-                )
-                steps.append(
-                    PostProcessingStepResult(
-                        mode,
-                        True,
-                        _REPEATED_SESSION_SOURCE_SKIP_MESSAGE,
-                    )
-                )
-                self._emit_phase_progress(
-                    phase_id,
-                    completed_before_source_maps + index,
-                    _REPEATED_SESSION_SOURCE_SKIP_MESSAGE,
-                )
-            return steps
-
-        self._emit_progress(
-            "Generating Hauk-informed time-domain source-space maps for 3D visualization of oddball responses."
-        )
-        steps: list[PostProcessingStepResult] = []
-        completed_before_source_maps = POST_PROCESSING_PHASE_COUNT - len(SOURCE_OUTPUT_MODES)
-        from Tools.LORETA_Visualizer.source_producers.source_psd_cache import source_psd_cache_scope
-
-        from Main_App.processing.source_harmonic_validation import source_harmonic_validation_scope
-
-        with source_psd_cache_scope(), source_harmonic_validation_scope(self._project):
-            for index, mode in enumerate(SOURCE_OUTPUT_MODES, start=1):
-                phase_id = _SOURCE_PHASE_BY_MODE[mode]
-                phase_message = _SOURCE_PHASE_MESSAGE_BY_MODE[mode]
-                self._emit_phase_progress(
-                    phase_id,
-                    completed_before_source_maps + index - 1,
-                    phase_message,
-                )
-                steps.append(
-                    self._record_artifact_freshness(
-                        self._run_source_map_mode(project_root, mode)
-                    )
-                )
-                self._emit_phase_progress(
-                    phase_id,
-                    completed_before_source_maps + index,
-                    phase_message,
-                )
-        return steps
-
-    def _run_source_map_mode(
-        self,
-        project_root: Path,
-        mode: str,
-    ) -> PostProcessingStepResult:
-        from Main_App.processing.hardware_capabilities import spatial_tool_unavailable_reason
-
-        unavailable_reason = spatial_tool_unavailable_reason(self._project, "LORETA Visualizer")
-        if unavailable_reason:
-            return PostProcessingStepResult(mode, True, unavailable_reason)
-
-        if mode == "l2_mne_source_psd":
-            label = "Hauk-informed time-domain L2-MNE source maps"
-            artifact_id = mode
-            from Main_App.processing.artifact_freshness import canonical_artifact_path
-
-            self._artifact_targets[artifact_id] = canonical_artifact_path(
-                project_root,
-                artifact_id,
-            )
-            try:
-                default_output_dir, write_payloads = _load_source_psd_export_api()
-                target = default_output_dir(project_root)
-                self._artifact_targets[artifact_id] = target
-                # The exporter owns staging, rollback and freshness as one commit.
-                if not getattr(self, "_source_build_batch_id", None):
-                    self._source_build_batch_id = uuid4().hex
-                result = write_payloads(
-                    project=self._project,
-                    project_root=project_root,
-                    include_flagged_subjects=False,
-                    allow_fetch_fsaverage=True,
-                    progress_callback=self._emit_progress,
-                    build_batch_id=self._source_build_batch_id,
-                )
-            except PIPELINE_STEP_EXCEPTIONS as exc:
-                logger.exception("post_processing_l2_mne_source_psd_maps_failed")
-                return PostProcessingStepResult(mode, False, f"{label} failed: {exc}")
-            source_ineligible = tuple(
-                getattr(result, "source_ineligible_participants", ()) or ()
-            )
-            source_condition_omissions = tuple(
-                getattr(result, "source_condition_omissions", ()) or ()
-            )
-            if source_ineligible or source_condition_omissions:
-                skipped_ids = ", ".join(
-                    str(getattr(item, "participant_id", "")).strip()
-                    for item in source_ineligible
-                    if str(getattr(item, "participant_id", "")).strip()
-                )
-                warning_parts = [
-                    (
-                        f"{label} generated from "
-                        f"{len(tuple(getattr(result, 'included_participants', ()) or ()))} "
-                        "source-eligible participant(s)"
-                    )
-                ]
-                if source_ineligible:
-                    warning_parts.append(
-                        "source-ineligible participant(s) were omitted from "
-                        f"every condition: {skipped_ids}"
-                    )
-                if source_condition_omissions:
-                    warning_parts.append(
-                        f"{len(source_condition_omissions)} incompatible or "
-                        "unavailable participant-condition input(s) were omitted"
-                    )
-                return PostProcessingStepResult(
-                    mode,
-                    True,
-                    "; ".join(warning_parts) + ".",
-                    str(result.manifest_path),
-                    warning=True,
-                )
-            return PostProcessingStepResult(
-                mode,
-                True,
-                f"{label} generated.",
-                str(result.manifest_path),
-            )
-
-        if mode == "eloreta_volume_source_psd":
-            label = "Hauk-informed time-domain eLORETA volume source maps"
-            artifact_id = mode
-            from Main_App.processing.artifact_freshness import canonical_artifact_path
-
-            self._artifact_targets[artifact_id] = canonical_artifact_path(
-                project_root,
-                artifact_id,
-            )
-            try:
-                default_output_dir, write_payloads = _load_eloreta_source_psd_export_api()
-                target = default_output_dir(project_root)
-                self._artifact_targets[artifact_id] = target
-                # The exporter owns staging, rollback and freshness as one commit.
-                if not getattr(self, "_source_build_batch_id", None):
-                    self._source_build_batch_id = uuid4().hex
-                result = write_payloads(
-                    project=self._project,
-                    project_root=project_root,
-                    include_flagged_subjects=False,
-                    allow_fetch_fsaverage=True,
-                    progress_callback=self._emit_progress,
-                    build_batch_id=self._source_build_batch_id,
-                )
-            except PIPELINE_STEP_EXCEPTIONS as exc:
-                logger.exception("post_processing_eloreta_volume_source_psd_maps_failed")
-                return PostProcessingStepResult(mode, False, f"{label} failed: {exc}")
-            source_ineligible = tuple(
-                getattr(result, "source_ineligible_participants", ()) or ()
-            )
-            source_condition_omissions = tuple(
-                getattr(result, "source_condition_omissions", ()) or ()
-            )
-            if source_ineligible or source_condition_omissions:
-                skipped_ids = ", ".join(
-                    str(getattr(item, "participant_id", "")).strip()
-                    for item in source_ineligible
-                    if str(getattr(item, "participant_id", "")).strip()
-                )
-                warning_parts = [
-                    (
-                        f"{label} generated from "
-                        f"{len(tuple(getattr(result, 'included_participants', ()) or ()))} "
-                        "source-eligible participant(s)"
-                    )
-                ]
-                if source_ineligible:
-                    warning_parts.append(
-                        "source-ineligible participant(s) were omitted from "
-                        f"every condition: {skipped_ids}"
-                    )
-                if source_condition_omissions:
-                    warning_parts.append(
-                        f"{len(source_condition_omissions)} incompatible or "
-                        "unavailable participant-condition input(s) were omitted"
-                    )
-                return PostProcessingStepResult(
-                    mode,
-                    True,
-                    "; ".join(warning_parts) + ".",
-                    str(result.manifest_path),
-                    warning=True,
-                )
-            return PostProcessingStepResult(
-                mode,
-                True,
-                f"{label} generated.",
-                str(result.manifest_path),
-            )
-
-        return PostProcessingStepResult(mode, False, f"Unsupported source-map mode: {mode}")
-
     def _capture_previous_selection_fingerprint(self, project_root: Path) -> None:
         if self._previous_selection_fingerprint is not None:
             return
@@ -1172,9 +908,6 @@ class PostProcessingPipelineWorker(QObject):
         self,
         step: PostProcessingStepResult,
     ) -> PostProcessingStepResult:
-        if step.name in {"l2_mne_source_psd", "eloreta_volume_source_psd"}:
-            # Source exporters publish their own receipt and freshness atomically.
-            return step
         project_root = Path(self._project.project_root).expanduser().resolve()
         target = self._artifact_targets.get(step.name)
         if (
@@ -1260,23 +993,6 @@ class PostProcessingPipelineWorker(QObject):
         self._emit_progress(f"Removing stale {label}: {target}")
         target.unlink()
 
-    def _clear_output_dir(
-        self,
-        output_dir: Path,
-        *,
-        project_root: Path,
-        label: str,
-    ) -> None:
-        root = self._assert_under_project_root(output_dir, project_root=project_root, label=label)
-        if not root.exists():
-            return
-        if root == project_root:
-            raise ValueError(f"Refusing to clear project root for {label}: {root}")
-        self._emit_progress(f"Removing stale {label} outputs...")
-        for path in root.rglob("*"):
-            if path.is_file():
-                path.unlink()
-
     @staticmethod
     def _assert_under_project_root(path: Path, *, project_root: Path, label: str) -> Path:
         target = Path(path).expanduser().resolve()
@@ -1320,33 +1036,6 @@ class PostProcessingPipelineWorker(QObject):
         )
 
 
-def _load_source_psd_export_api():  # noqa: ANN202
-    """Import the time-domain exporter through one narrow integration seam."""
-    from Tools.LORETA_Visualizer.source_producers.project_l2_mne_hauk_source_psd_export import (
-        default_project_l2_mne_hauk_source_psd_output_dir,
-        write_project_l2_mne_hauk_source_psd_payloads,
-    )
-
-    return (
-        default_project_l2_mne_hauk_source_psd_output_dir,
-        write_project_l2_mne_hauk_source_psd_payloads,
-    )
-
-
-def _load_eloreta_source_psd_export_api():  # noqa: ANN202
-    """Import the time-domain eLORETA exporter through one integration seam."""
-
-    from Tools.LORETA_Visualizer.source_producers.project_eloreta_volume_hauk_source_psd_export import (
-        default_project_eloreta_volume_hauk_source_psd_output_dir,
-        write_project_eloreta_volume_hauk_source_psd_payloads,
-    )
-
-    return (
-        default_project_eloreta_volume_hauk_source_psd_output_dir,
-        write_project_eloreta_volume_hauk_source_psd_payloads,
-    )
-
-
 def run_postprocessing_from_selection(
     project: Any,
     selection_metadata: Mapping[str, object],
@@ -1355,7 +1044,7 @@ def run_postprocessing_from_selection(
     progress_callback: Callable[[str], None] | None = None,
     phase_progress_callback: Callable[[str, int, int, str], None] | None = None,
 ) -> dict[str, object]:
-    """Synchronously rebuild selection derivatives in the caller's worker thread.
+    """Synchronously rebuild selection workbooks in the caller's worker thread.
 
     This entry point intentionally starts after harmonic selection.  It never
     loads raw EEG, preprocesses data, or regenerates participant FullFFT

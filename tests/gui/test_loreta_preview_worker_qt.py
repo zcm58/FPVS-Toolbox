@@ -1,12 +1,13 @@
-"""CI-only MRI preview lifecycle smoke tests with bounded fake rendering."""
+"""CI-only LORETA worker lifecycle smoke tests with bounded fake work."""
 
 from threading import Event
 from types import SimpleNamespace
 
 import pytest
 from PySide6.QtCore import QObject, QTimer, Signal, Slot
-from PySide6.QtWidgets import QPushButton, QWidget
+from PySide6.QtWidgets import QPushButton, QStackedWidget, QWidget
 
+from Main_App.gui import project_workflows
 from Tools.LORETA_Visualizer import gui
 
 
@@ -53,6 +54,7 @@ class _PreviewHarness(gui.LoretaVisualizerWindow):
         self.shutdown_count = 0
         self._display_mode = gui.DISPLAY_MODE_MRI_SLICES
         self._closing_requested = False
+        self._auto_project_zscore_attempted = True
         self._mesh_thread = None
         self._source_export_thread = None
         self._source_export_worker = None
@@ -276,3 +278,98 @@ def test_drag_frame_is_rejected_after_scale_context_changes(qtbot, preview_harne
     workers[2].release.set()
     qtbot.waitUntil(lambda: host._mri_render_thread is None)
     assert [result.request_id for result in host.applied] == [1, 3]
+
+
+@pytest.fixture
+def source_workspace(qtbot, monkeypatch, tmp_path):
+    def fake_renderer(window):
+        window.renderer = SimpleNamespace(shutdown=lambda: None)
+
+    def fake_anatomy(window, *, allow_fetch):
+        window._fsaverage_dir = tmp_path
+
+    monkeypatch.setattr(gui.LoretaVisualizerWindow, "_initialize_renderer", fake_renderer)
+    monkeypatch.setattr(gui.LoretaVisualizerWindow, "_start_fsaverage_load", fake_anatomy)
+    workspace = QStackedWidget()
+    qtbot.addWidget(workspace)
+    workspace.currentProject = SimpleNamespace(project_root=tmp_path)
+    home = QWidget()
+    workspace.addWidget(home)
+    window = gui.LoretaVisualizerWindow(parent=workspace, project_root=str(tmp_path))
+    workspace.addWidget(window)
+    workspace.show()
+    return workspace, home, window
+
+
+def test_source_build_starts_when_opened_and_drains_after_project_reset(
+    qtbot, monkeypatch, source_workspace
+):
+    workspace, home, window = source_workspace
+    entered = Event()
+    release = Event()
+    cancelled = Event()
+
+    class ControlledSourceWorker(gui.ProjectSourceMapExportWorker):
+        @Slot()
+        def run(self):
+            self.build_stage.emit("Building L2-MNE", 1, 2)
+            entered.set()
+            try:
+                if release.wait(timeout=5) and self.cancellation.requested:
+                    cancelled.set()
+            finally:
+                self.finished.emit()
+
+    monkeypatch.setattr(gui, "default_project_source_manifest_paths", lambda _root: ())
+    monkeypatch.setattr(gui, "ProjectSourceMapExportWorker", ControlledSourceWorker)
+    assert window._source_discovery_thread is None
+    assert window._source_export_thread is None
+    workspace.setCurrentWidget(window)
+    try:
+        qtbot.waitUntil(entered.is_set)
+        assert not window._source_build_progress.isHidden()
+        host = SimpleNamespace(
+            workspace_stack=workspace,
+            _loreta_visualizer_page=window,
+            show_home_page=lambda: workspace.setCurrentWidget(home),
+        )
+        assert project_workflows.reset_project_context_workspace(host)
+        assert host._loreta_visualizer_page is None
+        assert workspace.currentWidget() is home
+        assert window._source_export_thread is not None
+        with qtbot.waitSignal(window.destroyed, timeout=5000):
+            release.set()
+        assert cancelled.is_set()
+    finally:
+        release.set()
+
+
+def test_current_maps_reload_only_when_opened_after_a_new_release(
+    qtbot, monkeypatch, source_workspace, tmp_path
+):
+    workspace, home, window = source_workspace
+    paths = (tmp_path / "current_manifest.json",)
+    imports = []
+    monkeypatch.setattr(gui, "default_project_source_manifest_paths", lambda _root: paths)
+    monkeypatch.setattr(
+        window, "_import_prepared_source_manifests",
+        lambda found, **_kwargs: imports.append(found),
+    )
+
+    workspace.setCurrentWidget(window)
+    qtbot.waitUntil(lambda: len(imports) == 1 and window._source_discovery_thread is None)
+    assert window._source_export_thread is None
+    assert window._source_build_progress.isHidden()
+
+    workspace.setCurrentWidget(home)
+    workspace.setCurrentWidget(window)
+    assert window._source_discovery_thread is None
+
+    workspace.setCurrentWidget(home)
+    window.mark_project_source_maps_stale()
+    assert window._source_discovery_thread is None
+    workspace.setCurrentWidget(window)
+    qtbot.waitUntil(lambda: len(imports) == 2 and window._source_discovery_thread is None)
+    assert imports == [paths, paths]
+    assert window._source_export_thread is None
+    assert window._source_build_progress.isHidden()
