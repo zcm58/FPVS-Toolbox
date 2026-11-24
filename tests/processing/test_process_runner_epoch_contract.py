@@ -1898,7 +1898,16 @@ def test_preprocessed_cache_round_trip_preserves_audit_metadata(tmp_path: Path) 
             {"center_hz": 180.0, "reason": "above_low_pass_transition"},
         ],
     }
+    kurtosis_review = {
+        "_fpvs_kurtosis_review_required_channels": ["Cz", "P10"],
+        "_fpvs_kurtosis_corroborated_channels": ["Cz"],
+        "_fpvs_kurtosis_user_approved_channels": ["Cz"],
+        "_fpvs_kurtosis_user_rejected_channels": ["P10"],
+        "_fpvs_kurtosis_qc_evidence": {"findings": [{"channel": "Cz", "raw_kurtosis": 3.125}]},
+        "_fpvs_kurtosis_decision_plan": {"approved": ["Cz"], "rejected": ["P10"]},
+    }
     load_settings = dict(settings)
+    settings.update(kurtosis_review)
     load_settings.pop("_fpvs_raw_qc_bad_channels")
     load_settings.pop("_fpvs_raw_qc_low_variance_channels")
     load_settings.pop("_fpvs_raw_qc_high_amplitude_channels")
@@ -1955,9 +1964,7 @@ def test_preprocessed_cache_round_trip_preserves_audit_metadata(tmp_path: Path) 
     )
 
     assert stored == "stored"
-    assert payload["version"] == (
-        "preprocessed-raw-v13-v3-trigger-alignment"
-    )
+    assert payload["version"] == process_runner.PREPROC_CACHE_VERSION
     assert payload["geometry"] == biosemi64_geometry_identity(
         retained_channels=("Fp1",)
     )
@@ -2011,6 +2018,7 @@ def test_preprocessed_cache_round_trip_preserves_audit_metadata(tmp_path: Path) 
     assert load_settings["_fpvs_removed_electrode_auto_manual_overlap"] == ["FT7"]
     assert load_settings["_fpvs_removed_electrode_agreement_status"] == "partial"
     assert load_settings["_fpvs_kurtosis_bad_channels"] == ["Cz"]
+    assert {key: load_settings[key] for key in kurtosis_review} == kurtosis_review
     assert load_settings["_fpvs_interpolation_status"] == "succeeded"
     assert load_settings["_fpvs_interpolation_requested_channels"] == ["P9", "Cz"]
     assert load_settings["_fpvs_interpolated_channels"] == ["P9", "Cz"]

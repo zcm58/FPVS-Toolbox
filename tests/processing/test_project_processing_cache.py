@@ -18,6 +18,7 @@ from Main_App.processing.processing_ledger import (
 from Main_App.processing.project_processing_cache import (
     clear_project_processing_cache,
     inspect_project_processing_cache,
+    inspect_recording_cache_usage,
     preprocessed_cache_directory,
 )
 from Main_App.projects.project import Project
@@ -27,6 +28,51 @@ def _write(path: Path, payload: bytes) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(payload)
     return path
+
+
+def test_recording_cache_usage_counts_existing_files_without_changing_them(tmp_path: Path) -> None:
+    assert inspect_recording_cache_usage(tmp_path) == {
+        "enable_bids_import_cache": 0,
+        "enable_kurtosis_checkpoint_cache": 0,
+        "enable_preprocessed_cache": 0,
+    }
+    root = tmp_path / ".fpvs_cache"
+    assert not root.exists()
+
+    samples = {
+        root / "bids-import" / "import" / "eeg.bdf": b"12345",
+        root / "bids-import" / "import.json": b"meta",
+        root / "prepared_kurtosis" / "recording" / "prepared.npz": b"123",
+        root / "preprocessed" / "recording_raw.fif": b"12",
+        root / "other" / "unrelated.npz": b"unrelated",
+    }
+    for path, payload in samples.items():
+        _write(path, payload)
+
+    assert inspect_recording_cache_usage(tmp_path) == {
+        "enable_bids_import_cache": 9,
+        "enable_kurtosis_checkpoint_cache": 3,
+        "enable_preprocessed_cache": 2,
+    }
+    assert {path: path.read_bytes() for path in samples} == samples
+
+
+def test_recording_cache_usage_marks_a_redirected_cache_unavailable(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    cache = project / ".fpvs_cache"
+    cache.mkdir(parents=True)
+    outside = _write(tmp_path / "other" / "outside.bdf", b"outside")
+    try:
+        (cache / "bids-import").symlink_to(outside.parent, target_is_directory=True)
+    except (NotImplementedError, OSError) as exc:
+        pytest.skip(f"symbolic links unavailable in this environment: {exc}")
+
+    assert inspect_recording_cache_usage(project) == {
+        "enable_bids_import_cache": None,
+        "enable_kurtosis_checkpoint_cache": 0,
+        "enable_preprocessed_cache": 0,
+    }
+    assert outside.read_bytes() == b"outside"
 
 
 def test_clear_project_processing_cache_removes_only_cold_run_state(

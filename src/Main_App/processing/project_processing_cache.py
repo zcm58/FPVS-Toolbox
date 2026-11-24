@@ -8,14 +8,17 @@ module's deletion boundary.
 
 from __future__ import annotations
 
+import logging
 import shutil
 import threading
 from dataclasses import dataclass
 from pathlib import Path
 
 from Main_App.processing.preflight_qc_cache import preflight_qc_cache_directory
+from Main_App.processing.preflight_qc_pruning import safe_cache_directory
 from Main_App.processing.processing_ledger import ledger_path
 
+logger = logging.getLogger(__name__)
 PREPROCESSED_CACHE_RELATIVE_DIRECTORY = Path(".fpvs_cache") / "preprocessed"
 _CACHE_RESET_LOCK = threading.Lock()
 
@@ -108,6 +111,26 @@ def _path_usage(path: Path) -> tuple[int, int]:
     return file_count, total_bytes
 
 
+def inspect_recording_cache_usage(project_root: Path) -> dict[str, int | None]:
+    """Return bytes currently retained for each project recording cache."""
+    root = Path(project_root)
+    preprocessed = preprocessed_cache_directory(root)
+    cache_root = preprocessed.parent
+    usage = {}
+    for key, directory in (
+        ("enable_bids_import_cache", cache_root / "bids-import"),
+        ("enable_kurtosis_checkpoint_cache", cache_root / "prepared_kurtosis"),
+        ("enable_preprocessed_cache", preprocessed),
+    ):
+        usage[key] = None
+        if safe_cache_directory(root, directory):
+            try:
+                _, usage[key] = _path_usage(directory)
+            except OSError:
+                logger.warning("recording_cache_inventory_unavailable path=%s", directory, exc_info=True)
+    return usage
+
+
 def _inspect_project_processing_cache_unlocked(
     project_root: Path,
 ) -> ProjectProcessingCacheUsage:
@@ -167,5 +190,6 @@ __all__ = [
     "ProjectProcessingCacheUsage",
     "clear_project_processing_cache",
     "inspect_project_processing_cache",
+    "inspect_recording_cache_usage",
     "preprocessed_cache_directory",
 ]

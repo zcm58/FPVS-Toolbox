@@ -149,10 +149,8 @@ def test_real_recording_to_spectral_export(tmp_path, extension, preload_in_memor
     assert second["preproc_cache_status"] == "hit"
     assert second["geometry"] == result["geometry"]
     cached_fft = read_spectral_sheet(bundles[0], sheet_name=SPECTRAL_SHEET_NAMES[0])
-    # The established FIF cache stores single precision; its roundoff is below
-    # 1e-8 microvolts here, including bins whose true amplitude is almost zero.
     np.testing.assert_allclose(cached_fft.iloc[:, 1:].to_numpy(dtype=float),
-                               full_fft.iloc[:, 1:].to_numpy(dtype=float), atol=1e-8)
+                               full_fft.iloc[:, 1:].to_numpy(dtype=float), atol=1e-8, rtol=0)
 
 
 @pytest.mark.parametrize("extension", [".vhdr", ".bvrh"])

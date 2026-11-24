@@ -7,6 +7,7 @@ The dialog retains draft validation, persistence, and background-work ownership.
 from __future__ import annotations
 
 from Main_App.gui import settings_experimental_preprocessing_page
+from Main_App.gui.settings_recording_caches import RecordingCachesSection
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
@@ -155,6 +156,7 @@ def build_experimental_page(self, tabs: QTabWidget) -> QWidget:
     self.experimental_ram_preload_check.setEnabled(self.project is not None)
     ram_card.content_layout.addWidget(self.experimental_ram_preload_check)
     performance_layout.addWidget(ram_card)
+    performance_layout.addWidget(RecordingCachesSection(self, performance_page, qc_preproc))
     performance_layout.addStretch(1)
     self.experimental_tabs.addTab(performance_page, "Performance")
     self._init_beta_tools_page(self.experimental_tabs)

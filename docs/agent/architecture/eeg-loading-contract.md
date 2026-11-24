@@ -40,6 +40,11 @@ complete directories and never replace another reader's open files. Original
 recordings are not modified. Conversion and identity-validation times are
 reported separately; reuse records zero conversion time.
 
+With the project's import retention off, the same admission and verification
+use a temporary dataset in private process scratch storage. It is removed once
+the preloaded samples are available or the lazy read context closes. Existing
+project imports remain available when retention is enabled again.
+
 BioSemi BDF data is copied byte-for-byte. BVCDF signal bytes are copied unchanged while
 header/marker companion links are relocated. MNE-BIDS 0.16 loads these datasets
 using the pinned MNE 1.9 readers. Metadata normalization preserves source events,

@@ -16,6 +16,7 @@ import pytest
 from tests.bdf_factory import write_bdf
 from tests.processing.test_brain_products_integration import _recording, _settings
 from Main_App.io.acquisition_profiles import UNICORN_CHANNELS
+from Main_App.io.condition_data import read_condition_sheet
 from Main_App.io.eeg_geometry import BIOSEMI64_CHANNELS
 from Main_App.io.load_utils import open_preflight_eeg_file
 from Main_App.io.spectral_data import SPECTRAL_SHEET_NAMES, read_spectral_sheet
@@ -102,8 +103,15 @@ CASES = [
 ]
 
 
-@pytest.mark.parametrize("case", CASES)
-def test_generated_hardware_bids_pipeline_and_cache(tmp_path, case):
+@pytest.mark.parametrize("case, retain_imports", [
+    *(pytest.param(case, True, id=case) for case in CASES),
+    pytest.param("active_two", False, id="temporary_active_two"),
+    pytest.param("active_three_8", False, id="temporary_active_three"),
+    pytest.param("brain_products_vhdr", False, id="temporary_brainvision"),
+    pytest.param("brain_products_bvrh", False, id="temporary_bvrf"),
+    pytest.param("unicorn_classic", False, id="temporary_unicorn"),
+])
+def test_generated_hardware_bids_pipeline_and_cache(tmp_path, case, retain_imports):
     root = tmp_path / "project"
     root.mkdir()
     if case.startswith("brain_products"):
@@ -112,6 +120,9 @@ def test_generated_hardware_bids_pipeline_and_cache(tmp_path, case):
         channels, rate, expected_volts = ["Fz", "Cz", "Pz", "O1", "O2"], 256, None
     else:
         path, expected_events, settings, channels, rate, expected_volts = _bdf_recording(root, case)
+    if not retain_imports:
+        settings["enable_bids_import_cache"] = False
+    persistent_imports = root / ".fpvs_cache" / "bids-import"
     original_digest = hashlib.sha256(path.read_bytes()).hexdigest()
     protocol = FrequencyProtocol.from_recurrence(
         8, 4, expected_analyzed_oddball_cycles=128,
@@ -125,7 +136,9 @@ def test_generated_hardware_bids_pipeline_and_cache(tmp_path, case):
         assert source == ("canonical" if case.startswith("unicorn") else "stim")
         assert raw.info["sfreq"] == rate
         import_metadata = dict(raw._fpvs_bids_import)
-        assert ".fpvs_cache" in Path(import_metadata["dataset_root"]).parts
+        dataset_root = Path(import_metadata["dataset_root"])
+        assert dataset_root.is_dir()
+        assert dataset_root.is_relative_to(persistent_imports) is retain_imports
         if expected_volts is not None:
             # Equivalent calibration arithmetic differs at ~5e-17 V because
             # its offset and scale are evaluated in a different order by MNE.
@@ -139,6 +152,8 @@ def test_generated_hardware_bids_pipeline_and_cache(tmp_path, case):
             assert raw._fpvs_mobile_import["hardware_amplitude_calibration"] == "unverified"
             assert raw._fpvs_mobile_import["physical_timing"] == "unknown_uncalibrated"
             assert not raw._fpvs_recording_contract.interpolation_allowed
+    if not retain_imports:
+        assert not dataset_root.exists() and not persistent_imports.exists()
     preparation_seconds = perf_counter() - import_started
     settings.update(frequency_protocol=protocol, _fpvs_preflight_event_plans_by_file={str(path.resolve()): plan.to_payload()})
     started = perf_counter()
@@ -153,7 +168,12 @@ def test_generated_hardware_bids_pipeline_and_cache(tmp_path, case):
     if case != "active_two":
         assert first["geometry"]["hardware_platform"] == settings["hardware_platform"]
     bundle, = root.rglob("*.fpvs")
-    sheets = {name: read_spectral_sheet(bundle, sheet_name=name) for name in SPECTRAL_SHEET_NAMES}
+    readers = {
+        **dict.fromkeys(SPECTRAL_SHEET_NAMES, read_spectral_sheet),
+        **dict.fromkeys(("FFT Amplitude (uV)", "SNR", "Z Score", "BCA (uV)"), read_condition_sheet),
+    }
+    sheets = {name: reader(bundle, sheet_name=name) for name, reader in readers.items()}
+    spectral_eligibility = read_condition_sheet(bundle, sheet_name="Spectral Eligibility")
     full_fft = sheets[SPECTRAL_SHEET_NAMES[0]]
     assert full_fft.iloc[:, 0].tolist() == channels
     frequencies = np.array([float(name.removesuffix("_Hz")) for name in full_fft.columns[1:]])
@@ -167,24 +187,27 @@ def test_generated_hardware_bids_pipeline_and_cache(tmp_path, case):
     assert second["status"] == "ok", second
     assert second["preproc_cache_status"] == "hit", second
     assert second["geometry"] == first["geometry"]
-    assert second["audit"]["sfreq"] == first["audit"]["sfreq"]
+    assert second["events_info"] == first["events_info"]
+    for field in ("sfreq", "realized_analysis_span_plan", "kurtosis_qc_evidence", "kurtosis_decision_plan"):
+        assert second["audit"][field] == first["audit"][field]
+    assert spectral_eligibility.equals(read_condition_sheet(bundle, sheet_name="Spectral Eligibility"))
     compared = 0
     maximum_difference = 0.0
     for name, frame in sheets.items():
-        cached = read_spectral_sheet(bundle, sheet_name=name)
+        cached = readers[name](bundle, sheet_name=name)
         assert cached.columns.tolist() == frame.columns.tolist()
         assert cached.iloc[:, 0].tolist() == frame.iloc[:, 0].tolist()
         values, cached_values = frame.iloc[:, 1:].to_numpy(dtype=float), cached.iloc[:, 1:].to_numpy(dtype=float)
-        # Historical preprocessing FIF caches use float32; derived noise ratios
-        # can magnify its roundoff, so compare with an explicit relative bound.
-        if name == SPECTRAL_SHEET_NAMES[0]:
-            np.testing.assert_allclose(cached_values, values, atol=1e-8, rtol=0, equal_nan=True)
-        else:
-            np.testing.assert_allclose(cached_values, values, atol=1e-3, rtol=2e-3, equal_nan=True)
+        # Small sample roundoff can be amplified in ratios and z scores.
+        np.testing.assert_allclose(cached_values, values, atol=5e-7, rtol=0, equal_nan=True, err_msg=name)
+        np.testing.assert_array_equal(np.round(cached_values, 6), np.round(values, 6), err_msg=name)
         finite = np.isfinite(values) & np.isfinite(cached_values)
         maximum_difference = max(maximum_difference, float(np.max(abs(values[finite] - cached_values[finite]), initial=0)))
         compared += int(values.size)
     assert hashlib.sha256(path.read_bytes()).hexdigest() == original_digest
+    if not retain_imports:
+        assert not persistent_imports.exists()
+        return
     receipts = tmp_path.parent / "receipts"
     receipts.mkdir(exist_ok=True)
     (receipts / f"{case}.json").write_text(json.dumps({

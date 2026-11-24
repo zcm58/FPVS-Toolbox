@@ -12,6 +12,7 @@ import pytest
 from Main_App.gui import processing_inputs
 from Main_App.gui.condition_input_model import validate_condition_rows
 from Main_App.projects import FrequencyProtocol, Project
+from Main_App.projects.preprocessing_settings import RECORDING_CACHE_SETTING_KEYS
 from Main_App.processing import kurtosis_review_scan, preprocess
 from Main_App.processing.analysis_spans import (
     restrict_source_analysis_span_plan_by_condition,
@@ -258,6 +259,34 @@ def test_processing_params_pass_project_ram_preload_to_worker(tmp_path, conditio
 
     assert params is not None
     assert params["experimental_ram_preload"] is True
+
+
+def test_saved_cache_choices_reach_workers_without_changing_processing_identity(
+    tmp_path, condition_validation,
+) -> None:
+    from Main_App.processing.pipeline_settings_freshness import project_pipeline_settings_identity
+
+    project = _ready_project(tmp_path / "project")
+    host = SimpleNamespace(
+        currentProject=project,
+        file_mode=SimpleNamespace(get=lambda: "Batch"),
+        settings=object(),
+        event_rows=[("Condition A", "11")],
+    )
+    earlier_params = processing_inputs.build_validated_params(host)
+    assert earlier_params is not None
+    earlier_fingerprint = build_processing_fingerprint(project, earlier_params, {"Condition A": 11})
+    earlier_setup_identity = project_pipeline_settings_identity(project)
+
+    project.update_preprocessing({**project.preprocessing, **dict.fromkeys(RECORDING_CACHE_SETTING_KEYS, "false")})
+    project.save()
+    host.currentProject = reloaded = Project.load(project.project_root)
+    params = processing_inputs.build_validated_params(host)
+
+    assert params is not None
+    assert all(reloaded.preprocessing[key] is False and params[key] is False for key in RECORDING_CACHE_SETTING_KEYS)
+    assert build_processing_fingerprint(reloaded, params, {"Condition A": 11}) == earlier_fingerprint
+    assert project_pipeline_settings_identity(reloaded) == earlier_setup_identity
 
 
 def test_processing_params_block_incomplete_protocol_before_event_parsing(

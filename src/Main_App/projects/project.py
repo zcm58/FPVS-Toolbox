@@ -39,6 +39,7 @@ from .grouping import (
 from .preprocessing_settings import (
     OPTIONAL_PREPROCESSING_KEYS,
     PREPROCESSING_CANONICAL_KEYS,
+    RECORDING_CACHE_SETTING_KEYS,
     REMOVED_ELECTRODE_DETECTION_CHOICE_CANONICAL_KEYS,
     REMOVED_ELECTRODE_DETECTION_CHOICE_SOURCE_USER_CONFIRMED,
     REMOVED_ELECTRODE_DETECTION_CHOICE_STATUS_CONFIRMATION_REQUIRED,
@@ -1394,6 +1395,9 @@ class Project:
         )
         if "processing_pipeline" not in candidate_values and "processing_pipeline" in current_settings:
             candidate_values["processing_pipeline"] = deepcopy(current_settings["processing_pipeline"])
+        for key in RECORDING_CACHE_SETTING_KEYS:
+            if key in current_settings:
+                candidate_values.setdefault(key, current_settings[key])
         current_choice_unresolved = (
             current_settings["removed_electrode_detection_choice_status"]
             == REMOVED_ELECTRODE_DETECTION_CHOICE_STATUS_CONFIRMATION_REQUIRED

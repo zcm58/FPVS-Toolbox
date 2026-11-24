@@ -4,6 +4,28 @@ Cached numerical results are disposable copies, separate from recordings,
 analysis NumPy companions, exported results, reviewed decisions, and processing
 ledgers. Clearing caches must not change numerical methods or output readiness.
 
+## Recording cache preferences
+
+**Settings → Experimental → Performance** controls retention separately for
+BIDS imports, kurtosis checkpoints, and preprocessed EEG. Missing preferences
+default to on. The controls save with the project and apply to the next run.
+Turning a cache off bypasses its saved entries, leaves those files on disk, and
+keeps the completed-output and scientific settings fingerprints valid.
+
+With import retention off, the standard BIDS admission still validates and
+loads the recording through private temporary storage. Lazy reads keep it for
+the lifetime of their read context. Preloaded reads release it after loading.
+Separate reads can prepare separate temporary imports during one run.
+Prepared kurtosis identity uses the verified temporary import's content key
+and preserves reuse across changing scratch paths. Keeping kurtosis checkpoints
+off uses the initial-reference signal preview when no prepared trace is available.
+
+The page inventories retained storage off the GUI thread, independently of the
+checked state. The per-recording disk and timing figures are MCCTR estimates.
+The preprocessed timing is averaged over a parallel batch measured with the
+earlier cache format. Saved bytes shown on the page include files retained from
+earlier runs. Removing caches is a separate action.
+
 ## Automatic QC Retention
 
 `processing/preflight_qc_cache.py` publishes complete checksummed JSON entries.

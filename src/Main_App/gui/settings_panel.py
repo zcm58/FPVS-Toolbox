@@ -103,6 +103,7 @@ from Main_App.projects.preprocessing_settings import (
     MANUAL_REMOVED_ELECTRODES_ENABLED_KEY,
     OPTIONAL_PREPROCESSING_KEYS,
     PREPROCESSING_DEFAULTS,
+    RECORDING_CACHE_SETTING_KEYS,
     REMOVED_ELECTRODE_DETECTION_CHOICE_CANONICAL_KEYS,
     normalize_manual_excluded_participant_conditions,
     normalize_manual_excluded_recording_conditions,
@@ -3074,6 +3075,10 @@ class SettingsDialog(QDialog):
             self.project.refresh_processing_pipeline_settings()
             values.update({key: copy.deepcopy(self.project.preprocessing[key])
                            for key in OPTIONAL_PREPROCESSING_KEYS if key in self.project.preprocessing})
+            for key in RECORDING_CACHE_SETTING_KEYS:
+                checked = getattr(self, f"{key}_check").isChecked()
+                if key in values or not checked:
+                    values[key] = checked
             for key in REMOVED_ELECTRODE_DETECTION_CHOICE_CANONICAL_KEYS:
                 if key in self.project.preprocessing:
                     values[key] = self.project.preprocessing[key]

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping, Sequence
+from contextlib import ExitStack, nullcontext
 from pathlib import Path
 from typing import Any
 
@@ -32,28 +33,37 @@ def read_project_bids_raw(
     preload: bool | str = False,
     stim_channel: str = "Status",
     include: Sequence[str] | None = None,
+    temporary_imports: ExitStack | None = None,
 ) -> Any:
     """Prepare a verified BIDS import, then return the shared MNE recording."""
     from Main_App.io.bids_import import prepare_bids_recording, read_bids_recording
 
     import_settings = {**settings, "stim_channel": stim_channel}
-    descriptor = prepare_bids_recording(
-        path, project_root=project_import_root(app, settings), settings=import_settings,
-    )
+    temporary = settings.get("enable_bids_import_cache", True) is False
+    # Preloaded samples live in RAM or their caller-owned map after this read.
+    # Lazy readers keep the import alive through their enclosing reader scope.
+    owner = ExitStack() if temporary and preload is not False else nullcontext(temporary_imports)
     extra = {}
     if Path(path).suffix.lower() == ".bdf":
         extra["stim_channel"] = stim_channel
         if include is not None:
             extra["include"] = list(include)
-    raw = read_bids_recording(
-        descriptor, preload=preload, extra_params=extra, stim_channel=stim_channel,
-    )
+    with owner as imports:
+        descriptor = prepare_bids_recording(
+            path, project_root=project_import_root(app, settings), settings=import_settings,
+            temporary_imports=imports,
+        )
+        raw = read_bids_recording(
+            descriptor, preload=preload, extra_params=extra, stim_channel=stim_channel,
+        )
     raw._fpvs_bids_import = {
         **getattr(raw, "_fpvs_bids_import", {}),
         "dataset_root": str(descriptor.dataset_root),
         "conversion_seconds": descriptor.conversion_seconds,
         "reused": descriptor.reused,
     }
+    if temporary:
+        raw._fpvs_bids_import.update(temporary=True, import_key=descriptor.import_key)
     logger.info(
         "bids_import_ready source=%s dataset=%s reused=%s conversion_seconds=%.6f",
         path, descriptor.dataset_root, descriptor.reused, descriptor.conversion_seconds,

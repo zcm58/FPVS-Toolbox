@@ -74,6 +74,7 @@ class CheckpointIdentity:
     key: str
     source_sha256: str = ""
     bids_import_diagnostics: _BidsImportDiagnostics | None = field(default=None, compare=False, repr=False)
+    temporary_bids_attributes: dict | None = field(default=None, compare=False, repr=False)
 
 
 @dataclass(frozen=True)
@@ -170,12 +171,22 @@ def checkpoint_identity(raw, params: dict, preprocessing_fingerprint: str) -> Ch
         attributes = source_state["attributes"]
         bids_metadata = attributes.get("_fpvs_bids_import")
         diagnostics = _import_diagnostics(bids_metadata)
+        temporary_bids_attributes = None
         if diagnostics is not None:
             # raw_state creates this attributes dictionary; the original Raw and
             # the full state saved in the checkpoint retain their load provenance.
-            attributes["_fpvs_bids_import"] = {
+            import_identity = {
                 key: value for key, value in bids_metadata.items() if key not in diagnostics._fields
             }
+            if bids_metadata.get("temporary") is True and bids_metadata.get("import_key"):
+                # A new scratch path represents the same verified recording on
+                # the next load. The import key and sample/source hashes still bind it.
+                temporary_bids_attributes = {"_fpvs_bids_import": bids_metadata}
+                if "_filenames" in attributes:
+                    temporary_bids_attributes["_filenames"] = attributes.pop("_filenames")
+                import_identity.pop("path", None)
+                import_identity.pop("dataset_root", None)
+            attributes["_fpvs_bids_import"] = import_identity
         metadata_state = encode_state({
             "raw": source_state,
             "max_idx_keep": params.get("max_idx_keep"),
@@ -207,7 +218,10 @@ def checkpoint_identity(raw, params: dict, preprocessing_fingerprint: str) -> Ch
             # Keep unrecognized/incomplete provenance and older keys in separate namespaces.
             identity["bids_import_diagnostics_policy"] = "current_load_v1"
         encoded = json.dumps(identity, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
-        return CheckpointIdentity(root, folder, source, before, hashlib.sha256(encoded).hexdigest(), digest, diagnostics)
+        return CheckpointIdentity(
+            root, folder, source, before, hashlib.sha256(encoded).hexdigest(), digest,
+            diagnostics, temporary_bids_attributes,
+        )
     except (OSError, ValueError, TypeError, RuntimeError):
         logger.debug("prepared_kurtosis_cache_identity_unavailable", exc_info=True)
         return None
@@ -300,6 +314,9 @@ def load_checkpoint(identity: CheckpointIdentity | None, *, should_cancel=None,
                 raw.close()
                 return None
             raw._fpvs_bids_import = {**recorded, **identity.bids_import_diagnostics._asdict()}
+        if identity.temporary_bids_attributes is not None:
+            for key, value in identity.temporary_bids_attributes.items():
+                setattr(raw, key, value)
         return PreparedCheckpoint(raw, state["params"], evidence, state["original_sfreq"])
     except _CheckpointChecksumMismatch:
         return None

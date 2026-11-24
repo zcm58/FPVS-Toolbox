@@ -453,10 +453,12 @@ export, post-audit, and cleanup when those stages run. The returned per-file
 result includes `timings_ms` and `preproc_cache_status` so users can compare
 first-run and cache-hit runtimes.
 
-The preprocessed Raw cache version is
-`preprocessed-raw-v13-v3-trigger-alignment`, and the project processing ledger
-uses `processing_fingerprint_v13_v3_trigger_alignment`. The processing
-fingerprint stores the project frequency protocol's canonical payload and
+The preprocessed Raw cache version is `preprocessed-raw-v14-float64-fif`.
+It writes double-precision FIF samples for ordinary and condition-repaired
+recordings. Older disposable entries miss and rebuild when the recording next
+runs. Existing published outputs retain their normal incremental ledger
+validation through `processing_fingerprint_v13_v3_trigger_alignment`. The
+processing fingerprint stores the project frequency protocol's canonical payload and
 fingerprint, so equivalent protocol objects and manifests have one identity
 while a rate, analyzed-cycle count, recurrence, or marker-code change
 invalidates reuse. The
@@ -476,15 +478,21 @@ retained-scalp-set identity. Current cache metadata persists
 raw-QC, manual removed-electrode, kurtosis, and interpolated bad-channel names
 plus the interpolation request/status/error, requested/applied/skipped FFT
 multi-notch centers, and complete geometry identity so cache-hit runs can still
-produce complete participant QC and preprocessing provenance.
+produce complete participant QC and preprocessing provenance. The cache also
+restores the evidence, decisions, and reviewed channel lists for the kurtosis audit.
 Cache metadata also stores the exact observed pre-FIF sampling rate and filter
 edges in a checksummed snapshot bound to the cache key. On reuse,
 `processing/preprocessed_cache_info.py` validates those values against current
 settings and their exact float32 FIF-header representation before restoring the
 original Info values. This prevents header serialization from changing strict
 spectral eligibility (for example, 0.1 Hz becoming 0.10000000149011612 Hz).
-Missing or inconsistent snapshots require recomputation. Sample storage and the
-strict filter-validation tolerance remain unchanged.
+Missing or inconsistent snapshots require recomputation. Filter validation uses
+the existing strict tolerance.
+
+Cache replay tests compare cold and warm FullFFT, FullSNR, target FFT, BCA,
+SNR, and Z Score values to six decimal places across the supported hardware
+routes. Events, realized spans, and spectral eligibility must match exactly.
+
 The cache key also binds the current canonical frequency-protocol payload and
 fingerprint, the exact condition event map, and the reviewed source-span-plan
 fingerprint. Processing validates that reviewed plan against the current

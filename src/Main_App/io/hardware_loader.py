@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from contextlib import ExitStack
 from pathlib import Path
 from typing import Any
 import re
@@ -22,6 +23,7 @@ def open_brain_products_raw(
     settings: Mapping,
     preload: bool | str = False,
     stim_channel: str = "Status",
+    temporary_imports: ExitStack | None = None,
 ) -> Any:
     from Main_App.io.brain_products import (
         close_brain_products_raw, validate_electrical_channel_units,
@@ -33,6 +35,7 @@ def open_brain_products_raw(
     from Main_App.io.bids_loader import read_project_bids_raw
     raw = read_project_bids_raw(
         app, path, settings=settings, preload=preload, stim_channel=stim_channel,
+        **({"temporary_imports": temporary_imports} if temporary_imports is not None else {}),
     )
     try:
         roles = settings.get("channel_types") or {}
@@ -65,7 +68,8 @@ def open_brain_products_raw(
 
 
 def open_profiled_bdf_raw(app: Any, path: str | Path, *, settings: Mapping,
-                          preload: bool | str = False, stim_channel: str = "Status") -> Any:
+                          preload: bool | str = False, stim_channel: str = "Status",
+                          temporary_imports: ExitStack | None = None) -> Any:
     """Admit explicitly selected BDF hardware without the legacy 64-channel policy."""
     from Main_App.io.bids_loader import read_project_bids_raw
     from Main_App.io.brain_products import close_brain_products_raw, validate_electrical_channel_units
@@ -76,7 +80,10 @@ def open_profiled_bdf_raw(app: Any, path: str | Path, *, settings: Mapping,
     platform = require_hardware_ready(settings, paths=(Path(path),))
     if platform not in {"unicorn", "biosemi_active_three"}:
         raise ValueError("This BDF adapter requires an explicit supported acquisition selection.")
-    raw = read_project_bids_raw(app, path, settings=settings, preload=preload, stim_channel=stim_channel)
+    raw = read_project_bids_raw(
+        app, path, settings=settings, preload=preload, stim_channel=stim_channel,
+        **({"temporary_imports": temporary_imports} if temporary_imports is not None else {}),
+    )
     try:
         if platform == "unicorn":
             from Main_App.io.acquisition_profiles import resolve_acquisition_contract

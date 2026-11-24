@@ -40,6 +40,7 @@ from Main_App.projects import (
     FrequencyProtocol,
 )
 from Main_App.projects.project import Project
+from Main_App.projects.preprocessing_settings import RECORDING_CACHE_SETTING_KEYS
 from Main_App.gui.main_window import MainWindow
 from Main_App.gui.manual_participant_exclusions_dialog import (
     ManualParticipantExclusionsDialog,
@@ -2701,6 +2702,44 @@ def test_experimental_ram_preload_toggle_is_saved_per_project(tmp_path, qtbot, m
     qtbot.addWidget(projectless)
     assert projectless.experimental_ram_preload_check.isEnabled() is False
     assert projectless.experimental_ram_preload_check.isChecked() is False
+
+
+def test_recording_cache_controls_save_per_project_and_keep_files(tmp_path, qtbot, monkeypatch):
+    os.environ["XDG_CONFIG_HOME"] = str(tmp_path)
+    project = _prep_project(tmp_path)
+    retained = []
+    for folder in ("bids-import", "prepared_kurtosis", "preprocessed"):
+        path = project.project_root / ".fpvs_cache" / folder / "existing-cache"
+        path.parent.mkdir(parents=True)
+        path.write_bytes(b"Retained cache fixture")
+        retained.append(path)
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win.loadProject(project)
+    monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: None)
+
+    draft = SettingsDialog(win.settings, win, project)
+    qtbot.addWidget(draft)
+    for key in RECORDING_CACHE_SETTING_KEYS:
+        control = getattr(draft, f"{key}_check")
+        assert control.isEnabled() and control.isChecked()
+        control.setChecked(False)
+    draft.reject()
+    assert all(Project.load(project.project_root).preprocessing.get(key, True)
+               for key in RECORDING_CACHE_SETTING_KEYS)
+
+    saved = SettingsDialog(win.settings, win, project)
+    qtbot.addWidget(saved)
+    for key in RECORDING_CACHE_SETTING_KEYS:
+        getattr(saved, f"{key}_check").setChecked(False)
+    saved._save()
+    reloaded = Project.load(project.project_root)
+    reopened = SettingsDialog(win.settings, win, reloaded)
+    qtbot.addWidget(reopened)
+    for key in RECORDING_CACHE_SETTING_KEYS:
+        assert reloaded.preprocessing[key] is False
+        assert not getattr(reopened, f"{key}_check").isChecked()
+    assert [path.read_bytes() for path in retained] == [b"Retained cache fixture"] * 3
 
 
 @pytest.mark.parametrize("failed_write", ["project", "application"])

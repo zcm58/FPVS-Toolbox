@@ -18,7 +18,10 @@ from Main_App.projects.recordings import (
     RecordingSourceInfo,
     project_recording_context,
 )
-from Main_App.projects.preprocessing_settings import normalize_preprocessing_settings
+from Main_App.projects.preprocessing_settings import (
+    RECORDING_CACHE_SETTING_KEYS,
+    normalize_preprocessing_settings,
+)
 from Main_App.projects.raw_identity import infer_raw_participant_id, registered_raw_identities
 from Main_App.projects.recording_preflight import (
     RecordingPreflightReport,
@@ -1352,6 +1355,7 @@ def start_processing(self) -> None:
             "stim_channel": stim,
             "experimental_ram_preload": p.get("experimental_ram_preload", False) is True,
         }
+        params.update({key: p[key] for key in RECORDING_CACHE_SETTING_KEYS if key in p})
 
         self.log(
             "Using Main App preprocessing: "

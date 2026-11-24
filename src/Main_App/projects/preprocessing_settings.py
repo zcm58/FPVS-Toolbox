@@ -9,7 +9,11 @@ from Main_App.projects.hardware import (
     RECORDED_GEOMETRY_PLATFORMS, UNICORN_FACTORY_MAPPING_PROFILE,
     normalize_hardware_settings, resolve_hardware,
 )
-from Main_App.processing.pipeline_plan import default_pipeline_config, normalize_pipeline_config
+from Main_App.processing.pipeline_plan import (
+    RECORDING_CACHE_SETTING_KEYS,
+    default_pipeline_config,
+    normalize_pipeline_config,
+)
 
 from Main_App.processing.removed_electrode_detection import (
     REMOVED_ELECTRODE_DETECTION_MODE_AUTO,
@@ -397,11 +401,11 @@ PREPROCESSING_CANONICAL_KEYS: tuple[str, ...] = tuple(
     if field.name not in REPEATED_SESSION_PREPROCESSING_KEYS
 ) + _REMOVED_ELECTRODE_CHOICE_METADATA_KEYS
 PREPROCESSING_DEFAULTS: Dict[str, Any] = {field.name: field.default for field in _FIELDS}
-OPTIONAL_PREPROCESSING_KEYS = ("processing_pipeline",)
+OPTIONAL_PREPROCESSING_KEYS = ("processing_pipeline", *RECORDING_CACHE_SETTING_KEYS)
 
 
 def processing_metadata_snapshot(settings: Mapping[str, Any]) -> dict[str, Any]:
-    """Carry project-owned acquisition/method metadata into worker settings.
+    """Carry project-owned acquisition, method, and cache settings into workers.
 
     Preserve the historical ActiveTwo snapshot and keep the independently
     collected experimental-QC switch authoritative.
@@ -415,6 +419,7 @@ def processing_metadata_snapshot(settings: Mapping[str, Any]) -> dict[str, Any]:
                            if key in settings and key != "kurtosis_screening_enabled"})
     if "processing_pipeline" in settings:
         result["processing_pipeline"] = normalize_pipeline_config(settings["processing_pipeline"])
+    result.update({key: settings[key] for key in RECORDING_CACHE_SETTING_KEYS if key in settings})
     return result
 
 
@@ -1252,6 +1257,9 @@ def normalize_preprocessing_settings(
     normalized.update(hardware)
     if pipeline is not None:
         normalized["processing_pipeline"] = pipeline
+    for key in RECORDING_CACHE_SETTING_KEYS:
+        if key in source:
+            normalized[key] = _coerce_bool(source[key], default=True, field=key)
 
     # Surface runtime aliases expected by legacy helpers without duplicating storage
     for canonical, aliases in _ALIASES_FOR_OUTPUT.items():
@@ -1391,6 +1399,7 @@ __all__ = [
     "REPEATED_SESSION_PREPROCESSING_KEYS",
     "PREPROCESSING_DEFAULTS",
     "OPTIONAL_PREPROCESSING_KEYS",
+    "RECORDING_CACHE_SETTING_KEYS",
     "processing_metadata_snapshot",
     "SUPPORTED_ELECTRODE_MAPPING_PROFILES",
     "SUPPORTED_ELECTRODE_MONTAGES",

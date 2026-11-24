@@ -52,6 +52,7 @@ class BidsRecording:
     identity_seconds: float
     reused: bool
     representation: str
+    import_key: str = ""
 
     @property
     def header_path(self) -> Path:
@@ -273,16 +274,21 @@ def _descriptor(folder: Path, manifest: dict, *, conversion_seconds: float, iden
     bids_path = BIDSPath(root=root, subject=manifest["subject"], task="fpvs", datatype="eeg",
                          suffix="eeg", extension=manifest["extension"], check=manifest["extension"] != ".fif")
     return BidsRecording(bids_path, root, folder / "import.json", tuple(manifest["source_identity"]),
-                         conversion_seconds, identity_seconds, reused, manifest["representation"])
+                         conversion_seconds, identity_seconds, reused, manifest["representation"], manifest["key"])
 
 
-def prepare_bids_recording(source: str | Path, *, project_root: str | Path, settings: Mapping | None = None) -> BidsRecording:
+def prepare_bids_recording(
+    source: str | Path, *, project_root: str | Path, settings: Mapping | None = None,
+    temporary_imports: ExitStack | None = None,
+) -> BidsRecording:
     """Publish or reuse a content-verified project-local import, without editing sources.
 
     Independent concurrent importers publish unique directories; their completed
     results are interchangeable. No importer removes another reader's files.
     ``conversion_seconds`` excludes source hashing and cache validation, which
     are reported separately as ``identity_seconds``.
+    With retention disabled, the caller owns the temporary import until its
+    final sample read.
     """
     import mne_bids
     from Main_App.projects.hardware import require_hardware_ready
@@ -296,26 +302,40 @@ def prepare_bids_recording(source: str | Path, *, project_root: str | Path, sett
     root = Path(project_root).resolve(strict=True)
     if not root.is_dir():
         raise ValueError("BIDS import requires an active project directory.")
-    cache = _contained(root / ".fpvs_cache" / "bids-import", root)
-    cache.mkdir(parents=True, exist_ok=True)
+    retain = settings.get("enable_bids_import_cache", True) is not False
+    if retain:
+        publication_root = root
+        cache = _contained(root / ".fpvs_cache" / "bids-import", root)
+        cache.mkdir(parents=True, exist_ok=True)
+    else:
+        if temporary_imports is None:
+            raise ValueError("A temporary BIDS import requires a recording lifetime owner.")
+        from Main_App.io.memmap_paths import process_memmap_directory
+
+        publication_root = process_memmap_directory()
+        temporary = temporary_imports.enter_context(
+            tempfile.TemporaryDirectory(prefix="bids-", dir=publication_root),
+        )
+        cache = _contained(Path(temporary), publication_root)
     identity = _source_identity(source)
     key_payload = {"version": IMPORT_VERSION, "sources": identity,
                    "settings": {name: settings[name] for name in _SETTING_KEYS if name in settings},
                    "mne": mne.__version__, "mne_bids": mne_bids.__version__}
     key = hashlib.sha256(json.dumps(key_payload, sort_keys=True).encode()).hexdigest()
-    for existing in sorted(cache.glob(f"{key[:24]}-*")):
-        _contained(existing, root)
-        manifest = _valid_publication(existing, identity, key)
-        if manifest is not None:
-            return _descriptor(existing, manifest, conversion_seconds=0.0,
-                               identity_seconds=perf_counter() - started, reused=True)
+    if retain:
+        for existing in sorted(cache.glob(f"{key[:24]}-*")):
+            _contained(existing, root)
+            manifest = _valid_publication(existing, identity, key)
+            if manifest is not None:
+                return _descriptor(existing, manifest, conversion_seconds=0.0,
+                                   identity_seconds=perf_counter() - started, reused=True)
     identity_seconds = perf_counter() - started
     conversion_started = perf_counter()
     subject = "fpvs" + key[:16]
     suffix = source.suffix.lower()
     representation = "bvrf_fif64_derivative" if suffix == ".bvrh" else "raw_eeg_bids"
     extension = ".fif" if suffix == ".bvrh" else suffix
-    final = _contained(cache / f"{key[:24]}-{uuid.uuid4().hex[:8]}", root)
+    final = _contained(cache / f"{key[:24]}-{uuid.uuid4().hex[:8]}", publication_root)
     with tempfile.TemporaryDirectory(prefix=".import-", dir=cache) as temporary:
         staging = Path(temporary)
         dataset = staging / "dataset"

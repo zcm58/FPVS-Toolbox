@@ -107,6 +107,51 @@ def _assert_exact_state(left, right):
         assert arrays_left[key].tobytes() == arrays_right[key].tobytes()
 
 
+def test_disabled_checkpoint_preserves_existing_entry_for_reuse(recording):
+    raw, params, _source = recording
+    first, _, _ = _run(raw, params)
+    identity = _identity(raw, params)
+    entries = {path: path.read_bytes() for path in identity.folder.iterdir()}
+    assert {path.suffix for path in entries} == {".npz", ".json"}
+
+    disabled, _, off = _run(raw, {**params, "enable_kurtosis_checkpoint_cache": False})
+    assert off["_fpvs_kurtosis_checkpoint_status"] == "disabled"
+    assert {path: path.read_bytes() for path in identity.folder.iterdir()} == entries
+    restored, _, on = _run(raw, params)
+    assert on["_fpvs_kurtosis_checkpoint_status"] == "hit"
+    assert first._data.tobytes() == disabled._data.tobytes() == restored._data.tobytes()
+
+
+def test_temporary_bids_locations_do_not_block_checkpoint_reuse(recording):
+    raw, params, source = recording
+
+    def set_import(current, scratch_name):
+        dataset_root = source.parent / scratch_name
+        path = dataset_root / "recording.bdf"
+        current._filenames = [path]
+        current._fpvs_bids_import = {
+            "version": "bids_import_v1", "representation": "raw_eeg_bids", "path": str(path),
+            "dataset_root": str(dataset_root), "identity_seconds": 1.5, "conversion_seconds": 2.0,
+            "reused": False, "temporary": True, "import_key": "a" * 64,
+        }
+
+    set_import(raw, "first-import")
+    cold, _, _ = _run(raw, params)
+    original = _identity(raw, params)
+    current = raw.copy()
+    set_import(current, "next-import")
+    assert _identity(current, params).key == original.key
+
+    warm, _, settings = _run(current, params)
+    assert settings["_fpvs_kurtosis_checkpoint_status"] == "hit"
+    assert warm._fpvs_bids_import == current._fpvs_bids_import
+    assert warm.filenames == current.filenames
+    assert warm._data.tobytes() == cold._data.tobytes()
+
+    current._fpvs_bids_import["import_key"] = "b" * 64
+    assert _identity(current, params).key != original.key
+
+
 def test_current_import_diagnostics_reuse_exact_science_and_keep_original_receipt(recording, monkeypatch):
     raw, params, source = recording
     first_import = {

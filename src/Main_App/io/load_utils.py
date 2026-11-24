@@ -11,7 +11,7 @@ import logging
 import os
 import re
 import warnings
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager, nullcontext
 from dataclasses import dataclass
 from fractions import Fraction
 from pathlib import Path
@@ -595,19 +595,44 @@ def open_preflight_eeg_file(
     and never creates a full-recording memmap. Callers must keep all lazy reads
     inside the returned context manager.
     """
+    from Main_App.io.hardware_loader import project_acquisition_settings
+
+    settings = project_acquisition_settings(app, acquisition_settings)
+    owner = ExitStack() if settings.get("enable_bids_import_cache", True) is False else nullcontext()
+    with owner as imports:
+        yield from _read_preflight_eeg_file(
+            app, filepath, ref_pair, first_n_channels, stim_channel,
+            electrode_mapping_profile, electrode_montage,
+            settings=settings, temporary_imports=imports,
+        )
+
+
+def _read_preflight_eeg_file(
+    app: Any,
+    filepath: str,
+    ref_pair: Optional[Tuple[str, str]],
+    first_n_channels: Optional[int],
+    stim_channel: Optional[str],
+    electrode_mapping_profile: Optional[str],
+    electrode_montage: Optional[str],
+    *,
+    settings: dict[str, Any],
+    temporary_imports: ExitStack | None,
+) -> Iterator[Optional[mne.io.BaseRaw]]:
     ext = os.path.splitext(filepath)[1].lower()
     base = os.path.basename(filepath)
     app.log(f"[PREFLIGHT LAZY LOADER START] {base}: ext='{ext}'")
 
-    from Main_App.io.hardware_loader import open_brain_products_raw, open_profiled_bdf_raw, project_acquisition_settings
-    settings = project_acquisition_settings(app, acquisition_settings)
+    from Main_App.io.hardware_loader import open_brain_products_raw, open_profiled_bdf_raw
     from Main_App.projects.hardware import require_hardware_ready
+    temporary_options = {"temporary_imports": temporary_imports} if temporary_imports is not None else {}
     platform = require_hardware_ready(settings, paths=(Path(filepath),))
     if platform in {"brain_products", "biosemi_active_three", "unicorn"}:
         reader = open_brain_products_raw if platform == "brain_products" else open_profiled_bdf_raw
         raw = reader(
             app, filepath, settings=settings,
             stim_channel=str(stim_channel or settings.get("stim_channel") or "Status"),
+            **temporary_options,
         )
         try:
             yield raw
@@ -695,6 +720,7 @@ def open_preflight_eeg_file(
                         preload=False,
                         stim_channel=stim_name if stim_name else "Status",
                         include=include_channels,
+                        **temporary_options,
                     )
                     logger.debug(
                         "[PREFLIGHT LAZY LOADER STAGE] file=%s stage=read_raw_bdf_done "

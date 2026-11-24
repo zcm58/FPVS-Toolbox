@@ -14,6 +14,10 @@ OpenFPVS provides shared services and [desktop design guidance](../design-docs/D
 The apps exchange supported experiment configurations through a versioned
 handoff. A shared launcher is an option for future consideration only.
 
+Plan for FPVS studies of up to approximately 100 participants. Use about 200
+recordings as the practical sizing target for two-session performance and
+capacity checks, assuming one recording per participant per session.
+
 ## Workflow priority
 
 1. Create a Toolbox project from a supported Studio setup or completed-session

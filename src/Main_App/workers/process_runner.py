@@ -137,7 +137,15 @@ if TYPE_CHECKING:
 logger = logging.getLogger("Main_App.Performance.process_runner")
 _WORKER_FIR_CACHE: PreparedFirCache | None = None
 _WORKER_ADMISSION: ProcessingWorkerAdmission | None = None
-PREPROC_CACHE_VERSION = "preprocessed-raw-v13-v3-trigger-alignment"
+PREPROC_CACHE_VERSION = "preprocessed-raw-v14-float64-fif"
+_KURTOSIS_REVIEW_AUDIT_KEYS = (
+    "kurtosis_review_required_channels",
+    "kurtosis_corroborated_channels",
+    "kurtosis_user_approved_channels",
+    "kurtosis_user_rejected_channels",
+    "kurtosis_qc_evidence",
+    "kurtosis_decision_plan",
+)
 REMOVED_ELECTRODE_REVIEW_LIST_KEYS = (
     "removed_electrode_original_auto_flagged",
     "removed_electrode_accepted_auto_flagged",
@@ -1311,6 +1319,7 @@ def _load_preprocessed_cache(
             settings[f"_fpvs_{key}"] = _string_list(metadata.get(key))
         for key in REMOVED_ELECTRODE_REVIEW_SCALAR_KEYS:
             settings[f"_fpvs_{key}"] = str(metadata.get(key) or "")
+        settings.update({f"_fpvs_{key}": metadata.get(key) for key in _KURTOSIS_REVIEW_AUDIT_KEYS})
         return raw, audit_before, int(metadata.get("n_rejected", 0)), "hit"
     except Exception as exc:
         logger.warning(
@@ -1392,8 +1401,16 @@ def _store_preprocessed_cache(
         regular_file_info(raw_path)
         for split_path in raw_path.parent.glob(f"{raw_path.stem}-*.fif"):
             regular_file_info(split_path)
-        save_raw_fif(raw, str(raw_path), overwrite=True, verbose=False,
-                 **({"fmt": "double"} if condition_proof is not None else {}))
+        # MNE encodes acquisition skips at buffer boundaries. Keep those
+        # boundaries and the condition-repair cache's established layout.
+        has_acquisition_skip = any(
+            label.lower().startswith("bad_acq_skip") for label in raw.annotations.description
+        )
+        buffer_size_sec = None if condition_proof is not None or has_acquisition_skip else 4.0
+        save_raw_fif(
+            raw, str(raw_path), fmt="double", buffer_size_sec=buffer_size_sec,
+            overwrite=True, verbose=False,
+        )
         metadata = {
             "cache_key": cache_key,
             "payload": payload,
@@ -1501,6 +1518,7 @@ def _store_preprocessed_cache(
                 settings.get("_fpvs_raw_qc_scoring_sample_count") or 0
             ),
             **_review_metadata_from_settings(settings),
+            **{key: settings.get(f"_fpvs_{key}") for key in _KURTOSIS_REVIEW_AUDIT_KEYS},
         }
         canonical_metadata = snapshot_canonical_event_metadata(raw, cache_key=cache_key)
         if canonical_metadata is not None:

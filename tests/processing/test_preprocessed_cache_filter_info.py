@@ -27,8 +27,8 @@ def _cache_case(tmp_path, *, high_pass=0.1, low_pass=50.0, sfreq=256.0):
         "stim_channel": "Status", "max_idx_keep": 1,
         "high_pass": high_pass, "low_pass": low_pass, "downsample_rate": sfreq,
     }
-    # Binary fractions preserve the sample values through the existing FIF format.
-    values = np.arange(512, dtype=np.float64).reshape(2, 256) / 1024.0
+    values = np.zeros((2, 256), dtype=np.float64)
+    values[0] = np.linspace(-30e-6, 25e-6, values.shape[1])
     raw = mne.io.RawArray(
         values, mne.create_info(["Fp1", "Status"], sfreq, ["eeg", "stim"]), verbose=False,
     )
@@ -68,6 +68,7 @@ def test_cache_restores_exact_filter_edges_and_identical_spectral_eligibility(
     )
     original = raw.get_data().tobytes()
     with mne.io.read_raw_fif(fif_path, preload=True, verbose=False) as direct:
+        assert direct.orig_format == "double"
         assert direct.info["highpass"] == float(np.float32(high_pass))
         with pytest.raises(SpectralEligibilityError, match="Applied .*pass metadata"):
             _eligibility(direct.info, high_pass=high_pass, low_pass=low_pass)
@@ -133,6 +134,69 @@ def test_current_filter_change_invalidates_existing_cache_key(tmp_path):
         **{**kwargs, "settings": {**kwargs["settings"], "high_pass": 0.2}},
     )
     assert loaded is None and status == "miss"
+
+
+def test_disabling_preprocessed_cache_preserves_entries_for_reuse(tmp_path):
+    raw, kwargs, _key, fif_path, meta_path = _cache_case(tmp_path)
+    original = fif_path.read_bytes(), meta_path.read_bytes()
+    disabled = {**kwargs, "settings": {**kwargs["settings"], "enable_preprocessed_cache": False}}
+
+    loaded, _audit, _rejected, status = process_runner._load_preprocessed_cache(**disabled)
+    assert loaded is None and status == "disabled"
+    assert process_runner._store_preprocessed_cache(
+        raw=raw, audit_before={}, n_rejected=0, **disabled,
+    ) == "disabled"
+    assert (fif_path.read_bytes(), meta_path.read_bytes()) == original
+
+    loaded, _audit, _rejected, status = process_runner._load_preprocessed_cache(**kwargs)
+    assert status == "hit"
+    loaded.close()
+
+
+def test_legacy_single_precision_cache_misses_before_float64_rebuild(tmp_path, monkeypatch):
+    save = process_runner.save_raw_fif
+
+    def save_legacy(raw, path, **kwargs):
+        return save(raw, path, **{**kwargs, "fmt": "single", "buffer_size_sec": None})
+
+    with monkeypatch.context() as legacy:
+        legacy.setattr(process_runner, "PREPROC_CACHE_VERSION", "preprocessed-raw-v13-v3-trigger-alignment")
+        legacy.setattr(process_runner, "save_raw_fif", save_legacy)
+        raw, kwargs, _key, legacy_fif, legacy_meta = _cache_case(tmp_path)
+
+    loaded, _audit, _rejected, status = process_runner._load_preprocessed_cache(**kwargs)
+    assert loaded is None and status == "miss"
+    assert legacy_fif.is_file() and legacy_meta.is_file()
+
+    assert process_runner._store_preprocessed_cache(
+        raw=raw, audit_before={"original": True}, n_rejected=0, **kwargs,
+    ) == "stored"
+    assert not legacy_fif.exists() and not legacy_meta.exists()
+    loaded, _audit, _rejected, status = process_runner._load_preprocessed_cache(**kwargs)
+    assert status == "hit"
+    try:
+        assert loaded.orig_format == "double"
+        assert loaded.get_data().tobytes() == raw.get_data().tobytes()
+    finally:
+        loaded.close()
+
+
+def test_acquisition_skip_keeps_default_fif_buffer(tmp_path, monkeypatch):
+    raw, kwargs, _key, _fif_path, _meta_path = _cache_case(tmp_path)
+    raw.set_annotations(mne.Annotations([0.25], [0.125], ["Bad_Acq_Skip"]))
+    save = process_runner.save_raw_fif
+    buffer_sizes = []
+
+    def observe_save(raw, path, *, buffer_size_sec=None, **kwargs):
+        buffer_sizes.append(buffer_size_sec)
+        return save(raw, path, buffer_size_sec=buffer_size_sec, **kwargs)
+
+    monkeypatch.setattr(process_runner, "save_raw_fif", observe_save)
+    with pytest.warns(RuntimeWarning, match="Acquisition skips"):
+        assert process_runner._store_preprocessed_cache(
+            raw=raw, audit_before={}, n_rejected=0, **kwargs,
+        ) == "stored"
+    assert buffer_sizes == [None]
 
 
 def test_cache_does_not_certify_mismatched_cold_filter_info(tmp_path):

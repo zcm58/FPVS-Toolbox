@@ -3,6 +3,7 @@ from concurrent.futures import ThreadPoolExecutor
 import json
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import mne
 import numpy as np
@@ -37,6 +38,58 @@ def test_bdf_import_is_byte_exact_and_restores_annotations(tmp_path):
     reused = prepare_bids_recording(source, project_root=tmp_path)
     assert reused.reused and reused.conversion_seconds == 0
     assert reused.header_path == prepared.header_path
+
+
+@pytest.mark.parametrize("mode", ["lazy", "ram", "memmap"])
+def test_retention_off_uses_temporary_import_and_preserves_existing_cache(tmp_path, monkeypatch, mode):
+    from Main_App.io import memmap_paths
+    from Main_App.io.load_utils import load_eeg_file, open_preflight_eeg_file
+
+    source, _ = _write_bvcdf(tmp_path)
+    settings = {**BP, "project_root": str(tmp_path), "electrode_montage": "standard_1020"}
+    persistent = prepare_bids_recording(source, project_root=tmp_path, settings={**settings, "stim_channel": "Status"})
+    with read_bids_recording(persistent) as expected:
+        expected_samples = expected.get_data()
+    persistent_root = persistent.manifest_path.parent.parent
+    existing = {path: path.read_bytes() for path in persistent_root.rglob("*") if path.is_file()}
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    monkeypatch.setattr(memmap_paths, "process_memmap_directory", lambda: scratch)
+    app = SimpleNamespace(log=lambda _message: None)
+    disabled = {**settings, "enable_bids_import_cache": False}
+
+    def verify_samples(raw):
+        import_info = raw._fpvs_bids_import
+        assert import_info["temporary"] is True and import_info["reused"] is False
+        assert import_info["import_key"] == persistent.import_key
+        path = Path(import_info["path"])
+        assert path.is_relative_to(scratch)
+        np.testing.assert_array_equal(raw.get_data(), expected_samples)
+        return path
+
+    if mode == "lazy":
+        with pytest.raises(InterruptedError, match="review cancelled"):
+            with open_preflight_eeg_file(app, str(source), acquisition_settings=disabled) as raw:
+                assert verify_samples(raw).is_file()
+                raise InterruptedError("review cancelled")
+    else:
+        preload = scratch / "preloaded.dat"
+        raw = load_eeg_file(
+            app, str(source), acquisition_settings=disabled,
+            preload_path=preload if mode == "memmap" else None, preload_in_memory=mode == "ram",
+        )
+        try:
+            assert not verify_samples(raw).exists()
+            assert isinstance(raw._data, np.memmap) == (mode == "memmap")
+        finally:
+            close_brain_products_raw(raw)
+            preload.unlink(missing_ok=True)
+
+    assert list(scratch.iterdir()) == []
+    assert {path: path.read_bytes() for path in persistent_root.rglob("*") if path.is_file()} == existing
+    assert prepare_bids_recording(
+        source, project_root=tmp_path, settings={**settings, "stim_channel": "Status"},
+    ).manifest_path == persistent.manifest_path
 
 
 @pytest.mark.parametrize("writer", [_write_bvcdf, _write_bvrf])

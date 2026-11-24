@@ -362,8 +362,10 @@ editable while screening is off so invalid drafts can always be corrected.
 Each screen has a brief modal explanation. New projects explicitly
 start all optional screens off; migration preserves prior choices, including a
 legacy SNR-tool preference. Mandatory input/output validity checks remain active.
-**Performance** contains the project-only, default-off
-RAM preload switch; **Beta Tools** contains the application-wide visibility
+**Performance** contains the project-only, default-off RAM preload switch and
+[recording cache preferences](cache-maintenance.md#recording-cache-preferences).
+The cache section shows current retained space alongside per-recording estimates.
+**Beta Tools** contains the application-wide visibility
 toggle, applied after saving and restarting. The condition-specific interpolation
 setting controls new repair requests; turning it off keeps previously accepted
 signal repairs.
