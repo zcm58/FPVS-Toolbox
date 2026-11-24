@@ -196,6 +196,15 @@ def test_managed_noise_support_rejects_missing_physical_frequency_column() -> No
         require_complete_harmonic_noise_support(compressed_plan)
 
 
+def test_managed_noise_support_rejects_ambiguous_columns_below_expected_bin() -> None:
+    frequencies = sorted([0.1499, *(index / 100 for index in range(201))])
+    columns = ["Electrode", *[f"{frequency:.4f}_Hz" for frequency in frequencies]]
+    plan = build_fullfft_harmonic_plan(columns, [0.25])
+
+    with pytest.raises(ValueError, match=r"0\.25 Hz: -10\. Choose harmonics"):
+        require_complete_harmonic_noise_support(plan)
+
+
 def test_projectless_plan_preserves_partial_boundary_neighbors() -> None:
     columns = ["Electrode", *[f"{index / 10:.4f}_Hz" for index in range(21)]]
 

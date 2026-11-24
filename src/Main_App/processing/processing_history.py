@@ -176,7 +176,7 @@ def load_processing_history(
         return ProcessingHistoryStatus("unavailable")
     lines = [line for line in data.splitlines() if line.strip()]
     limited = limited or len(lines) > max_records
-    records: list[Mapping] = []
+    latest: CompletedProcessingRun | None = None
     malformed = False
     for line in lines[-max_records:]:
         try:
@@ -197,8 +197,9 @@ def load_processing_history(
                        for key in ("excluded_files", "condition_warning_files"))):
             malformed = True
             continue
-        records.append(record)
-    latest = latest_completed_processing_run(records)
+        candidate = _completed_run(record)
+        if candidate is not None and (latest is None or candidate.timestamp > latest.timestamp):
+            latest = candidate
     if malformed:
         logger.warning("processing_history_invalid_records", extra={"path": str(path)})
     if latest is not None:

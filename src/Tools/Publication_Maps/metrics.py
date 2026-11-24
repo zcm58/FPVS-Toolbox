@@ -211,7 +211,7 @@ def build_publication_map_result(
         workbooks,
         cancel_check=cancel_check,
     )
-    long_rows: list[dict[str, object]] = []
+    long_rows: list[tuple[object, ...]] = []
     for metric in requested_metrics:
         _cancellation_checkpoint(cancel_check)
         long_rows.extend(
@@ -757,11 +757,13 @@ def _collect_metric_rows(
         Path, _ReleasedPublicationSource
     ] | None = None,
     cancel_check: Callable[[], None] | None = None,
-) -> list[dict[str, object]]:
+) -> list[tuple[object, ...]]:
     montage_names = biosemi64_names_upper()
-    rows: list[dict[str, object]] = []
+    rows: list[tuple[object, ...]] = []
     source_sheet = metric.source_sheet
+    metric_label = metric.display_name
     selected_columns = [f"{float(freq):.4f}_Hz" for freq in harmonics_hz]
+    rounded_harmonics = tuple(round(float(freq), 4) for freq in harmonics_hz)
     required_columns = [ELECTRODE_COLUMN, *selected_columns]
     for workbook in workbooks:
         _cancellation_checkpoint(cancel_check)
@@ -830,9 +832,11 @@ def _collect_metric_rows(
             frozenset(),
         )
         if excluded_electrodes:
-            df_metric = df_metric.loc[~normalized_electrodes.astype(str).str.upper().isin(excluded_electrodes)].copy()
-        active_electrodes = df_metric[ELECTRODE_COLUMN].map(normalize_electrode_name)
-        montage_rows = df_metric.loc[active_electrodes.isin(montage_names)]
+            retained = ~normalized_electrodes.isin(excluded_electrodes)
+            df_metric = df_metric.loc[retained]
+            normalized_electrodes = normalized_electrodes.loc[retained]
+        is_montage_electrode = normalized_electrodes.isin(montage_names)
+        montage_rows = df_metric.loc[is_montage_electrode]
         numeric_values = montage_rows[selected_columns].apply(
             pd.to_numeric,
             errors="coerce",
@@ -845,13 +849,7 @@ def _collect_metric_rows(
                 f"({workbook.subject_id} / {workbook.condition}). Check blank or "
                 "nonnumeric cells and frequency-domain electrode exclusions."
             )
-        unmapped = sorted(
-            {
-                normalize_electrode_name(electrode)
-                for electrode in df_metric[ELECTRODE_COLUMN]
-                if normalize_electrode_name(electrode) and normalize_electrode_name(electrode) not in montage_names
-            }
-        )
+        unmapped = sorted(set(normalized_electrodes) - montage_names - {""})
         if unmapped:
             diagnostics.append(
                 Diagnostic(
@@ -863,33 +861,33 @@ def _collect_metric_rows(
                     detail=", ".join(unmapped[:12]),
                 )
             )
-        workbook_row_count = len(rows)
-        for harmonic in harmonics_hz:
+        workbook_path = str(workbook.path)
+        workbook_fields = (
+            workbook.condition, workbook.group_id, workbook.group_label,
+            workbook.group_folder, workbook.subject_id, workbook_path,
+        )
+        electrodes = list(zip(
+            normalized_electrodes,
+            df_metric[ELECTRODE_COLUMN],
+            is_montage_electrode,
+        ))
+        for source_column, harmonic in zip(selected_columns, rounded_harmonics):
             _cancellation_checkpoint(cancel_check)
-            source_column = f"{float(harmonic):.4f}_Hz"
+            values = pd.to_numeric(df_metric[source_column], errors="coerce")
+            harmonic_fields = (
+                metric.value, metric_label, harmonic, source_sheet,
+                source_column, harmonic, True,
+            )
+            # Tuple fields follow LONG_COLUMNS, with harmonics in source order.
             rows.extend(
-                _rows_for_frequency(
-                    df=df_metric,
-                    metric=metric,
-                    source_sheet=source_sheet,
-                    workbook_path=workbook.path,
-                    condition=workbook.condition,
-                    subject_id=workbook.subject_id,
-                    source_column=source_column,
-                    harmonic_hz=harmonic,
-                    montage_names=montage_names,
-                    group_id=workbook.group_id,
-                    group_label=workbook.group_label,
-                    group_folder=workbook.group_folder,
-                    cancel_check=cancel_check,
+                (
+                    *workbook_fields, *electrode_fields, *harmonic_fields,
+                    float(value) if pd.notna(value) else np.nan,
                 )
+                for electrode_fields, value in zip(electrodes, values)
+                if electrode_fields[0]
             )
-        if len(rows) == workbook_row_count:
-            raise PublicationMapInputError(
-                f"No electrode rows were available in requested {source_sheet} "
-                f"sheet: {workbook.path.name} ({workbook.subject_id} / "
-                f"{workbook.condition})."
-            )
+            _cancellation_checkpoint(cancel_check)
     return rows
 
 
@@ -931,54 +929,6 @@ def _validate_released_metric_source_rows(
             f"{workbook.path.name} ({workbook.subject_id} / "
             f"{workbook.condition})."
         )
-
-
-def _rows_for_frequency(
-    *,
-    df: pd.DataFrame,
-    metric: PublicationMetric,
-    source_sheet: str,
-    workbook_path: Path,
-    condition: str,
-    subject_id: str,
-    source_column: str,
-    harmonic_hz: float,
-    montage_names: frozenset[str],
-    group_id: str | None = None,
-    group_label: str | None = None,
-    group_folder: str | None = None,
-    cancel_check: Callable[[], None] | None = None,
-) -> list[dict[str, object]]:
-    _cancellation_checkpoint(cancel_check)
-    values = pd.to_numeric(df[source_column], errors="coerce")
-    rows: list[dict[str, object]] = []
-    for original_electrode, value in zip(df[ELECTRODE_COLUMN], values):
-        electrode = normalize_electrode_name(original_electrode)
-        if not electrode:
-            continue
-        rows.append(
-            {
-                "condition": condition,
-                "group_id": group_id,
-                "group_label": group_label,
-                "group_folder": group_folder,
-                "subject_id": subject_id,
-                "workbook_path": str(workbook_path),
-                "electrode": electrode,
-                "original_electrode": original_electrode,
-                "is_montage_electrode": electrode in montage_names,
-                "metric": metric.value,
-                "metric_label": metric.display_name,
-                "harmonic_hz": round(float(harmonic_hz), 4),
-                "source_sheet": source_sheet,
-                "source_column": source_column,
-                "source_column_hz": round(float(harmonic_hz), 4),
-                "exact_column_label": True,
-                "value": float(value) if pd.notna(value) else np.nan,
-            }
-        )
-    _cancellation_checkpoint(cancel_check)
-    return rows
 
 
 def _build_grand_average_frame(

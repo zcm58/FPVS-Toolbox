@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from bisect import bisect_left
 from dataclasses import dataclass, field
 from pathlib import Path
 import hashlib
@@ -429,6 +430,7 @@ def require_complete_harmonic_noise_support(
     planned_columns = {column for column, _bin in plan.column_bin_pairs}
     frequency_by_column = dict(plan.frequency_column_pairs)
     available_frequencies = tuple(plan.frequency_column_pairs)
+    finite_grid = all(map(math.isfinite, ordered_frequencies))
     missing: list[str] = []
     for harmonic_hz, target_bin, target_column in zip(
         plan.harmonic_list,
@@ -449,9 +451,16 @@ def require_complete_harmonic_noise_support(
                 if offset in {-1, 0, 1}:
                     continue
                 expected_hz = float(target_frequency) + offset * resolution_hz
+                candidates = available_frequencies
+                if finite_grid:
+                    insertion = bisect_left(ordered_frequencies, expected_hz)
+                    # The two closest entries on each side suffice to detect ambiguity.
+                    candidates = available_frequencies[
+                        max(0, insertion - 2):insertion + 2
+                    ]
                 matching_columns = [
                     column
-                    for column, frequency in available_frequencies
+                    for column, frequency in candidates
                     if math.isclose(
                         float(frequency),
                         expected_hz,

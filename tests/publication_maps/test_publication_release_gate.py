@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -288,6 +290,41 @@ def test_managed_publication_validates_rows_before_electrode_exclusions(
                 workbook_path.resolve(strict=False): _released_source(workbook_path)
             },
         )
+
+
+def test_metric_rows_preserve_harmonic_order_and_retained_source_values(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "P1_Faces_Results.xlsx"
+    source = replace(
+        _released_source(path),
+        allowed_auxiliary_rows=("EXG1",),
+        observed_auxiliary_rows=("EXG1",),
+    )
+    frame = pd.DataFrame({
+        "Electrode": [" o2 ", " exg1 ", " o1 "],
+        "1.2000_Hz": [6.0, "3.0", -0.0],
+        "2.4000_Hz": [9.0, None, 4.0],
+    }, index=[2, 0, 1])
+    monkeypatch.setattr(publication_metrics, "read_metric_sheet_selected_columns", lambda *_a, **_kw: frame)
+    diagnostics = []
+
+    rows = publication_metrics._collect_metric_rows(
+        metric=PublicationMetric.BCA,
+        workbooks=[_workbook(path)],
+        harmonics_hz=(2.4, 1.2),
+        diagnostics=diagnostics,
+        excluded_electrodes_by_subject={"P1": frozenset({"O2"})},
+        managed_sources_by_workbook={path.resolve(): source},
+    )
+
+    result = pd.DataFrame(rows, columns=publication_metrics.LONG_COLUMNS)
+    assert result["electrode"].tolist() == ["EXG1", "O1", "EXG1", "O1"]
+    assert result["original_electrode"].tolist() == [" exg1 ", " o1 "] * 2
+    assert result["is_montage_electrode"].tolist() == [False, True] * 2
+    assert result["source_column"].tolist() == ["2.4000_Hz"] * 2 + ["1.2000_Hz"] * 2
+    assert result["value"].to_numpy().tobytes() == np.array([np.nan, 4.0, 3.0, -0.0]).tobytes()
+    assert [(item.code, item.detail) for item in diagnostics] == [("unmapped_electrode", "EXG1")]
 
 
 def test_managed_publication_metadata_retains_release_and_source_fingerprints(
