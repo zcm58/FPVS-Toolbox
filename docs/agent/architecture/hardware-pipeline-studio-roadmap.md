@@ -174,11 +174,16 @@ identity; their scientific comparability must not be assumed.
 
 ### Required Brain Products support
 
-The maintainer wants broad Brain Products support and has not specified an
-amplifier, cap, channel count, reference, or Recorder version. Do not select one
-by assumption or require the user to know the model before planning the shared
-architecture. Detect documented format/acquisition metadata where available;
-request explicit montage/reference information only where it cannot be established.
+Toolbox supports the standard actiCAP slim/snap GACS 64- and 128-electrode
+layouts as explicit project templates. The operator selects the matching cap.
+Other Brain Products caps can still use positions embedded in the recording.
+See the [built-in cap templates](eeg-loading-contract.md#built-in-cap-templates).
+
+Importing a participant's separate BrainVision CapTrak scan is planned for
+future work. That import will need to bind the scan to its recording, validate
+units, coordinate frame, fiducials and electrode labels, and retain the scan's
+provenance. CapTrak's camera system works with actiCAP electrodes.
+[BrainVision CapTrak](https://www.brainproducts.com/solutions/captrak/)
 
 The format inventory must cover BrainVision Core/Data Exchange recordings
 (`.vhdr`, `.vmrk`, `.eeg`) and BrainVision Recording Format (BVRF: `.bvrh`,

@@ -90,6 +90,29 @@ sensor types, multi-subject splitting, or physical device qualification.
 [BioSemi's BDF documentation](https://www.biosemi.com/faq/file_format.htm)
 confirms the shared container format, not a shared montage/reference policy.
 
+### Built-in cap templates
+
+In project Settings > Processing, choose the EEG hardware and **Electrode
+montage**. Guided setup offers the same choices on its Recording page.
+ActiveThree and Brain Products projects default to recorded electrode positions.
+
+| Project hardware | Built-in cap | Recording labels and geometry |
+| --- | --- | --- |
+| BioSemi ActiveThree | 128 radial ABC (`biosemi128`) | Requires A1–A32, B1–B32, C1–C32 and D1–D32. Verify the radial layout because BioSemi's extended 10/20 cap also uses ABC labels. MNE's radial template matches the manufacturer's 128-channel spherical coordinates. [BioSemi coordinates](https://www.biosemi.com/download/Cap_coords_all.xls) · [BioSemi cap models](https://www.biosemi.com/download/BioSemi%20Pricelist%202024.pdf) |
+| Unicorn Hybrid Black | 8 (`unicorn8`) | Fz, C3, Cz, C4, Pz, PO7, Oz and PO8, using nominal 10/20 positions. Select the factory EEG 1–8 wiring when the recording uses numbered labels and the clips follow the factory wiring. The native 250 Hz and eight-scalp reference policies apply. [Unicorn hardware manual](https://github.com/unicorn-bi/Unicorn-Suite-Hybrid-Black-User-Manual/blob/main/UnicornHybridBlack.md) |
+| Brain Products | actiCAP slim/snap GACS 64 or 128 (`brainproducts_acticap_gacs_64`, `brainproducts_acticap_gacs_128`) | Requires the named scalp sites from the corresponding manufacturer BVEF. The recorded Iz or FCz identifies the GACS wiring variant. The template uses the vendor's nominal spherical angles and MNE's BrainVision 95 mm template radius. [Brain Products cap files](https://www.brainproducts.com/downloads/cap-montages/) |
+
+The named caps match the full set of scalp labels after channel roles are
+resolved. Recording order is preserved. Verify the physical cap and wiring
+before selecting a template. Declare auxiliary channels by role. External
+EEG channels selected for initial reference and removal stay coordinate-free.
+Templates carry explicit project-template provenance through processing and
+cache reuse. The existing calibrated QC and spatial-tool eligibility rules
+continue to apply.
+
+For a visible desktop check, select each cap in its project hardware settings,
+save, then reopen Settings and Guided setup to confirm the saved selection.
+
 ## Brain Products project route
 
 `Main_App.io.load_utils` dispatches `.vhdr` and `.bvrh` through `hardware_loader`
@@ -491,7 +514,7 @@ original recordings, exports, or the repository's MNE/fsaverage cache.
   freezes the 64 anatomical names, MNE head-frame coordinates, geometry
   version, coordinate fingerprint, canonical and retained scalp-set
   fingerprints, mapping profile, and composite geometry fingerprint.
-- The project-owned `electrode_montage` has one supported value:
+- For the ActiveTwo project route, `electrode_montage` has one supported value:
   `biosemi64`, displayed as **BioSemi ActiveTwo 64**. The loader applies MNE's
   cached `biosemi64` montage with `on_missing="raise"`, `match_case=True`, and
   `verbose=False`, then verifies every retained scalp coordinate against the

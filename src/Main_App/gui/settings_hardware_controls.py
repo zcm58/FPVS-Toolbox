@@ -10,7 +10,7 @@ from Main_App.projects.hardware import (
     HARDWARE_LABELS, HARDWARE_SETTINGS_KEYS, confirm_hardware_selection,
     RECORDED_GEOMETRY_PLATFORMS, UNICORN_FACTORY_MAPPING_PROFILE,
     hardware_supports_calibrated_qc, normalize_hardware_settings, resolve_hardware,
-    unicorn_acquisition_profile,
+    supported_electrode_montages, unicorn_acquisition_profile,
 )
 
 
@@ -102,9 +102,10 @@ def _refresh_controls(dialog) -> None:
     dialog.preproc_edits[2].setEnabled(not unicorn and dialog.project is not None)
     dialog.preproc_edits[2].setToolTip("Unicorn retains its native 250 Hz sampling grid." if unicorn else "")
     dialog.electrode_montage_combo.setEnabled(recorded_geometry and dialog.project is not None)
+    allowed_montages = dict(supported_electrode_montages(platform))
     for index in range(dialog.electrode_montage_combo.count()):
         dialog.electrode_montage_combo.model().item(index).setEnabled(
-            dialog.electrode_montage_combo.itemData(index) != "unicorn8" or unicorn
+            dialog.electrode_montage_combo.itemData(index) in allowed_montages
         )
     dialog.electrode_mapping_profile_combo.setEnabled(not recorded_geometry and dialog.project is not None)
     allowed_mappings = {"anatomical_labels", UNICORN_FACTORY_MAPPING_PROFILE if unicorn else "biosemi64_1020_ab_v1"}
@@ -118,7 +119,7 @@ def _refresh_controls(dialog) -> None:
             "the documented factory electrode positions."
         )
     elif recorded_geometry:
-        mapping_help = "Channel geometry is read from the recording."
+        mapping_help = "Electrode positions are matched by recorded channel label."
     else:
         mapping_help = (
             "Use anatomical labels when the recording names the scalp electrodes. "

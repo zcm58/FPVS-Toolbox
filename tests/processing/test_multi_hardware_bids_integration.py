@@ -35,9 +35,15 @@ def _bdf_recording(root: Path, case: str):
     mobile = case.startswith("unicorn")
     legacy = case == "active_two"
     rate = 250 if mobile else 256
-    scalp = list(UNICORN_CHANNELS) if mobile else list(BIOSEMI64_CHANNELS) if legacy else [
-        f"E{number:02d}" for number in range(1, (32 if case == "active_three_32" else 8) + 1)
-    ]
+    if mobile:
+        scalp = list(UNICORN_CHANNELS)
+    elif legacy:
+        scalp = list(BIOSEMI64_CHANNELS)
+    elif case == "active_three_radial_128":
+        scalp = [f"{bank}{number}" for bank in "ABCD" for number in range(1, 33)]
+    else:
+        count = 32 if case == "active_three_32" else 8
+        scalp = [f"E{number:02d}" for number in range(1, count + 1)]
     factory = case == "unicorn_factory_units"
     recorded = [f"EEG {i}" for i in range(1, 9)] if factory else scalp
     extras = ["CNT", "VALID", "DT"] if mobile else ["EXG1", "EXG2"] if legacy else ["EXG3", "EXG4", "AUX1"]
@@ -93,11 +99,14 @@ def _bdf_recording(root: Path, case: str):
     else:
         settings.update(initial_reference="channels", initial_reference_channels=["EXG3"],
                         drop_reference_channels=True, channel_types={"AUX1": "misc"})
+        if case == "active_three_radial_128":
+            settings["electrode_montage"] = "biosemi128"
     return path, events, settings, scalp, rate, expected_volts
 
 
 CASES = [
-    "active_two", "active_three_8", "active_three_32", "brain_products_vhdr", "brain_products_bvrh",
+    "active_two", "active_three_8", "active_three_32", "active_three_radial_128",
+    "brain_products_vhdr", "brain_products_bvrh",
     "unicorn_classic", "unicorn_bdf_plus", "unicorn_factory_units",
     "unicorn_annotations", "unicorn_reconcile",
 ]
@@ -164,6 +173,11 @@ def test_generated_hardware_bids_pipeline_and_cache(tmp_path, case, retain_impor
     assert first["source_derivative_status"] == "complete", first["source_derivative_warning"]
     assert first["preproc_cache_status"] == "stored"
     assert first["geometry"]["retained_scalp_channels"] == channels
+    if case == "active_three_radial_128":
+        assert first["geometry"]["montage_id"] == "biosemi128"
+        assert first["geometry"]["coordinate_source"] == "explicit_project_template"
+        assert first["geometry"]["geometry_status"] == "available"
+        assert first["geometry"]["canonical_scalp_channels"] == channels
     assert first["audit"]["sfreq"] == (250 if case.startswith("unicorn") else 128)
     if case != "active_two":
         assert first["geometry"]["hardware_platform"] == settings["hardware_platform"]

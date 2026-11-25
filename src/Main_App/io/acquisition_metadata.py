@@ -309,9 +309,9 @@ def validate_processing_geometry(raw: Any, contract: RecordingContract) -> None:
     if contract.recorded_channel_geometry:
         identity = validate_raw_recorded_geometry(raw)
         if contract.canonical_scalp_order is not None and (
-            tuple(identity["retained_scalp_channels"]) != contract.canonical_scalp_order
+            set(identity["retained_scalp_channels"]) != set(contract.canonical_scalp_order)
         ):
-            raise ValueError("Processing requires the complete configured scalp-channel order.")
+            raise ValueError("Processing requires the complete configured scalp-channel set.")
         if not contract.interpolation_allowed and identity.get("interpolation_supported"):
             raise ValueError("Recorded geometry conflicts with the configured interpolation capability.")
 
@@ -322,7 +322,14 @@ def validate_loaded_geometry(
     """Validate source geometry using resolved channel roles and coordinates."""
     from Main_App.io.recorded_eeg_geometry import validate_raw_eeg_geometry
 
-    if contract.canonical_scalp_order is not None:
+    if contract.recorded_channel_geometry and contract.canonical_scalp_order is not None:
+        # Numbered or anatomical labels identify the headset positions. The
+        # recording owns the row order, including after a cache round trip.
+        channels = contract.scalp_channels(raw)
+        if set(channels) != set(contract.canonical_scalp_order):
+            raise ValueError("Loading requires the complete configured scalp-channel set.")
+        kwargs.setdefault("expected_retained_channels", channels)
+    elif contract.canonical_scalp_order is not None:
         kwargs.setdefault("expected_retained_channels", contract.canonical_scalp_order[:contract.channel_limit])
         kwargs.setdefault("reference_channels", contract.load_reference_channels)
         kwargs.setdefault("require_runtime_identity", True)

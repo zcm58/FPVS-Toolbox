@@ -30,13 +30,13 @@ from .frequency_protocol import (
 from .hardware import (
     HardwareChangeConfirmationRequired, brain_products_qc_defaults,
     confirm_hardware_selection, hardware_supports_calibrated_qc,
-    require_hardware_ready, resolve_hardware, RECORDED_GEOMETRY_PLATFORMS,
+    require_hardware_ready, resolve_hardware, RECORDED_GEOMETRY_PLATFORMS, supported_electrode_montages,
 )
 from .manifest_store import manifest_file_path, project_manifest_transaction
 from .preprocessing_settings import (
     confirm_removed_electrode_detection_choice, normalize_preprocessing_settings,
     require_removed_electrode_detection_choice_ready, RemovedElectrodeDetectionConfirmationRequired,
-    SUPPORTED_ELECTRODE_MONTAGES, SUPPORTED_ELECTRODE_MAPPING_PROFILES,
+    SUPPORTED_ELECTRODE_MAPPING_PROFILES,
 )
 from .project import _electrode_geometry_settings, _pipeline_settings, _preprocessing_manifest_payload
 from .recordings import project_recording_context_from_manifest
@@ -248,15 +248,12 @@ class PipelineSetupDraft:
         platform = resolve_hardware(self.preprocessing).platform
         recorded = platform in RECORDED_GEOMETRY_PLATFORMS
         fixed = platform == "unicorn"
-        montages = (tuple(item for item in SUPPORTED_ELECTRODE_MONTAGES if item[0] != "unicorn8")
-                    if recorded else tuple(item for item in SUPPORTED_ELECTRODE_MONTAGES
-                                           if item[0] == ("unicorn8" if fixed else "biosemi64")))
         mappings = {"anatomical_labels"}
         if not recorded:
             mappings.add("unicorn_factory_v1" if fixed else "biosemi64_1020_ab_v1")
         return PipelineControlPolicy(
             not fixed, "fixed" if fixed else "selected_channels" if recorded else "legacy_pair",
-            recorded, not recorded, recorded, not fixed, montages,
+            recorded, not recorded, recorded, not fixed, supported_electrode_montages(platform),
             tuple(item for item in SUPPORTED_ELECTRODE_MAPPING_PROFILES if item[0] in mappings),
         )
 

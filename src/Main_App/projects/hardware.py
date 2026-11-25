@@ -24,7 +24,46 @@ HARDWARE_SETTINGS_KEYS = (*HARDWARE_KEYS, *BRAIN_PRODUCTS_KEYS, "acquisition_pro
 RECORDED_GEOMETRY_PLATFORMS = frozenset({"brain_products", "biosemi_active_three"})
 BDF_PLATFORMS = frozenset({"biosemi", "biosemi_active_three", "unicorn"})
 UNICORN_FACTORY_MAPPING_PROFILE = "unicorn_factory_v1"
+BIOSEMI128_MONTAGE = "biosemi128"
+ACTICAP_GACS_64 = "brainproducts_acticap_gacs_64"
+ACTICAP_GACS_128 = "brainproducts_acticap_gacs_128"
 _FORMAT_PLATFORMS = {".vhdr": "brain_products", ".bvrh": "brain_products"}
+
+# A BrainVision header or channel count cannot identify a cap. Keep the
+# previously available generic templates for both recorded-geometry routes.
+_ELECTRODE_MONTAGES = (
+    ("biosemi64", "BioSemi ActiveTwo 64", RECORDED_GEOMETRY_PLATFORMS | {"biosemi"}),
+    ("recorded", "Recorded electrode positions", RECORDED_GEOMETRY_PLATFORMS),
+    (BIOSEMI128_MONTAGE, "BioSemi ActiveThree 128 radial ABC", {"biosemi_active_three"}),
+    (ACTICAP_GACS_64, "Brain Products actiCAP slim/snap 64 (GACS)", {"brain_products"}),
+    (ACTICAP_GACS_128, "Brain Products actiCAP slim/snap 128 (GACS)", {"brain_products"}),
+    ("standard_1020", "Standard 10-20", RECORDED_GEOMETRY_PLATFORMS),
+    ("standard_1005", "Standard 10-05", RECORDED_GEOMETRY_PLATFORMS),
+    ("easycap-M1", "EasyCap M1", RECORDED_GEOMETRY_PLATFORMS),
+    ("easycap-M10", "EasyCap M10", RECORDED_GEOMETRY_PLATFORMS),
+    ("unicorn8", "Unicorn Hybrid Black 8", {"unicorn"}),
+)
+SUPPORTED_ELECTRODE_MONTAGES = tuple((key, label) for key, label, _ in _ELECTRODE_MONTAGES)
+_MONTAGES_BY_PLATFORM = {
+    platform: tuple((key, label) for key, label, platforms in _ELECTRODE_MONTAGES if platform in platforms)
+    for platform in HARDWARE_LABELS
+}
+
+
+def supported_electrode_montages(platform: str) -> tuple[tuple[str, str], ...]:
+    """Return the project montage choices for one acquisition hardware route."""
+    return _MONTAGES_BY_PLATFORM[platform]
+
+
+def validate_electrode_montage(platform: str, montage: str) -> None:
+    """Require an explicitly compatible hardware and montage pair."""
+    if any(montage == key for key, _ in supported_electrode_montages(platform)):
+        return
+    if platform == "biosemi":
+        raise ValueError("Unsupported electrode montage: BioSemi processing requires the BioSemi ActiveTwo 64 montage.")
+    if platform == "unicorn":
+        raise ValueError("Unicorn processing requires all eight scalp channels in the Unicorn montage.")
+    raise ValueError(f"Unsupported electrode montage {montage!r} for {HARDWARE_LABELS[platform]}.")
 
 
 class HardwareChangeConfirmationRequired(ValueError):

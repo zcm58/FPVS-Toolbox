@@ -1,4 +1,4 @@
-"""Recording-owned sensor identity for non-BioSemi acquisition systems.
+"""Recording-owned sensor identity for explicitly configured acquisition systems.
 
 Channel labels do not establish cap geometry. An explicit template selection or
 complete, finite recorded head coordinates are required for interpolation.
@@ -22,8 +22,12 @@ from Main_App.io.eeg_geometry import (
     read_raw_biosemi64_geometry,
     validate_raw_biosemi64_geometry,
 )
+from Main_App.projects.hardware import (
+    ACTICAP_GACS_64, ACTICAP_GACS_128, BIOSEMI128_MONTAGE, validate_electrode_montage,
+)
 
 RECORDED_GEOMETRY_VERSION = "recorded_eeg_geometry_v1"
+_NATIVE_CAPS = frozenset((BIOSEMI128_MONTAGE, ACTICAP_GACS_64, ACTICAP_GACS_128))
 
 
 def _fingerprint(value: Any) -> str:
@@ -59,6 +63,7 @@ def _identity(
     *, montage_id: str, mapping_profile: str, canonical: list[str],
     retained: list[str], coordinates: Mapping[str, Any], coordinate_source: str,
     hardware_platform: str = "brain_products", interpolation_allowed: bool = True,
+    reference_only_channels: Sequence[str] = (),
 ) -> dict[str, Any]:
     if not isinstance(hardware_platform, str) or not hardware_platform or hardware_platform != hardware_platform.strip():
         raise ValueError("Recorded EEG geometry requires an explicit acquisition platform.")
@@ -87,14 +92,54 @@ def _identity(
     # Existing Brain Products geometry is a frozen scientific identity.
     if hardware_platform != "brain_products" or not interpolation_allowed:
         identity["interpolation_allowed"] = interpolation_allowed
+    if reference_only_channels:
+        refs = _names(reference_only_channels, label="External reference channels")
+        if {name.casefold() for name in refs} & {name.casefold() for name in canonical}:
+            raise ValueError("An external reference cannot also be a scalp electrode.")
+        identity["reference_only_channels"] = refs
     identity["geometry_identity_fingerprint"] = _fingerprint(identity)
     return identity
+
+
+def _apply_native_cap(
+    raw: Any, montage_id: str, platform: str, eeg: list[str], dropped_refs: Sequence[str],
+) -> list[str]:
+    """Match the complete named layout, retaining separate EEG reference signals."""
+    validate_electrode_montage(platform, montage_id)
+    observed = {name.casefold() for name in eeg}
+    if montage_id == BIOSEMI128_MONTAGE:
+        template = mne.channels.make_standard_montage("biosemi128")
+    else:
+        from Main_App.io.acticap_montages import make_acticap_montage
+
+        # Standard GACS wiring records Iz or FCz at channel 64. A second
+        # signal at the other site must be an explicitly dropped reference.
+        variant = observed & {"iz", "fcz"}
+        if len(variant) == 2:
+            variant -= {name.casefold() for name in dropped_refs}
+            if len(variant) != 1:
+                raise ValueError("The actiCAP GACS template requires an unambiguous Iz or FCz scalp channel.")
+        template = make_acticap_montage(montage_id, recorded_fcz=variant == {"fcz"})
+
+    expected = {name.casefold(): name for name in template.ch_names}
+    missing = [name for key, name in expected.items() if key not in observed]
+    extra = [name for name in eeg if name.casefold() not in expected]
+    unexpected = [name for name in extra if name not in dropped_refs]
+    if missing or unexpected:
+        raise ValueError(
+            f"EEG labels do not match the complete {montage_id} montage. "
+            f"Missing electrodes: {missing}. Unexpected EEG channels: {unexpected}."
+        )
+    # MNE leaves only the explicitly admitted external reference positions empty.
+    raw.set_montage(template, match_case=False, on_missing="ignore" if extra else "raise", verbose=False)
+    return extra
 
 
 def attach_raw_recorded_geometry(
     raw: Any, *, montage_id: str = "recorded", template_montage: str | None = None,
     scalp_channels: Sequence[str] | None = None, mapping_profile: str = "recorded_labels",
     hardware_platform: str | None = None, interpolation_allowed: bool | None = None,
+    dropped_reference_channels: Sequence[str] = (),
 ) -> dict[str, Any]:
     """Attach identity after type/position resolution; never infer a cap by count.
 
@@ -113,30 +158,32 @@ def attach_raw_recorded_geometry(
         interpolation_allowed if interpolation_allowed is not None
         else prior_recorded.get("interpolation_allowed", True)
     )
+    external_refs = []
     if template_montage is not None:
-        if template_montage not in mne.channels.get_builtin_montages():
-            raise ValueError(f"Unknown EEG montage template {template_montage!r}.")
-        raw.set_montage(template_montage, match_case=True, on_missing="raise", verbose=False)
+        if template_montage in _NATIVE_CAPS:
+            external_refs = _apply_native_cap(raw, template_montage, platform, eeg, dropped_reference_channels)
+        else:
+            if template_montage not in mne.channels.get_builtin_montages():
+                raise ValueError(f"Unknown EEG montage template {template_montage!r}.")
+            raw.set_montage(template_montage, match_case=True, on_missing="raise", verbose=False)
         if montage_id == "recorded":
             montage_id = template_montage
         source = "explicit_project_template"
     else:
-        source = (
-            str(prior["coordinate_source"])
-            if prior and prior.get("geometry_version") == RECORDED_GEOMETRY_VERSION
-            else "recording"
-        )
-    canonical = (
-        list(prior["canonical_scalp_channels"])
-        if prior and prior.get("geometry_version") == RECORDED_GEOMETRY_VERSION
-        else list(retained)
-    )
+        source = prior_recorded.get("coordinate_source", "recording")
+        external_refs = [name for name in prior_recorded.get("reference_only_channels", ()) if name in eeg]
+    if external_refs:
+        retained = [name for name in retained if name not in external_refs]
+    canonical = list(retained)
+    if prior_recorded and template_montage not in _NATIVE_CAPS:
+        canonical = list(prior_recorded["canonical_scalp_channels"])
     if not set(retained).issubset(canonical):
         raise ValueError("Retained EEG channels do not belong to the recording identity.")
     identity = _identity(
         montage_id=montage_id, mapping_profile=mapping_profile, canonical=canonical,
         retained=retained, coordinates=_coordinates(raw, retained), coordinate_source=source,
         hardware_platform=platform, interpolation_allowed=allow_interpolation,
+        reference_only_channels=external_refs,
     )
     setattr(raw, BIOSEMI64_RUNTIME_ATTRIBUTE, identity)
     return copy.deepcopy(identity)
@@ -155,6 +202,11 @@ def validate_raw_recorded_geometry(raw: Any, *, require_coordinates: bool = Fals
     names = _names(raw.ch_names, label="Recording")
     eeg = [name for name, kind in zip(names, raw.get_channel_types(), strict=True) if kind == "eeg"]
     retained = _names(stored.get("retained_scalp_channels", []), label="Retained EEG channels")
+    external_refs = stored.get("reference_only_channels", [])
+    if external_refs:
+        if not set(external_refs).issubset(eeg) or any(_coordinates(raw, external_refs).values()):
+            raise ValueError("External EEG reference channels must be present and coordinate-free.")
+        eeg = [name for name in eeg if name not in external_refs]
     if eeg != retained:
         raise ValueError("EEG channel names, roles or order changed after geometry validation.")
     expected = _identity(
@@ -164,6 +216,7 @@ def validate_raw_recorded_geometry(raw: Any, *, require_coordinates: bool = Fals
         coordinate_source=stored["coordinate_source"],
         hardware_platform=stored["hardware_platform"],
         interpolation_allowed=stored.get("interpolation_allowed", True),
+        reference_only_channels=external_refs,
     )
     if stored != expected:
         raise ValueError("Recorded EEG geometry changed after validation.")
@@ -197,6 +250,7 @@ def validate_recorded_geometry_identity(value: Mapping[str, Any]) -> dict[str, A
         coordinate_source=str(value.get("coordinate_source")),
         hardware_platform=value.get("hardware_platform"),
         interpolation_allowed=value.get("interpolation_allowed", True),
+        reference_only_channels=value.get("reference_only_channels", ()),
     )
     if dict(value) != expected:
         raise ValueError("Recorded EEG geometry identity or fingerprint is inconsistent.")
