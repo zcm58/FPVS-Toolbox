@@ -2226,7 +2226,8 @@ def _run_full_pipeline_for_file(
                 log_func=_worker_log,
                 filename_for_log=file_path.name,
                 recording_contract=resolve_recording_contract(settings, raw=raw),
-                **({"before_kurtosis_scoring": _WORKER_ADMISSION.before_kurtosis,
+                **({"before_notch": _WORKER_ADMISSION.before_notch,
+                    "before_kurtosis_scoring": _WORKER_ADMISSION.before_kurtosis,
                     "before_processing_finish": _WORKER_ADMISSION.before_finish}
                    if _WORKER_ADMISSION is not None else {}),
             )

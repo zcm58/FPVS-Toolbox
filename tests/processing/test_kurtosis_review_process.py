@@ -162,7 +162,10 @@ def test_scoped_preparation_reservation_requires_approved_bound(tmp_path, monkey
     monkeypatch.setattr(process_module, "read_review_geometry", lambda *_a: geometry)
     jobs = process_module._review_job_inputs([info], settings, plans, None)
     selected = process_module._review_resource_plan([info], settings=settings, jobs=jobs, event_map=event_map)
-    expected = estimate_review_memory(geometry, raw_union_samples=expected_count if fault is None else None)
+    expected = estimate_review_memory(
+        geometry, raw_union_samples=expected_count if fault is None else None,
+        builtin_recording_raw_qc=True, builtin_kurtosis=True,
+    )
     assert selected.estimates == (expected,)
     assert selected.credits == (expected.healthy_bytes,)
     assert not selected.exclusive[0]

@@ -1173,6 +1173,11 @@ Kurtosis review and interpolation:
   `scipy.stats.kurtosis(..., fisher=True, bias=False, nan_policy="propagate")`,
   removes 10 percent from each tail of the finite channel distribution, and
   normalizes with its trimmed mean and population standard deviation.
+- On the pinned NumPy and SciPy runtime, large inputs score complete channel
+  rows in batches of eight. If any row contains NaN, scoring follows SciPy's
+  recording-wide choice of a one-dimensional reduction for unaffected rows.
+  The gathered scoring waveform is released after the preview is built and
+  before interpolation.
 - A nonfinite input/statistic, too few valid reference channels, or degenerate
   reference scale remains unavailable and blocks unsupported automatic action;
   it is never converted to a zero score.

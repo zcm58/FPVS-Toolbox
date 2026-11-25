@@ -130,10 +130,31 @@ def test_no_effective_centers_returns_before_fft_and_preserves_bytes(
         fundamental_hz=60,
         low_pass=50.0,
         stim_channel="Status",
+        before_filter=_unexpected_fft,
     )
 
     assert result.did_filter is False
     assert result.applied_centers_hz == ()
+    assert raw._data.tobytes() == before
+
+
+def test_active_notch_checks_memory_before_signal_allocations(monkeypatch) -> None:
+    raw = _raw(np.ones((2, 513)), sfreq=512.0)
+    before = raw._data.tobytes()
+    observed = []
+
+    def check(channels, samples, sfreq):
+        observed.append((channels, samples, sfreq))
+        raise MemoryError("Injected insufficient memory")
+
+    def unexpected_mask(*args, **kwargs):
+        raise AssertionError("Notch must check memory before creating a mask")
+
+    monkeypatch.setattr(fft_multinotch, "build_fft_multinotch_mask", unexpected_mask)
+    with pytest.raises(MemoryError, match="insufficient memory"):
+        apply_fft_multinotch(raw, fundamental_hz=60, low_pass=None, stim_channel="Status", before_filter=check)
+
+    assert observed == [(len(raw.ch_names), 513, 512.0)]
     assert raw._data.tobytes() == before
 
 

@@ -22,6 +22,7 @@ from typing import Any
 import warnings
 
 import numpy as np
+import scipy
 from scipy.stats import kurtosis
 
 from Main_App.io.acquisition_metadata import CALIBRATED_SPATIAL_PROFILE as _SPATIAL_PROFILE
@@ -41,6 +42,8 @@ KURTOSIS_TRIM_FRACTION = 0.10
 KURTOSIS_MIN_VALID_REFERENCE_CHANNELS = 16
 KURTOSIS_MIN_SAMPLES_PER_CHANNEL = 4
 KURTOSIS_MIN_REFERENCE_SCALE = 1e-12
+KURTOSIS_BATCH_MIN_BYTES = 16 * 1024**2
+_KURTOSIS_CHANNELS_PER_BATCH = 8
 
 EVIDENCE_STATUS_VALID = "valid"
 EVIDENCE_STATUS_PARTIAL = "partially_valid"
@@ -594,6 +597,54 @@ def _validated_geometry_identity(
     return supplied
 
 
+def kurtosis_batch_rows(channel_count: int, sample_count: int) -> int:
+    """Return the characterized whole-row batch size used by scoring and admission."""
+    if (8 * channel_count * sample_count >= KURTOSIS_BATCH_MIN_BYTES
+            and np.__version__ == "2.3.1" and scipy.__version__ == "1.16.0"):
+        return min(_KURTOSIS_CHANNELS_PER_BATCH, channel_count)
+    return channel_count
+
+
+def _kurtosis_channel_measurements(array: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    channel_count, sample_count = array.shape
+    batch_rows = kurtosis_batch_rows(channel_count, sample_count)
+    input_finite = np.empty(channel_count, dtype=bool)
+    for start in range(0, channel_count, batch_rows):
+        rows = slice(start, start + batch_rows)
+        input_finite[rows] = np.all(np.isfinite(array[rows]), axis=1)
+
+    raw_values = np.full(channel_count, np.nan, dtype=np.float64)
+    if sample_count < KURTOSIS_MIN_SAMPLES_PER_CHANNEL:
+        return raw_values, input_finite
+
+    nan_rows = set()
+    if batch_rows < channel_count:
+        nan_rows.update(index for index in np.flatnonzero(~input_finite) if np.isnan(array[index]).any())
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        if nan_rows:
+            # With any NaN, SciPy's whole-matrix nan-policy wrapper runs its
+            # one-dimensional statistic for each row without NaN. Preserve that
+            # reduction layout and leave NaN rows at the initialized value.
+            for index, row in enumerate(array):
+                if index not in nan_rows:
+                    raw_values[index] = kurtosis(
+                        row, axis=0, fisher=True, bias=False, nan_policy="propagate", _no_deco=True,
+                    )
+        else:
+            # The pinned wrapper would concatenate the batch and scan for NaN
+            # again. With the recording-wide check complete, run the same
+            # numerical body directly for each vectorized batch.
+            options = {"_no_deco": True} if batch_rows < channel_count else {}
+            for start in range(0, channel_count, batch_rows):
+                rows = slice(start, start + batch_rows)
+                raw_values[rows] = kurtosis(
+                    array[rows], axis=1, fisher=True, bias=False, nan_policy="propagate", **options,
+                )
+    return raw_values, input_finite
+
+
 def evaluate_kurtosis_qc(
     data: np.ndarray,
     channel_names: Sequence[object],
@@ -645,16 +696,7 @@ def evaluate_kurtosis_qc(
     }
     processing_provenance_fingerprint = _fingerprint(processing_provenance)
 
-    input_finite = np.all(np.isfinite(array), axis=1)
-    if array.shape[1] >= KURTOSIS_MIN_SAMPLES_PER_CHANNEL:
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", RuntimeWarning)
-            raw_values = np.asarray(
-                kurtosis(array, axis=1, fisher=True, bias=False, nan_policy="propagate"),
-                dtype=np.float64,
-            )
-    else:
-        raw_values = np.full(array.shape[0], np.nan, dtype=np.float64)
+    raw_values, input_finite = _kurtosis_channel_measurements(array)
 
     preliminary_validity: list[tuple[str, str | None]] = []
     finite_rows: list[tuple[str, float]] = []

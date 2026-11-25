@@ -4,6 +4,7 @@ from copy import deepcopy
 from dataclasses import replace
 import hashlib
 import json
+import warnings
 
 import numpy as np
 import pytest
@@ -159,6 +160,62 @@ def _data(
         data[0] = rng.normal(scale=0.05, size=sample_count)
         data[0, ::200] = 30.0
     return data
+
+
+@pytest.mark.parametrize("sample_count", [5, 4097])
+@pytest.mark.parametrize("kind", ["finite", "recording_nan", "infinite", "flat", "overflow"])
+def test_bounded_native_batches_preserve_statistic_bits_and_full_evidence(monkeypatch, sample_count, kind):
+    monkeypatch.setattr(qc_module, "KURTOSIS_BATCH_MIN_BYTES", 0)
+    if qc_module.kurtosis_batch_rows(20, sample_count) == 20:
+        pytest.skip("The pinned NumPy/SciPy Kurtosis batch route is unavailable")
+    data = _data(20, sample_count)
+    if kind == "recording_nan":
+        data[-1, 2] = np.nan
+    elif kind == "infinite":
+        data[-1, 2] = -np.inf
+    elif kind == "flat":
+        data[-1] = -0.0
+        data[-2] = 1e6 + np.finfo(np.float64).eps * 1e6 * data[-2]
+    elif kind == "overflow":
+        data[-1] *= 1e150
+
+    native = qc_module.kurtosis
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        expected = native(data, axis=1, fisher=True, bias=False, nan_policy="propagate")
+
+    observed = []
+
+    def track(array, **kwargs):
+        observed.append(array.shape)
+        return native(array, **kwargs)
+
+    monkeypatch.setattr(qc_module, "kurtosis", track)
+    values, finite = qc_module._kurtosis_channel_measurements(data)
+    np.testing.assert_array_equal(values.view(np.uint64), expected.view(np.uint64))
+    np.testing.assert_array_equal(finite, np.all(np.isfinite(data), axis=1))
+    if kind == "recording_nan":
+        assert observed == [(sample_count,)] * 19
+    else:
+        assert observed == [(8, sample_count), (8, sample_count), (4, sample_count)]
+
+    actual_evidence = _evidence(data=data)
+    with monkeypatch.context() as reference:
+        reference.setattr(qc_module, "kurtosis_batch_rows", lambda count, _samples: count)
+        expected_evidence = _evidence(data=data)
+    assert actual_evidence.to_payload() == expected_evidence.to_payload()
+    assert actual_evidence.fingerprint == expected_evidence.fingerprint
+    assert build_kurtosis_decision_plan(actual_evidence).to_payload() == build_kurtosis_decision_plan(expected_evidence).to_payload()
+
+
+def test_bound_uses_whole_matrix_below_cutoff_and_on_unknown_runtime(monkeypatch):
+    channels = 64
+    boundary = qc_module.KURTOSIS_BATCH_MIN_BYTES // (8 * channels)
+    assert qc_module.kurtosis_batch_rows(channels, boundary - 1) == channels
+    if qc_module.np.__version__ == "2.3.1" and qc_module.scipy.__version__ == "1.16.0":
+        assert qc_module.kurtosis_batch_rows(channels, boundary) == 8
+    monkeypatch.setattr(qc_module.scipy, "__version__", "uncharacterized")
+    assert qc_module.kurtosis_batch_rows(channels, boundary) == channels
 
 
 def _evidence(

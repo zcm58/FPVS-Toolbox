@@ -108,10 +108,27 @@ def bdf_reader_peak_bytes(geometry: ReviewGeometry) -> int:
     return 2 * 8 * geometry.loaded_channels * geometry.source_n_times + decoder
 
 
+def _kurtosis_scratch_bytes(channels: int, samples: int, *, builtin_kurtosis: bool) -> int:
+    waveform = 8 * channels * samples
+    if not builtin_kurtosis or samples < 4:
+        return 6 * waveform
+
+    from Main_App.processing.kurtosis_qc import KURTOSIS_BATCH_MIN_BYTES, kurtosis_batch_rows
+
+    # The assembled waveform and canonical reorder can overlap. SciPy's
+    # broadcast input and moment temporaries are confined to the selected rows.
+    rows = kurtosis_batch_rows(channels, samples)
+    if rows == channels:
+        return 6 * waveform
+    # A smaller realized sample union can land below the batching threshold.
+    return max(2 * waveform + 4 * 8 * rows * samples, 6 * KURTOSIS_BATCH_MIN_BYTES)
+
+
 def estimate_review_memory(
     geometry: ReviewGeometry, *, filter_enabled: bool = True,
     notch_enabled: bool = False, raw_qc_enabled: bool = True,
     raw_union_samples: int | None = None,
+    builtin_recording_raw_qc: bool = False, builtin_kurtosis: bool = False,
 ) -> ReviewMemoryEstimate:
     """Bound load/reference/FIR/resample and both possible scoring rates.
 
@@ -136,7 +153,7 @@ def estimate_review_memory(
     n2 = max(1, math.ceil(n0 * target_rate / source_rate))
     r0, r1, r2 = (8 * channels * samples for channels, samples in
                   ((g.loaded_channels, n0), (g.retained_channels, n0), (g.retained_channels, n2)))
-    a2, a0 = 8 * g.scored_channels * n2, 8 * g.scored_channels * n0
+    a2 = 8 * g.scored_channels * n2
     components = {"load": bdf_reader_peak_bytes(g),
                   "reference": 2 * r0 + 8 * n0,
                   "drop": r0 + r1}
@@ -159,11 +176,14 @@ def estimate_review_memory(
         if m0 > n0:
             raise ValueError("Source union cannot exceed the recording.")
         a = 8 * g.scored_channels * m0
-        # Span chunks plus concatenation, spatial normalization working arrays,
-        # finite-mask and bounded donor/row scratch all remain possible here.
-        components["raw_qc"] = r0 + 4 * a + math.ceil(a / 4) + 64 * _MIB + 64 * 8 * m0
+        # Built-in recording QC releases its span copies before scoring the
+        # union. Keep the separate centered and variance-work arrays because
+        # the owned-buffer optimization need not qualify for every input.
+        unions = 3 if builtin_recording_raw_qc else 4
+        components["raw_qc"] = r0 + unions * a + math.ceil(a / 4) + 64 * _MIB + 64 * 8 * m0
     prefix = max(components.values())
-    healthy, full = r2 + 6 * a2, r1 + 6 * a0
+    healthy = r2 + _kurtosis_scratch_bytes(g.scored_channels, n2, builtin_kurtosis=builtin_kurtosis)
+    full = r1 + _kurtosis_scratch_bytes(g.scored_channels, n0, builtin_kurtosis=builtin_kurtosis)
     components["checkpoint"] = r2 + a2 + 17 * _MIB
     # A warm checkpoint retains the original loaded input while restoring and
     # concatenating target scoring data; cached evidence skips SciPy entirely.
@@ -176,7 +196,7 @@ def estimate_review_memory(
 
 def actual_scoring_bytes(
     raw_channels: int, raw_samples: int, scored_channels: int, union_samples: int,
-    evidence_cached: bool = False, original_input_live_bytes: int = 0,
+    evidence_cached: bool = False, original_input_live_bytes: int = 0, *, builtin_kurtosis: bool = False,
 ) -> int:
     for value in (raw_channels, raw_samples, scored_channels, union_samples):
         _positive_int(value)
@@ -185,7 +205,10 @@ def actual_scoring_bytes(
     if type(original_input_live_bytes) is not int or original_input_live_bytes < 0:
         raise ValueError("Original live input bytes must be nonnegative.")
     r, a = 8 * raw_channels * raw_samples, 8 * scored_channels * union_samples
-    return original_input_live_bytes + max(r + (2 if evidence_cached else 6) * a, r + a + 17 * _MIB)
+    scratch = 2 * a if evidence_cached else _kurtosis_scratch_bytes(
+        scored_channels, union_samples, builtin_kurtosis=builtin_kurtosis,
+    )
+    return original_input_live_bytes + r + max(scratch, a + 17 * _MIB)
 
 
 def _windows_commit_available() -> int | None:

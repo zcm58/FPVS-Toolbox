@@ -121,6 +121,15 @@ def _approved_raw_union(info, geometry, job: _ReviewJobInputs, event_map):
         return None
 
 
+def _uses_builtin_review_methods(settings: Mapping[str, Any]) -> bool:
+    from Main_App.processing.pipeline_plan import PipelineConfigurationError, resolve_pipeline_plan
+
+    try:
+        return resolve_pipeline_plan(settings).is_legacy_default
+    except PipelineConfigurationError:
+        return False
+
+
 def _review_resource_plan(
     raw_file_infos: Sequence[Any], max_workers: int | None = None,
     *, settings: Mapping[str, Any] | None = None, jobs: Sequence[_ReviewJobInputs] | None = None,
@@ -146,6 +155,7 @@ def _review_resource_plan(
     estimates = []
     exclusive = []
     geometry_supported = True
+    builtin_methods = settings is not None and _uses_builtin_review_methods(settings)
     if settings is not None:
         from Main_App.processing.raw_channel_qc import (
             REMOVED_ELECTRODE_DETECTION_MODE_AUTO, normalize_removed_electrode_detection_mode,
@@ -171,7 +181,8 @@ def _review_resource_plan(
                     estimate = estimate_review_memory(
                         geometry, filter_enabled=bool(settings.get("high_pass") or settings.get("low_pass")),
                         notch_enabled=bool(settings.get("line_noise_filter_enabled")), raw_qc_enabled=raw_qc_enabled,
-                        raw_union_samples=raw_union,
+                        raw_union_samples=raw_union, builtin_recording_raw_qc=builtin_methods,
+                        builtin_kurtosis=builtin_methods,
                     )
                     credit = estimate.healthy_bytes
         except (AttributeError, ImportError, OSError, OverflowError, RuntimeError, TypeError, ValueError):
@@ -309,8 +320,8 @@ def _send_control_message(message: dict[str, Any]) -> None:
     raise InterruptedError("Preparation cancelled while requesting memory admission.")
 
 
-def _request_scoring_admission(index: int, *shape) -> None:
-    required = actual_scoring_bytes(*shape)
+def _request_scoring_admission(index: int, *shape, builtin_kurtosis: bool = False) -> None:
+    required = actual_scoring_bytes(*shape, builtin_kurtosis=builtin_kurtosis)
     if required <= _WORKER_CREDITS[index] and not _WORKER_EXCLUSIVE[index]:
         return
     process = psutil.Process()
@@ -341,11 +352,12 @@ def _run_one_review(
 
     callback = None
     if job_index is not None and _WORKER_GRANT_EVENTS is not None:
+        builtin_kurtosis = _uses_builtin_review_methods(settings)
         process = psutil.Process()
         _send_control_message({"type": "worker_started", "job_index": job_index,
                                "pid": process.pid, "created": process.create_time()})
         def callback(*shape):
-            _request_scoring_admission(job_index, *shape)
+            _request_scoring_admission(job_index, *shape, builtin_kurtosis=builtin_kurtosis)
 
     with prepared_fir_scope(process_runner._WORKER_FIR_CACHE):
         return _scan_kurtosis_review_serial(

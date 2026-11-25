@@ -226,9 +226,13 @@ Common long-running work:
   A conservative upper estimate larger than installed RAM also selects that
   fallback; it does not prove that the native operation is impossible. Supported
   files validate actual shape at an unconditional finish barrier, including
-  disabled kurtosis and warm preparation checkpoints. Source-rate fallback must
-  obtain its complete credit before repairs and cache publication; the later
-  tail barrier accounts for the measured shape through epochs and export.
+  disabled kurtosis and warm preparation checkpoints. The initial reservation
+  can defer the notch allowance when the requested FIR cutoff would remove all
+  notch targets. The worker checks the applied cutoff and obtains the original
+  FFT allowance before allocating filter buffers if any target remains. The
+  source-rate fallback must obtain its phase credit before repairs and cache
+  publication. The later tail barrier accounts for the measured shape through
+  epochs and export.
   After the source phase ends, the scheduler can admit more recordings using
   the smaller tail reservation. Resident memory from that process remains
   charged against available system memory. The run summary reports the pool

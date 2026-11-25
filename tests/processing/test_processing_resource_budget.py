@@ -19,6 +19,10 @@ pytestmark = pytest.mark.processing
 
 @pytest.fixture
 def case(tmp_path: Path, monkeypatch):
+    return _case(tmp_path, monkeypatch, source_rate=12)
+
+
+def _case(tmp_path: Path, monkeypatch, *, source_rate):
     path = tmp_path / "P1.bdf"
     protocol = FrequencyProtocol.from_recurrence(
         6, 3, expected_analyzed_oddball_cycles=4,
@@ -26,12 +30,13 @@ def case(tmp_path: Path, monkeypatch):
     )
     events = np.asarray([[0, 0, 1], [10, 0, 55], [16, 0, 55],
                          [22, 0, 55], [28, 0, 55], [34, 0, 55]], dtype=int)
+    events[:, 0] *= source_rate // 12
     event_map = {"Faces": 1}
     plan = plan_preflight_qc_events(
-        events=events, event_map=event_map, sfreq=12, n_times=1_000_000,
+        events=events, event_map=event_map, sfreq=source_rate, n_times=1_000_000,
         first_samp=0, frequency_protocol=protocol,
     ).to_payload()
-    geometry = ReviewGeometry(67, 65, 64, 1_000_000, 12, 6, 67 * 12 * 3, 12)
+    geometry = ReviewGeometry(67, 65, 64, 1_000_000, source_rate, 6, 67 * source_rate * 3, source_rate)
     monkeypatch.setattr(budget, "_supported_runtime", lambda: True)
     monkeypatch.setattr(budget, "read_review_geometry", lambda _path, _settings: geometry)
     settings = {"frequency_protocol": protocol, "downsample_rate": 6, "line_noise_filter_enabled": False,
@@ -86,7 +91,8 @@ def test_storage_mode_does_not_assume_memmaps_are_nonresident(case):
     assert (off.healthy_bytes, off.emergency_extra_bytes) == (on.healthy_bytes, on.emergency_extra_bytes)
 
 
-def test_default_enabled_notch_has_explicit_whole_source_prefix(case):
+def test_default_enabled_notch_has_explicit_whole_source_prefix(tmp_path, monkeypatch):
+    case = _case(tmp_path, monkeypatch, source_rate=192)
     disabled = _estimate(case)
     case[1].pop("line_noise_filter_enabled")
     enabled = _estimate(case)
@@ -94,6 +100,26 @@ def test_default_enabled_notch_has_explicit_whole_source_prefix(case):
     assert notch > 8 * case[3].loaded_channels * case[3].source_n_times
     assert enabled.healthy_bytes >= notch
     assert enabled.healthy_bytes > disabled.healthy_bytes
+    assert enabled.deferred_notch_bytes == 0
+
+
+def test_expected_low_pass_smart_skip_defers_notch_credit(tmp_path, monkeypatch):
+    case = _case(tmp_path, monkeypatch, source_rate=192)
+    case[1]["line_noise_filter_enabled"] = True
+    case[1]["low_pass"] = 50.0
+    result = _estimate(case)
+    phases = dict(result.components)
+
+    assert result.healthy_bytes < phases["fft_notch"]
+    assert result.deferred_notch_bytes == phases["fft_notch"]
+    assert result.fullrate_bytes >= result.deferred_notch_bytes
+    assert result.source_rate_phase_bytes >= phases["source_tail"]
+
+
+def test_no_centers_below_header_nyquist_waives_initial_notch_credit(case):
+    case[1]["line_noise_filter_enabled"] = True
+    result = _estimate(case)
+    assert result.healthy_bytes < result.deferred_notch_bytes <= result.fullrate_bytes
 
 
 def test_notch_workspace_uses_recording_not_short_approved_window(case):

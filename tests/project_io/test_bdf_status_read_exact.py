@@ -15,6 +15,17 @@ from Main_App.io import bdf_preload as candidate
 from test_bdf_preload_exact import _lazy, _lazy_data, _write
 
 
+@pytest.mark.parametrize("values", [[], [0], [-1], [0, 7, 7, -5, 0, 0, -5],
+                                    [-(2**63), 2**63 - 1, 0, 2**63 - 1]])
+def test_bids_status_transitions_match_native_order_and_zero_policy(values):
+    from Main_App.io.bids_import import _nonzero_status_transition_indices
+
+    status = np.asarray(values, dtype=np.int64)
+    original = np.flatnonzero(np.r_[True, np.diff(status) != 0] & (status != 0))
+    actual = _nonzero_status_transition_indices(status)
+    assert actual.dtype == original.dtype
+    assert actual.tobytes() == original.tobytes()
+
 @pytest.fixture
 def adapter(monkeypatch):
     try:

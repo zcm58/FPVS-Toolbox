@@ -19,6 +19,7 @@ Pipeline Order:
 
 from __future__ import annotations
 
+from functools import partial
 import hashlib
 import json
 import logging
@@ -829,6 +830,7 @@ def _finish_preprocessing_at_kurtosis(
                 checkpoint=checkpoint,
                 evidence_fingerprint=decision_plan.evidence_fingerprint,
             )
+            del data
             log_func(
                 f"Kurtosis evidence for {filename_for_log}: "
                 f"candidates={list(decision_plan.candidate_channels)}, "
@@ -1415,7 +1417,9 @@ def _stage_temporal_filter(context: PreprocessingContext) -> None:
     context.effective_low_pass_for_notch = effective_low_pass_for_notch
 
 
-def _stage_line_noise_filter(context: PreprocessingContext) -> None:
+def _stage_line_noise_filter(
+    context: PreprocessingContext, *, before_notch: Callable[[int, int, float], None] | None = None,
+) -> None:
     raw, params = context.raw, context.params
     log_func, filename_for_log = context.log_func, context.filename_for_log
     line_noise_filter_enabled = context.line_noise_filter_enabled
@@ -1432,6 +1436,7 @@ def _stage_line_noise_filter(context: PreprocessingContext) -> None:
                 low_pass=effective_low_pass_for_notch,
                 stim_channel=stim_ch,
                 h_trans_bandwidth=0.1,
+                **({"before_filter": before_notch} if before_notch is not None else {}),
             )
         except Exception as exc:
             raise RuntimeError(
@@ -1591,6 +1596,7 @@ def perform_preprocessing(
     filename_for_log: str = "UnknownFile",
     *,
     recording_contract: RecordingContract | None = None,
+    before_notch: Callable[[int, int, float], None] | None = None,
     before_kurtosis_scoring: Callable[[int, int, int, int, bool, int], None] | None = None,
     before_processing_finish: Callable[[mne.io.BaseRaw], None] | None = None,
 ) -> Tuple[Optional[mne.io.BaseRaw], int]:
@@ -1803,7 +1809,9 @@ def perform_preprocessing(
         )
 
         execute_preprocessing_stage("temporal_filter", _stage_temporal_filter, context)
-        execute_preprocessing_stage("line_noise_filter", _stage_line_noise_filter, context)
+        line_noise_filter = (_stage_line_noise_filter if before_notch is None
+                             else partial(_stage_line_noise_filter, before_notch=before_notch))
+        execute_preprocessing_stage("line_noise_filter", line_noise_filter, context)
         execute_preprocessing_stage("resample", _stage_resample, context)
         raw, checkpoint = context.raw, context.checkpoint
 

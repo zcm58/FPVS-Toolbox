@@ -406,6 +406,10 @@ def write_analysis_ready_workbook(
         ),
     }
 
+    # The frames own the cell values. Release the record-level row containers
+    # before the Excel writer allocates its worksheet cells.
+    del roi_rows, electrode_rows, whole_scalp_rows, rms_harmonic_scale_rows
+    del metadata_flag_rows, issue_flag_rows
     target = default_analysis_ready_workbook_path(root)
     _write_frames_atomically(target, frames)
     participants = {record.participant_id.casefold() for record in records}

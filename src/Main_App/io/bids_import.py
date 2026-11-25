@@ -147,6 +147,16 @@ def _source_subject(raw: mne.io.BaseRaw) -> dict | None:
             for key, value in subject.items()}
 
 
+def _nonzero_status_transition_indices(values: np.ndarray) -> np.ndarray:
+    # Equality of adjacent integer values is equivalent to zero difference,
+    # including integer wraparound. Fill one reusable boolean mask directly.
+    transitions = np.empty(values.shape, dtype=bool)
+    transitions[:1] = True
+    np.not_equal(values[1:], values[:-1], out=transitions[1:])
+    np.logical_and(transitions, values, out=transitions)
+    return np.flatnonzero(transitions)
+
+
 def _metadata(raw: mne.io.BaseRaw, target: Path, settings: Mapping, *, source: Path,
               import_key: str = "") -> dict:
     """Write source facts, never project preprocessing choices masquerading as acquisition."""
@@ -198,10 +208,11 @@ def _metadata(raw: mne.io.BaseRaw, target: Path, settings: Mapping, *, source: P
             with owned_recording_lazy_read(raw, stim_channel=stim, status_only=True,
                                            require_bounded_status=settings.get("_fpvs_preflight_bounded_status") is True):
                 values = raw.get_data(picks=[stim])[0].astype(np.int64)
-            changes = np.flatnonzero(np.r_[True, np.diff(values) != 0] & (values != 0))
+            changes = _nonzero_status_transition_indices(values)
             events.extend({"onset": repr(int(sample) / raw.info["sfreq"]), "duration": "0",
                            "trial_type": f"Status/{int(values[sample])}", "value": int(values[sample]), "sample": int(sample)}
                           for sample in changes)
+            del values, changes
     events.sort(key=lambda item: (item["sample"], item["trial_type"]))
     _tsv(folder / f"{stem}_events.tsv", ("onset", "duration", "trial_type", "value", "sample"), events)
     _json(folder / f"{stem}_events.json", {

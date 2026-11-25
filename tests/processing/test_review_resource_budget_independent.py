@@ -153,6 +153,35 @@ def test_auto_raw_qc_full_rate_arrays_are_reserved_before_the_scoring_callback()
     assert bounded.prefix_bytes >= _estimate().prefix_bytes
 
 
+def test_builtin_recording_raw_qc_releases_span_copies_before_scoring():
+    geometry = _geometry()
+    options = {"filter_enabled": False, "notch_enabled": False, "raw_union_samples": 100_000}
+    ordinary = estimate_review_memory(geometry, **options)
+    recording_qc = estimate_review_memory(geometry, builtin_recording_raw_qc=True, **options)
+    assert dict(ordinary.components)["raw_qc"] - dict(recording_qc.components)["raw_qc"] == 8 * 64 * 100_000
+    assert dict(recording_qc.components)["reference"] == dict(ordinary.components)["reference"]
+
+
+def test_builtin_scoring_reserves_full_waveforms_and_batched_scratch(monkeypatch):
+    from Main_App.processing import kurtosis_qc
+
+    monkeypatch.setattr(kurtosis_qc, "kurtosis_batch_rows", lambda channels, _samples: min(8, channels))
+    raw, scoring, batch = 8 * 65 * 262_144, 8 * 64 * 100_000, 8 * 8 * 100_000
+    shape = (65, 262_144, 64, 100_000)
+    assert actual_scoring_bytes(*shape, builtin_kurtosis=True) == raw + 2 * scoring + 4 * batch
+    assert actual_scoring_bytes(*shape, builtin_kurtosis=True, evidence_cached=True) == raw + 2 * scoring
+    assert actual_scoring_bytes(*shape) == raw + 6 * scoring
+
+    boundary = kurtosis_qc.KURTOSIS_BATCH_MIN_BYTES // (8 * 64)
+    monkeypatch.setattr(kurtosis_qc, "kurtosis_batch_rows", lambda channels, samples: 8 if samples >= boundary else channels)
+    assert actual_scoring_bytes(65, 262_144, 64, boundary, builtin_kurtosis=True) >= actual_scoring_bytes(
+        65, 262_144, 64, boundary - 1, builtin_kurtosis=True,
+    )
+
+    monkeypatch.setattr(kurtosis_qc, "kurtosis_batch_rows", lambda channels, _samples: channels)
+    assert actual_scoring_bytes(*shape, builtin_kurtosis=True) == actual_scoring_bytes(*shape)
+
+
 @pytest.mark.parametrize("changes", [
     {"source_n_times": 0},
     {"source_n_times": -1},

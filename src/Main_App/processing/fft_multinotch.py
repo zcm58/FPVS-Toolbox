@@ -8,7 +8,7 @@ to preloaded EEG data and leaves all Raw metadata untouched.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable
+from typing import Callable, Iterable
 
 import mne
 import numpy as np
@@ -231,6 +231,7 @@ def apply_fft_multinotch(
     low_pass: float | None,
     stim_channel: str | None,
     h_trans_bandwidth: float = 0.1,
+    before_filter: Callable[[int, int, float], None] | None = None,
 ) -> FFTMultiNotchResult:
     """Apply the versioned FFT multi-notch to eligible EEG data in place.
 
@@ -276,6 +277,9 @@ def apply_fft_multinotch(
             applied=(),
             skipped=no_channels,
         )
+
+    if before_filter is not None:
+        before_filter(len(raw.ch_names), int(raw.n_times), float(raw.info["sfreq"]))
 
     # Validate all selected data before changing the first channel, preventing
     # a late nonfinite value from leaving a partially filtered Raw object.

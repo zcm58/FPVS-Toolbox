@@ -71,3 +71,49 @@ def test_warm_checkpoint_observes_same_finish_barrier_without_changing_values(tm
                           callback=lambda raw: observed.append((raw.n_times, raw.info["sfreq"])))
     assert actual == baseline
     assert observed == [(800, 80.0)]
+
+
+@pytest.mark.parametrize("fir_succeeds", [False, True])
+def test_preprocessing_notch_gate_uses_applied_fir_cutoff(tmp_path, monkeypatch, fir_succeeds):
+    source = tmp_path / "P001.bdf"
+    source.write_bytes(b"Immutable native FFT barrier source")
+
+    def filter_raw(raw, _l_freq, h_freq, **_kwargs):
+        if not fir_succeeds:
+            raise MemoryError("Injected FIR allocation failure")
+        with raw.info._unlock():
+            raw.info["lowpass"] = h_freq
+
+    monkeypatch.setattr(preprocess, "filter_raw_with_prepared_fir", filter_raw)
+    observed = []
+
+    def run(before_notch=None):
+        raw = _source()
+        with raw.info._unlock():
+            raw.info["sfreq"] = 200.0
+            raw.info["lowpass"] = 100.0
+        params = _params(source)
+        params.pop("_fpvs_source_analysis_span_plan")
+        params.update(downsample_rate=200.0, low_pass=50.0, reject_thresh=0.0,
+                      line_noise_filter_enabled=True, enable_kurtosis_checkpoint_cache=False,
+                      _fpvs_require_analysis_spans=False, _fpvs_stop_before_kurtosis_interpolation=True)
+        try:
+            processed, _ = preprocess.perform_preprocessing(
+                raw, params, lambda *_: None, source.name, before_notch=before_notch,
+            )
+            assert processed is not None, params.get("_fpvs_preprocessing_error")
+            return _bits({
+                "samples": processed._data,
+                "requested": params["_fpvs_fft_multinotch_requested_centers_hz"],
+                "applied": params["_fpvs_fft_multinotch_applied_centers_hz"],
+                "skipped": params["_fpvs_fft_multinotch_skipped_centers"],
+            })
+        finally:
+            raw.close()
+
+    with threadpool_limits(limits=1):
+        baseline = run()
+        actual = run(lambda *shape: observed.append(shape))
+
+    assert actual == baseline
+    assert observed == ([] if fir_succeeds else [(21, 1000, 200.0)])

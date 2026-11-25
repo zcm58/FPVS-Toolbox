@@ -268,6 +268,16 @@ class ProcessingWorkerAdmission:
                 raise MemoryError("Actual processing phase exceeds its validated memory reservation.")
         raise InterruptedError("Processing cancelled while awaiting memory admission.")
 
+    def before_notch(self, channels, samples, sfreq):
+        if self.index is not None and not self.exclusive[self.index]:
+            estimate = self.estimates[self.index]
+            if estimate.deferred_notch_bytes:
+                geometry = estimate.geometry
+                if (not 0 < channels <= geometry.loaded_channels or samples != geometry.source_n_times
+                        or sfreq != geometry.source_rate_hz):
+                    raise MemoryError("Actual FFT multi-notch grid exceeds its validated memory reservation.")
+                self.request(estimate.deferred_notch_bytes)
+
     def before_kurtosis(self, *shape):
         import math
         from Main_App.workers.review_resource_budget import actual_scoring_bytes
@@ -280,10 +290,10 @@ class ProcessingWorkerAdmission:
             # Repairs and cache publication follow scoring before the tail
             # barrier. Source-rate fallback therefore needs its complete file
             # credit now, even when kurtosis alone fits the healthy reservation.
-            prefix = (estimate.fullrate_bytes
+            prefix = (estimate.source_rate_phase_bytes
                       if shape[1] == geometry.source_n_times or shape[1] > target_samples
                       else estimate.healthy_bytes)
-            self.request(max(prefix, actual_scoring_bytes(*shape)))
+            self.request(max(prefix, actual_scoring_bytes(*shape, builtin_kurtosis=estimate.builtin_kurtosis)))
 
     def before_tail(self, raw):
         if self.index is not None and not self.exclusive[self.index]:
@@ -299,7 +309,7 @@ class ProcessingWorkerAdmission:
         if self.index is not None and not self.exclusive[self.index]:
             estimate = self.estimates[self.index]
             actual_tail = estimate.tail_bytes(len(raw.ch_names), int(raw.n_times), float(raw.info["sfreq"]))
-            required = (estimate.fullrate_bytes
+            required = (estimate.source_rate_phase_bytes
                         if float(raw.info["sfreq"]) == estimate.geometry.source_rate_hz
                         else estimate.healthy_bytes)
             self.request(max(required, actual_tail))

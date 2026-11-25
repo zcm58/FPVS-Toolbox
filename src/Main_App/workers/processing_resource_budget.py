@@ -132,11 +132,19 @@ class ProcessingMemoryEstimate:
     metadata_bytes: int
     repair_requested: bool
     components: tuple[tuple[str, int], ...] = ()
+    deferred_notch_bytes: int = 0
+    resample_fallback_bytes: int | None = None
+    builtin_kurtosis: bool = False
 
     @property
     def fullrate_bytes(self) -> int:
         """Maximum characterized credit, including the shared emergency loan."""
         return self.healthy_bytes + self.emergency_extra_bytes
+
+    @property
+    def source_rate_phase_bytes(self) -> int:
+        """Credit after the notch stage if downsampling retained the source grid."""
+        return self.fullrate_bytes if self.resample_fallback_bytes is None else self.resample_fallback_bytes
 
     def _shape(self, channels: int, samples: int, sfreq: float) -> tuple[list[int], list[int]]:
         from Main_App.processing.analysis_spans import _v3_stim_window_index
@@ -234,6 +242,8 @@ def build_processing_estimate(
             _settings_for_file,
         )
         from Main_App.processing.analysis_spans import validate_source_analysis_span_context
+        from Main_App.processing.fft_multinotch import resolve_effective_centers
+        from Main_App.processing.pipeline_plan import resolve_pipeline_plan
 
         if not isinstance(path, Path) or type(settings) is not dict or type(event_map) is not dict:
             return None
@@ -244,6 +254,7 @@ def build_processing_estimate(
             return None
         metadata_size = plain_metadata_bytes((settings, event_map))
         file_settings = _settings_for_file(path, settings)
+        plan = resolve_pipeline_plan(file_settings)
         if any(len(str(file_settings.get(key) or "").encode("utf-8")) > 256 for key in
                ("_fpvs_recording_id", "_fpvs_participant_id", "_fpvs_session_id", "output_recording_stem")):
             return None
@@ -295,6 +306,8 @@ def build_processing_estimate(
             # AUTO controls extra spatial rules, not the common statistics.
             raw_qc_enabled=True,
             raw_union_samples=int(source["unique_sample_count"]),
+            builtin_recording_raw_qc=plan.is_legacy_default,
+            builtin_kurtosis=plan.is_legacy_default,
         )
         # Event finding can inspect every source sample. Metadata already supplied
         # by preflight is counted above; this covers fresh event arrays/scratch.
@@ -305,11 +318,27 @@ def build_processing_estimate(
         original = 8 * g.loaded_channels * g.source_n_times
         target_cache = original + 4 * 8 * g.retained_channels * target_samples + metadata + 64 * _MIB
         source_cache = original + 4 * 8 * g.retained_channels * g.source_n_times + metadata + 64 * _MIB
-        notch = (_notch_prefix_bytes(g) + metadata
-                 if file_settings.get("line_noise_filter_enabled", True) else 0)
+        notch = 0
+        defer_notch = False
+        if file_settings.get("line_noise_filter_enabled", True):
+            notch = _notch_prefix_bytes(g) + metadata
+            if plan.is_legacy_default:
+                _, effective, _ = resolve_effective_centers(
+                    fundamental_hz=file_settings.get("line_noise_frequency_hz", 60),
+                    sfreq=g.source_rate_hz,
+                    low_pass=file_settings.get("low_pass") or None,
+                )
+                # An ordinary FIR failure can continue without its requested
+                # cutoff. Only the worker's actual smart-skip predicate can
+                # waive the full source-rate FFT credit.
+                defer_notch = not effective
+        deferred_notch = notch if defer_notch else 0
         healthy = max(review.healthy_bytes + metadata, target_tail, target_repairs,
-                      event_prefix, target_cache, notch)
-        full = max(healthy, review.fullrate_qc_bytes + metadata, source_tail, source_repairs, source_cache)
+                      event_prefix, target_cache, 0 if defer_notch else notch)
+        source_rate_phase = max(
+            healthy, review.fullrate_qc_bytes + metadata, source_tail, source_repairs, source_cache,
+        )
+        full = max(source_rate_phase, deferred_notch)
         components = (("review_prefix", review.healthy_bytes + metadata),
                       ("event_prefix", event_prefix), ("target_tail", target_tail),
                       ("source_tail", source_tail), ("target_repairs", target_repairs),
@@ -318,6 +347,9 @@ def build_processing_estimate(
                       ("metadata", metadata))
         return ProcessingMemoryEstimate(healthy, full - healthy, g, spans,
                                         candidate.oddball_rate_hz, metadata,
-                                        candidate.repair_requested, components)
+                                        candidate.repair_requested, components,
+                                        deferred_notch_bytes=deferred_notch,
+                                        resample_fallback_bytes=source_rate_phase,
+                                        builtin_kurtosis=plan.is_legacy_default)
     except (AttributeError, ImportError, KeyError, OSError, OverflowError, RuntimeError, TypeError, ValueError):
         return None

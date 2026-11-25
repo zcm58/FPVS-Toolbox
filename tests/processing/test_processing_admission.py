@@ -251,15 +251,32 @@ def test_child_phase_checks_leave_exclusive_native_file_unmodified(setup):
     state = build([None])
     child = admission.ProcessingWorkerAdmission(*state.initializer_args())
     child.index = 0
+    child.before_notch(0, 0, 0.0)
     child.before_kurtosis(1, 10, 1, 10)
     child.before_tail(object())  # no Raw reads at all on an unbounded native path
     assert state.events.empty()
 
 
+def test_deferred_notch_requests_credit_before_scoring_and_checks_actual_grid(monkeypatch):
+    estimate = SimpleNamespace(
+        deferred_notch_bytes=8 * GIB,
+        geometry=SimpleNamespace(loaded_channels=67, source_n_times=8000, source_rate_hz=2048.0),
+    )
+    child = admission.ProcessingWorkerAdmission(ControlQueue(), (Event(),), [0], Event(), (estimate,), (False,))
+    child.index = 0
+    requested = []
+    monkeypatch.setattr(child, "request", requested.append)
+    child.before_notch(65, 8000, 2048.0)
+    with pytest.raises(MemoryError, match="validated memory reservation"):
+        child.before_notch(65, 8001, 2048.0)
+    assert requested == [8 * GIB]
+
+
 @pytest.mark.parametrize("samples,expected", [(8000, 20 * GIB), (1000, 10 * GIB)])
 def test_source_scoring_reserves_later_cache_and_repairs_before_tail(monkeypatch, samples, expected):
     estimate = SimpleNamespace(
-        healthy_bytes=10 * GIB, fullrate_bytes=20 * GIB,
+        healthy_bytes=10 * GIB, source_rate_phase_bytes=20 * GIB,
+        builtin_kurtosis=True,
         geometry=SimpleNamespace(source_n_times=8000, source_rate_hz=2048.0, target_rate_hz=256.0),
     )
     child = admission.ProcessingWorkerAdmission(ControlQueue(), (Event(),), [0], Event(), (estimate,), (False,))
@@ -278,7 +295,7 @@ def test_unconditional_finish_checks_shape_and_whole_file_credit(monkeypatch, ra
         checked.append((channels, samples, sfreq))
         return 5 * GIB
 
-    estimate = SimpleNamespace(healthy_bytes=10 * GIB, fullrate_bytes=20 * GIB,
+    estimate = SimpleNamespace(healthy_bytes=10 * GIB, source_rate_phase_bytes=20 * GIB,
                                geometry=SimpleNamespace(source_rate_hz=2048.0), tail_bytes=tail)
     child = admission.ProcessingWorkerAdmission(ControlQueue(), (Event(),), [0], Event(), (estimate,), (False,))
     child.index, child.credit = 0, 10 * GIB
@@ -294,7 +311,7 @@ def test_finish_rejects_uncharacterized_shape_before_repair_or_cache(monkeypatch
     def invalid(*_shape):
         raise ValueError("uncharacterized shape")
 
-    estimate = SimpleNamespace(healthy_bytes=10 * GIB, fullrate_bytes=20 * GIB,
+    estimate = SimpleNamespace(healthy_bytes=10 * GIB, source_rate_phase_bytes=20 * GIB,
                                geometry=SimpleNamespace(source_rate_hz=2048.0), tail_bytes=invalid)
     child = admission.ProcessingWorkerAdmission(ControlQueue(), (Event(),), [0], Event(), (estimate,), (False,))
     child.index = 0
