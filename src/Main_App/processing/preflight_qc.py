@@ -2608,6 +2608,14 @@ def _scan_preprocessing_qc_parallel(
             raise ReviewMemoryProbeError("Preflight could not read current Windows commit headroom; retry after checking system resources.")
         return snapshot
 
+    def _fits(snapshot: ReviewMemorySnapshot, active: Mapping[int, int], credit: int) -> bool:
+        # The parent also owns unrelated allocations. Charge the full active
+        # thread credits and never add back parent memory.
+        return memory_admission_fits(
+            snapshot, active_credits=active, active_owned={}, idle_owned=(),
+            worker_count=len(active), candidate_credit=credit, worker_floor_bytes=0,
+        )
+
     def _next_admissible() -> tuple[int, RawFileInfo, int, bool] | None:
         if any(item[3] for item in futures.values()):
             return None
@@ -2627,7 +2635,7 @@ def _scan_preprocessing_qc_parallel(
                 raise _capacity_error(info)
             if oversized and can_refine_status and (index not in status_plans or status_plans[index] is not None):
                 # The full event bound can exceed even the host's capacity.
-                # Attempt its qualified Status bound once existing work drains.
+                # An over-host estimate keeps its qualified solo recovery path.
                 continue
             exclusive = credit is None or oversized
             if exclusive:
@@ -2636,18 +2644,13 @@ def _scan_preprocessing_qc_parallel(
                 credit = _PREFLIGHT_THREAD_BYTES
             if credit + margin > snapshot.total_bytes:
                 raise ReviewMemoryProbeError("Preflight cannot fit its minimum scheduling reserve within host physical memory.")
-            # Threads share the parent. Its USS includes unrelated allocations,
-            # so retain full active credits and never add back parent memory.
-            if memory_admission_fits(
-                snapshot, active_credits=active, active_owned={}, idle_owned=(),
-                worker_count=len(futures), candidate_credit=credit, worker_floor_bytes=0,
-            ):
+            if _fits(snapshot, active, credit):
                 return index, info, credit, exclusive
             if exclusive:
                 break
-        if not remaining or futures or not can_refine_status:
+        if not remaining or not can_refine_status:
             return None
-        return _try_status_admission(snapshot, margin)
+        return _try_status_admission(snapshot, margin, active)
 
     def _capacity_error(info: RawFileInfo) -> ReviewMemoryProbeError:
         return ReviewMemoryProbeError(
@@ -2656,15 +2659,19 @@ def _scan_preprocessing_qc_parallel(
         )
 
     def _try_status_admission(
-        snapshot: ReviewMemorySnapshot, margin: int,
+        snapshot: ReviewMemorySnapshot, margin: int, active: Mapping[int, int],
     ) -> tuple[int, RawFileInfo, int, bool] | None:
-        # Only inspect Status when the ordinary queue is drained and pinned
-        # estimates block all eligible work. Leave the normal fast path alone.
+        # Refine only after ordinary admission has stalled. The ordinary
+        # readers already use the bounded Status fast path when qualified.
         stim_channel = _configured_stim_channel(qc_settings)
         for index, info in remaining.items():
-            original = credits[index]
+            original = credits.get(index)
             if original is None:
                 break  # Preserve exclusive queue boundaries.
+            if active and original + margin > snapshot.total_bytes:
+                # Defer an over-host recovery or capacity error until active
+                # recordings finish, as in the ordinary exclusive path.
+                break
             if should_cancel and should_cancel():
                 return None
             path = Path(info.path)
@@ -2690,11 +2697,10 @@ def _scan_preprocessing_qc_parallel(
                 continue
             if plan.minimum_credit + margin > snapshot.total_bytes:
                 raise _capacity_error(info)
-            if not memory_admission_fits(
-                snapshot, active_credits={}, active_owned={}, idle_owned=(),
-                worker_count=0, candidate_credit=plan.minimum_credit, worker_floor_bytes=0,
-            ):
+            if not _fits(_snapshot(), active, plan.minimum_credit):
                 continue
+            if not io_semaphore.acquire(blocking=False):
+                return None
             status_plans[index] = None
             try:
                 if _status_source_stamp(path) != plan.source_stamp:
@@ -2710,6 +2716,8 @@ def _scan_preprocessing_qc_parallel(
                     continue
             except (OSError, RuntimeError, ValueError):
                 continue
+            finally:
+                io_semaphore.release()
             # Include the recording edges as well as interior changes. Pointwise
             # trigger masks and onset filtering cannot create interior changes.
             event_rows = transitions + 2
@@ -2727,10 +2735,7 @@ def _scan_preprocessing_qc_parallel(
                 "preflight_status_memory_credit file=%s original_bytes=%d candidate_bytes=%d bounded_status=%s",
                 path.name, original, credit, plan.bounded_status,
             )
-            if memory_admission_fits(
-                _snapshot(), active_credits={}, active_owned={}, idle_owned=(),
-                worker_count=0, candidate_credit=credit, worker_floor_bytes=0,
-            ):
+            if _fits(_snapshot(), active, credit):
                 return index, info, credit, False
         return None
 

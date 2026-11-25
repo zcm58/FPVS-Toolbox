@@ -250,11 +250,15 @@ Common long-running work:
   BDF and evaluate its spectrum within that same reservation. The coordinator
   can start a smaller recording while a larger one waits for memory. Exclusive
   recordings form queue boundaries. Results retain their canonical order.
-  If the queue drains and the ordinary estimate blocks admission, preflight
-  can count packed Status transitions on confirmed, annotation-free BioSemi64
+  If no ordinary candidate fits and a worker slot is free, preflight can count
+  packed Status transitions on confirmed, annotation-free BioSemi64
   recordings with raw spectral screening off, including when the ordinary
-  estimate exceeds host capacity. A qualified smaller estimate must fit the
-  host and system reserve. The count bounds retained marker evidence.
+  estimate exceeds host capacity. Over-host recovery runs once active work
+  drains. Otherwise the probe can run beside active recordings when their
+  reservations and the candidate's minimum estimate fit live headroom. It shares
+  the recording I/O limit. The coordinator refreshes physical and commit
+  headroom before admitting the recording. The count bounds retained marker
+  evidence.
   On the pinned, qualified reader, cold BIDS admission and
   native event detection read Status using one output row while preserving
   physical record offsets. A worker admitted at that reservation requires the

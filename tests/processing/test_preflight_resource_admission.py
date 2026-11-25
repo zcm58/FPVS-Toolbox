@@ -3,7 +3,7 @@
 from contextlib import nullcontext
 from dataclasses import replace
 from pathlib import Path
-from threading import Barrier, Lock
+from threading import Barrier, Event, Lock
 import time
 from types import SimpleNamespace
 
@@ -61,6 +61,7 @@ def _run(tmp_path, count, *, workers=6, cancel=None, progress=None, settings=Non
 
 @pytest.mark.parametrize(("total", "available", "commit", "transitions", "bounded", "probed", "admitted", "oversized"), [
     (16, 12, 12, 40, True, False, True, False),
+    (128, 96, 96, 40, True, False, True, False),
     (16, 8, 8, 40, False, True, True, False),
     (16, 4, 4, 40, True, True, True, False),
     (16, 4, 4, 40, False, False, False, False),
@@ -130,6 +131,74 @@ def test_status_bound_only_admits_verified_low_memory_work(
         ]
     elif admitted:
         assert received == [None, None]
+
+
+@pytest.mark.parametrize("commit_drops_after_probe", [False, True])
+def test_status_refinement_counts_active_work_and_rechecks_headroom(
+    tmp_path, monkeypatch, commit_drops_after_probe,
+):
+    from Main_App.io import bdf_preload
+
+    first, second = _infos(tmp_path, 2)
+    for info in (first, second):
+        info.path.write_bytes(b"pinned source")
+    monkeypatch.setattr(bdf_preload, "supports_bounded_bdf_status", lambda *_a, **_k: True)
+    monkeypatch.setattr(module, "read_review_geometry", lambda *_: ReviewGeometry(
+        67, 65, 64, 2_048_000, 2048, 256, 448_512, 2048,
+    ))
+    first_started = Event()
+    first_finished = Event()
+    second_started = Event()
+    waiting = Event()
+    counted = []
+    overlapped = []
+    commit = 14
+
+    def snapshot():
+        return _snapshot(16, 14, commit)
+
+    def status_probe(path, **_kwargs):
+        nonlocal commit
+        assert path == second.path
+        assert first_started.wait(timeout=5)
+        counted.append(path)
+        if commit_drops_after_probe:
+            commit = 11
+        return 40
+
+    def credit(_info, _settings, *, event_rows=None, **_kwargs):
+        return (8 if event_rows is None else 3) * GIB
+
+    def scan(info, *_args, status_bound, **_kwargs):
+        if info == first:
+            assert status_bound is None
+            first_started.set()
+            resume = waiting if commit_drops_after_probe else second_started
+            assert resume.wait(timeout=5)
+            first_finished.set()
+        else:
+            assert status_bound.event_rows == 42
+            assert status_bound.bounded_status
+            overlapped.append(not first_finished.is_set())
+            second_started.set()
+        return _result(info)
+
+    def progress(message, *_):
+        if message == "Waiting for preflight memory headroom":
+            waiting.set()
+
+    monkeypatch.setattr(module, "count_bdf_status_transitions", status_probe)
+    _install(monkeypatch, snapshot=snapshot, credit=credit, scan=scan)
+    result = _run(
+        tmp_path, 2, workers=2, progress=progress,
+        settings={"hardware_platform": "biosemi", "hardware_confirmed": True,
+                  "electrode_montage": "biosemi64", "raw_spectral_screening": {"enabled": False}},
+    )
+
+    assert not result.cancelled
+    assert counted == [second.path]
+    assert overlapped == [not commit_drops_after_probe]
+    assert result.results == (_result(first), _result(second))
 
 
 def test_oversized_unsupported_status_route_retains_native_fallback(monkeypatch, tmp_path):
