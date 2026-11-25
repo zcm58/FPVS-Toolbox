@@ -83,6 +83,10 @@ _NATIVE_NUMPY = {name: getattr(np, name) for name in
                  ("fromfile", "empty", "right_shift", "negative", "uint8", "int32")}
 
 
+class BoundedBdfStatusReadError(RuntimeError):
+    """A narrow Status read is required by the admitted memory budget."""
+
+
 def _supported_runtime():
     return (sys.implementation.name == "cpython" and sys.version_info[:2] == (3, 13)
             and sys.byteorder == "little" and mne.__version__ == "1.9.0"
@@ -128,7 +132,7 @@ def _functions(edf, base):
     }
 
 
-def _warning_free_header(path, *, stim_channel, include):
+def _warning_free_header(path, *, stim_channel, include, status_index=None):
     """Validate a bounded ordinary header without reading signal samples."""
     try:
         path = Path(path)
@@ -164,6 +168,8 @@ def _warning_free_header(path, *, stim_channel, include):
         labels = take(16)
         if (any(not label or "annotations" in label.casefold() for label in labels)
                 or len(set(labels)) != channels or stim_channel not in labels):
+            return False
+        if status_index is not None and not (0 <= status_index < len(labels) and labels[status_index] == stim_channel):
             return False
         if include is not None and (stim_channel not in include
                 or [label for label in labels if label in include] != include):
@@ -326,12 +332,30 @@ def _adapter():
         return _ADAPTER
 
 
+def supports_bounded_bdf_status(path, *, stim_channel):
+    """Check the pinned decoder and full ordinary header before memory admission."""
+    try:
+        return _adapter().valid() and _warning_free_header(path, stim_channel=stim_channel, include=None)
+    except (AttributeError, ImportError, MemoryError, OSError, TypeError, ValueError):
+        return False
+
+
+def _read_one_status_row(native, data, idx, fi, start, stop, extra, filename, cals, mult):
+    # The file reader sizes its float64 scratch by len(sel), even for a single
+    # Status pick. Rebase the selected vectors and reader index while retaining
+    # the full physical n_samps, therefore keeping the exact record layout.
+    one_row = {**extra, **{key: extra[key][idx] for key in ("sel", "cal", "offsets", "units")},
+               "stim_channel_idxs": (0,)}
+    return native(data, slice(0, 1), fi, start, stop, one_row, filename, cals, mult)
+
+
 class _StatusRead:
     """One owned Status read, retaining all physical bytes and native bodies."""
 
-    def __init__(self, adapter, samples, reader_index, physical_index):
+    def __init__(self, adapter, samples, reader_index, physical_index, *, required_index=None):
         self.adapter, self.samples = adapter, samples
         self.reader_index, self.physical_index = reader_index, physical_index
+        self.required_index = required_index
         self.width = sum(samples)
         self.low = sum(samples[:physical_index])
         self.high = self.low + samples[physical_index]
@@ -339,12 +363,21 @@ class _StatusRead:
         self.segment = self.class_reader = None
         try:
             file_reader = _clone(adapter.functions["file_reader"], _read_ch=self.read_channel)
-            self.class_reader = _clone(adapter.functions["class_reader"], _read_segment_file=file_reader)
+            self.class_reader = _clone(adapter.functions["class_reader"],
+                                       _read_segment_file=partial(_read_one_status_row, file_reader))
             body = _clone(adapter.functions["segment_body"], _ReadSegmentFileProtector=self.protector)
             self.segment = _clone(adapter.functions["segment_wrapper"], _function_=body)
         except BaseException:
             self.segment = self.class_reader = None
             raise
+
+    def require_single_row(self, raw, start=0, stop=None, sel=None, data_buffer=None, *, verbose=None):
+        # BaseRaw allocates the requested output before it calls the file reader.
+        # Reject an unexpected pick before that allocation or any native fallback.
+        if (type(sel) is not np.ndarray or sel.shape != (1,) or sel[0] != self.required_index
+                or data_buffer is not None or raw._projector is not None or raw._comp is not None):
+            raise BoundedBdfStatusReadError("The requested BDF read exceeded the admitted Status selection.")
+        return self.segment(raw, start, stop, sel, data_buffer, verbose=verbose)
 
     def protector(self, raw):
         protector = self.adapter.protector_class(raw)
@@ -396,6 +429,8 @@ class _StatusDispatch:
                 and tuple(int(value) for value in extra["n_samps"]) == self.reader.samples
                 and extra["subtype"] == "bdf" and extra["dtype_byte"] == 3
                 and len(extra["tal_idx"]) == 0)
+            if not supported and self.reader.required_index is not None:
+                raise BoundedBdfStatusReadError("The requested BDF read exceeded the admitted Status selection.")
             reader = self.reader.class_reader if supported else self.reader.adapter.functions["class_reader"]
             return reader(self.protector, data, idx, fi, start, stop, cals, mult)
         finally:
@@ -403,12 +438,13 @@ class _StatusDispatch:
 
 
 @contextmanager
-def owned_bdf_lazy_read(raw, *, stim_channel=None, status_only=False):
+def owned_bdf_lazy_read(raw, *, stim_channel=None, status_only=False, require_bounded_status=False):
     """Scope one ordinary read on a fresh, exclusively owned native lazy Raw.
 
     The caller retains its native get_data/find_events call and I/O semaphore.
     This suspended context adds no active callback frame to native warnings;
     it does not provide persistent dispatch or support shared-Raw concurrency.
+    A caller admitted with a single Status row must require that selection.
     """
     supported = False
     scoped = None
@@ -416,7 +452,7 @@ def owned_bdf_lazy_read(raw, *, stim_channel=None, status_only=False):
         adapter = _adapter()
         local_methods = ("get_data", "_getitem", "__getitem__", "_parse_get_set_params",
                          "_handle_tmin_tmax", "_read_segment", "_read_segment_file")
-        supported = (type(status_only) is bool and adapter.valid()
+        supported = (type(status_only) is bool and type(require_bounded_status) is bool and adapter.valid()
             and type(raw) is adapter.raw_class and raw.preload is False
             and not any(name in vars(raw) for name in local_methods)
             and len(raw.filenames) == 1 and len(raw._raw_extras) == 1)
@@ -439,28 +475,37 @@ def owned_bdf_lazy_read(raw, *, stim_channel=None, status_only=False):
             if stim_channel is None:
                 stimuli = [channel["ch_name"] for channel in raw.info["chs"] if channel["kind"] == 3]
                 stim_channel = stimuli[0] if len(stimuli) == 1 else None
-            supported = (type(stim_channel) is str and stim_channel in raw.ch_names
-                and _warning_free_header(raw.filenames[0], stim_channel=stim_channel,
-                                         include=list(raw.ch_names)))
-        if supported and status_only:
+            supported = type(stim_channel) is str and stim_channel in raw.ch_names
+        if supported and (status_only or require_bounded_status):
             raw_index = raw.ch_names.index(stim_channel)
             reader_index = int(raw._read_picks[0][raw_index])
             physical_index = int(extra["sel"][reader_index])
             supported = (raw._projector is None and raw._comp is None
-                         and reader_index in extra["stim_channel_idxs"])
+                         and reader_index in extra["stim_channel_idxs"]
+                         and _warning_free_header(raw.filenames[0], stim_channel=stim_channel,
+                                                  include=None, status_index=physical_index))
             if supported:
                 samples = tuple(int(value) for value in extra["n_samps"])
-                scoped = _StatusRead(adapter, samples, reader_index, physical_index)
+                scoped = _StatusRead(adapter, samples, reader_index, physical_index,
+                                     required_index=raw_index if require_bounded_status else None)
+        elif supported:
+            supported = _warning_free_header(raw.filenames[0], stim_channel=stim_channel, include=list(raw.ch_names))
     except (AttributeError, ImportError, IndexError, KeyError, MemoryError, OSError, TypeError, ValueError):
         supported = False
     if not supported:
+        if require_bounded_status:
+            raise BoundedBdfStatusReadError("The current BDF reader could not enforce the admitted Status memory bound.")
         yield False
         return
-    raw._read_segment = MethodType(scoped.segment if scoped is not None else adapter.segment, raw)
+    segment = adapter.segment if scoped is None else scoped.segment
+    if require_bounded_status:
+        segment = scoped.require_single_row
+    raw._read_segment = MethodType(segment, raw)
     try:
         yield True
     finally:
         del raw._read_segment
+        del segment
         if scoped is not None:
             # Break private reader/function cycles before the Raw can escape.
             scoped.segment = scoped.class_reader = None

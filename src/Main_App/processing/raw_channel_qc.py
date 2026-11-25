@@ -899,6 +899,34 @@ def _safe_get_data(raw: Any, picks: Sequence[int], start: int, stop: int) -> np.
         return raw.get_data(picks=picks, start=start, stop=stop)
 
 
+def _read_qc_spans(
+    raw: Any, picks: Sequence[int], spans: Sequence[tuple[int, int]],
+) -> np.ndarray:
+    from mne.io import BaseRaw
+
+    # MNE's native preloaded reader returns a C-ordered float64 copy for
+    # explicit picks. Other readers retain concatenate's dtype and layout rules.
+    if (isinstance(raw, BaseRaw) and raw.preload
+            and getattr(raw.get_data, "__func__", None) is BaseRaw.get_data
+            and getattr(raw._getitem, "__func__", None) is BaseRaw._getitem
+            and type(raw._data) in (np.ndarray, np.memmap)
+            and raw._data.dtype == np.dtype(np.float64)
+            and raw._data.flags.c_contiguous):
+        if len(spans) == 1:
+            return _safe_get_data(raw, picks, *spans[0])
+        data = np.empty((len(picks), sum(stop - start for start, stop in spans)))
+        offset = 0
+        for start, stop in spans:
+            end = offset + stop - start
+            data[:, offset:end] = _safe_get_data(raw, picks, start, stop)
+            offset = end
+        return data
+
+    return np.concatenate(
+        [_safe_get_data(raw, picks, start, stop) for start, stop in spans], axis=1,
+    )
+
+
 def _robust_median(values: Sequence[float]) -> float:
     finite = [float(value) for value in values if np.isfinite(value) and value > 0.0]
     if not finite:
@@ -1093,14 +1121,32 @@ def _spatial_neighbor_map_from_positions(
     return neighbors
 
 
-def _zscore_rows(data: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    centered = data - np.nanmedian(data, axis=1, keepdims=True)
+def _finite_rows(data: np.ndarray) -> np.ndarray:
+    rows_per_batch = max(1, (8 * 1024 * 1024) // max(1, data.shape[1]))
+    if len(data) <= rows_per_batch:
+        return np.isfinite(data).all(axis=1)
+
+    mask = np.empty((rows_per_batch, data.shape[1]), dtype=bool)
+    finite = np.empty(len(data), dtype=bool)
+    for start in range(0, len(data), rows_per_batch):
+        stop = min(start + rows_per_batch, len(data))
+        batch = mask[:stop - start]
+        np.isfinite(data[start:stop], out=batch)
+        finite[start:stop] = batch.all(axis=1)
+    return finite
+
+
+def _zscore_rows(
+    data: np.ndarray, *, reuse_buffer: bool = False,
+) -> tuple[np.ndarray, np.ndarray]:
+    medians = np.nanmedian(data, axis=1, keepdims=True)
+    centered = np.subtract(data, medians, out=data) if reuse_buffer else data - medians
     # Preserve the existing median and reduction order. Ordinary finite
     # float64 rows do not need nanstd's extra sample copy and NaN masks.
     if (centered.dtype == np.dtype(np.float64)
             and centered.shape[1] > 0
             and centered.strides[1] == centered.itemsize
-            and bool(np.isfinite(centered).all())):
+            and bool(_finite_rows(centered).all())):
         row_bytes = centered.shape[1] * centered.itemsize
         rows_per_batch = max(1, (8 * 1024 * 1024) // row_bytes)
         if len(centered) <= rows_per_batch:
@@ -1118,6 +1164,9 @@ def _zscore_rows(data: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
 
     scale = np.nanstd(centered, axis=1)
     safe_scale = np.where(scale > 0.0, scale, np.nan)
+    if reuse_buffer:
+        np.divide(centered, safe_scale[:, None], out=centered)
+        return centered, scale
     return centered / safe_scale[:, None], scale
 
 
@@ -1128,13 +1177,17 @@ def _spatial_predictability_scores(
     *,
     donor_exclusions: Sequence[str],
     config: RawChannelQCConfig,
+    reuse_buffer: bool = False,
 ) -> dict[str, float]:
+    reuse_buffer = (reuse_buffer and data.dtype == np.dtype(np.float64)
+                    and data.flags.c_contiguous and data.flags.owndata and data.flags.writeable)
     return _spatial_predictability_scores_with_neighbors(
         data,
         channels,
         neighbor_map=_spatial_neighbor_map(raw, channels, config=config),
         donor_exclusions=donor_exclusions,
         config=config,
+        reuse_buffer=reuse_buffer,
     )
 
 
@@ -1145,16 +1198,17 @@ def _spatial_predictability_scores_with_neighbors(
     neighbor_map: Mapping[str, Sequence[str]],
     donor_exclusions: Sequence[str],
     config: RawChannelQCConfig,
+    reuse_buffer: bool = False,
 ) -> dict[str, float]:
     if not neighbor_map:
         return {}
 
     channel_lookup = {channel: index for index, channel in enumerate(channels)}
     excluded = {str(channel) for channel in donor_exclusions}
-    z_data, row_scale = _zscore_rows(data)
+    z_data, row_scale = _zscore_rows(data, reuse_buffer=True) if reuse_buffer else _zscore_rows(data)
     # Cache finiteness per donor row, so one unusable channel does not disable
     # the finite path for other neighborhoods. Keep donor and BLAS input order.
-    finite_rows = (np.isfinite(z_data).all(axis=1) if z_data.dtype == np.dtype(np.float64)
+    finite_rows = (_finite_rows(z_data) if z_data.dtype == np.dtype(np.float64)
                    else np.zeros(len(channels), dtype=bool))
     scores: dict[str, float] = {}
     for channel in channels:
@@ -1176,6 +1230,7 @@ def _spatial_predictability_scores_with_neighbors(
         donor_data = z_data[neighbor_indices]
         prediction = (np.mean(donor_data, axis=0) if bool(np.all(finite_rows[neighbor_indices]))
                       else np.nanmean(donor_data, axis=0))
+        del donor_data
         observed = z_data[row_index]
         finite = np.isfinite(observed) & np.isfinite(prediction)
         if int(np.sum(finite)) < config.spatial_min_neighbors:
@@ -1613,11 +1668,7 @@ def _evaluate_raw_channel_qc(
             settings,
         )
 
-    chunks = [
-        _safe_get_data(raw, picks=picks, start=start, stop=stop)
-        for start, stop in spans
-    ]
-    data = np.concatenate(chunks, axis=1)
+    data = _read_qc_spans(raw, picks, spans)
 
     channel_stats: list[_ChannelStats] = []
     left_total = right_total = midline_total = 0
@@ -1750,6 +1801,9 @@ def _evaluate_raw_channel_qc(
             channel_names,
             donor_exclusions=donor_exclusions,
             config=config,
+            # The assembled samples own their data, independent of the Raw.
+            # Metrics are complete, so spatial scoring may reuse their buffer.
+            reuse_buffer=True,
         )
         spatial_outlier_channels = list(
             _spatial_outlier_channels(

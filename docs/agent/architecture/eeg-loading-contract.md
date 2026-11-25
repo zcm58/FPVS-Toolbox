@@ -32,6 +32,12 @@ used by resource planning before worker admission. It neither reads signal
 samples nor creates BIDS imports, and rejects annotation-bearing files before
 MNE could scan their payload. It cannot supply numerical preprocessing input.
 
+Qualified ordinary BDF files use one float64 scratch row for an owned Status
+read during preflight event extraction and BIDS event metadata creation. The
+pinned MNE reader still uses the full physical record layout, Status calibration,
+and native event rules. When preflight admits work with the narrower reservation,
+both reads require the guarded path and reject a wider allocation.
+
 Imports live in `.fpvs_cache/bids-import/` beneath that project. Each immutable
 publication includes source/companion content hashes, metadata/settings identity,
 versioned import receipts, and hashes of generated files. Source changes or

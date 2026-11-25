@@ -51,11 +51,75 @@ def _install(monkeypatch, *, snapshot, credit, scan):
     monkeypatch.setattr(module, "_scan_one_preflight_file", scan)
 
 
-def _run(tmp_path, count, *, workers=6, cancel=None, progress=None):
+def _run(tmp_path, count, *, workers=6, cancel=None, progress=None, settings=None):
     return module.scan_preprocessing_qc(
-        _infos(tmp_path, count), {}, project_root=tmp_path, event_map={"A": 1},
+        _infos(tmp_path, count), settings or {}, project_root=tmp_path, event_map={"A": 1},
         max_workers=workers, should_cancel=cancel, progress=progress,
     )
+
+
+@pytest.mark.parametrize(("available", "commit", "transitions", "bounded", "probed", "admitted"), [
+    (12, 12, 40, True, False, True),
+    (8, 8, 40, False, True, True),
+    (4, 4, 40, True, True, True),
+    (4, 4, 40, False, False, False),
+    (8, 4, 40, False, False, False),
+    (8, 8, 1_000_000, True, True, False),
+])
+def test_status_bound_only_admits_verified_low_memory_work(
+    monkeypatch, tmp_path, available, commit, transitions, bounded, probed, admitted,
+):
+    from Main_App.io import bdf_preload
+
+    for info in _infos(tmp_path, 2):
+        info.path.write_bytes(b"pinned source")
+    monkeypatch.setattr(bdf_preload, "supports_bounded_bdf_status", lambda *_a, **_k: bounded)
+    monkeypatch.setattr(module, "read_review_geometry", lambda *_: ReviewGeometry(
+        67, 65, 64, 2_048_000, 2048, 256, 448_512, 2048,
+    ))
+    counted = []
+    received = []
+    cancelled = False
+
+    def status_probe(path, **_kwargs):
+        counted.append(path)
+        return transitions
+
+    def credit(_info, _settings, *, event_rows=None, bounded_status=False, **_kwargs):
+        if event_rows is None:
+            return 10 * GIB
+        if event_rows >= 100:
+            return 9 * GIB
+        return (3 if bounded_status else 5) * GIB
+
+    def scan(info, *_args, status_bound, **_kwargs):
+        received.append(status_bound)
+        return _result(info)
+
+    def progress(message, *_):
+        nonlocal cancelled
+        if message == "Waiting for preflight memory headroom" and not admitted:
+            cancelled = True
+
+    monkeypatch.setattr(module, "count_bdf_status_transitions", status_probe)
+    _install(monkeypatch, snapshot=lambda: _snapshot(16, available, commit), credit=credit, scan=scan)
+    result = _run(
+        tmp_path, 2, workers=4, cancel=lambda: cancelled, progress=progress,
+        settings={"hardware_platform": "biosemi", "hardware_confirmed": True,
+                  "electrode_montage": "biosemi64", "raw_spectral_screening": {"enabled": False}},
+    )
+
+    assert len(counted) == (2 if probed else 0)
+    assert result.cancelled is not admitted
+    assert [item.participant_id for item in result.results] == (["P0", "P1"] if admitted else [])
+    if admitted and probed:
+        assert [bound.event_rows for bound in received] == [transitions + 2] * 2
+        assert [bound.bounded_status for bound in received] == [bounded] * 2
+        assert [bound.source_stamp for bound in received] == [
+            module._status_source_stamp(info.path) for info in _infos(tmp_path, 2)
+        ]
+    elif admitted:
+        assert received == [None, None]
 
 
 @pytest.mark.parametrize("gib,cpus,workers", [
@@ -343,3 +407,28 @@ def test_confirmed_signal_only_route_limits_only_the_waveform_credit(monkeypatch
         assert module._preflight_memory_credit(info, {**settings, **unsupported}, signal_context=True) == fixed + review
     monkeypatch.setattr(module.np, "__version__", "different")
     assert module._preflight_memory_credit(info, settings, signal_context=True) == fixed + review
+
+
+def test_bounded_status_keeps_full_condition_and_dense_event_scratch(tmp_path):
+    geometry = ReviewGeometry(67, 65, 64, 4_177_920, 2048.0, 256.0, 73 * 2048 * 3, 2048)
+    protocol = FrequencyProtocol.from_recurrence(
+        6, 5, expected_analyzed_oddball_cycles=144, expected_analyzed_oddball_cycles_source="manual",
+    )
+    settings = {
+        "hardware_platform": "biosemi", "hardware_confirmed": True, "electrode_montage": "biosemi64",
+        "raw_spectral_screening": RawSpectralScreeningSettings(enabled=False).to_manifest(),
+        "frequency_protocol": protocol,
+    }
+    info = _infos(tmp_path, 1)[0]
+    options = {"signal_context": True, "geometry": geometry, "event_rows": 1767}
+    unrestricted = module._preflight_memory_credit(info, settings, **options)
+    bounded = module._preflight_memory_credit(info, settings, bounded_status=True, **options)
+
+    physical = replace(geometry, loaded_channels=73)
+    interval = protocol.expected_analyzed_samples(geometry.source_rate_hz)
+    assert bounded >= module._condition_signal_array_bytes(physical, interval, bounded_status=True)
+    assert bounded >= module.bdf_reader_peak_bytes(replace(geometry, loaded_channels=1)) + 256 * geometry.source_n_times
+    assert bounded + GIB < 4 * GIB < unrestricted + GIB
+    assert module._preflight_memory_credit(
+        info, {**settings, "hardware_confirmed": False}, bounded_status=True, **options,
+    ) is None

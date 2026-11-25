@@ -573,6 +573,30 @@ def test_analyzed_interval_qc_merges_overlaps_before_reading() -> None:
     assert result.scoring_sample_count == 2_000
 
 
+@pytest.mark.parametrize("spans", (((200, 1000),), ((200, 1000), (1300, 2600))))
+def test_native_raw_qc_span_buffer_matches_concatenated_science(monkeypatch, spans) -> None:
+    raw = _raw_with_clustered_removed_channels(["P9"])
+    settings = {"stim_channel": "Status", "max_bad_chans": 20}
+    before = raw._data.tobytes()
+    actual = evaluate_raw_channel_qc(raw, settings, filename="spans.bdf", analysis_spans=spans)
+
+    def _concatenate_spans(raw, picks, spans):  # noqa: ANN001
+        return np.concatenate([raw.get_data(picks=picks, start=start, stop=stop) for start, stop in spans], axis=1)
+
+    spatial_scores = raw_channel_qc_module._spatial_predictability_scores
+
+    def _copying_spatial_scores(*args, **kwargs):
+        kwargs["reuse_buffer"] = False
+        return spatial_scores(*args, **kwargs)
+
+    monkeypatch.setattr(raw_channel_qc_module, "_read_qc_spans", _concatenate_spans)
+    monkeypatch.setattr(raw_channel_qc_module, "_spatial_predictability_scores", _copying_spatial_scores)
+    expected = evaluate_raw_channel_qc(raw, settings, filename="spans.bdf", analysis_spans=spans)
+
+    assert _float_bytes_tree(actual.to_payload()) == _float_bytes_tree(expected.to_payload())
+    assert raw._data.tobytes() == before
+
+
 def test_raw_channel_qc_flags_spatial_outlier_without_interpolation() -> None:
     raw = _raw_with_spatial_outlier_channel("FT7")
 

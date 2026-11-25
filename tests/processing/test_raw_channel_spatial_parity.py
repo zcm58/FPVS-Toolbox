@@ -173,6 +173,19 @@ def test_large_spatial_normalization_uses_bounded_row_batches(monkeypatch):
     )
 
 
+@pytest.mark.parametrize("kind", ["contiguous", "signed_zero", "subnormal", "float_max", "invalid_rows"])
+def test_spatial_normalization_can_reuse_owned_scoring_buffer_bit_exactly(kind):
+    data = _data(kind, 1_201)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        expected = _baseline_zscore_rows(data)
+        actual = qc._zscore_rows(data, reuse_buffer=True)
+    assert actual[0] is data
+    assert tuple(value.tobytes() for value in actual) == tuple(
+        value.tobytes() for value in expected
+    )
+
+
 @pytest.mark.parametrize(
     "radius_factor, expected", [(1.01, ("AF3", "AF7", "F1")), (0.1, ("AF3", "AF7"))],
 )

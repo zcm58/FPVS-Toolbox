@@ -193,7 +193,11 @@ def _metadata(raw: mne.io.BaseRaw, target: Path, settings: Mapping, *, source: P
     elif source.suffix.lower() == ".bdf":
         stim = str(settings.get("stim_channel") or "Status")
         if stim in raw.ch_names:
-            values = raw.get_data(picks=[stim])[0].astype(np.int64)
+            from Main_App.io.recording_access import owned_recording_lazy_read
+
+            with owned_recording_lazy_read(raw, stim_channel=stim, status_only=True,
+                                           require_bounded_status=settings.get("_fpvs_preflight_bounded_status") is True):
+                values = raw.get_data(picks=[stim])[0].astype(np.int64)
             changes = np.flatnonzero(np.r_[True, np.diff(values) != 0] & (values != 0))
             events.extend({"onset": repr(int(sample) / raw.info["sfreq"]), "duration": "0",
                            "trial_type": f"Status/{int(values[sample])}", "value": int(values[sample]), "sample": int(sample)}

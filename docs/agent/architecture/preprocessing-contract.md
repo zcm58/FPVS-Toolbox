@@ -670,7 +670,11 @@ between condition reads, diagnostic windows, FFT channel batches, and cache writ
 Raw-channel metrics and spatial normalization use guarded finite-float64
 reductions to avoid redundant NaN masks and scratch copies. Unsupported
 layouts or nonfinite values retain the original NaN-aware formulas. Spatial
-donor finiteness is checked once per row; the median, donor order, finite-index
+donor finiteness is checked once per row in bounded batches, and donor scratch
+is released after each prediction. Native preloaded recordings fill one
+float64 buffer for the approved sample union and release each span after it is
+copied. Recording-wide spatial QC can normalize that owned buffer in place
+after channel metrics are computed. The median, donor order, finite-index
 copies, norm/dot operations and BLAS thread settings remain unchanged. Frozen
 baseline tests compare IEEE float bits, ordered findings and complete evidence
 payloads, including nonfinite, signed-zero, overflow and strided inputs. This

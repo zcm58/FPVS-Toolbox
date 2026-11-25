@@ -13,6 +13,7 @@ import hashlib
 import os
 from pathlib import Path
 import re
+from typing import BinaryIO, Callable
 
 
 class BdfFormatError(ValueError):
@@ -162,6 +163,90 @@ def _header(fixed: bytes, signals_bytes: bytes) -> BdfHeader:
     return result
 
 
+def _read_header(stream: BinaryIO) -> tuple[BdfHeader, bytes]:
+    fixed = stream.read(256)
+    if len(fixed) != 256:
+        raise BdfFormatError("Truncated BDF header.")
+    count = _integer(fixed[252:256], "signal count")
+    if not 1 <= count <= 9999:
+        raise BdfFormatError("Invalid BDF signal count.")
+    signal_bytes = stream.read(count * 256)
+    return _header(fixed, signal_bytes), fixed + signal_bytes
+
+
+def _file_identity(info: os.stat_result) -> tuple[int, int, int, int]:
+    # Windows path stat and descriptor fstat expose different ctime semantics.
+    return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns
+
+
+def count_bdf_status_transitions(
+    path: Path, *, stim_channel: str, expected_samples: int,
+    expected_record_samples: int, expected_record_bytes: int,
+    should_cancel: Callable[[], bool] | None = None,
+) -> int | None:
+    """Count adjacent packed Status-word changes for bounded resource planning.
+
+    Read only the fixed header and one Status slice per record. A pointwise
+    calibration or mask can merge transitions, so this count plus one (a
+    possible initial marker) bounds native event rows. Event detection stays
+    with the admitted reader. Return None for unsupported geometry or cancellation.
+    """
+    if path.suffix.casefold() != ".bdf" or (should_cancel and should_cancel()):
+        return None
+
+    before = path.stat()
+    identity = _file_identity(before)
+    with path.open("rb", buffering=0) as stream:
+        opened = os.fstat(stream.fileno())
+        if _file_identity(opened) != identity:
+            raise BdfFormatError("BDF source was replaced before reading Status.")
+        header, _ = _read_header(stream)
+        record_bytes = header.record_bytes
+        if before.st_size != header.header_bytes + header.data_records * record_bytes:
+            raise BdfFormatError("BDF record count/file size mismatch or truncated samples.")
+        if (header.variant != "BDF" or not header.data_records
+                or record_bytes != expected_record_bytes
+                or header.data_records * expected_record_samples != expected_samples
+                or any(signal.samples_per_record != expected_record_samples
+                       or signal.label.casefold() in {"bdf annotations", "edf annotations"}
+                       for signal in header.signals)):
+            return None
+        status_index = next((index for index, signal in enumerate(header.signals)
+                             if signal.label == stim_channel), None)
+        if status_index is None:
+            return None
+
+        import numpy as np
+
+        status_bytes = expected_record_samples * 3
+        status_offset = header.header_bytes + status_index * status_bytes
+        previous = None
+        transitions = 0
+        for record in range(header.data_records):
+            if should_cancel and should_cancel():
+                return None
+            stream.seek(status_offset + record * record_bytes)
+            payload = stream.read(status_bytes)
+            if len(payload) != status_bytes:
+                raise BdfFormatError("BDF source changed or ended while reading Status.")
+            if previous is not None and previous != payload[:3]:
+                transitions += 1
+            # Opaque three-byte values compare every bit of each packed sample.
+            words = np.frombuffer(payload, dtype="V3")
+            transitions += int(np.count_nonzero(words[1:] != words[:-1]))
+            previous = payload[-3:]
+        finished = os.fstat(stream.fileno())
+        if _file_identity(finished) != identity or finished.st_ctime_ns != opened.st_ctime_ns:
+            raise BdfFormatError("BDF source changed while reading Status.")
+
+    after = path.stat()
+    if _file_identity(after) != identity or after.st_ctime_ns != before.st_ctime_ns:
+        raise BdfFormatError("BDF source changed while reading Status.")
+    if should_cancel and should_cancel():
+        return None
+    return transitions
+
+
 def _tal_annotations(payload: bytes, record: int, channel: int) -> list[BdfAnnotation]:
     result = []
     chunks = payload.split(b"\x00")
@@ -227,21 +312,12 @@ def inspect_bdf_format(
     blockers = []
     with path.open("rb") as stream:
         opened = os.fstat(stream.fileno())
-        # Windows path stat and descriptor fstat expose different ctime semantics.
-        if ((opened.st_dev, opened.st_ino, opened.st_size, opened.st_mtime_ns)
-                != (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns)):
+        if _file_identity(opened) != _file_identity(before):
             raise BdfFormatError("BDF source was replaced before inspection.")
-        fixed = stream.read(256)
-        if len(fixed) != 256:
-            raise BdfFormatError("Truncated BDF header.")
-        count = _integer(fixed[252:256], "signal count")
-        if not 1 <= count <= 9999:
-            raise BdfFormatError("Invalid BDF signal count.")
-        signal_bytes = stream.read(count * 256)
-        header = _header(fixed, signal_bytes)
+        header, header_bytes = _read_header(stream)
         if before.st_size != header.header_bytes + header.data_records * header.record_bytes:
             raise BdfFormatError("BDF record count/file size mismatch or truncated samples.")
-        digest.update(fixed + signal_bytes)
+        digest.update(header_bytes)
         selected = {name: [] for name in digital_channels}
         available = {signal.label for signal in header.signals if not signal.is_annotation}
         if len(selected) != len(digital_channels) or not set(selected) <= available:
@@ -288,8 +364,7 @@ def inspect_bdf_format(
         if stream.read(1):
             raise BdfFormatError("BDF source grew during inspection.")
     after = path.stat()
-    if ((before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns, before.st_ctime_ns)
-            != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns)):
+    if _file_identity(after) != _file_identity(before) or after.st_ctime_ns != before.st_ctime_ns:
         raise BdfFormatError("BDF source changed during inspection.")
     if not header.data_records:
         blockers.append("No recorded samples.")
