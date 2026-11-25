@@ -30,6 +30,9 @@ hardware and physical timing.
   including completed sessions, historical files, malformed input, unsupported
   scientific semantics and optional metadata.
 - [x] Update the canonical contracts and user import guidance.
+- [x] Carry the recorder and chosen cap through setup, completed-session and
+  whole-study handoffs to the saved processing configuration. Keep manual
+  selection available for older exports with no declared cap.
 
 ## Verification and acceptance
 
@@ -46,9 +49,11 @@ No local Qt execution was authorized.
 After deterministic fixture regeneration, the final consumer import/workflow
 checks passed 92 tests with one skip; all four fixture copies remained byte-identical.
 
-Visible acceptance remains separate: export setup and a completed synthetic
-session from Studio, import each through Toolbox's New Project flow, select the
-hardware and raw folder, and inspect protocol/provenance before processing.
+For visible acceptance, choose the cap in Studio Recording Setup, export setup
+and a completed synthetic session, and import each through Toolbox's New
+Project flow. Select the raw folder, then reopen Processing settings and
+verify the recorder and cap. Repeat with an older file to check manual hardware
+selection and review the captured cap in a whole-study import.
 Cancel recording-folder selection and verify the project still requires explicit
 raw registration. Unsupported designs must fail before a usable project is saved.
 

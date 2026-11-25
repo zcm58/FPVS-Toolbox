@@ -292,9 +292,30 @@ The supported scientific subset is deliberately narrower than Studio authoring:
   validators. Legacy explicit `frequency_protocol` values remain supported;
   declaring both protocol representations is invalid.
 
+### Recorder and montage selection
+
+Studio's recording setup can declare `recording.electrode_montage` alongside
+`recording_backend`. Toolbox saves the compatible pair in the project's
+preprocessing settings. The selected backend identifies Studio's named recorder
+choice. The effective marker transport can differ, for example ActiveThree
+can send serial markers. A raw file extension alone cannot establish a cap.
+
+| Studio recorder choice | Supported declaration for processing |
+| --- | --- |
+| BioSemi ActiveTwo 64 | `biosemi64` |
+| BioSemi ActiveThree | `biosemi128` for the radial ABC cap, or `recorded` |
+| Brain Products, TriggerBox or parallel port | `brainproducts_acticap_gacs_64`, `brainproducts_acticap_gacs_128`, or `recorded` |
+| Unicorn Hybrid Black, factory wiring | `unicorn8` with the factory EEG 1–8 mapping |
+
+Completed sessions use the recorder and cap captured at execution. An
+incompatible pair or disagreement with the exported setup requires review.
+Historical files without a cap keep the manual hardware-selection workflow.
+Readers that strictly validate older field sets require an update to accept
+a declaration. [Built-in cap templates](eeg-loading-contract.md#built-in-cap-templates)
+
 Completed-session evidence does not replace the planned analysis target, certify
-complete EEG or supply an EEG sample-time mapping. Hardware selection and raw
-recording registration remain explicit Toolbox actions.
+complete EEG or supply an EEG sample-time mapping. Raw recording registration
+remains an explicit Toolbox action.
 When acquisition evidence is present, the importer verifies supported evidence
 and snapshot revisions, successful finalization, matching project/session/
 execution/participant identity and ordered run/condition identity. This
@@ -319,8 +340,9 @@ existing legacy top-level and participant-map electrode imports retain their
 manual-mode behavior.
 
 From Welcome, use **Create New Project… → Import FPVS Studio Config…**. The
-same import is available from **File → Import FPVS Studio Config…**. For setup and completed-session files it asks for
-hardware and then the raw EEG folder. It does not import a Studio project folder,
+same import is available from **File → Import FPVS Studio Config…**. For setup
+and completed-session files, it applies a declared recorder/cap pair or asks
+for the hardware, then asks for the raw EEG folder. It does not import a Studio project folder,
 merge sessions into an existing project, or associate EEG files automatically.
 The completed-import message identifies the source participant/visit and recorded
 electrode choices that still require review against the selected recording.
@@ -346,7 +368,10 @@ checks the roster digest and monotonic export sequence, and compares visits
 with the externally selected raw folder. `gui.studio_cohort_review` owns
 confirmation and exception resolution. **File → Review Studio Cohort…**
 reopens the saved evidence without asking for the source file. The
-`tools.studio_cohort` manifest namespace records the reviewed membership,
+`visits[].recording` snapshot carries each visit's recorder and cap. A
+compatible common declaration can configure processing for the reviewed
+cohort. Changing an existing project's cap requires an explicit decision.
+The `tools.studio_cohort` manifest namespace records the reviewed membership,
 version choice and older receipts. Canonical recording IDs identify
 processing inputs and downstream workbooks. Explicitly reviewed source
 folders can contain several visits. Filename-based registration retains its
@@ -596,8 +621,9 @@ FPVS Toolbox uses a strict hybrid settings model:
   payloads and fingerprints when no recording maps are enabled. Trigger maps
   never rewrite condition-onset events or silently merge their occurrences.
 - Electrode geometry is project-specific scientific state in the
-  `preprocessing` namespace. `electrode_montage` currently accepts only
-  `biosemi64`, displayed as **BioSemi ActiveTwo 64**. The default
+  `preprocessing` namespace. The confirmed hardware determines the available
+  [montages](eeg-loading-contract.md#built-in-cap-templates). For ActiveTwo,
+  the montage is `biosemi64`, displayed as **BioSemi ActiveTwo 64**. The default
   `electrode_mapping_profile` is `anatomical_labels`; the alternative
   `biosemi64_1020_ab_v1` means only the standard BioSemi 64-channel 10/20
   A1-A32/B1-B32 wiring. It does not support BioSemi ABC/equiradial or custom
@@ -606,7 +632,7 @@ FPVS Toolbox uses a strict hybrid settings model:
   GUI processing parameter construction forwards both fields into the frozen
   run plan and worker settings. Omitting them would silently process with the
   anatomical default while final validation reads a different project choice.
-  App defaults and newly created projects explicitly use BioSemi64 with
+  Legacy BioSemi defaults use BioSemi64 with
   anatomical labels. The A/B profile is an input-label translation for sources
   actually labeled A1-A32/B1-B32, not a different montage or a round-trip rename
   of already anatomical channel names.

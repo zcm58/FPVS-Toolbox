@@ -190,6 +190,45 @@ def test_active_three_retains_its_serial_transport(handoff):
     assert normalize_studio_handoff(handoff) == handoff
 
 
+@pytest.mark.parametrize("run_montage", [None, "brainproducts_acticap_gacs_64"])
+def test_named_cap_requires_matching_recorded_session_evidence(handoff, run_montage):
+    completed = _completion(handoff)
+    backend = "brainproducts_triggerbox"
+    handoff["recording"] = {"recording_backend": backend, "electrode_montage": "brainproducts_acticap_gacs_128"}
+    captured = completed["acquisition_evidence"]["recording"]
+    captured.update(selected_backend=backend, effective_backend=backend, electrode_montage=run_montage)
+    with pytest.raises(ValueError, match="montage conflicts"):
+        normalize_studio_handoff(handoff)
+
+
+def test_explicit_unicorn_selection_uses_factory_mapping_and_retains_native_policy(handoff):
+    from Main_App.projects.studio_handoff import studio_recording_selection
+
+    handoff["recording"] = {"recording_backend": "unicorn_udp", "electrode_montage": "unicorn8"}
+    choice = studio_recording_selection(normalize_studio_handoff(handoff))
+    settings = choice.apply({})
+    assert settings["hardware_platform"] == "unicorn" and settings["hardware_confirmed"]
+    assert settings["hardware_selection_source"] == "fpvs_studio_import"
+    assert settings["electrode_mapping_profile"] == "unicorn_factory_v1"
+    assert settings["acquisition_profile"]["source_to_canonical"]["EEG 8"] == "PO8"
+    assert settings["downsample"] == 250
+    del handoff["recording"]["electrode_montage"]
+    assert studio_recording_selection(normalize_studio_handoff(handoff)) is None
+
+
+@pytest.mark.parametrize("backend,platform", [
+    ("biosemi_active_three", "biosemi_active_three"),
+    ("brainproducts_triggerbox", "brain_products"),
+    ("brainproducts_parallel", "brain_products"),
+])
+def test_operator_selected_recorded_coordinates_carry_recorder_without_substituting_a_cap(handoff, backend, platform):
+    from Main_App.projects.studio_handoff import studio_recording_selection
+
+    handoff["recording"] = {"recording_backend": backend, "electrode_montage": "recorded"}
+    settings = studio_recording_selection(normalize_studio_handoff(handoff)).apply({})
+    assert (settings["hardware_platform"], settings["electrode_montage"]) == (platform, "recorded")
+
+
 @pytest.mark.parametrize("failure", ["project_backend", "transport", "profile"])
 def test_acquisition_hardware_declarations_must_agree(handoff, failure):
     evidence = _completion(handoff)["acquisition_evidence"]

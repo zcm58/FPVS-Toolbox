@@ -9,8 +9,14 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from copy import deepcopy
+from dataclasses import dataclass
 from fractions import Fraction
 from typing import Any
+
+from Main_App.projects.hardware import (
+    ACTICAP_GACS_64, ACTICAP_GACS_128, BIOSEMI128_MONTAGE, UNICORN_FACTORY_MAPPING_PROFILE,
+    confirm_hardware_selection, supported_electrode_montages, unicorn_acquisition_profile,
+)
 
 HANDOFF_FORMAT = "fpvs-handoff"
 HANDOFF_FORMAT_VERSION = 2
@@ -56,13 +62,96 @@ _SESSION_FIELDS = frozenset({
 _RECORDING_FIELDS = frozenset({
     "recording_backend", "unicorn_udp_port", "brainproducts_serial_port", "brainproducts_parallel_address",
     "brainproducts_pulse_width_ms", "brainproducts_amplifier", "brainproducts_sampling_rate_hz",
-    "acquisition_profile",
+    "acquisition_profile", "electrode_montage",
 })
+STUDIO_RECORDER_PLATFORMS = {
+    "serial": "biosemi", "biosemi_active_three": "biosemi_active_three",
+    "brainproducts_triggerbox": "brain_products", "brainproducts_parallel": "brain_products",
+    "unicorn_udp": "unicorn",
+}
+_STUDIO_MONTAGES = {
+    "biosemi": ("biosemi64",), "biosemi_active_three": ("recorded", BIOSEMI128_MONTAGE),
+    "brain_products": ("recorded", ACTICAP_GACS_64, ACTICAP_GACS_128), "unicorn": ("unicorn8",),
+}
 _EFFECTIVE_BACKENDS = {
     "serial": "serial", "biosemi_active_three": "serial",
     "brainproducts_triggerbox": "brainproducts_triggerbox",
     "brainproducts_parallel": "brainproducts_parallel", "unicorn_udp": "unicorn_udp",
 }
+
+
+@dataclass(frozen=True)
+class StudioRecordingSelection:
+    platform: str
+    montage: str
+
+    @property
+    def label(self) -> str:
+        return dict(supported_electrode_montages(self.platform))[self.montage]
+
+    def apply(self, settings: Mapping[str, Any]) -> dict[str, Any]:
+        result = confirm_hardware_selection(settings, self.platform, confirmed_change=True, source="fpvs_studio_import")
+        result["electrode_montage"] = self.montage
+        if self.platform == "unicorn":
+            result["electrode_mapping_profile"] = UNICORN_FACTORY_MAPPING_PROFILE
+            result["acquisition_profile"] = unicorn_acquisition_profile(result)
+        return result
+
+    def matches(self, settings: Mapping[str, Any]) -> bool:
+        return (settings.get("hardware_platform") == self.platform and settings.get("electrode_montage") == self.montage
+                and (self.platform != "unicorn" or settings.get("electrode_mapping_profile") == UNICORN_FACTORY_MAPPING_PROFILE))
+
+
+def _explicit_recording(recording: Mapping[str, Any], backend_key: str) -> StudioRecordingSelection | None:
+    recording = _object(recording, "recording declaration")
+    montage = recording.get("electrode_montage")
+    if montage is None:
+        return None
+    backend = _recording_backend(recording.get(backend_key), backend_key)
+    platform = STUDIO_RECORDER_PLATFORMS[backend]
+    if montage not in _STUDIO_MONTAGES[platform]:
+        raise ValueError(f"Unsupported Studio electrode montage {montage!r} for recorder {backend!r}.")
+    profile = recording.get("acquisition_profile")
+    if profile is not None:
+        profile = _object(profile, "acquisition_profile")
+        if profile.get("montage_id") != montage:
+            raise ValueError("Studio electrode montage conflicts with its acquisition profile.")
+        if platform == "unicorn" and profile.get("source_to_canonical") is not None:
+            from Main_App.io.acquisition_profiles import UNICORN_FACTORY_RECORDED_LABEL_MAP
+
+            if profile["source_to_canonical"] != UNICORN_FACTORY_RECORDED_LABEL_MAP:
+                raise ValueError("Studio channel mapping conflicts with the Unicorn factory montage.")
+    return StudioRecordingSelection(platform, montage)
+
+
+def studio_recording_selection(
+    setup: Mapping[str, Any], *, as_run: Mapping[str, Any] | None = None,
+) -> StudioRecordingSelection | None:
+    """Use explicit pairs only; a completed visit needs its captured recording declaration."""
+    if setup.get("format") != HANDOFF_FORMAT:
+        return None
+    recording = _object(setup.get("recording") or {}, "recording")
+    declared = _explicit_recording(recording, "recording_backend")
+    summary_profile = _object(setup.get("toolbox") or {}, "toolbox").get("acquisition_profile")
+    if declared and summary_profile is not None:
+        if _object(summary_profile, "toolbox.acquisition_profile").get("montage_id") != declared.montage:
+            raise ValueError("Studio electrode montage conflicts with its Toolbox acquisition profile.")
+    if as_run is not None:
+        # Study exports capture the recorder per visit. The referenced setup
+        # often contains only the protocol and has no recording declaration.
+        captured = _explicit_recording(as_run, "selected_backend")
+        if ((declared and declared != captured) or
+                (captured and recording and recording["recording_backend"] != as_run["selected_backend"])):
+            raise ValueError("Studio recorder or electrode montage conflicts between the captured setup and recording.")
+        return captured
+    if setup.get("kind") != "completed_session":
+        return declared
+    evidence = (setup.get("completed_session") or {}).get("acquisition_evidence") or {}
+    as_run = evidence.get("recording") or {}
+    captured = _explicit_recording(as_run, "selected_backend")
+    if declared != captured or (captured and setup["recording"]["recording_backend"] != as_run["selected_backend"]):
+        raise ValueError("Studio recorder or electrode montage conflicts between the captured setup and recording.")
+    return captured
 
 
 def _object(value: Any, field: str) -> Mapping[str, Any]:
@@ -143,6 +232,7 @@ def normalize_studio_handoff(payload: Mapping[str, Any]) -> dict[str, Any]:
     _validate_protocol_semantics(data, strict=current)
     _validate_toolbox_summary(data)
     _validate_completion(data, strict=current)
+    studio_recording_selection(data)
     return data
 
 

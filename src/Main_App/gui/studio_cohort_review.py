@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
 
 from Main_App.gui.components import AppDialog, SubsectionHeaderLabel, SurfaceSize, make_action_button, make_action_row
 from Main_App.gui.hardware_selection import choose_new_project_hardware
+from Main_App.projects.hardware import SUPPORTED_ELECTRODE_MONTAGES
 from Main_App.projects.preprocessing_settings import new_project_preprocessing_settings
 from Main_App.projects.studio_cohort import (
     NAMESPACE, commit_study_review, find_study_project, review_study, version_key,
@@ -37,6 +38,8 @@ class StudioCohortReview(AppDialog):
         extras = sorted(set(review.files) - {p for r in review.rows for p in (*r.candidates, r.previous.get("raw_file"))})
         visit_count = len(review.rows)
         counts_text = [f"{visit_count} {'visit' if visit_count == 1 else 'visits'}"]
+        if getattr(imported, "recording_selection", None):
+            counts_text.append(imported.recording_selection.label)
         counts_text.extend(f"{count} {name.replace('_', ' ')}" for name, count in sorted(counts.items()))
         if review.omitted:
             counts_text.append(f"{len(review.omitted)} omitted")
@@ -93,7 +96,9 @@ class StudioCohortReview(AppDialog):
             self.table.item(index, 2).setToolTip(version)
             setup = imported.provenance.get("setups", {}).get(v.get("setup_id"), {}) if hasattr(imported, "provenance") else {}
             conditions = [run.get("condition_name", "") for run in v.get("runs", ())]
-            hardware = (v.get("recording") or {}).get("selected_backend") or "Hardware unknown"
+            declaration = v.get("recording") or {}
+            hardware = dict(SUPPORTED_ELECTRODE_MONTAGES).get(str(declaration.get("electrode_montage")))
+            hardware = hardware or declaration.get("selected_backend") or "Hardware unknown"
             refresh = v.get("compiled_refresh_hz")
             refresh_label = f"{refresh:g} Hz" if isinstance(refresh, (float, int)) else "Refresh rate unavailable"
             self.details[index] = "\n".join(filter(None, (
@@ -335,10 +340,16 @@ def review_imported_study(host, parent, projects_root, imported, existing=None):
         folder = QFileDialog.getExistingDirectory(parent, "Select Folder Containing EEG Recordings", str(folder or projects_root))
         if not folder:
             return None
-    hardware = existing.preprocessing if existing else choose_new_project_hardware(parent, new_project_preprocessing_settings())
-    if not hardware:
-        return None
-    review = _run_source_registration_work(parent, lambda: review_study(imported, Path(folder), existing, hardware=hardware["hardware_platform"]),
+    if existing:
+        platform = existing.preprocessing["hardware_platform"]
+    elif imported.study_recording_platform:
+        platform = imported.study_recording_platform
+    else:
+        hardware = choose_new_project_hardware(parent, new_project_preprocessing_settings())
+        if not hardware:
+            return None
+        platform = hardware["hardware_platform"]
+    review = _run_source_registration_work(parent, lambda: review_study(imported, Path(folder), existing, hardware=platform),
                                            "Comparing the roster and recordings…")
     dialog = StudioCohortReview(imported, review, parent, project_root=existing.project_root if existing else None)
     while dialog.exec():
@@ -366,7 +377,7 @@ def review_imported_study(host, parent, projects_root, imported, existing=None):
         try:
             project = _run_source_registration_work(parent, lambda: commit_study_review(
                 projects_root, imported, review, decisions=decisions, omissions=omissions,
-                versions=versions, warnings=warnings, hardware=hardware["hardware_platform"], existing=existing,
+                versions=versions, warnings=warnings, hardware=platform, existing=existing,
                 group_assignments=assignments,
             ), "Saving the reviewed study…")
         except (OSError, RuntimeError, ValueError) as exc:
@@ -384,7 +395,7 @@ def review_imported_study(host, parent, projects_root, imported, existing=None):
 
 def reopen_study_review(host):
     from Main_App.gui.project_drafts import confirm_project_draft_exit
-    from Main_App.projects.fpvs_config_import import _import_setup
+    from Main_App.projects.fpvs_config_import import _import_setup, with_study_roster
     from Main_App.projects.studio_cohort import validate_study_handoff
     from Main_App.projects.project_manager import _run_source_registration_work
 
@@ -400,8 +411,8 @@ def reopen_study_review(host):
         setup, study = validate_study_handoff(saved["handoff"])
         if (study["study_id"], study["roster_revision"]) != (state["study_id"], state["roster_revision"]):
             raise ValueError("Saved Studio evidence conflicts with the current project.")
-        return replace(_import_setup(setup, Path(saved["source_filename"]), b""), provenance=study,
-                       project_title=study["project_title"], source_sha256=state["source_sha256"])
+        imported = with_study_roster(_import_setup(setup, Path(saved["source_filename"]), b""), study)
+        return replace(imported, source_sha256=state["source_sha256"])
     try:
         imported = _run_source_registration_work(host, read_saved, "Reading saved study evidence…")
         review_imported_study(host, host, project.project_root.parent, imported, project)

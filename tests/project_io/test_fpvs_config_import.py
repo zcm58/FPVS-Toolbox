@@ -571,6 +571,21 @@ def test_real_studio_frequency_fixture_reports_scientific_limit(tmp_path):
     assert not (tmp_path / "projects").exists()
 
 
+@pytest.mark.parametrize("filename,platform,montage", [
+    ("v2-setup-active-three-radial.fpvsconfig", "biosemi_active_three", "biosemi128"),
+    ("v2-completed-acticap-128.fpvsconfig", "brain_products", "brainproducts_acticap_gacs_128"),
+])
+def test_studio_export_selects_processing_montage_on_reopen(tmp_path, filename, platform, montage):
+    from Main_App.io.acquisition_metadata import resolve_recording_contract
+
+    project = create_project_from_fpvs_config(tmp_path / "projects", STUDIO_FIXTURES / filename)
+    saved = Project.load(project.project_root).preprocessing
+    assert saved["hardware_confirmed"] is True
+    assert saved["hardware_platform"] == platform
+    assert saved["electrode_montage"] == montage
+    assert resolve_recording_contract(saved).montage_id == montage
+
+
 def test_historical_completed_producer_shape_imports_without_version_block(tmp_path):
     payload = json.loads((STUDIO_FIXTURES / "v2-completed-biosemi.fpvsconfig").read_text(encoding="utf-8"))
     for field in ("format", "format_version", "kind", "metadata"):

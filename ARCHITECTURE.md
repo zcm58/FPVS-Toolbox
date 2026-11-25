@@ -22,8 +22,9 @@ Numerical stages consume MNE Raw and an immutable recording contract.
 production method each. Optional guided setup saves choices per project.
 
 Studio exports protocol settings. Toolbox imports the supported subset into
-a new project and retains provenance. Operators choose the hardware and EEG
-recordings. The [handoff contract](docs/agent/architecture/project-io.md#studio-config-handoff)
+a new project and retains provenance. A declared recorder and cap configure
+processing automatically. Operators select the EEG recordings and supply any
+missing hardware choice. The [handoff contract](docs/agent/architecture/project-io.md#studio-config-handoff)
 owns the consumer format and identity rules. The [roadmap](docs/agent/architecture/hardware-pipeline-studio-roadmap.md)
 tracks fuller interoperability and additional methods.
 

@@ -13,7 +13,7 @@ from typing import Any, Mapping
 from Main_App.io.atomic_write import atomic_write, rename_with_retry, replace_with_retry
 from Main_App.projects.studio_handoff import (
     LEGACY_CONFIG_VERSIONS,
-    normalize_studio_handoff,
+    StudioRecordingSelection, normalize_studio_handoff, studio_recording_selection,
 )
 from Main_App.processing.removed_electrode_detection import (
     REMOVED_ELECTRODE_DETECTION_MODE_MANUAL,
@@ -64,6 +64,8 @@ class FPVSConfigImport:
     source_filename: str
     source_sha256: str
     provenance: dict[str, Any]
+    recording_selection: StudioRecordingSelection | None = None
+    study_recording_platform: str | None = None
 
 
 def read_fpvs_config(path: Path) -> FPVSConfigImport:
@@ -90,8 +92,17 @@ def read_fpvs_config(path: Path) -> FPVSConfigImport:
         except (KeyError, AttributeError, TypeError) as exc:
             raise FPVSConfigImportError("Invalid visit or setup in the Studio study roster.") from exc
         imported = _import_setup(setup, config_path, source_bytes)
-        return replace(imported, project_title=study["project_title"], provenance=dict(study))
+        return with_study_roster(imported, study)
     return _import_setup(payload, config_path, source_bytes)
+
+
+def with_study_roster(imported: FPVSConfigImport, study: Mapping[str, Any]) -> FPVSConfigImport:
+    """Bind validated visit evidence to a freshly read or reopened cohort."""
+    from Main_App.projects.studio_cohort import study_recording_consensus
+
+    platform, selection = study_recording_consensus(study)
+    return replace(imported, project_title=study["project_title"], provenance=dict(study),
+                   recording_selection=selection, study_recording_platform=platform)
 
 
 def _import_setup(payload: Mapping[str, Any], config_path: Path, source_bytes: bytes) -> FPVSConfigImport:
@@ -147,6 +158,7 @@ def _import_setup(payload: Mapping[str, Any], config_path: Path, source_bytes: b
         raise FPVSConfigImportError(str(exc)) from exc
 
     return FPVSConfigImport(
+        recording_selection=studio_recording_selection(payload),
         project_title=title,
         event_map=event_map,
         manual_removed_electrodes=manual_removed_electrodes,
@@ -183,9 +195,12 @@ def create_project_from_fpvs_config(projects_root: Path, config_path: Path, impo
 
 
 def _create_imported_project(project_root: Path, imported: FPVSConfigImport) -> None:
+    settings = new_project_preprocessing_settings()
+    if imported.recording_selection:
+        settings = imported.recording_selection.apply(settings)
     project = Project.load(
         project_root,
-        manifest={"preprocessing": new_project_preprocessing_settings()},
+        manifest={"preprocessing": settings},
     )
     project.name = imported.project_title
     project.event_map = imported.event_map
@@ -253,6 +268,11 @@ def _write_import_provenance(project: Project, imported: FPVSConfigImport) -> No
 def fpvs_config_import_message(project: Project) -> str:
     """Explain the remaining recording/electrode review after project creation."""
     message = f"Created project '{project.name}' with {len(project.event_map)} condition(s)."
+    if project.preprocessing.get("hardware_selection_source") == "fpvs_studio_import":
+        from Main_App.projects.hardware import supported_electrode_montages
+
+        choices = dict(supported_electrode_montages(project.preprocessing["hardware_platform"]))
+        message += f"\nStudio electrode montage: {choices[project.preprocessing['electrode_montage']]}."
     receipt = project.manifest.get("tools", {}).get("studio_import", {})
     if receipt.get("kind") != "completed_session":
         return message
