@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
+from contextlib import nullcontext
 from dataclasses import dataclass
 import logging
 from multiprocessing import get_context
@@ -237,10 +238,7 @@ def _review_memory_snapshot():
 
 
 def _review_admission_fits(known_workers, credits, population, candidate_credit, emergency_reserve, *, snapshot=None):
-    # Worker-start messages and futures use different queues. Reject impossible
-    # owner counts even when no owned pages are needed to satisfy the bound.
-    idle_count = sum(index not in credits for _, index in known_workers.values())
-    if len(credits) + idle_count > population:
+    if len(known_workers) > population or len(credits) > population:
         return False
 
     def fits(headroom, active_owned, idle_owned):
@@ -260,12 +258,17 @@ def _review_admission_fits(known_workers, credits, population, candidate_credit,
     if not known_workers:
         return False
     active_owned, idle_owned = {}, []
+    known_active = {index for _, index in known_workers.values() if index in credits}
+    # A reused process can already own an active future while its new start
+    # message is in transit. Keep every floor and omit ambiguous idle credit.
+    allow_idle_credit = len(known_active) == len(credits)
     for pid, (created, index) in known_workers.items():
-        owner = probe_owned_memory(pid, created)
         if index in credits:
-            active_owned[index] = owner
-        else:
-            idle_owned.append(owner)
+            active_owned[index] = probe_owned_memory(pid, created)
+        elif allow_idle_credit:
+            idle_owned.append(probe_owned_memory(pid, created))
+    if not active_owned and not idle_owned:
+        return False
     return fits(_review_memory_snapshot(), active_owned, idle_owned)
 
 
@@ -346,6 +349,7 @@ def _run_one_review(
     raw_channel_qc_by_recording: Mapping[str, Mapping[str, object]] | None,
     job_index: int | None = None,
 ) -> KurtosisReviewScan:
+    from Main_App.io.memmap_paths import recording_memmap_path
     from Main_App.processing.kurtosis_review_scan import _scan_kurtosis_review_serial
     from Main_App.processing.prepared_fir import prepared_fir_scope
     from Main_App.workers import process_runner
@@ -359,7 +363,8 @@ def _run_one_review(
         def callback(*shape):
             _request_scoring_admission(job_index, *shape, builtin_kurtosis=builtin_kurtosis)
 
-    with prepared_fir_scope(process_runner._WORKER_FIR_CACHE):
+    scratch = nullcontext(None) if settings.get("experimental_ram_preload") is True else recording_memmap_path()
+    with prepared_fir_scope(process_runner._WORKER_FIR_CACHE), scratch as preload_path:
         return _scan_kurtosis_review_serial(
             [info], settings, event_map=event_map,
             reviewed_event_plans_by_file=reviewed_event_plans_by_file,
@@ -368,6 +373,7 @@ def _run_one_review(
                 "type": "progress", "message": message,
             }),
             should_cancel=_WORKER_CANCEL.is_set,
+            worker_preload_path=preload_path, raise_load_errors=True,
             **({"before_kurtosis_scoring": callback} if callback is not None else {}),
         )
 
@@ -499,8 +505,8 @@ def run_process_review(
             for index in indices if index != solo_owner
         ), default=0)
 
-    def live_fits(candidate_credit=0, *, candidate_index=None, granting_index=None,
-                  granting_credit=None, population=None, snapshot=None) -> bool:
+    def live_fits(candidate_credit=0, *, candidate_index=None, candidate_group=(),
+                  granting_index=None, granting_credit=None, population=None, snapshot=None) -> bool:
         credits = dict(active_credits)
         if granting_index is not None:
             credits[granting_index] = granting_credit
@@ -509,7 +515,7 @@ def run_process_review(
             max(0, credits[reserve_index] - resource_plan.credits[reserve_index])
             if reserve_index is not None else 0
         )
-        indices = set(credits)
+        indices = set(credits).union(candidate_group)
         if candidate_index is not None:
             indices.add(candidate_index)
         emergency_remaining = max(0, emergency_for(indices) - borrowed_bytes)
@@ -517,6 +523,25 @@ def run_process_review(
             known_workers, credits, worker_count if population is None else population,
             candidate_credit, emergency_remaining, snapshot=snapshot,
         )
+
+    def joint_fit(population, snapshot) -> bool:
+        # Size the pool for a jointly affordable first-fit group. A single
+        # recording plus spare floors can finance empty slots, not useful work.
+        needed = population - len(active_credits)
+        if needed <= 0 or needed > len(pending_indices):
+            return False
+        group = []
+        combined = 0
+        for index in pending_indices:
+            if resource_plan.exclusive[index]:
+                continue
+            candidate = combined + resource_plan.credits[index]
+            if live_fits(candidate, candidate_group=(*group, index), population=population, snapshot=snapshot):
+                group.append(index)
+                combined = candidate
+                if len(group) == needed:
+                    return True
+        return False
 
     def grant_waiting_requests() -> None:
         nonlocal emergency_owner, reserved_credits, peak_reserved_credits
@@ -613,8 +638,7 @@ def run_process_review(
                                   population=population, snapshot=snapshot))
 
         if pool is not None:
-            if (worker_count < min(worker_ceiling, len(pending_indices))
-                    and any(ordinary_fits(index, worker_count + 1) for index in pending_indices)):
+            if worker_count < worker_ceiling and joint_fit(worker_count + 1, snapshot):
                 close_idle_pool()
                 snapshot = _review_memory_snapshot()
             elif any(ordinary_fits(index, worker_count) for index in pending_indices):
@@ -633,8 +657,8 @@ def run_process_review(
                 close_idle_pool()
                 snapshot = _review_memory_snapshot()
 
-        for population in range(worker_ceiling, 0, -1):
-            if any(ordinary_fits(index, population) for index in pending_indices):
+        for population in range(min(worker_ceiling, len(pending_indices)), 0, -1):
+            if joint_fit(population, snapshot):
                 start_pool(population)
                 return
         # A healthy singleton can run even when hypothetical full-rate scoring
@@ -663,11 +687,9 @@ def run_process_review(
             grant_waiting_requests()
         if (not growth_drain and geometry_admission and futures and pool is not None
                 and len(futures) < worker_count and not resource_requests
-                and worker_count < min(worker_ceiling, len(pending_indices))
-                and any(not resource_plan.exclusive[index]
-                        and live_fits(resource_plan.credits[index], candidate_index=index,
-                                      population=worker_count + 1)
-                        for index in pending_indices)):
+                and worker_count < worker_ceiling and solo_owner not in active_credits
+                and not any(resource_plan.exclusive[index] for index in active_credits)
+                and joint_fit(worker_count + 1, _review_memory_snapshot())):
             growth_drain = True
             logger.info("kurtosis_review_pool_draining_for_growth current_workers=%d worker_ceiling=%d",
                         worker_count, worker_ceiling)

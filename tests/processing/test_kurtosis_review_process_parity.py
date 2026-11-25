@@ -112,7 +112,8 @@ def _prepare_shared_probe(source, project_root):
     }
 
 
-def _run_review_probe(info, settings, event_map, plans):
+def _run_review_probe(info, settings, event_map, plans, *, ordinary_preload=False):
+    from Main_App.io.memmap_paths import process_memmap_directory
     from Main_App.processing import kurtosis_review_scan
     from Main_App.workers.kurtosis_review_process import _run_one_review
 
@@ -130,9 +131,17 @@ def _run_review_probe(info, settings, event_map, plans):
 
     if _START_BARRIER is not None:
         _START_BARRIER.wait(timeout=30)
-    with patch.object(kurtosis_review_scan._LoaderLogAdapter, "log", capture_loader_log):
-        result = _run_one_review(info, settings, event_map, plans, None)
     cache = process_runner._WORKER_FIR_CACHE
+    with patch.object(kurtosis_review_scan._LoaderLogAdapter, "log", capture_loader_log):
+        if ordinary_preload:
+            with fir.prepared_fir_scope(cache):
+                result = kurtosis_review_scan._scan_kurtosis_review_serial(
+                    [info], settings, event_map=event_map, reviewed_event_plans_by_file=plans,
+                )
+        else:
+            result = _run_one_review(info, settings, event_map, plans, None)
+            # This check runs before the worker accepts another task or exits.
+            assert not list(process_memmap_directory().rglob("*.dat"))
     return {
         "result": result,
         "exact": _exact_payload(asdict(result)),
@@ -258,6 +267,9 @@ def test_actual_bdf_review_serial_and_concurrent_processes_preserve_full_evidenc
         ) as pool:
             serial = [pool.submit(_run_review_probe, info, settings, event_map, plans).result(timeout=60)
                       for info in infos]
+            baseline = [pool.submit(
+                _run_review_probe, info, settings, event_map, plans, ordinary_preload=True,
+            ).result(timeout=60) for info in infos]
         with ProcessPoolExecutor(
             max_workers=2, mp_context=context, initializer=_initialize_review_probe,
             initargs=(context.Event(), queue, context.Barrier(2)),
@@ -269,7 +281,7 @@ def test_actual_bdf_review_serial_and_concurrent_processes_preserve_full_evidenc
         queue.join_thread()
     assert len({item["pid"] for item in serial}) == 1
     assert len({item["pid"] for item in concurrent}) == 2
-    for mode, probes in (("serial", serial), ("concurrent", concurrent)):
+    for mode, probes in (("ordinary preload", baseline), ("serial", serial), ("concurrent", concurrent)):
         for probe in probes:
             scan = probe["result"]
             diagnostic = {
@@ -285,6 +297,7 @@ def test_actual_bdf_review_serial_and_concurrent_processes_preserve_full_evidenc
                 row.status in {"complete_no_review", "review_required"}
                 for row in scan.results
             ), diagnostic
+    assert [item["exact"] for item in serial] == [item["exact"] for item in baseline]
     assert [item["exact"] for item in serial] == [item["exact"] for item in concurrent]
     for item in serial + concurrent:
         assert not item["result"].errors

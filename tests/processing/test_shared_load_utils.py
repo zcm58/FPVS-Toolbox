@@ -474,6 +474,12 @@ def test_run_owned_preload_never_overwrites_existing_or_source_files(monkeypatch
     )
     assert len(errors) == 1 and expected in errors[0]
     assert any(expected in message for message in logs)
+    native_exception = ValueError if destination_kind == "relative" else FileExistsError
+    with pytest.raises(native_exception, match=expected):
+        load_utils.load_eeg_file(
+            _app(logs, tmp_path), str(source), preload_path=selected, raise_on_error=True,
+        )
+    assert len(errors) == 1
     assert source.read_bytes() == original
     assert destination.read_bytes() == b"another active worker"
 

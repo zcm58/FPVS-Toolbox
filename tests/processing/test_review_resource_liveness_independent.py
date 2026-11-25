@@ -6,6 +6,7 @@ from threading import Event, Timer
 from types import SimpleNamespace
 
 import psutil
+import pytest
 
 from Main_App.processing.kurtosis_review_scan import (
     KURTOSIS_REVIEW_FILE_STATUS_CLEAR, KurtosisReviewFileResult, KurtosisReviewScan,
@@ -182,6 +183,33 @@ def test_real_header_small_host_reduces_four_pool_floors_and_completes_fallbacks
     assert [row.recording_id for row in scan.results] == [f"P{i}__session" for i in range(4)]
 
 
+@pytest.mark.parametrize(("physical", "commit"), [(8, 16), (16, 8)])
+def test_single_affordable_recording_reuses_one_worker_despite_affordable_idle_slots(
+    monkeypatch, tmp_path, physical, commit,
+):
+    scan, pools, submitted, _progress = _fake_run(
+        monkeypatch, tmp_path, estimates=[_estimate(4 * GIB, 4 * GIB)] * 4,
+        snapshots=lambda *_: _snapshot(16, physical, commit),
+    )
+    # One 4 GiB job, 1 GiB host margin and three floors fit in 8 GiB.
+    # Two jobs and their floors require 11 GiB, so extra slots have no work.
+    assert not scan.cancelled and not scan.errors
+    assert submitted == [0, 1, 2, 3]
+    assert [pool.population for pool in pools] == [1]
+
+
+def test_joint_admission_shares_the_largest_fallback_reserve_once(monkeypatch, tmp_path):
+    scan, pools, submitted, _progress = _fake_run(
+        monkeypatch, tmp_path, estimates=[_estimate(2 * GIB, 4 * GIB)] * 4,
+        snapshots=lambda *_: _snapshot(16, 9),
+    )
+    # Two healthy jobs, two worker floors, the host margin and one 2 GiB
+    # fallback fit exactly. Giving each job its own reserve would block the pair.
+    assert not scan.cancelled and not scan.errors
+    assert submitted == [0, 1, 2, 3]
+    assert [pool.population for pool in pools] == [2]
+
+
 def test_steady_background_pressure_runs_healthy_singletons_without_hypothetical_fallback_reserve(
     monkeypatch, tmp_path,
 ):
@@ -267,7 +295,7 @@ def test_drained_singleton_pool_closes_then_grows_after_background_recovery(monk
         snapshots=lambda submitted, _pools: _snapshot(32, 6 if not submitted else 24),
     )
     assert not scan.cancelled and not scan.errors and submitted == [0, 1, 2, 3]
-    assert pools[0].population == 1 and pools[-1].population == 4
+    assert [pool.population for pool in pools] == [1, 3]
     assert pools[0].closed
 
 

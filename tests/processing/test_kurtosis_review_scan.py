@@ -8,6 +8,7 @@ from pathlib import Path
 from threading import Barrier, Event, get_ident
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 
 from Main_App.io.eeg_geometry import BIOSEMI64_CHANNELS, BIOSEMI64_MONTAGE_ID
@@ -609,6 +610,65 @@ def test_review_preparation_preserves_default_copy_and_owned_input_lifetime(
     else:
         assert source.info["bads"] == ["Fp1"]
         assert source.copies == []
+
+
+@pytest.mark.parametrize("outcome", ["cancel", "preparation_failure", "load_failure"])
+def test_worker_releases_owned_preload_on_early_exit(tmp_path, monkeypatch, outcome):
+    from Main_App.io import memmap_paths
+    from Main_App.workers import kurtosis_review_process as pool
+
+    source = tmp_path / "P01.bdf"
+    source.write_bytes(b"recording")
+    monkeypatch.setattr(memmap_paths.tempfile, "gettempdir", lambda: str(tmp_path))
+    worker_dir = memmap_paths.process_memmap_directory()
+    unrelated = worker_dir / "unrelated.dat"
+    unrelated.write_bytes(b"sibling")
+    loaded = []
+    _configure_active_scan(monkeypatch, loaded_raws=loaded)
+    cancel = Event()
+    monkeypatch.setattr(pool, "_WORKER_CANCEL", cancel)
+    maps = []
+    requested_paths = []
+
+    def load(_app, _path, *, preload_path, raise_on_error, **_kwargs):
+        assert raise_on_error and not preload_path.exists()
+        assert preload_path.parent.parent == worker_dir
+        requested_paths.append(preload_path)
+        if outcome == "load_failure":
+            preload_path.write_bytes(b"incomplete preload")
+            raise OSError("Synthetic native scratch write failure")
+        raw = _FakeRaw()
+        raw._data = np.memmap(preload_path, mode="w+", dtype=np.float64, shape=(2, 12))
+        maps.append(raw._data._mmap)
+        loaded.append(raw)
+        if outcome == "cancel":
+            cancel.set()
+        return raw
+
+    def fail_after_replacing_data(raw, *_args, **_kwargs):
+        raw._data = np.array(raw._data)
+        raise RuntimeError("Synthetic preparation failure")
+
+    monkeypatch.setattr(scan_module.load_utils, "load_eeg_file", load)
+    if outcome == "preparation_failure":
+        monkeypatch.setattr(scan_module, "prepare_kurtosis_review_evidence", fail_after_replacing_data)
+
+    scan = pool._run_one_review(
+        _info(source, "P01"), _settings(), {"Faces": 1, "Objects": 2},
+        {str(source): {}}, None,
+    )
+
+    assert len(requested_paths) == 1 and not requested_paths[0].parent.exists()
+    assert all(raw.closed for raw in loaded)
+    assert all(mmap.closed for mmap in maps)
+    assert unrelated.read_bytes() == b"sibling"
+    assert source.read_bytes() == b"recording"
+    if outcome == "cancel":
+        assert scan.cancelled and not scan.results
+    else:
+        assert not scan.cancelled and len(scan.errors) == 1
+        expected = "native scratch write" if outcome == "load_failure" else "preparation failure"
+        assert expected in scan.errors[0].error
 
 
 def _ample_scan_resources(monkeypatch):

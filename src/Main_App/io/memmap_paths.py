@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import atexit
+from collections.abc import Iterator
+from contextlib import contextmanager
 import errno
 import logging
 import os
@@ -74,3 +76,31 @@ def process_memmap_directory() -> Path:
         _directories[(pid, root)] = (path, identity)
         atexit.register(_cleanup_private_directory, path, identity)
         return path
+
+
+@contextmanager
+def recording_memmap_path() -> Iterator[Path]:
+    """Give one recording an unused preload destination and remove it on exit."""
+    parent = process_memmap_directory()
+    parent_info = _directory_info(parent)
+    if parent_info is None:
+        raise OSError(errno.ENOENT, "Memory-map directory disappeared", str(parent))
+    directory = Path(tempfile.mkdtemp(prefix="review-", dir=parent))
+    info = _directory_info(directory)
+    if info is None:
+        raise OSError(errno.ENOENT, "Recording memory-map directory disappeared", str(directory))
+    path = directory / "raw.dat"
+    try:
+        yield path
+    finally:
+        try:
+            _directory_info(parent.parent)
+            current_parent = _directory_info(parent)
+            current = _directory_info(directory)
+            if (current_parent is not None and current is not None
+                    and (current_parent.st_dev, current_parent.st_ino) == (parent_info.st_dev, parent_info.st_ino)
+                    and (current.st_dev, current.st_ino) == (info.st_dev, info.st_ino)):
+                path.unlink(missing_ok=True)
+                directory.rmdir()
+        except OSError:
+            _log.warning("recording_preparation_memmap_cleanup_failed path=%s", path, exc_info=True)

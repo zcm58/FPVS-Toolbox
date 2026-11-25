@@ -791,6 +791,7 @@ def load_eeg_file(
     preload_path: str | Path | None = None,
     preload_in_memory: bool = False,
     acquisition_settings: dict[str, Any] | None = None,
+    raise_on_error: bool = False,
 ) -> Optional[mne.io.BaseRaw]:
     """Load an EEG file and apply montage without resampling.
 
@@ -798,6 +799,8 @@ def load_eeg_file(
     private temporary directory. That caller owns the Raw and file cleanup.
     Existing destinations are never overwritten through this opt-in path.
     Experimental in-memory preloading creates no full-recording memmap.
+    A background caller may request native load exceptions in place of a
+    UI error message and empty return.
     """
     if preload_in_memory and preload_path is not None:
         raise ValueError("RAM preloading cannot use a disk preload path.")
@@ -956,6 +959,8 @@ def load_eeg_file(
                     Path(memmap_path).unlink(missing_ok=True)
             except (AttributeError, RuntimeError, OSError, ValueError):
                 logger.warning("Failed to release EEG preload after loading error", exc_info=True)
+        if raise_on_error:
+            raise
         try:
             user_messages.show_error("Loading Error", f"Could not load: {base}\nError: {e}")
         except Exception:

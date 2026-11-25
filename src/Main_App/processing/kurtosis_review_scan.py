@@ -1209,6 +1209,8 @@ def _scan_kurtosis_review_serial(
     should_cancel: CancelCallback | None = None,
     source_prefetch: QcSourcePrefetch | None = None,
     before_kurtosis_scoring: Callable[[int, int, int, int, bool, int], None] | None = None,
+    worker_preload_path: Path | None = None,
+    raise_load_errors: bool = False,
 ) -> KurtosisReviewScan:
     """Keep the serial numerical path independent of batch scheduling."""
 
@@ -1264,6 +1266,7 @@ def _scan_kurtosis_review_serial(
 
         raw: Any | None = None
         prefetched = False
+        worker_mmap = None
         try:
             file_event_map = canonical_event_map
             if protocol.condition_trigger_maps is not None:
@@ -1343,13 +1346,27 @@ def _scan_kurtosis_review_serial(
                 review_source_identity = source_content_identity(path, should_cancel=should_cancel)
                 if progress:
                     progress(f"Loading {path.name} with validated electrode geometry", index - 1, total)
+                preload = {}
+                if settings.get("experimental_ram_preload") is True:
+                    preload["preload_in_memory"] = True
+                elif worker_preload_path is not None:
+                    preload["preload_path"] = worker_preload_path
+                if raise_load_errors:
+                    preload["raise_on_error"] = True
                 raw = load_utils.load_eeg_file(
                     _LoaderLogAdapter(path),
                     str(path),
                     **source_load_kwargs(settings),
                     acquisition_settings={**settings, "event_id_map": file_event_map},
-                    **({"preload_in_memory": True} if settings.get("experimental_ram_preload") is True else {}),
+                    **preload,
                 )
+                if worker_preload_path is not None:
+                    data = getattr(raw, "_data", None)
+                    filename = getattr(data, "filename", None)
+                    if filename is not None and Path(filename) == worker_preload_path:
+                        # Preprocessing may replace Raw._data before cleanup.
+                        worker_mmap = getattr(data, "_mmap", None)
+                    del data
             elif progress:
                 progress(f"Using preloaded recording {path.name}", index - 1, total)
             if raw is None:
@@ -1602,9 +1619,17 @@ def _scan_kurtosis_review_serial(
                 try:
                     if prefetched:
                         source_prefetch.release(raw)
-                    else:
+                    elif worker_mmap is None:
                         raw.close()
-                except (AttributeError, OSError, RuntimeError, ValueError):
+                    else:
+                        if getattr(getattr(raw, "_data", None), "_mmap", None) is worker_mmap:
+                            # The worker owns unlinking this path after the map closes.
+                            raw._data = None
+                        try:
+                            raw.close()
+                        finally:
+                            worker_mmap.close()
+                except (AttributeError, BufferError, OSError, RuntimeError, ValueError):
                     logger.warning(
                         "kurtosis_review_raw_close_failed file=%s",
                         path,

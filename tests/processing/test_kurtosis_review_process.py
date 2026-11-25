@@ -36,6 +36,23 @@ def test_review_admits_full_charge_without_querying_working_sets(monkeypatch):
     assert not process_module._review_admission_fits(owners, dict.fromkeys(range(6), 5*GIB), 16, 5*GIB, 8*GIB)
 
 
+def test_late_worker_identity_keeps_the_floor_without_blocking_full_reservation(monkeypatch):
+    from Main_App.workers.review_resource_budget import ReviewMemorySnapshot
+
+    # This process was last seen on a completed job. Its next start message
+    # has not arrived yet, so it must not count as another worker or earn credit.
+    owners = {123: (1.0, 0)}
+    credits = {1: 2 * GIB}
+    monkeypatch.setattr(process_module, "probe_owned_memory", lambda *_: pytest.fail("Ambiguous owner"))
+    permitted = ReviewMemorySnapshot(8 * GIB, 4 * GIB, 4 * GIB, True)
+    assert process_module._review_admission_fits(owners, credits, 1, 0, 0, snapshot=permitted)
+    for snapshot in (
+        ReviewMemorySnapshot(8 * GIB, 3 * GIB, 4 * GIB, True),
+        ReviewMemorySnapshot(8 * GIB, 4 * GIB, 3 * GIB, True),
+    ):
+        assert not process_module._review_admission_fits(owners, credits, 1, 0, 0, snapshot=snapshot)
+
+
 @pytest.mark.parametrize(("free_physical","free_commit","owned_physical","owned_commit","expected"), [
     (4, 4, 1, 1, True),  # Exactly enough after the full ownership probes.
     (3, 4, 1, 1, False),  # Physical pressure arose during the working-set query.

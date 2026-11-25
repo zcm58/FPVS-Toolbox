@@ -113,13 +113,19 @@ Common long-running work:
   canonical exclusions and validates approved timing before scheduling eligible
   recordings. The CPU/affinity and current project ceiling bound the pool;
   initial memory pressure no longer permanently shrinks that ceiling. A drained
-  executor may be replaced with a smaller population, or grow toward the same
-  ceiling after headroom recovers; live executors always retain all their floors. The
+  executor can shrink or grow with current headroom. A new multi-worker population
+  requires a first-fit group of pending recordings whose combined credits, shared
+  emergency reserve and worker floors fit both live memory limits. An existing pool
+  continues while it can admit useful work. Every reservation includes all live
+  worker floors, even when worker identity is still being established. The
   GUI-neutral `review_resource_budget` module obtains source-bound ordinary
   BDF geometry using the existing validated lazy loader and bounds loading,
   referencing, drops, filtering, resampling, raw AUTO QC, checkpoint restoration
-  and target-rate kurtosis allocations. Each preparation job receives the approved
-  path-plan and display-QC entries for its recording, preserving ambiguous
+  and target-rate kurtosis allocations. Each disk-backed job owns its preload map
+  through the native scan, then closes and removes it before the worker accepts
+  another recording. The shared RAM-preload mode allocates no disk map.
+  Each preparation job receives the approved path-plan and display-QC entries
+  for its recording, preserving ambiguous
   aliases for native validation. For AUTO raw-electrode screening the parent
   bounds the source-rate scratch arrays by the union of all approved intervals
   **before condition exclusions**. It verifies the canonical plan fingerprint,
