@@ -46,7 +46,7 @@ def compute_dynamic_worker_ceiling(
     project_max_workers: int | None = None, *, cpu_count: int | None = None,
     total_ram_bytes: int | None = None,
 ) -> int:
-    """Choose a RAM-tier default or explicit override within available CPUs.
+    """Choose a worker ceiling from the RAM tier, available CPUs, and project setting.
 
     This is a population ceiling, not permission to start that many jobs. Each
     caller must separately admit work against fresh RAM and commit headroom.
@@ -85,17 +85,19 @@ def compute_dynamic_worker_ceiling(
     # ceilings used by threads, so a later process stage can use the same value.
     if sys.platform == "win32":
         ceiling = min(ceiling, _WINDOWS_PROCESS_POOL_MAX_WORKERS)
-    if project_max_workers is None or type(project_max_workers) is int and project_max_workers == 0:
-        if total_ram_bytes is None:
-            try:
-                total_ram_bytes = int(psutil.virtual_memory().total)
-            except (AttributeError, OSError, OverflowError, RuntimeError, TypeError, ValueError, psutil.Error):
-                return 1
-        if quota_memory is not None:
-            total_ram_bytes = min(total_ram_bytes, quota_memory)
-        if total_ram_bytes <= 0:
+    if total_ram_bytes is None:
+        try:
+            total_ram_bytes = int(psutil.virtual_memory().total)
+        except (AttributeError, OSError, OverflowError, RuntimeError, TypeError, ValueError, psutil.Error):
             return 1
-        _, tier_cap, _ = get_ram_tier_recommendation(total_ram_bytes)
+    if quota_memory is not None:
+        total_ram_bytes = min(total_ram_bytes, quota_memory)
+    if total_ram_bytes <= 0:
+        return 1
+    _, tier_cap, _ = get_ram_tier_recommendation(total_ram_bytes)
+    if tier_cap == 1:
+        return 1
+    if project_max_workers is None or type(project_max_workers) is int and project_max_workers == 0:
         return min(ceiling, tier_cap) if tier_cap is not None else ceiling
     if type(project_max_workers) is not int or project_max_workers < 1:
         return 1
@@ -106,15 +108,14 @@ def get_ram_tier_recommendation(total_ram_bytes: int) -> tuple[str, Optional[int
     """
     Return ``(tier_label, recommended_cap, total_ram_gib)`` from host RAM.
 
-    ``recommended_cap`` is the hardcoded safety recommendation used for automatic
-    worker selection. ``None`` means no RAM-tier cap applies.
+    The 8 GB tier always caps the pool at one. Other recommendations set the
+    automatic ceiling. ``None`` means usable CPUs alone set the automatic ceiling.
     """
 
     total_ram_gib = total_ram_bytes / float(1024 ** 3) if total_ram_bytes > 0 else 0.0
 
-    # Set your desired number of max parallel workers based on the amount of RAM.
     if total_ram_gib < 12.0:
-        return "8GB", 2, total_ram_gib
+        return "8GB", 1, total_ram_gib
     if total_ram_gib < 20.0:
         return "16GB", 4, total_ram_gib
     if total_ram_gib < 40.0:
@@ -167,6 +168,8 @@ def compute_effective_max_workers(
     cores = cpu_count if cpu_count and cpu_count > 0 else 1
     cpu_cap = max(1, cores - 1)
     _tier, ram_cap, _ram_gib = get_ram_tier_recommendation(total_ram_bytes)
+    if ram_cap == 1:
+        return 1
 
     if project_max_workers is not None and project_max_workers > 0:
         desired = project_max_workers

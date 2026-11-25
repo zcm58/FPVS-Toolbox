@@ -25,10 +25,12 @@ Memory-admitted EEG preflight, QC preparation, normal processing and condition-c
 validation use `Main_App.workers.mp_env.compute_dynamic_worker_ceiling`. The ceiling
 respects usable process CPUs and affinity, leaves one logical CPU available where
 possible, and applies a positive project worker setting as an upper limit. Zero
-selects the automatic RAM recommendation. Below 12, 40, 80 and 140 GiB the
-defaults are respectively 2, 4, 7 and 16 workers. At 140 GiB and above, usable
-CPU capacity sets the default. An explicit positive setting may raise or lower
-the RAM recommendation within the CPU and platform limits. Windows additionally
+selects the automatic RAM recommendation. The 8 GB tier (below 12 GiB of
+usable capacity) has a hard one-worker ceiling, including with a positive project
+setting. The next tiers below 40, 80 and 140 GiB default to 4, 7 and 16 workers.
+At 140 GiB and above, usable CPU capacity sets the default. Above the 8 GB tier
+an explicit positive setting may raise or lower the RAM recommendation within the
+CPU and platform limits. Windows additionally
 respects the 61-worker maximum supported by `ProcessPoolExecutor`. Linux
 includes the process's cgroup CPU quota and memory limit across its visible
 ancestors. Each stage separately checks current physical availability and, on
@@ -141,7 +143,9 @@ Common long-running work:
   separate host margin. Thus background
   RAM pressure pauses admissions with explicit waiting/resumed progress; recovery
   may reuse or replace the drained pool toward its full ceiling. These conservative estimates are scheduling credits, not a guarantee
-  against arbitrary concurrent external allocations.
+  against arbitrary concurrent external allocations. The compatibility thread
+  backend refreshes physical and commit headroom before running a second
+  recording alongside a native singleton.
   One emergency reserve over active/prospective jobs covers a full-rate scoring
   fallback; unrelated pending recordings cannot prevent a smaller job starting. A
   runtime callback before every scoring copy, including warm checkpoints,
@@ -240,16 +244,18 @@ Common long-running work:
 - EEG preflight uses the shared worker ceiling with fresh whole-file memory credits
   before submissions. Active thread credits are retained in full because the
   parent also owns unrelated allocations; parent RSS/USS is not reclaimed as
-  per-job credit. Unknown or over-host estimates run exclusively through the
-  native chunked route, and unavailable required host information reports an
+  per-job credit. Unknown or unqualified over-host estimates run exclusively
+  through the native chunked route. Unavailable required host information reports an
   actionable resource error. Each admitted recording can independently read its
   BDF and evaluate its spectrum within that same reservation. The coordinator
   can start a smaller recording while a larger one waits for memory. Exclusive
   recordings form queue boundaries. Results retain their canonical order.
   If the queue drains and the ordinary estimate blocks admission, preflight
   can count packed Status transitions on confirmed, annotation-free BioSemi64
-  recordings with raw spectral screening off. The count bounds retained
-  marker evidence. On the pinned, qualified reader, cold BIDS admission and
+  recordings with raw spectral screening off, including when the ordinary
+  estimate exceeds host capacity. A qualified smaller estimate must fit the
+  host and system reserve. The count bounds retained marker evidence.
+  On the pinned, qualified reader, cold BIDS admission and
   native event detection read Status using one output row while preserving
   physical record offsets. A worker admitted at that reservation requires the
   single-row read. The reservation includes the physical decoder batches,
@@ -471,6 +477,7 @@ Worker-setting visible/manual smoke: save `0` and a positive maximum in Settings
 neither should show the obsolete RAM-tier override prompt. Verify the field explains
 that live memory can reduce active concurrency. Change the saved maximum between
 runs and confirm preflight, preparation and normal-run logs use the current
-RAM-tier or explicit CPU-bounded ceiling. Do not infer actual
+RAM-tier or explicit project ceiling, including the single-worker cap on the
+8 GB tier. Do not infer actual
 concurrency from the ceiling alone. This path is not executed locally by the
 non-Qt checks.

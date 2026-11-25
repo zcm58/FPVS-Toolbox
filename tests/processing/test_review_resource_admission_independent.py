@@ -406,11 +406,18 @@ def _run_partial_reserve_case(monkeypatch, tmp_path, *, restore_old_zeroing):
     monkeypatch.setattr(process_module, "_run_one_review", _partial_reserve_probe)
     monkeypatch.setattr(process_module, "probe_owned_memory", lambda *_a: OwnedMemory())
 
+    external_headroom_recovered = False
+
+    def recover_after_borrower(index, _results):
+        nonlocal external_headroom_recovered
+        if index == 0:
+            external_headroom_recovered = True
+
     def live_snapshot():
-        # Host margin is1GiB and the created pool's three floors total3GiB.
-        # Only145MiB of additional allocations fit while the small owner is
-        # active. External headroom recovers after that owner closes.
-        payload = 512 if (tmp_path / "closed-0").exists() else 145
+        # The host margin is 1 GiB and the three pool floors total 3 GiB.
+        # Recover only after the runner releases the borrower's reservation.
+        # The worker's cleanup file can precede delivery of its Future.
+        payload = 512 if external_headroom_recovered else 145
         return ReviewMemorySnapshot(8 * 1024**3, 4 * 1024**3 + payload * 1024**2,
                                     8 * 1024**3, True)
 
@@ -434,9 +441,7 @@ def _run_partial_reserve_case(monkeypatch, tmp_path, *, restore_old_zeroing):
         admitted = native_fits(snapshot, **arguments)
         constrained = snapshot.physical_available_bytes == 4 * 1024**3 + 145 * 1024**2
         if candidate and partial and constrained:
-            # Recovery can precede Future delivery: admission with the full
-            # residual reservation is legitimate once physical RAM returns.
-            # Only the declared constrained snapshot tests the reserve loan.
+            # Only a constrained snapshot tests the reserve loan.
             premature_admissions.append(admitted)
             candidate_checks += 1
             # Keep two rejecting observations for the repaired implementation.
@@ -457,8 +462,10 @@ def _run_partial_reserve_case(monkeypatch, tmp_path, *, restore_old_zeroing):
     watchdog = Timer(40, watchdog_cancel.set)
     watchdog.start()
     try:
-        scan = process_module.run_process_review(infos, {}, event_map={},
-                                                  should_cancel=watchdog_cancel.is_set)
+        scan = process_module.run_process_review(
+            infos, {}, event_map={}, should_cancel=watchdog_cancel.is_set,
+            result_progress=recover_after_borrower,
+        )
     finally:
         watchdog.cancel()
         borrow_hold.set()

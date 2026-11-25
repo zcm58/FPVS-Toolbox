@@ -80,8 +80,9 @@ def build_preprocessing_page(self, tabs: QTabWidget) -> QWidget:
         if i == 8:
             edit.setToolTip(
                 "Automatic chooses a worker limit from RAM and available CPUs. "
-                "Enter a positive value to override the RAM recommendation. "
-                "Available CPUs and memory still limit concurrent jobs."
+                "Enter a positive value to set a project ceiling. "
+                "The 8 GB RAM tier always allows at most one worker. "
+                "At every tier, available memory can reduce how many jobs run at once."
             )
         edit.setAccessibleName(label_text.rstrip(":"))
         lbl.setBuddy(edit)

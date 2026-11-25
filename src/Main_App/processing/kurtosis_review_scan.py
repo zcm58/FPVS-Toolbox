@@ -13,7 +13,6 @@ from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field, replace
 import logging
 import math
-import os
 from pathlib import Path
 from queue import Empty, SimpleQueue
 from threading import Event
@@ -27,7 +26,8 @@ import psutil
 if TYPE_CHECKING:
     from Main_App.processing.qc_source_prefetch import QcSourcePrefetch
 
-from Main_App.workers.mp_env import compute_effective_max_workers
+from Main_App.workers.mp_env import compute_dynamic_worker_ceiling
+from Main_App.workers.review_resource_budget import memory_admission_fits, probe_memory_snapshot
 from Main_App.io import load_utils
 from Main_App.io.pipeline_events import canonical_recording_events
 from Main_App.io.acquisition_metadata import (
@@ -302,6 +302,10 @@ def _log_scan_timing(path: Path, stage: str, started: float) -> None:
     )
 
 
+def _review_thread_credit(path: Path) -> int:
+    return max(1024**3, path.stat().st_size * 24)
+
+
 def _review_worker_count(raw_file_infos: Sequence[Any], max_workers: int | None) -> int:
     """Allow at most two full-recording jobs within a conservative RAM budget."""
 
@@ -313,16 +317,18 @@ def _review_worker_count(raw_file_infos: Sequence[Any], max_workers: int | None)
         # stems must never be loaded simultaneously, even from different dirs.
         if len({path.stem.casefold() for path in paths}) != len(paths):
             return 1
+        cap = compute_dynamic_worker_ceiling(min(2, max_workers or 2))
+        if cap < 2:
+            return 1
         memory = psutil.virtual_memory()
-        cap = compute_effective_max_workers(int(memory.total), os.cpu_count() or 1, min(2, max_workers or 2))
         # Loaded samples expand into float64 arrays plus FIR/resampling
         # scratch arrays. Reserve 24x source bytes and at least 1 GiB per file;
         # leave half of currently available RAM for the GUI and other work.
         estimates = sorted(
-            (max(1024**3, path.stat().st_size * 24) for path in paths),
+            (_review_thread_credit(path) for path in paths),
             reverse=True,
         )
-        if cap < 2 or sum(estimates[:2]) > int(memory.available) // 2:
+        if sum(estimates[:2]) > int(memory.available) // 2:
             return 1
     except (AttributeError, OSError, TypeError, ValueError):
         return 1
@@ -351,11 +357,42 @@ def _scan_review_parallel(
     messages: SimpleQueue[str] = SimpleQueue()
     indexed_results: dict[int, tuple[KurtosisReviewFileResult, ...]] = {}
     futures = {}
+    credits: dict[int, int | None] = {}
+
+    def overlap_fits(index: int) -> bool:
+        credit = credits[index]
+        if credit is None:
+            return False
+        active_credits: dict[int, int] = {}
+        for other in futures.values():
+            active_credit = credits[other]
+            if active_credit is None:
+                return False
+            active_credits[other] = active_credit
+        try:
+            # The parent owns these threads, so its own resident pages cannot
+            # offset the reservations of individual recordings.
+            return memory_admission_fits(
+                probe_memory_snapshot(),
+                active_credits=active_credits, candidate_credit=credit,
+                active_owned={}, idle_owned=(), worker_count=len(futures), worker_floor_bytes=0,
+            )
+        except (AttributeError, OSError, OverflowError, RuntimeError, TypeError, ValueError, psutil.Error):
+            return False
 
     def submit_available(executor: ThreadPoolExecutor) -> None:
         nonlocal pending_index
         while not stop.is_set() and pending_index < total and len(futures) < max_workers:
             index = pending_index
+            if index not in credits:
+                try:
+                    credits[index] = _review_thread_credit(Path(raw_file_infos[index].path))
+                except OSError:
+                    credits[index] = None
+            # A drop in headroom pauses overlap. Preserve the legacy singleton
+            # scanner and its native error handling for an unstatable input.
+            if futures and not overlap_fits(index):
+                return
             pending_index += 1
             futures[
                 executor.submit(
@@ -1098,6 +1135,7 @@ def scan_kurtosis_review(
             indexed_results[eligible_indices[index]] = results[0]
             report_status()
 
+    requested_workers = max_workers if max_workers is not None else settings.get("max_parallel_workers_override")
     if execution_backend == "process":
         from Main_App.workers.kurtosis_review_process import run_process_review
 
@@ -1114,9 +1152,6 @@ def scan_kurtosis_review(
             source_prefetch.close()
         if should_cancel and should_cancel():
             return finished_scan(cancelled=True)
-        requested_workers = max_workers
-        if requested_workers is None:
-            requested_workers = settings.get("max_parallel_workers_override")
         scan = run_process_review(
             eligible_infos,
             settings,
@@ -1130,7 +1165,12 @@ def scan_kurtosis_review(
         )
         return finished_scan(cancelled=scan.cancelled)
 
-    worker_count = _review_worker_count(eligible_infos, 1 if prefetch_loading else max_workers)
+    if prefetch_loading and compute_dynamic_worker_ceiling(2) == 1:
+        # A speculative load occupies the only worker slot until it releases
+        # its source. Close on the review thread before starting that job.
+        source_prefetch.close()
+        source_prefetch = None
+    worker_count = _review_worker_count(eligible_infos, 1 if prefetch_loading else requested_workers)
     if worker_count > 1:
         scan = _scan_review_parallel(
             eligible_infos, settings, event_map=canonical_event_map,

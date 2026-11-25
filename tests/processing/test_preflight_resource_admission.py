@@ -1,5 +1,6 @@
 """Qt-free scheduling controls: no EEG source, preprocessing, or benchmark."""
 
+from contextlib import nullcontext
 from dataclasses import replace
 from pathlib import Path
 from threading import Barrier, Lock
@@ -58,16 +59,19 @@ def _run(tmp_path, count, *, workers=6, cancel=None, progress=None, settings=Non
     )
 
 
-@pytest.mark.parametrize(("available", "commit", "transitions", "bounded", "probed", "admitted"), [
-    (12, 12, 40, True, False, True),
-    (8, 8, 40, False, True, True),
-    (4, 4, 40, True, True, True),
-    (4, 4, 40, False, False, False),
-    (8, 4, 40, False, False, False),
-    (8, 8, 1_000_000, True, True, False),
+@pytest.mark.parametrize(("total", "available", "commit", "transitions", "bounded", "probed", "admitted", "oversized"), [
+    (16, 12, 12, 40, True, False, True, False),
+    (16, 8, 8, 40, False, True, True, False),
+    (16, 4, 4, 40, True, True, True, False),
+    (16, 4, 4, 40, False, False, False, False),
+    (16, 8, 4, 40, False, False, False, False),
+    (16, 8, 8, 1_000_000, True, True, False, False),
+    (8, 4, 4, 40, True, True, True, False),
+    (8, 3, 3, 40, True, False, False, False),
+    (8, 4, 4, 1_000_000, True, True, False, True),
 ])
 def test_status_bound_only_admits_verified_low_memory_work(
-    monkeypatch, tmp_path, available, commit, transitions, bounded, probed, admitted,
+    monkeypatch, tmp_path, total, available, commit, transitions, bounded, probed, admitted, oversized,
 ):
     from Main_App.io import bdf_preload
 
@@ -102,13 +106,19 @@ def test_status_bound_only_admits_verified_low_memory_work(
             cancelled = True
 
     monkeypatch.setattr(module, "count_bdf_status_transitions", status_probe)
-    _install(monkeypatch, snapshot=lambda: _snapshot(16, available, commit), credit=credit, scan=scan)
-    result = _run(
-        tmp_path, 2, workers=4, cancel=lambda: cancelled, progress=progress,
-        settings={"hardware_platform": "biosemi", "hardware_confirmed": True,
-                  "electrode_montage": "biosemi64", "raw_spectral_screening": {"enabled": False}},
-    )
+    _install(monkeypatch, snapshot=lambda: _snapshot(total, available, commit), credit=credit, scan=scan)
+    check = pytest.raises(module.ReviewMemoryProbeError, match="physical memory capacity") if oversized else nullcontext()
+    with check:
+        result = _run(
+            tmp_path, 2, workers=4, cancel=lambda: cancelled, progress=progress,
+            settings={"hardware_platform": "biosemi", "hardware_confirmed": True,
+                      "electrode_montage": "biosemi64", "raw_spectral_screening": {"enabled": False}},
+        )
 
+    if oversized:
+        assert len(counted) == 1
+        assert not received
+        return
     assert len(counted) == (2 if probed else 0)
     assert result.cancelled is not admitted
     assert [item.participant_id for item in result.results] == (["P0", "P1"] if admitted else [])
@@ -122,8 +132,26 @@ def test_status_bound_only_admits_verified_low_memory_work(
         assert received == [None, None]
 
 
+def test_oversized_unsupported_status_route_retains_native_fallback(monkeypatch, tmp_path):
+    info = _infos(tmp_path, 1)[0]
+    info.path.touch()
+    monkeypatch.setattr(module, "read_review_geometry", lambda *_: None)
+    monkeypatch.setattr(module, "count_bdf_status_transitions", lambda *_a, **_k: pytest.fail("Source has no geometry."))
+
+    def scan(row, *_args, status_bound, **_kwargs):
+        assert status_bound is None
+        return _result(row)
+
+    _install(monkeypatch, snapshot=lambda: _snapshot(8, 4, 4), credit=lambda *_a, **_k: 10 * GIB, scan=scan)
+    result = _run(tmp_path, 1, workers=1, settings={
+        "hardware_platform": "biosemi", "hardware_confirmed": True, "electrode_montage": "biosemi64",
+        "raw_spectral_screening": {"enabled": False},
+    })
+    assert result.results == (_result(info),)
+
+
 @pytest.mark.parametrize("gib,cpus,workers", [
-    (8, 24, 2), (16, 24, 4), (32, 24, 4), (64, 24, 7),
+    (8, 24, 1), (16, 24, 4), (32, 24, 4), (64, 24, 7),
     (128, 24, 16), (192, 12, 11), (128, 4, 3),
 ])
 def test_automatic_ram_tiers_reach_scanner_threads(monkeypatch, tmp_path, gib, cpus, workers):

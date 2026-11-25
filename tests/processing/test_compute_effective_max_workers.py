@@ -22,6 +22,14 @@ def _bytes_for_gib(value: float) -> int:
     return int(math.floor(value * (1024 ** 3)))
 
 
+def test_8_gib_tier_caps_workers_even_when_overrides_are_allowed():
+    total_ram = _bytes_for_gib(8.0)
+    assert compute_effective_max_workers(total_ram, cpu_count=12, project_max_workers=None) == 1
+    assert compute_effective_max_workers(
+        total_ram, cpu_count=12, project_max_workers=10, allow_ram_cap_bypass=True,
+    ) == 1
+
+
 def test_16_gib_tier_caps_workers():
     total_ram = _bytes_for_gib(15.0)
     assert compute_effective_max_workers(total_ram, cpu_count=12, project_max_workers=None) == 4

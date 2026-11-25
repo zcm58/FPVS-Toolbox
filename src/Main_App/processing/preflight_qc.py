@@ -2586,6 +2586,16 @@ def _scan_preprocessing_qc_parallel(
     waiting = False
 
     signal_context = project_root is not None and _has_condition_context(qc_settings, event_map)
+    can_refine_status = False
+    if (signal_context and _uses_condition_array_budget(qc_settings)
+            and not normalize_raw_spectral_screening_settings(qc_settings.get("raw_spectral_screening")).enabled):
+        try:
+            from Main_App.io.bdf_preload import supports_bounded_bdf_status
+            from mne_bids import __version__ as bids_version
+        except ImportError:
+            pass
+        else:
+            can_refine_status = bids_version == "0.16.0"
 
     def _snapshot() -> ReviewMemorySnapshot:
         try:
@@ -2612,7 +2622,14 @@ def _scan_preprocessing_qc_parallel(
             snapshot = _snapshot()
             margin = max(1024**3, snapshot.total_bytes // 16)
             credit = credits[index]
-            exclusive = credit is None or credit + margin > snapshot.total_bytes
+            oversized = credit is not None and credit + margin > snapshot.total_bytes
+            if oversized and index in status_bounds:
+                raise _capacity_error(info)
+            if oversized and can_refine_status and (index not in status_plans or status_plans[index] is not None):
+                # The full event bound can exceed even the host's capacity.
+                # Attempt its qualified Status bound once existing work drains.
+                continue
+            exclusive = credit is None or oversized
             if exclusive:
                 if position or futures:
                     break  # Drain every earlier recording before an exclusive reader.
@@ -2628,27 +2645,25 @@ def _scan_preprocessing_qc_parallel(
                 return index, info, credit, exclusive
             if exclusive:
                 break
-        if (not remaining or futures or not signal_context or not _uses_condition_array_budget(qc_settings)
-                or normalize_raw_spectral_screening_settings(qc_settings.get("raw_spectral_screening")).enabled):
+        if not remaining or futures or not can_refine_status:
             return None
         return _try_status_admission(snapshot, margin)
+
+    def _capacity_error(info: RawFileInfo) -> ReviewMemoryProbeError:
+        return ReviewMemoryProbeError(
+            f"Preflight estimate for {Path(info.path).name} plus the system reserve exceeds "
+            "physical memory capacity. Use a larger-memory host for this recording."
+        )
 
     def _try_status_admission(
         snapshot: ReviewMemorySnapshot, margin: int,
     ) -> tuple[int, RawFileInfo, int, bool] | None:
-        try:
-            from Main_App.io.bdf_preload import supports_bounded_bdf_status
-            from mne_bids import __version__ as bids_version
-        except ImportError:
-            return None
-        if bids_version != "0.16.0":
-            return None
         # Only inspect Status when the ordinary queue is drained and pinned
         # estimates block all eligible work. Leave the normal fast path alone.
         stim_channel = _configured_stim_channel(qc_settings)
         for index, info in remaining.items():
             original = credits[index]
-            if original is None or original + margin > snapshot.total_bytes:
+            if original is None:
                 break  # Preserve exclusive queue boundaries.
             if should_cancel and should_cancel():
                 return None
@@ -2670,7 +2685,11 @@ def _scan_preprocessing_qc_parallel(
                     continue
             plan = status_plans[index]
             if plan is None:
+                if original + margin > snapshot.total_bytes:
+                    break  # This route can proceed only as the native exclusive fallback.
                 continue
+            if plan.minimum_credit + margin > snapshot.total_bytes:
+                raise _capacity_error(info)
             if not memory_admission_fits(
                 snapshot, active_credits={}, active_owned={}, idle_owned=(),
                 worker_count=0, candidate_credit=plan.minimum_credit, worker_floor_bytes=0,
@@ -2698,6 +2717,8 @@ def _scan_preprocessing_qc_parallel(
                 info, qc_settings, signal_context=True, event_map=event_map,
                 geometry=plan.geometry, event_rows=event_rows, bounded_status=plan.bounded_status,
             )
+            if credit is not None and min(credit, original) + margin > snapshot.total_bytes:
+                raise _capacity_error(info)
             if credit is None or credit >= original:
                 continue
             credits[index] = credit

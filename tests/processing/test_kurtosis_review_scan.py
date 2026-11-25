@@ -28,6 +28,8 @@ from Main_App.processing.kurtosis_review_scan import (
     scan_kurtosis_review,
 )
 from Main_App.projects import EXPECTED_CYCLES_SOURCE_MANUAL, FrequencyProtocol
+from Main_App.workers import mp_env
+from Main_App.workers.review_resource_budget import ReviewMemorySnapshot
 
 
 class _FakeRaw:
@@ -411,6 +413,7 @@ def test_scan_adopts_preload_without_reloading_and_keeps_current_choices(tmp_pat
 
 @pytest.mark.parametrize("loading", [True, False])
 def test_active_prefetch_shares_foreground_concurrency_budget(tmp_path, monkeypatch, loading):
+    _ample_scan_resources(monkeypatch)
     path = tmp_path / "P01.bdf"
     path.touch()
     _configure_active_scan(monkeypatch, loaded_raws=[])
@@ -431,6 +434,30 @@ def test_active_prefetch_shares_foreground_concurrency_budget(tmp_path, monkeypa
     )
     assert not result.errors
     assert limits == [1 if loading else 2]
+
+
+def test_one_worker_tier_releases_active_prefetch_before_loading(tmp_path, monkeypatch):
+    _ample_scan_resources(monkeypatch)
+    monkeypatch.setattr(mp_env, "cgroup_limits", lambda: (None, 8 * 1024**3, 7 * 1024**3))
+    path = tmp_path / "P01.bdf"
+    path.touch()
+    order = []
+    captured = _configure_active_scan(monkeypatch, loaded_raws=[])
+    native_load = scan_module.load_utils.load_eeg_file
+
+    def load(*args, **kwargs):
+        order.append("scan")
+        return native_load(*args, **kwargs)
+
+    monkeypatch.setattr(scan_module.load_utils, "load_eeg_file", load)
+    source = SimpleNamespace(begin_consumption=lambda: True, close=lambda: order.append("close"))
+    result = scan_kurtosis_review(
+        [_info(path, "P01")], _settings(), event_map={"Faces": 1, "Objects": 2},
+        reviewed_event_plans_by_file={str(path): {}}, source_prefetch=source, max_workers=8,
+    )
+    assert not result.errors
+    assert order == ["close", "scan"]
+    assert captured["prepare"]["raw"].closed
 
 
 @pytest.mark.parametrize("failure", ["cancel", "geometry", "preprocessing"])
@@ -585,12 +612,17 @@ def test_review_preparation_preserves_default_copy_and_owned_input_lifetime(
 
 
 def _ample_scan_resources(monkeypatch):
-    monkeypatch.setattr(scan_module.os, "cpu_count", lambda: 8)
+    monkeypatch.setattr(mp_env.os, "process_cpu_count", lambda: 8, raising=False)
+    monkeypatch.setattr(mp_env.psutil, "Process", lambda: SimpleNamespace(cpu_affinity=lambda: range(8)))
+    monkeypatch.setattr(mp_env, "cgroup_limits", lambda: (None, None, None))
     monkeypatch.setattr(
         scan_module.psutil,
         "virtual_memory",
         lambda: SimpleNamespace(total=128 * 1024**3, available=64 * 1024**3),
     )
+    monkeypatch.setattr(scan_module, "probe_memory_snapshot", lambda: ReviewMemorySnapshot(
+        128 * 1024**3, 64 * 1024**3, 64 * 1024**3, True,
+    ))
 
 
 def test_parallel_scan_preserves_exact_evidence_order_and_callback_thread(tmp_path, monkeypatch):
@@ -691,15 +723,71 @@ def test_parallel_scan_respects_memory_cpu_and_memmap_collision_limits(tmp_path,
     assert scan_module._review_worker_count(infos, 1) == 1
     collision = [_info(paths[0], "P01"), _info(tmp_path / "other" / "p01.bdf", "P02")]
     assert scan_module._review_worker_count(collision, 2) == 1
-    monkeypatch.setattr(scan_module.os, "cpu_count", lambda: 1)
+    monkeypatch.setattr(mp_env.os, "process_cpu_count", lambda: 1)
     assert scan_module._review_worker_count(infos, 2) == 1
-    monkeypatch.setattr(scan_module.os, "cpu_count", lambda: 8)
+    monkeypatch.setattr(mp_env.os, "process_cpu_count", lambda: 8)
+    monkeypatch.setattr(mp_env, "cgroup_limits", lambda: (None, 8 * 1024**3, 7 * 1024**3))
+    assert scan_module._review_worker_count(infos, 2) == 1
+    monkeypatch.setattr(mp_env, "cgroup_limits", lambda: (None, None, None))
     monkeypatch.setattr(
         scan_module.psutil,
         "virtual_memory",
         lambda: SimpleNamespace(total=128 * 1024**3, available=3 * 1024**3),
     )
     assert scan_module._review_worker_count(infos, 2) == 1
+
+
+@pytest.mark.parametrize("limited", ["physical", "commit"])
+def test_thread_review_rechecks_headroom_before_replacing_completed_job(tmp_path, monkeypatch, limited):
+    _ample_scan_resources(monkeypatch)
+    paths = [tmp_path / f"P0{index}.bdf" for index in (1, 2, 3)]
+    for path in paths:
+        path.touch()
+    infos = [_info(path, path.stem) for path in paths]
+    both_started = Barrier(2)
+    release_second = Event()
+    pressure_seen = []
+    waiting_for_headroom = False
+    native_wait = scan_module.wait
+
+    def scan(jobs, *_args, **_kwargs):
+        if jobs[0] in infos[:2]:
+            both_started.wait(timeout=5)
+        if jobs[0] is infos[1]:
+            assert release_second.wait(timeout=5)
+        if jobs[0] is infos[2]:
+            assert release_second.is_set()
+        return scan_module.KurtosisReviewScan(())
+
+    def result_complete(index, _results):
+        nonlocal waiting_for_headroom
+        if index == 0:
+            waiting_for_headroom = True
+
+    def snapshot():
+        gib = 1024**3
+        if not waiting_for_headroom:
+            return ReviewMemorySnapshot(128 * gib, 64 * gib, 64 * gib, True)
+        pressure_seen.append(True)
+        return ReviewMemorySnapshot(
+            128 * gib, (9 if limited == "physical" else 64) * gib, (9 if limited == "commit" else 64) * gib, True,
+        )
+
+    def wait_for_workers(futures, **kwargs):
+        if pressure_seen and not release_second.is_set():
+            release_second.set()
+            assert len(futures) == 1
+        return native_wait(futures, **kwargs)
+
+    monkeypatch.setattr(scan_module, "_scan_kurtosis_review_serial", scan)
+    monkeypatch.setattr(scan_module, "probe_memory_snapshot", snapshot)
+    monkeypatch.setattr(scan_module, "wait", wait_for_workers)
+    assert not scan_module._scan_review_parallel(
+        infos, _settings(), event_map={"Objects": 2}, reviewed_event_plans_by_file=None,
+        raw_channel_qc_by_recording=None, progress=None, should_cancel=None, max_workers=2,
+        result_progress=result_complete,
+    ).cancelled
+    assert pressure_seen
 
 
 @pytest.mark.parametrize("excluded", [False, True])

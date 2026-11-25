@@ -36,7 +36,8 @@ def test_windows_executor_limit_is_a_runtime_bound_not_a_ram_tier(monkeypatch, p
 
 
 @pytest.mark.parametrize("gib,requested,expected", [
-    (8, 0, 2), (16, None, 4), (32, None, 4), (64, 0, 7),
+    (8, 0, 1), (8, 16, 1), (11.9, 16, 1), (12, 16, 16),
+    (16, None, 4), (32, None, 4), (64, 0, 7),
     (127.73, None, 16), (127.73, 0, 16), (127.73, 16, 16),
     (127.73, 5, 5), (64, 16, 16), (192, 0, 23),
 ])
@@ -100,6 +101,13 @@ def test_process_cgroup_bounds_automatic_and_explicit_workers_and_live_memory(mo
     assert mp_env.compute_dynamic_worker_ceiling(16, cpu_count=24) == 8
     snapshot = budget.probe_memory_snapshot()
     assert (snapshot.total_bytes, snapshot.physical_available_bytes) == (32 * gib, 3 * gib)
+
+
+def test_eight_gib_cgroup_caps_explicit_override(monkeypatch):
+    gib = 1024**3
+    monkeypatch.setattr(mp_env, "cgroup_limits", lambda: (9, 8 * gib, 3 * gib))
+
+    assert mp_env.compute_dynamic_worker_ceiling(16, cpu_count=24) == 1
 
 
 @pytest.mark.parametrize("unified", [True, False])

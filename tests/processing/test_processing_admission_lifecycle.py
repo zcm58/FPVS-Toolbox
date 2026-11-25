@@ -11,6 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from Main_App.workers import mp_env
 from Main_App.workers import process_runner as runner
 from Main_App.workers import processing_admission as admission_module
 from Main_App.workers.review_resource_budget import OwnedMemory, ReviewMemorySnapshot
@@ -47,7 +48,7 @@ def _estimate():
     return SimpleNamespace(healthy_bytes=2 * GIB, emergency_extra_bytes=GIB)
 
 
-def _controller(monkeypatch, tmp_path, *, snapshot, unknown=(), count=4):
+def _controller(monkeypatch, tmp_path, *, snapshot, unknown=(), count=4, worker_ceiling=3):
     context, pools, submissions, lifecycle = _Context(), [], [], []
     params = runner.RunParams(
         tmp_path, [tmp_path / f"P{i}.bdf" for i in range(count)],
@@ -86,7 +87,8 @@ def _controller(monkeypatch, tmp_path, *, snapshot, unknown=(), count=4):
     monkeypatch.setattr(admission_module, "probe_memory_snapshot", snapshot)
     monkeypatch.setattr(admission_module, "probe_owned_memory", lambda *_: OwnedMemory())
     monkeypatch.setattr(runner, "get_context", lambda _method: context)
-    monkeypatch.setattr(runner, "compute_dynamic_worker_ceiling", lambda _: 3)
+    if worker_ceiling is not None:
+        monkeypatch.setattr(runner, "compute_dynamic_worker_ceiling", lambda _: worker_ceiling)
     monkeypatch.setattr(runner, "ProcessPoolExecutor", Pool)
     monkeypatch.setattr(runner, "wait", complete)
     monkeypatch.setattr(runner, "_memory_ok", lambda _: (True, 20.0))
@@ -133,6 +135,32 @@ def test_public_scheduler_preserves_source_order_and_worker_payloads(monkeypatch
     assert [row[0] for row in submissions] == params.data_files
     assert all(row[1] == original_settings and row[2] == original_events for row in submissions)
     assert params.settings == original_settings and params.event_map == original_events
+    assert context.messages.closed and all(pool.closed for pool in pools)
+
+
+def test_eight_gib_serializes_public_processing_despite_explicit_override(monkeypatch, tmp_path):
+    def snapshot():
+        return ReviewMemorySnapshot(8 * GIB, 7 * GIB, 7 * GIB, True)
+
+    monkeypatch.setattr(mp_env, "cgroup_limits", lambda: (None, None, None))
+    monkeypatch.setattr(mp_env.os, "process_cpu_count", lambda: 24, raising=False)
+    monkeypatch.setattr(mp_env.psutil, "virtual_memory", lambda: SimpleNamespace(total=8 * GIB))
+    monkeypatch.setattr(mp_env.psutil.Process, "cpu_affinity", lambda _: list(range(24)), raising=False)
+    params, context, pools, submissions, lifecycle = _controller(
+        monkeypatch, tmp_path, snapshot=snapshot, worker_ceiling=None,
+    )
+    params = replace(params, max_workers=16)
+    monkeypatch.setattr(admission_module, "build_processing_estimate", lambda *_:
+                        SimpleNamespace(healthy_bytes=GIB // 2, emergency_extra_bytes=0))
+
+    outcome = runner.run_project_parallel(params)
+
+    assert outcome["status"] == "success"
+    assert [row[0] for row in submissions] == params.data_files
+    assert [pool.population for pool in pools] == [1]
+    assert lifecycle[1:-1] == [
+        (event, path.name) for path in params.data_files for event in ("submit", "complete")
+    ]
     assert context.messages.closed and all(pool.closed for pool in pools)
 
 

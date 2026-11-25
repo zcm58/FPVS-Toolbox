@@ -260,7 +260,8 @@ hit skips BDF loading, so speed comparisons must use comparable cache misses.
 EEG scheduling uses `compute_dynamic_worker_ceiling` for usable CPU/affinity,
 the automatic RAM recommendation and the current project maximum.
 A setting of `0` selects the [RAM-tier default](workers-threading.md).
-A positive setting overrides the recommendation within the CPU and platform limits. The GUI
+The 8 GB tier always has a one-worker ceiling. On higher tiers a positive setting
+overrides the recommendation within the CPU and platform limits. The GUI
 resolves the current saved setting before each preflight, preparation and normal
 run; an earlier run's worker count is not a new project limit. Actual concurrent
 jobs depend on fresh physical RAM and Windows commit headroom, with background
