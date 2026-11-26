@@ -164,6 +164,71 @@ def test_eight_gib_serializes_public_processing_despite_explicit_override(monkey
     assert context.messages.closed and all(pool.closed for pool in pools)
 
 
+@pytest.mark.parametrize(("physical", "commit"), [(8, 14), (14, 8)])
+def test_normal_runner_reuses_one_worker_when_a_second_recording_cannot_fit(
+    monkeypatch, tmp_path, physical, commit,
+):
+    params, context, pools, submissions, lifecycle = _controller(
+        monkeypatch, tmp_path,
+        snapshot=lambda: ReviewMemorySnapshot(16 * GIB, physical * GIB, commit * GIB, True),
+        worker_ceiling=4,
+    )
+    monkeypatch.setattr(admission_module, "build_processing_estimate", lambda *_:
+                        SimpleNamespace(healthy_bytes=4 * GIB, emergency_extra_bytes=0))
+
+    assert runner.run_project_parallel(params)["status"] == "success"
+    assert [pool.population for pool in pools] == [1]
+    assert [row[0] for row in submissions] == params.data_files
+    assert lifecycle[1:-1] == [
+        (event, path.name) for path in params.data_files for event in ("submit", "complete")
+    ]
+    assert context.messages.closed and pools[0].closed
+
+
+def test_idle_pool_starts_smaller_pending_files_before_the_next_exclusive_boundary(monkeypatch, tmp_path):
+    def snapshot():
+        available = (8 if len(submissions) < 2 else 20) * GIB
+        return ReviewMemorySnapshot(32 * GIB, available, available, True)
+
+    # The coordinator's first probe occurs after the fixture has been created.
+    params, _, pools, submissions, lifecycle = _controller(
+        monkeypatch, tmp_path, snapshot=snapshot, count=5, worker_ceiling=4,
+    )
+    def estimate(path, *_):
+        if path == params.data_files[3]:
+            return None
+        return SimpleNamespace(healthy_bytes=(9 if path == params.data_files[0] else 2) * GIB,
+                               emergency_extra_bytes=0)
+
+    monkeypatch.setattr(admission_module, "build_processing_estimate", estimate)
+    assert runner.run_project_parallel(params)["status"] == "success"
+    assert [pool.population for pool in pools] == [2, 1]
+    assert [row[0] for row in submissions] == [params.data_files[i] for i in (1, 2, 0, 3, 4)]
+    assert lifecycle.index(("complete", "P0.bdf")) < lifecycle.index(("submit", "P3.bdf"))
+    assert lifecycle.index(("complete", "P3.bdf")) < lifecycle.index(("submit", "P4.bdf"))
+
+
+def test_normal_runner_reports_soft_cap_idle_wait_separately_from_ram_and_commit(
+    monkeypatch, tmp_path, caplog,
+):
+    params, _, _, submissions, _ = _controller(
+        monkeypatch, tmp_path, count=2,
+        snapshot=lambda: ReviewMemorySnapshot(32 * GIB, 24 * GIB, 24 * GIB, True),
+    )
+    mem_checks = iter([(False, 90.0)])
+    monkeypatch.setattr(runner, "_memory_ok", lambda _: next(mem_checks, (True, 20.0)))
+
+    with caplog.at_level("INFO", logger=runner.logger.name):
+        assert runner.run_project_parallel(params)["status"] == "success"
+
+    assert len(submissions) == 2
+    assert "reason=system_ram_soft_limit activity=idle active_files=0" in caplog.text
+    assert "memory_percent=90.0 memory_soft_limit_ratio=0.85" in caplog.text
+    assert "processing_memory_wait_summary reason=system_ram_soft_limit activity=idle episodes=1 wait_seconds=" in caplog.text
+    assert "reason=physical_ram" not in caplog.text and "reason=windows_commit" not in caplog.text
+    assert "pool_starts=1" in caplog.text
+
+
 def test_budget_and_dispatch_use_the_same_recording_evidence(monkeypatch, tmp_path):
     params, _, _, submissions, _ = _controller(monkeypatch, tmp_path, snapshot=lambda:
         ReviewMemorySnapshot(32 * GIB, 24 * GIB, 24 * GIB, True))
@@ -217,7 +282,7 @@ def test_unknown_middle_file_drains_and_runs_exclusively_then_pool_recovers(monk
     outcome = runner.run_project_parallel(params, Queue())
     assert outcome["status"] == "success"
     assert [row[0] for row in submissions] == params.data_files
-    assert [row[3] for row in submissions] == [3, 1, 3, 3]
+    assert [row[3] for row in submissions] == [1, 1, 2, 2]
     assert lifecycle.index(("complete", "P0.bdf")) < lifecycle.index(("submit", "P1.bdf"))
     assert lifecycle.index(("complete", "P1.bdf")) < lifecycle.index(("submit", "P2.bdf"))
     assert context.messages.closed and all(pool.closed for pool in pools)

@@ -125,7 +125,7 @@ from Main_App.projects.preprocessing_settings import (
 )
 from Main_App.processing.fft_crop_utils import compute_onbin_step
 from Main_App.workers.mp_env import compute_dynamic_worker_ceiling
-from Main_App.workers.processing_admission import ProcessingAdmission, ProcessingWorkerAdmission
+from Main_App.workers.processing_admission import AdmissionWait, ProcessingAdmission, ProcessingWorkerAdmission
 
 import numpy as np
 import psutil  # soft memory cap
@@ -3274,49 +3274,79 @@ def _run_project_parallel(
 
     pool = None
     peak_pool_workers = 0
-    memory_paused = False
+    pool_starts = 0
+    admission_wait = None
+    wait_totals: dict[tuple[str, str], tuple[int, float]] = {}
     growth_drain = False
 
-    def _memory_status(waiting: bool) -> None:
-        nonlocal memory_paused
-        if waiting == memory_paused:
+    def _memory_status(wait: AdmissionWait | None = None, *, memory_percent=None) -> None:
+        nonlocal admission_wait
+        mode = "active" if in_flight else "idle"
+        key = (wait.reason, mode) if wait is not None else None
+        previous_key = None if admission_wait is None else admission_wait[0]
+        if key == previous_key:
             return
-        memory_paused = waiting
-        logger.info("processing_memory_admission status=%s",
-                    "waiting_for_RAM_or_commit" if waiting else "resumed")
+        now = time.perf_counter()
+        if admission_wait is not None:
+            previous_key, started = admission_wait
+            duration = now - started
+            entries, elapsed = wait_totals.get(previous_key, (0, 0.0))
+            wait_totals[previous_key] = (entries + 1, elapsed + duration)
+            logger.info(
+                "processing_memory_admission status=%s reason=%s activity=%s wait_seconds=%.3f",
+                "resumed" if key is None else "wait_changed", *previous_key, duration,
+            )
+        admission_wait = None if key is None else (key, now)
+        if wait is not None:
+            snapshot = wait.snapshot
+            status = ("waiting_for_RAM_or_commit" if wait.physical_shortfall_bytes is not None
+                      or wait.reason == "system_ram_soft_limit" else "waiting_for_scheduler")
+            logger.info(
+                "processing_memory_admission status=%s reason=%s activity=%s active_files=%d "
+                "pending_files=%d worker_population=%d physical_available_bytes=%s commit_available_bytes=%s "
+                "physical_shortfall_bytes=%s commit_shortfall_bytes=%s memory_percent=%s memory_soft_limit_ratio=%s",
+                status, wait.reason, mode, len(in_flight), len(remaining), maxw,
+                None if snapshot is None else snapshot.physical_available_bytes,
+                None if snapshot is None else snapshot.commit_available_bytes,
+                wait.physical_shortfall_bytes, wait.commit_shortfall_bytes,
+                memory_percent, memory_limit_ratio,
+            )
 
     def _prepare_idle_pool() -> bool:
-        nonlocal pool, maxw, peak_pool_workers
+        nonlocal pool, maxw, peak_pool_workers, pool_starts
         if in_flight or not remaining:
             return pool is not None
-        index = remaining_indices[0]
         admission.solo_owner = None
         if pool is not None:
-            if (not admission.exclusive[index] and maxw < min(worker_ceiling, len(remaining))
-                    and admission.fits(index, population=maxw + 1)):
-                pass  # Grow only after every current file has completed.
-            elif ((not admission.exclusive[index] or maxw == 1)
-                  and admission.fits(index, solo=admission.exclusive[index])):
-                admission.solo_owner = index if admission.exclusive[index] else None
-                return True
-            elif maxw == 1 and admission.fits(index, solo=True):
-                admission.solo_owner = index
-                return True
+            grow = maxw < worker_ceiling and admission.joint_fit(remaining_indices, maxw + 1)
+            if not grow and (maxw == 1 or not admission.exclusive[remaining_indices[0]]):
+                offset = admission.first_fitting(remaining_indices)
+                if offset is not None:
+                    index = remaining_indices[offset]
+                    admission.solo_owner = index if admission.exclusive[index] else None
+                    return True
+                if maxw == 1:
+                    offset = admission.first_fitting(remaining_indices, solo=True)
+                    if offset is not None:
+                        admission.solo_owner = remaining_indices[offset]
+                        return True
             pool.shutdown(wait=True, cancel_futures=True)
             pool = None
+            maxw = 0
             admission.reset_pool(0)
-        population, solo = admission.next_population(index, worker_ceiling)
+        population, solo_owner = admission.next_population(remaining_indices, worker_ceiling)
         if not population:
-            _memory_status(True)
+            _memory_status(admission.last_wait)
             return False
         maxw = population
-        admission.reset_pool(population, index if solo else None)
+        admission.reset_pool(population, solo_owner)
         logger.debug("[MP STAGE] pool_create_start max_workers=%d files=%d", maxw, total)
         pool = ProcessPoolExecutor(
             max_workers=maxw, mp_context=ctx, initializer=_admitted_worker_init,
             initargs=(_worker_init, *admission.initializer_args()),
         )
         peak_pool_workers = max(peak_pool_workers, maxw)
+        pool_starts += 1
         logger.debug("[MP STAGE] pool_created max_workers=%d", maxw)
         return True
 
@@ -3404,6 +3434,7 @@ def _run_project_parallel(
             """Submit one file if capacity and (if enabled) memory is OK."""
             nonlocal remaining, peak_in_flight, max_memory_percent, growth_drain
             if not remaining:
+                _memory_status(admission.phase_wait if admission.requests else None)
                 return False
             if _cancelled():
                 return False
@@ -3411,21 +3442,23 @@ def _run_project_parallel(
             if not in_flight:
                 growth_drain = False
             if growth_drain:
+                _memory_status(admission.phase_wait or AdmissionWait("pool_growth_drain"))
                 return False
-            if not _prepare_idle_pool() or len(in_flight) >= maxw:
+            if not _prepare_idle_pool():
                 return False
-            index = remaining_indices[0]
-            if (in_flight and not admission.requests and not admission.exclusive[index]
-                    and maxw < min(worker_ceiling, len(remaining))
-                    and admission.fits(index, population=maxw + 1)):
+            if len(in_flight) >= maxw:
+                _memory_status(admission.phase_wait if admission.requests else None)
+                return False
+            if in_flight and maxw < worker_ceiling and admission.joint_fit(remaining_indices, maxw + 1):
                 # Refilling every free slot prevents a reduced pool from ever
                 # draining. Finish its current owners before a fresh resize.
                 growth_drain = True
                 logger.info("processing_pool_growth_drain workers=%d pending_files=%d", maxw, len(remaining))
+                _memory_status(AdmissionWait("pool_growth_drain"))
                 return False
             offset = admission.first_fitting(remaining_indices)
             if offset is None:
-                _memory_status(True)
+                _memory_status(admission.last_wait)
                 return False
             index = remaining_indices[offset]
 
@@ -3434,7 +3467,7 @@ def _run_project_parallel(
             if percent_used > max_memory_percent:
                 max_memory_percent = percent_used
             if not mem_ok:
-                _memory_status(True)
+                _memory_status(AdmissionWait("system_ram_soft_limit"), memory_percent=percent_used)
                 return False
 
             f = remaining[offset]
@@ -3458,7 +3491,7 @@ def _run_project_parallel(
             remaining_indices.pop(offset)
             in_flight[fut] = f
             in_flight_indices[fut] = index
-            _memory_status(False)
+            _memory_status()
             logger.debug(
                 "[MP STAGE] submit_file_done file=%s in_flight=%d remaining=%d",
                 f.name,
@@ -3526,6 +3559,7 @@ def _run_project_parallel(
             _terminate_executor_workers(pool)
         raise
     finally:
+        _memory_status()
         try:
             if pool is not None:
                 pool.shutdown(wait=shutdown_wait, cancel_futures=True)
@@ -3543,13 +3577,16 @@ def _run_project_parallel(
     for _, delta in sorted(event for start, end in worker_intervals for event in ((start, 1), (end, -1))):
         active += delta
         peak_active = max(peak_active, active)
+    for (reason, mode), (episodes, seconds) in sorted(wait_totals.items()):
+        logger.info("processing_memory_wait_summary reason=%s activity=%s episodes=%d wait_seconds=%.3f",
+                    reason, mode, episodes, seconds)
     logger.info(
         (
             "mp_run_summary num_files=%d completed=%d "
             "max_workers_param=%s max_workers_used=%d "
             "peak_in_flight=%d max_memory_percent=%.2f "
             "elapsed_seconds=%.3f cancelled=%s worker_ceiling=%d peak_running=%d "
-            "timed_files=%d exclusive_files=%d"
+            "timed_files=%d exclusive_files=%d pool_starts=%d"
         ),
         total,
         completed,
@@ -3563,6 +3600,7 @@ def _run_project_parallel(
         peak_active,
         len(worker_intervals),
         sum(admission.exclusive),
+        pool_starts,
     )
 
     # Batch-level summary: average number of channels rejected per file.

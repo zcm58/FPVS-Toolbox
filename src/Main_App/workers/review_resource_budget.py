@@ -7,7 +7,7 @@ No waveform arrays, global source caches or scientific decisions are retained.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from fractions import Fraction
 import logging
@@ -282,8 +282,9 @@ def memory_admission_fits(
     active_owned: Mapping[int, OwnedMemory], idle_owned: Sequence[OwnedMemory],
     worker_count: int, candidate_credit: int = 0, emergency_reserve: int = 0,
     worker_floor_bytes: int = WORKER_FLOOR_BYTES, host_margin_bytes: int | None = None,
+    on_denial: Callable[[ReviewMemorySnapshot, int, int | None], None] | None = None,
 ) -> bool:
-    """Do not reserve already-owned pages twice or confuse commit with residence."""
+    """Check physical and commit bounds, optionally reporting exact shortfalls."""
     if worker_count < len(active_credits) or len(idle_owned) > worker_count - len(active_credits):
         raise ValueError("Owned workers exceed the reserved pool population.")
     for value in (*active_credits.values(), candidate_credit, emergency_reserve, worker_floor_bytes):
@@ -303,11 +304,19 @@ def memory_admission_fits(
     for owner in idle_owned:
         physical += max(0, worker_floor_bytes - _owned(owner.uss_bytes))
         commit += max(0, worker_floor_bytes - _owned(owner.private_commit_bytes))
-    if physical > max(0, snapshot.physical_available_bytes - margin):
+    physical_shortfall = physical - max(0, snapshot.physical_available_bytes - margin)
+    if physical_shortfall > 0 and on_denial is None:
         return False
-    if snapshot.commit_required and snapshot.commit_available_bytes is None:
-        return False
-    return snapshot.commit_available_bytes is None or commit <= max(0, snapshot.commit_available_bytes - margin)
+    if snapshot.commit_available_bytes is None:
+        commit_shortfall = None if snapshot.commit_required else 0
+    else:
+        commit_shortfall = commit - max(0, snapshot.commit_available_bytes - margin)
+    if physical_shortfall <= 0 and commit_shortfall is not None and commit_shortfall <= 0:
+        return True
+    if on_denial is not None:
+        on_denial(snapshot, max(0, physical_shortfall),
+                  None if commit_shortfall is None else max(0, commit_shortfall))
+    return False
 
 
 def read_review_geometry(path: Path, settings: Mapping) -> ReviewGeometry | None:

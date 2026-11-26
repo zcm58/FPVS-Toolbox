@@ -2,16 +2,38 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from queue import Empty
 
 from Main_App.workers.processing_resource_budget import build_processing_estimate
 from Main_App.workers.review_resource_budget import (
     ReviewMemoryProbeError,
+    ReviewMemorySnapshot,
     memory_admission_fits,
     probe_memory_snapshot,
     probe_owned_memory,
     single_review_capacity_bytes,
 )
+
+
+@dataclass(frozen=True)
+class AdmissionWait:
+    reason: str
+    snapshot: ReviewMemorySnapshot | None = None
+    physical_shortfall_bytes: int | None = None
+    commit_shortfall_bytes: int | None = None
+
+    @classmethod
+    def for_shortfall(cls, snapshot, physical_bytes, commit_bytes):
+        if commit_bytes is None:
+            reason = "commit_unavailable"
+        elif physical_bytes and commit_bytes:
+            reason = "physical_and_commit"
+        elif physical_bytes:
+            reason = "physical_ram"
+        else:
+            reason = "windows_commit"
+        return cls(reason, snapshot, physical_bytes, commit_bytes)
 
 
 class ProcessingAdmission:
@@ -51,6 +73,8 @@ class ProcessingAdmission:
         self.emergency_owner = None
         self.solo_owner = None
         self.population = 0
+        self.last_wait: AdmissionWait | None = None
+        self.phase_wait: AdmissionWait | None = None
 
     @staticmethod
     def snapshot():
@@ -97,15 +121,17 @@ class ProcessingAdmission:
             else:
                 raise ReviewMemoryProbeError("Invalid processing memory-control message.")
 
-    def fits(self, index=None, *, population=None, solo=False, granting=None, snapshot=None, owned_memory=None):
+    def fits(self, index=None, *, population=None, solo=False, granting=None, snapshot=None,
+             owned_memory=None, group=(), on_denial=None):
         if owned_memory is None:
             self.drain()
+            owned_memory = self._owned_memory()
         snapshot = self.snapshot() if snapshot is None else snapshot
         population = self.population if population is None else population
         credits = dict(self.active)
         if granting is not None:
             credits[granting[0]] = granting[1]
-        indices = set(credits)
+        indices = set(credits).union(group)
         if index is not None:
             indices.add(index)
         if any(self.exclusive[item] for item in indices) and len(indices) > 1:
@@ -120,12 +146,14 @@ class ProcessingAdmission:
         owner = granting[0] if granting is not None else self.emergency_owner
         if owner is not None:
             reserve = max(0, reserve - max(0, credits[owner] - self.credits[owner]))
-        active_owned, idle_owned = self._owned_memory() if owned_memory is None else owned_memory
+        active_owned, idle_owned = owned_memory
+        candidate_credit = sum(self.credits[item] for item in group) if group else 0
+        if index is not None:
+            candidate_credit += self.credits[index]
         return memory_admission_fits(
             snapshot, active_credits=credits, active_owned=active_owned,
             idle_owned=idle_owned, worker_count=population,
-            candidate_credit=0 if index is None else self.credits[index],
-            emergency_reserve=reserve,
+            candidate_credit=candidate_credit, emergency_reserve=reserve, on_denial=on_denial,
         )
 
     def _owned_memory(self):
@@ -149,33 +177,72 @@ class ProcessingAdmission:
             idle_owned = []
         return active_owned, idle_owned
 
-    def first_fitting(self, indices):
-        """Keep source order among jobs that fit; drain at exclusive boundaries."""
+    def _record_denial(self, snapshot, physical_bytes, commit_bytes):
+        previous = self.last_wait
+        if (previous is None or max(physical_bytes, commit_bytes or 0)
+                < max(previous.physical_shortfall_bytes or 0, previous.commit_shortfall_bytes or 0)):
+            self.last_wait = AdmissionWait.for_shortfall(snapshot, physical_bytes, commit_bytes)
+
+    def _probe(self):
         self.drain()
+        owned = self._owned_memory()
+        return self.snapshot(), owned
+
+    def first_fitting(self, indices, *, solo=False, population=None, probe=None):
+        """Keep source order among jobs that fit; drain at exclusive boundaries."""
+        self.last_wait = None
+        snapshot, owned = self._probe() if probe is None else probe
         if self.requests:
+            self.last_wait = self.phase_wait or AdmissionWait("phase_grant_pending", snapshot)
             return None
-        snapshot, owned = self.snapshot(), self._owned_memory()
+        reason = "exclusive_boundary" if any(self.exclusive[item] for item in self.active) else "queue_boundary"
+        if self.solo_owner is not None:
+            reason = "solo_owner"
+        on_denial = self._record_denial
         for offset, index in enumerate(indices):
             if self.exclusive[index] and (offset or self.active):
+                reason = "exclusive_boundary"
                 break
-            if self.fits(index, solo=self.solo_owner == index, snapshot=snapshot, owned_memory=owned):
+            if self.fits(index, solo=solo or self.solo_owner == index, population=population,
+                         snapshot=snapshot, owned_memory=owned, on_denial=on_denial):
+                self.last_wait = None
                 return offset
             if self.exclusive[index]:
                 break
+        if self.last_wait is None:
+            self.last_wait = AdmissionWait(reason, snapshot)
         return None
 
-    def next_population(self, index, ceiling):
-        """Choose only for an empty/drained pool; never resize active workers."""
+    def joint_fit(self, indices, population, *, probe=None):
+        """Prove a source-order group can occupy the proposed worker population."""
+        needed = population - len(self.active)
+        if (not 0 < needed <= len(indices) or self.solo_owner is not None
+                or any(self.exclusive[item] for item in self.active)):
+            return False
+        snapshot, owned = self._probe() if probe is None else probe
+        if self.requests:
+            return False
+        group = []
+        for index in indices:
+            if self.exclusive[index]:
+                break
+            if self.fits(group=(*group, index), population=population, snapshot=snapshot, owned_memory=owned):
+                group.append(index)
+                if len(group) == needed:
+                    return True
+        return False
+
+    def next_population(self, indices, ceiling):
+        """Choose a drained pool size and any required singleton owner."""
         self.solo_owner = None
-        if self.exclusive[index]:
-            return (1, True) if self.fits(index, population=1, solo=True) else (0, False)
-        for population in range(ceiling, 0, -1):
-            if self.fits(index, population=population):
-                return population, False
-        # A healthy file need not reserve an impossible hypothetical fallback.
-        if self.fits(index, population=1, solo=True):
-            return 1, True
-        return 0, False
+        probe = self._probe()
+        for population in range(min(ceiling, len(indices)), 0, -1):
+            if self.joint_fit(indices, population, probe=probe):
+                self.last_wait = None
+                return population, None
+        # Check the known healthy native path without a hypothetical fallback.
+        offset = self.first_fitting(indices, solo=True, population=1, probe=probe)
+        return (0, None) if offset is None else (1, indices[offset])
 
     def submitted(self, index):
         self.active[index] = self.credits[index]
@@ -199,6 +266,7 @@ class ProcessingAdmission:
 
     def grant_waiting(self):
         self.drain()
+        self.phase_wait = None
         for index, required in tuple(self.requests.items()):
             if index not in self.active:
                 raise ReviewMemoryProbeError("Processing memory request has no active file.")
@@ -210,15 +278,22 @@ class ProcessingAdmission:
             elif required <= self.active[index]:
                 status = 1
             elif self.emergency_owner not in (None, index):
+                if self.phase_wait is None:
+                    self.phase_wait = AdmissionWait("fallback_reserve_occupied")
                 continue
             else:
-                snapshot = self.snapshot()
+                snapshot, owned_memory = self._probe()
                 if single_review_capacity_bytes(snapshot, required) > snapshot.total_bytes:
                     status = -2
-                elif self.fits(granting=(index, required), snapshot=snapshot):
-                    self.active[index] = required
-                    self.emergency_owner = index
-                    status = 1
+                else:
+                    self.last_wait = None
+                    if self.fits(granting=(index, required), snapshot=snapshot,
+                                 owned_memory=owned_memory, on_denial=self._record_denial):
+                        self.active[index] = required
+                        self.emergency_owner = index
+                        status = 1
+                    elif self.phase_wait is None:
+                        self.phase_wait = self.last_wait
             if status:
                 self.grant_status[index] = status
                 self.grant_events[index].set()

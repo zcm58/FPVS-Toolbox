@@ -68,7 +68,7 @@ def test_worker_floors_and_file_credits_limit_concurrency(setup):
     assert not state.fits(3)
     state.completed(1)
     state.completed(2)
-    assert state.next_population(3, 7) == (3, False)
+    assert state.next_population([3], 7) == (1, None)
 
 
 def test_actual_commit_can_block_despite_free_physical_ram(setup):
@@ -78,6 +78,26 @@ def test_actual_commit_can_block_despite_free_physical_ram(setup):
     assert not state.fits(0, population=1)
     snapshot[0] = ReviewMemorySnapshot(16 * GIB, 14 * GIB, 4 * GIB, True)
     assert state.fits(0, population=1)
+
+
+def test_joint_group_reserves_the_largest_fallback_once(setup):
+    snapshot, build = setup
+    state = build([Estimate(2 * GIB, 2 * GIB)] * 3)
+    snapshot[0] = ReviewMemorySnapshot(16 * GIB, 9 * GIB, 9 * GIB, True)
+    assert state.next_population([0, 1, 2], 3) == (2, None)
+
+
+@pytest.mark.parametrize(("physical", "commit", "reason"), [
+    (3, 8, "physical_ram"), (8, 3, "windows_commit"), (3, 3, "physical_and_commit"),
+])
+def test_recorded_idle_shortfalls_use_native_credit_arithmetic(setup, physical, commit, reason):
+    snapshot, build = setup
+    state = build([Estimate()])
+    snapshot[0] = ReviewMemorySnapshot(16 * GIB, physical * GIB, commit * GIB, True)
+    assert state.next_population([0], 1) == (0, None)
+    assert state.last_wait == admission.AdmissionWait(
+        reason, snapshot[0], GIB if physical == 3 else 0, GIB if commit == 3 else 0,
+    )
 
 
 def test_required_commit_probe_failure_is_actionable(setup):
@@ -115,7 +135,7 @@ def test_unknown_or_overconservative_file_retains_exclusive_native_path(setup, e
     _, build = setup
     state = build([estimate, Estimate()])
     assert state.exclusive[0]
-    assert state.next_population(0, 7) == (1, True)
+    assert state.next_population([0, 1], 7) == (1, 0)
     state.reset_pool(1, 0)
     state.submitted(0)
     assert not state.fits(1, population=2)
@@ -128,7 +148,7 @@ def test_healthy_singleton_does_not_require_hypothetical_source_rate_tail(setup)
     snapshot, build = setup
     state = build([Estimate(2 * GIB, 6 * GIB)])
     snapshot[0] = ReviewMemorySnapshot(16 * GIB, 8 * GIB, 8 * GIB, True)
-    assert state.next_population(0, 7) == (1, True)
+    assert state.next_population([0], 7) == (1, 0)
 
 
 def test_only_one_source_rate_borrower_runs_until_its_file_completes(setup):
