@@ -29,6 +29,7 @@ __all__ = [
     "QC14_METRIC_METHOD_VERSION",
     "QC14NoiseMetricResult",
     "compute_qc14_standard_metrics",
+    "compute_qc14_standard_metrics_for_channels",
     "compute_noise_stats_for_bin",
     "compute_noise_stats_for_bin_channels",
 ]
@@ -165,6 +166,78 @@ def compute_qc14_standard_metrics(
 
     noise_mean = float(retained_values.mean())
     noise_sd = float(retained_values.std(ddof=0))
+    return _qc14_result_from_noise(
+        target, candidates, retained_indices, target_value, target_amplitude_status,
+        reasons, noise_mean, noise_sd, zero_tolerance,
+    )
+
+
+def compute_qc14_standard_metrics_for_channels(
+    amplitudes: np.ndarray,
+    *,
+    target_idx: int,
+    candidate_bin_indices: Sequence[int],
+    static_metrics_available: bool = True,
+    static_reason_codes: Sequence[str] = (),
+    target_amplitude_status: str = "available",
+) -> tuple[QC14NoiseMetricResult, ...] | None:
+    """Batch one harmonic's independent channel reductions on ordinary input.
+
+    Return None where the scalar path owns availability checks or warning
+    behavior. Each retained row has the same order and contiguous 16 values
+    as the scalar reducer, including the stable tie policy.
+    """
+    values = np.asarray(amplitudes)
+    if values.ndim != 2 or values.dtype != np.dtype(np.float64) or not static_metrics_available:
+        return None
+    num_channels, num_bins = values.shape
+    target = int(target_idx)
+    candidates = tuple(int(index) for index in candidate_bin_indices)
+    if (not num_channels or not 10 <= target < num_bins - 10
+            or candidates != tuple(target + offset for offset in _QC14_OFFSETS)):
+        return None
+    target_values = values[:, target]
+    noise_values = np.ascontiguousarray(values[:, candidates])
+    absolute = np.abs(noise_values)
+    if (
+        not np.isfinite(target_values).all()
+        or not np.all(absolute <= _BATCH_SAFE_ABS_MAX)
+        or np.any((absolute < _BATCH_SAFE_ABS_MIN) & (absolute != 0))
+    ):
+        return None
+    sorted_positions = np.argsort(noise_values, axis=1, kind="stable")
+    rows = np.arange(num_channels)
+    keep = np.ones(noise_values.shape, dtype=bool)
+    keep[rows, sorted_positions[:, 0]] = False
+    keep[rows, sorted_positions[:, -1]] = False
+    retained = noise_values[keep].reshape(num_channels, 16)
+    retained_indices = np.broadcast_to(candidates, noise_values.shape)[keep].reshape(num_channels, 16)
+    means = retained.mean(axis=1)
+    standard_deviations = retained.std(axis=1, ddof=0)
+    reasons = list(dict.fromkeys(str(value) for value in static_reason_codes if str(value)))
+    return tuple(
+        _qc14_result_from_noise(
+            target, candidates, tuple(indices), float(target_value),
+            target_amplitude_status, reasons.copy(), float(noise_mean),
+            float(noise_sd), QC14_EFFECTIVELY_ZERO_TOLERANCE,
+        )
+        for indices, target_value, noise_mean, noise_sd in zip(
+            retained_indices.tolist(), target_values, means, standard_deviations,
+        )
+    )
+
+
+def _qc14_result_from_noise(
+    target: int,
+    candidates: tuple[int, ...],
+    retained_indices: tuple[int, ...],
+    target_value: float,
+    target_amplitude_status: str,
+    reasons: list[str],
+    noise_mean: float,
+    noise_sd: float,
+    zero_tolerance: float,
+) -> QC14NoiseMetricResult:
     bca = float(target_value - noise_mean)
     snr: float | None = None
     local_z: float | None = None

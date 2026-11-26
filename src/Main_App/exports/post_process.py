@@ -22,6 +22,7 @@ from Tools.Stats.analysis.full_snr import (
 from Tools.Stats.analysis.noise_utils import (
     QC14NoiseMetricResult,
     compute_qc14_standard_metrics,
+    compute_qc14_standard_metrics_for_channels,
 )
 from Main_App.processing.fft_crop_utils import compute_onbin_N, compute_onbin_step
 from Main_App.processing.pipeline_plan import (
@@ -66,6 +67,8 @@ from Main_App.exports.post_process_excel import (
 
 
 logger = logging.getLogger("Main_App.Shared.post_process")
+_STANDARD_TARGET_METRIC = compute_qc14_standard_metrics
+_MAX_STAGED_TARGET_METRICS = 4096
 _EXPORT_TIMING_SINK: ContextVar[list[dict[str, object]] | None] = ContextVar(
     "_EXPORT_TIMING_SINK",
     default=None,
@@ -1381,26 +1384,51 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                     )
                     for item in condition_eligibility.targets
                 ]
+                channel_metrics = ()
+                if (
+                    not custom_target_metrics
+                    and compute_qc14_standard_metrics is _STANDARD_TARGET_METRIC
+                    and final_num_channels >= 4
+                    and final_num_channels * num_target_freqs <= _MAX_STAGED_TARGET_METRICS
+                ):
+                    try:
+                        channel_metrics = tuple(
+                            compute_qc14_standard_metrics_for_channels(
+                                fft_amplitudes,
+                                target_idx=availability.target_bin_index,
+                                candidate_bin_indices=availability.noise_candidate_bin_indices,
+                                static_metrics_available=availability.standard_metrics_available,
+                                static_reason_codes=availability.reason_codes,
+                                target_amplitude_status=availability.target_amplitude_status,
+                            )
+                            for availability in condition_eligibility.targets
+                        )
+                    except MemoryError:
+                        channel_metrics = ()
                 for chan_idx in range(final_num_channels):
                     channel_amplitudes = fft_amplitudes[chan_idx, :]
                     for freq_idx, availability in enumerate(
                         condition_eligibility.targets
                     ):
-                        metric_result = pipeline_plan.execute(
-                            "target_metrics", compute_qc14_standard_metrics,
-                            channel_amplitudes,
-                            target_idx=availability.target_bin_index,
-                            candidate_bin_indices=(
-                                availability.noise_candidate_bin_indices
-                            ),
-                            static_metrics_available=(
-                                availability.standard_metrics_available
-                            ),
-                            static_reason_codes=availability.reason_codes,
-                            target_amplitude_status=(
-                                availability.target_amplitude_status
-                            ),
-                        )
+                        batch = channel_metrics[freq_idx] if channel_metrics else None
+                        if batch is not None:
+                            metric_result = batch[chan_idx]
+                        else:
+                            metric_result = pipeline_plan.execute(
+                                "target_metrics", compute_qc14_standard_metrics,
+                                channel_amplitudes,
+                                target_idx=availability.target_bin_index,
+                                candidate_bin_indices=(
+                                    availability.noise_candidate_bin_indices
+                                ),
+                                static_metrics_available=(
+                                    availability.standard_metrics_available
+                                ),
+                                static_reason_codes=availability.reason_codes,
+                                target_amplitude_status=(
+                                    availability.target_amplitude_status
+                                ),
+                            )
                         if not isinstance(metric_result, QC14NoiseMetricResult):
                             raise PipelineExecutionError(
                                 "Target-frequency metrics must return the typed metric and availability result."
@@ -1470,6 +1498,7 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                                 ),
                             }
                         )
+                del channel_metrics
                 _log_export_timing(
                     "target_metrics_loop",
                     target_metrics_started,

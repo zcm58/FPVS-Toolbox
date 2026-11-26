@@ -3,11 +3,48 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from Tools.Stats.analysis.noise_utils import compute_qc14_standard_metrics
+from Tools.Stats.analysis.noise_utils import (
+    compute_qc14_standard_metrics,
+    compute_qc14_standard_metrics_for_channels,
+)
 
 
 def _candidate_indices(target: int) -> tuple[int, ...]:
     return tuple([*range(target - 10, target - 1), *range(target + 2, target + 11)])
+
+
+@pytest.mark.parametrize("channel_count", [4, 64, 67, 128])
+def test_qc14_channel_batch_matches_exact_scalar_payload(channel_count):
+    amplitudes = np.random.default_rng(182).lognormal(size=(channel_count, 161))
+    amplitudes[0] = 0.0
+    amplitudes[1] = -0.0
+    amplitudes[2] = 1e-12
+    amplitudes[3, ::2] = 1
+    amplitudes[3, 1::2] = -1
+    target = 120
+    kwargs = {
+        "target_idx": target,
+        "candidate_bin_indices": _candidate_indices(target),
+        "static_reason_codes": ("retained_note", "retained_note"),
+    }
+
+    batch = compute_qc14_standard_metrics_for_channels(amplitudes, **kwargs)
+    assert batch is not None
+    for row, measured in zip(amplitudes, batch, strict=True):
+        expected = compute_qc14_standard_metrics(row, **kwargs)
+        assert measured == expected
+        for key, value in measured.to_payload().items():
+            if isinstance(value, float):
+                assert value.hex() == expected.to_payload()[key].hex()
+
+
+@pytest.mark.parametrize("unsupported", [np.nan, np.inf, 1e-200, 1e200])
+def test_qc14_channel_batch_defers_unsupported_noise_to_scalar(unsupported):
+    amplitudes = np.ones((4, 80), dtype=np.float64)
+    amplitudes[1, 23] = unsupported
+    assert compute_qc14_standard_metrics_for_channels(
+        amplitudes, target_idx=30, candidate_bin_indices=_candidate_indices(30),
+    ) is None
 
 
 def test_qc14_metrics_preserve_locked_formula_with_complete_support() -> None:

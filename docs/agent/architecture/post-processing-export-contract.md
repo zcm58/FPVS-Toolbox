@@ -40,6 +40,13 @@ created. Receipt keys remain compatible (`workbook_write_receipt_v1`) and
 continue to bind exact anchor paths, hashes, validated schemas and companions.
 This changes no preprocessing or FFT operation, harmonic rule or QC decision.
 
+Native QC-14 target metrics may batch the independent channel reductions for
+one target at a time. Retained bins stay in frequency order, including stable
+ties at either extreme. The exporter stages at most 4,096 channel/target
+results and writes audit rows in their original channel-major order. Custom
+target methods, unsupported numeric inputs, and ineligible targets use the
+existing scalar path.
+
 Processing completion must recognize published `.fpvs` results as well as
 historical Excel outputs. The GUI and post-export worker share the same
 format-aware output snapshot, retaining the existing modification-time/size
